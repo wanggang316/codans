@@ -223,6 +223,65 @@ struct AgentKindPatternsTests {
     )
   }
 
+  // MARK: - .pi short-pattern word-boundary near-misses
+
+  /// The two-letter `.pi` patterns must not substring-match the
+  /// embedded `"pi"` in `"shipping"`. The matcher uses word
+  /// boundaries so `"pi"` is only considered a hit when framed by
+  /// non-alphanumeric characters (or by start/end-of-string).
+  @Test
+  func title_shippingDoesNotMatchPi() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: nil,
+        title: "shipping logs",
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  /// Same word-boundary rule rejects `"piano"` — the `"pi"` is
+  /// followed by `"ano"`, so the trailing character is a letter,
+  /// not a boundary.
+  @Test
+  func title_pianoDoesNotMatchPi() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: nil,
+        title: "piano practice",
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  /// `"pip"` shares the `"pi"` prefix but the trailing `"p"` blocks
+  /// the word-boundary check. Note this is the title-side analogue
+  /// of the `initialCommand_pipDoesNotMatchPi` first-token test.
+  @Test
+  func title_pipInstallDoesNotMatchPi() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: nil,
+        title: "pip install foo",
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  /// Same hazard applies to `notificationTitle`: `"Helping"`
+  /// contains the substring `"pi"` (`hel-pi-ng`) but is framed by
+  /// letters on both sides, so the word-boundary check rejects it.
+  @Test
+  func notificationTitle_helpingDoesNotMatchPi() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: nil,
+        title: nil,
+        notificationTitle: "Helping you"
+      ) == nil
+    )
+  }
+
   // MARK: - title hits
 
   @Test
@@ -393,7 +452,9 @@ struct AgentKindPatternsTests {
     let pane = Pane(workingDirectory: "/tmp")
     let data = try JSONEncoder().encode(pane)
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    #expect(object?["agentKind"] == nil)
-    #expect(object?["agentSessionID"] == nil)
+    // Assert on key presence rather than value lookup: the intent is
+    // "key absent", which is stronger than "value equals NSNull".
+    #expect(object?.keys.contains("agentKind") == false)
+    #expect(object?.keys.contains("agentSessionID") == false)
   }
 }

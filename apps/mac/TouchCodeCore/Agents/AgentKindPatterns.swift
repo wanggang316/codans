@@ -106,18 +106,22 @@ public nonisolated enum AgentKindPatterns {
     return nil
   }
 
-  /// Substring-match the title against every pattern in the `title`
-  /// table and return the kind whose matching pattern is the
+  /// Word-boundary match the title against every pattern in the
+  /// `title` table and return the kind whose matching pattern is the
   /// longest. Ties (same-length patterns from different kinds)
   /// resolve by `AgentKind.allCases` order — deterministic but not
   /// otherwise meaningful; the table is curated so real-world
-  /// inputs don't tie.
+  /// inputs don't tie. Word-boundary matching (rather than raw
+  /// substring) is load-bearing for short patterns like `"pi"`,
+  /// which would otherwise hit `"shipping"`, `"piano"`, `"Spider"`,
+  /// etc. Multi-word patterns like `"Claude Code"` still match
+  /// because every alphanumeric run inside them is framed by
+  /// whitespace or by the haystack's start/end.
   private static func bestTitleMatch(_ title: String) -> AgentKind? {
-    let lowered = title.lowercased()
     var best: (kind: AgentKind, length: Int)?
     for kind in AgentKind.allCases {
       guard let patterns = self.title[kind] else { continue }
-      for pattern in patterns where lowered.contains(pattern.lowercased()) {
+      for pattern in patterns where containsAsWord(title, pattern) {
         if best == nil || pattern.count > best!.length {
           best = (kind, pattern.count)
         }
@@ -126,18 +130,53 @@ public nonisolated enum AgentKindPatterns {
     return best?.kind
   }
 
-  /// Substring-match a notification title against the table.
-  /// Notification titles are short and agent-specific, so a single
-  /// pass over `allCases` with case-insensitive `contains` is
-  /// sufficient.
+  /// Word-boundary match a notification title against the table.
+  /// Same rationale as `bestTitleMatch`: notification titles like
+  /// `"Helping you"` must not collide with the `.pi` pattern.
   private static func matchNotificationTitle(_ value: String) -> AgentKind? {
-    let lowered = value.lowercased()
     for kind in AgentKind.allCases {
       guard let patterns = notificationTitle[kind] else { continue }
-      for pattern in patterns where lowered.contains(pattern.lowercased()) {
+      for pattern in patterns where containsAsWord(value, pattern) {
         return kind
       }
     }
     return nil
+  }
+
+  /// Case-insensitive word-boundary containment. Returns `true` iff
+  /// `needle` appears in `haystack` framed by either end-of-string
+  /// or a non-alphanumeric character on each side. Used by the
+  /// title / notificationTitle matchers so a two-letter pattern
+  /// like `"pi"` doesn't fire on `"shipping"` / `"piano"` /
+  /// `"Spider"`. Returns on the first occurrence — title patterns
+  /// are short and rarely repeat, and the matcher only needs a
+  /// yes/no answer.
+  private static func containsAsWord(_ haystack: String, _ needle: String) -> Bool {
+    let pattern = needle.lowercased()
+    guard !pattern.isEmpty else { return false }
+    let hay = haystack.lowercased()
+    var searchStart = hay.startIndex
+    while let range = hay.range(of: pattern, range: searchStart..<hay.endIndex) {
+      let before: Character? =
+        range.lowerBound == hay.startIndex
+        ? nil : hay[hay.index(before: range.lowerBound)]
+      let after: Character? =
+        range.upperBound == hay.endIndex ? nil : hay[range.upperBound]
+      if isWordBoundary(before) && isWordBoundary(after) {
+        return true
+      }
+      // Advance past the failed candidate so overlapping matches
+      // (e.g. needle `"pipi"` inside haystack `"pipipi"`) still
+      // get a chance to find the real word-boundary hit.
+      searchStart = hay.index(after: range.lowerBound)
+    }
+    return false
+  }
+
+  /// A nil character (= end-of-string) or any non-alphanumeric
+  /// character counts as a word boundary. Letters and digits do not.
+  private static func isWordBoundary(_ character: Character?) -> Bool {
+    guard let character else { return true }
+    return !(character.isLetter || character.isNumber)
   }
 }
