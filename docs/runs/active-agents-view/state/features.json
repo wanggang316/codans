@@ -1,0 +1,138 @@
+{
+  "plan": "active-agents-view",
+  "generated_at": "2026-05-22T00:00:00Z",
+  "features": [
+    {
+      "id": "T1",
+      "title": "AgentKind enum + AgentKindPatterns table + Pane.agentKind/agentSessionID fields",
+      "status": "pending",
+      "milestone": "M1",
+      "depends_on": [],
+      "fulfills": [],
+      "preconditions": "On feat/agent-state at HEAD 1a9d441 (planning docs committed). make mac-build is green. apps/mac/TouchCodeCore/Pane.swift is the existing Pane definition with id/workingDirectory/initialCommand/labels and a custom Codable that drops initialCommand on decode.",
+      "expected_behavior": "TouchCodeCore now exports AgentKind (claude-code / codex / pi) and AgentKindPatterns.classify(initialCommand:title:notificationTitle:). Pane carries optional agentKind and agentSessionID, with Codable that round-trips a Pane carrying agentKind, and decodes an older fixture (no agentKind key) to nil. No catalog migration runs.",
+      "verification_steps": [
+        "make mac-build passes.",
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentKindPatternsTests\" passes — at least three hit + three miss cases per AgentKind, plus a roundtrip Pane Codable test.",
+        "Manual: load an existing catalog.json fixture (one with no agentKind key) into a unit test, decode + encode, confirm the encoded JSON does not introduce an agentKind key (no spurious migration write)."
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "HierarchyClient setPaneAgentKind / setPaneAgentSessionID + HierarchyManager writers",
+      "status": "pending",
+      "milestone": "M1",
+      "depends_on": ["T1"],
+      "fulfills": [],
+      "preconditions": "T1 is committed (AgentKind + Pane fields exist). HierarchyClient struct currently exposes setPaneLabel etc.; HierarchyManager exposes labels writer with the standard debounced save pipeline.",
+      "expected_behavior": "HierarchyClient gains setPaneAgentKind and setPaneAgentSessionID closures (live / unimplemented / test default all wired). HierarchyManager.setPaneAgentKind mutates Pane.agentKind and schedules a save only when the value actually changes; same shape for sessionID. Repeated writes of the same value are no-ops.",
+      "verification_steps": [
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/HierarchyManagerAgentIdentityTests\" passes — covers (a) write reflects in snapshot, (b) repeat write does not schedule save, (c) write nil clears field."
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "AgentBinder — identify agent kind from initialCommand / title / OSC 9 banner",
+      "status": "pending",
+      "milestone": "M1",
+      "depends_on": ["T1", "T2"],
+      "fulfills": [],
+      "preconditions": "T1 + T2 committed. RootFeature has the existing engineEventReceived chain that already routes paneInfoChanged / paneExited etc. SurfaceInfo exposes title and lastNotificationTitle; libghostty may or may not deliver paneInfoChanged(.promptEnd) — OQ-1 tracks that.",
+      "expected_behavior": "A new @MainActor AgentBinder is wired up at AppState.bringUp. On pane creation it tries to classify from initialCommand; later title changes and OSC 9 banner events get a second pass; promptEnd is the only rebind trigger. paneExited / paneCrashed clear the binding. catalog.json starts carrying agentKind for panes that match the patterns.",
+      "verification_steps": [
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentBinderTests\" passes — covers initialCommand match, title-only match, sticky behaviour without prompt-end, rebind on prompt-end, paneExited unbind, no-match silence.",
+        "Manual: make mac-run-app; create a new tab via 'tc tab new --command claude' (or by simulating with printf '\\e]2;Claude Code\\a'); quit; jq '.. | objects | select(.agentKind?) | .agentKind' ~/.config/touch-code/catalog.json returns \"claude-code\"."
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "AgentRegistry @Observable state machine + 12-case unit suite",
+      "status": "pending",
+      "milestone": "M2",
+      "depends_on": ["T3"],
+      "fulfills": [],
+      "preconditions": "M1 committed. PaneKeyboardActivityTracker already exists. DetectionTranslator.classify already exists in TouchCodeCore.",
+      "expected_behavior": "AgentRegistry exposes entries keyed by PaneID, each AgentEntry carrying kind / sessionID / state / lastTransitionAt. Inputs (runningPanes change, TerminalEvent, keyboard activity, focus, agent-bound/unbound) drive a private scratch (prevPhase / pendingFinished / waitingForInput) that derives the four-state output. Priority is waitingForInput > loading > finished > idle.",
+      "verification_steps": [
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentRegistryStateTests\" passes — at least 12 cases covering the transition table in design doc §Runtime State Derivation."
+      ]
+    },
+    {
+      "id": "T8",
+      "title": "Cross-consumer consistency regression test",
+      "status": "pending",
+      "milestone": "M2",
+      "depends_on": ["T4"],
+      "fulfills": [],
+      "preconditions": "T4 committed. NotificationDetector + DetectionTranslator already exist and consume TerminalEvent.",
+      "expected_behavior": "A new integration test feeds an identical TerminalEvent sequence (OSC 9 → bell → OSC 9;4 busy → paneIdle → paneExited) to NotificationDetector and AgentRegistry and asserts both classify the same events consistently via DetectionTranslator.classify.",
+      "verification_steps": [
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentNotificationConsistencyTests\" passes."
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "ActiveAgentsPopoverView + ActiveAgentsRowView + SortedEntriesProvider + headline view model",
+      "status": "pending",
+      "milestone": "M3",
+      "depends_on": ["T4"],
+      "fulfills": ["UT-AA-P-003", "UT-AA-P-004"],
+      "preconditions": "M2 committed. AgentRegistry exists and is observable.",
+      "expected_behavior": "A SwiftUI popover view consumes AgentRegistry, sorts entries by state priority then lastTransitionAt desc, and renders one row per AgentEntry (logo + Project/Worktree path + state icon + relative time). A separate ActiveAgentsBadgeViewModel produces the headline copy in the four shapes (empty / single / multi-same / multi-mixed).",
+      "verification_steps": [
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/SortedEntriesProviderTests\" passes.",
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/ActiveAgentsBadgeViewModelTests\" passes — four headline shapes.",
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/ActiveAgentsRowSnapshotTests\" passes — four states × light/dark.",
+        "Runtime probes UT-AA-P-003 and UT-AA-P-004 from docs/user-tests/active-agents-view.md once the popover is reachable via T6's status-bar entry (or a temporary dev hook); the per-task probe defers to the milestone gate if the entry is not yet wired in T5 alone."
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "ActiveAgentsBadgeView + hover bridge + WorktreeHeader integration + click-to-focus",
+      "status": "pending",
+      "milestone": "M3",
+      "depends_on": ["T5"],
+      "fulfills": [
+        "UT-AA-B-001", "UT-AA-B-002", "UT-AA-B-003", "UT-AA-B-004", "UT-AA-B-005", "UT-AA-B-006", "UT-AA-B-007",
+        "UT-AA-P-001", "UT-AA-P-002",
+        "UT-AA-C-001", "UT-AA-C-002",
+        "UT-AA-I-001", "UT-AA-I-002", "UT-AA-I-003", "UT-AA-I-004",
+        "UT-AA-N-001", "UT-AA-N-002", "UT-AA-N-003"
+      ],
+      "preconditions": "T5 committed. WorktreeHeaderView currently hosts the inbox bell; the popover view exists and can render. HierarchyClient.focusPane is the existing focus API.",
+      "expected_behavior": "The badge view renders the headline from T5's view model, hosts the popover via .popover anchored to itself, and implements the 250ms-open / 150ms-close hover bridge. A new RootFeature action .activeAgents(.rowTapped) selects project → worktree → tab and calls focusPane. Required accessibility identifiers are declared: activeAgents.badge / activeAgents.popover / activeAgents.row.<paneID> / .row.<paneID>.state / .row.<paneID>.headline.",
+      "verification_steps": [
+        "make mac-test ARGS=\"-only-testing:touch-codeTests/ActiveAgentsHoverBridgeTests\" passes — 250 / 150 ms timing under TestClock.",
+        "Runtime probe via /hs-user-test against the 18 case IDs in fulfills."
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Agent logo assets + headline copy priority + pulse animation + accessibility labels",
+      "status": "pending",
+      "milestone": "M3",
+      "depends_on": ["T6"],
+      "fulfills": ["UT-AA-B-008", "UT-AA-A-001", "UT-AA-A-002"],
+      "preconditions": "T6 committed. Badge + popover are functional but logos are SF-Symbol placeholders, pulse trait may be missing, VoiceOver labels may be incomplete.",
+      "expected_behavior": "Three agent logos shipped in Assets.xcassets/AgentLogos/ (light + dark; brand-mark glyphs per OQ-2; generic SF Symbol fallback when an asset is missing). Pulse runs whenever any entry is loading/waitingForInput, disabled by accessibilityReduceMotion. Badge and rows carry full accessibility labels per spec AC14.",
+      "verification_steps": [
+        "Runtime probe via /hs-user-test against UT-AA-B-008 (reduce-motion), UT-AA-A-001 (badge VoiceOver), UT-AA-A-002 (row VoiceOver)."
+      ]
+    }
+  ],
+  "misc_buckets": [],
+  "dismissed": [],
+  "decisions": [
+    {
+      "at": "2026-05-22T00:00:00Z",
+      "question": "ExecPlan 的 fulfills 未绑定，怎么修才进 /hs-team？",
+      "options": [
+        "接受上面的绑定，推进 T6=18 case",
+        "拆 T6 为 T6a/T6b/T6c，按 surface 分担 case",
+        "改走 /hs-exec-plan（单 agent，无 fulfills 要求）"
+      ],
+      "answer": "接受上面的绑定，推进 T6=18 case",
+      "answered_by": "human"
+    }
+  ]
+}

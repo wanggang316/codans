@@ -447,16 +447,20 @@ a11y：徽章 `accessibilityLabel(headline) + accessibilityHint("Open active age
 
 | Task | fulfills | Reason if `—` |
 |------|----------|---------------|
-| T1 | — | 纯值类型 + 模式表；无可观察行为。Unit-test covered. |
-| T2 | — | Client/Manager 写入器；无可观察行为。Unit-test covered. |
-| T3 | — | Background binder；持久化字段是其副作用，行为通过 catalog.json 与 Manual 验证。 |
-| T4 | — | 派生态机；行为通过 `AgentRegistryStateTests` 12 用例覆盖。 |
-| T5 | — | 视图与排序；snapshot + viewmodel test 覆盖。 |
-| T6 | — | UI 集成；Manual 步骤覆盖（命令面板 / hover / click）。 |
-| T7 | — | 资源 + 动效 + a11y；Manual 步骤覆盖。 |
-| T8 | — | 一致性回归；integration test 覆盖。 |
+User-tests now live at [docs/user-tests/active-agents-view.md](../user-tests/active-agents-view.md) (23 cases across 6 journeys). Coverage bindings approved 2026-05-22:
 
-项目当前**没有** `docs/user-tests/` 目录；本计划不创建 user-tests markdown。若后续要补，建议在 M3 之后新开 `docs/user-tests/active-agents-view.md` 并把当前 Manual 步骤格式化成 UT-AA-001..NNN，覆盖率重新汇总即可。
+| Task | fulfills | Reason if `—` |
+|------|----------|---------------|
+| T1 | — | 纯值类型 + 模式表；无 UI surface 可探。Unit-test only. |
+| T2 | — | Client/Manager 写入器；无 UI surface 可探。Unit-test only. |
+| T3 | — | Binder 副作用只能在 M3 UI 起来后端到端探测；cases UT-AA-I-* 在 T6 整合后才完整可 probe。 |
+| T4 | — | 派生态机；无 UI surface，行为通过 `AgentRegistryStateTests` 12+ 单测覆盖。 |
+| T5 | UT-AA-P-003, UT-AA-P-004 | popover content + within-bucket sort，T5 引入 popover/row 后即可探。 |
+| T6 | UT-AA-B-001, UT-AA-B-002, UT-AA-B-003, UT-AA-B-004, UT-AA-B-005, UT-AA-B-006, UT-AA-B-007, UT-AA-P-001, UT-AA-P-002, UT-AA-C-001, UT-AA-C-002, UT-AA-I-001, UT-AA-I-002, UT-AA-I-003, UT-AA-I-004, UT-AA-N-001, UT-AA-N-002, UT-AA-N-003 | T6 整合 badge + hover bridge + WorktreeHeader 后，绝大多数端到端 case 同时可探；一并落在此处。 |
+| T7 | UT-AA-B-008, UT-AA-A-001, UT-AA-A-002 | reduce-motion + VoiceOver 两条 a11y/动效专用 case。 |
+| T8 | — | 一致性回归；integration test 覆盖，无新增 user-test。 |
+
+并集 = 23 cases ✓ 完整覆盖 `docs/user-tests/active-agents-view.md`，无 case 重复声明。
 
 ## Concrete Steps
 
