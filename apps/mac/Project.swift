@@ -38,6 +38,7 @@ let project = Project(
       infoPlist: .default,
       buildableFolders: [
         "TouchCodeCore",
+        "TouchCodeCore/Agents",
         "TouchCodeCore/GitHub",
         "TouchCodeCore/Notifications",
         "TouchCodeCore/Shortcuts",
