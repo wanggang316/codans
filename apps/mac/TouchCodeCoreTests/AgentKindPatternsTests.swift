@@ -85,6 +85,30 @@ struct AgentKindPatternsTests {
     )
   }
 
+  // MARK: - .pi hits via title / notificationTitle
+
+  /// Per-kind dimension coverage: `.pi` must hit on `title` as well as
+  /// on `initialCommand`. The title pattern table only contains
+  /// `["pi"]` for `.pi`; `"pi"` substring-matches none of the
+  /// `.claudeCode` / `.codex` title patterns, so this should classify
+  /// cleanly without tripping the longest-pattern tiebreaker.
+  @Test
+  func title_piBareWord() {
+    #expect(
+      AgentKindPatterns.classify(initialCommand: nil, title: "pi", notificationTitle: nil) == .pi
+    )
+  }
+
+  /// Per-kind dimension coverage: `.pi` must hit on
+  /// `notificationTitle`. Same substring-safety argument as
+  /// `title_piBareWord`.
+  @Test
+  func notificationTitle_piMatches() {
+    #expect(
+      AgentKindPatterns.classify(initialCommand: nil, title: nil, notificationTitle: "pi") == .pi
+    )
+  }
+
   // MARK: - initialCommand: first-token-only behaviour
 
   @Test
@@ -111,6 +135,89 @@ struct AgentKindPatternsTests {
       AgentKindPatterns.classify(
         initialCommand: "mpirun -n 4 ./solve",
         title: nil,
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  // MARK: - .claudeCode near-misses
+
+  /// First-token equality means a token that merely *resembles*
+  /// `"claude"` (here a misspelt `"clawd"`) must not classify.
+  @Test
+  func initialCommand_clawdDoesNotMatchClaude() {
+    #expect(
+      AgentKindPatterns.classify(initialCommand: "clawd", title: nil, notificationTitle: nil) == nil
+    )
+  }
+
+  /// First-token equality also rejects `"claudius"`, even though it
+  /// shares the `"claud"` prefix with the `.claudeCode` pattern.
+  @Test
+  func initialCommand_claudiusDoesNotMatchClaude() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: "claudius status",
+        title: nil,
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  /// Substring matching on `title` looks for the *full* pattern
+  /// string. `"claudication"` lacks the trailing `"e"` of `"claude"`
+  /// (`c-l-a-u-d-i-c-a-t-i-o-n`) so it cannot match either
+  /// `"claude"` or `"Claude Code"`.
+  @Test
+  func title_claudicationDoesNotMatchClaude() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: nil,
+        title: "claudication report",
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  // MARK: - .codex near-misses
+
+  /// `"codexlike"` shares the `"codex"` prefix but first-token
+  /// equality on `initialCommand` requires exact match (case-
+  /// insensitive), not prefix.
+  @Test
+  func initialCommand_codexlikeDoesNotMatchCodex() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: "codexlike",
+        title: nil,
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  /// `"codecs"` is a near-neighbour of `"codex"` and must not
+  /// classify under first-token equality.
+  @Test
+  func initialCommand_codecsDoesNotMatchCodex() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: "codecs install",
+        title: nil,
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  /// The `.codex` title patterns are `["Codex CLI", "Codex"]`. A
+  /// title containing only the substring `"Code"` (here `"Visual
+  /// Studio Code"`) does not contain the full pattern `"Codex"` and
+  /// must not classify.
+  @Test
+  func title_visualStudioCodeDoesNotMatchCodex() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: nil,
+        title: "Visual Studio Code",
         notificationTitle: nil
       ) == nil
     )
