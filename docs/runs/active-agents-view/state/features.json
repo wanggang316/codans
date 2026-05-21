@@ -5,7 +5,11 @@
     {
       "id": "T1",
       "title": "AgentKind enum + AgentKindPatterns table + Pane.agentKind/agentSessionID fields",
-      "status": "pending",
+      "status": "completed",
+      "started_at": "2026-05-22T01:00:00Z",
+      "completed_at": "2026-05-22T04:30:00Z",
+      "commit": "4421cdd",
+      "commits_in_task": ["0a2229a", "db8efbc", "4421cdd"],
       "milestone": "M1",
       "depends_on": [],
       "fulfills": [],
@@ -20,7 +24,8 @@
     {
       "id": "T2",
       "title": "HierarchyClient setPaneAgentKind / setPaneAgentSessionID + HierarchyManager writers",
-      "status": "pending",
+      "status": "in-progress",
+      "started_at": "2026-05-22T04:30:00Z",
       "milestone": "M1",
       "depends_on": ["T1"],
       "fulfills": [],
@@ -121,7 +126,44 @@
     }
   ],
   "misc_buckets": [],
-  "dismissed": [],
+  "dismissed": [
+    {
+      "from_task": "T1",
+      "issue": "make mac-check reports 70 pre-existing swiftlint errors in files outside T1's scope (app, runtime, unrelated tests). Lint baseline on feat/agent-state was already dirty before this plan started.",
+      "justification": "Inherited repo state; predates ActiveAgents work; fixing belongs in a dedicated lint-cleanup plan, not in any task of this feature.",
+      "dismissed_at": "2026-05-22T02:30:00Z"
+    },
+    {
+      "from_task": "T1",
+      "issue": "ShortcutSchemaAuditTests has 3 unrelated test failures on a clean feat/agent-state HEAD (ModifierMask rawValue mismatches; missing .changeActiveTabColor entry).",
+      "justification": "Pre-existing on branch baseline; verified by stashing T1 changes and re-running; fix requires touching the shortcut golden table which is orthogonal to ActiveAgents scope.",
+      "dismissed_at": "2026-05-22T02:30:00Z"
+    },
+    {
+      "from_task": "T1",
+      "issue": "Top-level Makefile target make mac-test is a no-op placeholder (echo 'no tests yet'); xcodebuild test must be invoked directly.",
+      "justification": "Infrastructure gap in repo; all subsequent task briefs should reference xcodebuild test -scheme <Target> -only-testing:... instead of make mac-test ARGS=..., which the controller will adopt for T2 onward.",
+      "dismissed_at": "2026-05-22T02:30:00Z"
+    },
+    {
+      "from_task": "T1",
+      "issue": "Brief specified test file path apps/mac/touch-code/Tests/TouchCodeCoreTests/ which does not exist; correct path is apps/mac/TouchCodeCoreTests/.",
+      "justification": "Brief errata absorbed by implementer who placed the file at the actual path; subsequent briefs in this plan will reference apps/mac/TouchCodeCoreTests/ directly.",
+      "dismissed_at": "2026-05-22T02:30:00Z"
+    },
+    {
+      "from_task": "T1",
+      "issue": "Brief example backward-compat JSON literal used bare-string UUID for Pane.id, but PaneID decodes as a nested {raw:<UUID>} object.",
+      "justification": "Brief errata; implementer used the correct nested shape per WorktreeArchivedCodableTests precedent; no functional impact on T1 deliverable.",
+      "dismissed_at": "2026-05-22T02:30:00Z"
+    },
+    {
+      "from_task": "T1",
+      "issue": "Code-reviewer Suggestion 3: pattern.lowercased() is recomputed inside the classify inner loop (could be hoisted to a precomputed table).",
+      "justification": "Pattern table has 7 entries total; recomputing lowercase on each classify call is below measurement noise. Premature optimisation per architecture and golden-rules guidance; revisit only if classify ever lands on a hot path.",
+      "dismissed_at": "2026-05-22T03:30:00Z"
+    }
+  ],
   "decisions": [
     {
       "at": "2026-05-22T00:00:00Z",
