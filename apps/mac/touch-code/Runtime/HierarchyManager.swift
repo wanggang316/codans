@@ -705,6 +705,62 @@ final class HierarchyManager {
     }
   }
 
+  // MARK: - Pane agent identity (active-agents-view T2)
+
+  /// Writes `Pane.agentKind` (the classified CLI agent currently driving
+  /// the pane). `nil` clears the field. Silent no-op on unknown `paneID`.
+  /// Idempotent — a repeat call with the same value is a true no-op
+  /// (no `scheduleSave`, no debounce churn). The single canonical writer
+  /// for `agentKind`; the upcoming `AgentBinder` (active-agents-view T3)
+  /// routes its classification output through here so all persistence
+  /// flows through the standard `store.scheduleSave(catalog)` pipeline.
+  func setPaneAgentKind(_ paneID: PaneID, kind: AgentKind?) {
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
+          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
+            continue
+          }
+          // Idempotent: unchanged value skips persistence so a flood of
+          // identical classifications (e.g. title-update spam on the
+          // same agent) does not wake the 500 ms debounce.
+          guard panes[paneIndex].agentKind != kind else { return }
+          catalog.projects[projectIndex]
+            .worktrees[worktreeIndex]
+            .tabs[tabIndex]
+            .panes[paneIndex].agentKind = kind
+          store.scheduleSave(catalog)
+          return
+        }
+      }
+    }
+  }
+
+  /// Writes `Pane.agentSessionID` (agent-supplied session identifier).
+  /// `nil` clears the field. Silent no-op on unknown `paneID`. Idempotent
+  /// — repeat calls with the same value skip the save. Single canonical
+  /// writer; consumed by `AgentBinder` alongside `setPaneAgentKind`.
+  func setPaneAgentSessionID(_ paneID: PaneID, sessionID: String?) {
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
+          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
+            continue
+          }
+          guard panes[paneIndex].agentSessionID != sessionID else { return }
+          catalog.projects[projectIndex]
+            .worktrees[worktreeIndex]
+            .tabs[tabIndex]
+            .panes[paneIndex].agentSessionID = sessionID
+          store.scheduleSave(catalog)
+          return
+        }
+      }
+    }
+  }
+
   /// Merges worktrees discovered on disk (typically from
   /// `wt ls --json`) into the catalog. Path-canonicalized dedupe
   /// against existing rows — both sides go through

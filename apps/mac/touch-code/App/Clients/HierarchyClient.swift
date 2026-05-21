@@ -418,6 +418,22 @@ nonisolated struct HierarchyClient: Sendable {
       _ present: Bool
     ) -> Void
 
+  /// Writes `Pane.agentKind` (classified CLI agent currently driving the
+  /// pane, e.g. `.claudeCode` / `.codex` / `.pi`). `nil` clears the field.
+  /// Idempotent: a repeat call with the same value is a true no-op
+  /// (no persistence churn). Silent no-op on unknown `paneID`. Consumed
+  /// by the upcoming `AgentBinder` (`docs/exec-plans/active-agents-view.md`
+  /// T3) that derives the kind from `SurfaceInfo.title` / `initialCommand`
+  /// / OSC 9 events.
+  var setPaneAgentKind: @MainActor @Sendable (_ paneID: PaneID, _ kind: AgentKind?) -> Void
+
+  /// Writes `Pane.agentSessionID` (agent-supplied session identifier;
+  /// stable across resumes for the same agent process). `nil` clears the
+  /// field. Idempotent: a repeat call with the same value is a true
+  /// no-op. Silent no-op on unknown `paneID`. Consumed alongside
+  /// `setPaneAgentKind` by `AgentBinder`.
+  var setPaneAgentSessionID: @MainActor @Sendable (_ paneID: PaneID, _ sessionID: String?) -> Void
+
   /// Reorder worktrees within a single sidebar segment under a Project.
   /// `from` is a segment-relative `IndexSet`; `to` is the segment-relative
   /// destination offset, both in SwiftUI `ForEach.onMove` convention. Out-of-
@@ -733,6 +749,12 @@ extension HierarchyClient {
       },
       setPaneLabel: { paneID, label, present in
         manager.setPaneLabel(paneID: paneID, label: label, present: present)
+      },
+      setPaneAgentKind: { paneID, kind in
+        manager.setPaneAgentKind(paneID, kind: kind)
+      },
+      setPaneAgentSessionID: { paneID, sessionID in
+        manager.setPaneAgentSessionID(paneID, sessionID: sessionID)
       },
       reorderWorktrees: { projectID, segment, from, to in
         try manager.reorderWorktrees(
@@ -1330,6 +1352,12 @@ extension HierarchyClient: DependencyKey {
     setPaneLabel: { _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
+    setPaneAgentKind: { _, _ in
+      fatalError("HierarchyClient.liveValue not configured")
+    },
+    setPaneAgentSessionID: { _, _ in
+      fatalError("HierarchyClient.liveValue not configured")
+    },
     reorderWorktrees: { _, _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     }
@@ -1410,6 +1438,8 @@ extension HierarchyClient: DependencyKey {
     ),
     promoteWorktree: unimplemented("HierarchyClient.promoteWorktree"),
     setPaneLabel: unimplemented("HierarchyClient.setPaneLabel"),
+    setPaneAgentKind: unimplemented("HierarchyClient.setPaneAgentKind"),
+    setPaneAgentSessionID: unimplemented("HierarchyClient.setPaneAgentSessionID"),
     reorderWorktrees: unimplemented("HierarchyClient.reorderWorktrees")
   )
 }
