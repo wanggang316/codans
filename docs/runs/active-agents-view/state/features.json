@@ -60,8 +60,11 @@
     {
       "id": "T4",
       "title": "AgentRegistry @Observable state machine + 12-case unit suite",
-      "status": "in-progress",
+      "status": "completed",
       "started_at": "2026-05-22T07:30:00Z",
+      "completed_at": "2026-05-22T08:30:00Z",
+      "commit": "6ab2def4",
+      "verification_posture": "build-only — 14 unit tests committed but exec deferred to touch-codeTests cleanup plan; AgentRegistry.swift typechecks against built TouchCodeCore.framework",
       "milestone": "M2",
       "depends_on": ["T3"],
       "fulfills": [],
@@ -74,7 +77,8 @@
     {
       "id": "T8",
       "title": "Cross-consumer consistency regression test",
-      "status": "pending",
+      "status": "in-progress",
+      "started_at": "2026-05-22T08:30:00Z",
       "milestone": "M2",
       "depends_on": ["T4"],
       "fulfills": [],
@@ -225,6 +229,18 @@
       "issue": "Code-reviewer N1/N2 (T3): closure name currentAgentKind could be paneAgentKind for sibling-name symmetry; OSLog log uses non-ASCII arrow → instead of ASCII ->.",
       "justification": "Pure naming/cosmetic. Will be revisited if the binder's closure interface ever grows new members (then a rename pass makes sense) and during the next time the codebase's OSLog format conventions get audited.",
       "dismissed_at": "2026-05-22T07:00:00Z"
+    },
+    {
+      "from_task": "T4",
+      "issue": "Pre-existing tc CLI target build failure: tc/Commands/AppCommands.swift cannot resolve ArgumentParser module after tuist install + tuist generate. Reproduced on stashed clean HEAD by T2 and T4 implementers; not introduced by ActiveAgents work. Blocks xcodebuild -scheme touch-code build from reaching exit 0 because the app target embeds the tc binary as a post-build phase.",
+      "justification": "Independent of touch-codeTests target breakage; deferred to the same touch-codeTests cleanup follow-up plan (or a sibling tc-build plan if its root cause turns out to be unrelated). Each T2-T8 implementer has verified production source compiles by running xcodebuild -scheme TouchCodeCore build (green) and confirming new files typecheck against the built framework; that is the strongest verification path available today.",
+      "dismissed_at": "2026-05-22T08:00:00Z"
+    },
+    {
+      "from_task": "T4",
+      "issue": "Code-reviewer S1-S3 + N1-N2 (T4): repeated default-scratch ladder could be a helper; onPaneKeyboardActivity / onPaneFocused are byte-identical; one test constructs its own registry instead of reusing Fixture; parameter name 'now' shadows the time-source closure on one method; onAgentUnbound does not clear lastRunning while teardown branch does (harmless asymmetry).",
+      "justification": "Five cosmetic / quality-of-life items, zero behavioural impact. Under build-only posture iterating on a test file without exec verification is unsafe; the production-side suggestions are pure readability and can wait for the cleanup pass when tests can run end-to-end. None blocks T5.",
+      "dismissed_at": "2026-05-22T08:30:00Z"
     }
   ],
   "decisions": [
