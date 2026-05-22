@@ -115,7 +115,12 @@
     {
       "id": "T6",
       "title": "ActiveAgentsBadgeView + hover bridge + WorktreeHeader integration + click-to-focus",
-      "status": "pending",
+      "status": "completed",
+      "started_at": "2026-05-22T10:00:00Z",
+      "completed_at": "2026-05-22T11:30:00Z",
+      "commit": "924683c4",
+      "commits_in_task": ["5adcb426", "924683c4"],
+      "verification_posture": "build-only + spec/code review passed; manual probing of 18 fulfilled cases deferred to combined M3 session after T7 (logo + polish) lands to avoid double-probing the same UI surface",
       "milestone": "M3",
       "depends_on": ["T5"],
       "fulfills": [
@@ -261,6 +266,24 @@
       "issue": "Code-reviewer T5 S3 + N1 + N2: in ActiveAgentsPopoverView, add a DEBUG-only assert when resolveSourcePath returns nil (programmer-error signal); SortedEntriesProvider's `nonisolated enum` declaration is technically redundant; ActiveAgentsBadgeViewModel doc-comment could call out the O(n) pulse scan is allocation-free.",
       "justification": "Three cosmetic items, zero behavioural impact. DEBUG assert is worth doing during the cleanup pass when manual probing has exercised the popover; nonisolated enum keep for symmetry with project precedent; doc wording is fine as-is.",
       "dismissed_at": "2026-05-22T10:00:00Z"
+    },
+    {
+      "from_task": "T6",
+      "issue": "WorktreeHeaderView.swift is dead code (no render call site). Brief asked to insert the ActiveAgents badge there; implementer correctly placed it in WorktreeDetailView.toolbar where the inbox bell visibly renders. WorktreeHeaderView.swift remains untouched dead code.",
+      "justification": "Cleaning up dead WorktreeHeaderView.swift (either deleting it or rewiring WorktreeDetailView to compose it) is out of ActiveAgents scope. Worth a dedicated cleanup task in the touch-codeTests-cleanup follow-up plan or a sibling 'remove dead UI scaffolding' plan.",
+      "dismissed_at": "2026-05-22T11:00:00Z"
+    },
+    {
+      "from_task": "T6",
+      "issue": "HierarchyManager.runningPanes is private with no public observation surface. AppState had to duplicate the OSC-9;4 → running-set derivation inside activeAgentsRunningPanes to feed AgentRegistry.onRunningPanesChanged.",
+      "justification": "Exposing runningPanes publicly (private(set) on HierarchyManager) would let AgentRegistry observe it directly via @Observable change tracking, removing the duplicate derivation. Defer until the cleanup pass so the encapsulation change can land alongside related observability cleanups.",
+      "dismissed_at": "2026-05-22T11:00:00Z"
+    },
+    {
+      "from_task": "T6",
+      "issue": "PaneKeyboardActivityTracker and AgentBinder now expose mutable `onActivity` / `agentBoundHandler` / `agentUnboundHandler` callback closures. Pattern works but the cleaner long-term shape would be AsyncStream<event> channels per producer.",
+      "justification": "AsyncStream refactor is non-trivial and orthogonal to ActiveAgents shipping. Optional closures with default no-op are a well-precedented lighter alternative until the call-site set proves large enough to justify a channel.",
+      "dismissed_at": "2026-05-22T11:00:00Z"
     }
   ],
   "decisions": [
@@ -285,6 +308,17 @@
       ],
       "answer": "Project.swift 加一行 SWIFT_MODULE_NAME=touch_code（推荐）",
       "answered_by": "human"
+    },
+    {
+      "at": "2026-05-22T11:00:00Z",
+      "question": "T6 implementer escalated: WorktreeHeaderView.swift is dead code (no render site), AgentBinder + PaneKeyboardActivityTracker gained optional callback hooks, AppState derives its own runningPanes set because HierarchyManager.runningPanes is private. Accept these scope decisions or rework?",
+      "options": [
+        "Accept all three: badge placed in WorktreeDetailView.toolbar (where inbox bell renders), callbacks are the brief-suggested seam, runningPanes workaround moves to cleanup plan",
+        "Rework: put badge inside WorktreeHeaderView.swift and revive its render call path",
+        "Rework: expose HierarchyManager.runningPanes publicly so AppState does not duplicate the derivation"
+      ],
+      "answer": "Accept all three: badge placed in WorktreeDetailView.toolbar (where inbox bell renders), callbacks are the brief-suggested seam, runningPanes workaround moves to cleanup plan",
+      "answered_by": "controller"
     },
     {
       "at": "2026-05-22T05:30:00Z",
