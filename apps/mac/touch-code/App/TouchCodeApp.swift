@@ -1035,7 +1035,7 @@ final class AppState {
       binder.consider(paneID: paneID, trigger: .paneCreated)
     case .paneInfoChanged(let paneID, let delta):
       switch delta {
-      case .title, .tabTitle:
+      case .title:
         binder.consider(paneID: paneID, trigger: .titleChanged)
       case .desktopNotification(let title, let body):
         binder.consider(
