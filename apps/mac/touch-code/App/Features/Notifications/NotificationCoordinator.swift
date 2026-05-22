@@ -123,7 +123,11 @@ final class NotificationCoordinator {
     let didSound: Bool
     if settings.systemEnabled {
       if auth == .authorized {
-        await osNotifier.post(candidate.entry, playSound: settings.soundEnabled)
+        await osNotifier.post(
+          candidate.entry,
+          playSound: settings.soundEnabled,
+          sourceLabel: candidate.bannerSourceLabel
+        )
         didPost = true
         didSound = settings.soundEnabled
       } else {
@@ -294,6 +298,17 @@ final class NotificationCoordinator {
     let entry: InboxEntry
     /// True iff the source pane equals the user's globally-focused pane.
     let sourceIsFocused: Bool
+    /// `<project> · <worktree>` resolved by the detector against the live
+    /// catalog (HAN-78). Appended on its own line after the OS banner
+    /// body; inbox surfaces don't read this field. Nil when the source
+    /// cache fallback path was taken (live catalog lost both names).
+    let bannerSourceLabel: String?
+
+    init(entry: InboxEntry, sourceIsFocused: Bool, bannerSourceLabel: String? = nil) {
+      self.entry = entry
+      self.sourceIsFocused = sourceIsFocused
+      self.bannerSourceLabel = bannerSourceLabel
+    }
   }
 
   /// Outcome of `handle(_:)`. `.posted` always carries the full bool tuple

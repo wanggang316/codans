@@ -160,22 +160,20 @@ public final class NotificationDetector {
     // definition the user isn't looking at it.
     let sourceIsFocused = resolved.source.paneID == globallyFocusedPane()
 
-    // Enrich the title with the originating worktree + project so a
-    // banner reads `[main · TouchCode] Pane bell` rather than just
-    // `Pane bell` — critical when the user has multiple worktrees and
-    // projects open and needs to triage at a glance (HAN-78). Worktree
-    // comes first (it's the more volatile axis the user actually
-    // diffed against); project trails as the stable context.
-    let enrichedTitle = enrich(
-      title: translated.title,
-      worktreeLabel: resolved.worktreeLabel,
-      projectLabel: resolved.projectLabel
-    )
+    // HAN-78: title stays clean; the source breadcrumb
+    // (`<project> · <worktree>`) is attached as `bannerSourceLabel` and
+    // appended to the OS banner body by `UserNotificationsOSNotifier`.
+    // The inbox popover already shows the same breadcrumb on the right
+    // of each row, so we deliberately keep `entry.body` untouched.
     let entry = InboxEntry(
       kind: translated.kind,
-      title: enrichedTitle,
+      title: translated.title,
       body: translated.body,
       source: resolved.source
+    )
+    let bannerSourceLabel = sourceLabel(
+      projectLabel: resolved.projectLabel,
+      worktreeLabel: resolved.worktreeLabel
     )
     // Activity bump for the sidebar's "active first" sort fires
     // before the coordinator dispatch: `lastActiveAt` reflects "a
@@ -188,7 +186,11 @@ public final class NotificationDetector {
     // longer touches `NotificationStore.append` or `OSNotifier.post`
     // directly.
     await coordinator.handle(
-      NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: sourceIsFocused)
+      NotificationCoordinator.Candidate(
+        entry: entry,
+        sourceIsFocused: sourceIsFocused,
+        bannerSourceLabel: bannerSourceLabel
+      )
     )
 
     // Drop the cache only after the entry has been emitted. A teardown
@@ -252,17 +254,14 @@ public final class NotificationDetector {
     return nil
   }
 
-  /// Compose the inbox/banner title prefix. Worktree first, then project,
-  /// joined by `·`. Empty bracket pair is never emitted — when both labels
-  /// are missing the original title is returned verbatim.
-  private func enrich(
-    title: String,
-    worktreeLabel: String?,
-    projectLabel: String?
-  ) -> String {
-    let parts = [worktreeLabel, projectLabel].compactMap { $0 }
-    guard !parts.isEmpty else { return title }
-    return "[\(parts.joined(separator: " · "))] \(title)"
+  /// Banner source label: `<project> · <worktree>` (project first, the
+  /// stable axis; worktree second, the volatile one). Returns nil when
+  /// both labels are missing so the OS banner falls back to a body-only
+  /// rendering rather than a trailing dangling separator.
+  private func sourceLabel(projectLabel: String?, worktreeLabel: String?) -> String? {
+    let parts = [projectLabel, worktreeLabel].compactMap { $0 }
+    guard !parts.isEmpty else { return nil }
+    return parts.joined(separator: " · ")
   }
 
   private struct Resolved {
