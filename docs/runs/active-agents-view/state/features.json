@@ -41,8 +41,12 @@
     {
       "id": "T3",
       "title": "AgentBinder — identify agent kind from initialCommand / title / OSC 9 banner",
-      "status": "in-progress",
+      "status": "completed",
       "started_at": "2026-05-22T06:30:00Z",
+      "completed_at": "2026-05-22T07:30:00Z",
+      "commit": "9cfbf95",
+      "commits_in_task": ["e149ab6", "9cfbf95"],
+      "verification_posture": "build-only — unit tests committed but exec deferred to touch-codeTests cleanup plan; OSC 133 prompt-end dispatch dormant pending libghostty OQ-1",
       "milestone": "M1",
       "depends_on": ["T1", "T2"],
       "fulfills": [],
@@ -56,7 +60,8 @@
     {
       "id": "T4",
       "title": "AgentRegistry @Observable state machine + 12-case unit suite",
-      "status": "pending",
+      "status": "in-progress",
+      "started_at": "2026-05-22T07:30:00Z",
       "milestone": "M2",
       "depends_on": ["T3"],
       "fulfills": [],
@@ -196,6 +201,30 @@
       "issue": "Code-reviewer S1: RecordingCatalogStore.scheduleSave override calls super, which spawns a real 500ms debounced disk write to a per-test tempdir that no assertion reads. Cleaner override would skip super and only count invocations.",
       "justification": "Single-line test cleanup. Cannot be safely iterated under build-only posture because the test target can not be executed today; touching test code without exec verification risks introducing a silent regression. Bundled into the touch-codeTests cleanup follow-up plan where the test will be re-run and the cleanup applied together.",
       "dismissed_at": "2026-05-22T06:30:00Z"
+    },
+    {
+      "from_task": "T3",
+      "issue": "Code-reviewer S1 (T3): AgentBinder.triggerLogTag helper has two unreachable branches; only .titleChanged / .desktopNotification ever invoke it (the other two callers pass string literals directly).",
+      "justification": "Pure cosmetic cleanup; no behavioural impact. The dead branches will be revisited if/when more triggers route through the helper. Build-only posture means we avoid iterating on the binder beyond the one real bug fix.",
+      "dismissed_at": "2026-05-22T07:00:00Z"
+    },
+    {
+      "from_task": "T3",
+      "issue": "Code-reviewer S2 (T3): Trigger.desktopNotification(title:body:) carries a body payload that the binder never reads (AgentKindPatterns.classify takes only notificationTitle). Body is dead data on the trigger.",
+      "justification": "Dropping the body parameter would require updating AgentBinderTests (which carry .desktopNotification(title:body:) call sites), and build-only posture says do not iterate test code without exec verification. Defer to the touch-codeTests cleanup plan that will re-run all tests; the dead body field costs nothing today and a future body-pattern matcher could reuse it.",
+      "dismissed_at": "2026-05-22T07:00:00Z"
+    },
+    {
+      "from_task": "T3",
+      "issue": "Code-reviewer S3 (T3): redundant same-kind guard in .promptReturned branch of consider(...). writeIfChanged already does the comparison; the local guard means prompt-end no-ops never log, asymmetric with other no-op paths.",
+      "justification": "Asymmetric log-line semantics is mild cosmetic noise; the production behaviour is identical (no spurious write either way). Defer until tests can run end-to-end to confirm removing the guard does not flip a test that depended on the silent no-op.",
+      "dismissed_at": "2026-05-22T07:00:00Z"
+    },
+    {
+      "from_task": "T3",
+      "issue": "Code-reviewer N1/N2 (T3): closure name currentAgentKind could be paneAgentKind for sibling-name symmetry; OSLog log uses non-ASCII arrow → instead of ASCII ->.",
+      "justification": "Pure naming/cosmetic. Will be revisited if the binder's closure interface ever grows new members (then a rename pass makes sense) and during the next time the codebase's OSLog format conventions get audited.",
+      "dismissed_at": "2026-05-22T07:00:00Z"
     }
   ],
   "decisions": [
