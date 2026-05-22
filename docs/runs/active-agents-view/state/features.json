@@ -24,8 +24,11 @@
     {
       "id": "T2",
       "title": "HierarchyClient setPaneAgentKind / setPaneAgentSessionID + HierarchyManager writers",
-      "status": "in-progress",
+      "status": "completed",
       "started_at": "2026-05-22T04:30:00Z",
+      "completed_at": "2026-05-22T06:30:00Z",
+      "commit": "3994012",
+      "verification_posture": "build-only — unit tests committed but exec deferred to touch-codeTests cleanup plan",
       "milestone": "M1",
       "depends_on": ["T1"],
       "fulfills": [],
@@ -38,7 +41,8 @@
     {
       "id": "T3",
       "title": "AgentBinder — identify agent kind from initialCommand / title / OSC 9 banner",
-      "status": "pending",
+      "status": "in-progress",
+      "started_at": "2026-05-22T06:30:00Z",
       "milestone": "M1",
       "depends_on": ["T1", "T2"],
       "fulfills": [],
@@ -186,6 +190,12 @@
       "issue": "T2's HierarchyManagerAgentIdentityTests (8 cases) committed at 3994012 but never exercised; static review only. Once touch-codeTests target is restored by the cleanup plan, these tests should be the first thing re-run to validate T2 behaviour retroactively.",
       "justification": "Build-only posture chosen 2026-05-22T06:00 means T2-T8 unit tests are committed-but-unrun until cleanup. The implementer self-reviewed each test line-by-line against the production API and reported it compile-shape correct; the gap is exec validation, not authoring quality.",
       "dismissed_at": "2026-05-22T06:00:00Z"
+    },
+    {
+      "from_task": "T2",
+      "issue": "Code-reviewer S1: RecordingCatalogStore.scheduleSave override calls super, which spawns a real 500ms debounced disk write to a per-test tempdir that no assertion reads. Cleaner override would skip super and only count invocations.",
+      "justification": "Single-line test cleanup. Cannot be safely iterated under build-only posture because the test target can not be executed today; touching test code without exec verification risks introducing a silent regression. Bundled into the touch-codeTests cleanup follow-up plan where the test will be re-run and the cleanup applied together.",
+      "dismissed_at": "2026-05-22T06:30:00Z"
     }
   ],
   "decisions": [
