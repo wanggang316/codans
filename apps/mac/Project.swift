@@ -301,6 +301,8 @@ let project = Project(
           "ENABLE_HARDENED_RUNTIME": "YES",
           "OTHER_LDFLAGS": "$(inherited) -lc++ -framework Carbon -framework Metal -framework MetalKit -framework CoreText -framework QuartzCore",
           "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
+          // SWIFT_MODULE_NAME pinned to touch_code: feb1801 dropped the space from productName for release-script safety, but the existing test suite (~99 files) imports via @testable import touch_code; keep the Swift module name stable.
+          "SWIFT_MODULE_NAME": "touch_code",
         ],
         defaultSettings: .essential
       )
