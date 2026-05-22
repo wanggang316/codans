@@ -29,6 +29,10 @@ struct ContentView: View {
   /// (each spawn re-runs `setNotificationCategories` on the shared
   /// UN center).
   let osNotifier: UserNotificationsOSNotifier?
+  /// T6 (active-agents): registry that backs the worktree-toolbar
+  /// badge + popover. Optional because `AppState.bringUp` constructs
+  /// it lazily; nil renders no badge.
+  let activeAgentsRegistry: AgentRegistry?
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
@@ -99,6 +103,8 @@ struct ContentView: View {
         inspectorVisible: store.state.diffInspectorVisible(in: hierarchyManager.catalog),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
+        onActiveAgentsRowTapped: { paneID in store.send(.activeAgents(.rowTapped(paneID))) },
+        activeAgentsRegistry: activeAgentsRegistry,
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it

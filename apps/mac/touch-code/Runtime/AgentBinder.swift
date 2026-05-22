@@ -56,17 +56,31 @@ final class AgentBinder {
   private let currentAgentKind: @MainActor (PaneID) -> AgentKind?
   private let paneInitialCommand: @MainActor (PaneID) -> String?
   private let paneTitle: @MainActor (PaneID) -> String?
+  /// Optional T6 hook: fired immediately AFTER `setPaneAgentKind` lands
+  /// a non-nil binding. AppState wires this to `AgentRegistry.onAgentBound`
+  /// so the ActiveAgents UI learns about the new agent without a separate
+  /// observation pass. Default no-op keeps existing tests / callers
+  /// untouched.
+  private let agentBoundHandler: @MainActor (PaneID, AgentKind, String?) -> Void
+  /// Companion of `agentBoundHandler` — fires on `unbind(_:)` and on any
+  /// path that writes a nil binding through `setPaneAgentKind`. AppState
+  /// wires this to `AgentRegistry.onAgentUnbound`.
+  private let agentUnboundHandler: @MainActor (PaneID) -> Void
 
   init(
     client: HierarchyClient,
     currentAgentKind: @escaping @MainActor (PaneID) -> AgentKind?,
     paneInitialCommand: @escaping @MainActor (PaneID) -> String?,
-    paneTitle: @escaping @MainActor (PaneID) -> String?
+    paneTitle: @escaping @MainActor (PaneID) -> String?,
+    agentBoundHandler: @escaping @MainActor (PaneID, AgentKind, String?) -> Void = { _, _, _ in },
+    agentUnboundHandler: @escaping @MainActor (PaneID) -> Void = { _ in }
   ) {
     self.client = client
     self.currentAgentKind = currentAgentKind
     self.paneInitialCommand = paneInitialCommand
     self.paneTitle = paneTitle
+    self.agentBoundHandler = agentBoundHandler
+    self.agentUnboundHandler = agentUnboundHandler
   }
 
   /// Re-run classification for this pane in response to the given trigger
@@ -136,6 +150,7 @@ final class AgentBinder {
   /// snapshot read.
   func unbind(_ paneID: PaneID) {
     client.setPaneAgentKind(paneID, nil)
+    agentUnboundHandler(paneID)
   }
 
   // MARK: - Helpers
@@ -162,6 +177,15 @@ final class AgentBinder {
       )
     }
     client.setPaneAgentKind(paneID, next)
+    // T6 hook — fire AFTER the writer so the registry observes the same
+    // kind that just landed in the catalog. Session-id is not modelled
+    // here yet (always nil); when `setPaneAgentSessionID` callers wake
+    // up, plumb a third channel down through this hook.
+    if let kind = next {
+      agentBoundHandler(paneID, kind, nil)
+    } else {
+      agentUnboundHandler(paneID)
+    }
   }
 
   private func triggerLogTag(_ trigger: Trigger) -> String {
