@@ -4,7 +4,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// M10 coverage: `CommandPaletteItems.build` surfaces one `runProjectScript`
 /// item per active-Project script, the items track active-selection

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Parse-only performance baseline for `DiffParser`. Scoped to what is measurable before the
 /// TCA shell lands: full reducer-dispatch + render measurement is the M8 test's job once

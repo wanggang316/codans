@@ -1,7 +1,7 @@
 import SwiftUI
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Time-of-day → (icon, colour) mapping for `StatusMotivationalView`.
 /// Pure function, so we don't spin up SwiftUI.

@@ -5,7 +5,7 @@ import SwiftUI
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Visual regression coverage for the Tab-bar chip visuals landed in M1-T1.3.
 /// Five cases exercise the chip background's state combinations plus one

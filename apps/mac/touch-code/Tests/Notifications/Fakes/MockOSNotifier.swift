@@ -1,7 +1,7 @@
 import Foundation
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 // swiftlint:disable async_without_await
 //

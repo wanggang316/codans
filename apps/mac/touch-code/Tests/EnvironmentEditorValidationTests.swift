@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// `EnvVarValidator` is a pure free enum — these tests hit it without
 /// SwiftUI ceremony. The Draft / commit logic in the SwiftUI view itself

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Covers the v2 batched PR fetch path (0013 M3): query builder, chunker, parser (dynamic
 /// keys + union-type + fork-PR filter), and the `LiveGitHubService.batchPullRequests`

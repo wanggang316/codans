@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Unit tests for `GhosttyThemeCatalogReader.load`. Covers directory
 /// discovery via `XDG_CONFIG_HOME` + `~/.config/ghostty/themes`, the

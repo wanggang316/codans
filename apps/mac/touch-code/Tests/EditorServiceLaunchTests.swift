@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// C8a Phase 6.3 — launch-mode branching. Drives `LiveEditorService.open` against a
 /// `RecordingAppLauncher` and pins the exact tuple `(urls, appURL, arguments,

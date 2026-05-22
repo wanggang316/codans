@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Locks the exact argv each `GhCommand.<method>` produces. These strings cross a process
 /// boundary to `gh`, so drift (a missing `--json` field, a reordered flag) is the kind of

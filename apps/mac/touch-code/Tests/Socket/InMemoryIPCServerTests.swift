@@ -3,7 +3,7 @@ import Testing
 
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import touch_code
+@testable import TouchCode
 
 /// Self-test for the harness. Uses `system.hello` + `system.ping` against
 /// a minimal router.

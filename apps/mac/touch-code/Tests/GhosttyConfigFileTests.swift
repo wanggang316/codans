@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Unit tests for `GhosttyConfigFile.updatedContents` — the pure transform
 /// that rewrites the managed block. The live reader/writer paths (`load` /

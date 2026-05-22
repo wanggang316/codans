@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// TestStore coverage for every `PaneActionRequest` arm of
 /// `PaneActionRouterFeature`. The reducer is a fan-out table, so each

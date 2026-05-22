@@ -4,7 +4,7 @@ import Testing
 import TouchCodeCore
 import TouchCodeIPC
 
-@testable import touch_code
+@testable import TouchCode
 
 /// C8a Phase 6 — `EditorHandlers` IPC coverage. Pins the wire-level contract for the four
 /// `editor.*` methods against stub `EditorClient` + `HierarchyClient` + live `SettingsStore`:

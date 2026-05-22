@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Each control in the General pane fans out through
 /// `ProjectGeneralSettingsView.WriteRoutes`. These tests construct a

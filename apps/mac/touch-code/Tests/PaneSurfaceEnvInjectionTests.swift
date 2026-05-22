@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Unit coverage for the pure C-string conversion that PaneSurface uses to
 /// hand env vars to libghostty. Spawning a real PaneSurface requires a live

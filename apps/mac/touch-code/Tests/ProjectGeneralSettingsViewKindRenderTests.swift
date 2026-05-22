@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Section visibility is exposed as the pure
 /// `ProjectGeneralSettingsView.visibleSections(for:)` function — that's

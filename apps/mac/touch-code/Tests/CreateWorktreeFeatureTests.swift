@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Synchronous-branch coverage for `CreateWorktreeFeature`. The async
 /// option-load and streaming-create paths are exercised end-to-end by

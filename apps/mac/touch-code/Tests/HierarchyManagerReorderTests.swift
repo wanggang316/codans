@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Coverage for the worktree-sidebar-ordering catalog primitives:
 /// - `HierarchyManager.reorderWorktrees(in:segment:from:to:)`

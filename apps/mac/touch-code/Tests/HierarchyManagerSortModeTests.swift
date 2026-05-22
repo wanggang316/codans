@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Coverage for the sidebar bottom-bar sort-mode manager APIs:
 /// - `HierarchyManager.setProjectSortMode`

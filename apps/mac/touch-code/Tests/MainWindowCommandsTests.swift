@@ -4,7 +4,7 @@ import SwiftUI
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Regression tests for the T3 main-window shortcuts
 /// (`MainWindowCommands` + `RootFeature` wiring).

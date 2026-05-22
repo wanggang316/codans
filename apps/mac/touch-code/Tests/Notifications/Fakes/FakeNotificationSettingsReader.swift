@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// In-memory `NotificationSettingsReader` for unit tests. Will be consumed
 /// by M2.T2's `NotificationCoordinator` test suite to drive coordinator

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// C8a Phase 6.1 — registry sanity coverage. Pins the shape of the 30-entry static registry:
 /// size, ID uniqueness, bundle-ID invariants, and priority-list consistency. Catches both

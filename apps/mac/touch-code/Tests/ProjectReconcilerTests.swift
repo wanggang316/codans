@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Recorder-driven tests for `ProjectReconciler`. The `HierarchyClient`
 /// closures this actor calls are replaced with a `LockIsolated` recorder;

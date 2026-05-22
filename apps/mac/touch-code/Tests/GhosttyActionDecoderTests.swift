@@ -3,7 +3,7 @@ import GhosttyKit
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Unit tests for the pure C-enum → Swift-enum helpers inside
 /// `GhosttyActionDecoder`. These helpers are the only slices of the 65-case

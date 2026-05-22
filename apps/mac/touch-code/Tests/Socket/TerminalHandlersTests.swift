@@ -3,7 +3,7 @@ import Testing
 
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import touch_code
+@testable import TouchCode
 
 /// M6's terminal.sendInput / broadcastInput are intentionally backed by
 /// an injectable `TerminalHandlers.InputSink` protocol — the M6

@@ -1,6 +1,6 @@
 import Foundation
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Test-only fake for `PrivilegedShell`. Records each `run(_:prompt:)`
 /// invocation and replays an injectable result. Tests use it to assert the

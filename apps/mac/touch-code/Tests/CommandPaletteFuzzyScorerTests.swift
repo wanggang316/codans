@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Scorer ranks items against a query. Tests are organized by the property
 /// they verify: band ordering (contiguous > subsequence title > subtitle),

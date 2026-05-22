@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Exercises `LiveGitService` against a scratch repo on disk. Gated behind
 /// `TC_RUN_GIT_INTEGRATION_TESTS=1` so CI can opt in on machines where `git` is available.

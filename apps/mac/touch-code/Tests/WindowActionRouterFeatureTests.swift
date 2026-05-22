@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// TestStore coverage for every `WindowActionRequest` arm of
 /// `WindowActionRouterFeature`. The reducer is a pure fan-out over

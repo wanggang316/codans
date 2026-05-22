@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Coverage for the `SettingsWriter` closures introduced in Phase 2.
 /// Each test uses a real `SettingsStore` backed by a temp file so we exercise

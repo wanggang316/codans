@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 struct HierarchyManagerResolvedEnvTests {
   /// Keys stripped from inherited process env so libghostty's own TERM

@@ -4,7 +4,7 @@ import tcKit
 
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import touch_code
+@testable import TouchCode
 
 /// Real-fd smoke. `EndToEndRPCIntegrationTests` runs the same router +
 /// handlers through a `RouterBackedTransport` adapter that skips the

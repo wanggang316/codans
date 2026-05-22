@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// End-to-end test against a real temp git repo + the bundled `wt`
 /// script. Exercises the full worktree lifecycle — create via

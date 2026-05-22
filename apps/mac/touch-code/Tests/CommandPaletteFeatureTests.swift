@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Reducer-level coverage for `CommandPaletteFeature`: item rebuild on
 /// open, filtering on each keystroke, selection arithmetic, and the

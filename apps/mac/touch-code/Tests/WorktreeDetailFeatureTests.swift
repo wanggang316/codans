@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Coverage for `WorktreeDetailFeature`'s composition: actions dispatched
 /// against the child scopes must route via `tabBar` / `splitViewport`
