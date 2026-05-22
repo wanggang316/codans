@@ -34,30 +34,51 @@ struct ActiveAgentsRowView: View {
   }()
 
   @State private var isHovering = false
+  /// `TimelineView(.periodic(from:))` rebases its schedule every time
+  /// the `from:` expression re-evaluates — `Date()` inline would reset
+  /// the 30s timer on every parent redraw (and the popover redraws on
+  /// every `@Observable` registry mutation). Captured once at view init
+  /// so the cadence is stable across redraws.
+  @State private var firstTick = Date()
 
   var body: some View {
-    Button(action: onTap) {
-      HStack(alignment: .center, spacing: 8) {
-        logo
-        headline
-        Spacer(minLength: 8)
-        trailing
+    // The visible age (and the matching a11y sentence) both read from
+    // the same `TimelineView` clock so VoiceOver doesn't drift away
+    // from what sighted users see — see the `trailing` builder.
+    TimelineView(.periodic(from: firstTick, by: 30)) { context in
+      let age = Self.relativeFormatter.localizedString(
+        for: entry.lastTransitionAt,
+        relativeTo: context.date
+      )
+      Button(action: onTap) {
+        HStack(alignment: .center, spacing: 8) {
+          logo
+          headline
+          Spacer(minLength: 8)
+          trailing(age: age)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(isHovering ? Color.gray.opacity(0.08) : Color.clear)
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .contentShape(Rectangle())
-      .background(isHovering ? Color.gray.opacity(0.08) : Color.clear)
+      .buttonStyle(.plain)
+      .onHover { isHovering = $0 }
+      // `.contain` keeps the inner `headline` Text and `stateIcon`
+      // HStack individually addressable by their sub-element
+      // identifiers (user-test contract — see the type doc).
+      // `.accessibilityLabel` on a `.contain` container is a no-op, so
+      // the row's full-sentence VoiceOver label is installed via
+      // `.accessibilityRepresentation { Button(label, action:) }` — a
+      // proxy element that carries the label without collapsing the
+      // children-contain semantics needed for sub-element probing.
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("activeAgents.row.\(paneID)")
+      .accessibilityRepresentation {
+        Button(accessibilityLabel(age: age), action: onTap)
+      }
     }
-    .buttonStyle(.plain)
-    .onHover { isHovering = $0 }
-    // `.contain` lets the inner `headline` Text and `stateIcon` HStack
-    // remain individually addressable by their sub-element identifiers
-    // (the user-test contract — see the type doc); the row itself still
-    // exposes a combined label + identifier for the row-level probes.
-    .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("activeAgents.row.\(paneID)")
-    .accessibilityLabel(accessibilityLabelText)
   }
 
   /// Leading 16pt logo. v1 uses the SF Symbol fallback for every
@@ -82,12 +103,13 @@ struct ActiveAgentsRowView: View {
       .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
   }
 
-  /// Trailing column — state icon, state verb, relative age. The
-  /// `TimelineView` refreshes the age text on a 30s cadence so the
-  /// popover doesn't go stale while open. The state icon's
-  /// `accessibilityLabel` is the raw enum value per the user-test
-  /// contract (`docs/user-tests/active-agents-view.md` §Test Surface).
-  private var trailing: some View {
+  /// Trailing column — state icon, state verb, relative age. The age
+  /// string is computed by the surrounding `TimelineView` so the
+  /// visible text and the row's a11y label share one clock. The state
+  /// icon's `accessibilityLabel` is the raw enum value per the user-
+  /// test contract (`docs/user-tests/active-agents-view.md` §Test
+  /// Surface).
+  private func trailing(age: String) -> some View {
     HStack(spacing: 6) {
       stateIcon
         .accessibilityElement(children: .ignore)
@@ -100,11 +122,9 @@ struct ActiveAgentsRowView: View {
         .font(.caption)
         .foregroundStyle(.tertiary)
         .accessibilityHidden(true)
-      TimelineView(.periodic(from: .now, by: 30)) { context in
-        Text(Self.relativeFormatter.localizedString(for: entry.lastTransitionAt, relativeTo: context.date))
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
+      Text(age)
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -152,9 +172,10 @@ struct ActiveAgentsRowView: View {
 
   /// Full-sentence accessibility label combining display name, project /
   /// worktree breadcrumb, state, and age — the line a VoiceOver user
-  /// hears when the row gains focus.
-  private var accessibilityLabelText: String {
-    let age = Self.relativeFormatter.localizedString(for: entry.lastTransitionAt, relativeTo: Date())
-    return "\(entry.kind.displayName), \(projectName) \(worktreeName), \(stateVerb), \(age)"
+  /// hears when the row gains focus. `age` is supplied by the
+  /// `TimelineView` clock so the spoken text stays in lockstep with
+  /// the visible age (review fix I2).
+  private func accessibilityLabel(age: String) -> String {
+    "\(entry.kind.displayName), \(projectName) \(worktreeName), \(stateVerb), \(age)"
   }
 }

@@ -25,13 +25,19 @@ struct ActiveAgentsPopoverView: View {
   let onTapRow: (PaneID) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    // Sort once per redraw and pass the array down. The previous
+    // `sortedEntries` computed property re-sorted twice per redraw
+    // (once for the `ForEach` source, once for the `last?.paneID`
+    // divider check inside the loop) — cheap at N ≤ 20, but the
+    // redundant work was unnecessary.
+    let rows = SortedEntriesProvider.sorted(entries)
+    return VStack(alignment: .leading, spacing: 0) {
       header
       Divider()
-      if sortedEntries.isEmpty {
+      if rows.isEmpty {
         emptyState
       } else {
-        list
+        list(rows: rows)
       }
     }
     .frame(width: 320)
@@ -40,10 +46,6 @@ struct ActiveAgentsPopoverView: View {
     // querying `activeAgents.row.<paneID>` *inside* the popover).
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("activeAgents.popover")
-  }
-
-  private var sortedEntries: [(paneID: PaneID, entry: AgentRegistry.AgentEntry)] {
-    SortedEntriesProvider.sorted(entries)
   }
 
   private var header: some View {
@@ -60,9 +62,9 @@ struct ActiveAgentsPopoverView: View {
   /// is cheaper than the lazy machinery. Each row gains its own row id
   /// via `ActiveAgentsRowView`'s `.accessibilityIdentifier`, so external
   /// probes can address them individually.
-  private var list: some View {
+  private func list(rows: [(paneID: PaneID, entry: AgentRegistry.AgentEntry)]) -> some View {
     VStack(spacing: 0) {
-      ForEach(sortedEntries, id: \.paneID) { item in
+      ForEach(Array(rows.enumerated()), id: \.element.paneID) { idx, item in
         let names = resolveSourcePath(item.paneID)
         ActiveAgentsRowView(
           paneID: item.paneID,
@@ -71,7 +73,7 @@ struct ActiveAgentsPopoverView: View {
           worktreeName: names?.worktree ?? "—",
           onTap: { onTapRow(item.paneID) }
         )
-        if item.paneID != sortedEntries.last?.paneID {
+        if idx < rows.count - 1 {
           Divider()
         }
       }
