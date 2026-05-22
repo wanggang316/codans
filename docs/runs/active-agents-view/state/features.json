@@ -140,7 +140,11 @@
     {
       "id": "T7",
       "title": "Agent logo assets + headline copy priority + pulse animation + accessibility labels",
-      "status": "pending",
+      "status": "completed",
+      "started_at": "2026-05-22T11:30:00Z",
+      "completed_at": "2026-05-22T12:30:00Z",
+      "commit": "51f0ecdd",
+      "verification_posture": "build-only + spec/code review passed; SF Symbol fallback path (sparkles / wand.and.stars / function) per OQ-2 brand-mark licensing pre-approval; manual probing of UT-AA-B-008 + UT-AA-A-001 + UT-AA-A-002 deferred to combined M3 session",
       "milestone": "M3",
       "depends_on": ["T6"],
       "fulfills": ["UT-AA-B-008", "UT-AA-A-001", "UT-AA-A-002"],
@@ -284,6 +288,18 @@
       "issue": "PaneKeyboardActivityTracker and AgentBinder now expose mutable `onActivity` / `agentBoundHandler` / `agentUnboundHandler` callback closures. Pattern works but the cleaner long-term shape would be AsyncStream<event> channels per producer.",
       "justification": "AsyncStream refactor is non-trivial and orthogonal to ActiveAgents shipping. Optional closures with default no-op are a well-precedented lighter alternative until the call-site set proves large enough to justify a channel.",
       "dismissed_at": "2026-05-22T11:00:00Z"
+    },
+    {
+      "from_task": "T7",
+      "issue": "T5 commit ac90d7379 contained .foregroundStyle(.accentColor) which is not a valid ShapeStyle member; T6 commit 5adcb426 added GHOSTTY_PROGRESS_STATE_REMOVE reference to TouchCodeApp.swift without `import GhosttyKit`. Both were masked by Xcode's incremental-build cache during prior task verification and only surfaced when T7's implementer did a clean build. Both fixed inline by T7's commit 51f0ecdd as drive-by build-unblockers.",
+      "justification": "Pre-existing latent bugs from prior tasks; the inline drive-by fixes were necessary because T7's brief required build-green verification. Future tasks should run clean builds (delete DerivedData or use xcodebuild clean) instead of incremental builds to avoid masking compile errors like these. Add to the touch-codeTests cleanup plan as a procedure update.",
+      "dismissed_at": "2026-05-22T12:00:00Z"
+    },
+    {
+      "from_task": "T7",
+      "issue": "ActiveAgentsBadgeViewModel.init(entries:) takes [AgentEntry] but T6's badge passed registry.entries which is [PaneID: AgentEntry]. T7 worked around by flattening Array(registry.entries.values) at the badge body call site. Long-term cleaner shape: either accept a Sequence on the view model or expose a sorted-array accessor on AgentRegistry.",
+      "justification": "T6's code passed spec-review and code-review without this being caught (possibly because reviewers traced argument types one layer at a time without verifying the concrete passed value). The flatten workaround is correct and clean enough; defer the API refactor to the touch-codeTests cleanup plan when the wider AgentRegistry surface gets revisited.",
+      "dismissed_at": "2026-05-22T12:00:00Z"
     }
   ],
   "decisions": [
@@ -308,6 +324,17 @@
       ],
       "answer": "Project.swift 加一行 SWIFT_MODULE_NAME=touch_code（推荐）",
       "answered_by": "human"
+    },
+    {
+      "at": "2026-05-22T12:00:00Z",
+      "question": "T7 implementer escalated: discovered two pre-existing build errors (T5 .foregroundStyle(.accentColor) typo + T6 missing import GhosttyKit) that were never caught because earlier task verifications used incremental builds. Fixed inline as drive-by because the brief required build-green. Accept scope expansion, or roll back?",
+      "options": [
+        "Accept the drive-by fixes; record cleanup-plan need for clean-build verification posture in future tasks",
+        "Roll back the drive-by fixes; treat T5/T6 build bugs as separate tasks; T7 stays scoped to logo+polish only",
+        "Pause and escalate to Gump: prior reviews missed real bugs, may need to re-review T5/T6 with cleaner build"
+      ],
+      "answer": "Accept the drive-by fixes; record cleanup-plan need for clean-build verification posture in future tasks",
+      "answered_by": "controller"
     },
     {
       "at": "2026-05-22T11:00:00Z",
