@@ -162,6 +162,30 @@
       "issue": "Code-reviewer Suggestion 3: pattern.lowercased() is recomputed inside the classify inner loop (could be hoisted to a precomputed table).",
       "justification": "Pattern table has 7 entries total; recomputing lowercase on each classify call is below measurement noise. Premature optimisation per architecture and golden-rules guidance; revisit only if classify ever lands on a hot path.",
       "dismissed_at": "2026-05-22T03:30:00Z"
+    },
+    {
+      "from_task": "T2",
+      "issue": "RootFeatureTests.swift:391-397 calls SettingsWindowPresenter(open:) constructor that no longer exists (production grew an openAt: parameter) and references .worktreeHeader(.delegate(.showCustomEditorsSettings)) which was removed. Pre-existing API drift surfaced when test target started compiling.",
+      "justification": "Dormant repo breakage; not introduced by ActiveAgents work. Per controller decision 2026-05-22T06:00, T2-T8 switch to build-only verification posture and the touch-codeTests target cleanup becomes a separate plan covering this file plus TabChipSnapshotTests plus a CI test job. Not safe to fix inline because each call site needs to be re-derived from current production signatures.",
+      "dismissed_at": "2026-05-22T06:00:00Z"
+    },
+    {
+      "from_task": "T2",
+      "issue": "TabChipSnapshotTests.swift:92 calls TabChip view constructor missing onChangeColorRequested + onCopyID parameters (production view grew callbacks without updating snapshot test). Pre-existing API drift.",
+      "justification": "Same root cause as the RootFeatureTests entry above (3 weeks of production drift while touch-codeTests target was un-runnable). Deferred to the same touch-codeTests-cleanup follow-up plan.",
+      "dismissed_at": "2026-05-22T06:00:00Z"
+    },
+    {
+      "from_task": "T2",
+      "issue": "Repo has no CI test workflow; only release.yml + release-tip.yml exist under .github/workflows/. No xcodebuild test runs on PR / push, which is the root cause that allowed three layers of dormant breakages (SWIFT_MODULE_NAME, MasterTerminal actor-isolation, RootFeature+TabChip API drift) to accumulate undetected over ~3 weeks.",
+      "justification": "Adding CI is the structural fix that prevents this class of regression from recurring; out of scope for ActiveAgents but a load-bearing item for the touch-codeTests-cleanup follow-up plan. Recorded here so the audit trail captures the why-it-was-broken alongside the what.",
+      "dismissed_at": "2026-05-22T06:00:00Z"
+    },
+    {
+      "from_task": "T2",
+      "issue": "T2's HierarchyManagerAgentIdentityTests (8 cases) committed at 3994012 but never exercised; static review only. Once touch-codeTests target is restored by the cleanup plan, these tests should be the first thing re-run to validate T2 behaviour retroactively.",
+      "justification": "Build-only posture chosen 2026-05-22T06:00 means T2-T8 unit tests are committed-but-unrun until cleanup. The implementer self-reviewed each test line-by-line against the production API and reported it compile-shape correct; the gap is exec validation, not authoring quality.",
+      "dismissed_at": "2026-05-22T06:00:00Z"
     }
   ],
   "decisions": [
@@ -174,6 +198,39 @@
         "改走 /hs-exec-plan（单 agent，无 fulfills 要求）"
       ],
       "answer": "接受上面的绑定，推进 T6=18 case",
+      "answered_by": "human"
+    },
+    {
+      "at": "2026-05-22T05:00:00Z",
+      "question": "touch-codeTests 目标自 feb1801 起编译失败（productName=TouchCode 让 PRODUCT_MODULE_NAME 也变 TouchCode，但 99 个测试仍 @testable import touch_code；CI 不跑 test 所以 3 周未被察觉）。怎么修？",
+      "options": [
+        "Project.swift 加一行 SWIFT_MODULE_NAME=touch_code（推荐）",
+        "批量 sed 重命名 99 个 import 为 TouchCode",
+        "T2 先体验性跳过测试验证，后续 task 同样 build-only 推进"
+      ],
+      "answer": "Project.swift 加一行 SWIFT_MODULE_NAME=touch_code（推荐）",
+      "answered_by": "human"
+    },
+    {
+      "at": "2026-05-22T05:30:00Z",
+      "question": "SWIFT_MODULE_NAME 修好后又揭出 MasterTerminalBootstrapTests.swift 的 14 个 actor-isolation 错误（同样是预存、同样是 CI 不跑 test 造成的）。继续怎么走？",
+      "options": [
+        "再派一个 small implementer 给 14 处加 @MainActor（推荐）",
+        "T2-T8 本趋推进，所有新测试只走 build，exec 验证等测试 target 清理成独立 plan 后补跳",
+        "暂停 ActiveAgents，先开一个专门 plan 清理测试 target 和 CI"
+      ],
+      "answer": "再派一个 small implementer 给 14 处加 @MainActor（推荐）",
+      "answered_by": "human"
+    },
+    {
+      "at": "2026-05-22T06:00:00Z",
+      "question": "出现第三层预存错误且是 API drift（RootFeatureTests + TabChipSnapshotTests 测试落后于 production 签名变化，不同于前两层、修复各需查当前 production 签名）。反应？",
+      "options": [
+        "改为 build-only 验证：T2-T8 新测试象上 commit 但不 exec，等独立 cleanup plan（推荐）",
+        "继续剩下两层修复，都是小文件、可能快点到底",
+        "暂停 ActiveAgents，另开 plan 修测试 target + 加 CI test job"
+      ],
+      "answer": "改为 build-only 验证：T2-T8 新测试象上 commit 但不 exec，等独立 cleanup plan（推荐）",
       "answered_by": "human"
     }
   ]
