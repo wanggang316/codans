@@ -94,7 +94,12 @@
     {
       "id": "T5",
       "title": "ActiveAgentsPopoverView + ActiveAgentsRowView + SortedEntriesProvider + headline view model",
-      "status": "pending",
+      "status": "completed",
+      "started_at": "2026-05-22T09:30:00Z",
+      "completed_at": "2026-05-22T10:00:00Z",
+      "commit": "fa8cb798",
+      "commits_in_task": ["ac90d737", "fa8cb798"],
+      "verification_posture": "build-only — 13 unit tests committed but exec deferred; UT-AA-P-003 and UT-AA-P-004 structurally satisfied, runtime probing deferred to T6 manual phase",
       "milestone": "M3",
       "depends_on": ["T4"],
       "fulfills": ["UT-AA-P-003", "UT-AA-P-004"],
@@ -250,6 +255,12 @@
       "issue": "Code-reviewer T8 suggestions: Test B could add a doc-comment noting that bell verdict is hardcoded in both subsystems (not classifier-mediated); Test D could call out the pendingFinished/paneOutput interaction; temp-file cleanup comment slightly overstates cleanliness; the comment on what is NOT in the events array could move next to its referent. Also FYI: no paneCrashed scenario in the five-test set (paneCrashed would be the highest-value sixth scenario).",
       "justification": "Five cosmetic items + one FYI about scope; zero correctness impact. Build-only posture prevents safely iterating on test files. paneCrashed scenario could be added in the touch-codeTests cleanup plan when tests can run end-to-end and the symmetry-break can be verified live.",
       "dismissed_at": "2026-05-22T09:00:00Z"
+    },
+    {
+      "from_task": "T5",
+      "issue": "Code-reviewer T5 S3 + N1 + N2: in ActiveAgentsPopoverView, add a DEBUG-only assert when resolveSourcePath returns nil (programmer-error signal); SortedEntriesProvider's `nonisolated enum` declaration is technically redundant; ActiveAgentsBadgeViewModel doc-comment could call out the O(n) pulse scan is allocation-free.",
+      "justification": "Three cosmetic items, zero behavioural impact. DEBUG assert is worth doing during the cleanup pass when manual probing has exercised the popover; nonisolated enum keep for symmetry with project precedent; doc wording is fine as-is.",
+      "dismissed_at": "2026-05-22T10:00:00Z"
     }
   ],
   "decisions": [
