@@ -300,6 +300,12 @@
       "issue": "ActiveAgentsBadgeViewModel.init(entries:) takes [AgentEntry] but T6's badge passed registry.entries which is [PaneID: AgentEntry]. T7 worked around by flattening Array(registry.entries.values) at the badge body call site. Long-term cleaner shape: either accept a Sequence on the view model or expose a sorted-array accessor on AgentRegistry.",
       "justification": "T6's code passed spec-review and code-review without this being caught (possibly because reviewers traced argument types one layer at a time without verifying the concrete passed value). The flatten workaround is correct and clean enough; defer the API refactor to the touch-codeTests cleanup plan when the wider AgentRegistry surface gets revisited.",
       "dismissed_at": "2026-05-22T12:00:00Z"
+    },
+    {
+      "from_task": "integration",
+      "issue": "Final integration code-review §3.2-§3.5: cross-file lastRunning invariant pin (suggestion), focus-pump edge-trigger comment (suggestion), progress-state heuristic duplication between TouchCodeApp.dispatchToAgentRegistry and RootFeature.paneProgressBusyChanged (nit), sessionID always nil in AgentBinder.writeIfChanged (FYI documented).",
+      "justification": "Four cosmetic / FYI items from the final integration review. Zero behavioural impact. The lastRunning invariant comment + focus-pump comment can be added during the cleanup pass when tests can run end-to-end to verify the comments still describe live behaviour; progress-state heuristic deduplication is a refactor better done when RootFeature's pulse-related surface gets touched next; sessionID end-to-end plumb is its own follow-up.",
+      "dismissed_at": "2026-05-22T12:30:00Z"
     }
   ],
   "decisions": [
