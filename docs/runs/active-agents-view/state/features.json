@@ -77,8 +77,11 @@
     {
       "id": "T8",
       "title": "Cross-consumer consistency regression test",
-      "status": "in-progress",
+      "status": "completed",
       "started_at": "2026-05-22T08:30:00Z",
+      "completed_at": "2026-05-22T09:00:00Z",
+      "commit": "76fea552",
+      "verification_posture": "build-only — 5 integration tests committed but exec deferred to touch-codeTests cleanup plan",
       "milestone": "M2",
       "depends_on": ["T4"],
       "fulfills": [],
@@ -241,6 +244,12 @@
       "issue": "Code-reviewer S1-S3 + N1-N2 (T4): repeated default-scratch ladder could be a helper; onPaneKeyboardActivity / onPaneFocused are byte-identical; one test constructs its own registry instead of reusing Fixture; parameter name 'now' shadows the time-source closure on one method; onAgentUnbound does not clear lastRunning while teardown branch does (harmless asymmetry).",
       "justification": "Five cosmetic / quality-of-life items, zero behavioural impact. Under build-only posture iterating on a test file without exec verification is unsafe; the production-side suggestions are pure readability and can wait for the cleanup pass when tests can run end-to-end. None blocks T5.",
       "dismissed_at": "2026-05-22T08:30:00Z"
+    },
+    {
+      "from_task": "T8",
+      "issue": "Code-reviewer T8 suggestions: Test B could add a doc-comment noting that bell verdict is hardcoded in both subsystems (not classifier-mediated); Test D could call out the pendingFinished/paneOutput interaction; temp-file cleanup comment slightly overstates cleanliness; the comment on what is NOT in the events array could move next to its referent. Also FYI: no paneCrashed scenario in the five-test set (paneCrashed would be the highest-value sixth scenario).",
+      "justification": "Five cosmetic items + one FYI about scope; zero correctness impact. Build-only posture prevents safely iterating on test files. paneCrashed scenario could be added in the touch-codeTests cleanup plan when tests can run end-to-end and the symmetry-break can be verified live.",
+      "dismissed_at": "2026-05-22T09:00:00Z"
     }
   ],
   "decisions": [
