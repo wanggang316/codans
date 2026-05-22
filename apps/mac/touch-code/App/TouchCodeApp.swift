@@ -153,6 +153,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // taps on banners are silently ignored — clicking would activate the app
     // (default behaviour) but our deeplink would never be parsed.
     UNUserNotificationCenter.current().delegate = self
+
+    // Advertise that focused responders can hand out plain-text selections
+    // through the macOS services system. Third-party text utilities
+    // (translators, dictionaries, "lookup-on-hover" tools) poll this
+    // registration to decide whether to query the frontmost app; without
+    // it, the system never asks our terminal surface for its selection
+    // even though the surface implements `NSServicesMenuRequestor`.
+    NSApplication.shared.registerServicesMenuSendTypes(
+      [.string],
+      returnTypes: []
+    )
   }
 
   nonisolated func applicationWillTerminate(_ notification: Notification) {

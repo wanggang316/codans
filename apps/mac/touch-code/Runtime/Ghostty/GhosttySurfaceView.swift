@@ -15,6 +15,46 @@ private let ghosttyViewLogger = Logger(
 /// `ghostty_platform_macos_s` and attaches a CAMetalLayer).
 @MainActor
 final class GhosttySurfaceView: NSView, NSTextInputClient {
+  /// Time-bounded memoized value used by AX accessors. AX clients tend
+  /// to call multiple attribute accessors in a burst; the cache collapses
+  /// those into a single libghostty read while still picking up screen
+  /// updates within `duration`. MainActor-isolated so the `fetch` closure
+  /// can touch MainActor state directly — every AX entry point we own is
+  /// already on the main actor.
+  @MainActor
+  private final class CachedValue<T> {
+    private var value: T?
+    private let fetch: @MainActor () -> T
+    private let duration: Duration
+    private var expiryTask: Task<Void, Never>?
+
+    init(duration: Duration, fetch: @escaping @MainActor () -> T) {
+      self.duration = duration
+      self.fetch = fetch
+    }
+
+    isolated deinit {
+      expiryTask?.cancel()
+    }
+
+    func get() -> T {
+      if let value {
+        return value
+      }
+      let fetched = fetch()
+      value = fetched
+      expiryTask?.cancel()
+      expiryTask = Task { [weak self] in
+        guard let self else { return }
+        try? await ContinuousClock().sleep(for: self.duration)
+        guard !Task.isCancelled else { return }
+        self.value = nil
+        self.expiryTask = nil
+      }
+      return fetched
+    }
+  }
+
   let paneID: PaneID
   private var surface: ghostty_surface_t?
   private var markedText = NSMutableAttributedString()
@@ -132,6 +172,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     let accepted = super.becomeFirstResponder()
     if accepted, let surface { ghostty_surface_set_focus(surface, true) }
     if accepted { onBecomeFirstResponder?() }
+    if accepted { postAccessibilityFocusChanged() }
     return accepted
   }
 
@@ -139,6 +180,124 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     let accepted = super.resignFirstResponder()
     if accepted, let surface { ghostty_surface_set_focus(surface, false) }
     return accepted
+  }
+
+  // MARK: - Accessibility
+
+  /// Cached snapshot of the rendered screen contents. AX clients can call
+  /// `accessibilityValue` / `accessibilityNumberOfCharacters` repeatedly
+  /// during a single read; hitting libghostty for every call is wasteful
+  /// and would also race with rendering. 500 ms is short enough that
+  /// assistive tech still sees fresh output and long enough to collapse
+  /// the bursts.
+  private lazy var cachedScreenContents = CachedValue<String>(duration: .milliseconds(500)) {
+    [weak self] in
+    self?.readScreenContents() ?? ""
+  }
+
+  /// Tell AX framework this view is the focused text element so external
+  /// readers (translators, screen readers, "look up selected text" tools)
+  /// know to query `accessibilitySelectedText` on us. Without this the
+  /// view advertises itself as a generic non-text NSView and AX clients
+  /// skip the selected-text path entirely — the symptom reported in
+  /// HAN-75.
+  override func isAccessibilityElement() -> Bool {
+    surface != nil
+  }
+
+  override func accessibilityRole() -> NSAccessibility.Role? {
+    // Match Ghostty.app so AX clients treat the surface as editable text.
+    .textArea
+  }
+
+  override func accessibilityLabel() -> String? {
+    "Terminal pane"
+  }
+
+  override func accessibilityValue() -> Any? {
+    cachedScreenContents.get()
+  }
+
+  override func accessibilitySelectedTextRange() -> NSRange {
+    // Must reflect a real (non-zero) range when there is a selection —
+    // assistive tech treats an empty range as "no selection" and skips
+    // the follow-up `accessibilitySelectedText` query entirely (the
+    // observable failure in HAN-75 before the fix).
+    selectedRange()
+  }
+
+  override func accessibilitySelectedText() -> String? {
+    guard let surface else { return nil }
+    var text = ghostty_text_s()
+    guard ghostty_surface_read_selection(surface, &text) else { return nil }
+    defer { ghostty_surface_free_text(surface, &text) }
+    guard let cString = text.text else { return nil }
+    let value = String(cString: cString)
+    return value.isEmpty ? nil : value
+  }
+
+  override func accessibilityNumberOfCharacters() -> Int {
+    cachedScreenContents.get().count
+  }
+
+  override func accessibilityVisibleCharacterRange() -> NSRange {
+    let content = cachedScreenContents.get()
+    return NSRange(location: 0, length: content.count)
+  }
+
+  override func accessibilityLine(for index: Int) -> Int {
+    let content = cachedScreenContents.get()
+    let clampedIndex = min(max(index, 0), content.count)
+    let prefix = String(content.prefix(clampedIndex))
+    return max(0, prefix.components(separatedBy: .newlines).count - 1)
+  }
+
+  override func accessibilityString(for range: NSRange) -> String? {
+    let content = cachedScreenContents.get()
+    guard let swiftRange = Range(range, in: content) else { return nil }
+    return String(content[swiftRange])
+  }
+
+  override func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? {
+    guard let plain = accessibilityString(for: range) else { return nil }
+    return NSAttributedString(string: plain)
+  }
+
+  private func postAccessibilityFocusChanged() {
+    guard surface != nil else { return }
+    if let window {
+      NSAccessibility.post(element: window, notification: .focusedUIElementChanged)
+    } else {
+      NSAccessibility.post(element: self, notification: .focusedUIElementChanged)
+    }
+  }
+
+  /// Pull the full screen (not scrollback) into a single string for AX
+  /// readers. Mirrors `PaneSurface.readText(.screen)` but lives here so
+  /// the view doesn't take a dependency on PaneSurface — keeping the AX
+  /// path resilient to teardown order.
+  private func readScreenContents() -> String {
+    guard let surface else { return "" }
+    var text = ghostty_text_s()
+    let selection = ghostty_selection_s(
+      top_left: ghostty_point_s(
+        tag: GHOSTTY_POINT_SCREEN,
+        coord: GHOSTTY_POINT_COORD_TOP_LEFT,
+        x: 0,
+        y: 0
+      ),
+      bottom_right: ghostty_point_s(
+        tag: GHOSTTY_POINT_SCREEN,
+        coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
+        x: 0,
+        y: 0
+      ),
+      rectangle: false
+    )
+    guard ghostty_surface_read_text(surface, selection, &text) else { return "" }
+    defer { ghostty_surface_free_text(surface, &text) }
+    guard let cString = text.text else { return "" }
+    return String(cString: cString)
   }
 
   // MARK: - Geometry
@@ -667,7 +826,18 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     }
   }
 
-  func selectedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+  func selectedRange() -> NSRange {
+    // Bridges NSTextInputClient (IME caret) and the AX selected-text-range
+    // accessor onto libghostty's current selection. Returning a real offset
+    // when text is selected is required by AX consumers (translators,
+    // dictionaries) to decide that a selection exists before they query
+    // `accessibilitySelectedText`.
+    guard let surface else { return NSRange() }
+    var text = ghostty_text_s()
+    guard ghostty_surface_read_selection(surface, &text) else { return NSRange() }
+    defer { ghostty_surface_free_text(surface, &text) }
+    return NSRange(location: Int(text.offset_start), length: Int(text.offset_len))
+  }
   func markedRange() -> NSRange {
     markedText.length == 0 ? NSRange(location: NSNotFound, length: 0) : NSRange(location: 0, length: markedText.length)
   }
@@ -730,5 +900,55 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
         ghostty_surface_preedit(surface, ptr, UInt(bytes.count))
       }
     }
+  }
+}
+
+// MARK: - Services menu (selected-text read-out)
+
+/// Third-party text utilities (translators, dictionaries, "lookup-on-hover"
+/// tools) read the focused responder's selection through the macOS
+/// services system, not through Accessibility. The flow is:
+///   1. system calls `validRequestor(forSendType:returnType:)` to find a
+///      responder that can serve `sendType` (and optionally accept
+///      `returnType`),
+///   2. on a match it calls `writeSelection(to:types:)` to harvest the
+///      data into a pasteboard.
+/// Without these hooks the selection in a pane is invisible to that whole
+/// class of tools — the HAN-75 symptom. Only the read-out side is wired
+/// here (`returnType == nil`); inbound services (sending text back into
+/// the pane) are out of scope for HAN-75 and intentionally fall through
+/// to `super`.
+extension GhosttySurfaceView: NSServicesMenuRequestor {
+  override func validRequestor(
+    forSendType sendType: NSPasteboard.PasteboardType?,
+    returnType: NSPasteboard.PasteboardType?
+  ) -> Any? {
+    let sendable: [NSPasteboard.PasteboardType] = [
+      .string,
+      .init("public.utf8-plain-text"),
+    ]
+    if returnType == nil,
+      let sendType,
+      sendable.contains(sendType),
+      let surface,
+      ghostty_surface_has_selection(surface)
+    {
+      return self
+    }
+    return super.validRequestor(forSendType: sendType, returnType: returnType)
+  }
+
+  func writeSelection(
+    to pboard: NSPasteboard,
+    types: [NSPasteboard.PasteboardType]
+  ) -> Bool {
+    guard let surface else { return false }
+    var text = ghostty_text_s()
+    guard ghostty_surface_read_selection(surface, &text) else { return false }
+    defer { ghostty_surface_free_text(surface, &text) }
+    guard let cString = text.text else { return false }
+    pboard.declareTypes([.string], owner: nil)
+    pboard.setString(String(cString: cString), forType: .string)
+    return true
   }
 }
