@@ -277,6 +277,12 @@ final class AppState {
   /// mirror task can call `recomputeDockBadge` on `unreadCount` changes
   /// that originate from non-coordinator paths (markRead, sweepOrphan...).
   @ObservationIgnored private(set) var notificationCoordinator: NotificationCoordinator?
+  /// Active-agents T3: classifies the agent driving each pane and persists
+  /// the verdict via `HierarchyClient.setPaneAgentKind`. Constructed in
+  /// `startNotificationObservers` (it shares the engine-event drain with
+  /// `NotificationDetector`) and dispatched from the same `for await event`
+  /// loop. Long-lived for the app lifetime.
+  @ObservationIgnored private(set) var agentBinder: AgentBinder?
   /// M5.T1 keystroke side channel: per-pane "last user keystroke at"
   /// timestamps fed into the translator's `userTypingRecently` window.
   /// Strong reference here keeps the tracker alive; the
@@ -569,10 +575,31 @@ final class AppState {
         manager?.bumpProjectActivity(projectID)
       }
     )
+    // Active-agents T3: AgentBinder is a peer consumer of the engine event
+    // stream — it watches the same `paneCreated` / `paneInfoChanged` /
+    // teardown events the detector does, classifies the agent driving the
+    // pane, and writes back through `HierarchyClient.setPaneAgentKind`.
+    // Dispatch lives inside the existing detector drain (a few lines below)
+    // so we don't open a second long-lived Task on the same stream.
+    let ghostty = self.ghosttyRuntime
+    let binder = AgentBinder(
+      client: hierarchy,
+      currentAgentKind: { [weak manager] paneID in
+        manager?.catalog.pane(paneID)?.agentKind
+      },
+      paneInitialCommand: { [weak manager] paneID in
+        manager?.catalog.pane(paneID)?.initialCommand
+      },
+      paneTitle: { [weak ghostty] paneID in
+        ghostty?.surface(for: paneID)?.info.title
+      }
+    )
+    self.agentBinder = binder
     let detectorEvents = engine.events()
     self.notificationDetectorTask = Task { @MainActor in
       for await event in detectorEvents {
         await detector.handle(event)
+        Self.dispatchToAgentBinder(event: event, binder: binder)
       }
     }
 
@@ -986,6 +1013,50 @@ final class AppState {
       for await _ in stream {
         break
       }
+    }
+  }
+
+  /// Active-agents T3: route the engine event stream through `AgentBinder`.
+  /// Lives next to `NotificationDetector.handle` (same drain loop, same
+  /// MainActor context) so the binder sees pane creation, title changes,
+  /// OSC 9 desktop-notification payloads, and lifecycle teardown without
+  /// opening a second long-lived Task on the events stream.
+  ///
+  /// OSC 133 prompt-end (`.promptReturned`) is intentionally NOT wired —
+  /// the engine does not currently surface a `PaneInfoDelta.promptEnd`
+  /// variant. See `docs/exec-plans/active-agents-view.md` OQ-1.
+  @MainActor
+  private static func dispatchToAgentBinder(
+    event: TerminalEvent,
+    binder: AgentBinder
+  ) {
+    switch event {
+    case .paneCreated(let paneID, _):
+      binder.consider(paneID: paneID, trigger: .paneCreated)
+    case .paneInfoChanged(let paneID, let delta):
+      switch delta {
+      case .title, .tabTitle:
+        binder.consider(paneID: paneID, trigger: .titleChanged)
+      case .desktopNotification(let title, let body):
+        binder.consider(
+          paneID: paneID,
+          trigger: .desktopNotification(title: title, body: body)
+        )
+      // Active-agents OQ-1: `PaneInfoDelta` has no `.promptEnd` variant
+      // today (libghostty does not surface OSC 133 D as a typed delta), so
+      // the binder's `.promptReturned` rebind path is intentionally not
+      // wired here. Until that lands, an initially-classified pane keeps
+      // its `agentKind` until close — the title-changed sticky guard makes
+      // this safe.
+      default:
+        break
+      }
+    case .paneExited(let paneID, _, _),
+      .paneCrashed(let paneID, _),
+      .paneClosedByTab(let paneID, _):
+      binder.unbind(paneID)
+    default:
+      break
     }
   }
 }
