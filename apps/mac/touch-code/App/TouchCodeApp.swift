@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import ComposableArchitecture
+import GhosttyKit
 import SwiftUI
 import TouchCodeCore
 import TouchCodeIPC

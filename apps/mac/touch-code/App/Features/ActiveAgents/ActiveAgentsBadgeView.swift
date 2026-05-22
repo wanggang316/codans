@@ -48,20 +48,30 @@ struct ActiveAgentsBadgeView: View {
   @State private var pendingTask: Task<Void, Never>?
 
   var body: some View {
-    let viewModel = ActiveAgentsBadgeViewModel(entries: registry.entries)
+    // `registry.entries` is keyed by `PaneID`; the badge ViewModel and
+    // the leading-kind helper both operate on a value-only sequence, so
+    // the dictionary is flattened once per redraw. Entry count is
+    // bounded by the number of bound agent panes (~tens), so the
+    // allocation is negligible.
+    let entries = Array(registry.entries.values)
+    let viewModel = ActiveAgentsBadgeViewModel(entries: entries)
     if let headline = viewModel.headline {
-      badge(headline: headline, pulse: viewModel.pulse)
+      badge(
+        headline: headline,
+        pulse: viewModel.pulse,
+        leadingKind: Self.leadingKind(in: entries)
+      )
     } else {
       EmptyView()
     }
   }
 
   @ViewBuilder
-  private func badge(headline: String, pulse: Bool) -> some View {
+  private func badge(headline: String, pulse: Bool, leadingKind: AgentKind?) -> some View {
     let pulseActive = pulse && !reduceMotion
     Button(action: handleClick) {
       HStack(spacing: 6) {
-        leadingIcon
+        leadingIcon(for: leadingKind)
           // Drive opacity off `pulseAnimating`, which is toggled from
           // `.onAppear` / `.onChange(of: pulseActive)` so the
           // `.repeatForever` animation actually runs both ways. Without
@@ -156,13 +166,38 @@ struct ActiveAgentsBadgeView: View {
     )
   }
 
-  private var leadingIcon: some View {
-    Image(systemName: "brain.head.profile")
-      .resizable()
-      .scaledToFit()
-      .frame(width: 14, height: 14)
-      .foregroundStyle(.secondary)
-      .accessibilityHidden(true)
+  /// Leading 14pt logo — drives the badge's visual identity.
+  ///
+  /// When the badge represents a single kind (every entry shares one
+  /// `AgentKind`), we show that kind's logo via `AgentLogoView` so the
+  /// status-bar mark matches the popover rows. When multiple kinds are
+  /// active (e.g. Claude Code + Codex both running), no single logo
+  /// would be honest, so we fall back to a kind-agnostic SF Symbol
+  /// (`brain.head.profile`) — the popover is the place to disambiguate.
+  ///
+  /// Always `accessibilityHidden(true)`: the badge a11y label already
+  /// spells out the headline.
+  @ViewBuilder
+  private func leadingIcon(for kind: AgentKind?) -> some View {
+    if let kind {
+      AgentLogoView(kind: kind, size: 14)
+    } else {
+      Image(systemName: "brain.head.profile")
+        .resizable()
+        .scaledToFit()
+        .frame(width: 14, height: 14)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    }
+  }
+
+  /// Returns the single `AgentKind` shared by every entry, or `nil`
+  /// when the snapshot is empty or mixes kinds. The badge uses this to
+  /// decide whether to show a kind-specific logo or a kind-agnostic
+  /// fallback — see `leadingIcon(for:)`.
+  private static func leadingKind(in entries: [AgentRegistry.AgentEntry]) -> AgentKind? {
+    guard let first = entries.first else { return nil }
+    return entries.allSatisfy { $0.kind == first.kind } ? first.kind : nil
   }
 
   private func handleClick() {

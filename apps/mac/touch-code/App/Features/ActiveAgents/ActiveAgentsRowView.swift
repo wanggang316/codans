@@ -4,8 +4,7 @@ import TouchCodeCore
 /// One Agent row in the ActiveAgents popover.
 ///
 /// Layout (see `docs/design-docs/active-agents-view.md` §UI):
-/// - Leading: 16pt agent logo (SF Symbol fallback `brain.head.profile` —
-///   T7 swaps in real logos from `Resources/Assets.xcassets/AgentLogos/`).
+/// - Leading: 16pt agent logo (per-kind SF Symbol via `AgentLogoView`).
 /// - Center: `<ProjectName> / <WorktreeName>` with middle truncation.
 /// - Trailing: state icon + state label + relative time.
 ///
@@ -52,7 +51,7 @@ struct ActiveAgentsRowView: View {
       )
       Button(action: onTap) {
         HStack(alignment: .center, spacing: 8) {
-          logo
+          AgentLogoView(kind: entry.kind, size: 16)
           headline
           Spacer(minLength: 8)
           trailing(age: age)
@@ -79,18 +78,6 @@ struct ActiveAgentsRowView: View {
         Button(accessibilityLabel(age: age), action: onTap)
       }
     }
-  }
-
-  /// Leading 16pt logo. v1 uses the SF Symbol fallback for every
-  /// AgentKind — T7 swaps in `Image("AgentLogos/<kind.rawValue>")` once
-  /// the assets ship.
-  private var logo: some View {
-    Image(systemName: "brain.head.profile")
-      .resizable()
-      .scaledToFit()
-      .frame(width: 16, height: 16)
-      .foregroundStyle(.secondary)
-      .accessibilityHidden(true)
   }
 
   /// Project / Worktree breadcrumb. Middle truncation so a long worktree
@@ -144,7 +131,7 @@ struct ActiveAgentsRowView: View {
     case .loading:
       Image(systemName: "arrow.triangle.2.circlepath")
         .symbolEffect(.variableColor.iterative.reversing)
-        .foregroundStyle(.accentColor)
+        .foregroundStyle(Color.accentColor)
         .accessibilityHidden(true)
     case .finished:
       Image(systemName: "checkmark.circle.fill")
@@ -157,10 +144,14 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Human-readable verb for the inline state label ("working" / "idle"
-  /// / "waiting" / "finished"). The *accessibility* label on the state
-  /// icon uses the raw enum value (the user-test contract); this text
-  /// is the visible label for sighted users.
+  /// Human-readable verb for the *visible* inline state label
+  /// ("working" / "idle" / "waiting" / "finished"). The short form
+  /// keeps the trailing column compact — the spoken VoiceOver label
+  /// uses the long form via `sentenceVerb` (see AC14).
+  ///
+  /// The `accessibilityLabel` on the state icon itself uses the raw
+  /// enum value per the user-test contract — that is the surface
+  /// queried by XCUI probes and is intentionally not adjusted here.
   private var stateVerb: String {
     switch entry.state {
     case .waitingForInput: return "waiting"
@@ -170,12 +161,28 @@ struct ActiveAgentsRowView: View {
     }
   }
 
+  /// Long-form sentence verb used in the row's VoiceOver label —
+  /// "waiting for input" reads naturally when chained after the
+  /// `<DisplayName>, <Project> <Worktree>` prefix and matches the
+  /// badge's single-entry sentence shape (`AA-B2`). Visible label
+  /// stays compact via `stateVerb`.
+  private var sentenceVerb: String {
+    switch entry.state {
+    case .waitingForInput: return "waiting for input"
+    case .loading: return "working"
+    case .finished: return "finished"
+    case .idle: return "idle"
+    }
+  }
+
   /// Full-sentence accessibility label combining display name, project /
   /// worktree breadcrumb, state, and age — the line a VoiceOver user
-  /// hears when the row gains focus. `age` is supplied by the
-  /// `TimelineView` clock so the spoken text stays in lockstep with
-  /// the visible age (review fix I2).
+  /// hears when the row gains focus (spec AC14). `age` is supplied by
+  /// the `TimelineView` clock so the spoken text stays in lockstep
+  /// with the visible age (review fix I2). State is spelled in the
+  /// long sentence form ("waiting for input" not "waiting") so the
+  /// announcement matches the badge's headline phrasing.
   private func accessibilityLabel(age: String) -> String {
-    "\(entry.kind.displayName), \(projectName) \(worktreeName), \(stateVerb), \(age)"
+    "\(entry.kind.displayName), \(projectName) \(worktreeName), \(sentenceVerb), \(age)"
   }
 }
