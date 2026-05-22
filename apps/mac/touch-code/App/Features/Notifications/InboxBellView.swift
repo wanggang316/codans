@@ -228,50 +228,33 @@ private struct InboxRowView: View {
           .frame(width: 6, height: 6)
           .padding(.top, 7)
         VStack(alignment: .leading, spacing: 2) {
+          // HAN-78: row 1 is the source breadcrumb + age; row 2 is the
+          // title + body joined by " - ". The breadcrumb dropped tab
+          // names so the row matches the OS banner footer; tab info was
+          // a nice-to-have rather than load-bearing.
           HStack(spacing: 6) {
-            Text(entry.title)
-              .font(.callout)
-              .fontWeight(entry.isUnread ? .semibold : .regular)
-              .foregroundStyle(entry.isUnread ? Color.primary : Color.secondary)
-              .lineLimit(1)
-            Spacer()
             if let breadcrumb, !breadcrumb.isEmpty {
               Text(breadcrumb)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-              Text("·")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
             }
+            Spacer(minLength: 6)
             Text(relativeAge)
               .font(.caption2)
               .foregroundStyle(.secondary)
           }
-          HStack(alignment: .bottom, spacing: 6) {
-            Text(entry.body)
-              .font(.caption)
-              .foregroundStyle(entry.isUnread ? Color.secondary : Color.secondary.opacity(0.7))
-              .lineLimit(2)
-              .frame(maxWidth: .infinity, alignment: .leading)
-            // HAN-56: unread rows are jumpable — show a small horizontal
-            // arrow cue at the bottom-right; subtle by default and
-            // shifts 3 pt right on hover. Read rows are no longer
-            // navigable (the inbox has no markUnread path), so the cue
-            // is dropped and the whole row gives up hit-testing below.
-            // SF Symbol `arrow.right` over a literal Unicode glyph so
-            // the icon respects Dynamic Type and the SF weight axis.
-            if entry.isUnread {
-              Image(systemName: "arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .opacity(isHovering ? 0.95 : 0.55)
-                .offset(x: isHovering ? 3 : 0)
-                .animation(.easeInOut(duration: 0.15), value: isHovering)
-                .accessibilityHidden(true)
-            }
-          }
+          (Text(entry.title)
+            .fontWeight(entry.isUnread ? .semibold : .regular)
+            .foregroundColor(entry.isUnread ? .primary : .secondary)
+            + Text(" - ")
+            .foregroundColor(.secondary)
+            + Text(entry.body)
+            .foregroundColor(entry.isUnread ? .secondary : Color.secondary.opacity(0.7)))
+            .font(.callout)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
       }
       .padding(.horizontal, 12)
@@ -304,17 +287,12 @@ private struct InboxRowView: View {
     }
   }
 
-  /// Breadcrumb for the entry's source path: `Project · Worktree` with
-  /// `· TabName` appended only when the user has explicitly renamed the
-  /// tab (`tab.name` non-empty). HAN-56: a renamed tab carries enough
-  /// signal to be worth surfacing in the row; the auto-derived live /
-  /// cached title (pwd basename, OSC title) is noise here and would
-  /// fight the body text for horizontal space.
-  ///
-  /// Resolved live from `HierarchyManager.catalog` so a project /
-  /// worktree / tab rename reflects in the popover without a save or
-  /// reload cycle. Returns nil when the project has been deleted (G3
-  /// dead-target case) so the row simply omits the breadcrumb.
+  /// Breadcrumb for the entry's source path: `<project>·<worktree>`,
+  /// matching the OS banner footer format (HAN-78). Resolved live from
+  /// `HierarchyManager.catalog` so a project / worktree rename reflects
+  /// in the popover without a save or reload cycle. Returns nil when the
+  /// project has been deleted (G3 dead-target case) so the row simply
+  /// omits the breadcrumb.
   private var breadcrumb: String? {
     guard let mgr = hierarchyManager,
       let project = mgr.catalog.projects.first(where: { $0.id == entry.source.projectID })
@@ -322,13 +300,8 @@ private struct InboxRowView: View {
     var parts: [String] = [project.name]
     if let worktree = project.worktrees.first(where: { $0.id == entry.source.worktreeID }) {
       parts.append(worktree.name)
-      if let tab = worktree.tabs.first(where: { $0.id == entry.source.tabID }),
-        let tabName = tab.name, !tabName.isEmpty
-      {
-        parts.append(tabName)
-      }
     }
-    return parts.joined(separator: " · ")
+    return parts.joined(separator: "·")
   }
 
   private var relativeAge: String {
