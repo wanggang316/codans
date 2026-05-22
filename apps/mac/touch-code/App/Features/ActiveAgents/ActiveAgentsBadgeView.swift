@@ -88,15 +88,24 @@ struct ActiveAgentsBadgeView: View {
     .accessibilityIdentifier("activeAgents.badge")
     .accessibilityLabel(headline)
     .accessibilityHint("Open active agents popover")
-    // The pulse trait identifier is purely a probe target — the user-
-    // test contract reads "present only when pulse is true" — and is
-    // installed as an empty-text accessibility child so probes can
-    // resolve it without the badge losing its primary label.
-    .accessibilityElement(children: .combine)
-    .background(alignment: .center) {
+    // Pulse trait identifier — exposed as a *sibling* accessibility
+    // element via `.overlay`, NOT a `.combine` child. SwiftUI's
+    // `.accessibilityElement(children: .combine)` collapses descendant
+    // identifiers into the parent's, so a `.background` child holding
+    // `activeAgents.badge.pulse` becomes unreachable to XCUI probes
+    // (UT-AA-B-008). An overlay sibling with its own
+    // `.accessibilityElement()` registers as a discrete queryable
+    // element, leaving the badge's primary `activeAgents.badge`
+    // identifier intact. The overlay is gated on `pulseActive`
+    // (`pulse && !reduceMotion`) so the pulse identifier appears in
+    // lockstep with the animation per spec.
+    .overlay(alignment: .topLeading) {
       if pulseActive {
         Color.clear
+          .frame(width: 1, height: 1)
+          .accessibilityElement()
           .accessibilityIdentifier("activeAgents.badge.pulse")
+          .accessibilityHidden(false)
       }
     }
     .popover(isPresented: popoverBinding, arrowEdge: .top) {

@@ -188,6 +188,26 @@ final class AgentRegistry {
       // Teardown — registry forgets the pane entirely. Anything
       // downstream that wants to remember the last state should
       // snapshot before teardown.
+      //
+      // Dual-path contract: in production wiring, AgentBinder.unbind
+      // also fires on every teardown event (see
+      // `TouchCodeApp.dispatchToAgentBinder`) and routes through
+      // `agentUnboundHandler → onAgentUnbound`, which already drops
+      // entry + scratch for bound panes. By the time this branch
+      // runs the entry is usually gone. This branch is still
+      // load-bearing for two cases:
+      //   1. Never-bound panes whose scratch accumulated from
+      //      `paneOutput` between `paneCreated` and the first
+      //      classification attempt — those never see the binder's
+      //      unbind path and would leak `scratch` + `lastRunning`
+      //      entries without this purge.
+      //   2. Callers that drive the registry directly (tests,
+      //      future non-binder consumers) without going through
+      //      AgentBinder.
+      // The redundant removeValue for an already-unbound pane is a
+      // single `@Observable` no-op write — keeping it removes a
+      // class of future regression where someone routes around the
+      // binder and forgets the cleanup.
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
       lastRunning.remove(paneID)
