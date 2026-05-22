@@ -7,13 +7,19 @@ import os
 /// `AGENTS.md` from the bundled template, creates `CLAUDE.md` as a symlink
 /// to `AGENTS.md`. Subsequent calls are no-ops if `AGENTS.md` already
 /// exists — user edits are preserved.
+///
+/// Members are `nonisolated` because the implementation is pure FileManager +
+/// Bundle I/O with no AppKit or shared mutable state — the project-wide
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` default would otherwise force
+/// disk I/O onto the main thread for no reason and block nonisolated tests
+/// from calling these helpers synchronously.
 public enum MasterTerminalBootstrap {
   /// `~/.config/touch-code/master-terminal/`. Stable across calls; depends only on `$HOME`.
-  public static var userDirectory: URL {
+  public nonisolated static var userDirectory: URL {
     userDirectory(homeDirectory: FileManager.default.homeDirectoryForCurrentUser)
   }
 
-  public static func userDirectory(homeDirectory: URL) -> URL {
+  public nonisolated static func userDirectory(homeDirectory: URL) -> URL {
     homeDirectory
       .appendingPathComponent(".config", isDirectory: true)
       .appendingPathComponent("touch-code", isDirectory: true)
@@ -28,7 +34,7 @@ public enum MasterTerminalBootstrap {
   /// - Throws: `MasterTerminalBootstrapError.templateMissing` if the bundle
   ///   does not contain the seed resource. Any underlying `FileManager` error
   ///   is rethrown verbatim.
-  public static func ensureUserDirectory(
+  public nonisolated static func ensureUserDirectory(
     homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
     bundle: Bundle = .main
   ) throws {
@@ -98,7 +104,7 @@ extension Logger {
   /// Module-shared logger for the Master Terminal feature. All feature files
   /// route through this category so the unified-logging filter
   /// `category:master-terminal` surfaces a single coherent stream.
-  static let masterTerminal = Logger(
+  nonisolated static let masterTerminal = Logger(
     subsystem: "com.gumpw.touch-agent-mac",
     category: "master-terminal"
   )

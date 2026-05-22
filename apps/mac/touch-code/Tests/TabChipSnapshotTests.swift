@@ -99,6 +99,8 @@ struct TabChipSnapshotTests {
       onCloseToRight: { _ in },
       onCloseAll: {},
       onRenameRequested: { _ in },
+      onChangeColorRequested: { _ in },
+      onCopyID: { _ in },
       onReorder: { _ in }
     )
     .frame(width: Self.rowSize.width, height: Self.rowSize.height, alignment: .bottom)

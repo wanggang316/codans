@@ -388,9 +388,12 @@ struct RootFeatureTests {
     } withDependencies: {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
-      $0.settingsWindowPresenter = SettingsWindowPresenter(open: {
-        openCount.withValue { $0 += 1 }
-      })
+      $0.settingsWindowPresenter = SettingsWindowPresenter(
+        open: {
+          openCount.withValue { $0 += 1 }
+        },
+        openAt: { _ in }
+      )
     }
     store.exhaustivity = .off
 
