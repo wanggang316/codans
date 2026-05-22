@@ -254,14 +254,15 @@ public final class NotificationDetector {
     return nil
   }
 
-  /// Banner source label: `<project> · <worktree>` (project first, the
-  /// stable axis; worktree second, the volatile one). Returns nil when
-  /// both labels are missing so the OS banner falls back to a body-only
-  /// rendering rather than a trailing dangling separator.
+  /// Banner source label: `【<project>·<worktree>】` (project first, the
+  /// stable axis; worktree second, the volatile one). Full-width brackets
+  /// and a no-space `·` mirror the spec Gump gave for HAN-78. Returns nil
+  /// when both labels are missing so the OS banner falls back to a
+  /// body-only rendering rather than a dangling pair of empty brackets.
   private func sourceLabel(projectLabel: String?, worktreeLabel: String?) -> String? {
     let parts = [projectLabel, worktreeLabel].compactMap { $0 }
     guard !parts.isEmpty else { return nil }
-    return parts.joined(separator: " · ")
+    return "【\(parts.joined(separator: "·"))】"
   }
 
   private struct Resolved {
