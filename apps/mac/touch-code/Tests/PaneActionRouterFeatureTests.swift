@@ -75,10 +75,12 @@ struct PaneActionRouterFeatureTests {
     } withDependencies: {
       $0.hierarchyClient = HierarchyClient.testValue
       $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.snapshot = { f.catalog() }
       $0.hierarchyClient.createTab = { wid, pid, name in
         recorded.setValue((wid, pid, name))
         return TabID()
       }
+      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
 
     await store.send(.requested(f.paneID, .newTab))

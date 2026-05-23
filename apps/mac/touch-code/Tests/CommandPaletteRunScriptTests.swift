@@ -183,6 +183,9 @@ struct CommandPaletteRunScriptTests {
       }
       $0.editorClient = EditorClient.testValue
       $0.gitService = GitServiceClient.testValue
+      // The warning toast routes through StatusBarFeature whose auto-clear timer
+      // consumes the continuous clock.
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 

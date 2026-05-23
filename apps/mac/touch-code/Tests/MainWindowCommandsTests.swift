@@ -86,6 +86,13 @@ struct MainWindowCommandsTests {
           binaryPath: nil
         )
       }
+      // EditorFeature.openDefaultInCurrentWorktreeRequested consults
+      // SettingsWriter for the per-Project editor override; the StatusBarFeature
+      // auto-clear timer subsequently consumes the continuous clock. Stub both
+      // with quiet defaults so the non-exhaustive assertion below isn't drowned
+      // out by stray `unimplemented` issues from the downstream chain.
+      $0.settingsWriter.readSnapshotSync = { .default }
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 

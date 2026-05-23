@@ -17,6 +17,12 @@ struct RootFeatureTests {
     } withDependencies: {
       $0.terminalClient.events = { eventStream }
       $0.hierarchyClient.selectionChanges = { selectionStream }
+      // Engine events drive downstream child reducers (notably StatusBar) that
+      // expect a real catalog/clock; stub both with quiet defaults so the
+      // non-exhaustive assertion below doesn't trip on `unimplemented` issues
+      // surfaced by side effects we don't care about here.
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 
@@ -81,6 +87,11 @@ struct RootFeatureTests {
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
       $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
       $0.editorClient = EditorClient.testValue
+      // `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`, which spawns a
+      // pane in the active tab when it has none. The fixture tab is empty so
+      // `openPane` is reached; stub it to a no-op since this test asserts
+      // only the splitViewport tabID mirror.
+      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
     // Non-exhaustive: this test is about the splitViewport tabID mirror only; the
     // downstream `.gitViewer.worktreeSelected` forwarding + its diff effect are
@@ -156,6 +167,10 @@ struct RootFeatureTests {
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
       $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
       $0.editorClient = EditorClient.testValue
+      // The gv-fixture worktrees have no tabs, so `autoSeedTabAndPaneIfNeeded`
+      // walks createTab → openPane on each selection switch.
+      $0.hierarchyClient.createTab = { _, _, _ in TabID() }
+      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
     store.exhaustivity = .off
 
@@ -279,6 +294,9 @@ struct RootFeatureTests {
           id: id ?? "finder", displayName: "x", binaryPath: nil
         )
       }
+      // .openSucceeded routes through StatusBarFeature which consumes the
+      // continuous clock to schedule its auto-clear timer.
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 
@@ -324,6 +342,7 @@ struct RootFeatureTests {
           id: id ?? "finder", displayName: "x", binaryPath: nil
         )
       }
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 
@@ -359,6 +378,7 @@ struct RootFeatureTests {
           id: id ?? "finder", displayName: "x", binaryPath: nil
         )
       }
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 
@@ -884,6 +904,7 @@ struct RootFeatureTests {
       $0.hierarchyClient.selectProject = { _ in }
       $0.hierarchyClient.selectWorktree = { _, _ in }
       $0.hierarchyClient.selectTab = { _, _, _ in }
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 
@@ -916,6 +937,7 @@ struct RootFeatureTests {
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { Catalog() }
       $0.editorClient = EditorClient.testValue
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 

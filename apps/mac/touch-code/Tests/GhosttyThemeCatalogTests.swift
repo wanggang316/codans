@@ -58,7 +58,10 @@ struct GhosttyThemeCatalogTests {
   ) -> GhosttyThemeCatalog {
     GhosttyThemeCatalogReader.load(
       homeDirectoryURL: home.url,
-      environment: ["XDG_CONFIG_HOME": xdg.url.path]
+      environment: [
+        "XDG_CONFIG_HOME": xdg.url.path,
+        "TOUCH_CODE_DISABLE_THEME_DEV_FALLBACK": "1",
+      ]
     )
   }
 
@@ -194,7 +197,7 @@ struct GhosttyThemeCatalogTests {
     )
     let catalog = GhosttyThemeCatalogReader.load(
       homeDirectoryURL: home.url,
-      environment: [:]
+      environment: ["TOUCH_CODE_DISABLE_THEME_DEV_FALLBACK": "1"]
     )
     #expect(catalog.light.contains("HomeLight"))
   }
@@ -243,7 +246,10 @@ struct GhosttyThemeCatalogTests {
     )
     let catalog = GhosttyThemeCatalogReader.load(
       homeDirectoryURL: home.url,
-      environment: ["GHOSTTY_RESOURCES_DIR": resources.url.path]
+      environment: [
+        "GHOSTTY_RESOURCES_DIR": resources.url.path,
+        "TOUCH_CODE_DISABLE_THEME_DEV_FALLBACK": "1",
+      ]
     )
     #expect(catalog.dark.contains("Bundled Dark"))
     #expect(catalog.light.contains("Bundled Light"))
@@ -272,6 +278,7 @@ struct GhosttyThemeCatalogTests {
       environment: [
         "XDG_CONFIG_HOME": xdg.url.path,
         "GHOSTTY_RESOURCES_DIR": resources.url.path,
+        "TOUCH_CODE_DISABLE_THEME_DEV_FALLBACK": "1",
       ]
     )
     #expect(catalog.light == ["Conflicting"])
