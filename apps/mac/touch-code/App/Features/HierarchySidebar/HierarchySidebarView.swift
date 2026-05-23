@@ -200,10 +200,10 @@ struct HierarchySidebarView: View {
                 )
               },
               onTapRow: { paneID in
+                // Panel stays open after a row tap — the user often
+                // fan-jumps between agents and re-opening the panel
+                // each time is friction.
                 onActiveAgentsRowTapped(paneID)
-                withAnimation(.easeOut(duration: 0.18)) {
-                  activeAgentsPanelOpen = false
-                }
               },
               onClose: {
                 withAnimation(.easeOut(duration: 0.18)) {
@@ -235,8 +235,7 @@ struct HierarchySidebarView: View {
                   activeAgentsPanelOpen.toggle()
                 }
               },
-            activeAgentsPanelOpen: activeAgentsPanelOpen,
-            activeAgentsCount: activeAgentsRegistry?.entries.count ?? 0
+            activeAgentsPanelOpen: activeAgentsPanelOpen
           )
         }
       }

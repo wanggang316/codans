@@ -1,24 +1,24 @@
 import SwiftUI
 import TouchCodeCore
 
-/// One Agent row in the ActiveAgents popover.
+/// One Agent row in the ActiveAgents sidebar panel.
 ///
-/// Layout (two-line variant per design feedback):
+/// Layout (current iteration per design feedback — agent name is now
+/// encoded by the leading logo alone, no longer duplicated in text;
+/// the relative-time column has been dropped entirely):
 /// - Leading: 20pt agent logo (per-kind brand glyph via `AgentLogoView`).
 /// - Center, two-line VStack:
-///     · Top:    `<DisplayName>` (e.g. "Claude Code").
-///     · Bottom: `<ProjectName> · <WorktreeName>` middle-truncated.
-/// - Trailing, two-line VStack right-aligned:
-///     · Top:    state icon + short state verb.
-///     · Bottom: relative time.
+///     · Top:    `<ProjectName>` — primary callout.
+///     · Bottom: `<WorktreeName>` — caption / secondary.
+/// - Trailing: state icon + short state verb in a centered HStack.
 ///
-/// Click target is the whole row — bound to `onTap`. Wiring the actual
-/// focus dispatch is T6's job; T5 only exposes the closure.
+/// Click target is the whole row — bound to `onTap`. The host (sidebar
+/// panel) intentionally does NOT collapse on tap; the row stays visible
+/// after focus so the user can fan-jump between agents.
 ///
-/// Relative time refreshes itself: wrapped in a `TimelineView(.periodic)`
-/// with a 30s cadence — matches the granularity of
-/// `RelativeDateTimeFormatter` ("12s ago", "2m ago", "1h ago") without
-/// burning redraws on per-second precision the user can't perceive.
+/// The breathing animation on `working` / `waitingForInput` icons is
+/// driven by a local `@State` flag flipped in `.onAppear`; reduce-motion
+/// suppresses the flip so the icon renders at full opacity statically.
 struct ActiveAgentsRowView: View {
   let paneID: PaneID
   let entry: AgentRegistry.AgentEntry
@@ -26,76 +26,59 @@ struct ActiveAgentsRowView: View {
   let worktreeName: String
   let onTap: () -> Void
 
-  /// Formatter is shared across all rows in a popover lifetime. Building
-  /// a fresh `RelativeDateTimeFormatter` per row would otherwise spin up
-  /// a CFLocale + calendar + ICU context on each redraw — same pattern
-  /// as `InboxRowView.relativeFormatter`.
-  private static let relativeFormatter: RelativeDateTimeFormatter = {
-    let f = RelativeDateTimeFormatter()
-    f.unitsStyle = .abbreviated
-    return f
-  }()
-
   @State private var isHovering = false
-  /// `TimelineView(.periodic(from:))` rebases its schedule every time
-  /// the `from:` expression re-evaluates — `Date()` inline would reset
-  /// the 30s timer on every parent redraw (and the popover redraws on
-  /// every `@Observable` registry mutation). Captured once at view init
-  /// so the cadence is stable across redraws.
-  @State private var firstTick = Date()
+  /// Drives the breathing opacity pulse on active states (working /
+  /// waitingForInput). Flipped once in `.onAppear` so SwiftUI's
+  /// `repeatForever` chain finds a value change to anchor against.
+  @State private var pulseActive = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    // The visible age (and the matching a11y sentence) both read from
-    // the same `TimelineView` clock so VoiceOver doesn't drift away
-    // from what sighted users see — see the `trailing` builder.
-    TimelineView(.periodic(from: firstTick, by: 30)) { context in
-      let age = Self.relativeFormatter.localizedString(
-        for: entry.lastTransitionAt,
-        relativeTo: context.date
-      )
-      Button(action: onTap) {
-        HStack(alignment: .center, spacing: 10) {
-          AgentLogoView(kind: entry.kind, size: 20)
-          identityColumn
-          Spacer(minLength: 8)
-          statusColumn(age: age)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .background(isHovering ? Color.gray.opacity(0.08) : Color.clear)
+    Button(action: onTap) {
+      HStack(alignment: .center, spacing: 10) {
+        AgentLogoView(kind: entry.kind, size: 20)
+        identityColumn
+        Spacer(minLength: 8)
+        statusColumn
       }
-      .buttonStyle(.plain)
-      .onHover { isHovering = $0 }
-      // `.contain` keeps the inner `headline` Text and `stateIcon`
-      // HStack individually addressable by their sub-element
-      // identifiers (user-test contract — see the type doc).
-      // `.accessibilityLabel` on a `.contain` container is a no-op, so
-      // the row's full-sentence VoiceOver label is installed via
-      // `.accessibilityRepresentation { Button(label, action:) }` — a
-      // proxy element that carries the label without collapsing the
-      // children-contain semantics needed for sub-element probing.
-      .accessibilityElement(children: .contain)
-      .accessibilityIdentifier("activeAgents.row.\(paneID)")
-      .accessibilityRepresentation {
-        Button(accessibilityLabel(age: age), action: onTap)
-      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+      .background(isHovering ? Color.gray.opacity(0.08) : Color.clear)
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovering = $0 }
+    // `.contain` keeps the `.headline` text and `.state` icon
+    // individually addressable by their sub-element identifiers (the
+    // user-test contract surface — see `docs/user-tests/active-agents-view.md`).
+    // `.accessibilityLabel` on a `.contain` container is a no-op, so
+    // the row's full-sentence VoiceOver label is installed via
+    // `.accessibilityRepresentation { Button(label, action:) }` — a
+    // proxy element that carries the label without collapsing the
+    // children-contain semantics needed for sub-element probing.
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("activeAgents.row.\(paneID)")
+    .accessibilityRepresentation {
+      Button(accessibilityLabelText, action: onTap)
+    }
+    .onAppear {
+      if !reduceMotion { pulseActive = true }
     }
   }
 
-  /// Two-line identity column: agent display name on top, project/
-  /// worktree breadcrumb beneath. The breadcrumb keeps the user-test
-  /// contract identifier (`activeAgents.row.<paneID>.headline`) on the
-  /// project/worktree text so XCUI probes find the same surface they
-  /// did before the layout change.
+  /// Two-line identity column: project name on top, worktree name
+  /// beneath. The bottom line keeps the `activeAgents.row.<paneID>.headline`
+  /// accessibility identifier the user-test contract depends on, even
+  /// though the visible breadcrumb shape has changed.
   private var identityColumn: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(entry.kind.displayName)
+      Text(projectName)
         .font(.callout)
         .foregroundStyle(.primary)
         .lineLimit(1)
-      Text("\(projectName) · \(worktreeName)")
+        .truncationMode(.middle)
+      Text(worktreeName)
         .font(.caption)
         .foregroundStyle(.secondary)
         .lineLimit(1)
@@ -104,66 +87,68 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Two-line trailing column: state icon + short verb on top, relative
-  /// age beneath. The age string is computed by the surrounding
-  /// `TimelineView` so the visible text and the row's a11y label share
-  /// one clock. The state icon's `accessibilityLabel` is the raw enum
-  /// value per the user-test contract (`docs/user-tests/active-agents-view.md`
-  /// §Test Surface).
-  private func statusColumn(age: String) -> some View {
-    VStack(alignment: .trailing, spacing: 2) {
-      HStack(spacing: 4) {
-        stateIcon
-          .accessibilityElement(children: .ignore)
-          .accessibilityIdentifier("activeAgents.row.\(paneID).state")
-          .accessibilityLabel(entry.state.rawValue)
-        Text(stateVerb)
-          .font(.callout)
-          .foregroundStyle(.primary)
-      }
-      Text(age)
-        .font(.caption)
+  /// Trailing status column — state icon + short verb, in a single
+  /// HStack that the outer row's `alignment: .center` keeps vertically
+  /// centered against the two-line identity column. The state icon's
+  /// `accessibilityLabel` is the raw enum value per the user-test
+  /// contract (`docs/user-tests/active-agents-view.md` §Test Surface).
+  private var statusColumn: some View {
+    HStack(spacing: 5) {
+      stateIcon
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("activeAgents.row.\(paneID).state")
+        .accessibilityLabel(entry.state.rawValue)
+      Text(stateVerb)
+        .font(.callout)
         .foregroundStyle(.secondary)
     }
   }
 
-  /// State icon glyph + color. The `.loading` case uses a SwiftUI 6
-  /// symbol effect for a subtle rotation, matching the precedent in
-  /// `HierarchySidebarView` (busy-pane indicator). Inner Images are
-  /// `accessibilityHidden` because the wrapping view already carries
-  /// the a11y label (the raw state enum value, per the user-test
-  /// contract).
+  /// State icon glyph + color. New visual language: circle-based for
+  /// every state, with a breathing opacity pulse on the two "active"
+  /// states (working, waitingForInput). `.idle` uses `circle.dashed`
+  /// to read as "present but quiet"; finished keeps the affirmative
+  /// green check.
   @ViewBuilder
   private var stateIcon: some View {
     switch entry.state {
     case .waitingForInput:
-      Image(systemName: "bell.badge.fill")
+      Image(systemName: "exclamationmark.circle.fill")
         .foregroundStyle(.orange)
+        .opacity(reduceMotion ? 1.0 : (pulseActive ? 0.5 : 1.0))
+        .animation(
+          reduceMotion
+            ? nil
+            : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+          value: pulseActive
+        )
         .accessibilityHidden(true)
     case .loading:
-      Image(systemName: "arrow.triangle.2.circlepath")
-        .symbolEffect(.variableColor.iterative.reversing)
-        .foregroundStyle(Color.accentColor)
+      Image(systemName: "circle.fill")
+        .foregroundStyle(.orange)
+        .opacity(reduceMotion ? 1.0 : (pulseActive ? 0.5 : 1.0))
+        .animation(
+          reduceMotion
+            ? nil
+            : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+          value: pulseActive
+        )
         .accessibilityHidden(true)
     case .finished:
       Image(systemName: "checkmark.circle.fill")
         .foregroundStyle(.green)
         .accessibilityHidden(true)
     case .idle:
-      Image(systemName: "circle")
+      Image(systemName: "circle.dashed")
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
     }
   }
 
-  /// Human-readable verb for the *visible* inline state label
+  /// Human-readable verb for the visible inline state label
   /// ("working" / "idle" / "waiting" / "finished"). The short form
   /// keeps the trailing column compact — the spoken VoiceOver label
-  /// uses the long form via `sentenceVerb` (see AC14).
-  ///
-  /// The `accessibilityLabel` on the state icon itself uses the raw
-  /// enum value per the user-test contract — that is the surface
-  /// queried by XCUI probes and is intentionally not adjusted here.
+  /// uses the long form via `sentenceVerb`.
   private var stateVerb: String {
     switch entry.state {
     case .waitingForInput: return "waiting"
@@ -173,11 +158,9 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Long-form sentence verb used in the row's VoiceOver label —
+  /// Long-form sentence verb used in the row's VoiceOver label.
   /// "waiting for input" reads naturally when chained after the
-  /// `<DisplayName>, <Project> <Worktree>` prefix and matches the
-  /// badge's single-entry sentence shape (`AA-B2`). Visible label
-  /// stays compact via `stateVerb`.
+  /// `<DisplayName>, <Project>, <Worktree>` prefix.
   private var sentenceVerb: String {
     switch entry.state {
     case .waitingForInput: return "waiting for input"
@@ -187,14 +170,11 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Full-sentence accessibility label combining display name, project /
-  /// worktree breadcrumb, state, and age — the line a VoiceOver user
-  /// hears when the row gains focus (spec AC14). `age` is supplied by
-  /// the `TimelineView` clock so the spoken text stays in lockstep
-  /// with the visible age (review fix I2). State is spelled in the
-  /// long sentence form ("waiting for input" not "waiting") so the
-  /// announcement matches the badge's headline phrasing.
-  private func accessibilityLabel(age: String) -> String {
-    "\(entry.kind.displayName), \(projectName) \(worktreeName), \(sentenceVerb), \(age)"
+  /// Full-sentence accessibility label combining display name, project,
+  /// worktree, and state. Agent name is dropped from the visible row
+  /// but kept here so VoiceOver still announces which kind of agent
+  /// occupies the pane.
+  private var accessibilityLabelText: String {
+    "\(entry.kind.displayName), \(projectName), \(worktreeName), \(sentenceVerb)"
   }
 }

@@ -1,24 +1,31 @@
+import AppKit
 import SwiftUI
 import TouchCodeCore
 
 /// ActiveAgents panel anchored at the sidebar's bottom safe-area inset.
 ///
+/// Visual brief (per design pass):
+/// - Rounded top corners (8pt) — the panel reads as a card pinned to
+///   the sidebar floor.
+/// - Background uses `controlBackgroundColor` so it adapts naturally
+///   to the active appearance (a light grey in light mode and a soft
+///   dark grey in dark mode — the inverse-of-content fill macOS uses
+///   for "tray over chrome" surfaces).
+/// - Capsule drag handle at the top. Hovering it swaps the cursor to
+///   `resizeUpDown` so the affordance is discoverable without label.
+///
 /// Layout (top → bottom):
-/// - Capsule drag handle. Pulling it upward grows the panel; downward
-///   shrinks it. The host clamps the resulting height to a sensible
-///   range; this view only proposes a new value via the `height`
-///   binding.
-/// - Header row: `Active Agents (N)` title + close button.
+/// - Header bar — drag handle, "Agents View" title, optional count chip
+///   (only shown when there are more than four entries; the panel is
+///   primarily a focus pivot, not a count display), and a close button.
 /// - Divider.
 /// - Scrollable list of `ActiveAgentsRowView`s ordered by
 ///   `SortedEntriesProvider` (`waitingForInput > finished > loading >
 ///   idle`, then `lastTransitionAt` desc).
 ///
-/// The panel is the sole entry point for the ActiveAgents UI as of the
-/// sidebar-relocation change — the worktree-toolbar badge that used to
-/// host the popover has been removed. Tapping a row dispatches focus
-/// to the corresponding pane (via the controller's `onTapRow` closure)
-/// and the host normally collapses the panel afterwards.
+/// Tapping a row dispatches focus to the corresponding pane (via the
+/// controller's `onTapRow` closure). The panel intentionally stays open
+/// after a row tap so the user can fan-jump between agents.
 struct ActiveAgentsSidebarPanel: View {
   let registry: AgentRegistry
   let resolveSourcePath: (PaneID) -> (project: String, worktree: String)?
@@ -29,16 +36,23 @@ struct ActiveAgentsSidebarPanel: View {
   /// the user drags the handle; the host is responsible for persisting
   /// the value (typically via `@AppStorage`).
   @Binding var height: Double
-  /// Lower bound below which the panel snaps closed visually but keeps
-  /// the binding clamped; useful so the user can't drag it to zero.
   let minHeight: Double
-  /// Upper bound — usually `0.5 * sidebarHeight`.
   let maxHeight: Double
 
   /// Snapshot of `height` taken at drag start. Without this anchor the
   /// drag delta would re-apply against the already-mutated height each
   /// `onChanged` tick and the resize would accelerate exponentially.
   @State private var dragAnchor: Double?
+  /// Whether the cursor is currently over the drag handle. Used to push
+  /// / pop a resize-up-down cursor without spamming the cursor stack.
+  @State private var handleHovering = false
+
+  /// Show the count chip only once the panel holds more than four
+  /// agents — for the typical 1-4 entry case the title alone reads
+  /// cleaner.
+  private var showsCountChip: Bool {
+    registry.entries.count > 4
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -48,16 +62,19 @@ struct ActiveAgentsSidebarPanel: View {
     }
     .frame(height: clampedHeight)
     .frame(maxWidth: .infinity)
-    .background(Color(nsColor: .underPageBackgroundColor))
+    .background(Color(nsColor: .controlBackgroundColor))
+    .clipShape(
+      UnevenRoundedRectangle(
+        topLeadingRadius: 8,
+        bottomLeadingRadius: 0,
+        bottomTrailingRadius: 0,
+        topTrailingRadius: 8,
+        style: .continuous
+      )
+    )
     .overlay(alignment: .top) { Divider() }
   }
 
-  /// Effective height that respects the host-supplied bounds. Drag
-  /// callbacks already clamp into `height`, but consumers may set
-  /// `height` outside the range when the host's geometry changes
-  /// (e.g. window resize shrinks the sidebar). This clamp ensures the
-  /// rendered panel never exceeds the new bounds even before the next
-  /// drag corrects the binding.
   private var clampedHeight: Double {
     min(max(height, minHeight), maxHeight)
   }
@@ -69,10 +86,16 @@ struct ActiveAgentsSidebarPanel: View {
         .frame(width: 36, height: 4)
         .padding(.top, 6)
         .padding(.bottom, 4)
-      HStack(spacing: 8) {
-        Text("Active Agents (\(registry.entries.count))")
+      HStack(spacing: 6) {
+        Text("Agents View")
           .font(.caption.weight(.semibold))
           .foregroundStyle(.secondary)
+        if showsCountChip {
+          Text("(\(registry.entries.count))")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+        }
         Spacer()
         Button(action: onClose) {
           Image(systemName: "xmark")
@@ -82,19 +105,26 @@ struct ActiveAgentsSidebarPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Close active agents panel")
-        .accessibilityLabel("Close active agents panel")
+        .help("Close agents view")
+        .accessibilityLabel("Close agents view")
       }
       .padding(.horizontal, 10)
       .padding(.bottom, 6)
     }
     .contentShape(Rectangle())
+    .onHover { hovering in
+      handleHovering = hovering
+      if hovering {
+        NSCursor.resizeUpDown.push()
+      } else {
+        NSCursor.pop()
+      }
+    }
     .gesture(
       DragGesture(coordinateSpace: .global)
         .onChanged { value in
           let base = dragAnchor ?? height
           if dragAnchor == nil { dragAnchor = height }
-          // Drag UP = negative y translation = panel grows.
           let proposed = base - value.translation.height
           height = min(max(proposed, minHeight), maxHeight)
         }
