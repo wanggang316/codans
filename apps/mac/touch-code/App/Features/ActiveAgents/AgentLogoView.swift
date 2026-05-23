@@ -5,14 +5,13 @@ import TouchCodeCore
 /// `ActiveAgentsBadgeView` (14pt). Centralises the symbol choice so a
 /// future swap stays in one file.
 ///
-/// Brand glyphs ship as SVG imagesets in `App/Assets.xcassets/`:
-/// - `.claudeCode` → `claude-code` (Anthropic Claude wordmark — preserved
-///   in its brand orange via the imageset's default rendering intent).
-/// - `.codex`      → `codex` (OpenAI Codex spiral — `template` rendering
-///   so it picks up `foregroundStyle`).
-/// - `.pi`         → `pi` (Inflection pi glyph — `template` rendering;
-///   the SVG ships in a near-black fill so the template path tints it
-///   to the surrounding typography colour).
+/// Brand glyphs ship as SVG imagesets in `App/Assets.xcassets/`, all
+/// three under `template` rendering so they pick up the surrounding
+/// `foregroundStyle` (consistent monochrome glyphs against the popover
+/// row typography):
+/// - `.claudeCode` → `claude-code` (Anthropic Claude wordmark).
+/// - `.codex`      → `codex` (OpenAI Codex spiral).
+/// - `.pi`         → `pi` (Inflection pi glyph).
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
@@ -40,13 +39,9 @@ struct AgentLogoView: View {
     }
   }
 
-  /// Tint applied to template-rendered glyphs. Claude Code's imageset uses
-  /// original rendering (preserves Anthropic's brand orange) and therefore
-  /// ignores `foregroundStyle`; the value below is harmless for that case.
+  /// Tint applied to template-rendered glyphs. All three imagesets use
+  /// `template` rendering so the glyph picks up this colour at draw time.
   private func tint(for kind: AgentKind) -> HierarchicalShapeStyle {
-    switch kind {
-    case .claudeCode: return .primary  // ignored by original-rendered SVG
-    case .codex, .pi: return .secondary
-    }
+    .secondary
   }
 }
