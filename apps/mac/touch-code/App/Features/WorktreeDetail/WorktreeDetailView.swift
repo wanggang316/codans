@@ -44,17 +44,6 @@ struct WorktreeDetailView: View {
   /// the InboxBellView's row-tap. Wired by `ContentView` so this view
   /// doesn't need to hold the root TCA scope just to fire one action.
   let onFocusHierarchyPath: (InboxEntry.SourcePath) -> Void
-  /// T6 (active-agents): dispatches `.activeAgents(.rowTapped(paneID))`
-  /// from `ActiveAgentsBadgeView`'s popover. Threaded as a closure so
-  /// this view's signature does not need the full RootFeature scope and
-  /// so the badge stays usable from previews / fixtures without a real
-  /// store.
-  let onActiveAgentsRowTapped: (PaneID) -> Void
-  /// T6: registry that backs the ActiveAgents badge + popover. Optional
-  /// because `AppState.bringUp` constructs it lazily; nil renders no
-  /// badge (the badge collapses to `EmptyView` on empty entries
-  /// anyway).
-  let activeAgentsRegistry: AgentRegistry?
   /// Bumped by `RootFeature` when the user invokes ⌘U / the "Show Unread
   /// Notifications" menu item. Threaded down to `InboxBellView` whose
   /// `.onChange` opens the popover — same UUID-trigger pattern as
@@ -269,7 +258,6 @@ struct WorktreeDetailView: View {
         // status / bell pair visually grouped at the window's
         // optical center.
         inboxBellToolbarItem()
-        activeAgentsBadgeToolbarItem()
         ToolbarSpacer(.flexible)
         trailingButtonsDefault(address: address, info: info)
       } else {
@@ -280,7 +268,6 @@ struct WorktreeDetailView: View {
         // cluster rather than seeing the bell in the trailing button
         // group with the action buttons.
         inboxBellToolbarItem()
-        activeAgentsBadgeToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
           HeaderRunScriptSplitButton(
             store: headerStore,
@@ -308,45 +295,6 @@ struct WorktreeDetailView: View {
         popoverTrigger: inboxBellPopoverTrigger
       )
     }
-  }
-
-  /// T6 (active-agents): one-line summary chip + hover popover for every
-  /// bound Agent in the catalog. Hidden entirely when `entries.isEmpty`
-  /// (the badge view itself returns `EmptyView` in that case). Reads the
-  /// `AgentRegistry` threaded in by `ContentView`; the catalog resolver
-  /// below walks `hierarchyManager.catalog` for each row's `<project> /
-  /// <worktree>` breadcrumb.
-  @ToolbarContentBuilder
-  private func activeAgentsBadgeToolbarItem() -> some ToolbarContent {
-    if let registry = activeAgentsRegistry {
-      ToolbarItem {
-        ActiveAgentsBadgeView(
-          registry: registry,
-          resolveSourcePath: { [hierarchyManager] paneID in
-            resolveSourcePath(paneID: paneID, in: hierarchyManager.catalog)
-          },
-          onTapRow: onActiveAgentsRowTapped
-        )
-      }
-    }
-  }
-
-  /// Walks the live catalog to a `(projectName, worktreeName)` for the
-  /// pane. Returns nil if the pane has been torn down between the
-  /// popover render and the catalog read — the row falls through to the
-  /// `—` placeholder in `ActiveAgentsRowView` so a stale id renders
-  /// gracefully instead of crashing.
-  private func resolveSourcePath(
-    paneID: PaneID, in catalog: Catalog
-  ) -> (project: String, worktree: String)? {
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs where tab.flatPaneIDs.contains(paneID) {
-          return (project.name, worktree.name)
-        }
-      }
-    }
-    return nil
   }
 
   /// macOS 26 leading identity item. Default placement so it sits before

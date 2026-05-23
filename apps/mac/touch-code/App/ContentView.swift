@@ -88,7 +88,9 @@ struct ContentView: View {
         currentSelection: store.selection,
         revealTrigger: store.revealSelectionTrigger,
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
-        editorStore: store.scope(state: \.editor, action: \.editor)
+        editorStore: store.scope(state: \.editor, action: \.editor),
+        activeAgentsRegistry: activeAgentsRegistry,
+        onActiveAgentsRowTapped: { paneID in store.send(.activeAgents(.rowTapped(paneID))) }
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {
@@ -103,8 +105,6 @@ struct ContentView: View {
         inspectorVisible: store.state.diffInspectorVisible(in: hierarchyManager.catalog),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
-        onActiveAgentsRowTapped: { paneID in store.send(.activeAgents(.rowTapped(paneID))) },
-        activeAgentsRegistry: activeAgentsRegistry,
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it

@@ -34,6 +34,27 @@ struct HierarchySidebarView: View {
   /// installed editor). Nil in previews — the submenu falls back to the
   /// shared "Open in Editor" entry alone.
   var editorStore: StoreOf<EditorFeature>?
+  /// ActiveAgents registry. Drives the bottom expandable panel + the
+  /// 🤖-style toggle button in the footer. Optional so previews / tests
+  /// without `AppState.bringUp` wiring omit the panel and the button.
+  var activeAgentsRegistry: AgentRegistry?
+  /// Row-tap dispatcher for the ActiveAgents panel — routes to
+  /// `RootFeature.activeAgents(.rowTapped)`. Closure (rather than direct
+  /// store write) keeps Sidebar decoupled from Root.
+  var onActiveAgentsRowTapped: (PaneID) -> Void = { _ in }
+  /// Whether the ActiveAgents bottom panel is currently expanded. Driven
+  /// by the footer toggle; closed by default each launch.
+  @State private var activeAgentsPanelOpen = false
+  /// Persisted panel height. The drag handle in
+  /// `ActiveAgentsSidebarPanel` writes to this; the host clamps the
+  /// rendered height to `[minHeight, 0.5 * sidebarHeight]`.
+  @AppStorage("activeAgents.panel.height") private var activeAgentsPanelHeight: Double = 200
+  /// Live sidebar height, captured via a background GeometryReader on
+  /// `treeBody`. Used to clamp the ActiveAgents panel to at most half
+  /// the sidebar so the worktree list always retains the other half.
+  /// Defaults to a sensible value so the first render before the
+  /// background measure lands doesn't pop a too-tall panel.
+  @State private var sidebarHeightObservation: Double = 600
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
@@ -149,21 +170,75 @@ struct HierarchySidebarView: View {
     // Sidebar body is the List, with a compact filter footer mounted at
     // the bottom `.safeAreaInset` — a single trailing glyph that opens an
     // upward popover listing the available tag filters.
+    //
+    // A second piece of bottom inset (above the footer, still inside the
+    // same `.safeAreaInset`) hosts the ActiveAgents panel when expanded.
+    // Stacking both in one VStack keeps the safe-area accounting in sync
+    // — the List automatically shrinks by the panel + footer total so
+    // worktree rows never get clipped behind them.
     treeBody(projects: visibleProjects)
+      .background(
+        GeometryReader { proxy in
+          Color.clear.preference(
+            key: SidebarHeightPreferenceKey.self,
+            value: proxy.size.height
+          )
+        }
+      )
+      .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
+        sidebarHeightObservation = newHeight
+      }
       .safeAreaInset(edge: .bottom, spacing: 0) {
-        TagFilterPopoverFooter(
-          tags: catalog.tags,
-          activeFilter: catalog.activeTagFilter,
-          showUntaggedChip: untaggedExists,
-          onAllTapped: { store.send(.allChipTapped) },
-          onTagTapped: { store.send(.tagChipTapped($0)) },
-          onUntaggedTapped: { store.send(.untaggedChipTapped) },
-          onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-          onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-          sortMode: catalog.projectSortMode,
-          onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
-          onManualSortRequested: { store.send(.manualSortSheetRequested) }
-        )
+        VStack(spacing: 0) {
+          if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
+            ActiveAgentsSidebarPanel(
+              registry: registry,
+              resolveSourcePath: { paneID in
+                resolveActiveAgentsSourcePath(
+                  paneID: paneID,
+                  catalog: hierarchyManager.catalog
+                )
+              },
+              onTapRow: { paneID in
+                onActiveAgentsRowTapped(paneID)
+                withAnimation(.easeOut(duration: 0.18)) {
+                  activeAgentsPanelOpen = false
+                }
+              },
+              onClose: {
+                withAnimation(.easeOut(duration: 0.18)) {
+                  activeAgentsPanelOpen = false
+                }
+              },
+              height: $activeAgentsPanelHeight,
+              minHeight: 140,
+              maxHeight: max(140, sidebarHeightObservation * 0.5)
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+          }
+          TagFilterPopoverFooter(
+            tags: catalog.tags,
+            activeFilter: catalog.activeTagFilter,
+            showUntaggedChip: untaggedExists,
+            onAllTapped: { store.send(.allChipTapped) },
+            onTagTapped: { store.send(.tagChipTapped($0)) },
+            onUntaggedTapped: { store.send(.untaggedChipTapped) },
+            onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
+            onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+            sortMode: catalog.projectSortMode,
+            onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
+            onManualSortRequested: { store.send(.manualSortSheetRequested) },
+            onActiveAgentsTapped: activeAgentsRegistry == nil
+              ? nil
+              : {
+                withAnimation(.easeOut(duration: 0.18)) {
+                  activeAgentsPanelOpen.toggle()
+                }
+              },
+            activeAgentsPanelOpen: activeAgentsPanelOpen,
+            activeAgentsCount: activeAgentsRegistry?.entries.count ?? 0
+          )
+        }
       }
       .sheet(
         isPresented: Binding(
@@ -1123,7 +1198,8 @@ private struct ProjectHeaderRow: View {
   @State private var isMenuHovering = false
 
   var body: some View {
-    let hasUnread = rollup?.current.unreadProjects.contains(project.id) == true
+    let hasUnread =
+      rollup?.current.unreadProjects.contains(project.id) == true
       && settingsStore.settings.notifications.projectBellEnabled
     HStack(spacing: 6) {
       // L4 unread indicator. When the project is in `unreadProjects`
@@ -1414,4 +1490,32 @@ private struct ProjectTagsMenu: View {
       Label("Tags", systemImage: "tag")
     }
   }
+}
+
+/// Captures the sidebar column's live height so the ActiveAgents bottom
+/// panel can clamp to half of it. Updated each time SwiftUI re-measures
+/// the sidebar background.
+private struct SidebarHeightPreferenceKey: PreferenceKey {
+  static let defaultValue: Double = 0
+  static func reduce(value: inout Double, nextValue: () -> Double) {
+    value = max(value, nextValue())
+  }
+}
+
+/// Walks the catalog for a paneID and returns the (projectName,
+/// worktreeName) pair the ActiveAgents row needs for its breadcrumb.
+/// Returns nil when the pane has been torn down between event delivery
+/// and the next popover render — the row renders an em-dash fallback.
+private func resolveActiveAgentsSourcePath(
+  paneID: PaneID,
+  catalog: Catalog
+) -> (project: String, worktree: String)? {
+  for project in catalog.projects {
+    for worktree in project.worktrees where worktree.tabs.contains(where: { tab in
+      tab.panes.contains(where: { $0.id == paneID })
+    }) {
+      return (project.name, worktree.name)
+    }
+  }
+  return nil
 }

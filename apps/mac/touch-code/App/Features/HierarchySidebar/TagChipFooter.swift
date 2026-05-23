@@ -32,6 +32,16 @@ struct TagFilterPopoverFooter: View {
   var sortMode: ProjectSortMode?
   var onSortModeChanged: ((ProjectSortMode) -> Void)?
   var onManualSortRequested: (() -> Void)?
+  /// Sidebar-relocated ActiveAgents toggle. nil = hide the button
+  /// entirely (used in previews / contexts without a registry wired).
+  var onActiveAgentsTapped: (() -> Void)?
+  /// Lit accent when the bottom Active Agents panel is currently
+  /// expanded — gives the user a "you opened this" visual anchor.
+  var activeAgentsPanelOpen: Bool = false
+  /// Count of bound Agent panes. Shown as a small numeric badge on
+  /// the button when > 0 so the user has ambient awareness of how
+  /// many panes are agent-driven without expanding the panel.
+  var activeAgentsCount: Int = 0
 
   @State private var isSortPopoverPresented = false
 
@@ -80,6 +90,28 @@ struct TagFilterPopoverFooter: View {
         }
       }
       Spacer()
+      if let onActiveAgentsTapped {
+        Button(action: onActiveAgentsTapped) {
+          ZStack(alignment: .topTrailing) {
+            Image(systemName: "sparkles.rectangle.stack.fill")
+              .font(.system(size: 13, weight: .regular))
+              .foregroundStyle(activeAgentsPanelOpen ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+              .frame(width: 22, height: 22)
+              .contentShape(Rectangle())
+            if activeAgentsCount > 0 {
+              Circle()
+                .fill(Color.accentColor)
+                .frame(width: 6, height: 6)
+                .offset(x: 4, y: -2)
+                .accessibilityHidden(true)
+            }
+          }
+        }
+        .buttonStyle(.plain)
+        .help(activeAgentsPanelOpen ? "Hide active agents" : "Show active agents")
+        .accessibilityLabel(activeAgentsPanelOpen ? "Hide active agents panel" : "Show active agents panel")
+        .accessibilityIdentifier("activeAgents.sidebarToggle")
+      }
       if let onRefreshTapped {
         Button(action: onRefreshTapped) {
           Image(systemName: "arrow.clockwise")
