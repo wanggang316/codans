@@ -602,4 +602,115 @@ struct HierarchyManagerWorktreeMgmtTests {
     let unknown = WorktreeID()
     #expect(manager.runningPaneCount(worktreeID: unknown) == 0)
   }
+
+  // MARK: - createWorktree uniqueness (HAN-82)
+
+  /// Repeated `tc worktree new` calls for the same `(project, path)`
+  /// used to silently add a fresh row each time (see HAN-82). The
+  /// guard rejects the second call with `.invariantViolation` so the
+  /// CLI hits exit 3 (conflict) instead of polluting the catalog.
+  @Test
+  func createWorktreeRejectsDuplicatePath() throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    _ = try manager.createWorktree(
+      in: projectID, name: "agent/HAN-79",
+      path: "/repo/HAN-79", branch: "agent/HAN-79"
+    )
+    #expect(throws: HierarchyError.self) {
+      try manager.createWorktree(
+        in: projectID, name: "agent/HAN-79-alt",
+        path: "/repo/HAN-79", branch: "agent/HAN-79"
+      )
+    }
+    #expect(manager.catalog.projects[0].worktrees.count == 1)
+  }
+
+  /// Name collision (different path) also rejected — the dispatcher's
+  /// HAN-82 reproduction had every retry use the same display name.
+  @Test
+  func createWorktreeRejectsDuplicateName() throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    _ = try manager.createWorktree(
+      in: projectID, name: "agent/HAN-79",
+      path: "/repo/HAN-79", branch: "agent/HAN-79"
+    )
+    #expect(throws: HierarchyError.self) {
+      try manager.createWorktree(
+        in: projectID, name: "agent/HAN-79",
+        path: "/repo/HAN-79-other", branch: "agent/HAN-79"
+      )
+    }
+    #expect(manager.catalog.projects[0].worktrees.count == 1)
+  }
+
+  /// Symlink-aliased paths collide too — `/var/...` and
+  /// `/private/var/...` resolve to the same canonical form, so a
+  /// second create must trip the path guard even when the caller
+  /// passes the un-resolved form.
+  @Test
+  func createWorktreeRejectsCanonicalAliasedPath() throws {
+    let alias = try Self.makeAliasedTempDir(tag: "create-dup")
+    defer { try? FileManager.default.removeItem(at: alias.url) }
+    let projectID = manager.addProject(
+      name: "p", rootPath: alias.privateForm, gitRoot: alias.privateForm
+    )
+    _ = try manager.createWorktree(
+      in: projectID, name: "main",
+      path: alias.privateForm, branch: "main"
+    )
+    #expect(throws: HierarchyError.self) {
+      try manager.createWorktree(
+        in: projectID, name: "second",
+        path: alias.varForm, branch: "second"
+      )
+    }
+    #expect(manager.catalog.projects[0].worktrees.count == 1)
+  }
+
+  /// Idempotent replay — caller (e.g. dispatcher recovering from a
+  /// downstream `tc tab new` failure) sets `reuseExisting` to ask
+  /// for the existing id back instead of a conflict.
+  @Test
+  func createWorktreeReuseExistingReturnsExistingID() throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    let first = try manager.createWorktree(
+      in: projectID, name: "agent/HAN-79",
+      path: "/repo/HAN-79", branch: "agent/HAN-79"
+    )
+    let second = try manager.createWorktree(
+      in: projectID, name: "agent/HAN-79",
+      path: "/repo/HAN-79", branch: "agent/HAN-79",
+      reuseExisting: true
+    )
+    #expect(first == second)
+    #expect(manager.catalog.projects[0].worktrees.count == 1)
+  }
+
+  /// `reuseExisting` only short-circuits on a canonical-path match;
+  /// a same-name / different-path call must still be a conflict
+  /// because two worktrees can't share a display name.
+  @Test
+  func createWorktreeReuseExistingStillRejectsNameOnlyCollision() throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    _ = try manager.createWorktree(
+      in: projectID, name: "agent/HAN-79",
+      path: "/repo/HAN-79", branch: "agent/HAN-79"
+    )
+    #expect(throws: HierarchyError.self) {
+      try manager.createWorktree(
+        in: projectID, name: "agent/HAN-79",
+        path: "/repo/HAN-79-other", branch: "agent/HAN-79",
+        reuseExisting: true
+      )
+    }
+    #expect(manager.catalog.projects[0].worktrees.count == 1)
+  }
 }

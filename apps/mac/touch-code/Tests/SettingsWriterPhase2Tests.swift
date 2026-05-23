@@ -4,7 +4,7 @@ import TouchCodeCore
 
 @testable import touch_code
 
-/// Coverage for the five `SettingsWriter` closures introduced in Phase 2.
+/// Coverage for the `SettingsWriter` closures introduced in Phase 2.
 /// Each test uses a real `SettingsStore` backed by a temp file so we exercise
 /// the `mutateProject` path and verify persistence end-to-end.
 @MainActor
@@ -14,22 +14,6 @@ struct SettingsWriterPhase2Tests {
       component: "settings-writer-phase2-\(UUID().uuidString).json"
     )
     return (SettingsStore(fileURL: url), url)
-  }
-
-  // MARK: - setProjectDefaultShell
-
-  @Test
-  func setProjectDefaultShellWritesAndClears() async throws {
-    let (store, url) = makeStore()
-    defer { try? FileManager.default.removeItem(at: url) }
-    let writer = SettingsWriter.live(store)
-    let pid = ProjectID()
-
-    await writer.setProjectDefaultShell(pid, "/opt/homebrew/bin/fish")
-    #expect(store.settings.projects[pid]?.defaultShell == "/opt/homebrew/bin/fish")
-
-    await writer.setProjectDefaultShell(pid, nil)
-    #expect(store.settings.projects[pid]?.defaultShell == nil)
   }
 
   // MARK: - setProjectGitField
@@ -165,7 +149,6 @@ struct SettingsWriterPhase2Tests {
     do {
       let store = SettingsStore(fileURL: url)
       let writer = SettingsWriter.live(store)
-      await writer.setProjectDefaultShell(pid, "/bin/zsh")
       await writer.setProjectEnvVar(pid, "MY_VAR", "hello")
       await writer.setProjectScripts(
         pid,
@@ -178,7 +161,6 @@ struct SettingsWriterPhase2Tests {
     }
 
     let reloaded = SettingsStore(fileURL: url)
-    #expect(reloaded.settings.projects[pid]?.defaultShell == "/bin/zsh")
     #expect(reloaded.settings.projects[pid]?.envVars["MY_VAR"] == "hello")
     #expect(reloaded.settings.projects[pid]?.scripts.count == 1)
     #expect(reloaded.settings.projects[pid]?.git?.githubDisabled == true)

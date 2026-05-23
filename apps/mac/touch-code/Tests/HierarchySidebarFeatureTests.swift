@@ -93,8 +93,8 @@ struct HierarchySidebarFeatureTests {
       $0.createWorktreeSheet = CreateWorktreeFeature.State(
         projectID: projectID,
         repoRoot: URL(fileURLWithPath: "/p"),
-        worktreesDirectory: URL(
-          fileURLWithPath: NSHomeDirectory() + "/.touch-code/repos/p"),
+        worktreesDirectory: settings.worktree.resolveBaseDirectory(
+          forProjectName: "p", projectOverride: nil),
         currentPendingCountForProject: 0,
         baseRefOverride: "origin/main",
         fetchOrigin: true,
@@ -128,8 +128,8 @@ struct HierarchySidebarFeatureTests {
       $0.createWorktreeSheet = CreateWorktreeFeature.State(
         projectID: projectID,
         repoRoot: URL(fileURLWithPath: "/p"),
-        worktreesDirectory: URL(
-          fileURLWithPath: NSHomeDirectory() + "/.touch-code/repos/p"),
+        worktreesDirectory: settings.worktree.resolveBaseDirectory(
+          forProjectName: "p", projectOverride: nil),
         currentPendingCountForProject: 0,
         baseRefOverride: nil,
         fetchOrigin: false,

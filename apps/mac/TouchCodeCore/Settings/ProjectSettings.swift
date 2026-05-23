@@ -28,11 +28,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
   /// uniformity; a future `git init` upgrade would pick it up for free).
   public var worktreesDirectory: String?
 
-  /// Per-Project default shell override. Reserved slot — the real picker
-  /// lands in the General sub-pane follow-up wave. Always omitted from
-  /// disk today because no writer sets it.
-  public var defaultShell: String?
-
   /// Environment variables injected into new panes opened under this
   /// Project. Empty by default. Reserved slot — the Environment sub-pane
   /// fills in the editing UI in a follow-up wave.
@@ -52,7 +47,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
     defaultEditor: EditorID? = nil,
     defaultGitViewer: ProjectGitViewerPreference? = nil,
     worktreesDirectory: String? = nil,
-    defaultShell: String? = nil,
     envVars: [String: String] = [:],
     scripts: [ScriptDefinition] = [],
     git: GitProjectSettings? = nil
@@ -60,7 +54,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
     self.defaultEditor = defaultEditor
     self.defaultGitViewer = defaultGitViewer
     self.worktreesDirectory = worktreesDirectory
-    self.defaultShell = defaultShell
     self.envVars = envVars
     self.scripts = scripts
     self.git = git
@@ -73,7 +66,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
     defaultEditor == nil
       && defaultGitViewer == nil
       && worktreesDirectory == nil
-      && defaultShell == nil
       && envVars.isEmpty
       && scripts.isEmpty
       && (git?.isEffectivelyEmpty ?? true)
@@ -115,7 +107,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
     case defaultEditor
     case defaultGitViewer
     case worktreesDirectory
-    case defaultShell
     case envVars
     case scripts
     case git
@@ -128,7 +119,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
       ProjectGitViewerPreference.self, forKey: .defaultGitViewer
     )
     self.worktreesDirectory = try c.decodeIfPresent(String.self, forKey: .worktreesDirectory)
-    self.defaultShell = try c.decodeIfPresent(String.self, forKey: .defaultShell)
     self.envVars = try c.decodeIfPresent([String: String].self, forKey: .envVars) ?? [:]
     self.scripts = try c.decodeIfPresent([ScriptDefinition].self, forKey: .scripts) ?? []
     self.git = try c.decodeIfPresent(GitProjectSettings.self, forKey: .git)
@@ -141,7 +131,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
     try c.encodeIfPresent(defaultEditor, forKey: .defaultEditor)
     try c.encodeIfPresent(defaultGitViewer, forKey: .defaultGitViewer)
     try c.encodeIfPresent(worktreesDirectory, forKey: .worktreesDirectory)
-    try c.encodeIfPresent(defaultShell, forKey: .defaultShell)
     if !envVars.isEmpty {
       try c.encode(envVars, forKey: .envVars)
     }

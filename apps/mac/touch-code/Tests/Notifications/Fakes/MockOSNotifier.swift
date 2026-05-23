@@ -14,14 +14,14 @@ import TouchCodeCore
 @MainActor
 final class MockOSNotifier: OSNotifier {
   var status: AuthorizationStatus = .authorized
-  private(set) var posts: [(entry: InboxEntry, playSound: Bool)] = []
+  private(set) var posts: [(entry: InboxEntry, playSound: Bool, sourceLabel: String?)] = []
 
   func currentAuthorizationStatus() async -> AuthorizationStatus { status }
 
   func requestAuthorization() async -> AuthorizationStatus { status }
 
-  func post(_ entry: InboxEntry, playSound: Bool) async {
-    posts.append((entry, playSound))
+  func post(_ entry: InboxEntry, playSound: Bool, sourceLabel: String?) async {
+    posts.append((entry, playSound, sourceLabel))
   }
 }
 // swiftlint:enable async_without_await

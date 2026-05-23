@@ -12,7 +12,7 @@ import TouchCodeCore
 /// assert the right closure fired with the right arguments.
 @MainActor
 struct ProjectGeneralSettingsViewWriteRoutingTests {
-  // MARK: - Editor / Shell
+  // MARK: - Editor
 
   @Test
   func writeDefaultEditorRoutesToSetProjectDefaultEditor() async {
@@ -30,22 +30,6 @@ struct ProjectGeneralSettingsViewWriteRoutingTests {
     #expect(captured.value.count == 1)
     #expect(captured.value.first?.0 == pid)
     #expect(captured.value.first?.1 == "vscode")
-  }
-
-  @Test
-  func writeDefaultShellRoutesToSetProjectDefaultShell() async {
-    let captured = LockIsolated<[(ProjectID, String?)]>([])
-    let pid = ProjectID()
-    var writer = SettingsWriter.testValue
-    writer.setProjectDefaultShell = { pid, value in
-      captured.withValue { $0.append((pid, value)) }
-    }
-
-    let routes = ProjectGeneralSettingsView.WriteRoutes(projectID: pid, writer: writer)
-    routes.writeDefaultShell("/opt/homebrew/bin/fish")
-    await waitForCapture(captured)
-
-    #expect(captured.value.first?.1 == "/opt/homebrew/bin/fish")
   }
 
   // MARK: - Worktree fields

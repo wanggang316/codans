@@ -15,11 +15,17 @@ import os
 final class HierarchyHandlers {
   private let manager: HierarchyManager
   private let envProvider: @MainActor (ProjectID) -> [String: String]
+  private let settingsProvider: @MainActor () -> Settings
   private let logger = Logger(subsystem: "com.touch-code.ipc", category: "hierarchy")
 
-  init(manager: HierarchyManager, envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] }) {
+  init(
+    manager: HierarchyManager,
+    envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] },
+    settingsProvider: @escaping @MainActor () -> Settings = { Settings() }
+  ) {
     self.manager = manager
     self.envProvider = envProvider
+    self.settingsProvider = settingsProvider
   }
 
   // MARK: - Error mapping
@@ -153,8 +159,22 @@ final class HierarchyHandlers {
   public struct CreateWorktreeParams: Codable, Sendable {
     public let projectID: ProjectID
     public let name: String
-    public let path: String
+    /// Optional. When nil, the daemon resolves the base directory through
+    /// `WorktreeSettings.resolveBaseDirectory` (per-project override → global
+    /// `defaultWorktreesDirectory` → system fallback) and appends the
+    /// sanitized branch name — mirroring the GUI's Create Worktree sheet
+    /// (HAN-81).
+    public let path: String?
     public let branch: String?
+    /// HAN-82: when true, a same-canonical-path collision returns the
+    /// existing row's id instead of `.conflict`, so a dispatcher
+    /// replaying create-after-partial-failure stays idempotent. Absent
+    /// (legacy clients) ⇒ strict mode.
+    public let reuseExisting: Bool?
+  }
+  public struct CreateWorktreeResult: Codable, Sendable {
+    public let id: WorktreeID
+    public let path: String
   }
   public func createWorktree(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
@@ -162,20 +182,52 @@ final class HierarchyHandlers {
     do {
       req = try params.decoded(as: CreateWorktreeParams.self)
     } catch {
-      return .failed(.invalidParams(message: "createWorktree requires {projectID, name, path}", path: nil))
+      return .failed(.invalidParams(message: "createWorktree requires {projectID, name}", path: nil))
+    }
+    let resolvedPath: String
+    if let explicit = req.path, !explicit.isEmpty {
+      resolvedPath = explicit
+    } else {
+      guard let branch = req.branch, !branch.isEmpty else {
+        return .failed(
+          .invalidParams(
+            message: "createWorktree requires either `path` or `branch` to derive the default path",
+            path: nil
+          ))
+      }
+      guard let project = manager.catalog.projects.first(where: { $0.id == req.projectID }) else {
+        return .failed(.notFound(kind: "project", id: req.projectID.description))
+      }
+      let settings = settingsProvider()
+      let baseDirectory = settings.worktree.resolveBaseDirectory(
+        forProjectName: project.name,
+        projectOverride: settings.projects[project.id]?.worktreesDirectory
+      )
+      let sanitized = GitWorktreeClient.sanitizeBranchName(branch)
+      guard !sanitized.isEmpty else {
+        return .failed(
+          .invalidParams(
+            message: "branch \"\(branch)\" produces an empty directory name",
+            path: nil
+          ))
+      }
+      resolvedPath = baseDirectory.appending(path: sanitized).path(percentEncoded: false)
     }
     do {
       let id = try manager.createWorktree(
         in: req.projectID,
         name: req.name,
-        path: req.path,
-        branch: req.branch
+        path: resolvedPath,
+        branch: req.branch,
+        reuseExisting: req.reuseExisting ?? false
       )
-      return .unary(try JSONValue.encoded(WorktreeIDPayload(id: id)))
+      let canonical = HierarchyManager.canonicalPath(resolvedPath)
+      return .unary(try JSONValue.encoded(CreateWorktreeResult(id: id, path: canonical)))
     } catch {
       return failure(for: error, fallbackKind: "project", fallbackID: req.projectID.description)
     }
   }
+
 
   public struct CreateTabParams: Codable, Sendable {
     public let projectID: ProjectID
@@ -702,7 +754,6 @@ nonisolated struct ListTabsPayload: Codable, Sendable { let tabs: [Tab] }
 nonisolated struct ListPanesPayload: Codable, Sendable { let panes: [Pane] }
 struct ListTagsPayload: Codable, Sendable { let tags: [Tag] }
 struct ProjectIDPayload: Codable, Sendable { let id: ProjectID }
-struct WorktreeIDPayload: Codable, Sendable { let id: WorktreeID }
 struct TabIDPayload: Codable, Sendable { let id: TabID }
 struct PaneIDPayload: Codable, Sendable { let id: PaneID }
 struct TagIDPayload: Codable, Sendable { let id: TagID }

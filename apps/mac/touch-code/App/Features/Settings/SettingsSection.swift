@@ -17,9 +17,9 @@ public enum SettingsSection: Hashable, Sendable {
 
   // MARK: - Project-scoped sub-panes
 
-  /// Project-universal settings: editor, default shell, worktree (git-only),
-  /// GitHub (git-only), environment variables. Sections render conditionally on
-  /// `ProjectKind` inside `ProjectGeneralSettingsView`.
+  /// Project-universal settings: editor, git viewer (git-only), worktree
+  /// (git-only), GitHub (git-only), environment variables. Sections render
+  /// conditionally on `ProjectKind` inside `ProjectGeneralSettingsView`.
   case projectGeneral(ProjectID)
   /// User-defined scripts + worktree-lifecycle scripts (git-only Section).
   case projectScripts(ProjectID)

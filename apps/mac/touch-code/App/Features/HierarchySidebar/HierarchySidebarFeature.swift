@@ -517,10 +517,10 @@ struct HierarchySidebarFeature {
       let settingsSnapshot = settingsWriter.readSnapshotSync()
       let projectSettings = settingsSnapshot.projects[projectID]
       let globalWorktree = settingsSnapshot.worktree
-      let wtDirOverride = projectSettings?.worktreesDirectory
-      let defaultWtDir = URL(
-        fileURLWithPath: wtDirOverride
-          ?? (NSHomeDirectory() + "/.touch-code/repos/\(project.name)"))
+      let defaultWtDir = globalWorktree.resolveBaseDirectory(
+        forProjectName: project.name,
+        projectOverride: projectSettings?.worktreesDirectory
+      )
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count
       // HAN-83: seed the sheet toggles from the effective settings so the
       // checkboxes match what the user pinned in Project Settings → Worktree

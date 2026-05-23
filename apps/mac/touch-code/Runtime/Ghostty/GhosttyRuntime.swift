@@ -114,7 +114,7 @@ final class GhosttyRuntime {
 
     guard let app = ghostty_app_new(&runtimeConfig, config) else {
       Unmanaged<CallbackDispatcher>.fromOpaque(userdata).release()
-      throw GhosttyError.appInitFailed
+      throw GhosttyError.appInitFailed(reason: "ghostty_app_new returned nil")
     }
     self.app = app
     Self.shared = self
@@ -681,10 +681,27 @@ final class GhosttyRuntime {
   }
 }
 
-enum GhosttyError: Error, Equatable, Sendable {
+enum GhosttyError: Error, Equatable, Sendable, CustomStringConvertible {
   case configInitFailed
-  case appInitFailed
-  case surfaceInitFailed
+  case appInitFailed(reason: String)
+  /// `retryable == true` means the caller can re-attempt after a short
+  /// backoff (HAN-82: `ghostty_surface_new` is observed to fail
+  /// transiently — the original throw site bubbled up an opaque
+  /// `surfaceInitFailed` so external scripts had no way to decide
+  /// retry vs. fail-hard).
+  case surfaceInitFailed(reason: String, retryable: Bool)
+
+  var description: String {
+    switch self {
+    case .configInitFailed:
+      return "ghostty config init failed"
+    case .appInitFailed(let reason):
+      return "ghostty app init failed: \(reason)"
+    case .surfaceInitFailed(let reason, let retryable):
+      let tail = retryable ? " (retryable)" : ""
+      return "surface init failed\(tail): \(reason)"
+    }
+  }
 }
 
 extension Notification.Name {

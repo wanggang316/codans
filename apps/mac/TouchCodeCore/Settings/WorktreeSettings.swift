@@ -101,4 +101,53 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
       try container.encode(deleteRemoteBranchWithWorktree, forKey: .deleteRemoteBranchWithWorktree)
     }
   }
+
+  // MARK: - Base directory resolution
+
+  /// Bottom-of-the-chain default when neither the per-project override nor
+  /// the global `defaultWorktreesDirectory` has been set. The single source
+  /// of truth for the `~/.touch-code/repos` literal — every UI surface and
+  /// IPC path that needs to display or compute a worktree base directory
+  /// resolves through `resolveBaseDirectory` (or `resolveGlobalBaseDirectory`),
+  /// not by re-deriving this path.
+  public static func systemFallbackBaseDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+  ) -> URL {
+    home.appending(path: ".touch-code/repos", directoryHint: .isDirectory)
+  }
+
+  /// Resolves the worktree base directory for a given project, walking the
+  /// fallback chain: per-project override → global default → system fallback.
+  ///
+  /// The per-project override is used verbatim (the user picked a specific
+  /// directory). The global default and system fallback are treated as shared
+  /// bases under which each project's worktrees live in its own subdirectory,
+  /// so `projectName` is appended in those cases.
+  public func resolveBaseDirectory(
+    forProjectName projectName: String,
+    projectOverride: String?,
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+  ) -> URL {
+    if let override = projectOverride, !override.isEmpty {
+      return URL(fileURLWithPath: override)
+    }
+    if let global = defaultWorktreesDirectory, !global.isEmpty {
+      return URL(fileURLWithPath: global)
+        .appending(path: projectName, directoryHint: .isDirectory)
+    }
+    return Self.systemFallbackBaseDirectory(home: home)
+      .appending(path: projectName, directoryHint: .isDirectory)
+  }
+
+  /// Resolves the global base directory (without per-project appending) for
+  /// display when editing global settings — global default if set, else
+  /// system fallback. Use this for the Settings → Worktree pane placeholder.
+  public func resolveGlobalBaseDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+  ) -> URL {
+    if let global = defaultWorktreesDirectory, !global.isEmpty {
+      return URL(fileURLWithPath: global)
+    }
+    return Self.systemFallbackBaseDirectory(home: home)
+  }
 }

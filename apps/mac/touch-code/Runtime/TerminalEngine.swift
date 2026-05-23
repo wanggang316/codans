@@ -105,12 +105,30 @@ final class TerminalEngine {
     guard let tabID = tabIDForPane(pane.id) else {
       throw SurfaceError.paneHasNoTab
     }
-    let surface = try PaneSurface(
-      runtime: runtime,
-      paneID: pane.id,
-      workingDirectory: pane.workingDirectory,
-      env: env
-    )
+    // HAN-82: `ghostty_surface_new` is observed to fail transiently
+    // — the user reported ~10 consecutive failures followed by a clean
+    // success with no input change, suggesting an internal race that
+    // resolves once libghostty has ticked. One ticked retry covers the
+    // race without busy-looping; if it still fails the original
+    // `GhosttyError` (now carrying a reason and a `retryable` flag) is
+    // re-thrown so external callers see actionable diagnostics.
+    let surface: PaneSurface
+    do {
+      surface = try PaneSurface(
+        runtime: runtime,
+        paneID: pane.id,
+        workingDirectory: pane.workingDirectory,
+        env: env
+      )
+    } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
+      runtime.tick()
+      surface = try PaneSurface(
+        runtime: runtime,
+        paneID: pane.id,
+        workingDirectory: pane.workingDirectory,
+        env: env
+      )
+    }
     runtime.register(pane: surface)
     surface.onClose = { [weak self] processAlive in
       self?.handleSurfaceClose(paneID: pane.id, processAlive: processAlive)

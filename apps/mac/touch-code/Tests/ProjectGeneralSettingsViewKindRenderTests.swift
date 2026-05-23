@@ -14,7 +14,6 @@ struct ProjectGeneralSettingsViewKindRenderTests {
   func dirHidesGitOnlySections() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .dir)
     #expect(visible.contains(.editor))
-    #expect(visible.contains(.defaultShell))
     #expect(visible.contains(.environment))
     #expect(!visible.contains(.gitViewer))
     #expect(!visible.contains(.worktree))
@@ -25,7 +24,7 @@ struct ProjectGeneralSettingsViewKindRenderTests {
   func gitRepoShowsAllSections() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .gitRepo)
     #expect(visible == Set(ProjectGeneralSettingsView.SectionID.allCases))
-    #expect(visible.count == 6)
+    #expect(visible.count == 5)
   }
 
   @Test
@@ -34,7 +33,7 @@ struct ProjectGeneralSettingsViewKindRenderTests {
     // test pins the canonical order so a future refactor cannot silently
     // shuffle sections.
     let canonical: [ProjectGeneralSettingsView.SectionID] = [
-      .editor, .gitViewer, .defaultShell, .worktree, .github, .environment,
+      .editor, .gitViewer, .worktree, .github, .environment,
     ]
     #expect(ProjectGeneralSettingsView.SectionID.allCases == canonical)
   }

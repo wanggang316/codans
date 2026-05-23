@@ -113,16 +113,6 @@ enum PathResolver {
     if raw.hasPrefix("/") { return raw }
     return URL(fileURLWithPath: pwd).appendingPathComponent(raw).path
   }
-
-  static func defaultWorktreePath(branch: String) -> String {
-    let safe =
-      branch
-      .replacingOccurrences(of: "/", with: "-")
-      .replacingOccurrences(of: " ", with: "-")
-    return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-      .appendingPathComponent(safe)
-      .path
-  }
 }
 
 enum CommandRunner {
