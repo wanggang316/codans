@@ -1386,7 +1386,10 @@ extension HierarchyClient: DependencyKey {
     splitPane: unimplemented("HierarchyClient.splitPane", placeholder: PaneID()),
     closePane: unimplemented("HierarchyClient.closePane"),
     focusPane: unimplemented("HierarchyClient.focusPane"),
-    focusSurfaceView: unimplemented("HierarchyClient.focusSurfaceView"),
+    // Pure visual side-effect (focuses an NSView; no return value, no test
+    // contract worth asserting). Every create/split path tail-calls this, so
+    // an `unimplemented` here turns ~all routing tests into noisy stub farms.
+    focusSurfaceView: { _ in },
     resizeSplit: unimplemented("HierarchyClient.resizeSplit"),
     setWorktreeDiffInspectorVisible: unimplemented("HierarchyClient.setWorktreeDiffInspectorVisible"),
     snapshot: unimplemented(

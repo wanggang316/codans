@@ -50,7 +50,12 @@ extension GitHubClient: DependencyKey {
   static let liveValue: GitHubClient = .live()
 
   static let testValue: GitHubClient = GitHubClient(
-    availability: unimplemented("GitHubClient.availability", placeholder: .unknown),
+    // Idempotent query — returning `.unknown` is a safe default that doesn't
+    // affect behaviour assertions. The host app probes availability eagerly
+    // (GitHubFeature.onAppear), so leaving this as `unimplemented` is enough
+    // to fail any XCTest case that doesn't manually override per-test, even
+    // when the test itself is skipped.
+    availability: { .unknown },
     pullRequest: unimplemented("GitHubClient.pullRequest", placeholder: nil),
     latestWorkflowRun: unimplemented("GitHubClient.latestWorkflowRun", placeholder: nil),
     merge: unimplemented("GitHubClient.merge"),

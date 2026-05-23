@@ -147,12 +147,18 @@ enum GhosttyThemeCatalogReader {
           .appendingPathComponent("themes", isDirectory: true)
       )
     }
-    if let devFallback = srcrootGhosttyThemesDirectory() {
+    // Test escape hatch: `#filePath`-based dev fallback below always resolves to
+    // a populated `.build/ghostty/share/ghostty/themes` inside a developer
+    // worktree, which pollutes "empty catalog" assertions. Tests set this env
+    // key to opt out of the implicit fallback while still being able to drive
+    // explicit roots via XDG_CONFIG_HOME / HOME / GHOSTTY_RESOURCES_DIR.
+    let suppressImplicit = environment["TOUCH_CODE_DISABLE_THEME_DEV_FALLBACK"] == "1"
+    if !suppressImplicit, let devFallback = srcrootGhosttyThemesDirectory() {
       roots.append(devFallback)
     }
 
     // Last resort: .app-bundled themes if we ever ship them as Tuist resources.
-    if let resourceURL = Bundle.main.resourceURL {
+    if !suppressImplicit, let resourceURL = Bundle.main.resourceURL {
       roots.append(
         resourceURL
           .appendingPathComponent("ghostty", isDirectory: true)
