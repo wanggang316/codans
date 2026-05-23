@@ -166,8 +166,8 @@ private struct InboxPopoverContent: View {
   private var header: some View {
     ZStack {
       Picker("", selection: $unreadOnly) {
-        Text("All").tag(false)
         Text("Unread").tag(true)
+        Text("All").tag(false)
       }
       .pickerStyle(.segmented)
       .labelsHidden()
@@ -203,6 +203,13 @@ private struct InboxRowView: View {
   let entry: InboxEntry
   let onTap: () -> Void
 
+  /// Dot column geometry. Kept as static constants so row 1's leading
+  /// indent (`dotColumnWidth + dotSpacing`) cannot drift away from
+  /// row 2's actual dot column.
+  fileprivate static let dotSize: CGFloat = 6
+  fileprivate static let dotSpacing: CGFloat = 8
+  fileprivate static let dotColumnWidth: CGFloat = dotSize + dotSpacing
+
   /// Formatter is allocated once for the whole popover lifetime; building
   /// a fresh `RelativeDateTimeFormatter` per row would otherwise spin up
   /// a CFLocale, calendar, and ICU context on every redraw.
@@ -217,34 +224,35 @@ private struct InboxRowView: View {
 
   var body: some View {
     Button(action: onTap) {
-      HStack(alignment: .top, spacing: 8) {
-        // Leading 6 px slot. Filled circle on unread (yellow for
-        // taskFinished, orange for the more urgent waitingForInput);
-        // empty space on read so we never show a check-shaped icon
-        // in front of an unread row (the previous green
-        // checkmark.circle.fill read as 'already done' and was the
-        // bug Gump flagged).
-        unreadDot
-          .frame(width: 6, height: 6)
-          .padding(.top, 7)
-        VStack(alignment: .leading, spacing: 2) {
-          // HAN-78: row 1 is the source breadcrumb + age; row 2 is the
-          // title + body joined by " - ". The breadcrumb dropped tab
-          // names so the row matches the OS banner footer; tab info was
-          // a nice-to-have rather than load-bearing.
-          HStack(spacing: 6) {
-            if let breadcrumb, !breadcrumb.isEmpty {
-              Text(breadcrumb)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            }
-            Spacer(minLength: 6)
-            Text(relativeAge)
+      // HAN-78: row 1 is the source breadcrumb + age; row 2 is the
+      // title + body joined by " - ". The dot indicator moved into
+      // row 2 so it sits next to the content line rather than the
+      // metadata strip; row 1 carries a matching leading indent
+      // (`dotColumnWidth`) so the two rows' text columns line up.
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          if let breadcrumb, !breadcrumb.isEmpty {
+            Text(breadcrumb)
               .font(.caption2)
               .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .truncationMode(.middle)
           }
+          Spacer(minLength: 6)
+          Text(relativeAge)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.leading, Self.dotColumnWidth)
+
+        HStack(alignment: .center, spacing: Self.dotSpacing) {
+          // Filled circle on unread (yellow for taskFinished, orange
+          // for the more urgent waitingForInput); empty space on read
+          // so we never show a check-shaped icon in front of an
+          // unread row (the previous green checkmark.circle.fill read
+          // as 'already done' and was the bug Gump flagged).
+          unreadDot
+            .frame(width: Self.dotSize, height: Self.dotSize)
           (Text(entry.title)
             .fontWeight(entry.isUnread ? .semibold : .regular)
             .foregroundColor(entry.isUnread ? .primary : .secondary)
