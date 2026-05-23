@@ -418,6 +418,18 @@ nonisolated struct HierarchyClient: Sendable {
       _ present: Bool
     ) -> Void
 
+  /// Writes the pane's live `workingDirectory` so restart restores it at the
+  /// cwd the user last `cd`'d to instead of the creation-time cwd. Driven by
+  /// libghostty `OSC 7` deltas routed through `RootFeature.engineEvents`. The
+  /// manager-side mutator is idempotent on equal paths and silent on unknown
+  /// ids, so a noisy shell that re-asserts the same pwd every prompt never
+  /// touches the catalog file.
+  var updatePaneWorkingDirectory:
+    @MainActor @Sendable (
+      _ paneID: PaneID,
+      _ newPath: String
+    ) -> Void
+
   /// Reorder worktrees within a single sidebar segment under a Project.
   /// `from` is a segment-relative `IndexSet`; `to` is the segment-relative
   /// destination offset, both in SwiftUI `ForEach.onMove` convention. Out-of-
@@ -733,6 +745,9 @@ extension HierarchyClient {
       },
       setPaneLabel: { paneID, label, present in
         manager.setPaneLabel(paneID: paneID, label: label, present: present)
+      },
+      updatePaneWorkingDirectory: { paneID, newPath in
+        manager.updatePaneWorkingDirectory(paneID, to: newPath)
       },
       reorderWorktrees: { projectID, segment, from, to in
         try manager.reorderWorktrees(
@@ -1330,6 +1345,9 @@ extension HierarchyClient: DependencyKey {
     setPaneLabel: { _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
+    updatePaneWorkingDirectory: { _, _ in
+      fatalError("HierarchyClient.liveValue not configured")
+    },
     reorderWorktrees: { _, _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     }
@@ -1410,6 +1428,7 @@ extension HierarchyClient: DependencyKey {
     ),
     promoteWorktree: unimplemented("HierarchyClient.promoteWorktree"),
     setPaneLabel: unimplemented("HierarchyClient.setPaneLabel"),
+    updatePaneWorkingDirectory: unimplemented("HierarchyClient.updatePaneWorkingDirectory"),
     reorderWorktrees: unimplemented("HierarchyClient.reorderWorktrees")
   )
 }

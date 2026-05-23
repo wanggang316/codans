@@ -172,6 +172,13 @@ struct RootFeature {
     /// non-`REMOVE` OSC 9;4 state. Drives the tab-chip running spinner
     /// (via `HierarchyManager.runningPanes`) and the sidebar busy glyph.
     case paneProgressBusyChanged(PaneID, Bool)
+    /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
+    /// stream. Persists the pane's live cwd so a restart restores it at the
+    /// directory the user last `cd`'d to rather than its creation-time cwd.
+    /// The reducer routes through `HierarchyClient.updatePaneWorkingDirectory`,
+    /// which is idempotent on equal paths so a shell that re-asserts the same
+    /// pwd every prompt never touches the catalog file.
+    case paneLivePwdChanged(PaneID, String)
     /// Emitted by `WorktreeHeadWatcher` when a worktree's `.git/HEAD`
     /// file changes — typically a `git checkout` / `git switch` inside
     /// a touch-code pane. The reducer reconciles that worktree's
@@ -430,6 +437,15 @@ struct RootFeature {
                 // sidebar busy glyph.
                 let isBusy = state != GHOSTTY_PROGRESS_STATE_REMOVE.rawValue
                 await send(.paneProgressBusyChanged(paneID, isBusy))
+              case .paneInfoChanged(let paneID, .pwd(let pwd)):
+                // libghostty OSC 7 → persist the live cwd so a restart
+                // restores the pane at the directory the user last `cd`'d
+                // to. Nil / empty payloads are dropped here so we never
+                // overwrite a real path with a transient clear; the
+                // manager-side mutator further dedupes equal-path writes.
+                if let pwd, !pwd.isEmpty {
+                  await send(.paneLivePwdChanged(paneID, pwd))
+                }
               default:
                 break
               }
@@ -683,6 +699,12 @@ struct RootFeature {
         } else {
           hierarchyClient.markPaneIdle(paneID)
         }
+        return .none
+
+      case .paneLivePwdChanged(let paneID, let path):
+        // No reducer state mutation — the manager writes through to the
+        // catalog directly and debounces the disk save via `scheduleSave`.
+        hierarchyClient.updatePaneWorkingDirectory(paneID, path)
         return .none
 
       case .paneLifecycleExited(let paneID):
