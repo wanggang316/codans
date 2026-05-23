@@ -3,15 +3,16 @@ import TouchCodeCore
 
 /// Per-kind agent logo shared between `ActiveAgentsRowView` (16pt) and
 /// `ActiveAgentsBadgeView` (14pt). Centralises the symbol choice so a
-/// future swap from SF Symbols to bundled brand glyphs (design-doc
-/// OQ-2 — brand-mark licensing) only touches one file.
+/// future swap stays in one file.
 ///
-/// v1 ships SF Symbol fallbacks because the official brand marks for
-/// Claude Code / Codex / pi are not freely redistributable. The
-/// fallback mapping is the one pre-approved by the controller:
-/// - `.claudeCode` → `sparkles`
-/// - `.codex`      → `wand.and.stars`
-/// - `.pi`         → `function`
+/// Brand glyphs ship as SVG imagesets in `App/Assets.xcassets/`:
+/// - `.claudeCode` → `claude-code` (Anthropic Claude wordmark — preserved
+///   in its brand orange via the imageset's default rendering intent).
+/// - `.codex`      → `codex` (OpenAI Codex spiral — `template` rendering
+///   so it picks up `foregroundStyle`).
+/// - `.pi`         → `pi` (Inflection pi glyph — `template` rendering;
+///   the SVG ships in a near-black fill so the template path tints it
+///   to the surrounding typography colour).
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
@@ -23,20 +24,29 @@ struct AgentLogoView: View {
   let size: CGFloat
 
   var body: some View {
-    Image(systemName: Self.symbolName(for: kind))
+    Image(assetName(for: kind))
       .resizable()
       .scaledToFit()
       .frame(width: size, height: size)
-      .foregroundStyle(.secondary)
+      .foregroundStyle(tint(for: kind))
       .accessibilityHidden(true)
   }
 
-  /// SF Symbol fallback names — see type doc for the rationale.
-  private static func symbolName(for kind: AgentKind) -> String {
+  private func assetName(for kind: AgentKind) -> String {
     switch kind {
-    case .claudeCode: return "sparkles"
-    case .codex: return "wand.and.stars"
-    case .pi: return "function"
+    case .claudeCode: return "claude-code"
+    case .codex: return "codex"
+    case .pi: return "pi"
+    }
+  }
+
+  /// Tint applied to template-rendered glyphs. Claude Code's imageset uses
+  /// original rendering (preserves Anthropic's brand orange) and therefore
+  /// ignores `foregroundStyle`; the value below is harmless for that case.
+  private func tint(for kind: AgentKind) -> HierarchicalShapeStyle {
+    switch kind {
+    case .claudeCode: return .primary  // ignored by original-rendered SVG
+    case .codex, .pi: return .secondary
     }
   }
 }
