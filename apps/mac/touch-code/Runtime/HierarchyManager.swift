@@ -403,7 +403,8 @@ final class HierarchyManager {
     in projectID: ProjectID,
     name: String,
     path: String,
-    branch: String?
+    branch: String?,
+    reuseExisting: Bool = false
   ) throws -> WorktreeID {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else {
       throw HierarchyError.notFound("Project \(projectID)")
@@ -415,6 +416,32 @@ final class HierarchyManager {
     // `Project.rootPath` already stores. Caller-side canonicalization
     // is easy to forget; doing it here means the API is self-correcting.
     let canonicalizedPath = Self.canonicalPath(path)
+
+    // Uniqueness guard (HAN-82): without this, dispatcher retries on
+    // tab/pane failure register a fresh row pointing at the same
+    // (canonical path, name) every time, polluting `tc tree` with
+    // orphan UUIDs. Compare canonical-form so symlinked paths
+    // (/var/...  vs /private/var/...) collide as expected.
+    let existingWorktrees = catalog.projects[projectIndex].worktrees
+    let pathConflict = existingWorktrees.first { Self.canonicalPath($0.path) == canonicalizedPath }
+    if let pathConflict {
+      if reuseExisting {
+        // Idempotent mode — caller is replaying create after a partial
+        // failure downstream and just wants the existing id. Name /
+        // branch are NOT re-applied to avoid silently rewriting fields
+        // the user may have customized through the UI.
+        return pathConflict.id
+      }
+      throw HierarchyError.invariantViolation(
+        "worktree with path \(canonicalizedPath) already exists (id=\(pathConflict.id))"
+      )
+    }
+    if let nameConflict = existingWorktrees.first(where: { $0.name == name }) {
+      throw HierarchyError.invariantViolation(
+        "worktree named '\(name)' already exists in this project (id=\(nameConflict.id))"
+      )
+    }
+
     let worktreeID = WorktreeID()
     let worktree = Worktree(
       id: worktreeID,

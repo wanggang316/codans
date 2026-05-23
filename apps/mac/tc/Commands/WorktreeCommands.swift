@@ -59,6 +59,11 @@ struct WorktreeNew: AsyncParsableCommand {
   var path: String?
   @Option(name: .long, help: "Display name. Defaults to the branch name.")
   var name: String?
+  @Flag(
+    name: .long,
+    help: "If a worktree with the same canonical path already exists, return its id instead of failing with a conflict. Name collisions still fail."
+  )
+  var reuseExisting: Bool = false
 
   func run() async throws {
     await CommandRunner.run {
@@ -72,6 +77,7 @@ struct WorktreeNew: AsyncParsableCommand {
         let name: String
         let path: String
         let branch: String?
+        let reuseExisting: Bool
       }
       struct Result: Codable { let id: WorktreeID }
       let result: Result = try await client.call(
@@ -80,7 +86,8 @@ struct WorktreeNew: AsyncParsableCommand {
           projectID: ProjectID(raw: projectUUID),
           name: displayName,
           path: resolvedPath,
-          branch: branch
+          branch: branch,
+          reuseExisting: reuseExisting
         )
       )
       try Renderer.emitObject(
@@ -125,16 +132,87 @@ struct WorktreeRemove: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Worktree id or 'current'.")
-  var worktree: String
+  @Argument(help: "Worktree id or 'current'. Omit when using --by-path.")
+  var worktree: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
+  @Option(
+    name: .long,
+    help: "Remove every worktree row in the project whose canonical path equals this path. Mutually exclusive with the positional worktree argument."
+  )
+  var byPath: String?
+  @Flag(
+    name: .long,
+    help: "With --by-path, allow removing more than one matching row. Without --all, --by-path requires exactly one match."
+  )
+  var all: Bool = false
 
   func run() async throws {
     await CommandRunner.run {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+
+      if let byPath {
+        // HAN-82 cleanup mode — list the project's worktrees, filter
+        // by canonical path, then issue per-row removes. Done
+        // client-side to keep the server's `hierarchy.removeWorktree`
+        // surface unchanged.
+        guard worktree == nil else {
+          throw CLIError(
+            code: .userError,
+            message: "tc worktree rm: pass either a worktree id OR --by-path, not both"
+          )
+        }
+        let canonical = Self.canonicalize(PathResolver.absolute(byPath))
+        struct ListParams: Codable { let projectID: ProjectID }
+        let list: WorktreeListPayload = try await client.call(
+          .hierarchyListWorktrees,
+          params: ListParams(projectID: ProjectID(raw: projectUUID))
+        )
+        let matches = list.worktrees.filter {
+          Self.canonicalize($0.path) == canonical
+        }
+        if matches.isEmpty {
+          throw CLIError(
+            code: .notFound,
+            message: "no worktree matches path \(canonical) in project \(projectUUID.uuidString)"
+          )
+        }
+        if matches.count > 1 && !all {
+          throw CLIError(
+            code: .conflict,
+            message:
+              "path \(canonical) matches \(matches.count) worktrees; re-run with --all to remove every match"
+          )
+        }
+        struct RemoveParams: Codable {
+          let id: WorktreeID
+          let projectID: ProjectID
+        }
+        var removed: [String] = []
+        for match in matches {
+          _ = try await client.callRaw(
+            .hierarchyRemoveWorktree,
+            params: RemoveParams(id: match.id, projectID: ProjectID(raw: projectUUID))
+          )
+          removed.append(match.id.description)
+        }
+        try Renderer.emitObject(
+          ["removed": removed, "path": canonical],
+          mode: globals.renderMode
+        ) { _ in
+          "removed \(removed.count) worktree(s) at \(canonical)"
+        }
+        return
+      }
+
+      guard let worktree else {
+        throw CLIError(
+          code: .userError,
+          message: "tc worktree rm: missing worktree id (or pass --by-path <path>)"
+        )
+      }
       let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
       struct Params: Codable {
         let id: WorktreeID
@@ -149,6 +227,16 @@ struct WorktreeRemove: AsyncParsableCommand {
         mode: globals.renderMode
       )
     }
+  }
+
+  /// Client-side mirror of `HierarchyManager.canonicalPath` — resolve
+  /// symlinks then standardize so `/var/...` and `/private/var/...`
+  /// (and similar macOS aliases) collapse to a single comparable form.
+  private static func canonicalize(_ path: String) -> String {
+    URL(fileURLWithPath: path)
+      .resolvingSymlinksInPath()
+      .standardizedFileURL
+      .path
   }
 }
 
