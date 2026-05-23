@@ -16,16 +16,32 @@ final class HierarchyHandlers {
   private let manager: HierarchyManager
   private let envProvider: @MainActor (ProjectID) -> [String: String]
   private let settingsProvider: @MainActor () -> Settings
+  /// Closure that sends `.kill` to the zmx daemon backing `paneID` and
+  /// waits for its control socket to disappear. Returns once the daemon
+  /// is gone or the bounded timeout elapses. Injected so handlers stay
+  /// independent of the libghostty surface registry; default is a no-op
+  /// for tests that exercise the catalog-side mutation in isolation.
+  private let daemonKiller: @MainActor (PaneID) async -> Void
+  /// Persistent zmx-session catalog accessor. The `pane.close` handler
+  /// loads the catalog, drops the entry for the closed pane, and saves
+  /// synchronously so the on-disk state reflects the kill before the
+  /// RPC returns. Default is `nil` for tests; production wiring passes
+  /// the shared `SessionStore`.
+  private let sessionStore: SessionStore?
   private let logger = Logger(subsystem: "com.touch-code.ipc", category: "hierarchy")
 
   init(
     manager: HierarchyManager,
     envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] },
-    settingsProvider: @escaping @MainActor () -> Settings = { Settings() }
+    settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
+    daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
+    sessionStore: SessionStore? = nil
   ) {
     self.manager = manager
     self.envProvider = envProvider
     self.settingsProvider = settingsProvider
+    self.daemonKiller = daemonKiller
+    self.sessionStore = sessionStore
   }
 
   // MARK: - Error mapping
@@ -410,6 +426,118 @@ final class HierarchyHandlers {
     } catch {
       return failure(for: error, fallbackKind: "pane", fallbackID: req.id.description)
     }
+  }
+
+  /// Handles `pane.close` — the user's explicit termination verb. Sends
+  /// `.kill` to the pane's zmx daemon (bounded ≤ 2 s wait for the
+  /// control socket to vanish), drops the persisted session-catalog
+  /// entry, and removes the pane from the in-memory hierarchy.
+  ///
+  /// Distinct from `hierarchy.closePane`: the latter detaches the
+  /// libghostty surface so a future attach can resume the same daemon;
+  /// this verb guarantees the daemon is gone before returning.
+  ///
+  /// Returns `closed == false` (without raising) when the pane is not
+  /// present in the catalog — the CLI maps that to a non-zero exit so
+  /// scripts can distinguish a successful kill from a missing pane.
+  public func paneClose(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: IPC.PaneCloseRequest
+    do {
+      req = try params.decoded(as: IPC.PaneCloseRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "pane.close requires {paneID}", path: nil))
+    }
+
+    // Resolve the catalog location for `paneID`. Caller-supplied locator
+    // fields take precedence so labels-already-resolved CLI invocations
+    // skip the catalog walk; absent fields fall back to a scan.
+    let locator: PaneLocator?
+    if let tabID = req.tabID, let worktreeID = req.worktreeID, let projectID = req.projectID {
+      locator = PaneLocator(
+        paneID: req.paneID,
+        tabID: tabID,
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    } else {
+      locator = findPaneLocator(req.paneID)
+    }
+
+    guard let locator else {
+      // Pane is not in the catalog. Surface the catalog-state truthfully
+      // so the CLI can tell apart "already closed" from "kill succeeded".
+      let response = IPC.PaneCloseResponse(paneID: req.paneID, closed: false)
+      return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+        ?? .failed(.internal("encode pane.close result"))
+    }
+
+    // Kill the daemon first. ZmxClient.kill polls for socket-file
+    // disappearance with a 2 s cap, so this awaits at most that long
+    // even if the daemon is wedged.
+    await daemonKiller(req.paneID)
+
+    // Reap the persisted session-catalog entry. Best-effort: a missing
+    // or unreadable file is normal in builds where the daemon writer
+    // path hasn't been wired yet, so we log and continue rather than
+    // failing the RPC.
+    if let store = sessionStore {
+      do {
+        var catalog = try store.load()
+        if catalog.sessions.removeValue(forKey: req.paneID.raw.uuidString) != nil {
+          try store.saveNow(catalog)
+        }
+      } catch {
+        logger.warning(
+          "pane.close: sessions.json reap failed: \(String(describing: error), privacy: .public)"
+        )
+      }
+    }
+
+    // Tear down the in-memory hierarchy entry. The libghostty surface
+    // close inside `manager.closePane` is now redundant (daemonKiller
+    // already shut the daemon socket), but it stays idempotent so the
+    // call remains the canonical place to update split-tree state.
+    do {
+      try manager.closePane(
+        locator.paneID,
+        in: locator.tabID,
+        in: locator.worktreeID,
+        in: locator.projectID
+      )
+    } catch {
+      return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.description)
+    }
+
+    let response = IPC.PaneCloseResponse(paneID: req.paneID, closed: true)
+    return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+      ?? .failed(.internal("encode pane.close result"))
+  }
+
+  private struct PaneLocator {
+    let paneID: PaneID
+    let tabID: TabID
+    let worktreeID: WorktreeID
+    let projectID: ProjectID
+  }
+
+  /// Walk the catalog looking for the project/worktree/tab triple that
+  /// owns `paneID`. Returns nil when no project contains a pane with
+  /// that id — caller maps to `closed == false`.
+  private func findPaneLocator(_ paneID: PaneID) -> PaneLocator? {
+    for project in manager.catalog.projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
+          return PaneLocator(
+            paneID: paneID,
+            tabID: tab.id,
+            worktreeID: worktree.id,
+            projectID: project.id
+          )
+        }
+      }
+    }
+    return nil
   }
 
   public func focusPane(_ params: JSONValue) async -> RouterOutcome {

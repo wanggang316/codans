@@ -739,12 +739,26 @@ final class AppState {
         appBundle: Self.bundleVersion()
       )
     )
+    // SessionStore backs the `pane.close` reap step. Construct it at the
+    // canonical location so the handler can drop persisted entries for
+    // killed daemons; failure to open is non-fatal (the handler treats a
+    // nil store as "no persistent catalog to reap").
+    let sessionStore = try? SessionStore(fileURL: SessionCatalog.defaultURL())
     let hierarchyHandlers = HierarchyHandlers(
       manager: hierarchy,
       envProvider: { projectID in
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
-      settingsProvider: { settingsStore.settings }
+      settingsProvider: { settingsStore.settings },
+      daemonKiller: { [weak terminalEngine] paneID in
+        // Reach across into the runtime's surface registry to find the
+        // pane's `ZmxClient` and ask it to send `.kill`. ZmxClient.kill
+        // polls for the daemon control socket to vanish with a bounded
+        // 2 s timeout; no-op when the pane has no live surface.
+        guard let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) else { return }
+        await surface.zmxClient.kill()
+      },
+      sessionStore: sessionStore
     )
     let terminalHandlers = TerminalHandlers(
       sink: terminalEngine.ghosttyRuntime == nil

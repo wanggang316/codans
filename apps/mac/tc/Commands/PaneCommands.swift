@@ -152,19 +152,62 @@ struct PaneFocus: AsyncParsableCommand {
 struct PaneClose: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "close",
-    abstract: "Close a pane."
+    abstract: "Close a pane and kill its zmx daemon.",
+    discussion: """
+      Sends `.kill` to the pane's zmx daemon (bounded ≤ 2 s wait for the
+      daemon's control socket to vanish), drops the persisted session
+      catalog entry, and removes the pane from the in-memory hierarchy.
+
+      Distinct from the UI X-button path, which detaches the libghostty
+      surface so a future attach can resume the same daemon. Use this
+      verb when you want the daemon gone.
+      """
   )
 
   @OptionGroup var globals: GlobalOptions
   @OptionGroup var args: PaneLocatorArgs
 
   func run() async throws {
-    await PaneLocatorFlow.run(
-      globals: globals,
-      args: args,
-      method: .hierarchyClosePane,
-      verbLabel: "closed"
-    )
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let paneUUID = try await AliasResolver.resolve(args.pane, kind: .pane, client: client)
+      // Best-effort locator: when the caller didn't override the
+      // project/worktree/tab triple, send only the paneID and let the
+      // handler walk the catalog server-side. Saves a round-trip on the
+      // common `tc pane close <id>` shape.
+      let request: IPC.PaneCloseRequest
+      if args.project != "current" || args.worktree != "current" || args.tab != "current" {
+        let path = try await PaneLocatorFlow.resolvePanePath(
+          paneUUID: paneUUID,
+          args: args,
+          client: client
+        )
+        request = IPC.PaneCloseRequest(
+          paneID: path.paneID,
+          tabID: path.tabID,
+          worktreeID: path.worktreeID,
+          projectID: path.projectID
+        )
+      } else {
+        request = IPC.PaneCloseRequest(paneID: PaneID(raw: paneUUID))
+      }
+      let response: IPC.PaneCloseResponse = try await client.call(.paneClose, params: request)
+      if response.closed {
+        try Renderer.emit(
+          IDMessage(
+            id: paneUUID.uuidString,
+            message: "closed pane \(paneUUID.uuidString)"
+          ),
+          mode: globals.renderMode
+        )
+      } else {
+        throw CLIError(
+          code: .notFound,
+          message: "no pane found for \(paneUUID.uuidString)"
+        )
+      }
+    }
   }
 }
 
