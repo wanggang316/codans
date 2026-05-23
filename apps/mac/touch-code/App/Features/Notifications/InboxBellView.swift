@@ -25,7 +25,7 @@ struct InboxBellView: View {
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts: ResolvedShortcutMap
 
   @State private var popoverShown = false
-  @State private var unreadOnly = false
+  @State private var unreadOnly = true
 
   var body: some View {
     // User-controlled visual filter (Settings → Notifications → In-app → Status-bar bell).
@@ -224,12 +224,28 @@ private struct InboxRowView: View {
 
   var body: some View {
     Button(action: onTap) {
-      // HAN-78: row 1 is the source breadcrumb + age; row 2 is the
-      // title + body joined by " - ". The dot indicator moved into
-      // row 2 so it sits next to the content line rather than the
-      // metadata strip; row 1 carries a matching leading indent
-      // (`dotColumnWidth`) so the two rows' text columns line up.
+      // HAN-78: row 1 is `<title> - <body>` (uniform font + colour so
+      // the line reads as one continuous sentence); row 2 is the
+      // source breadcrumb + age. The dot indicator stays on row 1 so
+      // it sits next to the content line; row 2 carries a matching
+      // leading indent (`dotColumnWidth + dotSpacing`) so the two
+      // rows' text columns line up.
       VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .center, spacing: Self.dotSpacing) {
+          // Filled circle on unread (yellow for taskFinished, orange
+          // for the more urgent waitingForInput); empty space on read
+          // so we never show a check-shaped icon in front of an
+          // unread row (the previous green checkmark.circle.fill read
+          // as 'already done' and was the bug Gump flagged).
+          unreadDot
+            .frame(width: Self.dotSize, height: Self.dotSize)
+          Text("\(entry.title) - \(entry.body)")
+            .font(.callout)
+            .foregroundStyle(entry.isUnread ? Color.primary : Color.secondary)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
         HStack(spacing: 6) {
           if let breadcrumb, !breadcrumb.isEmpty {
             Text(breadcrumb)
@@ -244,26 +260,6 @@ private struct InboxRowView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.leading, Self.dotColumnWidth)
-
-        HStack(alignment: .center, spacing: Self.dotSpacing) {
-          // Filled circle on unread (yellow for taskFinished, orange
-          // for the more urgent waitingForInput); empty space on read
-          // so we never show a check-shaped icon in front of an
-          // unread row (the previous green checkmark.circle.fill read
-          // as 'already done' and was the bug Gump flagged).
-          unreadDot
-            .frame(width: Self.dotSize, height: Self.dotSize)
-          (Text(entry.title)
-            .fontWeight(entry.isUnread ? .semibold : .regular)
-            .foregroundColor(entry.isUnread ? .primary : .secondary)
-            + Text(" - ")
-            .foregroundColor(.secondary)
-            + Text(entry.body)
-            .foregroundColor(entry.isUnread ? .secondary : Color.secondary.opacity(0.7)))
-            .font(.callout)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
