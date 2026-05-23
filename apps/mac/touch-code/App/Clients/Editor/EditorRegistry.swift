@@ -1,7 +1,7 @@
 import Foundation
 import TouchCodeCore
 
-/// The C8a 31-entry built-in registry. Every row is a template: `appURL` is always nil and
+/// The C8a 30-entry built-in registry. Every row is a template: `appURL` is always nil and
 /// `alternateBundleIdentifiers` is always empty — the service layer resolves a live `appURL`
 /// against an `AppLauncher` at `describe()` time.
 ///
@@ -96,11 +96,6 @@ nonisolated enum EditorRegistry {
       bundleIdentifier: "com.google.antigravity",
       launchMode: .directory, appURL: nil,
       alternateBundleIdentifiers: []),
-    EditorDescriptor(
-      id: "obsidian", displayName: "Obsidian",
-      bundleIdentifier: "md.obsidian",
-      launchMode: .directory, appURL: nil,
-      alternateBundleIdentifiers: []),
     // Xcode + Finder
     EditorDescriptor(
       id: "xcode", displayName: "Xcode",
@@ -192,7 +187,7 @@ nonisolated enum EditorRegistry {
   static let editorPriority: [EditorID] = [
     "cursor", "zed", "vscode", "windsurf", "vscodeInsiders", "vscodium", "sublimeText",
     "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "androidStudio",
-    "antigravity", "obsidian",
+    "antigravity",
   ]
 
   static let terminalPriority: [EditorID] = [
