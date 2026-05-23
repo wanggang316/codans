@@ -350,6 +350,16 @@ final class AppState {
   private let catalogStore: CatalogStore
   private let hierarchyRuntime: GhosttyBackedHierarchyRuntime
   private var ghosttyRuntime: GhosttyRuntime?
+  /// Shared `sessions.json` store. Built lazily in `bringUp` (nil if the
+  /// canonical URL cannot be opened — same fallback the IPC handlers use).
+  /// Reused by `SessionLifecycle` so the quit-time flush and the in-app
+  /// reap-on-pane-close path write through a single instance.
+  @ObservationIgnored private(set) var sessionStore: SessionStore?
+  /// Quit-time orchestrator: snapshots every live `ZmxClient` into
+  /// `sessions.json` and then sends `.detach` so the daemons survive the
+  /// app process. Built in `bringUp` alongside the engine; nil before
+  /// then, which keeps the `willTerminate` observer safe to fire early.
+  @ObservationIgnored private(set) var sessionLifecycle: SessionLifecycle?
   /// Per-Worktree "git status is non-clean" cache. The sidebar row's `.task(id:)`
   /// refreshes this lazily; a small dot is drawn next to the row name when dirty.
   let worktreeStatusMonitor: WorktreeStatusMonitor
@@ -407,7 +417,7 @@ final class AppState {
   /// Idempotent: subsequent calls while `store` is already set are no-ops.
   /// SwiftUI may re-run `.task` on scene transitions; the guard prevents
   /// rebuilding the engine + store and leaking the prior runtime.
-  func bringUp() {
+  func bringUp() {  // swiftlint:disable:this function_body_length
     guard store == nil else { return }
     let ghostty = try? GhosttyRuntime()
     self.ghosttyRuntime = ghostty
@@ -418,9 +428,9 @@ final class AppState {
     )
     self.terminalEngine = engine
     hierarchyRuntime.attach(engine: engine)
+    bootstrapSessionStack(ghostty: ghostty)
 
     // SettingsStore loads itself (with v1→v2 migration) during `init(fileURL:)`.
-
     let manager = hierarchyManager
     let settings = settingsStore
 
@@ -739,11 +749,11 @@ final class AppState {
         appBundle: Self.bundleVersion()
       )
     )
-    // SessionStore backs the `pane.close` reap step. Construct it at the
-    // canonical location so the handler can drop persisted entries for
-    // killed daemons; failure to open is non-fatal (the handler treats a
-    // nil store as "no persistent catalog to reap").
-    let sessionStore = try? SessionStore(fileURL: SessionCatalog.defaultURL())
+    // SessionStore backs the `pane.close` reap step. We reuse the shared
+    // instance opened in `bringUp` so the IPC handlers and the quit-time
+    // `SessionLifecycle` flush write through one store; nil falls back to
+    // the handler's "no persistent catalog to reap" path.
+    let sessionStore = self.sessionStore
     let hierarchyHandlers = HierarchyHandlers(
       manager: hierarchy,
       envProvider: { projectID in
@@ -805,11 +815,34 @@ final class AppState {
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.0"
   }
 
+  /// Open the shared `sessions.json` store once and stand up the quit-time
+  /// `SessionLifecycle` against it. Failure to open is non-fatal — the
+  /// lifecycle stays nil (so `willTerminate` skips the detach pass) and
+  /// the IPC handlers fall back to "no persistent catalog to reap" (their
+  /// existing behaviour). Extracted from `bringUp` to keep that method
+  /// under the SwiftLint function-body cap.
+  private func bootstrapSessionStack(ghostty: GhosttyRuntime?) {
+    let sessionStore = try? SessionStore(fileURL: SessionCatalog.defaultURL())
+    self.sessionStore = sessionStore
+    guard let sessionStore else { return }
+    self.sessionLifecycle = SessionLifecycle(
+      manager: hierarchyManager,
+      ghosttyRuntime: ghostty,
+      sessionStore: sessionStore
+    )
+  }
+
   /// Flushes all pending debounced writes. Called by `applicationWillTerminate`.
   /// Any debounced write that hasn't landed within 500 ms of quit would
   /// otherwise be dropped; each store below has its own debounce, so we
   /// drain them explicitly here.
   func flushAllPersistedState() {
+    // Capture the live zmx daemons into `sessions.json` and then send
+    // `.detach` so they survive the app process exit. Runs FIRST: the
+    // catalog write happens before any other flush so a crash mid-
+    // shutdown does not strand surviving daemons.
+    sessionLifecycle?.detachAllForQuit()
+
     // Cancel notification background Tasks first so none can race the
     // final flush by mutating store state mid-write.
     notificationDetectorTask?.cancel()

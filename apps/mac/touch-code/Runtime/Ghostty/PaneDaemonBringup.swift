@@ -59,14 +59,33 @@ enum PaneDaemonBringup {
         )
       }
       let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-      let socketPath = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+      // `zmx serve` prints two newline-terminated lines on stdout: the
+      // daemon's Unix control-socket path, then the daemon process PID
+      // (or `0` when ensureSession attached to a pre-existing daemon
+      // and did not fork a new one). Older daemon binaries print only
+      // the socket path; treat the missing PID line as `0` rather than
+      // failing — the rest of the spawn handshake still works, and the
+      // session catalog records `0` for "unknown".
+      let lines = stdout.split(whereSeparator: \.isNewline)
+      let socketPath = lines.first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
       guard !socketPath.isEmpty else {
         throw HierarchyError.zmxServeNoSocketPath
       }
+      let daemonPID: Int32 =
+        lines.dropFirst().first
+        .flatMap { Int32(String($0).trimmingCharacters(in: .whitespaces)) } ?? 0
       logger.debug(
-        "spawned zmx serve for pane \(paneID, privacy: .public): socket=\(socketPath, privacy: .public)"
+        "spawned zmx serve for pane \(paneID, privacy: .public): socket=\(socketPath, privacy: .public) pid=\(daemonPID, privacy: .public)"
       )
-      return try await ZmxClient(paneID: paneID, socketPath: socketPath)
+      return try await ZmxClient(
+        paneID: paneID,
+        socketPath: socketPath,
+        daemonPID: daemonPID,
+        cwd: workingDirectory,
+        command: [],
+        zmxVersion: "",
+        createdAt: Date()
+      )
 
     case .timedOut:
       throw HierarchyError.zmxServeFailed(detail: "timed out waiting for socket path")

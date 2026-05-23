@@ -29,6 +29,41 @@ public final class ZmxClient {
   /// returned from ``snapshot()`` and to disambiguate log lines.
   public let paneID: PaneID
 
+  /// Path of the daemon's Unix control socket. Persisted into
+  /// `sessions.json` at quit so the next launch can reconnect.
+  public let socketPath: String
+
+  /// PID of the daemon process backing this pane, captured from `zmx
+  /// serve` stdout at spawn time. `0` when the spawn helper could not
+  /// determine the PID (e.g. an older daemon binary that prints only the
+  /// socket path).
+  public let daemonPID: Int32
+
+  /// Working directory the daemon was launched with. Recorded into
+  /// `sessions.json` so a later restart can offer to reattach panes whose
+  /// catalog row has drifted away from their on-disk cwd.
+  public let cwd: String
+
+  /// Command-line the daemon was launched with. Empty when the daemon
+  /// fell back to the user's login shell (touch-code's standard path).
+  public let command: [String]
+
+  /// Reported semantic version of the spawning `zmx` binary (or `""`
+  /// when the spawn helper has not learned it). Recorded so reattach can
+  /// refuse to talk to a daemon whose IPC schema we do not know.
+  public let zmxVersion: String
+
+  /// Wall-clock time the client was constructed. Persisted into
+  /// `sessions.json` as the daemon's creation timestamp (close enough
+  /// for catalog purposes — the daemon prints its socket path within
+  /// milliseconds of fork).
+  public let createdAt: Date
+
+  /// Wall-clock time of the most recent successful `attach`. Updated in
+  /// place whenever the surface re-handshakes the daemon. Read by the
+  /// quit-time `SessionLifecycle` snapshot.
+  public private(set) var lastAttachedAt: Date
+
   /// Snapshot URL the daemon writes when ``snapshot()`` runs. Caller can
   /// also derive this from the socket directory; we expose it explicitly
   /// so ``snapshot()`` does not have to know about the cache layout.
@@ -36,8 +71,6 @@ public final class ZmxClient {
 
   /// Async stream of decoded `.info` frames from the daemon.
   public var info: AsyncStream<ZmxInfoPayload> { infoStream }
-
-  private let socketPath: String
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.zmx")
   private let controlFD: Int32
   private let localFD: Int32
@@ -61,17 +94,37 @@ public final class ZmxClient {
   // - Parameters:
   //   - paneID: identifier the daemon was launched for.
   //   - socketPath: filesystem path of the daemon's control socket.
+  //   - daemonPID: daemon process PID reported by `zmx serve` at spawn
+  //     time. `0` is accepted to mean "unknown" so reattach paths and
+  //     tests can still build a client without one.
+  //   - cwd: working directory the daemon was launched with.
+  //   - command: argv the daemon was launched with (empty = login shell).
+  //   - zmxVersion: version string of the spawning daemon binary.
+  //   - createdAt: wall-clock time the daemon was created. Defaults to
+  //     `Date()` so reconnect paths (T2.2) can pass through the value
+  //     recorded in `sessions.json` instead of re-stamping.
   //   - snapshotDirectory: directory the daemon writes `<paneID>.snap`
   //     into when ``snapshot()`` runs. Caller picks this so tests can
   //     point at a temp directory; defaults to the standard cache.
   public init(
     paneID: PaneID,
     socketPath: String,
+    daemonPID: Int32 = 0,
+    cwd: String = "",
+    command: [String] = [],
+    zmxVersion: String = "",
+    createdAt: Date = Date(),
     snapshotDirectory: URL? = nil
   ) async throws {
     // swiftlint:enable async_without_await
     self.paneID = paneID
     self.socketPath = socketPath
+    self.daemonPID = daemonPID
+    self.cwd = cwd
+    self.command = command
+    self.zmxVersion = zmxVersion
+    self.createdAt = createdAt
+    self.lastAttachedAt = createdAt
     let snapDir = snapshotDirectory ?? Self.defaultSnapshotDirectory()
     self.snapshotURL = snapDir.appendingPathComponent("\(paneID.raw.uuidString).snap")
 
@@ -139,7 +192,9 @@ public final class ZmxClient {
 
   /// Send `.init` with the requested terminal size; resolves when the
   /// daemon's first `.output` frame arrives (the restore stream, or the
-  /// first PTY output on a fresh attach).
+  /// first PTY output on a fresh attach). `lastAttachedAt` advances to
+  /// the resolution point so the quit-time snapshot reflects the latest
+  /// successful handshake.
   public func attach(cols: UInt16, rows: UInt16) async throws {
     if isClosed { throw ConnectError.alreadyClosed }
     let payload = ZmxResizePayload(cols: cols, rows: rows)
@@ -153,6 +208,7 @@ public final class ZmxClient {
         cont.resume(throwing: error)
       }
     }
+    self.lastAttachedAt = Date()
   }
 
   /// Fire-and-forget resize. No-op when the dimensions match the last
