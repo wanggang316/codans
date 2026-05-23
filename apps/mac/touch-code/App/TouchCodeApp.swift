@@ -428,7 +428,7 @@ final class AppState {
     )
     self.terminalEngine = engine
     hierarchyRuntime.attach(engine: engine)
-    bootstrapSessionStack(ghostty: ghostty)
+    bootstrapSessionStack(ghostty: ghostty, engine: engine)
 
     // SettingsStore loads itself (with v1→v2 migration) during `init(fileURL:)`.
     let manager = hierarchyManager
@@ -821,7 +821,13 @@ final class AppState {
   /// the IPC handlers fall back to "no persistent catalog to reap" (their
   /// existing behaviour). Extracted from `bringUp` to keep that method
   /// under the SwiftLint function-body cap.
-  private func bootstrapSessionStack(ghostty: GhosttyRuntime?) {
+  ///
+  /// Also drives the launch-time reaper: every catalog row whose daemon
+  /// socket still answers `connect(2)` is seeded into the engine so the
+  /// next `ensureSurface` for that paneID reattaches instead of spawning
+  /// a fresh daemon. Dead rows are pruned from the catalog as part of
+  /// the sweep.
+  private func bootstrapSessionStack(ghostty: GhosttyRuntime?, engine: TerminalEngine) {
     let sessionStore = try? SessionStore(fileURL: SessionCatalog.defaultURL())
     self.sessionStore = sessionStore
     guard let sessionStore else { return }
@@ -830,6 +836,19 @@ final class AppState {
       ghosttyRuntime: ghostty,
       sessionStore: sessionStore
     )
+
+    let reaper = SessionReaper(sessionStore: sessionStore)
+    do {
+      let states = try reaper.sweep()
+      engine.seedReattachableSessions(states)
+    } catch {
+      // A corrupt catalog or transient I/O error must not block app
+      // launch — the worst outcome is a fresh shell per pane, which is
+      // touch-code's pre-M2 behaviour. Log via os.Logger so a chronic
+      // failure surfaces in Console.
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.reaper")
+        .error("SessionReaper.sweep failed: \(String(describing: error), privacy: .public)")
+    }
   }
 
   /// Flushes all pending debounced writes. Called by `applicationWillTerminate`.

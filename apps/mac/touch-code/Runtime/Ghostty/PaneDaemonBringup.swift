@@ -95,6 +95,37 @@ enum PaneDaemonBringup {
     }
   }
 
+  /// Attach to a daemon that survived the previous touch-code process.
+  /// The caller (`SessionReaper`) has already verified the socket path
+  /// answers `connect(2)`, so this is a thin wrapper around `ZmxClient`'s
+  /// existing constructor that threads through the catalog-recorded
+  /// metadata (PID, cwd, command, version, createdAt) and stamps a fresh
+  /// `lastAttachedAt`.
+  ///
+  /// Replay of the daemon's screen state is handled inside `attach`: the
+  /// daemon serializes its terminal on every `.Init` after the first
+  /// (its `has_had_client` flag latches `true` on the leader's first
+  /// resize, before our reattach), so a touch-code restart receives the
+  /// snapshot frame as part of the standard handshake.
+  static func reattach(
+    paneID: PaneID,
+    session: Session
+  ) async throws -> ZmxClient {
+    let client = try await ZmxClient(
+      paneID: paneID,
+      socketPath: session.socketPath,
+      daemonPID: session.pid,
+      cwd: session.cwd,
+      command: session.command,
+      zmxVersion: session.zmxVersion,
+      createdAt: session.createdAt
+    )
+    logger.debug(
+      "reattached to zmx daemon for pane \(paneID, privacy: .public): socket=\(session.socketPath, privacy: .public) pid=\(session.pid, privacy: .public)"
+    )
+    return client
+  }
+
   /// Resolves the bundled `zmx` binary out of the app bundle's
   /// `Resources/bin/` folder. Tuist's `Embed zmx` build phase
   /// (apps/mac/scripts/embed-zmx.sh) is responsible for putting it

@@ -54,6 +54,14 @@ final class TerminalEngine {
   let ghosttyRuntime: GhosttyRuntime?
   var crashPolicy: CrashPolicy = .default
 
+  /// Daemons that the launch-time `SessionReaper` confirmed are still
+  /// reachable. Consumed at most once per paneID: the first
+  /// `ensureSurface` call for an alive entry diverts to
+  /// `PaneDaemonBringup.reattach` and the entry is removed so any later
+  /// recreate (e.g. crash-retry) takes the standard spawn path with a
+  /// fresh daemon.
+  private var pendingReattach: [PaneID: Session] = [:]
+
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
   private var crashRings: [PaneID: [Date]] = [:]
@@ -85,6 +93,19 @@ final class TerminalEngine {
     case paneHasNoTab
   }
 
+  /// Seed the engine with the live-daemon catalog produced by
+  /// `SessionReaper.sweep()` at launch. Each entry is consumed by the
+  /// next `ensureSurface` call for its paneID; subsequent calls for the
+  /// same pane fall through to the spawn path. Called once before any
+  /// HierarchyManager-driven pane bring-up.
+  func seedReattachableSessions(_ states: [PaneID: SessionState]) {
+    for (paneID, state) in states {
+      if case .alive(let session) = state {
+        pendingReattach[paneID] = session
+      }
+    }
+  }
+
   /// Create a libghostty surface for the given Pane. Idempotent: if a
   /// surface is already registered for the pane, returns the existing one.
   /// Wires the surface's `onClose` to emit the lifecycle event + dispose
@@ -109,15 +130,25 @@ final class TerminalEngine {
       throw SurfaceError.paneHasNoTab
     }
 
-    // Spawn the zmx daemon for this pane and connect to its control
-    // socket before the libghostty surface is built — libghostty's
-    // External backend latches onto `external_pty_fd` synchronously in
-    // `ghostty_surface_new`, so the socketpair must already exist.
-    let zmxClient = try await PaneDaemonBringup.spawnDaemonAndConnect(
-      paneID: pane.id,
-      workingDirectory: pane.workingDirectory,
-      env: env
-    )
+    // Either reattach to a daemon the previous touch-code process left
+    // alive (catalog row pre-vetted by `SessionReaper.sweep`) or spawn a
+    // fresh `zmx serve` and connect to its control socket. Either way
+    // the socketpair must exist before `ghostty_surface_new`, because
+    // libghostty's External backend latches onto `external_pty_fd`
+    // synchronously inside that call.
+    let zmxClient: ZmxClient
+    if let session = pendingReattach.removeValue(forKey: pane.id) {
+      zmxClient = try await PaneDaemonBringup.reattach(
+        paneID: pane.id,
+        session: session
+      )
+    } else {
+      zmxClient = try await PaneDaemonBringup.spawnDaemonAndConnect(
+        paneID: pane.id,
+        workingDirectory: pane.workingDirectory,
+        env: env
+      )
+    }
 
     // HAN-82: `ghostty_surface_new` is observed to fail transiently
     // — the user reported ~10 consecutive failures followed by a clean
