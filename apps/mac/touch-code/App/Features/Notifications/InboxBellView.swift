@@ -25,7 +25,7 @@ struct InboxBellView: View {
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts: ResolvedShortcutMap
 
   @State private var popoverShown = false
-  @State private var unreadOnly = false
+  @State private var unreadOnly = true
 
   var body: some View {
     // User-controlled visual filter (Settings → Notifications → In-app → Status-bar bell).
@@ -166,8 +166,8 @@ private struct InboxPopoverContent: View {
   private var header: some View {
     ZStack {
       Picker("", selection: $unreadOnly) {
-        Text("All").tag(false)
         Text("Unread").tag(true)
+        Text("All").tag(false)
       }
       .pickerStyle(.segmented)
       .labelsHidden()
@@ -203,6 +203,13 @@ private struct InboxRowView: View {
   let entry: InboxEntry
   let onTap: () -> Void
 
+  /// Dot column geometry. Kept as static constants so row 1's leading
+  /// indent (`dotColumnWidth + dotSpacing`) cannot drift away from
+  /// row 2's actual dot column.
+  fileprivate static let dotSize: CGFloat = 6
+  fileprivate static let dotSpacing: CGFloat = 8
+  fileprivate static let dotColumnWidth: CGFloat = dotSize + dotSpacing
+
   /// Formatter is allocated once for the whole popover lifetime; building
   /// a fresh `RelativeDateTimeFormatter` per row would otherwise spin up
   /// a CFLocale, calendar, and ICU context on every redraw.
@@ -217,62 +224,55 @@ private struct InboxRowView: View {
 
   var body: some View {
     Button(action: onTap) {
-      HStack(alignment: .top, spacing: 8) {
-        // Leading 6 px slot. Filled circle on unread (yellow for
-        // taskFinished, orange for the more urgent waitingForInput);
-        // empty space on read so we never show a check-shaped icon
-        // in front of an unread row (the previous green
-        // checkmark.circle.fill read as 'already done' and was the
-        // bug Gump flagged).
-        unreadDot
-          .frame(width: 6, height: 6)
-          .padding(.top, 7)
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 6) {
-            Text(entry.title)
-              .font(.callout)
-              .fontWeight(entry.isUnread ? .semibold : .regular)
-              .foregroundStyle(entry.isUnread ? Color.primary : Color.secondary)
-              .lineLimit(1)
-            Spacer()
-            if let breadcrumb, !breadcrumb.isEmpty {
-              Text(breadcrumb)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-              Text("·")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            }
-            Text(relativeAge)
-              .font(.caption2)
+      // HAN-78: row 1 is `<title> - <body>` (uniform font + colour so
+      // the line reads as one continuous sentence); row 2 is the
+      // source breadcrumb + age. The dot indicator stays on row 1 so
+      // it sits next to the content line; row 2 carries a matching
+      // leading indent (`dotColumnWidth + dotSpacing`) so the two
+      // rows' text columns line up.
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .center, spacing: Self.dotSpacing) {
+          // Filled circle on unread (yellow for taskFinished, orange
+          // for the more urgent waitingForInput); empty space on read
+          // so we never show a check-shaped icon in front of an
+          // unread row (the previous green checkmark.circle.fill read
+          // as 'already done' and was the bug Gump flagged).
+          unreadDot
+            .frame(width: Self.dotSize, height: Self.dotSize)
+          Text("\(entry.title) - \(entry.body)")
+            .font(.callout)
+            .foregroundStyle(entry.isUnread ? Color.primary : Color.secondary)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          // Hover-only nav cue: dimmed-zero by default, fades in and
+          // slides 3 pt right while the cursor is over the row.
+          // Suppressed on read rows since they're not navigable
+          // (HAN-56).
+          if entry.isUnread {
+            Image(systemName: "arrow.right")
+              .font(.footnote)
               .foregroundStyle(.secondary)
-          }
-          HStack(alignment: .bottom, spacing: 6) {
-            Text(entry.body)
-              .font(.caption)
-              .foregroundStyle(entry.isUnread ? Color.secondary : Color.secondary.opacity(0.7))
-              .lineLimit(2)
-              .frame(maxWidth: .infinity, alignment: .leading)
-            // HAN-56: unread rows are jumpable — show a small horizontal
-            // arrow cue at the bottom-right; subtle by default and
-            // shifts 3 pt right on hover. Read rows are no longer
-            // navigable (the inbox has no markUnread path), so the cue
-            // is dropped and the whole row gives up hit-testing below.
-            // SF Symbol `arrow.right` over a literal Unicode glyph so
-            // the icon respects Dynamic Type and the SF weight axis.
-            if entry.isUnread {
-              Image(systemName: "arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .opacity(isHovering ? 0.95 : 0.55)
-                .offset(x: isHovering ? 3 : 0)
-                .animation(.easeInOut(duration: 0.15), value: isHovering)
-                .accessibilityHidden(true)
-            }
+              .opacity(isHovering ? 0.9 : 0)
+              .offset(x: isHovering ? 3 : 0)
+              .animation(.easeInOut(duration: 0.15), value: isHovering)
+              .accessibilityHidden(true)
           }
         }
+
+        HStack(spacing: 6) {
+          if let breadcrumb, !breadcrumb.isEmpty {
+            Text(breadcrumb)
+              .font(.system(size: 10))
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .truncationMode(.middle)
+          }
+          Spacer(minLength: 6)
+          Text(relativeAge)
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+        }
+        .padding(.leading, Self.dotColumnWidth)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
@@ -291,30 +291,25 @@ private struct InboxRowView: View {
   /// Read state has no leading glyph (a check-shape next to a row reads
   /// as "this is done/read" and conflicts with the unread row case).
   /// Unread state shows a filled dot whose colour mirrors the kind:
-  /// orange for waitingForInput (more urgent), yellow for taskFinished
-  /// (matches the bell glyph theme).
+  /// orange for waitingForInput (more urgent), green for taskFinished
+  /// (a completion signal — matches macOS' "ok / done" semantics).
   @ViewBuilder
   private var unreadDot: some View {
     if entry.isUnread {
       Circle()
-        .fill(entry.kind == .waitingForInput ? Color.orange : Color.yellow)
+        .fill(entry.kind == .waitingForInput ? Color.orange : Color.green)
         .accessibilityLabel(entry.kind == .waitingForInput ? "Waiting for input" : "Unread")
     } else {
       Color.clear
     }
   }
 
-  /// Breadcrumb for the entry's source path: `Project · Worktree` with
-  /// `· TabName` appended only when the user has explicitly renamed the
-  /// tab (`tab.name` non-empty). HAN-56: a renamed tab carries enough
-  /// signal to be worth surfacing in the row; the auto-derived live /
-  /// cached title (pwd basename, OSC title) is noise here and would
-  /// fight the body text for horizontal space.
-  ///
-  /// Resolved live from `HierarchyManager.catalog` so a project /
-  /// worktree / tab rename reflects in the popover without a save or
-  /// reload cycle. Returns nil when the project has been deleted (G3
-  /// dead-target case) so the row simply omits the breadcrumb.
+  /// Breadcrumb for the entry's source path: `<project>·<worktree>`,
+  /// matching the OS banner footer format (HAN-78). Resolved live from
+  /// `HierarchyManager.catalog` so a project / worktree rename reflects
+  /// in the popover without a save or reload cycle. Returns nil when the
+  /// project has been deleted (G3 dead-target case) so the row simply
+  /// omits the breadcrumb.
   private var breadcrumb: String? {
     guard let mgr = hierarchyManager,
       let project = mgr.catalog.projects.first(where: { $0.id == entry.source.projectID })
@@ -322,13 +317,8 @@ private struct InboxRowView: View {
     var parts: [String] = [project.name]
     if let worktree = project.worktrees.first(where: { $0.id == entry.source.worktreeID }) {
       parts.append(worktree.name)
-      if let tab = worktree.tabs.first(where: { $0.id == entry.source.tabID }),
-        let tabName = tab.name, !tabName.isEmpty
-      {
-        parts.append(tabName)
-      }
     }
-    return parts.joined(separator: " · ")
+    return parts.joined(separator: "·")
   }
 
   private var relativeAge: String {
