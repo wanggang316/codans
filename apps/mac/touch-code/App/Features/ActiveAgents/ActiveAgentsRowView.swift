@@ -3,10 +3,14 @@ import TouchCodeCore
 
 /// One Agent row in the ActiveAgents popover.
 ///
-/// Layout (see `docs/design-docs/active-agents-view.md` §UI):
-/// - Leading: 16pt agent logo (per-kind SF Symbol via `AgentLogoView`).
-/// - Center: `<ProjectName> / <WorktreeName>` with middle truncation.
-/// - Trailing: state icon + state label + relative time.
+/// Layout (two-line variant per design feedback):
+/// - Leading: 20pt agent logo (per-kind brand glyph via `AgentLogoView`).
+/// - Center, two-line VStack:
+///     · Top:    `<DisplayName>` (e.g. "Claude Code").
+///     · Bottom: `<ProjectName> · <WorktreeName>` middle-truncated.
+/// - Trailing, two-line VStack right-aligned:
+///     · Top:    state icon + short state verb.
+///     · Bottom: relative time.
 ///
 /// Click target is the whole row — bound to `onTap`. Wiring the actual
 /// focus dispatch is T6's job; T5 only exposes the closure.
@@ -50,14 +54,14 @@ struct ActiveAgentsRowView: View {
         relativeTo: context.date
       )
       Button(action: onTap) {
-        HStack(alignment: .center, spacing: 8) {
-          AgentLogoView(kind: entry.kind, size: 16)
-          headline
+        HStack(alignment: .center, spacing: 10) {
+          AgentLogoView(kind: entry.kind, size: 20)
+          identityColumn
           Spacer(minLength: 8)
-          trailing(age: age)
+          statusColumn(age: age)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .background(isHovering ? Color.gray.opacity(0.08) : Color.clear)
@@ -80,35 +84,43 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Project / Worktree breadcrumb. Middle truncation so a long worktree
-  /// name doesn't push the trailing state column off-screen.
-  private var headline: some View {
-    Text("\(projectName) / \(worktreeName)")
-      .font(.callout)
-      .lineLimit(1)
-      .truncationMode(.middle)
-      .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
-  }
-
-  /// Trailing column — state icon, state verb, relative age. The age
-  /// string is computed by the surrounding `TimelineView` so the
-  /// visible text and the row's a11y label share one clock. The state
-  /// icon's `accessibilityLabel` is the raw enum value per the user-
-  /// test contract (`docs/user-tests/active-agents-view.md` §Test
-  /// Surface).
-  private func trailing(age: String) -> some View {
-    HStack(spacing: 6) {
-      stateIcon
-        .accessibilityElement(children: .ignore)
-        .accessibilityIdentifier("activeAgents.row.\(paneID).state")
-        .accessibilityLabel(entry.state.rawValue)
-      Text(stateVerb)
+  /// Two-line identity column: agent display name on top, project/
+  /// worktree breadcrumb beneath. The breadcrumb keeps the user-test
+  /// contract identifier (`activeAgents.row.<paneID>.headline`) on the
+  /// project/worktree text so XCUI probes find the same surface they
+  /// did before the layout change.
+  private var identityColumn: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(entry.kind.displayName)
+        .font(.callout)
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+      Text("\(projectName) · \(worktreeName)")
         .font(.caption)
         .foregroundStyle(.secondary)
-      Text("·")
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-        .accessibilityHidden(true)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+    }
+  }
+
+  /// Two-line trailing column: state icon + short verb on top, relative
+  /// age beneath. The age string is computed by the surrounding
+  /// `TimelineView` so the visible text and the row's a11y label share
+  /// one clock. The state icon's `accessibilityLabel` is the raw enum
+  /// value per the user-test contract (`docs/user-tests/active-agents-view.md`
+  /// §Test Surface).
+  private func statusColumn(age: String) -> some View {
+    VStack(alignment: .trailing, spacing: 2) {
+      HStack(spacing: 4) {
+        stateIcon
+          .accessibilityElement(children: .ignore)
+          .accessibilityIdentifier("activeAgents.row.\(paneID).state")
+          .accessibilityLabel(entry.state.rawValue)
+        Text(stateVerb)
+          .font(.callout)
+          .foregroundStyle(.primary)
+      }
       Text(age)
         .font(.caption)
         .foregroundStyle(.secondary)
