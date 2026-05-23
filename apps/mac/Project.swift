@@ -258,6 +258,24 @@ let project = Project(
           ],
           basedOnDependencyAnalysis: true
         ),
+        // zmx pane-resume daemon embedding. The zmx binary is built by
+        // the Makefile's build-zmx prerequisite (out-of-band from Tuist,
+        // since it's a vendored Zig build) and lives at
+        // .build/zmx/bin/zmx. This script copies it alongside tc under
+        // Resources/bin so the running app can spawn it from a stable
+        // inside-bundle path. Must run after "Embed tc" because that
+        // script wipes Resources/bin before copying tc.
+        .post(
+          script: "\"${SRCROOT}/scripts/embed-zmx.sh\"",
+          name: "Embed zmx",
+          inputPaths: [
+            "$(SRCROOT)/.build/zmx/bin/zmx",
+          ],
+          outputPaths: [
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/zmx",
+          ],
+          basedOnDependencyAnalysis: true
+        ),
         // Ghostty resources: themes (~480 files), shaders, shell-
         // integration scripts, and the xterm-ghostty terminfo
         // database. libghostty resolves these at runtime via the host
