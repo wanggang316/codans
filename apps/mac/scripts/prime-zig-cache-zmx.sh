@@ -37,6 +37,9 @@ zig_fetch() {
 }
 
 fetch_tarball() {
+  # Pre-fetches a tarball into Zig's global cache via curl + `zig fetch`.
+  # `zig fetch` itself is the cache-hit gate; this wrapper just bypasses
+  # Zig's HTTP client.
   local url="$1"
   local tarball hash_name
   tarball="${tmp_dir}/$(basename "${url}")"
@@ -63,6 +66,7 @@ fetch_git_as_path() {
   rev="${spec##*#}"
   checkout="${tmp_dir}/git-$(basename "${url_base%.git}")-$$"
   git clone --quiet "${url_base}" "${checkout}" || exit 1
+  git -C "${checkout}" fetch --quiet origin "${rev}" 2>/dev/null || true
   git -C "${checkout}" -c advice.detachedHead=false checkout --quiet "${rev}" || exit 1
   rm -rf "${checkout}/.git"
   hash_name="$(zig_fetch "${checkout}")" || exit 1
