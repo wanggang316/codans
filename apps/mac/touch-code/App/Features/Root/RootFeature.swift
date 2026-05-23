@@ -1352,20 +1352,29 @@ struct RootFeature {
         else {
           return .send(.editor(.openFailed(reason: "Could not create tab for $EDITOR")))
         }
-        guard
-          (try? hierarchyClient.openPane(
-            tabID, worktreeID, projectID, worktreePath, "$EDITOR")) != nil
-        else {
-          return .send(.editor(.openFailed(reason: "Could not spawn $EDITOR pane")))
+        // openPane is async (zmx daemon spawn); thread through an Effect so the
+        // post-spawn selection and success notification happen after the pane
+        // is wired into the catalog. On openPane failure the editor open is
+        // reported as failed instead of half-succeeded.
+        return .run { [client = hierarchyClient] send in
+          do {
+            _ = try await client.openPane(
+              tabID, worktreeID, projectID, worktreePath, "$EDITOR")
+          } catch {
+            await send(.editor(.openFailed(reason: "Could not spawn $EDITOR pane")))
+            return
+          }
+          // Bring the user to the freshly spawned Pane. Selecting after the catalog
+          // mutation lets `autoSeedTabAndPaneIfNeeded` (driven by selectionChanges)
+          // see the populated tab and skip its own seed.
+          await MainActor.run {
+            client.selectProject(projectID)
+            try? client.selectWorktree(worktreeID, projectID)
+            try? client.selectTab(tabID, worktreeID, projectID)
+          }
+          await send(
+            .editor(.openSucceeded(editorID: EditorRegistry.shellEditorID, displayName: "$EDITOR")))
         }
-        // Bring the user to the freshly spawned Pane. Selecting after the catalog
-        // mutation lets `autoSeedTabAndPaneIfNeeded` (driven by selectionChanges)
-        // see the populated tab and skip its own seed.
-        try? hierarchyClient.selectProject(projectID)
-        try? hierarchyClient.selectWorktree(worktreeID, projectID)
-        try? hierarchyClient.selectTab(tabID, worktreeID, projectID)
-        return .send(
-          .editor(.openSucceeded(editorID: EditorRegistry.shellEditorID, displayName: "$EDITOR")))
 
       case .newTabForCurrentWorktree:
         guard
@@ -1772,7 +1781,14 @@ struct RootFeature {
     if worktree.tabs.isEmpty {
       guard let tabID = try? hierarchyClient.createTab(worktreeID, projectID, nil)
       else { return }
-      _ = try? hierarchyClient.openPane(tabID, worktreeID, projectID, cwd, nil)
+      // Auto-seed runs from a synchronous reducer body; `openPane` is now
+      // async (zmx daemon bringup). Fire-and-forget — the result is unused
+      // and PaneHostFeature reports any bring-up error to the user via its
+      // own `.failed` phase.
+      let client = hierarchyClient
+      Task { @MainActor in
+        _ = try? await client.openPane(tabID, worktreeID, projectID, cwd, nil)
+      }
       return
     }
     let activeTabID = worktree.selectedTabID ?? worktree.tabs.first?.id
@@ -1780,7 +1796,10 @@ struct RootFeature {
       let tab = worktree.tabs.first(where: { $0.id == activeTabID }),
       tab.panes.isEmpty
     else { return }
-    _ = try? hierarchyClient.openPane(activeTabID, worktreeID, projectID, cwd, nil)
+    let client = hierarchyClient
+    Task { @MainActor in
+      _ = try? await client.openPane(activeTabID, worktreeID, projectID, cwd, nil)
+    }
   }
 
   /// Rebuilds `SplitViewportFeature.State.paneHosts` for the selection's

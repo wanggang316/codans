@@ -162,13 +162,13 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
       _ workingDirectory: String, _ initialCommand: String?
-    ) throws -> PaneID
+    ) async throws -> PaneID
   var splitPane:
     @MainActor @Sendable (
       _ paneID: PaneID, _ direction: SplitTree<PaneID>.NewDirection,
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
       _ workingDirectory: String, _ initialCommand: String?
-    ) throws -> PaneID
+    ) async throws -> PaneID
   var closePane:
     @MainActor @Sendable (
       _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
@@ -578,7 +578,7 @@ extension HierarchyClient {
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
           ?? [:]
-        return try manager.openPane(
+        return try await manager.openPane(
           in: tabID, in: worktreeID, in: projectID,
           workingDirectory: cwd, initialCommand: initial, env: env
         )
@@ -590,7 +590,7 @@ extension HierarchyClient {
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
           ?? [:]
-        return try manager.splitPane(
+        return try await manager.splitPane(
           paneID, direction: direction,
           in: tabID, in: worktreeID, in: projectID,
           workingDirectory: cwd, initialCommand: initial, env: env
@@ -809,7 +809,7 @@ extension HierarchyClient {
     let preSubscribedStream: AsyncStream<TerminalEvent>? =
       onFinishedNeeded ? terminalClient?.events() : nil
 
-    let spawnedPaneID = try dispatchScript(
+    let spawnedPaneID = try await dispatchScript(
       script: script,
       worktreeID: worktreeID,
       projectID: projectID,
@@ -859,7 +859,7 @@ extension HierarchyClient {
     env: [String: String],
     manager: HierarchyManager,
     terminalClient: TerminalClient?
-  ) throws -> PaneID? {
+  ) async throws -> PaneID? {
     // initialCommand is replayed by TerminalEngine via `sendInput(command + "\n")`
     // into an interactive shell, so the shell stays at a prompt after the user's
     // command finishes and `paneExited` never fires. When the script has an
@@ -872,13 +872,13 @@ extension HierarchyClient {
       policy: script.resolvedOnFinished
     )
 
-    func openInNewTab() throws -> PaneID {
+    func openInNewTab() async throws -> PaneID {
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID,
         name: script.displayName,
         select: script.focus
       )
-      return try manager.openPane(
+      return try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
         workingDirectory: cwd,
         initialCommand: spawnCommand,
@@ -888,7 +888,7 @@ extension HierarchyClient {
 
     switch script.target {
     case .newTab:
-      return try openInNewTab()
+      return try await openInNewTab()
 
     case .focused:
       // sendInput needs the focused pane and the terminal runtime; absent
@@ -902,11 +902,11 @@ extension HierarchyClient {
       runScriptLogger.info(
         "target=.focused fell back to .newTab — \(terminalClient == nil ? "no TerminalClient" : "no focused pane in worktree", privacy: .public)"
       )
-      return try openInNewTab()
+      return try await openInNewTab()
 
     case .split:
       if let anchor = focusedAnchor(worktreeID: worktreeID, in: manager) {
-        return try manager.splitPane(
+        return try await manager.splitPane(
           anchor.paneID,
           direction: mapSplitDirection(script.direction),
           in: anchor.tabID, in: worktreeID, in: projectID,
@@ -918,7 +918,7 @@ extension HierarchyClient {
       runScriptLogger.info(
         "target=.split fell back to .newTab — no focused pane in worktree"
       )
-      return try openInNewTab()
+      return try await openInNewTab()
     }
   }
 
@@ -1084,7 +1084,7 @@ extension HierarchyClient {
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID, name: tabName
       )
-      paneID = try manager.openPane(
+      paneID = try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
         workingDirectory: cwd,
         initialCommand: wrapped,

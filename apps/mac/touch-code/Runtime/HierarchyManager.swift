@@ -5,6 +5,14 @@ import TouchCodeCore
 enum HierarchyError: Error, Equatable, Sendable {
   case notFound(String)
   case invariantViolation(String)
+  /// `zmx serve <paneID>` exited successfully but printed no socket
+  /// path on stdout. Indicates a daemon-side packaging regression.
+  case zmxServeNoSocketPath
+  /// `zmx serve` failed to launch or exited with a non-zero status.
+  /// `detail` is whatever stderr / spawn error the runner captured.
+  case zmxServeFailed(detail: String)
+  /// The shipped app bundle is missing the embedded `bin/zmx` resource.
+  case zmxBinaryMissing
 }
 
 /// Identifies a reorderable sidebar section under a Project. The full sidebar
@@ -1403,7 +1411,7 @@ final class HierarchyManager {
     workingDirectory: String,
     initialCommand: String?,
     env: [String: String] = [:]
-  ) throws -> PaneID {
+  ) async throws -> PaneID {
     guard
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
         worktreeID: worktreeID,
@@ -1441,7 +1449,7 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: pane, in: worktree, env: env)
+    try await runtime.ensureSurface(for: pane, in: worktree, env: env)
 
     store.scheduleSave(catalog)
     return paneID
@@ -1456,7 +1464,7 @@ final class HierarchyManager {
     workingDirectory: String,
     initialCommand: String?,
     env: [String: String] = [:]
-  ) throws -> PaneID {
+  ) async throws -> PaneID {
     guard
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
         worktreeID: worktreeID,
@@ -1485,7 +1493,7 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: newPane, in: worktree, env: env)
+    try await runtime.ensureSurface(for: newPane, in: worktree, env: env)
 
     store.scheduleSave(catalog)
     return newPaneID
@@ -1587,7 +1595,7 @@ final class HierarchyManager {
     in worktreeID: WorktreeID,
     in projectID: ProjectID,
     env: [String: String] = [:]
-  ) throws {
+  ) async throws {
     guard !runtime.hasSurface(for: paneID) else { return }
     guard
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
@@ -1608,7 +1616,7 @@ final class HierarchyManager {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: pane, in: worktree, env: env)
+    try await runtime.ensureSurface(for: pane, in: worktree, env: env)
   }
 
   func unfocusPane(

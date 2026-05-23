@@ -91,10 +91,14 @@ struct PaneActionRouterFeature {
       // Without this, HierarchyManager.createTab initialises an empty Tab
       // and the UI shows "No panes" until the user opens one manually —
       // a surprise for a keybind that asked for a working tab.
-      _ = try? hierarchyClient.openPane(
-        newTabID, address.worktreeID, address.projectID, cwd, nil
-      )
-      return .none
+      let cwdForTab = cwd
+      let worktreeID = address.worktreeID
+      let projectID = address.projectID
+      return .run { [client = hierarchyClient] _ in
+        _ = try? await client.openPane(
+          newTabID, worktreeID, projectID, cwdForTab, nil
+        )
+      }
 
     case .closeTab(.this):
       guard let address = hierarchyClient.addressOf(paneID) else { return .none }
@@ -141,23 +145,26 @@ struct PaneActionRouterFeature {
         )
       else { return .none }
       let newDir = Self.splitDirection(for: direction)
-      let newPaneID = try? hierarchyClient.splitPane(
-        paneID, newDir,
-        address.tabID, address.worktreeID, address.projectID,
-        sourcePane.workingDirectory, nil
-      )
+      let tabID = address.tabID
+      let worktreeID = address.worktreeID
+      let projectID = address.projectID
+      let cwd = sourcePane.workingDirectory
       // Match ghostty macOS controller: focus the new pane. Dispatched
       // async so the surface view has been attached to the hosting
       // window by the time `makeFirstResponder` runs — at this moment
       // the NSViewRepresentable update cycle hasn't finished yet.
-      if let newPaneID {
-        return .run { [client = hierarchyClient] _ in
-          await MainActor.run {
-            client.focusSurfaceView(newPaneID)
-          }
+      return .run { [client = hierarchyClient] _ in
+        guard
+          let newPaneID = try? await client.splitPane(
+            paneID, newDir,
+            tabID, worktreeID, projectID,
+            cwd, nil
+          )
+        else { return }
+        await MainActor.run {
+          client.focusSurfaceView(newPaneID)
         }
       }
-      return .none
 
     case .gotoSplit(let direction):
       return gotoSplit(from: paneID, direction: direction)

@@ -42,6 +42,12 @@ final class HierarchyHandlers {
         return .failed(.notFound(kind: fallbackKind, id: fallbackID.isEmpty ? message : fallbackID))
       case .invariantViolation(let message):
         return .failed(.conflict(reason: message))
+      case .zmxServeNoSocketPath:
+        return .failed(.internal("zmx serve did not report a socket path"))
+      case .zmxServeFailed(let detail):
+        return .failed(.internal("zmx serve failed: \(detail)"))
+      case .zmxBinaryMissing:
+        return .failed(.internal("zmx binary missing from app bundle"))
       }
     }
     return .failed(.internal("\(error)"))
@@ -228,7 +234,6 @@ final class HierarchyHandlers {
     }
   }
 
-
   public struct CreateTabParams: Codable, Sendable {
     public let projectID: ProjectID
     public let worktreeID: WorktreeID
@@ -273,7 +278,7 @@ final class HierarchyHandlers {
           message: "openPane requires {projectID, worktreeID, tabID, workingDirectory}", path: nil))
     }
     do {
-      let id = try manager.openPane(
+      let id = try await manager.openPane(
         in: req.tabID,
         in: req.worktreeID,
         in: req.projectID,
@@ -426,7 +431,7 @@ final class HierarchyHandlers {
         in: req.worktreeID,
         in: req.projectID
       )
-      try manager.ensurePaneSurface(
+      try await manager.ensurePaneSurface(
         req.id,
         in: req.tabID,
         in: req.worktreeID,

@@ -92,12 +92,15 @@ final class TerminalEngine {
   /// Tab — the engine uses the Tab ID in the `.paneCreated` event, so
   /// callers must add the Pane to a Tab via `HierarchyManager.openPane`
   /// (or `splitPane`) before calling this.
+  ///
+  /// `async throws` because pane bring-up first spawns a `zmx serve`
+  /// daemon and then handshakes its control socket; both steps await.
   @discardableResult
   func ensureSurface(
     for pane: Pane,
     in worktree: Worktree,
     env: [String: String] = [:]
-  ) throws -> PaneSurface {
+  ) async throws -> PaneSurface {
     guard let runtime = ghosttyRuntime else { throw SurfaceError.runtimeUnavailable }
     if let existing = runtime.surface(for: pane.id) {
       return existing
@@ -105,6 +108,17 @@ final class TerminalEngine {
     guard let tabID = tabIDForPane(pane.id) else {
       throw SurfaceError.paneHasNoTab
     }
+
+    // Spawn the zmx daemon for this pane and connect to its control
+    // socket before the libghostty surface is built — libghostty's
+    // External backend latches onto `external_pty_fd` synchronously in
+    // `ghostty_surface_new`, so the socketpair must already exist.
+    let zmxClient = try await PaneDaemonBringup.spawnDaemonAndConnect(
+      paneID: pane.id,
+      workingDirectory: pane.workingDirectory,
+      env: env
+    )
+
     // HAN-82: `ghostty_surface_new` is observed to fail transiently
     // — the user reported ~10 consecutive failures followed by a clean
     // success with no input change, suggesting an internal race that
@@ -117,16 +131,14 @@ final class TerminalEngine {
       surface = try PaneSurface(
         runtime: runtime,
         paneID: pane.id,
-        workingDirectory: pane.workingDirectory,
-        env: env
+        zmxClient: zmxClient
       )
     } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
       runtime.tick()
       surface = try PaneSurface(
         runtime: runtime,
         paneID: pane.id,
-        workingDirectory: pane.workingDirectory,
-        env: env
+        zmxClient: zmxClient
       )
     }
     runtime.register(pane: surface)
