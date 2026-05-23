@@ -49,10 +49,12 @@ struct CreateWorktreeFeature {
     var automaticBaseRef: String?
     var loadingOptions: Bool = true
 
-    // User input.
+    // User input. Seeded from the effective settings (per-project override
+    // chained to global default) so the sheet matches what Settings shows
+    // for this Project instead of always starting at false (HAN-83).
     var branchNameDraft: String = ""
     var selectedBaseRef: String?
-    var fetchOrigin: Bool = false
+    var fetchOrigin: Bool = true
     var copyIgnored: Bool = false
     var copyUntracked: Bool = false
 

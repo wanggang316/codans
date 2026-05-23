@@ -289,6 +289,7 @@ nonisolated struct SettingsWriter: Sendable {
     case worktreeBaseRef(String?)
     case copyIgnoredOnWorktreeCreate(Bool?)
     case copyUntrackedOnWorktreeCreate(Bool?)
+    case fetchRemoteOnWorktreeCreate(Bool?)
     case defaultMergeStrategy(MergeStrategy?)
     case postMergeAction(MergedWorktreeAction?)
     case githubDisabled(Bool)
@@ -370,6 +371,8 @@ extension SettingsWriter {
               git.copyIgnoredOnWorktreeCreate = value
             case .copyUntrackedOnWorktreeCreate(let value):
               git.copyUntrackedOnWorktreeCreate = value
+            case .fetchRemoteOnWorktreeCreate(let value):
+              git.fetchRemoteOnWorktreeCreate = value
             case .defaultMergeStrategy(let value):
               git.defaultMergeStrategy = value
             case .postMergeAction(let value):

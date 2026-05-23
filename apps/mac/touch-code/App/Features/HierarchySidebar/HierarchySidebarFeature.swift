@@ -516,17 +516,33 @@ struct HierarchySidebarFeature {
       else { return .none }
       let settingsSnapshot = settingsWriter.readSnapshotSync()
       let projectSettings = settingsSnapshot.projects[projectID]
-      let defaultWtDir = settingsSnapshot.worktree.resolveBaseDirectory(
+      let globalWorktree = settingsSnapshot.worktree
+      let defaultWtDir = globalWorktree.resolveBaseDirectory(
         forProjectName: project.name,
         projectOverride: projectSettings?.worktreesDirectory
       )
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count
+      // HAN-83: seed the sheet toggles from the effective settings so the
+      // checkboxes match what the user pinned in Project Settings → Worktree
+      // (with the global Worktree pane as the fallback). Each per-project
+      // override is `nil` = inherit; if both are unset the value falls back
+      // to the global default.
+      let projectGit = projectSettings?.git
+      let copyIgnoredDefault =
+        projectGit?.copyIgnoredOnWorktreeCreate ?? globalWorktree.copyIgnoredOnCreate
+      let copyUntrackedDefault =
+        projectGit?.copyUntrackedOnWorktreeCreate ?? globalWorktree.copyUntrackedOnCreate
+      let fetchOriginDefault =
+        projectGit?.fetchRemoteOnWorktreeCreate ?? globalWorktree.fetchRemoteOnCreate
       state.createWorktreeSheet = CreateWorktreeFeature.State(
         projectID: projectID,
         repoRoot: URL(fileURLWithPath: gitRoot),
         worktreesDirectory: defaultWtDir,
         currentPendingCountForProject: pendingCount,
-        baseRefOverride: projectSettings?.git?.worktreeBaseRef
+        baseRefOverride: projectGit?.worktreeBaseRef,
+        fetchOrigin: fetchOriginDefault,
+        copyIgnored: copyIgnoredDefault,
+        copyUntracked: copyUntrackedDefault
       )
       return .none
 

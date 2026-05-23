@@ -60,7 +60,7 @@ struct CreateWorktreeSheet: View {
 
       VStack(alignment: .leading, spacing: 6) {
         Toggle(
-          "Fetch origin before creating",
+          "Fetch origin before creating worktree",
           isOn: Binding(
             get: { store.fetchOrigin },
             set: { store.send(.fetchOriginToggled($0)) }

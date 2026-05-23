@@ -95,6 +95,11 @@ struct ProjectGeneralSettingsView: View {
       Task { await setter(projectID, .copyUntrackedOnWorktreeCreate(value)) }
     }
 
+    func writeFetchRemote(_ value: Bool?) {
+      let setter = writer.setProjectGitField
+      Task { await setter(projectID, .fetchRemoteOnWorktreeCreate(value)) }
+    }
+
     func writeMergeStrategy(_ value: MergeStrategy?) {
       let setter = writer.setProjectGitField
       Task { await setter(projectID, .defaultMergeStrategy(value)) }
@@ -329,6 +334,11 @@ struct ProjectGeneralSettingsView: View {
       worktreeBaseRefPicker
 
       TriStateOverrideToggle(
+        title: "Fetch remote before creating worktree",
+        selection: fetchRemoteBinding,
+        inheritedValue: settingsStore.settings.worktree.fetchRemoteOnCreate
+      )
+      TriStateOverrideToggle(
         title: "Copy .gitignore'd files",
         selection: copyIgnoredBinding,
         inheritedValue: settingsStore.settings.worktree.copyIgnoredOnCreate
@@ -440,6 +450,13 @@ struct ProjectGeneralSettingsView: View {
     Binding(
       get: { entry?.git?.copyUntrackedOnWorktreeCreate },
       set: { routes.writeCopyUntracked($0) }
+    )
+  }
+
+  private var fetchRemoteBinding: Binding<Bool?> {
+    Binding(
+      get: { entry?.git?.fetchRemoteOnWorktreeCreate },
+      set: { routes.writeFetchRemote($0) }
     )
   }
 

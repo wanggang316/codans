@@ -47,7 +47,7 @@ struct SettingsWorktreeView: View {
         }
 
         Toggle(
-          "Fetch remote before creating",
+          "Fetch remote before creating worktree",
           isOn: fetchRemoteBinding
         )
       }
