@@ -1123,7 +1123,8 @@ private struct ProjectHeaderRow: View {
   @State private var isMenuHovering = false
 
   var body: some View {
-    let hasUnread = rollup?.current.unreadProjects.contains(project.id) == true
+    let hasUnread =
+      rollup?.current.unreadProjects.contains(project.id) == true
       && settingsStore.settings.notifications.projectBellEnabled
     HStack(spacing: 6) {
       // L4 unread indicator. When the project is in `unreadProjects`
