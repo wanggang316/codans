@@ -26,7 +26,7 @@ struct HierarchyHandlersCreateWorktreeTests {
   }
 
   @Test
-  func defaultPathFallsBackToTouchCodeRepos() async throws {
+  func defaultPathFallsBackToSystemDefaultWhenNoGlobalOrOverride() async throws {
     let fixture = Self.makeFixture()
     let params = try JSONValue.encoded(
       HierarchyHandlers.CreateWorktreeParams(
@@ -44,6 +44,48 @@ struct HierarchyHandlersCreateWorktreeTests {
       NSHomeDirectory() + "/.touch-code/repos/repo/feature/login"
     )
     #expect(result.path == expected)
+  }
+
+  @Test
+  func defaultPathHonoursGlobalDefault() async throws {
+    let fixture = Self.makeFixture(globalWorktreesDirectory: "/global/wt-base")
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID,
+        name: "feature",
+        path: nil,
+        branch: "feature"
+      )
+    )
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    // Global base appends `<projectName>/<sanitizedBranch>`.
+    let expected = HierarchyManager.canonicalPath("/global/wt-base/repo/feature")
+    #expect(result.path == expected)
+  }
+
+  @Test
+  func projectOverrideWinsOverGlobalDefault() async throws {
+    let fixture = Self.makeFixture(
+      globalWorktreesDirectory: "/global/wt-base",
+      worktreesDirectoryOverride: "/custom/wt-base"
+    )
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID,
+        name: "feature",
+        path: nil,
+        branch: "feature"
+      )
+    )
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    // Project override is verbatim — projectName is NOT re-appended on top.
+    #expect(result.path == HierarchyManager.canonicalPath("/custom/wt-base/feature"))
   }
 
   @Test
@@ -106,6 +148,7 @@ struct HierarchyHandlersCreateWorktreeTests {
   }
 
   private static func makeFixture(
+    globalWorktreesDirectory: String? = nil,
     worktreesDirectoryOverride: String? = nil
   ) -> Fixture {
     let projectID = ProjectID()
@@ -123,6 +166,7 @@ struct HierarchyHandlersCreateWorktreeTests {
       runtime: FakeHierarchyRuntime()
     )
     var settings = Settings()
+    settings.worktree.defaultWorktreesDirectory = globalWorktreesDirectory
     if let override = worktreesDirectoryOverride {
       settings.projects[projectID] = ProjectSettings(worktreesDirectory: override)
     }

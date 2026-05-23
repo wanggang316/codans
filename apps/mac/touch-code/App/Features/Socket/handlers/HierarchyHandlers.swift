@@ -159,10 +159,11 @@ final class HierarchyHandlers {
   public struct CreateWorktreeParams: Codable, Sendable {
     public let projectID: ProjectID
     public let name: String
-    /// Optional. When nil, the daemon derives the worktree path from the
-    /// project's configured `worktreesDirectory` (or the
-    /// `~/.touch-code/repos/<projectName>` fallback) plus the sanitized
-    /// branch name — mirroring the GUI's Create Worktree sheet (HAN-81).
+    /// Optional. When nil, the daemon resolves the base directory through
+    /// `WorktreeSettings.resolveBaseDirectory` (per-project override → global
+    /// `defaultWorktreesDirectory` → system fallback) and appends the
+    /// sanitized branch name — mirroring the GUI's Create Worktree sheet
+    /// (HAN-81).
     public let path: String?
     public let branch: String?
   }
@@ -192,9 +193,10 @@ final class HierarchyHandlers {
       guard let project = manager.catalog.projects.first(where: { $0.id == req.projectID }) else {
         return .failed(.notFound(kind: "project", id: req.projectID.description))
       }
-      let baseDirectory = Self.defaultWorktreesDirectory(
-        for: project,
-        settings: settingsProvider()
+      let settings = settingsProvider()
+      let baseDirectory = settings.worktree.resolveBaseDirectory(
+        forProjectName: project.name,
+        projectOverride: settings.projects[project.id]?.worktreesDirectory
       )
       let sanitized = GitWorktreeClient.sanitizeBranchName(branch)
       guard !sanitized.isEmpty else {
@@ -220,18 +222,6 @@ final class HierarchyHandlers {
     }
   }
 
-  /// Mirrors `HierarchySidebarFeature.projectAddWorktreeTapped`: an explicit
-  /// per-Project `worktreesDirectory` override wins; otherwise fall back to
-  /// `~/.touch-code/repos/<projectName>`.
-  static func defaultWorktreesDirectory(for project: Project, settings: Settings) -> URL {
-    if let override = settings.projects[project.id]?.worktreesDirectory,
-      !override.isEmpty
-    {
-      return URL(fileURLWithPath: override)
-    }
-    return URL(fileURLWithPath: NSHomeDirectory())
-      .appending(path: ".touch-code/repos/\(project.name)")
-  }
 
   public struct CreateTabParams: Codable, Sendable {
     public let projectID: ProjectID

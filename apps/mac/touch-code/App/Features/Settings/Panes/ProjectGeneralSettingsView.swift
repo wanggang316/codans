@@ -384,11 +384,15 @@ struct ProjectGeneralSettingsView: View {
 
   /// Fallback shown when the project has no `worktreesDirectory` override —
   /// matches the runtime fallback computed in `HierarchySidebarFeature` when
-  /// opening the Create Worktree sheet.
+  /// opening the Create Worktree sheet. Routes through
+  /// `WorktreeSettings.resolveBaseDirectory` so the inherited preview tracks
+  /// any change to the global default.
   private var defaultWorktreesDirectory: String {
     let projectName =
       hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.name ?? "<project>"
-    return NSHomeDirectory() + "/.touch-code/repos/\(projectName)"
+    return settingsStore.settings.worktree
+      .resolveBaseDirectory(forProjectName: projectName, projectOverride: nil)
+      .path(percentEncoded: false)
   }
 
   /// Dropdown for the per-Project Worktree base ref. `nil` = inherit (use
