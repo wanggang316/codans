@@ -2,9 +2,9 @@ import Foundation
 import Testing
 import tcKit
 
+@testable import TouchCode
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import TouchCode
 
 /// End-to-end integration tests: a real `RPCClient` (with its pipelined
 /// handshake, inbound-pump actor, and typed Codable decode) driving a
