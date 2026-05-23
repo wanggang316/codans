@@ -244,19 +244,32 @@ private struct InboxRowView: View {
             .foregroundStyle(entry.isUnread ? Color.primary : Color.secondary)
             .lineLimit(2)
             .frame(maxWidth: .infinity, alignment: .leading)
+          // Hover-only nav cue: dimmed-zero by default, fades in and
+          // slides 3 pt right while the cursor is over the row.
+          // Suppressed on read rows since they're not navigable
+          // (HAN-56).
+          if entry.isUnread {
+            Image(systemName: "arrow.right")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+              .opacity(isHovering ? 0.9 : 0)
+              .offset(x: isHovering ? 3 : 0)
+              .animation(.easeInOut(duration: 0.15), value: isHovering)
+              .accessibilityHidden(true)
+          }
         }
 
         HStack(spacing: 6) {
           if let breadcrumb, !breadcrumb.isEmpty {
             Text(breadcrumb)
-              .font(.caption2)
+              .font(.system(size: 10))
               .foregroundStyle(.secondary)
               .lineLimit(1)
               .truncationMode(.middle)
           }
           Spacer(minLength: 6)
           Text(relativeAge)
-            .font(.caption2)
+            .font(.system(size: 10))
             .foregroundStyle(.secondary)
         }
         .padding(.leading, Self.dotColumnWidth)
