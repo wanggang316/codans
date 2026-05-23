@@ -42,6 +42,16 @@ struct SettingsGeneralView: View {
     )
   }
 
+  /// Toggle binding for the M3 "resume vs. snapshot on quit" knob. Matches the surrounding
+  /// SettingsStore binding pattern — `get` reads `settings.general`, `set` goes through the
+  /// dedicated setter so the debounced atomic write fires.
+  private var resumePanesOnLaunchBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.resumePanesOnLaunch },
+      set: { settingsStore.setResumePanesOnLaunch($0) }
+    )
+  }
+
   /// Settings → General → Default Git Viewer binding. `nil` means "use the in-app
   /// Git Viewer overlay"; any other id names an installed git client from
   /// `EditorRegistry.gitClientPriority` that should open instead when the user
@@ -82,6 +92,14 @@ struct SettingsGeneralView: View {
             onJumpToTerminal()
             return .handled
           }
+        )
+      }
+
+      Section {
+        Toggle("Resume panes on launch", isOn: resumePanesOnLaunchBinding)
+      } footer: {
+        Text(
+          "Keep terminal panes running after quit so they resume where you left off."
         )
       }
 

@@ -65,6 +65,42 @@ struct SettingsCodableTests {
     }
   }
 
+  /// `general.resumePanesOnLaunch` defaults to `true` so unconfigured users land on the
+  /// M2 live-resume tier; the M3 snapshot-quit path only engages when the user opts out.
+  @Test
+  func resumePanesOnLaunchDefaultsToTrue() {
+    #expect(GeneralSettings.default.resumePanesOnLaunch == true)
+    #expect(Settings.default.general.resumePanesOnLaunch == true)
+  }
+
+  /// Encoding and decoding the field round-trips both states.
+  @Test
+  func resumePanesOnLaunchRoundTrips() throws {
+    for value in [true, false] {
+      var original = Settings.default
+      original.general.resumePanesOnLaunch = value
+      let data = try JSONEncoder.touchCodeDefault.encode(original)
+      let decoded = try JSONDecoder.touchCodeDefault.decode(Settings.self, from: data)
+      #expect(decoded.general.resumePanesOnLaunch == value)
+    }
+  }
+
+  /// Settings files written before this field existed must decode with `resumePanesOnLaunch`
+  /// defaulted to `true` — the M3 toggle is opt-out, not opt-in.
+  @Test
+  func resumePanesOnLaunchMissingKeyDecodesToTrue() throws {
+    let json = """
+      {
+        "version": 3,
+        "general": {
+          "appearance": "system"
+        }
+      }
+      """
+    let decoded = try JSONDecoder.touchCodeDefault.decode(Settings.self, from: Data(json.utf8))
+    #expect(decoded.general.resumePanesOnLaunch == true)
+  }
+
   /// Verifies `projects` serialises as a JSON object keyed by UUID string, not as the
   /// array-of-pairs layout JSONEncoder falls back to for non-String-keyed dictionaries. This
   /// is the on-disk invariant design §Data Storage relies on for hand-editability.

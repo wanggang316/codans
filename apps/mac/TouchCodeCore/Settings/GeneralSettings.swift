@@ -39,6 +39,13 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// `updatesAutomaticallyCheckForUpdates` is also true.
   public var updatesAutomaticallyDownloadUpdates: Bool
 
+  /// Whether terminal panes resume across app launches. Default `true`. When true (M2 live
+  /// tier) cmd-Q leaves daemons running and the next launch reattaches the live PTYs. When
+  /// false (M3 snapshot tier) quit serializes each pane's VT state and tears down the
+  /// daemons; relaunch restores the visual buffer into a fresh shell. Legacy settings files
+  /// without this key decode to `true` via `decodeIfPresent`.
+  public var resumePanesOnLaunch: Bool
+
   public init(
     appearance: AppearancePreference = .system,
     defaultEditorID: EditorID? = nil,
@@ -48,7 +55,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updateChannel: UpdateChannel = .stable,
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
-    updatesAutomaticallyDownloadUpdates: Bool = false
+    updatesAutomaticallyDownloadUpdates: Bool = false,
+    resumePanesOnLaunch: Bool = true
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -59,6 +67,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updateCheckInterval = updateCheckInterval
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
+    self.resumePanesOnLaunch = resumePanesOnLaunch
   }
 
   public static let `default` = GeneralSettings()
@@ -67,6 +76,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
+    case resumePanesOnLaunch
   }
 
   public init(from decoder: Decoder) throws {
@@ -87,5 +97,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyCheckForUpdates) ?? true
     self.updatesAutomaticallyDownloadUpdates =
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyDownloadUpdates) ?? false
+    // Default-on: legacy files (and the common case) want panes to resume across launches.
+    // The M3 snapshot-quit path only engages when the user explicitly disables this.
+    self.resumePanesOnLaunch =
+      try container.decodeIfPresent(Bool.self, forKey: .resumePanesOnLaunch) ?? true
   }
 }
