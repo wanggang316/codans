@@ -62,6 +62,15 @@ final class TerminalEngine {
   /// fresh daemon.
   private var pendingReattach: [PaneID: Session] = [:]
 
+  /// Snapshot files left by the previous quit's snapshot tier (M3.T3.2).
+  /// Consumed at most once per paneID: the first `ensureSurface` call
+  /// for a snapshot entry diverts to `PaneDaemonBringup.restore`, which
+  /// spawns a fresh daemon with `--restore-from` so the VT mirror
+  /// pre-fills with the saved bytes before the shell starts. The
+  /// `.snap` file is deleted on a successful restore — a later
+  /// recreate falls through to a vanilla spawn.
+  private var pendingRestore: [PaneID: URL] = [:]
+
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
   private var crashRings: [PaneID: [Date]] = [:]
@@ -100,8 +109,15 @@ final class TerminalEngine {
   /// HierarchyManager-driven pane bring-up.
   func seedReattachableSessions(_ states: [PaneID: SessionState]) {
     for (paneID, state) in states {
-      if case .alive(let session) = state {
+      switch state {
+      case .alive(let session):
         pendingReattach[paneID] = session
+      case .snapshot(let url):
+        pendingRestore[paneID] = url
+      case .dead:
+        // No live daemon and no snapshot — let `ensureSurface` take the
+        // standard spawn path.
+        continue
       }
     }
   }
@@ -130,17 +146,30 @@ final class TerminalEngine {
       throw SurfaceError.paneHasNoTab
     }
 
-    // Either reattach to a daemon the previous touch-code process left
-    // alive (catalog row pre-vetted by `SessionReaper.sweep`) or spawn a
-    // fresh `zmx serve` and connect to its control socket. Either way
-    // the socketpair must exist before `ghostty_surface_new`, because
-    // libghostty's External backend latches onto `external_pty_fd`
-    // synchronously inside that call.
+    // Three possible bringup paths, picked by the launch-time reaper:
+    //   1. `.alive` → reattach to a daemon the previous process left
+    //      running (live tier, M2.T2.2). The catalog row was pre-vetted
+    //      via `connect(2)` so we trust the recorded socket.
+    //   2. `.snapshot` → spawn a fresh daemon with `--restore-from`
+    //      pointed at the captured `.snap` (snapshot tier, M3.T3.3).
+    //      The VT mirror pre-fills with the saved buffer before the
+    //      shell starts; the snapshot file is consumed on success.
+    //   3. Neither → standard spawn of a brand-new daemon.
+    // Either way the socketpair must exist before `ghostty_surface_new`,
+    // because libghostty's External backend latches onto
+    // `external_pty_fd` synchronously inside that call.
     let zmxClient: ZmxClient
     if let session = pendingReattach.removeValue(forKey: pane.id) {
       zmxClient = try await PaneDaemonBringup.reattach(
         paneID: pane.id,
         session: session
+      )
+    } else if let snapshotURL = pendingRestore.removeValue(forKey: pane.id) {
+      zmxClient = try await PaneDaemonBringup.restore(
+        paneID: pane.id,
+        workingDirectory: pane.workingDirectory,
+        snapshotURL: snapshotURL,
+        env: env
       )
     } else {
       zmxClient = try await PaneDaemonBringup.spawnDaemonAndConnect(

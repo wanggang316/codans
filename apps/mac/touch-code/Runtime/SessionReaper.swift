@@ -7,10 +7,14 @@ import os.log
 /// daemon whose Unix control socket responded to `connect(2)` within the
 /// probe timeout; `.dead` entries are catalog rows whose socket is gone
 /// or rejected our probe, and are removed from `sessions.json` as part
-/// of the same sweep.
+/// of the same sweep. `.snapshot` entries name a paneID for which a
+/// `<paneID>.snap` file exists in the canonical snapshot directory but
+/// no live daemon was found — set by M3.T3.2's quit-time snapshot tier
+/// when the "Resume panes on launch" toggle is off.
 public enum SessionState: Sendable, Equatable {
   case alive(Session)
   case dead(Session)
+  case snapshot(URL)
 }
 
 /// Launch-time companion to `SessionLifecycle`. Reads the persisted
@@ -34,10 +38,12 @@ public final class SessionReaper {
   private static let probeTimeoutMS: Int32 = 200
 
   private let sessionStore: SessionStore
+  private let snapshotDirectory: URL
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.reaper")
 
-  public init(sessionStore: SessionStore) {
+  public init(sessionStore: SessionStore, snapshotDirectory: URL? = nil) {
     self.sessionStore = sessionStore
+    self.snapshotDirectory = snapshotDirectory ?? PaneDaemonBringup.canonicalSnapshotDirectory()
   }
 
   /// Read the on-disk catalog, probe every entry, and return per-paneID
@@ -52,9 +58,6 @@ public final class SessionReaper {
   /// an empty map without throwing.
   public func sweep() throws -> [PaneID: SessionState] {
     var catalog = try sessionStore.load()
-    if catalog.sessions.isEmpty {
-      return [:]
-    }
 
     var states: [PaneID: SessionState] = [:]
     var deadKeys: [String] = []
@@ -91,7 +94,65 @@ public final class SessionReaper {
       }
     }
 
+    // M3.T3.3 snapshot fallback: every `<paneID>.snap` file in the
+    // canonical snapshot directory becomes a `.snapshot` state unless
+    // the paneID already has a live daemon (in which case the snap is
+    // stale and is unlinked). Snapshots and live daemons co-existing
+    // for the same paneID would have meant the toggle was flipped from
+    // off → on between two quits without a relaunch in between; the
+    // live daemon wins, and the snap is dropped.
+    mergeSnapshotsIntoStates(&states)
+
     return states
+  }
+
+  /// Scan `snapshotDirectory` for `<uuid>.snap` files and merge them
+  /// into the per-paneID state map. Stale snapshots whose paneID is
+  /// already `.alive` are deleted from disk so a future sweep does not
+  /// re-discover them. Missing-directory and any other I/O failure are
+  /// non-fatal: we simply produce no extra entries.
+  private func mergeSnapshotsIntoStates(_ states: inout [PaneID: SessionState]) {
+    let fm = FileManager.default
+    let dirPath = snapshotDirectory.path
+    guard fm.fileExists(atPath: dirPath) else { return }
+    let contents: [URL]
+    do {
+      contents = try fm.contentsOfDirectory(
+        at: snapshotDirectory,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+      )
+    } catch {
+      logger.error(
+        "Failed to scan snapshot directory \(dirPath, privacy: .public): \(String(describing: error), privacy: .public)"
+      )
+      return
+    }
+
+    for url in contents where url.pathExtension == "snap" {
+      let stem = url.deletingPathExtension().lastPathComponent
+      guard let uuid = UUID(uuidString: stem) else { continue }
+      let paneID = PaneID(raw: uuid)
+      switch states[paneID] {
+      case .alive:
+        // Live daemon trumps a stale snapshot. The live tier on the next
+        // quit will produce a fresh catalog row; the snap from the
+        // previous snapshot-tier quit is no longer the source of truth.
+        do {
+          try fm.removeItem(at: url)
+        } catch {
+          logger.warning(
+            "Failed to remove stale snapshot \(url.path, privacy: .public): \(String(describing: error), privacy: .public)"
+          )
+        }
+      case .dead, .none:
+        states[paneID] = .snapshot(url)
+      case .snapshot:
+        // Already set (shouldn't happen — uuid is unique within a scan)
+        // but guard against duplicates rather than overwriting silently.
+        continue
+      }
+    }
   }
 
   /// Synchronous `connect(2)` probe against a Unix domain socket. Uses

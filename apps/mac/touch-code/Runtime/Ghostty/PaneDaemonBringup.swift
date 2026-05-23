@@ -19,6 +19,30 @@ enum PaneDaemonBringup {
     category: "runtime.zmx.bringup"
   )
 
+  /// Canonical zmx `ZMX_DIR`. The daemon places its control socket here
+  /// and writes snapshots into `<ZMX_DIR>/snapshots/<paneID>.snap`. We
+  /// pin this to `~/Library/Caches/touch-code` so the snapshot path the
+  /// daemon produces lines up byte-for-byte with `ZmxClient.snapshotURL`
+  /// and `SessionReaper`'s launch-time scan — without a pin, zmx falls
+  /// back to `$TMPDIR/zmx-<uid>` (or `$XDG_RUNTIME_DIR/zmx`) which would
+  /// scatter snapshots somewhere the reaper has no reason to look.
+  static func canonicalSocketDirectory() -> URL {
+    let fm = FileManager.default
+    let base =
+      (try? fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false))
+      ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
+    return base.appendingPathComponent("touch-code", isDirectory: true)
+  }
+
+  /// Directory the daemon writes `<paneID>.snap` into when `.Snapshot`
+  /// fires. Mirrors `ZmxClient.defaultSnapshotDirectory()` so a snapshot
+  /// produced by the daemon at quit-time is the same file the reaper
+  /// finds at launch-time. Kept here (rather than re-derived in
+  /// `SessionReaper`) so the canonical path has one owner.
+  static func canonicalSnapshotDirectory() -> URL {
+    canonicalSocketDirectory().appendingPathComponent("snapshots", isDirectory: true)
+  }
+
   /// Look up the embedded zmx binary, spawn `zmx serve <paneID>`, parse
   /// its stdout for the daemon socket path, and return a connected
   /// `ZmxClient`. Throws if the binary is missing, the spawn fails, or
@@ -28,19 +52,84 @@ enum PaneDaemonBringup {
     workingDirectory: String,
     env: [String: String]
   ) async throws -> ZmxClient {
+    return try await spawn(
+      paneID: paneID,
+      workingDirectory: workingDirectory,
+      env: env,
+      extraArguments: []
+    )
+  }
+
+  /// Spawn `zmx serve <paneID> --cwd <cwd> --restore-from <snap>` so the
+  /// daemon pre-fills its VT mirror with the captured buffer before the
+  /// shell starts. The shell itself is a fresh fork+exec — only the
+  /// visible terminal state is reproduced. The snapshot file is
+  /// consumed on success: a successful restore deletes the `.snap` so a
+  /// later launch does not re-replay stale state.
+  static func restore(
+    paneID: PaneID,
+    workingDirectory: String,
+    snapshotURL: URL,
+    env: [String: String] = [:]
+  ) async throws -> ZmxClient {
+    let client = try await spawn(
+      paneID: paneID,
+      workingDirectory: workingDirectory,
+      env: env,
+      extraArguments: ["--restore-from", snapshotURL.path]
+    )
+    // Single-use restore — drop the file once the daemon has it. Best
+    // effort: if the unlink fails, the next launch will replay the same
+    // bytes into a fresh daemon, which is recoverable (the user sees
+    // their buffer again, just like a re-quit) rather than catastrophic.
+    do {
+      try FileManager.default.removeItem(at: snapshotURL)
+    } catch {
+      logger.warning(
+        "failed to remove consumed snapshot \(snapshotURL.path, privacy: .public): \(String(describing: error), privacy: .public)"
+      )
+    }
+    return client
+  }
+
+  /// Common spawn helper. `extraArguments` is appended after the
+  /// `--cwd <path>` pair so callers can opt in to `--restore-from <file>`
+  /// without reimplementing the stdout-parse / ZmxClient handshake.
+  private static func spawn(
+    paneID: PaneID,
+    workingDirectory: String,
+    env: [String: String],
+    extraArguments: [String]
+  ) async throws -> ZmxClient {
     let binaryURL = try zmxBinaryURL()
     let cwdURL = URL(fileURLWithPath: workingDirectory)
 
     // Merge the caller-provided env over the inherited process env so
     // Project-defined env vars (M8) reach the spawned shell while
-    // keeping PATH / HOME / TERM defaults intact.
+    // keeping PATH / HOME / TERM defaults intact. `ZMX_DIR` is pinned
+    // last so callers cannot accidentally redirect the daemon out of
+    // touch-code's canonical cache directory — snapshot path alignment
+    // depends on this being authoritative.
     var mergedEnv = ProcessInfo.processInfo.environment
     for (key, value) in env { mergedEnv[key] = value }
+    let zmxDir = canonicalSocketDirectory()
+    mergedEnv["ZMX_DIR"] = zmxDir.path
+    // zmx's mkdir helper is non-recursive (`mkdirat`), so the parent
+    // chain must already exist before the daemon attempts to create
+    // the socket file. `~/Library/Caches` is always present on macOS;
+    // `touch-code/` underneath it may not be on first launch.
+    try? FileManager.default.createDirectory(
+      at: zmxDir,
+      withIntermediateDirectories: true
+    )
+
+    var arguments = ["serve", paneID.raw.uuidString, "--cwd", workingDirectory]
+    arguments.append(contentsOf: extraArguments)
 
     let runner = FoundationCommandRunner()
     let outcome = await runner.run(
       executable: binaryURL,
-      arguments: ["serve", paneID.raw.uuidString, "--cwd", workingDirectory],
+      arguments: arguments,
       env: mergedEnv,
       cwd: cwdURL,
       // `zmx serve` daemonizes promptly after printing the socket path on

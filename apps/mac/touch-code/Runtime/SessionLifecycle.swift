@@ -18,6 +18,7 @@ final class SessionLifecycle {
   private let manager: HierarchyManager
   private let ghosttyRuntime: GhosttyRuntime?
   private let sessionStore: SessionStore
+  private let settingsStore: SettingsStore
   private let now: () -> Date
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.lifecycle")
 
@@ -25,11 +26,13 @@ final class SessionLifecycle {
     manager: HierarchyManager,
     ghosttyRuntime: GhosttyRuntime?,
     sessionStore: SessionStore,
+    settingsStore: SettingsStore,
     now: @escaping () -> Date = Date.init
   ) {
     self.manager = manager
     self.ghosttyRuntime = ghosttyRuntime
     self.sessionStore = sessionStore
+    self.settingsStore = settingsStore
     self.now = now
   }
 
@@ -51,6 +54,17 @@ final class SessionLifecycle {
       return
     }
 
+    if settingsStore.settings.general.resumePanesOnLaunch {
+      detachLiveTier(liveClients)
+    } else {
+      snapshotTier(liveClients)
+    }
+  }
+
+  /// Live tier (M2.T2.1): persist each daemon's catalog row, then send
+  /// `.Detach` so the daemons survive the app's exit. The next launch
+  /// re-`connect(2)`s the recorded sockets in `SessionReaper.sweep`.
+  private func detachLiveTier(_ liveClients: [ZmxClient]) {
     let stamp = now()
     var sessions: [String: Session] = [:]
     sessions.reserveCapacity(liveClients.count)
@@ -72,6 +86,86 @@ final class SessionLifecycle {
     for client in liveClients {
       client.detach()
     }
+  }
+
+  /// Snapshot tier (M3.T3.2): send `.Snapshot` to each daemon, which
+  /// serializes its VT mirror to `<paneID>.snap` and exits. The catalog
+  /// is written empty so a previous live-tier quit's rows do not trick
+  /// the reaper into probing dead sockets — the only state worth
+  /// resurrecting on the next launch lives in the `.snap` files.
+  ///
+  /// Each `.Snapshot` is run synchronously with a per-client deadline
+  /// so a hung daemon cannot block `willTerminate` indefinitely. A
+  /// per-client failure is logged and the loop continues — losing one
+  /// pane's snapshot is preferable to dropping the rest of them.
+  private func snapshotTier(_ liveClients: [ZmxClient]) {
+    for client in liveClients {
+      do {
+        _ = try synchronousSnapshot(client: client)
+      } catch {
+        logger.error(
+          "snapshot failed for pane \(client.paneID, privacy: .public): \(String(describing: error), privacy: .public)"
+        )
+      }
+    }
+    // Reset the catalog so a prior live-tier write does not survive into
+    // the next launch's `SessionReaper.sweep` — the daemons it would
+    // reference are now gone. Snapshot-tier resume keys off the `.snap`
+    // files instead.
+    persist(catalog: SessionCatalog(version: SessionCatalog.currentVersion, sessions: [:]))
+  }
+
+  /// Synchronous bridge to `ZmxClient.snapshot()`. `willTerminate` runs
+  /// on the main actor and `ZmxClient.snapshot()` is itself MainActor-
+  /// isolated, so we cannot simply block on a `DispatchSemaphore` —
+  /// that would deadlock the actor before the daemon's `EOF` callback
+  /// can hop back onto it. Instead, kick off the async call inside a
+  /// `Task { @MainActor }` and spin `RunLoop.main` in `.default` mode
+  /// until either the Task completes (`result.value` becomes non-nil)
+  /// or the per-client budget elapses. Spinning the runloop keeps the
+  /// MainActor servicing background hops (the read loop's EOF handoff,
+  /// the continuation resume) so the snapshot can actually finish.
+  private func synchronousSnapshot(client: ZmxClient) throws -> URL {
+    let result = SnapshotResult()
+    Task { @MainActor in
+      do {
+        let url = try await client.snapshot()
+        result.value = .success(url)
+      } catch {
+        result.value = .failure(error)
+      }
+    }
+    let deadline = Date().addingTimeInterval(Self.snapshotTimeoutSeconds)
+    while result.value == nil && Date() < deadline {
+      // Service one batch of pending events on the main runloop. Capped
+      // at 50 ms so a stalled snapshot is still bounded by the outer
+      // deadline rather than parking inside Foundation indefinitely.
+      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    switch result.value {
+    case .success(let url): return url
+    case .failure(let error): throw error
+    case .none: throw SnapshotError.timedOut(paneID: client.paneID)
+    }
+  }
+
+  /// 5 s per-client budget for the `.Snapshot` round-trip, expressed
+  /// as a `TimeInterval` so it composes with the `Date()`-based runloop
+  /// spin in `synchronousSnapshot`.
+  private static let snapshotTimeoutSeconds: TimeInterval = 5.0
+
+  /// Internal error surfaced when the per-client snapshot budget
+  /// elapses without the daemon completing the `.Snapshot` round-trip.
+  private enum SnapshotError: Error {
+    case timedOut(paneID: PaneID)
+  }
+
+  /// Reference-shaped one-shot holder so the Task callback can publish
+  /// its outcome to the runloop-spinning waiter without crossing actor
+  /// isolation on a captured `var`. MainActor-confined writes + reads.
+  @MainActor
+  private final class SnapshotResult {
+    var value: Result<URL, Error>?
   }
 
   /// Walk the catalog top-down and pull out every `ZmxClient` whose pane

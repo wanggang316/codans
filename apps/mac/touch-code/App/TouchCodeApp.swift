@@ -834,7 +834,8 @@ final class AppState {
     self.sessionLifecycle = SessionLifecycle(
       manager: hierarchyManager,
       ghosttyRuntime: ghostty,
-      sessionStore: sessionStore
+      sessionStore: sessionStore,
+      settingsStore: settingsStore
     )
 
     let reaper = SessionReaper(sessionStore: sessionStore)
