@@ -291,13 +291,13 @@ private struct InboxRowView: View {
   /// Read state has no leading glyph (a check-shape next to a row reads
   /// as "this is done/read" and conflicts with the unread row case).
   /// Unread state shows a filled dot whose colour mirrors the kind:
-  /// orange for waitingForInput (more urgent), yellow for taskFinished
-  /// (matches the bell glyph theme).
+  /// orange for waitingForInput (more urgent), green for taskFinished
+  /// (a completion signal — matches macOS' "ok / done" semantics).
   @ViewBuilder
   private var unreadDot: some View {
     if entry.isUnread {
       Circle()
-        .fill(entry.kind == .waitingForInput ? Color.orange : Color.yellow)
+        .fill(entry.kind == .waitingForInput ? Color.orange : Color.green)
         .accessibilityLabel(entry.kind == .waitingForInput ? "Waiting for input" : "Unread")
     } else {
       Color.clear
