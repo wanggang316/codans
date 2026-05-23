@@ -5,23 +5,23 @@ import TouchCodeCore
 /// ActiveAgents panel anchored at the sidebar's bottom safe-area inset.
 ///
 /// Visual brief (per design pass):
-/// - Rounded top corners (8pt) — the panel reads as a card pinned to
-///   the sidebar floor.
-/// - Background uses `controlBackgroundColor` so it adapts naturally
-///   to the active appearance (a light grey in light mode and a soft
-///   dark grey in dark mode — the inverse-of-content fill macOS uses
-///   for "tray over chrome" surfaces).
-/// - Capsule drag handle at the top. Hovering it swaps the cursor to
-///   `resizeUpDown` so the affordance is discoverable without label.
+/// - Rounded top corners (10pt) — `.regularMaterial` background drawn
+///   inside the rounded shape so the corner contour reads against the
+///   sidebar's native chrome material instead of blending with it.
+/// - Header carries no chrome by default: the title sits on top of the
+///   panel directly. A capsule resize handle fades in only when the
+///   cursor enters a narrow strip at the very top (16pt tall) — that
+///   strip is also the sole drag-to-resize hit region. Cursor swaps to
+///   `resizeUpDown` on hover.
+/// - The close button has been removed; the footer toggle is the only
+///   open/close affordance.
 ///
 /// Layout (top → bottom):
-/// - Header bar — drag handle, "Agents View" title, optional count chip
-///   (only shown when there are more than four entries; the panel is
-///   primarily a focus pivot, not a count display), and a close button.
+/// - Resize strip (16pt; capsule fades in on hover).
+/// - Title row: "Agents View" + optional `(N)` count chip when N > 4.
 /// - Divider.
 /// - Scrollable list of `ActiveAgentsRowView`s ordered by
-///   `SortedEntriesProvider` (`waitingForInput > finished > loading >
-///   idle`, then `lastTransitionAt` desc).
+///   `SortedEntriesProvider`.
 ///
 /// Tapping a row dispatches focus to the corresponding pane (via the
 /// controller's `onTapRow` closure). The panel intentionally stays open
@@ -30,6 +30,9 @@ struct ActiveAgentsSidebarPanel: View {
   let registry: AgentRegistry
   let resolveSourcePath: (PaneID) -> (project: String, worktree: String)?
   let onTapRow: (PaneID) -> Void
+  /// Kept on the API even though the header no longer carries a close
+  /// button — the host (sidebar) still uses this to collapse the panel
+  /// from the keyboard / programmatic paths if it ever needs to.
   let onClose: () -> Void
 
   /// Current panel height in points. The view writes to this binding as
@@ -43,9 +46,9 @@ struct ActiveAgentsSidebarPanel: View {
   /// drag delta would re-apply against the already-mutated height each
   /// `onChanged` tick and the resize would accelerate exponentially.
   @State private var dragAnchor: Double?
-  /// Whether the cursor is currently over the drag handle. Used to push
-  /// / pop a resize-up-down cursor without spamming the cursor stack.
-  @State private var handleHovering = false
+  /// Whether the cursor is currently over the resize strip. Drives the
+  /// capsule's fade-in and pushes / pops the resize-up-down cursor.
+  @State private var strokeHovering = false
 
   /// Show the count chip only once the panel holds more than four
   /// agents — for the typical 1-4 entry case the title alone reads
@@ -54,66 +57,54 @@ struct ActiveAgentsSidebarPanel: View {
     registry.entries.count > 4
   }
 
+  /// Height of the resize hit region. Kept narrow so the drag affordance
+  /// is purely on the top edge — the title row beneath stays inert and
+  /// the user can scroll the list without accidentally resizing.
+  private let resizeStripHeight: CGFloat = 8
+
   var body: some View {
-    VStack(spacing: 0) {
-      handleAndHeader
+    let shape = UnevenRoundedRectangle(
+      topLeadingRadius: 10,
+      bottomLeadingRadius: 0,
+      bottomTrailingRadius: 0,
+      topTrailingRadius: 10,
+      style: .continuous
+    )
+    return VStack(spacing: 0) {
+      resizeStrip
+      titleBar
       Divider()
       content
     }
     .frame(height: clampedHeight)
     .frame(maxWidth: .infinity)
-    .background(Color(nsColor: .controlBackgroundColor))
-    .clipShape(
-      UnevenRoundedRectangle(
-        topLeadingRadius: 8,
-        bottomLeadingRadius: 0,
-        bottomTrailingRadius: 0,
-        topTrailingRadius: 8,
-        style: .continuous
-      )
+    .background(.regularMaterial, in: shape)
+    .overlay(
+      shape.stroke(Color.primary.opacity(0.08), lineWidth: 1)
     )
-    .overlay(alignment: .top) { Divider() }
+    .clipShape(shape)
   }
 
   private var clampedHeight: Double {
     min(max(height, minHeight), maxHeight)
   }
 
-  private var handleAndHeader: some View {
-    VStack(spacing: 0) {
+  /// Top-edge resize strip. The capsule fades in only on hover so the
+  /// panel reads as a clean card by default; once the user hovers, the
+  /// affordance + cursor signal "drag me".
+  private var resizeStrip: some View {
+    ZStack {
       Capsule()
         .fill(.tertiary)
         .frame(width: 36, height: 4)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
-      HStack(spacing: 6) {
-        Text("Agents View")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.secondary)
-        if showsCountChip {
-          Text("(\(registry.entries.count))")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.tertiary)
-            .accessibilityHidden(true)
-        }
-        Spacer()
-        Button(action: onClose) {
-          Image(systemName: "xmark")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .frame(width: 16, height: 16)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Close agents view")
-        .accessibilityLabel("Close agents view")
-      }
-      .padding(.horizontal, 10)
-      .padding(.bottom, 6)
+        .opacity(strokeHovering ? 1 : 0)
+        .animation(.easeOut(duration: 0.12), value: strokeHovering)
     }
+    .frame(maxWidth: .infinity)
+    .frame(height: resizeStripHeight)
     .contentShape(Rectangle())
     .onHover { hovering in
-      handleHovering = hovering
+      strokeHovering = hovering
       if hovering {
         NSCursor.resizeUpDown.push()
       } else {
@@ -133,6 +124,24 @@ struct ActiveAgentsSidebarPanel: View {
         }
     )
     .accessibilityIdentifier("activeAgents.sidebarPanel.handle")
+  }
+
+  private var titleBar: some View {
+    HStack(spacing: 6) {
+      Text("Agents View")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+      if showsCountChip {
+        Text("(\(registry.entries.count))")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+          .accessibilityHidden(true)
+      }
+      Spacer()
+    }
+    .padding(.horizontal, 10)
+    .padding(.top, 2)
+    .padding(.bottom, 6)
   }
 
   private var content: some View {

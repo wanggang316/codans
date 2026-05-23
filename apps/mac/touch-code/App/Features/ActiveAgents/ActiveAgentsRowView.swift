@@ -27,10 +27,6 @@ struct ActiveAgentsRowView: View {
   let onTap: () -> Void
 
   @State private var isHovering = false
-  /// Drives the breathing opacity pulse on active states (working /
-  /// waitingForInput). Flipped once in `.onAppear` so SwiftUI's
-  /// `repeatForever` chain finds a value change to anchor against.
-  @State private var pulseActive = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
@@ -62,28 +58,26 @@ struct ActiveAgentsRowView: View {
     .accessibilityRepresentation {
       Button(accessibilityLabelText, action: onTap)
     }
-    .onAppear {
-      if !reduceMotion { pulseActive = true }
-    }
   }
 
-  /// Two-line identity column: project name on top, worktree name
-  /// beneath. The bottom line keeps the `activeAgents.row.<paneID>.headline`
-  /// accessibility identifier the user-test contract depends on, even
-  /// though the visible breadcrumb shape has changed.
+  /// Two-line identity column: worktree (branch) name on top, project
+  /// name beneath. The primary line carries the
+  /// `activeAgents.row.<paneID>.headline` accessibility identifier
+  /// (formerly on the breadcrumb) — the headline contract surface stays
+  /// on the user-facing top line of the row.
   private var identityColumn: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(projectName)
+      Text(worktreeName)
         .font(.callout)
         .foregroundStyle(.primary)
         .lineLimit(1)
         .truncationMode(.middle)
-      Text(worktreeName)
+        .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+      Text(projectName)
         .font(.caption)
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .truncationMode(.middle)
-        .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
     }
   }
 
@@ -93,46 +87,33 @@ struct ActiveAgentsRowView: View {
   /// `accessibilityLabel` is the raw enum value per the user-test
   /// contract (`docs/user-tests/active-agents-view.md` §Test Surface).
   private var statusColumn: some View {
-    HStack(spacing: 5) {
-      stateIcon
-        .accessibilityElement(children: .ignore)
-        .accessibilityIdentifier("activeAgents.row.\(paneID).state")
-        .accessibilityLabel(entry.state.rawValue)
-      Text(stateVerb)
-        .font(.callout)
-        .foregroundStyle(.secondary)
-    }
+    stateIcon
+      .font(.caption2)
+      .accessibilityElement(children: .ignore)
+      .accessibilityIdentifier("activeAgents.row.\(paneID).state")
+      .accessibilityLabel(entry.state.rawValue)
   }
 
-  /// State icon glyph + color. New visual language: circle-based for
-  /// every state, with a breathing opacity pulse on the two "active"
-  /// states (working, waitingForInput). `.idle` uses `circle.dashed`
-  /// to read as "present but quiet"; finished keeps the affirmative
-  /// green check.
+  /// State icon glyph + color. Circle-based visual language for every
+  /// state, with `.symbolEffect(.pulse)` on the two "active" states
+  /// (working, waitingForInput). `.pulse` is SwiftUI 6's symbol
+  /// breathing animation; routes through the symbol renderer so the
+  /// animation survives the row's @Observable rebuild cycle (unlike a
+  /// manual `.opacity` + `.repeatForever` chain, which restarts on
+  /// every parent redraw). Color is `Color.orange` to match the
+  /// inbox bell unread tint (same warning hue across the chrome).
   @ViewBuilder
   private var stateIcon: some View {
     switch entry.state {
     case .waitingForInput:
       Image(systemName: "exclamationmark.circle.fill")
-        .foregroundStyle(.orange)
-        .opacity(reduceMotion ? 1.0 : (pulseActive ? 0.5 : 1.0))
-        .animation(
-          reduceMotion
-            ? nil
-            : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
-          value: pulseActive
-        )
+        .foregroundStyle(Color.orange)
+        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
         .accessibilityHidden(true)
     case .loading:
       Image(systemName: "circle.fill")
-        .foregroundStyle(.orange)
-        .opacity(reduceMotion ? 1.0 : (pulseActive ? 0.5 : 1.0))
-        .animation(
-          reduceMotion
-            ? nil
-            : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
-          value: pulseActive
-        )
+        .foregroundStyle(Color.orange)
+        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
         .accessibilityHidden(true)
     case .finished:
       Image(systemName: "checkmark.circle.fill")
@@ -170,11 +151,11 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Full-sentence accessibility label combining display name, project,
-  /// worktree, and state. Agent name is dropped from the visible row
-  /// but kept here so VoiceOver still announces which kind of agent
-  /// occupies the pane.
+  /// Full-sentence accessibility label combining display name,
+  /// worktree (top line), project (bottom line), and state. Agent name
+  /// is dropped from the visible row but kept here so VoiceOver still
+  /// announces which kind of agent occupies the pane.
   private var accessibilityLabelText: String {
-    "\(entry.kind.displayName), \(projectName), \(worktreeName), \(sentenceVerb)"
+    "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)"
   }
 }

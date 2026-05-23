@@ -5,13 +5,17 @@ import TouchCodeCore
 /// `ActiveAgentsBadgeView` (14pt). Centralises the symbol choice so a
 /// future swap stays in one file.
 ///
-/// Brand glyphs ship as SVG imagesets in `App/Assets.xcassets/`, all
-/// three under `template` rendering so they pick up the surrounding
-/// `foregroundStyle` (consistent monochrome glyphs against the popover
-/// row typography):
-/// - `.claudeCode` → `claude-code` (Anthropic Claude wordmark).
-/// - `.codex`      → `codex` (OpenAI Codex spiral).
-/// - `.pi`         → `pi` (Inflection pi glyph).
+/// Glyph assignment (all rendered template-style to inherit the
+/// surrounding `foregroundStyle`):
+///
+/// - `.claudeCode` → SVG asset `claude-code` (Anthropic Claude
+///   wordmark; thick strokes survive small-size rasterisation).
+/// - `.codex`      → SF Symbol `chevron.left.forwardslash.chevron.right`.
+///   The OpenAI Codex spiral SVG has very thin internal cutouts (≈ 0.8
+///   units in a 24-unit viewBox) that vanish into a featureless blob
+///   when rasterised at 14-20pt. The `</>` SF Symbol carries the
+///   "code-generation" semantic without that small-size hazard.
+/// - `.pi`         → SVG asset `pi` (Inflection pi glyph).
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
@@ -23,20 +27,27 @@ struct AgentLogoView: View {
   let size: CGFloat
 
   var body: some View {
-    Image(assetName(for: kind))
-      .resizable()
-      .scaledToFit()
-      .frame(width: size, height: size)
-      .foregroundStyle(tint(for: kind))
-      .accessibilityHidden(true)
-  }
-
-  private func assetName(for kind: AgentKind) -> String {
-    switch kind {
-    case .claudeCode: return "claude-code"
-    case .codex: return "codex"
-    case .pi: return "pi"
+    Group {
+      switch kind {
+      case .claudeCode:
+        Image("claude-code")
+          .resizable()
+          .scaledToFit()
+      case .codex:
+        // SF Symbol — see the type doc for why the bundled OpenAI
+        // glyph was retired here.
+        Image(systemName: "chevron.left.forwardslash.chevron.right")
+          .resizable()
+          .scaledToFit()
+      case .pi:
+        Image("pi")
+          .resizable()
+          .scaledToFit()
+      }
     }
+    .frame(width: size, height: size)
+    .foregroundStyle(tint(for: kind))
+    .accessibilityHidden(true)
   }
 
   /// Tint applied to template-rendered glyphs. All three imagesets use
