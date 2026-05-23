@@ -15,7 +15,8 @@ struct HierarchyHandlersCreateWorktreeTests {
         projectID: fixture.projectID,
         name: "feature",
         path: "/explicit/path",
-        branch: "feature"
+        branch: "feature",
+        reuseExisting: nil
       )
     )
 
@@ -33,7 +34,8 @@ struct HierarchyHandlersCreateWorktreeTests {
         projectID: fixture.projectID,
         name: "feature/login",
         path: nil,
-        branch: "feature/login"
+        branch: "feature/login",
+        reuseExisting: nil
       )
     )
 
@@ -54,7 +56,8 @@ struct HierarchyHandlersCreateWorktreeTests {
         projectID: fixture.projectID,
         name: "feature",
         path: nil,
-        branch: "feature"
+        branch: "feature",
+        reuseExisting: nil
       )
     )
 
@@ -77,7 +80,8 @@ struct HierarchyHandlersCreateWorktreeTests {
         projectID: fixture.projectID,
         name: "feature",
         path: nil,
-        branch: "feature"
+        branch: "feature",
+        reuseExisting: nil
       )
     )
 
@@ -96,7 +100,8 @@ struct HierarchyHandlersCreateWorktreeTests {
         projectID: fixture.projectID,
         name: "feature",
         path: nil,
-        branch: "feature"
+        branch: "feature",
+        reuseExisting: nil
       )
     )
 
@@ -115,7 +120,8 @@ struct HierarchyHandlersCreateWorktreeTests {
         projectID: fixture.projectID,
         name: "weird name",
         path: nil,
-        branch: "weird:name"
+        branch: "weird:name",
+        reuseExisting: nil
       )
     )
 
@@ -133,7 +139,8 @@ struct HierarchyHandlersCreateWorktreeTests {
         projectID: fixture.projectID,
         name: "headless",
         path: nil,
-        branch: nil
+        branch: nil,
+        reuseExisting: nil
       )
     )
 

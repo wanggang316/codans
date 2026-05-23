@@ -153,6 +153,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // taps on banners are silently ignored — clicking would activate the app
     // (default behaviour) but our deeplink would never be parsed.
     UNUserNotificationCenter.current().delegate = self
+
+    // Advertise that focused responders can hand out plain-text selections
+    // through the macOS services system. Third-party text utilities
+    // (translators, dictionaries, "lookup-on-hover" tools) poll this
+    // registration to decide whether to query the frontmost app; without
+    // it, the system never asks our terminal surface for its selection
+    // even though the surface implements `NSServicesMenuRequestor`.
+    NSApplication.shared.registerServicesMenuSendTypes(
+      [.string],
+      returnTypes: []
+    )
   }
 
   nonisolated func applicationWillTerminate(_ notification: Notification) {
@@ -186,12 +197,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   /// behaviour suppresses them). The detector already gates banner posting
   /// on "either app not frontmost OR pane not focused", so by the time we
   /// reach this delegate we already know the user can't see the source.
+  /// `.sound` is included so the per-notification `content.sound` set by
+  /// `OSNotifier.post` actually plays while the app is foregrounded —
+  /// without it macOS silences sound for the foregrounded delivery path
+  /// even when authorization was granted with `.sound`.
   nonisolated func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    completionHandler([.banner, .list])
+    completionHandler([.banner, .list, .sound])
   }
 
   /// `touch-code://focus?project=...&worktree=...&tab=...&pane=...`

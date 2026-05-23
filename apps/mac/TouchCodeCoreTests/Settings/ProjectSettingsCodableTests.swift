@@ -31,7 +31,6 @@ struct ProjectSettingsCodableTests {
     let settings = ProjectSettings(
       defaultEditor: "vscode",
       worktreesDirectory: "/tmp/wt",
-      defaultShell: "/bin/zsh",
       envVars: ["FOO": "bar"],
       scripts: [ScriptDefinition(name: "run", command: "make run")],
       git: nil

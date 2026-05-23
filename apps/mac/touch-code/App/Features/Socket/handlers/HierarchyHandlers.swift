@@ -166,6 +166,11 @@ final class HierarchyHandlers {
     /// (HAN-81).
     public let path: String?
     public let branch: String?
+    /// HAN-82: when true, a same-canonical-path collision returns the
+    /// existing row's id instead of `.conflict`, so a dispatcher
+    /// replaying create-after-partial-failure stays idempotent. Absent
+    /// (legacy clients) ⇒ strict mode.
+    public let reuseExisting: Bool?
   }
   public struct CreateWorktreeResult: Codable, Sendable {
     public let id: WorktreeID
@@ -213,7 +218,8 @@ final class HierarchyHandlers {
         in: req.projectID,
         name: req.name,
         path: resolvedPath,
-        branch: req.branch
+        branch: req.branch,
+        reuseExisting: req.reuseExisting ?? false
       )
       let canonical = HierarchyManager.canonicalPath(resolvedPath)
       return .unary(try JSONValue.encoded(CreateWorktreeResult(id: id, path: canonical)))

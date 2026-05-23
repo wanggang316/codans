@@ -55,7 +55,7 @@ public final class UserNotificationsOSNotifier: OSNotifier {
 
   public func requestAuthorization() async -> AuthorizationStatus {
     do {
-      _ = try await center.requestAuthorization(options: [.alert, .badge])
+      _ = try await center.requestAuthorization(options: [.alert, .badge, .sound])
     } catch {
       // Authorization-request failure falls through to the status refetch
       // below — the refetch is the source of truth for the final state.

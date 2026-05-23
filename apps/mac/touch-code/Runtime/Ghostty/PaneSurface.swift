@@ -70,7 +70,9 @@ final class PaneSurface {
     fontSize: Float32 = 13.0
   ) throws {
     guard let app = runtime.app else {
-      throw GhosttyError.appInitFailed
+      throw GhosttyError.appInitFailed(
+        reason: "libghostty app not initialized; surface request for pane \(paneID) at \(workingDirectory)"
+      )
     }
     self.runtime = runtime
     self.paneID = paneID
@@ -128,7 +130,17 @@ final class PaneSurface {
     config.userdata = UnsafeMutableRawPointer(paneIDUserdata)
 
     guard let surface = ghostty_surface_new(app, &config) else {
-      throw GhosttyError.surfaceInitFailed
+      // HAN-82: surface the diagnostic context libghostty doesn't return
+      // through its nil-pointer protocol. The pane id, working
+      // directory, and env-var count are the inputs callers can act on
+      // (cwd missing? env too large? same surface request a moment
+      // later succeeded?). `retryable: true` tags it as a transient
+      // failure so the caller knows it can backoff and retry.
+      throw GhosttyError.surfaceInitFailed(
+        reason:
+          "ghostty_surface_new returned nil for pane \(paneID) (workingDirectory=\(workingDirectory), envVarCount=\(strdupped.count))",
+        retryable: true
+      )
     }
     self.surface = surface
     self.view.attach(surface: surface)
