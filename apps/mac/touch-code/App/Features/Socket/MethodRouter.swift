@@ -57,6 +57,8 @@ public final class MethodRouter {
     guard let h = hierarchyHandlers else { return nil }
     switch request.method {
     case .paneClose: return await h.paneClose(request.params)
+    case .paneInfo: return await h.paneInfo(request.params)
+    case .paneRead: return await h.paneRead(request.params)
     default: return nil
     }
   }

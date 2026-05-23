@@ -82,6 +82,15 @@ public final class ZmxClient {
   private var attachContinuation: CheckedContinuation<Void, Error>?
   private var snapshotContinuation: CheckedContinuation<URL, Error>?
   private var killContinuation: CheckedContinuation<Void, Never>?
+  /// One-shot continuation drained by `requestInfo()`. Each call enqueues
+  /// itself here; the next `.info` frame from the daemon dequeues and
+  /// resolves it. FIFO order matches request order because the daemon
+  /// answers `.info` synchronously on its event loop.
+  private var infoRequests: [CheckedContinuation<ZmxInfoPayload, Error>] = []
+  /// One-shot continuation drained by `readHistory()`. Same FIFO rule
+  /// as `infoRequests`; the daemon emits exactly one `.history` frame
+  /// per request.
+  private var historyRequests: [CheckedContinuation<Data, Error>] = []
   private var lastResize: ZmxResizePayload?
   private var isClosed = false
 
@@ -243,6 +252,52 @@ public final class ZmxClient {
     }
   }
 
+  /// Send `.info` and resolve with the daemon's next `.info` response.
+  /// Distinct from the unsolicited `info` AsyncStream — that stream
+  /// fans every `.info` frame out to passive observers, while this
+  /// method waits for the specific frame produced in answer to our
+  /// request. Caller-driven (probes used by `tc pane info`).
+  public func requestInfo() async throws -> ZmxInfoPayload {
+    if isClosed { throw ConnectError.alreadyClosed }
+    return try await withCheckedThrowingContinuation {
+      (cont: CheckedContinuation<ZmxInfoPayload, Error>) in
+      self.infoRequests.append(cont)
+      do {
+        try sendFrame(ZmxFrame(tag: .info, payload: Data()))
+      } catch {
+        // Failed before the daemon could answer — pull the continuation
+        // back off the queue (it's the one we just appended) and throw.
+        if !self.infoRequests.isEmpty {
+          self.infoRequests.removeLast()
+        }
+        cont.resume(throwing: error)
+      }
+    }
+  }
+
+  /// Send `.history` with the given format byte and resolve with the
+  /// raw payload of the daemon's `.history` response. The daemon's
+  /// `serializeTerminal(... .vt)` output preserves ANSI escapes,
+  /// cursor position, terminal modes, and OSC 7 pwd; `.plain` strips
+  /// the escapes and returns wrapped text.
+  public func readHistory(format: ZmxHistoryFormat) async throws -> Data {
+    if isClosed { throw ConnectError.alreadyClosed }
+    return try await withCheckedThrowingContinuation {
+      (cont: CheckedContinuation<Data, Error>) in
+      self.historyRequests.append(cont)
+      var payload = Data(capacity: 1)
+      payload.append(format.rawValue)
+      do {
+        try sendFrame(ZmxFrame(tag: .history, payload: payload))
+      } catch {
+        if !self.historyRequests.isEmpty {
+          self.historyRequests.removeLast()
+        }
+        cont.resume(throwing: error)
+      }
+    }
+  }
+
   /// Send `.detach` and close the control socket. The daemon survives;
   /// a future attach reopens via a fresh ZmxClient.
   public func detach() {
@@ -305,6 +360,16 @@ public final class ZmxClient {
     if let cont = killContinuation {
       killContinuation = nil
       cont.resume()
+    }
+    let pendingInfo = infoRequests
+    infoRequests.removeAll()
+    for cont in pendingInfo {
+      cont.resume(throwing: ConnectError.alreadyClosed)
+    }
+    let pendingHistory = historyRequests
+    historyRequests.removeAll()
+    for cont in pendingHistory {
+      cont.resume(throwing: ConnectError.alreadyClosed)
     }
   }
 
@@ -438,10 +503,29 @@ public final class ZmxClient {
         cont.resume()
       }
     case .info:
-      if let info = try? ZmxInfoPayload.decode(frame.payload) {
+      // Yield to the broadcast stream so passive observers see the
+      // payload, then resolve the oldest pending `requestInfo()` (if
+      // any) with the same decoded value.
+      let decoded = try? ZmxInfoPayload.decode(frame.payload)
+      if let info = decoded {
         infoContinuation.yield(info)
       }
-    case .ack, .taskComplete, .history, .run, .write, .input, .resize, .detach,
+      if !infoRequests.isEmpty {
+        let cont = infoRequests.removeFirst()
+        if let info = decoded {
+          cont.resume(returning: info)
+        } else {
+          cont.resume(throwing: ZmxIPCError.malformedLength)
+        }
+      }
+    case .history:
+      if !historyRequests.isEmpty {
+        let cont = historyRequests.removeFirst()
+        cont.resume(returning: frame.payload)
+      } else {
+        logger.debug("dropping unsolicited history frame bytes=\(frame.payload.count, privacy: .public)")
+      }
+    case .ack, .taskComplete, .run, .write, .input, .resize, .detach,
       .detachAll, .kill, .`init`, .`switch`, .snapshot:
       // Tags that the daemon doesn't normally send back as unsolicited
       // updates to clients. Ack arrives for some commands; consumers

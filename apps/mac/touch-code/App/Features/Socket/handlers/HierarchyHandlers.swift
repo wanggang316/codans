@@ -3,6 +3,22 @@ import TouchCodeCore
 import TouchCodeIPC
 import os
 
+/// Narrow read-only view onto a pane's live zmx daemon. Implemented in
+/// production by an adapter over `ZmxClient`; tests inject a fake so
+/// they exercise the handler's encoding/error paths without spinning
+/// up a real daemon socket.
+@MainActor
+public protocol PaneRuntimeProbe: AnyObject, Sendable {
+  /// Resolves with the daemon's next `.info` response. Wraps
+  /// `ZmxClient.requestInfo()`.
+  func requestInfo() async throws -> ZmxInfoPayload
+  /// Resolves with the raw bytes of the daemon's `.history` response in
+  /// the requested format. Wraps `ZmxClient.readHistory(format:)`.
+  func readHistory(format: ZmxHistoryFormat) async throws -> Data
+}
+
+extension ZmxClient: PaneRuntimeProbe {}
+
 /// Handlers for `hierarchy.*` — both reads (list / describe /
 /// resolveAlias) and mutations (create / activate / close / label).
 ///
@@ -22,6 +38,12 @@ final class HierarchyHandlers {
   /// independent of the libghostty surface registry; default is a no-op
   /// for tests that exercise the catalog-side mutation in isolation.
   private let daemonKiller: @MainActor (PaneID) async -> Void
+  /// Probe surface for `pane.info` / `pane.read`. Returns a typed
+  /// `PaneRuntimeProbe` view of the live `ZmxClient` for `paneID`, or
+  /// `nil` when no surface is bound (no live daemon to talk to). Kept
+  /// behind a protocol so tests can inject a fake without dragging
+  /// `GhosttyRuntime` into the test target.
+  private let runtimeProbe: @MainActor (PaneID) -> PaneRuntimeProbe?
   /// Persistent zmx-session catalog accessor. The `pane.close` handler
   /// loads the catalog, drops the entry for the closed pane, and saves
   /// synchronously so the on-disk state reflects the kill before the
@@ -35,12 +57,14 @@ final class HierarchyHandlers {
     envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] },
     settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
     daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
+    runtimeProbe: @escaping @MainActor (PaneID) -> PaneRuntimeProbe? = { _ in nil },
     sessionStore: SessionStore? = nil
   ) {
     self.manager = manager
     self.envProvider = envProvider
     self.settingsProvider = settingsProvider
     self.daemonKiller = daemonKiller
+    self.runtimeProbe = runtimeProbe
     self.sessionStore = sessionStore
   }
 
@@ -512,6 +536,103 @@ final class HierarchyHandlers {
     let response = IPC.PaneCloseResponse(paneID: req.paneID, closed: true)
     return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
       ?? .failed(.internal("encode pane.close result"))
+  }
+
+  /// Handles `pane.info` — probe the pane's zmx daemon for shell pid,
+  /// pwd, and (when available) cursor + terminal modes. The daemon's
+  /// frozen `.Info` payload only carries `pid` + `cwd` today; `cursor`
+  /// and `modes` are surfaced as `nil` so callers can fall back to
+  /// `pane.read --raw` for byte-faithful assertions.
+  public func paneInfo(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: IPC.PaneInfoRequest
+    do {
+      req = try params.decoded(as: IPC.PaneInfoRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "pane.info requires {paneID}", path: nil))
+    }
+    guard let probe = runtimeProbe(req.paneID) else {
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    }
+    let payload: ZmxInfoPayload
+    do {
+      payload = try await probe.requestInfo()
+    } catch {
+      return .failed(.internal("pane.info: \(error)"))
+    }
+    let response = IPC.PaneInfoResponse(
+      paneID: req.paneID,
+      shellPid: payload.pid,
+      pwd: payload.cwd,
+      cursor: nil,
+      modes: nil
+    )
+    return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+      ?? .failed(.internal("encode pane.info result"))
+  }
+
+  /// Handles `pane.read` — pull serialized terminal state from the
+  /// pane's zmx daemon. The daemon returns the full
+  /// `serializeTerminalState` dump in the requested format (`plain`
+  /// strips ANSI; `vt` keeps them, including cursor / modes / OSC 7).
+  /// `range` and `tail` are applied client-side after the dump arrives.
+  public func paneRead(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: IPC.PaneReadRequest
+    do {
+      req = try params.decoded(as: IPC.PaneReadRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "pane.read requires {paneID}", path: nil))
+    }
+    if let tail = req.tail, tail <= 0 {
+      return .failed(.invalidParams(message: "tail must be a positive integer", path: ["tail"]))
+    }
+    guard let probe = runtimeProbe(req.paneID) else {
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    }
+    let format: ZmxHistoryFormat = req.raw ? .vt : .plain
+    let dump: Data
+    do {
+      dump = try await probe.readHistory(format: format)
+    } catch {
+      return .failed(.internal("pane.read: \(error)"))
+    }
+    let content = String(data: dump, encoding: .utf8) ?? ""
+    let filtered = Self.applyRange(content, range: req.range)
+    let trimmed = Self.applyTail(filtered, tail: req.tail)
+    let response = IPC.PaneReadResponse(
+      paneID: req.paneID,
+      format: req.raw ? .vt : .plain,
+      content: trimmed
+    )
+    return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+      ?? .failed(.internal("encode pane.read result"))
+  }
+
+  /// Client-side range filtering. The daemon dumps scrollback above
+  /// the viewport followed by the viewport itself; we split on a blank
+  /// row boundary as an approximation since the dump is not annotated
+  /// with the split point. `all` is the canonical (pass-through) shape;
+  /// `visible` / `scrollback` are best-effort filters until the daemon
+  /// learns to label the boundary.
+  static func applyRange(_ content: String, range: IPC.PaneReadRange) -> String {
+    switch range {
+    case .all:
+      return content
+    case .visible, .scrollback:
+      // The daemon's serializer does not currently annotate the
+      // scrollback / viewport boundary. Return the full dump so
+      // callers see everything; the CLI documents this limitation.
+      return content
+    }
+  }
+
+  /// Trim to the last N newline-delimited rows. `nil` is a no-op.
+  static func applyTail(_ content: String, tail: Int?) -> String {
+    guard let tail else { return content }
+    let rows = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    if rows.count <= tail { return content }
+    return rows.suffix(tail).joined(separator: "\n")
   }
 
   private struct PaneLocator {

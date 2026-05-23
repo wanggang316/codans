@@ -23,6 +23,17 @@ public nonisolated enum ZmxTag: UInt8, Sendable {
   case snapshot = 14
 }
 
+/// Format byte sent in the payload of a `.history` request. Mirrors
+/// zmx's `util.HistoryFormat` enum: the daemon's `serializeTerminal`
+/// dispatches on the same numeric values, so changing one side without
+/// the other silently swaps formats. New variants land at the next
+/// free integer; never renumber.
+public nonisolated enum ZmxHistoryFormat: UInt8, Sendable {
+  case plain = 0
+  case vt = 1
+  case html = 2
+}
+
 /// A single decoded IPC frame: tag plus opaque payload bytes.
 public nonisolated struct ZmxFrame: Sendable, Equatable {
   public let tag: ZmxTag

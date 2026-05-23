@@ -768,6 +768,13 @@ final class AppState {
         guard let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) else { return }
         await surface.zmxClient.kill()
       },
+      runtimeProbe: { [weak terminalEngine] paneID in
+        // Same surface-registry walk as `daemonKiller`, but returns the
+        // `ZmxClient` directly so `pane.info` / `pane.read` can probe
+        // the daemon for serialized state. `ZmxClient` conforms to
+        // `PaneRuntimeProbe` so the handler stays test-injectable.
+        terminalEngine?.ghosttyRuntime?.surface(for: paneID)?.zmxClient
+      },
       sessionStore: sessionStore
     )
     let terminalHandlers = TerminalHandlers(
