@@ -23,7 +23,7 @@ struct AboutSettingsView: View {
           .font(.caption)
           .foregroundStyle(.tertiary)
       }
-      Text("touch-code.app")
+      Text("TouchCode.app")
         .font(.caption)
         .foregroundStyle(.tertiary)
     }
@@ -35,7 +35,7 @@ struct AboutSettingsView: View {
     let info = Bundle.main.infoDictionary
     return (info?["CFBundleDisplayName"] as? String)
       ?? (info?["CFBundleName"] as? String)
-      ?? "touch-code"
+      ?? "TouchCode"
   }
 
   private var versionLine: String? {

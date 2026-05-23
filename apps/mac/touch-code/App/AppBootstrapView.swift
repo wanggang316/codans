@@ -15,7 +15,7 @@ struct AppBootstrapView: View {
   /// two apps feel like siblings on launch); a couple are touch-code
   /// specific. Pure flavor — no localization, no telemetry hook.
   private static let messages = [
-    "Starting touch-code…",
+    "Starting TouchCode…",
     "Preparing your worktree…",
     "Getting your agents ready…",
     "Syncing git state…",

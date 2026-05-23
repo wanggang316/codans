@@ -114,7 +114,7 @@ struct NotificationsSettingsView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text(
-        "macOS is currently blocking notifications for touch-code. "
+        "macOS is currently blocking notifications for TouchCode. "
           + "Open System Settings to allow them."
       )
     }
@@ -259,7 +259,7 @@ struct NotificationsSettingsView: View {
         .foregroundStyle(status == .denied ? Color.orange : Color.yellow)
       Text(
         status == .denied
-          ? "macOS is blocking notifications for touch-code."
+          ? "macOS is blocking notifications for TouchCode."
           : "macOS has not yet been asked for permission."
       )
       .foregroundStyle(.secondary)
