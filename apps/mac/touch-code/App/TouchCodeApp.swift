@@ -835,7 +835,31 @@ final class AppState {
   /// a fresh daemon. Dead rows are pruned from the catalog as part of
   /// the sweep.
   private func bootstrapSessionStack(ghostty: GhosttyRuntime?, engine: TerminalEngine) {
-    let sessionStore = try? SessionStore(fileURL: SessionCatalog.defaultURL())
+    let sessionStore: SessionStore?
+    do {
+      sessionStore = try SessionStore(fileURL: SessionCatalog.defaultURL())
+    } catch SessionStoreError.alreadyHeld {
+      // Second touch-code instance: the primary process holds the
+      // LOCK_EX on `sessions.json`. Degrade to "no-resume mode" —
+      // every pane cold-starts, the quit-time `SessionLifecycle`
+      // skips its detach/snapshot pass, and the launch-time reaper
+      // is never built. Daemons spawned by this instance are still
+      // `setsid`-detached, but they will not be added to the
+      // catalog and therefore won't be reattached on the next launch.
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session")
+        .info("sessions.json already locked by another instance; entering no-resume mode")
+      self.sessionStore = nil
+      return
+    } catch {
+      // Any other init failure (open(2) refused, flock errno that
+      // isn't EWOULDBLOCK) — log and fall through to the same
+      // no-resume mode. Aligns with the original `try?` semantics:
+      // the worst outcome is a fresh shell per pane.
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session")
+        .error("SessionStore init failed: \(String(describing: error), privacy: .public)")
+      self.sessionStore = nil
+      return
+    }
     self.sessionStore = sessionStore
     guard let sessionStore else { return }
     self.sessionLifecycle = SessionLifecycle(

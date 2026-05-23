@@ -38,6 +38,11 @@ struct SessionStoreTests {
     ])
 
     try storeA.saveNow(catalog)
+    // Release storeA's flock before opening storeB — `SessionStore.init`
+    // takes `LOCK_EX|LOCK_NB` (M5.T5.2) so a second concurrent owner
+    // would throw `.alreadyHeld`. The "two stores against the same file"
+    // shape models a relaunch, where the previous owner is already gone.
+    storeA.release()
 
     let storeB = try SessionStore(fileURL: ctx.fileURL)
     let loaded = try storeB.load()

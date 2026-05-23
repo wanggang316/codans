@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os.log
 
@@ -17,8 +18,115 @@ public final class SessionStore {
   private var pendingSaveTask: Task<Void, Never>?
   private var latestCatalog: SessionCatalog?
 
+  /// Owning file descriptor for the LOCK_EX|LOCK_NB advisory lock on
+  /// `sessions.json`. Held for the lifetime of the store and released
+  /// from `release()` / `deinit`. `-1` means no lock is held (either
+  /// because acquisition failed and the store was never returned, or
+  /// because `release()` already ran). `nonisolated(unsafe)` so the
+  /// `nonisolated deinit` can close the descriptor without hopping
+  /// back onto the main actor — the fd is a POSIX primitive whose
+  /// only mutation point is `init` / `release()` / `deinit`, and
+  /// those are already serialised by the @MainActor caller.
+  private nonisolated(unsafe) var lockFD: Int32 = -1
+
+  /// Acquires an exclusive advisory lock on `fileURL` so a second
+  /// touch-code instance cannot race the catalog. The file is created
+  /// if missing (the directory is expected to already exist — callers
+  /// use `Session.defaultURL()` whose parent is created elsewhere on
+  /// the bring-up path). A successful `flock(LOCK_EX|LOCK_NB)` keeps
+  /// the descriptor open for the lifetime of the store; if `flock`
+  /// fails with `EWOULDBLOCK`/`EAGAIN`, `SessionStoreError.alreadyHeld`
+  /// is thrown and the descriptor is closed — the caller is expected
+  /// to degrade to "no-resume mode".
+  ///
+  /// Caveat: `AtomicFileStore.write` (used by `saveNow`) replaces the
+  /// catalog via `rename(2)`, which means our fd ends up holding a
+  /// lock on the *orphaned* inode after the first save. This is fine
+  /// for the second-instance defense at launch (the race is decided
+  /// during `init`, before any save), but two instances launching
+  /// strictly after a save would each see a fresh inode and acquire
+  /// independent locks. The right long-term fix is a sidecar
+  /// `sessions.json.lock` whose inode never changes; tracked for a
+  /// follow-up so the M5.T5 scope stays focused on the launch-race
+  /// guard the brief calls out.
   public init(fileURL: URL) throws {
     self.fileURL = fileURL
+
+    // O_RDWR|O_CREAT so we can take the lock even before the catalog
+    // exists. 0o644 mirrors the mode AtomicFileStore writes (it can't
+    // see the existing perms on first save, and there's no security-
+    // sensitive content in sessions.json).
+    let fd = fileURL.path.withCString { path in
+      Darwin.open(path, O_RDWR | O_CREAT, 0o644)
+    }
+    if fd < 0 {
+      let err = errno
+      throw SessionStoreError.write(
+        "open(\(fileURL.path)) failed: errno=\(err)"
+      )
+    }
+    // `fcntl(F_SETLK)` with a whole-file `struct flock` gives us the
+    // same "exclusive, non-blocking, inode-scoped" semantics as
+    // `flock(LOCK_EX|LOCK_NB)`. We use fcntl because Swift's Darwin
+    // overlay imports both the `flock` C function and the
+    // `struct flock` type into the same namespace, and the type wins
+    // name resolution — calling the function directly is awkward.
+    // fcntl-based locking is also POSIX (`flock(2)` is BSD-only) so
+    // this keeps the code portable to a hypothetical Linux build.
+    var lock = Darwin.flock(
+      l_start: 0,
+      l_len: 0,  // 0 = "to EOF" per F_SETLK semantics
+      l_pid: 0,
+      l_type: Int16(F_WRLCK),
+      l_whence: Int16(SEEK_SET)
+    )
+    if Darwin.fcntl(fd, F_SETLK, &lock) != 0 {
+      let err = errno
+      _ = Darwin.close(fd)
+      // F_SETLK reports contention as EAGAIN on macOS; some kernels
+      // alias EWOULDBLOCK to the same value, others use EACCES — the
+      // POSIX text allows either. Treat all three as "another owner
+      // already holds the lock" and bubble up as `.alreadyHeld`.
+      if err == EAGAIN || err == EWOULDBLOCK || err == EACCES {
+        throw SessionStoreError.alreadyHeld
+      }
+      throw SessionStoreError.write("fcntl(F_SETLK, \(fileURL.path)) failed: errno=\(err)")
+    }
+    self.lockFD = fd
+  }
+
+  /// Releases the advisory lock and closes the owning descriptor.
+  /// Idempotent — a second call after `release()` (or after `deinit`)
+  /// is a no-op. Exposed so callers that intentionally tear down the
+  /// store mid-process (tests, second-instance fallback in `bringUp`)
+  /// can hand the lock to another owner.
+  public func release() {
+    guard lockFD >= 0 else { return }
+    Self.releaseLock(fd: lockFD)
+    lockFD = -1
+  }
+
+  nonisolated deinit {
+    if lockFD >= 0 {
+      Self.releaseLock(fd: lockFD)
+    }
+  }
+
+  /// Drops the F_WRLCK held on `fd` and closes the descriptor. Shared
+  /// by `release()` and `deinit` so the un-lock + close sequence has
+  /// one site to keep consistent. `nonisolated` so the
+  /// `nonisolated deinit` can reach it without hopping actors —
+  /// the underlying syscalls are themselves thread-safe.
+  private nonisolated static func releaseLock(fd: Int32) {
+    var unlock = Darwin.flock(
+      l_start: 0,
+      l_len: 0,
+      l_pid: 0,
+      l_type: Int16(F_UNLCK),
+      l_whence: Int16(SEEK_SET)
+    )
+    _ = Darwin.fcntl(fd, F_SETLK, &unlock)
+    _ = Darwin.close(fd)
   }
 
   /// Read the on-disk catalog. Returns `.empty` for both a missing file
@@ -126,7 +234,9 @@ public final class SessionStore {
 public enum SessionStoreError: Error, Equatable {
   case decode(String)
   case write(String)
-  /// Reserved for the flock-based single-writer guard that will land
-  /// alongside the daemon-spawn path.
+  /// Surfaced when `SessionStore.init` cannot acquire `LOCK_EX` on
+  /// `sessions.json` because another touch-code instance already
+  /// holds it. The caller is expected to degrade to "no-resume mode"
+  /// for the duration of this process.
   case alreadyHeld
 }

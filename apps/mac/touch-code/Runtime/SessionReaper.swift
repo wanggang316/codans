@@ -39,11 +39,20 @@ public final class SessionReaper {
 
   private let sessionStore: SessionStore
   private let snapshotDirectory: URL
+  private let staleAfter: TimeInterval
+  private let clock: @MainActor () -> Date
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.reaper")
 
-  public init(sessionStore: SessionStore, snapshotDirectory: URL? = nil) {
+  public init(
+    sessionStore: SessionStore,
+    snapshotDirectory: URL? = nil,
+    staleAfter: TimeInterval = SessionConfig.defaultStaleAfter,
+    clock: @escaping @MainActor () -> Date = { Date() }
+  ) {
     self.sessionStore = sessionStore
     self.snapshotDirectory = snapshotDirectory ?? PaneDaemonBringup.canonicalSnapshotDirectory()
+    self.staleAfter = staleAfter
+    self.clock = clock
   }
 
   /// Read the on-disk catalog, probe every entry, and return per-paneID
@@ -59,12 +68,31 @@ public final class SessionReaper {
   public func sweep() throws -> [PaneID: SessionState] {
     var catalog = try sessionStore.load()
 
+    let now = clock()
+    let staleCutoff = now.addingTimeInterval(-staleAfter)
+
     var states: [PaneID: SessionState] = [:]
     var deadKeys: [String] = []
     for (key, session) in catalog.sessions {
       let alive = Self.probe(socketPath: session.socketPath)
       if alive {
-        states[session.paneID] = .alive(session)
+        if session.lastAttachedAt < staleCutoff {
+          // Stale daemon: send `.kill` over a one-shot connection, then
+          // treat the entry as dead so the row is pruned and the
+          // snapshot file (if any) cleaned up alongside it. We don't
+          // wait for the daemon to fully exit — `.kill` is best-effort
+          // and the next sweep would re-probe and clean up anyway.
+          logger.notice(
+            "Killing stale daemon for pane \(session.paneID, privacy: .public): lastAttachedAt=\(session.lastAttachedAt, privacy: .public) older than staleAfter=\(self.staleAfter)s"
+          )
+          Self.sendOneShotKill(socketPath: session.socketPath)
+          states[session.paneID] = .dead(session)
+          deadKeys.append(key)
+          _ = Darwin.unlink(session.socketPath)
+          deleteSnapshotFile(for: session.paneID)
+        } else {
+          states[session.paneID] = .alive(session)
+        }
       } else {
         states[session.paneID] = .dead(session)
         deadKeys.append(key)
@@ -218,5 +246,85 @@ public final class SessionReaper {
     var len = socklen_t(MemoryLayout<Int32>.size)
     let rc = getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len)
     return rc == 0 && soError == 0
+  }
+
+  /// Hand-rolled one-shot `.kill` IPC: open a Unix socket, write a
+  /// framed `.kill` request, wait briefly for the socket to EOF
+  /// (daemon exit) or for the 2 s deadline. We avoid spinning up a
+  /// full `ZmxClient` for the stale path because the only signal we
+  /// need is "daemon exit" — `ZmxClient` would also start a read
+  /// loop, register a continuation, and keep `kill()` MainActor-
+  /// bound, none of which fit a fire-and-forget reap.
+  ///
+  /// All failures (connect refused, write short, poll timeout) are
+  /// silent: the caller has already decided to drop this row from
+  /// the catalog and unlink the socket file. The next sweep would
+  /// catch a daemon that somehow survived the kill.
+  private static func sendOneShotKill(socketPath: String) {
+    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    if fd < 0 { return }
+    defer { _ = Darwin.close(fd) }
+
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    let pathBytes = Array(socketPath.utf8CString)
+    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { return }
+    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+      ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
+        pathBytes.withUnsafeBufferPointer { src in
+          _ = memcpy(dst, src.baseAddress, pathBytes.count)
+        }
+      }
+    }
+    let connectResult = withUnsafePointer(to: &addr) { addrPtr in
+      addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+        Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+      }
+    }
+    if connectResult != 0 { return }
+
+    // Wire format mirrors `ZmxFraming.encode(ZmxFrame(tag: .kill))`:
+    // `[tag(1)=5][len_LE(4)=0][padding(3)=0]`. Hand-rolled here to
+    // keep the reaper's import graph minimal (no `TouchCodeIPC`
+    // dependency) and because `.kill` has no payload — encode is
+    // a constant 8-byte sequence.
+    let killFrame: [UInt8] = [
+      0x05,  // ZmxTag.kill = 5
+      0x00, 0x00, 0x00, 0x00,  // little-endian u32 length = 0
+      0x00, 0x00, 0x00,  // 3 zero padding bytes
+    ]
+    let written = killFrame.withUnsafeBytes { buf in
+      Darwin.write(fd, buf.baseAddress, buf.count)
+    }
+    if written != killFrame.count { return }
+
+    // Wait for the daemon to close the socket (POLLIN with zero-length
+    // read = EOF) or for the 2 s budget to elapse. We don't try to
+    // read any reply — `.kill` is one-way; the daemon's exit IS the
+    // ack.
+    var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+    _ = withUnsafeMutablePointer(to: &pfd) {
+      Darwin.poll($0, 1, 2000)
+    }
+  }
+
+  /// Remove `<paneID>.snap` from the canonical snapshot directory.
+  /// Used by the 7-day reap path so a stale daemon's last snapshot
+  /// does not get picked up by the snapshot-tier merge as a "ghost"
+  /// resumable pane. Missing-file and any other I/O failure is
+  /// non-fatal — the merge already skips paneIDs whose UUID does
+  /// not parse, and a stranded snap will eventually be reaped by
+  /// the orphan-snap sweep in the bring-up path.
+  private func deleteSnapshotFile(for paneID: PaneID) {
+    let snapURL = snapshotDirectory.appendingPathComponent("\(paneID.raw.uuidString).snap")
+    let fm = FileManager.default
+    guard fm.fileExists(atPath: snapURL.path) else { return }
+    do {
+      try fm.removeItem(at: snapURL)
+    } catch {
+      logger.warning(
+        "Failed to remove snapshot for stale pane \(paneID, privacy: .public): \(String(describing: error), privacy: .public)"
+      )
+    }
   }
 }
