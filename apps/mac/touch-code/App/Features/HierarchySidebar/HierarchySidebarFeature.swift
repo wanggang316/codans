@@ -526,20 +526,21 @@ struct HierarchySidebarFeature {
       // checkboxes match what the user pinned in Project Settings → Worktree
       // (with the global Worktree pane as the fallback). Each per-project
       // override is `nil` = inherit; if both are unset the value falls back
-      // to the global default. `fetchRemoteOnCreate` has no per-project
-      // override so it reads straight off the global pane.
+      // to the global default.
       let projectGit = projectSettings?.git
       let copyIgnoredDefault =
         projectGit?.copyIgnoredOnWorktreeCreate ?? globalWorktree.copyIgnoredOnCreate
       let copyUntrackedDefault =
         projectGit?.copyUntrackedOnWorktreeCreate ?? globalWorktree.copyUntrackedOnCreate
+      let fetchOriginDefault =
+        projectGit?.fetchRemoteOnWorktreeCreate ?? globalWorktree.fetchRemoteOnCreate
       state.createWorktreeSheet = CreateWorktreeFeature.State(
         projectID: projectID,
         repoRoot: URL(fileURLWithPath: gitRoot),
         worktreesDirectory: defaultWtDir,
         currentPendingCountForProject: pendingCount,
         baseRefOverride: projectGit?.worktreeBaseRef,
-        fetchOrigin: globalWorktree.fetchRemoteOnCreate,
+        fetchOrigin: fetchOriginDefault,
         copyIgnored: copyIgnoredDefault,
         copyUntracked: copyUntrackedDefault
       )

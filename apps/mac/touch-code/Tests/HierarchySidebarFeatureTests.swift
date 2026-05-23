@@ -77,7 +77,8 @@ struct HierarchySidebarFeatureTests {
       git: GitProjectSettings(
         worktreeBaseRef: "origin/main",
         copyIgnoredOnWorktreeCreate: true,
-        copyUntrackedOnWorktreeCreate: true
+        copyUntrackedOnWorktreeCreate: true,
+        fetchRemoteOnWorktreeCreate: false
       )
     )
 
@@ -97,7 +98,7 @@ struct HierarchySidebarFeatureTests {
           forProjectName: "p", projectOverride: nil),
         currentPendingCountForProject: 0,
         baseRefOverride: "origin/main",
-        fetchOrigin: true,
+        fetchOrigin: false,
         copyIgnored: true,
         copyUntracked: true
       )

@@ -13,6 +13,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
   public var worktreeBaseRef: String?
   public var copyIgnoredOnWorktreeCreate: Bool?
   public var copyUntrackedOnWorktreeCreate: Bool?
+  public var fetchRemoteOnWorktreeCreate: Bool?
   public var defaultMergeStrategy: MergeStrategy?
   public var postMergeAction: MergedWorktreeAction?
   public var githubDisabled: Bool
@@ -41,6 +42,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     worktreeBaseRef: String? = nil,
     copyIgnoredOnWorktreeCreate: Bool? = nil,
     copyUntrackedOnWorktreeCreate: Bool? = nil,
+    fetchRemoteOnWorktreeCreate: Bool? = nil,
     defaultMergeStrategy: MergeStrategy? = nil,
     postMergeAction: MergedWorktreeAction? = nil,
     githubDisabled: Bool = false,
@@ -51,6 +53,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     self.worktreeBaseRef = worktreeBaseRef
     self.copyIgnoredOnWorktreeCreate = copyIgnoredOnWorktreeCreate
     self.copyUntrackedOnWorktreeCreate = copyUntrackedOnWorktreeCreate
+    self.fetchRemoteOnWorktreeCreate = fetchRemoteOnWorktreeCreate
     self.defaultMergeStrategy = defaultMergeStrategy
     self.postMergeAction = postMergeAction
     self.githubDisabled = githubDisabled
@@ -68,6 +71,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     worktreeBaseRef == nil
       && copyIgnoredOnWorktreeCreate == nil
       && copyUntrackedOnWorktreeCreate == nil
+      && fetchRemoteOnWorktreeCreate == nil
       && defaultMergeStrategy == nil
       && postMergeAction == nil
       && githubDisabled == false
@@ -80,6 +84,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     case worktreeBaseRef
     case copyIgnoredOnWorktreeCreate
     case copyUntrackedOnWorktreeCreate
+    case fetchRemoteOnWorktreeCreate
     case defaultMergeStrategy
     case postMergeAction
     case githubDisabled
@@ -93,6 +98,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     self.worktreeBaseRef = try c.decodeIfPresent(String.self, forKey: .worktreeBaseRef)
     self.copyIgnoredOnWorktreeCreate = try c.decodeIfPresent(Bool.self, forKey: .copyIgnoredOnWorktreeCreate)
     self.copyUntrackedOnWorktreeCreate = try c.decodeIfPresent(Bool.self, forKey: .copyUntrackedOnWorktreeCreate)
+    self.fetchRemoteOnWorktreeCreate = try c.decodeIfPresent(Bool.self, forKey: .fetchRemoteOnWorktreeCreate)
     self.defaultMergeStrategy = try c.decodeIfPresent(MergeStrategy.self, forKey: .defaultMergeStrategy)
     self.postMergeAction = try c.decodeIfPresent(MergedWorktreeAction.self, forKey: .postMergeAction)
     self.githubDisabled = try c.decodeIfPresent(Bool.self, forKey: .githubDisabled) ?? false
@@ -109,6 +115,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     try c.encodeIfPresent(worktreeBaseRef, forKey: .worktreeBaseRef)
     try c.encodeIfPresent(copyIgnoredOnWorktreeCreate, forKey: .copyIgnoredOnWorktreeCreate)
     try c.encodeIfPresent(copyUntrackedOnWorktreeCreate, forKey: .copyUntrackedOnWorktreeCreate)
+    try c.encodeIfPresent(fetchRemoteOnWorktreeCreate, forKey: .fetchRemoteOnWorktreeCreate)
     try c.encodeIfPresent(defaultMergeStrategy, forKey: .defaultMergeStrategy)
     try c.encodeIfPresent(postMergeAction, forKey: .postMergeAction)
     if githubDisabled {
