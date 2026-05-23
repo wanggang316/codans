@@ -12,8 +12,9 @@ struct SettingsWorktreeView: View {
         LabeledContent("Default directory") {
           HStack(spacing: 6) {
             Text(
-              settingsStore.settings.worktree.defaultWorktreesDirectory
-                ?? Self.fallbackWorktreesDirectory
+              settingsStore.settings.worktree
+                .resolveGlobalBaseDirectory()
+                .path(percentEncoded: false)
             )
             .foregroundStyle(
               settingsStore.settings.worktree.defaultWorktreesDirectory == nil
@@ -100,15 +101,6 @@ struct SettingsWorktreeView: View {
       }
     }
     .formStyle(.grouped)
-  }
-
-  /// Path shown when the user has never customised the global default. Matches
-  /// the runtime fallback that `HierarchySidebarFeature` injects into the
-  /// Create Worktree sheet (`~/.touch-code/repos/<project>`) but stops at the
-  /// `repos/` segment because the per-project name isn't part of the global
-  /// default.
-  private static var fallbackWorktreesDirectory: String {
-    NSHomeDirectory() + "/.touch-code/repos/"
   }
 
   private func chooseWorktreeDirectory() {

@@ -693,7 +693,8 @@ final class AppState {
       manager: hierarchy,
       envProvider: { projectID in
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
-      }
+      },
+      settingsProvider: { settingsStore.settings }
     )
     let terminalHandlers = TerminalHandlers(
       sink: terminalEngine.ghosttyRuntime == nil

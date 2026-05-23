@@ -55,7 +55,10 @@ struct WorktreeNew: AsyncParsableCommand {
   var branch: String
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Path for the worktree. Defaults to ./<branch>.")
+  @Option(
+    name: .long,
+    help: "Path for the worktree. Defaults to the project's configured worktrees directory."
+  )
   var path: String?
   @Option(name: .long, help: "Display name. Defaults to the branch name.")
   var name: String?
@@ -70,28 +73,31 @@ struct WorktreeNew: AsyncParsableCommand {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let resolvedPath = path.map { PathResolver.absolute($0) } ?? PathResolver.defaultWorktreePath(branch: branch)
+      let explicitPath = path.map { PathResolver.absolute($0) }
       let displayName = name ?? branch
       struct Params: Codable {
         let projectID: ProjectID
         let name: String
-        let path: String
+        let path: String?
         let branch: String?
         let reuseExisting: Bool
       }
-      struct Result: Codable { let id: WorktreeID }
+      struct Result: Codable {
+        let id: WorktreeID
+        let path: String
+      }
       let result: Result = try await client.call(
         .hierarchyCreateWorktree,
         params: Params(
           projectID: ProjectID(raw: projectUUID),
           name: displayName,
-          path: resolvedPath,
+          path: explicitPath,
           branch: branch,
           reuseExisting: reuseExisting
         )
       )
       try Renderer.emitObject(
-        ["id": result.id.description, "name": displayName, "path": resolvedPath],
+        ["id": result.id.description, "name": displayName, "path": result.path],
         mode: globals.renderMode
       ) { _ in
         "created worktree \(result.id.description)  \(displayName)"

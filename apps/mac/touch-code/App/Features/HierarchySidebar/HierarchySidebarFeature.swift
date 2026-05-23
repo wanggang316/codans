@@ -514,11 +514,12 @@ struct HierarchySidebarFeature {
       guard let project = snapshot.projects.first(where: { $0.id == projectID }),
         let gitRoot = project.gitRoot
       else { return .none }
-      let projectSettings = settingsWriter.readSnapshotSync().projects[projectID]
-      let wtDirOverride = projectSettings?.worktreesDirectory
-      let defaultWtDir = URL(
-        fileURLWithPath: wtDirOverride
-          ?? (NSHomeDirectory() + "/.touch-code/repos/\(project.name)"))
+      let settingsSnapshot = settingsWriter.readSnapshotSync()
+      let projectSettings = settingsSnapshot.projects[projectID]
+      let defaultWtDir = settingsSnapshot.worktree.resolveBaseDirectory(
+        forProjectName: project.name,
+        projectOverride: projectSettings?.worktreesDirectory
+      )
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count
       state.createWorktreeSheet = CreateWorktreeFeature.State(
         projectID: projectID,

@@ -164,7 +164,7 @@ Example: `tc space create "day job" --activate` → resolves to `POST {"method":
 | `tc worktree show [ID]`                 | `hierarchy.describeWorktree`| read-only                                                        | `[ID]` defaults to `$TOUCH_CODE_WORKTREE_ID`                  |
 | `tc worktree prune`                     | `hierarchy.pruneWorktrees`| `HierarchyManager.pruneWorktreesMissingOnDisk(project:)`            | `[--project ID]`                                              |
 
-Default `--path` resolution for `tc worktree create` is `<repo>-worktrees/<branch>/` per architecture Open Q #7. Collisions disambiguate with a UUID suffix.
+Default `--path` resolution for `tc worktree new` is server-side: the daemon expands the project's configured `worktreesDirectory` (from `settings.json`, falling back to `~/.touch-code/repos/<projectName>`) and appends the sanitized branch name, mirroring the Create Worktree sheet. The response includes the resolved absolute path. Pass `--path` to override.
 
 #### `tc tab …`
 
