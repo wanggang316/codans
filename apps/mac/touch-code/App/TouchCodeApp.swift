@@ -36,7 +36,7 @@ struct TouchCodeApp: App {
     // system menu does not synthesize a "New Window" item that would let
     // users create extras out-of-band. See docs/design-docs/project-tags.md
     // §3.8 for the close-vs-quit semantics.
-    Window("touch-code", id: TouchCodeApp.mainWindowID) {
+    Window("TouchCode", id: TouchCodeApp.mainWindowID) {
       AppAppearanceView(settingsStore: appState.settingsStore) {
         if let store = appState.store, appState.terminalEngine != nil {
           ContentView(

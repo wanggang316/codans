@@ -95,7 +95,7 @@ enum CommandPaletteItems {
       ),
       CommandPaletteItem(
         id: "app.quit",
-        title: "Quit touch-code",
+        title: "Quit TouchCode",
         icon: "power",
         shortcut: .command("Q"),
         hiddenWhenQueryEmpty: true,

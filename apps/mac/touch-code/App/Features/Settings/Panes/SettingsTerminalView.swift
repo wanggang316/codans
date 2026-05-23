@@ -60,7 +60,7 @@ struct SettingsTerminalView: View {
       Text("Theme")
     } footer: {
       Text(
-        "touch-code reads and writes your Ghostty config, so changes here stay in sync "
+        "TouchCode reads and writes your Ghostty config, so changes here stay in sync "
           + "with Ghostty itself."
       )
     }

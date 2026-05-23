@@ -48,7 +48,7 @@ struct CLIInstallStatusCard: View {
       return "Installed at \(url.path). `\(commandName)` is reachable from any shell."
     case .collision(let owner):
       return
-        "Another file is at \(owner.path). touch-code will not overwrite a tool it did not install."
+        "Another file is at \(owner.path). TouchCode will not overwrite a tool it did not install."
     case .failed:
       return "Last attempt failed. Click Retry to try again."
     }

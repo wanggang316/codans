@@ -78,7 +78,7 @@ struct ProjectAdd: AsyncParsableCommand {
 struct ProjectRemove: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "rm",
-    abstract: "Remove a project from touch-code."
+    abstract: "Remove a project from TouchCode."
   )
 
   @OptionGroup var globals: GlobalOptions

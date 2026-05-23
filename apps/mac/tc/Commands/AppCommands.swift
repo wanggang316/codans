@@ -7,7 +7,7 @@ import tcKit
 struct StatusCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "status",
-    abstract: "Show the running touch-code app status."
+    abstract: "Show the running TouchCode app status."
   )
 
   @OptionGroup var globals: GlobalOptions
@@ -44,7 +44,7 @@ struct StatusCommand: AsyncParsableCommand {
 struct LaunchCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "launch",
-    abstract: "Start touch-code and wait for its command socket."
+    abstract: "Start TouchCode and wait for its command socket."
   )
 
   @Flag(name: .long, help: "Emit JSON on stdout instead of human-readable text.")

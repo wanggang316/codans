@@ -153,7 +153,7 @@ final class CLIInstallerClient {
       try privilegedShell.run(
         script,
         prompt:
-          "touch-code needs administrator access to install the `\(paths.primaryCommandName)` command into /usr/local/bin."
+          "TouchCode needs administrator access to install the `\(paths.primaryCommandName)` command into /usr/local/bin."
       )
     } catch let error as PrivilegedShellError {
       return .failure(Self.mapPrivilegedError(error))
@@ -188,7 +188,7 @@ final class CLIInstallerClient {
       try privilegedShell.run(
         script,
         prompt:
-          "touch-code needs administrator access to remove `\(paths.primaryCommandName)` from /usr/local/bin."
+          "TouchCode needs administrator access to remove `\(paths.primaryCommandName)` from /usr/local/bin."
       )
     } catch let error as PrivilegedShellError {
       return .failure(Self.mapPrivilegedError(error))
@@ -331,12 +331,12 @@ extension CLIInstallerClient.CLIInstallError: LocalizedError {
     switch self {
     case .bundleMissing(let url):
       if let url {
-        return "`tc` binary not found at \(url.path). Please reinstall touch-code."
+        return "`tc` binary not found at \(url.path). Please reinstall TouchCode."
       }
-      return "`tc` binary not found in the app bundle. Please reinstall touch-code."
+      return "`tc` binary not found in the app bundle. Please reinstall TouchCode."
     case .destinationExistsNotOurs(let url):
       return
-        "Another file exists at \(url.path). Rename or remove it, then retry — touch-code will not overwrite a tool it did not install."
+        "Another file exists at \(url.path). Rename or remove it, then retry — TouchCode will not overwrite a tool it did not install."
     case .userCancelled:
       return "Install cancelled. Click Install to retry."
     case .scriptFailed(let stderr):
