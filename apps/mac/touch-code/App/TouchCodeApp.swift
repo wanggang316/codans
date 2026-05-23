@@ -433,6 +433,13 @@ final class AppState {
       $0.hierarchyClient = hierarchy
       $0.settingsWriter = .live(settings)
       $0.terminalClient = .live(engine: engine)
+      // Under XCTest host, swift-dependencies defaults unset keys to `testValue` —
+      // most of ours are `unimplemented(...)`, which `Issue.record`s from a detached
+      // Task and crashes once the recording escapes any active test context. Register
+      // the live values explicitly so the host app behaves like production regardless
+      // of the test bundle being loaded.
+      $0.gitService = .live()
+      $0.gitHub = .live()
     }
 
     // Sparkle bringup: push persisted Updates preferences to the live updater so
