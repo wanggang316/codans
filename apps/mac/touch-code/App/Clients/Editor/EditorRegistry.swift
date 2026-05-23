@@ -1,7 +1,7 @@
 import Foundation
 import TouchCodeCore
 
-/// The C8a 29-entry built-in registry. Every row is a template: `appURL` is always nil and
+/// The C8a 30-entry built-in registry. Every row is a template: `appURL` is always nil and
 /// `alternateBundleIdentifiers` is always empty — the service layer resolves a live `appURL`
 /// against an `AppLauncher` at `describe()` time.
 ///
@@ -83,6 +83,11 @@ nonisolated enum EditorRegistry {
     EditorDescriptor(
       id: "rustrover", displayName: "RustRover",
       bundleIdentifier: "com.jetbrains.rustrover",
+      launchMode: .applicationWithArguments, appURL: nil,
+      alternateBundleIdentifiers: []),
+    EditorDescriptor(
+      id: "androidStudio", displayName: "Android Studio",
+      bundleIdentifier: "com.google.android.studio",
       launchMode: .applicationWithArguments, appURL: nil,
       alternateBundleIdentifiers: []),
     // Editors — .directory (continued)
@@ -181,7 +186,8 @@ nonisolated enum EditorRegistry {
 
   static let editorPriority: [EditorID] = [
     "cursor", "zed", "vscode", "windsurf", "vscodeInsiders", "vscodium", "sublimeText",
-    "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "antigravity",
+    "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "androidStudio",
+    "antigravity",
   ]
 
   static let terminalPriority: [EditorID] = [

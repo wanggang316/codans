@@ -4,7 +4,7 @@ import TouchCodeCore
 
 @testable import touch_code
 
-/// C8a Phase 6.1 — registry sanity coverage. Pins the shape of the 29-entry static registry:
+/// C8a Phase 6.1 — registry sanity coverage. Pins the shape of the 30-entry static registry:
 /// size, ID uniqueness, bundle-ID invariants, and priority-list consistency. Catches both
 /// accidental duplication (e.g. adding a new editor without pruning the old) and stale
 /// references (priority lists citing IDs that no longer exist in the registry).
@@ -12,8 +12,8 @@ struct EditorRegistryTests {
   // MARK: - Shape
 
   @Test
-  func registryHasTwentyNineEntries() {
-    #expect(EditorRegistry.registry.count == 29)
+  func registryHasThirtyEntries() {
+    #expect(EditorRegistry.registry.count == 30)
   }
 
   @Test
