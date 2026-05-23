@@ -4,3 +4,6 @@
 [submodule "apps/mac/ThirdParty/git-wt"]
 	path = apps/mac/ThirdParty/git-wt
 	url = https://github.com/khoi/git-wt.git
+[submodule "apps/mac/ThirdParty/zmx"]
+	path = apps/mac/ThirdParty/zmx
+	url = https://github.com/neurosnap/zmx.git

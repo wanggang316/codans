@@ -42,6 +42,7 @@ apps/mac/touch-code/Tests/Performance/baseline.json
 apps/mac/touch-code/Tests/Performance/baseline.run.txt
 
 apps/mac/.build/release/
+apps/mac/.build/zmx/
 
 # Agent tooling workspaces. `.claude/skills/` is the exception — those skills
 # are project-specific knowledge that should follow the repo (e.g. release.skill
