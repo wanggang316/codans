@@ -156,8 +156,27 @@ struct GitCommandTests {
     ]
     for target in targets {
       let argv = GitCommand.switchBranch(target: target)
-      #expect(!argv.contains("-c"), "switch argv must not contain `-c` (the --create short flag)")
       #expect(!argv.contains("--create"), "switch argv must not contain `--create`")
+      // `-c` as the `--create` short flag only appears AFTER the `switch` subcommand;
+      // any `-c` BEFORE `switch` is git's config-override flag and is allowed.
+      if let switchIdx = argv.firstIndex(of: "switch") {
+        let trailing = argv.dropFirst(switchIdx + 1)
+        #expect(
+          !trailing.contains("-c"),
+          "switch argv must not contain `-c` after the subcommand (the --create short flag)"
+        )
+      }
     }
+  }
+
+  @Test
+  func forEachRefBranchesArgvIsExact() {
+    #expect(
+      GitCommand.forEachRefBranches() == [
+        "-c", "core.quotePath=false",
+        "for-each-ref",
+        "--format=%(refname)%09%(refname:short)%09%(upstream:short)%09%(HEAD)",
+        "refs/heads", "refs/remotes",
+      ])
   }
 }

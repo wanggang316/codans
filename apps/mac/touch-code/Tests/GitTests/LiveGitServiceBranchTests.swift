@@ -20,6 +20,9 @@ struct LiveGitServiceBranchTests {
     let service = LiveGitService(runner: runner)
     let branch = try await service.currentBranch(at: URL(fileURLWithPath: "/tmp"))
     #expect(branch == "main")
+    let calls = await runner.calls
+    #expect(calls.count == 2)  // ensureIsRepo + symbolic-ref
+    #expect(calls.last?.arguments == ["symbolic-ref", "--short", "HEAD"])
   }
 
   @Test
@@ -79,6 +82,16 @@ struct LiveGitServiceBranchTests {
     // `main` is pinned to position 0 because it's the current branch; the rest are sorted.
     #expect(inventory.local.map(\.shortName) == ["main", "feature/x"])
     #expect(inventory.remote.map(\.shortName) == ["origin/main"])
+    let calls = await runner.calls
+    #expect(calls.count == 2)
+    #expect(
+      calls.last?.arguments == [
+        "-c", "core.quotePath=false",
+        "for-each-ref",
+        "--format=%(refname)%09%(refname:short)%09%(upstream:short)%09%(HEAD)",
+        "refs/heads", "refs/remotes",
+      ]
+    )
   }
 
   // MARK: - switchBranch

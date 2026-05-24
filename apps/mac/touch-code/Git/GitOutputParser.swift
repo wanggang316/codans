@@ -329,8 +329,10 @@ nonisolated enum GitOutputParser {
       let upstream: String? = (isRemote || upstreamRaw.isEmpty) ? nil : upstreamRaw
 
       if marker.count == 1, marker.first == currentMarker {
-        if current != nil {
-          throw GitError.unparsable(context: "multiple records carry the HEAD marker")
+        if let existing = current {
+          throw GitError.unparsable(
+            context: "multiple records carry the HEAD marker (first '\(existing)', then '\(shortName)')"
+          )
         }
         current = shortName
       }

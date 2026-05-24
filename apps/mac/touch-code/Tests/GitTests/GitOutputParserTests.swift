@@ -208,6 +208,23 @@ struct GitOutputParserBranchInventoryTests {
   }
 
   @Test
+  func parseBranchInventoryRemoteUpstreamForcedToNilEvenIfPresent() throws {
+    // git shouldn't emit an upstream for refs/remotes/, but the contract says
+    // we drop it defensively if it appears. Lock that behaviour.
+    let fixture = "refs/remotes/origin/main\torigin/main\torigin/main\t \n"
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.remote == [BranchRef(shortName: "origin/main", isRemote: true, upstream: nil)])
+  }
+
+  @Test
+  func parseBranchInventoryLocalNamedHEADIsKept() throws {
+    let fixture = "refs/heads/feature/HEAD\tfeature/HEAD\t\t \n"
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.local.map(\.shortName) == ["feature/HEAD"])
+    #expect(inv.remote.isEmpty)
+  }
+
+  @Test
   func parseBranchInventoryDetachedHEADHasNilCurrent() throws {
     let fixture = """
       refs/heads/main\tmain\t\t \n\

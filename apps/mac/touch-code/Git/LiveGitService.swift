@@ -190,7 +190,9 @@ nonisolated final class LiveGitService: GitService {
       env: GitProcessEnv.build(),
       cwd: path,
       timeout: Self.defaultTimeout,
-      maxOutputBytes: Self.maxOutputBytes
+      // `git symbolic-ref --short HEAD` returns a single ref name (≤ 255 chars);
+      // mirror the 1024 cap used by `ensureIsRepo` for the same one-line shape.
+      maxOutputBytes: 1024
     )
     switch outcome {
     case .exited(let code, let stdout, let stderr, let overflow):
