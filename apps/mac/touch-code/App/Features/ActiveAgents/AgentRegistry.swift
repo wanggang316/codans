@@ -68,7 +68,27 @@ final class AgentRegistry {
     var prevPhase: PrevPhase
     var pendingFinished: Bool
     var waitingForInput: Bool
+    /// Timestamp of the most recent `paneOutput` event. Drives
+    /// output-driven loading for agents that don't emit OSC 9;4
+    /// progress reports (Codex, pi, …): if output landed in the
+    /// past `outputLoadingWindow`, the pane reads as `.loading`
+    /// regardless of the `runningPanes` set. Cleared by the decay
+    /// task when output goes quiet long enough.
+    var lastOutputAt: Date?
   }
+
+  /// Time window during which a recent `paneOutput` event keeps the
+  /// pane in `.loading`. Picked to bridge typical inter-line gaps in
+  /// agent output (Codex / pi emit chatty streams with brief pauses)
+  /// while still letting the panel relax to idle within a few seconds
+  /// of work actually stopping.
+  private static let outputLoadingWindow: TimeInterval = 2.5
+
+  /// Per-pane decay Task — fires `decayOutputLoading` after the
+  /// `outputLoadingWindow` so the registry can transition out of
+  /// output-driven loading even when no further runtime events arrive.
+  /// Cancelled (or replaced) on every fresh `paneOutput` event.
+  private var outputDecayTasks: [PaneID: Task<Void, Never>] = [:]
 
   private enum PrevPhase: Equatable {
     case idle
@@ -143,7 +163,10 @@ final class AgentRegistry {
 
     for paneID in entered {
       var s =
-        scratch[paneID] ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        scratch[paneID]
+        ?? Scratch(
+          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
+        )
       s.prevPhase = .loading
       s.pendingFinished = false
       scratch[paneID] = s
@@ -151,7 +174,10 @@ final class AgentRegistry {
     }
     for paneID in left {
       var s =
-        scratch[paneID] ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        scratch[paneID]
+        ?? Scratch(
+          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
+        )
       if s.prevPhase == .loading {
         s.pendingFinished = true
       }
@@ -168,14 +194,25 @@ final class AgentRegistry {
     switch event {
     case .paneOutput(let paneID, _):
       var s =
-        scratch[paneID] ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        scratch[paneID]
+        ?? Scratch(
+          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
+        )
       s.pendingFinished = false
+      // Output-driven loading signal — see `outputLoadingWindow` doc.
+      // Stamping every `paneOutput` arms the `.loading` state inside
+      // `derive` and pushes the decay deadline forward.
+      s.lastOutputAt = now()
       scratch[paneID] = s
+      scheduleOutputDecay(for: paneID)
       recompute(paneID)
 
     case .paneIdle(let paneID, _):
       var s =
-        scratch[paneID] ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        scratch[paneID]
+        ?? Scratch(
+          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
+        )
       if s.prevPhase == .loading {
         s.pendingFinished = true
       }
@@ -211,6 +248,8 @@ final class AgentRegistry {
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
       lastRunning.remove(paneID)
+      outputDecayTasks[paneID]?.cancel()
+      outputDecayTasks.removeValue(forKey: paneID)
 
     case .paneInfoChanged(let paneID, let delta):
       switch delta {
@@ -299,6 +338,8 @@ final class AgentRegistry {
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
     scratch.removeValue(forKey: paneID)
+    outputDecayTasks[paneID]?.cancel()
+    outputDecayTasks.removeValue(forKey: paneID)
   }
 
   // MARK: - Derivation
@@ -309,11 +350,59 @@ final class AgentRegistry {
   /// badge (T6).
   private func derive(paneID: PaneID, isRunning: Bool) -> AgentRuntimeState {
     let s =
-      scratch[paneID] ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+      scratch[paneID]
+        ?? Scratch(
+          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
+        )
     if s.waitingForInput { return .waitingForInput }
-    if isRunning { return .loading }
+    // Loading from either signal: OSC 9;4 busy (Claude Code) OR a
+    // recent paneOutput (Codex / pi / anything else that doesn't
+    // emit OSC 9;4). The output window is short so output bursts
+    // bridge gaps but quiet panes flip back to idle.
+    if isRunning || isOutputLoadingActive(s) { return .loading }
     if s.pendingFinished { return .finished }
     return .idle
+  }
+
+  /// True when `lastOutputAt` is within the output-loading window.
+  /// Comparison uses the injected `now` closure so tests stay
+  /// deterministic.
+  private func isOutputLoadingActive(_ s: Scratch) -> Bool {
+    guard let lastOutput = s.lastOutputAt else { return false }
+    return now().timeIntervalSince(lastOutput) < Self.outputLoadingWindow
+  }
+
+  /// Replace (cancel + schedule) the per-pane decay task that fires
+  /// once the output-loading window has elapsed without a fresh
+  /// `paneOutput`. The fired task calls `decayOutputLoading(_:)` which
+  /// arms `pendingFinished` (mirroring the running-set-leave
+  /// transition for OSC 9;4 agents) and clears `lastOutputAt`.
+  private func scheduleOutputDecay(for paneID: PaneID) {
+    outputDecayTasks[paneID]?.cancel()
+    outputDecayTasks[paneID] = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .seconds(Self.outputLoadingWindow + 0.05))
+      guard let self, !Task.isCancelled else { return }
+      self.decayOutputLoading(for: paneID)
+    }
+  }
+
+  /// Called from the decay task when the output-loading window has
+  /// elapsed. Defensive against races: a `paneOutput` that arrived
+  /// between the sleep and the wake re-stamps `lastOutputAt`, so the
+  /// elapsed-window check stays the source of truth.
+  private func decayOutputLoading(for paneID: PaneID) {
+    guard var s = scratch[paneID], let lastOutput = s.lastOutputAt else { return }
+    let elapsed = now().timeIntervalSince(lastOutput)
+    guard elapsed >= Self.outputLoadingWindow else { return }
+    // Output-driven loading just ended — mirror the running-set-leave
+    // transition (`pendingFinished` so the next focus / keystroke /
+    // new output flips back to idle, or paneIdle / teardown surfaces
+    // `.finished` if no user action arrives).
+    s.pendingFinished = true
+    s.lastOutputAt = nil
+    scratch[paneID] = s
+    outputDecayTasks.removeValue(forKey: paneID)
+    recompute(paneID)
   }
 
   /// Apply the latest derivation to `entries[paneID]`. No-op when the
