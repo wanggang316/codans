@@ -36,6 +36,18 @@ nonisolated struct GitServiceClient: Sendable {
   /// worktree's uncommitted edits (`git diff HEAD --shortstat`). Nil only on
   /// git failure; a clean tree yields `LocalDiffStats(0, 0)`.
   var localDiffStats: @Sendable (URL) async throws -> LocalDiffStats?
+  /// `(repoURL) -> currentBranch?`. `git symbolic-ref --short HEAD`. Returns nil on
+  /// detached HEAD; throws on other failures via the standard `GitError` cases.
+  var currentBranch: @Sendable (URL) async throws -> String?
+  /// `(repoURL) -> BranchInventory`. One-shot `git for-each-ref` covering refs/heads
+  /// + refs/remotes, parsed and rendered ready (current pinned to local position 0,
+  /// `<remote>/HEAD` filtered, sorted ascending by short name).
+  var listAllBranches: @Sendable (URL) async throws -> BranchInventory
+  /// `(target, repoURL) -> Void`. `git switch <name>` for `.local`, `git switch --track
+  /// <origin/x>` for `.remoteTracking`. Dirty-tree / conflict failures surface as
+  /// `GitError.exec(code, stderr)` with stderr verbatim; the popover reducer's banner
+  /// extracts the first line.
+  var switchBranch: @Sendable (BranchSwitchTarget, URL) async throws -> Void
 }
 
 extension GitServiceClient {
@@ -60,7 +72,10 @@ extension GitServiceClient {
       showFileAtHEAD: { path, worktreePath in
         try await service.showFileAtHEAD(path, at: URL(fileURLWithPath: worktreePath))
       },
-      localDiffStats: { url in try await service.localDiffStats(at: url) }
+      localDiffStats: { url in try await service.localDiffStats(at: url) },
+      currentBranch: { url in try await service.currentBranch(at: url) },
+      listAllBranches: { url in try await service.listAllBranches(at: url) },
+      switchBranch: { target, url in try await service.switchBranch(to: target, at: url) }
     )
   }
 }
@@ -104,6 +119,17 @@ extension GitServiceClient: DependencyKey {
     localDiffStats: unimplemented(
       "GitServiceClient.localDiffStats",
       placeholder: nil
+    ),
+    currentBranch: unimplemented(
+      "GitServiceClient.currentBranch",
+      placeholder: nil
+    ),
+    listAllBranches: unimplemented(
+      "GitServiceClient.listAllBranches",
+      placeholder: BranchInventory(current: nil, local: [], remote: [])
+    ),
+    switchBranch: unimplemented(
+      "GitServiceClient.switchBranch"
     )
   )
 }
