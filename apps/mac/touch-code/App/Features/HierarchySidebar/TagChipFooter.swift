@@ -125,12 +125,13 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // `.regularMaterial` instead of `.bar`: `.bar` reads as the chrome /
-    // titlebar material and AppKit renders it nearly transparent in
-    // fullscreen (HAN-63), letting the terminal panes bleed through the
-    // footer. Regular content-material survives the fullscreen flip with
-    // the same visual weight it has windowed.
-    .background(.regularMaterial)
+    // Match the sidebar's own background tone so the footer reads as a
+    // continuation of the sidebar rather than a separate material strip.
+    // NSColor.windowBackgroundColor is the same surface AppKit uses for
+    // the sidebar in `.listStyle(.sidebar)`. It is opaque so it survives
+    // fullscreen without the terminal panes bleeding through that an
+    // earlier `.bar` material attempt (HAN-63) exposed.
+    .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {
