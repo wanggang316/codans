@@ -128,7 +128,15 @@ struct DiffFeature {
   /// instance, so a wrapper compares equal to itself by reference; a fresh
   /// load produces a new instance which compares unequal — the only two
   /// transitions we care about for view diffing.
-  final class LoadedDiffDocument: Equatable, @unchecked Sendable {
+  ///
+  /// Explicitly `nonisolated` so the deinit does NOT route through the
+  /// MainActor back-deploy shim (`swift_task_deinitOnExecutorMainActorBackDeploy`).
+  /// Without this, releasing a `diffsByPath` / `diffsByCommit` dictionary
+  /// holding cached entries — e.g. when `.historyRefreshRequested` clears
+  /// the commit-diff cache — would crash in `TaskLocal::StopLookupScope::~`
+  /// with `POINTER_BEING_FREED_WAS_NOT_ALLOCATED`. The class holds only an
+  /// immutable `let`, so a nonisolated deinit is correct.
+  nonisolated final class LoadedDiffDocument: Equatable, @unchecked Sendable {
     let document: DiffDocument
     init(_ document: DiffDocument) { self.document = document }
     static func == (lhs: LoadedDiffDocument, rhs: LoadedDiffDocument) -> Bool {
