@@ -1,6 +1,11 @@
 import Foundation
 import Observation
+import OSLog
 import TouchCodeCore
+
+private let registryLogger = Logger(
+  subsystem: "com.touch-code.activeagents", category: "registry"
+)
 
 /// Runtime-only state machine that derives each bound agent pane's
 /// runtime state (`waitingForInput` / `loading` / `finished` / `idle`)
@@ -205,6 +210,9 @@ final class AgentRegistry {
       s.lastOutputAt = now()
       scratch[paneID] = s
       scheduleOutputDecay(for: paneID)
+      registryLogger.debug(
+        "paneOutput pane=\(paneID.raw.uuidString, privacy: .public) bound=\(self.entries[paneID] != nil, privacy: .public)"
+      )
       recompute(paneID)
 
     case .paneIdle(let paneID, _):
@@ -415,6 +423,9 @@ final class AgentRegistry {
     let isRunning = runningPanes().contains(paneID)
     let newState = derive(paneID: paneID, isRunning: isRunning)
     guard entry.state != newState else { return }
+    registryLogger.info(
+      "state-transition pane=\(paneID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public)"
+    )
     entry.state = newState
     entry.lastTransitionAt = now()
     entries[paneID] = entry
