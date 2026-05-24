@@ -52,7 +52,6 @@ struct BranchSwitcherErrorBannerView: View {
       .accessibilityIdentifier("branch_switcher.error_banner")
       .accessibilityElement(children: .combine)
       .accessibilityLabel("Branch switch error: \(text)")
-      .accessibilityAddTraits(.isStaticText)
     }
   }
 }
