@@ -235,3 +235,43 @@ public nonisolated struct LocalDiffStats: Equatable, Codable, Sendable {
     self.deletions = deletions
   }
 }
+
+/// One branch known to the worktree. `shortName` is the user-facing form
+/// (`main`, `feature/x`, `origin/main`); refs/heads/ and refs/remotes/ prefixes
+/// are stripped before construction.
+public nonisolated struct BranchRef: Equatable, Hashable, Sendable {
+  public let shortName: String
+  public let isRemote: Bool
+  /// For local branches, the upstream's short name (e.g. `origin/main`); nil for
+  /// untracked locals and for all remote-tracking refs.
+  public let upstream: String?
+
+  public init(shortName: String, isRemote: Bool, upstream: String?) {
+    self.shortName = shortName
+    self.isRemote = isRemote
+    self.upstream = upstream
+  }
+}
+
+/// Snapshot of all branches visible in a worktree. `current == nil` indicates
+/// detached HEAD; `local` and `remote` may both be empty in a freshly
+/// initialised repository.
+public nonisolated struct BranchInventory: Equatable, Sendable {
+  public let current: String?
+  public let local: [BranchRef]
+  public let remote: [BranchRef]
+
+  public init(current: String?, local: [BranchRef], remote: [BranchRef]) {
+    self.current = current
+    self.local = local
+    self.remote = remote
+  }
+}
+
+/// Caller intent for a branch switch. `remoteTracking` means "check out this
+/// remote ref"; the service layer decides whether to materialise a local
+/// tracking branch.
+public nonisolated enum BranchSwitchTarget: Equatable, Sendable {
+  case local(name: String)
+  case remoteTracking(shortName: String)
+}
