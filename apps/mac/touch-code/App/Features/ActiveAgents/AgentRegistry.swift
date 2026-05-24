@@ -196,6 +196,7 @@ final class AgentRegistry {
   /// reacts only to a small subset (output / idle / teardown / a few
   /// info deltas); other cases are silent no-ops.
   func onTerminalEvent(_ event: TerminalEvent) {
+    registryLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
     switch event {
     case .paneOutput(let paneID, _):
       var s =
@@ -411,6 +412,41 @@ final class AgentRegistry {
     scratch[paneID] = s
     outputDecayTasks.removeValue(forKey: paneID)
     recompute(paneID)
+  }
+
+  /// Diagnostic tag — short shape-only string for the active log
+  /// subsystem so we can see at a glance which event variants flow
+  /// through onTerminalEvent without dragging the full enum payload
+  /// (Data blobs, embedded structs) into the log stream.
+  private static func eventTag(_ event: TerminalEvent) -> String {
+    switch event {
+    case .paneOutput(let id, _): return "paneOutput(\(id.raw.uuidString.prefix(8)))"
+    case .paneIdle(let id, _): return "paneIdle(\(id.raw.uuidString.prefix(8)))"
+    case .paneExited(let id, _, _): return "paneExited(\(id.raw.uuidString.prefix(8)))"
+    case .paneCrashed(let id, _): return "paneCrashed(\(id.raw.uuidString.prefix(8)))"
+    case .paneClosedByTab(let id, _): return "paneClosedByTab(\(id.raw.uuidString.prefix(8)))"
+    case .paneInfoChanged(let id, let delta): return "paneInfoChanged(\(id.raw.uuidString.prefix(8)),\(deltaTag(delta)))"
+    case .paneCreated(let id, _): return "paneCreated(\(id.raw.uuidString.prefix(8)))"
+    case .paneReady(let id): return "paneReady(\(id.raw.uuidString.prefix(8)))"
+    case .tabActivated: return "tabActivated"
+    case .tabAutoClosed: return "tabAutoClosed"
+    case .worktreeActivated: return "worktreeActivated"
+    case .hierarchyMutated: return "hierarchyMutated"
+    case .paneActionRequested: return "paneActionRequested"
+    case .windowActionRequested: return "windowActionRequested"
+    case .configChanged: return "configChanged"
+    }
+  }
+
+  private static func deltaTag(_ delta: PaneInfoDelta) -> String {
+    switch delta {
+    case .title: return "title"
+    case .tabTitle: return "tabTitle"
+    case .desktopNotification: return "desktopNotification"
+    case .bellRang: return "bellRang"
+    case .progress: return "progress"
+    default: return "other"
+    }
   }
 
   /// Apply the latest derivation to `entries[paneID]`. No-op when the
