@@ -234,13 +234,16 @@ struct DiffFeature {
         return .none
 
       case .fileRowTapped(let path):
-        // Re-tapping the open row is a no-op (the chevron / × button
-        // own the close path; row body is open-only).
-        if state.presentedFilePath == path { return .none }
         state.presentedFilePath = path
-        // Cache hit on `.loaded` / `.error` / `.tooLarge`: don't refetch.
-        if let existing = state.diffsByPath[path], existing != .loading {
-          return .none
+        // Cache hit on `.loaded` / `.tooLarge`: don't refetch (drawer
+        // already shows the right content). `.error` falls through so the
+        // Retry button can re-issue the load (FU-T14). `.loading` is the
+        // in-flight case and also falls through — `.cancellable(cancelInFlight:
+        // true)` on `CancelID.diff` cancels the prior load before issuing
+        // the new one, so re-tapping a loaded row still no-ops via `.loaded`.
+        switch state.diffsByPath[path] {
+        case .loaded, .tooLarge: return .none
+        case .error, .loading, .none: break
         }
         state.diffsByPath[path] = .loading
         guard let worktreePath = state.worktreePath, !worktreePath.isEmpty else {
@@ -324,13 +327,15 @@ struct DiffFeature {
 
       case .historyCommitTapped(let sha, _):
         // `subject` is not stored — the view derives it from the selected
-        // commit's lookup. Re-tapping the open commit is a no-op (drawer
-        // close path is via tab switch / new selection).
-        if state.presentedCommitSha == sha { return .none }
+        // commit's lookup. Cache hit on `.loaded` / `.tooLarge`: don't
+        // refetch. `.error` falls through so the Retry button can re-issue
+        // the load (FU-T14). `.loading` falls through too —
+        // `.cancellable(cancelInFlight: true)` on `CancelID.commitDiff`
+        // handles the in-flight overlap.
         state.presentedCommitSha = sha
-        // Cache hit (.loaded / .error / .tooLarge): no re-fetch.
-        if let existing = state.diffsByCommit[sha], existing != .loading {
-          return .none
+        switch state.diffsByCommit[sha] {
+        case .loaded, .tooLarge: return .none
+        case .error, .loading, .none: break
         }
         state.diffsByCommit[sha] = .loading
         guard let worktreePath = state.worktreePath, !worktreePath.isEmpty else {

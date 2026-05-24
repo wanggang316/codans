@@ -394,33 +394,137 @@ struct DiffFeatureTests {
     }
   }
 
-  // MARK: - Cached error short-circuits row tap (I5)
+  // MARK: - Retry re-issues load on .error cache state (FU-T14)
 
   @Test
-  func fileRowTappedWithCachedErrorDoesNotRefetch() async {
-    let cachedError = GitError.invalidInput("nope")
+  func fileRowTappedRetriesAfterError() async {
+    // Pre-populate `.error` cache and `presentedFilePath` to mirror the
+    // state a Retry-button tap arrives in: the user already selected the
+    // row, the prior load failed, and now they're hitting Retry. The
+    // reducer must reset the cache slot to `.loading` and issue a fresh
+    // `showFileAtHEAD` call rather than short-circuiting.
+    let worktree = Self.makeTempWorktree(files: ["x.swift": "new\n"])
+    let cachedError = GitError.exec(code: 1, stderr: "fatal: …")
+    let store = TestStore(
+      initialState: DiffFeature.State(
+        worktreeID: WorktreeID(),
+        projectID: ProjectID(),
+        worktreePath: worktree.path,
+        presentedFilePath: "x.swift",
+        diffsByPath: ["x.swift": .error(cachedError)]
+      )
+    ) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.showFileAtHEAD = { _, _ in "OK" }
+    }
+
+    await store.send(.fileRowTapped(path: "x.swift")) { state in
+      state.diffsByPath["x.swift"] = .loading
+    }
+    let expectedDocument = DiffDocument(
+      files: [
+        DiffFile(oldPath: "x.swift", newPath: "x.swift", oldContents: "OK", newContents: "new\n")
+      ],
+      title: "x.swift"
+    )
+    // `LoadedDiffDocument` is identity-equatable; match the action then
+    // unwrap the wrapper to compare contents (same pattern as
+    // `fileRowTappedLoadsAndCachesDiff`).
+    store.exhaustivity = .off
+    await store.receive(.diffSucceededFor(path: "x.swift", document: expectedDocument))
+    if case .loaded(let wrapper) = store.state.diffsByPath["x.swift"] {
+      #expect(wrapper.document == expectedDocument)
+    } else {
+      Issue.record("expected diffsByPath[x.swift] to be .loaded(...) after retry")
+    }
+  }
+
+  // MARK: - Cache hit on .loaded short-circuits row tap (FU-T14 sanity)
+
+  @Test
+  func fileRowTappedNoOpsWhenAlreadyLoaded() async {
+    // The fix introduced an explicit `.loaded` short-circuit; this guards
+    // against a regression where Retry's plumbing accidentally re-loads
+    // already-loaded rows.
+    let cachedDoc = DiffDocument(
+      files: [
+        DiffFile(oldPath: "x", newPath: "x", oldContents: "old", newContents: "new")
+      ],
+      title: "x"
+    )
+    let cachedWrapper = DiffFeature.LoadedDiffDocument(cachedDoc)
     let store = TestStore(
       initialState: DiffFeature.State(
         worktreeID: WorktreeID(),
         projectID: ProjectID(),
         worktreePath: "/tmp",
-        diffsByPath: ["a.swift": .error(cachedError)]
+        diffsByPath: ["x": .loaded(cachedWrapper)]
       )
     ) {
       DiffFeature()
     } withDependencies: {
-      // No stubs: the reducer must NOT call `showFileAtHEAD` on a cached
-      // error, otherwise the unimplemented closure trips the test.
+      // No `showFileAtHEAD` stub: an unintended refetch would trip the
+      // `unimplemented` closure and fail the test.
       $0.gitService = GitServiceClient.testValue
     }
 
-    await store.send(.fileRowTapped(path: "a.swift")) { state in
-      state.presentedFilePath = "a.swift"
+    await store.send(.fileRowTapped(path: "x")) { state in
+      state.presentedFilePath = "x"
     }
-    // No effects expected; `await store.finish()` is implicit at scope end
-    // and would flag a leak if the reducer kicked off a load.
     await store.finish()
-    #expect(store.state.diffsByPath["a.swift"] == .error(cachedError))
+    if case .loaded(let wrapper) = store.state.diffsByPath["x"] {
+      #expect(wrapper === cachedWrapper)
+    } else {
+      Issue.record("expected diffsByPath[x] to remain .loaded(cachedWrapper)")
+    }
+  }
+
+  // MARK: - History-side Retry re-issues commit-diff load on .error (FU-T14)
+
+  @Test
+  func historyCommitTappedRetriesAfterError() async {
+    // History-side symmetric variant of `fileRowTappedRetriesAfterError`.
+    // Pre-populate `.error` for the selected commit and assert the reducer
+    // drops back to `.loading` and re-fires `commitDiff` rather than
+    // short-circuiting on the cached error.
+    let sha = "abc1234000000000000000000000000000000000"
+    let cachedError = GitError.exec(code: 1, stderr: "fatal: …")
+    let unified = UnifiedDiff(scope: .commit(sha: sha), files: [])
+    let store = TestStore(
+      initialState: DiffFeature.State(
+        worktreeID: WorktreeID(),
+        projectID: ProjectID(),
+        worktreePath: "/tmp/wt",
+        presentedCommitSha: sha,
+        diffsByCommit: [sha: .error(cachedError)]
+      )
+    ) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.commitDiff = { _, requestedSha, _ in
+        #expect(requestedSha == sha)
+        return unified
+      }
+    }
+
+    await store.send(.historyCommitTapped(sha: sha, subject: "x")) { state in
+      state.diffsByCommit[sha] = .loading
+    }
+    store.exhaustivity = .off
+    let expectedDocument = DiffDocument(
+      files: [],
+      title: String(sha.prefix(7)),
+      fallbackPatch: ""
+    )
+    await store.receive(.commitDiffSucceededFor(sha: sha, document: expectedDocument))
+    if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
+      #expect(wrapper.document == expectedDocument)
+    } else {
+      Issue.record("expected diffsByCommit[\(sha)] to be .loaded(...) after retry")
+    }
   }
 
   // MARK: - Line-count cap (I5)

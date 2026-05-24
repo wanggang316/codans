@@ -138,6 +138,7 @@ struct DiffDrawerView: View {
       Image(systemName: "exclamationmark.triangle")
         .font(.title2)
         .foregroundStyle(.orange)
+        .accessibilityHidden(true)
       Text(Self.errorMessage(error))
         .font(.callout)
         .foregroundStyle(.secondary)
