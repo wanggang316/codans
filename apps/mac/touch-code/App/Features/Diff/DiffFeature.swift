@@ -249,9 +249,13 @@ struct DiffFeature {
         return loadDiff(forPath: path, worktreePath: worktreePath)
 
       case .drawerCloseRequested:
-        // Cache survives — re-tapping a row that was previously opened
-        // re-uses the loaded DiffDocument without re-fetch.
+        // Closes the drawer regardless of which tab opened it. Both
+        // selection fields are cleared so a future re-open of the drawer
+        // in either tab starts from no selection. Cache (`diffsByPath` /
+        // `diffsByCommit`) is preserved — re-tapping a previously-
+        // rendered row hits cache.
         state.presentedFilePath = nil
+        state.presentedCommitSha = nil
         return .none
 
       case .diffSucceededFor(let path, let document):

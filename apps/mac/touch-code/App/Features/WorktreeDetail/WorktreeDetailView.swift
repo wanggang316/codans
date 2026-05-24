@@ -103,7 +103,7 @@ struct WorktreeDetailView: View {
         .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
-          if diffStore.state.presentedFilePath != nil {
+          if shouldShowDrawer(diff: diffStore.state) {
             DiffDrawerView(store: diffStore)
               .zIndex(80)
               .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -111,7 +111,7 @@ struct WorktreeDetailView: View {
         }
         .animation(
           .spring(response: 0.32, dampingFraction: 0.85),
-          value: diffStore.state.presentedFilePath
+          value: drawerVisibilityKey(diff: diffStore.state)
         )
 
         if inspectorVisible {
@@ -450,6 +450,36 @@ struct WorktreeDetailView: View {
     EmptyProjectStateView(onAddProject: onAddProject)
       .modifier(SuppressTitleModifier())
       .toolbarBackground(.hidden, for: .windowToolbar)
+  }
+
+  /// T14: drawer mount-gate. Reads from whichever selection field belongs
+  /// to the active tab — Changes owns `presentedFilePath`, History owns
+  /// `presentedCommitSha`. Without this routing, switching to History and
+  /// selecting a commit wouldn't surface the drawer at all.
+  private func shouldShowDrawer(diff: DiffFeature.State) -> Bool {
+    switch diff.selectedTab {
+    case .changes: return diff.presentedFilePath != nil
+    case .history: return diff.presentedCommitSha != nil
+    }
+  }
+
+  /// SwiftUI `.animation(_:value:)` keys on Equatable. Packing the three
+  /// fields the drawer cares about (active tab + both selections) into a
+  /// small Equatable struct re-triggers the spring whenever any of them
+  /// changes — including the user toggling tabs while a selection is
+  /// open on each side, which should fade between the two diffs.
+  private struct DrawerVisibilityKey: Equatable {
+    let tab: DiffFeature.DiffTab
+    let path: String?
+    let sha: String?
+  }
+
+  private func drawerVisibilityKey(diff: DiffFeature.State) -> DrawerVisibilityKey {
+    DrawerVisibilityKey(
+      tab: diff.selectedTab,
+      path: diff.presentedFilePath,
+      sha: diff.presentedCommitSha
+    )
   }
 
   /// Maps a `PendingWorktree` row to the view-layer struct the loading

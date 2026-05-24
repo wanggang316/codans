@@ -209,6 +209,27 @@ struct DiffFeatureTests {
     #expect(store.state.diffsByPath["a.swift"] == .loaded(cachedWrapper))
   }
 
+  // MARK: - Drawer close clears both selections (T14)
+
+  @Test
+  func drawerCloseRequestedClearsBothPresentations() async {
+    let store = TestStore(initialState: {
+      var s = DiffFeature.State()
+      s.presentedFilePath = "src/App.swift"
+      s.presentedCommitSha = "abc1234567890000000000000000000000000000"
+      return s
+    }()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.drawerCloseRequested) {
+      $0.presentedFilePath = nil
+      $0.presentedCommitSha = nil
+    }
+  }
+
   // MARK: - Style change
 
   @Test
