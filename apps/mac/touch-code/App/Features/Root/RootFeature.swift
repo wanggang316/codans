@@ -26,6 +26,11 @@ struct RootFeature {
 
     var sidebar: HierarchySidebarFeature.State = .init()
     var detail: WorktreeDetailFeature.State = .init()
+    /// T10: Branch popover / switch state. Owned at the root so the HEAD
+    /// watcher's `worktreeHeadChanged` and the sidebar's `selectionChanged`
+    /// can both forward into it from a single dispatch site, matching the
+    /// per-worktree-aware peer features around it.
+    var branchSwitcher: BranchSwitcherFeature.State = .init()
     /// C8 M6b (0005): editor preferences + per-Project override state.
     var editor: EditorFeature.State = .init()
     /// T2: Header feature (bell + Open-in split button + GV toggle).
@@ -334,6 +339,7 @@ struct RootFeature {
     case focusHierarchyPath(InboxEntry.SourcePath)
     case sidebar(HierarchySidebarFeature.Action)
     case detail(WorktreeDetailFeature.Action)
+    case branchSwitcher(BranchSwitcherFeature.Action)
     case editor(EditorFeature.Action)
     case worktreeHeader(WorktreeHeaderFeature.Action)
     case gitHub(GitHubFeature.Action)
@@ -366,6 +372,7 @@ struct RootFeature {
   private var sidebarAndDetailScopes: some Reducer<State, Action> {
     Scope(state: \.sidebar, action: \.sidebar) { HierarchySidebarFeature() }
     Scope(state: \.detail, action: \.detail) { WorktreeDetailFeature() }
+    Scope(state: \.branchSwitcher, action: \.branchSwitcher) { BranchSwitcherFeature() }
     Scope(state: \.diff, action: \.diff) { DiffFeature() }
   }
 
@@ -621,6 +628,19 @@ struct RootFeature {
                 path: resolvedWorktreePath
               )))
         )
+        // T10: forward selection delta into the branch switcher so the
+        // next popover open re-fetches against the new worktree path.
+        // `resolvedWorktreePath` already resolves to nil when either id is
+        // nil, which the reducer treats as a full caches+ids reset.
+        effects.append(
+          .send(
+            .branchSwitcher(
+              .worktreeChanged(
+                projectID: selection.projectID,
+                worktreeID: selection.worktreeID,
+                path: resolvedWorktreePath
+              )))
+        )
         // v2 GitHub integration (0013 M4): when the active Project changes, ask
         // GitHubFeature to batch-fetch PR data for every branch in that Project.
         // The reducer runs one `gh api graphql` for the whole repo instead of
@@ -663,6 +683,12 @@ struct RootFeature {
         else { return .none }
         let worktreePath = catalog.projects.first(where: { $0.id == projectID })?
           .worktrees.first(where: { $0.id == worktreeID })?.path
+        // T10: route the HEAD-change into the branch switcher ONLY when
+        // the watched worktree matches the one the popover currently
+        // backs. Reducers run on the main actor, so reading
+        // `state.branchSwitcher.worktreeID` here is the authoritative
+        // value at dispatch time — no captured-snapshot races.
+        let shouldForwardToBranchSwitcher = worktreeID == state.branchSwitcher.worktreeID
         return .run {
           [projectReconciler, client = hierarchyClient, monitor = worktreeLocalDiffMonitor] send in
           // HEAD moved → the cached `git diff HEAD --shortstat` numbers are
@@ -681,6 +707,9 @@ struct RootFeature {
             Self.makeActiveProjectGitHubRefresh(client: client)
           }) {
             await send(.gitHub(action))
+          }
+          if shouldForwardToBranchSwitcher {
+            await send(.branchSwitcher(.headChangedForCurrentWorktree))
           }
         }
 
@@ -1024,6 +1053,23 @@ struct RootFeature {
         return .none
 
       case .diff:
+        return .none
+
+      case .branchSwitcher(.delegate(.openDiffViewerOnHistoryTab)):
+        // T10: "View all" from the recent-commits section. Ensure the Diff
+        // Inspector is visible (mirrors the `.diffInspectorToggledForCurrentWorktree`
+        // path so the chord and this delegate share one open semantics).
+        let catalog = hierarchyClient.snapshot()
+        if !state.diffInspectorVisible(in: catalog) {
+          return .send(.diffInspectorToggledForCurrentWorktree)
+        }
+        // Pending (T11/T12): after T11 adds `.diff(.tabSelected(.history))`,
+        // dispatch it here after ensuring the inspector is visible so "View all"
+        // lands the user on the History tab.
+        return .none
+
+      case .branchSwitcher:
+        // Sub-feature transitions handled by the Scope; ignore in root.
         return .none
 
       case .commandPaletteToggle(let sourcePaneID):

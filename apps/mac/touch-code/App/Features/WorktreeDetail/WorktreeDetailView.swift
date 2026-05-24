@@ -31,6 +31,10 @@ struct WorktreeDetailView: View {
   /// M6: diff feature store — drives the Diff inspector column and the
   /// drawer overlay that fills the detail body when a file row is open.
   let diffStore: StoreOf<DiffFeature>
+  /// T10: branch popover + switch state. Threaded through to the leading
+  /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
+  /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
+  let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
   /// M5: drives the inline Diff inspector column rendered to the right
   /// of the detail body. Sourced from `Worktree.diffInspectorVisible` via
   /// `RootFeature.State.diffInspectorVisible(in:)` in `ContentView`.
@@ -86,9 +90,17 @@ struct WorktreeDetailView: View {
       let info = worktreeInfo(for: address)
       HStack(spacing: 0) {
         VStack(spacing: 0) {
+          // T10: inline branch-switch error banner. Renders itself only
+          // when `branchSwitcherStore.switchError` is non-nil, so it stays
+          // a zero-height no-op on the happy path. Placed at the top of
+          // the detail body — directly under the window toolbar — so the
+          // banner reads as a "drop-down notification strip" regardless
+          // of which tab / pane is foreground.
+          BranchSwitcherErrorBannerView(store: branchSwitcherStore)
           tabBarRow(address: address)
           terminalRegion(address: address)
         }
+        .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
           if diffStore.state.presentedFilePath != nil {
@@ -310,7 +322,8 @@ struct WorktreeDetailView: View {
       WorktreeHeaderInfoLabel(
         worktree: info.worktree,
         project: info.project,
-        gitHubStore: gitHubStore
+        gitHubStore: gitHubStore,
+        branchSwitcherStore: branchSwitcherStore
       )
     }
     .sharedBackgroundVisibility(.hidden)
@@ -354,7 +367,8 @@ struct WorktreeDetailView: View {
       WorktreeHeaderInfoLabel(
         worktree: info.worktree,
         project: info.project,
-        gitHubStore: gitHubStore
+        gitHubStore: gitHubStore,
+        branchSwitcherStore: branchSwitcherStore
       )
     }
     if #available(macOS 26.0, *) {

@@ -490,6 +490,10 @@ struct RootFeatureTests {
     // Worktree. With `worktreeID: nil`, DiffFeature returns `.cancel(...)` —
     // no further actions follow.
     await store.receive(\.diff.worktreeSelected)
+    // T10: `.selectionChanged` also forwards into `.branchSwitcher(.worktreeChanged)`.
+    // All-nil ids leave State at its defaults (initial state matches the
+    // mutation), so the assertion is a no-change receive.
+    await store.receive(\.branchSwitcher.worktreeChanged)
 
     selectionContinuation.finish()
     await store.send(.onQuit)
