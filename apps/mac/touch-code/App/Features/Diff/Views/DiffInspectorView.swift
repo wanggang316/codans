@@ -3,20 +3,50 @@ import ComposableArchitecture
 import SwiftUI
 import TouchCodeCore
 
-/// Diff inspector column body. Displays the active Worktree's changed
-/// files; tapping a row opens the drawer (M6) for that file. Width is
-/// fixed at 280 pt by the inspector mount in `ContentView`.
+/// Diff inspector column body. Hosts a segmented Changes / History tab
+/// picker; routes the body to either the changed-files list (M5 default)
+/// or the commit-history list (T13). Width is fixed at 280 pt by the
+/// inspector mount in `ContentView`.
 struct DiffInspectorView: View {
   @Bindable var store: StoreOf<DiffFeature>
 
   var body: some View {
     VStack(spacing: 0) {
+      tabPicker
+      Divider()
       header
       Divider()
       content
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .background(Color(nsColor: .windowBackgroundColor))
+  }
+
+  // MARK: - Tab picker
+
+  @ViewBuilder
+  private var tabPicker: some View {
+    // `DiffFeature` is not `BindableAction`-conformant, so `$store.selectedTab`
+    // can't bridge writes straight back into state. A manual `Binding` that
+    // forwards through `.tabSelected` keeps the reducer the sole owner of
+    // `selectedTab`, matching the pattern used by `BranchSwitcherView` and
+    // `DiffStylePicker`.
+    let binding = Binding<DiffFeature.DiffTab>(
+      get: { store.selectedTab },
+      set: { newValue in
+        guard newValue != store.selectedTab else { return }
+        store.send(.tabSelected(newValue))
+      }
+    )
+    Picker("Inspector tab", selection: binding) {
+      Text("Changes").tag(DiffFeature.DiffTab.changes)
+      Text("History").tag(DiffFeature.DiffTab.history)
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+    .accessibilityIdentifier("diff_inspector.tab_picker")
   }
 
   // MARK: - Header
@@ -27,35 +57,76 @@ struct DiffInspectorView: View {
         .font(.headline)
       Spacer()
       Button {
-        store.send(.refreshRequested)
+        handleRefresh()
       } label: {
         Image(systemName: "arrow.clockwise")
       }
       .buttonStyle(.borderless)
       .disabled(isRefreshing)
-      .help("Refresh changed files")
-      .accessibilityLabel("Refresh changed files")
+      .help(refreshHelp)
+      .accessibilityLabel(refreshHelp)
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
   }
 
   private var headerTitle: String {
-    switch store.changedFiles {
-    case .loaded(let files): return "Changes (\(files.count))"
-    default: return "Changes"
+    switch store.selectedTab {
+    case .changes:
+      if case .loaded(let files) = store.changedFiles { return "Changes (\(files.count))" }
+      return "Changes"
+    case .history:
+      // History is paginated; "loaded so far" isn't a meaningful signal.
+      return "History"
     }
   }
 
   private var isRefreshing: Bool {
-    if case .loading = store.changedFiles { return true }
-    return false
+    switch store.selectedTab {
+    case .changes:
+      if case .loading = store.changedFiles { return true }
+      return false
+    case .history:
+      return store.historyState.loading
+    }
+  }
+
+  private var refreshHelp: String {
+    switch store.selectedTab {
+    case .changes: return "Refresh changed files"
+    case .history: return "Refresh history"
+    }
+  }
+
+  private func handleRefresh() {
+    switch store.selectedTab {
+    case .changes:
+      store.send(.refreshRequested)
+    case .history:
+      // `DiffFeature` has no dedicated history-refresh action yet; compose
+      // the cache reset (`.headChangedForCurrentWorktree` drops commits +
+      // per-commit cache + selection) with `.historyAppeared` which then
+      // re-triggers the first-page load. TCA queues both sends and the
+      // reducer processes them in order on the main actor.
+      store.send(.headChangedForCurrentWorktree)
+      store.send(.historyAppeared)
+    }
   }
 
   // MARK: - Content
 
   @ViewBuilder
   private var content: some View {
+    switch store.selectedTab {
+    case .changes:
+      changesBody
+    case .history:
+      historyBody
+    }
+  }
+
+  @ViewBuilder
+  private var changesBody: some View {
     switch store.changedFiles {
     case .idle:
       placeholder("No worktree selected")
@@ -72,6 +143,21 @@ struct DiffInspectorView: View {
     case .error(let error):
       errorBlock(error)
     }
+  }
+
+  @ViewBuilder
+  private var historyBody: some View {
+    // T13 placeholder. The real `DiffHistoryListView` lands in T13 and
+    // consumes `store.historyState` + `.historyAppeared` +
+    // `.historyLoadNextPageRequested` + `.historyCommitTapped`. The
+    // accessibility identifier carries over to the real view so XCUITest
+    // queries by `diff_inspector.history_list` keep working across the
+    // swap.
+    Text("History")
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .accessibilityIdentifier("diff_inspector.history_list")
   }
 
   @ViewBuilder
@@ -95,6 +181,7 @@ struct DiffInspectorView: View {
         }
       }
     }
+    .accessibilityIdentifier("diff_inspector.changes_list")
   }
 
   @ViewBuilder
