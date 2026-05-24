@@ -49,6 +49,7 @@ These accessibility identifiers must be declared by the implementation (per patt
 | `branch_switcher.error_banner` | Inline error banner displayed under the header. |
 | `branch_switcher.error_dismiss_button` | The banner's close button. |
 | `diff_inspector.tab_picker` | Segmented control (Changes / History). |
+| `diff_inspector.close_button` | Close button in inspector header. |
 | `diff_inspector.changes_list` | Existing changed-files list container (renamed if currently unidentified). |
 | `diff_inspector.history_list` | History list container. |
 | `diff_inspector.history_row.<short-sha>` | One row per commit in History tab. |

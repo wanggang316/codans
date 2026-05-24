@@ -9,6 +9,12 @@ import TouchCodeCore
 /// inspector mount in `ContentView`.
 struct DiffInspectorView: View {
   @Bindable var store: StoreOf<DiffFeature>
+  /// Invoked when the user clicks the header's close button. Wired by the
+  /// mount site (`WorktreeDetailView`) to force the inspector hidden — the
+  /// symmetric counterpart to FU-T10's "View all" open path, bypassing the
+  /// 3-tier Git Viewer resolution that `.diffInspectorToggledForCurrentWorktree`
+  /// would otherwise run.
+  let onClose: () -> Void
 
   var body: some View {
     VStack(spacing: 0) {
@@ -65,6 +71,16 @@ struct DiffInspectorView: View {
       .disabled(isRefreshing)
       .help(refreshHelp)
       .accessibilityLabel(refreshHelp)
+
+      Button {
+        onClose()
+      } label: {
+        Image(systemName: "xmark")
+      }
+      .buttonStyle(.borderless)
+      .help("Close inspector")
+      .accessibilityLabel("Close inspector")
+      .accessibilityIdentifier("diff_inspector.close_button")
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)

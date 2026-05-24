@@ -116,7 +116,22 @@ struct WorktreeDetailView: View {
 
         if inspectorVisible {
           Divider()
-          DiffInspectorView(store: diffStore)
+          DiffInspectorView(
+            store: diffStore,
+            onClose: {
+              // Force in-app hidden, symmetric with FU-T10's "View all"
+              // open path (`RootFeature` line ~1085). Bypassing the
+              // 3-tier Git Viewer resolution that
+              // `.diffInspectorToggledForCurrentWorktree` runs is
+              // intentional: users with external viewers configured
+              // would not see this header button to begin with, since
+              // the inspector wouldn't be visible.
+              hierarchyManager.setWorktreeDiffInspectorVisible(
+                worktreeID: address.worktree,
+                visible: false
+              )
+            }
+          )
             .frame(width: 280)
             .transition(.move(edge: .trailing))
         }
