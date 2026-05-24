@@ -510,7 +510,7 @@ struct DiffFeatureTests {
       }
     }
 
-    await store.send(.historyCommitTapped(sha: sha, subject: "x")) { state in
+    await store.send(.historyCommitTapped(sha: sha)) { state in
       state.diffsByCommit[sha] = .loading
     }
     store.exhaustivity = .off
@@ -826,7 +826,7 @@ struct DiffFeatureHistoryTests {
       }
     }
 
-    await store.send(.historyCommitTapped(sha: sha, subject: "x")) { state in
+    await store.send(.historyCommitTapped(sha: sha)) { state in
       state.presentedCommitSha = sha
       state.diffsByCommit[sha] = .loading
     }
@@ -873,13 +873,13 @@ struct DiffFeatureHistoryTests {
     store.exhaustivity = .off
 
     // 1) Tap A → fetch.
-    await store.send(.historyCommitTapped(sha: shaA, subject: "a"))
+    await store.send(.historyCommitTapped(sha: shaA))
     await store.receive(\.commitDiffSucceededFor)
     // 2) Tap B → fetch.
-    await store.send(.historyCommitTapped(sha: shaB, subject: "b"))
+    await store.send(.historyCommitTapped(sha: shaB))
     await store.receive(\.commitDiffSucceededFor)
     // 3) Re-tap A → cache hit, no new fetch.
-    await store.send(.historyCommitTapped(sha: shaA, subject: "a"))
+    await store.send(.historyCommitTapped(sha: shaA))
     await store.finish()
 
     let totalCalls = await counter.count()
@@ -897,8 +897,8 @@ struct DiffFeatureHistoryTests {
     seed.historyState.commits = commits
     seed.historyState.nextOffset = commits.count
     seed.historyState.hasMore = false
-    seed.presentedCommitSha = "abcdef00000000000000000000000000000000000"
-    seed.diffsByCommit["abcdef00000000000000000000000000000000000"] = .loaded(
+    seed.presentedCommitSha = "abcdef0000000000000000000000000000000000"
+    seed.diffsByCommit["abcdef0000000000000000000000000000000000"] = .loaded(
       DiffFeature.LoadedDiffDocument(cachedDoc))
     seed.selectedTab = .history  // user preference must persist
 
@@ -942,8 +942,8 @@ struct DiffFeatureHistoryTests {
     seed.historyState.commits = commits
     seed.historyState.nextOffset = commits.count
     seed.historyState.hasMore = false
-    seed.presentedCommitSha = "12345670000000000000000000000000000000000"
-    seed.diffsByCommit["12345670000000000000000000000000000000000"] = .loaded(
+    seed.presentedCommitSha = "1234567000000000000000000000000000000000"
+    seed.diffsByCommit["1234567000000000000000000000000000000000"] = .loaded(
       DiffFeature.LoadedDiffDocument(cachedDoc))
     seed.selectedTab = .history
 
@@ -980,5 +980,170 @@ struct DiffFeatureHistoryTests {
       state.historyState.loading = false
       state.historyState.error = .timedOut
     }
+  }
+
+  // MARK: - 12. Refresh request resets + kicks first page (FU-T12)
+
+  @Test
+  func historyRefreshRequestedResetsAndKicksFirstPage() async {
+    let staleSha = String(repeating: "b", count: 40)
+    let staleCommit = Self.sampleCommit(id: staleSha, subject: "stale")
+    let freshCommits = Self.sampleCommits(prefix: "f", count: 1)
+    let cachedDoc = DiffDocument(files: [], title: "bbbbbbb", fallbackPatch: "")
+
+    var seed = Self.makeState()
+    seed.selectedTab = .history
+    seed.historyState.commits = [staleCommit]
+    seed.historyState.nextOffset = 1
+    seed.historyState.hasMore = false
+    seed.presentedCommitSha = staleSha
+    seed.diffsByCommit[staleSha] = .loaded(DiffFeature.LoadedDiffDocument(cachedDoc))
+
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.log = { _, cursor in
+        // Refresh re-fires `.historyAppeared`, which loads from offset 0.
+        #expect(cursor.offset == 0)
+        #expect(cursor.limit == 50)
+        return LogPage(cursor: cursor, commits: freshCommits, hasMore: false)
+      }
+    }
+
+    // Step 1: the refresh arm wipes history state, selection, and per-commit
+    // cache before re-firing `.historyAppeared`.
+    await store.send(.historyRefreshRequested) { state in
+      state.historyState = .init()
+      state.presentedCommitSha = nil
+      state.diffsByCommit = [:]
+    }
+    // Step 2: the `.send(.historyAppeared)` inside the refresh effect
+    // promotes `loading = true` before the log call resolves.
+    await store.receive(\.historyAppeared) { state in
+      state.historyState.loading = true
+    }
+    // Step 3: the log call returns the fresh page.
+    await store.receive(.historyPageSucceeded(freshCommits, hasMore: false)) { state in
+      state.historyState.commits = freshCommits
+      state.historyState.nextOffset = freshCommits.count
+      state.historyState.hasMore = false
+      state.historyState.loading = false
+    }
+  }
+}
+
+/// Direct unit tests for `DiffFeature.renderUnifiedDiffAsPatch`. The serializer
+/// re-emits parsed `UnifiedDiff` shapes as canonical `git diff` text, which is
+/// what `DiffDocument(fallbackPatch:)` feeds straight to the WebView. Pins the
+/// expected text-format scaffolding so a regression in the serializer would
+/// fail loudly rather than corrupt every commit-diff render path. (FU-T11.)
+struct DiffFeaturePatchSerializerTests {
+  @Test
+  func renderUnifiedDiffAsPatchEmitsAddedFileWithDevNullSource() {
+    let file = FileChange(
+      id: "new.txt", kind: .added, isBinary: false,
+      linesAdded: 1, linesRemoved: 0,
+      hunks: [
+        DiffHunk(
+          header: "@@ -0,0 +1 @@", oldStart: 0, oldCount: 0,
+          newStart: 1, newCount: 1,
+          lines: [DiffLine(kind: .added, text: "hello")]
+        )
+      ]
+    )
+    let out = DiffFeature.renderUnifiedDiffAsPatch(
+      UnifiedDiff(scope: .commit(sha: "abc1234"), files: [file])
+    )
+    #expect(out.contains("diff --git a/new.txt b/new.txt"))
+    #expect(out.contains("new file mode 100644"))
+    #expect(out.contains("--- /dev/null"))
+    #expect(out.contains("+++ b/new.txt"))
+    #expect(out.contains("+hello"))
+  }
+
+  @Test
+  func renderUnifiedDiffAsPatchEmitsDeletedFileWithDevNullTarget() {
+    let file = FileChange(
+      id: "old.txt", kind: .deleted, isBinary: false,
+      linesAdded: 0, linesRemoved: 1,
+      hunks: [
+        DiffHunk(
+          header: "@@ -1 +0,0 @@", oldStart: 1, oldCount: 1,
+          newStart: 0, newCount: 0,
+          lines: [DiffLine(kind: .removed, text: "goodbye")]
+        )
+      ]
+    )
+    let out = DiffFeature.renderUnifiedDiffAsPatch(
+      UnifiedDiff(scope: .commit(sha: "def5678"), files: [file])
+    )
+    #expect(out.contains("diff --git a/old.txt b/old.txt"))
+    #expect(out.contains("deleted file mode 100644"))
+    #expect(out.contains("--- a/old.txt"))
+    #expect(out.contains("+++ /dev/null"))
+    #expect(out.contains("-goodbye"))
+  }
+
+  @Test
+  func renderUnifiedDiffAsPatchEmitsRenamedFileWithDistinctPaths() {
+    let file = FileChange(
+      id: "new/path.txt",
+      kind: .renamed(from: "old/path.txt"),
+      isBinary: false,
+      linesAdded: 0, linesRemoved: 0,
+      hunks: []
+    )
+    let out = DiffFeature.renderUnifiedDiffAsPatch(
+      UnifiedDiff(scope: .commit(sha: "ren1234"), files: [file])
+    )
+    #expect(out.contains("diff --git a/old/path.txt b/new/path.txt"))
+    #expect(out.contains("rename from old/path.txt"))
+    #expect(out.contains("rename to new/path.txt"))
+  }
+
+  @Test
+  func renderUnifiedDiffAsPatchEmitsBinaryFileShortcut() {
+    let file = FileChange(
+      id: "image.png", kind: .modified, isBinary: true,
+      linesAdded: 0, linesRemoved: 0,
+      hunks: []
+    )
+    let out = DiffFeature.renderUnifiedDiffAsPatch(
+      UnifiedDiff(scope: .commit(sha: "bin1234"), files: [file])
+    )
+    #expect(out.contains("diff --git a/image.png b/image.png"))
+    #expect(out.contains("Binary files a/image.png and b/image.png differ"))
+  }
+
+  @Test
+  func renderUnifiedDiffAsPatchEmitsModifiedFileWithMultiLineHunk() {
+    let file = FileChange(
+      id: "src/x.swift", kind: .modified, isBinary: false,
+      linesAdded: 1, linesRemoved: 1,
+      hunks: [
+        DiffHunk(
+          header: "@@ -1,3 +1,3 @@", oldStart: 1, oldCount: 3,
+          newStart: 1, newCount: 3,
+          lines: [
+            DiffLine(kind: .context, text: "context-before"),
+            DiffLine(kind: .removed, text: "old-line"),
+            DiffLine(kind: .added, text: "new-line"),
+            DiffLine(kind: .context, text: "context-after"),
+          ]
+        )
+      ]
+    )
+    let out = DiffFeature.renderUnifiedDiffAsPatch(
+      UnifiedDiff(scope: .commit(sha: "mod1234"), files: [file])
+    )
+    #expect(out.contains("diff --git a/src/x.swift b/src/x.swift"))
+    #expect(out.contains("--- a/src/x.swift"))
+    #expect(out.contains("+++ b/src/x.swift"))
+    #expect(out.contains("@@ -1,3 +1,3 @@"))
+    #expect(out.contains(" context-before"))  // space prefix for context
+    #expect(out.contains("-old-line"))  // - prefix for removed
+    #expect(out.contains("+new-line"))  // + prefix for added
+    #expect(out.contains(" context-after"))
   }
 }

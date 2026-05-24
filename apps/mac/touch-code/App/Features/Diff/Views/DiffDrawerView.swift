@@ -155,10 +155,7 @@ struct DiffDrawerView: View {
   /// History-side error block. Distinct from `errorBlock(path:error:)`
   /// because the retry actions differ — Changes re-dispatches
   /// `.fileRowTapped(path:)`; History re-dispatches
-  /// `.historyCommitTapped(sha:subject:)`. Subject is recovered from the
-  /// commits cache; if the cache no longer carries the selected sha (a
-  /// state that shouldn't occur in normal flow), the retry falls back to
-  /// an empty subject — the reducer doesn't store `subject` anyway.
+  /// `.historyCommitTapped(sha:)`.
   @ViewBuilder
   private func commitErrorBlock(sha: String, error: GitError) -> some View {
     VStack(spacing: 10) {
@@ -172,8 +169,7 @@ struct DiffDrawerView: View {
         .multilineTextAlignment(.center)
         .padding(.horizontal, 16)
       Button("Retry") {
-        let subject = store.historyState.commits.first(where: { $0.id == sha })?.subject ?? ""
-        store.send(.historyCommitTapped(sha: sha, subject: subject))
+        store.send(.historyCommitTapped(sha: sha))
       }
       .controlSize(.small)
     }

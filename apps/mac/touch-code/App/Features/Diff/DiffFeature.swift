@@ -158,7 +158,13 @@ struct DiffFeature {
     case historyLoadNextPageRequested
     case historyPageSucceeded([Commit], hasMore: Bool)
     case historyPageFailed(GitError)
-    case historyCommitTapped(sha: String, subject: String)
+    /// Atomic "refresh the History tab" intent. Resets the cache + selection
+    /// (same shape as `.headChangedForCurrentWorktree`) and re-fires
+    /// `.historyAppeared` to kick the first-page load. Owned by FU-T12 so
+    /// the refresh button and Retry button in `DiffHistoryListView` drive a
+    /// single action instead of composing two sends from the view layer.
+    case historyRefreshRequested
+    case historyCommitTapped(sha: String)
     case commitDiffSucceededFor(sha: String, document: DiffDocument)
     case commitDiffFailedFor(sha: String, error: GitError)
     case commitDiffTooLargeFor(sha: String, reason: TooLargeReason, copyCommand: String)
@@ -281,6 +287,21 @@ struct DiffFeature {
         state.selectedTab = tab
         return .none
 
+      case .historyRefreshRequested:
+        // Atomic refresh: drop the prior cache + selection, cancel any
+        // in-flight history / commit-diff effects, then re-fire
+        // `.historyAppeared` to kick the first-page load. Same reset shape
+        // as `.headChangedForCurrentWorktree`; the difference is intent —
+        // refresh is user-initiated and unconditionally re-fetches.
+        state.historyState = .init()
+        state.presentedCommitSha = nil
+        state.diffsByCommit = [:]
+        return .merge(
+          .cancel(id: CancelID.historyPage),
+          .cancel(id: CancelID.commitDiff),
+          .send(.historyAppeared)
+        )
+
       case .historyAppeared:
         // Idempotent: only trigger first-page load when cache is genuinely
         // empty and not already loading. Subsequent rebinds (tab switch
@@ -325,23 +346,23 @@ struct DiffFeature {
         state.historyState.error = error
         return .none
 
-      case .historyCommitTapped(let sha, _):
-        // `subject` is not stored — the view derives it from the selected
-        // commit's lookup. Cache hit on `.loaded` / `.tooLarge`: don't
+      case .historyCommitTapped(let sha):
+        // Guard FIRST: a missing worktree path is a no-op rather than a
+        // selection mutation, so the inspector never visually highlights a
+        // commit we can't load. Cache hit on `.loaded` / `.tooLarge`: don't
         // refetch. `.error` falls through so the Retry button can re-issue
         // the load (FU-T14). `.loading` falls through too —
         // `.cancellable(cancelInFlight: true)` on `CancelID.commitDiff`
         // handles the in-flight overlap.
+        guard let worktreePath = state.worktreePath, !worktreePath.isEmpty else {
+          return .none
+        }
         state.presentedCommitSha = sha
         switch state.diffsByCommit[sha] {
         case .loaded, .tooLarge: return .none
         case .error, .loading, .none: break
         }
         state.diffsByCommit[sha] = .loading
-        guard let worktreePath = state.worktreePath, !worktreePath.isEmpty else {
-          return .send(
-            .commitDiffFailedFor(sha: sha, error: .invalidInput("missing worktree path")))
-        }
         return loadCommitDiff(sha: sha, worktreePath: worktreePath)
 
       case .commitDiffSucceededFor(let sha, let document):

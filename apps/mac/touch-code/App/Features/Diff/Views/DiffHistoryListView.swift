@@ -66,11 +66,10 @@ struct DiffHistoryListView: View {
         .multilineTextAlignment(.center)
         .padding(.horizontal, 12)
       Button("Retry") {
-        // Mirrors `DiffInspectorView.handleRefresh()`'s History branch:
-        // reset the cache + selection, then re-fire the first-page load.
-        // FU-T12 tracks atomicising this into a single action.
-        store.send(.headChangedForCurrentWorktree)
-        store.send(.historyAppeared)
+        // Atomic refresh in a single send: the reducer's
+        // `.historyRefreshRequested` arm resets the cache + selection and
+        // re-fires the first-page load.
+        store.send(.historyRefreshRequested)
       }
       .controlSize(.small)
     }
@@ -100,7 +99,12 @@ struct DiffHistoryListView: View {
   @ViewBuilder
   private func row(commit: Commit, index: Int, total: Int) -> some View {
     let isSelected = store.presentedCommitSha == commit.id
-    let shortSha = String(commit.id.prefix(7))
+    let shortSha = commit.shortID
+    // Hoisted once per row render: feeds both the visible trailing label
+    // and the VoiceOver string so the a11y surface matches what sighted
+    // users see, and we don't re-invoke the formatter twice per row.
+    let relativeAge = Self.relativeFormatter.localizedString(
+      for: commit.date, relativeTo: Date())
 
     HStack(spacing: 8) {
       Text(shortSha)
@@ -111,7 +115,7 @@ struct DiffHistoryListView: View {
         .font(.body)
         .lineLimit(1)
       Spacer()
-      Text(Self.relativeFormatter.localizedString(for: commit.date, relativeTo: Date()))
+      Text(relativeAge)
         .font(.caption2)
         .foregroundStyle(.tertiary)
     }
@@ -120,11 +124,11 @@ struct DiffHistoryListView: View {
     .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
     .contentShape(.rect)
     .onTapGesture {
-      store.send(.historyCommitTapped(sha: commit.id, subject: commit.subject))
+      store.send(.historyCommitTapped(sha: commit.id))
     }
     .accessibilityIdentifier("diff_inspector.history_row.\(shortSha)")
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("Commit \(shortSha), \(commit.subject)")
+    .accessibilityLabel("Commit \(shortSha), \(commit.subject), \(relativeAge)")
     .accessibilityAddTraits(.isButton)
     .onAppear {
       // Infinite scroll: when the 5th-from-end row becomes visible, kick

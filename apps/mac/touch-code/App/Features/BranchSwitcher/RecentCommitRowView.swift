@@ -20,7 +20,7 @@ struct RecentCommitRowView: View {
     return formatter
   }()
 
-  private var shortSHA: String { String(commit.id.prefix(7)) }
+  private var shortSHA: String { commit.shortID }
 
   private var relativeAge: String {
     Self.relativeFormatter.localizedString(for: commit.date, relativeTo: Date())

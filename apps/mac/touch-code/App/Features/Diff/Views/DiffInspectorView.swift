@@ -103,13 +103,9 @@ struct DiffInspectorView: View {
     case .changes:
       store.send(.refreshRequested)
     case .history:
-      // `DiffFeature` has no dedicated history-refresh action yet; compose
-      // the cache reset (`.headChangedForCurrentWorktree` drops commits +
-      // per-commit cache + selection) with `.historyAppeared` which then
-      // re-triggers the first-page load. TCA queues both sends and the
-      // reducer processes them in order on the main actor.
-      store.send(.headChangedForCurrentWorktree)
-      store.send(.historyAppeared)
+      // Atomic refresh — the reducer resets cache + selection and re-fires
+      // the first-page load in a single arm. See FU-T12.
+      store.send(.historyRefreshRequested)
     }
   }
 
