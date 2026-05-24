@@ -38,9 +38,14 @@ struct AgentLogoView: View {
           .resizable()
           .scaledToFit()
       case .codex:
+        // Visually inset the codex glyph so it reads ~15% smaller than
+        // the claude / pi marks at the same outer frame. The bundled
+        // glyph carries less negative padding than the other two, so
+        // without the inset it looks chunkier in the row.
         Image("codex")
           .resizable()
           .scaledToFit()
+          .padding(size * 0.15)
       case .pi:
         Image("pi")
           .resizable()
