@@ -1,4 +1,5 @@
 import Foundation
+import TouchCodeCore
 
 /// Argv builder for the Git CLI. Each static method produces the arguments passed to `git` —
 /// never to a shell. `gitExecutable` itself is argv[0] on the Process side; these arrays
@@ -89,5 +90,38 @@ nonisolated enum GitCommand {
   /// the `origin` remote since the GitHub integration does not support multi-remote setups.
   static func remoteGetUrl(remote: String = "origin") -> [String] {
     ["remote", "get-url", remote]
+  }
+
+  /// `git symbolic-ref --short HEAD`. Exit 0 + branch on stdout when HEAD points at a ref;
+  /// exit 1 (no stdout) when HEAD is detached. Caller maps the exit 1 case to "detached".
+  static func symbolicRefShortHead() -> [String] {
+    ["symbolic-ref", "--short", "HEAD"]
+  }
+
+  /// `git for-each-ref … refs/heads refs/remotes` formatted for parser ingestion.
+  /// Fields per record (TAB-separated): full refname, short refname, upstream short name,
+  /// HEAD marker (`*` for current, space otherwise). Records are newline-separated.
+  /// Branch names cannot contain TAB or LF per git ref-naming rules, so the chosen
+  /// separators are unambiguous.
+  static func forEachRefBranches() -> [String] {
+    [
+      "-c", "core.quotePath=false",
+      "for-each-ref",
+      "--format=%(refname)%09%(refname:short)%09%(upstream:short)%09%(HEAD)",
+      "refs/heads", "refs/remotes",
+    ]
+  }
+
+  /// `git switch <name>` for `.local`, `git switch --track <origin/x>` for `.remoteTracking`.
+  /// No `-C` / `--create`; switching to a non-existent local branch must fail with git's
+  /// native error rather than silently create. Returns argv only — caller wraps with the
+  /// shared subprocess runner.
+  static func switchBranch(target: BranchSwitchTarget) -> [String] {
+    switch target {
+    case .local(let name):
+      return ["switch", name]
+    case .remoteTracking(let shortName):
+      return ["switch", "--track", shortName]
+    }
   }
 }

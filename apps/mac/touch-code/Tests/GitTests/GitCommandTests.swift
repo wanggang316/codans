@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TouchCodeCore
 
 @testable import TouchCode
 
@@ -106,6 +107,57 @@ struct GitCommandTests {
       let argv = GitCommand.diff(kind: kind)
       #expect(argv[0] == "-c")
       #expect(argv[1] == "core.quotePath=false")
+    }
+  }
+
+  @Test
+  func symbolicRefShortHeadArgvIsExact() {
+    #expect(GitCommand.symbolicRefShortHead() == ["symbolic-ref", "--short", "HEAD"])
+  }
+
+  @Test
+  func forEachRefBranchesIncludesBothRefRoots() {
+    let argv = GitCommand.forEachRefBranches()
+    #expect(argv.contains("refs/heads"))
+    #expect(argv.contains("refs/remotes"))
+    let formatToken = argv.first(where: { $0.hasPrefix("--format=") })
+    #expect(formatToken != nil)
+    if let formatToken {
+      #expect(formatToken.contains("%(refname)"))
+      #expect(formatToken.contains("%(refname:short)"))
+      #expect(formatToken.contains("%(upstream:short)"))
+      #expect(formatToken.contains("%(HEAD)"))
+    }
+  }
+
+  @Test
+  func forEachRefBranchesQuotePathDisabled() {
+    let argv = GitCommand.forEachRefBranches()
+    #expect(Array(argv.prefix(3)) == ["-c", "core.quotePath=false", "for-each-ref"])
+  }
+
+  @Test
+  func switchBranchLocalArgvIsExact() {
+    #expect(GitCommand.switchBranch(target: .local(name: "main")) == ["switch", "main"])
+  }
+
+  @Test
+  func switchBranchRemoteTrackingArgvIsExact() {
+    #expect(
+      GitCommand.switchBranch(target: .remoteTracking(shortName: "origin/feat/x"))
+        == ["switch", "--track", "origin/feat/x"])
+  }
+
+  @Test
+  func switchBranchDoesNotCreate() {
+    let targets: [BranchSwitchTarget] = [
+      .local(name: "main"),
+      .remoteTracking(shortName: "origin/feat/x"),
+    ]
+    for target in targets {
+      let argv = GitCommand.switchBranch(target: target)
+      #expect(!argv.contains("-c"), "switch argv must not contain `-c` (the --create short flag)")
+      #expect(!argv.contains("--create"), "switch argv must not contain `--create`")
     }
   }
 }
