@@ -120,7 +120,7 @@ struct SettingsGeneralView: View {
       Section {
         Toggle("Auto-open Agents View", isOn: agentsViewAutoOpenBinding)
       } footer: {
-        Text("The sidebar panel opens automatically when an agent running")
+        Text("The sidebar panel opens automatically when an agent is running.")
       }
     }
     .formStyle(.grouped)
