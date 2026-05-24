@@ -151,7 +151,7 @@ struct ActiveAgentsRowView: View {
       // every cell at full opacity. Tint follows `.primary` so the grid
       // is black in light mode / white in dark mode, distinct from the
       // orange "waiting" icon without competing visually for attention.
-      LoadingGridIcon(size: 14, isAnimating: !reduceMotion)
+      LoadingGridIcon(size: 16, isAnimating: !reduceMotion)
         .foregroundStyle(.primary)
     case .finished:
       Image(systemName: "checkmark.circle.fill")
