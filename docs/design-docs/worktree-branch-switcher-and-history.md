@@ -338,7 +338,7 @@ Row 1: `WorktreeRowIcon` (existing, sized down to caption if it visually clashes
 Row 2: `Text("\(worktree.name) · \(project.name)")` (`.caption`, `.secondary`).
 
 `branchTitle` source:
-- `worktree.branch == nil` → "(detached @ \(shortSha))" — short sha pulled from `Worktree.headSha` if exposed, otherwise placeholder "(detached HEAD)". (Verify in implementation; if not available, a separate `currentBranch` call's nil return drives the placeholder, with the resolved sha left to a follow-up.)
+- `worktree.branch == nil` → `"(detached)"` baseline literal (matches `UT-BSH-HD-003`'s regex `^\(detached( @ [0-9a-f]{7,12})?\)$`). Future short-sha form `"(detached @ \(shortSha))"` lights up once `Worktree.headSha` is exposed (OQ-D1).
 - otherwise → `worktree.branch ?? worktree.name` (worktree.name fallback covers the freshly-cloned no-HEAD case).
 
 Hover affordance: `.contentShape(.rect)` + `.onHover { isHovered = $0 }` controlling row background opacity. Click toggles `BranchSwitcherFeature.popoverTapped`.
@@ -469,7 +469,7 @@ No data migration. Rollback = revert the diff. The new `GitService` methods are 
 | `WorktreeHeadWatcher` debounce (200 ms) makes header spinner linger an extra ~200 ms post-switch | Certain | Low | Acceptable. Faster reset would require a parallel "I just switched" hint, doubling truth sources. |
 | Switching while popover's inventory load is still in flight produces visible flicker (popover dismisses, then reload triggers fresh inventory next open) | Possible | Low | `.cancellable(id: .inventory)` cancels the in-flight load; next open re-issues. Verified in TestStore. |
 | Large merge commit diffs hit the 16 MiB cap and show "too large" placeholder | Possible | Low | Existing behaviour for working-tree diffs; consistent UX. Out of scope to implement summary/stat-only view. |
-| Detached HEAD short-sha source not exposed on `Worktree` model | Possible | Low | Fallback to "(detached HEAD)" without sha. Add sha if `Worktree` already carries it; otherwise file follow-up — does not block this design. |
+| Detached HEAD short-sha source not exposed on `Worktree` model | Possible | Low | Fallback to `"(detached)"` without sha. Add `@ <short-sha>` suffix if `Worktree` already carries it; otherwise file follow-up — does not block this design. |
 | Cross-worktree popover sharing (user clicks Worktree A's header, then B's before A's inventory returns) | Possible | Medium | `worktreeChanged` action cancels in-flight effects and resets state; the inventory load's `[gitService]` capture targets the worktree path captured at dispatch time, not the current state. |
 | Adding a `BranchSwitcherFeature` to every WorktreeDetailView mount could regress memory if dozens of worktrees | Low | Low | Reducer state is small (< 1 KB cold, < 50 KB with inventory cache); only one mounts per detail view; cleared on `worktreeChanged`. |
 | User clicks "View all" but Diff Viewer is closed and Cmd-Opt-G is unbound | Low | Low | RootFeature delegate handler always opens the viewer (independent of keybinding) before switching tab. |
