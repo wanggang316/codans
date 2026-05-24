@@ -65,30 +65,30 @@ struct SettingsCodableTests {
     }
   }
 
-  /// `general.resumePanesOnLaunch` defaults to `true` so unconfigured users land on the
-  /// M2 live-resume tier; the M3 snapshot-quit path only engages when the user opts out.
+  /// `general.quitStrategy` defaults to `.ask` so fresh installs prompt the user on quit
+  /// whenever at least one pane is live.
   @Test
-  func resumePanesOnLaunchDefaultsToTrue() {
-    #expect(GeneralSettings.default.resumePanesOnLaunch == true)
-    #expect(Settings.default.general.resumePanesOnLaunch == true)
+  func quitStrategyDefaultsToAsk() {
+    #expect(GeneralSettings.default.quitStrategy == .ask)
+    #expect(Settings.default.general.quitStrategy == .ask)
   }
 
-  /// Encoding and decoding the field round-trips both states.
+  /// Encoding and decoding the field round-trips every case.
   @Test
-  func resumePanesOnLaunchRoundTrips() throws {
-    for value in [true, false] {
+  func quitStrategyRoundTrips() throws {
+    for value in QuitStrategy.allCases {
       var original = Settings.default
-      original.general.resumePanesOnLaunch = value
+      original.general.quitStrategy = value
       let data = try JSONEncoder.touchCodeDefault.encode(original)
       let decoded = try JSONDecoder.touchCodeDefault.decode(Settings.self, from: data)
-      #expect(decoded.general.resumePanesOnLaunch == value)
+      #expect(decoded.general.quitStrategy == value)
     }
   }
 
-  /// Settings files written before this field existed must decode with `resumePanesOnLaunch`
-  /// defaulted to `true` — the M3 toggle is opt-out, not opt-in.
+  /// Settings files written before either knob existed must decode to the new install
+  /// default `.ask` so the quit dialog surfaces on the next quit.
   @Test
-  func resumePanesOnLaunchMissingKeyDecodesToTrue() throws {
+  func quitStrategyMissingKeyDecodesToAsk() throws {
     let json = """
       {
         "version": 3,
@@ -98,7 +98,39 @@ struct SettingsCodableTests {
       }
       """
     let decoded = try JSONDecoder.touchCodeDefault.decode(Settings.self, from: Data(json.utf8))
-    #expect(decoded.general.resumePanesOnLaunch == true)
+    #expect(decoded.general.quitStrategy == .ask)
+  }
+
+  /// Legacy settings files carrying `resumePanesOnLaunch: true` must migrate to
+  /// `.keepRunning` so users who previously opted into live-resume keep that behaviour.
+  @Test
+  func legacyResumePanesOnLaunchTrueMigratesToKeepRunning() throws {
+    let json = """
+      {
+        "version": 3,
+        "general": {
+          "resumePanesOnLaunch": true
+        }
+      }
+      """
+    let decoded = try JSONDecoder.touchCodeDefault.decode(Settings.self, from: Data(json.utf8))
+    #expect(decoded.general.quitStrategy == .keepRunning)
+  }
+
+  /// Legacy settings files carrying `resumePanesOnLaunch: false` must migrate to
+  /// `.snapshot` so users who opted out of live-resume keep snapshot-on-quit semantics.
+  @Test
+  func legacyResumePanesOnLaunchFalseMigratesToSnapshot() throws {
+    let json = """
+      {
+        "version": 3,
+        "general": {
+          "resumePanesOnLaunch": false
+        }
+      }
+      """
+    let decoded = try JSONDecoder.touchCodeDefault.decode(Settings.self, from: Data(json.utf8))
+    #expect(decoded.general.quitStrategy == .snapshot)
   }
 
   /// Verifies `projects` serialises as a JSON object keyed by UUID string, not as the

@@ -183,13 +183,12 @@ final class SettingsStore {
     scheduleSave()
   }
 
-  /// Toggle for the M3 resume-vs-snapshot quit branch. When true (default), cmd-Q leaves
-  /// pane daemons running so the next launch reattaches. When false, quit serialises each
-  /// pane's VT state and tears down the daemons; the next launch restores the visual
-  /// buffer into a fresh shell. T3.2 / T3.3 wire the runtime branches; this setter just
-  /// persists the user's choice.
-  func setResumePanesOnLaunch(_ enabled: Bool) {
-    settings.general.resumePanesOnLaunch = enabled
+  /// Persist the user's chosen quit strategy. `applicationShouldTerminate` consults this
+  /// to pick the live / snapshot branch, or to surface the quit confirmation dialog when
+  /// the user prefers `.ask`. The dialog itself routes through here when the user ticks
+  /// "Don't ask again", so the call site is shared.
+  func setQuitStrategy(_ value: QuitStrategy) {
+    settings.general.quitStrategy = value
     scheduleSave()
   }
 

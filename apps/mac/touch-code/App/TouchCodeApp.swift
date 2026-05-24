@@ -196,6 +196,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
   }
 
+  /// Gates `cmd-Q` so the daemon-disposition decision can run before AppKit tears the
+  /// process down. When at least one pane is live and the user's `QuitStrategy` is
+  /// `.ask`, this surfaces the quit confirmation dialog and dispatches the chosen
+  /// branch through `SessionLifecycle`. The non-ask strategies dispatch directly so
+  /// no extra prompt is shown for users who already picked a default.
+  ///
+  /// Returns `.terminateNow` for keep / snapshot / discard so the subsequent
+  /// `willTerminate` hook still fires and the remaining persisted-state flushes run.
+  /// `.cancel` aborts the quit entirely.
+  nonisolated func applicationShouldTerminate(
+    _ sender: NSApplication
+  ) -> NSApplication.TerminateReply {
+    MainActor.assumeIsolated {
+      guard let appState else { return .terminateNow }
+      let lifecycle = appState.sessionLifecycle
+      let activePanes = lifecycle?.liveZmxClientCount ?? 0
+      guard activePanes > 0 else { return .terminateNow }
+
+      let strategy = appState.settingsStore.settings.general.quitStrategy
+      switch strategy {
+      case .keepRunning:
+        lifecycle?.detachAllForQuit(action: .keepRunning)
+        return .terminateNow
+      case .snapshot:
+        lifecycle?.detachAllForQuit(action: .snapshot)
+        return .terminateNow
+      case .ask:
+        let settingsStore = appState.settingsStore
+        let choice = QuitConfirmationDialog.present(
+          paneCount: activePanes,
+          rememberClosure: { [weak settingsStore] picked in
+            settingsStore?.setQuitStrategy(picked)
+          }
+        )
+        switch choice {
+        case .keepRunning:
+          lifecycle?.detachAllForQuit(action: .keepRunning)
+          return .terminateNow
+        case .snapshot:
+          lifecycle?.detachAllForQuit(action: .snapshot)
+          return .terminateNow
+        case .discard:
+          lifecycle?.killAllForQuit()
+          return .terminateNow
+        case .cancel:
+          return .terminateCancel
+        }
+      }
+    }
+  }
+
   /// Handles a banner click. Parses the deeplink the OSNotifier embedded
   /// in `userInfo["deeplink"]` and dispatches `RootFeature.focusHierarchyPath`
   /// against the live root store.
@@ -865,8 +916,7 @@ final class AppState {
     self.sessionLifecycle = SessionLifecycle(
       manager: hierarchyManager,
       ghosttyRuntime: ghostty,
-      sessionStore: sessionStore,
-      settingsStore: settingsStore
+      sessionStore: sessionStore
     )
 
     let reaper = SessionReaper(sessionStore: sessionStore)
@@ -887,13 +937,12 @@ final class AppState {
   /// Any debounced write that hasn't landed within 500 ms of quit would
   /// otherwise be dropped; each store below has its own debounce, so we
   /// drain them explicitly here.
+  ///
+  /// The pane-daemon disposition (detach / snapshot / kill) is handled upstream by
+  /// `AppDelegate.applicationShouldTerminate(_:)` so it can pause for the quit
+  /// confirmation dialog. By the time this runs the daemons are already in their
+  /// chosen post-quit state; we only flush the remaining persisted-state stores here.
   func flushAllPersistedState() {
-    // Capture the live zmx daemons into `sessions.json` and then send
-    // `.detach` so they survive the app process exit. Runs FIRST: the
-    // catalog write happens before any other flush so a crash mid-
-    // shutdown does not strand surviving daemons.
-    sessionLifecycle?.detachAllForQuit()
-
     // Cancel notification background Tasks first so none can race the
     // final flush by mutating store state mid-write.
     notificationDetectorTask?.cancel()

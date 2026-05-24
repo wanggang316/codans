@@ -42,13 +42,13 @@ struct SettingsGeneralView: View {
     )
   }
 
-  /// Toggle binding for the M3 "resume vs. snapshot on quit" knob. Matches the surrounding
-  /// SettingsStore binding pattern — `get` reads `settings.general`, `set` goes through the
-  /// dedicated setter so the debounced atomic write fires.
-  private var resumePanesOnLaunchBinding: Binding<Bool> {
+  /// Quit-strategy picker binding. Matches the surrounding SettingsStore binding pattern —
+  /// `get` reads `settings.general`, `set` goes through the dedicated setter so the
+  /// debounced atomic write fires.
+  private var quitStrategyBinding: Binding<QuitStrategy> {
     Binding(
-      get: { settingsStore.settings.general.resumePanesOnLaunch },
-      set: { settingsStore.setResumePanesOnLaunch($0) }
+      get: { settingsStore.settings.general.quitStrategy },
+      set: { settingsStore.setQuitStrategy($0) }
     )
   }
 
@@ -96,10 +96,15 @@ struct SettingsGeneralView: View {
       }
 
       Section {
-        Toggle("Resume panes on launch", isOn: resumePanesOnLaunchBinding)
+        Picker("On quit", selection: quitStrategyBinding) {
+          Text("Ask each time").tag(QuitStrategy.ask)
+          Text("Keep panes running").tag(QuitStrategy.keepRunning)
+          Text("Snapshot and exit").tag(QuitStrategy.snapshot)
+        }
       } footer: {
         Text(
-          "Keep terminal panes running after quit so they resume where you left off."
+          "Keep panes running survives the app quit so long-running commands continue. "
+            + "Snapshot exits cleanly but preserves the visible buffer for next launch."
         )
       }
 
