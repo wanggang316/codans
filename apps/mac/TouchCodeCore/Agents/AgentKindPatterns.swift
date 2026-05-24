@@ -173,10 +173,15 @@ public nonisolated enum AgentKindPatterns {
     return false
   }
 
-  /// A nil character (= end-of-string) or any non-alphanumeric
-  /// character counts as a word boundary. Letters and digits do not.
+  /// A nil character (= start / end of string) or any whitespace
+  /// character counts as a word boundary. Punctuation, slashes, and
+  /// dots do NOT — otherwise a terminal title carrying a path like
+  /// `~/.codex/worktrees/...` would false-match `.codex` as "codex"
+  /// (the actual bug reported by Gump in the field). The agent's brand
+  /// name should be set off from its neighbours by whitespace or
+  /// stand alone; anything embedded inside a path component is noise.
   private static func isWordBoundary(_ character: Character?) -> Bool {
     guard let character else { return true }
-    return !(character.isLetter || character.isNumber)
+    return character.isWhitespace
   }
 }
