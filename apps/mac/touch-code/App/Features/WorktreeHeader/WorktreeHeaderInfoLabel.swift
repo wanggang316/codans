@@ -48,26 +48,21 @@ struct WorktreeHeaderInfoLabel: View {
       )
       VStack(alignment: .leading, spacing: 0) {
         branchRowButton
+          .popover(
+            isPresented: Binding(
+              get: { branchSwitcherStore.isPopoverOpen },
+              set: { newValue in
+                if !newValue {
+                  branchSwitcherStore.send(.popoverDismissed)
+                }
+              }
+            ),
+            arrowEdge: .bottom
+          ) {
+            BranchSwitcherView(store: branchSwitcherStore)
+          }
         contextRow(isMainCheckout: isMainCheckout)
       }
-    }
-    .popover(
-      isPresented: Binding(
-        get: { branchSwitcherStore.isPopoverOpen },
-        set: { newValue in
-          if !newValue {
-            branchSwitcherStore.send(.popoverDismissed)
-          }
-        }
-      ),
-      arrowEdge: .bottom
-    ) {
-      // Popover is anchored on the outer `HStack` rather than on the Button
-      // itself: AppKit centres the arrow on the attachment view, and the
-      // outer HStack gives a visually balanced anchor (icon + content)
-      // rather than originating the arrow from the small chevron slot.
-      BranchSwitcherView(store: branchSwitcherStore)
-        .frame(width: 360, height: 480)
     }
   }
 
@@ -104,7 +99,7 @@ struct WorktreeHeaderInfoLabel: View {
       ProgressView()
         .controlSize(.mini)
         .accessibilityIdentifier("worktree_header.switching_spinner")
-        .accessibilityHidden(true)
+        .accessibilityLabel("Switching")
     } else {
       Image(systemName: "chevron.down")
         .font(.caption2)
@@ -116,22 +111,25 @@ struct WorktreeHeaderInfoLabel: View {
   // MARK: - Row 2: worktree name · project (caption)
 
   private func contextRow(isMainCheckout: Bool) -> some View {
+    // Pin marker sits between `worktree.name` and the `·` separator so the
+    // visual "pinned" affordance attaches to the worktree (not the
+    // following project name). The orange `pin.fill` still suppresses on
+    // the main checkout where pinning is meaningless.
     HStack(spacing: 4) {
-      Text("\(worktree.name) · \(project.name)")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .accessibilityIdentifier("worktree_header.context_text")
-      // The pin marker follows the worktree name to row 2 (the row swap
-      // moved that name down); the orange `pin.fill` still suppresses on
-      // the main checkout where pinning is meaningless.
+      Text(worktree.name)
       if worktree.isPinned && !isMainCheckout {
         Image(systemName: "pin.fill")
           .font(.caption2)
           .foregroundStyle(.orange)
           .accessibilityLabel("Pinned")
       }
+      Text("· \(project.name)")
     }
+    .font(.caption)
+    .foregroundStyle(.secondary)
+    .lineLimit(1)
+    .accessibilityIdentifier("worktree_header.context_text")
+    .accessibilityElement(children: .combine)
   }
 
   // MARK: - Branch title
@@ -141,6 +139,6 @@ struct WorktreeHeaderInfoLabel: View {
   /// render explicit text so the user-test `UT-BSH-HD-003` has a stable
   /// string to assert against.
   private var branchTitle: String {
-    worktree.branch ?? "(detached HEAD)"
+    worktree.branch ?? "(detached)"
   }
 }
