@@ -11,12 +11,14 @@ public nonisolated enum AgentKind: String, Codable, Sendable, CaseIterable, Equa
   case claudeCode = "claude-code"
   case codex
   case pi
+  case opencode
 
   public var displayName: String {
     switch self {
     case .claudeCode: return "Claude Code"
     case .codex: return "Codex"
     case .pi: return "pi"
+    case .opencode: return "opencode"
     }
   }
 }

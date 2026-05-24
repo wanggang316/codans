@@ -50,6 +50,13 @@ struct AgentLogoView: View {
         Image("pi")
           .resizable()
           .scaledToFit()
+      case .opencode:
+        // SF Symbol fallback until a brand glyph is bundled. `curlybraces`
+        // reads as "code" without colliding with the other agent marks.
+        Image(systemName: "curlybraces")
+          .resizable()
+          .scaledToFit()
+          .padding(size * 0.1)
       }
     }
     .frame(width: size, height: size)
