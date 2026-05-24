@@ -199,22 +199,7 @@ final class AgentRegistry {
     registryLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
     switch event {
     case .paneOutput(let paneID, _):
-      var s =
-        scratch[paneID]
-        ?? Scratch(
-          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
-        )
-      s.pendingFinished = false
-      // Output-driven loading signal — see `outputLoadingWindow` doc.
-      // Stamping every `paneOutput` arms the `.loading` state inside
-      // `derive` and pushes the decay deadline forward.
-      s.lastOutputAt = now()
-      scratch[paneID] = s
-      scheduleOutputDecay(for: paneID)
-      registryLogger.debug(
-        "paneOutput pane=\(paneID.raw.uuidString, privacy: .public) bound=\(self.entries[paneID] != nil, privacy: .public)"
-      )
-      recompute(paneID)
+      applyActivityHeartbeat(paneID: paneID)
 
     case .paneIdle(let paneID, _):
       var s =
@@ -288,9 +273,21 @@ final class AgentRegistry {
         scratch[paneID] = s
         recompute(paneID)
 
+      case .title, .tabTitle:
+        // Alt-screen TUI agents (Codex, pi, claude interactive) render
+        // through libghostty without flowing bytes through the
+        // `.paneOutput` channel, but they DO update their terminal
+        // title rapidly while working (4-5 Hz observed for pi). Reuse
+        // the output-driven loading machinery: every title delta is
+        // an activity heartbeat → arms `.loading` and pushes the
+        // decay deadline forward. When work stops, title updates stop
+        // and decay flips the row back to idle.
+        applyActivityHeartbeat(paneID: paneID)
+
       default:
-        // Title / pwd / mouse / progress etc. — not signals the state
-        // machine cares about.
+        // pwd / mouse / progress / size etc. — not signals the state
+        // machine cares about. (.progress feeds running-set diffs via
+        // `TouchCodeApp.dispatchToAgentRegistry` wire 2, not here.)
         break
       }
 
@@ -381,10 +378,32 @@ final class AgentRegistry {
     return now().timeIntervalSince(lastOutput) < Self.outputLoadingWindow
   }
 
+  /// Common entry point for "the pane just showed signs of activity".
+  /// Bumped on every `paneOutput` (line-mode agents like Claude Code
+  /// outside of TUI) and on every `paneInfoChanged(.title)` /
+  /// `.tabTitle` (alt-screen TUI agents like Codex and pi). Clears
+  /// `pendingFinished`, stamps `lastOutputAt`, schedules the decay
+  /// task, and recomputes the surfaced state.
+  private func applyActivityHeartbeat(paneID: PaneID) {
+    var s =
+      scratch[paneID]
+      ?? Scratch(
+        prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
+      )
+    s.pendingFinished = false
+    s.lastOutputAt = now()
+    scratch[paneID] = s
+    scheduleOutputDecay(for: paneID)
+    registryLogger.debug(
+      "activity pane=\(paneID.raw.uuidString, privacy: .public) bound=\(self.entries[paneID] != nil, privacy: .public)"
+    )
+    recompute(paneID)
+  }
+
   /// Replace (cancel + schedule) the per-pane decay task that fires
   /// once the output-loading window has elapsed without a fresh
-  /// `paneOutput`. The fired task calls `decayOutputLoading(_:)` which
-  /// arms `pendingFinished` (mirroring the running-set-leave
+  /// activity heartbeat. The fired task calls `decayOutputLoading(_:)`
+  /// which arms `pendingFinished` (mirroring the running-set-leave
   /// transition for OSC 9;4 agents) and clears `lastOutputAt`.
   private func scheduleOutputDecay(for paneID: PaneID) {
     outputDecayTasks[paneID]?.cancel()
