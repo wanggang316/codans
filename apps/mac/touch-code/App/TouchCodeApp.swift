@@ -197,12 +197,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   /// Gates `cmd-Q` so the daemon-disposition decision can run before AppKit tears the
-  /// process down. When at least one pane is live and the user's `QuitStrategy` is
-  /// `.ask`, this surfaces the quit confirmation dialog and dispatches the chosen
-  /// branch through `SessionLifecycle`. The non-ask strategies dispatch directly so
-  /// no extra prompt is shown for users who already picked a default.
+  /// process down. The user's `QuitConfirmation` setting decides whether to surface the
+  /// quit confirmation dialog at all; the orthogonal `QuitAction` setting decides what
+  /// the no-dialog branch applies (and which button is default-focused when the dialog
+  /// IS shown).
   ///
-  /// Returns `.terminateNow` for keep / snapshot / discard so the subsequent
+  /// Returns `.terminateNow` for keepRunning / snapshot so the subsequent
   /// `willTerminate` hook still fires and the remaining persisted-state flushes run.
   /// `.cancel` aborts the quit entirely.
   nonisolated func applicationShouldTerminate(
@@ -212,37 +212,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       guard let appState else { return .terminateNow }
       let lifecycle = appState.sessionLifecycle
       let activePanes = lifecycle?.liveZmxClientCount ?? 0
-      guard activePanes > 0 else { return .terminateNow }
 
-      let strategy = appState.settingsStore.settings.general.quitStrategy
-      switch strategy {
+      let confirmation = appState.settingsStore.settings.general.quitConfirmation
+      let action = appState.settingsStore.settings.general.quitAction
+
+      let shouldAsk: Bool
+      switch confirmation {
+      case .never: shouldAsk = false
+      case .always: shouldAsk = true
+      case .auto: shouldAsk = activePanes > 0
+      }
+
+      if !shouldAsk {
+        // No dialog — apply the configured action directly. `detachAllForQuit` is a
+        // no-op when there are no live clients, so skipping it for activePanes == 0
+        // is purely an optimisation; the explicit guard keeps the no-panes path cheap.
+        if activePanes > 0 {
+          lifecycle?.detachAllForQuit(action: action)
+        }
+        return .terminateNow
+      }
+
+      let choice = QuitConfirmationDialog.present(
+        paneCount: activePanes,
+        defaultAction: action
+      )
+      switch choice {
       case .keepRunning:
         lifecycle?.detachAllForQuit(action: .keepRunning)
         return .terminateNow
       case .snapshot:
         lifecycle?.detachAllForQuit(action: .snapshot)
         return .terminateNow
-      case .ask:
-        let settingsStore = appState.settingsStore
-        let choice = QuitConfirmationDialog.present(
-          paneCount: activePanes,
-          rememberClosure: { [weak settingsStore] picked in
-            settingsStore?.setQuitStrategy(picked)
-          }
-        )
-        switch choice {
-        case .keepRunning:
-          lifecycle?.detachAllForQuit(action: .keepRunning)
-          return .terminateNow
-        case .snapshot:
-          lifecycle?.detachAllForQuit(action: .snapshot)
-          return .terminateNow
-        case .discard:
-          lifecycle?.killAllForQuit()
-          return .terminateNow
-        case .cancel:
-          return .terminateCancel
-        }
+      case .cancel:
+        return .terminateCancel
       }
     }
   }

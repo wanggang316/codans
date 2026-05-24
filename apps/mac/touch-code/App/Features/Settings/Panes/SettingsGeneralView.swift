@@ -42,13 +42,21 @@ struct SettingsGeneralView: View {
     )
   }
 
-  /// Quit-strategy picker binding. Matches the surrounding SettingsStore binding pattern —
-  /// `get` reads `settings.general`, `set` goes through the dedicated setter so the
-  /// debounced atomic write fires.
-  private var quitStrategyBinding: Binding<QuitStrategy> {
+  /// "Confirm before quitting" picker binding. Reads `settings.general.quitConfirmation`;
+  /// writes route through the dedicated setter so the debounced atomic write fires.
+  private var quitConfirmationBinding: Binding<QuitConfirmation> {
     Binding(
-      get: { settingsStore.settings.general.quitStrategy },
-      set: { settingsStore.setQuitStrategy($0) }
+      get: { settingsStore.settings.general.quitConfirmation },
+      set: { settingsStore.setQuitConfirmation($0) }
+    )
+  }
+
+  /// "On quit" action picker binding. Drives both the no-dialog branch (applied directly)
+  /// and the default-focused button when the dialog IS shown.
+  private var quitActionBinding: Binding<QuitAction> {
+    Binding(
+      get: { settingsStore.settings.general.quitAction },
+      set: { settingsStore.setQuitAction($0) }
     )
   }
 
@@ -96,15 +104,19 @@ struct SettingsGeneralView: View {
       }
 
       Section {
-        Picker("On quit", selection: quitStrategyBinding) {
-          Text("Ask each time").tag(QuitStrategy.ask)
-          Text("Keep panes running").tag(QuitStrategy.keepRunning)
-          Text("Snapshot and exit").tag(QuitStrategy.snapshot)
+        Picker("Confirm before quitting", selection: quitConfirmationBinding) {
+          Text("Auto (only when panes are running)").tag(QuitConfirmation.auto)
+          Text("Always").tag(QuitConfirmation.always)
+          Text("Never").tag(QuitConfirmation.never)
+        }
+        Picker("On quit", selection: quitActionBinding) {
+          Text("Keep session running").tag(QuitAction.keepRunning)
+          Text("Snapshot and exit").tag(QuitAction.snapshot)
         }
       } footer: {
         Text(
-          "Keep panes running survives the app quit so long-running commands continue. "
-            + "Snapshot exits cleanly but preserves the visible buffer for next launch."
+          "Keep session running lets long-running commands survive the quit; "
+            + "Snapshot saves the screen state and exits."
         )
       }
 

@@ -13,19 +13,11 @@ import os.log
 /// Catalog write happens BEFORE any detach: if the app dies mid-shutdown
 /// between the two steps, the on-disk record still points at the surviving
 /// daemons, which is the worst the next launch needs to recover.
-/// Per-quit policy passed to `SessionLifecycle.detachAllForQuit(action:)`. The strategy
-/// is decided in `TouchCodeApp` (either from `settings.general.quitStrategy` or via the
-/// user's choice in the quit confirmation dialog) so the lifecycle component stays a pure
-/// mechanism.
-@MainActor
-enum QuitAction {
-  /// Live tier: persist each daemon's catalog row, then send `.detach` so the daemons
-  /// survive the app exit.
-  case keepRunning
-  /// Snapshot tier: send `.snapshot` to each daemon (writes a `.snap` file and exits) and
-  /// reset the on-disk catalog to empty.
-  case snapshot
-}
+///
+/// `detachAllForQuit(action:)` takes a `TouchCodeCore.QuitAction` — the canonical
+/// declaration lives in `TouchCodeCore` so the UI and the runtime share one definition.
+/// `TouchCodeApp` decides which action to pass (from `settings.general.quitAction` or
+/// the user's dialog choice) so the lifecycle component stays a pure mechanism.
 
 @MainActor
 final class SessionLifecycle {
@@ -80,21 +72,6 @@ final class SessionLifecycle {
     case .snapshot:
       snapshotTier(liveClients)
     }
-  }
-
-  /// Discard tier: send `.kill` to every live daemon and reset the on-disk catalog. Used
-  /// by the quit confirmation dialog's "Discard" button — the user wants the panes torn
-  /// down right now, with no resume on next launch.
-  ///
-  /// Each `.kill` is run synchronously with the same per-client deadline pattern as
-  /// `synchronousSnapshot` so a hung daemon cannot block `applicationShouldTerminate`
-  /// indefinitely. A per-client failure / timeout is logged and the loop continues.
-  func killAllForQuit() {
-    let liveClients = collectLiveClients()
-    for client in liveClients {
-      synchronousKill(client: client)
-    }
-    persist(catalog: SessionCatalog(version: SessionCatalog.currentVersion, sessions: [:]))
   }
 
   /// Live tier (M2.T2.1): persist each daemon's catalog row, then send
@@ -183,34 +160,6 @@ final class SessionLifecycle {
     case .failure(let error): throw error
     case .none: throw SnapshotError.timedOut(paneID: client.paneID)
     }
-  }
-
-  /// Synchronous bridge to `ZmxClient.kill()`. Mirrors `synchronousSnapshot`'s runloop-
-  /// spin pattern so `applicationShouldTerminate` (which runs on the main actor) can
-  /// await the daemon's exit without deadlocking the actor that owns the kill callback.
-  /// `kill()` itself has an internal 2 s wait for the socket to disappear; we add the
-  /// same outer 5 s ceiling used elsewhere so a runaway daemon cannot block quit.
-  private func synchronousKill(client: ZmxClient) {
-    let done = KillResult()
-    Task { @MainActor in
-      await client.kill()
-      done.finished = true
-    }
-    let deadline = Date().addingTimeInterval(Self.snapshotTimeoutSeconds)
-    while !done.finished && Date() < deadline {
-      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
-    }
-    if !done.finished {
-      logger.error("kill timed out for pane \(client.paneID, privacy: .public)")
-    }
-  }
-
-  /// Reference-shaped one-shot holder for `synchronousKill` — mirrors `SnapshotResult` so
-  /// the detached Task's completion is visible to the runloop-spinning waiter without
-  /// crossing actor isolation on a captured `var`.
-  @MainActor
-  private final class KillResult {
-    var finished: Bool = false
   }
 
   /// 5 s per-client budget for the `.Snapshot` round-trip, expressed

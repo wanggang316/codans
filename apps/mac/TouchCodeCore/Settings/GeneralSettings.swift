@@ -1,17 +1,30 @@
 import Foundation
 
-/// User's preferred handling of live panes at quit time. Replaces the legacy boolean
-/// `resumePanesOnLaunch` with a tri-state strategy so the user can also choose to be
-/// prompted on each quit. Migration of the legacy key is handled by
-/// `GeneralSettings.init(from:)`.
-public enum QuitStrategy: String, Codable, CaseIterable, Sendable, Equatable {
+/// User-facing "Confirm before quitting" preference. Decoupled from the action taken on
+/// quit so that "ask vs don't ask" and "what to do" are orthogonal. Default `.auto`:
+/// the quit dialog appears only when at least one pane is live; quitting with no live
+/// panes never prompts. Migration of the retired `quitStrategy` / `resumePanesOnLaunch`
+/// keys is handled by `GeneralSettings.init(from:)`.
+public enum QuitConfirmation: String, Codable, CaseIterable, Equatable, Sendable {
+  /// Ask only when there are active panes — the smart default.
+  case auto
+  /// Always present the dialog on quit, even with zero panes.
+  case always
+  /// Never present the dialog; apply `quitAction` directly.
+  case never
+}
+
+/// User-facing "On quit" action. Drives both the no-dialog branch
+/// (`applicationShouldTerminate` applies this directly when `QuitConfirmation` skips the
+/// dialog) and the default-focused button in the dialog when it IS shown. Canonical home
+/// for this enum lives in `TouchCodeCore` so the runtime (`SessionLifecycle`) and the UI
+/// layer share one definition without cyclic imports.
+public enum QuitAction: String, Codable, CaseIterable, Equatable, Sendable {
   /// Live tier: cmd-Q leaves pane daemons running so the next launch reattaches.
   case keepRunning
   /// Snapshot tier: quit serialises each pane's VT state and tears down the daemons;
   /// the next launch restores the visible buffer into a fresh shell.
   case snapshot
-  /// Prompt the user each quit when at least one pane is live.
-  case ask
 }
 
 /// `general` sub-tree of `settings.json` (v2). Carries the appearance placeholder, the
@@ -53,11 +66,16 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// `updatesAutomaticallyCheckForUpdates` is also true.
   public var updatesAutomaticallyDownloadUpdates: Bool
 
-  /// Quit-time strategy for live panes. Default `.ask` — the quit confirmation dialog is
-  /// presented whenever at least one pane is running. Legacy files that carry the retired
-  /// boolean `resumePanesOnLaunch` key are migrated in `init(from:)`: `true` → `.keepRunning`,
-  /// `false` → `.snapshot`.
-  public var quitStrategy: QuitStrategy
+  /// Whether to confirm at quit time. Default `.auto` (ask only when at least one pane is
+  /// live). Orthogonal to `quitAction`, which decides what happens when the dialog is
+  /// skipped or after the user picks the default button. Legacy files carrying the retired
+  /// `quitStrategy` enum or the older `resumePanesOnLaunch` boolean are migrated in
+  /// `init(from:)`.
+  public var quitConfirmation: QuitConfirmation
+  /// Default action taken on quit when no dialog is shown, and the focused button in the
+  /// dialog when it IS shown. Default `.keepRunning` — long-running commands survive a
+  /// quit by default.
+  public var quitAction: QuitAction
 
   public init(
     appearance: AppearancePreference = .system,
@@ -69,7 +87,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
     updatesAutomaticallyDownloadUpdates: Bool = false,
-    quitStrategy: QuitStrategy = .ask
+    quitConfirmation: QuitConfirmation = .auto,
+    quitAction: QuitAction = .keepRunning
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -80,7 +99,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updateCheckInterval = updateCheckInterval
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
-    self.quitStrategy = quitStrategy
+    self.quitConfirmation = quitConfirmation
+    self.quitAction = quitAction
   }
 
   public static let `default` = GeneralSettings()
@@ -89,10 +109,21 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
+    case quitConfirmation, quitAction
+    /// Retired in favour of `quitConfirmation` + `quitAction`. Still decoded by
+    /// `init(from:)` so legacy settings files migrate transparently on first launch.
     case quitStrategy
-    /// Retired in favour of `quitStrategy`. Still decoded by `init(from:)` so legacy
-    /// settings files migrate transparently on first launch.
+    /// Retired earlier than `quitStrategy`. Decoded by `init(from:)` as the last
+    /// migration step so very old files still find their way to the new defaults.
     case resumePanesOnLaunch
+  }
+
+  /// Legacy enum kept private to drive the `quitStrategy` migration branch. The user-facing
+  /// surface is `QuitConfirmation` + `QuitAction`; this exists only to decode old files.
+  private enum LegacyQuitStrategy: String, Codable {
+    case keepRunning
+    case snapshot
+    case ask
   }
 
   public init(from decoder: Decoder) throws {
@@ -113,23 +144,46 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyCheckForUpdates) ?? true
     self.updatesAutomaticallyDownloadUpdates =
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyDownloadUpdates) ?? false
-    // Quit strategy: prefer the new key when present. Otherwise migrate the retired
-    // `resumePanesOnLaunch` boolean (true → keepRunning, false → snapshot). Files that
-    // carry neither — fresh installs and historical files written before either key
-    // existed — fall back to `.ask` so the new install default surfaces the dialog.
-    if let stored = try container.decodeIfPresent(QuitStrategy.self, forKey: .quitStrategy) {
-      self.quitStrategy = stored
-    } else if let legacy = try container.decodeIfPresent(Bool.self, forKey: .resumePanesOnLaunch) {
-      self.quitStrategy = legacy ? .keepRunning : .snapshot
+    // Quit-time settings migration chain (newest wins):
+    //   1. quitConfirmation + quitAction present → use as-is.
+    //   2. quitStrategy present → split: keepRunning/snapshot → (never, action); ask →
+    //      (always, keepRunning). Matches the prior single-Picker semantics exactly.
+    //   3. resumePanesOnLaunch present → (auto, true ? keepRunning : snapshot). The auto
+    //      default carries the new "ask only when panes are live" behaviour to users who
+    //      had only the boolean opt-in/out before.
+    //   4. Neither present → defaults (auto, keepRunning).
+    let storedConfirmation = try container.decodeIfPresent(QuitConfirmation.self, forKey: .quitConfirmation)
+    let storedAction = try container.decodeIfPresent(QuitAction.self, forKey: .quitAction)
+    if let storedConfirmation, let storedAction {
+      self.quitConfirmation = storedConfirmation
+      self.quitAction = storedAction
+    } else if let legacyStrategy = try container.decodeIfPresent(
+      LegacyQuitStrategy.self, forKey: .quitStrategy)
+    {
+      switch legacyStrategy {
+      case .keepRunning:
+        self.quitConfirmation = .never
+        self.quitAction = .keepRunning
+      case .snapshot:
+        self.quitConfirmation = .never
+        self.quitAction = .snapshot
+      case .ask:
+        self.quitConfirmation = .always
+        self.quitAction = .keepRunning
+      }
+    } else if let legacyResume = try container.decodeIfPresent(Bool.self, forKey: .resumePanesOnLaunch) {
+      self.quitConfirmation = .auto
+      self.quitAction = legacyResume ? .keepRunning : .snapshot
     } else {
-      self.quitStrategy = .ask
+      self.quitConfirmation = .auto
+      self.quitAction = .keepRunning
     }
   }
 
-  /// Explicit encoder so the retired `resumePanesOnLaunch` CodingKey (kept around purely
-  /// to drive legacy-file migration in `init(from:)`) is never written back to disk. The
-  /// synthesized `encode(to:)` would otherwise require a matching stored property or fail
-  /// to compile.
+  /// Explicit encoder so the retired `resumePanesOnLaunch` / `quitStrategy` CodingKeys
+  /// (kept around purely to drive legacy-file migration in `init(from:)`) are never written
+  /// back to disk. The synthesized `encode(to:)` would otherwise require matching stored
+  /// properties or fail to compile.
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(appearance, forKey: .appearance)
@@ -143,6 +197,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       updatesAutomaticallyCheckForUpdates, forKey: .updatesAutomaticallyCheckForUpdates)
     try container.encode(
       updatesAutomaticallyDownloadUpdates, forKey: .updatesAutomaticallyDownloadUpdates)
-    try container.encode(quitStrategy, forKey: .quitStrategy)
+    try container.encode(quitConfirmation, forKey: .quitConfirmation)
+    try container.encode(quitAction, forKey: .quitAction)
   }
 }

@@ -183,12 +183,17 @@ final class SettingsStore {
     scheduleSave()
   }
 
-  /// Persist the user's chosen quit strategy. `applicationShouldTerminate` consults this
-  /// to pick the live / snapshot branch, or to surface the quit confirmation dialog when
-  /// the user prefers `.ask`. The dialog itself routes through here when the user ticks
-  /// "Don't ask again", so the call site is shared.
-  func setQuitStrategy(_ value: QuitStrategy) {
-    settings.general.quitStrategy = value
+  /// Persist the user's "Confirm before quitting" preference. `applicationShouldTerminate`
+  /// reads this to decide whether to present the quit confirmation dialog at all.
+  func setQuitConfirmation(_ value: QuitConfirmation) {
+    settings.general.quitConfirmation = value
+    scheduleSave()
+  }
+
+  /// Persist the user's "On quit" action. Applied directly when the confirmation dialog is
+  /// skipped, and drives the default-focused button when the dialog IS shown.
+  func setQuitAction(_ value: QuitAction) {
+    settings.general.quitAction = value
     scheduleSave()
   }
 
