@@ -3,7 +3,7 @@ import Testing
 
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import touch_code
+@testable import TouchCode
 
 @MainActor
 struct HierarchyHandlersCreateWorktreeTests {
