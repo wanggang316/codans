@@ -147,17 +147,7 @@ struct DiffInspectorView: View {
 
   @ViewBuilder
   private var historyBody: some View {
-    // T13 placeholder. The real `DiffHistoryListView` lands in T13 and
-    // consumes `store.historyState` + `.historyAppeared` +
-    // `.historyLoadNextPageRequested` + `.historyCommitTapped`. The
-    // accessibility identifier carries over to the real view so XCUITest
-    // queries by `diff_inspector.history_list` keep working across the
-    // swap.
-    Text("History")
-      .font(.callout)
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .accessibilityIdentifier("diff_inspector.history_list")
+    DiffHistoryListView(store: store)
   }
 
   @ViewBuilder
