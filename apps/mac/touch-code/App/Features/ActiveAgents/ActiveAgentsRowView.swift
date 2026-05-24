@@ -139,10 +139,14 @@ struct ActiveAgentsRowView: View {
     switch entry.state {
     case .waitingForInput:
       // Pause-fill glyph — terminal-style "agent has paused for you".
-      // Orange + symbol pulse continue to read as "needs your attention".
+      // Static (no pulse) per design feedback; the orange tint alone
+      // carries the "needs your attention" signal. `.imageScale(.large)`
+      // bumps the SF Symbol up roughly one tier above the surrounding
+      // caption2 font so the icon reads at the same visual weight as
+      // the 16pt LoadingGridIcon used for the working state.
       Image(systemName: "pause.fill")
+        .imageScale(.large)
         .foregroundStyle(Color.orange)
-        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
         .accessibilityHidden(true)
     case .loading:
       // Nine-square activity grid — staggered fade-out per cell on a 3 s
