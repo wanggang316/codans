@@ -240,6 +240,22 @@ struct HierarchySidebarView: View {
           )
         }
       }
+      // Auto-open the Agents View panel on the rising edge into "any
+      // bound agent is loading" — but only when the user has the
+      // Settings → General toggle on. We do NOT auto-close when the
+      // signal falls back to false; the user keeps the panel open
+      // until they explicitly close it via the footer toggle. The
+      // observed value is a Bool so SwiftUI's `.onChange` fires only
+      // on real transitions (not every dict mutation).
+      .onChange(of: anyAgentLoading) { _, newValue in
+        guard newValue,
+          settingsStore.settings.general.agentsViewAutoOpen,
+          !activeAgentsPanelOpen
+        else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+          activeAgentsPanelOpen = true
+        }
+      }
       .sheet(
         isPresented: Binding(
           get: { store.manualSortSheet != nil },
@@ -1176,6 +1192,15 @@ struct HierarchySidebarView: View {
     if snapshot.mergeable == .conflicting { return "Pull request has merge conflicts" }
     if snapshot.mergeable == .unknown { return "Merge status unknown — try refresh" }
     return nil
+  }
+
+  /// True iff any bound agent in the registry currently reads as
+  /// `.loading`. Drives the auto-open of the ActiveAgents sidebar panel
+  /// via `.onChange`, gated by Settings → General →
+  /// `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange` fires
+  /// only on real transitions, not on every entry mutation.
+  private var anyAgentLoading: Bool {
+    activeAgentsRegistry?.entries.values.contains { $0.state == .loading } ?? false
   }
 
   /// Walks the selection chain (project → worktree → tab) and returns

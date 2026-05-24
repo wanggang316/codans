@@ -53,10 +53,10 @@ struct SettingsGeneralView: View {
     )
   }
 
-  private var agentsViewEnabledBinding: Binding<Bool> {
+  private var agentsViewAutoOpenBinding: Binding<Bool> {
     Binding(
-      get: { settingsStore.settings.general.agentsViewEnabled },
-      set: { settingsStore.setAgentsViewEnabled($0) }
+      get: { settingsStore.settings.general.agentsViewAutoOpen },
+      set: { settingsStore.setAgentsViewAutoOpen($0) }
     )
   }
 
@@ -118,12 +118,12 @@ struct SettingsGeneralView: View {
       }
 
       Section {
-        Toggle("Show Agents View", isOn: agentsViewEnabledBinding)
+        Toggle("Auto-open Agents View when an agent is working", isOn: agentsViewAutoOpenBinding)
       } footer: {
         Text(
-          "Exposes the Agents View panel and its sidebar footer toggle. "
-            + "Turn off to hide the panel; the underlying agent tracking keeps "
-            + "running so re-enabling restores the same rows without re-identification."
+          "The sidebar panel opens automatically the moment any bound agent "
+            + "transitions into the working state. Turn off if you'd rather "
+            + "open the panel manually via the sidebar's footer toggle."
         )
       }
     }

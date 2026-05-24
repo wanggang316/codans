@@ -183,9 +183,9 @@ final class SettingsStore {
     scheduleSave()
   }
 
-  func setAgentsViewEnabled(_ enabled: Bool) {
-    guard settings.general.agentsViewEnabled != enabled else { return }
-    settings.general.agentsViewEnabled = enabled
+  func setAgentsViewAutoOpen(_ autoOpen: Bool) {
+    guard settings.general.agentsViewAutoOpen != autoOpen else { return }
+    settings.general.agentsViewAutoOpen = autoOpen
     scheduleSave()
   }
 
