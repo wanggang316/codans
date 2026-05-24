@@ -199,6 +199,7 @@ struct HierarchySidebarView: View {
                   catalog: hierarchyManager.catalog
                 )
               },
+              focusedPaneID: currentlyFocusedPaneID(),
               onTapRow: { paneID in
                 // Panel stays open after a row tap — the user often
                 // fan-jumps between agents and re-opening the panel
@@ -1175,6 +1176,22 @@ struct HierarchySidebarView: View {
     if snapshot.mergeable == .conflicting { return "Pull request has merge conflicts" }
     if snapshot.mergeable == .unknown { return "Merge status unknown — try refresh" }
     return nil
+  }
+
+  /// Walks the selection chain (project → worktree → tab) and returns
+  /// the pane the user is currently focused on, or nil when the chain
+  /// breaks (no project selected, archived worktree, etc.). Used by the
+  /// ActiveAgents sidebar panel to highlight the row corresponding to
+  /// the pane already in view.
+  private func currentlyFocusedPaneID() -> PaneID? {
+    let catalog = hierarchyManager.catalog
+    guard let projectID = catalog.selectedProjectID,
+      let project = catalog.projects.first(where: { $0.id == projectID }),
+      let worktreeID = project.selectedWorktreeID,
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+      let tabID = worktree.selectedTabID
+    else { return nil }
+    return hierarchyManager.lastFocusedPane(in: tabID)
   }
 
 }

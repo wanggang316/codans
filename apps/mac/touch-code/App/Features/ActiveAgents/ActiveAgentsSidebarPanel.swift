@@ -29,6 +29,11 @@ import TouchCodeCore
 struct ActiveAgentsSidebarPanel: View {
   let registry: AgentRegistry
   let resolveSourcePath: (PaneID) -> (project: String, worktree: String)?
+  /// Pane the main window is currently focused on (selection chain bottom).
+  /// Drives the selected-row highlight inside the panel so the user can see
+  /// at a glance which row corresponds to the pane they're already looking
+  /// at. nil = no pane currently focused (sidebar focus, no selection, etc.)
+  let focusedPaneID: PaneID?
   let onTapRow: (PaneID) -> Void
   /// Kept on the API even though the header no longer carries a close
   /// button — the host (sidebar) still uses this to collapse the panel
@@ -73,12 +78,11 @@ struct ActiveAgentsSidebarPanel: View {
     return VStack(spacing: 0) {
       resizeStrip
       titleBar
-      Divider()
       content
     }
     .frame(height: clampedHeight)
     .frame(maxWidth: .infinity)
-    .background(.regularMaterial, in: shape)
+    .background(.ultraThinMaterial, in: shape)
     .overlay(
       shape.stroke(Color.primary.opacity(0.08), lineWidth: 1)
     )
@@ -129,11 +133,11 @@ struct ActiveAgentsSidebarPanel: View {
   private var titleBar: some View {
     HStack(spacing: 6) {
       Text("Agents View")
-        .font(.caption.weight(.semibold))
+        .font(.caption)
         .foregroundStyle(.secondary)
       if showsCountChip {
         Text("(\(registry.entries.count))")
-          .font(.caption.weight(.semibold))
+          .font(.caption)
           .foregroundStyle(.tertiary)
           .accessibilityHidden(true)
       }
@@ -148,18 +152,16 @@ struct ActiveAgentsSidebarPanel: View {
     let rows = SortedEntriesProvider.sorted(registry.entries)
     return ScrollView {
       LazyVStack(spacing: 0) {
-        ForEach(Array(rows.enumerated()), id: \.element.paneID) { idx, item in
+        ForEach(rows, id: \.paneID) { item in
           let resolved = resolveSourcePath(item.paneID)
           ActiveAgentsRowView(
             paneID: item.paneID,
             entry: item.entry,
             projectName: resolved?.project ?? "—",
             worktreeName: resolved?.worktree ?? "—",
+            isSelected: item.paneID == focusedPaneID,
             onTap: { onTapRow(item.paneID) }
           )
-          if idx < rows.count - 1 {
-            Divider().padding(.leading, 44)
-          }
         }
       }
     }

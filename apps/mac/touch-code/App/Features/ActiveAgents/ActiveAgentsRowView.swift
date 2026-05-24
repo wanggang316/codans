@@ -24,6 +24,12 @@ struct ActiveAgentsRowView: View {
   let entry: AgentRegistry.AgentEntry
   let projectName: String
   let worktreeName: String
+  /// True when this row's pane is the main window's currently-focused
+  /// pane. Renders a native-style selected-row tint so the user can
+  /// match the row they're hovering to "the pane I'm looking at".
+  /// Defaults false so older call sites that don't pass it (legacy
+  /// popover view, tests) still compile.
+  var isSelected: Bool = false
   let onTap: () -> Void
 
   @State private var isHovering = false
@@ -41,7 +47,7 @@ struct ActiveAgentsRowView: View {
       .padding(.vertical, 8)
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
-      .background(isHovering ? Color.gray.opacity(0.08) : Color.clear)
+      .background(rowBackground)
     }
     .buttonStyle(.plain)
     .onHover { isHovering = $0 }
@@ -81,6 +87,26 @@ struct ActiveAgentsRowView: View {
     }
   }
 
+  /// Row background. Three tiers:
+  /// - Selected (this pane is the main window's current focus): accent
+  ///   tint at low opacity — native-sidebar selection tone without
+  ///   overwhelming the row chrome.
+  /// - Hovering (pointer over the row): a soft gray wash so the row
+  ///   feels clickable even when not selected.
+  /// - Default: clear.
+  /// When selected AND hovering, the selected tint wins — selection is
+  /// the more semantically informative signal.
+  @ViewBuilder
+  private var rowBackground: some View {
+    if isSelected {
+      Color.accentColor.opacity(0.18)
+    } else if isHovering {
+      Color.gray.opacity(0.08)
+    } else {
+      Color.clear
+    }
+  }
+
   /// Trailing status column — state icon + short verb, in a single
   /// HStack that the outer row's `alignment: .center` keeps vertically
   /// centered against the two-line identity column. The state icon's
@@ -106,13 +132,20 @@ struct ActiveAgentsRowView: View {
   private var stateIcon: some View {
     switch entry.state {
     case .waitingForInput:
-      Image(systemName: "exclamationmark.circle.fill")
+      // Composite prompt-cursor glyph: `>` arrow + blinking `|` cursor.
+      // Only the cursor blinks (matches terminal-prompt visual language;
+      // "agent is waiting at the prompt for the user to type"). Reduce
+      // motion keeps the cursor solid.
+      PromptCursorIcon(reduceMotion: reduceMotion)
         .foregroundStyle(Color.orange)
-        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
         .accessibilityHidden(true)
     case .loading:
+      // Accent (system blue by default) — reserves orange for the two
+      // "needs attention" states (waitingForInput, finished-but-unread)
+      // and reads loading as informational activity rather than a
+      // warning. Pulses to convey "live work in progress".
       Image(systemName: "circle.fill")
-        .foregroundStyle(Color.orange)
+        .foregroundStyle(Color.accentColor)
         .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
         .accessibilityHidden(true)
     case .finished:
@@ -157,5 +190,35 @@ struct ActiveAgentsRowView: View {
   /// announces which kind of agent occupies the pane.
   private var accessibilityLabelText: String {
     "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)"
+  }
+}
+
+/// `> |` glyph used for the `.waitingForInput` state: a small chevron
+/// followed by a 1.5pt-wide blinking caret. The caret toggles its
+/// opacity on a 0.55s repeat-forever curve; reduce-motion keeps it
+/// solid. Mirrors the visual language of a terminal prompt awaiting
+/// input.
+private struct PromptCursorIcon: View {
+  let reduceMotion: Bool
+
+  @State private var cursorOn: Bool = true
+
+  var body: some View {
+    HStack(spacing: 1.5) {
+      Image(systemName: "chevron.right")
+        .font(.system(size: 10, weight: .heavy))
+      Rectangle()
+        .frame(width: 1.5, height: 10)
+        .opacity(cursorOn ? 1 : 0)
+    }
+    .frame(width: 14, height: 14, alignment: .center)
+    .onAppear {
+      guard !reduceMotion else { return }
+      withAnimation(
+        .easeInOut(duration: 0.55).repeatForever(autoreverses: true)
+      ) {
+        cursorOn = false
+      }
+    }
   }
 }

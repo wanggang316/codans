@@ -33,7 +33,6 @@ struct ActiveAgentsPopoverView: View {
     let rows = SortedEntriesProvider.sorted(entries)
     return VStack(alignment: .leading, spacing: 0) {
       header
-      Divider()
       if rows.isEmpty {
         emptyState
       } else {
@@ -41,6 +40,10 @@ struct ActiveAgentsPopoverView: View {
       }
     }
     .frame(width: 320)
+    // Lighter material than the system popover default so the popover
+    // reads as a quieter overlay on top of the sidebar / worktree chrome
+    // rather than punching a heavy chrome strip onto the screen.
+    .background(.ultraThinMaterial)
     // `.contain` keeps inner row / header identifiers individually
     // addressable by the user-test probes (the contract requires
     // querying `activeAgents.row.<paneID>` *inside* the popover).
@@ -50,7 +53,7 @@ struct ActiveAgentsPopoverView: View {
 
   private var header: some View {
     Text("Active Agents (\(entries.count))")
-      .font(.callout.weight(.semibold))
+      .font(.callout)
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
@@ -64,7 +67,7 @@ struct ActiveAgentsPopoverView: View {
   /// probes can address them individually.
   private func list(rows: [(paneID: PaneID, entry: AgentRegistry.AgentEntry)]) -> some View {
     VStack(spacing: 0) {
-      ForEach(Array(rows.enumerated()), id: \.element.paneID) { idx, item in
+      ForEach(rows, id: \.paneID) { item in
         let names = resolveSourcePath(item.paneID)
         ActiveAgentsRowView(
           paneID: item.paneID,
@@ -73,9 +76,6 @@ struct ActiveAgentsPopoverView: View {
           worktreeName: names?.worktree ?? "—",
           onTap: { onTapRow(item.paneID) }
         )
-        if idx < rows.count - 1 {
-          Divider()
-        }
       }
     }
   }
