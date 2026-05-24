@@ -1,7 +1,12 @@
 import AppKit
 import ComposableArchitecture
+import OSLog
 import SwiftUI
 import TouchCodeCore
+
+private let autoOpenLogger = Logger(
+  subsystem: "com.touch-code.activeagents", category: "autoOpen"
+)
 
 /// Renders the sidebar: a sticky toolbar with "+ Add Project" and a "⋯"
 /// menu; the catalog's Projects as collapsible sections with hover-revealed
@@ -154,6 +159,13 @@ struct HierarchySidebarView: View {
 
   var body: some View {
     let catalog = hierarchyManager.catalog
+    // Force `@Observable` subscription to `agentRegistry.entries` even
+    // while the panel is closed and `registry` is never unwrapped in
+    // the conditional below. Without this top-level read the body
+    // never re-evaluates on entry mutations, and the `.onChange(of:
+    // anyAgentLoading)` modifier below never fires the auto-open
+    // transition (the rising edge into "any agent is loading").
+    let _ = anyAgentLoading
 
     // Filter the project list by the catalog's active tag filter (M4).
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
@@ -247,11 +259,15 @@ struct HierarchySidebarView: View {
       // until they explicitly close it via the footer toggle. The
       // observed value is a Bool so SwiftUI's `.onChange` fires only
       // on real transitions (not every dict mutation).
-      .onChange(of: anyAgentLoading) { _, newValue in
+      .onChange(of: anyAgentLoading) { oldValue, newValue in
+        autoOpenLogger.debug(
+          "anyAgentLoading transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.activeAgentsPanelOpen, privacy: .public)"
+        )
         guard newValue,
           settingsStore.settings.general.agentsViewAutoOpen,
           !activeAgentsPanelOpen
         else { return }
+        autoOpenLogger.info("auto-opening Agents View panel")
         withAnimation(.easeOut(duration: 0.18)) {
           activeAgentsPanelOpen = true
         }

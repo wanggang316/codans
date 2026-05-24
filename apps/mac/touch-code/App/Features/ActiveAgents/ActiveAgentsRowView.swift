@@ -103,9 +103,10 @@ struct ActiveAgentsRowView: View {
   /// the more semantically informative signal.
   @ViewBuilder
   private var rowBackground: some View {
-    if isSelected {
-      Color.gray.opacity(0.22)
-    } else if isHovering {
+    // Selected and hovering share the same soft gray wash — selection
+    // is signalled by the bolder title + darker logo (set elsewhere
+    // in the row), not by a heavier background fill.
+    if isSelected || isHovering {
       Color.gray.opacity(0.08)
     } else {
       Color.clear
@@ -147,9 +148,11 @@ struct ActiveAgentsRowView: View {
       // Nine-square activity grid — staggered fade-out per cell on a 3 s
       // cycle (bottom-left first → top-right last) reads as "filling in
       // progress" rather than a generic spinner. Reduce motion holds
-      // every cell at full opacity.
+      // every cell at full opacity. Tint follows `.primary` so the grid
+      // is black in light mode / white in dark mode, distinct from the
+      // orange "waiting" icon without competing visually for attention.
       LoadingGridIcon(size: 14, isAnimating: !reduceMotion)
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(.primary)
     case .finished:
       Image(systemName: "checkmark.circle.fill")
         .foregroundStyle(.green)
