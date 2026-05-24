@@ -77,7 +77,7 @@ struct WorktreeHeaderInfoLabel: View {
     .buttonStyle(.plain)
     .onHover { isBranchRowHovered = $0 }
     .accessibilityIdentifier("worktree_header.branch_button")
-    .accessibilityLabel("Branch \(branchTitle), button")
+    .accessibilityLabel("Branch \(branchTitle)")
   }
 
   private var branchRowContent: some View {
@@ -128,8 +128,8 @@ struct WorktreeHeaderInfoLabel: View {
     .font(.caption)
     .foregroundStyle(.secondary)
     .lineLimit(1)
-    .accessibilityIdentifier("worktree_header.context_text")
     .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("worktree_header.context_text")
   }
 
   // MARK: - Branch title
