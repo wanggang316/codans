@@ -163,9 +163,9 @@ struct HierarchySidebarView: View {
     // while the panel is closed and `registry` is never unwrapped in
     // the conditional below. Without this top-level read the body
     // never re-evaluates on entry mutations, and the `.onChange(of:
-    // anyAgentLoading)` modifier below never fires the auto-open
+    // anyAgentNeedsAttention)` modifier below never fires the auto-open
     // transition (the rising edge into "any agent is loading").
-    let _ = anyAgentLoading
+    let _ = anyAgentNeedsAttention
 
     // Filter the project list by the catalog's active tag filter (M4).
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
@@ -259,9 +259,9 @@ struct HierarchySidebarView: View {
       // until they explicitly close it via the footer toggle. The
       // observed value is a Bool so SwiftUI's `.onChange` fires only
       // on real transitions (not every dict mutation).
-      .onChange(of: anyAgentLoading) { oldValue, newValue in
+      .onChange(of: anyAgentNeedsAttention) { oldValue, newValue in
         autoOpenLogger.debug(
-          "anyAgentLoading transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.activeAgentsPanelOpen, privacy: .public)"
+          "anyAgentNeedsAttention transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.activeAgentsPanelOpen, privacy: .public)"
         )
         guard newValue,
           settingsStore.settings.general.agentsViewAutoOpen,
@@ -1210,13 +1210,17 @@ struct HierarchySidebarView: View {
     return nil
   }
 
-  /// True iff any bound agent in the registry currently reads as
-  /// `.loading`. Drives the auto-open of the ActiveAgents sidebar panel
-  /// via `.onChange`, gated by Settings → General →
-  /// `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange` fires
-  /// only on real transitions, not on every entry mutation.
-  private var anyAgentLoading: Bool {
-    activeAgentsRegistry?.entries.values.contains { $0.state == .loading } ?? false
+  /// True iff any bound agent currently demands the user's attention —
+  /// either it's actively working (`.loading`) or it's blocked on a
+  /// user response (`.waitingForInput`). Drives the auto-open of the
+  /// ActiveAgents sidebar panel via `.onChange`, gated by Settings →
+  /// General → `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange`
+  /// fires only on real transitions, not on every entry mutation.
+  private var anyAgentNeedsAttention: Bool {
+    guard let entries = activeAgentsRegistry?.entries else { return false }
+    return entries.values.contains { entry in
+      entry.state == .loading || entry.state == .waitingForInput
+    }
   }
 
   /// Walks the selection chain (project → worktree → tab) and returns
