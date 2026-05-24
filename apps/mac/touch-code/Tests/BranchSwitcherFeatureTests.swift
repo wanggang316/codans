@@ -170,8 +170,10 @@ struct BranchSwitcherFeatureTests {
       state.worktreePath = pathB
       state.inventory = nil
       state.inventoryLoading = false
-      state.recentCommits = []
+      state.inventoryError = nil
+      state.recentCommits = nil
       state.commitsLoading = false
+      state.commitsError = nil
       state.isPopoverOpen = false
       state.isSwitching = false
       state.searchQuery = ""
@@ -211,7 +213,7 @@ struct BranchSwitcherFeatureTests {
     await store.send(.headChangedForCurrentWorktree) { state in
       state.isSwitching = false
       state.inventory = nil
-      state.recentCommits = []
+      state.recentCommits = nil
       state.switchError = nil
     }
   }
@@ -299,8 +301,97 @@ struct BranchSwitcherFeatureTests {
     await store.send(.headChangedForCurrentWorktree) { state in
       state.isSwitching = false
       state.inventory = nil
-      state.recentCommits = []
+      state.recentCommits = nil
       state.switchError = nil
+    }
+  }
+
+  // MARK: - 8. inventoryLoaded failure captures error + clears loading
+
+  @Test
+  func inventoryFailureCapturesErrorAndClearsLoading() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.inventoryLoading = true
+    let error = GitError.exec(code: 1, stderr: "fatal: foo")
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.inventoryLoaded(.failure(error))) { state in
+      state.inventory = nil
+      state.inventoryLoading = false
+      state.inventoryError = error
+    }
+  }
+
+  // MARK: - 9. commitsLoaded failure captures error + clears loading
+
+  @Test
+  func commitsFailureCapturesErrorAndClearsLoading() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.commitsLoading = true
+    let error = GitError.exec(code: 128, stderr: "fatal: bad object HEAD")
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.commitsLoaded(.failure(error))) { state in
+      state.recentCommits = nil
+      state.commitsLoading = false
+      state.commitsError = error
+    }
+  }
+
+  // MARK: - 10. Reopen after commits failure kicks a fresh load
+
+  @Test
+  func popoverReopenAfterCommitsFailureKicksFreshLoad() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let priorError = GitError.exec(code: 128, stderr: "fatal: bad object")
+    let inventory = Self.sampleInventory()
+    let commits = Self.sampleCommits()
+
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    // Prior attempt failed: cache is nil, error is captured, no in-flight
+    // load. Inventory is already populated so the reopen only kicks the
+    // commits load — keeps the assertion surface tight.
+    state.inventory = inventory
+    state.recentCommits = nil
+    state.commitsError = priorError
+    state.commitsLoading = false
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.log = { _, _ in
+        LogPage(cursor: .init(offset: 0, limit: 10), commits: commits, hasMore: false)
+      }
+    }
+
+    await store.send(.popoverTapped) { state in
+      state.isPopoverOpen = true
+      state.commitsLoading = true
+      // Clearing the prior error before the fresh fetch is the contract
+      // that makes Retry-by-reopen work — otherwise stale "couldn't load"
+      // copy would survive into the new attempt.
+      state.commitsError = nil
+    }
+    await store.receive(.commitsLoaded(.success(commits))) { state in
+      state.recentCommits = commits
+      state.commitsLoading = false
+      state.commitsError = nil
     }
   }
 }

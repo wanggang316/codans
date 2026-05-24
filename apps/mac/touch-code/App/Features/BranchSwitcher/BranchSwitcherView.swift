@@ -103,10 +103,14 @@ struct BranchSwitcherView: View {
           )
         }
       }
+    } else if store.inventoryError != nil {
+      // Distinguish "couldn't load" from "no branches" so the user
+      // doesn't mistake a transient git failure for a genuinely empty
+      // inventory. The reducer logs the underlying error.
+      emptyRow("Couldn't load branches")
     } else {
-      // `inventory == nil && !inventoryLoading` — covers both the
-      // pre-fetch state and the load-failure state (FU-T6 will split
-      // these once an error surface lands).
+      // `inventory == nil && !inventoryLoading && inventoryError == nil`
+      // — pre-fetch state only.
       emptyRow("No branches")
     }
   }
@@ -125,13 +129,17 @@ struct BranchSwitcherView: View {
   private var recentCommitsBody: some View {
     if store.commitsLoading {
       sectionSpinner
-    } else if store.recentCommits.isEmpty {
-      emptyRow("No commits")
-    } else {
+    } else if let commits = store.recentCommits, !commits.isEmpty {
       // The reducer already caps this list at 10; do not re-slice here.
-      ForEach(store.recentCommits, id: \.id) { commit in
+      ForEach(commits, id: \.id) { commit in
         RecentCommitRowView(commit: commit)
       }
+    } else if store.commitsError != nil {
+      emptyRow("Couldn't load commits")
+    } else {
+      // `recentCommits == nil` (unloaded) or `recentCommits == []`
+      // (loaded against a 0-commit branch) — same neutral copy.
+      emptyRow("No commits")
     }
   }
 

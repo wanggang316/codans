@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Foundation
 import TouchCodeCore
+import os.log
 
 /// Drives the branch popover anchored at `WorktreeHeaderInfoLabel` (T9).
 /// Owns the inventory + recent-commits loads, the switch effect, and the
@@ -25,8 +26,13 @@ struct BranchSwitcherFeature {
     var projectID: ProjectID?
     var inventory: BranchInventory?
     var inventoryLoading: Bool = false
-    var recentCommits: [Commit] = []
+    var inventoryError: GitError?
+    /// nil = unloaded (so reopening the popover re-fetches);
+    /// `[]` = loaded against a 0-commit branch (no re-fetch on reopen);
+    /// `[Commit]` = loaded with results.
+    var recentCommits: [Commit]?
     var commitsLoading: Bool = false
+    var commitsError: GitError?
     var isPopoverOpen: Bool = false
     var isSwitching: Bool = false
     var searchQuery: String = ""
@@ -68,6 +74,11 @@ struct BranchSwitcherFeature {
 
   @Dependency(GitServiceClient.self) private var gitService
 
+  private static let logger = Logger(
+    subsystem: "com.touch-code.branch-switcher",
+    category: "load"
+  )
+
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
@@ -81,8 +92,10 @@ struct BranchSwitcherFeature {
         state.worktreePath = path
         state.inventory = nil
         state.inventoryLoading = false
-        state.recentCommits = []
+        state.inventoryError = nil
+        state.recentCommits = nil
         state.commitsLoading = false
+        state.commitsError = nil
         state.isPopoverOpen = false
         state.isSwitching = false
         state.searchQuery = ""
@@ -111,10 +124,15 @@ struct BranchSwitcherFeature {
         var effects: [Effect<Action>] = []
         if state.inventory == nil, !state.inventoryLoading {
           state.inventoryLoading = true
+          // Clearing any prior error makes Retry-by-reopen automatic:
+          // close + reopen always renders a fresh load, never the stale
+          // empty-state-with-error copy.
+          state.inventoryError = nil
           effects.append(loadInventory(at: path))
         }
-        if state.recentCommits.isEmpty, !state.commitsLoading {
+        if state.recentCommits == nil, !state.commitsLoading {
           state.commitsLoading = true
+          state.commitsError = nil
           effects.append(loadRecentCommits(at: path))
         }
         return effects.isEmpty ? .none : .merge(effects)
@@ -161,22 +179,30 @@ struct BranchSwitcherFeature {
       case .inventoryLoaded(.success(let inventory)):
         state.inventory = inventory
         state.inventoryLoading = false
+        state.inventoryError = nil
         return .none
 
-      case .inventoryLoaded(.failure):
+      case .inventoryLoaded(.failure(let error)):
         // Empty-state rendering owns the failure UX; no banner here.
+        // The error is captured so the view can render a distinguishing
+        // copy ("Couldn't load branches") and so Console gets a signal.
         state.inventory = nil
         state.inventoryLoading = false
+        state.inventoryError = error
+        Self.logger.error("inventory load failed: \(error.firstLine(), privacy: .public)")
         return .none
 
       case .commitsLoaded(.success(let commits)):
         state.recentCommits = commits
         state.commitsLoading = false
+        state.commitsError = nil
         return .none
 
-      case .commitsLoaded(.failure):
-        state.recentCommits = []
+      case .commitsLoaded(.failure(let error)):
+        state.recentCommits = nil
         state.commitsLoading = false
+        state.commitsError = error
+        Self.logger.error("commits load failed: \(error.firstLine(), privacy: .public)")
         return .none
 
       case .switchFailed(let message):
@@ -191,7 +217,9 @@ struct BranchSwitcherFeature {
         // open re-fetches against the new HEAD.
         state.isSwitching = false
         state.inventory = nil
-        state.recentCommits = []
+        state.inventoryError = nil
+        state.recentCommits = nil
+        state.commitsError = nil
         state.switchError = nil
         return .none
 
