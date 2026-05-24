@@ -32,6 +32,13 @@ struct TagFilterPopoverFooter: View {
   var sortMode: ProjectSortMode?
   var onSortModeChanged: ((ProjectSortMode) -> Void)?
   var onManualSortRequested: (() -> Void)?
+  /// Sidebar-relocated ActiveAgents toggle. nil = hide the button
+  /// entirely (used in previews / contexts without a registry wired).
+  var onActiveAgentsTapped: (() -> Void)?
+  /// Drives the toggle glyph (filled when open, outlined when closed)
+  /// per design — no color shift, no badge dot, the glyph variant is
+  /// the only ambient signal the footer carries.
+  var activeAgentsPanelOpen: Bool = false
 
   @State private var isSortPopoverPresented = false
 
@@ -80,6 +87,29 @@ struct TagFilterPopoverFooter: View {
         }
       }
       Spacer()
+      if let onActiveAgentsTapped {
+        Button(action: onActiveAgentsTapped) {
+          // Glyph alone communicates open/closed via outline vs fill;
+          // no color shift, no badge dot — keeps the footer button
+          // chrome visually quiet so the actual panel content does
+          // the signalling.
+          Image(
+            systemName: activeAgentsPanelOpen
+              ? "sparkles.rectangle.stack.fill"
+              : "sparkles.rectangle.stack"
+          )
+          .font(.system(size: 13, weight: .regular))
+          .foregroundStyle(.secondary)
+          .frame(width: 22, height: 22)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(activeAgentsPanelOpen ? "Hide agents view" : "Show agents view")
+        .accessibilityLabel(
+          activeAgentsPanelOpen ? "Hide agents view" : "Show agents view"
+        )
+        .accessibilityIdentifier("activeAgents.sidebarToggle")
+      }
       if let onRefreshTapped {
         Button(action: onRefreshTapped) {
           Image(systemName: "arrow.clockwise")
@@ -95,12 +125,13 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // `.regularMaterial` instead of `.bar`: `.bar` reads as the chrome /
-    // titlebar material and AppKit renders it nearly transparent in
-    // fullscreen (HAN-63), letting the terminal panes bleed through the
-    // footer. Regular content-material survives the fullscreen flip with
-    // the same visual weight it has windowed.
-    .background(.regularMaterial)
+    // Match the sidebar's own background tone so the footer reads as a
+    // continuation of the sidebar rather than a separate material strip.
+    // NSColor.windowBackgroundColor is the same surface AppKit uses for
+    // the sidebar in `.listStyle(.sidebar)`. It is opaque so it survives
+    // fullscreen without the terminal panes bleeding through that an
+    // earlier `.bar` material attempt (HAN-63) exposed.
+    .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {

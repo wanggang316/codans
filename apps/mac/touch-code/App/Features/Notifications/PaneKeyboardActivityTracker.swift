@@ -28,6 +28,13 @@ public final class PaneKeyboardActivityTracker {
   /// AppState's `bringUp` sets this once; nothing else writes it.
   public static weak var shared: PaneKeyboardActivityTracker?
 
+  /// Optional T6 fan-out: fired AFTER `recordKey` updates the map.
+  /// AppState wires this to `AgentRegistry.onPaneKeyboardActivity` so
+  /// the ActiveAgents state machine clears its sticky `waitingForInput`
+  /// flag on real typing. The default no-op keeps the tracker
+  /// detector-local for existing call sites that don't need the hook.
+  public var onActivity: (@MainActor (PaneID) -> Void)?
+
   public init() {}
 
   /// Record a user key event delivered to `paneID` at `at`. Called from
@@ -35,6 +42,7 @@ public final class PaneKeyboardActivityTracker {
   /// to libghostty's PTY.
   public func recordKey(in paneID: PaneID, at: Date = Date()) {
     lastByPane[paneID] = at
+    onActivity?(paneID)
   }
 
   /// Snapshot of all recorded timestamps. The detector calls this once

@@ -1,7 +1,12 @@
 import AppKit
 import ComposableArchitecture
+import OSLog
 import SwiftUI
 import TouchCodeCore
+
+private let autoOpenLogger = Logger(
+  subsystem: "com.touch-code.activeagents", category: "autoOpen"
+)
 
 /// Renders the sidebar: a sticky toolbar with "+ Add Project" and a "⋯"
 /// menu; the catalog's Projects as collapsible sections with hover-revealed
@@ -34,6 +39,27 @@ struct HierarchySidebarView: View {
   /// installed editor). Nil in previews — the submenu falls back to the
   /// shared "Open in Editor" entry alone.
   var editorStore: StoreOf<EditorFeature>?
+  /// ActiveAgents registry. Drives the bottom expandable panel + the
+  /// 🤖-style toggle button in the footer. Optional so previews / tests
+  /// without `AppState.bringUp` wiring omit the panel and the button.
+  var activeAgentsRegistry: AgentRegistry?
+  /// Row-tap dispatcher for the ActiveAgents panel — routes to
+  /// `RootFeature.activeAgents(.rowTapped)`. Closure (rather than direct
+  /// store write) keeps Sidebar decoupled from Root.
+  var onActiveAgentsRowTapped: (PaneID) -> Void = { _ in }
+  /// Whether the ActiveAgents bottom panel is currently expanded. Driven
+  /// by the footer toggle; closed by default each launch.
+  @State private var activeAgentsPanelOpen = false
+  /// Persisted panel height. The drag handle in
+  /// `ActiveAgentsSidebarPanel` writes to this; the host clamps the
+  /// rendered height to `[minHeight, 0.5 * sidebarHeight]`.
+  @AppStorage("activeAgents.panel.height") private var activeAgentsPanelHeight: Double = 200
+  /// Live sidebar height, captured via a background GeometryReader on
+  /// `treeBody`. Used to clamp the ActiveAgents panel to at most half
+  /// the sidebar so the worktree list always retains the other half.
+  /// Defaults to a sensible value so the first render before the
+  /// background measure lands doesn't pop a too-tall panel.
+  @State private var sidebarHeightObservation: Double = 600
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
@@ -133,6 +159,13 @@ struct HierarchySidebarView: View {
 
   var body: some View {
     let catalog = hierarchyManager.catalog
+    // Force `@Observable` subscription to `agentRegistry.entries` even
+    // while the panel is closed and `registry` is never unwrapped in
+    // the conditional below. Without this top-level read the body
+    // never re-evaluates on entry mutations, and the `.onChange(of:
+    // anyAgentNeedsAttention)` modifier below never fires the auto-open
+    // transition (the rising edge into "any agent is loading").
+    let _ = anyAgentNeedsAttention
 
     // Filter the project list by the catalog's active tag filter (M4).
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
@@ -149,21 +182,95 @@ struct HierarchySidebarView: View {
     // Sidebar body is the List, with a compact filter footer mounted at
     // the bottom `.safeAreaInset` — a single trailing glyph that opens an
     // upward popover listing the available tag filters.
+    //
+    // A second piece of bottom inset (above the footer, still inside the
+    // same `.safeAreaInset`) hosts the ActiveAgents panel when expanded.
+    // Stacking both in one VStack keeps the safe-area accounting in sync
+    // — the List automatically shrinks by the panel + footer total so
+    // worktree rows never get clipped behind them.
     treeBody(projects: visibleProjects)
+      .background(
+        GeometryReader { proxy in
+          Color.clear.preference(
+            key: SidebarHeightPreferenceKey.self,
+            value: proxy.size.height
+          )
+        }
+      )
+      .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
+        sidebarHeightObservation = newHeight
+      }
       .safeAreaInset(edge: .bottom, spacing: 0) {
-        TagFilterPopoverFooter(
-          tags: catalog.tags,
-          activeFilter: catalog.activeTagFilter,
-          showUntaggedChip: untaggedExists,
-          onAllTapped: { store.send(.allChipTapped) },
-          onTagTapped: { store.send(.tagChipTapped($0)) },
-          onUntaggedTapped: { store.send(.untaggedChipTapped) },
-          onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-          onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-          sortMode: catalog.projectSortMode,
-          onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
-          onManualSortRequested: { store.send(.manualSortSheetRequested) }
+        VStack(spacing: 0) {
+          if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
+            ActiveAgentsSidebarPanel(
+              registry: registry,
+              resolveSourcePath: { paneID in
+                resolveActiveAgentsSourcePath(
+                  paneID: paneID,
+                  catalog: hierarchyManager.catalog
+                )
+              },
+              focusedPaneID: currentlyFocusedPaneID(),
+              onTapRow: { paneID in
+                // Panel stays open after a row tap — the user often
+                // fan-jumps between agents and re-opening the panel
+                // each time is friction.
+                onActiveAgentsRowTapped(paneID)
+              },
+              onClose: {
+                withAnimation(.easeOut(duration: 0.18)) {
+                  activeAgentsPanelOpen = false
+                }
+              },
+              height: $activeAgentsPanelHeight,
+              minHeight: 140,
+              maxHeight: max(140, sidebarHeightObservation * 0.5)
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+          }
+          TagFilterPopoverFooter(
+            tags: catalog.tags,
+            activeFilter: catalog.activeTagFilter,
+            showUntaggedChip: untaggedExists,
+            onAllTapped: { store.send(.allChipTapped) },
+            onTagTapped: { store.send(.tagChipTapped($0)) },
+            onUntaggedTapped: { store.send(.untaggedChipTapped) },
+            onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
+            onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+            sortMode: catalog.projectSortMode,
+            onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
+            onManualSortRequested: { store.send(.manualSortSheetRequested) },
+            onActiveAgentsTapped: activeAgentsRegistry == nil
+              ? nil
+              : {
+                withAnimation(.easeOut(duration: 0.18)) {
+                  activeAgentsPanelOpen.toggle()
+                }
+              },
+            activeAgentsPanelOpen: activeAgentsPanelOpen
+          )
+        }
+      }
+      // Auto-open the Agents View panel on the rising edge into "any
+      // bound agent is loading" — but only when the user has the
+      // Settings → General toggle on. We do NOT auto-close when the
+      // signal falls back to false; the user keeps the panel open
+      // until they explicitly close it via the footer toggle. The
+      // observed value is a Bool so SwiftUI's `.onChange` fires only
+      // on real transitions (not every dict mutation).
+      .onChange(of: anyAgentNeedsAttention) { oldValue, newValue in
+        autoOpenLogger.debug(
+          "anyAgentNeedsAttention transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.activeAgentsPanelOpen, privacy: .public)"
         )
+        guard newValue,
+          settingsStore.settings.general.agentsViewAutoOpen,
+          !activeAgentsPanelOpen
+        else { return }
+        autoOpenLogger.info("auto-opening Agents View panel")
+        withAnimation(.easeOut(duration: 0.18)) {
+          activeAgentsPanelOpen = true
+        }
       }
       .sheet(
         isPresented: Binding(
@@ -1103,6 +1210,35 @@ struct HierarchySidebarView: View {
     return nil
   }
 
+  /// True iff any bound agent currently demands the user's attention —
+  /// either it's actively working (`.loading`) or it's blocked on a
+  /// user response (`.waitingForInput`). Drives the auto-open of the
+  /// ActiveAgents sidebar panel via `.onChange`, gated by Settings →
+  /// General → `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange`
+  /// fires only on real transitions, not on every entry mutation.
+  private var anyAgentNeedsAttention: Bool {
+    guard let entries = activeAgentsRegistry?.entries else { return false }
+    return entries.values.contains { entry in
+      entry.state == .loading || entry.state == .waitingForInput
+    }
+  }
+
+  /// Walks the selection chain (project → worktree → tab) and returns
+  /// the pane the user is currently focused on, or nil when the chain
+  /// breaks (no project selected, archived worktree, etc.). Used by the
+  /// ActiveAgents sidebar panel to highlight the row corresponding to
+  /// the pane already in view.
+  private func currentlyFocusedPaneID() -> PaneID? {
+    let catalog = hierarchyManager.catalog
+    guard let projectID = catalog.selectedProjectID,
+      let project = catalog.projects.first(where: { $0.id == projectID }),
+      let worktreeID = project.selectedWorktreeID,
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+      let tabID = worktree.selectedTabID
+    else { return nil }
+    return hierarchyManager.lastFocusedPane(in: tabID)
+  }
+
 }
 
 // MARK: - Project header (hover chrome)
@@ -1415,4 +1551,32 @@ private struct ProjectTagsMenu: View {
       Label("Tags", systemImage: "tag")
     }
   }
+}
+
+/// Captures the sidebar column's live height so the ActiveAgents bottom
+/// panel can clamp to half of it. Updated each time SwiftUI re-measures
+/// the sidebar background.
+private struct SidebarHeightPreferenceKey: PreferenceKey {
+  static let defaultValue: Double = 0
+  static func reduce(value: inout Double, nextValue: () -> Double) {
+    value = max(value, nextValue())
+  }
+}
+
+/// Walks the catalog for a paneID and returns the (projectName,
+/// worktreeName) pair the ActiveAgents row needs for its breadcrumb.
+/// Returns nil when the pane has been torn down between event delivery
+/// and the next popover render — the row renders an em-dash fallback.
+private func resolveActiveAgentsSourcePath(
+  paneID: PaneID,
+  catalog: Catalog
+) -> (project: String, worktree: String)? {
+  for project in catalog.projects {
+    for worktree in project.worktrees where worktree.tabs.contains(where: { tab in
+      tab.panes.contains(where: { $0.id == paneID })
+    }) {
+      return (project.name, worktree.name)
+    }
+  }
+  return nil
 }

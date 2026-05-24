@@ -39,6 +39,13 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// `updatesAutomaticallyCheckForUpdates` is also true.
   public var updatesAutomaticallyDownloadUpdates: Bool
 
+  /// Whether the ActiveAgents sidebar panel should auto-open whenever any
+  /// bound agent transitions into the `loading` state. Default `true`. When
+  /// off, the panel only opens via the sidebar footer's toggle button. The
+  /// panel + footer button stay visible regardless; this setting only
+  /// controls the auto-open behaviour on the rising edge into `loading`.
+  public var agentsViewAutoOpen: Bool
+
   public init(
     appearance: AppearancePreference = .system,
     defaultEditorID: EditorID? = nil,
@@ -48,7 +55,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updateChannel: UpdateChannel = .stable,
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
-    updatesAutomaticallyDownloadUpdates: Bool = false
+    updatesAutomaticallyDownloadUpdates: Bool = false,
+    agentsViewAutoOpen: Bool = true
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -59,6 +67,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updateCheckInterval = updateCheckInterval
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
+    self.agentsViewAutoOpen = agentsViewAutoOpen
   }
 
   public static let `default` = GeneralSettings()
@@ -67,6 +76,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
+    case agentsViewAutoOpen
   }
 
   public init(from decoder: Decoder) throws {
@@ -87,5 +97,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyCheckForUpdates) ?? true
     self.updatesAutomaticallyDownloadUpdates =
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyDownloadUpdates) ?? false
+    self.agentsViewAutoOpen =
+      try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoOpen) ?? true
   }
 }
