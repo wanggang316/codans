@@ -118,9 +118,9 @@ struct SettingsGeneralView: View {
       }
 
       Section {
-        Toggle("Auto-open Agents View when an agent is working", isOn: agentsViewAutoOpenBinding)
+        Toggle("Auto-open Agents View", isOn: agentsViewAutoOpenBinding)
       } footer: {
-        Text("The sidebar panel opens automatically when an agent starts running or asks for input.")
+        Text("The sidebar panel opens automatically when an agent starts running.")
       }
     }
     .formStyle(.grouped)
