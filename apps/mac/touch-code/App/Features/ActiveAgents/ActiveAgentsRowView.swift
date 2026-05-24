@@ -68,35 +68,26 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Single-line identity row: `<worktree> · <project>` rendered as one
-  /// `Text` built from an `AttributedString` so the two halves can carry
-  /// distinct foreground / weight styling without breaking truncation
-  /// across two views. Selected row bolds only the worktree (the
-  /// primary identity); the project tail stays at `.secondary`.
+  /// Two-line identity column: worktree (branch) name on top, project
+  /// name beneath. The primary line carries the
+  /// `activeAgents.row.<paneID>.headline` accessibility identifier
+  /// (the headline contract surface stays on the user-facing top line
+  /// of the row).
   private var identityColumn: some View {
-    Text(identityAttributedString)
-      .font(.callout)
-      .lineLimit(1)
-      .truncationMode(.middle)
-      .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
-  }
-
-  /// Build the `<worktree> · <project>` attributed string with the
-  /// selection-aware weighting on the worktree segment.
-  private var identityAttributedString: AttributedString {
-    var worktree = AttributedString(worktreeName)
-    worktree.foregroundColor = .primary
-    if isSelected {
-      worktree.font = .callout.weight(.semibold)
+    VStack(alignment: .leading, spacing: 2) {
+      Text(worktreeName)
+        .font(.callout)
+        .fontWeight(isSelected ? .semibold : .regular)
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+      Text(projectName)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.middle)
     }
-
-    var separator = AttributedString(" · ")
-    separator.foregroundColor = .secondary
-
-    var project = AttributedString(projectName)
-    project.foregroundColor = .secondary
-
-    return worktree + separator + project
   }
 
   /// Row background. Three tiers:
@@ -146,22 +137,19 @@ struct ActiveAgentsRowView: View {
   private var stateIcon: some View {
     switch entry.state {
     case .waitingForInput:
-      // Composite prompt-cursor glyph: `>` arrow + blinking `|` cursor.
-      // Only the cursor blinks (matches terminal-prompt visual language;
-      // "agent is waiting at the prompt for the user to type"). Reduce
-      // motion keeps the cursor solid.
-      PromptCursorIcon(reduceMotion: reduceMotion)
+      // Pause-fill glyph — terminal-style "agent has paused for you".
+      // Orange + symbol pulse continue to read as "needs your attention".
+      Image(systemName: "pause.fill")
         .foregroundStyle(Color.orange)
-        .accessibilityHidden(true)
-    case .loading:
-      // Accent (system blue by default) — reserves orange for the two
-      // "needs attention" states (waitingForInput, finished-but-unread)
-      // and reads loading as informational activity rather than a
-      // warning. Pulses to convey "live work in progress".
-      Image(systemName: "circle.fill")
-        .foregroundStyle(Color.accentColor)
         .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
         .accessibilityHidden(true)
+    case .loading:
+      // Nine-square activity grid — staggered fade-out per cell on a 3 s
+      // cycle (bottom-left first → top-right last) reads as "filling in
+      // progress" rather than a generic spinner. Reduce motion holds
+      // every cell at full opacity.
+      LoadingGridIcon(size: 14, isAnimating: !reduceMotion)
+        .foregroundStyle(Color.accentColor)
     case .finished:
       Image(systemName: "checkmark.circle.fill")
         .foregroundStyle(.green)
@@ -207,32 +195,68 @@ struct ActiveAgentsRowView: View {
   }
 }
 
-/// `> |` glyph used for the `.waitingForInput` state: a small chevron
-/// followed by a 1.5pt-wide blinking caret. The caret toggles its
-/// opacity on a 0.55s repeat-forever curve; reduce-motion keeps it
-/// solid. Mirrors the visual language of a terminal prompt awaiting
-/// input.
-private struct PromptCursorIcon: View {
-  let reduceMotion: Bool
+/// 3×3 activity-grid glyph used for the `.loading` state: nine 4-unit
+/// squares on a 24-unit canvas, each fading from full opacity to 0
+/// over 90 % of a 3 s cycle (then holding at 0 for 10 % before the
+/// next cycle starts). Stagger goes bottom-left → top-right with
+/// 0.2 s steps so the diagonal reads as the work "filling up".
+/// Mirrors the SVG with `<animate>` attribute provided in the
+/// design feedback. Reduce motion holds every cell at full opacity.
+private struct LoadingGridIcon: View {
+  let size: CGFloat
+  let isAnimating: Bool
 
-  @State private var cursorOn: Bool = true
+  /// Begin offsets matching the SVG, indexed `[row][col]` with row 0
+  /// = top row. The SVG starts the animation at the bottom-left
+  /// (begin 0.2 s) and walks up rightward.
+  private static let beginOffsets: [[Double]] = [
+    [1.4, 1.6, 1.8],
+    [0.8, 1.0, 1.2],
+    [0.2, 0.4, 0.6],
+  ]
+  private static let cycle: Double = 3.0
 
   var body: some View {
-    HStack(spacing: 1.5) {
-      Image(systemName: "chevron.right")
-        .font(.system(size: 10, weight: .heavy))
-      Rectangle()
-        .frame(width: 1.5, height: 10)
-        .opacity(cursorOn ? 1 : 0)
-    }
-    .frame(width: 14, height: 14, alignment: .center)
-    .onAppear {
-      guard !reduceMotion else { return }
-      withAnimation(
-        .easeInOut(duration: 0.55).repeatForever(autoreverses: true)
-      ) {
-        cursorOn = false
+    // SVG geometry: 4-pt squares with 2-pt gutters in a 24-pt
+    // viewBox. Translate to a `size`-pt rendered glyph.
+    let cell = size * (4.0 / 24.0)
+    let gap = size * (2.0 / 24.0)
+    TimelineView(
+      .animation(minimumInterval: 1.0 / 30.0, paused: !isAnimating)
+    ) { context in
+      let now = context.date.timeIntervalSinceReferenceDate
+      VStack(spacing: gap) {
+        ForEach(0..<3, id: \.self) { row in
+          HStack(spacing: gap) {
+            ForEach(0..<3, id: \.self) { col in
+              Rectangle()
+                .frame(width: cell, height: cell)
+                .opacity(isAnimating ? opacity(now: now, row: row, col: col) : 1.0)
+            }
+          }
+        }
       }
+    }
+    .frame(width: size, height: size)
+    .accessibilityHidden(true)
+  }
+
+  /// Linear fade from 1 → 0 across the first 90 % of the 3 s cycle,
+  /// then pinned at 0 for the last 10 %, matching the SVG's
+  /// `values="1;0;0"` over `keyTimes="0;0.9;1"`.
+  private func opacity(now: Double, row: Int, col: Int) -> Double {
+    let begin = Self.beginOffsets[row][col]
+    let elapsed = now - begin
+    // Before the begin offset on the first cycle, SVG shows the cell
+    // at full opacity (default fill). Compute the phase modulo `cycle`
+    // so the wraparound case continues looping after the first cycle.
+    let phase = elapsed >= 0
+      ? elapsed.truncatingRemainder(dividingBy: Self.cycle) / Self.cycle
+      : 0.0
+    if phase < 0.9 {
+      return 1.0 - (phase / 0.9)
+    } else {
+      return 0.0
     }
   }
 }
