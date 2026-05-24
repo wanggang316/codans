@@ -148,23 +148,49 @@ struct ActiveAgentsSidebarPanel: View {
     .padding(.bottom, 6)
   }
 
+  @ViewBuilder
   private var content: some View {
     let rows = SortedEntriesProvider.sorted(registry.entries)
-    return ScrollView {
-      LazyVStack(spacing: 0) {
-        ForEach(rows, id: \.paneID) { item in
-          let resolved = resolveSourcePath(item.paneID)
-          ActiveAgentsRowView(
-            paneID: item.paneID,
-            entry: item.entry,
-            projectName: resolved?.project ?? "—",
-            worktreeName: resolved?.worktree ?? "—",
-            isSelected: item.paneID == focusedPaneID,
-            onTap: { onTapRow(item.paneID) }
-          )
+    if rows.isEmpty {
+      emptyState
+    } else {
+      ScrollView {
+        LazyVStack(spacing: 0) {
+          ForEach(rows, id: \.paneID) { item in
+            let resolved = resolveSourcePath(item.paneID)
+            ActiveAgentsRowView(
+              paneID: item.paneID,
+              entry: item.entry,
+              projectName: resolved?.project ?? "—",
+              worktreeName: resolved?.worktree ?? "—",
+              isSelected: item.paneID == focusedPaneID,
+              onTap: { onTapRow(item.paneID) }
+            )
+          }
         }
       }
+      .accessibilityIdentifier("activeAgents.sidebarPanel.list")
     }
-    .accessibilityIdentifier("activeAgents.sidebarPanel.list")
+  }
+
+  /// Empty-state placeholder when no agents are bound. Replaces the
+  /// empty `ScrollView` so the panel doesn't read as broken when it
+  /// first opens or after every bound agent has exited.
+  private var emptyState: some View {
+    VStack(spacing: 6) {
+      Image(systemName: "sparkles")
+        .font(.system(size: 22, weight: .regular))
+        .foregroundStyle(.tertiary)
+      Text("No agents running")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+      Text("Start an agent (claude / codex / pi) in a pane and it shows up here.")
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 16)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .accessibilityIdentifier("activeAgents.sidebarPanel.emptyState")
   }
 }
