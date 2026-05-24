@@ -228,7 +228,6 @@ final class HierarchyHandlers {
     }
   }
 
-
   public struct CreateTabParams: Codable, Sendable {
     public let projectID: ProjectID
     public let worktreeID: WorktreeID

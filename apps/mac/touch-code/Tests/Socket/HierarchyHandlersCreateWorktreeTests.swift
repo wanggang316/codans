@@ -149,7 +149,8 @@ struct HierarchyHandlersCreateWorktreeTests {
       Issue.record("expected failure, got \(outcome)")
       return
     }
-    if case .invalidParams = err { } else {
+    if case .invalidParams = err {
+    } else {
       Issue.record("expected invalidParams, got \(err)")
     }
   }
