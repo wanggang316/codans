@@ -173,20 +173,16 @@ struct ActiveAgentsSidebarPanel: View {
     }
   }
 
-  /// Empty-state placeholder when no agents are bound. Replaces the
-  /// empty `ScrollView` so the panel doesn't read as broken when it
-  /// first opens or after every bound agent has exited.
+  /// Empty-state placeholder when no agents are bound — minimal: a
+  /// single icon stacked over a one-line invitation.
   private var emptyState: some View {
-    VStack(spacing: 6) {
+    VStack(spacing: 8) {
       Image(systemName: "sparkles")
         .font(.system(size: 22, weight: .regular))
         .foregroundStyle(.tertiary)
-      Text("No agents running")
+      Text("Run an agent and it'll show up here.")
         .font(.callout)
         .foregroundStyle(.secondary)
-      Text("Start an agent (claude / codex / pi) in a pane and it shows up here.")
-        .font(.caption)
-        .foregroundStyle(.tertiary)
         .multilineTextAlignment(.center)
         .padding(.horizontal, 16)
     }
