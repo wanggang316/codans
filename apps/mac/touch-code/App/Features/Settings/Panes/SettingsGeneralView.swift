@@ -53,6 +53,13 @@ struct SettingsGeneralView: View {
     )
   }
 
+  private var agentsViewEnabledBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.agentsViewEnabled },
+      set: { settingsStore.setAgentsViewEnabled($0) }
+    )
+  }
+
   /// Installed git clients surfaced under "Default Git Viewer". Sourced from the
   /// editor feature's `describe()` cache so only installed apps show up; the
   /// `gitClientPriority` filter walks `EditorRegistry`'s git-tool group in its
@@ -107,6 +114,16 @@ struct SettingsGeneralView: View {
           "Drives the Git Viewer chord (⌘⌥G). Built-in shows the in-app overlay; "
             + "any other choice opens the worktree in that git client. Falls back to "
             + "the built-in viewer if the chosen client is uninstalled later."
+        )
+      }
+
+      Section {
+        Toggle("Show Agents View", isOn: agentsViewEnabledBinding)
+      } footer: {
+        Text(
+          "Exposes the Agents View panel and its sidebar footer toggle. "
+            + "Turn off to hide the panel; the underlying agent tracking keeps "
+            + "running so re-enabling restores the same rows without re-identification."
         )
       }
     }

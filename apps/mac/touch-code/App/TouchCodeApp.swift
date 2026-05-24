@@ -73,7 +73,13 @@ struct TouchCodeApp: App {
             notificationRollup: appState.notificationRollup,
             notificationStore: appState.notificationStore,
             osNotifier: appState.osNotifier,
-            activeAgentsRegistry: appState.agentRegistry
+            // Gate the ActiveAgents panel on the user-facing Settings →
+            // General toggle. Passing nil hides both the sidebar footer
+            // toggle button and the panel itself (HierarchySidebarView
+            // treats a nil registry as "feature disabled").
+            activeAgentsRegistry: appState.settingsStore.settings.general.agentsViewEnabled
+              ? appState.agentRegistry
+              : nil
           )
           .frame(minWidth: 800, minHeight: 600)
           .environment(commandKeyObserver)

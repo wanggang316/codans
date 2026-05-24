@@ -183,6 +183,12 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  func setAgentsViewEnabled(_ enabled: Bool) {
+    guard settings.general.agentsViewEnabled != enabled else { return }
+    settings.general.agentsViewEnabled = enabled
+    scheduleSave()
+  }
+
   // MARK: - Updates (Sparkle preferences mirrored in settings.json)
 
   func setUpdateChannel(_ channel: UpdateChannel) {

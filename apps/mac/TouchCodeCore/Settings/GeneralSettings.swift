@@ -39,6 +39,12 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// `updatesAutomaticallyCheckForUpdates` is also true.
   public var updatesAutomaticallyDownloadUpdates: Bool
 
+  /// Whether the ActiveAgents sidebar panel + its footer toggle button are exposed
+  /// in the UI. Default `true`. Disabling hides both the toggle in the sidebar
+  /// footer and the panel itself; the underlying `AgentRegistry` keeps running so
+  /// the toggle can re-show panes without re-identification once flipped back on.
+  public var agentsViewEnabled: Bool
+
   public init(
     appearance: AppearancePreference = .system,
     defaultEditorID: EditorID? = nil,
@@ -48,7 +54,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updateChannel: UpdateChannel = .stable,
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
-    updatesAutomaticallyDownloadUpdates: Bool = false
+    updatesAutomaticallyDownloadUpdates: Bool = false,
+    agentsViewEnabled: Bool = true
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -59,6 +66,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updateCheckInterval = updateCheckInterval
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
+    self.agentsViewEnabled = agentsViewEnabled
   }
 
   public static let `default` = GeneralSettings()
@@ -67,6 +75,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
+    case agentsViewEnabled
   }
 
   public init(from decoder: Decoder) throws {
@@ -87,5 +96,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyCheckForUpdates) ?? true
     self.updatesAutomaticallyDownloadUpdates =
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyDownloadUpdates) ?? false
+    self.agentsViewEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .agentsViewEnabled) ?? true
   }
 }
