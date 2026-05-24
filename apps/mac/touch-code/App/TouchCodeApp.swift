@@ -1285,9 +1285,15 @@ final class AppState {
   /// OSC 9 desktop-notification payloads, and lifecycle teardown without
   /// opening a second long-lived Task on the events stream.
   ///
-  /// OSC 133 prompt-end (`.promptReturned`) is intentionally NOT wired —
-  /// the engine does not currently surface a `PaneInfoDelta.promptEnd`
-  /// variant. See `docs/exec-plans/active-agents-view.md` OQ-1.
+  /// `.commandFinished` (OSC 133 D, shell-integration "command finished")
+  /// is treated as "the foreground command in the pane just returned to
+  /// the shell prompt" — i.e. the agent that owned this pane has exited
+  /// (Ctrl+C, `exit`, `:q`, …). Since `paneExited` only fires when the
+  /// *pane's child* dies and the shell underneath the agent stays alive,
+  /// this is the only reliable signal that the agent itself is gone
+  /// while the pane is still open. We unbind unconditionally; the call
+  /// is idempotent and a re-run of the same agent re-binds on the next
+  /// title-changed event.
   @MainActor
   private static func dispatchToAgentBinder(
     event: TerminalEvent,
@@ -1305,12 +1311,8 @@ final class AppState {
           paneID: paneID,
           trigger: .desktopNotification(title: title, body: body)
         )
-      // Active-agents OQ-1: `PaneInfoDelta` has no `.promptEnd` variant
-      // today (libghostty does not surface OSC 133 D as a typed delta), so
-      // the binder's `.promptReturned` rebind path is intentionally not
-      // wired here. Until that lands, an initially-classified pane keeps
-      // its `agentKind` until close — the title-changed sticky guard makes
-      // this safe.
+      case .commandFinished:
+        binder.unbind(paneID)
       default:
         break
       }
