@@ -208,6 +208,9 @@ public final class ZmxClient {
     if isClosed { throw ConnectError.alreadyClosed }
     let payload = ZmxResizePayload(cols: cols, rows: rows)
     self.lastResize = payload
+    logger.info(
+      "attach sending init: pane=\(self.paneID, privacy: .public) cols=\(cols, privacy: .public) rows=\(rows, privacy: .public)"
+    )
     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
       self.attachContinuation = cont
       do {
@@ -497,9 +500,19 @@ public final class ZmxClient {
   private func handleFrame(_ frame: ZmxFrame) {
     switch frame.tag {
     case .output:
+      // Log every daemon-originated .output frame so we can see whether the
+      // serialize-on-second-init replay actually reaches us (large first
+      // frame after attach => buffer restore worked) vs. the daemon just
+      // sending fresh PTY output (small ongoing frames).
+      logger.info(
+        "daemon output frame: pane=\(self.paneID, privacy: .public) bytes=\(frame.payload.count, privacy: .public) firstFrame=\(self.attachContinuation != nil, privacy: .public)"
+      )
       writeToLocal(frame.payload)
       if let cont = attachContinuation {
         attachContinuation = nil
+        logger.info(
+          "attach received first output, bytes=\(frame.payload.count, privacy: .public) pane=\(self.paneID, privacy: .public)"
+        )
         cont.resume()
       }
     case .info:

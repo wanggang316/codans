@@ -163,8 +163,15 @@ enum PaneDaemonBringup {
       let daemonPID: Int32 =
         lines.dropFirst().first
         .flatMap { Int32(String($0).trimmingCharacters(in: .whitespaces)) } ?? 0
-      logger.debug(
-        "spawned zmx serve for pane \(paneID, privacy: .public): socket=\(socketPath, privacy: .public) pid=\(daemonPID, privacy: .public)"
+      // pid==0 means `zmx serve` reused a pre-existing daemon (via
+      // `ensureSession`) rather than forking a new one — the daemon is
+      // already in `has_had_client = true` state and the next `.init`
+      // we send will trigger the serialize-and-replay branch. Logging
+      // the reuse flag here lets us diagnose whether the resume path
+      // actually walked through daemon reuse vs. a fresh spawn.
+      let isReused = (daemonPID == 0)
+      logger.info(
+        "spawn returned: pane=\(paneID, privacy: .public) socketPath=\(socketPath, privacy: .public) daemonPID=\(daemonPID, privacy: .public) isReused=\(isReused, privacy: .public)"
       )
       return try await ZmxClient(
         paneID: paneID,

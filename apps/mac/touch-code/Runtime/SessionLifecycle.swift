@@ -232,25 +232,15 @@ final class SessionLifecycle {
     var value: Result<URL, Error>?
   }
 
-  /// Walk the catalog top-down and pull out every `ZmxClient` whose pane
-  /// still has a live `PaneSurface` registered with the runtime. Surfaces
-  /// can lag behind the catalog when tab activation is lazy, so this is
-  /// the only path that reliably enumerates the running daemons.
+  /// Enumerate every `ZmxClient` whose `PaneSurface` is registered with the
+  /// runtime right now. The runtime's surface registry is the only source of
+  /// truth for "a daemon is actually attached" — the hierarchy catalog lists
+  /// panes whose surfaces have not been built yet (tab activation is lazy),
+  /// and walking the catalog at quit time silently dropped those panes,
+  /// leaving `sessions.json` empty after most cmd-Q invocations.
   private func collectLiveClients() -> [ZmxClient] {
     guard let runtime = ghosttyRuntime else { return [] }
-    var clients: [ZmxClient] = []
-    for project in manager.catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          for pane in tab.panes {
-            if let surface = runtime.surface(for: pane.id) {
-              clients.append(surface.zmxClient)
-            }
-          }
-        }
-      }
-    }
-    return clients
+    return runtime.allLiveSurfaces().map { $0.zmxClient }
   }
 
   private func persist(catalog: SessionCatalog) {

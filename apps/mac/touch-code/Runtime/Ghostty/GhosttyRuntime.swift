@@ -211,6 +211,16 @@ final class GhosttyRuntime {
     surfacesByPaneID[paneID]
   }
 
+  /// Snapshot of every `PaneSurface` currently registered with this runtime.
+  /// Used by `SessionLifecycle` to enumerate live `ZmxClient`s at quit time
+  /// without depending on the hierarchy catalog being in sync — surfaces are
+  /// created lazily on tab activation, so the catalog often lists panes for
+  /// which no surface exists yet, and conversely the surface registry is
+  /// authoritative about which daemons are actually attached right now.
+  func allLiveSurfaces() -> [PaneSurface] {
+    Array(surfacesByPaneID.values)
+  }
+
   /// Force-clear libghostty focus on every surface except `target`. Called
   /// by `TerminalEngine.focusSurfaceView` before `makeFirstResponder` so
   /// surfaces left stale by AppKit's focus machinery (e.g. briefly-detached
