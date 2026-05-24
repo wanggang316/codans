@@ -508,3 +508,352 @@ struct DiffFeatureTests {
     }
   }
 }
+
+/// Tests for the T11 Changes / History split on `DiffFeature` — covers tab
+/// routing, first-page + paginate-more loading, idempotence guards, commit
+/// selection / cache hit, and the worktree-switch / HEAD-change resets.
+/// Separate top-level struct so the original `DiffFeatureTests` keeps its
+/// pre-T11 shape and history-side fixtures don't leak into the Changes
+/// fixtures.
+@MainActor
+struct DiffFeatureHistoryTests {
+  // MARK: - Fixtures
+
+  private static func sampleCommit(id: String, subject: String) -> Commit {
+    Commit(
+      id: id,
+      authorName: "Gump",
+      authorEmail: "1989wg@gmail.com",
+      date: Date(timeIntervalSince1970: 1_700_000_000),
+      subject: subject,
+      parents: []
+    )
+  }
+
+  /// Build `count` commits with deterministic 40-char SHAs derived from the
+  /// `prefix` + index. Length matches the live `git log` output so any
+  /// future SHA-length validation in the reducer won't trip on test data.
+  private static func sampleCommits(prefix: String, count: Int) -> [Commit] {
+    (0..<count).map { idx in
+      let suffix = String(repeating: "0", count: 40 - prefix.count - String(idx).count) + "\(idx)"
+      return sampleCommit(id: prefix + suffix, subject: "subject-\(idx)")
+    }
+  }
+
+  private static func makeState(
+    worktreePath: String = "/tmp/wt"
+  ) -> DiffFeature.State {
+    var state = DiffFeature.State()
+    state.projectID = ProjectID()
+    state.worktreeID = WorktreeID()
+    state.worktreePath = worktreePath
+    return state
+  }
+
+  // MARK: - 1. Tab routing
+
+  @Test
+  func tabSelectedChangesActiveTab() async {
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+    #expect(store.state.selectedTab == .changes)
+    await store.send(.tabSelected(.history)) { state in
+      state.selectedTab = .history
+    }
+  }
+
+  // MARK: - 2. First-page load on appear
+
+  @Test
+  func historyAppearedTriggersFirstPageLoad() async {
+    let commits = Self.sampleCommits(prefix: "a", count: 3)
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.log = { _, cursor in
+        // Verify the reducer hands us the expected first-page cursor.
+        #expect(cursor.offset == 0)
+        #expect(cursor.limit == 50)
+        return LogPage(cursor: cursor, commits: commits, hasMore: true)
+      }
+    }
+
+    await store.send(.historyAppeared) { state in
+      state.historyState.loading = true
+    }
+    await store.receive(.historyPageSucceeded(commits, hasMore: true)) { state in
+      state.historyState.commits = commits
+      state.historyState.nextOffset = commits.count
+      state.historyState.hasMore = true
+      state.historyState.loading = false
+    }
+  }
+
+  // MARK: - 3. Idempotent: already loaded
+
+  @Test
+  func historyAppearedIsIdempotentWhenLoaded() async {
+    let commits = Self.sampleCommits(prefix: "b", count: 2)
+    var seed = Self.makeState()
+    seed.historyState.commits = commits
+    seed.historyState.nextOffset = commits.count
+    seed.historyState.hasMore = true
+
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      // No `log` stub: a re-fire on a loaded cache would trip
+      // `unimplemented` and surface as a test failure.
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.historyAppeared)
+    await store.finish()
+  }
+
+  // MARK: - 4. Idempotent: load already in flight
+
+  @Test
+  func historyAppearedIsIdempotentWhileLoading() async {
+    var seed = Self.makeState()
+    seed.historyState.loading = true
+
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.historyAppeared)
+    await store.finish()
+  }
+
+  // MARK: - 5. Load-more appends + advances offset
+
+  @Test
+  func historyLoadNextPageRequestedAppendsAndAdvances() async {
+    let firstPage = Self.sampleCommits(prefix: "c", count: 50)
+    let secondPage = Self.sampleCommits(prefix: "d", count: 20)
+    var seed = Self.makeState()
+    seed.historyState.commits = firstPage
+    seed.historyState.nextOffset = 50
+    seed.historyState.hasMore = true
+
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.log = { _, cursor in
+        #expect(cursor.offset == 50)
+        #expect(cursor.limit == 50)
+        return LogPage(cursor: cursor, commits: secondPage, hasMore: false)
+      }
+    }
+
+    await store.send(.historyLoadNextPageRequested) { state in
+      state.historyState.loading = true
+    }
+    await store.receive(.historyPageSucceeded(secondPage, hasMore: false)) { state in
+      state.historyState.commits = firstPage + secondPage
+      state.historyState.nextOffset = 70
+      state.historyState.hasMore = false
+      state.historyState.loading = false
+    }
+  }
+
+  // MARK: - 6. Load-more gated on hasMore
+
+  @Test
+  func historyLoadNextPageRequestedGatedOnHasMore() async {
+    var seed = Self.makeState()
+    seed.historyState.commits = Self.sampleCommits(prefix: "e", count: 10)
+    seed.historyState.nextOffset = 10
+    seed.historyState.hasMore = false
+
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.historyLoadNextPageRequested)
+    await store.finish()
+  }
+
+  // MARK: - 7. Commit tap sets selection + loads diff
+
+  @Test
+  func historyCommitTappedSetsSelectionAndLoads() async {
+    let sha = "abc0000000000000000000000000000000000000"
+    let unified = UnifiedDiff(scope: .commit(sha: sha), files: [])
+
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.commitDiff = { _, requestedSha, _ in
+        #expect(requestedSha == sha)
+        return unified
+      }
+    }
+
+    await store.send(.historyCommitTapped(sha: sha, subject: "x")) { state in
+      state.presentedCommitSha = sha
+      state.diffsByCommit[sha] = .loading
+    }
+    // `LoadedDiffDocument` is identity-equatable; we can't predict the
+    // wrapper instance the reducer builds, so use non-exhaustive matching
+    // for the wrapper field and verify the document contents below.
+    store.exhaustivity = .off
+    let expectedDocument = DiffDocument(
+      files: [],
+      title: String(sha.prefix(7)),
+      fallbackPatch: ""
+    )
+    await store.receive(.commitDiffSucceededFor(sha: sha, document: expectedDocument))
+    if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
+      #expect(wrapper.document == expectedDocument)
+    } else {
+      Issue.record("expected diffsByCommit[\(sha)] to be .loaded(...)")
+    }
+  }
+
+  // MARK: - 8. Cache hit on re-tap
+
+  @Test
+  func historyCommitTappedReusesCacheOnRepeat() async {
+    let shaA = "aaaa000000000000000000000000000000000000"
+    let shaB = "bbbb000000000000000000000000000000000000"
+
+    actor CallCounter {
+      private(set) var calls: [String] = []
+      func record(_ sha: String) { calls.append(sha) }
+      func count() -> Int { calls.count }
+    }
+    let counter = CallCounter()
+
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.commitDiff = { _, sha, _ in
+        await counter.record(sha)
+        return UnifiedDiff(scope: .commit(sha: sha), files: [])
+      }
+    }
+    store.exhaustivity = .off
+
+    // 1) Tap A → fetch.
+    await store.send(.historyCommitTapped(sha: shaA, subject: "a"))
+    await store.receive(\.commitDiffSucceededFor)
+    // 2) Tap B → fetch.
+    await store.send(.historyCommitTapped(sha: shaB, subject: "b"))
+    await store.receive(\.commitDiffSucceededFor)
+    // 3) Re-tap A → cache hit, no new fetch.
+    await store.send(.historyCommitTapped(sha: shaA, subject: "a"))
+    await store.finish()
+
+    let totalCalls = await counter.count()
+    #expect(totalCalls == 2)
+    #expect(store.state.presentedCommitSha == shaA)
+  }
+
+  // MARK: - 9. Worktree switch resets history side
+
+  @Test
+  func worktreeSelectedResetsHistorySide() async {
+    let commits = Self.sampleCommits(prefix: "f", count: 3)
+    let cachedDoc = DiffDocument(files: [], title: "abcdef0", fallbackPatch: "")
+    var seed = Self.makeState(worktreePath: "/tmp/old")
+    seed.historyState.commits = commits
+    seed.historyState.nextOffset = commits.count
+    seed.historyState.hasMore = false
+    seed.presentedCommitSha = "abcdef00000000000000000000000000000000000"
+    seed.diffsByCommit["abcdef00000000000000000000000000000000000"] = .loaded(
+      DiffFeature.LoadedDiffDocument(cachedDoc))
+    seed.selectedTab = .history  // user preference must persist
+
+    let newProject = ProjectID()
+    let newWorktree = WorktreeID()
+    let newPath = "/tmp/new"
+
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.diffNumstat = { _ in [] }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .worktreeSelected(projectID: newProject, worktreeID: newWorktree, path: newPath)
+    ) { state in
+      state.projectID = newProject
+      state.worktreeID = newWorktree
+      state.worktreePath = newPath
+      state.presentedFilePath = nil
+      state.diffsByPath = [:]
+      state.historyState = .init()
+      state.presentedCommitSha = nil
+      state.diffsByCommit = [:]
+      state.changedFiles = .loading
+      // selectedTab stays .history — user preference persists across switches.
+    }
+    await store.finish()
+    #expect(store.state.selectedTab == .history)
+  }
+
+  // MARK: - 10. HEAD change resets history side
+
+  @Test
+  func headChangedForCurrentWorktreeResetsHistorySide() async {
+    let commits = Self.sampleCommits(prefix: "g", count: 5)
+    let cachedDoc = DiffDocument(files: [], title: "1234567", fallbackPatch: "")
+    var seed = Self.makeState()
+    seed.historyState.commits = commits
+    seed.historyState.nextOffset = commits.count
+    seed.historyState.hasMore = false
+    seed.presentedCommitSha = "12345670000000000000000000000000000000000"
+    seed.diffsByCommit["12345670000000000000000000000000000000000"] = .loaded(
+      DiffFeature.LoadedDiffDocument(cachedDoc))
+    seed.selectedTab = .history
+
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.headChangedForCurrentWorktree) { state in
+      state.historyState = .init()
+      state.presentedCommitSha = nil
+      state.diffsByCommit = [:]
+      // selectedTab stays .history.
+    }
+    #expect(store.state.selectedTab == .history)
+  }
+
+  // MARK: - 11. Load failure surfaces as error
+
+  @Test
+  func historyPageFailedCapturesError() async {
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.log = { _, _ in throw GitError.timedOut }
+    }
+
+    await store.send(.historyAppeared) { state in
+      state.historyState.loading = true
+    }
+    await store.receive(.historyPageFailed(.timedOut)) { state in
+      state.historyState.loading = false
+      state.historyState.error = .timedOut
+    }
+  }
+}

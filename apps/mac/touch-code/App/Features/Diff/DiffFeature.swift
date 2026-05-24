@@ -45,6 +45,67 @@ struct DiffFeature {
     var diffsByPath: [String: DiffEntryState] = [:]
     /// Mirrors `@AppStorage("diffStyle")`; the picker view writes both.
     var style: DiffStyle = .unified
+
+    /// Right-panel tab routing for the inspector. Default `.changes` preserves
+    /// pre-T11 behaviour: the inspector mounts straight onto the Changes body
+    /// without forcing a tab switch on the first render.
+    var selectedTab: DiffTab = .changes
+
+    /// History tab cache + pagination. Reset on worktree switch and on the
+    /// current worktree's HEAD changing (see `.headChangedForCurrentWorktree`).
+    /// Empty `commits` + `loading == false + error == nil + hasMore == true`
+    /// is the never-loaded sentinel; the view triggers the first page load
+    /// from `.onAppear` via `.historyAppeared`.
+    var historyState: HistoryState = .init()
+
+    /// History-mode selection. Drives the left-side diff render when
+    /// `selectedTab == .history`. Mutually independent of `presentedFilePath`
+    /// — switching tabs does NOT clear either, so the user can ping-pong
+    /// between Changes and History without losing the selected file or
+    /// commit. Reset on worktree switch / HEAD change.
+    var presentedCommitSha: String?
+
+    /// Per-commit diff cache keyed by full SHA. Mirrors `diffsByPath`'s
+    /// lifecycle: survives drawer close, reset only on worktree switch or
+    /// HEAD change. Re-tapping a previously-rendered commit reuses the
+    /// cached DiffDocument without re-fetch.
+    var diffsByCommit: [String: DiffEntryState] = [:]
+  }
+
+  /// Routes the inspector's right panel between the Changes list (default,
+  /// pre-T11 behaviour) and the History list (T11+). The user's tab choice
+  /// survives worktree switches and HEAD changes; only an explicit
+  /// `.tabSelected` action mutates it.
+  enum DiffTab: Equatable, Sendable { case changes, history }
+
+  /// Snapshot of the History tab's commit-list pagination plus the lifecycle
+  /// flags the reducer guards on. The view treats `commits.isEmpty &&
+  /// !loading && error == nil && hasMore` as the never-loaded sentinel and
+  /// dispatches `.historyAppeared` on first render to trigger the initial
+  /// page load.
+  struct HistoryState: Equatable, Sendable {
+    /// Loaded commits in display order (newest first; the order
+    /// `GitServiceClient.log` returns).
+    var commits: [Commit] = []
+
+    /// Next offset to request. Always equals `commits.count`; promoted to
+    /// a stored field for ergonomic guards on the load-more path.
+    var nextOffset: Int = 0
+
+    /// 50 per page — matches the design-doc target. Not user-tunable.
+    var pageLimit: Int = 50
+
+    /// True while a `gitService.log` call is in flight. Used to debounce
+    /// `.historyLoadNextPageRequested` (re-entry while loading is a no-op).
+    var loading: Bool = false
+
+    /// `false` once the latest page returned fewer commits than `pageLimit`.
+    /// New worktree / HEAD reset back to `true` so the first load can run.
+    var hasMore: Bool = true
+
+    /// Last load failure, if any. Surfaces in the view as an inline error
+    /// row + retry button (T13). Cleared on next successful load.
+    var error: GitError?
   }
 
   enum ChangedFilesState: Equatable {
@@ -92,6 +153,19 @@ struct DiffFeature {
     case diffFailedFor(path: String, error: GitError)
     case diffTooLargeFor(path: String, reason: TooLargeReason, copyCommand: String)
     case styleChanged(DiffStyle)
+    case tabSelected(DiffTab)
+    case historyAppeared
+    case historyLoadNextPageRequested
+    case historyPageSucceeded([Commit], hasMore: Bool)
+    case historyPageFailed(GitError)
+    case historyCommitTapped(sha: String, subject: String)
+    case commitDiffSucceededFor(sha: String, document: DiffDocument)
+    case commitDiffFailedFor(sha: String, error: GitError)
+    case commitDiffTooLargeFor(sha: String, reason: TooLargeReason, copyCommand: String)
+    /// Forwarded by `RootFeature` when `WorktreeHeadWatcher` ticks for the
+    /// active worktree. Resets `historyState`, `presentedCommitSha`, and
+    /// `diffsByCommit` — the commit list shape is by definition stale.
+    case headChangedForCurrentWorktree
   }
 
   /// `nonisolated` because TCA's `.cancellable(id:)` requires `Hashable & Sendable`.
@@ -102,6 +176,8 @@ struct DiffFeature {
   nonisolated enum CancelID: Hashable, Sendable {
     case changedFiles
     case diff
+    case historyPage
+    case commitDiff
   }
 
   @Dependency(GitServiceClient.self) private var gitService
@@ -117,17 +193,26 @@ struct DiffFeature {
         state.worktreePath = path
         state.presentedFilePath = nil
         state.diffsByPath = [:]
+        // History side resets identically. `selectedTab` is NOT touched —
+        // the user's tab preference persists across worktree switches.
+        state.historyState = .init()
+        state.presentedCommitSha = nil
+        state.diffsByCommit = [:]
         guard worktreeID != nil, let path, !path.isEmpty else {
           state.changedFiles = .idle
           // Cancel any inflight loads from the previous worktree.
           return .merge(
             .cancel(id: CancelID.changedFiles),
-            .cancel(id: CancelID.diff)
+            .cancel(id: CancelID.diff),
+            .cancel(id: CancelID.historyPage),
+            .cancel(id: CancelID.commitDiff)
           )
         }
         state.changedFiles = .loading
         return .merge(
           .cancel(id: CancelID.diff),
+          .cancel(id: CancelID.historyPage),
+          .cancel(id: CancelID.commitDiff),
           loadChangedFiles(at: path)
         )
 
@@ -184,6 +269,96 @@ struct DiffFeature {
       case .styleChanged(let style):
         state.style = style
         return .none
+
+      case .tabSelected(let tab):
+        state.selectedTab = tab
+        return .none
+
+      case .historyAppeared:
+        // Idempotent: only trigger first-page load when cache is genuinely
+        // empty and not already loading. Subsequent rebinds (tab switch
+        // back to History) re-trigger `.onAppear` but should be no-ops.
+        // A pending error blocks re-fire too; T13's retry action will
+        // own clearing it and re-issuing the load.
+        guard state.historyState.commits.isEmpty,
+          !state.historyState.loading,
+          state.historyState.error == nil,
+          let path = state.worktreePath, !path.isEmpty
+        else { return .none }
+        state.historyState.loading = true
+        return loadHistoryPage(
+          at: path,
+          offset: state.historyState.nextOffset,
+          limit: state.historyState.pageLimit
+        )
+
+      case .historyLoadNextPageRequested:
+        guard state.historyState.hasMore,
+          !state.historyState.loading,
+          state.historyState.error == nil,
+          let path = state.worktreePath, !path.isEmpty
+        else { return .none }
+        state.historyState.loading = true
+        return loadHistoryPage(
+          at: path,
+          offset: state.historyState.nextOffset,
+          limit: state.historyState.pageLimit
+        )
+
+      case .historyPageSucceeded(let commits, let hasMore):
+        state.historyState.commits.append(contentsOf: commits)
+        state.historyState.nextOffset = state.historyState.commits.count
+        state.historyState.hasMore = hasMore
+        state.historyState.loading = false
+        state.historyState.error = nil
+        return .none
+
+      case .historyPageFailed(let error):
+        state.historyState.loading = false
+        state.historyState.error = error
+        return .none
+
+      case .historyCommitTapped(let sha, _):
+        // `subject` is not stored — the view derives it from the selected
+        // commit's lookup. Re-tapping the open commit is a no-op (drawer
+        // close path is via tab switch / new selection).
+        if state.presentedCommitSha == sha { return .none }
+        state.presentedCommitSha = sha
+        // Cache hit (.loaded / .error / .tooLarge): no re-fetch.
+        if let existing = state.diffsByCommit[sha], existing != .loading {
+          return .none
+        }
+        state.diffsByCommit[sha] = .loading
+        guard let worktreePath = state.worktreePath, !worktreePath.isEmpty else {
+          return .send(
+            .commitDiffFailedFor(sha: sha, error: .invalidInput("missing worktree path")))
+        }
+        return loadCommitDiff(sha: sha, worktreePath: worktreePath)
+
+      case .commitDiffSucceededFor(let sha, let document):
+        state.diffsByCommit[sha] = .loaded(LoadedDiffDocument(document))
+        return .none
+
+      case .commitDiffFailedFor(let sha, let error):
+        state.diffsByCommit[sha] = .error(error)
+        return .none
+
+      case .commitDiffTooLargeFor(let sha, let reason, let copyCommand):
+        state.diffsByCommit[sha] = .tooLarge(reason: reason, copyCommand: copyCommand)
+        return .none
+
+      case .headChangedForCurrentWorktree:
+        // The commit list and any in-flight history fetch are stale by
+        // definition. Drop the cache + per-commit cache + selection. Do
+        // NOT touch `selectedTab` — user's tab choice survives HEAD
+        // changes (same posture as `.worktreeSelected`).
+        state.historyState = .init()
+        state.presentedCommitSha = nil
+        state.diffsByCommit = [:]
+        return .merge(
+          .cancel(id: CancelID.historyPage),
+          .cancel(id: CancelID.commitDiff)
+        )
       }
     }
   }
@@ -257,6 +432,54 @@ struct DiffFeature {
     .cancellable(id: CancelID.diff, cancelInFlight: true)
   }
 
+  private func loadHistoryPage(
+    at worktreePath: String,
+    offset: Int,
+    limit: Int
+  ) -> Effect<Action> {
+    .run { [gitService] send in
+      do {
+        let url = URL(fileURLWithPath: worktreePath)
+        let cursor = LogPage.Cursor(offset: offset, limit: limit)
+        let page = try await gitService.log(url, cursor)
+        await send(.historyPageSucceeded(page.commits, hasMore: page.hasMore))
+      } catch let error as GitError {
+        await send(.historyPageFailed(error))
+      } catch {
+        await send(.historyPageFailed(.unparsable(context: "\(error)")))
+      }
+    }
+    .cancellable(id: CancelID.historyPage, cancelInFlight: true)
+  }
+
+  /// Fetches the unified diff for a single commit and packages it into a
+  /// `DiffDocument` via the renderer's `fallbackPatch` path. `UnifiedDiff` is
+  /// the parsed shape — `FileChange` carries hunks but NOT pre/post-image
+  /// file contents — so we can't construct `DiffFile(oldContents:,
+  /// newContents:)` directly. Re-serialising the parsed diff back into its
+  /// canonical unified-diff text is the cleanest bridge: the renderer's JS
+  /// already accepts the `patch` field for exactly this case (see
+  /// `DiffWebViewBridge.makeDocument`).
+  private func loadCommitDiff(sha: String, worktreePath: String) -> Effect<Action> {
+    .run { [gitService] send in
+      do {
+        let url = URL(fileURLWithPath: worktreePath)
+        let unified = try await gitService.commitDiff(url, sha, false)
+        let patch = Self.renderUnifiedDiffAsPatch(unified)
+        let title = String(sha.prefix(7))
+        let document = await MainActor.run { () -> DiffDocument in
+          DiffDocument(files: [], title: title, fallbackPatch: patch)
+        }
+        await send(.commitDiffSucceededFor(sha: sha, document: document))
+      } catch let error as GitError {
+        await send(.commitDiffFailedFor(sha: sha, error: error))
+      } catch {
+        await send(.commitDiffFailedFor(sha: sha, error: .unparsable(context: "\(error)")))
+      }
+    }
+    .cancellable(id: CancelID.commitDiff, cancelInFlight: true)
+  }
+
   // MARK: - Helpers
 
   /// POSIX shell-quote a single argument by wrapping in single quotes and
@@ -269,6 +492,86 @@ struct DiffFeature {
 
   nonisolated private static func posixQuote(_ s: String) -> String {
     "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  }
+
+  /// Serialises a parsed `UnifiedDiff` back into the canonical `git diff`
+  /// text shape. Used to feed `DiffDocument.fallbackPatch` for commit-diff
+  /// rendering, where we don't have the pre/post-image file contents the
+  /// per-file path otherwise needs. The output retains enough header
+  /// scaffolding (`diff --git`, `--- a/...`, `+++ b/...`, `@@ ...`) for the
+  /// renderer's JS to identify file boundaries and hunk ranges.
+  ///
+  /// Not a perfect round-trip — mode / index / similarity headers from the
+  /// original `git diff` output are not re-emitted because the parsed
+  /// `FileChange` does not retain them. The renderer is tolerant of the
+  /// minimal shape; merge / combined-diff input is out of scope (same
+  /// boundary as `DiffParser`).
+  nonisolated static func renderUnifiedDiffAsPatch(_ unified: UnifiedDiff) -> String {
+    var out = ""
+    for file in unified.files {
+      let oldPath = oldPathForRender(file)
+      let newPath = newPathForRender(file)
+      out += "diff --git a/\(oldPath) b/\(newPath)\n"
+      switch file.kind {
+      case .added:
+        out += "new file mode 100644\n"
+      case .deleted:
+        out += "deleted file mode 100644\n"
+      case .renamed(let from):
+        out += "rename from \(from)\n"
+        out += "rename to \(file.id)\n"
+      case .copied(let from):
+        out += "copy from \(from)\n"
+        out += "copy to \(file.id)\n"
+      case .modified, .typeChanged:
+        break
+      }
+      if file.isBinary {
+        out += "Binary files a/\(oldPath) and b/\(newPath) differ\n"
+        continue
+      }
+      if case .deleted = file.kind {
+        out += "--- a/\(oldPath)\n+++ /dev/null\n"
+      } else if case .added = file.kind {
+        out += "--- /dev/null\n+++ b/\(newPath)\n"
+      } else {
+        out += "--- a/\(oldPath)\n+++ b/\(newPath)\n"
+      }
+      for hunk in file.hunks {
+        // `hunk.header` is the raw header line as captured by the parser,
+        // including the trailing section hint. Re-emit verbatim so the
+        // renderer sees the same shape `git diff` would have produced.
+        out += "\(hunk.header)\n"
+        for line in hunk.lines {
+          switch line.kind {
+          case .context: out += " \(line.text)\n"
+          case .added: out += "+\(line.text)\n"
+          case .removed: out += "-\(line.text)\n"
+          case .noNewlineMarker: out += "\\\(line.text)\n"
+          }
+        }
+      }
+    }
+    return out
+  }
+
+  /// Pre-image path. For renames/copies the parsed model carries the source
+  /// path inside `kind`; otherwise it equals `file.id` (which is the
+  /// pre-image for deletions and the post-image for everything else — see
+  /// `FileChange`'s docstring).
+  nonisolated private static func oldPathForRender(_ file: FileChange) -> String {
+    switch file.kind {
+    case .renamed(let from), .copied(let from): return from
+    default: return file.id
+    }
+  }
+
+  /// Post-image path. Always `file.id` — for deletions the post-image is
+  /// `/dev/null` (handled by the `--- a/ +++ /dev/null` branch above), but
+  /// the `b/<path>` slot in the `diff --git` header conventionally repeats
+  /// the pre-image path.
+  nonisolated private static func newPathForRender(_ file: FileChange) -> String {
+    file.id
   }
 }
 
