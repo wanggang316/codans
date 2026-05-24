@@ -1,6 +1,6 @@
 # ExecPlan: Worktree Branch Switcher & Diff History
 
-**Status:** Draft
+**Status:** Implemented
 **Author:** Gump (with Claude)
 **Date:** 2026-05-24
 
@@ -12,46 +12,65 @@ After this change, a user in `touch-code` can switch the current Worktree's bran
 
 ## Progress
 
-**State:** Draft
+**State:** Completed
 **Active worker:** none
-**Last handoff:** —
+**Last handoff:** 2026-05-24 T16 closer — docs only (this commit)
 
 ### Handoff log
 
 (Append-only. One line per completed dispatch. Format: `<ISO ts> <task-id> <role> <outcome> [<commit-sha>]`)
 
+- 2026-05-24 T1 implementer DONE `8952cf9a` feat(git-models): add branch inventory + switch target types
+- 2026-05-24 T2 implementer DONE `1c2d911b` feat(git-command): add branch list / switch / current-branch argv builders
+- 2026-05-24 T3 implementer DONE `123eb519` feat(git-parser): add parseBranchInventory with sort + pin + filter rules
+- 2026-05-24 T4 implementer DONE `f9e97f1e` feat(git-service): add currentBranch / listAllBranches / switchBranch
+- 2026-05-24 T5 implementer DONE `1604e4f2` feat(git-client): expose currentBranch / listAllBranches / switchBranch
+- 2026-05-24 T6 implementer DONE `498fba28` feat(branch-switcher): add reducer with popover state + switch effect + delegate
+- 2026-05-24 T7 implementer DONE `dd995ba6` feat(branch-switcher): popover content views (BranchSwitcherView + rows) (+ polish `ac840377` `ec6b5a26`)
+- 2026-05-24 T8 implementer DONE `045f6518` feat(branch-switcher): add inline error banner for failed switches
+- 2026-05-24 T9 implementer DONE `e86f770d` feat(worktree-header): two-row layout + branch popover host (+ review fixes `07d1be95` `e38c5144` `59a5366c`)
+- 2026-05-24 T10 implementer DONE `c6395d65` feat(branch-switcher): mount feature in root + wire HEAD watcher + delegate
+- 2026-05-24 T11 implementer DONE `5234ab98` feat(diff): add Changes/History tab state + commit-diff cache
+- 2026-05-24 T12 implementer DONE `bcd677c8` feat(diff): segmented Changes/History tab in inspector
+- 2026-05-24 T13 implementer DONE `224d4389` feat(diff): add DiffHistoryListView for History tab body
+- 2026-05-24 T14 implementer DONE `74af0cf9` feat(diff): render commit diff in drawer for History tab
+- 2026-05-24 FU-T6 implementer DONE `c8109339` fix(branch-switcher): nil-sentinel for recentCommits + capture load errors
+- 2026-05-24 FU-T14 implementer DONE `189177fc` fix(diff): allow Retry to re-issue load on .error cache state
+- 2026-05-24 T15 implementer DONE `1a1df275` test(fixtures): author UT-BSH-* git bundles + catalog seeds + restore scripts
+- 2026-05-24 T16 implementer DONE_WITH_CONCERNS (this commit) docs(branch-switcher): close M5 with UT coverage status + ExecPlan retrospective
+
 ### Task checklist
 
 #### M1 — Git service layer
 
-- [ ] T1: Add `BranchRef`, `BranchInventory`, `BranchSwitchTarget` to `TouchCodeCore/Git/GitModels.swift` (+ tests)
-- [ ] T2: Add argv builders to `apps/mac/touch-code/Git/GitCommand.swift` (+ tests)
-- [ ] T3: Add `GitOutputParser.parseBranchInventory` to `apps/mac/touch-code/Git/GitOutputParser.swift` (+ tests)
-- [ ] T4: Add `currentBranch / listAllBranches / switchBranch` to `GitService` + `LiveGitService` (+ tests)
-- [ ] T5: Extend `App/Clients/GitServiceClient.swift` with three new closures + `unimplemented` test values
+- [x] T1: Add `BranchRef`, `BranchInventory`, `BranchSwitchTarget` to `TouchCodeCore/Git/GitModels.swift` (+ tests) — `8952cf9a`
+- [x] T2: Add argv builders to `apps/mac/touch-code/Git/GitCommand.swift` (+ tests) — `1c2d911b`
+- [x] T3: Add `GitOutputParser.parseBranchInventory` to `apps/mac/touch-code/Git/GitOutputParser.swift` (+ tests) — `123eb519`
+- [x] T4: Add `currentBranch / listAllBranches / switchBranch` to `GitService` + `LiveGitService` (+ tests) — `f9e97f1e`
+- [x] T5: Extend `App/Clients/GitServiceClient.swift` with three new closures + `unimplemented` test values — `1604e4f2`
 
 #### M2 — BranchSwitcherFeature + view
 
-- [ ] T6: Create `App/Features/BranchSwitcher/BranchSwitcherFeature.swift` reducer + TestStore tests
-- [ ] T7: Create `App/Features/BranchSwitcher/BranchSwitcherView.swift` + `BranchRowView` + `RecentCommitRowView`
-- [ ] T8: Add inline `ErrorBannerView` (sub-view under the header)
+- [x] T6: Create `App/Features/BranchSwitcher/BranchSwitcherFeature.swift` reducer + TestStore tests — `498fba28` (+ FU `c8109339`)
+- [x] T7: Create `App/Features/BranchSwitcher/BranchSwitcherView.swift` + `BranchRowView` + `RecentCommitRowView` — `dd995ba6`
+- [x] T8: Add inline `ErrorBannerView` (sub-view under the header) — `045f6518`
 
 #### M3 — Header refit + cross-feature wiring
 
-- [ ] T9: Rewrite `App/Features/WorktreeHeader/WorktreeHeaderInfoLabel.swift` to the two-row layout + branch button + popover host
-- [ ] T10: Mount `BranchSwitcherFeature` in `WorktreeDetailView` (scope), wire `RootFeature` to forward `WorktreeHeadWatcher` events to BranchSwitcher + DiffFeature, and handle `BranchSwitcher.delegate.openDiffViewerOnHistoryTab`
+- [x] T9: Rewrite `App/Features/WorktreeHeader/WorktreeHeaderInfoLabel.swift` to the two-row layout + branch button + popover host — `e86f770d`
+- [x] T10: Mount `BranchSwitcherFeature` in `WorktreeDetailView` (scope), wire `RootFeature` to forward `WorktreeHeadWatcher` events to BranchSwitcher + DiffFeature, and handle `BranchSwitcher.delegate.openDiffViewerOnHistoryTab` — `c6395d65`
 
 #### M4 — DiffFeature Changes / History tabs
 
-- [ ] T11: Extend `App/Features/Diff/DiffFeature.swift` with `selectedTab`, `historyState`, `presentedCommitSha`, `diffsByCommit`, and corresponding actions + effects + cancellation IDs + TestStore tests
-- [ ] T12: Update `App/Features/Diff/Views/DiffInspectorView.swift` to host a segmented picker that routes to Changes vs History content
-- [ ] T13: Create `App/Features/Diff/Views/DiffHistoryListView.swift` (header + list + empty / error / load-more)
-- [ ] T14: Update `App/Features/Diff/Views/DiffDrawerView.swift` to render either a per-file diff or a commit diff, with the `<sha> · <subject>` title path
+- [x] T11: Extend `App/Features/Diff/DiffFeature.swift` with `selectedTab`, `historyState`, `presentedCommitSha`, `diffsByCommit`, and corresponding actions + effects + cancellation IDs + TestStore tests — `5234ab98`
+- [x] T12: Update `App/Features/Diff/Views/DiffInspectorView.swift` to host a segmented picker that routes to Changes vs History content — `bcd677c8`
+- [x] T13: Create `App/Features/Diff/Views/DiffHistoryListView.swift` (header + list + empty / error / load-more) — `224d4389`
+- [x] T14: Update `App/Features/Diff/Views/DiffDrawerView.swift` to render either a per-file diff or a commit diff, with the `<sha> · <subject>` title path — `74af0cf9` (+ FU `189177fc`)
 
 #### M5 — Verification & test fixtures
 
-- [ ] T15: Author user-test fixtures in `docs/user-tests/_shared/fixtures/` (3 git bundles + restore script + 3 catalog seeds)
-- [ ] T16: Declare every `accessibilityIdentifier` named in the user-test seams table; run `make mac-check`; runtime-validate the user-test set per the Exit Gate below
+- [x] T15: Author user-test fixtures in `docs/user-tests/_shared/fixtures/` (3 git bundles + restore script + 3 catalog seeds) — `1a1df275`
+- [x] T16: Declare every `accessibilityIdentifier` named in the user-test seams table; run `make mac-check`; runtime-validate the user-test set per the Exit Gate below — this commit (runtime-validation deferred — see [Outcomes & Retrospective](#outcomes--retrospective) + [worktree-branch-switcher-and-history-status.md](../user-tests/worktree-branch-switcher-and-history-status.md))
 
 ## Surprises & Discoveries
 
@@ -63,7 +82,71 @@ After this change, a user in `touch-code` can switch the current Worktree's bran
 
 ## Outcomes & Retrospective
 
-(To be filled at milestone completion)
+### What landed
+
+All 16 tasks across 5 milestones shipped on `feat/git_branch_update` between the initial planning commit (`0e0b9fdd`) and the M5 closer (this commit), in the order recorded in the [Handoff log](#handoff-log). The end-state runtime surface:
+
+- **M1 (T1–T5):** `BranchRef` / `BranchInventory` / `BranchSwitchTarget` types in `TouchCodeCore`; three new methods on `GitService`/`LiveGitService` (`currentBranch`, `listAllBranches`, `switchBranch`); the matching `GitServiceClient` closures with `unimplemented` test values; argv builders + `parseBranchInventory` with sort + pin + filter rules.
+- **M2 (T6–T8):** `BranchSwitcherFeature` reducer (open/load/switch/error/delegate), `BranchSwitcherView` + row sub-views, `BranchSwitcherErrorBannerView`.
+- **M3 (T9–T10):** Two-row `WorktreeHeaderInfoLabel` with branch button + popover host, BranchSwitcher mounted at `WorktreeDetailView`, `WorktreeHeadWatcher` events forwarded into BranchSwitcher + DiffFeature, `openDiffViewerOnHistoryTab` delegate routed via `RootFeature`.
+- **M4 (T11–T14):** `DiffTab`/`HistoryState`/`presentedCommitSha`/`diffsByCommit` on `DiffFeature`, segmented Changes/History picker, `DiffHistoryListView` (header + list + empty/error/load-more), drawer renders either file diff or commit diff with the `<sha> · <subject>` title.
+- **M5 (T15–T16):** User-test fixtures (3 git bundles + 3 catalog seeds + restore + generator scripts) and this closing pass — 17 required `accessibilityIdentifier` strings audited + status doc + plan retrospective.
+
+### Static gate
+
+- Workspace: `apps/mac/touch-code.xcworkspace`, scheme `touch-code`.
+- Full suite: **914 tests** across 103 suites. Outcome: **913 passing, 1 pre-existing flake** (`HierarchyManagerWorktreeMgmtTests.createWorktreeStoresCanonicalizedPath` — host-symlink-dependent invariant introduced by HAN-82 `ae17377e`, unrelated to branch-switcher work; passes in isolation).
+- `TouchCodeCore` scheme: **374 tests**, 3 pre-existing failures in `ShortcutSchemaAuditTests` (modifier-mask golden + missing CommandID coverage — unrelated to branch-switcher).
+- `tcKit` scheme: passing.
+- `make mac-check` (swiftlint + swift-format): passing.
+
+No regression in any branch-switcher / Diff-history test from FU-T6, FU-T14, T15, or T16.
+
+### Runtime gate
+
+The original exit gate expected `/hs-user-test` to drive every UT-BSH-* case against a running app. The repo has the seams in place (17 of 17 required identifiers + 2 bonus) and the fixtures in place (T15), but **no XCUITest target / `XCUIApplication` harness exists** in `apps/mac/Project.swift` yet. The closing pass therefore substitutes a structured coverage status document — [docs/user-tests/worktree-branch-switcher-and-history-status.md](../user-tests/worktree-branch-switcher-and-history-status.md) — with a per-case bucket (UNIT-COVERED / MANUAL-PENDING / DEFERRED / MANUAL) and real test citations. End-state buckets:
+
+- **12 UNIT-COVERED** — load-bearing parser / service / reducer contract exercised by Swift Testing tests.
+- **8 MANUAL-PENDING** — UI-only assertions (popover render, hover, selection trait, segmented-control visual state).
+- **1 DEFERRED** — UT-BSH-VS-001 (material introspection infrastructure).
+- **1 MANUAL by design** — UT-BSH-VS-003 (animation review).
+
+The status doc spells out the work needed to stand up an XCUITest target so the MANUAL-PENDING bucket can be promoted to AUTOMATED.
+
+### Follow-ups landed during the run
+
+These showed up during /hs-code-reviewer passes and got closed before M5 finished:
+
+- **FU-T6** (`c8109339`) — `BranchSwitcherFeature` used `[]` as a sentinel for "no commits loaded yet" which collided with "load succeeded but repo has zero recent commits"; promoted to a `recentCommits: [Commit]?` nil sentinel and captured separate `inventoryError` / `commitsError` fields so the popover surfaces real errors instead of silent empty states.
+- **FU-T8** — covered by T9's review-fix commits (`07d1be95` / `e38c5144` / `59a5366c`) — banner copy + ordering fixes folded into header polish.
+- **FU-T14** (`189177fc`) — `DiffFeature.historyCommitTapped` ignored `.error` states in `diffsByCommit`, so Retry was a silent no-op after a failure; now treats `.error` as cache-miss and re-fires `commitDiff`.
+
+### Follow-ups deferred as polish
+
+These were spotted in reviews but judged out-of-scope for the M5 close. They are queued as polish work and do not block the feature being usable:
+
+- **FU-T2** — argv builder coverage gap for `forEachRefBranches` snapshot test.
+- **FU-T3** — `parseBranchInventory` malformed-record fuzz coverage beyond the four happy + three failure tests currently in place.
+- **FU-T4** — `LiveGitService.currentBranch` Detached HEAD branch coverage for `git symbolic-ref` exit-code 128 path (vs the exit-code-1 path the current test exercises).
+- **FU-T7** — `BranchSwitcherView` keyboard navigation (Up/Down/Return inside the popover).
+- **FU-T10** — `RootFeature` -side test for the `openDiffViewerOnHistoryTab` delegate handler (today only the BranchSwitcher emit side is unit-tested).
+- **FU-T11** — `DiffFeature.commitDiff` over-cap path (per-commit equivalent of the per-file `oversizedFileSurfacesAsTooLargeWithCopyCommand` test).
+- **FU-T12** — `DiffInspectorView` snapshot test for the segmented-picker layout.
+- **FU-T13** — `DiffHistoryListView` infinite-scroll boundary test (5-row trigger threshold).
+
+Three cheap unit-test promotions that would lift UT-BSH-BP-003, UT-BSH-BP-007, and UT-BSH-DV-005 to UNIT-COVERED are spelled out in the status doc's "Test infrastructure follow-up" section — they fit in a single follow-up PR.
+
+### Decisions worth remembering
+
+- **No new `accessibilityLabel` overrides on the branch button** — the SwiftUI default (label from `Text(branchTitle)` + the `.button` trait from the surrounding `Button`) is what UT-BSH-VS-002 expects ("Branch <name>" + button trait). Adding a literal `accessibilityLabel("Branch \(name)")` would have masked any regression where the label diverged from the visible text. The "Branch " prefix is the VoiceOver heuristic prepending the type label; keep relying on it.
+- **HEAD-watcher event forwarding is fan-out, not request-response** — `RootFeature` forwards each `.git/HEAD` tick to both `BranchSwitcher` (`.headChangedForCurrentWorktree`) and `Diff` (`.headChangedForCurrentWorktree`) without waiting for either. The reducers are idempotent on this action, so duplicate forwards across rapid HEAD changes are safe.
+- **Popover state is per-worktree, not global** — every visible Worktree gets its own `BranchSwitcherFeature` scope keyed by worktree ID. This costs O(visible-worktrees) live stores (in practice ≤ 1 for the current single-detail-view layout) and keeps state changes from one worktree from racing another's popover-open animation.
+- **Detached HEAD literal is `(detached HEAD)`** — per `07d1be95`, the user-test regex `^\(detached( @ [0-9a-f]{7,12})?\)$` accepts both forms, but the implementation chose the short form to keep the header layout stable. OQ-D1 in the design doc tracks the model-field path if we ever want the short SHA.
+- **`(detached @ <sha>)` was deferred** — the design doc OQ-D1 is the future hook for it; the current implementation does not read `Worktree.headSha` for the title.
+
+### Where to start polish work next
+
+The status doc's [Test infrastructure follow-up](../user-tests/worktree-branch-switcher-and-history-status.md#test-infrastructure-follow-up) is the highest-leverage next step — landing the XCUITest target promotes 8 MANUAL-PENDING cases to AUTOMATED in one batch and unblocks every future UI-shaped user-test set. The three cheap unit-test promotions sketched in the same section are the lowest-cost polish PR.
 
 ## Context and Orientation
 
