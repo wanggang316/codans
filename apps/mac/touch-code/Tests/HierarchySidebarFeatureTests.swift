@@ -81,12 +81,13 @@ struct HierarchySidebarFeatureTests {
         fetchRemoteOnWorktreeCreate: false
       )
     )
+    let snap = settings
 
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
-      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0[SettingsWriter.self].readSnapshotSync = { snap }
     }
     store.exhaustivity = .off
 
@@ -116,12 +117,13 @@ struct HierarchySidebarFeatureTests {
     settings.worktree.fetchRemoteOnCreate = false
     settings.worktree.copyIgnoredOnCreate = true
     settings.worktree.copyUntrackedOnCreate = true
+    let snap = settings
 
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
-      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0[SettingsWriter.self].readSnapshotSync = { snap }
     }
     store.exhaustivity = .off
 
