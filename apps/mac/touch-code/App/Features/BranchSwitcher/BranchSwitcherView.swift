@@ -28,7 +28,6 @@ struct BranchSwitcherView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 8) {
           branchesSection
-          Divider().padding(.horizontal, 12)
           recentCommitsSection
         }
         .padding(.vertical, 8)
@@ -76,31 +75,32 @@ struct BranchSwitcherView: View {
     if store.inventoryLoading {
       sectionSpinner
     } else if let inventory = store.inventory {
+      // Inventory loaded: render whatever survives the filter. When the
+      // filter excludes everything we intentionally render nothing — the
+      // spec hides the current-branch row on filter miss with no special
+      // case, so a "No branches" message would be misleading here. The
+      // section header alone signals an empty filtered result.
       let locals = filtered(inventory.local, query: store.searchQuery)
       let remotes = filtered(inventory.remote, query: store.searchQuery)
-      if locals.isEmpty && remotes.isEmpty {
-        emptyRow("No branches")
-      } else {
-        ForEach(locals, id: \.shortName) { ref in
-          let isCurrent = ref.shortName == inventory.current
+      ForEach(locals, id: \.shortName) { ref in
+        let isCurrent = ref.shortName == inventory.current
+        BranchRowView(
+          ref: ref,
+          isCurrent: isCurrent,
+          onTap: {
+            guard !isCurrent else { return }
+            store.send(.branchTapped(target(for: ref, inventory: inventory)))
+          }
+        )
+      }
+      if !remotes.isEmpty {
+        Divider().padding(.horizontal, 12)
+        ForEach(remotes, id: \.shortName) { ref in
           BranchRowView(
             ref: ref,
-            isCurrent: isCurrent,
-            onTap: {
-              guard !isCurrent else { return }
-              store.send(.branchTapped(target(for: ref, inventory: inventory)))
-            }
+            isCurrent: false,
+            onTap: { store.send(.branchTapped(target(for: ref, inventory: inventory))) }
           )
-        }
-        if !remotes.isEmpty {
-          Divider().padding(.horizontal, 12)
-          ForEach(remotes, id: \.shortName) { ref in
-            BranchRowView(
-              ref: ref,
-              isCurrent: false,
-              onTap: { store.send(.branchTapped(target(for: ref, inventory: inventory))) }
-            )
-          }
         }
       }
     } else {
