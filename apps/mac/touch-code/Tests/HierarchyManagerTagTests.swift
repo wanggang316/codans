@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Coverage for `HierarchyManager`'s tag CRUD + cascade rules + filter
 /// normalization. The design doc (§3.5, §5.3) treats `removeTag` as the

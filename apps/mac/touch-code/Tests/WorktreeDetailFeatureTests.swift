@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Coverage for `WorktreeDetailFeature`'s composition: actions dispatched
 /// against the child scopes must route via `tabBar` / `splitViewport`
@@ -24,6 +24,11 @@ struct WorktreeDetailFeatureTests {
         received.withValue { $0 = newTabID }
         return newTabID
       }
+      // newTabButtonTapped follows up createTab with a snapshot lookup to
+      // resolve the worktree path. The worktree won't be in the catalog so
+      // the reducer short-circuits before openPane — we just need a quiet
+      // snapshot so the unimplemented testValue doesn't fire an issue.
+      $0.hierarchyClient.snapshot = { Catalog() }
     }
 
     await store.send(

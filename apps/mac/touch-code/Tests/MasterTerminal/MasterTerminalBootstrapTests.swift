@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 // Production APIs under test (`MasterTerminalBootstrap.userDirectory(...)`,
 // `.ensureUserDirectory(...)`) are `@MainActor`-isolated, but the

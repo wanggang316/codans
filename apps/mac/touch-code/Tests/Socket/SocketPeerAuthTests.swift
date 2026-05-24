@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 @MainActor
 struct SocketPeerAuthTests {

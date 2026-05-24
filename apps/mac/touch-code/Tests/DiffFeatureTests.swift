@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Tests for `DiffFeature` — covers the selection → changed-files load,
 /// per-file diff load with cache, drawer-close cache survival, style

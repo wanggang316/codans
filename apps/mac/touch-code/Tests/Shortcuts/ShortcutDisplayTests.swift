@@ -4,7 +4,7 @@ import SwiftUI
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 @MainActor
 struct ShortcutDisplayTests {

@@ -422,9 +422,9 @@ nonisolated struct HierarchyClient: Sendable {
   /// pane, e.g. `.claudeCode` / `.codex` / `.pi`). `nil` clears the field.
   /// Idempotent: a repeat call with the same value is a true no-op
   /// (no persistence churn). Silent no-op on unknown `paneID`. Consumed
-  /// by the upcoming `AgentBinder` (`docs/exec-plans/active-agents-view.md`
-  /// T3) that derives the kind from `SurfaceInfo.title` / `initialCommand`
-  /// / OSC 9 events.
+  /// by `AgentBinder` (`docs/exec-plans/active-agents-view.md` T3) that
+  /// derives the kind from `SurfaceInfo.title` / `initialCommand` /
+  /// OSC 9 events.
   var setPaneAgentKind: @MainActor @Sendable (_ paneID: PaneID, _ kind: AgentKind?) -> Void
 
   /// Writes `Pane.agentSessionID` (agent-supplied session identifier;
@@ -433,6 +433,18 @@ nonisolated struct HierarchyClient: Sendable {
   /// no-op. Silent no-op on unknown `paneID`. Consumed alongside
   /// `setPaneAgentKind` by `AgentBinder`.
   var setPaneAgentSessionID: @MainActor @Sendable (_ paneID: PaneID, _ sessionID: String?) -> Void
+
+  /// Writes the pane's live `workingDirectory` so restart restores it at the
+  /// cwd the user last `cd`'d to instead of the creation-time cwd. Driven by
+  /// libghostty `OSC 7` deltas routed through `RootFeature.engineEvents`. The
+  /// manager-side mutator is idempotent on equal paths and silent on unknown
+  /// ids, so a noisy shell that re-asserts the same pwd every prompt never
+  /// touches the catalog file.
+  var updatePaneWorkingDirectory:
+    @MainActor @Sendable (
+      _ paneID: PaneID,
+      _ newPath: String
+    ) -> Void
 
   /// Reorder worktrees within a single sidebar segment under a Project.
   /// `from` is a segment-relative `IndexSet`; `to` is the segment-relative
@@ -755,6 +767,9 @@ extension HierarchyClient {
       },
       setPaneAgentSessionID: { paneID, sessionID in
         manager.setPaneAgentSessionID(paneID, sessionID: sessionID)
+      },
+      updatePaneWorkingDirectory: { paneID, newPath in
+        manager.updatePaneWorkingDirectory(paneID, to: newPath)
       },
       reorderWorktrees: { projectID, segment, from, to in
         try manager.reorderWorktrees(
@@ -1358,6 +1373,9 @@ extension HierarchyClient: DependencyKey {
     setPaneAgentSessionID: { _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
+    updatePaneWorkingDirectory: { _, _ in
+      fatalError("HierarchyClient.liveValue not configured")
+    },
     reorderWorktrees: { _, _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     }
@@ -1396,7 +1414,10 @@ extension HierarchyClient: DependencyKey {
     splitPane: unimplemented("HierarchyClient.splitPane", placeholder: PaneID()),
     closePane: unimplemented("HierarchyClient.closePane"),
     focusPane: unimplemented("HierarchyClient.focusPane"),
-    focusSurfaceView: unimplemented("HierarchyClient.focusSurfaceView"),
+    // Pure visual side-effect (focuses an NSView; no return value, no test
+    // contract worth asserting). Every create/split path tail-calls this, so
+    // an `unimplemented` here turns ~all routing tests into noisy stub farms.
+    focusSurfaceView: { _ in },
     resizeSplit: unimplemented("HierarchyClient.resizeSplit"),
     setWorktreeDiffInspectorVisible: unimplemented("HierarchyClient.setWorktreeDiffInspectorVisible"),
     snapshot: unimplemented(
@@ -1440,6 +1461,7 @@ extension HierarchyClient: DependencyKey {
     setPaneLabel: unimplemented("HierarchyClient.setPaneLabel"),
     setPaneAgentKind: unimplemented("HierarchyClient.setPaneAgentKind"),
     setPaneAgentSessionID: unimplemented("HierarchyClient.setPaneAgentSessionID"),
+    updatePaneWorkingDirectory: unimplemented("HierarchyClient.updatePaneWorkingDirectory"),
     reorderWorktrees: unimplemented("HierarchyClient.reorderWorktrees")
   )
 }

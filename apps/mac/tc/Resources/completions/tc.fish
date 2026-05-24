@@ -203,7 +203,7 @@ complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc work
 complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" socket' -l 'socket' -d 'Override the socket path (default: $TOUCH_CODE_SOCKET_PATH → Debug /tmp/touch-code-dev-<uid>.sock, Release /tmp/touch-code-<uid>.sock).' -rfka ''
 complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" timeout' -l 'timeout' -d 'Client-side timeout in seconds for a single unary call.' -rfka ''
 complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" project' -l 'project' -d 'Project id, name, or \'current\'.' -rfka ''
-complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" path' -l 'path' -d 'Path for the worktree. Defaults to ./<branch>.' -rfka ''
+complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" path' -l 'path' -d 'Path for the worktree. Defaults to the project\'s configured worktrees directory.' -rfka ''
 complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" name' -l 'name' -d 'Display name. Defaults to the branch name.' -rfka ''
 complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" version' -l 'version' -d 'Show the version.'
 complete -c 'tc' -n '__tc_should_offer_completions_for_flags_or_options "tc worktree new" h help' -s 'h' -l 'help' -d 'Show help information.'

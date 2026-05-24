@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// `OptionalOverridePicker` is a thin wrapper over SwiftUI's `Picker`; the
 /// only logic we own is the inherit-row label composition and the binding

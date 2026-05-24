@@ -5,7 +5,7 @@ import SwiftUI
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Visual regression coverage for the Tab-bar chip visuals landed in M1-T1.3.
 /// Five cases exercise the chip background's state combinations plus one
@@ -99,6 +99,8 @@ struct TabChipSnapshotTests {
       onCloseToRight: { _ in },
       onCloseAll: {},
       onRenameRequested: { _ in },
+      onChangeColorRequested: { _ in },
+      onCopyID: { _ in },
       onReorder: { _ in }
     )
     .frame(width: Self.rowSize.width, height: Self.rowSize.height, alignment: .bottom)

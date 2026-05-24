@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Every `CommandPaletteItem.Kind` must land in `RootFeature.route(_:)`
 /// and fan out to an existing feature action. The switch is exhaustive

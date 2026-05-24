@@ -3,7 +3,7 @@ import SwiftUI
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 struct AppearancePreferenceUITests {
   @Test

@@ -10,6 +10,30 @@ import os
 
 @main
 struct TouchCodeApp: App {
+  init() {
+    // SwiftUI evaluates view bodies — and therefore any `@Dependency(...)`
+    // captured in `@Observable` view-models or `Commands` structs — before
+    // the scene's `.task { appState.bringUp() }` ever runs. When the app is
+    // loaded as the XCTest host, every unset `DependencyKey` falls through
+    // to `testValue`, which for our clients (and TCA's built-ins) records
+    // an `Issue` from any detached task that touches them. Register the
+    // pure-Foundation built-ins here so a view body resolving `\.date` or
+    // `\.uuid` before `bringUp()` gets a sane default; engine-dependent
+    // clients are still wired inside `bringUp` where `engine` exists.
+    prepareDependencies {
+      $0.date = .init { Date() }
+      $0.continuousClock = ContinuousClock()
+      $0.suspendingClock = SuspendingClock()
+      $0.uuid = .init { UUID() }
+      // GitHubClient + GitServiceClient have no engine/state dependency, so
+      // wire them here too — both are touched by background tasks (PR
+      // batch fetch, sidebar status monitor) that the running host app spins
+      // up before `bringUp()` reaches its own `prepareDependencies` block.
+      $0.gitHub = .live()
+      $0.gitService = .live()
+    }
+  }
+
   /// Single long-lived runtime stack. `@State` keeps this alive across the
   /// scene lifecycle without re-creating on re-render.
   @State private var appState = AppState()
@@ -37,7 +61,7 @@ struct TouchCodeApp: App {
     // system menu does not synthesize a "New Window" item that would let
     // users create extras out-of-band. See docs/design-docs/project-tags.md
     // §3.8 for the close-vs-quit semantics.
-    Window("touch-code", id: TouchCodeApp.mainWindowID) {
+    Window("TouchCode", id: TouchCodeApp.mainWindowID) {
       AppAppearanceView(settingsStore: appState.settingsStore) {
         if let store = appState.store, appState.terminalEngine != nil {
           ContentView(
@@ -155,6 +179,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // taps on banners are silently ignored — clicking would activate the app
     // (default behaviour) but our deeplink would never be parsed.
     UNUserNotificationCenter.current().delegate = self
+
+    // Advertise that focused responders can hand out plain-text selections
+    // through the macOS services system. Third-party text utilities
+    // (translators, dictionaries, "lookup-on-hover" tools) poll this
+    // registration to decide whether to query the frontmost app; without
+    // it, the system never asks our terminal surface for its selection
+    // even though the surface implements `NSServicesMenuRequestor`.
+    NSApplication.shared.registerServicesMenuSendTypes(
+      [.string],
+      returnTypes: []
+    )
   }
 
   nonisolated func applicationWillTerminate(_ notification: Notification) {
@@ -188,12 +223,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   /// behaviour suppresses them). The detector already gates banner posting
   /// on "either app not frontmost OR pane not focused", so by the time we
   /// reach this delegate we already know the user can't see the source.
+  /// `.sound` is included so the per-notification `content.sound` set by
+  /// `OSNotifier.post` actually plays while the app is foregrounded —
+  /// without it macOS silences sound for the foregrounded delivery path
+  /// even when authorization was granted with `.sound`.
   nonisolated func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    completionHandler([.banner, .list])
+    completionHandler([.banner, .list, .sound])
   }
 
   /// `touch-code://focus?project=...&worktree=...&tab=...&pane=...`
@@ -443,6 +482,21 @@ final class AppState {
       $0.hierarchyClient = hierarchy
       $0.settingsWriter = .live(settings)
       $0.terminalClient = .live(engine: engine)
+      // Under XCTest host, swift-dependencies defaults unset keys to `testValue` —
+      // most of ours are `unimplemented(...)`, which `Issue.record`s from a detached
+      // Task and crashes once the recording escapes any active test context. Register
+      // the live values explicitly so the host app behaves like production regardless
+      // of the test bundle being loaded.
+      $0.gitService = .live()
+      $0.gitHub = .live()
+      // TCA's built-in dependencies (date, clocks, mainQueue, …) fall back to
+      // `unimplemented` under XCTest. Restore the production defaults so any
+      // detached task in the host app that resolves them doesn't crash the
+      // session via `Issue.record` from an unowned context.
+      $0.date = .init { Date() }
+      $0.continuousClock = ContinuousClock()
+      $0.suspendingClock = SuspendingClock()
+      $0.uuid = .init { UUID() }
     }
 
     // Sparkle bringup: push persisted Updates preferences to the live updater so
@@ -498,6 +552,17 @@ final class AppState {
       $0.projectReconciler = ProjectReconciler(client: hierarchy)
       $0.worktreeHeadWatcher = self.worktreeHeadWatcher
       $0.worktreeLocalDiffMonitor = self.worktreeLocalDiffMonitor
+      // Built-in TCA dependencies (`\.date`, `\.continuousClock`, `\.uuid`) are
+      // always swapped to `unimplemented` under XCTest regardless of any
+      // process-wide `prepareDependencies` — swift-dependencies guards these
+      // controllable keys explicitly so tests can't accidentally rely on real
+      // time. The live store has no such constraint; pin the production
+      // defaults at the Store boundary so any reducer effect that captures
+      // them keeps working when the app boots inside a test host.
+      $0.date = .init { Date() }
+      $0.continuousClock = ContinuousClock()
+      $0.suspendingClock = SuspendingClock()
+      $0.uuid = .init { UUID() }
     }
 
     startHeadWatcherSync()
@@ -708,7 +773,8 @@ final class AppState {
       manager: hierarchy,
       envProvider: { projectID in
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
-      }
+      },
+      settingsProvider: { settingsStore.settings }
     )
     let terminalHandlers = TerminalHandlers(
       sink: terminalEngine.ghosttyRuntime == nil

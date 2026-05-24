@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Service-level tests for `LiveGitService.remoteInfo(at:)`. Covers the happy path
 /// (stdout parses cleanly) and the translation of `RemoteInfo.ParseError.malformed` into

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 @testable import TouchCodeCore
-@testable import touch_code
+@testable import TouchCode
 
 /// Coverage for `HierarchyManager.setPaneAgentKind` /
 /// `setPaneAgentSessionID` — the catalog-write seam consumed by the

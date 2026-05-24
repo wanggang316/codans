@@ -20,6 +20,34 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.2.5] - 2026-05-23
+
+### Added
+
+- Panes restore at the directory you last `cd`'d to, so reopened tabs land where you were working instead of the project root.
+- Terminal panes now expose their selection to macOS Accessibility and the Services menu — translators, dictionaries, and hover-to-translate tools can read the selected text from a pane.
+- Android Studio in the editor registry, alongside the existing editor choices.
+
+### Changed
+
+- Notification banners lead with `【project · worktree】` so banners from different projects sharing a branch name (`main`, `dev`) are distinguishable.
+- Create Worktree sheet seeds its Copy gitignored / Copy untracked / Fetch from origin toggles from per-project and global Worktree settings, instead of always starting unchecked.
+- Project Settings → Worktree gains a "fetch from origin on create" override that inherits the global default when left unset.
+- `tc worktree new` plants the new worktree in the project's configured worktrees directory by default, matching the GUI's Create Worktree sheet. Pass `--path` to override.
+- Inbox rows lead with the project · worktree breadcrumb, fold title and body onto one line below, and reveal the jump arrow only on hover.
+- The task-finished notification dot is green instead of yellow; the orange waiting-for-input dot still carries the urgent signal.
+- Front-facing product name is unified as **TouchCode** across menus, About, and Settings.
+
+### Removed
+
+- Project Settings → General Default Shell picker. It had no effect on spawned panes (the resolved shell always fell back to the system default), so it was visual clutter.
+
+### Fixed
+
+- System notification banners play sound again when the user has Sound enabled.
+- `tc worktree new` rejects duplicate paths and names instead of stacking orphan rows on retried calls. Pass `--reuse-existing` to make repeated `new` calls idempotent, or `tc worktree rm --by-path <path>` to clean up rows accumulated before the guard.
+- `tc pane new` failures now carry a human-readable reason describing what went wrong, and retry once for transient libghostty surface-init races that previously bubbled up an opaque error.
+
 ## [0.2.4] - 2026-05-21
 
 ### Added

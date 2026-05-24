@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// `CommandPaletteItems.build` produces different items depending on
 /// selection state and catalog shape. Tests cover each context band.

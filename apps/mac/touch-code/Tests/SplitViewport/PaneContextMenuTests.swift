@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Behavioural tests for `PaneContextMenuModel` (M7.T1). The SwiftUI view
 /// itself is a thin wrapper that forwards to this model; testing the

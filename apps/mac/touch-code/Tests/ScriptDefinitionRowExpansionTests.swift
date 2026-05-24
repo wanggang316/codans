@@ -3,7 +3,7 @@ import SwiftUI
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// `ScriptDefinitionRow` keeps its expanded edit buffer in `@State`. The
 /// invariants we pin here are model-level (carried by `ScriptDefinition`)

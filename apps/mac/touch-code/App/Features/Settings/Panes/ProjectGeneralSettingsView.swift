@@ -3,10 +3,10 @@ import ComposableArchitecture
 import SwiftUI
 import TouchCodeCore
 
-/// Project General detail pane — Phase 2 5-Section Form.
+/// Project General detail pane.
 ///
-/// Five sibling Sections in fixed order: Editor, Default Shell, Worktree,
-/// GitHub, Environment. Worktree and GitHub render only when
+/// Sibling Sections rendered in fixed order: Editor, Git Viewer, Worktree,
+/// GitHub, Environment. Git Viewer, Worktree, and GitHub render only when
 /// `ProjectKind == .gitRepo`; the design doc's "kind drives sections, not
 /// labels" rule means we never paint a "this is a git repo" affordance —
 /// the sections simply appear or don't.
@@ -38,12 +38,11 @@ struct ProjectGeneralSettingsView: View {
   @State private var defaultRemoteBaseRef: String?
   @State private var baseRefOptionsLoaded: Bool = false
 
-  /// IDs for the six Sections — useful for the kind-render tests so they
+  /// IDs for the Sections — useful for the kind-render tests so they
   /// can assert visibility without inspecting SwiftUI's view tree.
   enum SectionID: String, CaseIterable, Hashable {
     case editor
     case gitViewer
-    case defaultShell
     case worktree
     case github
     case environment
@@ -54,7 +53,7 @@ struct ProjectGeneralSettingsView: View {
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
     case .dir:
-      return [.editor, .defaultShell, .environment]
+      return [.editor, .environment]
     case .gitRepo:
       return Set(SectionID.allCases)
     }
@@ -79,11 +78,6 @@ struct ProjectGeneralSettingsView: View {
       Task { await setter(projectID, value) }
     }
 
-    func writeDefaultShell(_ value: String?) {
-      let setter = writer.setProjectDefaultShell
-      Task { await setter(projectID, value) }
-    }
-
     func writeWorktreeBaseRef(_ rawValue: String) {
       let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
       let payload: String? = trimmed.isEmpty ? nil : trimmed
@@ -99,6 +93,11 @@ struct ProjectGeneralSettingsView: View {
     func writeCopyUntracked(_ value: Bool?) {
       let setter = writer.setProjectGitField
       Task { await setter(projectID, .copyUntrackedOnWorktreeCreate(value)) }
+    }
+
+    func writeFetchRemote(_ value: Bool?) {
+      let setter = writer.setProjectGitField
+      Task { await setter(projectID, .fetchRemoteOnWorktreeCreate(value)) }
     }
 
     func writeMergeStrategy(_ value: MergeStrategy?) {
@@ -145,9 +144,6 @@ struct ProjectGeneralSettingsView: View {
       }
       if visible.contains(.gitViewer) {
         gitViewerSection
-      }
-      if visible.contains(.defaultShell) {
-        defaultShellSection
       }
       if visible.contains(.worktree) {
         worktreeSection
@@ -300,38 +296,6 @@ struct ProjectGeneralSettingsView: View {
     )
   }
 
-  // MARK: - Default Shell
-
-  @ViewBuilder
-  private var defaultShellSection: some View {
-    Section("Default Shell") {
-      OptionalOverridePicker<String>(
-        title: "Shell",
-        selection: shellBinding,
-        // GeneralSettings.defaultShell does not exist today — when a future
-        // wave adds it, swap this literal for the real field. The live
-        // resolved-shell logic across the app already falls back to
-        // /bin/zsh, so the inherit row label matches the runtime default.
-        inheritedValue: "/bin/zsh",
-        options: shellOptions,
-        inheritedLabel: { value in value ?? "/bin/zsh" }
-      )
-    }
-  }
-
-  private var shellOptions: [OptionalOverridePicker<String>.Option] {
-    ShellRegistry.installed.map { path in
-      .init(value: path, label: path)
-    }
-  }
-
-  private var shellBinding: Binding<String?> {
-    Binding(
-      get: { entry?.defaultShell },
-      set: { routes.writeDefaultShell($0) }
-    )
-  }
-
   // MARK: - Worktree
 
   @ViewBuilder
@@ -370,6 +334,11 @@ struct ProjectGeneralSettingsView: View {
       worktreeBaseRefPicker
 
       TriStateOverrideToggle(
+        title: "Fetch remote before creating worktree",
+        selection: fetchRemoteBinding,
+        inheritedValue: settingsStore.settings.worktree.fetchRemoteOnCreate
+      )
+      TriStateOverrideToggle(
         title: "Copy .gitignore'd files",
         selection: copyIgnoredBinding,
         inheritedValue: settingsStore.settings.worktree.copyIgnoredOnCreate
@@ -384,11 +353,15 @@ struct ProjectGeneralSettingsView: View {
 
   /// Fallback shown when the project has no `worktreesDirectory` override —
   /// matches the runtime fallback computed in `HierarchySidebarFeature` when
-  /// opening the Create Worktree sheet.
+  /// opening the Create Worktree sheet. Routes through
+  /// `WorktreeSettings.resolveBaseDirectory` so the inherited preview tracks
+  /// any change to the global default.
   private var defaultWorktreesDirectory: String {
     let projectName =
       hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.name ?? "<project>"
-    return NSHomeDirectory() + "/.touch-code/repos/\(projectName)"
+    return settingsStore.settings.worktree
+      .resolveBaseDirectory(forProjectName: projectName, projectOverride: nil)
+      .path(percentEncoded: false)
   }
 
   /// Dropdown for the per-Project Worktree base ref. `nil` = inherit (use
@@ -477,6 +450,13 @@ struct ProjectGeneralSettingsView: View {
     Binding(
       get: { entry?.git?.copyUntrackedOnWorktreeCreate },
       set: { routes.writeCopyUntracked($0) }
+    )
+  }
+
+  private var fetchRemoteBinding: Binding<Bool?> {
+    Binding(
+      get: { entry?.git?.fetchRemoteOnWorktreeCreate },
+      set: { routes.writeFetchRemote($0) }
     )
   }
 

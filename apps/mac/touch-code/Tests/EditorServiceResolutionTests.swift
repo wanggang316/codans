@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// C8a Phase 6.2 — resolution cascade coverage. Exercises `LiveEditorService.resolve(preferred:)`
 /// across the four tiers described in the design doc:

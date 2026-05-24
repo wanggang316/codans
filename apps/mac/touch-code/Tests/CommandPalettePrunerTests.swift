@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// `CommandPalettePruner` drops dynamic-ID entries whose target entity is
 /// no longer live, and caps the dictionary at 200 entries by recency.

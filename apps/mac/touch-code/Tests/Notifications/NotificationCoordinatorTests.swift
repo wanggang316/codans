@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Behavioural tests for `NotificationCoordinator` (M2.T2). Each test
 /// declares the AC ID it covers; the runtime probe at the milestone gate

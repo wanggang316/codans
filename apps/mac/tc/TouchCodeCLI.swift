@@ -7,11 +7,11 @@ import tcKit
 
 @main
 struct TouchCodeCLI: AsyncParsableCommand {
-  static let version = "0.2.4"
+  static let version = "0.2.5"
 
   static let configuration = CommandConfiguration(
     commandName: "tc",
-    abstract: "Control touch-code from the terminal.",
+    abstract: "Control TouchCode from the terminal.",
     discussion: """
       Common examples:
         tc status
@@ -20,7 +20,7 @@ struct TouchCodeCLI: AsyncParsableCommand {
         tc pane send <pane> 'git status --short'
         tc pane new --label agent codex
       """,
-    version: "touch-code \(TouchCodeCLI.version)",
+    version: "TouchCode \(TouchCodeCLI.version)",
     subcommands: [
       StatusCommand.self,
       LaunchCommand.self,

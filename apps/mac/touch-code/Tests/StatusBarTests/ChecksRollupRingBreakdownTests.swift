@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Unit coverage for `ChecksRollupRing.Breakdown`. The ring view itself is
 /// SwiftUI geometry — we test the pure counts projection that drives it.

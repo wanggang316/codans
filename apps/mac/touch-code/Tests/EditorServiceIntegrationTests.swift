@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// C8a Phase 6.5 — integration smoke test. Hits the real `NSWorkspace` via `LiveAppLauncher`
 /// to verify that a freshly-built `LiveEditorService` can open a temp directory in Finder end

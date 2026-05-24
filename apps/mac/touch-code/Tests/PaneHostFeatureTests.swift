@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// TCA reducer tests for `PaneHostFeature`. Covers the decision tree that
 /// used to live in `LazyPaneHost.ensureSurface()`: registry short-circuit,

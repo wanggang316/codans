@@ -93,7 +93,12 @@ extension TerminalClient: DependencyKey {
     retryPane: unimplemented("TerminalClient.retryPane", placeholder: false),
     ensureSurface: unimplemented("TerminalClient.ensureSurface"),
     closeSurface: unimplemented("TerminalClient.closeSurface"),
-    surface: unimplemented("TerminalClient.surface", placeholder: nil),
+    // Quiet `{ _ in nil }` mirrors the liveValue fallback above: pane-host
+    // / view-side lookups for a not-yet-attached surface are an expected
+    // outcome, not a test contract worth asserting. Without this default,
+    // detached SwiftUI tasks in the test host record an issue against
+    // `unimplemented(...)` after their owning test scope has finished.
+    surface: { _ in nil },
     events: unimplemented(
       "TerminalClient.events",
       placeholder: AsyncStream { $0.finish() }

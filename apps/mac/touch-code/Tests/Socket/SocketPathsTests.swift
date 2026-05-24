@@ -1,6 +1,6 @@
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 struct SocketPathsTests {
   @Test

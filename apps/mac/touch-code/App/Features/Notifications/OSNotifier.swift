@@ -30,7 +30,13 @@ public protocol OSNotifier: AnyObject {
   /// (M2.T2) decided to surface this entry; the live SettingsStore value
   /// is intentionally read once at the call site rather than re-read here
   /// so a same-tick toggle flip cannot race the banner build.
-  func post(_ entry: InboxEntry, playSound: Bool) async
+  ///
+  /// `sourceLabel` is the optional `<project> · <worktree>` breadcrumb
+  /// (HAN-78) the detector pre-resolved against the live catalog. When
+  /// non-nil it is appended to the banner body on its own line; nil
+  /// renders the body unchanged. The inbox row is unaffected — only the
+  /// OS-banner surface composes the breadcrumb here.
+  func post(_ entry: InboxEntry, playSound: Bool, sourceLabel: String?) async
 }
 
 /// Production adapter. On the first `post` after a `.notDetermined` boot the
@@ -55,7 +61,7 @@ public final class UserNotificationsOSNotifier: OSNotifier {
 
   public func requestAuthorization() async -> AuthorizationStatus {
     do {
-      _ = try await center.requestAuthorization(options: [.alert, .badge])
+      _ = try await center.requestAuthorization(options: [.alert, .badge, .sound])
     } catch {
       // Authorization-request failure falls through to the status refetch
       // below — the refetch is the source of truth for the final state.
@@ -63,7 +69,7 @@ public final class UserNotificationsOSNotifier: OSNotifier {
     return await currentAuthorizationStatus()
   }
 
-  public func post(_ entry: InboxEntry, playSound: Bool) async {
+  public func post(_ entry: InboxEntry, playSound: Bool, sourceLabel: String?) async {
     var status = await currentAuthorizationStatus()
     if status == .notDetermined {
       status = await requestAuthorization()
@@ -72,7 +78,15 @@ public final class UserNotificationsOSNotifier: OSNotifier {
 
     let content = UNMutableNotificationContent()
     content.title = entry.title
-    content.body = entry.body
+    // HAN-78: append `<project> · <worktree>` on its own line after the
+    // body so the banner shows where the event came from without
+    // crowding the title. Empty body + non-nil label still renders the
+    // label as the only body line (no stray leading newline).
+    if let sourceLabel, !sourceLabel.isEmpty {
+      content.body = entry.body.isEmpty ? sourceLabel : "\(entry.body)\n\(sourceLabel)"
+    } else {
+      content.body = entry.body
+    }
     content.threadIdentifier = entry.source.paneID.raw.uuidString
     content.categoryIdentifier = entry.kind.rawValue
     content.sound = playSound ? .default : nil

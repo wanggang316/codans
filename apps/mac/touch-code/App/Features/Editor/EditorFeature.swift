@@ -289,6 +289,7 @@ nonisolated struct SettingsWriter: Sendable {
     case worktreeBaseRef(String?)
     case copyIgnoredOnWorktreeCreate(Bool?)
     case copyUntrackedOnWorktreeCreate(Bool?)
+    case fetchRemoteOnWorktreeCreate(Bool?)
     case defaultMergeStrategy(MergeStrategy?)
     case postMergeAction(MergedWorktreeAction?)
     case githubDisabled(Bool)
@@ -310,11 +311,6 @@ nonisolated struct SettingsWriter: Sendable {
     @Sendable (_ projectID: ProjectID, _ override: ProjectGitViewerPreference?) async -> Void
   /// Per-Project worktree base directory override. `nil` clears.
   var setProjectWorktreesDirectory: @Sendable (_ projectID: ProjectID, _ path: String?) async -> Void
-
-  // MARK: - Phase 2 closures
-
-  /// Per-Project default shell override. `nil` clears.
-  var setProjectDefaultShell: @Sendable (_ projectID: ProjectID, _ shell: String?) async -> Void
 
   /// Per-Project mutation of a specific git-subtree field. The closure
   /// ensures `git` is non-nil before applying the field write and runs
@@ -364,11 +360,6 @@ extension SettingsWriter {
           store?.mutateProject(pid) { $0.worktreesDirectory = path }
         }
       },
-      setProjectDefaultShell: { [weak store] pid, shell in
-        await MainActor.run {
-          store?.mutateProject(pid) { $0.defaultShell = shell }
-        }
-      },
       setProjectGitField: { [weak store] pid, update in
         await MainActor.run {
           store?.mutateProject(pid) { project in
@@ -380,6 +371,8 @@ extension SettingsWriter {
               git.copyIgnoredOnWorktreeCreate = value
             case .copyUntrackedOnWorktreeCreate(let value):
               git.copyUntrackedOnWorktreeCreate = value
+            case .fetchRemoteOnWorktreeCreate(let value):
+              git.fetchRemoteOnWorktreeCreate = value
             case .defaultMergeStrategy(let value):
               git.defaultMergeStrategy = value
             case .postMergeAction(let value):
@@ -448,7 +441,6 @@ extension SettingsWriter: DependencyKey {
     setProjectDefaultEditor: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectDefaultGitViewer: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectWorktreesDirectory: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
-    setProjectDefaultShell: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectGitField: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectEnvVar: { _, _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectScripts: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
@@ -462,7 +454,6 @@ extension SettingsWriter: DependencyKey {
     setProjectDefaultEditor: unimplemented("SettingsWriter.setProjectDefaultEditor"),
     setProjectDefaultGitViewer: unimplemented("SettingsWriter.setProjectDefaultGitViewer"),
     setProjectWorktreesDirectory: unimplemented("SettingsWriter.setProjectWorktreesDirectory"),
-    setProjectDefaultShell: unimplemented("SettingsWriter.setProjectDefaultShell"),
     setProjectGitField: unimplemented("SettingsWriter.setProjectGitField"),
     setProjectEnvVar: unimplemented("SettingsWriter.setProjectEnvVar"),
     setProjectScripts: unimplemented("SettingsWriter.setProjectScripts"),

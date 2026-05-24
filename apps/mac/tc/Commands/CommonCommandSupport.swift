@@ -14,7 +14,7 @@ enum CLISession {
     do {
       transport = try UnixSocketTransport(path: path)
     } catch {
-      CLIError(code: .noSocket, message: "touch-code is not running at \(path)").exitProcess()
+      CLIError(code: .noSocket, message: "TouchCode is not running at \(path)").exitProcess()
     }
     return RPCClient(
       transport: transport,
@@ -79,7 +79,7 @@ struct CLIError: Error, CustomStringConvertible {
   private static func fromConnectError(_ connect: UnixSocketTransport.ConnectError) -> CLIError {
     switch connect {
     case .connectFailed(let path, _):
-      return CLIError(code: .noSocket, message: "touch-code is not running at \(path)")
+      return CLIError(code: .noSocket, message: "TouchCode is not running at \(path)")
     case .socketCreateFailed(let errno):
       return CLIError(code: .noSocket, message: "socket create failed (errno=\(errno))")
     case .pathTooLong(let path):
@@ -112,16 +112,6 @@ enum PathResolver {
     let raw = (path?.isEmpty == false) ? path! : (defaultingToPWD ? pwd : "")
     if raw.hasPrefix("/") { return raw }
     return URL(fileURLWithPath: pwd).appendingPathComponent(raw).path
-  }
-
-  static func defaultWorktreePath(branch: String) -> String {
-    let safe =
-      branch
-      .replacingOccurrences(of: "/", with: "-")
-      .replacingOccurrences(of: " ", with: "-")
-    return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-      .appendingPathComponent(safe)
-      .path
   }
 }
 

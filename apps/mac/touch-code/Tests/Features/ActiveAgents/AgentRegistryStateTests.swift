@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Behavioural coverage for `AgentRegistry`'s state machine. The
 /// registry derives each bound agent pane's runtime state from a few

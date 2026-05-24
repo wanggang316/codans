@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Pure visibility logic for the Scripts pane. The Lifecycle Section is
 /// git-only; the Scripts Section is always present. We exercise

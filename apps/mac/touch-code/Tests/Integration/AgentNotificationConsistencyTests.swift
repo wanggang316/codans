@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Cross-subsystem invariant pin: when the same canned `TerminalEvent`
 /// sequence is fed to both `NotificationDetector` (the notifications

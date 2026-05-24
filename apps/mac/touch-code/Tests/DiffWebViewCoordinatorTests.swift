@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Pins the Coordinator's two-layer dedupe (queue dedupe + post-ready
 /// send-cache) so SwiftUI's `updateNSView` storms can't re-trigger Shiki

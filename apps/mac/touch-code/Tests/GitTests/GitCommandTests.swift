@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Argv-ordering tests for `GitCommand`. Added after the 0005 M4a.1 review caught a bug
 /// where `-w` was appended AFTER `--` for `.commit`, turning it into a pathspec named `-w`

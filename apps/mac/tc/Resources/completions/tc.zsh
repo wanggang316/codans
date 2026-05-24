@@ -229,7 +229,7 @@ _tc_worktree_new() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':branch:'
         '--project[Project id, name, or '\''current'\''.]:project:'
-        '--path[Path for the worktree. Defaults to ./<branch>.]:path:'
+        '--path[Path for the worktree. Defaults to the project'\''s configured worktrees directory.]:path:'
         '--name[Display name. Defaults to the branch name.]:name:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'

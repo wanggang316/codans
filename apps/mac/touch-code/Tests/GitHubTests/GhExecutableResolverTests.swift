@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Covers the four behaviours of `GhExecutableResolver` documented in exec-plan 0012 M0:
 ///   - missing binary returns nil

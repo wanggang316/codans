@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// C8a Phase 6 — `EditorFeature` coverage. The C8 custom-editor surface
 /// (add/update/remove) retired in Phase 3; this suite exercises the narrowed NSWorkspace-

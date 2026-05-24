@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Pure tests for `HierarchySidebarView.orderedSidebarRows(project:pendings:)` — the
 /// segment-merge function that decides which rows render in what order. No `TestStore`

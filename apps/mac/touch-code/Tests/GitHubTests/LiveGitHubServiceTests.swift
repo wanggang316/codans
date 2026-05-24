@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Negative and happy path coverage for LiveGitHubService. Uses RecordingCommandRunner
 /// (the existing actor test double from touch-code/Process/) to feed canned

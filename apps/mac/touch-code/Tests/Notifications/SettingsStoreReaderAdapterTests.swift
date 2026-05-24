@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Plumbing-only tests for `SettingsStoreReaderAdapter` (M2.T1). The
 /// coordinator that consumes this surface lands in M2.T2; here we only

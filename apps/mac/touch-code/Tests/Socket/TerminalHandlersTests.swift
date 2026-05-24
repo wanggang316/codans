@@ -1,9 +1,9 @@
 import Foundation
 import Testing
 
+@testable import TouchCode
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import touch_code
 
 /// M6's terminal.sendInput / broadcastInput are intentionally backed by
 /// an injectable `TerminalHandlers.InputSink` protocol — the M6

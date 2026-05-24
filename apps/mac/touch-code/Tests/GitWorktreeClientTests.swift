@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Pure-helper coverage for `GitWorktreeClient`. The closures themselves
 /// are exercised by the M13 integration test against a real git repo;

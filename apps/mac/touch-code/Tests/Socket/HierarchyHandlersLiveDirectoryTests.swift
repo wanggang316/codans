@@ -1,9 +1,9 @@
 import Foundation
 import Testing
 
+@testable import TouchCode
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import touch_code
 
 @MainActor
 struct HierarchyHandlersLiveDirectoryTests {

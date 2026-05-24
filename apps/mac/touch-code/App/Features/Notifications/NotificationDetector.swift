@@ -160,16 +160,20 @@ public final class NotificationDetector {
     // definition the user isn't looking at it.
     let sourceIsFocused = resolved.source.paneID == globallyFocusedPane()
 
-    // Enrich the title with the originating worktree's display name so
-    // a banner reads `[main] Pane bell` rather than just `Pane bell` —
-    // critical when the user has multiple worktrees backgrounded and
-    // needs to triage at a glance.
-    let enrichedTitle = resolved.worktreeLabel.map { "[\($0)] \(translated.title)" } ?? translated.title
+    // HAN-78: title stays clean; the source breadcrumb
+    // (`<project> · <worktree>`) is attached as `bannerSourceLabel` and
+    // appended to the OS banner body by `UserNotificationsOSNotifier`.
+    // The inbox popover already shows the same breadcrumb on the right
+    // of each row, so we deliberately keep `entry.body` untouched.
     let entry = InboxEntry(
       kind: translated.kind,
-      title: enrichedTitle,
+      title: translated.title,
       body: translated.body,
       source: resolved.source
+    )
+    let bannerSourceLabel = sourceLabel(
+      projectLabel: resolved.projectLabel,
+      worktreeLabel: resolved.worktreeLabel
     )
     // Activity bump for the sidebar's "active first" sort fires
     // before the coordinator dispatch: `lastActiveAt` reflects "a
@@ -182,7 +186,11 @@ public final class NotificationDetector {
     // longer touches `NotificationStore.append` or `OSNotifier.post`
     // directly.
     await coordinator.handle(
-      NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: sourceIsFocused)
+      NotificationCoordinator.Candidate(
+        entry: entry,
+        sourceIsFocused: sourceIsFocused,
+        bannerSourceLabel: bannerSourceLabel
+      )
     )
 
     // Drop the cache only after the entry has been emitted. A teardown
@@ -196,23 +204,21 @@ public final class NotificationDetector {
 
   // MARK: - Helpers
 
-  /// Resolve `paneID` to source path + mute state + worktree label.
-  /// Tries the live catalog first; falls back to `paneSourceCache` when
-  /// the pane has already been removed from the catalog (typical on
-  /// `paneExited`: `RootFeature.paneLifecycleExited` may have closed it
-  /// before this consumer runs). Returns nil only when both the live
-  /// catalog and the cache have nothing — meaning the pane never had
-  /// any prior catalog presence in this process. Cache fallback path
-  /// loses worktreeLabel + mute info; that's an acceptable trade for
-  /// not silently swallowing the final teardown notification.
-  private func resolve(
-    paneID: PaneID
-  ) -> (source: InboxEntry.SourcePath, muted: Bool, worktreeLabel: String?)? {
+  /// Resolve `paneID` to source path + mute state + worktree label +
+  /// project label. Tries the live catalog first; falls back to
+  /// `paneSourceCache` when the pane has already been removed from the
+  /// catalog (typical on `paneExited`: `RootFeature.paneLifecycleExited`
+  /// may have closed it before this consumer runs). Returns nil only when
+  /// both the live catalog and the cache have nothing — meaning the pane
+  /// never had any prior catalog presence in this process. Cache fallback
+  /// path loses worktree/project labels + mute info; that's an acceptable
+  /// trade for not silently swallowing the final teardown notification.
+  private func resolve(paneID: PaneID) -> Resolved? {
     if let live = liveResolve(paneID: paneID) {
       return live
     }
     if let cached = paneSourceCache[paneID] {
-      return (cached, false, nil)
+      return Resolved(source: cached, muted: false, worktreeLabel: nil, projectLabel: nil)
     }
     return nil
   }
@@ -221,9 +227,7 @@ public final class NotificationDetector {
   /// later teardown events still have a valid source after the pane
   /// has been removed from the catalog.
   @discardableResult
-  private func liveResolve(
-    paneID: PaneID
-  ) -> (source: InboxEntry.SourcePath, muted: Bool, worktreeLabel: String?)? {
+  private func liveResolve(paneID: PaneID) -> Resolved? {
     let catalog = catalogSnapshot()
     for project in catalog.projects {
       for worktree in project.worktrees {
@@ -236,12 +240,35 @@ public final class NotificationDetector {
             paneID: pane.id
           )
           paneSourceCache[paneID] = source
-          let label = worktree.name.isEmpty ? nil : worktree.name
-          return (source, pane.labels.contains(InboxLabels.muted), label)
+          let worktreeLabel = worktree.name.isEmpty ? nil : worktree.name
+          let projectLabel = project.name.isEmpty ? nil : project.name
+          return Resolved(
+            source: source,
+            muted: pane.labels.contains(InboxLabels.muted),
+            worktreeLabel: worktreeLabel,
+            projectLabel: projectLabel
+          )
         }
       }
     }
     return nil
   }
 
+  /// Banner source label: `【<project>·<worktree>】` (project first, the
+  /// stable axis; worktree second, the volatile one). Full-width brackets
+  /// and a no-space `·` mirror the spec Gump gave for HAN-78. Returns nil
+  /// when both labels are missing so the OS banner falls back to a
+  /// body-only rendering rather than a dangling pair of empty brackets.
+  private func sourceLabel(projectLabel: String?, worktreeLabel: String?) -> String? {
+    let parts = [projectLabel, worktreeLabel].compactMap { $0 }
+    guard !parts.isEmpty else { return nil }
+    return "【\(parts.joined(separator: "·"))】"
+  }
+
+  private struct Resolved {
+    let source: InboxEntry.SourcePath
+    let muted: Bool
+    let worktreeLabel: String?
+    let projectLabel: String?
+  }
 }

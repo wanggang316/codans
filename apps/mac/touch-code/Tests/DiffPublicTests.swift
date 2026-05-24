@@ -1,6 +1,6 @@
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Pins the public API contract for the Diff module. The defaults below
 /// match the design doc's Public API section. Bumping any default here is

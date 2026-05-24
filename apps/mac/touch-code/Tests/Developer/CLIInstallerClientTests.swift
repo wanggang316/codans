@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import tcKit
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Covers install / uninstall / probe state transitions, the script composer,
 /// and the privileged-shell invocation contract. Probe uses a real filesystem

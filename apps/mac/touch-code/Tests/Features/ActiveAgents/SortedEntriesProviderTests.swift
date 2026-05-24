@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Unit tests for `SortedEntriesProvider.sorted(_:)`. Pure mapping —
 /// no SwiftUI, no live registry. We build `AgentEntry` values directly

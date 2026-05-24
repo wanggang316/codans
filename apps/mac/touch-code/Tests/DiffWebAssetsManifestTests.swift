@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Pins the contract between the vendored web bundle's `manifest.json` and
 /// the Swift bridge's `DiffBridgeProtocol.version`. Drift here means the JS

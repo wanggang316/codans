@@ -3,7 +3,7 @@ import Foundation
 import Testing
 import TouchCodeCore
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Behavioural coverage for `AgentBinder`. The binder is the only writer
 /// to `Pane.agentKind` outside of catalog-decode paths, so these tests

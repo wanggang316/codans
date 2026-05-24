@@ -2,7 +2,7 @@ import Foundation
 import TouchCodeCore
 import TouchCodeIPC
 
-@testable import touch_code
+@testable import TouchCode
 
 /// Test-only RPC harness. Binds a `MethodRouter` to in-memory streams so
 /// `tcTests` can drive the full wire protocol — `system.hello`, unary
