@@ -17,13 +17,21 @@ struct BranchRowView: View {
   var body: some View {
     HStack(spacing: 6) {
       // Reserve the checkmark column for non-current rows too so every row
-      // aligns at the branch-name baseline regardless of selection.
-      Image(systemName: isCurrent ? "checkmark" : "")
-        .font(.caption)
-        .frame(width: 12)
-        .foregroundStyle(.primary)
-        .accessibilityIdentifier(isCurrent ? "branch_switcher.current_marker" : "")
-        .accessibilityHidden(!isCurrent)
+      // aligns at the branch-name baseline regardless of selection. An
+      // empty SF Symbol name logs a runtime warning, so use Color.clear as
+      // the spacer when the row is not current.
+      Group {
+        if isCurrent {
+          Image(systemName: "checkmark")
+            .font(.caption)
+            .foregroundStyle(.primary)
+            .accessibilityIdentifier("branch_switcher.current_marker")
+            .accessibilityHidden(true)
+        } else {
+          Color.clear
+        }
+      }
+      .frame(width: 12)
       Text(ref.shortName)
         .font(.body)
         .lineLimit(1)
@@ -41,7 +49,9 @@ struct BranchRowView: View {
     .background(isHovered ? Color.accentColor.opacity(0.10) : Color.clear)
     .onHover { hovering in isHovered = hovering }
     .onTapGesture(perform: onTap)
-    .accessibilityIdentifier("branch_switcher.branch_row.\(ref.shortName)")
+    .accessibilityIdentifier(
+      "branch_switcher.branch_row.\(ref.isRemote ? "remote" : "local").\(ref.shortName)"
+    )
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(
       isCurrent

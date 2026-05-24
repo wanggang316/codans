@@ -10,11 +10,11 @@ struct RecentCommitRowView: View {
   let commit: Commit
 
   /// Single shared formatter — `RelativeDateTimeFormatter` allocations are
-  /// non-trivial and a popover renders up to 10 rows per appearance.
-  /// `nonisolated(unsafe)` is the standard Swift 6 escape hatch for a
-  /// process-wide formatter constant; the type is documented as
-  /// thread-safe for read-only reuse.
-  private nonisolated(unsafe) static let relativeFormatter: RelativeDateTimeFormatter = {
+  /// non-trivial and a popover renders up to 10 rows per appearance. The
+  /// implicit main-actor isolation of this `View` keeps the static let
+  /// well-typed under Swift 6 without an explicit escape hatch (see
+  /// `InboxRowView` for the same pattern).
+  private static let relativeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .short
     return formatter

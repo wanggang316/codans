@@ -147,7 +147,7 @@ struct BranchSwitcherView: View {
 
   private var footer: some View {
     HStack {
-      Button("View all in Diff Viewer →") {
+      Button("View all in Diff Viewer") {
         store.send(.viewAllCommitsTapped)
       }
       .buttonStyle(.borderless)
@@ -191,7 +191,12 @@ struct BranchSwitcherView: View {
   private func filtered(_ refs: [BranchRef], query: String) -> [BranchRef] {
     let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
     if needle.isEmpty { return refs }
-    return refs.filter { $0.shortName.lowercased().contains(needle) }
+    // `range(of:options:)` with `.caseInsensitive` avoids allocating a
+    // lowercased copy of every haystack per render — meaningful when the
+    // user types into a repo with hundreds of refs.
+    return refs.filter {
+      $0.shortName.range(of: needle, options: [.caseInsensitive]) != nil
+    }
   }
 
   // MARK: - Switch-target resolution

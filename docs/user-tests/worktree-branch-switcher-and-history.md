@@ -42,7 +42,7 @@ These accessibility identifiers must be declared by the implementation (per patt
 | `worktree_header.context_text` | `folder · project` text on row 2. |
 | `worktree_header.switching_spinner` | Spinner element replacing the chevron during a switch. |
 | `branch_switcher.popover` | Popover container view. |
-| `branch_switcher.branch_row.<short-name>` | One row per branch. `<short-name>` is the branch's short ref (e.g. `main`, `origin/feat/new-shell`). |
+| `branch_switcher.branch_row.<local\|remote>.<short-name>` | One row per branch. `<short-name>` is the branch's short ref (e.g. `main`, `origin/feat/new-shell`); the `local`/`remote` segment disambiguates rare collisions when a local branch happens to share its short name with a remote ref. |
 | `branch_switcher.current_marker` | Checkmark element on the current row. |
 | `branch_switcher.commit_row.<short-sha>` | One row per recent commit. |
 | `branch_switcher.view_all_button` | "View all" footer button. |
