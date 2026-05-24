@@ -183,6 +183,12 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  func setAgentsViewAutoOpen(_ autoOpen: Bool) {
+    guard settings.general.agentsViewAutoOpen != autoOpen else { return }
+    settings.general.agentsViewAutoOpen = autoOpen
+    scheduleSave()
+  }
+
   // MARK: - Updates (Sparkle preferences mirrored in settings.json)
 
   func setUpdateChannel(_ channel: UpdateChannel) {

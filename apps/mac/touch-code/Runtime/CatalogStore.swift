@@ -3,7 +3,7 @@ import TouchCodeCore
 import os.log
 
 @MainActor
-final class CatalogStore {
+class CatalogStore {
   private let fileURL: URL
   private let logger = Logger(subsystem: "com.touch-code.persistence", category: "catalog")
 

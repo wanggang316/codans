@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import ComposableArchitecture
+import GhosttyKit
 import SwiftUI
 import TouchCodeCore
 import TouchCodeIPC
@@ -71,7 +72,8 @@ struct TouchCodeApp: App {
             worktreeLocalDiffMonitor: appState.worktreeLocalDiffMonitor,
             notificationRollup: appState.notificationRollup,
             notificationStore: appState.notificationStore,
-            osNotifier: appState.osNotifier
+            osNotifier: appState.osNotifier,
+            activeAgentsRegistry: appState.agentRegistry
           )
           .frame(minWidth: 800, minHeight: 600)
           .environment(commandKeyObserver)
@@ -316,6 +318,29 @@ final class AppState {
   /// mirror task can call `recomputeDockBadge` on `unreadCount` changes
   /// that originate from non-coordinator paths (markRead, sweepOrphan...).
   @ObservationIgnored private(set) var notificationCoordinator: NotificationCoordinator?
+  /// Active-agents T3: classifies the agent driving each pane and persists
+  /// the verdict via `HierarchyClient.setPaneAgentKind`. Constructed in
+  /// `startNotificationObservers` (it shares the engine-event drain with
+  /// `NotificationDetector`) and dispatched from the same `for await event`
+  /// loop. Long-lived for the app lifetime.
+  @ObservationIgnored private(set) var agentBinder: AgentBinder?
+  /// Active-agents T6: derived UI-side state machine for the badge +
+  /// popover. Subscribes to five event sources (terminal events,
+  /// running-panes diff, keystrokes, focus, agent bind/unbind) wired in
+  /// `startNotificationObservers`. Held long-lived so SwiftUI consumers
+  /// outlive any scene reattach.
+  @ObservationIgnored private(set) var agentRegistry: AgentRegistry?
+  /// Mirror of the runtime's running-pane set, derived from the engine's
+  /// OSC 9;4 progress stream. `HierarchyManager.runningPanes` itself is
+  /// private; we duplicate the derivation here so AgentRegistry can read
+  /// a stable snapshot without expanding HierarchyManager's surface.
+  /// Held only for the registry's `runningPanes` closure capture.
+  @ObservationIgnored private var activeAgentsRunningPanes: Set<PaneID> = []
+  /// Long-running focus observer for AgentRegistry. Re-arms on every
+  /// catalog mutation that could change the globally-focused pane and
+  /// forwards new ids to `registry.onPaneFocused`. Same re-arming
+  /// pattern as `observeFocusedPaneForRead`.
+  @ObservationIgnored private var activeAgentsFocusTask: Task<Void, Never>?
   /// M5.T1 keystroke side channel: per-pane "last user keystroke at"
   /// timestamps fed into the translator's `userTypingRecently` window.
   /// Strong reference here keeps the tracker alive; the
@@ -634,12 +659,17 @@ final class AppState {
         manager?.bumpProjectActivity(projectID)
       }
     )
-    let detectorEvents = engine.events()
-    self.notificationDetectorTask = Task { @MainActor in
-      for await event in detectorEvents {
-        await detector.handle(event)
-      }
-    }
+    // Active-agents T3 + T6: build the binder and registry, install the
+    // five-wire fan-out (terminal events / running set / keystrokes /
+    // focus / agent bind), and start the long-running drain. Extracted
+    // into a helper so this function stays under the lint body length.
+    startActiveAgentsObservers(
+      manager: manager,
+      engine: engine,
+      hierarchy: hierarchy,
+      detector: detector,
+      keystrokeTracker: keystrokeTracker
+    )
 
     let inbox = notificationStore
     // Initial badge paint goes through the coordinator so the dock honours
@@ -802,6 +832,7 @@ final class AppState {
     dockBadgerTask?.cancel()
     focusReadMarkerTask?.cancel()
     orphanSweepTask?.cancel()
+    activeAgentsFocusTask?.cancel()
     // Drop the M2.T2 observation tokens explicitly so a `didBecomeActive`
     // arriving mid-shutdown cannot wake the coordinator on a half-torn-down
     // settings reader.
@@ -1052,6 +1083,245 @@ final class AppState {
       for await _ in stream {
         break
       }
+    }
+  }
+
+  /// Active-agents T3 + T6: build the binder + registry, install the
+  /// five fan-out wires, kick the drain. Extracted from
+  /// `startNotificationObservers` so that function stays under the lint
+  /// body-length budget. `@discardableResult` so the call site doesn't
+  /// have to acknowledge the binder.
+  @discardableResult
+  private func startActiveAgentsObservers(
+    manager: HierarchyManager,
+    engine: TerminalEngine,
+    hierarchy: HierarchyClient,
+    detector: NotificationDetector,
+    keystrokeTracker: PaneKeyboardActivityTracker
+  ) -> AgentBinder {
+    // T6: AgentRegistry is the @Observable state machine the badge +
+    // popover bind to. Five wires feed it:
+    //   1. terminal events  → onTerminalEvent (drain loop below)
+    //   2. running set diff → onRunningPanesChanged (drain loop below)
+    //   3. keystrokes       → onPaneKeyboardActivity (tracker.onActivity)
+    //   4. focus changes    → onPaneFocused (observation pump)
+    //   5. agent bind/unbind→ onAgentBound / onAgentUnbound (binder handlers)
+    let registry = AgentRegistry(
+      runningPanes: { [weak self] in self?.activeAgentsRunningPanes ?? [] },
+      focusedPane: { [weak manager] in
+        guard let manager else { return nil }
+        return Self.currentlyFocusedPane(
+          catalog: manager.catalog,
+          lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }
+        )
+      }
+    )
+    self.agentRegistry = registry
+    // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
+    // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
+    // pty child from the previous session can't haunt the panel. The
+    // registry starts empty and refills from AgentBinder events as the
+    // user runs agents in this session.
+    let ghostty = self.ghosttyRuntime
+    let binder = AgentBinder(
+      client: hierarchy,
+      currentAgentKind: { [weak manager] paneID in
+        manager?.catalog.pane(paneID)?.agentKind
+      },
+      paneInitialCommand: { [weak manager] paneID in
+        manager?.catalog.pane(paneID)?.initialCommand
+      },
+      paneTitle: { [weak ghostty] paneID in
+        ghostty?.surface(for: paneID)?.info.title
+      },
+      agentBoundHandler: { [weak registry] paneID, kind, sessionID in
+        registry?.onAgentBound(paneID, kind: kind, sessionID: sessionID)
+      },
+      agentUnboundHandler: { [weak registry] paneID in
+        registry?.onAgentUnbound(paneID)
+      }
+    )
+    self.agentBinder = binder
+    // Wire 3: keystroke fan-out. The detector continues to read
+    // `snapshot()` per-event; the new `onActivity` callback fires on
+    // every recorded keystroke so the registry can clear waiting-for-
+    // input promptly. Both consumers stay decoupled from each other.
+    keystrokeTracker.onActivity = { [weak registry] paneID in
+      registry?.onPaneKeyboardActivity(paneID)
+    }
+    let detectorEvents = engine.events()
+    self.notificationDetectorTask = Task { @MainActor [weak self] in
+      for await event in detectorEvents {
+        await detector.handle(event)
+        Self.dispatchToAgentBinder(event: event, binder: binder)
+        Self.dispatchToAgentRegistry(event: event, registry: registry, owner: self)
+      }
+    }
+    // Wire 4: focus tracker. Same re-arming observation pump pattern as
+    // `observeFocusedPaneForRead` — fire `onPaneFocused` whenever the
+    // globally-focused pane id changes.
+    self.activeAgentsFocusTask = Task { @MainActor in
+      await Self.observeFocusedPaneForRegistry(
+        catalog: { manager.catalog },
+        lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
+        registry: registry
+      )
+    }
+    return binder
+  }
+
+  /// Drain-loop branch that feeds `AgentRegistry` wires 1 + 2 (terminal
+  /// events + running-set diff). Extracted so the drain `for await`
+  /// stays compact and so the conditional-on-progress + teardown logic
+  /// has a single dedicated home.
+  @MainActor
+  private static func dispatchToAgentRegistry(
+    event: TerminalEvent,
+    registry: AgentRegistry,
+    owner: AppState?
+  ) {
+    // Wire 1: every terminal event flows into the registry. The
+    // registry filters internally — irrelevant cases are no-ops.
+    registry.onTerminalEvent(event)
+    guard let owner else { return }
+    // Wire 2: maintain the running-pane snapshot and forward diffs.
+    // OSC 9;4 progress events are the only writers; same predicate
+    // RootFeature.paneProgressBusyChanged uses (any non-REMOVE
+    // state = running).
+    if case .paneInfoChanged(let paneID, .progress(let state, _)) = event {
+      let isBusy = state != GHOSTTY_PROGRESS_STATE_REMOVE.rawValue
+      owner.activeAgentsRunningPanes = updatedRunningPanes(
+        owner.activeAgentsRunningPanes,
+        paneID: paneID,
+        isBusy: isBusy
+      )
+      registry.onRunningPanesChanged(owner.activeAgentsRunningPanes)
+    }
+    // Teardown branches also drop the pane from the running set so
+    // a crashed/closed pane doesn't leak through as still-loading.
+    switch event {
+    case .paneExited(let paneID, _, _),
+      .paneCrashed(let paneID, _),
+      .paneClosedByTab(let paneID, _):
+      if owner.activeAgentsRunningPanes.contains(paneID) {
+        owner.activeAgentsRunningPanes.remove(paneID)
+        registry.onRunningPanesChanged(owner.activeAgentsRunningPanes)
+      }
+    default:
+      break
+    }
+  }
+
+  /// Active-agents T6: helper used by the drain loop to maintain the
+  /// running-pane snapshot. Kept pure / static so the drain logic stays
+  /// readable. Returns the new set rather than mutating in place so
+  /// the call site reads as a single assignment.
+  @MainActor
+  private static func updatedRunningPanes(
+    _ current: Set<PaneID>, paneID: PaneID, isBusy: Bool
+  ) -> Set<PaneID> {
+    var next = current
+    if isBusy {
+      next.insert(paneID)
+    } else {
+      next.remove(paneID)
+    }
+    return next
+  }
+
+  /// Active-agents T6: long-running focus observer for `AgentRegistry`.
+  /// Same re-arming `withObservationTracking` pump as
+  /// `observeFocusedPaneForRead`: read the globally-focused pane (via
+  /// `currentlyFocusedPane`), forward to `registry.onPaneFocused`
+  /// whenever the id changes, then re-arm against the catalog fields
+  /// whose mutation could shift focus.
+  @MainActor
+  private static func observeFocusedPaneForRegistry(
+    catalog: @escaping @MainActor () -> Catalog,
+    lastFocusedPane: @escaping @MainActor (TabID) -> PaneID?,
+    registry: AgentRegistry
+  ) async {
+    var last: PaneID?
+    while !Task.isCancelled {
+      let current = currentlyFocusedPane(catalog: catalog(), lastFocusedPane: lastFocusedPane)
+      if current != last, let current {
+        registry.onPaneFocused(current)
+      }
+      last = current
+      let stream = AsyncStream<Void> { continuation in
+        withObservationTracking {
+          let snap = catalog()
+          _ = snap.selectedProjectID
+          for project in snap.projects {
+            _ = project.selectedWorktreeID
+            for worktree in project.worktrees {
+              _ = worktree.selectedTabID
+            }
+          }
+          if let activeProjectID = snap.selectedProjectID,
+            let project = snap.projects.first(where: { $0.id == activeProjectID }),
+            let worktreeID = project.selectedWorktreeID,
+            let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+            let tabID = worktree.selectedTabID
+          {
+            _ = lastFocusedPane(tabID)
+          }
+        } onChange: {
+          Task { @MainActor [continuation] in
+            continuation.yield(())
+          }
+        }
+        continuation.onTermination = { _ in }
+      }
+      for await _ in stream {
+        break
+      }
+    }
+  }
+
+  /// Active-agents T3: route the engine event stream through `AgentBinder`.
+  /// Lives next to `NotificationDetector.handle` (same drain loop, same
+  /// MainActor context) so the binder sees pane creation, title changes,
+  /// OSC 9 desktop-notification payloads, and lifecycle teardown without
+  /// opening a second long-lived Task on the events stream.
+  ///
+  /// `.commandFinished` (OSC 133 D, shell-integration "command finished")
+  /// is treated as "the foreground command in the pane just returned to
+  /// the shell prompt" — i.e. the agent that owned this pane has exited
+  /// (Ctrl+C, `exit`, `:q`, …). Since `paneExited` only fires when the
+  /// *pane's child* dies and the shell underneath the agent stays alive,
+  /// this is the only reliable signal that the agent itself is gone
+  /// while the pane is still open. We unbind unconditionally; the call
+  /// is idempotent and a re-run of the same agent re-binds on the next
+  /// title-changed event.
+  @MainActor
+  private static func dispatchToAgentBinder(
+    event: TerminalEvent,
+    binder: AgentBinder
+  ) {
+    switch event {
+    case .paneCreated(let paneID, _):
+      binder.consider(paneID: paneID, trigger: .paneCreated)
+    case .paneInfoChanged(let paneID, let delta):
+      switch delta {
+      case .title:
+        binder.consider(paneID: paneID, trigger: .titleChanged)
+      case .desktopNotification(let title, let body):
+        binder.consider(
+          paneID: paneID,
+          trigger: .desktopNotification(title: title, body: body)
+        )
+      case .commandFinished:
+        binder.unbind(paneID)
+      default:
+        break
+      }
+    case .paneExited(let paneID, _, _),
+      .paneCrashed(let paneID, _),
+      .paneClosedByTab(let paneID, _):
+      binder.unbind(paneID)
+    default:
+      break
     }
   }
 }

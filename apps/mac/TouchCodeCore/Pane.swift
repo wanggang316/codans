@@ -5,22 +5,36 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
   public var workingDirectory: String
   public var initialCommand: String?
   public var labels: Set<String>
+  /// Coding-agent identity detected at pane creation / refreshed by the
+  /// runtime. Persists across catalog reloads so the ActiveAgents view
+  /// can render an agent-specific status before any output is observed.
+  public var agentKind: AgentKind?
+  /// Opaque per-agent session identifier (e.g. the Claude Code session
+  /// UUID) used to correlate the pane with the agent's own session
+  /// records. Optional because not every agent exposes one.
+  public var agentSessionID: String?
 
   public init(
     id: PaneID = PaneID(),
     workingDirectory: String,
     initialCommand: String? = nil,
-    labels: Set<String> = []
+    labels: Set<String> = [],
+    agentKind: AgentKind? = nil,
+    agentSessionID: String? = nil
   ) {
     self.id = id
     self.workingDirectory = workingDirectory
     self.initialCommand = initialCommand
     self.labels = labels
+    self.agentKind = agentKind
+    self.agentSessionID = agentSessionID
   }
 }
 
 extension Pane: Codable {
-  private enum CodingKeys: String, CodingKey { case id, workingDirectory, labels }
+  private enum CodingKeys: String, CodingKey {
+    case id, workingDirectory, labels, agentKind, agentSessionID
+  }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -32,6 +46,10 @@ extension Pane: Codable {
     // ignore any legacy value that older builds may have written.
     self.initialCommand = nil
     self.labels = try container.decodeIfPresent(Set<String>.self, forKey: .labels) ?? []
+    // agentKind / agentSessionID are optional and absent from pre-T1
+    // catalogs; decodeIfPresent + nil default keeps backward compat.
+    self.agentKind = try container.decodeIfPresent(AgentKind.self, forKey: .agentKind)
+    self.agentSessionID = try container.decodeIfPresent(String.self, forKey: .agentSessionID)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -39,5 +57,10 @@ extension Pane: Codable {
     try container.encode(id, forKey: .id)
     try container.encode(workingDirectory, forKey: .workingDirectory)
     if !labels.isEmpty { try container.encode(labels.sorted(), forKey: .labels) }
+    // Forward-compat probe: a pre-T1 catalog that never set these
+    // fields must re-encode without introducing the new keys, so we
+    // emit them only when non-nil.
+    try container.encodeIfPresent(agentKind, forKey: .agentKind)
+    try container.encodeIfPresent(agentSessionID, forKey: .agentSessionID)
   }
 }

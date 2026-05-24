@@ -29,6 +29,10 @@ struct ContentView: View {
   /// (each spawn re-runs `setNotificationCategories` on the shared
   /// UN center).
   let osNotifier: UserNotificationsOSNotifier?
+  /// T6 (active-agents): registry that backs the worktree-toolbar
+  /// badge + popover. Optional because `AppState.bringUp` constructs
+  /// it lazily; nil renders no badge.
+  let activeAgentsRegistry: AgentRegistry?
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
@@ -84,7 +88,9 @@ struct ContentView: View {
         currentSelection: store.selection,
         revealTrigger: store.revealSelectionTrigger,
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
-        editorStore: store.scope(state: \.editor, action: \.editor)
+        editorStore: store.scope(state: \.editor, action: \.editor),
+        activeAgentsRegistry: activeAgentsRegistry,
+        onActiveAgentsRowTapped: { paneID in store.send(.activeAgents(.rowTapped(paneID))) }
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {

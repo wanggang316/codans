@@ -347,6 +347,23 @@ struct RootFeature {
     case paneActionRouter(PaneActionRouterFeature.Action)
     case windowActionRouter(WindowActionRouterFeature.Action)
     case diff(DiffFeature.Action)
+    /// T6 (active-agents): rows in the ActiveAgentsPopoverView dispatch
+    /// here. Cross-Project / Worktree / Tab focus belongs to the same
+    /// reducer that owns selection state — same precedent as
+    /// `.focusHierarchyPath` for inbox-row taps.
+    case activeAgents(ActiveAgentsAction)
+  }
+
+  /// Child action enum for the ActiveAgents popover. `.rowTapped` walks
+  /// the catalog to the (project, worktree, tab) chain containing the
+  /// pane and lands focus on the pane itself. `.popoverDismissRequested`
+  /// is reserved for future use — today the badge view manages its own
+  /// presentation state through the SwiftUI `.popover(isPresented:)`
+  /// closure, but keeping the case in the enum lets a future
+  /// `setActiveAgentsPopoverOpen(_:)` chord land without a reshuffle.
+  enum ActiveAgentsAction: Equatable {
+    case rowTapped(PaneID)
+    case popoverDismissRequested
   }
 
   nonisolated enum CancelID: Sendable {
@@ -1072,6 +1089,52 @@ struct RootFeature {
 
       case .branchSwitcher:
         // Sub-feature transitions handled by the Scope; ignore in root.
+        return .none
+
+      case .activeAgents(.rowTapped(let paneID)):
+        // Walk the live catalog to the (project, worktree, tab) chain
+        // containing `paneID` and land focus on the pane. Same shape as
+        // `.focusHierarchyPath` — re-read snapshot between mutations so
+        // a teardown race steers us to the deepest still-existing
+        // ancestor rather than committing a doomed selection. Silent
+        // no-op when the pane has already left the catalog (close + tap
+        // race).
+        guard let address = hierarchyClient.addressOf(paneID) else {
+          return .none
+        }
+        try? hierarchyClient.selectProject(address.projectID)
+        guard
+          hierarchyClient.snapshot()
+            .projects.first(where: { $0.id == address.projectID })?
+            .worktrees.contains(where: { $0.id == address.worktreeID }) == true
+        else { return .none }
+        try? hierarchyClient.selectWorktree(address.worktreeID, address.projectID)
+        guard
+          hierarchyClient.snapshot()
+            .projects.first(where: { $0.id == address.projectID })?
+            .worktrees.first(where: { $0.id == address.worktreeID })?
+            .tabs.contains(where: { $0.id == address.tabID }) == true
+        else { return .none }
+        try? hierarchyClient.selectTab(address.tabID, address.worktreeID, address.projectID)
+        guard
+          hierarchyClient.snapshot()
+            .projects.first(where: { $0.id == address.projectID })?
+            .worktrees.first(where: { $0.id == address.worktreeID })?
+            .tabs.first(where: { $0.id == address.tabID })?
+            .flatPaneIDs.contains(paneID) == true
+        else { return .none }
+        try? hierarchyClient.focusPane(
+          paneID, address.tabID, address.worktreeID, address.projectID
+        )
+        hierarchyClient.focusSurfaceView(paneID)
+        return .none
+
+      case .activeAgents(.popoverDismissRequested):
+        // Reserved for future direct close-from-reducer paths (e.g. a
+        // ⌘W variant that closes the popover before the chord routes
+        // elsewhere). The view manages its own presentation state
+        // today; landing here is a no-op rather than an error so
+        // future call sites don't blow up.
         return .none
 
       case .commandPaletteToggle(let sourcePaneID):
