@@ -68,30 +68,35 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Two-line identity column: worktree (branch) name on top, project
-  /// name beneath. The primary line carries the
-  /// `activeAgents.row.<paneID>.headline` accessibility identifier
-  /// (formerly on the breadcrumb) — the headline contract surface stays
-  /// on the user-facing top line of the row.
+  /// Single-line identity row: `<worktree> · <project>` rendered as one
+  /// `Text` built from an `AttributedString` so the two halves can carry
+  /// distinct foreground / weight styling without breaking truncation
+  /// across two views. Selected row bolds only the worktree (the
+  /// primary identity); the project tail stays at `.secondary`.
   private var identityColumn: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(worktreeName)
-        .font(.callout)
-        // Selected row bolds the title (per design feedback) so the
-        // active focus stands out even when the background tint is
-        // muted; unselected rows render with the platform's default
-        // `.callout` weight (regular).
-        .fontWeight(isSelected ? .semibold : .regular)
-        .foregroundStyle(.primary)
-        .lineLimit(1)
-        .truncationMode(.middle)
-        .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
-      Text(projectName)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .truncationMode(.middle)
+    Text(identityAttributedString)
+      .font(.callout)
+      .lineLimit(1)
+      .truncationMode(.middle)
+      .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+  }
+
+  /// Build the `<worktree> · <project>` attributed string with the
+  /// selection-aware weighting on the worktree segment.
+  private var identityAttributedString: AttributedString {
+    var worktree = AttributedString(worktreeName)
+    worktree.foregroundColor = .primary
+    if isSelected {
+      worktree.font = .callout.weight(.semibold)
     }
+
+    var separator = AttributedString(" · ")
+    separator.foregroundColor = .secondary
+
+    var project = AttributedString(projectName)
+    project.foregroundColor = .secondary
+
+    return worktree + separator + project
   }
 
   /// Row background. Three tiers:
