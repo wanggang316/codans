@@ -1051,24 +1051,11 @@ final class AppState {
       }
     )
     self.agentRegistry = registry
-    // Hydrate the registry with already-bound panes from the persisted
-    // catalog. `Pane.agentKind` survives app restarts (T1's persistence),
-    // but the binder's `.paneCreated` branch sticky-skips bound panes — so
-    // without this loop the registry stays empty until a fresh
-    // classification round writes a new `agentKind`, which never happens
-    // for panes that already have one. Runs once at startup; the engine's
-    // subsequent events naturally evolve the derived state from here.
-    for project in manager.catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          for pane in tab.panes {
-            if let kind = pane.agentKind {
-              registry.onAgentBound(pane.id, kind: kind, sessionID: pane.agentSessionID)
-            }
-          }
-        }
-      }
-    }
+    // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
+    // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
+    // pty child from the previous session can't haunt the panel. The
+    // registry starts empty and refills from AgentBinder events as the
+    // user runs agents in this session.
     let ghostty = self.ghosttyRuntime
     let binder = AgentBinder(
       client: hierarchy,

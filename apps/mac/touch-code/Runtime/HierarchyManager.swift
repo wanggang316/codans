@@ -58,13 +58,40 @@ final class HierarchyManager {
     self.runtime = runtime
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
-    if didStampLegacyTimestamps {
+    let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
+    if didStampLegacyTimestamps || didClearAgentBindings {
       // Persist the migration so successive launches start from the
       // backfilled timestamps rather than re-deriving them on every
       // open (and so the user-visible order is deterministic the
       // moment another writer touches the catalog).
       store.scheduleSave(self.catalog)
     }
+  }
+
+  /// Agent bindings (`Pane.agentKind` + `Pane.agentSessionID`) are
+  /// session-scoped: the pty child that hosted the agent dies when
+  /// touch-code quits, so on every cold start the catalog's stored kind
+  /// describes a process that no longer exists. Keep these fields
+  /// runtime-only by wiping them at launch — AgentBinder re-classifies
+  /// once the user actually runs the agent again. Returns true if any
+  /// pane was mutated.
+  private static func clearAgentBindings(in catalog: inout Catalog) -> Bool {
+    var mutated = false
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          for paneIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes.indices {
+            let pane = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex]
+            if pane.agentKind != nil || pane.agentSessionID != nil {
+              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentKind = nil
+              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID = nil
+              mutated = true
+            }
+          }
+        }
+      }
+    }
+    return mutated
   }
 
   /// Defensive sweep run at load: if any project's `selectedWorktreeID`
