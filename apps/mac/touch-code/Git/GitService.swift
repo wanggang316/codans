@@ -44,6 +44,24 @@ public nonisolated protocol GitService: Sendable {
   /// fails (not a repo, transient git error). A clean tree returns a stats
   /// value with both counts at zero, not nil.
   func localDiffStats(at worktreePath: URL) async throws -> LocalDiffStats?
+
+  /// `git symbolic-ref --short HEAD`. Returns the current branch's short name when HEAD
+  /// points at a ref; returns `nil` when HEAD is detached. Other failures (not-a-repo,
+  /// git missing, timeout) throw via the standard `GitError` cases.
+  func currentBranch(at path: URL) async throws -> String?
+
+  /// `git for-each-ref refs/heads refs/remotes` parsed through
+  /// `GitOutputParser.parseBranchInventory`. Returns a render-ready inventory:
+  /// current is server-side resolved, lists are sorted, `<remote>/HEAD` is filtered,
+  /// and the current branch (if local) is pinned to position 0.
+  func listAllBranches(at path: URL) async throws -> BranchInventory
+
+  /// `git switch <name>` for `.local`, `git switch --track <origin/x>` for
+  /// `.remoteTracking`. Dirty-tree / conflict failures surface as
+  /// `GitError.exec(code, stderr)` with stderr preserved verbatim — the caller
+  /// (BranchSwitcherFeature, T6) extracts the first line for the inline error
+  /// banner. No pre-check; rely on git's native enforcement.
+  func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws
 }
 
 extension GitService {

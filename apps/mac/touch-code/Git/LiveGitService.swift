@@ -179,6 +179,51 @@ nonisolated final class LiveGitService: GitService {
     }
   }
 
+  func currentBranch(at path: URL) async throws -> String? {
+    try await ensureIsRepo(at: path)
+    // Call the runner directly (rather than the shared `run` helper) so we can
+    // inspect the exit code without throwing — `git symbolic-ref --short HEAD`
+    // returns exit 1 on detached HEAD and we surface that as `nil`.
+    let outcome = await runner.run(
+      executable: gitExecutable,
+      arguments: GitCommand.symbolicRefShortHead(),
+      env: GitProcessEnv.build(),
+      cwd: path,
+      timeout: Self.defaultTimeout,
+      maxOutputBytes: Self.maxOutputBytes
+    )
+    switch outcome {
+    case .exited(let code, let stdout, let stderr, let overflow):
+      if code == 1 {
+        // Detached HEAD — trust the exit code, do not parse stderr.
+        return nil
+      }
+      if code != 0 {
+        let stderrText = String(data: stderr, encoding: .utf8) ?? ""
+        throw GitError.exec(code: code, stderr: stderrText)
+      }
+      if overflow { throw GitError.outputTooLarge }
+      let text = String(data: stdout, encoding: .utf8) ?? ""
+      return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    case .timedOut:
+      throw GitError.timedOut
+    case .spawnFailed(let reason):
+      if reason.contains("binary not found") { throw GitError.gitMissing }
+      throw GitError.unparsable(context: "spawn failed: \(reason)")
+    }
+  }
+
+  func listAllBranches(at path: URL) async throws -> BranchInventory {
+    try await ensureIsRepo(at: path)
+    let out = try await run(arguments: GitCommand.forEachRefBranches(), cwd: path)
+    return try GitOutputParser.parseBranchInventory(out)
+  }
+
+  func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws {
+    try await ensureIsRepo(at: path)
+    _ = try await run(arguments: GitCommand.switchBranch(target: target), cwd: path)
+  }
+
   // MARK: - Edge checks
 
   /// Runs `git rev-parse --is-inside-work-tree` and throws `.notARepo` on failure. This is the
