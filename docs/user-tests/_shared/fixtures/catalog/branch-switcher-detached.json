@@ -1,0 +1,25 @@
+{
+  "version" : 3,
+  "projects" : [
+    {
+      "id" : {
+        "raw" : "00000000-0000-0000-0000-0000000B0003"
+      },
+      "name" : "playground",
+      "rootPath" : "__TMP__/repo-detached",
+      "gitRoot" : "__TMP__/repo-detached",
+      "worktrees" : [
+        {
+          "id" : {
+            "raw" : "00000000-0000-0000-0000-0000000C0003"
+          },
+          "name" : "repo-detached",
+          "path" : "__TMP__/repo-detached",
+          "branch" : null,
+          "tabs" : []
+        }
+      ]
+    }
+  ],
+  "tags" : []
+}
