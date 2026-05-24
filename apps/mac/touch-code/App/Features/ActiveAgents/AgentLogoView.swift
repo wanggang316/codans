@@ -10,21 +10,25 @@ import TouchCodeCore
 ///
 /// - `.claudeCode` → SVG asset `claude-code` (Anthropic Claude
 ///   wordmark; thick strokes survive small-size rasterisation).
-/// - `.codex`      → SF Symbol `chevron.left.forwardslash.chevron.right`.
-///   The OpenAI Codex spiral SVG has very thin internal cutouts (≈ 0.8
-///   units in a 24-unit viewBox) that vanish into a featureless blob
-///   when rasterised at 14-20pt. The `</>` SF Symbol carries the
-///   "code-generation" semantic without that small-size hazard.
+/// - `.codex`      → SVG asset `codex` (OpenAI Codex brand glyph).
 /// - `.pi`         → SVG asset `pi` (Inflection pi glyph).
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
 /// its `DisplayName`. Letting VoiceOver also announce the symbol name
 /// would double-speak the agent identity.
+///
+/// The optional `tint` override lets a host (the selected row) darken
+/// the glyph from the default `.secondary` to `.primary` so the
+/// selected row reads as visually heavier than its neighbours.
 struct AgentLogoView: View {
   let kind: AgentKind
   /// Render size in points. Row uses 16; badge uses 14.
   let size: CGFloat
+  /// Foreground style applied to the template-rendered glyph. Defaults
+  /// to `.secondary`; the selected row passes `.primary` so its logo
+  /// reads alongside the bolder title.
+  var tint: HierarchicalShapeStyle = .secondary
 
   var body: some View {
     Group {
@@ -34,9 +38,7 @@ struct AgentLogoView: View {
           .resizable()
           .scaledToFit()
       case .codex:
-        // SF Symbol — see the type doc for why the bundled OpenAI
-        // glyph was retired here.
-        Image(systemName: "chevron.left.forwardslash.chevron.right")
+        Image("codex")
           .resizable()
           .scaledToFit()
       case .pi:
@@ -46,13 +48,7 @@ struct AgentLogoView: View {
       }
     }
     .frame(width: size, height: size)
-    .foregroundStyle(tint(for: kind))
+    .foregroundStyle(tint)
     .accessibilityHidden(true)
-  }
-
-  /// Tint applied to template-rendered glyphs. All three imagesets use
-  /// `template` rendering so the glyph picks up this colour at draw time.
-  private func tint(for kind: AgentKind) -> HierarchicalShapeStyle {
-    .secondary
   }
 }

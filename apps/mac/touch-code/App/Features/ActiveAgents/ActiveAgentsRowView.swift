@@ -38,7 +38,9 @@ struct ActiveAgentsRowView: View {
   var body: some View {
     Button(action: onTap) {
       HStack(alignment: .center, spacing: 10) {
-        AgentLogoView(kind: entry.kind, size: 20)
+        // Logo tint darkens to `.primary` on the selected row so it
+        // reads alongside the bolder title.
+        AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
         identityColumn
         Spacer(minLength: 8)
         statusColumn
@@ -75,6 +77,11 @@ struct ActiveAgentsRowView: View {
     VStack(alignment: .leading, spacing: 2) {
       Text(worktreeName)
         .font(.callout)
+        // Selected row bolds the title (per design feedback) so the
+        // active focus stands out even when the background tint is
+        // muted; unselected rows render with the platform's default
+        // `.callout` weight (regular).
+        .fontWeight(isSelected ? .semibold : .regular)
         .foregroundStyle(.primary)
         .lineLimit(1)
         .truncationMode(.middle)
@@ -88,10 +95,12 @@ struct ActiveAgentsRowView: View {
   }
 
   /// Row background. Three tiers:
-  /// - Selected (this pane is the main window's current focus): accent
-  ///   tint at low opacity — native-sidebar selection tone without
-  ///   overwhelming the row chrome.
-  /// - Hovering (pointer over the row): a soft gray wash so the row
+  /// - Selected (this pane is the main window's current focus): a
+  ///   muted gray fill (per design feedback — orange is reserved for
+  ///   "needs attention" / waiting state, accent blue is reserved for
+  ///   progress, so selection rides on neutral grey + bolder title to
+  ///   stand out).
+  /// - Hovering (pointer over the row): a softer gray wash so the row
   ///   feels clickable even when not selected.
   /// - Default: clear.
   /// When selected AND hovering, the selected tint wins — selection is
@@ -99,7 +108,7 @@ struct ActiveAgentsRowView: View {
   @ViewBuilder
   private var rowBackground: some View {
     if isSelected {
-      Color.accentColor.opacity(0.18)
+      Color.gray.opacity(0.22)
     } else if isHovering {
       Color.gray.opacity(0.08)
     } else {
