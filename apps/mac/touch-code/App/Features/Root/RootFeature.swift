@@ -1055,17 +1055,19 @@ struct RootFeature {
       case .diff:
         return .none
 
-      case .branchSwitcher(.delegate(.openDiffViewerOnHistoryTab)):
-        // T10: "View all" from the recent-commits section. Ensure the Diff
-        // Inspector is visible (mirrors the `.diffInspectorToggledForCurrentWorktree`
-        // path so the chord and this delegate share one open semantics).
-        let catalog = hierarchyClient.snapshot()
-        if !state.diffInspectorVisible(in: catalog) {
-          return .send(.diffInspectorToggledForCurrentWorktree)
-        }
+      case .branchSwitcher(.delegate(.openDiffViewerOnHistoryTab(let worktreeID, _))):
+        // T10: "View all" from the recent-commits section. Force the in-app
+        // inspector visible regardless of the user's default Git Viewer
+        // preference — the follow-up `.diff(.tabSelected(.history))` dispatch
+        // only makes sense in-app (external viewers like Tower / Fork have no
+        // History-tab analogue), so we bypass the 3-tier Git Viewer
+        // resolution that `.diffInspectorToggledForCurrentWorktree` runs.
+        // Idempotent when the inspector is already visible:
+        // `setWorktreeDiffInspectorVisible(_, true)` no-ops on already-visible
+        // worktrees per HierarchyClient's contract.
+        hierarchyClient.setWorktreeDiffInspectorVisible(worktreeID, true)
         // Pending (T11/T12): after T11 adds `.diff(.tabSelected(.history))`,
-        // dispatch it here after ensuring the inspector is visible so "View all"
-        // lands the user on the History tab.
+        // dispatch it here so "View all" lands the user on the History tab.
         return .none
 
       case .branchSwitcher:

@@ -959,4 +959,98 @@ struct RootFeatureTests {
     await store.receive(
       .openShellEditorInWorktree(worktreePath: worktreePath, projectID: projectID))
   }
+
+  // MARK: - FU-T10 BranchSwitcher root-level routing
+
+  @Test
+  func worktreeHeadChangedForwardsToBranchSwitcherWhenIDMatches() async {
+    // T10 wired `RootFeature.worktreeHeadChanged` to forward into
+    // `branchSwitcher.headChangedForCurrentWorktree` ONLY when the changed
+    // worktree matches the popover's currently-bound worktreeID. This test
+    // pins the match arm of that filter.
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    let catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB,
+      aVisible: false, bVisible: false
+    )
+
+    var initial = RootFeature.State()
+    initial.branchSwitcher.worktreeID = worktreeA
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.worktreeHeadChanged(worktreeA))
+    await store.receive(\.branchSwitcher.headChangedForCurrentWorktree)
+    await store.finish()
+  }
+
+  @Test
+  func worktreeHeadChangedDoesNotForwardWhenIDDoesNotMatch() async {
+    // Complement to the match-arm test: HEAD changes on a worktree that is
+    // NOT the one the popover is currently bound to must not invalidate
+    // the popover's caches.
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    let catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB,
+      aVisible: false, bVisible: false
+    )
+
+    var initial = RootFeature.State()
+    initial.branchSwitcher.worktreeID = worktreeA
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+    }
+    store.exhaustivity = .off
+
+    // HEAD changes on the *other* worktree. With `exhaustivity = .off` the
+    // absence of a forward is implicit; `store.finish()` makes it explicit
+    // by asserting no leftover effects produced a `headChangedForCurrentWorktree`.
+    await store.send(.worktreeHeadChanged(worktreeB))
+    await store.finish()
+  }
+
+  @Test
+  func openDiffViewerOnHistoryTabDelegateMakesInspectorVisible() async {
+    // FU-T10 fix: the `openDiffViewerOnHistoryTab` delegate handler must
+    // bypass the 3-tier Git Viewer resolution and force the in-app inspector
+    // visible directly via `hierarchyClient.setWorktreeDiffInspectorVisible`.
+    // Users with an external Git Viewer (Tower / Fork) configured as their
+    // default would otherwise see the external app open instead — and the
+    // follow-up `.diff(.tabSelected(.history))` dispatch would be impossible.
+    let worktreeID = WorktreeID()
+    let projectID = ProjectID()
+    let recorded = LockIsolated<[(WorktreeID, Bool)]>([])
+
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.setWorktreeDiffInspectorVisible = { wt, visible in
+        recorded.withValue { $0.append((wt, visible)) }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .branchSwitcher(
+        .delegate(
+          .openDiffViewerOnHistoryTab(worktreeID: worktreeID, projectID: projectID)
+        )))
+    await store.finish()
+
+    #expect(recorded.value.count == 1)
+    #expect(recorded.value.first?.0 == worktreeID)
+    #expect(recorded.value.first?.1 == true)
+  }
 }
