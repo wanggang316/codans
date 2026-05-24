@@ -12,6 +12,7 @@ import TouchCodeCore
 ///   wordmark; thick strokes survive small-size rasterisation).
 /// - `.codex`      → SVG asset `codex` (OpenAI Codex brand glyph).
 /// - `.pi`         → SVG asset `pi` (Inflection pi glyph).
+/// - `.opencode`   → SVG asset `opencode` (opencode brand glyph).
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
@@ -51,12 +52,9 @@ struct AgentLogoView: View {
           .resizable()
           .scaledToFit()
       case .opencode:
-        // SF Symbol fallback until a brand glyph is bundled. `curlybraces`
-        // reads as "code" without colliding with the other agent marks.
-        Image(systemName: "curlybraces")
+        Image("opencode")
           .resizable()
           .scaledToFit()
-          .padding(size * 0.1)
       }
     }
     .frame(width: size, height: size)
