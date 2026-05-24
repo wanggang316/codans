@@ -156,3 +156,124 @@ struct GitOutputParserTests {
     return [hash, authorName, authorEmail, date, subject, parents].joined(separator: "\0") + "\0"
   }
 }
+
+// MARK: - Branch inventory
+
+struct GitOutputParserBranchInventoryTests {
+  @Test
+  func parseBranchInventoryEmptyInputReturnsEmpty() throws {
+    let inv = try GitOutputParser.parseBranchInventory(Data())
+    #expect(inv.current == nil)
+    #expect(inv.local.isEmpty)
+    #expect(inv.remote.isEmpty)
+  }
+
+  @Test
+  func parseBranchInventorySingleLocalMarkedCurrent() throws {
+    let fixture = "refs/heads/main\tmain\torigin/main\t*\n"
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.current == "main")
+    #expect(inv.local == [BranchRef(shortName: "main", isRemote: false, upstream: "origin/main")])
+    #expect(inv.remote.isEmpty)
+  }
+
+  @Test
+  func parseBranchInventoryMixedLocalAndRemoteSortedAndPinned() throws {
+    let fixture = """
+      refs/heads/main\tmain\t\t \n\
+      refs/heads/feat/x\tfeat/x\t\t*\n\
+      refs/heads/bugfix/y\tbugfix/y\t\t \n\
+      refs/remotes/origin/main\torigin/main\t\t \n\
+      refs/remotes/origin/feat/x\torigin/feat/x\t\t \n
+      """
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.current == "feat/x")
+    #expect(inv.local.map(\.shortName) == ["feat/x", "bugfix/y", "main"])
+    #expect(inv.local.allSatisfy { $0.isRemote == false })
+    #expect(inv.local.allSatisfy { $0.upstream == nil })
+    #expect(inv.remote.map(\.shortName) == ["origin/feat/x", "origin/main"])
+    #expect(inv.remote.allSatisfy { $0.isRemote })
+    #expect(inv.remote.allSatisfy { $0.upstream == nil })
+  }
+
+  @Test
+  func parseBranchInventoryFiltersOriginHEAD() throws {
+    let fixture = """
+      refs/remotes/origin/HEAD\torigin/HEAD\torigin/main\t \n\
+      refs/remotes/origin/main\torigin/main\t\t \n
+      """
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.remote.count == 1)
+    #expect(inv.remote[0].shortName == "origin/main")
+  }
+
+  @Test
+  func parseBranchInventoryDetachedHEADHasNilCurrent() throws {
+    let fixture = """
+      refs/heads/main\tmain\t\t \n\
+      refs/heads/feat/x\tfeat/x\t\t \n\
+      refs/remotes/origin/main\torigin/main\t\t \n
+      """
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.current == nil)
+    #expect(inv.local.map(\.shortName) == ["feat/x", "main"])
+    #expect(inv.remote.map(\.shortName) == ["origin/main"])
+  }
+
+  @Test
+  func parseBranchInventoryUnbornHEADUntrackedLocalCanonicalizesEmptyUpstreamToNil() throws {
+    let fixture = "refs/heads/main\tmain\t\t*\n"
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.current == "main")
+    #expect(inv.local.count == 1)
+    #expect(inv.local[0].upstream == nil)
+  }
+
+  @Test
+  func parseBranchInventoryUTF8BranchNames() throws {
+    let fixture = """
+      refs/heads/特性\t特性\t\t \n\
+      refs/heads/🌱\t🌱\t\t \n
+      """
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.local.map(\.shortName).sorted() == ["特性", "🌱"].sorted())
+  }
+
+  @Test
+  func parseBranchInventoryNonUTF8Throws() {
+    // Stray 0xFF byte makes the buffer invalid UTF-8.
+    var bytes = Data("refs/heads/main\tmain\t\t \n".utf8)
+    bytes.append(0xFF)
+    #expect(throws: GitError.self) {
+      try GitOutputParser.parseBranchInventory(bytes)
+    }
+  }
+
+  @Test
+  func parseBranchInventoryMalformedRecordThrows() {
+    // Only three TAB-separated fields — missing HEAD marker.
+    let fixture = "refs/heads/main\tmain\torigin/main\n"
+    #expect(throws: GitError.self) {
+      try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    }
+  }
+
+  @Test
+  func parseBranchInventoryMultipleCurrentMarkersThrows() {
+    let fixture = """
+      refs/heads/main\tmain\t\t*\n\
+      refs/heads/feat/x\tfeat/x\t\t*\n
+      """
+    #expect(throws: GitError.self) {
+      try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    }
+  }
+
+  @Test
+  func parseBranchInventoryUnknownPrefixThrows() {
+    let fixture = "refs/tags/v1\tv1\t\t \n"
+    #expect(throws: GitError.self) {
+      try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    }
+  }
+}

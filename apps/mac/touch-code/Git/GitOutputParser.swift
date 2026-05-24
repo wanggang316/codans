@@ -263,4 +263,94 @@ nonisolated enum GitOutputParser {
       )
     }
   }
+
+  // MARK: - Branch inventory
+
+  /// Parse the output of `GitCommand.forEachRefBranches()` into a render-ready
+  /// `BranchInventory`. Guarantees on the returned value:
+  ///
+  /// - **Classification**: every record is bucketed by its `refs/heads/` or
+  ///   `refs/remotes/` prefix; unrecognised prefixes throw.
+  /// - **Filtering**: remote symbolic refs whose short name ends in `/HEAD`
+  ///   (e.g. `origin/HEAD`) are dropped from the remote list.
+  /// - **Sorting**: `local` and `remote` are each ascending by `shortName`.
+  /// - **Pinning**: if `current` is a local branch, that `BranchRef` is moved
+  ///   to position 0 in `local` after sorting.
+  ///
+  /// Empty input is a legal bootstrap-time signal (a repo with no refs) and
+  /// returns an empty inventory rather than throwing.
+  static func parseBranchInventory(
+    _ bytes: Data,
+    currentMarker: Character = "*"
+  ) throws -> BranchInventory {
+    guard let text = String(data: bytes, encoding: .utf8) else {
+      throw GitError.unparsable(context: "branch inventory output was not UTF-8")
+    }
+    if text.isEmpty {
+      return BranchInventory(current: nil, local: [], remote: [])
+    }
+
+    var records = text.components(separatedBy: "\n")
+    if records.last == "" { records.removeLast() }
+
+    var locals: [BranchRef] = []
+    var remotes: [BranchRef] = []
+    var current: String?
+
+    for record in records {
+      let fields = record.components(separatedBy: "\t")
+      guard fields.count == 4 else {
+        throw GitError.unparsable(
+          context: "branch inventory record has wrong field count: '\(record)'"
+        )
+      }
+      let refname = fields[0]
+      let shortName = fields[1]
+      let upstreamRaw = fields[2]
+      let marker = fields[3]
+
+      let isRemote: Bool
+      if refname.hasPrefix("refs/heads/") {
+        isRemote = false
+      } else if refname.hasPrefix("refs/remotes/") {
+        isRemote = true
+      } else {
+        throw GitError.unparsable(context: "unrecognised refname prefix: '\(refname)'")
+      }
+
+      // Drop `<remote>/HEAD` symbolic refs — they're not selectable branches.
+      // Local refs literally named `…/HEAD` are kept (parser stays neutral).
+      if isRemote && shortName.hasSuffix("/HEAD") {
+        continue
+      }
+
+      // Upstream canonicalization: empty → nil; remote-side refs → nil
+      // (defensive — git shouldn't emit an upstream for refs/remotes/).
+      let upstream: String? = (isRemote || upstreamRaw.isEmpty) ? nil : upstreamRaw
+
+      if marker.count == 1, marker.first == currentMarker {
+        if current != nil {
+          throw GitError.unparsable(context: "multiple records carry the HEAD marker")
+        }
+        current = shortName
+      }
+
+      let ref = BranchRef(shortName: shortName, isRemote: isRemote, upstream: upstream)
+      if isRemote {
+        remotes.append(ref)
+      } else {
+        locals.append(ref)
+      }
+    }
+
+    locals.sort { $0.shortName < $1.shortName }
+    remotes.sort { $0.shortName < $1.shortName }
+
+    if let current, let pinIdx = locals.firstIndex(where: { $0.shortName == current }), pinIdx != 0 {
+      let pinned = locals.remove(at: pinIdx)
+      locals.insert(pinned, at: 0)
+    }
+
+    return BranchInventory(current: current, local: locals, remote: remotes)
+  }
 }
