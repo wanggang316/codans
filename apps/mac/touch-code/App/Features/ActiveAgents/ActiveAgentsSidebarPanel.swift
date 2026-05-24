@@ -178,7 +178,7 @@ struct ActiveAgentsSidebarPanel: View {
   private var emptyState: some View {
     VStack(spacing: 8) {
       Image(systemName: "sparkles")
-        .font(.system(size: 22, weight: .regular))
+        .font(.system(size: 14, weight: .regular))
         .foregroundStyle(.tertiary)
       Text("Run an agent and it'll show up here.")
         .font(.callout)
