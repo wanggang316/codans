@@ -198,4 +198,3 @@ struct ActiveAgentsSidebarPanel: View {
     .accessibilityIdentifier("activeAgents.sidebarPanel.emptyState")
   }
 }
-
