@@ -9,10 +9,11 @@ private let registryLogger = Logger(
 
 /// Runtime-only state machine that derives each bound agent pane's
 /// runtime state (`waitingForInput` / `loading` / `finished` / `idle`)
-/// from the raw `TerminalEvent` stream plus keyboard / focus side
-/// channels. Designed to be the single source of truth for the
-/// ActiveAgents badge + popover (T5–T7). Nothing is persisted: every
-/// entry is reconstructed from the live event flow at process start.
+/// from the OSC 9;4 progress stream plus keyboard / focus / bell /
+/// notification side channels. Designed to be the single source of
+/// truth for the ActiveAgents badge + popover (T5–T7). Nothing is
+/// persisted: every entry is reconstructed from the live event flow
+/// at process start.
 ///
 /// `entries` is keyed by `PaneID` and exposes one `AgentEntry` per
 /// pane that has been bound via `onAgentBound(_:kind:sessionID:)`. The
@@ -23,10 +24,18 @@ private let registryLogger = Logger(
 /// State priority (see `derive(...)`): `waitingForInput > loading >
 /// finished > idle`. The waiting flag is sticky until the user
 /// observably interacts (keystroke / focus). Loading is a live read
-/// from the `runningPanes` closure. Finished is set when a previously-
-/// loading pane goes quiet, either by leaving `runningPanes` or by
-/// firing `paneIdle` while `prevPhase == .loading`. Idle is the
-/// default fall-through.
+/// from the `runningPanes` closure — i.e. OSC 9;4 progress reports
+/// are the *only* "agent is working" signal. Title / output bursts
+/// are not treated as activity heartbeats because they fire for many
+/// reasons unrelated to "agent is doing real work" (TUI cursor
+/// redraws, context bars, prompt animation) and produced false
+/// `.loading` while the user was sitting at an input prompt. Agents
+/// that don't emit OSC 9;4 (Codex, pi, ...) therefore won't surface
+/// a `.loading` state until they adopt the protocol or shell-
+/// integration provides equivalent command boundaries. Finished is
+/// set when a previously-loading pane goes quiet, either by leaving
+/// `runningPanes` or by firing `paneIdle` while `prevPhase ==
+/// .loading`. Idle is the default fall-through.
 ///
 /// Lifecycle teardown (`paneExited` / `paneCrashed` / `paneClosedByTab`)
 /// drops both the entry and its scratch — the popover row disappears
@@ -65,35 +74,15 @@ final class AgentRegistry {
   private(set) var entries: [PaneID: AgentEntry] = [:]
 
   /// Per-pane derivation scratch. Kept around for all panes the
-  /// registry has heard about (bound or not) so a pane that fires
-  /// `paneOutput` before its agent is identified still has the
-  /// correct `prevPhase` when `onAgentBound` lands. Dropped on
-  /// teardown / unbind.
+  /// registry has heard about (bound or not) so signals that arrive
+  /// before an agent is identified still leave the correct
+  /// `prevPhase` when `onAgentBound` lands. Dropped on teardown /
+  /// unbind.
   private struct Scratch {
     var prevPhase: PrevPhase
     var pendingFinished: Bool
     var waitingForInput: Bool
-    /// Timestamp of the most recent `paneOutput` event. Drives
-    /// output-driven loading for agents that don't emit OSC 9;4
-    /// progress reports (Codex, pi, …): if output landed in the
-    /// past `outputLoadingWindow`, the pane reads as `.loading`
-    /// regardless of the `runningPanes` set. Cleared by the decay
-    /// task when output goes quiet long enough.
-    var lastOutputAt: Date?
   }
-
-  /// Time window during which a recent `paneOutput` event keeps the
-  /// pane in `.loading`. Picked to bridge typical inter-line gaps in
-  /// agent output (Codex / pi emit chatty streams with brief pauses)
-  /// while still letting the panel relax to idle within a few seconds
-  /// of work actually stopping.
-  private static let outputLoadingWindow: TimeInterval = 2.5
-
-  /// Per-pane decay Task — fires `decayOutputLoading` after the
-  /// `outputLoadingWindow` so the registry can transition out of
-  /// output-driven loading even when no further runtime events arrive.
-  /// Cancelled (or replaced) on every fresh `paneOutput` event.
-  private var outputDecayTasks: [PaneID: Task<Void, Never>] = [:]
 
   private enum PrevPhase: Equatable {
     case idle
@@ -142,8 +131,6 @@ final class AgentRegistry {
   //    output for ≥ idle threshold).
   //  - onTerminalEvent(.paneExited | .paneCrashed | .paneClosedByTab):
   //    teardown — drop entry and scratch.
-  //  - onTerminalEvent(.paneOutput): clear pendingFinished; leave
-  //    waitingForInput alone (agent may still be printing the prompt).
   //  - onTerminalEvent(.paneInfoChanged(.desktopNotification)): run
   //    `DetectionTranslator.classify`; .waitingForInput → set
   //    waitingForInput=true. .taskFinished is *not* mapped to
@@ -157,6 +144,14 @@ final class AgentRegistry {
   //  - onAgentBound: ensure scratch exists, derive current state,
   //    materialise an entry.
   //  - onAgentUnbound: drop entry and scratch.
+  //
+  // Deliberately NOT in the table: `paneOutput`, `paneInfoChanged
+  // (.title | .tabTitle)`. Those fire too liberally to map onto a
+  // working/idle signal — TUI agents redraw their title and emit
+  // output bytes for non-work reasons (cursor blink, prompt context
+  // refresh, scroll redraws) and treating them as activity heartbeats
+  // pinned the registry on `.loading` while the user was actually
+  // sitting at an input prompt.
 
   /// Diff the running-panes set against the previous snapshot and
   /// react per the table above. Called from the engine-event drain
@@ -169,9 +164,7 @@ final class AgentRegistry {
     for paneID in entered {
       var s =
         scratch[paneID]
-        ?? Scratch(
-          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
-        )
+        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
       s.prevPhase = .loading
       s.pendingFinished = false
       scratch[paneID] = s
@@ -180,9 +173,7 @@ final class AgentRegistry {
     for paneID in left {
       var s =
         scratch[paneID]
-        ?? Scratch(
-          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
-        )
+        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
       if s.prevPhase == .loading {
         s.pendingFinished = true
       }
@@ -193,20 +184,15 @@ final class AgentRegistry {
   }
 
   /// Single funnel for the runtime's typed event stream. The registry
-  /// reacts only to a small subset (output / idle / teardown / a few
-  /// info deltas); other cases are silent no-ops.
+  /// reacts only to a small subset (idle / teardown / notification /
+  /// bell); other cases are silent no-ops.
   func onTerminalEvent(_ event: TerminalEvent) {
     registryLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
     switch event {
-    case .paneOutput(let paneID, _):
-      applyActivityHeartbeat(paneID: paneID)
-
     case .paneIdle(let paneID, _):
       var s =
         scratch[paneID]
-        ?? Scratch(
-          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
-        )
+        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
       if s.prevPhase == .loading {
         s.pendingFinished = true
       }
@@ -226,24 +212,13 @@ final class AgentRegistry {
       // `agentUnboundHandler → onAgentUnbound`, which already drops
       // entry + scratch for bound panes. By the time this branch
       // runs the entry is usually gone. This branch is still
-      // load-bearing for two cases:
-      //   1. Never-bound panes whose scratch accumulated from
-      //      `paneOutput` between `paneCreated` and the first
-      //      classification attempt — those never see the binder's
-      //      unbind path and would leak `scratch` + `lastRunning`
-      //      entries without this purge.
-      //   2. Callers that drive the registry directly (tests,
-      //      future non-binder consumers) without going through
-      //      AgentBinder.
-      // The redundant removeValue for an already-unbound pane is a
-      // single `@Observable` no-op write — keeping it removes a
-      // class of future regression where someone routes around the
-      // binder and forgets the cleanup.
+      // load-bearing for callers that drive the registry directly
+      // (tests, future non-binder consumers) without going through
+      // AgentBinder. The redundant removeValue for an already-
+      // unbound pane is a single `@Observable` no-op write.
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
       lastRunning.remove(paneID)
-      outputDecayTasks[paneID]?.cancel()
-      outputDecayTasks.removeValue(forKey: paneID)
 
     case .paneInfoChanged(let paneID, let delta):
       switch delta {
@@ -273,25 +248,16 @@ final class AgentRegistry {
         scratch[paneID] = s
         recompute(paneID)
 
-      case .title, .tabTitle:
-        // Alt-screen TUI agents (Codex, pi, claude interactive) render
-        // through libghostty without flowing bytes through the
-        // `.paneOutput` channel, but they DO update their terminal
-        // title rapidly while working (4-5 Hz observed for pi). Reuse
-        // the output-driven loading machinery: every title delta is
-        // an activity heartbeat → arms `.loading` and pushes the
-        // decay deadline forward. When work stops, title updates stop
-        // and decay flips the row back to idle.
-        applyActivityHeartbeat(paneID: paneID)
-
       default:
-        // pwd / mouse / progress / size etc. — not signals the state
-        // machine cares about. (.progress feeds running-set diffs via
+        // title / tabTitle / pwd / mouse / progress / size etc. —
+        // not signals the state machine cares about. (.progress
+        // feeds running-set diffs via
         // `TouchCodeApp.dispatchToAgentRegistry` wire 2, not here.)
         break
       }
 
-    case .paneCreated, .paneReady,
+    case .paneOutput,
+      .paneCreated, .paneReady,
       .tabActivated, .tabAutoClosed, .worktreeActivated, .hierarchyMutated,
       .paneActionRequested, .windowActionRequested, .configChanged:
       break
@@ -344,8 +310,6 @@ final class AgentRegistry {
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
     scratch.removeValue(forKey: paneID)
-    outputDecayTasks[paneID]?.cancel()
-    outputDecayTasks.removeValue(forKey: paneID)
   }
 
   // MARK: - Derivation
@@ -357,80 +321,15 @@ final class AgentRegistry {
   private func derive(paneID: PaneID, isRunning: Bool) -> AgentRuntimeState {
     let s =
       scratch[paneID]
-        ?? Scratch(
-          prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
-        )
+        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
     if s.waitingForInput { return .waitingForInput }
-    // Loading from either signal: OSC 9;4 busy (Claude Code) OR a
-    // recent paneOutput (Codex / pi / anything else that doesn't
-    // emit OSC 9;4). The output window is short so output bursts
-    // bridge gaps but quiet panes flip back to idle.
-    if isRunning || isOutputLoadingActive(s) { return .loading }
+    // Loading is exactly "OSC 9;4 currently reports busy". Defensive
+    // 15s auto-reset lives at the surface layer (see PaneSurface) so
+    // a misbehaving emitter that never clears can't pin the row on
+    // `.loading` forever.
+    if isRunning { return .loading }
     if s.pendingFinished { return .finished }
     return .idle
-  }
-
-  /// True when `lastOutputAt` is within the output-loading window.
-  /// Comparison uses the injected `now` closure so tests stay
-  /// deterministic.
-  private func isOutputLoadingActive(_ s: Scratch) -> Bool {
-    guard let lastOutput = s.lastOutputAt else { return false }
-    return now().timeIntervalSince(lastOutput) < Self.outputLoadingWindow
-  }
-
-  /// Common entry point for "the pane just showed signs of activity".
-  /// Bumped on every `paneOutput` (line-mode agents like Claude Code
-  /// outside of TUI) and on every `paneInfoChanged(.title)` /
-  /// `.tabTitle` (alt-screen TUI agents like Codex and pi). Clears
-  /// `pendingFinished`, stamps `lastOutputAt`, schedules the decay
-  /// task, and recomputes the surfaced state.
-  private func applyActivityHeartbeat(paneID: PaneID) {
-    var s =
-      scratch[paneID]
-      ?? Scratch(
-        prevPhase: .idle, pendingFinished: false, waitingForInput: false, lastOutputAt: nil
-      )
-    s.pendingFinished = false
-    s.lastOutputAt = now()
-    scratch[paneID] = s
-    scheduleOutputDecay(for: paneID)
-    registryLogger.debug(
-      "activity pane=\(paneID.raw.uuidString, privacy: .public) bound=\(self.entries[paneID] != nil, privacy: .public)"
-    )
-    recompute(paneID)
-  }
-
-  /// Replace (cancel + schedule) the per-pane decay task that fires
-  /// once the output-loading window has elapsed without a fresh
-  /// activity heartbeat. The fired task calls `decayOutputLoading(_:)`
-  /// which arms `pendingFinished` (mirroring the running-set-leave
-  /// transition for OSC 9;4 agents) and clears `lastOutputAt`.
-  private func scheduleOutputDecay(for paneID: PaneID) {
-    outputDecayTasks[paneID]?.cancel()
-    outputDecayTasks[paneID] = Task { @MainActor [weak self] in
-      try? await Task.sleep(for: .seconds(Self.outputLoadingWindow + 0.05))
-      guard let self, !Task.isCancelled else { return }
-      self.decayOutputLoading(for: paneID)
-    }
-  }
-
-  /// Called from the decay task when the output-loading window has
-  /// elapsed. Defensive against races: a `paneOutput` that arrived
-  /// between the sleep and the wake re-stamps `lastOutputAt`, so the
-  /// elapsed-window check stays the source of truth.
-  private func decayOutputLoading(for paneID: PaneID) {
-    guard var s = scratch[paneID], let lastOutput = s.lastOutputAt else { return }
-    let elapsed = now().timeIntervalSince(lastOutput)
-    guard elapsed >= Self.outputLoadingWindow else { return }
-    // Output-driven loading just ended — mirror the running-set-leave
-    // transition (`pendingFinished` so the next focus / keystroke /
-    // new output flips back to idle, or paneIdle / teardown surfaces
-    // `.finished` if no user action arrives).
-    s.pendingFinished = true
-    s.lastOutputAt = nil
-    scratch[paneID] = s
-    outputDecayTasks.removeValue(forKey: paneID)
-    recompute(paneID)
   }
 
   /// Diagnostic tag — short shape-only string for the active log

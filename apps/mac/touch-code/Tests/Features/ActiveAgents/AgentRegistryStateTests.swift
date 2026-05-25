@@ -49,10 +49,36 @@ struct AgentRegistryStateTests {
     #expect(f.registry.entries[f.paneID]?.state == .finished)
   }
 
-  /// (4) From `.finished`, `paneOutput` clears `pendingFinished` →
-  /// `.idle` (no running, no waiting, no pending finished).
+  /// (4) From `.finished`, the running set re-entering (a fresh
+  /// OSC 9;4 busy report) clears `pendingFinished` and flips the
+  /// pane back to `.loading`. `paneOutput` and title heartbeats no
+  /// longer drive transitions — OSC 9;4 is the sole "working"
+  /// signal, so the cycle is fully self-healing through the
+  /// running-set channel without needing a separate output-based
+  /// nudge.
   @Test
-  func paneOutputClearsFinishedBackToIdle() {
+  func runningPanesReEnteringClearsFinishedBackToLoading() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.running.setValue([f.paneID])
+    f.registry.onRunningPanesChanged([f.paneID])
+    f.running.setValue([])
+    f.registry.onRunningPanesChanged([])
+    #expect(f.registry.entries[f.paneID]?.state == .finished)
+
+    f.running.setValue([f.paneID])
+    f.registry.onRunningPanesChanged([f.paneID])
+    #expect(f.registry.entries[f.paneID]?.state == .loading)
+  }
+
+  /// (4b) `paneOutput` is intentionally not a state signal: a
+  /// `.finished` pane stays `.finished` when raw output arrives.
+  /// TUI agents (and even shell-mode agents painting their prompt)
+  /// stream output for non-work reasons; treating it as activity
+  /// pinned the registry on `.loading` while the user was sitting
+  /// at an input prompt.
+  @Test
+  func paneOutputDoesNotChangeFinishedState() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
     f.running.setValue([f.paneID])
@@ -62,6 +88,22 @@ struct AgentRegistryStateTests {
     #expect(f.registry.entries[f.paneID]?.state == .finished)
 
     f.registry.onTerminalEvent(.paneOutput(f.paneID, Data()))
+    #expect(f.registry.entries[f.paneID]?.state == .finished)
+  }
+
+  /// (4c) Title and tabTitle deltas are intentionally not state
+  /// signals either: TUI agents update their title for many reasons
+  /// unrelated to "agent is working" (cursor blinks, context bars,
+  /// prompt animation). An `.idle` pane stays `.idle` when title /
+  /// tabTitle arrives.
+  @Test
+  func titleAndTabTitleDeltasDoNotChangeIdleState() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("claude-code")))
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .tabTitle("● claude-code")))
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 

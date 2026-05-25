@@ -294,12 +294,15 @@ system):
 | `runningPanes` gains pane | `prevPhase = .loading`; clear `pendingFinished` |
 | `runningPanes` loses pane | if `prevPhase == .loading`, set `pendingFinished = true`; `prevPhase = .idle` |
 | `TerminalEvent.paneIdle` | if `prevPhase == .loading`, set `pendingFinished = true` |
-| `paneExited` / `paneCrashed` | set `pendingFinished = true` (terminal state until cleared) |
+| `paneExited` / `paneCrashed` / `paneClosedByTab` | drop entry and scratch (teardown) |
 | OSC 9 / bell classified as `waitingForInput` (`DetectionTranslator.classify`) | set `waitingForInput = true` |
 | `PaneKeyboardActivityTracker` records key in pane | clear `waitingForInput`; clear `pendingFinished` |
-| `paneOutput` (new bytes) | clear `pendingFinished`; leave `waitingForInput` untouched (agent may be printing the prompt) |
 | Pane gains focus (selection chain points at it AND app frontmost) | clear `pendingFinished`; clear `waitingForInput` |
 | `agentKind` becomes nil | drop entry from registry |
+
+`paneOutput` and `paneInfoChanged(.title | .tabTitle)` are deliberately **not** in the table. They fire too liberally to map onto a working / idle signal (TUI cursor redraws, prompt context bars, scroll redraws), and treating them as activity heartbeats pinned the registry on `.loading` while the user was sitting at an input prompt. `loading` is therefore exactly "OSC 9;4 currently reports busy". Agents that do not emit OSC 9;4 (Codex, pi, ...) won't surface a `.loading` state until they adopt the protocol — that is the deliberate trade-off.
+
+A defensive 15 s auto-reset lives one layer down in `PaneSurface`: any non-REMOVE OSC 9;4 state schedules a per-surface task that synthesises a REMOVE if no fresh progress event arrives, so a crashed or stuck emitter cannot pin the badge on `.loading` for the rest of the session.
 
 Final state is a pure function of the scratch fields plus the live
 `runningPanes` set:

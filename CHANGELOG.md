@@ -12,6 +12,8 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **Active Agents row state now follows OSC 9;4 only.** The sidebar's "working / waiting / finished / idle" indicator no longer treats terminal output or title updates as activity heartbeats — Claude Code panes were getting pinned on "working" while the user was sitting at the input prompt because the TUI keeps redrawing its title. The flip side: agents that don't emit OSC 9;4 (Codex, pi) no longer surface a "working" state. A 15-second per-surface safety net at the libghostty bridge synthesises a REMOVE if a non-REMOVE OSC 9;4 state goes unrefreshed, so a crashed emitter can't pin the badge indefinitely.
+
 ### Deprecated
 
 ### Removed
