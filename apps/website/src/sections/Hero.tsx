@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import AppWindow from "@/components/AppWindow";
+import AppShell from "@/components/app/AppShell";
 import Button from "@/components/Button";
 import { LINKS } from "@/lib/links";
 
@@ -118,7 +118,7 @@ export default function Hero() {
                   "radial-gradient(700px 220px at 50% 100%, rgba(167,198,92,0.18), transparent 70%)",
               }}
             />
-            <AppWindow />
+            <AppShell />
           </div>
         </motion.div>
       </div>
