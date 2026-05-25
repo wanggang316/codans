@@ -980,7 +980,7 @@ struct HierarchySidebarView: View {
           }
         }
       } label: {
-        Label("Open in", systemImage: "arrow.up.forward.app")
+        Text("Open in")
       }
     }
   }
