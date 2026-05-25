@@ -32,31 +32,29 @@ extension View {
 
 private struct GhosttyChromeTintModifier: ViewModifier {
   @Environment(\.colorScheme) private var colorScheme
-  /// Bumped on `.ghosttyRuntimeConfigApplied` so a user theme / palette
-  /// change re-resolves the band color without an app restart. We deliberately
-  /// observe the *applied* signal (post-swap) rather than `.ghosttyRuntimeReloadRequested`
-  /// (pre-swap) — libghostty hands the new config back asynchronously, so
-  /// the request notification fires while `backgroundColor()` still returns
-  /// the previous palette. `colorScheme` covers the light/dark flip path.
-  @State private var reloadTrigger: Int = 0
+  /// Resolved tint color. Stored in `@State` so re-renders are driven by
+  /// explicit writes from `refresh()` — we observe both the post-swap
+  /// `.ghosttyRuntimeConfigApplied` signal (user theme reload / OS dark-mode
+  /// flip — libghostty hands the new config back asynchronously, so the
+  /// pre-swap `.ghosttyRuntimeReloadRequested` request notification fires
+  /// while `backgroundColor()` still returns the previous palette) and
+  /// `colorScheme` changes (SwiftUI Appearance toggle path).
+  @State private var nsColor: NSColor = .windowBackgroundColor
   let edges: Edge.Set
   let alpha: Double
 
   func body(content: Content) -> some View {
-    // Reading both establishes the SwiftUI dependencies that drive
-    // re-resolution of the underlying NSColor. The runtime returns the
-    // already-resolved palette color, so we don't need a dynamic NSColor.
-    _ = (colorScheme, reloadTrigger)
-    let nsColor = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
-    let color = Color(nsColor: nsColor)
-    return
-      content
-      .modifier(GhosttyChromeTintBands(color: color, alpha: alpha, edges: edges))
-      .onReceive(
-        NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)
-      ) { _ in
-        reloadTrigger &+= 1
+    content
+      .modifier(GhosttyChromeTintBands(color: Color(nsColor: nsColor), alpha: alpha, edges: edges))
+      .onAppear { refresh() }
+      .onChange(of: colorScheme) { _, _ in refresh() }
+      .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+        refresh()
       }
+  }
+
+  private func refresh() {
+    nsColor = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
   }
 }
 

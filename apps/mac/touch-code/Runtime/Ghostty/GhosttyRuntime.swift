@@ -244,6 +244,13 @@ final class GhosttyRuntime {
       pane.applyColorScheme(ghosttyScheme)
     }
     applyBackgroundColorToWindows()
+    // libghostty re-resolves the palette synchronously against the new
+    // conditional state, so `backgroundColor()` already returns the new
+    // tone here. CONFIG_CHANGE may or may not fire back depending on
+    // libghostty's internal diffing; post explicitly so chrome-tint
+    // observers refresh on every appearance flip, not just on config
+    // reloads.
+    NotificationCenter.default.post(name: .ghosttyRuntimeConfigApplied, object: nil)
   }
 
   /// Current ghostty theme background color (from the `background` config
