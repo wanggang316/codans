@@ -1,0 +1,130 @@
+name: update-homebrew-cask
+
+# Publishes touch-code's Homebrew cask to wanggang316/homebrew-tap whenever
+# a stable GitHub Release is published. We trigger on `release: published`
+# (not on tag push) so the cask only updates after the DMG asset is
+# publicly downloadable — the cask's `url` would otherwise 404 until the
+# draft release in release.yml is manually undrafted.
+#
+# Required secret on this repository:
+#   HOMEBREW_TAP_TOKEN   PAT (classic) with `repo` scope on
+#                        wanggang316/homebrew-tap, OR a fine-grained PAT
+#                        with contents:write on that specific repo.
+#
+# One-time bootstrap (outside CI):
+#   1. Create empty repo wanggang316/homebrew-tap (default branch: main)
+#   2. gh secret set HOMEBREW_TAP_TOKEN --body "$PAT_VALUE"
+#
+# Tip-channel releases (`tip` floating tag, marked prerelease) and any
+# release whose tag is not vX.Y.Z are filtered out below.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (vX.Y.Z, must be an existing published release)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update-cask:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve target tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$RELEASE_TAG}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::notice::tag '$TAG' is not vX.Y.Z (likely 'tip' or workflow_dispatch typo) — skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # release: published also fires for tip prereleases — skip them.
+          if [[ -z "$INPUT_TAG" && "$IS_PRERELEASE" == "true" ]]; then
+            echo "::notice::release is marked prerelease — skipping cask update"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tag=$TAG"           >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}"   >> "$GITHUB_OUTPUT"
+          echo "skip=false"         >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.meta.outputs.skip != 'true'
+
+      - name: Download DMG and verify SHA256
+        if: steps.meta.outputs.skip != 'true'
+        id: dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          DMG="TouchCode-${VERSION}.dmg"
+
+          # release.yml uploads both the .dmg and a .dmg.sha256 sidecar
+          # (emitted by apps/mac/scripts/release.sh). Pull both and
+          # cross-check — protects against a swapped or corrupted asset.
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern "$DMG" \
+            --pattern "$DMG.sha256"
+
+          EXPECTED=$(awk '{print $1}' "$DMG.sha256")
+          ACTUAL=$(shasum -a 256 "$DMG" | awk '{print $1}')
+          if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+            echo "::error::sha256 mismatch for $DMG: expected $EXPECTED, got $ACTUAL"
+            exit 1
+          fi
+          echo "sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
+
+      - name: Render cask
+        if: steps.meta.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          ./scripts/render-cask.sh \
+            "${{ steps.meta.outputs.version }}" \
+            "${{ steps.dmg.outputs.sha256 }}" \
+            "$RUNNER_TEMP/touch-code.rb"
+          echo "--- rendered cask ---"
+          cat "$RUNNER_TEMP/touch-code.rb"
+
+      - name: Push cask to wanggang316/homebrew-tap
+        if: steps.meta.outputs.skip != 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          : "${TAP_TOKEN:?secret HOMEBREW_TAP_TOKEN is not set on this repo (see workflow header)}"
+
+          TAP_DIR="$RUNNER_TEMP/tap"
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/wanggang316/homebrew-tap.git" \
+            "$TAP_DIR"
+
+          mkdir -p "$TAP_DIR/Casks"
+          /bin/cp -f "$RUNNER_TEMP/touch-code.rb" "$TAP_DIR/Casks/touch-code.rb"
+
+          cd "$TAP_DIR"
+          if git diff --quiet -- Casks/touch-code.rb; then
+            echo "::notice::cask already at ${TAG} in tap — nothing to push"
+            exit 0
+          fi
+          git config user.name  "touch-code release bot"
+          git config user.email "noreply@touch-code.app"
+          git add Casks/touch-code.rb
+          git commit -m "touch-code ${VERSION}"
+          git push origin HEAD
