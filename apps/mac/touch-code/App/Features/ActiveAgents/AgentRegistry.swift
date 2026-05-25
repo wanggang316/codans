@@ -9,11 +9,12 @@ private let registryLogger = Logger(
 
 /// Runtime-only state machine that derives each bound agent pane's
 /// runtime state (`waitingForInput` / `loading` / `finished` / `idle`)
-/// from the OSC 9;4 progress stream plus keyboard / focus / bell /
-/// notification side channels. Designed to be the single source of
-/// truth for the ActiveAgents badge + popover (T5–T7). Nothing is
-/// persisted: every entry is reconstructed from the live event flow
-/// at process start.
+/// from the OSC 9;4 progress stream, a title-rate heuristic for TUI
+/// agents that don't emit OSC 9;4 around model work, plus keyboard /
+/// focus / bell / notification side channels. Designed to be the
+/// single source of truth for the ActiveAgents badge + popover
+/// (T5–T7). Nothing is persisted: every entry is reconstructed from
+/// the live event flow at process start.
 ///
 /// `entries` is keyed by `PaneID` and exposes one `AgentEntry` per
 /// pane that has been bound via `onAgentBound(_:kind:sessionID:)`. The
@@ -23,19 +24,20 @@ private let registryLogger = Logger(
 ///
 /// State priority (see `derive(...)`): `waitingForInput > loading >
 /// finished > idle`. The waiting flag is sticky until the user
-/// observably interacts (keystroke / focus). Loading is a live read
-/// from the `runningPanes` closure — i.e. OSC 9;4 progress reports
-/// are the *only* "agent is working" signal. Title / output bursts
-/// are not treated as activity heartbeats because they fire for many
-/// reasons unrelated to "agent is doing real work" (TUI cursor
-/// redraws, context bars, prompt animation) and produced false
-/// `.loading` while the user was sitting at an input prompt. Agents
-/// that don't emit OSC 9;4 (Codex, pi, ...) therefore won't surface
-/// a `.loading` state until they adopt the protocol or shell-
-/// integration provides equivalent command boundaries. Finished is
-/// set when a previously-loading pane goes quiet, either by leaving
-/// `runningPanes` or by firing `paneIdle` while `prevPhase ==
-/// .loading`. Idle is the default fall-through.
+/// observably interacts (keystroke / focus). Loading fires from two
+/// sources: (1) OSC 9;4 progress — the live `runningPanes` set; and
+/// (2) a *title-rate* signal — the bound pane's `title` / `tabTitle`
+/// deltas exceed `titleActivityThreshold` events inside the rolling
+/// `titleActivityWindow`. The rate gate is the load-bearing
+/// difference from a naive title heartbeat: a single sporadic title
+/// change at the input prompt (cursor redraw, focus restore, manual
+/// rename) is not enough to flip the row to `.loading`, but the
+/// rapid status / token-counter updates a TUI agent emits while
+/// actually thinking are. Finished is set when a previously-loading
+/// pane goes quiet, either by leaving `runningPanes`, by firing
+/// `paneIdle` while `prevPhase == .loading`, or by the title-rate
+/// signal decaying back below the threshold. Idle is the default
+/// fall-through.
 ///
 /// Lifecycle teardown (`paneExited` / `paneCrashed` / `paneClosedByTab`)
 /// drops both the entry and its scratch — the popover row disappears
@@ -82,6 +84,15 @@ final class AgentRegistry {
     var prevPhase: PrevPhase
     var pendingFinished: Bool
     var waitingForInput: Bool
+    /// Sliding window of recent `title` / `tabTitle` event times.
+    /// Append on each delta, trim to `titleActivityWindow`, then ask
+    /// "is the rate above `titleActivityThreshold`?" before claiming
+    /// the pane is doing work. A single sporadic title change at the
+    /// input prompt (cursor moves, single redraw, focus restore) is
+    /// not enough — a working TUI agent emits several updates per
+    /// second (status spinner, token counter, etc.) and easily clears
+    /// the bar.
+    var titleEventTimes: [Date]
   }
 
   private enum PrevPhase: Equatable {
@@ -90,6 +101,24 @@ final class AgentRegistry {
   }
 
   private var scratch: [PaneID: Scratch] = [:]
+
+  /// Rolling window for title-rate detection.
+  private static let titleActivityWindow: TimeInterval = 2.0
+
+  /// Minimum number of title / tabTitle deltas inside
+  /// `titleActivityWindow` for the pane to read as actively working.
+  /// Picked low enough that a normal TUI status update (typically
+  /// 2–5 Hz) clears the bar quickly, but high enough that a single
+  /// stray redraw at the input prompt does not flip the row to
+  /// `.loading`.
+  private static let titleActivityThreshold: Int = 3
+
+  /// Per-pane decay Task — fires `decayTitleActivity` once
+  /// `titleActivityWindow` has elapsed without a fresh delta, so the
+  /// registry leaves `.loading` even when the agent stops updating
+  /// without firing any other event. Cancelled / replaced on every
+  /// fresh title delta.
+  private var titleDecayTasks: [PaneID: Task<Void, Never>] = [:]
 
   /// Snapshot of currently-running pane IDs (process attached + child
   /// alive). The registry samples this on every input.
@@ -141,17 +170,22 @@ final class AgentRegistry {
   //    detector (DetectionTranslator's bellRang branch).
   //  - onPaneKeyboardActivity / onPaneFocused: clear waitingForInput
   //    *and* pendingFinished — both are "user has observed the pane".
+  //  - onTerminalEvent(.paneInfoChanged(.title | .tabTitle)): append
+  //    `now` to the per-pane title-event window; recompute. Loading
+  //    surfaces only when the count inside `titleActivityWindow`
+  //    crosses `titleActivityThreshold` — so a single sporadic
+  //    redraw at the input prompt is harmless. A per-pane decay task
+  //    re-checks once the window has elapsed so the row falls back
+  //    to `.idle` / `.finished` even if no other event arrives.
   //  - onAgentBound: ensure scratch exists, derive current state,
   //    materialise an entry.
   //  - onAgentUnbound: drop entry and scratch.
   //
-  // Deliberately NOT in the table: `paneOutput`, `paneInfoChanged
-  // (.title | .tabTitle)`. Those fire too liberally to map onto a
-  // working/idle signal — TUI agents redraw their title and emit
-  // output bytes for non-work reasons (cursor blink, prompt context
-  // refresh, scroll redraws) and treating them as activity heartbeats
-  // pinned the registry on `.loading` while the user was actually
-  // sitting at an input prompt.
+  // Deliberately NOT in the table: `paneOutput`. The libghostty
+  // bridge does not currently forward subprocess bytes onto the
+  // engine's output stream (see `PaneSurface.onOutput` — deferred),
+  // so this event is effectively dead in production and would be a
+  // spurious dependency to bind state on.
 
   /// Diff the running-panes set against the previous snapshot and
   /// react per the table above. Called from the engine-event drain
@@ -164,7 +198,7 @@ final class AgentRegistry {
     for paneID in entered {
       var s =
         scratch[paneID]
-        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: [])
       s.prevPhase = .loading
       s.pendingFinished = false
       scratch[paneID] = s
@@ -173,7 +207,7 @@ final class AgentRegistry {
     for paneID in left {
       var s =
         scratch[paneID]
-        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: [])
       if s.prevPhase == .loading {
         s.pendingFinished = true
       }
@@ -185,14 +219,14 @@ final class AgentRegistry {
 
   /// Single funnel for the runtime's typed event stream. The registry
   /// reacts only to a small subset (idle / teardown / notification /
-  /// bell); other cases are silent no-ops.
+  /// bell / title-rate); other cases are silent no-ops.
   func onTerminalEvent(_ event: TerminalEvent) {
     registryLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
     switch event {
     case .paneIdle(let paneID, _):
       var s =
         scratch[paneID]
-        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: [])
       if s.prevPhase == .loading {
         s.pendingFinished = true
       }
@@ -219,6 +253,8 @@ final class AgentRegistry {
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
       lastRunning.remove(paneID)
+      titleDecayTasks[paneID]?.cancel()
+      titleDecayTasks.removeValue(forKey: paneID)
 
     case .paneInfoChanged(let paneID, let delta):
       switch delta {
@@ -231,7 +267,7 @@ final class AgentRegistry {
         if DetectionTranslator.classify(title: title, body: body) == .waitingForInput {
           var s =
             scratch[paneID]
-            ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+            ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: [])
           s.waitingForInput = true
           scratch[paneID] = s
           recompute(paneID)
@@ -243,16 +279,22 @@ final class AgentRegistry {
         // notification that classifies as waitingForInput.
         var s =
           scratch[paneID]
-          ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+          ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: [])
         s.waitingForInput = true
         scratch[paneID] = s
         recompute(paneID)
 
+      case .title, .tabTitle:
+        // Append to the title-event window and recompute. The pane
+        // surfaces as `.loading` only when the rate inside
+        // `titleActivityWindow` clears `titleActivityThreshold`.
+        recordTitleEvent(paneID: paneID)
+
       default:
-        // title / tabTitle / pwd / mouse / progress / size etc. —
-        // not signals the state machine cares about. (.progress
-        // feeds running-set diffs via
-        // `TouchCodeApp.dispatchToAgentRegistry` wire 2, not here.)
+        // pwd / mouse / progress / size etc. — not signals the
+        // state machine cares about. (.progress feeds running-set
+        // diffs via `TouchCodeApp.dispatchToAgentRegistry` wire 2,
+        // not here.)
         break
       }
 
@@ -292,7 +334,9 @@ final class AgentRegistry {
   /// `titleChanged`, by which point `paneOutput` may have arrived).
   func onAgentBound(_ paneID: PaneID, kind: AgentKind, sessionID: String?) {
     if scratch[paneID] == nil {
-      scratch[paneID] = Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+      scratch[paneID] = Scratch(
+        prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: []
+      )
     }
     let isRunning = runningPanes().contains(paneID)
     let initialState = derive(paneID: paneID, isRunning: isRunning)
@@ -310,6 +354,8 @@ final class AgentRegistry {
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
     scratch.removeValue(forKey: paneID)
+    titleDecayTasks[paneID]?.cancel()
+    titleDecayTasks.removeValue(forKey: paneID)
   }
 
   // MARK: - Derivation
@@ -321,15 +367,89 @@ final class AgentRegistry {
   private func derive(paneID: PaneID, isRunning: Bool) -> AgentRuntimeState {
     let s =
       scratch[paneID]
-        ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false)
+        ?? Scratch(
+          prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: []
+        )
     if s.waitingForInput { return .waitingForInput }
-    // Loading is exactly "OSC 9;4 currently reports busy". Defensive
-    // 15s auto-reset lives at the surface layer (see PaneSurface) so
-    // a misbehaving emitter that never clears can't pin the row on
-    // `.loading` forever.
-    if isRunning { return .loading }
+    // Loading fires from either signal:
+    //   - OSC 9;4 busy (Claude Code wrapping a tool call, gh / cargo
+    //     progress UIs, ...). Defensive 15 s surface-layer reset
+    //     handles a misbehaving emitter that never clears.
+    //   - Title-rate above threshold inside the rolling window. This
+    //     is what covers the long thinking / streaming stretches in
+    //     TUI agents that do not emit OSC 9;4 outside of explicit
+    //     tool calls — the status spinner / token counter / phase
+    //     label all update fast enough to clear the bar, while a
+    //     single sporadic redraw at the input prompt does not.
+    if isRunning || isTitleActivityActive(s) { return .loading }
     if s.pendingFinished { return .finished }
     return .idle
+  }
+
+  /// True when the pane's title-event window contains at least
+  /// `titleActivityThreshold` events whose timestamps are inside
+  /// `titleActivityWindow` from `now()`. Comparison uses the injected
+  /// `now` closure so tests stay deterministic.
+  private func isTitleActivityActive(_ s: Scratch) -> Bool {
+    let cutoff = now().addingTimeInterval(-Self.titleActivityWindow)
+    let recent = s.titleEventTimes.filter { $0 > cutoff }
+    return recent.count >= Self.titleActivityThreshold
+  }
+
+  /// Push a title / tabTitle event onto the per-pane window, trim
+  /// stale entries, schedule the decay re-check, and recompute. The
+  /// trim happens here (not lazily in `derive`) so the scratch
+  /// doesn't grow unboundedly for a chatty agent.
+  private func recordTitleEvent(paneID: PaneID) {
+    var s =
+      scratch[paneID]
+      ?? Scratch(
+        prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: []
+      )
+    let cutoff = now().addingTimeInterval(-Self.titleActivityWindow)
+    s.titleEventTimes = s.titleEventTimes.filter { $0 > cutoff }
+    s.titleEventTimes.append(now())
+    // Any title event also means "the agent did something" — clear
+    // pendingFinished so the row doesn't stay on `.finished` while a
+    // fresh title burst is starting.
+    s.pendingFinished = false
+    scratch[paneID] = s
+    scheduleTitleActivityDecay(for: paneID)
+    recompute(paneID)
+  }
+
+  /// Replace (cancel + schedule) the per-pane decay task that fires
+  /// once the rolling title-activity window has elapsed without a
+  /// fresh delta. The fired task simply recomputes; if the windowed
+  /// count has fallen below the threshold the pane falls out of
+  /// `.loading` on its own.
+  private func scheduleTitleActivityDecay(for paneID: PaneID) {
+    titleDecayTasks[paneID]?.cancel()
+    titleDecayTasks[paneID] = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .seconds(Self.titleActivityWindow + 0.05))
+      guard let self, !Task.isCancelled else { return }
+      self.decayTitleActivity(for: paneID)
+    }
+  }
+
+  /// Called from the decay task. Re-evaluates the windowed title
+  /// rate; if it has fallen below the threshold, arms
+  /// `pendingFinished` (mirroring the running-set-leave transition)
+  /// so the next keystroke / focus clears it or the `.finished` cue
+  /// surfaces if the user doesn't interact. Skips the arm when the
+  /// pane is in the OSC 9;4 running set — that signal will drive
+  /// its own finished transition.
+  private func decayTitleActivity(for paneID: PaneID) {
+    guard var s = scratch[paneID] else { return }
+    let cutoff = now().addingTimeInterval(-Self.titleActivityWindow)
+    s.titleEventTimes = s.titleEventTimes.filter { $0 > cutoff }
+    let stillActive = s.titleEventTimes.count >= Self.titleActivityThreshold
+    if !stillActive, !lastRunning.contains(paneID) {
+      s.pendingFinished = true
+    }
+    scratch[paneID] = s
+    titleDecayTasks.removeValue(forKey: paneID)
+    recompute(paneID)
   }
 
   /// Diagnostic tag — short shape-only string for the active log

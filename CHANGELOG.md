@@ -12,7 +12,7 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Active Agents row state now follows OSC 9;4 only.** The sidebar's "working / waiting / finished / idle" indicator no longer treats terminal output or title updates as activity heartbeats — Claude Code panes were getting pinned on "working" while the user was sitting at the input prompt because the TUI keeps redrawing its title. The flip side: agents that don't emit OSC 9;4 (Codex, pi) no longer surface a "working" state. A 15-second per-surface safety net at the libghostty bridge synthesises a REMOVE if a non-REMOVE OSC 9;4 state goes unrefreshed, so a crashed emitter can't pin the badge indefinitely.
+- **Active Agents row state derivation is now rate-gated.** The sidebar's "working / waiting / finished / idle" indicator used to treat every title / tabTitle update as an "agent is working" heartbeat, so Claude Code panes got pinned on "working" whenever the input prompt attracted a stray TUI redraw. The detector now requires several title updates inside a short rolling window before flipping the row to "working" — which leaves the long thinking / streaming stretches of a TUI agent intact (the status spinner and token counter easily clear the bar) while keeping a quiet input prompt at "idle". OSC 9;4 progress reports remain the strong signal for tool-call execution. A 15-second per-surface safety net at the libghostty bridge synthesises a REMOVE if a non-REMOVE OSC 9;4 state goes unrefreshed, so a crashed emitter can't pin the badge indefinitely.
 
 ### Deprecated
 
