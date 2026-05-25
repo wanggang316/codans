@@ -1,8 +1,13 @@
 import AppKit
 import Foundation
 import GhosttyKit
+import OSLog
 import SwiftUI
 import TouchCodeCore
+
+private let chromeTintLogger = Logger(
+  subsystem: "com.touch-code.runtime", category: "chrome-tint-debug"
+)
 
 /// Process-global libghostty façade. Owns one `ghostty_app_t` and the runtime
 /// config whose callbacks route via a user-data pointer back to a weak
@@ -239,6 +244,7 @@ final class GhosttyRuntime {
     let ghosttyScheme: ghostty_color_scheme_e =
       scheme == .dark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
     lastColorScheme = ghosttyScheme
+    chromeTintLogger.log("setColorScheme entry scheme=\(scheme == .dark ? "dark" : "light")")
     ghostty_app_set_color_scheme(app, ghosttyScheme)
     for pane in surfacesByPaneID.values {
       pane.applyColorScheme(ghosttyScheme)
@@ -250,6 +256,7 @@ final class GhosttyRuntime {
     // libghostty's internal diffing; post explicitly so chrome-tint
     // observers refresh on every appearance flip, not just on config
     // reloads.
+    chromeTintLogger.log("setColorScheme posting .ghosttyRuntimeConfigApplied")
     NotificationCenter.default.post(name: .ghosttyRuntimeConfigApplied, object: nil)
   }
 
@@ -263,13 +270,20 @@ final class GhosttyRuntime {
   /// against pixels underneath) reads as the terminal's theme tone rather
   /// than the system window color. Matches supacode's approach.
   func backgroundColor() -> NSColor {
-    guard let config else { return .windowBackgroundColor }
+    guard let config else {
+      chromeTintLogger.log("backgroundColor: no config, returning windowBackgroundColor")
+      return .windowBackgroundColor
+    }
     var color = ghostty_config_color_s()
     let key = "background"
     let keyLen = UInt(key.lengthOfBytes(using: .utf8))
     guard ghostty_config_get(config, &color, key, keyLen) else {
+      chromeTintLogger.log("backgroundColor: ghostty_config_get('background') failed")
       return .windowBackgroundColor
     }
+    chromeTintLogger.log(
+      "backgroundColor resolved RGB=\(color.r),\(color.g),\(color.b) (config handle=\(String(describing: config)))"
+    )
     return NSColor(ghostty: color)
   }
 
@@ -609,6 +623,7 @@ final class GhosttyRuntime {
   /// existing snapshots until ghostty re-applies.
   @MainActor
   func applyClonedConfig(_ cloned: ghostty_config_t) {
+    chromeTintLogger.log("applyClonedConfig entry cloned=\(String(describing: cloned))")
     let old = config
     config = cloned
     if let old { ghostty_config_free(old) }
@@ -617,6 +632,7 @@ final class GhosttyRuntime {
     // landed. `.ghosttyRuntimeReloadRequested` fires *before* the new
     // config exists — observers that need post-reload state should
     // listen here instead.
+    chromeTintLogger.log("applyClonedConfig posting .ghosttyRuntimeConfigApplied")
     NotificationCenter.default.post(name: .ghosttyRuntimeConfigApplied, object: nil)
   }
 
@@ -641,14 +657,22 @@ final class GhosttyRuntime {
   /// `self.config` on our side.
   @MainActor
   func reloadConfig(soft: Bool) {
-    guard let app else { return }
+    chromeTintLogger.log("reloadConfig entry soft=\(soft)")
+    guard let app else {
+      chromeTintLogger.log("reloadConfig: no app handle, bailing")
+      return
+    }
     let pushed: ghostty_config_t?
     if soft, let current = config {
       pushed = ghostty_config_clone(current)
     } else {
       pushed = GhosttyConfigLoader.makeFreshConfig()
     }
-    guard let handle = pushed else { return }
+    guard let handle = pushed else {
+      chromeTintLogger.log("reloadConfig: no pushed config, bailing")
+      return
+    }
+    chromeTintLogger.log("reloadConfig calling ghostty_app_update_config")
     ghostty_app_update_config(app, handle)
     ghostty_config_free(handle)
   }

@@ -1,5 +1,10 @@
 import AppKit
+import OSLog
 import SwiftUI
+
+private let chromeTintLogger = Logger(
+  subsystem: "com.touch-code.runtime", category: "chrome-tint-debug"
+)
 
 /// Paints a low-alpha Ghostty-terminal-background band into the requested
 /// chrome edges of the detail body. The translucent toolbar and floating
@@ -46,15 +51,28 @@ private struct GhosttyChromeTintModifier: ViewModifier {
   func body(content: Content) -> some View {
     content
       .modifier(GhosttyChromeTintBands(color: Color(nsColor: nsColor), alpha: alpha, edges: edges))
-      .onAppear { refresh() }
-      .onChange(of: colorScheme) { _, _ in refresh() }
+      .onAppear {
+        chromeTintLogger.log("modifier onAppear edges=\(String(describing: edges)) alpha=\(alpha)")
+        refresh(reason: "onAppear")
+      }
+      .onChange(of: colorScheme) { _, new in
+        chromeTintLogger.log("modifier onChange(colorScheme) new=\(new == .dark ? "dark" : "light")")
+        refresh(reason: "colorScheme")
+      }
       .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-        refresh()
+        chromeTintLogger.log("modifier received .ghosttyRuntimeConfigApplied")
+        refresh(reason: "configApplied")
       }
   }
 
-  private func refresh() {
-    nsColor = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
+  private func refresh(reason: String) {
+    let resolved = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
+    let srgb = resolved.usingColorSpace(.sRGB)
+    let r = Int((srgb?.redComponent ?? 0) * 255)
+    let g = Int((srgb?.greenComponent ?? 0) * 255)
+    let b = Int((srgb?.blueComponent ?? 0) * 255)
+    chromeTintLogger.log("refresh(\(reason)) → sRGB(\(r),\(g),\(b))")
+    nsColor = resolved
   }
 }
 
