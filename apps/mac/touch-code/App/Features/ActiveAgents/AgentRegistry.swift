@@ -25,9 +25,10 @@ private let registryLogger = Logger(
 ///
 /// Display priority is `waitingForInput > loading > finished > idle`.
 /// The raw blocked flag is sticky until the user observably interacts
-/// (keystroke / focus). Raw working fires from two sources: (1) OSC 9;4
-/// progress — the live `runningPanes` set; and (2) a *title-rate* signal
-/// — the bound pane's `title` / `tabTitle` deltas exceed
+/// (keystroke / focus). Raw working fires only after the bound agent has
+/// observed user input, from two sources: (1) OSC 9;4 progress — the live
+/// `runningPanes` set; and (2) a *title-rate* signal — the bound pane's
+/// `title` / `tabTitle` deltas exceed
 /// `titleActivityThreshold` events inside the rolling
 /// `titleActivityWindow`. Finished is not a raw state: it is the display
 /// form of a pane that moved from active raw state back to idle while the
@@ -77,6 +78,7 @@ final class AgentRegistry {
   private struct Scratch {
     var rawState: AgentRawState
     var seen: Bool
+    var userInputSeen: Bool
     var waitingForInput: Bool
     /// Sliding window of recent `title` / `tabTitle` event times.
     /// Append on each delta, trim to `titleActivityWindow`, then ask
@@ -150,10 +152,12 @@ final class AgentRegistry {
   // Reaction table (see docs/design-docs/active-agents-view.md
   // §"Runtime State Derivation"):
   //
-  //  - onRunningPanesChanged: pane entered → raw `.working`; pane left
-  //    recomputes raw state. If that transition moves from active to
-  //    idle while the pane is not focused, the display state becomes
-  //    `.finished`.
+  //  - onRunningPanesChanged: pane entered / left recomputes raw
+  //    state. Progress only becomes raw `.working`
+  //    after input has been seen for the bound agent, so process
+  //    startup / first-screen loading stays idle. If a later
+  //    transition moves from active to idle while the pane is not
+  //    focused, the display state becomes `.finished`.
   //  - onTerminalEvent(.paneIdle): recompute raw state; if this is the
   //    first active → idle transition observed in the background, the
   //    display state becomes `.finished`.
@@ -194,11 +198,7 @@ final class AgentRegistry {
     lastRunning = now
 
     for paneID in entered {
-      var s =
-        scratch[paneID]
-        ?? Scratch(rawState: .idle, seen: true, waitingForInput: false, titleEventTimes: [])
-      s.rawState = .working
-      scratch[paneID] = s
+      ensureScratch(paneID)
       refresh(paneID)
     }
     for paneID in left {
@@ -251,7 +251,13 @@ final class AgentRegistry {
         if DetectionTranslator.classify(title: title, body: body) == .waitingForInput {
           var s =
             scratch[paneID]
-            ?? Scratch(rawState: .idle, seen: true, waitingForInput: false, titleEventTimes: [])
+            ?? Scratch(
+              rawState: .idle,
+              seen: true,
+              userInputSeen: false,
+              waitingForInput: false,
+              titleEventTimes: []
+            )
           s.waitingForInput = true
           scratch[paneID] = s
           refresh(paneID)
@@ -263,7 +269,13 @@ final class AgentRegistry {
         // notification that classifies as waitingForInput.
         var s =
           scratch[paneID]
-          ?? Scratch(rawState: .idle, seen: true, waitingForInput: false, titleEventTimes: [])
+          ?? Scratch(
+            rawState: .idle,
+            seen: true,
+            userInputSeen: false,
+            waitingForInput: false,
+            titleEventTimes: []
+          )
         s.waitingForInput = true
         scratch[paneID] = s
         refresh(paneID)
@@ -294,6 +306,7 @@ final class AgentRegistry {
   /// flag and marks the pane as observed.
   func onPaneKeyboardActivity(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
+    s.userInputSeen = true
     s.waitingForInput = false
     s.seen = true
     scratch[paneID] = s
@@ -317,7 +330,11 @@ final class AgentRegistry {
   func onAgentBound(_ paneID: PaneID, kind: AgentKind, sessionID: String?) {
     if scratch[paneID] == nil {
       scratch[paneID] = Scratch(
-        rawState: .idle, seen: true, waitingForInput: false, titleEventTimes: []
+        rawState: .idle,
+        seen: true,
+        userInputSeen: false,
+        waitingForInput: false,
+        titleEventTimes: []
       )
     }
     refresh(paneID)
@@ -347,6 +364,7 @@ final class AgentRegistry {
   /// represented here; it is derived later from `seen`.
   private func deriveRawState(_ s: Scratch, isRunning: Bool) -> AgentRawState {
     if s.waitingForInput { return .blocked }
+    guard s.userInputSeen else { return .idle }
     if isRunning || isTitleActivityActive(s) { return .working }
     return .idle
   }
@@ -380,7 +398,11 @@ final class AgentRegistry {
     var s =
       scratch[paneID]
       ?? Scratch(
-        rawState: .idle, seen: true, waitingForInput: false, titleEventTimes: []
+        rawState: .idle,
+        seen: true,
+        userInputSeen: false,
+        waitingForInput: false,
+        titleEventTimes: []
       )
     let cutoff = now().addingTimeInterval(-Self.titleActivityWindow)
     s.titleEventTimes = s.titleEventTimes.filter { $0 > cutoff }
@@ -424,7 +446,11 @@ final class AgentRegistry {
   private func ensureScratch(_ paneID: PaneID) {
     if scratch[paneID] == nil {
       scratch[paneID] = Scratch(
-        rawState: .idle, seen: true, waitingForInput: false, titleEventTimes: []
+        rawState: .idle,
+        seen: true,
+        userInputSeen: false,
+        waitingForInput: false,
+        titleEventTimes: []
       )
     }
   }

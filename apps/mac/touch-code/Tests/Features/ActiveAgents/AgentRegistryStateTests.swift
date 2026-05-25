@@ -27,11 +27,23 @@ struct AgentRegistryStateTests {
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
-  /// (2) After bound, `onRunningPanesChanged([paneID])` → `.loading`.
+  /// (2) Startup progress without post-bind input stays `.idle`.
   @Test
-  func runningPanesEnteringDrivesLoading() {
+  func startupProgressWithoutInputStaysIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.running.setValue([f.paneID])
+    f.registry.onRunningPanesChanged([f.paneID])
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+  }
+
+  /// (2b) After bound input, `onRunningPanesChanged([paneID])`
+  /// → `.loading`.
+  @Test
+  func runningPanesEnteringAfterInputDrivesLoading() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     #expect(f.registry.entries[f.paneID]?.state == .loading)
@@ -42,6 +54,7 @@ struct AgentRegistryStateTests {
   func runningPanesLeavingDrivesFinished() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     f.running.setValue([])
@@ -59,6 +72,7 @@ struct AgentRegistryStateTests {
   func runningPanesReEnteringClearsFinishedBackToLoading() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     f.running.setValue([])
@@ -80,6 +94,7 @@ struct AgentRegistryStateTests {
   func paneOutputDoesNotChangeFinishedState() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     f.running.setValue([])
@@ -134,6 +149,7 @@ struct AgentRegistryStateTests {
     )
     let paneID = PaneID()
     registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
+    registry.onPaneKeyboardActivity(paneID)
 
     // Three title events inside a 2s window — clears the rate gate.
     registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking")))
@@ -161,6 +177,7 @@ struct AgentRegistryStateTests {
     )
     let paneID = PaneID()
     registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
+    registry.onPaneKeyboardActivity(paneID)
 
     registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking")))
     clock.setValue(Date(timeIntervalSince1970: 1_000.5))
@@ -178,11 +195,10 @@ struct AgentRegistryStateTests {
     #expect(registry.entries[paneID]?.state == .finished)
   }
 
-  /// Title-rate startup bursts should not leave a focused pane stuck
-  /// on `.finished` once the burst decays; the user is already looking
-  /// at the pane.
+  /// Title-rate startup bursts should stay idle before the bound agent
+  /// sees input, even when the pane is focused.
   @Test
-  func focusedPaneTitleRateDecayDoesNotSurfaceFinished() async {
+  func focusedPaneStartupTitleRateDoesNotDriveLoading() async {
     let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
     let running = LockIsolated<Set<PaneID>>([])
     let paneID = PaneID()
@@ -199,7 +215,7 @@ struct AgentRegistryStateTests {
     registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting.")))
     clock.setValue(Date(timeIntervalSince1970: 1_001.0))
     registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting..")))
-    #expect(registry.entries[paneID]?.state == .loading)
+    #expect(registry.entries[paneID]?.state == .idle)
 
     clock.setValue(Date(timeIntervalSince1970: 1_010.0))
     try? await Task.sleep(for: .seconds(2.5))
@@ -211,6 +227,7 @@ struct AgentRegistryStateTests {
   func keyboardActivityClearsFinishedBackToIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     f.running.setValue([])
@@ -226,6 +243,7 @@ struct AgentRegistryStateTests {
   func focusClearsFinishedBackToIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     f.running.setValue([])
@@ -245,6 +263,7 @@ struct AgentRegistryStateTests {
     let f = Fixture()
     f.focused.setValue(f.paneID)
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     #expect(f.registry.entries[f.paneID]?.state == .loading)
@@ -263,6 +282,7 @@ struct AgentRegistryStateTests {
   func paneIdleWhileLoadingArmsFinished() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     #expect(f.registry.entries[f.paneID]?.state == .loading)
@@ -285,6 +305,7 @@ struct AgentRegistryStateTests {
   func paneExitedDropsEntry() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     #expect(f.registry.entries[f.paneID] != nil)
@@ -338,6 +359,7 @@ struct AgentRegistryStateTests {
   func waitingForInputBeatsLoading() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
     f.running.setValue([f.paneID])
     f.registry.onRunningPanesChanged([f.paneID])
     #expect(f.registry.entries[f.paneID]?.state == .loading)
@@ -407,6 +429,7 @@ struct AgentRegistryStateTests {
 
     // Advance time and trigger a real transition.
     clock.setValue(Date(timeIntervalSince1970: 2_000))
+    registry.onPaneKeyboardActivity(paneID)
     running.setValue([paneID])
     registry.onRunningPanesChanged([paneID])
     #expect(registry.entries[paneID]?.state == .loading)

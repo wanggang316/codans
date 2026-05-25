@@ -129,17 +129,18 @@ struct AgentNotificationConsistencyTests {
 
   // MARK: - Test D: OSC 9;4 busy lifecycle (loading → finished)
 
-  /// Sequence: bind, runningPanes enters {P1}, paneOutput, runningPanes
-  /// leaves ∅, paneIdle. Registry transitions loading → finished →
-  /// finished (paneIdle while prevPhase==.idle is a no-op). Detector
-  /// fires a `.taskFinished` inbox entry from the paneIdle branch (gated
-  /// on prior paneOutput having flipped the pane into
+  /// Sequence: bind, input, runningPanes enters {P1}, paneOutput,
+  /// runningPanes leaves ∅, paneIdle. Registry transitions loading →
+  /// finished → finished. Detector fires a `.taskFinished` inbox entry
+  /// from the paneIdle branch (gated on prior paneOutput having flipped
+  /// the pane into
   /// `hasProducedOutput` and the duration crossing
   /// `DetectionTranslator.idleThreshold`).
   @Test
   func runningSetLifecycleIsConsistent() async {
     let fixture = Fixture()
     fixture.registry.onAgentBound(fixture.paneID, kind: .claudeCode, sessionID: nil)
+    fixture.registry.onPaneKeyboardActivity(fixture.paneID)
 
     // Step 1: running set enters {P1}. AgentRegistry-only signal — the
     // detector consumes TerminalEvents, not running-set deltas, so there
@@ -161,9 +162,8 @@ struct AgentNotificationConsistencyTests {
     #expect(fixture.registry.entries[fixture.paneID]?.state == .finished)
 
     // Step 4: paneIdle with duration above the detector's threshold.
-    // Registry: prevPhase is now .idle (was flipped by the runningPanes
-    // exit), so paneIdle does NOT re-arm pendingFinished — but it's
-    // already armed; the surfaced state stays at .finished.
+    // Registry: raw state is already idle after the runningPanes exit,
+    // so the surfaced state stays at .finished.
     // Detector: pane has produced output AND duration ≥ idleThreshold,
     // so translator returns a .taskFinished entry.
     let idle = TerminalEvent.paneIdle(fixture.paneID, duration: DetectionTranslator.idleThreshold)
