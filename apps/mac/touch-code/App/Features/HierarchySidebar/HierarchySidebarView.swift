@@ -868,14 +868,14 @@ struct HierarchySidebarView: View {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(worktree.path, forType: .string)
     } label: {
-      Label("Copy as Pathname", systemImage: "doc.on.clipboard")
+      Label("Copy as Pathname", systemImage: "doc.on.doc")
     }
     if let branch = worktree.branch {
       Button {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(branch, forType: .string)
       } label: {
-        Label("Copy as Branch Name", systemImage: "doc.on.clipboard")
+        Label("Copy as Branch Name", systemImage: "doc.on.doc")
       }
     }
 
@@ -1596,7 +1596,8 @@ private func resolveActiveAgentsSourcePath(
   catalog: Catalog
 ) -> (project: String, worktree: String)? {
   for project in catalog.projects {
-    for worktree in project.worktrees where worktree.tabs.contains(where: { tab in
+    for worktree in project.worktrees
+    where worktree.tabs.contains(where: { tab in
       tab.panes.contains(where: { $0.id == paneID })
     }) {
       return (project.name, worktree.name)
