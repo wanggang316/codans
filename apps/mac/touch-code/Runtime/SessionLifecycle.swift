@@ -107,20 +107,15 @@ final class SessionLifecycle {
   /// the reaper into probing dead sockets — the only state worth
   /// resurrecting on the next launch lives in the `.snap` files.
   ///
-  /// Each `.Snapshot` is run synchronously with a per-client deadline
-  /// so a hung daemon cannot block `willTerminate` indefinitely. A
-  /// per-client failure is logged and the loop continues — losing one
-  /// pane's snapshot is preferable to dropping the rest of them.
+  /// All `.Snapshot` round-trips are dispatched in parallel and share
+  /// one wall-clock deadline so a single hung daemon cannot serialise
+  /// the rest. Without parallelism N panes × 5 s/pane could stall quit
+  /// for 5N seconds; with it, total wait is bounded by the slowest
+  /// straggler (capped at the shared budget). Stragglers are logged
+  /// and skipped — losing one pane's snapshot is preferable to
+  /// blocking termination.
   private func snapshotTier(_ liveClients: [ZmxClient]) {
-    for client in liveClients {
-      do {
-        _ = try synchronousSnapshot(client: client)
-      } catch {
-        logger.error(
-          "snapshot failed for pane \(client.paneID, privacy: .public): \(String(describing: error), privacy: .public)"
-        )
-      }
-    }
+    parallelSnapshot(liveClients)
     // Reset the catalog so a prior live-tier write does not survive into
     // the next launch's `SessionReaper.sweep` — the daemons it would
     // reference are now gone. Snapshot-tier resume keys off the `.snap`
@@ -128,50 +123,55 @@ final class SessionLifecycle {
     persist(catalog: SessionCatalog(version: SessionCatalog.currentVersion, sessions: [:]))
   }
 
-  /// Synchronous bridge to `ZmxClient.snapshot()`. `willTerminate` runs
-  /// on the main actor and `ZmxClient.snapshot()` is itself MainActor-
-  /// isolated, so we cannot simply block on a `DispatchSemaphore` —
-  /// that would deadlock the actor before the daemon's `EOF` callback
-  /// can hop back onto it. Instead, kick off the async call inside a
-  /// `Task { @MainActor }` and spin `RunLoop.main` in `.default` mode
-  /// until either the Task completes (`result.value` becomes non-nil)
-  /// or the per-client budget elapses. Spinning the runloop keeps the
-  /// MainActor servicing background hops (the read loop's EOF handoff,
-  /// the continuation resume) so the snapshot can actually finish.
-  private func synchronousSnapshot(client: ZmxClient) throws -> URL {
-    let result = SnapshotResult()
-    Task { @MainActor in
-      do {
-        let url = try await client.snapshot()
-        result.value = .success(url)
-      } catch {
-        result.value = .failure(error)
+  /// Fan out `client.snapshot()` across every live client, then spin
+  /// the runloop until every slot is populated or the shared deadline
+  /// elapses. `willTerminate` runs on the main actor and
+  /// `ZmxClient.snapshot()` is itself MainActor-isolated, so we cannot
+  /// block on a semaphore — that would deadlock the actor before the
+  /// daemon's `EOF` callback can hop back onto it. Spinning
+  /// `RunLoop.main` keeps the MainActor servicing background hops
+  /// (the read-loop EOF handoff, the continuation resume) so each
+  /// snapshot can actually finish.
+  private func parallelSnapshot(_ liveClients: [ZmxClient]) {
+    guard !liveClients.isEmpty else { return }
+    let results = liveClients.map { _ in SnapshotResult() }
+    for (client, slot) in zip(liveClients, results) {
+      Task { @MainActor in
+        do {
+          let url = try await client.snapshot()
+          slot.value = .success(url)
+        } catch {
+          slot.value = .failure(error)
+        }
       }
     }
     let deadline = Date().addingTimeInterval(Self.snapshotTimeoutSeconds)
-    while result.value == nil && Date() < deadline {
+    while results.contains(where: { $0.value == nil }) && Date() < deadline {
       // Service one batch of pending events on the main runloop. Capped
       // at 50 ms so a stalled snapshot is still bounded by the outer
       // deadline rather than parking inside Foundation indefinitely.
       RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
     }
-    switch result.value {
-    case .success(let url): return url
-    case .failure(let error): throw error
-    case .none: throw SnapshotError.timedOut(paneID: client.paneID)
+    for (client, slot) in zip(liveClients, results) {
+      switch slot.value {
+      case .success:
+        continue
+      case .failure(let error):
+        logger.error(
+          "snapshot failed for pane \(client.paneID, privacy: .public): \(String(describing: error), privacy: .public)"
+        )
+      case .none:
+        logger.error(
+          "snapshot timed out for pane \(client.paneID, privacy: .public) (shared \(Self.snapshotTimeoutSeconds)s budget exhausted)"
+        )
+      }
     }
   }
 
-  /// 5 s per-client budget for the `.Snapshot` round-trip, expressed
-  /// as a `TimeInterval` so it composes with the `Date()`-based runloop
-  /// spin in `synchronousSnapshot`.
+  /// Shared wall-clock budget for the fan-out `.Snapshot` round-trip.
+  /// Applies to the whole batch — stragglers past this point are
+  /// logged and skipped so the rest of the snapshots still land.
   private static let snapshotTimeoutSeconds: TimeInterval = 5.0
-
-  /// Internal error surfaced when the per-client snapshot budget
-  /// elapses without the daemon completing the `.Snapshot` round-trip.
-  private enum SnapshotError: Error {
-    case timedOut(paneID: PaneID)
-  }
 
   /// Reference-shaped one-shot holder so the Task callback can publish
   /// its outcome to the runloop-spinning waiter without crossing actor
