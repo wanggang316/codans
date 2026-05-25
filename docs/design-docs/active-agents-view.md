@@ -294,12 +294,20 @@ system):
 | `runningPanes` gains pane | `prevPhase = .loading`; clear `pendingFinished` |
 | `runningPanes` loses pane | if `prevPhase == .loading`, set `pendingFinished = true`; `prevPhase = .idle` |
 | `TerminalEvent.paneIdle` | if `prevPhase == .loading`, set `pendingFinished = true` |
-| `paneExited` / `paneCrashed` | set `pendingFinished = true` (terminal state until cleared) |
+| `paneExited` / `paneCrashed` / `paneClosedByTab` | drop entry and scratch (teardown) |
 | OSC 9 / bell classified as `waitingForInput` (`DetectionTranslator.classify`) | set `waitingForInput = true` |
 | `PaneKeyboardActivityTracker` records key in pane | clear `waitingForInput`; clear `pendingFinished` |
-| `paneOutput` (new bytes) | clear `pendingFinished`; leave `waitingForInput` untouched (agent may be printing the prompt) |
+| `paneInfoChanged(.title | .tabTitle)` | append `now` to per-pane title window; trim to `titleActivityWindow`; recompute. `.loading` surfaces only when the count in the window crosses `titleActivityThreshold` |
 | Pane gains focus (selection chain points at it AND app frontmost) | clear `pendingFinished`; clear `waitingForInput` |
 | `agentKind` becomes nil | drop entry from registry |
+
+`loading` therefore fires from two sources: (1) OSC 9;4 progress (`runningPanes` membership) — accurate for Claude Code's tool calls, `gh` / `cargo` progress UIs, and similar; (2) a **title-rate** signal — the bound pane's `title` / `tabTitle` deltas exceed the threshold inside a rolling window. The rate gate is what separates this from a naive title heartbeat: a single sporadic title change at the input prompt (cursor redraw, focus restore, manual rename) is not enough to flip the row, but the rapid status / token-counter updates a TUI agent emits while actually thinking are. The earlier implementation treated every title delta as activity and pinned panes on `.loading` whenever the user sat at an input prompt long enough to attract one stray redraw — the rate gate fixes that without losing detection of the long thinking / streaming stretches between tool calls.
+
+A per-pane decay task re-evaluates the title window once `titleActivityWindow` has elapsed since the last delta, so the row falls out of `.loading` even when the agent simply stops updating its title without firing any other event.
+
+A defensive 15 s auto-reset lives one layer down in `PaneSurface`: any non-REMOVE OSC 9;4 state schedules a per-surface task that synthesises a REMOVE if no fresh progress event arrives, so a crashed or stuck emitter cannot pin the badge on `.loading` for the rest of the session.
+
+`paneOutput` is deliberately **not** in the table. The libghostty bridge does not currently forward subprocess bytes onto the engine's output stream (see `PaneSurface.onOutput` — deferred), so the event is effectively dead in production and binding state on it would be a spurious dependency.
 
 Final state is a pure function of the scratch fields plus the live
 `runningPanes` set:

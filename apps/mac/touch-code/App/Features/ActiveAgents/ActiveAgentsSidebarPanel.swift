@@ -5,9 +5,14 @@ import TouchCodeCore
 /// ActiveAgents panel anchored at the sidebar's bottom safe-area inset.
 ///
 /// Visual brief (per design pass):
-/// - Rounded top corners (10pt) — `.regularMaterial` background drawn
-///   inside the rounded shape so the corner contour reads against the
-///   sidebar's native chrome material instead of blending with it.
+/// - Rounded top corners (10pt) — system glass background drawn inside
+///   the rounded shape. The background is a bridged
+///   `NSVisualEffectView` (`.popover` material with `.behindWindow`
+///   blending) rather than a SwiftUI `Material`, so the panel actually
+///   samples the desktop / window beneath it the way native macOS
+///   chrome (popovers, HUD panels, sidebars) does. SwiftUI's
+///   `Material` is a layer-based blur that cannot reach past the
+///   hosting window.
 /// - Header carries no chrome by default: the title sits on top of the
 ///   panel directly. A capsule resize handle fades in only when the
 ///   cursor enters a narrow strip at the very top (16pt tall) — that
@@ -82,7 +87,10 @@ struct ActiveAgentsSidebarPanel: View {
     }
     .frame(height: clampedHeight)
     .frame(maxWidth: .infinity)
-    .background(.ultraThinMaterial, in: shape)
+    .background(
+      VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
+        .clipShape(shape)
+    )
     .overlay(
       shape.stroke(Color.primary.opacity(0.08), lineWidth: 1)
     )
@@ -188,5 +196,35 @@ struct ActiveAgentsSidebarPanel: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("activeAgents.sidebarPanel.emptyState")
+  }
+}
+
+/// SwiftUI bridge around `NSVisualEffectView` so the panel can use the
+/// real system glass materials (HUD, sidebar, popover, ...) instead of
+/// SwiftUI's `Material` shim. The shim is layer-bound and cannot reach
+/// past the hosting window; the real `NSVisualEffectView` with
+/// `.behindWindow` blending samples the desktop / windows beneath so
+/// the panel matches the native macOS chrome look.
+private struct VisualEffectBackground: NSViewRepresentable {
+  let material: NSVisualEffectView.Material
+  let blendingMode: NSVisualEffectView.BlendingMode
+
+  func makeNSView(context: Context) -> NSVisualEffectView {
+    let view = NSVisualEffectView()
+    view.material = material
+    view.blendingMode = blendingMode
+    // `.active` keeps the blur live even when the host window is not
+    // key — without this the panel goes flat / opaque on focus loss
+    // because the default `.followsWindowActiveState` would treat
+    // every background window as inactive.
+    view.state = .active
+    view.isEmphasized = false
+    view.autoresizingMask = [.width, .height]
+    return view
+  }
+
+  func updateNSView(_ view: NSVisualEffectView, context: Context) {
+    view.material = material
+    view.blendingMode = blendingMode
   }
 }
