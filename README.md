@@ -2,6 +2,14 @@
 
 A native macOS app that orchestrates terminals into a four-level hierarchy — Project → Worktree → Tab → Pane — for CLI-agent power users. Ships with the `tc` companion CLI and a published Agent Skill, all built from a Tuist-managed monorepo.
 
+## Install
+
+```bash
+brew install --cask wanggang316/tap/touch-code
+```
+
+The cask installs `TouchCode.app` into `/Applications` and symlinks the embedded `tc` CLI into Homebrew's `bin`. Subsequent updates flow through the in-app Sparkle updater; `brew upgrade --cask touch-code` also picks up new stable releases.
+
 ## Requirements
 
 - macOS with Xcode **26.0+** (pinned via `apps/mac/Tuist.swift`)
@@ -48,6 +56,7 @@ All project knowledge lives in [`docs/`](docs/):
 - [Product specs](docs/product-specs/) — what the product is
 - [Design docs](docs/design-docs/) — feature and system designs
 - [Execution plans](docs/exec-plans/) — versioned plans with progress
+- [Homebrew release pipeline](docs/homebrew.md) — cask, tap, and the auto-publish workflow
 
 Agent-facing entry point: [`AGENTS.md`](AGENTS.md) (also exposed as `CLAUDE.md`).
 
