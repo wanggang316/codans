@@ -12,8 +12,6 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Active Agents row state derivation is now rate-gated.** The sidebar's "working / waiting / finished / idle" indicator used to treat every title / tabTitle update as an "agent is working" heartbeat, so Claude Code panes got pinned on "working" whenever the input prompt attracted a stray TUI redraw. The detector now requires several title updates inside a short rolling window before flipping the row to "working" — which leaves the long thinking / streaming stretches of a TUI agent intact (the status spinner and token counter easily clear the bar) while keeping a quiet input prompt at "idle". OSC 9;4 progress reports remain the strong signal for tool-call execution. A 15-second per-surface safety net at the libghostty bridge synthesises a REMOVE if a non-REMOVE OSC 9;4 state goes unrefreshed, so a crashed emitter can't pin the badge indefinitely.
-
 ### Deprecated
 
 ### Removed
@@ -21,6 +19,26 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 ### Security
+
+## [0.3.1] - 2026-05-25
+
+### Added
+
+- **Homebrew install.** `brew install --cask wanggang316/tap/touch-code` installs the notarized build; the app keeps updating itself through Sparkle.
+- **Copy as Pathname / Copy Branch Name** in the worktree right-click menu. The branch entry hides itself for detached-HEAD or folder-only worktrees.
+
+### Changed
+
+- **Agents View row state is steadier.** The working / waiting / finished / idle indicator no longer pins Claude Code panes on "working" when an idle input prompt redraws. Long thinking and streaming stretches still register, and a crashed agent clears itself within 15 seconds.
+- **Sidebar and toolbar tone follow the terminal palette.** Window chrome reads light or dark from the active Ghostty background so the sidebar no longer clashes with the terminal.
+- **Settings window opens at its compact default size** instead of stretching to fit content.
+
+### Fixed
+
+- **No more black title-bar bleed** when no project is open.
+- **Settings → Appearance** no longer paints a system focus ring around the selected theme tile.
+- **Pending worktree rows align with their siblings** under the project header instead of sitting flush-left.
+- **Agents View sidebar uses the system glass panel material** instead of a flat fill.
 
 ## [0.3.0] - 2026-05-24
 
