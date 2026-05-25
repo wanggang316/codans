@@ -60,6 +60,13 @@ struct SettingsGeneralView: View {
     )
   }
 
+  private var crashReportsEnabledBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.crashReportsEnabled },
+      set: { settingsStore.setCrashReportsEnabled($0) }
+    )
+  }
+
   /// Installed git clients surfaced under "Default Git Viewer". Sourced from the
   /// editor feature's `describe()` cache so only installed apps show up; the
   /// `gitClientPriority` filter walks `EditorRegistry`'s git-tool group in its
@@ -121,6 +128,16 @@ struct SettingsGeneralView: View {
         Toggle("Auto-open Agents View", isOn: agentsViewAutoOpenBinding)
       } footer: {
         Text("The sidebar panel opens automatically when an agent is running.")
+      }
+
+      Section {
+        Toggle("Send crash reports", isOn: crashReportsEnabledBinding)
+      } footer: {
+        Text(
+          "Helps fix problems by uploading anonymous crash details when the app "
+            + "stops unexpectedly. No file contents, terminal output, or personal "
+            + "information are sent. A change takes effect after the next launch."
+        )
       }
     }
     .formStyle(.grouped)

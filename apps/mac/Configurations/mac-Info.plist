@@ -34,5 +34,7 @@
 	<string>bRg+MnS8YhPSuwCkPXyrJ7RvwtYGy2vH0HR+1h/IUXo=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<key>SentryDSN</key>
+	<string>$(SENTRY_DSN)</string>
 </dict>
 </plist>

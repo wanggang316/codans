@@ -189,6 +189,20 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  /// Toggles crash reporting at runtime. Persists the new value to
+  /// settings.json. Disabling here is a hint for *future* launches — the
+  /// Sentry SDK is bootstrapped once at `init()` from the on-disk value, so
+  /// a runtime opt-out only fully stops uploads after a relaunch. Disabling
+  /// also clears the install identifier so a re-enable starts fresh.
+  func setCrashReportsEnabled(_ enabled: Bool) {
+    guard settings.general.crashReportsEnabled != enabled else { return }
+    settings.general.crashReportsEnabled = enabled
+    if !enabled {
+      InstallIdentifier.reset()
+    }
+    scheduleSave()
+  }
+
   // MARK: - Updates (Sparkle preferences mirrored in settings.json)
 
   func setUpdateChannel(_ channel: UpdateChannel) {

@@ -1,2 +1,13 @@
 MARKETING_VERSION = 0.3.1
 CURRENT_PROJECT_VERSION = 20260525002
+
+// Optional per-machine secrets (DSN, signing IDs, …). Tracked via
+// Secrets.xcconfig.template; the live file is gitignored. The leading `?`
+// makes the include optional, so contributors without a Secrets.xcconfig
+// still produce working builds (Sentry simply bootstraps with an empty
+// DSN and no-ops — see CrashReporting.bootstrap).
+#include? "Secrets.xcconfig"
+
+// Fallback so `$(SENTRY_DSN)` substitution into mac-Info.plist never
+// leaves a literal placeholder string when Secrets.xcconfig is absent.
+SENTRY_DSN =
