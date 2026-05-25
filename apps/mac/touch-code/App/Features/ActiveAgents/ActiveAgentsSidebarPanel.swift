@@ -7,10 +7,10 @@ import TouchCodeCore
 /// Visual brief (per design pass):
 /// - Rounded top corners (10pt) — system glass background drawn inside
 ///   the rounded shape. The background is a bridged
-///   `NSVisualEffectView` (`.hudWindow` material with `.behindWindow`
+///   `NSVisualEffectView` (`.popover` material with `.behindWindow`
 ///   blending) rather than a SwiftUI `Material`, so the panel actually
 ///   samples the desktop / window beneath it the way native macOS
-///   chrome (HUD panels, popovers, sidebars) does. SwiftUI's
+///   chrome (popovers, HUD panels, sidebars) does. SwiftUI's
 ///   `Material` is a layer-based blur that cannot reach past the
 ///   hosting window.
 /// - Header carries no chrome by default: the title sits on top of the
@@ -88,7 +88,7 @@ struct ActiveAgentsSidebarPanel: View {
     .frame(height: clampedHeight)
     .frame(maxWidth: .infinity)
     .background(
-      VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow)
+      VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
         .clipShape(shape)
     )
     .overlay(
