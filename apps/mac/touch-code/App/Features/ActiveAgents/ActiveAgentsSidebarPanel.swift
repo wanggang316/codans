@@ -199,32 +199,3 @@ struct ActiveAgentsSidebarPanel: View {
   }
 }
 
-/// SwiftUI bridge around `NSVisualEffectView` so the panel can use the
-/// real system glass materials (HUD, sidebar, popover, ...) instead of
-/// SwiftUI's `Material` shim. The shim is layer-bound and cannot reach
-/// past the hosting window; the real `NSVisualEffectView` with
-/// `.behindWindow` blending samples the desktop / windows beneath so
-/// the panel matches the native macOS chrome look.
-private struct VisualEffectBackground: NSViewRepresentable {
-  let material: NSVisualEffectView.Material
-  let blendingMode: NSVisualEffectView.BlendingMode
-
-  func makeNSView(context: Context) -> NSVisualEffectView {
-    let view = NSVisualEffectView()
-    view.material = material
-    view.blendingMode = blendingMode
-    // `.active` keeps the blur live even when the host window is not
-    // key — without this the panel goes flat / opaque on focus loss
-    // because the default `.followsWindowActiveState` would treat
-    // every background window as inactive.
-    view.state = .active
-    view.isEmphasized = false
-    view.autoresizingMask = [.width, .height]
-    return view
-  }
-
-  func updateNSView(_ view: NSVisualEffectView, context: Context) {
-    view.material = material
-    view.blendingMode = blendingMode
-  }
-}

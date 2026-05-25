@@ -605,6 +605,12 @@ final class GhosttyRuntime {
     let old = config
     config = cloned
     if let old { ghostty_config_free(old) }
+    // Fan out so chrome tint, future overlays etc. can re-read derived
+    // values (`backgroundColor()`, ...) once the new config has actually
+    // landed. `.ghosttyRuntimeReloadRequested` fires *before* the new
+    // config exists — observers that need post-reload state should
+    // listen here instead.
+    NotificationCenter.default.post(name: .ghosttyRuntimeConfigApplied, object: nil)
   }
 
   /// Respond to libghostty's app-scoped `reload_config` action. Triggered by:
@@ -720,6 +726,13 @@ extension Notification.Name {
   /// `~/.config/ghostty/config`. `GhosttyRuntime` listens and re-parses the config so
   /// running surfaces pick up the new theme / font without an app restart.
   static let ghosttyRuntimeReloadRequested = Notification.Name("ghosttyRuntimeReloadRequested")
+
+  /// Posted by `GhosttyRuntime.applyClonedConfig` once libghostty has handed
+  /// back the resolved config and it has been swapped into `self.config`.
+  /// Observers that need to re-read derived values (e.g. terminal
+  /// `backgroundColor()` for chrome tint) should listen here — by contrast
+  /// `.ghosttyRuntimeReloadRequested` fires before the new config lands.
+  static let ghosttyRuntimeConfigApplied = Notification.Name("ghosttyRuntimeConfigApplied")
 }
 
 extension NSColor {

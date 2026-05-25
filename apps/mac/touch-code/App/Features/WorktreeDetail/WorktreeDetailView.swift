@@ -80,6 +80,21 @@ struct WorktreeDetailView: View {
   }
 
   var body: some View {
+    detailBody
+      // Paint a low-alpha Ghostty-terminal-background band into the
+      // detail's top + leading safe-area insets. The unified toolbar
+      // (`.toolbarBackground(.hidden)` below) and the macOS 26
+      // floating-sidebar overlay both render their glass material over
+      // the detail content, so painting in those insets is the surface
+      // the chrome actually samples. Without this the chrome is the
+      // neutral system tone regardless of which terminal palette is
+      // active. Skipped in fullscreen because the unified toolbar
+      // collapses and the system reserves no top inset to fill.
+      .ghosttyChromeTint(edges: isWindowFullscreen ? [.leading] : [.top, .leading])
+  }
+
+  @ViewBuilder
+  private var detailBody: some View {
     if let pending = activePendingWorktree {
       WorktreeLoadingView(info: loadingInfo(for: pending))
     } else if let address = resolveAddress() {
