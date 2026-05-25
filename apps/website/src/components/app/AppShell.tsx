@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { EditorIcon } from "./EditorIcon";
 import {
   AgentClaude,
   AgentCodex,
@@ -429,13 +430,17 @@ function OpenInSplitButton({
         menuOpen ? "border-leaf-500/50" : "border-white/[0.08]"
       }`}
     >
+      {/* Primary half mirrors HeaderOpenSplitButton.primaryLabel — the
+          "Open in " prefix is dropped per the SwiftUI implementation; the
+          editor app icon already conveys the verb. The descriptive form
+          stays in the tooltip via `title`. */}
       <button
         type="button"
-        title={`Open in ${editor.name} (${editor.chord ?? ""})`}
+        title={`Open in ${editor.name}${editor.chord ? ` (${editor.chord})` : ""}`}
         className="flex cursor-pointer items-center gap-1.5 px-2 text-[12px] text-ink hover:bg-white/[0.06]"
       >
-        <EditorGlyph id={editor.id} />
-        <span>Open in {editor.name}</span>
+        <EditorIcon id={editor.id} size={14} />
+        <span>{editor.name}</span>
       </button>
       <span className="w-px self-stretch bg-white/[0.08]" />
       <button
@@ -448,27 +453,6 @@ function OpenInSplitButton({
         <CaretDown size={10} />
       </button>
     </div>
-  );
-}
-
-/** Generic editor glyph — abstract letter chip, sized to feel like an app-mark. */
-function EditorGlyph({ id }: { id: string }) {
-  const map: Record<string, { letter: string; bg: string; fg: string }> = {
-    vscode: { letter: "V", bg: "#007ACC", fg: "#ffffff" },
-    cursor: { letter: "C", bg: "#1f1f24", fg: "#E8E8EA" },
-    zed: { letter: "Z", bg: "#10131B", fg: "#FFE8B7" },
-    xcode: { letter: "Xc", bg: "#147EFB", fg: "#ffffff" },
-    sublime: { letter: "S", bg: "#1A1B22", fg: "#FE7B11" },
-  };
-  const m = map[id] ?? { letter: "?", bg: "#444", fg: "#fff" };
-  return (
-    <span
-      className="grid h-[14px] w-[14px] place-items-center rounded-[3px] text-[8px] font-bold"
-      style={{ background: m.bg, color: m.fg }}
-      aria-hidden
-    >
-      {m.letter}
-    </span>
   );
 }
 
@@ -730,19 +714,29 @@ function WorktreeRowView({
   const checks = row.pr?.checks;
   const showBranch = row.branch && row.branch !== row.name;
 
+  // Worktree rows render at level 2 under the Project header. The real
+  // app applies `listRowInsets(EdgeInsets(top:2, leading:14, …))` plus a
+  // clip-view-driven visual indent — together that pushes content roughly
+  // a chevron-width to the right of the section header text. We mirror
+  // it with a `pl-5` lead so the icon column lines up under the project
+  // name's first character.
+  // Bell glyph at row level uses 12pt in the SwiftUI source
+  // (WorktreeRowIcon's `frame(width:12, height:12)`), whereas other
+  // glyphs render at 14pt inside their slot.
+  const iconSize = row.unreadBell ? 12 : 14;
   return (
     <li>
       <button
         type="button"
         onClick={onClick}
-        className={`group relative flex w-full cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-left transition-colors ${
+        className={`group relative flex w-full cursor-pointer items-center gap-1.5 rounded py-1 pl-5 pr-1.5 text-left transition-colors ${
           isSelected
             ? "bg-[#2C6BCB]/55 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
             : "text-ink/90 hover:bg-white/[0.04]"
         }`}
       >
         <span className={`relative flex h-3.5 w-3.5 shrink-0 items-center justify-center ${iconColor}`}>
-          {row.busy ? <Spinner size={12} /> : <Icon size={14} />}
+          {row.busy ? <Spinner size={12} /> : <Icon size={iconSize} />}
           {checks && checks !== "none" && !row.busy && (
             <span className="absolute -bottom-0.5 -right-0.5">
               {checks === "passing" && (
@@ -1009,13 +1003,19 @@ function Detail({ detail }: { detail: { tabs: TabConfig[]; panes: PaneConfig[] }
   const [activeTab, setActiveTab] = useState<string>(() =>
     detail.tabs.find((t) => t.activeByDefault)?.id ?? detail.tabs[0]?.id ?? "",
   );
+  // Only one pane holds first responder at a time — mirrors libghostty's
+  // pane focus semantics. The focused pane animates its cursor; sibling
+  // panes show an outlined static cursor so the user can still see where
+  // their next input would land if they clicked over.
+  const [focusedPane, setFocusedPane] = useState(0);
 
-  // When the selected worktree changes the tabs swap; reset to the new
-  // default. `key` on the tabbar would do the same with less control.
+  // When the selected worktree changes the tabs swap and the pane layout
+  // is reset — drop focus back to the first pane.
   const lastTabsRef = useRef(detail.tabs);
   useEffect(() => {
     if (lastTabsRef.current !== detail.tabs) {
       setActiveTab(detail.tabs.find((t) => t.activeByDefault)?.id ?? detail.tabs[0]?.id ?? "");
+      setFocusedPane(0);
       lastTabsRef.current = detail.tabs;
     }
   }, [detail.tabs]);
@@ -1023,7 +1023,11 @@ function Detail({ detail }: { detail: { tabs: TabConfig[]; panes: PaneConfig[] }
   return (
     <div className="flex flex-col bg-[#0a0a0c]">
       <TabBar tabs={detail.tabs} activeTab={activeTab} onSelect={setActiveTab} />
-      <PaneSplit panes={detail.panes} />
+      <PaneSplit
+        panes={detail.panes}
+        focusedIdx={focusedPane}
+        onFocus={setFocusedPane}
+      />
     </div>
   );
 }
@@ -1086,26 +1090,56 @@ function TabBar({
   );
 }
 
-function PaneSplit({ panes }: { panes: PaneConfig[] }) {
+function PaneSplit({
+  panes,
+  focusedIdx,
+  onFocus,
+}: {
+  panes: PaneConfig[];
+  focusedIdx: number;
+  onFocus: (idx: number) => void;
+}) {
   if (panes.length === 1) {
     return (
       <div className="flex-1">
-        <PaneBody pane={panes[0]} />
+        <PaneBody pane={panes[0]} isFocused onFocus={() => onFocus(0)} />
       </div>
     );
   }
   return (
     <div className="grid flex-1 grid-cols-[1.25fr_1fr] gap-px bg-white/[0.06]">
       {panes.map((p, i) => (
-        <PaneBody key={i} pane={p} />
+        <PaneBody
+          key={i}
+          pane={p}
+          isFocused={i === focusedIdx}
+          onFocus={() => onFocus(i)}
+        />
       ))}
     </div>
   );
 }
 
-function PaneBody({ pane }: { pane: PaneConfig }) {
+function PaneBody({
+  pane,
+  isFocused,
+  onFocus,
+}: {
+  pane: PaneConfig;
+  isFocused: boolean;
+  onFocus: () => void;
+}) {
   return (
-    <div className="relative bg-[#0a0a0c]">
+    <div
+      onClick={onFocus}
+      role="button"
+      tabIndex={0}
+      className={`relative bg-[#0a0a0c] transition-shadow ${
+        isFocused
+          ? "ring-1 ring-inset ring-leaf-500/30"
+          : "cursor-pointer hover:ring-1 hover:ring-inset hover:ring-white/[0.04]"
+      }`}
+    >
       <div className="p-3 font-mono text-[11.5px] leading-[1.6] text-ink/85">
         {pane.lines.map((l, i) => {
           const isPrompt = l.startsWith("$");
@@ -1128,7 +1162,20 @@ function PaneBody({ pane }: { pane: PaneConfig }) {
             waiting for your input
           </div>
         )}
-        <span className="ml-0.5 mt-0.5 inline-block h-[12px] w-[6px] bg-leaf-300 align-middle animate-blink" />
+        {/* Cursor: filled + blinking on the focused pane, outlined static
+            block on background panes — matches libghostty's pane focus
+            semantics (only the first-responder pane animates). */}
+        {isFocused ? (
+          <span
+            className="ml-0.5 mt-0.5 inline-block h-[12px] w-[6px] bg-leaf-300 align-middle animate-blink"
+            aria-hidden
+          />
+        ) : (
+          <span
+            className="ml-0.5 mt-0.5 inline-block h-[12px] w-[6px] align-middle border border-leaf-300/70"
+            aria-hidden
+          />
+        )}
       </div>
     </div>
   );
@@ -1284,10 +1331,10 @@ function EditorRow({ e }: { e: EditorChoice }) {
         className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ${
           e.installed
             ? "cursor-pointer text-ink hover:bg-white/[0.06]"
-            : "cursor-not-allowed text-ink-dim"
+            : "cursor-not-allowed text-ink-dim opacity-60"
         }`}
       >
-        <EditorGlyph id={e.id} />
+        <EditorIcon id={e.id} size={16} />
         <span className="text-[12.5px]">{e.name}</span>
         {!e.installed && (
           <span className="ml-1 text-[10.5px] text-ink-dim">(not found)</span>
