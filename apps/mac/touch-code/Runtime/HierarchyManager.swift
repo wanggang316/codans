@@ -84,7 +84,8 @@ final class HierarchyManager {
             let pane = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex]
             if pane.agentKind != nil || pane.agentSessionID != nil {
               catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentKind = nil
-              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID = nil
+              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID =
+                nil
               mutated = true
             }
           }

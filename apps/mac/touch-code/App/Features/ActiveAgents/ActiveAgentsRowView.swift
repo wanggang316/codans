@@ -257,7 +257,8 @@ private struct LoadingGridIcon: View {
     // Before the begin offset on the first cycle, SVG shows the cell
     // at full opacity (default fill). Compute the phase modulo `cycle`
     // so the wraparound case continues looping after the first cycle.
-    let phase = elapsed >= 0
+    let phase =
+      elapsed >= 0
       ? elapsed.truncatingRemainder(dividingBy: Self.cycle) / Self.cycle
       : 0.0
     if phase < 0.9 {

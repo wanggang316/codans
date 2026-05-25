@@ -1,6 +1,6 @@
 import Foundation
-import Observation
 import OSLog
+import Observation
 import TouchCodeCore
 
 private let registryLogger = Logger(
@@ -440,7 +440,8 @@ final class AgentRegistry {
     case .paneExited(let id, _, _): return "paneExited(\(id.raw.uuidString.prefix(8)))"
     case .paneCrashed(let id, _): return "paneCrashed(\(id.raw.uuidString.prefix(8)))"
     case .paneClosedByTab(let id, _): return "paneClosedByTab(\(id.raw.uuidString.prefix(8)))"
-    case .paneInfoChanged(let id, let delta): return "paneInfoChanged(\(id.raw.uuidString.prefix(8)),\(deltaTag(delta)))"
+    case .paneInfoChanged(let id, let delta):
+      return "paneInfoChanged(\(id.raw.uuidString.prefix(8)),\(deltaTag(delta)))"
     case .paneCreated(let id, _): return "paneCreated(\(id.raw.uuidString.prefix(8)))"
     case .paneReady(let id): return "paneReady(\(id.raw.uuidString.prefix(8)))"
     case .tabActivated: return "tabActivated"

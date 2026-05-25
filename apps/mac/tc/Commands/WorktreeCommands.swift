@@ -64,7 +64,8 @@ struct WorktreeNew: AsyncParsableCommand {
   var name: String?
   @Flag(
     name: .long,
-    help: "If a worktree with the same canonical path already exists, return its id instead of failing with a conflict. Name collisions still fail."
+    help:
+      "If a worktree with the same canonical path already exists, return its id instead of failing with a conflict. Name collisions still fail."
   )
   var reuseExisting: Bool = false
 
@@ -144,12 +145,14 @@ struct WorktreeRemove: AsyncParsableCommand {
   var project: String = "current"
   @Option(
     name: .long,
-    help: "Remove every worktree row in the project whose canonical path equals this path. Mutually exclusive with the positional worktree argument."
+    help:
+      "Remove every worktree row in the project whose canonical path equals this path. Mutually exclusive with the positional worktree argument."
   )
   var byPath: String?
   @Flag(
     name: .long,
-    help: "With --by-path, allow removing more than one matching row. Without --all, --by-path requires exactly one match."
+    help:
+      "With --by-path, allow removing more than one matching row. Without --all, --by-path requires exactly one match."
   )
   var all: Bool = false
 
