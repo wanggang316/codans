@@ -635,6 +635,11 @@ struct HierarchySidebarView: View {
       onRetry: { store.send(.pendingWorktreeRetryTapped(pending.id)) },
       onDiscard: { store.send(.pendingWorktreeDiscardTapped(pending.id)) }
     )
+    // Match the worktree row's `listRowInsets` so the spinner + name line up
+    // with sibling worktree rows. Without this the row renders flush-left
+    // because the clip-view shift compensated by `leading: 14` (see
+    // `worktreeRow`) is not applied.
+    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
   }
 
