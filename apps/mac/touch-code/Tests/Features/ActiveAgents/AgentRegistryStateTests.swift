@@ -50,12 +50,11 @@ struct AgentRegistryStateTests {
   }
 
   /// (4) From `.finished`, the running set re-entering (a fresh
-  /// OSC 9;4 busy report) clears `pendingFinished` and flips the
-  /// pane back to `.loading`. `paneOutput` and title heartbeats no
-  /// longer drive transitions — OSC 9;4 is the sole "working"
-  /// signal, so the cycle is fully self-healing through the
-  /// running-set channel without needing a separate output-based
-  /// nudge.
+  /// OSC 9;4 busy report) flips the pane back to `.loading`.
+  /// `paneOutput` and title heartbeats no longer drive transitions —
+  /// OSC 9;4 is the sole "working" signal, so the cycle is fully
+  /// self-healing through the running-set channel without needing a
+  /// separate output-based nudge.
   @Test
   func runningPanesReEnteringClearsFinishedBackToLoading() {
     let f = Fixture()
@@ -256,12 +255,10 @@ struct AgentRegistryStateTests {
   }
 
   /// (7) From `.loading`, `paneIdle` while still in the running set
-  /// flags `pendingFinished`. The pane is still running per the live
-  /// closure, so derive still returns `.loading` (loading beats
-  /// pendingFinished) — what we assert is that the *subsequent* exit
-  /// from the running set lands on `.finished`. Tests 7a-7b cover both
-  /// readings of the spec: the inline state, and the resulting
-  /// transition after the runtime catches up.
+  /// keeps the surfaced state at `.loading`; what we assert is that
+  /// the *subsequent* exit from the running set lands on `.finished`.
+  /// Tests 7a-7b cover both readings of the spec: the inline state,
+  /// and the resulting transition after the runtime catches up.
   @Test
   func paneIdleWhileLoadingArmsFinished() {
     let f = Fixture()
@@ -270,16 +267,14 @@ struct AgentRegistryStateTests {
     f.registry.onRunningPanesChanged([f.paneID])
     #expect(f.registry.entries[f.paneID]?.state == .loading)
 
-    // paneIdle while loading arms pendingFinished. Per the priority
-    // rule (loading beats pendingFinished), the surfaced state is
-    // still .loading at this instant.
+    // paneIdle while the running set still contains this pane keeps
+    // the surfaced state at .loading.
     f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 30))
     #expect(f.registry.entries[f.paneID]?.state == .loading)
 
-    // Once the running-pane set catches up and the pane leaves,
-    // pendingFinished is *not* re-armed (already true), prevPhase
-    // flips to .idle, and the state surfaces as .finished — proving
-    // the paneIdle arm was load-bearing.
+    // Once the running-pane set catches up and the pane leaves, raw
+    // state moves to idle while unseen, so the display state surfaces
+    // as .finished.
     f.running.setValue([])
     f.registry.onRunningPanesChanged([])
     #expect(f.registry.entries[f.paneID]?.state == .finished)
