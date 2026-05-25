@@ -61,11 +61,21 @@ public final class SessionReaper {
   /// crash between the sweep and the first reattach does not resurrect
   /// stale rows.
   ///
+  /// `livePaneIDs`, when supplied, enables the orphan branch: a daemon
+  /// whose socket answers `connect(2)` but whose `PaneID` is absent
+  /// from the hierarchy catalog has no surface to reattach to. The
+  /// `ensureSurface` path would never claim it, so without this branch
+  /// the daemon would survive untouched until the 7-day stale cutoff
+  /// caught it. Such orphans are killed immediately and pruned in the
+  /// same persist pass as `.dead` rows. Callers that cannot supply the
+  /// hierarchy (e.g. unit tests) pass `nil` to retain the
+  /// liveness-only semantics.
+  ///
   /// Throws only on a fatal read error. Decode failures are surfaced
   /// through `SessionStore.load` as an empty catalog (with the corrupt
   /// file moved aside), so the typical "no usable catalog" path returns
   /// an empty map without throwing.
-  public func sweep() throws -> [PaneID: SessionState] {
+  public func sweep(livePaneIDs: Set<PaneID>? = nil) throws -> [PaneID: SessionState] {
     var catalog = try sessionStore.load()
 
     let now = clock()
@@ -84,6 +94,20 @@ public final class SessionReaper {
           // and the next sweep would re-probe and clean up anyway.
           logger.notice(
             "Killing stale daemon for pane \(session.paneID, privacy: .public): lastAttachedAt=\(session.lastAttachedAt, privacy: .public) older than staleAfter=\(self.staleAfter)s"
+          )
+          Self.sendOneShotKill(socketPath: session.socketPath)
+          states[session.paneID] = .dead(session)
+          deadKeys.append(key)
+          _ = Darwin.unlink(session.socketPath)
+          deleteSnapshotFile(for: session.paneID)
+        } else if let livePaneIDs, !livePaneIDs.contains(session.paneID) {
+          // Orphan daemon: alive on the wire, but no surface in the
+          // hierarchy will ever claim it. Mirror the stale branch —
+          // one-shot kill, prune the row, drop the socket and any
+          // companion snapshot — so resources don't leak across launches
+          // when sessions.json and hierarchy.json fall out of sync.
+          logger.notice(
+            "Killing orphan daemon for pane \(session.paneID, privacy: .public) (not present in hierarchy)"
           )
           Self.sendOneShotKill(socketPath: session.socketPath)
           states[session.paneID] = .dead(session)

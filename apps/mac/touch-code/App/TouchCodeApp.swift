@@ -924,7 +924,11 @@ final class AppState {
 
     let reaper = SessionReaper(sessionStore: sessionStore)
     do {
-      let states = try reaper.sweep()
+      // Pass the current hierarchy's pane ids so the reaper can kill any
+      // alive daemon whose paneID no longer maps to a surface — without
+      // this, an out-of-sync sessions.json vs hierarchy.json would leak
+      // daemons until the 7-day stale window catches them.
+      let states = try reaper.sweep(livePaneIDs: Self.livePaneIDs(in: hierarchyManager.catalog))
       engine.seedReattachableSessions(states)
     } catch {
       // A corrupt catalog or transient I/O error must not block app
