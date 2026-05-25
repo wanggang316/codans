@@ -26,8 +26,13 @@ import {
   LoadingGrid,
   PauseFill,
   PinFill,
+  PlayFill,
   Plus,
+  Refresh,
   Search,
+  SortIcon,
+  Sparkles,
+  SparklesFill,
   StarFill,
   XCircleFill,
 } from "./icons";
@@ -390,9 +395,9 @@ function RunScriptSplitButton({
         title="Run setup.sh (⌘R)"
         className="flex cursor-pointer items-center gap-1.5 px-2 text-[12px] text-ink hover:bg-white/[0.06]"
       >
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" className="text-leaf-300">
-          <path d="M4 3l9 5-9 5V3z" />
-        </svg>
+        <span className="text-leaf-300">
+          <PlayFill size={11} />
+        </span>
         <span>Run</span>
       </button>
       <span className="w-px self-stretch bg-white/[0.08]" />
@@ -952,9 +957,7 @@ function TagFilterFooter({
   return (
     <div className="flex h-7 items-center border-t border-white/[0.06] bg-white/[0.03] px-1.5 backdrop-blur-xl">
       <FooterIcon ariaLabel="Sort projects" help="Sort projects">
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-          <path d="M5 3v10M3 5l2-2 2 2M11 13V3M9 11l2 2 2-2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <SortIcon size={12} />
       </FooterIcon>
       <div className="flex-1" />
       <FooterIcon
@@ -963,18 +966,10 @@ function TagFilterFooter({
         onClick={onAgentsToggle}
         active={agentsOpen}
       >
-        <svg width="13" height="13" viewBox="0 0 16 16" fill={agentsOpen ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.3">
-          <rect x="2.5" y="5.5" width="9" height="6" rx="1.4" />
-          <path
-            d="M12.5 3l.6 1.4L14.5 5l-1.4.6L12.5 7l-.6-1.4L10.5 5l1.4-.6z"
-            fill="currentColor"
-          />
-        </svg>
+        {agentsOpen ? <SparklesFill size={13} /> : <Sparkles size={13} />}
       </FooterIcon>
       <FooterIcon ariaLabel="Refresh all projects" help="Refresh all projects">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-          <path d="M13.5 8a5.5 5.5 0 11-1.7-3.9M13.5 3v3h-3" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Refresh size={12} />
       </FooterIcon>
     </div>
   );
@@ -1332,9 +1327,9 @@ function ScriptRow({ s }: { s: RunScript }) {
         type="button"
         className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-ink transition-colors hover:bg-white/[0.06]"
       >
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" className="text-leaf-300">
-          <path d="M4 3l9 5-9 5V3z" />
-        </svg>
+        <span className="text-leaf-300">
+          <PlayFill size={11} />
+        </span>
         <span className="text-[12.5px]">{s.name}</span>
         <span className="ml-2 font-mono text-[10.5px] text-ink-dim">{s.command}</span>
         {s.chord && (
