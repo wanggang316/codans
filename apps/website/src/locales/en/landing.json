@@ -1,0 +1,56 @@
+{
+  "brand": "touch-code",
+  "nav": {
+    "changelog": "Changelog",
+    "download": "Download",
+    "github": "GitHub"
+  },
+  "hero": {
+    "eyebrow": "Native · macOS",
+    "tagline": "Parallel development for the agent era.",
+    "subtitle": "A Mac-native workspace that turns git worktrees and terminals into a cockpit for many agents.",
+    "primary_cta": "Download for macOS",
+    "secondary_cta": "View on GitHub",
+    "footnote": "Apple Silicon · macOS 14+ · Free & open source"
+  },
+  "matrix": {
+    "eyebrow": "§1 · Parallelism",
+    "title": "Many agents. One cockpit.",
+    "lead": "Sixteen worktrees, sixteen agents, one window. Each pane runs its own session — claude, codex, tests, a dev server — and you keep them in your peripheral vision the way a pilot reads instruments.",
+    "hint": "Hover any tile to isolate it."
+  },
+  "hierarchy": {
+    "eyebrow": "§2 · Model",
+    "title": "From repo to pane in one move.",
+    "lead": "Project → Worktree → Tab → Pane. A four-level hierarchy that maps directly onto how you already think about parallel work, with one keystroke between any two levels."
+  },
+  "worktree": {
+    "eyebrow": "§3 · Branching",
+    "title": "Worktrees, weaponized.",
+    "lead": "Spin up a worktree per task in a single command. Each one gets its own filesystem, its own terminal, its own agent — diverging from main and merging back without ever stashing or context-switching the repo."
+  },
+  "cli": {
+    "eyebrow": "§4 · Scripting",
+    "title": "Drive it from any terminal.",
+    "lead": "The app speaks JSON-RPC over a local Unix socket. Inspect the hierarchy, spawn panes, send keystrokes, read back rendered output, broadcast across panes — every interaction the GUI exposes is a one-liner away."
+  },
+  "native": {
+    "eyebrow": "§5 · Substance",
+    "title": "Native, fast, quiet.",
+    "lead": "Built on libghostty for terminals you can actually feel. Swift 6 with strict concurrency. Tuned for Apple Silicon. Nothing between you and the bytes."
+  },
+  "cta": {
+    "title": "Get touch-code.",
+    "sub": "One drag into /Applications. The tc shim installs itself on first launch.",
+    "primary": "Download .dmg",
+    "secondary": "Read the source"
+  },
+  "footer": {
+    "tagline": "Built for the agent era.",
+    "releases": "Releases",
+    "issues": "Issues",
+    "repo": "Repository",
+    "license": "MIT",
+    "version": "v0.3.0"
+  }
+}
