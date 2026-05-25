@@ -860,7 +860,26 @@ struct HierarchySidebarView: View {
     }
     .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
 
-    // Group 2 — Worktree lifecycle. Hidden for the main checkout (W-Q3
+    // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
+    // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
+    // worktrees, detached HEAD) so the menu never offers an empty copy.
+    Divider()
+    Button {
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(worktree.path, forType: .string)
+    } label: {
+      Label("Copy as Pathname", systemImage: "doc.on.clipboard")
+    }
+    if let branch = worktree.branch {
+      Button {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(branch, forType: .string)
+      } label: {
+        Label("Copy as Branch Name", systemImage: "doc.on.clipboard")
+      }
+    }
+
+    // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
     // guard: cannot pin / archive / remove the project's root worktree).
     if !isMainCheckout {
       Divider()
