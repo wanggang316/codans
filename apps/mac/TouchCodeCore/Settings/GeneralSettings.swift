@@ -77,6 +77,13 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// quit by default.
   public var quitAction: QuitAction
 
+  /// Whether the ActiveAgents sidebar panel should auto-open whenever any
+  /// bound agent transitions into the `loading` state. Default `true`. When
+  /// off, the panel only opens via the sidebar footer's toggle button. The
+  /// panel + footer button stay visible regardless; this setting only
+  /// controls the auto-open behaviour on the rising edge into `loading`.
+  public var agentsViewAutoOpen: Bool
+
   public init(
     appearance: AppearancePreference = .system,
     defaultEditorID: EditorID? = nil,
@@ -88,7 +95,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updatesAutomaticallyCheckForUpdates: Bool = true,
     updatesAutomaticallyDownloadUpdates: Bool = false,
     quitConfirmation: QuitConfirmation = .auto,
-    quitAction: QuitAction = .keepRunning
+    quitAction: QuitAction = .keepRunning,
+    agentsViewAutoOpen: Bool = true
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -101,6 +109,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
     self.quitConfirmation = quitConfirmation
     self.quitAction = quitAction
+    self.agentsViewAutoOpen = agentsViewAutoOpen
   }
 
   public static let `default` = GeneralSettings()
@@ -110,6 +119,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case quitConfirmation, quitAction
+    case agentsViewAutoOpen
     /// Retired in favour of `quitConfirmation` + `quitAction`. Still decoded by
     /// `init(from:)` so legacy settings files migrate transparently on first launch.
     case quitStrategy
@@ -178,6 +188,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       self.quitConfirmation = .auto
       self.quitAction = .keepRunning
     }
+    self.agentsViewAutoOpen =
+      try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoOpen) ?? true
   }
 
   /// Explicit encoder so the retired `resumePanesOnLaunch` / `quitStrategy` CodingKeys
@@ -199,5 +211,6 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       updatesAutomaticallyDownloadUpdates, forKey: .updatesAutomaticallyDownloadUpdates)
     try container.encode(quitConfirmation, forKey: .quitConfirmation)
     try container.encode(quitAction, forKey: .quitAction)
+    try container.encode(agentsViewAutoOpen, forKey: .agentsViewAutoOpen)
   }
 }

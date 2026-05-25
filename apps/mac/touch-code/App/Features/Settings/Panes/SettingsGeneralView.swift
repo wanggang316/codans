@@ -71,6 +71,13 @@ struct SettingsGeneralView: View {
     )
   }
 
+  private var agentsViewAutoOpenBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.agentsViewAutoOpen },
+      set: { settingsStore.setAgentsViewAutoOpen($0) }
+    )
+  }
+
   /// Installed git clients surfaced under "Default Git Viewer". Sourced from the
   /// editor feature's `describe()` cache so only installed apps show up; the
   /// `gitClientPriority` filter walks `EditorRegistry`'s git-tool group in its
@@ -143,6 +150,12 @@ struct SettingsGeneralView: View {
             + "any other choice opens the worktree in that git client. Falls back to "
             + "the built-in viewer if the chosen client is uninstalled later."
         )
+      }
+
+      Section {
+        Toggle("Auto-open Agents View", isOn: agentsViewAutoOpenBinding)
+      } footer: {
+        Text("The sidebar panel opens automatically when an agent is running.")
       }
     }
     .formStyle(.grouped)

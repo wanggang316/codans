@@ -20,6 +20,12 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.3.0] - 2026-05-24
+
+### Added
+
+- **Active Agents sidebar view.** A new sidebar panel lists every pane currently running a coding agent (Claude Code, Codex, pi, opencode) with a live status — working / waiting for input / finished / idle — and a single click jumps you back to that pane. Settings → General has a toggle (on by default) to auto-open the panel whenever an agent is doing real work.
+
 ## [0.2.5] - 2026-05-23
 
 ### Added

@@ -33,7 +33,10 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
       self.fetch = fetch
     }
 
-    isolated deinit {
+    deinit {
+      // `Task.cancel()` is nonisolated and Sendable — no actor hop
+      // needed here. An `isolated deinit` on this generic nested class
+      // crashes Swift 6 IRGen under `-O` (Release).
       expiryTask?.cancel()
     }
 

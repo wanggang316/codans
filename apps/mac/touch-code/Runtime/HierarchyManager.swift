@@ -66,13 +66,40 @@ final class HierarchyManager {
     self.runtime = runtime
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
-    if didStampLegacyTimestamps {
+    let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
+    if didStampLegacyTimestamps || didClearAgentBindings {
       // Persist the migration so successive launches start from the
       // backfilled timestamps rather than re-deriving them on every
       // open (and so the user-visible order is deterministic the
       // moment another writer touches the catalog).
       store.scheduleSave(self.catalog)
     }
+  }
+
+  /// Agent bindings (`Pane.agentKind` + `Pane.agentSessionID`) are
+  /// session-scoped: the pty child that hosted the agent dies when
+  /// touch-code quits, so on every cold start the catalog's stored kind
+  /// describes a process that no longer exists. Keep these fields
+  /// runtime-only by wiping them at launch — AgentBinder re-classifies
+  /// once the user actually runs the agent again. Returns true if any
+  /// pane was mutated.
+  private static func clearAgentBindings(in catalog: inout Catalog) -> Bool {
+    var mutated = false
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          for paneIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes.indices {
+            let pane = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex]
+            if pane.agentKind != nil || pane.agentSessionID != nil {
+              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentKind = nil
+              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID = nil
+              mutated = true
+            }
+          }
+        }
+      }
+    }
+    return mutated
   }
 
   /// Defensive sweep run at load: if any project's `selectedWorktreeID`
@@ -760,6 +787,62 @@ final class HierarchyManager {
                 .panes[paneIndex].labels.remove(label) != nil
             else { return }
           }
+          store.scheduleSave(catalog)
+          return
+        }
+      }
+    }
+  }
+
+  // MARK: - Pane agent identity (active-agents-view T2)
+
+  /// Writes `Pane.agentKind` (the classified CLI agent currently driving
+  /// the pane). `nil` clears the field. Silent no-op on unknown `paneID`.
+  /// Idempotent — a repeat call with the same value is a true no-op
+  /// (no `scheduleSave`, no debounce churn). The single canonical writer
+  /// for `agentKind`; the upcoming `AgentBinder` (active-agents-view T3)
+  /// routes its classification output through here so all persistence
+  /// flows through the standard `store.scheduleSave(catalog)` pipeline.
+  func setPaneAgentKind(_ paneID: PaneID, kind: AgentKind?) {
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
+          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
+            continue
+          }
+          // Idempotent: unchanged value skips persistence so a flood of
+          // identical classifications (e.g. title-update spam on the
+          // same agent) does not wake the 500 ms debounce.
+          guard panes[paneIndex].agentKind != kind else { return }
+          catalog.projects[projectIndex]
+            .worktrees[worktreeIndex]
+            .tabs[tabIndex]
+            .panes[paneIndex].agentKind = kind
+          store.scheduleSave(catalog)
+          return
+        }
+      }
+    }
+  }
+
+  /// Writes `Pane.agentSessionID` (agent-supplied session identifier).
+  /// `nil` clears the field. Silent no-op on unknown `paneID`. Idempotent
+  /// — repeat calls with the same value skip the save. Single canonical
+  /// writer; consumed by `AgentBinder` alongside `setPaneAgentKind`.
+  func setPaneAgentSessionID(_ paneID: PaneID, sessionID: String?) {
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
+          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
+            continue
+          }
+          guard panes[paneIndex].agentSessionID != sessionID else { return }
+          catalog.projects[projectIndex]
+            .worktrees[worktreeIndex]
+            .tabs[tabIndex]
+            .panes[paneIndex].agentSessionID = sessionID
           store.scheduleSave(catalog)
           return
         }

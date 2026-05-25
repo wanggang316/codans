@@ -3,12 +3,22 @@ import Testing
 
 @testable import TouchCode
 
+// Production APIs under test (`MasterTerminalBootstrap.userDirectory(...)`,
+// `.ensureUserDirectory(...)`) are `@MainActor`-isolated, but the
+// `touch-codeTests` target defaults to `nonisolated`. Annotating the suite
+// rather than each test keeps the nested `Fixtures` helper's `masterDir`
+// (which also touches a main-actor API) compilable without extra plumbing.
+@MainActor
 struct MasterTerminalBootstrapTests {
   // MARK: - Helpers
 
+  // `masterDir` calls a `@MainActor` API; pin the helper to the main actor
+  // so it composes with the suite-level annotation (nested types do not
+  // inherit the parent's actor isolation).
   /// Creates a temp directory layout suitable for use as `homeDirectory`,
   /// plus a Bundle whose `MasterTerminalAGENTS.md` resolves to a fixture
   /// file the test owns.
+  @MainActor
   private struct Fixtures {
     let homeDir: URL
     let bundle: Bundle
