@@ -153,6 +153,7 @@ struct TouchCodeApp: App {
       }
       .background(SettingsWindowTag())
     }
+    .defaultSize(width: 750, height: 500)
     .windowResizability(.contentMinSize)
   }
 

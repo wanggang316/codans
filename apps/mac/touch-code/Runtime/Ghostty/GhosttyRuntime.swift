@@ -313,8 +313,16 @@ final class GhosttyRuntime {
   /// Push the current ghostty theme background to every NSWindow in the app.
   /// Called on color-scheme changes (from `setColorScheme`) and, through
   /// `WindowAppearanceSetter`, on appearance-preference toggles. Idempotent.
+  ///
+  /// Also refreshes each non-Settings window's `appearance` so the
+  /// sidebar's translucent material + toolbar tone track the new palette's
+  /// luminance — but only when the window already carries an explicit
+  /// appearance (i.e. the user is in light/dark mode, not `.system`).
+  /// In `.system` mode we leave `window.appearance = nil` so OS dark-mode
+  /// flips cascade through NSApp.effectiveAppearance untouched.
   private func applyBackgroundColorToWindows() {
     let color = backgroundColor()
+    let inferred = color.perceivedAppearance
     for window in NSApp.windows {
       // Settings window opts out of the Ghostty terminal-background stain;
       // restore the stock `.windowBackgroundColor` so the pane keeps the
@@ -324,6 +332,9 @@ final class GhosttyRuntime {
         continue
       }
       window.backgroundColor = color
+      if window.appearance != nil, let inferred {
+        window.appearance = inferred
+      }
     }
   }
 

@@ -635,6 +635,11 @@ struct HierarchySidebarView: View {
       onRetry: { store.send(.pendingWorktreeRetryTapped(pending.id)) },
       onDiscard: { store.send(.pendingWorktreeDiscardTapped(pending.id)) }
     )
+    // Match the worktree row's `listRowInsets` so the spinner + name line up
+    // with sibling worktree rows. Without this the row renders flush-left
+    // because the clip-view shift compensated by `leading: 14` (see
+    // `worktreeRow`) is not applied.
+    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
   }
 
@@ -855,7 +860,26 @@ struct HierarchySidebarView: View {
     }
     .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
 
-    // Group 2 — Worktree lifecycle. Hidden for the main checkout (W-Q3
+    // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
+    // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
+    // worktrees, detached HEAD) so the menu never offers an empty copy.
+    Divider()
+    Button {
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(worktree.path, forType: .string)
+    } label: {
+      Label("Copy as Pathname", systemImage: "doc.on.clipboard")
+    }
+    if let branch = worktree.branch {
+      Button {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(branch, forType: .string)
+      } label: {
+        Label("Copy as Branch Name", systemImage: "doc.on.clipboard")
+      }
+    }
+
+    // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
     // guard: cannot pin / archive / remove the project's root worktree).
     if !isMainCheckout {
       Divider()
@@ -956,7 +980,7 @@ struct HierarchySidebarView: View {
           }
         }
       } label: {
-        Label("Open in", systemImage: "arrow.up.forward.app")
+        Text("Open in")
       }
     }
   }
