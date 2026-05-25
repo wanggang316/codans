@@ -123,10 +123,9 @@ final class AgentRegistry {
   /// Snapshot of currently-running pane IDs (process attached + child
   /// alive). The registry samples this on every input.
   private let runningPanes: @MainActor () -> Set<PaneID>
-  /// Globally focused pane, if any. Currently unused inside derivation
-  /// (focus side-effects flow through `onPaneFocused`) but injected so
-  /// future signals — e.g. "auto-clear waiting on focus regain" — can
-  /// be added without changing the constructor.
+  /// Globally focused pane, if any. Used to avoid surfacing
+  /// `.finished` for work the user is already looking at; focus
+  /// change events still clear a previously surfaced finished state.
   private let focusedPane: @MainActor () -> PaneID?
   /// Time source. Injected so tests can assert on `lastTransitionAt`
   /// without racing real `Date()`.
@@ -208,8 +207,10 @@ final class AgentRegistry {
       var s =
         scratch[paneID]
         ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: [])
-      if s.prevPhase == .loading {
+      if s.prevPhase == .loading, shouldArmFinished(for: paneID) {
         s.pendingFinished = true
+      } else if isFocused(paneID) {
+        s.pendingFinished = false
       }
       s.prevPhase = .idle
       scratch[paneID] = s
@@ -227,8 +228,10 @@ final class AgentRegistry {
       var s =
         scratch[paneID]
         ?? Scratch(prevPhase: .idle, pendingFinished: false, waitingForInput: false, titleEventTimes: [])
-      if s.prevPhase == .loading {
+      if s.prevPhase == .loading, shouldArmFinished(for: paneID) {
         s.pendingFinished = true
+      } else if isFocused(paneID) {
+        s.pendingFinished = false
       }
       scratch[paneID] = s
       recompute(paneID)
@@ -444,12 +447,22 @@ final class AgentRegistry {
     let cutoff = now().addingTimeInterval(-Self.titleActivityWindow)
     s.titleEventTimes = s.titleEventTimes.filter { $0 > cutoff }
     let stillActive = s.titleEventTimes.count >= Self.titleActivityThreshold
-    if !stillActive, !lastRunning.contains(paneID) {
+    if !stillActive, !lastRunning.contains(paneID), shouldArmFinished(for: paneID) {
       s.pendingFinished = true
+    } else if isFocused(paneID) {
+      s.pendingFinished = false
     }
     scratch[paneID] = s
     titleDecayTasks.removeValue(forKey: paneID)
     recompute(paneID)
+  }
+
+  private func shouldArmFinished(for paneID: PaneID) -> Bool {
+    !isFocused(paneID)
+  }
+
+  private func isFocused(_ paneID: PaneID) -> Bool {
+    focusedPane() == paneID
   }
 
   /// Diagnostic tag — short shape-only string for the active log

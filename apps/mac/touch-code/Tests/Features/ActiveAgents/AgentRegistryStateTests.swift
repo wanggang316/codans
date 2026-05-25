@@ -179,6 +179,34 @@ struct AgentRegistryStateTests {
     #expect(registry.entries[paneID]?.state == .finished)
   }
 
+  /// Title-rate startup bursts should not leave a focused pane stuck
+  /// on `.finished` once the burst decays; the user is already looking
+  /// at the pane.
+  @Test
+  func focusedPaneTitleRateDecayDoesNotSurfaceFinished() async {
+    let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
+    let running = LockIsolated<Set<PaneID>>([])
+    let paneID = PaneID()
+    let focused = LockIsolated<PaneID?>(paneID)
+    let registry = AgentRegistry(
+      runningPanes: { running.value },
+      focusedPane: { focused.value },
+      now: { clock.value }
+    )
+    registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
+
+    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting")))
+    clock.setValue(Date(timeIntervalSince1970: 1_000.5))
+    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting.")))
+    clock.setValue(Date(timeIntervalSince1970: 1_001.0))
+    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting..")))
+    #expect(registry.entries[paneID]?.state == .loading)
+
+    clock.setValue(Date(timeIntervalSince1970: 1_010.0))
+    try? await Task.sleep(for: .seconds(2.5))
+    #expect(registry.entries[paneID]?.state == .idle)
+  }
+
   /// (5) From `.finished`, `onPaneKeyboardActivity` → `.idle`.
   @Test
   func keyboardActivityClearsFinishedBackToIdle() {
@@ -206,6 +234,24 @@ struct AgentRegistryStateTests {
     #expect(f.registry.entries[f.paneID]?.state == .finished)
 
     f.registry.onPaneFocused(f.paneID)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+  }
+
+  /// If the pane is already focused when work leaves the running set,
+  /// there is no focus-change event to clear `.finished` afterward. The
+  /// registry should treat the completion as observed and fall back to
+  /// `.idle` immediately.
+  @Test
+  func focusedPaneRunningLeaveDoesNotSurfaceFinished() {
+    let f = Fixture()
+    f.focused.setValue(f.paneID)
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.running.setValue([f.paneID])
+    f.registry.onRunningPanesChanged([f.paneID])
+    #expect(f.registry.entries[f.paneID]?.state == .loading)
+
+    f.running.setValue([])
+    f.registry.onRunningPanesChanged([])
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
