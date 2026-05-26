@@ -59,6 +59,7 @@ struct ThemePickerButton: View {
   @ViewBuilder
   private var triggerLabel: some View {
     HStack(spacing: 8) {
+      Spacer(minLength: 8)
       if let selection {
         ThemeSwatchStrip(preview: previews[selection], dotSize: 9)
         Text(selection)
@@ -68,13 +69,12 @@ struct ThemePickerButton: View {
         Text("Select Theme")
           .foregroundStyle(.secondary)
       }
-      Spacer(minLength: 8)
       Image(systemName: "chevron.up.chevron.down")
         .font(.system(size: 9, weight: .semibold))
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
     }
-    .frame(minWidth: 220, maxWidth: 320, alignment: .leading)
+    .frame(minWidth: 220, maxWidth: 320, alignment: .trailing)
     .contentShape(Rectangle())
   }
 }
