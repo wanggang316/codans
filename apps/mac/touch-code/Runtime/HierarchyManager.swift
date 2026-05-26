@@ -329,6 +329,18 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Recolors the Project. `nil` clears the assignment so the UI falls back
+  /// to the system accent. Unchanged value is a silent no-op so repeated
+  /// taps on the same swatch don't churn the catalog or debounced save.
+  func setProjectColor(_ id: ProjectID, color: ProjectColor?) throws {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
+      throw HierarchyError.notFound("Project \(id)")
+    }
+    guard catalog.projects[projectIndex].color != color else { return }
+    catalog.projects[projectIndex].color = color
+    store.scheduleSave(catalog)
+  }
+
   func removeProject(_ id: ProjectID) throws {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")

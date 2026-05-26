@@ -48,6 +48,10 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// on their `catalog.projects` array position, which equals their
   /// historical sidebar order — i.e. a no-op upgrade.
   public var manualOrder: Int
+  /// User-assigned Project accent. `nil` = no color (system accent).
+  /// Edited via Settings → Projects → General. Encoded only when set so
+  /// catalogs without a color stay byte-identical on round-trip.
+  public var color: ProjectColor?
   /// Transient. See `ProjectLoadState` doc-comment.
   public var loadState: ProjectLoadState
 
@@ -63,6 +67,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     addedAt: Date = Date(),
     lastActiveAt: Date? = nil,
     manualOrder: Int = 0,
+    color: ProjectColor? = nil,
     loadState: ProjectLoadState = .loading
   ) {
     self.id = id
@@ -76,6 +81,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     self.addedAt = addedAt
     self.lastActiveAt = lastActiveAt
     self.manualOrder = manualOrder
+    self.color = color
     self.loadState = loadState
   }
 
@@ -88,7 +94,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, name, rootPath, gitRoot, worktrees, selectedWorktreeID, isExpanded, tagIDs,
-      addedAt, lastActiveAt, manualOrder
+      addedAt, lastActiveAt, manualOrder, color
   }
 
   public init(from decoder: Decoder) throws {
@@ -108,6 +114,7 @@ extension Project: Codable {
     self.addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt) ?? .distantPast
     self.lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
     self.manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
+    self.color = try container.decodeIfPresent(ProjectColor.self, forKey: .color)
     self.loadState = .loading
   }
 
@@ -143,6 +150,7 @@ extension Project: Codable {
     if manualOrder != 0 {
       try container.encode(manualOrder, forKey: .manualOrder)
     }
+    try container.encodeIfPresent(color, forKey: .color)
     // `loadState` intentionally not encoded (transient).
   }
 }

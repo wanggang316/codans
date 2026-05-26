@@ -24,6 +24,7 @@ struct ProjectGeneralSettingsView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Dependency(SettingsWriter.self) private var settingsWriter
+  @Dependency(HierarchyClient.self) private var hierarchyClient
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
 
   /// Branches loaded from the repo on view appearance. `baseRefOptions` is
@@ -41,6 +42,7 @@ struct ProjectGeneralSettingsView: View {
   /// IDs for the Sections — useful for the kind-render tests so they
   /// can assert visibility without inspecting SwiftUI's view tree.
   enum SectionID: String, CaseIterable, Hashable {
+    case general
     case editor
     case gitViewer
     case worktree
@@ -53,7 +55,7 @@ struct ProjectGeneralSettingsView: View {
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
     case .dir:
-      return [.editor, .environment]
+      return [.general, .editor, .environment]
     case .gitRepo:
       return Set(SectionID.allCases)
     }
@@ -139,6 +141,9 @@ struct ProjectGeneralSettingsView: View {
 
   var body: some View {
     Form {
+      if visible.contains(.general) {
+        generalSection
+      }
       if visible.contains(.editor) {
         editorSection
       }
@@ -182,6 +187,52 @@ struct ProjectGeneralSettingsView: View {
     baseRefOptions = loadedRefs
     defaultRemoteBaseRef = loadedAuto
     baseRefOptionsLoaded = true
+  }
+
+  // MARK: - General
+
+  /// Project identity — Title and Color. Writes go through `HierarchyClient`
+  /// because the underlying data lives on `Project` in the catalog, not in
+  /// `settings.json`. Empty / whitespace-only titles revert silently to the
+  /// last accepted name so the catalog never ends up with a blank entry.
+  /// Color is an inline swatch row (No Color + seven named entries) plus a
+  /// system `ColorPicker` that opens NSColorPanel for arbitrary hex.
+  @ViewBuilder
+  private var generalSection: some View {
+    Section("General") {
+      LabeledContent("Name") {
+        ProjectNameField(
+          currentName: projectName,
+          commit: { newName in
+            try? hierarchyClient.renameProject(projectID, newName)
+          }
+        )
+        .frame(maxWidth: .infinity, minHeight: 22)
+      }
+
+      LabeledContent("Color") {
+        ProjectColorSwatchRow(selection: projectColorBinding)
+      }
+    }
+  }
+
+  /// Current canonical project name. The catalog is the source of truth — the
+  /// nested `ProjectTitleField` resyncs whenever this value changes so an
+  /// external rename (e.g. from `tc`) updates the field without blowing away
+  /// an in-progress local edit unrelated to the same project.
+  private var projectName: String {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.name ?? ""
+  }
+
+  private var projectColorBinding: Binding<ProjectColor?> {
+    Binding(
+      get: {
+        hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.color
+      },
+      set: { newValue in
+        try? hierarchyClient.setProjectColor(projectID, newValue)
+      }
+    )
   }
 
   // MARK: - Editor
@@ -554,5 +605,282 @@ struct ProjectGeneralSettingsView: View {
         store.send(.setWorktreeBaseDirectory(url.path))
       }
     }
+  }
+}
+
+/// Native `NSTextField`-backed name editor. SwiftUI's `TextField` with
+/// `.textFieldStyle(.plain)` in a Form keeps showing a blinking caret after
+/// outside clicks (Form's empty area doesn't propagate as a focus event),
+/// so we drop down to AppKit for reliable "click anywhere → resign first
+/// responder → commit" semantics.
+///
+/// The current Project name is exposed via `placeholderString` rather than
+/// the field's `stringValue`. That way the row reads like macOS System
+/// Settings — the existing value is a soft hint, the field starts empty,
+/// and the user types only what they want to change to. Blank / whitespace
+/// commits are dropped (no rename), so leaving the field untouched is a
+/// no-op.
+private struct ProjectNameField: NSViewRepresentable {
+  let currentName: String
+  let commit: (String) -> Void
+
+  func makeNSView(context: Context) -> NSTextField {
+    let field = NSTextField()
+    field.isBordered = false
+    field.drawsBackground = false
+    field.focusRingType = .none
+    field.alignment = .right
+    field.font = .systemFont(ofSize: NSFont.systemFontSize)
+    field.placeholderString = currentName
+    field.stringValue = ""
+    field.cell?.usesSingleLineMode = true
+    field.cell?.lineBreakMode = .byTruncatingTail
+    field.delegate = context.coordinator
+    return field
+  }
+
+  func updateNSView(_ field: NSTextField, context: Context) {
+    if field.placeholderString != currentName {
+      field.placeholderString = currentName
+    }
+    context.coordinator.commit = commit
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(commit: commit)
+  }
+
+  final class Coordinator: NSObject, NSTextFieldDelegate {
+    var commit: (String) -> Void
+
+    init(commit: @escaping (String) -> Void) {
+      self.commit = commit
+    }
+
+    /// Fires on Return and on focus loss. Whitespace-only / empty input is
+    /// a no-op so an accidental click-away after a stray space doesn't
+    /// blow away the name. Always clears the field afterwards so the
+    /// placeholder (now the new current name) is the visible state again.
+    func controlTextDidEndEditing(_ obj: Notification) {
+      guard let field = obj.object as? NSTextField else { return }
+      let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      field.stringValue = ""
+      guard !trimmed.isEmpty else { return }
+      commit(trimmed)
+    }
+  }
+}
+
+/// Horizontal palette + custom-color trigger for the General section. Mirrors
+/// the inline swatch row used by Tag Manager: a No-Color sentinel, the
+/// seven Finder palette colors, then a multicolor disc that opens
+/// NSColorPanel for arbitrary hex values.
+///
+/// Selection rules:
+/// - Named / No-Color picks **don't** repaint the rightmost chip; it always
+///   represents "Custom" as a slot, not the current selection.
+/// - Clicking the rightmost chip opens the system color panel. The picked
+///   color becomes the new `selection` AND the chip's fill — so the chip
+///   acts as a recall button for the last hex the user chose.
+/// - The remembered custom hex (`lastCustomHex`) is sticky across named
+///   selections: switch to Red then back to Custom and you land on the
+///   previous hue, not the default.
+private struct ProjectColorSwatchRow: View {
+  @Binding var selection: ProjectColor?
+
+  /// Last hex chosen via the color panel. Seeded from `selection` if the
+  /// project already carries a custom value when the row first appears, so
+  /// the chip reflects state from a prior session.
+  @State private var lastCustomHex: String?
+  /// Holds the NSColorPanel callback target alive across panel-open and
+  /// color-pick events. Cleared on disappear so the panel never calls into
+  /// a freed observer.
+  @State private var panelObserver: ColorPanelObserver?
+
+  var body: some View {
+    HStack(spacing: 8) {
+      noColorChip
+      ForEach(ProjectColor.namedCases, id: \.self) { color in
+        namedChip(color)
+      }
+      customColorChip
+    }
+    .frame(maxWidth: .infinity, alignment: .trailing)
+    .onAppear { seedLastCustomFromSelection() }
+    .onChange(of: selection) { _, _ in seedLastCustomFromSelection() }
+    .onDisappear { detachColorPanelObserver() }
+  }
+
+  /// "No Color" sentinel — clears `selection` to nil so the Project falls
+  /// back to the system accent.
+  @ViewBuilder
+  private var noColorChip: some View {
+    ColorChip(
+      isSelected: selection == nil,
+      action: { selection = nil },
+      accessibilityName: "No Color"
+    ) {
+      Image(systemName: "nosign")
+        .font(.system(size: 12, weight: .regular))
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    }
+  }
+
+  @ViewBuilder
+  private func namedChip(_ color: ProjectColor) -> some View {
+    ColorChip(
+      isSelected: selection == color,
+      action: { selection = color },
+      accessibilityName: color.displayName
+    ) {
+      Circle()
+        .fill(color.swiftUIColor)
+        .frame(width: 16, height: 16)
+        .overlay(
+          Circle().strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+        )
+    }
+  }
+
+  /// Custom-color trigger. Renders either a multicolor disc (no custom
+  /// hex yet) or a solid disc of the last picked hue. Click opens
+  /// `NSColorPanel`; the picked color persists as `.custom(hex:)` and
+  /// becomes the chip's visible fill.
+  @ViewBuilder
+  private var customColorChip: some View {
+    let isSelected: Bool = {
+      if case .custom = selection { return true }
+      return false
+    }()
+    ColorChip(
+      isSelected: isSelected,
+      action: { openColorPanel() },
+      accessibilityName: "Custom Color"
+    ) {
+      customCircleContent
+    }
+    .help("Custom Color…")
+  }
+
+  /// Fill content for the custom chip. Solid color when a custom hex is
+  /// remembered; otherwise a smooth conic rainbow so the chip reads as
+  /// "open the picker" rather than "currently set to something".
+  @ViewBuilder
+  private var customCircleContent: some View {
+    if let hex = lastCustomHex, let color = ProjectColor.parseHex(hex) {
+      Circle()
+        .fill(color)
+        .frame(width: 16, height: 16)
+        .overlay(
+          Circle().strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+        )
+    } else {
+      Circle()
+        .fill(
+          AngularGradient(
+            colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
+            center: .center
+          )
+        )
+        .frame(width: 16, height: 16)
+        .overlay(
+          Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+  }
+
+  // MARK: - NSColorPanel plumbing
+
+  private func openColorPanel() {
+    let observer = ColorPanelObserver { nsColor in
+      if let hex = ProjectColor.hex(from: nsColor) {
+        lastCustomHex = hex
+        selection = .custom(hex: hex)
+      }
+    }
+    panelObserver = observer
+    let panel = NSColorPanel.shared
+    panel.setTarget(observer)
+    panel.setAction(#selector(ColorPanelObserver.colorDidChange(_:)))
+    panel.showsAlpha = false
+    if let hex = lastCustomHex, let nsColor = ProjectColor.nsColor(from: hex) {
+      panel.color = nsColor
+    }
+    panel.makeKeyAndOrderFront(nil)
+  }
+
+  /// Avoid leaving a dangling target/action behind us — if the user closes
+  /// the Settings window while the panel is still open, the panel would
+  /// fire `colorDidChange:` into a deallocated observer otherwise.
+  /// `NSColorPanel` doesn't expose its current target, so we conservatively
+  /// detach whenever this row had set one. Setting `target` to `nil` is a
+  /// no-op when something else has taken ownership in the meantime.
+  private func detachColorPanelObserver() {
+    guard panelObserver != nil else { return }
+    let panel = NSColorPanel.shared
+    panel.setTarget(nil)
+    panel.setAction(nil)
+    panelObserver = nil
+  }
+
+  private func seedLastCustomFromSelection() {
+    if case .custom(let hex) = selection {
+      lastCustomHex = hex
+    }
+  }
+}
+
+/// `NSColorPanel.setTarget(_:)` keeps an `unsafe_unretained` reference, so
+/// the panel callback target must outlive the panel session. Held as the
+/// `@State`-tracked `panelObserver` on `ProjectColorSwatchRow` and detached
+/// on `onDisappear`.
+@MainActor
+private final class ColorPanelObserver: NSObject {
+  let onChange: (NSColor) -> Void
+
+  init(onChange: @escaping (NSColor) -> Void) {
+    self.onChange = onChange
+  }
+
+  @objc func colorDidChange(_ sender: NSColorPanel) {
+    onChange(sender.color)
+  }
+}
+
+/// Shared swatch wrapper. Centralises the visual rules — fixed 24pt hit
+/// area, 1pt subdued ring on hover, 1.5pt accent ring when selected — so
+/// every chip in the row stays pixel-aligned regardless of its inner fill
+/// (named color, nosign glyph, conic rainbow, or solid custom hex).
+private struct ColorChip<Content: View>: View {
+  let isSelected: Bool
+  let action: () -> Void
+  let accessibilityName: String
+  @ViewBuilder var content: () -> Content
+
+  @State private var isHovering: Bool = false
+
+  var body: some View {
+    Button(action: action) {
+      ZStack {
+        if isSelected {
+          Circle()
+            .strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
+            .frame(width: 22, height: 22)
+        } else if isHovering {
+          Circle()
+            .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1)
+            .frame(width: 22, height: 22)
+        }
+        content()
+      }
+      .frame(width: 24, height: 24)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovering = $0 }
+    .help(accessibilityName)
+    .accessibilityLabel(accessibilityName)
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 }
