@@ -60,6 +60,12 @@ struct HierarchySidebarView: View {
   /// Defaults to a sensible value so the first render before the
   /// background measure lands doesn't pop a too-tall panel.
   @State private var sidebarHeightObservation: Double = 600
+  /// Live height of the bottom `TagFilterPopoverFooter`. Used as a
+  /// bottom padding on the ActiveAgents overlay so the panel slides up
+  /// from the footer's top edge instead of the window's bottom edge —
+  /// keeps the footer fully visible and unanimated while the panel
+  /// expands above it.
+  @State private var footerHeight: Double = 0
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
@@ -179,15 +185,14 @@ struct HierarchySidebarView: View {
       uniqueKeysWithValues: catalog.projects.map { ($0.id, $0.name) }
     )
 
-    // Sidebar body: the List takes the remaining vertical space, with
-    // the ActiveAgents panel + TagFilterPopoverFooter stacked below it
-    // in a plain `VStack`. A previous version mounted the panel and
-    // footer in `.safeAreaInset(edge: .bottom)`, but that lets the
-    // List's scroll content slide *under* the inset region. With a
-    // transparent footer (needed to inherit the sidebar's glass +
-    // chrome tint), the bleed-through made scrolling rows overlap the
-    // footer glyphs. A plain VStack physically caps the List's frame,
-    // so rows can never reach the footer slot.
+    // Sidebar body: VStack stacks the List on top of the footer so the
+    // list's scrollable area is physically capped above the footer
+    // (transparent inset cannot mask scroll content otherwise). The
+    // ActiveAgents panel is rendered as an `overlay(alignment: .bottom)`
+    // on the VStack — `.padding(.bottom, footerHeight)` slides it up to
+    // the footer's top edge, so the panel expands from that edge rather
+    // than the window's bottom edge and the footer itself stays
+    // visible / unanimated underneath.
     VStack(spacing: 0) {
       treeBody(projects: visibleProjects)
         .background(
@@ -201,6 +206,34 @@ struct HierarchySidebarView: View {
         .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
           sidebarHeightObservation = newHeight
         }
+      TagFilterPopoverFooter(
+        tags: catalog.tags,
+        activeFilter: catalog.activeTagFilter,
+        showUntaggedChip: untaggedExists,
+        onAllTapped: { store.send(.allChipTapped) },
+        onTagTapped: { store.send(.tagChipTapped($0)) },
+        onUntaggedTapped: { store.send(.untaggedChipTapped) },
+        onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
+        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+        sortMode: catalog.projectSortMode,
+        onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
+        onManualSortRequested: { store.send(.manualSortSheetRequested) },
+        onActiveAgentsTapped: activeAgentsRegistry == nil
+          ? nil
+          : {
+            withAnimation(.easeOut(duration: 0.18)) {
+              activeAgentsPanelOpen.toggle()
+            }
+          },
+        activeAgentsPanelOpen: activeAgentsPanelOpen
+      )
+      .onGeometryChange(for: Double.self) { proxy in
+        Double(proxy.size.height)
+      } action: { newHeight in
+        footerHeight = newHeight
+      }
+    }
+    .overlay(alignment: .bottom) {
       if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
         ActiveAgentsSidebarPanel(
           registry: registry,
@@ -226,29 +259,9 @@ struct HierarchySidebarView: View {
           minHeight: 140,
           maxHeight: max(140, sidebarHeightObservation * 0.5)
         )
+        .padding(.bottom, footerHeight)
         .transition(.move(edge: .bottom).combined(with: .opacity))
       }
-      TagFilterPopoverFooter(
-        tags: catalog.tags,
-        activeFilter: catalog.activeTagFilter,
-        showUntaggedChip: untaggedExists,
-        onAllTapped: { store.send(.allChipTapped) },
-        onTagTapped: { store.send(.tagChipTapped($0)) },
-        onUntaggedTapped: { store.send(.untaggedChipTapped) },
-        onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-        sortMode: catalog.projectSortMode,
-        onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
-        onManualSortRequested: { store.send(.manualSortSheetRequested) },
-        onActiveAgentsTapped: activeAgentsRegistry == nil
-          ? nil
-          : {
-            withAnimation(.easeOut(duration: 0.18)) {
-              activeAgentsPanelOpen.toggle()
-            }
-          },
-        activeAgentsPanelOpen: activeAgentsPanelOpen
-      )
     }
       // Auto-open the Agents View panel on the rising edge into "any
       // bound agent is loading" — but only when the user has the
