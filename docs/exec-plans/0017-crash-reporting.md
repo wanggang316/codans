@@ -15,7 +15,7 @@ Users keep control: a `crashReportsEnabled` toggle in **Settings → General** t
 ## Progress
 
 - [x] Decision: choose Sentry over alternatives (see Decision Log)
-- [x] Step 1 — Add `sentry-cocoa` (from 8.40.0; resolves to 8.58.2) to Tuist Package, force dynamic framework
+- [x] Step 1 — Add `sentry-cocoa` (`from: 9.14.0`) to Tuist Package, force dynamic framework
 - [x] Step 2 — Plumb `SENTRY_DSN` through `Secrets.xcconfig` (gitignored) → `mac-Info.plist` placeholder
 - [x] Step 3 — Add `Telemetry/CrashReporting.swift` bootstrap with `Configuration` parser + `isEnabled` gate
 - [x] Step 4 — Add `Telemetry/SystemHangFilter.swift` `beforeSend` scrubber
@@ -62,11 +62,25 @@ Mitigation: revert those reformats explicitly before staging and run
 lint violations in unrelated files (`TouchCodeApp.bringUp`,
 `GhosttyActionDecoder`, etc.) also remain — not in scope.
 
-### DSC-4 — Sentry resolved version is 8.58.2, not 8.40.x
+### DSC-4 — Bumped pin from 8.x to 9.14.0 after initial commit
 
-`from: 8.40.0` in `Tuist/Package.swift` resolved to the current 8.x at
-`8.58.2`. No API breakage — `Frame` / `SentryThread` / `SentryStacktrace`
-shapes match the plan.
+First commit pinned `from: 8.40.0`, which resolved to 8.58.2 — but
+`getsentry/sentry-cocoa` 9.x has been GA for months and 9.14.0 is the
+current latest. Reviewing the 9.0 breaking-change list against our
+surface:
+
+- `enableAppHangTracking` was removed on iOS/tvOS but **macOS still
+  uses V1**, so the property is still settable in our `options.start`
+  block. No change needed.
+- `SentryFrame.function` default changed from `<redacted>` to `nil` —
+  `SystemHangFilter.filter` already gates on `if let function = …`,
+  so the new behaviour is correctly handled.
+- Removed APIs (V1 profiling, UserFeedback, SessionReplay options,
+  `enableTracing`) — none used here.
+- Minimum macOS 10.14 / Xcode 16+ — our deployment target is 14.0 and
+  the build runs on Xcode 26.
+
+Bumped pin to `from: "9.14.0"` and rebuilt; no source changes required.
 
 ## Decision Log
 

@@ -27,6 +27,6 @@ let package = Package(
     // dependency resolution. See 0005 DEC-2.
     .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.1"),
-    .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.40.0"),
+    .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.14.0"),
   ]
 )
