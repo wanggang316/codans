@@ -33,7 +33,13 @@ enum CrashReporting {
         let raw = infoDictionary["SentryDSN"] as? String
       else { return nil }
       let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !trimmed.isEmpty else { return nil }
+      // `SentryDSN` is composed in mac-Info.plist as `https://$(SENTRY_DSN_REST)`.
+      // When SENTRY_DSN_REST is empty (no Secrets.xcconfig configured), the
+      // substitution yields the bare scheme `https://`, which is *not* a
+      // valid DSN — reject it so the bootstrap stays a no-op rather than
+      // letting the SDK fail later with an opaque parse error.
+      guard !trimmed.isEmpty, trimmed != "https://", trimmed != "http://"
+      else { return nil }
       self.dsn = trimmed
       if let version = infoDictionary["CFBundleShortVersionString"] as? String,
         !version.isEmpty

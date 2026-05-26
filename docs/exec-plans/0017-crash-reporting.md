@@ -62,6 +62,24 @@ Mitigation: revert those reformats explicitly before staging and run
 lint violations in unrelated files (`TouchCodeApp.bringUp`,
 `GhosttyActionDecoder`, etc.) also remain — not in scope.
 
+### DSC-5 — xcconfig truncates `//`, DSN scheme moved into mac-Info.plist
+
+Discovered while smoke-testing the real DSN: xcconfig treats `//` as a
+comment delimiter, so `SENTRY_DSN = https://abc@host/0` is parsed as
+`SENTRY_DSN = https:` and the rest of the URL is silently dropped. The
+canonical `$()` empty-expansion workaround did not survive the parser
+on Xcode 26 either.
+
+Fix: split the DSN. The literal `https://` scheme prefix lives in
+`mac-Info.plist` as part of the plist value (where xcconfig comment
+rules don't apply), and `SENTRY_DSN_REST` carries only the host + path
+portion — which has no `//`. The Swift bootstrap rejects the bare
+`https://` value (empty rest) as missing-DSN so the no-DSN branch
+still no-ops cleanly.
+
+Verified: `plutil -p TouchCode.app/Contents/Info.plist | grep -i sentry`
+shows the full reassembled URL on a fresh build.
+
 ### DSC-4 — Bumped pin from 8.x to 9.14.0 after initial commit
 
 First commit pinned `from: 8.40.0`, which resolved to 8.58.2 — but

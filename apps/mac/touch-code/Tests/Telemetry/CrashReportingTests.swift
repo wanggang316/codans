@@ -28,6 +28,14 @@ struct CrashReportingTests {
     #expect(CrashReporting.Configuration(infoDictionary: ["SentryDSN": "   \n"]) == nil)
   }
 
+  @Test func configurationReturnsNilForBareSchemeDSN() {
+    // mac-Info.plist composes the DSN as `https://$(SENTRY_DSN_REST)`,
+    // so an unconfigured Secrets.xcconfig yields a bare `https://`.
+    // That must be treated as "no DSN" rather than a malformed real DSN.
+    #expect(CrashReporting.Configuration(infoDictionary: ["SentryDSN": "https://"]) == nil)
+    #expect(CrashReporting.Configuration(infoDictionary: ["SentryDSN": "  https://  "]) == nil)
+  }
+
   @Test func configurationOmitsReleaseNameWhenVersionMissing() {
     let parsed = CrashReporting.Configuration(infoDictionary: [
       "SentryDSN": "https://abc@o123.ingest.sentry.io/456"

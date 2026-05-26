@@ -1,13 +1,19 @@
 MARKETING_VERSION = 0.3.1
 CURRENT_PROJECT_VERSION = 20260525002
 
+// Fallback so the SentryDSN substitution in mac-Info.plist never leaves
+// a literal placeholder when Secrets.xcconfig is absent. Must come
+// BEFORE the include — xcconfig is last-write-wins, so any value in
+// Secrets.xcconfig has to follow this default to override it.
+//
+// SENTRY_DSN_REST carries everything *after* `https://` in the DSN. We
+// can't put the full URL in a variable because xcconfig treats `//` as
+// a comment delimiter and truncates the value at it.
+SENTRY_DSN_REST =
+
 // Optional per-machine secrets (DSN, signing IDs, …). Tracked via
 // Secrets.xcconfig.template; the live file is gitignored. The leading `?`
 // makes the include optional, so contributors without a Secrets.xcconfig
 // still produce working builds (Sentry simply bootstraps with an empty
 // DSN and no-ops — see CrashReporting.bootstrap).
 #include? "Secrets.xcconfig"
-
-// Fallback so `$(SENTRY_DSN)` substitution into mac-Info.plist never
-// leaves a literal placeholder string when Secrets.xcconfig is absent.
-SENTRY_DSN =

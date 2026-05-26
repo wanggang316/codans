@@ -70,15 +70,20 @@ of the pipeline still produces a notarized DMG.
    url=https://sentry.io/
    ```
 
-3. **Add the DSN to the build.** Copy the template, fill in the DSN,
-   and confirm the file stays gitignored:
+3. **Add the DSN to the build.** Copy the template, fill in the host +
+   path portion (everything after `https://`), and confirm the file
+   stays gitignored:
 
    ```bash
    cp apps/mac/Configurations/Secrets.xcconfig.template \
       apps/mac/Configurations/Secrets.xcconfig
-   $EDITOR apps/mac/Configurations/Secrets.xcconfig    # set SENTRY_DSN
+   $EDITOR apps/mac/Configurations/Secrets.xcconfig    # set SENTRY_DSN_REST
    git status -- apps/mac/Configurations/Secrets.xcconfig  # should be ignored
    ```
+
+   Note: `mac-Info.plist` carries the literal `https://` prefix because
+   xcconfig strips `//` as a comment delimiter — only the host + path
+   portion of the DSN travels through `SENTRY_DSN_REST`.
 
 4. **Cut a release.** `release.sh release` performs `upload-symbols`
    between archive and notarize; verify the dashboard shows the
