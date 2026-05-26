@@ -215,6 +215,12 @@ private struct LeafView: View {
   /// change, layout) forces a rebuild — which is what produced the stale
   /// light/dark wash on unfocused panes after a theme switch.
   @Environment(\.colorScheme) private var colorScheme
+  /// Bumped on `.ghosttyRuntimeConfigApplied` so the overlay re-resolves when
+  /// the user picks a new ghostty theme (Settings → Terminal, or by editing
+  /// `~/.config/ghostty/config`). `colorScheme` only covers the appearance
+  /// flip path; without this tick the overlay stays on the previous theme's
+  /// fill colour until the user re-focuses the pane or triggers a layout pass.
+  @State private var configReloadTick: Int = 0
   /// Used for the one-frame fallback on tab switch — see `body`. Reducer
   /// state is the long-term source of truth; this lookup only fills the
   /// gap between catalog update and `.panesInActiveTabChanged` landing.
@@ -236,6 +242,9 @@ private struct LeafView: View {
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
         .overlay(alignment: .top) { paneIndicatorLine }
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+          configReloadTick &+= 1
+        }
     } else if let warmSurface = terminalClient.surface(paneID) {
       // Tab-switch fast path: the catalog already points at this pane but
       // `SplitViewportView.task(id:)` hasn't run yet, so the reducer-scoped
@@ -249,6 +258,9 @@ private struct LeafView: View {
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
         .overlay(alignment: .top) { paneIndicatorLine }
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+          configReloadTick &+= 1
+        }
     } else {
       // Truly cold pane: surface hasn't been spawned yet (first render
       // after creation). Background tracks Ghostty's terminal color so
@@ -275,13 +287,15 @@ private struct LeafView: View {
   /// focused leaf get nothing.
   @ViewBuilder
   private var unfocusedDimOverlay: some View {
+    // Both `colorScheme` and `configReloadTick` are read so SwiftUI tracks
+    // them as body dependencies: the first covers OS / Appearance flips,
+    // the second covers ghostty config-file theme reloads (Settings →
+    // Terminal picker / manual config edit). Without the tick the overlay
+    // keeps the previous theme's wash colour until a focus change or
+    // layout pass forces a rebuild.
+    let _ = configReloadTick
     if isSplit, !isFocused {
       let runtime = GhosttyRuntime.shared
-      // `colorScheme` is folded into the fill resolution so SwiftUI tracks it
-      // as a body dependency: `unfocusedSplitFill` resolves against the active
-      // ghostty palette, which flips with appearance. Without this read the
-      // overlay would keep the previous scheme's tint until something else
-      // invalidated the view (focus change, layout pass).
       let fill = runtime?.unfocusedSplitFill(colorScheme) ?? .windowBackgroundColor
       let opacity = runtime?.unfocusedSplitOpacity() ?? 0.15
       if opacity > 0 {
