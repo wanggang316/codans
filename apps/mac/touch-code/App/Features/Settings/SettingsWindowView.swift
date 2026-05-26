@@ -37,7 +37,7 @@ struct SettingsWindowView: View {
         Color.clear.frame(width: 0, height: 0)
       }
     }
-    .frame(minWidth: 750, minHeight: 500)
+    .frame(minWidth: 800, minHeight: 500)
     .navigationTitle(title(for: store.state.effectiveSection))
     .navigationSubtitle(subtitle(for: store.state.effectiveSection))
     .onChange(of: projectIDs, initial: true) { _, current in
