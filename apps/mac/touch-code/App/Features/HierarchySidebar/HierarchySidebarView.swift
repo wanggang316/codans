@@ -484,15 +484,16 @@ struct HierarchySidebarView: View {
           // above from bleeding through the transparent footer.
           // `.contentMargins(.bottom, _, for: .scrollContent)` is the
           // ScrollView-native modifier for this, but `List(.sidebar)`
-          // on macOS 26 ignores it.
-          if bottomInsetHeight > 0 {
-            Color.clear
-              .frame(height: bottomInsetHeight)
-              .listRowInsets(EdgeInsets())
-              .listRowBackground(Color.clear)
-              .listRowSeparator(.hidden)
-              .accessibilityHidden(true)
-          }
+          // on macOS 26 ignores it. Floor at a positive value so the
+          // spacer is always emitted: relying on the live measurement
+          // alone leaves a one-frame window during initial layout where
+          // the inset reads as 0 and the row collapses.
+          Color.clear
+            .frame(height: max(bottomInsetHeight, 40))
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
         }
         .listStyle(.sidebar)
         // Hide the List's own opaque content background so the sidebar
