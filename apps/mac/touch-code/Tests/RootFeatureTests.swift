@@ -517,6 +517,7 @@ struct RootFeatureTests {
       (.tabAutoClosed(tab, cause: .other(reason: "x")), .tabAutoClosed),
       (.worktreeActivated(worktree), .worktreeActivated),
       (.hierarchyMutated(.catalog), .hierarchyMutated),
+      (.foregroundJobChanged(pane, ForegroundJob(processGroupID: 1, processes: [])), .foregroundJobChanged),
     ]
     for (event, expected) in cases {
       #expect(RootFeature.LastEventMarker(event) == expected)

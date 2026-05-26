@@ -402,6 +402,7 @@ struct PaneAttentionInterpreterTests {
       .tabActivated(TabID()),
       .worktreeActivated(WorktreeID()),
       .hierarchyMutated(.catalog),
+      .foregroundJobChanged(PaneID(), ForegroundJob(processGroupID: 1, processes: [])),
       .configChanged,
     ]
     for event in cases {

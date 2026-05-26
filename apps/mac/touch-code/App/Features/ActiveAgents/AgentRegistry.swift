@@ -260,6 +260,7 @@ final class AgentRegistry {
       }
 
     case .paneOutput,
+      .foregroundJobChanged,
       .paneCreated, .paneReady,
       .tabActivated, .tabAutoClosed, .worktreeActivated, .hierarchyMutated,
       .paneActionRequested, .windowActionRequested, .configChanged:
@@ -456,6 +457,7 @@ final class AgentRegistry {
     case .paneClosedByTab(let id, _): return "paneClosedByTab(\(id.raw.uuidString.prefix(8)))"
     case .paneInfoChanged(let id, let delta):
       return "paneInfoChanged(\(id.raw.uuidString.prefix(8)),\(deltaTag(delta)))"
+    case .foregroundJobChanged(let id, _): return "foregroundJobChanged(\(id.raw.uuidString.prefix(8)))"
     case .paneCreated(let id, _): return "paneCreated(\(id.raw.uuidString.prefix(8)))"
     case .paneReady(let id): return "paneReady(\(id.raw.uuidString.prefix(8)))"
     case .tabActivated: return "tabActivated"

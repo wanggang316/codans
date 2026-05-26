@@ -57,6 +57,10 @@ final class TerminalEngine {
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
   private var crashRings: [PaneID: [Date]] = [:]
+  private let foregroundJobReader: ForegroundJobReader
+  private var foregroundJobPollTask: Task<Void, Never>?
+  private var foregroundJobPaneIDs: Set<PaneID> = []
+  private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
   private let clock: @Sendable () -> Date
   private var finished = false
 
@@ -66,11 +70,13 @@ final class TerminalEngine {
     store: CatalogStore,
     hierarchy: HierarchyManager,
     ghosttyRuntime: GhosttyRuntime? = nil,
+    foregroundJobReader: ForegroundJobReader = ForegroundJobReader(),
     clock: @escaping @Sendable () -> Date = Date.init
   ) {
     self.store = store
     self.hierarchy = hierarchy
     self.ghosttyRuntime = ghosttyRuntime
+    self.foregroundJobReader = foregroundJobReader
     self.clock = clock
     // Back-pointer so the libghostty action decoder can emit events
     // (paneInfoChanged, paneActionRequested, etc.) onto this engine's
@@ -130,6 +136,8 @@ final class TerminalEngine {
       )
     }
     runtime.register(pane: surface)
+    foregroundJobPaneIDs.insert(pane.id)
+    startForegroundJobPollingIfNeeded()
     surface.onClose = { [weak self] processAlive in
       self?.handleSurfaceClose(paneID: pane.id, processAlive: processAlive)
     }
@@ -251,6 +259,9 @@ final class TerminalEngine {
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
+    foregroundJobPaneIDs.remove(paneID)
+    foregroundJobSnapshots.removeValue(forKey: paneID)
+    stopForegroundJobPollingIfIdle()
   }
 
   private func tabIDForPane(_ paneID: PaneID) -> TabID? {
@@ -325,6 +336,8 @@ final class TerminalEngine {
   func finishEventStream() {
     guard !finished else { return }
     finished = true
+    foregroundJobPollTask?.cancel()
+    foregroundJobPollTask = nil
     // Drain any pending output into the lifecycle-bound path before finishing.
     for (_, buffer) in outputBuffers {
       buffer.flush()
@@ -466,6 +479,54 @@ final class TerminalEngine {
     outputBuffers[paneID] = buffer
     return buffer
   }
+
+  private func startForegroundJobPollingIfNeeded() {
+    guard foregroundJobPollTask == nil else { return }
+    foregroundJobPollTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        await self?.pollForegroundJobs()
+        try? await Task.sleep(for: .milliseconds(750))
+      }
+    }
+  }
+
+  private func stopForegroundJobPollingIfIdle() {
+    guard foregroundJobPaneIDs.isEmpty else { return }
+    foregroundJobPollTask?.cancel()
+    foregroundJobPollTask = nil
+  }
+
+  private func pollForegroundJobs() async {
+    guard let ghosttyRuntime, !foregroundJobPaneIDs.isEmpty else { return }
+
+    var groupByPane: [PaneID: Int32] = [:]
+    for paneID in foregroundJobPaneIDs {
+      guard let groupID = ghosttyRuntime.surface(for: paneID)?.foregroundProcessGroupID() else {
+        continue
+      }
+      groupByPane[paneID] = groupID
+    }
+
+    let jobsByGroup = await foregroundJobReader.readJobs(
+      processGroupIDs: Set(groupByPane.values)
+    )
+
+    for paneID in foregroundJobPaneIDs {
+      let next: ForegroundJob
+      if let groupID = groupByPane[paneID], let job = jobsByGroup[groupID] {
+        next = job
+      } else {
+        next = ForegroundJob(processGroupID: groupByPane[paneID] ?? 0, processes: [])
+      }
+
+      if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
+        continue
+      }
+      guard foregroundJobSnapshots[paneID] != next else { continue }
+      foregroundJobSnapshots[paneID] = next
+      emit(.foregroundJobChanged(paneID, next))
+    }
+  }
 }
 
 extension TerminalEvent {
@@ -474,7 +535,7 @@ extension TerminalEvent {
   /// because scrollback retains history.
   fileprivate var isLifecycle: Bool {
     switch self {
-    case .paneOutput, .paneIdle, .paneInfoChanged:
+    case .paneOutput, .paneIdle, .paneInfoChanged, .foregroundJobChanged:
       return false
     case .paneCreated, .paneReady, .paneExited, .paneCrashed,
       .paneClosedByTab, .tabActivated, .tabAutoClosed,

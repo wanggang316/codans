@@ -108,7 +108,7 @@ struct TerminalEngineTests {
 
     for event in [first, second].compactMap({ $0 }) {
       switch event {
-      case .paneOutput, .paneIdle:
+      case .paneOutput, .paneIdle, .foregroundJobChanged:
         Issue.record("output event leaked to lifecycle-only subscriber")
       default:
         break

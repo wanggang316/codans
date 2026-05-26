@@ -1297,15 +1297,6 @@ final class AppState {
   /// OSC 9 desktop-notification payloads, and lifecycle teardown without
   /// opening a second long-lived Task on the events stream.
   ///
-  /// `.commandFinished` (OSC 133 D, shell-integration "command finished")
-  /// is treated as "the foreground command in the pane just returned to
-  /// the shell prompt" — i.e. the agent that owned this pane has exited
-  /// (Ctrl+C, `exit`, `:q`, …). Since `paneExited` only fires when the
-  /// *pane's child* dies and the shell underneath the agent stays alive,
-  /// this is the only reliable signal that the agent itself is gone
-  /// while the pane is still open. We unbind unconditionally; the call
-  /// is idempotent and a re-run of the same agent re-binds on the next
-  /// title-changed event.
   @MainActor
   private static func dispatchToAgentBinder(
     event: TerminalEvent,
@@ -1323,11 +1314,11 @@ final class AppState {
           paneID: paneID,
           trigger: .desktopNotification(title: title, body: body)
         )
-      case .commandFinished:
-        binder.unbind(paneID)
       default:
         break
       }
+    case .foregroundJobChanged(let paneID, let job):
+      binder.consider(paneID: paneID, trigger: .foregroundJobChanged(job))
     case .paneExited(let paneID, _, _),
       .paneCrashed(let paneID, _),
       .paneClosedByTab(let paneID, _):

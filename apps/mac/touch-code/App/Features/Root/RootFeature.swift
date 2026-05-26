@@ -132,6 +132,7 @@ struct RootFeature {
     case worktreeActivated
     case hierarchyMutated
     case paneInfoChanged
+    case foregroundJobChanged
     case paneActionRequested
     case windowActionRequested
     case configChanged
@@ -150,6 +151,7 @@ struct RootFeature {
       case .worktreeActivated: self = .worktreeActivated
       case .hierarchyMutated: self = .hierarchyMutated
       case .paneInfoChanged: self = .paneInfoChanged
+      case .foregroundJobChanged: self = .foregroundJobChanged
       case .paneActionRequested: self = .paneActionRequested
       case .windowActionRequested: self = .windowActionRequested
       case .configChanged: self = .configChanged

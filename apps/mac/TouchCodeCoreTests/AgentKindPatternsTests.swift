@@ -180,6 +180,105 @@ struct AgentKindPatternsTests {
     }
   }
 
+  // MARK: - foreground job hits
+
+  @Test
+  func foregroundJob_matchesDirectAgentProcess() {
+    let job = ForegroundJob(
+      processGroupID: 10,
+      processes: [
+        ForegroundProcess(
+          pid: 10,
+          parentPID: 9,
+          processGroupID: 10,
+          argv0: "/opt/homebrew/bin/codex",
+          commandLine: "/opt/homebrew/bin/codex --resume"
+        ),
+      ]
+    )
+
+    #expect(AgentKindPatterns.classify(foregroundJob: job) == .codex)
+  }
+
+  @Test
+  func foregroundJob_matchesAgentInsideNodeWrapper() {
+    let job = ForegroundJob(
+      processGroupID: 20,
+      processes: [
+        ForegroundProcess(
+          pid: 20,
+          parentPID: 19,
+          processGroupID: 20,
+          argv0: "node",
+          commandLine: "node /Users/me/.npm/bin/codex --dangerously-bypass"
+        ),
+      ]
+    )
+
+    #expect(AgentKindPatterns.classify(foregroundJob: job) == .codex)
+  }
+
+  @Test
+  func foregroundJob_matchesCursorAgentAliasInGenericAgentProcess() {
+    let job = ForegroundJob(
+      processGroupID: 30,
+      processes: [
+        ForegroundProcess(
+          pid: 30,
+          parentPID: 29,
+          processGroupID: 30,
+          argv0: "agent",
+          commandLine: "agent --client /Applications/Cursor.app --cursor-agent"
+        ),
+      ]
+    )
+
+    #expect(AgentKindPatterns.classify(foregroundJob: job) == .cursorAgent)
+  }
+
+  @Test
+  func foregroundJob_directAgentOutranksWrapperToken() {
+    let job = ForegroundJob(
+      processGroupID: 40,
+      processes: [
+        ForegroundProcess(
+          pid: 40,
+          parentPID: 39,
+          processGroupID: 40,
+          argv0: "node",
+          commandLine: "node /tmp/codex"
+        ),
+        ForegroundProcess(
+          pid: 41,
+          parentPID: 40,
+          processGroupID: 40,
+          argv0: "claude",
+          commandLine: "claude --resume"
+        ),
+      ]
+    )
+
+    #expect(AgentKindPatterns.classify(foregroundJob: job) == .claudeCode)
+  }
+
+  @Test
+  func foregroundJob_nonWrapperDoesNotMatchCommandLineSubstring() {
+    let job = ForegroundJob(
+      processGroupID: 50,
+      processes: [
+        ForegroundProcess(
+          pid: 50,
+          parentPID: 49,
+          processGroupID: 50,
+          argv0: "vim",
+          commandLine: "vim /tmp/codex-notes.md"
+        ),
+      ]
+    )
+
+    #expect(AgentKindPatterns.classify(foregroundJob: job) == nil)
+  }
+
   // MARK: - initialCommand: first-token-only behaviour
 
   @Test

@@ -126,7 +126,7 @@ public nonisolated enum PaneAttentionInterpreter {
 
     case .paneCreated, .paneReady,
       .tabActivated, .tabAutoClosed, .worktreeActivated, .hierarchyMutated,
-      .paneActionRequested, .windowActionRequested, .configChanged:
+      .foregroundJobChanged, .paneActionRequested, .windowActionRequested, .configChanged:
       return Step(cue: nil, outputFlag: .unchanged)
     }
   }

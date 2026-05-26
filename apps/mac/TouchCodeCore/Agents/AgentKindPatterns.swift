@@ -47,6 +47,20 @@ public nonisolated enum AgentKindPatterns {
     .amp: ["amp", "amp-local"],
   ]
 
+  /// Process names and executable basenames matched against the pane's
+  /// current foreground process group. This is the strongest runtime
+  /// signal because it follows the job that owns the TTY foreground,
+  /// including agents started after the shell is already open.
+  public static let processName: [AgentKind: [String]] = initialCommand
+
+  /// Runtime wrappers that commonly host CLI entrypoints. When one of
+  /// these is the visible process name, command-line tokens are inspected
+  /// for an agent binary or shim name.
+  public static let wrapperProcessNames: Set<String> = [
+    "node", "bun", "python", "python3", "ruby", "deno",
+    "sh", "bash", "zsh", "fish", "tmux", "npx", "bunx",
+  ]
+
   /// Substring patterns matched against the terminal title (`OSC 0/2`
   /// + libghostty-derived title). Longer patterns are preferred when
   /// multiple kinds match the same input — see `bestTitleMatch`.
@@ -107,6 +121,14 @@ public nonisolated enum AgentKindPatterns {
     return nil
   }
 
+  /// Classify from the pane's foreground process group. The highest
+  /// scoring process candidate wins. Executable identity outranks wrapper
+  /// command-line tokens so a child process named like an agent beats a
+  /// generic `node` / `python` launcher that merely mentions one.
+  public static func classify(foregroundJob job: ForegroundJob) -> AgentKind? {
+    bestForegroundJobMatch(job)?.kind
+  }
+
   // MARK: - Per-signal matchers
 
   /// Match the command's basename and first token against the
@@ -125,6 +147,68 @@ public nonisolated enum AgentKindPatterns {
       guard let patterns = initialCommand[kind] else { continue }
       for pattern in patterns where candidates.contains(pattern.lowercased()) {
         return kind
+      }
+    }
+    return nil
+  }
+
+  private static func bestForegroundJobMatch(
+    _ job: ForegroundJob
+  ) -> (kind: AgentKind, score: Int)? {
+    var best: (kind: AgentKind, score: Int, order: Int)?
+
+    for process in job.processes {
+      for candidate in processCandidates(process) {
+        guard let kind = matchProcessCandidate(candidate.value) else { continue }
+        let order = AgentKind.allCases.firstIndex(of: kind) ?? Int.max
+        if best == nil
+          || candidate.score > best!.score
+          || (candidate.score == best!.score && order < best!.order)
+        {
+          best = (kind, candidate.score, order)
+        }
+      }
+    }
+
+    return best.map { ($0.kind, $0.score) }
+  }
+
+  private static func processCandidates(
+    _ process: ForegroundProcess
+  ) -> [(value: String, score: Int)] {
+    var candidates: [(String, Int)] = [
+      (process.argv0, 80),
+      (process.processName, 70),
+    ]
+
+    let normalizedName = process.processName.lowercased()
+    if wrapperProcessNames.contains(normalizedName) {
+      candidates.append(contentsOf: process.commandTokens.map { ($0, 40) })
+    }
+
+    if normalizedName == "agent",
+      process.commandLine.lowercased().contains("cursor-agent")
+        || process.commandLine.lowercased().contains("cursor.app")
+    {
+      candidates.append(("cursor-agent", 60))
+    }
+
+    return candidates
+  }
+
+  private static func matchProcessCandidate(_ candidate: String) -> AgentKind? {
+    let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let basename = (trimmed as NSString).lastPathComponent.lowercased()
+    let normalized = trimmed.lowercased()
+
+    for kind in AgentKind.allCases {
+      guard let patterns = processName[kind] else { continue }
+      for pattern in patterns {
+        let lowered = pattern.lowercased()
+        if basename == lowered || normalized == lowered {
+          return kind
+        }
       }
     }
     return nil
