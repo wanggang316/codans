@@ -164,12 +164,12 @@ final class AgentRegistry {
   //  - onTerminalEvent(.paneExited | .paneCrashed | .paneClosedByTab):
   //    teardown — drop entry and scratch.
   //  - onTerminalEvent(.paneInfoChanged(.desktopNotification)): run
-  //    `DetectionTranslator.classify`; .waitingForInput → set
+  //    `PaneAttentionInterpreter.classify`; .waitingForInput → set
   //    waitingForInput=true. .taskFinished is *not* mapped to finished
   //    here — finished is derived only from active → idle transitions.
   //  - onTerminalEvent(.paneInfoChanged(.bellRang)): treat the bell as
   //    a synthetic waitingForInput cue, matching the notifications
-  //    detector (DetectionTranslator's bellRang branch).
+  //    detector (PaneAttentionInterpreter's bellRang branch).
   //  - onPaneKeyboardActivity / onPaneFocused: clear waitingForInput
   //    and mark the pane as seen.
   //  - onTerminalEvent(.paneInfoChanged(.title | .tabTitle)): append

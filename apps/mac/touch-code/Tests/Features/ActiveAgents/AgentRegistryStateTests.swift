@@ -317,7 +317,7 @@ struct AgentRegistryStateTests {
   /// (9) From `.idle`, an OSC 9 desktop notification whose
   /// title/body classify as `.waitingForInput` flips the entry to
   /// `.waitingForInput`. The classifier under test is
-  /// `DetectionTranslator.classify` — `"Approve this action"` hits
+  /// `PaneAttentionInterpreter.classify` — `"Approve this action"` hits
   /// the `"approv"` lexical cue.
   @Test
   func waitingForInputDesktopNotificationFlipsState() {
@@ -401,7 +401,7 @@ struct AgentRegistryStateTests {
   // MARK: - Extra coverage
 
   /// Bell delta is treated as a synthetic `waitingForInput` cue,
-  /// mirroring `DetectionTranslator.translate`'s bellRang branch.
+  /// mirroring `PaneAttentionInterpreter.interpret`'s bellRang branch.
   @Test
   func bellRangFlipsToWaitingForInput() {
     let f = Fixture()

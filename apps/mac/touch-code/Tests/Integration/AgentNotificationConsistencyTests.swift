@@ -9,7 +9,7 @@ import TouchCodeCore
 /// sequence is fed to both `NotificationDetector` (the notifications
 /// subsystem's consumer) and `AgentRegistry` (the ActiveAgents
 /// subsystem's consumer), the two consumers must remain in lockstep
-/// about how the shared `DetectionTranslator.classify(title:body:)`
+/// about how the shared `PaneAttentionInterpreter.classify(title:body:)`
 /// reading of a desktop notification (or the synthetic
 /// `bellRang` / `paneIdle` cues) flows through their respective
 /// output surfaces.
@@ -30,7 +30,7 @@ struct AgentNotificationConsistencyTests {
   /// Sequence: bind agent, paneOutput, OSC 9 (`"Approve this action?"`).
   /// Registry must end at `.waitingForInput`; detector must record one
   /// inbox entry with `kind == .waitingForInput`. Both arrive via
-  /// `DetectionTranslator.classify`, which is also called directly to
+  /// `PaneAttentionInterpreter.classify`, which is also called directly to
   /// pin the shared verdict.
   @Test
   func oscNineWaitingForInputIsConsistent() async {
@@ -39,7 +39,7 @@ struct AgentNotificationConsistencyTests {
     let body = "Yes / No"
 
     // Shared classifier verdict — the invariant under test.
-    #expect(DetectionTranslator.classify(title: title, body: body) == .waitingForInput)
+    #expect(PaneAttentionInterpreter.classify(title: title, body: body) == .waitingForInput)
 
     let events: [TerminalEvent] = [
       // onAgentBound is not a TerminalEvent — drive the registry input directly.
@@ -66,7 +66,7 @@ struct AgentNotificationConsistencyTests {
 
   /// Sequence: bind agent, paneOutput, `.bellRang`. Both consumers treat
   /// the bell as a waitingForInput cue. The detector's actual title
-  /// string is `"Pane bell"` (per `DetectionTranslator.translate`'s bell
+  /// string is `"Pane bell"` (per `PaneAttentionInterpreter.interpret`'s bell
   /// branch); what matters is the `kind`, not the exact title.
   @Test
   func bellRangIsConsistent() async {
@@ -105,7 +105,7 @@ struct AgentNotificationConsistencyTests {
     let title = "Build complete"
     let body = "Exited 0"
 
-    #expect(DetectionTranslator.classify(title: title, body: body) == .taskFinished)
+    #expect(PaneAttentionInterpreter.classify(title: title, body: body) == .taskFinished)
 
     let events: [TerminalEvent] = [
       .paneOutput(fixture.paneID, Data()),
@@ -135,7 +135,7 @@ struct AgentNotificationConsistencyTests {
   /// from the paneIdle branch (gated on prior paneOutput having flipped
   /// the pane into
   /// `hasProducedOutput` and the duration crossing
-  /// `DetectionTranslator.idleThreshold`).
+  /// `PaneAttentionInterpreter.idleThreshold`).
   @Test
   func runningSetLifecycleIsConsistent() async {
     let fixture = Fixture()
@@ -164,9 +164,9 @@ struct AgentNotificationConsistencyTests {
     // Step 4: paneIdle with duration above the detector's threshold.
     // Registry: raw state is already idle after the runningPanes exit,
     // so the surfaced state stays at .finished.
-    // Detector: pane has produced output AND duration ≥ idleThreshold,
-    // so translator returns a .taskFinished entry.
-    let idle = TerminalEvent.paneIdle(fixture.paneID, duration: DetectionTranslator.idleThreshold)
+    // Detector: pane has produced output AND duration >= idleThreshold,
+    // so the interpreter returns a .taskFinished cue.
+    let idle = TerminalEvent.paneIdle(fixture.paneID, duration: PaneAttentionInterpreter.idleThreshold)
     fixture.registry.onTerminalEvent(idle)
     await fixture.detector.handle(idle)
 
@@ -181,8 +181,8 @@ struct AgentNotificationConsistencyTests {
 
   /// Sequence: bind, runningPanes enters {P1}, paneExited. Registry
   /// drops the entry entirely (teardown). Detector treats paneExited
-  /// as bookkeeping-only — per `DetectionTranslator.translate`'s
-  /// paneExited branch, the translator returns `entry: nil` (clean and
+  /// as bookkeeping-only — per `PaneAttentionInterpreter.interpret`'s
+  /// paneExited branch, the interpreter returns `cue: nil` (clean and
   /// user-initiated exits are intentionally silent; only `paneCrashed`
   /// and post-busy `paneIdle` cover the "needs attention" cases). The
   /// invariant is "both consumers process the same teardown event and
