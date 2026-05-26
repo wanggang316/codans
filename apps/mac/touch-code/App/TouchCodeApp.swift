@@ -1134,17 +1134,10 @@ final class AppState {
     // pty child from the previous session can't haunt the panel. The
     // registry starts empty and refills from AgentBinder events as the
     // user runs agents in this session.
-    let ghostty = self.ghosttyRuntime
     let binder = AgentBinder(
       client: hierarchy,
       currentAgentKind: { [weak manager] paneID in
         manager?.catalog.pane(paneID)?.agentKind
-      },
-      paneInitialCommand: { [weak manager] paneID in
-        manager?.catalog.pane(paneID)?.initialCommand
-      },
-      paneTitle: { [weak ghostty] paneID in
-        ghostty?.surface(for: paneID)?.info.title
       },
       agentBoundHandler: { [weak registry] paneID, kind, sessionID in
         registry?.onAgentBound(paneID, kind: kind, sessionID: sessionID)
@@ -1293,10 +1286,9 @@ final class AppState {
 
   /// Active-agents T3: route the engine event stream through `AgentBinder`.
   /// Lives next to `NotificationDetector.handle` (same drain loop, same
-  /// MainActor context) so the binder sees pane creation, title changes,
-  /// OSC 9 desktop-notification payloads, and lifecycle teardown without
+  /// MainActor context) so the binder sees pane creation, foreground jobs,
+  /// and lifecycle teardown without
   /// opening a second long-lived Task on the events stream.
-  ///
   @MainActor
   private static func dispatchToAgentBinder(
     event: TerminalEvent,
@@ -1305,18 +1297,6 @@ final class AppState {
     switch event {
     case .paneCreated(let paneID, _):
       binder.consider(paneID: paneID, trigger: .paneCreated)
-    case .paneInfoChanged(let paneID, let delta):
-      switch delta {
-      case .title:
-        binder.consider(paneID: paneID, trigger: .titleChanged)
-      case .desktopNotification(let title, let body):
-        binder.consider(
-          paneID: paneID,
-          trigger: .desktopNotification(title: title, body: body)
-        )
-      default:
-        break
-      }
     case .foregroundJobChanged(let paneID, let job):
       binder.consider(paneID: paneID, trigger: .foregroundJobChanged(job))
     case .paneExited(let paneID, _, _),

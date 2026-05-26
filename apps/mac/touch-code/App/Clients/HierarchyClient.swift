@@ -429,8 +429,7 @@ nonisolated struct HierarchyClient: Sendable {
   /// Idempotent: a repeat call with the same value is a true no-op
   /// (no persistence churn). Silent no-op on unknown `paneID`. Consumed
   /// by `AgentBinder` (`docs/exec-plans/active-agents-view.md` T3) that
-  /// derives the kind from `SurfaceInfo.title` / `initialCommand` /
-  /// OSC 9 events.
+  /// derives the kind from foreground job snapshots.
   var setPaneAgentKind: @MainActor @Sendable (_ paneID: PaneID, _ kind: AgentKind?) -> Void
 
   /// Writes `Pane.agentSessionID` (agent-supplied session identifier;

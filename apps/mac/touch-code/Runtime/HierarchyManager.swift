@@ -823,9 +823,9 @@ final class HierarchyManager {
           guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
             continue
           }
-          // Idempotent: unchanged value skips persistence so a flood of
-          // identical classifications (e.g. title-update spam on the
-          // same agent) does not wake the 500 ms debounce.
+          // Idempotent: unchanged value skips persistence so repeated
+          // foreground snapshots for the same agent do not wake the
+          // 500 ms debounce.
           guard panes[paneIndex].agentKind != kind else { return }
           catalog.projects[projectIndex]
             .worktrees[worktreeIndex]

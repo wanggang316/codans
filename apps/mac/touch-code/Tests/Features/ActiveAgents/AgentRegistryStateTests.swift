@@ -64,8 +64,8 @@ struct AgentRegistryStateTests {
 
   /// (4) From `.finished`, the running set re-entering (a fresh
   /// OSC 9;4 busy report) flips the pane back to `.loading`.
-  /// `paneOutput` and title heartbeats no longer drive transitions —
-  /// OSC 9;4 is the sole "working" signal, so the cycle is fully
+  /// `paneOutput` no longer drives transitions — the running set is the
+  /// sole "working" signal, so the cycle is fully
   /// self-healing through the running-set channel without needing a
   /// separate output-based nudge.
   @Test
@@ -105,121 +105,19 @@ struct AgentRegistryStateTests {
     #expect(f.registry.entries[f.paneID]?.state == .finished)
   }
 
-  /// (4c) A single title delta is not enough to flip the row —
-  /// sporadic redraws at the input prompt (cursor moves, focus
-  /// restore, manual rename) must not register as "working". The
-  /// rate gate requires the windowed count to clear
-  /// `titleActivityThreshold`.
+  /// (4c) Title / tabTitle changes are not runtime-state signals.
+  /// Foreground execution state comes from the running set.
   @Test
-  func singleTitleDeltaDoesNotChangeIdleState() {
-    let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
-    let running = LockIsolated<Set<PaneID>>([])
-    let registry = AgentRegistry(
-      runningPanes: { running.value },
-      focusedPane: { nil },
-      now: { clock.value }
-    )
-    let paneID = PaneID()
-    registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
-    #expect(registry.entries[paneID]?.state == .idle)
+  func titleChangesDoNotDriveLoadingAfterInput() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
 
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("claude-code")))
-    #expect(registry.entries[paneID]?.state == .idle)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Thinking")))
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Thinking.")))
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .tabTitle("Thinking..")))
 
-    // A second event still inside the window but still under the
-    // threshold (which is ≥ 3 by current tuning) — still idle.
-    clock.setValue(Date(timeIntervalSince1970: 1_000.5))
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .tabTitle("● claude-code")))
-    #expect(registry.entries[paneID]?.state == .idle)
-  }
-
-  /// (4d) Title-rate above threshold inside the window flips the
-  /// row to `.loading`. Covers the long thinking / streaming
-  /// stretches in TUI agents that do not emit OSC 9;4 outside of
-  /// explicit tool calls — the status spinner / token counter / phase
-  /// label all update fast enough to clear the bar.
-  @Test
-  func titleRateAboveThresholdDrivesLoading() {
-    let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
-    let running = LockIsolated<Set<PaneID>>([])
-    let registry = AgentRegistry(
-      runningPanes: { running.value },
-      focusedPane: { nil },
-      now: { clock.value }
-    )
-    let paneID = PaneID()
-    registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
-    registry.onPaneKeyboardActivity(paneID)
-
-    // Three title events inside a 2s window — clears the rate gate.
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking")))
-    clock.setValue(Date(timeIntervalSince1970: 1_000.5))
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking (10k)")))
-    clock.setValue(Date(timeIntervalSince1970: 1_001.0))
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking (20k)")))
-
-    #expect(registry.entries[paneID]?.state == .loading)
-  }
-
-  /// (4e) Title rate decay: once title events stop, advancing time
-  /// past the window and recomputing must let the pane fall out of
-  /// `.loading`. This is the "Claude Code finished thinking and the
-  /// user is back at the prompt" path — no OSC 9;4 leave, no
-  /// paneIdle, just the title burst trailing off.
-  @Test
-  func titleRateDecayingReleasesLoading() async {
-    let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
-    let running = LockIsolated<Set<PaneID>>([])
-    let registry = AgentRegistry(
-      runningPanes: { running.value },
-      focusedPane: { nil },
-      now: { clock.value }
-    )
-    let paneID = PaneID()
-    registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
-    registry.onPaneKeyboardActivity(paneID)
-
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking")))
-    clock.setValue(Date(timeIntervalSince1970: 1_000.5))
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking (10k)")))
-    clock.setValue(Date(timeIntervalSince1970: 1_001.0))
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("✶ Thinking (20k)")))
-    #expect(registry.entries[paneID]?.state == .loading)
-
-    // Jump past the rolling window. Without firing a new event,
-    // re-derivation happens via the decay task scheduled after the
-    // last title delta. Sleep just past the window + decay
-    // jitter to let the @MainActor decay task fire.
-    clock.setValue(Date(timeIntervalSince1970: 1_010.0))
-    try? await Task.sleep(for: .seconds(2.5))
-    #expect(registry.entries[paneID]?.state == .finished)
-  }
-
-  /// Title-rate startup bursts should stay idle before the bound agent
-  /// sees input, even when the pane is focused.
-  @Test
-  func focusedPaneStartupTitleRateDoesNotDriveLoading() async {
-    let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
-    let running = LockIsolated<Set<PaneID>>([])
-    let paneID = PaneID()
-    let focused = LockIsolated<PaneID?>(paneID)
-    let registry = AgentRegistry(
-      runningPanes: { running.value },
-      focusedPane: { focused.value },
-      now: { clock.value }
-    )
-    registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
-
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting")))
-    clock.setValue(Date(timeIntervalSince1970: 1_000.5))
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting.")))
-    clock.setValue(Date(timeIntervalSince1970: 1_001.0))
-    registry.onTerminalEvent(.paneInfoChanged(paneID, .title("Starting..")))
-    #expect(registry.entries[paneID]?.state == .idle)
-
-    clock.setValue(Date(timeIntervalSince1970: 1_010.0))
-    try? await Task.sleep(for: .seconds(2.5))
-    #expect(registry.entries[paneID]?.state == .idle)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   /// (5) From `.finished`, `onPaneKeyboardActivity` → `.idle`.
