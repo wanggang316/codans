@@ -125,6 +125,12 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
+    // Opaque fill so the scrolling sidebar list above does not bleed
+    // through. `.windowBackground` tracks `NSWindow.backgroundColor`,
+    // which the ghostty runtime already keeps in sync with the active
+    // terminal palette — so the footer reads as the same surface the
+    // sidebar list sits on, without per-view observers.
+    .background(.windowBackground)
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {
