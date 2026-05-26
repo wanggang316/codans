@@ -956,7 +956,17 @@ struct RootFeature {
                 )))
           )
 
-        case .runScriptRequested(let scriptID, let projectID, let worktreeID):
+        case .runScriptRequested(let scriptID):
+          // Resolve target Project + Worktree from `state.selection` at
+          // handle-time — the SwiftUI Menu's NSMenuItem actions and the
+          // `.keyboardShortcut`-bridged chord can hold stale closure
+          // captures after a worktree switch, which previously fired the
+          // script against the wrong worktree. Same fix pattern as
+          // `pickEditorFromMenu` above.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
           let client = hierarchyClient
           let presenter = settingsWindowPresenter
           return .run { send in
