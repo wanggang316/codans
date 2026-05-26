@@ -16,7 +16,14 @@ nonisolated struct GhosttyThemeCatalog: Equatable, Sendable {
   /// parseable `background` directive — Ghostty itself falls back to dark.
   let dark: [String]
 
-  static let empty = GhosttyThemeCatalog(light: [], dark: [])
+  /// Parsed color directives keyed by theme name. Populated alongside the
+  /// classification (same file read) so the Settings picker can render
+  /// swatches without re-touching disk. A missing entry means the file was
+  /// unreadable; an empty `GhosttyThemePreview` means it was readable but had
+  /// no parseable color directives — both render as neutral chrome.
+  let previews: [String: GhosttyThemePreview]
+
+  static let empty = GhosttyThemeCatalog(light: [], dark: [], previews: [:])
 }
 
 /// Read-only, best-effort enumerator of Ghostty theme files. Never throws;
@@ -61,6 +68,7 @@ enum GhosttyThemeCatalogReader {
 
     var lightSet: Set<String> = []
     var darkSet: Set<String> = []
+    var previews: [String: GhosttyThemePreview] = [:]
     var seen: Set<String> = []
 
     for root in searchRoots {
@@ -80,7 +88,9 @@ enum GhosttyThemeCatalogReader {
         guard isRegular else { continue }
         seen.insert(name)
 
-        switch classify(fileURL: entry) {
+        let preview = parseThemeFile(at: entry)
+        previews[name] = preview ?? .empty
+        switch classify(preview: preview) {
         case .light:
           lightSet.insert(name)
         case .dark:
@@ -99,7 +109,11 @@ enum GhosttyThemeCatalogReader {
         lhs.localizedStandardCompare(rhs) == .orderedAscending
       }
     }
-    return GhosttyThemeCatalog(light: sort(Array(lightSet)), dark: sort(Array(darkSet)))
+    return GhosttyThemeCatalog(
+      light: sort(Array(lightSet)),
+      dark: sort(Array(darkSet)),
+      previews: previews
+    )
   }
 
   // MARK: - Search path resolution
@@ -191,38 +205,75 @@ enum GhosttyThemeCatalogReader {
 
   private enum Classification { case light, dark, unclassified }
 
-  /// Read the theme file (best-effort UTF-8) and look for a `background`
-  /// directive. Any I/O error or unparseable color → `.unclassified`, which
-  /// the caller maps to dark.
-  private static func classify(fileURL: URL) -> Classification {
+  /// Map a parsed preview to a light/dark classification using the same
+  /// luminance threshold as before. A missing or unparseable background →
+  /// `.unclassified`, which the caller maps to dark.
+  private static func classify(preview: GhosttyThemePreview?) -> Classification {
+    guard let background = preview?.background else { return .unclassified }
+    let y = 0.299 * background.r + 0.587 * background.g + 0.114 * background.b
+    return y > 0.5 ? .light : .dark
+  }
+
+  // MARK: - Theme file parsing
+
+  /// Read a theme file (best-effort UTF-8) and extract the color directives
+  /// the preview UI cares about. Returns `nil` only on I/O failure — an empty
+  /// file or a file with zero parseable directives still returns a struct
+  /// (with all-`nil` fields) so the catalog can record that we tried.
+  static func parseThemeFile(at fileURL: URL) -> GhosttyThemePreview? {
     guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
-      return .unclassified
+      return nil
     }
+    var background: GhosttyThemePreview.RGB?
+    var foreground: GhosttyThemePreview.RGB?
+    var cursor: GhosttyThemePreview.RGB?
+    var palette: [Int: GhosttyThemePreview.RGB] = [:]
+
     for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
       let line = rawLine.trimmingCharacters(in: .whitespaces)
       // Strip `#` comments. A `#RRGGBB` value is distinguished from a
       // comment only by position — comments start the line; color literals
       // appear after `=`.
       if line.isEmpty || line.hasPrefix("#") { continue }
-      guard line.lowercased().hasPrefix("background") else { continue }
       guard let eq = line.firstIndex(of: "=") else { continue }
+      let key = line[..<eq].trimmingCharacters(in: .whitespaces).lowercased()
       let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-      if let rgb = parseColor(String(value)) {
-        let y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b
-        return y > 0.5 ? .light : .dark
+
+      switch key {
+      case "background":
+        background = parseColor(value)
+      case "foreground":
+        foreground = parseColor(value)
+      case "cursor-color":
+        cursor = parseColor(value)
+      case "palette":
+        // `palette = N=<color>`. Split once on '=' inside the value half.
+        guard let inner = value.firstIndex(of: "=") else { continue }
+        let indexPart = value[..<inner].trimmingCharacters(in: .whitespaces)
+        let colorPart = value[value.index(after: inner)...].trimmingCharacters(in: .whitespaces)
+        guard let idx = Int(indexPart), (0...15).contains(idx),
+          let rgb = parseColor(String(colorPart))
+        else { continue }
+        palette[idx] = rgb
+      default:
+        continue
       }
-      return .unclassified
     }
-    return .unclassified
+    return GhosttyThemePreview(
+      background: background,
+      foreground: foreground,
+      cursor: cursor,
+      palette: palette
+    )
   }
 
-  /// Parse the three color formats Ghostty accepts for `background`:
+  /// Parse the three color formats Ghostty accepts for color directives:
   /// - `#RRGGBB` (hex with leading hash)
   /// - `RRGGBB` (bare hex)
   /// - `r:g:b` (decimal tuple, 0–255 per channel)
   ///
   /// Returned channels are normalized to 0–1.
-  fileprivate static func parseColor(_ raw: String) -> (r: Double, g: Double, b: Double)? {
+  fileprivate static func parseColor(_ raw: String) -> GhosttyThemePreview.RGB? {
     let trimmed = raw.trimmingCharacters(in: .whitespaces)
     if trimmed.contains(":") {
       let parts = trimmed.split(separator: ":", omittingEmptySubsequences: false)
@@ -231,15 +282,20 @@ enum GhosttyThemeCatalogReader {
         let g = UInt8(parts[1].trimmingCharacters(in: .whitespaces)),
         let b = UInt8(parts[2].trimmingCharacters(in: .whitespaces))
       else { return nil }
-      return (Double(r) / 255.0, Double(g) / 255.0, Double(b) / 255.0)
+      return GhosttyThemePreview.RGB(
+        r: Double(r) / 255.0,
+        g: Double(g) / 255.0,
+        b: Double(b) / 255.0
+      )
     }
     let hex = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
     guard hex.count == 6,
       let value = UInt32(hex, radix: 16)
     else { return nil }
-    let r = Double((value >> 16) & 0xFF) / 255.0
-    let g = Double((value >> 8) & 0xFF) / 255.0
-    let b = Double(value & 0xFF) / 255.0
-    return (r, g, b)
+    return GhosttyThemePreview.RGB(
+      r: Double((value >> 16) & 0xFF) / 255.0,
+      g: Double((value >> 8) & 0xFF) / 255.0,
+      b: Double(value & 0xFF) / 255.0
+    )
   }
 }
