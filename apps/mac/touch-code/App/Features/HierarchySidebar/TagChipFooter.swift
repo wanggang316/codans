@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TouchCodeCore
 
@@ -41,6 +42,11 @@ struct TagFilterPopoverFooter: View {
   var activeAgentsPanelOpen: Bool = false
 
   @State private var isSortPopoverPresented = false
+  /// Active ghostty terminal background — same source the chrome tint
+  /// band in the detail uses, so the overlay below can layer the same
+  /// hue the sidebar list sits on.
+  @State private var ghosttyBackground: NSColor = .windowBackgroundColor
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     HStack(spacing: 0) {
@@ -125,14 +131,33 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // SwiftUI's `.bar` material renders with the system glass effect the
-    // sidebar column itself uses on macOS 26, so the footer matches the
-    // sidebar list's vibrancy + ghostty tint instead of reading as a flat
-    // colour. It's also opaque enough to mask the scrolling list above —
-    // a plain `.background(.windowBackground)` was the right colour but
-    // had no glass, while removing the background entirely let the list
-    // rows bleed through.
-    .background(.bar)
+    // Reconstruct the same two-layer surface the sidebar list shows:
+    //   1. `.bar` material is macOS 26's footer/toolbar glass — same
+    //      vibrancy the sidebar column's floating overlay uses.
+    //   2. Ghostty terminal background overlaid at the same low alpha
+    //      `ghosttyChromeTint` paints behind the floating sidebar, so
+    //      the footer ends up with the identical tint the sidebar list
+    //      gets from its glass sampling the chrome tint band.
+    // The footer cannot sample the chrome tint band itself (it's
+    // outside the detail), so the layering has to be applied here.
+    .background {
+      Rectangle()
+        .fill(.bar)
+        .overlay(
+          Color(nsColor: ghosttyBackground)
+            .opacity(0.18)
+            .allowsHitTesting(false)
+        )
+    }
+    .onAppear { refreshGhosttyBackground() }
+    .onChange(of: colorScheme) { _, _ in refreshGhosttyBackground() }
+    .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+      refreshGhosttyBackground()
+    }
+  }
+
+  private func refreshGhosttyBackground() {
+    ghosttyBackground = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {
