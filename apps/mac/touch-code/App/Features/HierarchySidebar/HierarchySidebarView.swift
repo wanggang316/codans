@@ -60,6 +60,13 @@ struct HierarchySidebarView: View {
   /// Defaults to a sensible value so the first render before the
   /// background measure lands doesn't pop a too-tall panel.
   @State private var sidebarHeightObservation: Double = 600
+  /// Live height of the bottom safe-area-inset content (ActiveAgents
+  /// panel when expanded + the always-present `TagFilterPopoverFooter`).
+  /// Pushed onto the List as a bottom content margin so scrolling rows
+  /// stop above the inset region — the footer is transparent on
+  /// purpose (to inherit the sidebar's glass + chrome tint) and a
+  /// transparent inset cannot mask scroll content on its own.
+  @State private var bottomInsetHeight: Double = 0
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
@@ -250,6 +257,11 @@ struct HierarchySidebarView: View {
               },
             activeAgentsPanelOpen: activeAgentsPanelOpen
           )
+        }
+        .onGeometryChange(for: Double.self) { proxy in
+          Double(proxy.size.height)
+        } action: { newHeight in
+          bottomInsetHeight = newHeight
         }
       }
       // Auto-open the Agents View panel on the rising edge into "any
@@ -473,6 +485,11 @@ struct HierarchySidebarView: View {
         // sits on that glass via safeAreaInset) reads as one continuous
         // material with the list above it.
         .scrollContentBackground(.hidden)
+        // Push the scrollable region up by the live bottom-inset height
+        // (footer + optional ActiveAgents panel) so rows physically stop
+        // above the inset instead of bleeding through the transparent
+        // footer underneath them.
+        .contentMargins(.bottom, bottomInsetHeight, for: .scrollContent)
         .opacity(sidebarIndentReady ? 1 : 0)
         .background(SidebarIndentZeroer(onReady: { sidebarIndentReady = true }))
         .onChange(of: revealTrigger) { _, _ in
