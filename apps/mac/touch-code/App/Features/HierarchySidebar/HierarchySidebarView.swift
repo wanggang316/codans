@@ -491,23 +491,29 @@ struct HierarchySidebarView: View {
           ForEach(projects) { project in
             projectSection(project, hotkeyIndex: hotkeyIndex)
           }
-          // Invisible bottom row sized to the live ActiveAgents panel
-          // height (when expanded). The List honours this as a real
-          // row, so its scrollable content stops above the panel and
-          // the last worktree row can be scrolled into the clear
-          // region above the (translucent) panel. We can't use
-          // `.contentMargins(.bottom, _, for: .scrollContent)` here —
-          // `List(.sidebar)` on macOS 26 ignores it (see 6c1c3631).
+        }
+        .listStyle(.sidebar)
+        // Bottom safe-area-inset sized to the live ActiveAgents panel
+        // height (when expanded). Unlike a spacer row, the inset
+        // shrinks the List's underlying `NSScrollView` safe area — so
+        // both the scrollable content AND the overlay scroller stop
+        // above the panel. A spacer row would instead inflate
+        // content-size and leave the scroller trailing behind the
+        // panel (its drag range covers the spacer's blank tail and
+        // the scroller's track is still the full List height).
+        // `.contentMargins(.bottom, _, for: .scrollContent)` is the
+        // ScrollView-native version but `List(.sidebar)` on macOS 26
+        // ignores it — see 6c1c3631. We don't worry about
+        // bleed-through here because the panel (a ZStack sibling) is
+        // a translucent popover material; rows showing through the
+        // inset region are exactly the behind-glass effect we want.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
           if bottomInsetHeight > 0 {
             Color.clear
               .frame(height: bottomInsetHeight)
-              .listRowInsets(EdgeInsets())
-              .listRowBackground(Color.clear)
-              .listRowSeparator(.hidden)
               .accessibilityHidden(true)
           }
         }
-        .listStyle(.sidebar)
         // Hide the List's own opaque content background so the sidebar
         // column's system glass overlay shows through — same surface
         // the floating sidebar samples, so the footer below (rendered
