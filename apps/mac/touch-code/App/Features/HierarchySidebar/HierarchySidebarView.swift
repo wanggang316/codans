@@ -60,13 +60,6 @@ struct HierarchySidebarView: View {
   /// Defaults to a sensible value so the first render before the
   /// background measure lands doesn't pop a too-tall panel.
   @State private var sidebarHeightObservation: Double = 600
-  /// Live height of the bottom safe-area-inset content (ActiveAgents
-  /// panel when expanded + the always-present `TagFilterPopoverFooter`).
-  /// Pushed onto the List as a bottom content margin so scrolling rows
-  /// stop above the inset region — the footer is transparent on
-  /// purpose (to inherit the sidebar's glass + chrome tint) and a
-  /// transparent inset cannot mask scroll content on its own.
-  @State private var bottomInsetHeight: Double = 0
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
@@ -186,84 +179,77 @@ struct HierarchySidebarView: View {
       uniqueKeysWithValues: catalog.projects.map { ($0.id, $0.name) }
     )
 
-    // Sidebar body is the List, with a compact filter footer mounted at
-    // the bottom `.safeAreaInset` — a single trailing glyph that opens an
-    // upward popover listing the available tag filters.
-    //
-    // A second piece of bottom inset (above the footer, still inside the
-    // same `.safeAreaInset`) hosts the ActiveAgents panel when expanded.
-    // Stacking both in one VStack keeps the safe-area accounting in sync
-    // — the List automatically shrinks by the panel + footer total so
-    // worktree rows never get clipped behind them.
-    treeBody(projects: visibleProjects)
-      .background(
-        GeometryReader { proxy in
-          Color.clear.preference(
-            key: SidebarHeightPreferenceKey.self,
-            value: proxy.size.height
-          )
-        }
-      )
-      .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
-        sidebarHeightObservation = newHeight
-      }
-      .safeAreaInset(edge: .bottom, spacing: 0) {
-        VStack(spacing: 0) {
-          if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
-            ActiveAgentsSidebarPanel(
-              registry: registry,
-              resolveSourcePath: { paneID in
-                resolveActiveAgentsSourcePath(
-                  paneID: paneID,
-                  catalog: hierarchyManager.catalog
-                )
-              },
-              focusedPaneID: currentlyFocusedPaneID(),
-              onTapRow: { paneID in
-                // Panel stays open after a row tap — the user often
-                // fan-jumps between agents and re-opening the panel
-                // each time is friction.
-                onActiveAgentsRowTapped(paneID)
-              },
-              onClose: {
-                withAnimation(.easeOut(duration: 0.18)) {
-                  activeAgentsPanelOpen = false
-                }
-              },
-              height: $activeAgentsPanelHeight,
-              minHeight: 140,
-              maxHeight: max(140, sidebarHeightObservation * 0.5)
+    // Sidebar body: the List takes the remaining vertical space, with
+    // the ActiveAgents panel + TagFilterPopoverFooter stacked below it
+    // in a plain `VStack`. A previous version mounted the panel and
+    // footer in `.safeAreaInset(edge: .bottom)`, but that lets the
+    // List's scroll content slide *under* the inset region. With a
+    // transparent footer (needed to inherit the sidebar's glass +
+    // chrome tint), the bleed-through made scrolling rows overlap the
+    // footer glyphs. A plain VStack physically caps the List's frame,
+    // so rows can never reach the footer slot.
+    VStack(spacing: 0) {
+      treeBody(projects: visibleProjects)
+        .background(
+          GeometryReader { proxy in
+            Color.clear.preference(
+              key: SidebarHeightPreferenceKey.self,
+              value: proxy.size.height
             )
-            .transition(.move(edge: .bottom).combined(with: .opacity))
           }
-          TagFilterPopoverFooter(
-            tags: catalog.tags,
-            activeFilter: catalog.activeTagFilter,
-            showUntaggedChip: untaggedExists,
-            onAllTapped: { store.send(.allChipTapped) },
-            onTagTapped: { store.send(.tagChipTapped($0)) },
-            onUntaggedTapped: { store.send(.untaggedChipTapped) },
-            onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-            onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-            sortMode: catalog.projectSortMode,
-            onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
-            onManualSortRequested: { store.send(.manualSortSheetRequested) },
-            onActiveAgentsTapped: activeAgentsRegistry == nil
-              ? nil
-              : {
-                withAnimation(.easeOut(duration: 0.18)) {
-                  activeAgentsPanelOpen.toggle()
-                }
-              },
-            activeAgentsPanelOpen: activeAgentsPanelOpen
-          )
+        )
+        .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
+          sidebarHeightObservation = newHeight
         }
-        .onGeometryChange(for: Double.self) { proxy in
-          Double(proxy.size.height)
-        } action: { newHeight in
-          bottomInsetHeight = newHeight
-        }
+      if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
+        ActiveAgentsSidebarPanel(
+          registry: registry,
+          resolveSourcePath: { paneID in
+            resolveActiveAgentsSourcePath(
+              paneID: paneID,
+              catalog: hierarchyManager.catalog
+            )
+          },
+          focusedPaneID: currentlyFocusedPaneID(),
+          onTapRow: { paneID in
+            // Panel stays open after a row tap — the user often
+            // fan-jumps between agents and re-opening the panel
+            // each time is friction.
+            onActiveAgentsRowTapped(paneID)
+          },
+          onClose: {
+            withAnimation(.easeOut(duration: 0.18)) {
+              activeAgentsPanelOpen = false
+            }
+          },
+          height: $activeAgentsPanelHeight,
+          minHeight: 140,
+          maxHeight: max(140, sidebarHeightObservation * 0.5)
+        )
+        .transition(.move(edge: .bottom).combined(with: .opacity))
       }
+      TagFilterPopoverFooter(
+        tags: catalog.tags,
+        activeFilter: catalog.activeTagFilter,
+        showUntaggedChip: untaggedExists,
+        onAllTapped: { store.send(.allChipTapped) },
+        onTagTapped: { store.send(.tagChipTapped($0)) },
+        onUntaggedTapped: { store.send(.untaggedChipTapped) },
+        onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
+        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+        sortMode: catalog.projectSortMode,
+        onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
+        onManualSortRequested: { store.send(.manualSortSheetRequested) },
+        onActiveAgentsTapped: activeAgentsRegistry == nil
+          ? nil
+          : {
+            withAnimation(.easeOut(duration: 0.18)) {
+              activeAgentsPanelOpen.toggle()
+            }
+          },
+        activeAgentsPanelOpen: activeAgentsPanelOpen
+      )
+    }
       // Auto-open the Agents View panel on the rising edge into "any
       // bound agent is loading" — but only when the user has the
       // Settings → General toggle on. We do NOT auto-close when the
@@ -477,29 +463,12 @@ struct HierarchySidebarView: View {
           ForEach(projects) { project in
             projectSection(project, hotkeyIndex: hotkeyIndex)
           }
-          // Invisible bottom row sized to the live safe-area-inset
-          // (footer + optional ActiveAgents panel). The List honours
-          // this as a real row, so its scrollable content can never
-          // reach the footer slot underneath — preventing the rows
-          // above from bleeding through the transparent footer.
-          // `.contentMargins(.bottom, _, for: .scrollContent)` is the
-          // ScrollView-native modifier for this, but `List(.sidebar)`
-          // on macOS 26 ignores it. Floor at a positive value so the
-          // spacer is always emitted: relying on the live measurement
-          // alone leaves a one-frame window during initial layout where
-          // the inset reads as 0 and the row collapses.
-          Color.clear
-            .frame(height: max(bottomInsetHeight, 40))
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .accessibilityHidden(true)
         }
         .listStyle(.sidebar)
         // Hide the List's own opaque content background so the sidebar
-        // column's system glass overlay shows through — same surface the
-        // floating sidebar samples, so the bottom footer (which also
-        // sits on that glass via safeAreaInset) reads as one continuous
+        // column's system glass overlay shows through — same surface
+        // the floating sidebar samples, so the footer below (rendered
+        // as a sibling in the outer VStack) reads as one continuous
         // material with the list above it.
         .scrollContentBackground(.hidden)
         .opacity(sidebarIndentReady ? 1 : 0)
