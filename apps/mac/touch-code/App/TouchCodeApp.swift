@@ -32,6 +32,17 @@ struct TouchCodeApp: App {
       $0.gitHub = .live()
       $0.gitService = .live()
     }
+
+    // Install the Sentry crash handler before SwiftUI renders anything,
+    // so view-body crashes are still captured. Reads settings directly
+    // from disk because SettingsStore is constructed later in
+    // AppState.bringUp(); the read is cheap and degrades to defaults on
+    // any failure. DEBUG builds and users who opted out short-circuit
+    // inside `bootstrap`.
+    CrashReporting.bootstrap(
+      settings: CrashReporting.loadSettingsForBootstrap(),
+      infoDictionary: Bundle.main.infoDictionary ?? [:]
+    )
   }
 
   /// Single long-lived runtime stack. `@State` keeps this alive across the

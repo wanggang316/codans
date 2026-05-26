@@ -16,6 +16,19 @@ name: release
 #                                   produced by `generate_keys -x`,
 #                                   counterpart of SUPublicEDKey in
 #                                   apps/mac/Configurations/mac-Info.plist)
+#
+# Optional secrets — release succeeds without these, but the published
+# build will not report crashes (or will report unsymbolicated stacks):
+#   SENTRY_DSN_REST               - host+path portion of the Sentry DSN
+#                                   (everything after `https://`). When
+#                                   absent the bundle ships with an empty
+#                                   DSN and crash reporting no-ops at
+#                                   launch — see docs/references/crash-reporting.md.
+#   SENTRY_AUTH_TOKEN             - scopes project:read, project:write,
+#                                   project:releases. Needed to register
+#                                   the Sentry release and upload dSYMs;
+#                                   absence is non-fatal but stack traces
+#                                   stay unsymbolicated in the dashboard.
 
 on:
   push:
@@ -158,10 +171,39 @@ jobs:
           rm -f "$P12_PATH"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
+      - name: Inject Sentry DSN into Secrets.xcconfig
+        # xcconfig is read by xcodebuild at Archive time. Without this
+        # step the CI build links against a SentryDSN of bare "https://",
+        # which CrashReporting.Configuration rejects and the SDK never
+        # starts — every release would silently lose crash visibility.
+        # Empty SENTRY_DSN_REST is intentionally tolerated: useful when
+        # cutting a release before the secret is provisioned.
+        env:
+          SENTRY_DSN_REST: ${{ secrets.SENTRY_DSN_REST }}
+        run: |
+          if [ -z "$SENTRY_DSN_REST" ]; then
+            echo "::warning::SENTRY_DSN_REST secret is empty; release will ship without crash reporting"
+          fi
+          printf 'SENTRY_DSN_REST = %s\n' "$SENTRY_DSN_REST" \
+            > apps/mac/Configurations/Secrets.xcconfig
+
       - name: Archive (xcodebuild archive + extract signed app)
         env:
           APPLE_TEAM_ID: ${{ secrets.DEVELOPMENT_TEAM }}
         run: make mac-archive
+
+      - name: Upload dSYMs to Sentry
+        # Registers the release `touch-code@<version>` on Sentry and
+        # pushes the dSYMs from the .xcarchive so future crashes resolve
+        # to readable source lines. The script no-ops cleanly when
+        # SENTRY_AUTH_TOKEN is unset, keeping the workflow tolerant of
+        # secret-not-yet-provisioned states. Runs immediately after
+        # Archive (and therefore before notarization/stapling) because
+        # notarize mutates the .app bundle but leaves the .xcarchive
+        # dSYMs untouched.
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: ./apps/mac/scripts/release.sh upload-symbols
 
       - name: Notarize app
         env:

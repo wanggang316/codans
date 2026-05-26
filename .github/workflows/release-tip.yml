@@ -13,7 +13,8 @@ name: release-tip
 # with all assets present.
 #
 # Required secrets: identical set to release.yml — Developer ID cert,
-# notary creds, Sparkle private key.
+# notary creds, Sparkle private key. Optional: SENTRY_DSN_REST +
+# SENTRY_AUTH_TOKEN (see release.yml header for the contract).
 
 on:
   push:
@@ -169,6 +170,20 @@ jobs:
           rm -f "$P12_PATH"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
+      - name: Inject Sentry DSN into Secrets.xcconfig
+        # See release.yml for the rationale — empty REST yields a bare
+        # `https://` DSN, which CrashReporting.Configuration rejects and
+        # the SDK never starts. Tolerated when the secret is absent so
+        # an early tip build can still ship before Sentry is provisioned.
+        env:
+          SENTRY_DSN_REST: ${{ secrets.SENTRY_DSN_REST }}
+        run: |
+          if [ -z "$SENTRY_DSN_REST" ]; then
+            echo "::warning::SENTRY_DSN_REST secret is empty; tip build will ship without crash reporting"
+          fi
+          printf 'SENTRY_DSN_REST = %s\n' "$SENTRY_DSN_REST" \
+            > apps/mac/Configurations/Secrets.xcconfig
+
       - name: Override CURRENT_PROJECT_VERSION for tip build
         # Override the build number in-place so the produced binary's
         # CFBundleVersion matches the tip build computed above.
@@ -184,6 +199,17 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.DEVELOPMENT_TEAM }}
         run: make mac-archive
+
+      - name: Upload dSYMs to Sentry
+        # Same contract as release.yml: registers a Sentry release and
+        # ships dSYMs from the .xcarchive. Idempotent across re-runs and
+        # no-ops cleanly without SENTRY_AUTH_TOKEN. Note: tip builds and
+        # the matching stable build share `touch-code@<MARKETING_VERSION>`,
+        # so the dSYM set on Sentry accumulates frames from both — this
+        # is correct since both came from the same source tree.
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: ./apps/mac/scripts/release.sh upload-symbols
 
       - name: Notarize app
         env:
