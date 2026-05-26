@@ -33,17 +33,6 @@ extension View {
   ) -> some View {
     modifier(GhosttyChromeTintModifier(edges: edges, alpha: alpha))
   }
-
-  /// Renders the receiver with the same surface as the floating sidebar
-  /// overlay above it: `.sidebar` material + low-alpha Ghostty terminal
-  /// tint. Use this on chrome surfaces that sit inside the sidebar column
-  /// (e.g. the footer toolbar) — the system sidebar material samples the
-  /// chrome tint band in the detail's leading inset, but standalone
-  /// surfaces inside the sidebar column do not, so they need the tint
-  /// applied directly to read as one continuous surface with the list.
-  func ghosttySidebarSurface(alpha: Double = 0.18) -> some View {
-    modifier(GhosttySidebarSurfaceModifier(alpha: alpha))
-  }
 }
 
 private struct GhosttyChromeTintModifier: ViewModifier {
@@ -132,38 +121,5 @@ private struct GhosttyChromeTintBands: ViewModifier {
     color
       .opacity(alpha)
       .allowsHitTesting(false)
-  }
-}
-
-/// Backing for `ghosttySidebarSurface`: lays down the system `.sidebar`
-/// glass and a Ghostty-terminal tint on top, refreshing the tint on the
-/// same signals as `GhosttyChromeTintModifier` (`colorScheme` flip,
-/// post-swap `.ghosttyRuntimeConfigApplied`).
-private struct GhosttySidebarSurfaceModifier: ViewModifier {
-  @Environment(\.colorScheme) private var colorScheme
-  @State private var nsColor: NSColor = .windowBackgroundColor
-  let alpha: Double
-
-  func body(content: Content) -> some View {
-    content
-      .background {
-        // `.behindWindow` mirrors the original footer choice — avoids the
-        // HAN-63 within-window-pixel bleed regression — and the explicit
-        // tint above does the colour-match work that `.withinWindow` would
-        // otherwise have attempted (and failed, since the macOS 26 floating
-        // sidebar overlay is a separate render layer the safe-area-inset
-        // surface cannot sample).
-        VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
-          .overlay(Color(nsColor: nsColor).opacity(alpha))
-      }
-      .onAppear { refresh() }
-      .onChange(of: colorScheme) { _, _ in refresh() }
-      .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-        refresh()
-      }
-  }
-
-  private func refresh() {
-    nsColor = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
   }
 }

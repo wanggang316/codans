@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TouchCodeCore
 
@@ -41,6 +42,11 @@ struct TagFilterPopoverFooter: View {
   var activeAgentsPanelOpen: Bool = false
 
   @State private var isSortPopoverPresented = false
+  /// Footer background = active Ghostty terminal background colour.
+  /// Refreshed on `colorScheme` flips and `.ghosttyRuntimeConfigApplied`
+  /// so the footer tracks the same palette the sidebar list sits on.
+  @State private var backgroundNSColor: NSColor = .windowBackgroundColor
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     HStack(spacing: 0) {
@@ -125,14 +131,16 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // Render the footer with the same surface as the floating sidebar
-    // overlay above it: `.sidebar` material + the active Ghostty terminal
-    // tint. The sidebar list naturally picks up the tint because the
-    // system overlay samples the chrome tint band in the detail's leading
-    // inset; the footer lives inside the sidebar column's safe-area inset
-    // and cannot sample that band itself, so the tint has to be applied
-    // directly here.
-    .ghosttySidebarSurface()
+    .background(Color(nsColor: backgroundNSColor))
+    .onAppear { refreshBackgroundColor() }
+    .onChange(of: colorScheme) { _, _ in refreshBackgroundColor() }
+    .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+      refreshBackgroundColor()
+    }
+  }
+
+  private func refreshBackgroundColor() {
+    backgroundNSColor = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {
