@@ -49,6 +49,35 @@ SENTRY_AUTH_TOKEN=... apps/mac/scripts/release.sh upload-symbols
 Without `SENTRY_AUTH_TOKEN` the step is a friendly no-op and the rest
 of the pipeline still produces a notarized DMG.
 
+### In CI
+
+`.github/workflows/release.yml` (tag-triggered) and
+`release-tip.yml` (every push to `main`) both run the same archive →
+notarize → dmg pipeline. They wrap two Sentry-specific steps around the
+Archive call:
+
+1. **Inject Sentry DSN** — writes `apps/mac/Configurations/Secrets.xcconfig`
+   from the `SENTRY_DSN_REST` repository secret *before* Archive so the
+   built `Info.plist` carries a real DSN rather than the bare `https://`
+   fallback. An empty/missing secret only emits a warning; the workflow
+   still produces a usable DMG, but it will not phone home.
+2. **Upload dSYMs** — runs `release.sh upload-symbols` *after* Archive
+   and *before* notarize, using the `SENTRY_AUTH_TOKEN` secret. Same
+   tolerance: missing token degrades to a no-op.
+
+Add both secrets via `gh secret set` (or the GitHub UI):
+
+```bash
+gh secret set SENTRY_DSN_REST \
+  --body '7a35f7894920ef885837030b57b18702@o4511454478467072.ingest.us.sentry.io/4511455005310976'
+gh secret set SENTRY_AUTH_TOKEN --body 'sntryu_xxxxxxxx'
+```
+
+(Both values here are illustrative — substitute your real values. The
+DSN host+path is not technically secret, but routing it through Actions
+secrets keeps it out of workflow logs and makes future rotation a
+single-place edit.)
+
 ## Setup checklist (first time)
 
 1. **Create the Sentry project.** The default organisation and project

@@ -62,6 +62,25 @@ Mitigation: revert those reformats explicitly before staging and run
 lint violations in unrelated files (`TouchCodeApp.bringUp`,
 `GhosttyActionDecoder`, etc.) also remain — not in scope.
 
+### DSC-6 — Original commits missed the CI release pipeline
+
+`.github/workflows/release.yml` and `release-tip.yml` already drive the
+Developer ID release; the initial implementation only wired `release.sh
+upload-symbols` into the `cmd_release` chain used by manual local
+releases. The workflows call `release.sh` subcommands individually
+(`archive`, `notarize`, `dmg`, `notarize`) rather than the top-level
+`release` subcommand, so the new upload step never ran in CI — and the
+CI builds also lacked any `Secrets.xcconfig` injection, so every
+tag-triggered DMG would have shipped with a bare `https://` DSN that
+the bootstrap rejects as missing.
+
+Fix: explicit `Inject Sentry DSN` step (between keychain import and
+Archive) and `Upload dSYMs to Sentry` step (between Archive and
+Notarize) added to both workflows. Both gracefully no-op when their
+secret is absent so a release can be cut before Sentry is provisioned.
+
+Required new secrets: `SENTRY_DSN_REST`, `SENTRY_AUTH_TOKEN`.
+
 ### DSC-5 — xcconfig truncates `//`, DSN scheme moved into mac-Info.plist
 
 Discovered while smoke-testing the real DSN: xcconfig treats `//` as a
