@@ -51,6 +51,10 @@ nonisolated struct GhosttyTerminalSettings: Equatable, Sendable {
   /// `lightTheme` / `darkTheme` — see callers that prepend missing entries.
   let availableLightThemes: [String]
   let availableDarkThemes: [String]
+  /// Parsed color directives keyed by theme name. Used by the Settings →
+  /// Terminal picker to render swatches + a hover preview without re-touching
+  /// disk. Missing entries (or empty previews) render as neutral chrome.
+  let themePreviews: [String: GhosttyThemePreview]
   /// Non-nil when the user's config contains a non-split `theme = X`
   /// directive. Surfaced so the pane can warn before overwrite.
   let warningMessage: String?
@@ -183,6 +187,7 @@ struct GhosttyConfigFile {
       darkTheme: parsed.dark,
       availableLightThemes: catalog.light,
       availableDarkThemes: catalog.dark,
+      themePreviews: catalog.previews,
       warningMessage: parsed.warning
     )
   }

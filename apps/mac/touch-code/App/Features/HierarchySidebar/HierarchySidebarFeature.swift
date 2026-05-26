@@ -518,7 +518,9 @@ struct HierarchySidebarFeature {
       let projectSettings = settingsSnapshot.projects[projectID]
       let globalWorktree = settingsSnapshot.worktree
       let defaultWtDir = globalWorktree.resolveBaseDirectory(
-        forProjectName: project.name,
+        // Use the path-derived canonical name so renaming a project in
+        // Settings → General never relocates the suggested worktree folder.
+        forProjectName: project.canonicalName,
         projectOverride: projectSettings?.worktreesDirectory
       )
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count

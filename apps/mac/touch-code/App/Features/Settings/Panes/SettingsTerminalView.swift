@@ -46,16 +46,22 @@ struct SettingsTerminalView: View {
       selected: snapshot.darkTheme
     )
     return Section {
-      themePickerRow(
+      ThemePickerButton(
         title: "Light",
         options: lightOptions,
-        selection: snapshot.lightTheme
-      ) { store.send(.lightThemeSelected($0)) }
-      themePickerRow(
+        previews: snapshot.themePreviews,
+        selection: snapshot.lightTheme,
+        isDisabled: controlsDisabled,
+        onPick: { store.send(.lightThemeSelected($0)) }
+      )
+      ThemePickerButton(
         title: "Dark",
         options: darkOptions,
-        selection: snapshot.darkTheme
-      ) { store.send(.darkThemeSelected($0)) }
+        previews: snapshot.themePreviews,
+        selection: snapshot.darkTheme,
+        isDisabled: controlsDisabled,
+        onPick: { store.send(.darkThemeSelected($0)) }
+      )
     } header: {
       Text("Theme")
     } footer: {
@@ -64,28 +70,6 @@ struct SettingsTerminalView: View {
           + "with Ghostty itself."
       )
     }
-  }
-
-  private func themePickerRow(
-    title: String,
-    options: [String],
-    selection: String?,
-    onPick: @escaping (String?) -> Void
-  ) -> some View {
-    let binding = Binding<String?>(
-      get: { selection },
-      set: { onPick($0) }
-    )
-    return Picker(title, selection: binding) {
-      if selection == nil {
-        Text("Select Theme").tag(String?.none)
-      }
-      ForEach(options, id: \.self) { theme in
-        Text(theme).tag(String?.some(theme))
-      }
-    }
-    .pickerStyle(.menu)
-    .disabled(controlsDisabled)
   }
 
   // MARK: - Config file path

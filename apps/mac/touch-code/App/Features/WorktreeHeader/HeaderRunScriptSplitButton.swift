@@ -15,8 +15,12 @@ import TouchCodeCore
 /// `RootFeature` owns the `HierarchyClient.runScript` effect.
 struct HeaderRunScriptSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
+  /// Project whose script list the dropdown enumerates. The active
+  /// Worktree is intentionally NOT stored on this view: the chord +
+  /// menu dispatch goes through `RootFeature` which resolves the
+  /// target Worktree from `state.selection` at handle-time, sidestepping
+  /// stale NSMenuItem closure captures on worktree switch.
   let projectID: ProjectID
-  let worktreeID: WorktreeID
   @Environment(SettingsStore.self) private var settingsStore
 
   var body: some View {
@@ -61,8 +65,7 @@ struct HeaderRunScriptSplitButton: View {
       }
     } primaryAction: {
       if let script = primary {
-        store.send(
-          .runScriptTapped(scriptID: script.id, projectID: projectID, worktreeID: worktreeID))
+        store.send(.runScriptTapped(scriptID: script.id))
       } else {
         store.send(.manageScriptsTapped(projectID: projectID))
       }
@@ -105,8 +108,7 @@ struct HeaderRunScriptSplitButton: View {
   @ViewBuilder
   private func menuButton(for script: ScriptDefinition) -> some View {
     let button = Button {
-      store.send(
-        .runScriptTapped(scriptID: script.id, projectID: projectID, worktreeID: worktreeID))
+      store.send(.runScriptTapped(scriptID: script.id))
     } label: {
       Label(script.displayName, systemImage: script.resolvedSystemImage)
     }

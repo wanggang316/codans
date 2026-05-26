@@ -317,15 +317,34 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  /// Renames the Project in place. Missing project is `.notFound`; an unchanged
-  /// name is a silent no-op (no catalog churn, no save). The caller is
-  /// responsible for trimming / empty-string validation.
+  /// Sets the Project's user-facing display name. Persists onto
+  /// `Project.displayName`; the canonical name (derived from `rootPath`) is
+  /// untouched and remains the worktree-path anchor. Empty / whitespace input
+  /// or a value equal to the canonical name clears the override so the
+  /// catalog never carries a redundant string that just mirrors the path.
+  /// Missing project is `.notFound`; an unchanged value is a silent no-op
+  /// (no catalog churn, no save).
   func renameProject(_ id: ProjectID, name: String) throws {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")
     }
-    guard catalog.projects[projectIndex].name != name else { return }
-    catalog.projects[projectIndex].name = name
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let canonical = catalog.projects[projectIndex].canonicalName
+    let newOverride: String? = (trimmed.isEmpty || trimmed == canonical) ? nil : trimmed
+    guard catalog.projects[projectIndex].displayName != newOverride else { return }
+    catalog.projects[projectIndex].displayName = newOverride
+    store.scheduleSave(catalog)
+  }
+
+  /// Recolors the Project. `nil` clears the assignment so the UI falls back
+  /// to the system accent. Unchanged value is a silent no-op so repeated
+  /// taps on the same swatch don't churn the catalog or debounced save.
+  func setProjectColor(_ id: ProjectID, color: ProjectColor?) throws {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
+      throw HierarchyError.notFound("Project \(id)")
+    }
+    guard catalog.projects[projectIndex].color != color else { return }
+    catalog.projects[projectIndex].color = color
     store.scheduleSave(catalog)
   }
 

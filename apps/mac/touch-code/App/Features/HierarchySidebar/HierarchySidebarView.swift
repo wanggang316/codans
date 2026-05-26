@@ -256,148 +256,148 @@ struct HierarchySidebarView: View {
       )
       .zIndex(2)
     }
-      // Auto-open the Agents View panel on the rising edge into "any
-      // bound agent is loading" — but only when the user has the
-      // Settings → General toggle on. We do NOT auto-close when the
-      // signal falls back to false; the user keeps the panel open
-      // until they explicitly close it via the footer toggle. The
-      // observed value is a Bool so SwiftUI's `.onChange` fires only
-      // on real transitions (not every dict mutation).
-      .onChange(of: anyAgentNeedsAttention) { oldValue, newValue in
-        autoOpenLogger.debug(
-          "anyAgentNeedsAttention transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.activeAgentsPanelOpen, privacy: .public)"
-        )
-        guard newValue,
-          settingsStore.settings.general.agentsViewAutoOpen,
-          !activeAgentsPanelOpen
-        else { return }
-        autoOpenLogger.info("auto-opening Agents View panel")
-        withAnimation(.easeOut(duration: 0.18)) {
-          activeAgentsPanelOpen = true
-        }
+    // Auto-open the Agents View panel on the rising edge into "any
+    // bound agent is loading" — but only when the user has the
+    // Settings → General toggle on. We do NOT auto-close when the
+    // signal falls back to false; the user keeps the panel open
+    // until they explicitly close it via the footer toggle. The
+    // observed value is a Bool so SwiftUI's `.onChange` fires only
+    // on real transitions (not every dict mutation).
+    .onChange(of: anyAgentNeedsAttention) { oldValue, newValue in
+      autoOpenLogger.debug(
+        "anyAgentNeedsAttention transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.activeAgentsPanelOpen, privacy: .public)"
+      )
+      guard newValue,
+        settingsStore.settings.general.agentsViewAutoOpen,
+        !activeAgentsPanelOpen
+      else { return }
+      autoOpenLogger.info("auto-opening Agents View panel")
+      withAnimation(.easeOut(duration: 0.18)) {
+        activeAgentsPanelOpen = true
       }
-      .sheet(
-        isPresented: Binding(
-          get: { store.manualSortSheet != nil },
-          set: { isPresented in
-            if !isPresented {
-              store.send(.manualSortCancelled)
-            }
+    }
+    .sheet(
+      isPresented: Binding(
+        get: { store.manualSortSheet != nil },
+        set: { isPresented in
+          if !isPresented {
+            store.send(.manualSortCancelled)
           }
-        )
-      ) {
-        ManualProjectSortSheetView(projectNames: projectNames, store: store)
-      }
-      .toolbar { sidebarToolbarContent }
-      .sheet(
-        isPresented: Binding(
-          get: { store.createWorktreeSheet != nil },
-          set: { isPresented in
-            if !isPresented {
-              store.send(.createWorktreeSheet(.cancelButtonTapped))
-            }
+        }
+      )
+    ) {
+      ManualProjectSortSheetView(projectNames: projectNames, store: store)
+    }
+    .toolbar { sidebarToolbarContent }
+    .sheet(
+      isPresented: Binding(
+        get: { store.createWorktreeSheet != nil },
+        set: { isPresented in
+          if !isPresented {
+            store.send(.createWorktreeSheet(.cancelButtonTapped))
           }
-        )
+        }
+      )
+    ) {
+      if let childStore = store.scope(
+        state: \.createWorktreeSheet,
+        action: \.createWorktreeSheet
       ) {
-        if let childStore = store.scope(
-          state: \.createWorktreeSheet,
-          action: \.createWorktreeSheet
-        ) {
-          CreateWorktreeSheet(store: childStore)
-        }
+        CreateWorktreeSheet(store: childStore)
       }
-      .confirmationDialog(
-        worktreeRemovalTitle,
-        isPresented: Binding(
-          get: { store.pendingWorktreeRemoval != nil },
-          set: { if !$0 { store.send(.worktreeRemoveCancelled) } }
-        ),
-        titleVisibility: .visible
+    }
+    .confirmationDialog(
+      worktreeRemovalTitle,
+      isPresented: Binding(
+        get: { store.pendingWorktreeRemoval != nil },
+        set: { if !$0 { store.send(.worktreeRemoveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove Worktree", role: .destructive) {
+        store.send(.worktreeRemoveConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.worktreeRemoveCancelled)
+      }
+    } message: {
+      Text(
+        "Closes all panes and deletes the Worktree directory, including any uncommitted changes. This cannot be undone."
+      )
+    }
+    .confirmationDialog(
+      projectRemovalTitle,
+      isPresented: Binding(
+        get: { store.pendingProjectRemoval != nil },
+        set: { if !$0 { store.send(.projectRemoveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove Project", role: .destructive) {
+        store.send(.projectRemoveConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.projectRemoveCancelled)
+      }
+    } message: {
+      Text("Removes the Project and closes all its panes. Files on disk are not affected.")
+    }
+    // Archived Worktrees sheet (opened from Project ⋯ menu).
+    .sheet(
+      isPresented: Binding(
+        get: { store.archivedWorktreesSheet != nil },
+        set: { if !$0 { store.send(.archivedWorktreesSheetDismissed) } }
+      )
+    ) {
+      if let childStore = store.scope(
+        state: \.archivedWorktreesSheet,
+        action: \.archivedWorktreesSheet
       ) {
-        Button("Remove Worktree", role: .destructive) {
-          store.send(.worktreeRemoveConfirmed)
-        }
-        Button("Cancel", role: .cancel) {
-          store.send(.worktreeRemoveCancelled)
-        }
-      } message: {
-        Text(
-          "Closes all panes and deletes the Worktree directory, including any uncommitted changes. This cannot be undone."
-        )
+        ArchivedWorktreesSheet(store: childStore)
       }
-      .confirmationDialog(
-        projectRemovalTitle,
-        isPresented: Binding(
-          get: { store.pendingProjectRemoval != nil },
-          set: { if !$0 { store.send(.projectRemoveCancelled) } }
-        ),
-        titleVisibility: .visible
-      ) {
-        Button("Remove Project", role: .destructive) {
-          store.send(.projectRemoveConfirmed)
-        }
-        Button("Cancel", role: .cancel) {
-          store.send(.projectRemoveCancelled)
-        }
-      } message: {
-        Text("Removes the Project and closes all its panes. Files on disk are not affected.")
+    }
+    // First-archive explainer (once per session).
+    .confirmationDialog(
+      "Archive this Worktree?",
+      isPresented: Binding(
+        get: { store.pendingArchiveExplainer != nil },
+        set: { if !$0 { store.send(.worktreeArchiveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Archive") {
+        store.send(.worktreeArchiveConfirmed)
       }
-      // Archived Worktrees sheet (opened from Project ⋯ menu).
-      .sheet(
-        isPresented: Binding(
-          get: { store.archivedWorktreesSheet != nil },
-          set: { if !$0 { store.send(.archivedWorktreesSheetDismissed) } }
-        )
-      ) {
-        if let childStore = store.scope(
-          state: \.archivedWorktreesSheet,
-          action: \.archivedWorktreesSheet
-        ) {
-          ArchivedWorktreesSheet(store: childStore)
-        }
+      Button("Cancel", role: .cancel) {
+        store.send(.worktreeArchiveCancelled)
       }
-      // First-archive explainer (once per session).
-      .confirmationDialog(
-        "Archive this Worktree?",
-        isPresented: Binding(
-          get: { store.pendingArchiveExplainer != nil },
-          set: { if !$0 { store.send(.worktreeArchiveCancelled) } }
-        ),
-        titleVisibility: .visible
-      ) {
-        Button("Archive") {
-          store.send(.worktreeArchiveConfirmed)
-        }
-        Button("Cancel", role: .cancel) {
-          store.send(.worktreeArchiveCancelled)
-        }
-      } message: {
-        Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
-      }
-      // Prune toast.
-      .alert(
-        "Prune complete",
-        isPresented: Binding(
-          get: { store.pruneToast != nil },
-          set: { if !$0 { store.send(.pruneToastDismissed) } }
-        )
-      ) {
-        Button("OK") { store.send(.pruneToastDismissed) }
-      } message: {
-        Text(store.pruneToast ?? "")
-      }
-      // Lifecycle wrapper failure (archive flag flip / delete teardown).
-      .alert(
-        "Worktree action failed",
-        isPresented: Binding(
-          get: { store.lifecycleErrorToast != nil },
-          set: { if !$0 { store.send(.lifecycleErrorToastDismissed) } }
-        )
-      ) {
-        Button("OK") { store.send(.lifecycleErrorToastDismissed) }
-      } message: {
-        Text(store.lifecycleErrorToast ?? "")
-      }
+    } message: {
+      Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
+    }
+    // Prune toast.
+    .alert(
+      "Prune complete",
+      isPresented: Binding(
+        get: { store.pruneToast != nil },
+        set: { if !$0 { store.send(.pruneToastDismissed) } }
+      )
+    ) {
+      Button("OK") { store.send(.pruneToastDismissed) }
+    } message: {
+      Text(store.pruneToast ?? "")
+    }
+    // Lifecycle wrapper failure (archive flag flip / delete teardown).
+    .alert(
+      "Worktree action failed",
+      isPresented: Binding(
+        get: { store.lifecycleErrorToast != nil },
+        set: { if !$0 { store.send(.lifecycleErrorToastDismissed) } }
+      )
+    ) {
+      Button("OK") { store.send(.lifecycleErrorToastDismissed) }
+    } message: {
+      Text(store.lifecycleErrorToast ?? "")
+    }
   }
 
   // MARK: - Toolbar
@@ -744,10 +744,6 @@ struct HierarchySidebarView: View {
     // shared computed property — `gitRoot == nil` + path match is the same
     // pair already used to suppress git affordances elsewhere in this view.
     let isSyntheticWorktree = isMainCheckout && project.gitRoot == nil
-    let roleTint: Color = {
-      if worktree.isPinned { return .orange }
-      return .secondary
-    }()
     // Plain content (no Button wrapping). With native `List(selection:)`,
     // the row's tap is owned by AppKit's NSTableView so the click also
     // promotes the table to first responder — that's what flips the
@@ -782,7 +778,7 @@ struct HierarchySidebarView: View {
             .accessibilityLabel("Worktree has a running command")
         } else {
           WorktreeRowIcon(
-            snapshot: snapshot, rollup: rollup, isSelected: isSelected, roleTint: roleTint,
+            snapshot: snapshot, rollup: rollup, isSelected: isSelected,
             isSynthetic: isSyntheticWorktree,
             hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
               && settingsStore.settings.notifications.worktreeBellEnabled,

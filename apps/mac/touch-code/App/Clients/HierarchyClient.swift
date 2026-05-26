@@ -68,6 +68,12 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ projectID: ProjectID, _ name: String
     ) throws -> Void
+  /// Recolors the Project. `nil` clears the assignment so the UI falls back
+  /// to the system accent. Silent no-op for unknown ids / unchanged values.
+  var setProjectColor:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ color: ProjectColor?
+    ) throws -> Void
 
   // MARK: - Worktree mutations
 
@@ -522,6 +528,9 @@ extension HierarchyClient {
       removeProject: { projectID in try manager.removeProject(projectID) },
       renameProject: { projectID, name in
         try manager.renameProject(projectID, name: name)
+      },
+      setProjectColor: { projectID, color in
+        try manager.setProjectColor(projectID, color: color)
       },
       createWorktree: { projectID, name, path, branch in
         try manager.createWorktree(in: projectID, name: name, path: path, branch: branch)
@@ -1306,6 +1315,7 @@ extension HierarchyClient: DependencyKey {
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setProjectColor: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     createWorktree: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeWorktree: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     selectProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1391,6 +1401,7 @@ extension HierarchyClient: DependencyKey {
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),
+    setProjectColor: unimplemented("HierarchyClient.setProjectColor"),
     createWorktree: unimplemented("HierarchyClient.createWorktree", placeholder: WorktreeID()),
     removeWorktree: unimplemented("HierarchyClient.removeWorktree"),
     selectProject: unimplemented("HierarchyClient.selectProject"),

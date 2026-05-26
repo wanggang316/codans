@@ -37,8 +37,9 @@ struct SettingsWindowView: View {
         Color.clear.frame(width: 0, height: 0)
       }
     }
-    .frame(minWidth: 750, minHeight: 500)
+    .frame(minWidth: 800, minHeight: 500)
     .navigationTitle(title(for: store.state.effectiveSection))
+    .navigationSubtitle(subtitle(for: store.state.effectiveSection))
     .onChange(of: projectIDs, initial: true) { _, current in
       // B8: when the catalog drops a Project the user is viewing, fall back to General.
       store.send(.projectsChanged(current))
@@ -74,6 +75,18 @@ struct SettingsWindowView: View {
       .first { $0.id == projectID }
     guard let project else { return suffix }
     return "\(project.name) — \(suffix)"
+  }
+
+  /// Window subtitle binding. Only project-scoped sections carry one — the
+  /// owning Project's `rootPath` shows under the window title so the user
+  /// can disambiguate two Projects that share a canonical name (e.g. two
+  /// `worktrees/` checkouts of the same repo). Global panes return an
+  /// empty string, which the AppKit title bar renders as no subtitle.
+  private func subtitle(for section: SettingsSection) -> String {
+    guard let pid = section.projectID,
+      let project = hierarchyManager.catalog.projects.first(where: { $0.id == pid })
+    else { return "" }
+    return project.rootPath
   }
 
   @ViewBuilder

@@ -135,8 +135,7 @@ struct WorktreeDetailView: View {
       .background(alignment: .topLeading) {
         ProjectScriptsShortcutBindings(
           store: headerStore,
-          projectID: address.project,
-          worktreeID: address.worktree
+          projectID: address.project
         )
       }
       // On macOS 15+ remove the title slot entirely so default-placement
@@ -286,8 +285,7 @@ struct WorktreeDetailView: View {
         ToolbarItemGroup(placement: .primaryAction) {
           HeaderRunScriptSplitButton(
             store: headerStore,
-            projectID: address.project,
-            worktreeID: info.worktree.id
+            projectID: address.project
           )
           .buttonStyle(.plain)
           HeaderOpenSplitButton(
@@ -348,8 +346,7 @@ struct WorktreeDetailView: View {
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,
-        projectID: address.project,
-        worktreeID: info.worktree.id
+        projectID: address.project
       )
     }
     ToolbarSpacer(.fixed)
