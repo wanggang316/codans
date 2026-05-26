@@ -60,6 +60,25 @@ struct HierarchySidebarView: View {
   /// Defaults to a sensible value so the first render before the
   /// background measure lands doesn't pop a too-tall panel.
   @State private var sidebarHeightObservation: Double = 600
+
+  /// Min / max height bounds for the ActiveAgents panel. Kept as a
+  /// type-level constant so both `ActiveAgentsSidebarPanel`'s own clamp
+  /// and the List's bottom spacer-row height share one source.
+  private static let activeAgentsPanelMinHeight: Double = 140
+
+  /// Effective panel height after clamping to `[minHeight, 0.5 *
+  /// sidebarHeight]`. Mirrors the clamp inside
+  /// `ActiveAgentsSidebarPanel.clampedHeight` so the spacer row inside
+  /// the List can reserve exactly the height the panel occupies. Note:
+  /// `.contentMargins(.bottom, _, for: .scrollContent)` is the
+  /// ScrollView-native modifier for this purpose but `List(.sidebar)`
+  /// on macOS 26 ignores it — see commit 6c1c3631. The invisible
+  /// `Color.clear` row inside `treeBody`'s List is the workaround.
+  private var clampedActiveAgentsPanelHeight: Double {
+    let minH = Self.activeAgentsPanelMinHeight
+    let maxH = max(minH, sidebarHeightObservation * 0.5)
+    return min(max(activeAgentsPanelHeight, minH), maxH)
+  }
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
@@ -189,7 +208,10 @@ struct HierarchySidebarView: View {
     // up from beneath the fixed footer.
     VStack(spacing: 0) {
       ZStack(alignment: .bottom) {
-        treeBody(projects: visibleProjects)
+        treeBody(
+          projects: visibleProjects,
+          bottomInsetHeight: activeAgentsPanelOpen ? clampedActiveAgentsPanelHeight : 0
+        )
           .background(
             GeometryReader { proxy in
               Color.clear.preference(
@@ -224,8 +246,8 @@ struct HierarchySidebarView: View {
               }
             },
             height: $activeAgentsPanelHeight,
-            minHeight: 140,
-            maxHeight: max(140, sidebarHeightObservation * 0.5)
+            minHeight: Self.activeAgentsPanelMinHeight,
+            maxHeight: max(Self.activeAgentsPanelMinHeight, sidebarHeightObservation * 0.5)
           )
           .zIndex(1)
           .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -438,7 +460,7 @@ struct HierarchySidebarView: View {
   // MARK: - Tree
 
   @ViewBuilder
-  private func treeBody(projects: [Project]) -> some View {
+  private func treeBody(projects: [Project], bottomInsetHeight: Double) -> some View {
     if projects.isEmpty {
       emptyState
     } else {
@@ -468,6 +490,21 @@ struct HierarchySidebarView: View {
         List(selection: nativeSelectionBinding) {
           ForEach(projects) { project in
             projectSection(project, hotkeyIndex: hotkeyIndex)
+          }
+          // Invisible bottom row sized to the live ActiveAgents panel
+          // height (when expanded). The List honours this as a real
+          // row, so its scrollable content stops above the panel and
+          // the last worktree row can be scrolled into the clear
+          // region above the (translucent) panel. We can't use
+          // `.contentMargins(.bottom, _, for: .scrollContent)` here —
+          // `List(.sidebar)` on macOS 26 ignores it (see 6c1c3631).
+          if bottomInsetHeight > 0 {
+            Color.clear
+              .frame(height: bottomInsetHeight)
+              .listRowInsets(EdgeInsets())
+              .listRowBackground(Color.clear)
+              .listRowSeparator(.hidden)
+              .accessibilityHidden(true)
           }
         }
         .listStyle(.sidebar)
