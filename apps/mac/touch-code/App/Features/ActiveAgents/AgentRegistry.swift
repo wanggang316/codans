@@ -242,43 +242,8 @@ final class AgentRegistry {
 
     case .paneInfoChanged(let paneID, let delta):
       switch delta {
-      case .desktopNotification(let title, let body):
-        // Reuse the notifications classifier so the two consumers
-        // agree on what counts as "agent wants the user". Only
-        // .waitingForInput maps to the sticky flag; .taskFinished is
-        // ignored here — task-finished signalling for the runtime
-        // state machine flows through paneIdle / runningPanes-exit.
-        if DetectionTranslator.classify(title: title, body: body) == .waitingForInput {
-          var s =
-            scratch[paneID]
-            ?? Scratch(
-              rawState: .idle,
-              seen: true,
-              userInputSeen: false,
-              waitingForInput: false,
-              titleEventTimes: []
-            )
-          s.waitingForInput = true
-          scratch[paneID] = s
-          refresh(paneID)
-        }
-
-      case .bellRang:
-        // Bell is treated as a waitingForInput cue, matching the
-        // detector's bellRang branch. Same handling as a desktop
-        // notification that classifies as waitingForInput.
-        var s =
-          scratch[paneID]
-          ?? Scratch(
-            rawState: .idle,
-            seen: true,
-            userInputSeen: false,
-            waitingForInput: false,
-            titleEventTimes: []
-          )
-        s.waitingForInput = true
-        scratch[paneID] = s
-        refresh(paneID)
+      case .desktopNotification, .bellRang:
+        applyWaitingCueIfNeeded(from: event, paneID: paneID)
 
       case .title, .tabTitle:
         // Append to the title-event window and recompute. The pane
@@ -453,6 +418,29 @@ final class AgentRegistry {
         titleEventTimes: []
       )
     }
+  }
+
+  private func applyWaitingCueIfNeeded(from event: TerminalEvent, paneID: PaneID) {
+    let step = PaneAttentionInterpreter.interpret(
+      event,
+      context: PaneAttentionInterpreter.Context(
+        hasProducedOutput: [],
+        commandFinishedEnabled: false
+      )
+    )
+    guard step.cue?.kind == .waitingForInput else { return }
+    var s =
+      scratch[paneID]
+      ?? Scratch(
+        rawState: .idle,
+        seen: true,
+        userInputSeen: false,
+        waitingForInput: false,
+        titleEventTimes: []
+      )
+    s.waitingForInput = true
+    scratch[paneID] = s
+    refresh(paneID)
   }
 
   /// Diagnostic tag — short shape-only string for the active log

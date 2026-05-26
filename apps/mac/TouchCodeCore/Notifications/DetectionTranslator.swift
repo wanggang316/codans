@@ -1,19 +1,14 @@
 import Foundation
 
-/// Pure translation from a single `TerminalEvent` to a `Translation`
-/// describing the inbox row that should be appended (or `nil` if the
-/// event carries no notification value).
+/// Backward-compatible inbox adapter over `PaneAttentionInterpreter`.
 ///
-/// Splitting the translation logic out of the app-target
-/// `NotificationDetector` lets `TouchCodeCoreTests` exercise the full
-/// table without needing a `NotificationStore`, an `OSNotifier`, or a
-/// live runtime. The orchestration (catalog walk → SourcePath, mute
-/// label check, banner gating, store.append) stays in the detector.
+/// The shared terminal-event interpretation table lives in
+/// `PaneAttentionInterpreter`; this type preserves the notification-facing
+/// `Entry` / `Step` API used by `NotificationDetector` and existing tests.
+/// The orchestration (catalog walk → SourcePath, mute label check, banner
+/// gating, store.append) stays in the detector.
 public nonisolated enum DetectionTranslator {
-  /// Lower bound on `paneIdle.duration` below which an idle event is
-  /// treated as terminal noise (cursor blink, typing reset) rather than
-  /// a "task quiet" signal worth notifying about.
-  public static let idleThreshold: TimeInterval = 30
+  public static let idleThreshold = PaneAttentionInterpreter.idleThreshold
 
   /// One step's translation result. The detector also gets back a hint
   /// for whether to update its `hasProducedOutput` membership for the
@@ -46,24 +41,7 @@ public nonisolated enum DetectionTranslator {
     }
   }
 
-  public enum OutputFlag: Equatable, Sendable {
-    /// Mark this pane as having produced output (gate for future idle).
-    case markProduced(PaneID)
-    /// Clear the pane's "has produced" flag — pane has gone away.
-    case clearProduced(PaneID)
-    /// No change to the output-produced map.
-    case unchanged
-
-    /// Whether this flag corresponds to a terminal teardown event —
-    /// `paneExited` / `paneCrashed` / `paneClosedByTab`. Lets the
-    /// detector drop its source-path cache after the final emit.
-    public var isTeardown: Bool {
-      switch self {
-      case .clearProduced: return true
-      case .markProduced, .unchanged: return false
-      }
-    }
-  }
+  public typealias OutputFlag = PaneAttentionInterpreter.OutputFlag
 
   /// Backward-compatible overload used by call sites that have not yet
   /// adopted `Context`. Constructs a `Context` with default
@@ -86,88 +64,14 @@ public nonisolated enum DetectionTranslator {
     _ event: TerminalEvent,
     context: Context
   ) -> Step {
-    switch event {
-    case .paneOutput(let paneID, _):
-      return Step(entry: nil, outputFlag: .markProduced(paneID))
-
-    case .paneInfoChanged(let paneID, let delta):
-      switch delta {
-      case .desktopNotification(let title, let body):
-        return Step(
-          entry: Entry(
-            paneID: paneID,
-            kind: classify(title: title, body: body),
-            title: title,
-            body: body
-          ),
-          outputFlag: .unchanged
-        )
-      case .bellRang:
-        return Step(
-          entry: Entry(
-            paneID: paneID,
-            kind: .waitingForInput,
-            title: "Pane bell",
-            body: "A pane rang the terminal bell."
-          ),
-          outputFlag: .unchanged
-        )
-      case .commandFinished(let exitCode, let durationNs):
-        return translateCommandFinished(
-          paneID: paneID,
-          exitCode: exitCode,
-          durationNs: durationNs,
-          context: context
-        )
-      default:
-        return Step(entry: nil, outputFlag: .unchanged)
-      }
-
-    case .paneExited(let paneID, _, _):
-      // Pane exits don't notify — explicit closes (close-pane
-      // binding) and natural command completion are both expected,
-      // user-initiated transitions. Crashes (paneCrashed below)
-      // and post-busy idle (paneIdle) still cover the genuine
-      // "needs your attention" cases. Cache cleanup still runs
-      // so a recreated PaneID can never inherit stale gate state.
-      return Step(entry: nil, outputFlag: .clearProduced(paneID))
-
-    case .paneCrashed(let paneID, let reason):
-      return Step(
-        entry: Entry(paneID: paneID, kind: .taskFinished, title: "Pane crashed", body: reason),
-        outputFlag: .clearProduced(paneID)
-      )
-
-    case .paneIdle(let paneID, let duration):
-      // Two gates: the idle has to be longer than the noise threshold
-      // AND the pane must have produced output at some point — a
-      // freshly spawned pane that never wrote anything cannot fire
-      // a "task finished" idle.
-      guard duration >= idleThreshold, context.hasProducedOutput.contains(paneID) else {
-        return Step(entry: nil, outputFlag: .unchanged)
-      }
-      return Step(
-        entry: Entry(
-          paneID: paneID,
-          kind: .taskFinished,
-          title: "Pane idle",
-          body: "No output for \(Int(duration.rounded())) s."
-        ),
-        outputFlag: .unchanged
-      )
-
-    case .paneClosedByTab(let paneID, _):
-      // Tab autoclose tears down the pane without firing paneExited /
-      // paneCrashed (engine path bypasses both). Clear the produced-
-      // output flag so a recreated PaneID — defensive even though IDs
-      // are UUIDs and shouldn't recur — cannot inherit the prior gate.
-      return Step(entry: nil, outputFlag: .clearProduced(paneID))
-
-    case .paneCreated, .paneReady,
-      .tabActivated, .tabAutoClosed, .worktreeActivated, .hierarchyMutated,
-      .paneActionRequested, .windowActionRequested, .configChanged:
-      return Step(entry: nil, outputFlag: .unchanged)
-    }
+    let step = PaneAttentionInterpreter.interpret(event, context: context.coreContext)
+    return Step(
+      entry: step.cue.map {
+        Entry(paneID: $0.paneID, kind: $0.kind, title: $0.title, body: $0.body)
+      },
+      outputFlag: step.outputFlag,
+      drop: step.drop
+    )
   }
 
   /// Heuristic: pick `.waitingForInput` for desktop notifications whose
@@ -177,77 +81,7 @@ public nonisolated enum DetectionTranslator {
   /// `?` characters (e.g. "Built 5 targets. Add tests?") which would
   /// otherwise misclassify routine completion as input-required.
   public static func classify(title: String, body: String) -> InboxEntry.Kind {
-    let combined = (title + " " + body).lowercased()
-    let lexicalCues = ["permission", "approval", "approve", "input"]
-    if lexicalCues.contains(where: combined.contains) {
-      return .waitingForInput
-    }
-    if title.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") {
-      return .waitingForInput
-    }
-    return .taskFinished
-  }
-
-  /// Command-finished branch lifted out of `translate` to keep the main
-  /// switch under SwiftLint's cyclomatic-complexity budget. Implements
-  /// the M4.T1 suppression chain — feature flag, user-cancellation,
-  /// duration threshold, recent-keystroke window — and emits a
-  /// differential success / failure title when the event survives.
-  private static func translateCommandFinished(
-    paneID: PaneID,
-    exitCode: Int32,
-    durationNs: UInt64,
-    context: Context
-  ) -> Step {
-    // 1. Feature toggle.
-    guard context.commandFinishedEnabled else {
-      return Step(entry: nil, outputFlag: .unchanged, drop: .commandFinishedDisabled)
-    }
-    // 2. User-cancellation suppression. SIGINT (130) and SIGTERM (143)
-    //    on a POSIX shell mean the user already knows the command
-    //    ended; a banner would be redundant.
-    if exitCode == 130 || exitCode == 143 {
-      return Step(entry: nil, outputFlag: .unchanged, drop: .commandCancelled)
-    }
-    // 3. Duration threshold. durationNs is nanoseconds; threshold is
-    //    seconds.
-    let durationSec = Double(durationNs) / 1_000_000_000
-    guard durationSec >= Double(context.commandFinishedThresholdSec) else {
-      return Step(entry: nil, outputFlag: .unchanged, drop: .commandFinishedShort)
-    }
-    // 4. Recent-keystroke suppression. If the user typed into the pane
-    //    within the last 1 s the command-finished event is likely the
-    //    user pressing Enter on the next prompt rather than a
-    //    long-running task completing without observation. The 1 s
-    //    window is hardcoded; M5.T1 wires the actual keystroke source.
-    if let lastKey = context.lastUserKeystrokeAt[paneID],
-      context.now.timeIntervalSince(lastKey) < 1.0
-    {
-      return Step(entry: nil, outputFlag: .unchanged, drop: .userTypingRecently)
-    }
-    // 5. Differential title for non-zero exit.
-    let durationLabel = formatDuration(durationSec)
-    let (title, body): (String, String) =
-      exitCode == 0
-      ? ("Command finished", "Completed in \(durationLabel).")
-      : ("Command failed (exit \(exitCode))", "Ran for \(durationLabel) before failing.")
-    return Step(
-      entry: Entry(paneID: paneID, kind: .taskFinished, title: title, body: body),
-      outputFlag: .unchanged,
-      drop: nil
-    )
-  }
-
-  /// Compact human-readable duration for inbox bodies. `< 60 s` renders
-  /// as `Ns`, `< 1 h` as `Nm[ Ns]`, otherwise `Nh[ Nm]`.
-  private static func formatDuration(_ seconds: Double) -> String {
-    if seconds < 60 { return "\(Int(seconds.rounded())) s" }
-    let minutes = Int(seconds / 60)
-    let remainSec = Int(seconds) % 60
-    if minutes < 60 { return remainSec == 0 ? "\(minutes) m" : "\(minutes) m \(remainSec) s" }
-    let hours = minutes / 60
-    let remainMin = minutes % 60
-    return remainMin == 0 ? "\(hours) h" : "\(hours) h \(remainMin) m"
+    PaneAttentionInterpreter.classify(title: title, body: body)
   }
 }
 
@@ -277,6 +111,16 @@ extension DetectionTranslator {
       self.now = now
       self.commandFinishedEnabled = commandFinishedEnabled
       self.commandFinishedThresholdSec = commandFinishedThresholdSec
+    }
+
+    fileprivate var coreContext: PaneAttentionInterpreter.Context {
+      PaneAttentionInterpreter.Context(
+        hasProducedOutput: hasProducedOutput,
+        lastUserKeystrokeAt: lastUserKeystrokeAt,
+        now: now,
+        commandFinishedEnabled: commandFinishedEnabled,
+        commandFinishedThresholdSec: commandFinishedThresholdSec
+      )
     }
   }
 }
