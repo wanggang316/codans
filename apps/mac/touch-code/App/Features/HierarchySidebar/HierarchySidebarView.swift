@@ -477,6 +477,22 @@ struct HierarchySidebarView: View {
           ForEach(projects) { project in
             projectSection(project, hotkeyIndex: hotkeyIndex)
           }
+          // Invisible bottom row sized to the live safe-area-inset
+          // (footer + optional ActiveAgents panel). The List honours
+          // this as a real row, so its scrollable content can never
+          // reach the footer slot underneath — preventing the rows
+          // above from bleeding through the transparent footer.
+          // `.contentMargins(.bottom, _, for: .scrollContent)` is the
+          // ScrollView-native modifier for this, but `List(.sidebar)`
+          // on macOS 26 ignores it.
+          if bottomInsetHeight > 0 {
+            Color.clear
+              .frame(height: bottomInsetHeight)
+              .listRowInsets(EdgeInsets())
+              .listRowBackground(Color.clear)
+              .listRowSeparator(.hidden)
+              .accessibilityHidden(true)
+          }
         }
         .listStyle(.sidebar)
         // Hide the List's own opaque content background so the sidebar
@@ -485,11 +501,6 @@ struct HierarchySidebarView: View {
         // sits on that glass via safeAreaInset) reads as one continuous
         // material with the list above it.
         .scrollContentBackground(.hidden)
-        // Push the scrollable region up by the live bottom-inset height
-        // (footer + optional ActiveAgents panel) so rows physically stop
-        // above the inset instead of bleeding through the transparent
-        // footer underneath them.
-        .contentMargins(.bottom, bottomInsetHeight, for: .scrollContent)
         .opacity(sidebarIndentReady ? 1 : 0)
         .background(SidebarIndentZeroer(onReady: { sidebarIndentReady = true }))
         .onChange(of: revealTrigger) { _, _ in
