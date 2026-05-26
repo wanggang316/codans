@@ -627,6 +627,15 @@ final class GhosttyRuntime {
     let old = config
     config = cloned
     if let old { ghostty_config_free(old) }
+    // Re-stain every window with the new background colour. Without
+    // this, `setColorScheme` is the only path that updates
+    // `NSWindow.backgroundColor` — config-file reloads (Settings →
+    // Terminal theme picker, manual edit of ~/.config/ghostty/config)
+    // would leave the chrome on the old tone because the translucent
+    // sidebar/toolbar material reads `behindWindow` and samples that
+    // backing colour.
+    chromeTintLogger.log("applyClonedConfig calling applyBackgroundColorToWindows")
+    applyBackgroundColorToWindows()
     // Fan out so chrome tint, future overlays etc. can re-read derived
     // values (`backgroundColor()`, ...) once the new config has actually
     // landed. `.ghosttyRuntimeReloadRequested` fires *before* the new
