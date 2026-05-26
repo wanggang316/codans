@@ -44,15 +44,17 @@ struct ThemePickerButton: View {
           }
         )
       }
+      .frame(maxHeight: .infinity, alignment: .center)
     }
   }
 
   /// Mirrors the system `.menu` Picker inside `Form(.grouped)`: no resting
-  /// background, a faint highlight on hover, and a permanent accent-tinted
-  /// chevron badge on the trailing edge (matching AppKit's `NSPopUpButton`).
+  /// background and a faint highlight on hover. The chevron always shows the
+  /// same neutral tint as the hover background, then becomes transparent on
+  /// hover so the whole button reads as one uniformly tinted hit target.
   @ViewBuilder
   private var triggerLabel: some View {
-    HStack(spacing: 6) {
+    HStack(alignment: .center, spacing: 6) {
       if let selection {
         ThemeSwatchStrip(preview: previews[selection], dotSize: 9)
         Text(selection)
@@ -65,23 +67,23 @@ struct ThemePickerButton: View {
       chevronBadge
     }
     .padding(.horizontal, 10)
-    .padding(.vertical, 5)
+    .padding(.vertical, 2)
     .background(
-      RoundedRectangle(cornerRadius: 6, style: .continuous)
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
         .fill(isHovered ? Self.tintFill : Color.clear)
     )
     .contentShape(Rectangle())
   }
 
-  /// Circular badge holding the up/down chevron. Always tinted with the
-  /// same fill as the hover highlight so the popup-arrow reads as part of
-  /// the same affordance the cursor lights up.
+  /// Circular badge holding the up/down chevron. Tinted with the same fill as
+  /// the hover highlight at rest; falls back to clear on hover so the badge
+  /// doesn't double up over the surrounding hover background.
   private var chevronBadge: some View {
     Image(systemName: "chevron.up.chevron.down")
       .font(.system(size: 9, weight: .bold))
       .foregroundStyle(.secondary)
       .frame(width: 18, height: 18)
-      .background(Circle().fill(Self.tintFill))
+      .background(Circle().fill(isHovered ? Color.clear : Self.tintFill))
       .accessibilityHidden(true)
   }
 
