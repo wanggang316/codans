@@ -64,28 +64,28 @@ struct ThemePickerButton: View {
       }
       chevronBadge
     }
-    .padding(.horizontal, 6)
-    .padding(.vertical, 2)
+    .padding(.horizontal, 10)
+    .padding(.vertical, 5)
     .background(
-      RoundedRectangle(cornerRadius: 5, style: .continuous)
-        .fill(isHovered ? Color.primary.opacity(0.08) : Color.clear)
+      RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .fill(isHovered ? Self.tintFill : Color.clear)
     )
     .contentShape(Rectangle())
   }
 
-  /// Accent-tinted rounded square holding the up/down chevron, matching the
-  /// "popup arrow" affordance on AppKit `NSPopUpButton`.
+  /// Circular badge holding the up/down chevron. Always tinted with the
+  /// same fill as the hover highlight so the popup-arrow reads as part of
+  /// the same affordance the cursor lights up.
   private var chevronBadge: some View {
     Image(systemName: "chevron.up.chevron.down")
       .font(.system(size: 9, weight: .bold))
-      .foregroundStyle(Color.white)
-      .frame(width: 16, height: 18)
-      .background(
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
-          .fill(Color.accentColor)
-      )
+      .foregroundStyle(.secondary)
+      .frame(width: 18, height: 18)
+      .background(Circle().fill(Self.tintFill))
       .accessibilityHidden(true)
   }
+
+  private static let tintFill = Color.primary.opacity(0.08)
 }
 
 /// Popover body: a List of themes on the left, a live `ThemePreviewCard` on
