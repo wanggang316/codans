@@ -744,10 +744,6 @@ struct HierarchySidebarView: View {
     // shared computed property — `gitRoot == nil` + path match is the same
     // pair already used to suppress git affordances elsewhere in this view.
     let isSyntheticWorktree = isMainCheckout && project.gitRoot == nil
-    let roleTint: Color = {
-      if worktree.isPinned { return .orange }
-      return .secondary
-    }()
     // Plain content (no Button wrapping). With native `List(selection:)`,
     // the row's tap is owned by AppKit's NSTableView so the click also
     // promotes the table to first responder — that's what flips the
@@ -782,7 +778,7 @@ struct HierarchySidebarView: View {
             .accessibilityLabel("Worktree has a running command")
         } else {
           WorktreeRowIcon(
-            snapshot: snapshot, rollup: rollup, isSelected: isSelected, roleTint: roleTint,
+            snapshot: snapshot, rollup: rollup, isSelected: isSelected,
             isSynthetic: isSyntheticWorktree,
             hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
               && settingsStore.settings.notifications.worktreeBellEnabled,
