@@ -66,10 +66,11 @@ struct ThemePickerButton: View {
       }
       chevronBadge
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 2)
+    .padding(.leading, 10)
+    .padding(.trailing, 5)
+    .padding(.vertical, 3)
     .background(
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
+      RoundedRectangle(cornerRadius: 5, style: .continuous)
         .fill(isHovered ? Self.tintFill : Color.clear)
     )
     .contentShape(Rectangle())
