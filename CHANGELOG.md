@@ -20,6 +20,32 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.3.2] - 2026-05-27
+
+### Added
+
+- **Crash reports on release builds.** Crashes are sent to Sentry so post-release regressions can be diagnosed from telemetry instead of needing a repro from the user.
+- **Per-project name and accent color in Settings → General.** Rename a project for display and tag it with an accent color; the sidebar and header reflect the change live.
+- **Project path under the window title** as a subtitle, so sibling clones of the same repo are distinguishable at a glance.
+- **Live color preview in the terminal theme editor.** Adjusting a theme color updates the preview in real time instead of after the panel closes.
+- **Active Agents detects more agent kinds**, including agents launched as foreground jobs (no daemon), so the panel reflects what's actually running.
+
+### Changed
+
+- **Window chrome reacts immediately to theme changes.** Sidebar tint, window background, unfocused-split dim, and detail safe-area insets all refresh in place when the Ghostty theme reloads or the system flips between light and dark, without needing to reopen a window.
+- **Active Agents panel slides up cleanly from the sidebar footer's top edge** instead of from the window bottom, and no longer paints over the footer or interrupts list scrolling.
+- **Theme picker polish in Settings.** Wider hover area, accent-tinted chevron badge, tighter corner radius and right inset, system-style button background, and right-aligned content match the rest of macOS Settings.
+- **Window minimum width widened to 800pt** so the project-path subtitle has room to render.
+
+### Fixed
+
+- **Run-script keyboard chord targets the currently selected worktree** instead of an arbitrary one.
+- **Settings project name updates on every keystroke** rather than waiting for the field to lose focus.
+- **Color panel close no longer applies a stale empty change** when the close callback fires after the panel resets its color.
+- **Active Agents status is steadier.** A focused pane no longer flips to "finished" prematurely, and a pane's startup progress now reads as idle before the agent has received any input.
+- **Pinned worktree rows drop the orange tint override** in both the sidebar and worktree header so they match the rest of the row treatment.
+- **Sidebar list rows no longer bleed under the footer.** The footer adopts the sidebar's material and Ghostty palette so list content can scroll cleanly without showing through.
+
 ## [0.3.1] - 2026-05-25
 
 ### Added
