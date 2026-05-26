@@ -18,6 +18,7 @@ struct ThemePickerButton: View {
   let onPick: (String?) -> Void
 
   @State private var isPopoverPresented = false
+  @State private var isHovered = false
 
   var body: some View {
     LabeledContent(title) {
@@ -29,6 +30,9 @@ struct ThemePickerButton: View {
       .buttonStyle(.plain)
       .disabled(isDisabled)
       .opacity(isDisabled ? 0.5 : 1)
+      .onHover { hovering in
+        isHovered = hovering && !isDisabled
+      }
       .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
         ThemePickerPopover(
           options: options,
@@ -43,10 +47,9 @@ struct ThemePickerButton: View {
     }
   }
 
-  /// Borderless trailing content that mirrors the system `.menu` Picker's
-  /// look inside `Form(.grouped)`: no background fill, no stroke, content
-  /// sized to its intrinsic width and right-aligned by `LabeledContent`'s
-  /// value column. Shows "Select Theme" in secondary when no commit yet.
+  /// Mirrors the system `.menu` Picker inside `Form(.grouped)`: no resting
+  /// background, a faint highlight on hover, and a permanent accent-tinted
+  /// chevron badge on the trailing edge (matching AppKit's `NSPopUpButton`).
   @ViewBuilder
   private var triggerLabel: some View {
     HStack(spacing: 6) {
@@ -59,12 +62,29 @@ struct ThemePickerButton: View {
         Text("Select Theme")
           .foregroundStyle(.secondary)
       }
-      Image(systemName: "chevron.up.chevron.down")
-        .font(.system(size: 9, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
+      chevronBadge
     }
+    .padding(.horizontal, 6)
+    .padding(.vertical, 2)
+    .background(
+      RoundedRectangle(cornerRadius: 5, style: .continuous)
+        .fill(isHovered ? Color.primary.opacity(0.08) : Color.clear)
+    )
     .contentShape(Rectangle())
+  }
+
+  /// Accent-tinted rounded square holding the up/down chevron, matching the
+  /// "popup arrow" affordance on AppKit `NSPopUpButton`.
+  private var chevronBadge: some View {
+    Image(systemName: "chevron.up.chevron.down")
+      .font(.system(size: 9, weight: .bold))
+      .foregroundStyle(Color.white)
+      .frame(width: 16, height: 18)
+      .background(
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+          .fill(Color.accentColor)
+      )
+      .accessibilityHidden(true)
   }
 }
 
