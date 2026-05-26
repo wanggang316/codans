@@ -125,12 +125,14 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // Opaque fill so the scrolling sidebar list above does not bleed
-    // through. `.windowBackground` tracks `NSWindow.backgroundColor`,
-    // which the ghostty runtime already keeps in sync with the active
-    // terminal palette — so the footer reads as the same surface the
-    // sidebar list sits on, without per-view observers.
-    .background(.windowBackground)
+    // SwiftUI's `.bar` material renders with the system glass effect the
+    // sidebar column itself uses on macOS 26, so the footer matches the
+    // sidebar list's vibrancy + ghostty tint instead of reading as a flat
+    // colour. It's also opaque enough to mask the scrolling list above —
+    // a plain `.background(.windowBackground)` was the right colour but
+    // had no glass, while removing the background entirely let the list
+    // rows bleed through.
+    .background(.bar)
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {

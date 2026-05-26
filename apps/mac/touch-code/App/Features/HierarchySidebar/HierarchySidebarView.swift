@@ -467,6 +467,12 @@ struct HierarchySidebarView: View {
           }
         }
         .listStyle(.sidebar)
+        // Hide the List's own opaque content background so the sidebar
+        // column's system glass overlay shows through — same surface the
+        // floating sidebar samples, so the bottom footer (which also
+        // sits on that glass via safeAreaInset) reads as one continuous
+        // material with the list above it.
+        .scrollContentBackground(.hidden)
         .opacity(sidebarIndentReady ? 1 : 0)
         .background(SidebarIndentZeroer(onReady: { sidebarIndentReady = true }))
         .onChange(of: revealTrigger) { _, _ in
