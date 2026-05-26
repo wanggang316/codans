@@ -202,7 +202,8 @@ struct ProjectGeneralSettingsView: View {
     Section("General") {
       LabeledContent("Name") {
         ProjectNameField(
-          currentName: projectName,
+          placeholder: projectCanonicalName,
+          currentOverride: projectDisplayOverride,
           commit: { newName in
             try? hierarchyClient.renameProject(projectID, newName)
           }
@@ -216,12 +217,19 @@ struct ProjectGeneralSettingsView: View {
     }
   }
 
-  /// Current canonical project name. The catalog is the source of truth — the
-  /// nested `ProjectTitleField` resyncs whenever this value changes so an
-  /// external rename (e.g. from `tc`) updates the field without blowing away
-  /// an in-progress local edit unrelated to the same project.
-  private var projectName: String {
-    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.name ?? ""
+  /// Path-derived canonical name. Shown as the field's placeholder so the
+  /// user can always see what the project would fall back to if they cleared
+  /// their override. Also feeds the worktree-path preview, so renames stay
+  /// purely cosmetic.
+  private var projectCanonicalName: String {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.canonicalName ?? ""
+  }
+
+  /// User-set display override or `nil` when the project is using the
+  /// canonical name. Drives the field's initial value so a user re-opening
+  /// Settings on a customized project sees their override, not the placeholder.
+  private var projectDisplayOverride: String? {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.displayName
   }
 
   private var projectColorBinding: Binding<ProjectColor?> {
@@ -406,12 +414,14 @@ struct ProjectGeneralSettingsView: View {
   /// matches the runtime fallback computed in `HierarchySidebarFeature` when
   /// opening the Create Worktree sheet. Routes through
   /// `WorktreeSettings.resolveBaseDirectory` so the inherited preview tracks
-  /// any change to the global default.
+  /// any change to the global default. Anchored on the canonical name so
+  /// renaming the project never moves where new worktrees would land.
   private var defaultWorktreesDirectory: String {
-    let projectName =
-      hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.name ?? "<project>"
+    let canonical =
+      hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.canonicalName
+      ?? "<project>"
     return settingsStore.settings.worktree
-      .resolveBaseDirectory(forProjectName: projectName, projectOverride: nil)
+      .resolveBaseDirectory(forProjectName: canonical, projectOverride: nil)
       .path(percentEncoded: false)
   }
 
@@ -614,14 +624,19 @@ struct ProjectGeneralSettingsView: View {
 /// so we drop down to AppKit for reliable "click anywhere → resign first
 /// responder → commit" semantics.
 ///
-/// The current Project name is exposed via `placeholderString` rather than
-/// the field's `stringValue`. That way the row reads like macOS System
-/// Settings — the existing value is a soft hint, the field starts empty,
-/// and the user types only what they want to change to. Blank / whitespace
-/// commits are dropped (no rename), so leaving the field untouched is a
-/// no-op.
+/// The field surfaces the project's `displayName` override directly: when
+/// the project carries a custom name, the field starts pre-filled with it
+/// so the user can edit in place; when there is no override the field is
+/// empty and the canonical name acts as the placeholder hint.
+///
+/// Commit semantics intentionally distinguish "the user opened the field
+/// but didn't change anything" (no-op) from "the user actively edited the
+/// content" (always commits the new trimmed value, including the empty
+/// string which clears the override and reverts to the canonical name). An
+/// `edited` flag set by `controlTextDidChange(_:)` is the discriminator.
 private struct ProjectNameField: NSViewRepresentable {
-  let currentName: String
+  let placeholder: String
+  let currentOverride: String?
   let commit: (String) -> Void
 
   func makeNSView(context: Context) -> NSTextField {
@@ -631,19 +646,31 @@ private struct ProjectNameField: NSViewRepresentable {
     field.focusRingType = .none
     field.alignment = .right
     field.font = .systemFont(ofSize: NSFont.systemFontSize)
-    field.placeholderString = currentName
-    field.stringValue = ""
+    field.placeholderString = placeholder
+    field.stringValue = currentOverride ?? ""
     field.cell?.usesSingleLineMode = true
     field.cell?.lineBreakMode = .byTruncatingTail
     field.delegate = context.coordinator
+    context.coordinator.lastAcceptedOverride = currentOverride
     return field
   }
 
   func updateNSView(_ field: NSTextField, context: Context) {
-    if field.placeholderString != currentName {
-      field.placeholderString = currentName
+    if field.placeholderString != placeholder {
+      field.placeholderString = placeholder
     }
     context.coordinator.commit = commit
+    // Resync the field's stringValue with the catalog's current override
+    // when the user is not actively editing — otherwise an external rename
+    // (or our own commit) would race with their typing. `currentEditor()`
+    // is non-nil exactly when the field holds first-responder status.
+    let isEditing = field.currentEditor() != nil
+    if !isEditing,
+      context.coordinator.lastAcceptedOverride != currentOverride
+    {
+      field.stringValue = currentOverride ?? ""
+      context.coordinator.lastAcceptedOverride = currentOverride
+    }
   }
 
   func makeCoordinator() -> Coordinator {
@@ -652,20 +679,41 @@ private struct ProjectNameField: NSViewRepresentable {
 
   final class Coordinator: NSObject, NSTextFieldDelegate {
     var commit: (String) -> Void
+    /// Tracks the override value the field currently mirrors. Used by
+    /// `updateNSView` to detect when an external rename has changed the
+    /// catalog under us and the displayed text needs a quiet refresh.
+    var lastAcceptedOverride: String?
+    /// Flipped on the first keystroke of an editing session. Lets
+    /// `controlTextDidEndEditing` tell apart "focused-and-left-untouched"
+    /// (don't commit) from "actively cleared the field" (commit empty so
+    /// the override is cleared).
+    private var edited: Bool = false
 
     init(commit: @escaping (String) -> Void) {
       self.commit = commit
     }
 
-    /// Fires on Return and on focus loss. Whitespace-only / empty input is
-    /// a no-op so an accidental click-away after a stray space doesn't
-    /// blow away the name. Always clears the field afterwards so the
-    /// placeholder (now the new current name) is the visible state again.
+    func controlTextDidChange(_: Notification) {
+      edited = true
+    }
+
+    /// Fires on Return and on focus loss. Only commits when the user
+    /// actually touched the field this session — an accidental click-in /
+    /// click-out is a no-op. An edited-to-empty commit is meaningful: it
+    /// signals "clear the override" and the manager reverts the project
+    /// to its canonical name.
     func controlTextDidEndEditing(_ obj: Notification) {
       guard let field = obj.object as? NSTextField else { return }
+      defer { edited = false }
+      guard edited else { return }
       let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-      field.stringValue = ""
-      guard !trimmed.isEmpty else { return }
+      // Reflect the canonicalized value back into the field. The next
+      // `updateNSView` will overwrite this with whatever the catalog
+      // settled on, but doing it locally avoids a one-frame flicker
+      // where the field shows the raw typed value before the SwiftUI
+      // round-trip lands.
+      field.stringValue = trimmed
+      lastAcceptedOverride = trimmed.isEmpty ? nil : trimmed
       commit(trimmed)
     }
   }
