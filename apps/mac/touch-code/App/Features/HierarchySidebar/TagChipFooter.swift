@@ -125,14 +125,14 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // Match the sidebar List's own `.sidebar` material so the footer
-    // reads as one continuous surface with the rows above it. Using the
-    // real `NSVisualEffectView` with `.behindWindow` blending (rather
-    // than SwiftUI's `Material` shim) is what keeps detail-side terminal
-    // panes from bleeding through in fullscreen — `Material` samples
-    // within-window pixels and exposed the bleed regression in HAN-63.
+    // Match the system sidebar exactly: `.sidebar` material with
+    // `.withinWindow` blending so the footer samples the same surface
+    // the floating sidebar overlay does. `.behindWindow` would sample
+    // the desktop directly and miss any in-window staining (e.g. the
+    // ghostty chrome tint band painted behind the floating sidebar),
+    // producing a visible seam between the sidebar list and the footer.
     .background(
-      VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
+      VisualEffectBackground(material: .sidebar, blendingMode: .withinWindow)
     )
   }
 
