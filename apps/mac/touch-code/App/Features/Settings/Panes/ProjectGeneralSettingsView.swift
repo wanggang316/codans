@@ -629,11 +629,12 @@ struct ProjectGeneralSettingsView: View {
 /// so the user can edit in place; when there is no override the field is
 /// empty and the canonical name acts as the placeholder hint.
 ///
-/// Commit semantics intentionally distinguish "the user opened the field
-/// but didn't change anything" (no-op) from "the user actively edited the
-/// content" (always commits the new trimmed value, including the empty
-/// string which clears the override and reverts to the canonical name). An
-/// `edited` flag set by `controlTextDidChange(_:)` is the discriminator.
+/// Commit fires on every keystroke (via `controlTextDidChange`) so the
+/// sidebar / Settings sidebar / window header pick up the new name as
+/// soon as the user types. Trimming + canonical-equality collapse to a
+/// `nil` override lives in `HierarchyManager.renameProject`, so an empty
+/// or whitespace-only field naturally reverts to the canonical name on
+/// each keystroke.
 private struct ProjectNameField: NSViewRepresentable {
   let placeholder: String
   let currentOverride: String?
@@ -683,38 +684,23 @@ private struct ProjectNameField: NSViewRepresentable {
     /// `updateNSView` to detect when an external rename has changed the
     /// catalog under us and the displayed text needs a quiet refresh.
     var lastAcceptedOverride: String?
-    /// Flipped on the first keystroke of an editing session. Lets
-    /// `controlTextDidEndEditing` tell apart "focused-and-left-untouched"
-    /// (don't commit) from "actively cleared the field" (commit empty so
-    /// the override is cleared).
-    private var edited: Bool = false
 
     init(commit: @escaping (String) -> Void) {
       self.commit = commit
     }
 
-    func controlTextDidChange(_: Notification) {
-      edited = true
-    }
-
-    /// Fires on Return and on focus loss. Only commits when the user
-    /// actually touched the field this session — an accidental click-in /
-    /// click-out is a no-op. An edited-to-empty commit is meaningful: it
-    /// signals "clear the override" and the manager reverts the project
-    /// to its canonical name.
-    func controlTextDidEndEditing(_ obj: Notification) {
-      guard let field = obj.object as? NSTextField else { return }
-      defer { edited = false }
-      guard edited else { return }
-      let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-      // Reflect the canonicalized value back into the field. The next
-      // `updateNSView` will overwrite this with whatever the catalog
-      // settled on, but doing it locally avoids a one-frame flicker
-      // where the field shows the raw typed value before the SwiftUI
-      // round-trip lands.
-      field.stringValue = trimmed
+    /// Fires on every keystroke. We forward the raw `stringValue` to the
+    /// manager unchanged — trimming and the empty/canonical → `nil`
+    /// collapse live in `renameProject`, so the field's text and the
+    /// catalog's `displayName` stay in lockstep without us second-guessing
+    /// what the user is mid-typing (a trim here would eat trailing spaces
+    /// before the user finished a word).
+    func controlTextDidChange(_ notification: Notification) {
+      guard let field = notification.object as? NSTextField else { return }
+      let raw = field.stringValue
+      let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
       lastAcceptedOverride = trimmed.isEmpty ? nil : trimmed
-      commit(trimmed)
+      commit(raw)
     }
   }
 }
