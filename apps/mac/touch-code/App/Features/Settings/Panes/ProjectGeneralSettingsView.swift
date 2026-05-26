@@ -793,6 +793,11 @@ private struct ProjectColorSwatchRow: View {
   // MARK: - NSColorPanel plumbing
 
   private func openColorPanel() {
+    // Tear down any prior observer first — the panel target is shared global
+    // state, and re-opening must not leave the previous binding wired up.
+    if let existing = panelObserver {
+      existing.unbind(from: NSColorPanel.shared)
+    }
     let observer = ColorPanelObserver { nsColor in
       if let hex = ProjectColor.hex(from: nsColor) {
         lastCustomHex = hex
@@ -801,12 +806,11 @@ private struct ProjectColorSwatchRow: View {
     }
     panelObserver = observer
     let panel = NSColorPanel.shared
-    panel.setTarget(observer)
-    panel.setAction(#selector(ColorPanelObserver.colorDidChange(_:)))
     panel.showsAlpha = false
     if let hex = lastCustomHex, let nsColor = ProjectColor.nsColor(from: hex) {
       panel.color = nsColor
     }
+    observer.bind(to: panel)
     panel.makeKeyAndOrderFront(nil)
   }
 
@@ -817,10 +821,8 @@ private struct ProjectColorSwatchRow: View {
   /// detach whenever this row had set one. Setting `target` to `nil` is a
   /// no-op when something else has taken ownership in the meantime.
   private func detachColorPanelObserver() {
-    guard panelObserver != nil else { return }
-    let panel = NSColorPanel.shared
-    panel.setTarget(nil)
-    panel.setAction(nil)
+    guard let observer = panelObserver else { return }
+    observer.unbind(from: NSColorPanel.shared)
     panelObserver = nil
   }
 
@@ -835,15 +837,48 @@ private struct ProjectColorSwatchRow: View {
 /// the panel callback target must outlive the panel session. Held as the
 /// `@State`-tracked `panelObserver` on `ProjectColorSwatchRow` and detached
 /// on `onDisappear`.
+///
+/// The observer also self-deactivates as soon as the panel begins to close.
+/// `NSColorPanel` fires a final `colorDidChange:` during its close animation
+/// with the panel's current color reset to black; without the guard, that
+/// stray callback would overwrite the just-picked hex with `#000000`. Hooking
+/// `NSWindow.willCloseNotification` (the panel *is* a window) flips
+/// `isActive` ahead of that final action so it's dropped on the floor.
 @MainActor
 private final class ColorPanelObserver: NSObject {
   let onChange: (NSColor) -> Void
+  private var willCloseToken: NSObjectProtocol?
+  private var isActive: Bool = true
 
   init(onChange: @escaping (NSColor) -> Void) {
     self.onChange = onChange
   }
 
+  func bind(to panel: NSColorPanel) {
+    isActive = true
+    panel.setTarget(self)
+    panel.setAction(#selector(colorDidChange(_:)))
+    willCloseToken = NotificationCenter.default.addObserver(
+      forName: NSWindow.willCloseNotification,
+      object: panel,
+      queue: .main
+    ) { [weak self] _ in
+      self?.isActive = false
+    }
+  }
+
+  func unbind(from panel: NSColorPanel) {
+    isActive = false
+    panel.setTarget(nil)
+    panel.setAction(nil)
+    if let token = willCloseToken {
+      NotificationCenter.default.removeObserver(token)
+      willCloseToken = nil
+    }
+  }
+
   @objc func colorDidChange(_ sender: NSColorPanel) {
+    guard isActive else { return }
     onChange(sender.color)
   }
 }
