@@ -125,15 +125,14 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // Match the system sidebar exactly: `.sidebar` material with
-    // `.withinWindow` blending so the footer samples the same surface
-    // the floating sidebar overlay does. `.behindWindow` would sample
-    // the desktop directly and miss any in-window staining (e.g. the
-    // ghostty chrome tint band painted behind the floating sidebar),
-    // producing a visible seam between the sidebar list and the footer.
-    .background(
-      VisualEffectBackground(material: .sidebar, blendingMode: .withinWindow)
-    )
+    // Render the footer with the same surface as the floating sidebar
+    // overlay above it: `.sidebar` material + the active Ghostty terminal
+    // tint. The sidebar list naturally picks up the tint because the
+    // system overlay samples the chrome tint band in the detail's leading
+    // inset; the footer lives inside the sidebar column's safe-area inset
+    // and cannot sample that band itself, so the tint has to be applied
+    // directly here.
+    .ghosttySidebarSurface()
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {
