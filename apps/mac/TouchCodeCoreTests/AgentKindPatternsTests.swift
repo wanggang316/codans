@@ -85,6 +85,31 @@ struct AgentKindPatternsTests {
     )
   }
 
+  @Test
+  func initialCommand_newAgentPatterns() {
+    let samples: [(command: String, kind: AgentKind)] = [
+      ("gemini", .gemini),
+      ("cursor-agent --resume", .cursorAgent),
+      ("cline", .cline),
+      ("copilot", .copilot),
+      ("github-copilot status", .copilot),
+      ("ghcs", .copilot),
+      ("kimi code", .kimi),
+      ("droid", .droid),
+      ("amp-local", .amp),
+    ]
+
+    for sample in samples {
+      #expect(
+        AgentKindPatterns.classify(
+          initialCommand: sample.command,
+          title: nil,
+          notificationTitle: nil
+        ) == sample.kind
+      )
+    }
+  }
+
   // MARK: - .pi hits via title / notificationTitle
 
   /// Per-kind dimension coverage: `.pi` must hit on `title` as well as
@@ -107,6 +132,52 @@ struct AgentKindPatternsTests {
     #expect(
       AgentKindPatterns.classify(initialCommand: nil, title: nil, notificationTitle: "pi") == .pi
     )
+  }
+
+  @Test
+  func title_newAgentPatterns() {
+    let samples: [(title: String, kind: AgentKind)] = [
+      ("Gemini", .gemini),
+      ("Cursor Agent", .cursorAgent),
+      ("Cline", .cline),
+      ("GitHub Copilot", .copilot),
+      ("Kimi", .kimi),
+      ("Droid", .droid),
+      ("Amp", .amp),
+    ]
+
+    for sample in samples {
+      #expect(
+        AgentKindPatterns.classify(
+          initialCommand: nil,
+          title: sample.title,
+          notificationTitle: nil
+        ) == sample.kind
+      )
+    }
+  }
+
+  @Test
+  func notificationTitle_newAgentPatterns() {
+    let samples: [(title: String, kind: AgentKind)] = [
+      ("Gemini needs attention", .gemini),
+      ("Cursor Agent", .cursorAgent),
+      ("Cline", .cline),
+      ("Copilot", .copilot),
+      ("Kimi", .kimi),
+      ("Droid", .droid),
+      ("Amp", .amp),
+    ]
+
+    for sample in samples {
+      #expect(
+        AgentKindPatterns.classify(
+          initialCommand: nil,
+          title: nil,
+          notificationTitle: sample.title
+        ) == sample.kind
+      )
+    }
   }
 
   // MARK: - initialCommand: first-token-only behaviour
@@ -138,6 +209,41 @@ struct AgentKindPatternsTests {
         notificationTitle: nil
       ) == nil
     )
+  }
+
+  @Test
+  func initialCommand_cursorEditorDoesNotMatchCursorAgent() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: "cursor .",
+        title: nil,
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  @Test
+  func title_cursorEditorDoesNotMatchCursorAgent() {
+    #expect(
+      AgentKindPatterns.classify(
+        initialCommand: nil,
+        title: "Cursor",
+        notificationTitle: nil
+      ) == nil
+    )
+  }
+
+  @Test
+  func initialCommand_ampNearMissesDoNotMatch() {
+    for command in ["lamp", "ramp", "sample"] {
+      #expect(
+        AgentKindPatterns.classify(
+          initialCommand: command,
+          title: nil,
+          notificationTitle: nil
+        ) == nil
+      )
+    }
   }
 
   // MARK: - .claudeCode near-misses

@@ -37,7 +37,14 @@ public nonisolated enum AgentKindPatterns {
     .claudeCode: ["claude", "claude-code"],
     .codex: ["codex"],
     .pi: ["pi"],
-    .opencode: ["opencode"],
+    .opencode: ["opencode", "open-code"],
+    .gemini: ["gemini"],
+    .cursorAgent: ["cursor-agent"],
+    .cline: ["cline"],
+    .copilot: ["copilot", "github-copilot", "ghcs"],
+    .kimi: ["kimi", "kimi-code"],
+    .droid: ["droid"],
+    .amp: ["amp", "amp-local"],
   ]
 
   /// Substring patterns matched against the terminal title (`OSC 0/2`
@@ -47,7 +54,14 @@ public nonisolated enum AgentKindPatterns {
     .claudeCode: ["Claude Code", "claude"],
     .codex: ["Codex CLI", "Codex"],
     .pi: ["pi"],
-    .opencode: ["opencode"],
+    .opencode: ["opencode", "open-code"],
+    .gemini: ["Gemini"],
+    .cursorAgent: ["Cursor Agent", "cursor-agent"],
+    .cline: ["Cline"],
+    .copilot: ["GitHub Copilot", "Copilot"],
+    .kimi: ["Kimi"],
+    .droid: ["Droid"],
+    .amp: ["Amp"],
   ]
 
   /// Substring patterns matched against `OSC 9` notification titles.
@@ -58,7 +72,14 @@ public nonisolated enum AgentKindPatterns {
     .claudeCode: ["Claude"],
     .codex: ["Codex"],
     .pi: ["pi"],
-    .opencode: ["opencode"],
+    .opencode: ["opencode", "open-code"],
+    .gemini: ["Gemini"],
+    .cursorAgent: ["Cursor Agent", "cursor-agent"],
+    .cline: ["Cline"],
+    .copilot: ["GitHub Copilot", "Copilot"],
+    .kimi: ["Kimi"],
+    .droid: ["Droid"],
+    .amp: ["Amp"],
   ]
 
   /// Classify a pane from up to three signals. Returns the first
