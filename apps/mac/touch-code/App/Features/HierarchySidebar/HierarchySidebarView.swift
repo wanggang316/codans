@@ -179,55 +179,59 @@ struct HierarchySidebarView: View {
       uniqueKeysWithValues: catalog.projects.map { ($0.id, $0.name) }
     )
 
-    // Sidebar body: VStack stacks List + Footer as siblings — the
-    // List's bottom edge IS the footer's top edge. The ActiveAgents
-    // panel is mounted as an `.overlay(alignment: .bottom)` on the
-    // List, which anchors it to that same edge: it slides up from
-    // there instead of from the window's bottom edge, and the footer
-    // stays fixed underneath. No footer-height measurement needed —
-    // the layout edge does the work.
+    // Sidebar body: the upper ZStack is the only area the
+    // ActiveAgents panel may draw into. Clipping this region is
+    // essential on macOS 26: List overlays can paint past their
+    // allocated frame while a bottom move transition is entering, so
+    // an unclipped panel visually covers the footer sibling below.
+    // With the panel mounted inside this clipped slot, its bottom
+    // transition is cut at the footer's top edge and reads as sliding
+    // up from beneath the fixed footer.
     VStack(spacing: 0) {
-      treeBody(projects: visibleProjects)
-        .background(
-          GeometryReader { proxy in
-            Color.clear.preference(
-              key: SidebarHeightPreferenceKey.self,
-              value: proxy.size.height
-            )
+      ZStack(alignment: .bottom) {
+        treeBody(projects: visibleProjects)
+          .background(
+            GeometryReader { proxy in
+              Color.clear.preference(
+                key: SidebarHeightPreferenceKey.self,
+                value: proxy.size.height
+              )
+            }
+          )
+          .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
+            sidebarHeightObservation = newHeight
           }
-        )
-        .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
-          sidebarHeightObservation = newHeight
+
+        if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
+          ActiveAgentsSidebarPanel(
+            registry: registry,
+            resolveSourcePath: { paneID in
+              resolveActiveAgentsSourcePath(
+                paneID: paneID,
+                catalog: hierarchyManager.catalog
+              )
+            },
+            focusedPaneID: currentlyFocusedPaneID(),
+            onTapRow: { paneID in
+              // Panel stays open after a row tap — the user often
+              // fan-jumps between agents and re-opening the panel
+              // each time is friction.
+              onActiveAgentsRowTapped(paneID)
+            },
+            onClose: {
+              withAnimation(.easeOut(duration: 0.18)) {
+                activeAgentsPanelOpen = false
+              }
+            },
+            height: $activeAgentsPanelHeight,
+            minHeight: 140,
+            maxHeight: max(140, sidebarHeightObservation * 0.5)
+          )
+          .zIndex(1)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
         }
-        .overlay(alignment: .bottom) {
-          if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
-            ActiveAgentsSidebarPanel(
-              registry: registry,
-              resolveSourcePath: { paneID in
-                resolveActiveAgentsSourcePath(
-                  paneID: paneID,
-                  catalog: hierarchyManager.catalog
-                )
-              },
-              focusedPaneID: currentlyFocusedPaneID(),
-              onTapRow: { paneID in
-                // Panel stays open after a row tap — the user often
-                // fan-jumps between agents and re-opening the panel
-                // each time is friction.
-                onActiveAgentsRowTapped(paneID)
-              },
-              onClose: {
-                withAnimation(.easeOut(duration: 0.18)) {
-                  activeAgentsPanelOpen = false
-                }
-              },
-              height: $activeAgentsPanelHeight,
-              minHeight: 140,
-              maxHeight: max(140, sidebarHeightObservation * 0.5)
-            )
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-          }
-        }
+      }
+      .clipped()
 
       TagFilterPopoverFooter(
         tags: catalog.tags,
@@ -250,6 +254,7 @@ struct HierarchySidebarView: View {
           },
         activeAgentsPanelOpen: activeAgentsPanelOpen
       )
+      .zIndex(2)
     }
       // Auto-open the Agents View panel on the rising edge into "any
       // bound agent is loading" — but only when the user has the
