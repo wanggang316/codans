@@ -185,55 +185,40 @@ struct HierarchySidebarView: View {
       uniqueKeysWithValues: catalog.projects.map { ($0.id, $0.name) }
     )
 
-    // Sidebar body: VStack stacks the List on top of the footer so the
-    // list's scrollable area is physically capped above the footer
-    // (transparent inset cannot mask scroll content otherwise). The
-    // ActiveAgents panel is rendered as an `overlay(alignment: .bottom)`
-    // on the VStack — `.padding(.bottom, footerHeight)` slides it up to
-    // the footer's top edge, so the panel expands from that edge rather
-    // than the window's bottom edge and the footer itself stays
-    // visible / unanimated underneath.
-    VStack(spacing: 0) {
-      treeBody(projects: visibleProjects)
-        .background(
-          GeometryReader { proxy in
-            Color.clear.preference(
-              key: SidebarHeightPreferenceKey.self,
-              value: proxy.size.height
-            )
-          }
-        )
-        .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
-          sidebarHeightObservation = newHeight
-        }
-      TagFilterPopoverFooter(
-        tags: catalog.tags,
-        activeFilter: catalog.activeTagFilter,
-        showUntaggedChip: untaggedExists,
-        onAllTapped: { store.send(.allChipTapped) },
-        onTagTapped: { store.send(.tagChipTapped($0)) },
-        onUntaggedTapped: { store.send(.untaggedChipTapped) },
-        onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-        sortMode: catalog.projectSortMode,
-        onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
-        onManualSortRequested: { store.send(.manualSortSheetRequested) },
-        onActiveAgentsTapped: activeAgentsRegistry == nil
-          ? nil
-          : {
-            withAnimation(.easeOut(duration: 0.18)) {
-              activeAgentsPanelOpen.toggle()
+    // Sidebar body: ZStack layers list / panel / footer along the z-axis.
+    //   z=0 (bottom)  list      — fills the column, scroll area is
+    //                              physically capped above the footer
+    //                              via a reserved spacer below it.
+    //   z=1 (middle)  panel     — overlaid above the list, padded up
+    //                              to the footer's top edge so it
+    //                              slides out from there.
+    //   z=2 (top)     footer    — always visible / unanimated, the only
+    //                              chrome that can never be covered.
+    // This mirrors the reference design's layering. A VStack wouldn't
+    // work because we need the panel to *overlay* the list (not push it),
+    // so the footer remains pinned at the bottom while the panel
+    // expands above it.
+    ZStack(alignment: .bottom) {
+      VStack(spacing: 0) {
+        treeBody(projects: visibleProjects)
+          .background(
+            GeometryReader { proxy in
+              Color.clear.preference(
+                key: SidebarHeightPreferenceKey.self,
+                value: proxy.size.height
+              )
             }
-          },
-        activeAgentsPanelOpen: activeAgentsPanelOpen
-      )
-      .onGeometryChange(for: Double.self) { proxy in
-        Double(proxy.size.height)
-      } action: { newHeight in
-        footerHeight = newHeight
+          )
+          .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
+            sidebarHeightObservation = newHeight
+          }
+        // Reserve the footer's slot in the column so the List's frame
+        // ends above it — the footer is drawn separately on the ZStack
+        // top layer (see below).
+        Color.clear
+          .frame(height: footerHeight)
       }
-    }
-    .overlay(alignment: .bottom) {
+
       if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
         ActiveAgentsSidebarPanel(
           registry: registry,
@@ -261,6 +246,33 @@ struct HierarchySidebarView: View {
         )
         .padding(.bottom, footerHeight)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
+
+      TagFilterPopoverFooter(
+        tags: catalog.tags,
+        activeFilter: catalog.activeTagFilter,
+        showUntaggedChip: untaggedExists,
+        onAllTapped: { store.send(.allChipTapped) },
+        onTagTapped: { store.send(.tagChipTapped($0)) },
+        onUntaggedTapped: { store.send(.untaggedChipTapped) },
+        onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
+        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+        sortMode: catalog.projectSortMode,
+        onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
+        onManualSortRequested: { store.send(.manualSortSheetRequested) },
+        onActiveAgentsTapped: activeAgentsRegistry == nil
+          ? nil
+          : {
+            withAnimation(.easeOut(duration: 0.18)) {
+              activeAgentsPanelOpen.toggle()
+            }
+          },
+        activeAgentsPanelOpen: activeAgentsPanelOpen
+      )
+      .onGeometryChange(for: Double.self) { proxy in
+        Double(proxy.size.height)
+      } action: { newHeight in
+        footerHeight = newHeight
       }
     }
       // Auto-open the Agents View panel on the rising edge into "any
