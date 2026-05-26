@@ -27,16 +27,6 @@ struct ThemePickerButton: View {
         triggerLabel
       }
       .buttonStyle(.plain)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 4)
-      .background(
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
-          .fill(Color(nsColor: .controlBackgroundColor))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
-          .strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5)
-      )
       .disabled(isDisabled)
       .opacity(isDisabled ? 0.5 : 1)
       .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
@@ -53,13 +43,13 @@ struct ThemePickerButton: View {
     }
   }
 
-  /// Mimics the macOS popup-button look: inline swatch + theme name +
-  /// trailing chevron. Shows a "Select Theme" placeholder when nothing
-  /// is currently selected.
+  /// Borderless trailing content that mirrors the system `.menu` Picker's
+  /// look inside `Form(.grouped)`: no background fill, no stroke, content
+  /// sized to its intrinsic width and right-aligned by `LabeledContent`'s
+  /// value column. Shows "Select Theme" in secondary when no commit yet.
   @ViewBuilder
   private var triggerLabel: some View {
-    HStack(spacing: 8) {
-      Spacer(minLength: 8)
+    HStack(spacing: 6) {
       if let selection {
         ThemeSwatchStrip(preview: previews[selection], dotSize: 9)
         Text(selection)
@@ -74,7 +64,6 @@ struct ThemePickerButton: View {
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
     }
-    .frame(minWidth: 220, maxWidth: 320, alignment: .trailing)
     .contentShape(Rectangle())
   }
 }
