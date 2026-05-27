@@ -55,12 +55,14 @@ These accessibility identifiers must be declared by the implementation (per patt
 | `branch_switcher.error_banner` | Inline error banner displayed under the header. |
 | `branch_switcher.error_dismiss_button` | The banner's close button. |
 | `diff_inspector.tab_picker` | Segmented control (Changes / History). |
-| `diff_inspector.close_button` | Close button in inspector header. |
 | `diff_inspector.changes_list` | Existing changed-files list container (renamed if currently unidentified). |
 | `diff_inspector.history_list` | History list container. |
 | `diff_inspector.history_row.<short-sha>` | One row per commit in History tab. |
+| `diff_inspector.history_row_popover.<short-sha>` | Hover popover surfaced from a history row; shows full SHA, subject, author, and date. |
 | `diff_inspector.history_empty_state` | Empty-state element in History tab. |
 | `diff_drawer.title_text` | Left-side title text (file path or `<sha> · <subject>`). |
+| `diff_drawer.file_picker_button` | Header button that opens the changed-files popover (Changes mode only). |
+| `diff_drawer.file_picker_row.<path>` | One row per changed file in the popover; tap switches the drawer to that file's diff. |
 
 ## Ready Signals
 

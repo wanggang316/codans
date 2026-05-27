@@ -11,6 +11,12 @@ import TouchCodeCore
 /// Hosted by `DiffInspectorView.historyBody` (T12).
 struct DiffHistoryListView: View {
   @Bindable var store: StoreOf<DiffFeature>
+  /// Tracks which row the cursor is currently over so exactly one hover
+  /// popover is presented at a time. `nil` = no hover. SwiftUI's `.onHover`
+  /// fires on enter / exit; the row's exit handler only clears the field
+  /// when it matches `self`, so a fast cursor move between adjacent rows
+  /// doesn't briefly null the value and flicker the popover.
+  @State private var hoveredCommitID: String?
 
   // MARK: - Body
 
@@ -100,24 +106,29 @@ struct DiffHistoryListView: View {
   private func row(commit: Commit, index: Int, total: Int) -> some View {
     let isSelected = store.presentedCommitSha == commit.id
     let shortSha = commit.shortID
-    // Hoisted once per row render: feeds both the visible trailing label
-    // and the VoiceOver string so the a11y surface matches what sighted
-    // users see, and we don't re-invoke the formatter twice per row.
+    // Hoisted once per row render: feeds the visible metadata line, the
+    // hover popover, and the VoiceOver string so the a11y surface matches
+    // what sighted users see and we don't re-invoke the formatter twice
+    // per row.
     let relativeAge = Self.relativeFormatter.localizedString(
       for: commit.date, relativeTo: Date())
 
+    // Two-line layout mirrors the GitHub / Tower convention: subject on
+    // top, `<sha> · <author> · <relative-age>` underneath in a smaller,
+    // secondary-foreground font.
     HStack(spacing: 8) {
-      Text(shortSha)
-        .font(.caption.monospaced())
-        .foregroundStyle(.secondary)
-        .frame(width: 56, alignment: .leading)
-      Text(commit.subject)
-        .font(.body)
-        .lineLimit(1)
-      Spacer()
-      Text(relativeAge)
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(commit.subject)
+          .font(.body)
+          .lineLimit(1)
+          .truncationMode(.tail)
+        Text("\(shortSha) · \(commit.authorName) · \(relativeAge)")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+      }
+      Spacer(minLength: 0)
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 6)
@@ -125,6 +136,30 @@ struct DiffHistoryListView: View {
     .contentShape(.rect)
     .onTapGesture {
       store.send(.historyCommitTapped(sha: commit.id))
+    }
+    .onHover { hovering in
+      // Only clear the field if this row owns the current hover, so a
+      // quick cursor move from row A → row B sets `hoveredCommitID = B`
+      // before A's exit handler fires (and A's exit then no-ops because
+      // the field no longer matches).
+      if hovering {
+        hoveredCommitID = commit.id
+      } else if hoveredCommitID == commit.id {
+        hoveredCommitID = nil
+      }
+    }
+    .popover(
+      isPresented: Binding(
+        get: { hoveredCommitID == commit.id },
+        set: { newValue in
+          if !newValue, hoveredCommitID == commit.id {
+            hoveredCommitID = nil
+          }
+        }
+      ),
+      arrowEdge: .leading
+    ) {
+      commitDetailPopover(commit: commit, shortSha: shortSha, relativeAge: relativeAge)
     }
     .accessibilityIdentifier("diff_inspector.history_row.\(shortSha)")
     .accessibilityElement(children: .ignore)
@@ -138,6 +173,43 @@ struct DiffHistoryListView: View {
         store.send(.historyLoadNextPageRequested)
       }
     }
+  }
+
+  /// Hover popover surfacing the full commit metadata that the two-line
+  /// row truncates. `arrowEdge: .leading` anchors the popover to the row's
+  /// LEFT edge — matches the user's "左侧出现浮层" requirement.
+  @ViewBuilder
+  private func commitDetailPopover(
+    commit: Commit, shortSha: String, relativeAge: String
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(commit.subject)
+        .font(.headline)
+        .textSelection(.enabled)
+      Divider()
+      Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+        GridRow {
+          Text("SHA").foregroundStyle(.secondary)
+          Text(commit.id)
+            .font(.system(.callout, design: .monospaced))
+            .textSelection(.enabled)
+        }
+        GridRow {
+          Text("Author").foregroundStyle(.secondary)
+          Text("\(commit.authorName) <\(commit.authorEmail)>")
+            .textSelection(.enabled)
+        }
+        GridRow {
+          Text("Date").foregroundStyle(.secondary)
+          Text(commit.date.formatted(date: .complete, time: .standard))
+            .textSelection(.enabled)
+        }
+      }
+      .font(.callout)
+    }
+    .padding(12)
+    .frame(maxWidth: 480, alignment: .leading)
+    .accessibilityIdentifier("diff_inspector.history_row_popover.\(shortSha)")
   }
 
   // MARK: - Helpers

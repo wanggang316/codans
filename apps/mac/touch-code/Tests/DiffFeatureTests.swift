@@ -887,6 +887,40 @@ struct DiffFeatureHistoryTests {
     #expect(store.state.presentedCommitSha == shaA)
   }
 
+  // MARK: - 8b. Re-tapping the presented sha toggles the selection off
+
+  @Test
+  func historyCommitTappedTogglesPresentedSha() async {
+    // Tapping the currently-presented sha clears the selection (drawer
+    // closes). The per-commit cache stays — a future third tap re-presents
+    // from cache without a re-fetch.
+    let sha = "abc0000000000000000000000000000000000000"
+    let cachedDoc = DiffDocument(files: [], title: "abc0000", fallbackPatch: "")
+    let cachedWrapper = DiffFeature.LoadedDiffDocument(cachedDoc)
+    let store = TestStore(
+      initialState: DiffFeature.State(
+        worktreeID: WorktreeID(),
+        projectID: ProjectID(),
+        worktreePath: "/tmp/wt",
+        presentedCommitSha: sha,
+        diffsByCommit: [sha: .loaded(cachedWrapper)]
+      )
+    ) {
+      DiffFeature()
+    } withDependencies: {
+      // No `commitDiff` stub — an unintended refetch would trip
+      // `unimplemented` and fail the test.
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.historyCommitTapped(sha: sha)) { state in
+      state.presentedCommitSha = nil
+      // Cache stays — see decision log on the toggle behavior.
+    }
+    // Cache survives the toggle so the next tap can short-circuit.
+    #expect(store.state.diffsByCommit[sha] == .loaded(cachedWrapper))
+  }
+
   // MARK: - 9. Worktree switch resets history side
 
   @Test

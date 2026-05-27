@@ -6,15 +6,11 @@ import TouchCodeCore
 /// Diff inspector column body. Hosts a segmented Changes / History tab
 /// picker; routes the body to either the changed-files list (M5 default)
 /// or the commit-history list (T13). Width is fixed at 280 pt by the
-/// inspector mount in `ContentView`.
+/// inspector mount in `ContentView`. The header close button is gone in
+/// favour of the toolbar Git Viewer toggle (Phase E), which now owns the
+/// open/close affordance from a more discoverable location.
 struct DiffInspectorView: View {
   @Bindable var store: StoreOf<DiffFeature>
-  /// Invoked when the user clicks the header's close button. Wired by the
-  /// mount site (`WorktreeDetailView`) to force the inspector hidden — the
-  /// symmetric counterpart to FU-T10's "View all" open path, bypassing the
-  /// 3-tier Git Viewer resolution that `.diffInspectorToggledForCurrentWorktree`
-  /// would otherwise run.
-  let onClose: () -> Void
 
   var body: some View {
     VStack(spacing: 0) {
@@ -25,7 +21,7 @@ struct DiffInspectorView: View {
       content
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .background(.regularMaterial)
   }
 
   // MARK: - Tab picker
@@ -44,9 +40,19 @@ struct DiffInspectorView: View {
         store.send(.tabSelected(newValue))
       }
     )
+    // Icon-only segmented control mirrors the Xcode-style right-panel tab
+    // bar idiom. `.help(...)` provides the hover tooltip; the explicit
+    // `.accessibilityLabel` keeps the surface readable for VoiceOver since
+    // the icon alone is ambiguous.
     Picker("Inspector tab", selection: binding) {
-      Text("Changes").tag(DiffFeature.DiffTab.changes)
-      Text("History").tag(DiffFeature.DiffTab.history)
+      Image(systemName: "doc.text")
+        .help("Changes")
+        .accessibilityLabel("Changes")
+        .tag(DiffFeature.DiffTab.changes)
+      Image(systemName: "clock.arrow.circlepath")
+        .help("History")
+        .accessibilityLabel("History")
+        .tag(DiffFeature.DiffTab.history)
     }
     .pickerStyle(.segmented)
     .labelsHidden()
@@ -71,16 +77,6 @@ struct DiffInspectorView: View {
       .disabled(isRefreshing)
       .help(refreshHelp)
       .accessibilityLabel(refreshHelp)
-
-      Button {
-        onClose()
-      } label: {
-        Image(systemName: "xmark")
-      }
-      .buttonStyle(.borderless)
-      .help("Close inspector")
-      .accessibilityLabel("Close inspector")
-      .accessibilityIdentifier("diff_inspector.close_button")
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)

@@ -357,14 +357,32 @@ struct DiffFeature {
       case .historyCommitTapped(let sha):
         // Guard FIRST: a missing worktree path is a no-op rather than a
         // selection mutation, so the inspector never visually highlights a
-        // commit we can't load. Cache hit on `.loaded` / `.tooLarge`: don't
-        // refetch. `.error` falls through so the Retry button can re-issue
-        // the load (FU-T14). `.loading` falls through too —
-        // `.cancellable(cancelInFlight: true)` on `CancelID.commitDiff`
-        // handles the in-flight overlap.
+        // commit we can't load.
         guard let worktreePath = state.worktreePath, !worktreePath.isEmpty else {
           return .none
         }
+        // Toggle: re-tapping the CURRENTLY-presented sha clears the
+        // selection when the drawer is genuinely *showing* the diff —
+        // `.loaded` (rendered) or `.tooLarge` (too-large placeholder).
+        // `diffsByCommit[sha]` stays so a third tap re-presents from
+        // cache instantly. Re-tap on `.error` deliberately falls through
+        // so the in-drawer Retry button (which sends this same action)
+        // re-issues the load instead of closing the drawer; `.loading`
+        // similarly falls through and the cancel-in-flight handles it.
+        if state.presentedCommitSha == sha {
+          switch state.diffsByCommit[sha] {
+          case .loaded, .tooLarge:
+            state.presentedCommitSha = nil
+            return .none
+          case .error, .loading, .none:
+            break
+          }
+        }
+        // Cache hit on `.loaded` / `.tooLarge`: don't refetch. `.error`
+        // falls through so the Retry button can re-issue the load
+        // (FU-T14). `.loading` falls through too —
+        // `.cancellable(cancelInFlight: true)` on `CancelID.commitDiff`
+        // handles the in-flight overlap.
         state.presentedCommitSha = sha
         switch state.diffsByCommit[sha] {
         case .loaded, .tooLarge: return .none

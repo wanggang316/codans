@@ -10,6 +10,10 @@ import TouchCodeCore
 struct DiffDrawerView: View {
   @Bindable var store: StoreOf<DiffFeature>
   @Environment(\.colorScheme) private var colorScheme
+  /// Drives the changed-files picker popover. Local view state — the
+  /// popover lives entirely inside the drawer header; the store doesn't
+  /// need to know about it.
+  @State private var showFilePicker = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -32,6 +36,20 @@ struct DiffDrawerView: View {
         .help(titleText)
         .accessibilityIdentifier("diff_drawer.title_text")
       DiffStylePicker(store: store)
+      if shouldShowFilePicker {
+        Button {
+          showFilePicker.toggle()
+        } label: {
+          Image(systemName: "list.bullet.rectangle")
+        }
+        .buttonStyle(.borderless)
+        .help("Show changed files")
+        .accessibilityLabel("Show changed files")
+        .accessibilityIdentifier("diff_drawer.file_picker_button")
+        .popover(isPresented: $showFilePicker, arrowEdge: .top) {
+          filePickerContent
+        }
+      }
       Button {
         store.send(.drawerCloseRequested)
       } label: {
@@ -43,6 +61,62 @@ struct DiffDrawerView: View {
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
+  }
+
+  /// File picker is Changes-only. History mode would need file-list
+  /// extraction from the per-commit cache (not yet stored in state); that
+  /// is deferred. Empty file lists also hide the button — no point opening
+  /// a popover with zero rows.
+  private var shouldShowFilePicker: Bool {
+    switch store.selectedTab {
+    case .changes:
+      if case .loaded(let files) = store.changedFiles, !files.isEmpty {
+        return true
+      }
+      return false
+    case .history:
+      return false
+    }
+  }
+
+  @ViewBuilder
+  private var filePickerContent: some View {
+    if case .loaded(let files) = store.changedFiles {
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 0) {
+          ForEach(files) { file in
+            let isPresented = store.presentedFilePath == file.id
+            Button {
+              store.send(.fileRowTapped(path: file.id))
+              // Dismiss after pick — selection is now visible in the
+              // drawer body so the popover has served its purpose.
+              showFilePicker = false
+            } label: {
+              HStack(spacing: 6) {
+                Image(systemName: isPresented ? "checkmark" : "")
+                  .frame(width: 12)
+                  .accessibilityHidden(true)
+                Text(file.id)
+                  .font(.system(.callout, design: .monospaced))
+                  .lineLimit(1)
+                  .truncationMode(.middle)
+                Spacer()
+              }
+              .padding(.horizontal, 12)
+              .padding(.vertical, 4)
+              .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("diff_drawer.file_picker_row.\(file.id)")
+          }
+        }
+      }
+      .frame(width: 360, height: min(CGFloat(files.count) * 26 + 16, 320))
+    } else {
+      Text("No changes")
+        .foregroundStyle(.secondary)
+        .padding(12)
+    }
   }
 
   /// Title rendered in the drawer header. Routes on the active tab:
