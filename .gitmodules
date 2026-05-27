@@ -1,7 +1,7 @@
 [submodule "apps/mac/ThirdParty/ghostty"]
 	path = apps/mac/ThirdParty/ghostty
 	url = https://github.com/wanggang316/ghostty.git
-	branch = touch-code/foreground-process-info
+	branch = main-tc
 [submodule "apps/mac/ThirdParty/git-wt"]
 	path = apps/mac/ThirdParty/git-wt
 	url = https://github.com/khoi/git-wt.git
