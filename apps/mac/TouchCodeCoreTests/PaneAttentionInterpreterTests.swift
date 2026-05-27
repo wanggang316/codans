@@ -234,12 +234,12 @@ struct PaneAttentionInterpreterTests {
   }
 
   @Test
-  func keystrokeWithinOneSecond_suppresses() {
+  func keystrokeWithinSuppressionWindow_suppresses() {
     let pane = PaneID()
     let now = Date()
     let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
-      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-0.5)],
+      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-2.5)],
       now: now,
       commandFinishedThresholdSec: 1
     )
@@ -252,12 +252,12 @@ struct PaneAttentionInterpreterTests {
   }
 
   @Test
-  func keystrokeOlderThanOneSecond_doesNotSuppress() {
+  func keystrokeOutsideSuppressionWindow_doesNotSuppress() {
     let pane = PaneID()
     let now = Date()
     let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
-      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-1.5)],
+      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-3.5)],
       now: now,
       commandFinishedThresholdSec: 1
     )

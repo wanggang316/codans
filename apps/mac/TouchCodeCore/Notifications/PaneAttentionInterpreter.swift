@@ -163,8 +163,14 @@ public nonisolated enum PaneAttentionInterpreter {
     guard durationSec >= Double(context.commandFinishedThresholdSec) else {
       return Step(cue: nil, outputFlag: .unchanged, drop: .commandFinishedShort)
     }
+    // Keystroke-recency gate: if the user pressed a key in this pane in the
+    // last 3 s, suppress the "command finished" cue. A user-driven `/exit`
+    // or `Ctrl-C` produces a command-finished event whose notification value
+    // is zero — the user already knows the command ended. 3 s matches the
+    // window upstream reference projects use; tighter windows (1 s) miss
+    // the case where the command's wrap-up shells take ~2 s to settle.
     if let lastKey = context.lastUserKeystrokeAt[paneID],
-      context.now.timeIntervalSince(lastKey) < 1.0
+      context.now.timeIntervalSince(lastKey) < 3.0
     {
       return Step(cue: nil, outputFlag: .unchanged, drop: .userTypingRecently)
     }
