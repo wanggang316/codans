@@ -44,6 +44,32 @@ struct BranchSwitcherView: View {
     // load completes (the popover doesn't re-measure mid-presentation).
     .frame(minHeight: 240, maxHeight: 480)
     .accessibilityIdentifier("branch_switcher.popover")
+    .alert(
+      store.creatingBranchFrom.map { "New branch from \($0)" } ?? "",
+      isPresented: Binding(
+        get: { store.creatingBranchFrom != nil },
+        set: { newValue in
+          if !newValue { store.send(.newBranchCancelled) }
+        }
+      )
+    ) {
+      TextField(
+        "Branch name",
+        text: Binding(
+          get: { store.newBranchDraft },
+          set: { store.send(.newBranchDraftChanged($0)) }
+        )
+      )
+      .accessibilityIdentifier("branch_switcher.new_branch_field")
+      Button("Create") {
+        store.send(.newBranchConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.newBranchCancelled)
+      }
+    } message: {
+      Text("Create a new branch from this commit and switch to it.")
+    }
   }
 
   // MARK: - Search
@@ -129,12 +155,15 @@ struct BranchSwitcherView: View {
             get: { store.renameDraft },
             set: { store.send(.renameDraftChanged($0)) }
           ),
-          onCheckout: {
+          onSwitch: {
             guard !isCurrent, blockingWorktreeName == nil else { return }
             store.send(.branchTapped(target(for: ref, inventory: inventory)))
           },
+          onNewBranchFrom: {
+            store.send(.newBranchButtonTapped(baseBranchName: ref.shortName))
+          },
           onRename: {
-            store.send(.renameButtonTapped(currentBranchName: ref.shortName))
+            store.send(.renameButtonTapped(branchName: ref.shortName))
           },
           onRenameConfirm: { store.send(.renameConfirmed) },
           onRenameCancel: { store.send(.renameCancelled) }
@@ -150,8 +179,11 @@ struct BranchSwitcherView: View {
             isRenaming: false,
             renameInFlight: false,
             renameDraft: .constant(""),
-            onCheckout: {
+            onSwitch: {
               store.send(.branchTapped(target(for: ref, inventory: inventory)))
+            },
+            onNewBranchFrom: {
+              store.send(.newBranchButtonTapped(baseBranchName: ref.shortName))
             },
             onRename: {},
             onRenameConfirm: {},

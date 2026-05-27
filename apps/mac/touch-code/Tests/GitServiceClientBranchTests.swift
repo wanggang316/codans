@@ -7,8 +7,8 @@ import TouchCodeCore
 struct GitServiceClientBranchTests {
   /// `live(service:)` must forward the new closures to the underlying service
   /// 1:1, in argument order. Recorded calls double as a regression guard against
-  /// the `switchBranch` / `renameCurrentBranch` arguments being flipped during
-  /// refactors.
+  /// the `switchBranch` / `renameBranch` / `createAndSwitchBranch` arguments
+  /// being flipped during refactors.
   @Test
   func liveForwardsNewClosuresToUnderlyingService() async throws {
     let fake = FakeGitService()
@@ -19,7 +19,8 @@ struct GitServiceClientBranchTests {
     _ = try await client.listAllBranches(url)
     try await client.switchBranch(.local(name: "main"), url)
     try await client.switchBranch(.remoteTracking(shortName: "origin/x"), url)
-    try await client.renameCurrentBranch("feat/renamed", url)
+    try await client.renameBranch("old/x", "new/x", url)
+    try await client.createAndSwitchBranch("feat/y", "main", url)
 
     let calls = fake.recordedCalls()
     #expect(
@@ -28,7 +29,8 @@ struct GitServiceClientBranchTests {
         .listAllBranches(url),
         .switchBranch(.local(name: "main"), url),
         .switchBranch(.remoteTracking(shortName: "origin/x"), url),
-        .renameCurrentBranch("feat/renamed", url),
+        .renameBranch("old/x", "new/x", url),
+        .createAndSwitchBranch("feat/y", "main", url),
       ])
   }
 
@@ -43,7 +45,8 @@ struct GitServiceClientBranchTests {
     _ = client.currentBranch
     _ = client.listAllBranches
     _ = client.switchBranch
-    _ = client.renameCurrentBranch
+    _ = client.renameBranch
+    _ = client.createAndSwitchBranch
   }
 }
 
@@ -58,7 +61,8 @@ private final class FakeGitService: GitService, @unchecked Sendable {
     case currentBranch(URL)
     case listAllBranches(URL)
     case switchBranch(BranchSwitchTarget, URL)
-    case renameCurrentBranch(String, URL)
+    case renameBranch(String, String, URL)
+    case createAndSwitchBranch(String, String, URL)
   }
 
   private let lock = NSLock()
@@ -90,8 +94,16 @@ private final class FakeGitService: GitService, @unchecked Sendable {
     record(.switchBranch(target, path))
   }
 
-  func renameCurrentBranch(to newName: String, at path: URL) async throws {
-    record(.renameCurrentBranch(newName, path))
+  func renameBranch(from oldName: String, to newName: String, at path: URL) async throws {
+    record(.renameBranch(oldName, newName, path))
+  }
+
+  func createAndSwitchBranch(
+    name newName: String,
+    from baseName: String,
+    at path: URL
+  ) async throws {
+    record(.createAndSwitchBranch(newName, baseName, path))
   }
 
   // === Unused protocol surface — trap if accidentally called. ===

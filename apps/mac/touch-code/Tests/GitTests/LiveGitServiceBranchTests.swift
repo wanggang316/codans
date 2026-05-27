@@ -143,23 +143,27 @@ struct LiveGitServiceBranchTests {
     }
   }
 
-  // MARK: - renameCurrentBranch
+  // MARK: - renameBranch
 
   @Test
-  func renameCurrentBranchIssuesBranchMArgv() async throws {
+  func renameBranchIssuesTwoArgBranchM() async throws {
     let runner = RecordingCommandRunner(outcomes: [
       .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
       .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false),
     ])
     let service = LiveGitService(runner: runner)
-    try await service.renameCurrentBranch(to: "feat/renamed", at: URL(fileURLWithPath: "/tmp"))
+    try await service.renameBranch(
+      from: "old",
+      to: "new",
+      at: URL(fileURLWithPath: "/tmp")
+    )
     let calls = await runner.calls
     #expect(calls.count == 2)
-    #expect(calls.last?.arguments == ["branch", "-m", "feat/renamed"])
+    #expect(calls.last?.arguments == ["branch", "-m", "old", "new"])
   }
 
   @Test
-  func renameCurrentBranchPropagatesGitError() async {
+  func renameBranchPropagatesGitError() async {
     let runner = RecordingCommandRunner(outcomes: [
       .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
       .exited(
@@ -173,7 +177,53 @@ struct LiveGitServiceBranchTests {
     await #expect(
       throws: GitError.exec(code: 128, stderr: "fatal: A branch named 'main' already exists.\n")
     ) {
-      _ = try await service.renameCurrentBranch(to: "main", at: URL(fileURLWithPath: "/tmp"))
+      _ = try await service.renameBranch(
+        from: "feat/x",
+        to: "main",
+        at: URL(fileURLWithPath: "/tmp")
+      )
+    }
+  }
+
+  // MARK: - createAndSwitchBranch
+
+  @Test
+  func createAndSwitchBranchIssuesSwitchCArgv() async throws {
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false),
+    ])
+    let service = LiveGitService(runner: runner)
+    try await service.createAndSwitchBranch(
+      name: "feat/y",
+      from: "main",
+      at: URL(fileURLWithPath: "/tmp")
+    )
+    let calls = await runner.calls
+    #expect(calls.count == 2)
+    #expect(calls.last?.arguments == ["switch", "-c", "feat/y", "main"])
+  }
+
+  @Test
+  func createAndSwitchBranchPropagatesGitError() async {
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
+      .exited(
+        code: 128,
+        stdout: Data(),
+        stderr: Data("fatal: A branch named 'main' already exists.\n".utf8),
+        stdoutOverflow: false
+      ),
+    ])
+    let service = LiveGitService(runner: runner)
+    await #expect(
+      throws: GitError.exec(code: 128, stderr: "fatal: A branch named 'main' already exists.\n")
+    ) {
+      _ = try await service.createAndSwitchBranch(
+        name: "main",
+        from: "main",
+        at: URL(fileURLWithPath: "/tmp")
+      )
     }
   }
 }

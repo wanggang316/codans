@@ -47,11 +47,11 @@ These accessibility identifiers must be declared by the implementation (per patt
 | `branch_switcher.current_marker` | Checkmark element on the current row. |
 | `branch_switcher.commit_row.<short-sha>` | One row per recent commit. |
 | `branch_switcher.history_button` | Inline "History" button on the Branches section header that opens the Diff Inspector's History tab. |
-| `branch_switcher.branch_row.menu_button.current` | Hover-revealed ellipsis (`...`) menu button on the current branch row. The menu contains `Rename…`. |
-| `branch_switcher.branch_row.menu_button.checkout` | Hover-revealed ellipsis (`...`) menu button on non-current, non-blocked branch rows. The menu contains `Checkout`. |
-| `branch_switcher.branch_row.blocked_marker` | `+` icon in the leading slot of rows whose branch is currently checked out in another worktree of the same project. Replaces the checkmark slot. |
-| `branch_switcher.rename_field` | Inline TextField that replaces the current branch's name while the user is editing the rename draft. |
+| `branch_switcher.branch_row.menu_button` | Hover-revealed ellipsis (`...`) menu button present on every branch row (local, remote, blocked). The menu exposes a uniform three-item action set: `Switch`, `New Branch From "<name>"…`, `Rename…`. Per-item disabled state is set by the implementation (e.g. `Switch` is disabled on the current row, `Rename…` is disabled on remote-tracking rows). |
+| `branch_switcher.branch_row.blocked_marker` | `+` icon in the leading slot of rows whose branch is currently checked out in another worktree of the same project. Replaces the checkmark slot; the sole visual signal for blocked rows (no trailing `@<worktree>` label is rendered). |
+| `branch_switcher.rename_field` | Inline TextField that replaces the branch name while the user is editing the rename draft. Works on any local branch row, not only the current one. |
 | `branch_switcher.rename_spinner` | Mini spinner shown next to the TextField while the `git branch -m` effect is in flight. |
+| `branch_switcher.new_branch_field` | TextField inside the "New branch from <base>" alert presented when the user invokes `New Branch From "<base>"…` on any branch row. The alert's Create button triggers `git switch -c <new> <base>`. |
 | `branch_switcher.error_banner` | Inline error banner displayed under the header. |
 | `branch_switcher.error_dismiss_button` | The banner's close button. |
 | `diff_inspector.tab_picker` | Segmented control (Changes / History). |

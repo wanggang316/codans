@@ -4,21 +4,23 @@ import TouchCodeCore
 /// One row inside the Branch popover's "Branches" section.
 ///
 /// Pure projection of a `BranchRef`: the parent (`BranchSwitcherView`) decides
-/// what the explicit actions do via the `onCheckout` / `onRename` closures.
-/// The row body itself is no longer tappable — interaction goes through a
-/// hover-revealed ellipsis Menu (Tower-style). Blocked rows (a branch
-/// checked out in another worktree of the same Project, per Phase B) keep
-/// normal opacity, expose no menu, and surface the blocking worktree's
-/// name on the trailing edge along with a leading `+` marker in the
-/// checkmark slot.
+/// what the explicit actions do via the `onSwitch` / `onNewBranchFrom` /
+/// `onRename` closures. The row body itself is no longer tappable —
+/// interaction goes through a hover-revealed ellipsis Menu (Tower-style)
+/// that exposes a uniform 3-item action set on every row. Blocked rows
+/// (a branch checked out in another worktree of the same Project, per
+/// Phase B) keep normal opacity and surface their state via a leading `+`
+/// marker in the checkmark slot — no trailing `@<worktree>` label.
 struct BranchRowView: View {
   let ref: BranchRef
   let isCurrent: Bool
   /// Non-nil when this branch is currently checked out by another worktree
   /// in the same Project; the value is that worktree's folder name. Local
-  /// rows only — remote rows are never marked blocked.
+  /// rows only — remote rows are never marked blocked. Drives ONLY the
+  /// leading `+` marker; the trailing label was dropped to keep the row
+  /// clean (the leading icon carries the signal on its own).
   let blockingWorktreeName: String?
-  /// True when this row is the current branch AND user clicked Rename.
+  /// True when this row's branch matches the reducer's `renamingBranch`.
   /// The label collapses to a TextField bound to `renameDraft`.
   let isRenaming: Bool
   /// True while the rename effect is running. The TextField becomes
@@ -28,7 +30,12 @@ struct BranchRowView: View {
   /// Two-way binding to the reducer's `renameDraft` (composed by the
   /// parent from `store.renameDraft` + `.renameDraftChanged`).
   let renameDraft: Binding<String>
-  let onCheckout: () -> Void
+  /// Switch to (checkout) this branch. Caller disables/no-ops on the
+  /// current row and on blocked rows.
+  let onSwitch: () -> Void
+  /// Open the "New Branch From <this>" alert. Always allowed.
+  let onNewBranchFrom: () -> Void
+  /// Begin inline rename. Caller disables on remote rows.
   let onRename: () -> Void
   /// Dispatched on TextField submit (Return key).
   let onRenameConfirm: () -> Void
@@ -40,7 +47,7 @@ struct BranchRowView: View {
   @FocusState private var renameFocus: Bool
 
   private var isBlocked: Bool { blockingWorktreeName != nil }
-  private var showsRenameField: Bool { isCurrent && isRenaming }
+  private var showsRenameField: Bool { isRenaming }
 
   var body: some View {
     HStack(spacing: 6) {
@@ -86,9 +93,9 @@ struct BranchRowView: View {
     .padding(.vertical, 4)
     .contentShape(.rect)
     .background(isHovered ? Color.accentColor.opacity(0.10) : Color.clear)
-    // Blocked rows no longer dim — the leading `+` marker and trailing
-    // `@<worktree>` label carry the "checked out elsewhere" signal on
-    // their own, and the row stays legible at normal contrast.
+    // Blocked rows no longer dim — the leading `+` marker carries the
+    // "checked out elsewhere" signal on its own, and the row stays
+    // legible at normal contrast.
     .onHover { hovering in isHovered = hovering }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier(
@@ -115,12 +122,13 @@ struct BranchRowView: View {
 
   // MARK: - Trailing accessory
 
-  /// Four mutually-exclusive presentations:
+  /// Three mutually-exclusive presentations:
   ///   - Renaming + in-flight: small spinner (no menu).
   ///   - Renaming: no accessory — the TextField is the only affordance.
-  ///   - Blocked: surface the blocking worktree's folder name (no menu).
-  ///   - Hovered (not blocked, not renaming): ellipsis Menu with context
-  ///     items — `Rename…` on the current row, `Checkout` on other rows.
+  ///   - Hovered (not renaming): uniform ellipsis Menu with `Switch` /
+  ///     `New Branch From …` / `Rename…`. Blocked rows ALSO show the menu
+  ///     (every branch supports the same three actions; per-item
+  ///     `.disabled` handles which apply).
   @ViewBuilder
   private var trailingAccessory: some View {
     if showsRenameField {
@@ -129,15 +137,6 @@ struct BranchRowView: View {
           .controlSize(.mini)
           .accessibilityIdentifier("branch_switcher.rename_spinner")
       }
-    } else if let blockingName = blockingWorktreeName {
-      // Plain Text — the `+` marker in the leading slot carries the
-      // accessibility identifier for the blocked state. The trailing
-      // label is just supplementary context.
-      Text("@\(blockingName)")
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-        .lineLimit(1)
-        .truncationMode(.tail)
     } else if isHovered {
       hoverMenu
     }
@@ -147,13 +146,20 @@ struct BranchRowView: View {
   /// a single hover-revealed control. `Menu` + `.menuStyle(.borderlessButton)`
   /// + `.menuIndicator(.hidden)` renders just the ellipsis glyph with no
   /// trailing chevron — see `MergeSplitButton` for the same pattern.
+  ///
+  /// The same three items appear on every row; per-item `.disabled` encodes
+  /// which ones apply:
+  ///   - Switch:   disabled on the current row (can't switch to self).
+  ///   - New Branch From: always enabled.
+  ///   - Rename:   disabled on remote-tracking rows (git can't rename
+  ///     them locally).
   private var hoverMenu: some View {
     Menu {
-      if isCurrent {
-        Button("Rename…", action: onRename)
-      } else {
-        Button("Checkout", action: onCheckout)
-      }
+      Button("Switch", action: onSwitch)
+        .disabled(isCurrent || isBlocked)
+      Button("New Branch From \"\(ref.shortName)\"…", action: onNewBranchFrom)
+      Button("Rename…", action: onRename)
+        .disabled(ref.isRemote)
     } label: {
       Image(systemName: "ellipsis.circle")
         .font(.caption)
@@ -163,11 +169,7 @@ struct BranchRowView: View {
     .menuStyle(.borderlessButton)
     .menuIndicator(.hidden)
     .fixedSize()
-    .accessibilityIdentifier(
-      isCurrent
-        ? "branch_switcher.branch_row.menu_button.current"
-        : "branch_switcher.branch_row.menu_button.checkout"
-    )
+    .accessibilityIdentifier("branch_switcher.branch_row.menu_button")
     .accessibilityLabel("Branch actions")
   }
 
@@ -192,7 +194,8 @@ struct BranchRowView: View {
     isRenaming: false,
     renameInFlight: false,
     renameDraft: .constant(""),
-    onCheckout: {},
+    onSwitch: {},
+    onNewBranchFrom: {},
     onRename: {},
     onRenameConfirm: {},
     onRenameCancel: {}
@@ -209,7 +212,8 @@ struct BranchRowView: View {
     isRenaming: true,
     renameInFlight: false,
     renameDraft: .constant("feat/header"),
-    onCheckout: {},
+    onSwitch: {},
+    onNewBranchFrom: {},
     onRename: {},
     onRenameConfirm: {},
     onRenameCancel: {}
@@ -226,7 +230,8 @@ struct BranchRowView: View {
     isRenaming: false,
     renameInFlight: false,
     renameDraft: .constant(""),
-    onCheckout: {},
+    onSwitch: {},
+    onNewBranchFrom: {},
     onRename: {},
     onRenameConfirm: {},
     onRenameCancel: {}
@@ -243,7 +248,8 @@ struct BranchRowView: View {
     isRenaming: false,
     renameInFlight: false,
     renameDraft: .constant(""),
-    onCheckout: {},
+    onSwitch: {},
+    onNewBranchFrom: {},
     onRename: {},
     onRenameConfirm: {},
     onRenameCancel: {}
@@ -260,7 +266,8 @@ struct BranchRowView: View {
     isRenaming: false,
     renameInFlight: false,
     renameDraft: .constant(""),
-    onCheckout: {},
+    onSwitch: {},
+    onNewBranchFrom: {},
     onRename: {},
     onRenameConfirm: {},
     onRenameCancel: {}

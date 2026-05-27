@@ -416,7 +416,7 @@ struct BranchSwitcherFeatureTests {
       $0.gitService = GitServiceClient.testValue
     }
 
-    await store.send(.renameButtonTapped(currentBranchName: "feat/x")) { state in
+    await store.send(.renameButtonTapped(branchName: "feat/x")) { state in
       state.renamingBranch = "feat/x"
       state.renameDraft = "feat/x"
       state.switchError = nil
@@ -507,7 +507,7 @@ struct BranchSwitcherFeatureTests {
       BranchSwitcherFeature()
     } withDependencies: {
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.renameCurrentBranch = { _, _ in }
+      $0.gitService.renameBranch = { _, _, _ in }
     }
 
     await store.send(.renameConfirmed) { state in
@@ -537,7 +537,7 @@ struct BranchSwitcherFeatureTests {
       BranchSwitcherFeature()
     } withDependencies: {
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.renameCurrentBranch = { _, _ in
+      $0.gitService.renameBranch = { _, _, _ in
         throw error
       }
     }
@@ -602,6 +602,110 @@ struct BranchSwitcherFeatureTests {
       state.renamingBranch = nil
       state.renameDraft = ""
       state.renameInFlight = false
+    }
+  }
+
+  // MARK: - 19. newBranchButtonTapped opens alert state
+
+  @Test
+  func newBranchButtonTappedOpensAlertState() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    // Pre-existing banner is cleared when the user opens the alert.
+    state.switchError = .message("stale switch error")
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.newBranchButtonTapped(baseBranchName: "main")) { state in
+      state.creatingBranchFrom = "main"
+      state.newBranchDraft = ""
+      state.switchError = nil
+    }
+  }
+
+  // MARK: - 20. newBranchDraftChanged updates draft
+
+  @Test
+  func newBranchDraftChangedUpdatesDraft() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.creatingBranchFrom = "main"
+    state.newBranchDraft = ""
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.newBranchDraftChanged("feat/y")) { state in
+      state.newBranchDraft = "feat/y"
+    }
+  }
+
+  // MARK: - 21. newBranchConfirmed kicks effect and succeeds
+
+  @Test
+  func newBranchConfirmedKicksEffectAndSucceeds() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID, path: "/tmp/repo")
+    state.creatingBranchFrom = "main"
+    state.newBranchDraft = "feat/y"
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.createAndSwitchBranch = { _, _, _ in }
+    }
+
+    await store.send(.newBranchConfirmed) { state in
+      state.newBranchInFlight = true
+    }
+    await store.receive(.newBranchSucceeded) { state in
+      state.creatingBranchFrom = nil
+      state.newBranchDraft = ""
+      state.newBranchInFlight = false
+    }
+  }
+
+  // MARK: - 22. newBranchConfirmed surfaces git error as banner
+
+  @Test
+  func newBranchConfirmedSurfacesGitErrorAsBanner() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let stderr = "fatal: A branch named 'main' already exists.\n"
+    let firstLine = "fatal: A branch named 'main' already exists."
+    let error = GitError.exec(code: 128, stderr: stderr)
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID, path: "/tmp/repo")
+    state.creatingBranchFrom = "main"
+    state.newBranchDraft = "main"
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.createAndSwitchBranch = { _, _, _ in
+        throw error
+      }
+    }
+
+    await store.send(.newBranchConfirmed) { state in
+      state.newBranchInFlight = true
+    }
+    await store.receive(.newBranchFailed(error)) { state in
+      state.creatingBranchFrom = nil
+      state.newBranchDraft = ""
+      state.newBranchInFlight = false
+      state.switchError = .message(firstLine)
     }
   }
 }

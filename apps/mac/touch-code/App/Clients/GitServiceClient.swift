@@ -48,8 +48,10 @@ nonisolated struct GitServiceClient: Sendable {
   /// `GitError.exec(code, stderr)` with stderr verbatim; the popover reducer's banner
   /// extracts the first line.
   var switchBranch: @Sendable (BranchSwitchTarget, URL) async throws -> Void
-  /// `(newName, repoURL) -> Void`. `git branch -m <newName>`.
-  var renameCurrentBranch: @Sendable (String, URL) async throws -> Void
+  /// `(oldName, newName, repoURL) -> Void`. `git branch -m <old> <new>`.
+  var renameBranch: @Sendable (String, String, URL) async throws -> Void
+  /// `(newName, baseName, repoURL) -> Void`. `git switch -c <new> <base>`.
+  var createAndSwitchBranch: @Sendable (String, String, URL) async throws -> Void
 }
 
 extension GitServiceClient {
@@ -78,8 +80,11 @@ extension GitServiceClient {
       currentBranch: { url in try await service.currentBranch(at: url) },
       listAllBranches: { url in try await service.listAllBranches(at: url) },
       switchBranch: { target, url in try await service.switchBranch(to: target, at: url) },
-      renameCurrentBranch: { newName, url in
-        try await service.renameCurrentBranch(to: newName, at: url)
+      renameBranch: { oldName, newName, url in
+        try await service.renameBranch(from: oldName, to: newName, at: url)
+      },
+      createAndSwitchBranch: { newName, baseName, url in
+        try await service.createAndSwitchBranch(name: newName, from: baseName, at: url)
       }
     )
   }
@@ -136,8 +141,11 @@ extension GitServiceClient: DependencyKey {
     switchBranch: unimplemented(
       "GitServiceClient.switchBranch"
     ),
-    renameCurrentBranch: unimplemented(
-      "GitServiceClient.renameCurrentBranch"
+    renameBranch: unimplemented(
+      "GitServiceClient.renameBranch"
+    ),
+    createAndSwitchBranch: unimplemented(
+      "GitServiceClient.createAndSwitchBranch"
     )
   )
 }

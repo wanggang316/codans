@@ -20,6 +20,9 @@ import os.log
 ///   - `CancelID.rename` — the `git branch -m` effect (Phase D). Cancelled
 ///     on `.worktreeChanged` so a stale rename can't write a banner into
 ///     the new worktree.
+///   - `CancelID.newBranch` — the `git switch -c` effect. Cancelled on
+///     `.worktreeChanged` and `.headChangedForCurrentWorktree` so a stale
+///     create-and-switch can't write a banner into the new worktree.
 @Reducer
 struct BranchSwitcherFeature {
   @ObservableState
@@ -46,17 +49,26 @@ struct BranchSwitcherFeature {
     /// has it as its current `Worktree.branch`. The view greys these rows
     /// and disables click.
     var blockedBranches: [String: String] = [:]
-    /// Non-nil while the user is editing the current branch's name in the
-    /// row's inline TextField. Holds the original branch name at the time
-    /// the user clicked Rename — used to detect "no-op edits" (draft equals
-    /// original) so we don't issue an empty `git branch -m`.
+    /// Non-nil while the user is editing some branch's name in the row's
+    /// inline TextField. Holds the original branch short-name at the time
+    /// the user clicked Rename — used as the `<old>` arg to `git branch -m
+    /// <old> <new>` and to detect "no-op edits" (draft equals original) so
+    /// we don't issue an empty rename.
     var renamingBranch: String?
     /// The TextField's current contents. Updated by `renameDraftChanged`
     /// from the view's two-way binding. Empty when no rename is in progress.
     var renameDraft: String = ""
-    /// True while the `gitService.renameCurrentBranch` effect is in flight.
-    /// The TextField becomes read-only (or shows a spinner) while true.
+    /// True while the `gitService.renameBranch` effect is in flight. The
+    /// TextField becomes read-only (or shows a spinner) while true.
     var renameInFlight: Bool = false
+    /// Non-nil when the user has clicked "New Branch From …" on some row.
+    /// Holds the BASE branch's short name. While non-nil, the view presents
+    /// a modal alert with a TextField bound to `newBranchDraft`.
+    var creatingBranchFrom: String?
+    /// The TextField's current contents. Empty when no creation is in flight.
+    var newBranchDraft: String = ""
+    /// True while the `gitService.createAndSwitchBranch` effect is running.
+    var newBranchInFlight: Bool = false
   }
 
   enum SwitchError: Equatable {
@@ -74,12 +86,18 @@ struct BranchSwitcherFeature {
     case popoverDismissed
     case searchQueryChanged(String)
     case branchTapped(BranchSwitchTarget)
-    case renameButtonTapped(currentBranchName: String)
+    case renameButtonTapped(branchName: String)
     case renameDraftChanged(String)
     case renameConfirmed
     case renameCancelled
     case renameSucceeded
     case renameFailed(GitError)
+    case newBranchButtonTapped(baseBranchName: String)
+    case newBranchDraftChanged(String)
+    case newBranchConfirmed
+    case newBranchCancelled
+    case newBranchSucceeded
+    case newBranchFailed(GitError)
     case viewAllCommitsTapped
     case errorDismissed
     case inventoryLoaded(Result<BranchInventory, GitError>)
@@ -102,6 +120,7 @@ struct BranchSwitcherFeature {
     case commits
     case switchOp
     case rename
+    case newBranch
   }
 
   @Dependency(GitServiceClient.self) private var gitService
@@ -139,11 +158,15 @@ struct BranchSwitcherFeature {
         state.renamingBranch = nil
         state.renameDraft = ""
         state.renameInFlight = false
+        state.creatingBranchFrom = nil
+        state.newBranchDraft = ""
+        state.newBranchInFlight = false
         return .merge(
           .cancel(id: CancelID.inventory),
           .cancel(id: CancelID.commits),
           .cancel(id: CancelID.switchOp),
-          .cancel(id: CancelID.rename)
+          .cancel(id: CancelID.rename),
+          .cancel(id: CancelID.newBranch)
         )
 
       case .popoverTapped:
@@ -203,13 +226,14 @@ struct BranchSwitcherFeature {
           switchTo(target, at: path)
         )
 
-      case .renameButtonTapped(let currentBranchName):
-        // Begin inline rename. Pre-fill the draft with the current name and
+      case .renameButtonTapped(let branchName):
+        // Begin inline rename. Pre-fill the draft with the source name and
         // clear any prior switch / rename error so the banner doesn't shadow
-        // the new edit.
+        // the new edit. `branchName` may be the current branch or any other
+        // local branch — the reducer treats them uniformly.
         guard !state.renameInFlight else { return .none }
-        state.renamingBranch = currentBranchName
-        state.renameDraft = currentBranchName
+        state.renamingBranch = branchName
+        state.renameDraft = branchName
         state.switchError = nil
         return .none
 
@@ -230,7 +254,7 @@ struct BranchSwitcherFeature {
           return .send(.renameCancelled)
         }
         state.renameInFlight = true
-        return renameCurrentBranchEffect(to: trimmed, worktreePath: path)
+        return renameBranchEffect(from: original, to: trimmed, worktreePath: path)
 
       case .renameCancelled:
         state.renamingBranch = nil
@@ -239,18 +263,75 @@ struct BranchSwitcherFeature {
         return .none
 
       case .renameSucceeded:
-        // The WorktreeHeadWatcher will fire `.headChangedForCurrentWorktree`
-        // shortly afterwards, which resets the inventory + commits caches.
-        // Just clean up the inline-edit fields here.
+        // For a current-branch rename, `WorktreeHeadWatcher` will fire
+        // `.headChangedForCurrentWorktree` shortly afterwards and reset the
+        // inventory + commits caches. For a non-current rename the watcher
+        // is silent, so the cached inventory still carries the old
+        // branch name; drop the cache and re-fetch if the popover is open
+        // so the user sees the renamed branch immediately.
         state.renamingBranch = nil
         state.renameDraft = ""
         state.renameInFlight = false
+        if state.isPopoverOpen, let path = state.worktreePath, !path.isEmpty {
+          state.inventory = nil
+          state.inventoryError = nil
+          state.inventoryLoading = true
+          return loadInventory(at: path)
+        }
         return .none
 
       case .renameFailed(let error):
         state.renamingBranch = nil
         state.renameDraft = ""
         state.renameInFlight = false
+        state.switchError = .message(error.firstLine())
+        return .none
+
+      case .newBranchButtonTapped(let baseName):
+        // Open the alert. Pre-fill the draft as empty — the user must
+        // consciously name the new branch (auto-suggested names like
+        // "<source>-copy" leak intent the user didn't express).
+        guard !state.newBranchInFlight else { return .none }
+        state.creatingBranchFrom = baseName
+        state.newBranchDraft = ""
+        state.switchError = nil
+        return .none
+
+      case .newBranchDraftChanged(let draft):
+        state.newBranchDraft = draft
+        return .none
+
+      case .newBranchConfirmed:
+        let trimmed = state.newBranchDraft.trimmingCharacters(in: .whitespaces)
+        guard let baseName = state.creatingBranchFrom,
+          !trimmed.isEmpty,
+          let path = state.worktreePath, !path.isEmpty
+        else {
+          return .send(.newBranchCancelled)
+        }
+        state.newBranchInFlight = true
+        return createAndSwitchBranchEffect(name: trimmed, baseName: baseName, worktreePath: path)
+
+      case .newBranchCancelled:
+        state.creatingBranchFrom = nil
+        state.newBranchDraft = ""
+        state.newBranchInFlight = false
+        return .none
+
+      case .newBranchSucceeded:
+        // `WorktreeHeadWatcher` will fire `.headChangedForCurrentWorktree`
+        // shortly afterwards (HEAD just moved to the new branch). Cache
+        // reset happens in that arm — here we just clean up the alert
+        // state.
+        state.creatingBranchFrom = nil
+        state.newBranchDraft = ""
+        state.newBranchInFlight = false
+        return .none
+
+      case .newBranchFailed(let error):
+        state.creatingBranchFrom = nil
+        state.newBranchDraft = ""
+        state.newBranchInFlight = false
         state.switchError = .message(error.firstLine())
         return .none
 
@@ -317,6 +398,10 @@ struct BranchSwitcherFeature {
         state.renamingBranch = nil
         state.renameDraft = ""
         state.renameInFlight = false
+        // And the new-branch alert state for consistency with rename.
+        state.creatingBranchFrom = nil
+        state.newBranchDraft = ""
+        state.newBranchInFlight = false
         return .none
 
       case .delegate:
@@ -374,13 +459,18 @@ struct BranchSwitcherFeature {
     .cancellable(id: CancelID.switchOp, cancelInFlight: true)
   }
 
-  private func renameCurrentBranchEffect(
+  private func renameBranchEffect(
+    from oldName: String,
     to newName: String,
     worktreePath: String
   ) -> Effect<Action> {
     .run { [gitService] send in
       do {
-        try await gitService.renameCurrentBranch(newName, URL(fileURLWithPath: worktreePath))
+        try await gitService.renameBranch(
+          oldName,
+          newName,
+          URL(fileURLWithPath: worktreePath)
+        )
         await send(.renameSucceeded)
       } catch let error as GitError {
         await send(.renameFailed(error))
@@ -389,6 +479,28 @@ struct BranchSwitcherFeature {
       }
     }
     .cancellable(id: CancelID.rename, cancelInFlight: true)
+  }
+
+  private func createAndSwitchBranchEffect(
+    name newName: String,
+    baseName: String,
+    worktreePath: String
+  ) -> Effect<Action> {
+    .run { [gitService] send in
+      do {
+        try await gitService.createAndSwitchBranch(
+          newName,
+          baseName,
+          URL(fileURLWithPath: worktreePath)
+        )
+        await send(.newBranchSucceeded)
+      } catch let error as GitError {
+        await send(.newBranchFailed(error))
+      } catch {
+        await send(.newBranchFailed(.unparsable(context: "\(error)")))
+      }
+    }
+    .cancellable(id: CancelID.newBranch, cancelInFlight: true)
   }
 }
 

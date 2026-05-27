@@ -125,11 +125,25 @@ nonisolated enum GitCommand {
     }
   }
 
-  /// `git branch -m <newName>` — rename the current branch. Single-arg form
-  /// (without `<from>`) is intentional: only the current branch is
-  /// renamable from the popover.
-  static func branchRename(to newName: String) -> [String] {
+  /// `git branch -m <oldName> <newName>` — rename any branch. Works on the
+  /// current branch (git's "-m" handles HEAD-ref rewrite atomically) and on
+  /// non-current local branches. Errors (duplicate target, invalid name,
+  /// branch is checked out elsewhere on stale git) surface as
+  /// `GitError.exec` with stderr preserved.
+  static func branchRename(from oldName: String, to newName: String) -> [String] {
+    precondition(!oldName.isEmpty, "branch rename source must be non-empty")
     precondition(!newName.isEmpty, "branch rename target must be non-empty")
-    return ["branch", "-m", newName]
+    return ["branch", "-m", oldName, newName]
+  }
+
+  /// `git switch -c <newName> <baseName>` — create `<newName>` from
+  /// `<baseName>` and switch HEAD to it in one atomic step. Equivalent to
+  /// `git checkout -b <newName> <baseName>` but uses the modern verb.
+  /// `<baseName>` may be a local branch ("main"), a remote tracking ref
+  /// ("origin/feat/x"), or any committish.
+  static func switchCreate(name: String, from baseName: String) -> [String] {
+    precondition(!name.isEmpty, "new-branch name must be non-empty")
+    precondition(!baseName.isEmpty, "new-branch base must be non-empty")
+    return ["switch", "-c", name, baseName]
   }
 }

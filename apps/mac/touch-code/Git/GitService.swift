@@ -63,15 +63,20 @@ public nonisolated protocol GitService: Sendable {
   /// banner. No pre-check; rely on git's native enforcement.
   func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws
 
-  /// `git branch -m <newName>` — rename the worktree's current branch. The
-  /// caller has already filtered out empty / unchanged names. Errors
-  /// (duplicate target name, invalid ref name, …) surface verbatim as
-  /// `GitError.exec(code, stderr)`; the popover renders the first stderr
-  /// line in the existing inline error banner. After success the worktree's
-  /// HEAD ref text becomes `ref: refs/heads/<newName>`, which the existing
-  /// `WorktreeHeadWatcher` picks up to refresh the catalog + clear the
-  /// inventory cache.
-  func renameCurrentBranch(to newName: String, at path: URL) async throws
+  /// `git branch -m <oldName> <newName>` — rename any local branch. The
+  /// current branch is allowed (git handles HEAD-ref rewrite atomically);
+  /// non-current local branches are also fine. Renaming a remote-tracking
+  /// ref is NOT supported by git and surfaces as `GitError.exec`. After a
+  /// current-branch rename the worktree's HEAD ref text becomes
+  /// `ref: refs/heads/<newName>`, which the existing `WorktreeHeadWatcher`
+  /// picks up to refresh the catalog + clear the inventory cache.
+  func renameBranch(from oldName: String, to newName: String, at path: URL) async throws
+
+  /// `git switch -c <newName> <baseName>` — create a new local branch from
+  /// the given base and switch HEAD to it. The base may be local or a
+  /// remote tracking ref. After success, the worktree's HEAD ref points at
+  /// `<newName>`; the existing `WorktreeHeadWatcher` picks up the change.
+  func createAndSwitchBranch(name newName: String, from baseName: String, at path: URL) async throws
 }
 
 extension GitService {

@@ -226,9 +226,21 @@ nonisolated final class LiveGitService: GitService {
     _ = try await run(arguments: GitCommand.switchBranch(target: target), cwd: path)
   }
 
-  func renameCurrentBranch(to newName: String, at path: URL) async throws {
+  func renameBranch(from oldName: String, to newName: String, at path: URL) async throws {
     try await ensureIsRepo(at: path)
-    _ = try await run(arguments: GitCommand.branchRename(to: newName), cwd: path)
+    _ = try await run(arguments: GitCommand.branchRename(from: oldName, to: newName), cwd: path)
+  }
+
+  func createAndSwitchBranch(
+    name newName: String,
+    from baseName: String,
+    at path: URL
+  ) async throws {
+    try await ensureIsRepo(at: path)
+    _ = try await run(
+      arguments: GitCommand.switchCreate(name: newName, from: baseName),
+      cwd: path
+    )
   }
 
   // MARK: - Edge checks

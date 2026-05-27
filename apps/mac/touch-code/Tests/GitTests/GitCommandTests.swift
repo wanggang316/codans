@@ -182,6 +182,21 @@ struct GitCommandTests {
 
   @Test
   func branchRenameArgvIsExact() {
-    #expect(GitCommand.branchRename(to: "feat/x") == ["branch", "-m", "feat/x"])
+    #expect(
+      GitCommand.branchRename(from: "old/x", to: "new/x") == ["branch", "-m", "old/x", "new/x"]
+    )
+  }
+
+  @Test
+  func switchCreateArgvIsExact() {
+    #expect(GitCommand.switchCreate(name: "feat/y", from: "main") == ["switch", "-c", "feat/y", "main"])
+  }
+
+  @Test
+  func switchCreateAcceptsRemoteTrackingBase() {
+    #expect(
+      GitCommand.switchCreate(name: "feat/y", from: "origin/main")
+        == ["switch", "-c", "feat/y", "origin/main"]
+    )
   }
 }

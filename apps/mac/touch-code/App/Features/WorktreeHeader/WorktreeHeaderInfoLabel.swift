@@ -123,15 +123,35 @@ struct WorktreeHeaderInfoLabel: View {
     // visual "pinned" affordance attaches to the worktree (not the
     // following project name). The orange `pin.fill` still suppresses on
     // the main checkout where pinning is meaningless.
-    HStack(spacing: 4) {
-      Text(worktree.name)
-      if worktree.isPinned && !isMainCheckout {
-        Image(systemName: "pin.fill")
-          .font(.caption2)
-          .foregroundStyle(.orange)
-          .accessibilityLabel("Pinned")
+    //
+    // When the worktree's folder name equals the current branch (a common
+    // git-wt pattern: `feat/login` worktree on `feat/login` branch), the
+    // folder portion restates row 1. Suppress the folder name + leading
+    // separator and keep only the pin (if any) + project name. Mirrors
+    // the Sidebar's "suppress secondary line when it restates primary"
+    // precedent. Detached HEAD has `worktree.branch == nil`, so the
+    // empty-string comparison won't match any real folder — detached
+    // worktrees keep the full row.
+    let folderRestatesBranch = worktree.name == (worktree.branch ?? "")
+    return HStack(spacing: 4) {
+      if !folderRestatesBranch {
+        Text(worktree.name)
+        if worktree.isPinned && !isMainCheckout {
+          Image(systemName: "pin.fill")
+            .font(.caption2)
+            .foregroundStyle(.orange)
+            .accessibilityLabel("Pinned")
+        }
+        Text("· \(project.name)")
+      } else {
+        if worktree.isPinned && !isMainCheckout {
+          Image(systemName: "pin.fill")
+            .font(.caption2)
+            .foregroundStyle(.orange)
+            .accessibilityLabel("Pinned")
+        }
+        Text(project.name)
       }
-      Text("· \(project.name)")
     }
     .font(.caption)
     .foregroundStyle(.secondary)
