@@ -47,9 +47,13 @@ struct HierarchySidebarView: View {
   /// `RootFeature.activeAgents(.rowTapped)`. Closure (rather than direct
   /// store write) keeps Sidebar decoupled from Root.
   var onActiveAgentsRowTapped: (PaneID) -> Void = { _ in }
-  /// Whether the ActiveAgents bottom panel is currently expanded. Driven
-  /// by the footer toggle; closed by default each launch.
-  @State private var activeAgentsPanelOpen = false
+  /// Whether the ActiveAgents bottom panel is currently expanded.
+  /// Persisted so the footer toggle's last state survives a relaunch —
+  /// users who keep the panel open during long sessions should not
+  /// re-toggle it after every restart. The auto-open path in
+  /// `onChange(anyAgentNeedsAttention)` still re-opens a closed panel
+  /// when a fresh agent demands attention.
+  @AppStorage("activeAgents.panel.open") private var activeAgentsPanelOpen = false
   /// Persisted panel height. The drag handle in
   /// `ActiveAgentsSidebarPanel` writes to this; the host clamps the
   /// rendered height to `[minHeight, 0.5 * sidebarHeight]`.
