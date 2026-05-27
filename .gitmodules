@@ -1,7 +1,7 @@
 [submodule "apps/mac/ThirdParty/ghostty"]
 	path = apps/mac/ThirdParty/ghostty
 	url = https://github.com/wanggang316/ghostty.git
-	branch = main-tc
+	branch = v1.3.1-tc
 [submodule "apps/mac/ThirdParty/git-wt"]
 	path = apps/mac/ThirdParty/git-wt
 	url = https://github.com/khoi/git-wt.git
