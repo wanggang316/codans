@@ -209,6 +209,8 @@ jobs:
         # is correct since both came from the same source tree.
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG:        ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT:    ${{ secrets.SENTRY_PROJECT }}
         run: ./apps/mac/scripts/release.sh upload-symbols
 
       - name: Notarize app

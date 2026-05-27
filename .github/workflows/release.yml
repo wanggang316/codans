@@ -29,6 +29,13 @@ name: release
 #                                   the Sentry release and upload dSYMs;
 #                                   absence is non-fatal but stack traces
 #                                   stay unsymbolicated in the dashboard.
+#   SENTRY_ORG                    - Sentry organisation slug (matches the
+#                                   `org` field of ~/.sentryclirc).
+#   SENTRY_PROJECT                - Sentry project slug or numeric ID. All
+#                                   three SENTRY_* upload secrets must be
+#                                   present for dSYM upload to run; the
+#                                   script no-ops cleanly when any is
+#                                   missing.
 
 on:
   push:
@@ -203,6 +210,8 @@ jobs:
         # dSYMs untouched.
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG:        ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT:    ${{ secrets.SENTRY_PROJECT }}
         run: ./apps/mac/scripts/release.sh upload-symbols
 
       - name: Notarize app
