@@ -15,7 +15,6 @@ private let binderLogger = Logger(
 @MainActor
 final class AgentBinder {
   enum Trigger: Equatable {
-    case paneCreated
     case foregroundJobChanged(ForegroundJob)
   }
 
@@ -24,12 +23,12 @@ final class AgentBinder {
 
     var misses: UInt8 = 0
 
-    mutating func shouldRelease(after classified: AgentKind?) -> Bool {
+    mutating func shouldRelease(afterMiss classified: AgentKind?) -> Bool {
       if classified != nil {
         misses = 0
         return false
       }
-      misses = min(misses + 1, Self.releaseMissThreshold)
+      misses += 1
       if misses >= Self.releaseMissThreshold {
         misses = 0
         return true
@@ -45,17 +44,20 @@ final class AgentBinder {
   /// so the ActiveAgents UI learns about the new agent without a separate
   /// observation pass. Default no-op keeps existing tests / callers
   /// untouched.
-  private let agentBoundHandler: @MainActor (PaneID, AgentKind, String?) -> Void
+  private let agentBoundHandler: @MainActor (PaneID, AgentKind, String?, Bool) -> Void
   /// Companion of `agentBoundHandler` — fires on `unbind(_:)` and on any
   /// path that writes a nil binding through `setPaneAgentKind`. AppState
   /// wires this to `AgentRegistry.onAgentUnbound`.
   private let agentUnboundHandler: @MainActor (PaneID) -> Void
   private var presenceByPane: [PaneID: Presence] = [:]
+  private var materializedBindings: Set<PaneID> = []
 
   init(
     client: HierarchyClient,
     currentAgentKind: @escaping @MainActor (PaneID) -> AgentKind?,
-    agentBoundHandler: @escaping @MainActor (PaneID, AgentKind, String?) -> Void = { _, _, _ in },
+    agentBoundHandler: @escaping @MainActor (PaneID, AgentKind, String?, Bool) -> Void = {
+      _, _, _, _ in
+    },
     agentUnboundHandler: @escaping @MainActor (PaneID) -> Void = { _ in }
   ) {
     self.client = client
@@ -71,9 +73,6 @@ final class AgentBinder {
     let existing = currentAgentKind(paneID)
 
     switch trigger {
-    case .paneCreated:
-      break
-
     case .foregroundJobChanged(let job):
       let classified = AgentKindPatterns.classify(foregroundJob: job)
       if classified == nil, existing == nil {
@@ -83,19 +82,26 @@ final class AgentBinder {
       var presence = presenceByPane[paneID] ?? Presence()
       defer { presenceByPane[paneID] = presence }
       if classified == nil {
-        if existing != nil, !presence.shouldRelease(after: classified) {
+        if existing != nil, !presence.shouldRelease(afterMiss: classified) {
           binderLogger.debug("retain binding through transient classify miss")
           return
         }
       } else {
-        _ = presence.shouldRelease(after: classified)
+        _ = presence.shouldRelease(afterMiss: classified)
       }
-      guard classified != existing else { return }
+      if classified == existing {
+        if let kind = classified, !materializedBindings.contains(paneID) {
+          materializedBindings.insert(paneID)
+          agentBoundHandler(paneID, kind, nil, true)
+        }
+        return
+      }
       writeIfChanged(
         paneID: paneID,
         existing: existing,
         next: classified,
-        reason: "foregroundJobChanged"
+        reason: "foregroundJobChanged",
+        assumeUserInputSeen: false
       )
     }
   }
@@ -105,6 +111,7 @@ final class AgentBinder {
   /// snapshot read.
   func unbind(_ paneID: PaneID) {
     presenceByPane.removeValue(forKey: paneID)
+    materializedBindings.remove(paneID)
     client.setPaneAgentKind(paneID, nil)
     agentUnboundHandler(paneID)
   }
@@ -115,7 +122,8 @@ final class AgentBinder {
     paneID: PaneID,
     existing: AgentKind?,
     next: AgentKind?,
-    reason: String
+    reason: String,
+    assumeUserInputSeen: Bool
   ) {
     guard existing != next else {
       binderLogger.debug(
@@ -138,8 +146,10 @@ final class AgentBinder {
     // here yet (always nil); when `setPaneAgentSessionID` callers wake
     // up, plumb a third channel down through this hook.
     if let kind = next {
-      agentBoundHandler(paneID, kind, nil)
+      materializedBindings.insert(paneID)
+      agentBoundHandler(paneID, kind, nil, assumeUserInputSeen)
     } else {
+      materializedBindings.remove(paneID)
       agentUnboundHandler(paneID)
     }
   }

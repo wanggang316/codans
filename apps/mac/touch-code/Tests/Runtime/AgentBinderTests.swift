@@ -10,13 +10,6 @@ import TouchCodeCore
 @MainActor
 struct AgentBinderTests {
   @Test
-  func paneCreatedDoesNotBindFromInitialCommand() {
-    let f = Fixture()
-    f.binder.consider(paneID: f.paneID, trigger: .paneCreated)
-    #expect(f.calls.value.isEmpty)
-  }
-
-  @Test
   func foregroundJobBindsDirectAgentProcess() {
     let f = Fixture()
     f.binder.consider(
@@ -24,6 +17,11 @@ struct AgentBinderTests {
       trigger: .foregroundJobChanged(Self.job(argv0: "codex", commandLine: "codex --resume"))
     )
     #expect(f.calls.value == [.init(paneID: f.paneID, kind: .codex)])
+    #expect(
+      f.boundCalls.value == [
+        .init(paneID: f.paneID, kind: .codex, assumeUserInputSeen: false)
+      ]
+    )
   }
 
   @Test
@@ -66,6 +64,24 @@ struct AgentBinderTests {
       trigger: .foregroundJobChanged(Self.job(argv0: "codex", commandLine: "codex"))
     )
     #expect(f.calls.value.isEmpty)
+    #expect(
+      f.boundCalls.value == [
+        .init(paneID: f.paneID, kind: .codex, assumeUserInputSeen: true)
+      ]
+    )
+  }
+
+  @Test
+  func foregroundJobWithSameKindMaterializesOnlyOnce() {
+    let f = Fixture(initialAgentKind: .codex)
+    for _ in 0..<2 {
+      f.binder.consider(
+        paneID: f.paneID,
+        trigger: .foregroundJobChanged(Self.job(argv0: "codex", commandLine: "codex"))
+      )
+    }
+    #expect(f.calls.value.isEmpty)
+    #expect(f.boundCalls.value.count == 1)
   }
 
   @Test
@@ -94,6 +110,7 @@ struct AgentBinderTests {
   final class Fixture {
     let paneID = PaneID()
     let calls = LockIsolated<[RecordedCall]>([])
+    let boundCalls = LockIsolated<[RecordedBoundCall]>([])
     let agentKind: LockIsolated<AgentKind?>
     let binder: AgentBinder
 
@@ -108,9 +125,21 @@ struct AgentBinderTests {
         agentKind.setValue(kind)
       }
 
+      let boundCalls = self.boundCalls
       self.binder = AgentBinder(
         client: hierarchyClient,
-        currentAgentKind: { _ in agentKind.value }
+        currentAgentKind: { _ in agentKind.value },
+        agentBoundHandler: { paneID, kind, _, assumeUserInputSeen in
+          boundCalls.withValue {
+            $0.append(
+              RecordedBoundCall(
+                paneID: paneID,
+                kind: kind,
+                assumeUserInputSeen: assumeUserInputSeen
+              )
+            )
+          }
+        }
       )
     }
   }
@@ -118,5 +147,11 @@ struct AgentBinderTests {
   struct RecordedCall: Equatable {
     let paneID: PaneID
     let kind: AgentKind?
+  }
+
+  struct RecordedBoundCall: Equatable {
+    let paneID: PaneID
+    let kind: AgentKind
+    let assumeUserInputSeen: Bool
   }
 }

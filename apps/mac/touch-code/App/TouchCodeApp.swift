@@ -1131,8 +1131,13 @@ final class AppState {
       currentAgentKind: { [weak manager] paneID in
         manager?.catalog.pane(paneID)?.agentKind
       },
-      agentBoundHandler: { [weak registry] paneID, kind, sessionID in
-        registry?.onAgentBound(paneID, kind: kind, sessionID: sessionID)
+      agentBoundHandler: { [weak registry] paneID, kind, sessionID, assumeUserInputSeen in
+        registry?.onAgentBound(
+          paneID,
+          kind: kind,
+          sessionID: sessionID,
+          assumeUserInputSeen: assumeUserInputSeen
+        )
       },
       agentUnboundHandler: { [weak registry] paneID in
         registry?.onAgentUnbound(paneID)
@@ -1228,8 +1233,7 @@ final class AppState {
 
   /// Active-agents T3: route the engine event stream through `AgentBinder`.
   /// Lives next to `NotificationDetector.handle` (same drain loop, same
-  /// MainActor context) so the binder sees pane creation, foreground jobs,
-  /// and lifecycle teardown without
+  /// MainActor context) so the binder sees foreground jobs and lifecycle teardown without
   /// opening a second long-lived Task on the events stream.
   @MainActor
   private static func dispatchToAgentBinder(
@@ -1237,8 +1241,6 @@ final class AppState {
     binder: AgentBinder
   ) {
     switch event {
-    case .paneCreated(let paneID, _):
-      binder.consider(paneID: paneID, trigger: .paneCreated)
     case .foregroundJobChanged(let paneID, let job):
       binder.consider(paneID: paneID, trigger: .foregroundJobChanged(job))
     case .paneExited(let paneID, _, _),

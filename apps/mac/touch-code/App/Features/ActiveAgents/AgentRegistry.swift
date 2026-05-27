@@ -79,6 +79,17 @@ final class AgentRegistry {
     var waitingForInput: Bool
     var lastViewportText: String?
     var lastWorkingAt: Date?
+
+    static func fresh(userInputSeen: Bool = false) -> Self {
+      Self(
+        rawState: .idle,
+        seen: true,
+        userInputSeen: userInputSeen,
+        waitingForInput: false,
+        lastViewportText: nil,
+        lastWorkingAt: nil
+      )
+    }
   }
 
   private typealias AgentRawState = PaneAttentionInterpreter.AgentActivityState
@@ -189,6 +200,9 @@ final class AgentRegistry {
   /// flag and marks the pane as observed.
   func onPaneKeyboardActivity(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
+    if s.waitingForInput {
+      s.lastViewportText = nil
+    }
     s.userInputSeen = true
     s.waitingForInput = false
     s.seen = true
@@ -200,6 +214,9 @@ final class AgentRegistry {
   /// the user has observed the pane, so clear display-only attention.
   func onPaneFocused(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
+    if s.waitingForInput {
+      s.lastViewportText = nil
+    }
     s.waitingForInput = false
     s.seen = true
     scratch[paneID] = s
@@ -209,16 +226,17 @@ final class AgentRegistry {
   /// `AgentBinder` identified an agent in `paneID`. Materialise an
   /// entry and derive the initial state from any scratch already
   /// accumulated before the foreground job is identified.
-  func onAgentBound(_ paneID: PaneID, kind: AgentKind, sessionID: String?) {
-    if scratch[paneID] == nil {
-      scratch[paneID] = Scratch(
-        rawState: .idle,
-        seen: true,
-        userInputSeen: false,
-        waitingForInput: false,
-        lastViewportText: nil,
-        lastWorkingAt: nil
-      )
+  func onAgentBound(
+    _ paneID: PaneID,
+    kind: AgentKind,
+    sessionID: String?,
+    assumeUserInputSeen: Bool = false
+  ) {
+    if var existing = scratch[paneID] {
+      existing.userInputSeen = existing.userInputSeen || assumeUserInputSeen
+      scratch[paneID] = existing
+    } else {
+      scratch[paneID] = .fresh(userInputSeen: assumeUserInputSeen)
     }
     entries[paneID] = AgentEntry(
       kind: kind,
@@ -266,28 +284,12 @@ final class AgentRegistry {
 
   private func ensureScratch(_ paneID: PaneID) {
     if scratch[paneID] == nil {
-      scratch[paneID] = Scratch(
-        rawState: .idle,
-        seen: true,
-        userInputSeen: false,
-        waitingForInput: false,
-        lastViewportText: nil,
-        lastWorkingAt: nil
-      )
+      scratch[paneID] = .fresh()
     }
   }
 
   private func applyViewportText(_ text: String, paneID: PaneID) {
-    var s =
-      scratch[paneID]
-      ?? Scratch(
-        rawState: .idle,
-        seen: true,
-        userInputSeen: false,
-        waitingForInput: false,
-        lastViewportText: nil,
-        lastWorkingAt: nil
-      )
+    var s = scratch[paneID] ?? .fresh()
     s.lastViewportText = text
     scratch[paneID] = s
     refresh(paneID)
@@ -302,16 +304,7 @@ final class AgentRegistry {
       )
     )
     guard step.cue?.kind == .waitingForInput else { return }
-    var s =
-      scratch[paneID]
-      ?? Scratch(
-        rawState: .idle,
-        seen: true,
-        userInputSeen: false,
-        waitingForInput: false,
-        lastViewportText: nil,
-        lastWorkingAt: nil
-      )
+    var s = scratch[paneID] ?? .fresh()
     s.waitingForInput = true
     scratch[paneID] = s
     refresh(paneID)

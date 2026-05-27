@@ -32,6 +32,19 @@ struct AgentRegistryStateTests {
   }
 
   @Test
+  func existingBoundAgentCanLoadBeforeCurrentSessionInput() {
+    let f = Fixture()
+    f.registry.onAgentBound(
+      f.paneID,
+      kind: .codex,
+      sessionID: nil,
+      assumeUserInputSeen: true
+    )
+    f.viewport("• Working (10s)")
+    #expect(f.registry.entries[f.paneID]?.state == .loading)
+  }
+
+  @Test
   func activeToIdleInBackgroundDrivesFinished() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
@@ -137,6 +150,21 @@ struct AgentRegistryStateTests {
 
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("codex> ")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+  }
+
+  @Test
+  func keyboardActivityAfterWaitingCueDoesNotRestoreStaleLoading() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (10s)")
+    #expect(f.registry.entries[f.paneID]?.state == .loading)
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .bellRang))
+    #expect(f.registry.entries[f.paneID]?.state == .waitingForInput)
+
+    f.registry.onPaneKeyboardActivity(f.paneID)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 

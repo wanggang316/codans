@@ -299,7 +299,7 @@ extension PaneAttentionInterpreter {
   private static func claudeCurrentInteractionRegion(_ content: String) -> String {
     let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     guard let promptIndex = lines.lastIndex(where: { $0.contains("❯") }) else {
-      return lines.suffix(18).joined(separator: "\n")
+      return lines.suffix(agentActivityRecentLineLimit).joined(separator: "\n")
     }
     let lowerBound = max(lines.startIndex, promptIndex - 10)
     return lines[lowerBound..<lines.endIndex].joined(separator: "\n")
