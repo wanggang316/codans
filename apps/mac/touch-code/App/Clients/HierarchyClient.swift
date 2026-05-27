@@ -924,6 +924,15 @@ extension HierarchyClient {
         name: script.displayName,
         select: script.focus
       )
+      // Carry the script's resolved SF Symbol onto the spawned tab under
+      // the .script lock. A later auto re-derivation cannot displace it;
+      // a user pick still can. Failures are non-fatal — the tab keeps
+      // running with its default icon.
+      try? manager.setTabIcon(
+        tabID, in: worktreeID, in: projectID,
+        icon: script.resolvedSystemImage,
+        lock: .script
+      )
       return try manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
         workingDirectory: cwd,
