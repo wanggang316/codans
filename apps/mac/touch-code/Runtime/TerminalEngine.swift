@@ -63,6 +63,18 @@ final class TerminalEngine {
   private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
   private var foregroundJobMisses: [PaneID: UInt8] = [:]
   private var viewportSnapshots: [PaneID: String] = [:]
+  /// Process-group → resolved foreground job cache. The poll loop hits
+  /// every PGID at ≤300 ms when an agent is bound; the underlying
+  /// `proc_listpids` + `proc_pidinfo` + `KERN_PROCARGS2` triad costs a
+  /// handful of syscalls per group. A short TTL collapses repeated
+  /// queries for the same PGID across consecutive ticks down to one
+  /// real syscall round per `cacheTTL` window.
+  private struct CachedForegroundJob {
+    let job: ForegroundJob
+    let expiresAt: Date
+  }
+  private var foregroundJobCache: [Int32: CachedForegroundJob] = [:]
+  private static let foregroundJobCacheTTL: TimeInterval = 0.75
   private let clock: @Sendable () -> Date
   private var finished = false
 
@@ -262,6 +274,12 @@ final class TerminalEngine {
 
     ghosttyRuntime?.unregister(paneID: paneID)
     foregroundJobPaneIDs.remove(paneID)
+    if let snapshot = foregroundJobSnapshots[paneID] {
+      // Evict the cache entry for the closing pane's PGID so a recycled
+      // group id picked up by a later pane never reads back this pane's
+      // last job description.
+      foregroundJobCache.removeValue(forKey: snapshot.processGroupID)
+    }
     foregroundJobSnapshots.removeValue(forKey: paneID)
     foregroundJobMisses.removeValue(forKey: paneID)
     viewportSnapshots.removeValue(forKey: paneID)
@@ -517,9 +535,29 @@ final class TerminalEngine {
       groupByPane[paneID] = groupID
     }
 
-    let jobsByGroup = foregroundJobReader.readJobs(
-      processGroupIDs: Set(groupByPane.values)
-    )
+    let activeGroupIDs = Set(groupByPane.values)
+    let now = clock()
+    var jobsByGroup: [Int32: ForegroundJob] = [:]
+    var groupIDsToQuery: Set<Int32> = []
+    for groupID in activeGroupIDs {
+      if let cached = foregroundJobCache[groupID], cached.expiresAt > now {
+        jobsByGroup[groupID] = cached.job
+      } else {
+        groupIDsToQuery.insert(groupID)
+      }
+    }
+    let freshJobs = foregroundJobReader.readJobs(processGroupIDs: groupIDsToQuery)
+    let cacheUntil = now.addingTimeInterval(Self.foregroundJobCacheTTL)
+    for (groupID, job) in freshJobs {
+      jobsByGroup[groupID] = job
+      foregroundJobCache[groupID] = CachedForegroundJob(job: job, expiresAt: cacheUntil)
+    }
+    // Drop cache entries for PGIDs we no longer poll — pane teardown,
+    // an agent shell that respawned under a new group id, etc. The OS
+    // can recycle process group ids, so retaining a stale entry beyond
+    // the lifetime of its owning pane risks attributing a future
+    // unrelated group to a long-departed job.
+    foregroundJobCache = foregroundJobCache.filter { activeGroupIDs.contains($0.key) }
 
     for paneID in foregroundJobPaneIDs {
       let next: ForegroundJob
