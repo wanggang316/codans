@@ -13,7 +13,7 @@ public nonisolated enum AgentKindPatterns {
     .pi: ["pi"],
     .opencode: ["opencode", "open-code"],
     .gemini: ["gemini"],
-    .cursorAgent: ["cursor-agent"],
+    .cursorAgent: ["cursor", "cursor-agent"],
     .cline: ["cline"],
     .copilot: ["copilot", "github-copilot", "ghcs"],
     .kimi: ["kimi", "kimi-code"],
