@@ -11,7 +11,7 @@ nonisolated struct ForegroundJobReader: Sendable {
     return Self.foregroundProcessGroupID(childPID: childPID)
   }
 
-  func readJobs(processGroupIDs: Set<Int32>) async -> [Int32: ForegroundJob] {
+  func readJobs(processGroupIDs: Set<Int32>) -> [Int32: ForegroundJob] {
     var jobs: [Int32: ForegroundJob] = [:]
     for processGroupID in processGroupIDs where processGroupID > 0 {
       guard let job = Self.foregroundJob(processGroupID: processGroupID) else { continue }

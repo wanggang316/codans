@@ -488,7 +488,7 @@ final class TerminalEngine {
     guard foregroundJobPollTask == nil else { return }
     foregroundJobPollTask = Task { @MainActor [weak self] in
       while !Task.isCancelled {
-        await self?.pollForegroundJobs()
+        self?.pollForegroundJobs()
         let interval = self?.foregroundJobPollInterval() ?? .seconds(2)
         try? await Task.sleep(for: interval)
       }
@@ -501,7 +501,7 @@ final class TerminalEngine {
     foregroundJobPollTask = nil
   }
 
-  private func pollForegroundJobs() async {
+  private func pollForegroundJobs() {
     guard let ghosttyRuntime, !foregroundJobPaneIDs.isEmpty else { return }
 
     var groupByPane: [PaneID: Int32] = [:]
@@ -517,7 +517,7 @@ final class TerminalEngine {
       groupByPane[paneID] = groupID
     }
 
-    let jobsByGroup = await foregroundJobReader.readJobs(
+    let jobsByGroup = foregroundJobReader.readJobs(
       processGroupIDs: Set(groupByPane.values)
     )
 
