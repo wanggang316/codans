@@ -48,6 +48,11 @@ struct WorktreeDetailView: View {
   /// the InboxBellView's row-tap. Wired by `ContentView` so this view
   /// doesn't need to hold the root TCA scope just to fire one action.
   let onFocusHierarchyPath: (InboxEntry.SourcePath) -> Void
+  /// Phase E: toolbar Git Viewer toggle. Wired by `ContentView` to dispatch
+  /// `RootFeature.diffInspectorToggledForCurrentWorktree` so this view
+  /// doesn't need the root store to fire the same action the ⌘⇧G chord
+  /// already triggers (see `MainWindowCommands` "Toggle Git Viewer").
+  let onToggleGitViewer: () -> Void
   /// Bumped by `RootFeature` when the user invokes ⌘U / the "Show Unread
   /// Notifications" menu item. Threaded down to `InboxBellView` whose
   /// `.onChange` opens the popover — same UUID-trigger pattern as
@@ -296,6 +301,17 @@ struct WorktreeDetailView: View {
         // group with the action buttons.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
+          // Phase E: Git Viewer toggle leads the trailing cluster on the
+          // pre-macOS-26 layout too, matching the modern path's ordering.
+          Button {
+            onToggleGitViewer()
+          } label: {
+            Image(systemName: "sidebar.right")
+          }
+          .buttonStyle(.plain)
+          .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+          .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+          .accessibilityIdentifier("worktree_header.git_viewer_toggle")
           HeaderRunScriptSplitButton(
             store: headerStore,
             projectID: address.project,
@@ -358,6 +374,24 @@ struct WorktreeDetailView: View {
     // No `.buttonStyle` / no manual padding — each ToolbarItem gets
     // the toolbar's native glass capsule + hover state. Same pattern as
     // supacode's openMenu / ScriptMenu.
+    //
+    // Phase E: a Git Viewer toggle leads the trailing cluster so the
+    // user has a discoverable, click-targetable surface for the same
+    // action ⌘⇧G triggers. Tooltip flips between Open/Close based on
+    // `inspectorVisible`; the SF Symbol stays `sidebar.right` for both
+    // states since the SF set has no clean open/closed pair for a
+    // right-anchored inspector — the tooltip is the disambiguator.
+    ToolbarItem {
+      Button {
+        onToggleGitViewer()
+      } label: {
+        Image(systemName: "sidebar.right")
+      }
+      .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+      .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+      .accessibilityIdentifier("worktree_header.git_viewer_toggle")
+    }
+    ToolbarSpacer(.fixed)
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,

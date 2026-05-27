@@ -41,11 +41,12 @@ These accessibility identifiers must be declared by the implementation (per patt
 | `worktree_header.branch_text` | The branch-name text element on row 1. |
 | `worktree_header.context_text` | `folder · project` text on row 2. |
 | `worktree_header.switching_spinner` | Spinner element replacing the chevron during a switch. |
+| `worktree_header.git_viewer_toggle` | Toolbar button (trailing cluster) that opens/closes the Diff Inspector — same action as ⌘⇧G. |
 | `branch_switcher.popover` | Popover container view. |
 | `branch_switcher.branch_row.<local\|remote>.<short-name>` | One row per branch. `<short-name>` is the branch's short ref (e.g. `main`, `origin/feat/new-shell`); the `local`/`remote` segment disambiguates rare collisions when a local branch happens to share its short name with a remote ref. |
 | `branch_switcher.current_marker` | Checkmark element on the current row. |
 | `branch_switcher.commit_row.<short-sha>` | One row per recent commit. |
-| `branch_switcher.view_all_button` | "View all" footer button. |
+| `branch_switcher.history_button` | Inline "History" button on the Branches section header that opens the Diff Inspector's History tab. |
 | `branch_switcher.error_banner` | Inline error banner displayed under the header. |
 | `branch_switcher.error_dismiss_button` | The banner's close button. |
 | `diff_inspector.tab_picker` | Segmented control (Changes / History). |
@@ -310,7 +311,7 @@ In addition to the project's standard "App launched" signal, cases in this docum
 - The Diff Viewer is currently closed (verified by absence of `diff_inspector.tab_picker`).
 
 **Steps:**
-1. Click `branch_switcher.view_all_button`.
+1. Click `branch_switcher.history_button`.
 2. Wait for `diff_inspector.tab_picker` to appear.
 
 **Assertions:**

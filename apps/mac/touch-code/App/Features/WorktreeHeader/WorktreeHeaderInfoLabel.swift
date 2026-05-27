@@ -85,7 +85,6 @@ struct WorktreeHeaderInfoLabel: View {
       Text(branchTitle)
         .font(.headline)
         .lineLimit(1)
-        .underline(isBranchRowHovered, color: .primary)
         .accessibilityIdentifier("worktree_header.branch_text")
       trailingAffordance
         .frame(width: 12, alignment: .center)
@@ -93,6 +92,12 @@ struct WorktreeHeaderInfoLabel: View {
     .contentShape(Rectangle())
   }
 
+  /// Trailing slot is fixed at 12pt regardless of state so the branch text
+  /// doesn't shift horizontally as the user hovers in/out. Hover affordance
+  /// is now chevron-only (the prior underline was dropped) — when the row
+  /// is neither hovered nor switching, the slot holds an empty `Color.clear`
+  /// placeholder so layout stays stable. `Color.clear` is preferred over
+  /// `.opacity(0)` because the latter still consumes hit-test area and a11y.
   @ViewBuilder
   private var trailingAffordance: some View {
     if branchSwitcherStore.isSwitching {
@@ -100,10 +105,13 @@ struct WorktreeHeaderInfoLabel: View {
         .controlSize(.mini)
         .accessibilityIdentifier("worktree_header.switching_spinner")
         .accessibilityLabel("Switching")
-    } else {
+    } else if isBranchRowHovered {
       Image(systemName: "chevron.down")
         .font(.caption2)
         .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    } else {
+      Color.clear
         .accessibilityHidden(true)
     }
   }

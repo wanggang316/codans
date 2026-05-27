@@ -106,6 +106,7 @@ struct ContentView: View {
         inspectorVisible: store.state.diffInspectorVisible(in: hierarchyManager.catalog),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
+        onToggleGitViewer: { store.send(.diffInspectorToggledForCurrentWorktree) },
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it

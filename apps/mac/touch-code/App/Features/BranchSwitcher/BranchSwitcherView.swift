@@ -5,10 +5,14 @@ import TouchCodeCore
 /// Branch popover content anchored at `WorktreeHeaderInfoLabel` (mounted by
 /// T9). Pure projection of `BranchSwitcherFeature.State`: the reducer owns
 /// the loads, the switch effect, and the HEAD-change reset; this view only
-/// renders inventory + recent commits and dispatches tap actions.
+/// renders inventory and dispatches tap actions.
 ///
 /// Layout: 360 pt fixed width, ~480 pt max height, a single `ScrollView`
-/// wrapping both sections (sections do not scroll independently).
+/// wrapping the Branches section. The reducer still tracks
+/// `recentCommits` (other surfaces consume it), but this popover no longer
+/// renders them — the inline "History" button on the Branches header opens
+/// the Diff Inspector's History tab via the same `.viewAllCommitsTapped`
+/// action the prior footer button used.
 struct BranchSwitcherView: View {
   @Bindable var store: StoreOf<BranchSwitcherFeature>
 
@@ -28,12 +32,9 @@ struct BranchSwitcherView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 8) {
           branchesSection
-          recentCommitsSection
         }
         .padding(.vertical, 8)
       }
-      Divider().padding(.horizontal, 12)
-      footer
     }
     .frame(width: 360)
     .frame(maxHeight: 480)
@@ -65,9 +66,33 @@ struct BranchSwitcherView: View {
   @ViewBuilder
   private var branchesSection: some View {
     VStack(alignment: .leading, spacing: 2) {
-      sectionHeader("Branches")
+      branchesSectionHeader
       branchesBody
     }
+  }
+
+  /// Branches section header with an inline "History" button on the trailing
+  /// edge. Dispatches the same `.viewAllCommitsTapped` action the old footer
+  /// button used — the reducer's delegate routing (Diff Inspector visible +
+  /// History tab selected) stays unchanged; only the dispatch site moved.
+  private var branchesSectionHeader: some View {
+    HStack {
+      Text("Branches")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Spacer()
+      Button {
+        store.send(.viewAllCommitsTapped)
+      } label: {
+        Label("History", systemImage: "clock.arrow.circlepath")
+          .font(.caption)
+          .labelStyle(.titleAndIcon)
+      }
+      .buttonStyle(.borderless)
+      .accessibilityIdentifier("branch_switcher.history_button")
+      .help("Open History in Diff Viewer")
+    }
+    .padding(.horizontal, 12)
   }
 
   @ViewBuilder
@@ -115,56 +140,7 @@ struct BranchSwitcherView: View {
     }
   }
 
-  // MARK: - Recent commits section
-
-  @ViewBuilder
-  private var recentCommitsSection: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      sectionHeader("Recent commits")
-      recentCommitsBody
-    }
-  }
-
-  @ViewBuilder
-  private var recentCommitsBody: some View {
-    if store.commitsLoading {
-      sectionSpinner
-    } else if let commits = store.recentCommits, !commits.isEmpty {
-      // The reducer already caps this list at 10; do not re-slice here.
-      ForEach(commits, id: \.id) { commit in
-        RecentCommitRowView(commit: commit)
-      }
-    } else if store.commitsError != nil {
-      emptyRow("Couldn't load commits")
-    } else {
-      // `recentCommits == nil` (unloaded) or `recentCommits == []`
-      // (loaded against a 0-commit branch) — same neutral copy.
-      emptyRow("No commits")
-    }
-  }
-
-  // MARK: - Footer
-
-  private var footer: some View {
-    HStack {
-      Button("View all in Diff Viewer") {
-        store.send(.viewAllCommitsTapped)
-      }
-      .buttonStyle(.borderless)
-      .accessibilityIdentifier("branch_switcher.view_all_button")
-      Spacer()
-    }
-    .padding(12)
-  }
-
   // MARK: - Section primitives
-
-  private func sectionHeader(_ title: String) -> some View {
-    Text(title)
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .padding(.horizontal, 12)
-  }
 
   private func emptyRow(_ message: String) -> some View {
     Text(message)
