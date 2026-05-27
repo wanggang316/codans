@@ -12,7 +12,7 @@ import TouchCodeCore
 /// fires `onRenameRequested`, and the parent (`TabBarView`) presents
 /// the editor as a window-attached sheet via `.sheet(item:)`. Keeping
 /// the editor at the bar level avoids per-chip popover state and gives
-/// rename a proper modal surface (matches the Prowl pattern).
+/// rename a proper modal surface.
 struct TabChipView: View {
   let title: String
   let isActive: Bool
@@ -43,13 +43,13 @@ struct TabChipView: View {
   @State private var isPressing = false
 
   var body: some View {
-    // Supacode-style hit layout: the select Button claims the whole
-    // chip rectangle so a click anywhere on the chip selects it; the
-    // close button is overlaid on the trailing edge inside the same
-    // ZStack so it intercepts its own taps without forwarding to the
-    // outer Button. Without this, the previous HStack-of-Button-plus-
-    // sibling layout left dead zones (between the label and the close
-    // glyph, and on either chip-padding strip) that swallowed clicks.
+    // Hit layout: the select Button claims the whole chip rectangle so
+    // a click anywhere on the chip selects it; the close button is
+    // overlaid on the trailing edge inside the same ZStack so it
+    // intercepts its own taps without forwarding to the outer Button.
+    // Without this, an HStack-of-Button-plus-sibling layout leaves dead
+    // zones (between the label and the close glyph, and on either
+    // chip-padding strip) that swallow clicks.
     ZStack(alignment: .trailing) {
       Button(action: onSelect) {
         TabChipLabel(

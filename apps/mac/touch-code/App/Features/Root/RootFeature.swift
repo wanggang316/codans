@@ -172,9 +172,9 @@ struct RootFeature {
     /// and calls `hierarchyClient.closePane` to drop the catalog entry.
     case paneLifecycleExited(PaneID)
     /// Forwarded from `paneInfoChanged + .progress(...)` in the engine
-    /// event stream. `isBusy` mirrors the supacode predicate: true for any
-    /// non-`REMOVE` OSC 9;4 state. Drives the tab-chip running spinner
-    /// (via `HierarchyManager.runningPanes`) and the sidebar busy glyph.
+    /// event stream. `isBusy` is true for any non-`REMOVE` OSC 9;4
+    /// state. Drives the tab-chip running spinner (via
+    /// `HierarchyManager.runningPanes`) and the sidebar busy glyph.
     case paneProgressBusyChanged(PaneID, Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the

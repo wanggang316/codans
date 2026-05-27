@@ -6,11 +6,11 @@ import TouchCodeCore
 /// every row to its default. Conflict feedback during recording surfaces inline; cascading
 /// resets present a confirmation dialog before applying.
 ///
-/// Layout follows the macOS System-Settings convention used by supacode's
-/// `KeyboardShortcutsSettingsView`: a hierarchical `Table` with `DisclosureTableRow` group
-/// headers, alternating row backgrounds, search routed through `.searchable(.toolbar)`,
-/// and a primary toolbar action for "Restore Defaults". The behavioural surface (recording,
-/// conflict resolution, reset planning) is unchanged from the previous custom-painted pane.
+/// Layout follows the macOS System-Settings convention: a hierarchical `Table` with
+/// `DisclosureTableRow` group headers, alternating row backgrounds, search routed through
+/// `.searchable(.toolbar)`, and a primary toolbar action for "Restore Defaults". The
+/// behavioural surface (recording, conflict resolution, reset planning) is unchanged
+/// from the previous custom-painted pane.
 struct ShortcutsSettingsView: View {
   @Bindable var store: ShortcutsStore
   @State private var query: String = ""
@@ -267,7 +267,7 @@ struct ShortcutsSettingsView: View {
 // MARK: - Table model
 
 /// Row model for the outline `Table`. Categories are group rows with `children`; individual
-/// shortcuts are leaf rows. Mirrors the supacode model so the call-site reads similarly.
+/// shortcuts are leaf rows.
 struct ShortcutTableItem: Identifiable {
   enum Kind {
     case group(ShortcutSchema.Category)

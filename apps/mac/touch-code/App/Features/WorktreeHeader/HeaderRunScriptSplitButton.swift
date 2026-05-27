@@ -9,7 +9,7 @@ import TouchCodeCore
 /// every menu item route to "Manage Scripts" so users land in a
 /// place where they can create one. Uses
 /// `Menu(content:label:primaryAction:)` so macOS renders the native
-/// split-button chrome — matches supacode's `ScriptMenu` pattern.
+/// split-button chrome.
 ///
 /// Both halves dispatch through `WorktreeHeaderFeature.delegate` so
 /// `RootFeature` owns the `HierarchyClient.runScript` effect.

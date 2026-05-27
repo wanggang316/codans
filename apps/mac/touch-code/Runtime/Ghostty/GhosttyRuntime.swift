@@ -268,7 +268,7 @@ final class GhosttyRuntime {
   /// Used by `applyBackgroundColorToWindows` to stain the NSWindow
   /// background so the translucent sidebar material (blended `withinWindow`
   /// against pixels underneath) reads as the terminal's theme tone rather
-  /// than the system window color. Matches supacode's approach.
+  /// than the system window color.
   func backgroundColor() -> NSColor {
     guard let config else {
       chromeTintLogger.log("backgroundColor: no config, returning windowBackgroundColor")

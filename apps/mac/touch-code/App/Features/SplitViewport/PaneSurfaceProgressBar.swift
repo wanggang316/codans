@@ -14,15 +14,13 @@ import TouchCodeCore
 /// - Paused (`PAUSE`): full bar pinned at the orange / amber accent so
 ///   the suspended-but-not-cleared state is distinguishable from done.
 ///
-/// Mirrors supacode's `GhosttySurfaceProgressBar` (1:1 visual + a11y
-/// strings) — keeps the launch-flow vocabulary consistent across the
-/// two products and gives programs emitting OSC 9;4 (winget, some
-/// `gh` / `cargo` subcommands, the Claude Code CLI while it executes
-/// tool calls, etc.) a place to surface "I'm doing something" without
-/// drawing extra terminal chrome. Plain interactive commands (make,
-/// npm, go build, git, pytest) don't emit OSC 9;4 themselves —
-/// coverage of those is the job of a separate shell-integration
-/// layer that wraps preexec/precmd around each prompt.
+/// Gives programs emitting OSC 9;4 (winget, some `gh` / `cargo`
+/// subcommands, the Claude Code CLI while it executes tool calls, etc.)
+/// a place to surface "I'm doing something" without drawing extra
+/// terminal chrome. Plain interactive commands (make, npm, go build,
+/// git, pytest) don't emit OSC 9;4 themselves — coverage of those is
+/// the job of a separate shell-integration layer that wraps
+/// preexec/precmd around each prompt.
 struct PaneSurfaceProgressBar: View {
   let progressState: UInt32
   let progressValue: Int?

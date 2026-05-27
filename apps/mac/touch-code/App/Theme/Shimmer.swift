@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Diagonal mask sweep used for skeleton placeholders. Ported from
-/// supacode (`Support/ShimmerModifier.swift`) — driven by `phaseAnimator`
-/// so SwiftUI pauses the timeline when the host view is occluded
-/// instead of leaving the animation pipeline spinning forever the way
-/// `.repeatForever` would.
+/// Diagonal mask sweep used for skeleton placeholders. Driven by
+/// `phaseAnimator` so SwiftUI pauses the timeline when the host view
+/// is occluded instead of leaving the animation pipeline spinning
+/// forever the way `.repeatForever` would.
 struct ShimmerModifier: ViewModifier {
   let isActive: Bool
   @Environment(\.layoutDirection) private var layoutDirection

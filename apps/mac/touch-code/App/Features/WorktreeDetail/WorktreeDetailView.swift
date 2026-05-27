@@ -140,7 +140,7 @@ struct WorktreeDetailView: View {
       }
       // On macOS 15+ remove the title slot entirely so default-placement
       // toolbar items can flow leading-to-trailing with `ToolbarSpacer`
-      // controlling the layout (same pattern supacode uses).
+      // controlling the layout.
       // `.navigationTitle("")` still reserves a leading region and would
       // push default-placement items toward the trailing edge — which is
       // why earlier centering attempts collapsed onto the right side.
@@ -153,7 +153,7 @@ struct WorktreeDetailView: View {
       // underneath it. Without this, the toolbar's full-window glass
       // repaints on every toolbar-state change (tab switch rebuilds
       // `worktreeToolbarContent`) and flickers across the area covered
-      // by the translucent sidebar. Same pattern supacode uses.
+      // by the translucent sidebar.
       //
       // HAN-63: re-show the chrome when fullscreen — without it, the
       // sidebar `+` button and detail toolbar render over the terminal
@@ -205,7 +205,7 @@ struct WorktreeDetailView: View {
   /// git-viewer toggle used to live to the right of the tabs (old
   /// `unifiedHeader`); they moved into the window titlebar via
   /// `worktreeToolbarContent(address:)` so the content region gets its
-  /// vertical space back, matching supacode's `.toolbar {}` layout.
+  /// vertical space back.
   @ViewBuilder
   private func tabBarRow(address: Address) -> some View {
     TabBarView(
@@ -241,7 +241,7 @@ struct WorktreeDetailView: View {
   /// viewer toggle on the trailing edge (`.primaryAction`). Mirrors the
   /// layout that used to live as the right cluster of the content-region
   /// header; moving it into `.toolbar {}` reclaims vertical pixels above
-  /// the tab bar and matches macOS native chrome (Xcode, Finder, supacode).
+  /// the tab bar and matches macOS native chrome (Xcode, Finder).
   ///
   /// `ContentView` contributes one additional trailing `ToolbarItem`
   /// (Settings gear) — SwiftUI merges both sources, with Settings rendered
@@ -252,8 +252,8 @@ struct WorktreeDetailView: View {
     info: WorktreeInfo?
   ) -> some ToolbarContent {
     if let info {
-      // macOS 26 follows supacode's pattern: every item in default
-      // placement, ordering plus ToolbarSpacer(.flexible) splits
+      // macOS 26 layout: every item in default placement, ordering
+      // plus ToolbarSpacer(.flexible) splits
       // horizontal space evenly so the status capsule sits visually
       // equidistant between the branch label and the trailing buttons.
       // Pre-26 keeps the older `.navigation` / `.principal` /
@@ -341,8 +341,7 @@ struct WorktreeDetailView: View {
     address: Address, info: WorktreeInfo
   ) -> some ToolbarContent {
     // No `.buttonStyle` / no manual padding — each ToolbarItem gets
-    // the toolbar's native glass capsule + hover state. Same pattern as
-    // supacode's openMenu / ScriptMenu.
+    // the toolbar's native glass capsule + hover state.
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,

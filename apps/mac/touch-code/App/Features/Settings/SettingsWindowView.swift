@@ -25,7 +25,7 @@ struct SettingsWindowView: View {
     // collapse toggle; the remaining `.toolbar(removing: .sidebarToggle)` on the
     // sidebar column scrubs the placeholder, and the invisible principal item
     // below pins the toolbar height so the sidebar list does not slide down
-    // when the toggle disappears. Pattern lifted from supacode's `SettingsView`.
+    // when the toggle disappears.
     NavigationSplitView(columnVisibility: .constant(.all)) {
       SettingsSidebarView(selection: selection)
         .toolbar(removing: .sidebarToggle)
