@@ -3,6 +3,8 @@ import Foundation
 import TouchCodeCore
 
 nonisolated struct ForegroundJobReader: Sendable {
+  private static let procargsRetryLimit = 3
+
   func resolveProcessGroupID(preferred: Int32?, childPID: Int32?) -> Int32? {
     if let preferred, preferred > 0 { return preferred }
     guard let childPID, childPID > 0 else { return nil }
@@ -104,16 +106,38 @@ nonisolated struct ForegroundJobReader: Sendable {
   static func kernProcargs2(pid: Int32) -> [UInt8]? {
     var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
     var size = 0
-    guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else {
+    guard sysctlProcargs2(&mib, buffer: nil, size: &size) == 0, size > 0 else {
       return nil
     }
 
-    var buffer = [UInt8](repeating: 0, count: size)
-    let result = buffer.withUnsafeMutableBufferPointer { pointer in
-      sysctl(&mib, u_int(mib.count), pointer.baseAddress, &size, nil, 0)
+    for _ in 0..<procargsRetryLimit {
+      var buffer = [UInt8](repeating: 0, count: size)
+      var readSize = size
+      let result = buffer.withUnsafeMutableBufferPointer { pointer in
+        sysctlProcargs2(&mib, buffer: pointer.baseAddress, size: &readSize)
+      }
+      if result == 0 {
+        guard readSize > 0 else { return nil }
+        return Array(buffer.prefix(min(readSize, buffer.count)))
+      }
+      guard errno == ENOMEM || readSize > size else { return nil }
+      size = max(readSize, size * 2)
     }
-    guard result == 0 else { return nil }
-    return Array(buffer.prefix(size))
+
+    return nil
+  }
+
+  private static func sysctlProcargs2(
+    _ mib: inout [Int32],
+    buffer: UnsafeMutableRawPointer?,
+    size: inout Int
+  ) -> Int32 {
+    var result: Int32
+    repeat {
+      errno = 0
+      result = sysctl(&mib, u_int(mib.count), buffer, &size, nil, 0)
+    } while result == -1 && errno == EINTR
+    return result
   }
 
   static func procargs2Argv(_ buffer: [UInt8]) -> [String]? {
@@ -136,16 +160,15 @@ nonisolated struct ForegroundJobReader: Sendable {
       while position < buffer.count, buffer[position] != 0 {
         position += 1
       }
-      if position > start,
+      guard position < buffer.count,
         let value = String(bytes: buffer[start..<position], encoding: .utf8)
-      {
-        argv.append(value)
+      else {
+        return nil
       }
-      while position < buffer.count, buffer[position] == 0 {
-        position += 1
-      }
+      argv.append(value)
+      position += 1
     }
 
-    return argv.isEmpty ? nil : argv
+    return argv.count == Int(argc) ? argv : nil
   }
 }

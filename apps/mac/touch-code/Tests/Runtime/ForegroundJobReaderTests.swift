@@ -27,6 +27,22 @@ struct ForegroundJobReaderTests {
   }
 
   @Test
+  func procargs2ArgvPreservesEmptyArguments() {
+    let buffer = Self.procargsBuffer(
+      execPath: "/usr/bin/node",
+      argv: ["/usr/bin/node", "", "codex"]
+    )
+
+    #expect(
+      ForegroundJobReader.procargs2Argv(buffer) == [
+        "/usr/bin/node",
+        "",
+        "codex",
+      ]
+    )
+  }
+
+  @Test
   func processGroupPIDsRejectsInvalidGroups() {
     #expect(ForegroundJobReader.processGroupPIDs(0).isEmpty)
     #expect(ForegroundJobReader.processGroupPIDs(-1).isEmpty)
