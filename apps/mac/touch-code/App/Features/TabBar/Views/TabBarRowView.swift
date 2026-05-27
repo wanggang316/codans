@@ -34,6 +34,7 @@ struct TabBarRowView: View {
   let onCloseAll: () -> Void
   let onRenameRequested: (TabID) -> Void
   let onChangeColorRequested: (TabID) -> Void
+  let onChangeIconRequested: (TabID) -> Void
   let onCopyID: (TabID) -> Void
   let onReorder: @MainActor @Sendable ([TabID]) -> Void
   /// Fires whenever a chip resolves a non-empty live title (OSC tabTitle
@@ -64,8 +65,10 @@ struct TabBarRowView: View {
           onCloseAll: onCloseAll,
           onRenameRequested: { onRenameRequested(tab.id) },
           onChangeColor: { onChangeColorRequested(tab.id) },
+          onChangeIcon: { onChangeIconRequested(tab.id) },
           onCopyID: { onCopyID(tab.id) },
           tabColor: tab.color,
+          icon: tab.resolvedIcon(autoFallback: nil),
           onCacheLiveTitle: { title in onCacheLiveTitle(tab.id, title) }
         )
         .id(tab.id)
@@ -149,8 +152,10 @@ private struct ResolvingTabChipView: View {
   let onCloseAll: () -> Void
   let onRenameRequested: () -> Void
   let onChangeColor: () -> Void
+  let onChangeIcon: () -> Void
   let onCopyID: () -> Void
   let tabColor: TabColor?
+  let icon: String?
   let onCacheLiveTitle: (String) -> Void
 
   @Environment(HierarchyManager.self) private var hierarchyManager
@@ -177,8 +182,10 @@ private struct ResolvingTabChipView: View {
       onCloseAll: onCloseAll,
       onRenameRequested: onRenameRequested,
       onChangeColor: onChangeColor,
+      onChangeIcon: onChangeIcon,
       onCopyID: onCopyID,
-      tabColor: tabColor
+      tabColor: tabColor,
+      icon: icon
     )
     .onChange(of: live, initial: true) { _, newLive in
       // Only persist once the surface has actually produced a live

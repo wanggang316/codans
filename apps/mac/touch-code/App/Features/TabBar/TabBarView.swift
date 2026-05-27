@@ -66,6 +66,26 @@ struct TabBarView: View {
           onCancel: { store.send(.colorDismissed) }
         )
       }
+      .sheet(
+        item: Binding(
+          get: { store.iconTarget },
+          set: { newValue in
+            if newValue == nil { store.send(.iconDismissed) }
+          }
+        )
+      ) { target in
+        TabIconPickerSheet(
+          initialIcon: target.currentIcon,
+          onCommit: { icon in
+            store.send(
+              .iconSubmitted(
+                target.id, icon: icon,
+                inWorktree: worktreeID, inProject: projectID
+              ))
+          },
+          onCancel: { store.send(.iconDismissed) }
+        )
+      }
   }
 
   @ViewBuilder
@@ -165,6 +185,10 @@ struct TabBarView: View {
       onChangeColorRequested: { tabID in
         guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
         store.send(.colorRequested(tabID, currentColor: tab.color))
+      },
+      onChangeIconRequested: { tabID in
+        guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
+        store.send(.iconRequested(tabID, currentIcon: tab.icon))
       },
       onCopyID: { tabID in
         NSPasteboard.general.clearContents()

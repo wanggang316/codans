@@ -36,8 +36,13 @@ struct TabChipView: View {
   let onCloseAll: () -> Void
   let onRenameRequested: () -> Void
   let onChangeColor: () -> Void
+  let onChangeIcon: () -> Void
   let onCopyID: () -> Void
   let tabColor: TabColor?
+  /// SF Symbol resolved by `Tab.resolvedIcon(autoFallback:)` — `nil`
+  /// hides the leading slot so unlocked tabs without a runtime fallback
+  /// keep the chip clean.
+  var icon: String? = nil
 
   @State private var isHovering = false
   @State private var isPressing = false
@@ -56,7 +61,8 @@ struct TabChipView: View {
           title: title,
           isActive: isActive,
           isDirty: isDirty,
-          hasUnreadNotification: hasUnreadNotification
+          hasUnreadNotification: hasUnreadNotification,
+          icon: icon
         )
         // `maxHeight: .infinity` is the load-bearing piece — without
         // it the label collapses to its intrinsic text height (~16pt)
@@ -125,6 +131,7 @@ struct TabChipView: View {
         isLastTab: isLastTab,
         onRename: onRenameRequested,
         onChangeColor: onChangeColor,
+        onChangeIcon: onChangeIcon,
         onCopyID: onCopyID,
         onClose: onClose,
         onCloseOthers: onCloseOthers,
