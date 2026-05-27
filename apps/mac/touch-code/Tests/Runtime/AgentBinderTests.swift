@@ -37,12 +37,24 @@ struct AgentBinderTests {
   }
 
   @Test
-  func foregroundJobClearsWhenNoAgentProcessRemains() {
+  func foregroundJobRetainsAcrossTransientMisses() {
     let f = Fixture(initialAgentKind: .codex)
     f.binder.consider(
       paneID: f.paneID,
       trigger: .foregroundJobChanged(Self.job(argv0: "-zsh", commandLine: "-zsh"))
     )
+    #expect(f.calls.value.isEmpty)
+  }
+
+  @Test
+  func foregroundJobClearsAfterRepeatedMisses() {
+    let f = Fixture(initialAgentKind: .codex)
+    for _ in 0..<6 {
+      f.binder.consider(
+        paneID: f.paneID,
+        trigger: .foregroundJobChanged(Self.job(argv0: "-zsh", commandLine: "-zsh"))
+      )
+    }
     #expect(f.calls.value == [.init(paneID: f.paneID, kind: nil)])
   }
 

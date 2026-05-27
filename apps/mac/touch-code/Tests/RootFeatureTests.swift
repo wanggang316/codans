@@ -509,6 +509,7 @@ struct RootFeatureTests {
       (.paneCreated(pane, tab), .paneCreated),
       (.paneReady(pane), .paneReady),
       (.paneOutput(pane, Data([0x01])), .paneOutput),
+      (.paneViewportChanged(pane, text: "screen"), .paneViewportChanged),
       (.paneIdle(pane, duration: 1), .paneIdle),
       (.paneExited(pane, code: 0, signal: nil), .paneExited),
       (.paneCrashed(pane, reason: "x"), .paneCrashed),

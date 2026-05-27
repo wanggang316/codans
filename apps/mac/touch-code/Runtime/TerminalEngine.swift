@@ -62,6 +62,7 @@ final class TerminalEngine {
   private var foregroundJobPaneIDs: Set<PaneID> = []
   private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
   private var foregroundJobMisses: [PaneID: UInt8] = [:]
+  private var viewportSnapshots: [PaneID: String] = [:]
   private let clock: @Sendable () -> Date
   private var finished = false
 
@@ -263,6 +264,7 @@ final class TerminalEngine {
     foregroundJobPaneIDs.remove(paneID)
     foregroundJobSnapshots.removeValue(forKey: paneID)
     foregroundJobMisses.removeValue(forKey: paneID)
+    viewportSnapshots.removeValue(forKey: paneID)
     stopForegroundJobPollingIfIdle()
   }
 
@@ -487,7 +489,8 @@ final class TerminalEngine {
     foregroundJobPollTask = Task { @MainActor [weak self] in
       while !Task.isCancelled {
         await self?.pollForegroundJobs()
-        try? await Task.sleep(for: .milliseconds(750))
+        let interval = self?.foregroundJobPollInterval() ?? .seconds(2)
+        try? await Task.sleep(for: interval)
       }
     }
   }
@@ -536,10 +539,42 @@ final class TerminalEngine {
       } else {
         foregroundJobMisses[paneID] = 0
       }
-      guard foregroundJobSnapshots[paneID] != next else { continue }
-      foregroundJobSnapshots[paneID] = next
-      emit(.foregroundJobChanged(paneID, next))
+      if foregroundJobSnapshots[paneID] != next {
+        foregroundJobSnapshots[paneID] = next
+        emit(.foregroundJobChanged(paneID, next))
+      }
+      if let surface = ghosttyRuntime.surface(for: paneID) {
+        emitViewportIfNeeded(paneID: paneID, surface: surface, foregroundJob: next)
+      }
     }
+  }
+
+  private func foregroundJobPollInterval() -> Duration {
+    for paneID in foregroundJobPaneIDs {
+      if hierarchy.catalog.pane(paneID)?.agentKind != nil {
+        return .milliseconds(300)
+      }
+      if let job = foregroundJobSnapshots[paneID],
+        AgentKindPatterns.classify(foregroundJob: job) != nil
+      {
+        return .milliseconds(300)
+      }
+    }
+    return .seconds(2)
+  }
+
+  private func emitViewportIfNeeded(
+    paneID: PaneID,
+    surface: PaneSurface,
+    foregroundJob: ForegroundJob
+  ) {
+    let hasAgentSignal =
+      hierarchy.catalog.pane(paneID)?.agentKind != nil
+      || AgentKindPatterns.classify(foregroundJob: foregroundJob) != nil
+    guard hasAgentSignal, let text = surface.readText(.viewport) else { return }
+    guard viewportSnapshots[paneID] != text else { return }
+    viewportSnapshots[paneID] = text
+    emit(.paneViewportChanged(paneID, text: text))
   }
 }
 
@@ -549,7 +584,7 @@ extension TerminalEvent {
   /// because scrollback retains history.
   fileprivate var isLifecycle: Bool {
     switch self {
-    case .paneOutput, .paneIdle, .paneInfoChanged, .foregroundJobChanged:
+    case .paneOutput, .paneViewportChanged, .paneIdle, .paneInfoChanged, .foregroundJobChanged:
       return false
     case .paneCreated, .paneReady, .paneExited, .paneCrashed,
       .paneClosedByTab, .tabActivated, .tabAutoClosed,

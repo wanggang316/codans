@@ -403,6 +403,7 @@ struct PaneAttentionInterpreterTests {
       .worktreeActivated(WorktreeID()),
       .hierarchyMutated(.catalog),
       .foregroundJobChanged(PaneID(), ForegroundJob(processGroupID: 1, processes: [])),
+      .paneViewportChanged(PaneID(), text: "screen"),
       .configChanged,
     ]
     for event in cases {
@@ -420,5 +421,58 @@ struct PaneAttentionInterpreterTests {
     )
     #expect(step.cue == nil)
     #expect(step.outputFlag == .unchanged)
+  }
+
+  // MARK: - agent activity
+
+  @Test
+  func codexActivityDetectsWorkingAndBlockedStates() {
+    #expect(
+      PaneAttentionInterpreter.classifyAgentActivity(
+        kind: .codex,
+        viewportText: "• Working (12s)"
+      ) == .working
+    )
+    #expect(
+      PaneAttentionInterpreter.classifyAgentActivity(
+        kind: .codex,
+        viewportText: "Allow command?\n[y/n]"
+      ) == .blocked
+    )
+  }
+
+  @Test
+  func agentActivityUsesRecentNonBlankLines() {
+    let oldWorking = Array(repeating: "• Working (1s)", count: 30).joined(separator: "\n")
+    let recentIdle = oldWorking + "\n\ncodex> "
+    #expect(
+      PaneAttentionInterpreter.classifyAgentActivity(
+        kind: .codex,
+        viewportText: recentIdle
+      ) == .idle
+    )
+  }
+
+  @Test
+  func claudeWorkingStateIsHeldBriefly() {
+    var lastWorkingAt: Date?
+    let start = Date(timeIntervalSince1970: 1_000)
+    let working = PaneAttentionInterpreter.stabilizeAgentActivity(
+      kind: .claudeCode,
+      previous: .idle,
+      raw: .working,
+      now: start,
+      lastWorkingAt: &lastWorkingAt
+    )
+    #expect(working == .working)
+
+    let held = PaneAttentionInterpreter.stabilizeAgentActivity(
+      kind: .claudeCode,
+      previous: .working,
+      raw: .idle,
+      now: start.addingTimeInterval(0.5),
+      lastWorkingAt: &lastWorkingAt
+    )
+    #expect(held == .working)
   }
 }

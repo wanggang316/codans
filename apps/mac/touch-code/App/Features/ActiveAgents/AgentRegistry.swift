@@ -10,8 +10,8 @@ private let registryLogger = Logger(
 /// Runtime-only state machine that derives each bound agent pane's
 /// runtime state (`waitingForInput` / `loading` / `finished` / `idle`)
 /// from a raw working/blocked/idle model plus an observed/unobserved
-/// attention bit. Raw state comes from the OSC 9;4 progress stream, a
-/// foreground running-set sample, plus bell / notification side channels.
+/// attention bit. Raw state comes from the rendered viewport plus bell /
+/// notification side channels.
 /// Designed to be the single source of truth for the ActiveAgents badge +
 /// popover (T5–T7). Nothing is persisted: every entry is reconstructed
 /// from the live event flow at process start.
@@ -25,7 +25,8 @@ private let registryLogger = Logger(
 /// Display priority is `waitingForInput > loading > finished > idle`.
 /// The raw blocked flag is sticky until the user observably interacts
 /// (keystroke / focus). Raw working fires only after the bound agent has
-/// observed user input and the pane is in the live `runningPanes` set.
+/// observed user input and its viewport matches an agent-specific
+/// working cue.
 /// Finished is not a raw state: it is the display form of a pane that
 /// moved from active raw state back to idle while the user was not looking
 /// at it.
@@ -76,23 +77,14 @@ final class AgentRegistry {
     var seen: Bool
     var userInputSeen: Bool
     var waitingForInput: Bool
+    var lastViewportText: String?
+    var lastWorkingAt: Date?
   }
 
-  private enum AgentRawState: Equatable {
-    case working
-    case blocked
-    case idle
-
-    var isActive: Bool {
-      self == .working || self == .blocked
-    }
-  }
+  private typealias AgentRawState = PaneAttentionInterpreter.AgentActivityState
 
   private var scratch: [PaneID: Scratch] = [:]
 
-  /// Snapshot of currently-running pane IDs (process attached + child
-  /// alive). The registry samples this on every input.
-  private let runningPanes: @MainActor () -> Set<PaneID>
   /// Globally focused pane, if any. Used to avoid surfacing
   /// `.finished` for work the user is already looking at; focus
   /// change events still clear a previously surfaced finished state.
@@ -101,17 +93,10 @@ final class AgentRegistry {
   /// without racing real `Date()`.
   private let now: () -> Date
 
-  /// Last running-panes snapshot. Diffed against the next call to
-  /// `onRunningPanesChanged(_:)` so we can distinguish "just entered"
-  /// from "just left" without forcing callers to compute the delta.
-  private var lastRunning: Set<PaneID> = []
-
   init(
-    runningPanes: @escaping @MainActor () -> Set<PaneID>,
     focusedPane: @escaping @MainActor () -> PaneID?,
     now: @escaping () -> Date = Date.init
   ) {
-    self.runningPanes = runningPanes
     self.focusedPane = focusedPane
     self.now = now
   }
@@ -121,12 +106,10 @@ final class AgentRegistry {
   // Reaction table (see docs/design-docs/active-agents-view.md
   // §"Runtime State Derivation"):
   //
-  //  - onRunningPanesChanged: pane entered / left recomputes raw
-  //    state. Progress only becomes raw `.working`
-  //    after input has been seen for the bound agent, so process
-  //    startup / first-screen loading stays idle. If a later
-  //    transition moves from active to idle while the pane is not
-  //    focused, the display state becomes `.finished`.
+  //  - onTerminalEvent(.paneViewportChanged): classify the rendered
+  //    viewport through `PaneAttentionInterpreter`'s agent-specific
+  //    rules. Process identity decides which agent this is; viewport
+  //    content decides whether it is working, blocked, or idle.
   //  - onTerminalEvent(.paneIdle): recompute raw state; if this is the
   //    first active → idle transition observed in the background, the
   //    display state becomes `.finished`.
@@ -145,29 +128,9 @@ final class AgentRegistry {
   //    materialise an entry.
   //  - onAgentUnbound: drop entry and scratch.
   //
-  // Deliberately NOT in the table: `paneOutput`. The libghostty
-  // bridge does not currently forward subprocess bytes onto the
-  // engine's output stream (see `PaneSurface.onOutput` — deferred),
-  // so this event is effectively dead in production and would be a
-  // spurious dependency to bind state on.
-
-  /// Diff the running-panes set against the previous snapshot and
-  /// react per the table above. Called from the engine-event drain
-  /// each time the runtime publishes a new running-set.
-  func onRunningPanesChanged(_ now: Set<PaneID>) {
-    let entered = now.subtracting(lastRunning)
-    let left = lastRunning.subtracting(now)
-    lastRunning = now
-
-    for paneID in entered {
-      ensureScratch(paneID)
-      refresh(paneID)
-    }
-    for paneID in left {
-      ensureScratch(paneID)
-      refresh(paneID)
-    }
-  }
+  // Deliberately NOT in the table: `paneOutput`. The state machine reads
+  // stable viewport snapshots instead of raw byte output so TUI repaint
+  // noise cannot pin a pane on `.loading`.
 
   /// Single funnel for the runtime's typed event stream. The registry
   /// reacts only to a small subset (idle / teardown / notification /
@@ -198,7 +161,6 @@ final class AgentRegistry {
       // unbound pane is a single `@Observable` no-op write.
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
-      lastRunning.remove(paneID)
 
     case .paneInfoChanged(let paneID, let delta):
       switch delta {
@@ -206,12 +168,13 @@ final class AgentRegistry {
         applyWaitingCueIfNeeded(from: event, paneID: paneID)
 
       default:
-        // pwd / mouse / progress / size etc. — not signals the
-        // state machine cares about. (.progress feeds running-set
-        // diffs via `TouchCodeApp.dispatchToAgentRegistry` wire 2,
-        // not here.)
+        // pwd / mouse / progress / size etc. are not signals the
+        // state machine cares about.
         break
       }
+
+    case .paneViewportChanged(let paneID, let text):
+      applyViewportText(text, paneID: paneID)
 
     case .paneOutput,
       .foregroundJobChanged,
@@ -252,18 +215,18 @@ final class AgentRegistry {
         rawState: .idle,
         seen: true,
         userInputSeen: false,
-        waitingForInput: false
+        waitingForInput: false,
+        lastViewportText: nil,
+        lastWorkingAt: nil
       )
     }
-    refresh(paneID)
-    let s = scratch[paneID]!
-    let initialState = displayState(for: s)
     entries[paneID] = AgentEntry(
       kind: kind,
       sessionID: sessionID,
-      state: initialState,
+      state: .idle,
       lastTransitionAt: now()
     )
+    refresh(paneID)
   }
 
   /// User-driven unbind path. Drops both the entry and its scratch so
@@ -278,11 +241,12 @@ final class AgentRegistry {
 
   /// Raw state derivation. Display-only finished is intentionally not
   /// represented here; it is derived later from `seen`.
-  private func deriveRawState(_ s: Scratch, isRunning: Bool) -> AgentRawState {
+  private func deriveRawState(_ s: Scratch, kind: AgentKind?) -> AgentRawState {
     if s.waitingForInput { return .blocked }
-    guard s.userInputSeen else { return .idle }
-    if isRunning { return .working }
-    return .idle
+    guard let kind, let text = s.lastViewportText else { return .idle }
+    let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
+    if raw == .blocked { return .blocked }
+    return s.userInputSeen ? raw : .idle
   }
 
   private func displayState(for s: Scratch) -> AgentRuntimeState {
@@ -306,9 +270,27 @@ final class AgentRegistry {
         rawState: .idle,
         seen: true,
         userInputSeen: false,
-        waitingForInput: false
+        waitingForInput: false,
+        lastViewportText: nil,
+        lastWorkingAt: nil
       )
     }
+  }
+
+  private func applyViewportText(_ text: String, paneID: PaneID) {
+    var s =
+      scratch[paneID]
+      ?? Scratch(
+        rawState: .idle,
+        seen: true,
+        userInputSeen: false,
+        waitingForInput: false,
+        lastViewportText: nil,
+        lastWorkingAt: nil
+      )
+    s.lastViewportText = text
+    scratch[paneID] = s
+    refresh(paneID)
   }
 
   private func applyWaitingCueIfNeeded(from event: TerminalEvent, paneID: PaneID) {
@@ -326,7 +308,9 @@ final class AgentRegistry {
         rawState: .idle,
         seen: true,
         userInputSeen: false,
-        waitingForInput: false
+        waitingForInput: false,
+        lastViewportText: nil,
+        lastWorkingAt: nil
       )
     s.waitingForInput = true
     scratch[paneID] = s
@@ -340,6 +324,8 @@ final class AgentRegistry {
   private static func eventTag(_ event: TerminalEvent) -> String {
     switch event {
     case .paneOutput(let id, _): return "paneOutput(\(id.raw.uuidString.prefix(8)))"
+    case .paneViewportChanged(let id, _):
+      return "paneViewportChanged(\(id.raw.uuidString.prefix(8)))"
     case .paneIdle(let id, _): return "paneIdle(\(id.raw.uuidString.prefix(8)))"
     case .paneExited(let id, _, _): return "paneExited(\(id.raw.uuidString.prefix(8)))"
     case .paneCrashed(let id, _): return "paneCrashed(\(id.raw.uuidString.prefix(8)))"
@@ -375,9 +361,18 @@ final class AgentRegistry {
   /// `onAgentBound`.
   private func refresh(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    let isRunning = runningPanes().contains(paneID)
+    let kind = entries[paneID]?.kind
     let previousRaw = s.rawState
-    let newRaw = deriveRawState(s, isRunning: isRunning)
+    var newRaw = deriveRawState(s, kind: kind)
+    if let kind {
+      newRaw = PaneAttentionInterpreter.stabilizeAgentActivity(
+        kind: kind,
+        previous: previousRaw,
+        raw: newRaw,
+        now: now(),
+        lastWorkingAt: &s.lastWorkingAt
+      )
+    }
     if isFocused(paneID) {
       s.seen = true
     } else if previousRaw.isActive, newRaw == .idle {

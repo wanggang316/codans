@@ -123,6 +123,7 @@ struct RootFeature {
     case paneCreated
     case paneReady
     case paneOutput
+    case paneViewportChanged
     case paneExited
     case paneCrashed
     case paneClosedByTab
@@ -142,6 +143,7 @@ struct RootFeature {
       case .paneCreated: self = .paneCreated
       case .paneReady: self = .paneReady
       case .paneOutput: self = .paneOutput
+      case .paneViewportChanged: self = .paneViewportChanged
       case .paneIdle: self = .paneIdle
       case .paneExited: self = .paneExited
       case .paneCrashed: self = .paneCrashed

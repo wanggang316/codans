@@ -19,6 +19,25 @@ final class AgentBinder {
     case foregroundJobChanged(ForegroundJob)
   }
 
+  private struct Presence {
+    static let releaseMissThreshold: UInt8 = 6
+
+    var misses: UInt8 = 0
+
+    mutating func shouldRelease(after classified: AgentKind?) -> Bool {
+      if classified != nil {
+        misses = 0
+        return false
+      }
+      misses = min(misses + 1, Self.releaseMissThreshold)
+      if misses >= Self.releaseMissThreshold {
+        misses = 0
+        return true
+      }
+      return false
+    }
+  }
+
   private let client: HierarchyClient
   private let currentAgentKind: @MainActor (PaneID) -> AgentKind?
   /// Optional T6 hook: fired immediately AFTER `setPaneAgentKind` lands
@@ -31,6 +50,7 @@ final class AgentBinder {
   /// path that writes a nil binding through `setPaneAgentKind`. AppState
   /// wires this to `AgentRegistry.onAgentUnbound`.
   private let agentUnboundHandler: @MainActor (PaneID) -> Void
+  private var presenceByPane: [PaneID: Presence] = [:]
 
   init(
     client: HierarchyClient,
@@ -56,6 +76,20 @@ final class AgentBinder {
 
     case .foregroundJobChanged(let job):
       let classified = AgentKindPatterns.classify(foregroundJob: job)
+      if classified == nil, existing == nil {
+        presenceByPane.removeValue(forKey: paneID)
+        return
+      }
+      var presence = presenceByPane[paneID] ?? Presence()
+      defer { presenceByPane[paneID] = presence }
+      if classified == nil {
+        if existing != nil, !presence.shouldRelease(after: classified) {
+          binderLogger.debug("retain binding through transient classify miss")
+          return
+        }
+      } else {
+        _ = presence.shouldRelease(after: classified)
+      }
       guard classified != existing else { return }
       writeIfChanged(
         paneID: paneID,
@@ -70,6 +104,7 @@ final class AgentBinder {
   /// underlying writer is idempotent so a never-bound pane costs only a
   /// snapshot read.
   func unbind(_ paneID: PaneID) {
+    presenceByPane.removeValue(forKey: paneID)
     client.setPaneAgentKind(paneID, nil)
     agentUnboundHandler(paneID)
   }

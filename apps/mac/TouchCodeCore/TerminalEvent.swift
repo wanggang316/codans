@@ -28,6 +28,7 @@ public nonisolated enum TerminalEvent: Sendable {
   /// 16 KB buffer boundary — consumers that decode text (scrollback viewer,
   /// C3 hook matchers) must buffer across batches per pane.
   case paneOutput(PaneID, Data)
+  case paneViewportChanged(PaneID, text: String)
   case paneIdle(PaneID, duration: TimeInterval)
   /// Clean child exit. `code` is the exit status; `signal` is non-nil when
   /// the child was terminated by a signal (SIGKILL / SIGTERM / etc.) and
