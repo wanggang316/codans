@@ -45,6 +45,18 @@ struct AgentRegistryStateTests {
   }
 
   @Test
+  func bindAcceptsClassifierWhenViewportAlreadyShowsActive() {
+    // Viewport arrives before the binding forms — e.g. a fresh pane spawned
+    // with an immediately-running agent (`codex --resume` via a script).
+    // The bound classifier should accept the viewport cue without waiting
+    // for the user to type into this pane first.
+    let f = Fixture()
+    f.viewport("• Working (10s)")
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.entries[f.paneID]?.state == .loading)
+  }
+
+  @Test
   func activeToIdleInBackgroundDrivesFinished() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)

@@ -230,17 +230,31 @@ final class AgentRegistry {
   /// `AgentBinder` identified an agent in `paneID`. Materialise an
   /// entry and derive the initial state from any scratch already
   /// accumulated before the foreground job is identified.
+  ///
+  /// If a viewport snapshot already classifies as `.working` or `.blocked`
+  /// for the bound kind, treat it as user-input observed. This catches
+  /// the "agent was already running when the binding formed" case (app
+  /// restart with a restored pane, or a fresh pane that an external trigger
+  /// spawned with an immediately-running agent) so the badge surfaces the
+  /// classifier output instead of staying `.idle` until the user types.
   func onAgentBound(
     _ paneID: PaneID,
     kind: AgentKind,
     sessionID: String?,
     assumeUserInputSeen: Bool = false
   ) {
+    let viewportImpliesActive: Bool = {
+      guard let text = scratch[paneID]?.lastViewportText else { return false }
+      let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
+      return raw == .working || raw == .blocked
+    }()
+    let effectiveUserInputSeen = assumeUserInputSeen || viewportImpliesActive
+
     if var existing = scratch[paneID] {
-      existing.userInputSeen = existing.userInputSeen || assumeUserInputSeen
+      existing.userInputSeen = existing.userInputSeen || effectiveUserInputSeen
       scratch[paneID] = existing
     } else {
-      scratch[paneID] = .fresh(userInputSeen: assumeUserInputSeen)
+      scratch[paneID] = .fresh(userInputSeen: effectiveUserInputSeen)
     }
     entries[paneID] = AgentEntry(
       kind: kind,
