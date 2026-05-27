@@ -4,12 +4,13 @@ import TouchCodeCore
 /// One row inside the Branch popover's "Branches" section.
 ///
 /// Pure projection of a `BranchRef`: the parent (`BranchSwitcherView`) decides
-/// what the explicit action buttons do via the `onCheckout` / `onRename`
-/// closures. The row body itself is no longer tappable — interaction goes
-/// through hover-revealed buttons (Phase C). Blocked rows (a branch checked
-/// out in another worktree of the same Project, per Phase B) render greyed
-/// out, expose neither button, and surface the blocking worktree's name on
-/// the trailing edge.
+/// what the explicit actions do via the `onCheckout` / `onRename` closures.
+/// The row body itself is no longer tappable — interaction goes through a
+/// hover-revealed ellipsis Menu (Tower-style). Blocked rows (a branch
+/// checked out in another worktree of the same Project, per Phase B) keep
+/// normal opacity, expose no menu, and surface the blocking worktree's
+/// name on the trailing edge along with a leading `+` marker in the
+/// checkmark slot.
 struct BranchRowView: View {
   let ref: BranchRef
   let isCurrent: Bool
@@ -43,16 +44,27 @@ struct BranchRowView: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      // Reserve the checkmark column for non-current rows too so every row
-      // aligns at the branch-name baseline regardless of selection. An
-      // empty SF Symbol name logs a runtime warning, so use Color.clear as
-      // the spacer when the row is not current.
+      // Reserve the leading column for every row so the branch-name
+      // baseline stays aligned regardless of which marker (if any) shows.
+      // Three mutually-exclusive states share the slot:
+      //   - current:  checkmark
+      //   - blocked:  `+` (signal: another worktree has this branch; the
+      //     user could create a new worktree if they wanted to)
+      //   - other:    empty (Color.clear placeholder)
+      // An empty SF Symbol name logs a runtime warning, so Color.clear is
+      // the spacer for the empty case.
       Group {
         if isCurrent {
           Image(systemName: "checkmark")
             .font(.caption)
             .foregroundStyle(.primary)
             .accessibilityIdentifier("branch_switcher.current_marker")
+            .accessibilityHidden(true)
+        } else if isBlocked {
+          Image(systemName: "plus")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .accessibilityIdentifier("branch_switcher.branch_row.blocked_marker")
             .accessibilityHidden(true)
         } else {
           Color.clear
@@ -74,7 +86,9 @@ struct BranchRowView: View {
     .padding(.vertical, 4)
     .contentShape(.rect)
     .background(isHovered ? Color.accentColor.opacity(0.10) : Color.clear)
-    .opacity(isBlocked ? 0.55 : 1.0)
+    // Blocked rows no longer dim — the leading `+` marker and trailing
+    // `@<worktree>` label carry the "checked out elsewhere" signal on
+    // their own, and the row stays legible at normal contrast.
     .onHover { hovering in isHovered = hovering }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier(
@@ -102,11 +116,11 @@ struct BranchRowView: View {
   // MARK: - Trailing accessory
 
   /// Four mutually-exclusive presentations:
-  ///   - Renaming + in-flight: small spinner (no button).
+  ///   - Renaming + in-flight: small spinner (no menu).
   ///   - Renaming: no accessory — the TextField is the only affordance.
-  ///   - Blocked: surface the blocking worktree's folder name (no button).
-  ///   - Current + hovered: "Rename" button.
-  ///   - Other + hovered (not blocked): "Checkout" button.
+  ///   - Blocked: surface the blocking worktree's folder name (no menu).
+  ///   - Hovered (not blocked, not renaming): ellipsis Menu with context
+  ///     items — `Rename…` on the current row, `Checkout` on other rows.
   @ViewBuilder
   private var trailingAccessory: some View {
     if showsRenameField {
@@ -116,29 +130,45 @@ struct BranchRowView: View {
           .accessibilityIdentifier("branch_switcher.rename_spinner")
       }
     } else if let blockingName = blockingWorktreeName {
+      // Plain Text — the `+` marker in the leading slot carries the
+      // accessibility identifier for the blocked state. The trailing
+      // label is just supplementary context.
       Text("@\(blockingName)")
         .font(.caption2)
         .foregroundStyle(.tertiary)
         .lineLimit(1)
         .truncationMode(.tail)
-        .accessibilityIdentifier("branch_switcher.branch_row.blocked_marker")
-    } else if isCurrent {
-      if isHovered {
-        Button("Rename") { onRename() }
-          .buttonStyle(.borderless)
-          .controlSize(.small)
-          .font(.caption)
-          .accessibilityIdentifier("branch_switcher.branch_row.rename_button")
-      }
-    } else {
-      if isHovered {
-        Button("Checkout") { onCheckout() }
-          .buttonStyle(.borderless)
-          .controlSize(.small)
-          .font(.caption)
-          .accessibilityIdentifier("branch_switcher.branch_row.checkout_button")
-      }
+    } else if isHovered {
+      hoverMenu
     }
+  }
+
+  /// Tower-style ellipsis dropdown that consolidates per-row actions into
+  /// a single hover-revealed control. `Menu` + `.menuStyle(.borderlessButton)`
+  /// + `.menuIndicator(.hidden)` renders just the ellipsis glyph with no
+  /// trailing chevron — see `MergeSplitButton` for the same pattern.
+  private var hoverMenu: some View {
+    Menu {
+      if isCurrent {
+        Button("Rename…", action: onRename)
+      } else {
+        Button("Checkout", action: onCheckout)
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    }
+    .menuStyle(.borderlessButton)
+    .menuIndicator(.hidden)
+    .fixedSize()
+    .accessibilityIdentifier(
+      isCurrent
+        ? "branch_switcher.branch_row.menu_button.current"
+        : "branch_switcher.branch_row.menu_button.checkout"
+    )
+    .accessibilityLabel("Branch actions")
   }
 
   // MARK: - Accessibility label

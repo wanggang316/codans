@@ -208,6 +208,20 @@ struct GitOutputParserBranchInventoryTests {
   }
 
   @Test
+  func parseBranchInventoryDropsBareRemoteShortName() throws {
+    // Edge: a remote record without a branch segment (`refs/remotes/origin`
+    // → short `origin`). git shouldn't emit this in practice but the parser
+    // is defensive: a true remote-tracking ref always has the shape
+    // `<remote>/<branch>`, so a bare short name with no `/` is dropped.
+    let fixture = """
+      refs/remotes/origin\torigin\t\t \n\
+      refs/remotes/origin/main\torigin/main\t\t \n
+      """
+    let inv = try GitOutputParser.parseBranchInventory(Data(fixture.utf8))
+    #expect(inv.remote.map(\.shortName) == ["origin/main"])
+  }
+
+  @Test
   func parseBranchInventoryRemoteUpstreamForcedToNilEvenIfPresent() throws {
     // git shouldn't emit an upstream for refs/remotes/, but the contract says
     // we drop it defensively if it appears. Lock that behaviour.

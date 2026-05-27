@@ -37,7 +37,12 @@ struct BranchSwitcherView: View {
       }
     }
     .frame(width: 360)
-    .frame(maxHeight: 480)
+    // `minHeight` keeps the popover from collapsing to ~30pt on first open
+    // when the inventory is still loading and the section body is just a
+    // small ProgressView. Without a lower bound, the popover's intrinsic
+    // size locks to the loading state's height and never expands once the
+    // load completes (the popover doesn't re-measure mid-presentation).
+    .frame(minHeight: 240, maxHeight: 480)
     .accessibilityIdentifier("branch_switcher.popover")
   }
 
@@ -177,12 +182,13 @@ struct BranchSwitcherView: View {
   }
 
   private var sectionSpinner: some View {
-    HStack {
-      Spacer()
-      ProgressView().controlSize(.small)
-      Spacer()
-    }
-    .padding(.vertical, 6)
+    // Take the full available area so the spinner reads as centered in the
+    // popover's `minHeight`-stretched body during the first load (instead
+    // of hugging the top edge with a thin strip of empty space below).
+    ProgressView()
+      .controlSize(.small)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .padding(.vertical, 6)
   }
 
   // MARK: - Filtering

@@ -47,9 +47,9 @@ These accessibility identifiers must be declared by the implementation (per patt
 | `branch_switcher.current_marker` | Checkmark element on the current row. |
 | `branch_switcher.commit_row.<short-sha>` | One row per recent commit. |
 | `branch_switcher.history_button` | Inline "History" button on the Branches section header that opens the Diff Inspector's History tab. |
-| `branch_switcher.branch_row.checkout_button` | Hover-revealed Checkout button on each non-current, non-blocked local branch row. |
-| `branch_switcher.branch_row.rename_button` | Hover-revealed Rename button on the current local branch row. |
-| `branch_switcher.branch_row.blocked_marker` | "@\<worktree-name\>" label on rows whose branch is currently checked out in another worktree of the same project. |
+| `branch_switcher.branch_row.menu_button.current` | Hover-revealed ellipsis (`...`) menu button on the current branch row. The menu contains `Rename…`. |
+| `branch_switcher.branch_row.menu_button.checkout` | Hover-revealed ellipsis (`...`) menu button on non-current, non-blocked branch rows. The menu contains `Checkout`. |
+| `branch_switcher.branch_row.blocked_marker` | `+` icon in the leading slot of rows whose branch is currently checked out in another worktree of the same project. Replaces the checkmark slot. |
 | `branch_switcher.rename_field` | Inline TextField that replaces the current branch's name while the user is editing the rename draft. |
 | `branch_switcher.rename_spinner` | Mini spinner shown next to the TextField while the `git branch -m` effect is in flight. |
 | `branch_switcher.error_banner` | Inline error banner displayed under the header. |

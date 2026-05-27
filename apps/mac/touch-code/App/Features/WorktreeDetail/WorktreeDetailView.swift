@@ -301,17 +301,9 @@ struct WorktreeDetailView: View {
         // group with the action buttons.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
-          // Phase E: Git Viewer toggle leads the trailing cluster on the
-          // pre-macOS-26 layout too, matching the modern path's ordering.
-          Button {
-            onToggleGitViewer()
-          } label: {
-            Image(systemName: "sidebar.right")
-          }
-          .buttonStyle(.plain)
-          .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
-          .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
-          .accessibilityIdentifier("worktree_header.git_viewer_toggle")
+          // Order matches the macOS 26 path: RunScript, Open, then the
+          // Git Viewer toggle as the rightmost chip. `ToolbarItemGroup`
+          // renders children leading-to-trailing in declaration order.
           HeaderRunScriptSplitButton(
             store: headerStore,
             projectID: address.project,
@@ -325,6 +317,15 @@ struct WorktreeDetailView: View {
             worktreePath: info.worktree.path
           )
           .buttonStyle(.plain)
+          Button {
+            onToggleGitViewer()
+          } label: {
+            Image(systemName: "sidebar.right")
+          }
+          .buttonStyle(.plain)
+          .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+          .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+          .accessibilityIdentifier("worktree_header.git_viewer_toggle")
         }
       }
     }
@@ -375,23 +376,13 @@ struct WorktreeDetailView: View {
     // the toolbar's native glass capsule + hover state. Same pattern as
     // supacode's openMenu / ScriptMenu.
     //
-    // Phase E: a Git Viewer toggle leads the trailing cluster so the
-    // user has a discoverable, click-targetable surface for the same
-    // action ⌘⇧G triggers. Tooltip flips between Open/Close based on
-    // `inspectorVisible`; the SF Symbol stays `sidebar.right` for both
-    // states since the SF set has no clean open/closed pair for a
-    // right-anchored inspector — the tooltip is the disambiguator.
-    ToolbarItem {
-      Button {
-        onToggleGitViewer()
-      } label: {
-        Image(systemName: "sidebar.right")
-      }
-      .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
-      .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
-      .accessibilityIdentifier("worktree_header.git_viewer_toggle")
-    }
-    ToolbarSpacer(.fixed)
+    // Order: RunScript, Open, Git Viewer toggle. The toggle sits as the
+    // rightmost chip — visually furthest from the worktree-header area,
+    // matching the user-attached reference. Tooltip flips between
+    // Open/Close based on `inspectorVisible`; the SF Symbol stays
+    // `sidebar.right` for both states since the SF set has no clean
+    // open/closed pair for a right-anchored inspector — the tooltip is
+    // the disambiguator.
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,
@@ -407,6 +398,17 @@ struct WorktreeDetailView: View {
         projectID: address.project,
         worktreePath: info.worktree.path
       )
+    }
+    ToolbarSpacer(.fixed)
+    ToolbarItem {
+      Button {
+        onToggleGitViewer()
+      } label: {
+        Image(systemName: "sidebar.right")
+      }
+      .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+      .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+      .accessibilityIdentifier("worktree_header.git_viewer_toggle")
     }
   }
 

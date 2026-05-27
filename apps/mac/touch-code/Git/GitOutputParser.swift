@@ -318,9 +318,15 @@ nonisolated enum GitOutputParser {
         throw GitError.unparsable(context: "unrecognised refname prefix: '\(refname)'")
       }
 
-      // Drop `<remote>/HEAD` symbolic refs — they're not selectable branches.
+      // Drop:
+      //   - `<remote>/HEAD` symbolic refs (not selectable branches).
+      //   - Bare `<remote>` short names with no `/` — true remote tracking
+      //     refs always have the shape `<remote>/<branch>`. A bare "origin"
+      //     violates this contract and is dropped defensively (some git
+      //     versions / pack configurations have been observed emitting
+      //     `refs/remotes/origin` as a record with short = `origin`).
       // Local refs literally named `…/HEAD` are kept (parser stays neutral).
-      if isRemote && shortName.hasSuffix("/HEAD") {
+      if isRemote && (shortName.hasSuffix("/HEAD") || !shortName.contains("/")) {
         continue
       }
 
