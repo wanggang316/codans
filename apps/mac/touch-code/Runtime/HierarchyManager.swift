@@ -1237,6 +1237,43 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Update the tab's SF Symbol icon, subject to the lock precedence in
+  /// `TabIconLock` (`.auto` ≤ `.script` ≤ `.user`). A lower-priority write
+  /// against a higher lock is a silent no-op; a `.user` write with `nil`
+  /// drops the lock back to `.auto` so the runtime fallback takes over
+  /// again. Persists through the same debounced save path as the other
+  /// tab mutators.
+  func setTabIcon(
+    _ id: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID,
+    icon: String?,
+    lock: TabIconLock
+  ) throws {
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+    guard
+      let tabIndex = catalog.projects[projectIndex]
+        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
+    else {
+      throw HierarchyError.notFound("Tab \(id)")
+    }
+    let current = catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex]
+    guard let updated = current.applyingIcon(icon, lock: lock),
+      updated != current
+    else { return }
+    catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex] = updated
+    store.scheduleSave(catalog)
+  }
+
   /// Persists the most recently resolved live tab title so the chip can
   /// fall back to it on the next launch (before the surface respawns and
   /// the shell re-pushes OSC titles). No-op when the cache is unchanged

@@ -119,6 +119,17 @@ nonisolated struct HierarchyClient: Sendable {
       _ inWorktree: WorktreeID, _ inProject: ProjectID,
       _ color: TabColor?
     ) throws -> Void
+  /// Updates the tab's SF Symbol icon under the `TabIconLock` rules
+  /// (`.auto` ≤ `.script` ≤ `.user`). A write whose `lock` cannot
+  /// override the tab's current lock is a silent no-op — UI consumers
+  /// re-read the tab afterwards if they need to confirm the result.
+  var setTabIcon:
+    @MainActor @Sendable (
+      _ id: TabID,
+      _ inWorktree: WorktreeID, _ inProject: ProjectID,
+      _ icon: String?,
+      _ lock: TabIconLock
+    ) throws -> Void
   var reorderTabs:
     @MainActor @Sendable (
       _ inWorktree: WorktreeID, _ inProject: ProjectID,
@@ -555,6 +566,11 @@ extension HierarchyClient {
       },
       setTabColor: { tabID, worktreeID, projectID, color in
         try manager.setTabColor(tabID, in: worktreeID, in: projectID, color: color)
+      },
+      setTabIcon: { tabID, worktreeID, projectID, icon, lock in
+        try manager.setTabIcon(
+          tabID, in: worktreeID, in: projectID, icon: icon, lock: lock
+        )
       },
       reorderTabs: { worktreeID, projectID, orderedIDs in
         try manager.reorderTabs(
@@ -1324,6 +1340,7 @@ extension HierarchyClient: DependencyKey {
     selectTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     renameTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setTabColor: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setTabIcon: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     reorderTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closeOtherTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closeTabsToRight: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1410,6 +1427,7 @@ extension HierarchyClient: DependencyKey {
     selectTab: unimplemented("HierarchyClient.selectTab"),
     renameTab: unimplemented("HierarchyClient.renameTab"),
     setTabColor: unimplemented("HierarchyClient.setTabColor"),
+    setTabIcon: unimplemented("HierarchyClient.setTabIcon"),
     reorderTabs: unimplemented("HierarchyClient.reorderTabs"),
     closeOtherTabs: unimplemented("HierarchyClient.closeOtherTabs"),
     closeTabsToRight: unimplemented("HierarchyClient.closeTabsToRight"),
