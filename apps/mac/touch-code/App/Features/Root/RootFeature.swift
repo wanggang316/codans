@@ -649,13 +649,38 @@ struct RootFeature {
         // next popover open re-fetches against the new worktree path.
         // `resolvedWorktreePath` already resolves to nil when either id is
         // nil, which the reducer treats as a full caches+ids reset.
+        //
+        // Phase B: also compute the "blocked branches" map — branches
+        // checked out in OTHER worktrees of the same Project, keyed by
+        // branch short-name → that worktree's folder name. The popover
+        // greys these rows so users see the constraint before clicking.
+        let blockedBranches: [String: String] = {
+          guard
+            let projectID = selection.projectID,
+            let worktreeID = selection.worktreeID
+          else { return [:] }
+          let snapshot = hierarchyClient.snapshot()
+          guard
+            let project = snapshot.projects.first(where: { $0.id == projectID })
+          else { return [:] }
+          var map: [String: String] = [:]
+          for worktree in project.worktrees {
+            // The active worktree's own branch is never "blocked from
+            // itself"; detached worktrees (branch == nil) cannot block.
+            if worktree.id == worktreeID { continue }
+            guard let branch = worktree.branch else { continue }
+            map[branch] = worktree.name
+          }
+          return map
+        }()
         effects.append(
           .send(
             .branchSwitcher(
               .worktreeChanged(
                 projectID: selection.projectID,
                 worktreeID: selection.worktreeID,
-                path: resolvedWorktreePath
+                path: resolvedWorktreePath,
+                blockedBranches: blockedBranches
               )))
         )
         // v2 GitHub integration (0013 M4): when the active Project changes, ask

@@ -109,12 +109,21 @@ struct BranchSwitcherView: View {
       let remotes = filtered(inventory.remote, query: store.searchQuery)
       ForEach(locals, id: \.shortName) { ref in
         let isCurrent = ref.shortName == inventory.current
+        // Phase B: only LOCAL rows are marked blocked. A remote ref with
+        // a stripped short-name matching a blocked local is still visible
+        // (you can examine the remote-tracking ref) — semantically the
+        // block is on the local, not the remote.
+        let blockingWorktreeName = store.blockedBranches[ref.shortName]
         BranchRowView(
           ref: ref,
           isCurrent: isCurrent,
-          onTap: {
-            guard !isCurrent else { return }
+          blockingWorktreeName: blockingWorktreeName,
+          onCheckout: {
+            guard !isCurrent, blockingWorktreeName == nil else { return }
             store.send(.branchTapped(target(for: ref, inventory: inventory)))
+          },
+          onRename: {
+            store.send(.renameButtonTapped(currentBranchName: ref.shortName))
           }
         )
       }
@@ -124,7 +133,11 @@ struct BranchSwitcherView: View {
           BranchRowView(
             ref: ref,
             isCurrent: false,
-            onTap: { store.send(.branchTapped(target(for: ref, inventory: inventory))) }
+            blockingWorktreeName: nil,
+            onCheckout: {
+              store.send(.branchTapped(target(for: ref, inventory: inventory)))
+            },
+            onRename: {}
           )
         }
       }

@@ -37,6 +37,12 @@ struct BranchSwitcherFeature {
     var isSwitching: Bool = false
     var searchQuery: String = ""
     var switchError: SwitchError?
+    /// Maps each "blocked" branch short-name to the OTHER worktree's
+    /// folder name that currently has it checked out. A branch is "blocked"
+    /// if some other worktree within the same Project (NOT this worktree)
+    /// has it as its current `Worktree.branch`. The view greys these rows
+    /// and disables click.
+    var blockedBranches: [String: String] = [:]
   }
 
   enum SwitchError: Equatable {
@@ -44,11 +50,17 @@ struct BranchSwitcherFeature {
   }
 
   enum Action: Equatable {
-    case worktreeChanged(projectID: ProjectID?, worktreeID: WorktreeID?, path: String?)
+    case worktreeChanged(
+      projectID: ProjectID?,
+      worktreeID: WorktreeID?,
+      path: String?,
+      blockedBranches: [String: String]
+    )
     case popoverTapped
     case popoverDismissed
     case searchQueryChanged(String)
     case branchTapped(BranchSwitchTarget)
+    case renameButtonTapped(currentBranchName: String)
     case viewAllCommitsTapped
     case errorDismissed
     case inventoryLoaded(Result<BranchInventory, GitError>)
@@ -82,7 +94,7 @@ struct BranchSwitcherFeature {
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .worktreeChanged(let projectID, let worktreeID, let path):
+      case .worktreeChanged(let projectID, let worktreeID, let path, let blockedBranches):
         // Replace identifiers; drop every cache so the next popover open
         // re-fetches against the new worktree. Cancel every in-flight
         // effect — a stale switch in particular must not paint a banner
@@ -100,6 +112,10 @@ struct BranchSwitcherFeature {
         state.isSwitching = false
         state.searchQuery = ""
         state.switchError = nil
+        // RootFeature computes the blocked map from the catalog (a branch
+        // is "blocked" when another worktree in the same Project has it
+        // checked out); the reducer just stores it for the view to read.
+        state.blockedBranches = worktreeID == nil ? [:] : blockedBranches
         return .merge(
           .cancel(id: CancelID.inventory),
           .cancel(id: CancelID.commits),
@@ -162,6 +178,10 @@ struct BranchSwitcherFeature {
           .cancel(id: CancelID.commits),
           switchTo(target, at: path)
         )
+
+      case .renameButtonTapped:
+        // Pending (Phase D): start the inline rename flow.
+        return .none
 
       case .viewAllCommitsTapped:
         guard let worktreeID = state.worktreeID else { return .none }

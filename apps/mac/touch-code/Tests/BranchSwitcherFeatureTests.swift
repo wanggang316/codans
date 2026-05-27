@@ -163,7 +163,12 @@ struct BranchSwitcherFeatureTests {
 
     // Switch worktree — cancels the in-flight loads and clears caches.
     await store.send(
-      .worktreeChanged(projectID: projectB, worktreeID: worktreeB, path: pathB)
+      .worktreeChanged(
+        projectID: projectB,
+        worktreeID: worktreeB,
+        path: pathB,
+        blockedBranches: [:]
+      )
     ) { state in
       state.projectID = projectB
       state.worktreeID = worktreeB
