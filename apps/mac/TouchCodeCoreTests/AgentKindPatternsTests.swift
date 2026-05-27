@@ -16,7 +16,6 @@ struct AgentKindPatternsTests {
       ("opencode", .opencode),
       ("open-code", .opencode),
       ("gemini", .gemini),
-      ("cursor", .cursorAgent),
       ("cursor-agent", .cursorAgent),
       ("cline", .cline),
       ("copilot", .copilot),
@@ -149,10 +148,19 @@ struct AgentKindPatternsTests {
   }
 
   @Test
-  func foregroundJob_cursorProcessMatchesCursorAgent() {
+  func foregroundJob_cursorEditorDoesNotMatchCursorAgent() {
     #expect(
       AgentKindPatterns.classify(
         foregroundJob: Self.job(argv0: "cursor", commandLine: "cursor .")
+      ) == nil
+    )
+  }
+
+  @Test
+  func foregroundJob_cursorProcessWithAgentHintMatchesCursorAgent() {
+    #expect(
+      AgentKindPatterns.classify(
+        foregroundJob: Self.job(argv0: "cursor", commandLine: "cursor --cursor-agent")
       ) == .cursorAgent
     )
   }

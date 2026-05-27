@@ -13,7 +13,7 @@ public nonisolated enum AgentKindPatterns {
     .pi: ["pi"],
     .opencode: ["opencode", "open-code"],
     .gemini: ["gemini"],
-    .cursorAgent: ["cursor", "cursor-agent"],
+    .cursorAgent: ["cursor-agent"],
     .cline: ["cline"],
     .copilot: ["copilot", "github-copilot", "ghcs"],
     .kimi: ["kimi", "kimi-code"],
@@ -71,7 +71,7 @@ public nonisolated enum AgentKindPatterns {
       candidates.append(contentsOf: process.commandTokens.map { ($0, 40) })
     }
 
-    if normalizedName == "agent",
+    if normalizedName == "agent" || normalizedName == "cursor",
       process.commandLine.lowercased().contains("cursor-agent")
         || process.commandLine.lowercased().contains("cursor.app")
     {

@@ -426,18 +426,87 @@ struct PaneAttentionInterpreterTests {
   // MARK: - agent activity
 
   @Test
+  func agentActivityClassifiesSupportedViewportShapes() {
+    let samples: [AgentActivitySample] = [
+      .init(kind: .pi, working: "Working...", blocked: nil, idle: "pi> "),
+      .init(
+        kind: .claudeCode,
+        working: "✢ Editing…",
+        blocked: "Do you want to proceed?\n❯ 1. Yes\n  2. No",
+        idle: "❯ "
+      ),
+      .init(
+        kind: .codex,
+        working: "• Working (12s)",
+        blocked: "Allow command?\n[y/n]",
+        idle: "codex> "
+      ),
+      .init(
+        kind: .gemini,
+        working: "Esc to cancel",
+        blocked: "│ Do you want to proceed",
+        idle: "gemini> "
+      ),
+      .init(
+        kind: .cursorAgent,
+        working: "Ctrl+C to stop",
+        blocked: "Run this command?\nRun (y) (enter)",
+        idle: "cursor> "
+      ),
+      .init(
+        kind: .cline,
+        working: "Esc to interrupt",
+        blocked: "Let Cline use this tool?",
+        idle: "cline> "
+      ),
+      .init(
+        kind: .opencode,
+        working: "Esc to interrupt",
+        blocked: "△ Permission required",
+        idle: "opencode> "
+      ),
+      .init(
+        kind: .copilot,
+        working: "Esc to cancel",
+        blocked: "│ do you want to continue",
+        idle: "copilot> "
+      ),
+      .init(
+        kind: .kimi,
+        working: "thinking",
+        blocked: "approve?",
+        idle: "kimi> "
+      ),
+      .init(
+        kind: .droid,
+        working: "⠋ Esc to stop",
+        blocked: "EXECUTE\nenter to select\n> yes, allow",
+        idle: "droid> "
+      ),
+      .init(
+        kind: .amp,
+        working: "Esc to cancel",
+        blocked: "Waiting for approval\nInvoke tool\nApprove\nAllow all for this session",
+        idle: "amp> "
+      ),
+    ]
+
+    for sample in samples {
+      #expect(activity(sample.kind, sample.working) == .working)
+      if let blocked = sample.blocked {
+        #expect(activity(sample.kind, blocked) == .blocked)
+      }
+      #expect(activity(sample.kind, sample.idle) == .idle)
+    }
+  }
+
+  @Test
   func codexActivityDetectsWorkingAndBlockedStates() {
     #expect(
-      PaneAttentionInterpreter.classifyAgentActivity(
-        kind: .codex,
-        viewportText: "• Working (12s)"
-      ) == .working
+      activity(.codex, "• Working (12s)") == .working
     )
     #expect(
-      PaneAttentionInterpreter.classifyAgentActivity(
-        kind: .codex,
-        viewportText: "Allow command?\n[y/n]"
-      ) == .blocked
+      activity(.codex, "Allow command?\n[y/n]") == .blocked
     )
   }
 
@@ -446,10 +515,7 @@ struct PaneAttentionInterpreterTests {
     let oldWorking = Array(repeating: "• Working (1s)", count: 30).joined(separator: "\n")
     let recentIdle = oldWorking + "\n\ncodex> "
     #expect(
-      PaneAttentionInterpreter.classifyAgentActivity(
-        kind: .codex,
-        viewportText: recentIdle
-      ) == .idle
+      activity(.codex, recentIdle) == .idle
     )
   }
 
@@ -474,5 +540,19 @@ struct PaneAttentionInterpreterTests {
       lastWorkingAt: &lastWorkingAt
     )
     #expect(held == .working)
+  }
+
+  private func activity(
+    _ kind: AgentKind,
+    _ viewportText: String
+  ) -> PaneAttentionInterpreter.AgentActivityState {
+    PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: viewportText)
+  }
+
+  private struct AgentActivitySample {
+    let kind: AgentKind
+    let working: String
+    let blocked: String?
+    let idle: String
   }
 }
