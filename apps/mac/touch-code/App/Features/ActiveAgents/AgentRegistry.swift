@@ -200,8 +200,10 @@ final class AgentRegistry {
   /// flag and marks the pane as observed.
   func onPaneKeyboardActivity(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    if s.waitingForInput {
+    if s.waitingForInput || s.rawState == .blocked {
       s.lastViewportText = nil
+      s.lastWorkingAt = nil
+      s.rawState = .idle
     }
     s.userInputSeen = true
     s.waitingForInput = false
@@ -214,8 +216,10 @@ final class AgentRegistry {
   /// the user has observed the pane, so clear display-only attention.
   func onPaneFocused(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    if s.waitingForInput {
+    if s.waitingForInput || s.rawState == .blocked {
       s.lastViewportText = nil
+      s.lastWorkingAt = nil
+      s.rawState = .idle
     }
     s.waitingForInput = false
     s.seen = true
