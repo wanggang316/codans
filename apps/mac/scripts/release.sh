@@ -223,6 +223,11 @@ cmd_upload_symbols() {
     return 0
   fi
 
+  if [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT:-}" ]; then
+    log "SENTRY_ORG or SENTRY_PROJECT not set — skipping dSYM upload (release ${release_name})"
+    return 0
+  fi
+
   local sentry_cli
   if command -v mise >/dev/null 2>&1 && mise exec -- sentry-cli --version >/dev/null 2>&1; then
     sentry_cli="mise exec -- sentry-cli"
