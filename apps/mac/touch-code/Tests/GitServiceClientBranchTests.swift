@@ -5,11 +5,12 @@ import TouchCodeCore
 @testable import TouchCode
 
 struct GitServiceClientBranchTests {
-  /// `live(service:)` must forward the three new closures to the underlying service
-  /// 1:1, in argument order. Recorded calls double as a regression guard against the
-  /// `switchBranch` argument being flipped during refactors.
+  /// `live(service:)` must forward the new closures to the underlying service
+  /// 1:1, in argument order. Recorded calls double as a regression guard against
+  /// the `switchBranch` / `renameCurrentBranch` arguments being flipped during
+  /// refactors.
   @Test
-  func liveForwardsThreeNewClosuresToUnderlyingService() async throws {
+  func liveForwardsNewClosuresToUnderlyingService() async throws {
     let fake = FakeGitService()
     let client = GitServiceClient.live(service: fake)
     let url = URL(fileURLWithPath: "/tmp/x")
@@ -18,6 +19,7 @@ struct GitServiceClientBranchTests {
     _ = try await client.listAllBranches(url)
     try await client.switchBranch(.local(name: "main"), url)
     try await client.switchBranch(.remoteTracking(shortName: "origin/x"), url)
+    try await client.renameCurrentBranch("feat/renamed", url)
 
     let calls = fake.recordedCalls()
     #expect(
@@ -26,10 +28,11 @@ struct GitServiceClientBranchTests {
         .listAllBranches(url),
         .switchBranch(.local(name: "main"), url),
         .switchBranch(.remoteTracking(shortName: "origin/x"), url),
+        .renameCurrentBranch("feat/renamed", url),
       ])
   }
 
-  /// `testValue` must declare the three new closures so feature tests that override
+  /// `testValue` must declare the new closures so feature tests that override
   /// them with `withDependencies` see populated stored properties (the missing-key
   /// case would surface as a nil-closure trap at call site). This is a compile-time
   /// witness — `unimplemented(...)` itself is verified at runtime by feature tests
@@ -40,6 +43,7 @@ struct GitServiceClientBranchTests {
     _ = client.currentBranch
     _ = client.listAllBranches
     _ = client.switchBranch
+    _ = client.renameCurrentBranch
   }
 }
 
@@ -54,6 +58,7 @@ private final class FakeGitService: GitService, @unchecked Sendable {
     case currentBranch(URL)
     case listAllBranches(URL)
     case switchBranch(BranchSwitchTarget, URL)
+    case renameCurrentBranch(String, URL)
   }
 
   private let lock = NSLock()
@@ -83,6 +88,10 @@ private final class FakeGitService: GitService, @unchecked Sendable {
 
   func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws {
     record(.switchBranch(target, path))
+  }
+
+  func renameCurrentBranch(to newName: String, at path: URL) async throws {
+    record(.renameCurrentBranch(newName, path))
   }
 
   // === Unused protocol surface — trap if accidentally called. ===

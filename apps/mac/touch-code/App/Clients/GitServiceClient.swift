@@ -48,6 +48,8 @@ nonisolated struct GitServiceClient: Sendable {
   /// `GitError.exec(code, stderr)` with stderr verbatim; the popover reducer's banner
   /// extracts the first line.
   var switchBranch: @Sendable (BranchSwitchTarget, URL) async throws -> Void
+  /// `(newName, repoURL) -> Void`. `git branch -m <newName>`.
+  var renameCurrentBranch: @Sendable (String, URL) async throws -> Void
 }
 
 extension GitServiceClient {
@@ -75,7 +77,10 @@ extension GitServiceClient {
       localDiffStats: { url in try await service.localDiffStats(at: url) },
       currentBranch: { url in try await service.currentBranch(at: url) },
       listAllBranches: { url in try await service.listAllBranches(at: url) },
-      switchBranch: { target, url in try await service.switchBranch(to: target, at: url) }
+      switchBranch: { target, url in try await service.switchBranch(to: target, at: url) },
+      renameCurrentBranch: { newName, url in
+        try await service.renameCurrentBranch(to: newName, at: url)
+      }
     )
   }
 }
@@ -130,6 +135,9 @@ extension GitServiceClient: DependencyKey {
     ),
     switchBranch: unimplemented(
       "GitServiceClient.switchBranch"
+    ),
+    renameCurrentBranch: unimplemented(
+      "GitServiceClient.renameCurrentBranch"
     )
   )
 }

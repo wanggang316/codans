@@ -17,12 +17,29 @@ struct BranchRowView: View {
   /// in the same Project; the value is that worktree's folder name. Local
   /// rows only — remote rows are never marked blocked.
   let blockingWorktreeName: String?
+  /// True when this row is the current branch AND user clicked Rename.
+  /// The label collapses to a TextField bound to `renameDraft`.
+  let isRenaming: Bool
+  /// True while the rename effect is running. The TextField becomes
+  /// non-editable until the response arrives. Cosmetic — the reducer
+  /// guards re-entry separately.
+  let renameInFlight: Bool
+  /// Two-way binding to the reducer's `renameDraft` (composed by the
+  /// parent from `store.renameDraft` + `.renameDraftChanged`).
+  let renameDraft: Binding<String>
   let onCheckout: () -> Void
   let onRename: () -> Void
+  /// Dispatched on TextField submit (Return key).
+  let onRenameConfirm: () -> Void
+  /// Dispatched on Escape OR when the TextField loses focus without a
+  /// successful submission (e.g., user clicked outside the popover).
+  let onRenameCancel: () -> Void
 
   @State private var isHovered = false
+  @FocusState private var renameFocus: Bool
 
   private var isBlocked: Bool { blockingWorktreeName != nil }
+  private var showsRenameField: Bool { isCurrent && isRenaming }
 
   var body: some View {
     HStack(spacing: 6) {
@@ -42,10 +59,14 @@ struct BranchRowView: View {
         }
       }
       .frame(width: 12)
-      Text(ref.shortName)
-        .font(.body)
-        .lineLimit(1)
-        .truncationMode(.tail)
+      if showsRenameField {
+        renameField
+      } else {
+        Text(ref.shortName)
+          .font(.body)
+          .lineLimit(1)
+          .truncationMode(.tail)
+      }
       Spacer(minLength: 8)
       trailingAccessory
     }
@@ -62,15 +83,39 @@ struct BranchRowView: View {
     .accessibilityLabel(accessibilityLabel)
   }
 
+  // MARK: - Rename field
+
+  /// Inline TextField that replaces the branch label while `isRenaming` is
+  /// true. Auto-focused on appear so the user can type immediately;
+  /// Return submits, Esc cancels via `onExitCommand`.
+  private var renameField: some View {
+    TextField("", text: renameDraft, onCommit: onRenameConfirm)
+      .textFieldStyle(.plain)
+      .font(.body)
+      .focused($renameFocus)
+      .onAppear { renameFocus = true }
+      .onExitCommand(perform: onRenameCancel)
+      .disabled(renameInFlight)
+      .accessibilityIdentifier("branch_switcher.rename_field")
+  }
+
   // MARK: - Trailing accessory
 
-  /// Three mutually-exclusive presentations:
+  /// Four mutually-exclusive presentations:
+  ///   - Renaming + in-flight: small spinner (no button).
+  ///   - Renaming: no accessory — the TextField is the only affordance.
   ///   - Blocked: surface the blocking worktree's folder name (no button).
   ///   - Current + hovered: "Rename" button.
   ///   - Other + hovered (not blocked): "Checkout" button.
   @ViewBuilder
   private var trailingAccessory: some View {
-    if let blockingName = blockingWorktreeName {
+    if showsRenameField {
+      if renameInFlight {
+        ProgressView()
+          .controlSize(.mini)
+          .accessibilityIdentifier("branch_switcher.rename_spinner")
+      }
+    } else if let blockingName = blockingWorktreeName {
       Text("@\(blockingName)")
         .font(.caption2)
         .foregroundStyle(.tertiary)
@@ -114,8 +159,30 @@ struct BranchRowView: View {
     ref: BranchRef(shortName: "feat/header", isRemote: false, upstream: "origin/feat/header"),
     isCurrent: true,
     blockingWorktreeName: nil,
+    isRenaming: false,
+    renameInFlight: false,
+    renameDraft: .constant(""),
     onCheckout: {},
-    onRename: {}
+    onRename: {},
+    onRenameConfirm: {},
+    onRenameCancel: {}
+  )
+  .frame(width: 360)
+  .padding(.vertical, 4)
+}
+
+#Preview("current local renaming") {
+  BranchRowView(
+    ref: BranchRef(shortName: "feat/header", isRemote: false, upstream: "origin/feat/header"),
+    isCurrent: true,
+    blockingWorktreeName: nil,
+    isRenaming: true,
+    renameInFlight: false,
+    renameDraft: .constant("feat/header"),
+    onCheckout: {},
+    onRename: {},
+    onRenameConfirm: {},
+    onRenameCancel: {}
   )
   .frame(width: 360)
   .padding(.vertical, 4)
@@ -126,8 +193,13 @@ struct BranchRowView: View {
     ref: BranchRef(shortName: "bugfix/menu", isRemote: false, upstream: nil),
     isCurrent: false,
     blockingWorktreeName: nil,
+    isRenaming: false,
+    renameInFlight: false,
+    renameDraft: .constant(""),
     onCheckout: {},
-    onRename: {}
+    onRename: {},
+    onRenameConfirm: {},
+    onRenameCancel: {}
   )
   .frame(width: 360)
   .padding(.vertical, 4)
@@ -138,8 +210,13 @@ struct BranchRowView: View {
     ref: BranchRef(shortName: "feat/x", isRemote: false, upstream: nil),
     isCurrent: false,
     blockingWorktreeName: "wt-feat-x",
+    isRenaming: false,
+    renameInFlight: false,
+    renameDraft: .constant(""),
     onCheckout: {},
-    onRename: {}
+    onRename: {},
+    onRenameConfirm: {},
+    onRenameCancel: {}
   )
   .frame(width: 360)
   .padding(.vertical, 4)
@@ -150,8 +227,13 @@ struct BranchRowView: View {
     ref: BranchRef(shortName: "origin/feat/new-shell", isRemote: true, upstream: nil),
     isCurrent: false,
     blockingWorktreeName: nil,
+    isRenaming: false,
+    renameInFlight: false,
+    renameDraft: .constant(""),
     onCheckout: {},
-    onRename: {}
+    onRename: {},
+    onRenameConfirm: {},
+    onRenameCancel: {}
   )
   .frame(width: 360)
   .padding(.vertical, 4)

@@ -179,4 +179,9 @@ struct GitCommandTests {
         "refs/heads", "refs/remotes",
       ])
   }
+
+  @Test
+  func branchRenameArgvIsExact() {
+    #expect(GitCommand.branchRename(to: "feat/x") == ["branch", "-m", "feat/x"])
+  }
 }

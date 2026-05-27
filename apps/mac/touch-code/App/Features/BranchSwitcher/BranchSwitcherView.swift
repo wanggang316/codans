@@ -118,13 +118,21 @@ struct BranchSwitcherView: View {
           ref: ref,
           isCurrent: isCurrent,
           blockingWorktreeName: blockingWorktreeName,
+          isRenaming: store.renamingBranch == ref.shortName,
+          renameInFlight: store.renameInFlight,
+          renameDraft: Binding(
+            get: { store.renameDraft },
+            set: { store.send(.renameDraftChanged($0)) }
+          ),
           onCheckout: {
             guard !isCurrent, blockingWorktreeName == nil else { return }
             store.send(.branchTapped(target(for: ref, inventory: inventory)))
           },
           onRename: {
             store.send(.renameButtonTapped(currentBranchName: ref.shortName))
-          }
+          },
+          onRenameConfirm: { store.send(.renameConfirmed) },
+          onRenameCancel: { store.send(.renameCancelled) }
         )
       }
       if !remotes.isEmpty {
@@ -134,10 +142,15 @@ struct BranchSwitcherView: View {
             ref: ref,
             isCurrent: false,
             blockingWorktreeName: nil,
+            isRenaming: false,
+            renameInFlight: false,
+            renameDraft: .constant(""),
             onCheckout: {
               store.send(.branchTapped(target(for: ref, inventory: inventory)))
             },
-            onRename: {}
+            onRename: {},
+            onRenameConfirm: {},
+            onRenameCancel: {}
           )
         }
       }

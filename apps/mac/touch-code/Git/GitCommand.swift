@@ -124,4 +124,12 @@ nonisolated enum GitCommand {
       return ["switch", "--track", shortName]
     }
   }
+
+  /// `git branch -m <newName>` — rename the current branch. Single-arg form
+  /// (without `<from>`) is intentional: only the current branch is
+  /// renamable from the popover.
+  static func branchRename(to newName: String) -> [String] {
+    precondition(!newName.isEmpty, "branch rename target must be non-empty")
+    return ["branch", "-m", newName]
+  }
 }

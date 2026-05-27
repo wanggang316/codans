@@ -226,6 +226,11 @@ nonisolated final class LiveGitService: GitService {
     _ = try await run(arguments: GitCommand.switchBranch(target: target), cwd: path)
   }
 
+  func renameCurrentBranch(to newName: String, at path: URL) async throws {
+    try await ensureIsRepo(at: path)
+    _ = try await run(arguments: GitCommand.branchRename(to: newName), cwd: path)
+  }
+
   // MARK: - Edge checks
 
   /// Runs `git rev-parse --is-inside-work-tree` and throws `.notARepo` on failure. This is the

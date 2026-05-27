@@ -62,6 +62,16 @@ public nonisolated protocol GitService: Sendable {
   /// (BranchSwitcherFeature, T6) extracts the first line for the inline error
   /// banner. No pre-check; rely on git's native enforcement.
   func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws
+
+  /// `git branch -m <newName>` — rename the worktree's current branch. The
+  /// caller has already filtered out empty / unchanged names. Errors
+  /// (duplicate target name, invalid ref name, …) surface verbatim as
+  /// `GitError.exec(code, stderr)`; the popover renders the first stderr
+  /// line in the existing inline error banner. After success the worktree's
+  /// HEAD ref text becomes `ref: refs/heads/<newName>`, which the existing
+  /// `WorktreeHeadWatcher` picks up to refresh the catalog + clear the
+  /// inventory cache.
+  func renameCurrentBranch(to newName: String, at path: URL) async throws
 }
 
 extension GitService {

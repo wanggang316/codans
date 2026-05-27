@@ -17,6 +17,9 @@ import os.log
 ///   - `CancelID.switchOp` — the `git switch` effect. Cancelled on
 ///     `.worktreeChanged` so a stale switch can't write a banner into the
 ///     new worktree.
+///   - `CancelID.rename` — the `git branch -m` effect (Phase D). Cancelled
+///     on `.worktreeChanged` so a stale rename can't write a banner into
+///     the new worktree.
 @Reducer
 struct BranchSwitcherFeature {
   @ObservableState
@@ -43,6 +46,17 @@ struct BranchSwitcherFeature {
     /// has it as its current `Worktree.branch`. The view greys these rows
     /// and disables click.
     var blockedBranches: [String: String] = [:]
+    /// Non-nil while the user is editing the current branch's name in the
+    /// row's inline TextField. Holds the original branch name at the time
+    /// the user clicked Rename — used to detect "no-op edits" (draft equals
+    /// original) so we don't issue an empty `git branch -m`.
+    var renamingBranch: String?
+    /// The TextField's current contents. Updated by `renameDraftChanged`
+    /// from the view's two-way binding. Empty when no rename is in progress.
+    var renameDraft: String = ""
+    /// True while the `gitService.renameCurrentBranch` effect is in flight.
+    /// The TextField becomes read-only (or shows a spinner) while true.
+    var renameInFlight: Bool = false
   }
 
   enum SwitchError: Equatable {
@@ -61,6 +75,11 @@ struct BranchSwitcherFeature {
     case searchQueryChanged(String)
     case branchTapped(BranchSwitchTarget)
     case renameButtonTapped(currentBranchName: String)
+    case renameDraftChanged(String)
+    case renameConfirmed
+    case renameCancelled
+    case renameSucceeded
+    case renameFailed(GitError)
     case viewAllCommitsTapped
     case errorDismissed
     case inventoryLoaded(Result<BranchInventory, GitError>)
@@ -82,6 +101,7 @@ struct BranchSwitcherFeature {
     case inventory
     case commits
     case switchOp
+    case rename
   }
 
   @Dependency(GitServiceClient.self) private var gitService
@@ -116,10 +136,14 @@ struct BranchSwitcherFeature {
         // is "blocked" when another worktree in the same Project has it
         // checked out); the reducer just stores it for the view to read.
         state.blockedBranches = worktreeID == nil ? [:] : blockedBranches
+        state.renamingBranch = nil
+        state.renameDraft = ""
+        state.renameInFlight = false
         return .merge(
           .cancel(id: CancelID.inventory),
           .cancel(id: CancelID.commits),
-          .cancel(id: CancelID.switchOp)
+          .cancel(id: CancelID.switchOp),
+          .cancel(id: CancelID.rename)
         )
 
       case .popoverTapped:
@@ -179,8 +203,55 @@ struct BranchSwitcherFeature {
           switchTo(target, at: path)
         )
 
-      case .renameButtonTapped:
-        // Pending (Phase D): start the inline rename flow.
+      case .renameButtonTapped(let currentBranchName):
+        // Begin inline rename. Pre-fill the draft with the current name and
+        // clear any prior switch / rename error so the banner doesn't shadow
+        // the new edit.
+        guard !state.renameInFlight else { return .none }
+        state.renamingBranch = currentBranchName
+        state.renameDraft = currentBranchName
+        state.switchError = nil
+        return .none
+
+      case .renameDraftChanged(let draft):
+        state.renameDraft = draft
+        return .none
+
+      case .renameConfirmed:
+        let trimmed = state.renameDraft.trimmingCharacters(in: .whitespaces)
+        // Treat empty / unchanged drafts as a silent cancel — no point
+        // round-tripping through git, and "rename to same name" is the
+        // natural "I changed my mind" affordance.
+        guard let original = state.renamingBranch,
+          !trimmed.isEmpty,
+          trimmed != original,
+          let path = state.worktreePath, !path.isEmpty
+        else {
+          return .send(.renameCancelled)
+        }
+        state.renameInFlight = true
+        return renameCurrentBranchEffect(to: trimmed, worktreePath: path)
+
+      case .renameCancelled:
+        state.renamingBranch = nil
+        state.renameDraft = ""
+        state.renameInFlight = false
+        return .none
+
+      case .renameSucceeded:
+        // The WorktreeHeadWatcher will fire `.headChangedForCurrentWorktree`
+        // shortly afterwards, which resets the inventory + commits caches.
+        // Just clean up the inline-edit fields here.
+        state.renamingBranch = nil
+        state.renameDraft = ""
+        state.renameInFlight = false
+        return .none
+
+      case .renameFailed(let error):
+        state.renamingBranch = nil
+        state.renameDraft = ""
+        state.renameInFlight = false
+        state.switchError = .message(error.firstLine())
         return .none
 
       case .viewAllCommitsTapped:
@@ -241,6 +312,11 @@ struct BranchSwitcherFeature {
         state.recentCommits = nil
         state.commitsError = nil
         state.switchError = nil
+        // Also clear inline rename state — the branch name has changed
+        // out from under us.
+        state.renamingBranch = nil
+        state.renameDraft = ""
+        state.renameInFlight = false
         return .none
 
       case .delegate:
@@ -296,6 +372,23 @@ struct BranchSwitcherFeature {
       }
     }
     .cancellable(id: CancelID.switchOp, cancelInFlight: true)
+  }
+
+  private func renameCurrentBranchEffect(
+    to newName: String,
+    worktreePath: String
+  ) -> Effect<Action> {
+    .run { [gitService] send in
+      do {
+        try await gitService.renameCurrentBranch(newName, URL(fileURLWithPath: worktreePath))
+        await send(.renameSucceeded)
+      } catch let error as GitError {
+        await send(.renameFailed(error))
+      } catch {
+        await send(.renameFailed(.unparsable(context: "\(error)")))
+      }
+    }
+    .cancellable(id: CancelID.rename, cancelInFlight: true)
   }
 }
 

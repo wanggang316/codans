@@ -399,4 +399,209 @@ struct BranchSwitcherFeatureTests {
       state.commitsError = nil
     }
   }
+
+  // MARK: - 11. renameButtonTapped enters inline edit mode
+
+  @Test
+  func renameButtonTappedEntersInlineEditMode() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    // Pre-existing banner should be cleared when the user opens a rename.
+    state.switchError = .message("stale switch error")
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.renameButtonTapped(currentBranchName: "feat/x")) { state in
+      state.renamingBranch = "feat/x"
+      state.renameDraft = "feat/x"
+      state.switchError = nil
+    }
+  }
+
+  // MARK: - 12. renameDraftChanged updates draft
+
+  @Test
+  func renameDraftChangedUpdatesDraft() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.renamingBranch = "x"
+    state.renameDraft = "x"
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.renameDraftChanged("y")) { state in
+      state.renameDraft = "y"
+    }
+  }
+
+  // MARK: - 13. renameConfirmed with same name cancels
+
+  @Test
+  func renameConfirmedWithSameNameCancels() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.renamingBranch = "x"
+    // Surrounding whitespace must trim to the same name; treated as a no-op.
+    state.renameDraft = "  x  "
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.renameConfirmed)
+    await store.receive(.renameCancelled) { state in
+      state.renamingBranch = nil
+      state.renameDraft = ""
+      state.renameInFlight = false
+    }
+  }
+
+  // MARK: - 14. renameConfirmed with empty draft cancels
+
+  @Test
+  func renameConfirmedWithEmptyDraftCancels() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.renamingBranch = "x"
+    state.renameDraft = "  "
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.renameConfirmed)
+    await store.receive(.renameCancelled) { state in
+      state.renamingBranch = nil
+      state.renameDraft = ""
+      state.renameInFlight = false
+    }
+  }
+
+  // MARK: - 15. renameConfirmed kicks effect and succeeds
+
+  @Test
+  func renameConfirmedKicksRenameEffectAndSucceeds() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID, path: "/tmp/repo")
+    state.renamingBranch = "x"
+    state.renameDraft = "y"
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.renameCurrentBranch = { _, _ in }
+    }
+
+    await store.send(.renameConfirmed) { state in
+      state.renameInFlight = true
+    }
+    await store.receive(.renameSucceeded) { state in
+      state.renamingBranch = nil
+      state.renameDraft = ""
+      state.renameInFlight = false
+    }
+  }
+
+  // MARK: - 16. renameConfirmed surfaces git error as banner
+
+  @Test
+  func renameConfirmedSurfacesGitErrorAsBanner() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let stderr = "fatal: A branch named 'main' already exists.\n"
+    let firstLine = "fatal: A branch named 'main' already exists."
+    let error = GitError.exec(code: 128, stderr: stderr)
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID, path: "/tmp/repo")
+    state.renamingBranch = "x"
+    state.renameDraft = "main"
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.renameCurrentBranch = { _, _ in
+        throw error
+      }
+    }
+
+    await store.send(.renameConfirmed) { state in
+      state.renameInFlight = true
+    }
+    await store.receive(.renameFailed(error)) { state in
+      state.renamingBranch = nil
+      state.renameDraft = ""
+      state.renameInFlight = false
+      state.switchError = .message(firstLine)
+    }
+  }
+
+  // MARK: - 17. renameCancelled clears state
+
+  @Test
+  func renameCancelledClearsState() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.renamingBranch = "x"
+    state.renameDraft = "y"
+    state.renameInFlight = true
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.renameCancelled) { state in
+      state.renamingBranch = nil
+      state.renameDraft = ""
+      state.renameInFlight = false
+    }
+  }
+
+  // MARK: - 18. headChangedForCurrentWorktree clears rename state
+
+  @Test
+  func headChangedForCurrentWorktreeClearsRenameState() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
+    state.inventory = Self.sampleInventory()
+    state.recentCommits = Self.sampleCommits()
+    state.renamingBranch = "x"
+    state.renameDraft = "y"
+    state.renameInFlight = true
+
+    let store = TestStore(initialState: state) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+
+    await store.send(.headChangedForCurrentWorktree) { state in
+      state.inventory = nil
+      state.recentCommits = nil
+      state.renamingBranch = nil
+      state.renameDraft = ""
+      state.renameInFlight = false
+    }
+  }
 }
