@@ -83,9 +83,10 @@ public nonisolated enum AgentKindPatterns {
 
   private static func matchProcessCandidate(_ candidate: String) -> AgentKind? {
     let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+      .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
     guard !trimmed.isEmpty else { return nil }
-    let basename = (trimmed as NSString).lastPathComponent.lowercased()
-    let normalized = trimmed.lowercased()
+    let basename = normalizeExecutableName((trimmed as NSString).lastPathComponent)
+    let normalized = normalizeExecutableName(trimmed)
 
     for kind in AgentKind.allCases {
       guard let patterns = processName[kind] else { continue }
@@ -97,5 +98,16 @@ public nonisolated enum AgentKindPatterns {
       }
     }
     return nil
+  }
+
+  private static func normalizeExecutableName(_ raw: String) -> String {
+    var value = raw.lowercased()
+    if value.hasPrefix("-") {
+      value.removeFirst()
+    }
+    if value.hasSuffix(".js") {
+      value.removeLast(3)
+    }
+    return value
   }
 }

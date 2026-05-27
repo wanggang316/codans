@@ -239,6 +239,13 @@ final class PaneSurface {
     return Int32(value)
   }
 
+  func childProcessID() -> Int32? {
+    guard let surface else { return nil }
+    let value = ghostty_surface_child_process_id(surface)
+    guard value > 0, value <= UInt64(Int32.max) else { return nil }
+    return Int32(value)
+  }
+
   /// Apply a color scheme to this surface and request a redraw. No-op after `close()`.
   /// Called by `GhosttyRuntime.setColorScheme(_:)` when the app's resolved
   /// color scheme changes (either user picker toggle or OS-level appearance flip).

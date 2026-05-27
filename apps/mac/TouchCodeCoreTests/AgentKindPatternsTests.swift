@@ -74,6 +74,18 @@ struct AgentKindPatternsTests {
   }
 
   @Test
+  func foregroundJob_matchesJavaScriptEntrypointInWrapper() {
+    #expect(
+      AgentKindPatterns.classify(
+        foregroundJob: Self.job(
+          argv0: "node",
+          commandLine: "node /Users/me/.npm/_npx/bin/codex.js --resume"
+        )
+      ) == .codex
+    )
+  }
+
+  @Test
   func foregroundJob_matchesCursorAgentAliasInGenericAgentProcess() {
     #expect(
       AgentKindPatterns.classify(

@@ -61,6 +61,7 @@ final class TerminalEngine {
   private var foregroundJobPollTask: Task<Void, Never>?
   private var foregroundJobPaneIDs: Set<PaneID> = []
   private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
+  private var foregroundJobMisses: [PaneID: UInt8] = [:]
   private let clock: @Sendable () -> Date
   private var finished = false
 
@@ -261,6 +262,7 @@ final class TerminalEngine {
     ghosttyRuntime?.unregister(paneID: paneID)
     foregroundJobPaneIDs.remove(paneID)
     foregroundJobSnapshots.removeValue(forKey: paneID)
+    foregroundJobMisses.removeValue(forKey: paneID)
     stopForegroundJobPollingIfIdle()
   }
 
@@ -501,7 +503,12 @@ final class TerminalEngine {
 
     var groupByPane: [PaneID: Int32] = [:]
     for paneID in foregroundJobPaneIDs {
-      guard let groupID = ghosttyRuntime.surface(for: paneID)?.foregroundProcessGroupID() else {
+      guard let surface = ghosttyRuntime.surface(for: paneID),
+        let groupID = foregroundJobReader.resolveProcessGroupID(
+          preferred: surface.foregroundProcessGroupID(),
+          childPID: surface.childProcessID()
+        )
+      else {
         continue
       }
       groupByPane[paneID] = groupID
@@ -521,6 +528,13 @@ final class TerminalEngine {
 
       if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
         continue
+      }
+      if next.isEmpty {
+        let misses = min((foregroundJobMisses[paneID] ?? 0) + 1, 3)
+        foregroundJobMisses[paneID] = misses
+        guard misses >= 3 else { continue }
+      } else {
+        foregroundJobMisses[paneID] = 0
       }
       guard foregroundJobSnapshots[paneID] != next else { continue }
       foregroundJobSnapshots[paneID] = next
