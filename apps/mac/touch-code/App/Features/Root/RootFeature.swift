@@ -449,6 +449,13 @@ struct RootFeature {
                 // still need to remove the Pane from the catalog so the
                 // SplitTree collapses and no stale black rect is rendered.
                 await send(.paneLifecycleExited(paneID))
+              case .paneCrashed(let paneID, _):
+                // The pane stays in the catalog for the user to retry, but
+                // its OSC 9;4 running flag would otherwise leak: a crashing
+                // program rarely gets a chance to emit the REMOVE state
+                // that closes out the indicator. Force-clear so the
+                // tab-chip / sidebar spinners do not pin on a dead pane.
+                await send(.paneProgressBusyChanged(paneID, false))
               case .paneInfoChanged(let paneID, .progress(let state, _)):
                 // OSC 9;4 progress reports drive the per-pane "executing"
                 // signal. Any non-REMOVE state (set / indeterminate /
