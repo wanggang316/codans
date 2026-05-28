@@ -28,6 +28,7 @@ public nonisolated enum TerminalEvent: Sendable {
   /// 16 KB buffer boundary — consumers that decode text (scrollback viewer,
   /// C3 hook matchers) must buffer across batches per pane.
   case paneOutput(PaneID, Data)
+  case paneViewportChanged(PaneID, text: String)
   case paneIdle(PaneID, duration: TimeInterval)
   /// Clean child exit. `code` is the exit status; `signal` is non-nil when
   /// the child was terminated by a signal (SIGKILL / SIGTERM / etc.) and
@@ -49,6 +50,7 @@ public nonisolated enum TerminalEvent: Sendable {
   /// before emission so subscribers can choose between reading the
   /// `@Observable` state or reacting to the delta directly.
   case paneInfoChanged(PaneID, PaneInfoDelta)
+  case foregroundJobChanged(PaneID, ForegroundJob)
   /// Runtime decoded a tab / split intent. Consumed exclusively by
   /// `PaneActionRouterFeature` — other features must not subscribe.
   case paneActionRequested(PaneID, PaneActionRequest)

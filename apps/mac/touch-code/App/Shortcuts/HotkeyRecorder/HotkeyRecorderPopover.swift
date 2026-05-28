@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TouchCodeCore
 
-/// Raycast / supacode-style chord recorder popover.
+/// Raycast-style chord recorder popover.
 ///
 /// Sits inside `.popover(isPresented:)` from a row's chord button. Self-owns the recorder
 /// `NSView` (mounted as a 0×0 background) and fans live `flagsChanged` previews into the

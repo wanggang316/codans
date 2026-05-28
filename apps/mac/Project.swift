@@ -313,6 +313,7 @@ let project = Project(
         .target(name: "GhosttyKit"),
         .external(name: "ComposableArchitecture"),
         .external(name: "Sparkle"),
+        .external(name: "Sentry"),
       ],
       settings: .settings(
         base: [

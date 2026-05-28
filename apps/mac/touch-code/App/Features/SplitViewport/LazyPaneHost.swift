@@ -74,12 +74,12 @@ struct LazyPaneHost: View {
   }
 
   private var loadingPlaceholder: some View {
-    // Spinner + a shimmering caption match supacode's launch beat for
-    // panes that are still negotiating with the engine. Background
-    // tracks Ghostty's terminal `background` color so the hand-off to
-    // the live surface is a no-op visually — switching to a fresh
-    // worktree previously flashed grey (underPageBackgroundColor) for
-    // the spawn window before settling onto the terminal's theme tone.
+    // Spinner + shimmering caption for panes that are still negotiating
+    // with the engine. Background tracks Ghostty's terminal `background`
+    // color so the hand-off to the live surface is a no-op visually —
+    // switching to a fresh worktree previously flashed grey
+    // (underPageBackgroundColor) for the spawn window before settling
+    // onto the terminal's theme tone.
     let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
     return VStack(spacing: 8) {
       Image(systemName: "apple.terminal.on.rectangle")

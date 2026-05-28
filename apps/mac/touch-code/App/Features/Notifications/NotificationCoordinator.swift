@@ -15,7 +15,7 @@ import os.log
 /// captured at construction so a same-tick toggle flip is honoured.
 ///
 /// M4.T1 will lift the `DropReason` enum into `TouchCodeCore.InboxDropReason`
-/// (shared with `DetectionTranslator.Step.drop`); the case names are pinned
+/// (shared with `PaneAttentionInterpreter.Step.drop`); the case names are pinned
 /// so the lift is mechanical.
 @MainActor
 final class NotificationCoordinator {
@@ -329,10 +329,10 @@ final class NotificationCoordinator {
 
   /// Local to M2.T2. M4.T1 will lift this into
   /// `TouchCodeCore.InboxDropReason` (shared with
-  /// `DetectionTranslator.Step.drop`). Case names are pinned so the lift is
+  /// `PaneAttentionInterpreter.Step.drop`). Case names are pinned so the lift is
   /// mechanical. `paneMuted`, `commandFinishedDisabled`,
   /// `commandFinishedShort`, `commandCancelled`, `userTypingRecently` are
-  /// reserved for the translator log line — the coordinator itself does not
+  /// reserved for the interpreter log line — the coordinator itself does not
   /// emit them today.
   enum DropReason: String, Equatable, Sendable {
     case sourceIsFocused

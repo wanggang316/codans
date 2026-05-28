@@ -1,8 +1,8 @@
 import Foundation
 import Testing
 
-@testable import TouchCodeCore
 @testable import TouchCode
+@testable import TouchCodeCore
 
 @MainActor
 struct HierarchyManagerLivePwdTests {

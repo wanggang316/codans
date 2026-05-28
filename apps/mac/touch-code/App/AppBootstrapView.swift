@@ -1,19 +1,15 @@
 import SwiftUI
 
 /// Full-window placeholder shown while `AppState.bringUp()` is still
-/// constructing the TCA store / TerminalEngine / IPC stack. Ported from
-/// supacode's `DetailPlaceholderView`: a primary spinner sitting above a
-/// rotating one-liner that shimmers between transitions, so the gap
-/// between the window appearing and the catalog landing reads as
-/// purposeful instead of "the app is frozen". Identical visual idiom
-/// across the two products keeps the launch beat coherent for users
-/// running both side-by-side.
+/// constructing the TCA store / TerminalEngine / IPC stack. A primary
+/// spinner sits above a rotating one-liner that shimmers between
+/// transitions, so the gap between the window appearing and the catalog
+/// landing reads as purposeful instead of "the app is frozen".
 struct AppBootstrapView: View {
   @State private var messageIndex = Int.random(in: 0..<Self.messages.count)
 
-  /// Curated launch-time messages. Mostly drop-in from supacode (so the
-  /// two apps feel like siblings on launch); a couple are touch-code
-  /// specific. Pure flavor — no localization, no telemetry hook.
+  /// Curated launch-time messages. Pure flavor — no localization, no
+  /// telemetry hook.
   private static let messages = [
     "Starting TouchCode…",
     "Preparing your worktree…",

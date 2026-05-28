@@ -14,7 +14,11 @@ public nonisolated enum ProjectLoadState: Equatable, Sendable {
 
 public nonisolated struct Project: Equatable, Sendable, Identifiable {
   public var id: ProjectID
-  public var name: String
+  /// User-set display override. `nil` means the project shows under its
+  /// canonical name — the last path component of `rootPath`. Renaming via
+  /// Settings → General → Name writes here; clearing the field writes `nil`.
+  /// Persistence-only; `name` is still the right thing to read at call sites.
+  public var displayName: String?
   public var rootPath: String
   public var gitRoot: String?
   public var worktrees: [Worktree]
@@ -48,6 +52,10 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// on their `catalog.projects` array position, which equals their
   /// historical sidebar order — i.e. a no-op upgrade.
   public var manualOrder: Int
+  /// User-assigned Project accent. `nil` = no color (system accent).
+  /// Edited via Settings → Projects → General. Encoded only when set so
+  /// catalogs without a color stay byte-identical on round-trip.
+  public var color: ProjectColor?
   /// Transient. See `ProjectLoadState` doc-comment.
   public var loadState: ProjectLoadState
 
@@ -63,11 +71,17 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     addedAt: Date = Date(),
     lastActiveAt: Date? = nil,
     manualOrder: Int = 0,
+    color: ProjectColor? = nil,
     loadState: ProjectLoadState = .loading
   ) {
     self.id = id
-    self.name = name
     self.rootPath = rootPath
+    // Compress the legacy `name:` argument into the canonical/override split.
+    // A value equal to the canonical (or empty) means "no override" — keeps
+    // every existing caller (tests, addProject) source-compatible while the
+    // semantics of `Project.name` move under the hood.
+    let canonical = (rootPath as NSString).lastPathComponent
+    self.displayName = (name.isEmpty || name == canonical) ? nil : name
     self.gitRoot = gitRoot
     self.worktrees = worktrees
     self.selectedWorktreeID = selectedWorktreeID
@@ -76,6 +90,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     self.addedAt = addedAt
     self.lastActiveAt = lastActiveAt
     self.manualOrder = manualOrder
+    self.color = color
     self.loadState = loadState
   }
 
@@ -83,19 +98,42 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// For non-git Projects, the UI presents a single synthetic Worktree (`Project.rootPath`)
   /// and the "Add Worktree" affordance is suppressed.
   public var supportsWorktrees: Bool { gitRoot != nil }
+
+  /// Path-derived fallback name. Identical to `name` when the user hasn't
+  /// set a custom `displayName`. Worktree base-directory resolution uses
+  /// this so renaming a project never relocates its worktrees on disk.
+  public var canonicalName: String {
+    (rootPath as NSString).lastPathComponent
+  }
+
+  /// Effective name shown in sidebars, the Settings header, and any other
+  /// label surface. Reads through the override → canonical chain so a
+  /// `nil` `displayName` transparently renders as the canonical name.
+  public var name: String { displayName ?? canonicalName }
 }
 
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, rootPath, gitRoot, worktrees, selectedWorktreeID, isExpanded, tagIDs,
-      addedAt, lastActiveAt, manualOrder
+    case id, name, displayName, rootPath, gitRoot, worktrees, selectedWorktreeID, isExpanded,
+      tagIDs, addedAt, lastActiveAt, manualOrder, color
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.id = try container.decode(ProjectID.self, forKey: .id)
-    self.name = try container.decode(String.self, forKey: .name)
     self.rootPath = try container.decode(String.self, forKey: .rootPath)
+    // Migration: prefer the explicit `displayName` key when present. Fall back
+    // to the legacy `name` field — keeping it as the override only when it
+    // differs from the canonical path-derived name (else it's redundant and
+    // gets normalized away).
+    let canonicalForDecode = (self.rootPath as NSString).lastPathComponent
+    if let explicit = try container.decodeIfPresent(String.self, forKey: .displayName) {
+      self.displayName = explicit.isEmpty ? nil : explicit
+    } else if let legacy = try container.decodeIfPresent(String.self, forKey: .name) {
+      self.displayName = (legacy.isEmpty || legacy == canonicalForDecode) ? nil : legacy
+    } else {
+      self.displayName = nil
+    }
     self.gitRoot = try container.decodeIfPresent(String.self, forKey: .gitRoot)
     self.worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
     self.selectedWorktreeID = try container.decodeIfPresent(WorktreeID.self, forKey: .selectedWorktreeID)
@@ -108,13 +146,18 @@ extension Project: Codable {
     self.addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt) ?? .distantPast
     self.lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
     self.manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
+    self.color = try container.decodeIfPresent(ProjectColor.self, forKey: .color)
     self.loadState = .loading
   }
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(id, forKey: .id)
+    // `name` is written verbatim as the effective (computed) name so older
+    // builds that don't know about `displayName` still render the project
+    // under the right label. `displayName` is the source of truth on read.
     try container.encode(name, forKey: .name)
+    try container.encodeIfPresent(displayName, forKey: .displayName)
     try container.encode(rootPath, forKey: .rootPath)
     try container.encodeIfPresent(gitRoot, forKey: .gitRoot)
     try container.encode(worktrees, forKey: .worktrees)
@@ -143,6 +186,7 @@ extension Project: Codable {
     if manualOrder != 0 {
       try container.encode(manualOrder, forKey: .manualOrder)
     }
+    try container.encodeIfPresent(color, forKey: .color)
     // `loadState` intentionally not encoded (transient).
   }
 }

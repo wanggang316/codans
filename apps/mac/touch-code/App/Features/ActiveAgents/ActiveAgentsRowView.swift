@@ -30,6 +30,11 @@ struct ActiveAgentsRowView: View {
   /// Defaults false so older call sites that don't pass it (legacy
   /// popover view, tests) still compile.
   var isSelected: Bool = false
+  /// Row density — `normal` keeps the two-line identity column;
+  /// `compact` joins worktree and project on one line and tightens
+  /// vertical padding. Defaults to `.normal` so the legacy popover
+  /// caller and tests render unchanged without opt-in.
+  var displayMode: AgentsViewDisplayMode = .normal
   let onTap: () -> Void
 
   @State private var isHovering = false
@@ -38,15 +43,26 @@ struct ActiveAgentsRowView: View {
   var body: some View {
     Button(action: onTap) {
       HStack(alignment: .center, spacing: 10) {
-        // Logo tint darkens to `.primary` on the selected row so it
-        // reads alongside the bolder title.
+        // Logo tint darkens to `.primary` on the selected row — the
+        // primary visual signal that this row is the current focus.
         AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
         identityColumn
-        Spacer(minLength: 8)
+        // Compact mode packs status right after identity (no greedy
+        // spacer) so the project name and the status icon read as a
+        // single tight unit on the trailing side of the row. Normal
+        // mode keeps the spacer so status pins to the row's right
+        // edge against the two-line identity column.
+        if displayMode == .normal {
+          Spacer(minLength: 8)
+        }
         statusColumn
       }
       .padding(.horizontal, 12)
-      .padding(.vertical, 8)
+      // Compact mode tightens the row to roughly two-thirds of the
+      // normal vertical padding so a single-line identity reads as
+      // genuinely denser, not just one line collapsed into the same
+      // height.
+      .padding(.vertical, displayMode == .compact ? 4 : 8)
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
       .background(rowBackground)
@@ -68,25 +84,55 @@ struct ActiveAgentsRowView: View {
     }
   }
 
-  /// Two-line identity column: worktree (branch) name on top, project
-  /// name beneath. The primary line carries the
-  /// `activeAgents.row.<paneID>.headline` accessibility identifier
-  /// (the headline contract surface stays on the user-facing top line
-  /// of the row).
+  /// Identity column. `normal` stacks worktree (primary, callout) over
+  /// project (secondary, caption); `compact` keeps worktree at the
+  /// leading edge and pushes project all the way to the trailing edge
+  /// via an internal `Spacer`, so the project name visually right-
+  /// aligns against the status icon. The primary line carries the
+  /// `activeAgents.row.<paneID>.headline` accessibility identifier in
+  /// both modes (the headline contract surface stays on the user-
+  /// facing worktree text).
+  @ViewBuilder
   private var identityColumn: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(worktreeName)
-        .font(.callout)
-        .fontWeight(isSelected ? .semibold : .regular)
-        .foregroundStyle(.primary)
-        .lineLimit(1)
-        .truncationMode(.middle)
-        .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
-      Text(projectName)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .truncationMode(.middle)
+    switch displayMode {
+    case .normal:
+      VStack(alignment: .leading, spacing: 2) {
+        Text(worktreeName)
+          .font(.subheadline)
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+        Text(projectName)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .padding(.leading, 8)
+      }
+    case .compact:
+      // Single-line variant: worktree at the leading edge, a small
+      // fixed gap, then project right after. Both share the available
+      // width — no `Spacer` or `layoutPriority` pushing one to a row
+      // edge, since a long branch name plus a forced trailing-edge
+      // project crushes the project text to a single letter. With
+      // equal priority both truncate proportionally and stay
+      // readable. The HStack intrinsic-sizes; the outer row's
+      // `Spacer(minLength: 8)` between identityColumn and
+      // statusColumn keeps the gap to the status icon.
+      HStack(spacing: 8) {
+        Text(worktreeName)
+          .font(.subheadline)
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+        Text(projectName)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+      }
     }
   }
 
@@ -94,8 +140,8 @@ struct ActiveAgentsRowView: View {
   /// - Selected (this pane is the main window's current focus): a
   ///   muted gray fill (per design feedback — orange is reserved for
   ///   "needs attention" / waiting state, accent blue is reserved for
-  ///   progress, so selection rides on neutral grey + bolder title to
-  ///   stand out).
+  ///   progress, so selection rides on neutral grey + a darker logo
+  ///   tint to stand out).
   /// - Hovering (pointer over the row): a softer gray wash so the row
   ///   feels clickable even when not selected.
   /// - Default: clear.
@@ -104,8 +150,8 @@ struct ActiveAgentsRowView: View {
   @ViewBuilder
   private var rowBackground: some View {
     // Selected and hovering share the same soft gray wash — selection
-    // is signalled by the bolder title + darker logo (set elsewhere
-    // in the row), not by a heavier background fill.
+    // is signalled by the darker logo tint (set elsewhere in the row),
+    // not by a heavier background fill.
     if isSelected || isHovering {
       Color.gray.opacity(0.08)
     } else {
@@ -257,7 +303,8 @@ private struct LoadingGridIcon: View {
     // Before the begin offset on the first cycle, SVG shows the cell
     // at full opacity (default fill). Compute the phase modulo `cycle`
     // so the wraparound case continues looping after the first cycle.
-    let phase = elapsed >= 0
+    let phase =
+      elapsed >= 0
       ? elapsed.truncatingRemainder(dividingBy: Self.cycle) / Self.cycle
       : 0.0
     if phase < 0.9 {

@@ -8,6 +8,41 @@ import TouchCodeCore
 @MainActor
 struct RootFeatureTests {
   @Test
+  func paneCrashedClearsRunningFlag() async {
+    // Crashed panes stay in the catalog for the user to retry. The OSC 9;4
+    // running flag must be force-cleared here because a crashing program
+    // rarely emits the REMOVE state itself, which would otherwise leave
+    // the tab-chip / sidebar spinners pinned on a dead pane forever.
+    let (eventStream, eventContinuation) = AsyncStream<TerminalEvent>.makeStream()
+    let (selectionStream, selectionContinuation) = AsyncStream<HierarchySelection>.makeStream()
+    let paneID = PaneID()
+    let markedIdle = LockIsolated<PaneID?>(nil)
+
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { eventStream }
+      $0.hierarchyClient.selectionChanges = { selectionStream }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.markPaneIdle = { id in
+        markedIdle.withValue { $0 = id }
+      }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.onLaunch)
+    eventContinuation.yield(.paneCrashed(paneID, reason: "test"))
+    await store.receive(\.paneProgressBusyChanged)
+
+    eventContinuation.finish()
+    selectionContinuation.finish()
+    await store.send(.onQuit)
+
+    #expect(markedIdle.value == paneID)
+  }
+
+  @Test
   func onLaunchReceivesEngineEventThenCancels() async {
     let (eventStream, eventContinuation) = AsyncStream<TerminalEvent>.makeStream()
     let (selectionStream, selectionContinuation) = AsyncStream<HierarchySelection>.makeStream()
@@ -490,6 +525,10 @@ struct RootFeatureTests {
     // Worktree. With `worktreeID: nil`, DiffFeature returns `.cancel(...)` —
     // no further actions follow.
     await store.receive(\.diff.worktreeSelected)
+    // T10: `.selectionChanged` also forwards into `.branchSwitcher(.worktreeChanged)`.
+    // All-nil ids leave State at its defaults (initial state matches the
+    // mutation), so the assertion is a no-change receive.
+    await store.receive(\.branchSwitcher.worktreeChanged)
 
     selectionContinuation.finish()
     await store.send(.onQuit)
@@ -509,6 +548,7 @@ struct RootFeatureTests {
       (.paneCreated(pane, tab), .paneCreated),
       (.paneReady(pane), .paneReady),
       (.paneOutput(pane, Data([0x01])), .paneOutput),
+      (.paneViewportChanged(pane, text: "screen"), .paneViewportChanged),
       (.paneIdle(pane, duration: 1), .paneIdle),
       (.paneExited(pane, code: 0, signal: nil), .paneExited),
       (.paneCrashed(pane, reason: "x"), .paneCrashed),
@@ -517,6 +557,7 @@ struct RootFeatureTests {
       (.tabAutoClosed(tab, cause: .other(reason: "x")), .tabAutoClosed),
       (.worktreeActivated(worktree), .worktreeActivated),
       (.hierarchyMutated(.catalog), .hierarchyMutated),
+      (.foregroundJobChanged(pane, ForegroundJob(processGroupID: 1, processes: [])), .foregroundJobChanged),
     ]
     for (event, expected) in cases {
       #expect(RootFeature.LastEventMarker(event) == expected)
@@ -954,5 +995,99 @@ struct RootFeatureTests {
           .openShellEditorRequested(worktreePath: worktreePath, projectID: projectID))))
     await store.receive(
       .openShellEditorInWorktree(worktreePath: worktreePath, projectID: projectID))
+  }
+
+  // MARK: - FU-T10 BranchSwitcher root-level routing
+
+  @Test
+  func worktreeHeadChangedForwardsToBranchSwitcherWhenIDMatches() async {
+    // T10 wired `RootFeature.worktreeHeadChanged` to forward into
+    // `branchSwitcher.headChangedForCurrentWorktree` ONLY when the changed
+    // worktree matches the popover's currently-bound worktreeID. This test
+    // pins the match arm of that filter.
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    let catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB,
+      aVisible: false, bVisible: false
+    )
+
+    var initial = RootFeature.State()
+    initial.branchSwitcher.worktreeID = worktreeA
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.worktreeHeadChanged(worktreeA))
+    await store.receive(\.branchSwitcher.headChangedForCurrentWorktree)
+    await store.finish()
+  }
+
+  @Test
+  func worktreeHeadChangedDoesNotForwardWhenIDDoesNotMatch() async {
+    // Complement to the match-arm test: HEAD changes on a worktree that is
+    // NOT the one the popover is currently bound to must not invalidate
+    // the popover's caches.
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    let catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB,
+      aVisible: false, bVisible: false
+    )
+
+    var initial = RootFeature.State()
+    initial.branchSwitcher.worktreeID = worktreeA
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+    }
+    store.exhaustivity = .off
+
+    // HEAD changes on the *other* worktree. With `exhaustivity = .off` the
+    // absence of a forward is implicit; `store.finish()` makes it explicit
+    // by asserting no leftover effects produced a `headChangedForCurrentWorktree`.
+    await store.send(.worktreeHeadChanged(worktreeB))
+    await store.finish()
+  }
+
+  @Test
+  func openDiffViewerOnHistoryTabDelegateMakesInspectorVisible() async {
+    // FU-T10 fix: the `openDiffViewerOnHistoryTab` delegate handler must
+    // bypass the 3-tier Git Viewer resolution and force the in-app inspector
+    // visible directly via `hierarchyClient.setWorktreeDiffInspectorVisible`.
+    // Users with an external Git Viewer (Tower / Fork) configured as their
+    // default would otherwise see the external app open instead — and the
+    // follow-up `.diff(.tabSelected(.history))` dispatch would be impossible.
+    let worktreeID = WorktreeID()
+    let projectID = ProjectID()
+    let recorded = LockIsolated<[(WorktreeID, Bool)]>([])
+
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.setWorktreeDiffInspectorVisible = { wt, visible in
+        recorded.withValue { $0.append((wt, visible)) }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .branchSwitcher(
+        .delegate(
+          .openDiffViewerOnHistoryTab(worktreeID: worktreeID, projectID: projectID)
+        )))
+    await store.finish()
+
+    #expect(recorded.value.count == 1)
+    #expect(recorded.value.first?.0 == worktreeID)
+    #expect(recorded.value.first?.1 == true)
   }
 }

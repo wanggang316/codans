@@ -11,9 +11,9 @@ import TouchCodeCore
 ///   inline next to the worktree name. PR snapshot still wins — when a PR exists on
 ///   main, the row falls through to the PR-state octicon below.
 /// - Worktrees with no PR snapshot (non-default) → the `git-branch` octicon tinted by
-///   `roleTint` (orange for user-pinned rows, secondary otherwise). Desaturates to the
-///   selection text color when the row is selected — `listRowBackground` already shows
-///   selection, so a loud icon would fight the highlight.
+///   `roleTint` (defaults to `.secondary`). Desaturates to the selection text color
+///   when the row is selected — `listRowBackground` already shows selection, so a
+///   loud icon would fight the highlight.
 /// - PR snapshot     → `git-pull-request`, `git-merge`, `git-pull-request-closed`, or
 ///   `git-pull-request-draft`, tinted by PR state (green / purple / red / grey). PR
 ///   state is the dominant signal when a PR exists; the role tint is suppressed.

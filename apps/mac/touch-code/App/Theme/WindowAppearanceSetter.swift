@@ -54,36 +54,68 @@ final class AppearanceApplyingView: NSView {
   }
 
   private func syncGhosttyScheme(reason: String) {
-    let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let scheme: SwiftUI.ColorScheme = isDark ? .dark : .light
+    // Resolve from the user preference, NOT the view's effective appearance.
+    // `applyAppearance` overrides main-window `appearance` with the value
+    // inferred from the Ghostty terminal background's luminance — that
+    // override cascades back into the view's effective appearance, so
+    // sampling it here would create a feedback loop that drops the user's
+    // picker on the floor whenever the inferred chrome appearance and the
+    // picker disagree (e.g. user picks "Light" but the active Ghostty
+    // palette has a dark background).
+    let scheme = resolveColorScheme()
     guard lastPushedGhosttyScheme != scheme else { return }
     lastPushedGhosttyScheme = scheme
     GhosttyRuntime.shared?.setColorScheme(scheme)
     AppearanceDiagnostics.log(
       "ghostty-scheme-sync reason=\(reason) "
-        + "effective=\(effectiveAppearance.name.rawValue) "
+        + "preference=\(preference.rawValue) "
         + "scheme=\(scheme == .dark ? "dark" : "light")"
     )
+  }
+
+  /// User-picker-driven scheme. `.system` resolves via `NSApp.effectiveAppearance`
+  /// (which follows the OS dark-mode flag when `NSApp.appearance` is nil) so an
+  /// OS-level flip still propagates into Ghostty even though we override the
+  /// main window's `appearance` below.
+  private func resolveColorScheme() -> SwiftUI.ColorScheme {
+    switch preference {
+    case .light: return .light
+    case .dark: return .dark
+    case .system:
+      let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+      return isDark ? .dark : .light
+    }
   }
 
   private func applyAppearance(reason: String) {
     guard window != nil else { return }
     let appearance = preference.appearance
     NSApp.appearance = appearance
-    // Stain the NSWindow background with the ghostty theme color (read from
-    // libghostty's config — falls back to `.windowBackgroundColor` before
-    // the runtime is up). The sidebar's translucent material blends against
-    // this layer via `withinWindow`, so the sidebar reads as the terminal's
-    // tone rather than a flat system color. `GhosttyRuntime.setColorScheme`
-    // covers the scheme-flip path; this one catches preference toggles.
+    // Push the resolved scheme to Ghostty *before* we sample its background —
+    // otherwise we'd infer chrome luminance from the *previous* palette and
+    // then have to re-apply on the next pass. setColorScheme also paints
+    // each NSWindow's backgroundColor, so the loop below is purely about
+    // appearance + invalidation.
+    syncGhosttyScheme(reason: "applyAppearance")
     let ghosttyBackground = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
+    // Infer chrome appearance from the resolved Ghostty background. Only
+    // applied to main windows in *explicit* picker modes (light / dark) —
+    // in `.system` the window's appearance stays nil so OS dark-mode flips
+    // cascade naturally via NSApp.effectiveAppearance.
+    let inferredChromeAppearance: NSAppearance? =
+      (preference == .system) ? nil : ghosttyBackground.perceivedAppearance
     for window in NSApp.windows {
-      window.appearance = appearance
-      // Settings window opts out of the Ghostty terminal-background stain so
-      // its sidebar reads as a standard macOS Settings pane. See
-      // `SettingsWindowTagger`.
-      window.backgroundColor =
-        SettingsWindowTagger.matches(window) ? .windowBackgroundColor : ghosttyBackground
+      let isSettings = SettingsWindowTagger.matches(window)
+      if isSettings {
+        // Settings window opts out of the Ghostty terminal-background stain
+        // *and* the luminance-derived chrome override so its panes keep the
+        // standard macOS Settings tone. See `SettingsWindowTagger`.
+        window.appearance = appearance
+        window.backgroundColor = .windowBackgroundColor
+      } else {
+        window.appearance = inferredChromeAppearance ?? appearance
+        window.backgroundColor = ghosttyBackground
+      }
       window.contentView?.needsLayout = true
       window.contentView?.needsDisplay = true
       window.invalidateShadow()
@@ -91,6 +123,7 @@ final class AppearanceApplyingView: NSView {
     AppearanceDiagnostics.log(
       "app-appearance reason=\(reason) mode=\(preference.rawValue) "
         + "requested=\(appearance?.name.rawValue ?? "nil") "
+        + "inferred=\(inferredChromeAppearance?.name.rawValue ?? "nil") "
         + "effective=\(NSApp.effectiveAppearance.name.rawValue) "
         + "windowCount=\(NSApp.windows.count)"
     )

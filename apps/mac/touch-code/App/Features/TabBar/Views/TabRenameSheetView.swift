@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Sheet-hosted rename editor for a single tab. Mirrors the Prowl
-/// `TabIconPickerView` shape — a modally presented card attached to the
-/// enclosing window via `.sheet(item:)`. Pre-populates with the current
-/// title, commits on Return / Save, discards on Esc / Cancel.
+/// Sheet-hosted rename editor for a single tab. A modally presented
+/// card attached to the enclosing window via `.sheet(item:)`. Pre-
+/// populates with the current title, commits on Return / Save,
+/// discards on Esc / Cancel.
 struct TabRenameSheetView: View {
   let initialName: String
   let onCommit: (String?) -> Void

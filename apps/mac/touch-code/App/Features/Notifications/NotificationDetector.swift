@@ -28,10 +28,10 @@ public final class NotificationDetector {
   private let lastFocusedPane: @MainActor (TabID) -> PaneID?
   private let isAppFrontmost: @MainActor () -> Bool
   /// Side-channel keystroke tracker. Snapshotted once per event into the
-  /// translator's `Context.lastUserKeystrokeAt` so the 1-second
+  /// interpreter's `Context.lastUserKeystrokeAt` so the 1-second
   /// `userTypingRecently` suppression can actually fire on real input.
   private let tracker: PaneKeyboardActivityTracker
-  /// Settings reader: the translator's command-finished branch reads
+  /// Settings reader: the interpreter's command-finished branch reads
   /// `commandFinishedEnabled` and `commandFinishedThresholdSec` from the
   /// per-event Context, so the detector folds the live snapshot in here
   /// every call rather than capturing values at construction.
@@ -98,26 +98,25 @@ public final class NotificationDetector {
   }
 
   /// Single entry point. Called for every `TerminalEvent` the runtime
-  /// emits. The translation table itself lives in
-  /// `TouchCodeCore.DetectionTranslator` (pure, fully unit-tested);
-  /// this method orchestrates: catalog walk → SourcePath, mute label
-  /// check, then hands a `Candidate` to `NotificationCoordinator`.
-  /// The coordinator owns inbox append, banner posting, dock badge,
-  /// and the focused-pane drop.
+  /// emits. The shared interpretation table lives in
+  /// `TouchCodeCore.PaneAttentionInterpreter`; this method orchestrates:
+  /// catalog walk → SourcePath, mute label check, then hands a
+  /// `Candidate` to `NotificationCoordinator`. The coordinator owns
+  /// inbox append, banner posting, dock badge, and the focused-pane drop.
   public func handle(_ event: TerminalEvent) async {
     let notifSettings = settingsReader.notifications
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: hasProducedOutput,
       lastUserKeystrokeAt: tracker.snapshot(),
       now: Date(),
       commandFinishedEnabled: notifSettings.commandFinishedEnabled,
       commandFinishedThresholdSec: notifSettings.commandFinishedThresholdSec
     )
-    let step = DetectionTranslator.translate(event, context: context)
+    let step = PaneAttentionInterpreter.interpret(event, context: context)
 
     if let drop = step.drop {
       detectorLogger.debug(
-        "translator drop reason=\(drop.rawValue, privacy: .public)"
+        "interpreter drop reason=\(drop.rawValue, privacy: .public)"
       )
     }
 
@@ -142,12 +141,12 @@ public final class NotificationDetector {
       break
     }
 
-    guard let entry = step.entry else { return }
-    await emit(entry, isTeardown: step.outputFlag.isTeardown)
+    guard let cue = step.cue else { return }
+    await emit(cue, isTeardown: step.outputFlag.isTeardown)
   }
 
-  private func emit(_ translated: DetectionTranslator.Entry, isTeardown: Bool) async {
-    guard let resolved = resolve(paneID: translated.paneID) else { return }
+  private func emit(_ cue: PaneAttentionInterpreter.Cue, isTeardown: Bool) async {
+    guard let resolved = resolve(paneID: cue.paneID) else { return }
     if resolved.muted { return }
 
     // Pre-compute the focused-pane comparison once so the coordinator does
@@ -166,9 +165,9 @@ public final class NotificationDetector {
     // The inbox popover already shows the same breadcrumb on the right
     // of each row, so we deliberately keep `entry.body` untouched.
     let entry = InboxEntry(
-      kind: translated.kind,
-      title: translated.title,
-      body: translated.body,
+      kind: cue.kind,
+      title: cue.title,
+      body: cue.body,
       source: resolved.source
     )
     let bannerSourceLabel = sourceLabel(
@@ -198,7 +197,7 @@ public final class NotificationDetector {
     // the cached source path to resolve, but no future event for this
     // pane id will ever arrive again — clean up.
     if isTeardown {
-      paneSourceCache.removeValue(forKey: translated.paneID)
+      paneSourceCache.removeValue(forKey: cue.paneID)
     }
   }
 

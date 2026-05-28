@@ -26,6 +26,11 @@ struct RootFeature {
 
     var sidebar: HierarchySidebarFeature.State = .init()
     var detail: WorktreeDetailFeature.State = .init()
+    /// T10: Branch popover / switch state. Owned at the root so the HEAD
+    /// watcher's `worktreeHeadChanged` and the sidebar's `selectionChanged`
+    /// can both forward into it from a single dispatch site, matching the
+    /// per-worktree-aware peer features around it.
+    var branchSwitcher: BranchSwitcherFeature.State = .init()
     /// C8 M6b (0005): editor preferences + per-Project override state.
     var editor: EditorFeature.State = .init()
     /// T2: Header feature (bell + Open-in split button + GV toggle).
@@ -123,6 +128,7 @@ struct RootFeature {
     case paneCreated
     case paneReady
     case paneOutput
+    case paneViewportChanged
     case paneExited
     case paneCrashed
     case paneClosedByTab
@@ -132,6 +138,7 @@ struct RootFeature {
     case worktreeActivated
     case hierarchyMutated
     case paneInfoChanged
+    case foregroundJobChanged
     case paneActionRequested
     case windowActionRequested
     case configChanged
@@ -141,6 +148,7 @@ struct RootFeature {
       case .paneCreated: self = .paneCreated
       case .paneReady: self = .paneReady
       case .paneOutput: self = .paneOutput
+      case .paneViewportChanged: self = .paneViewportChanged
       case .paneIdle: self = .paneIdle
       case .paneExited: self = .paneExited
       case .paneCrashed: self = .paneCrashed
@@ -150,6 +158,7 @@ struct RootFeature {
       case .worktreeActivated: self = .worktreeActivated
       case .hierarchyMutated: self = .hierarchyMutated
       case .paneInfoChanged: self = .paneInfoChanged
+      case .foregroundJobChanged: self = .foregroundJobChanged
       case .paneActionRequested: self = .paneActionRequested
       case .windowActionRequested: self = .windowActionRequested
       case .configChanged: self = .configChanged
@@ -168,9 +177,9 @@ struct RootFeature {
     /// and calls `hierarchyClient.closePane` to drop the catalog entry.
     case paneLifecycleExited(PaneID)
     /// Forwarded from `paneInfoChanged + .progress(...)` in the engine
-    /// event stream. `isBusy` mirrors the supacode predicate: true for any
-    /// non-`REMOVE` OSC 9;4 state. Drives the tab-chip running spinner
-    /// (via `HierarchyManager.runningPanes`) and the sidebar busy glyph.
+    /// event stream. `isBusy` is true for any non-`REMOVE` OSC 9;4
+    /// state. Drives the tab-chip running spinner (via
+    /// `HierarchyManager.runningPanes`) and the sidebar busy glyph.
     case paneProgressBusyChanged(PaneID, Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the
@@ -334,6 +343,7 @@ struct RootFeature {
     case focusHierarchyPath(InboxEntry.SourcePath)
     case sidebar(HierarchySidebarFeature.Action)
     case detail(WorktreeDetailFeature.Action)
+    case branchSwitcher(BranchSwitcherFeature.Action)
     case editor(EditorFeature.Action)
     case worktreeHeader(WorktreeHeaderFeature.Action)
     case gitHub(GitHubFeature.Action)
@@ -383,6 +393,7 @@ struct RootFeature {
   private var sidebarAndDetailScopes: some Reducer<State, Action> {
     Scope(state: \.sidebar, action: \.sidebar) { HierarchySidebarFeature() }
     Scope(state: \.detail, action: \.detail) { WorktreeDetailFeature() }
+    Scope(state: \.branchSwitcher, action: \.branchSwitcher) { BranchSwitcherFeature() }
     Scope(state: \.diff, action: \.diff) { DiffFeature() }
   }
 
@@ -445,6 +456,13 @@ struct RootFeature {
                 // still need to remove the Pane from the catalog so the
                 // SplitTree collapses and no stale black rect is rendered.
                 await send(.paneLifecycleExited(paneID))
+              case .paneCrashed(let paneID, _):
+                // The pane stays in the catalog for the user to retry, but
+                // its OSC 9;4 running flag would otherwise leak: a crashing
+                // program rarely gets a chance to emit the REMOVE state
+                // that closes out the indicator. Force-clear so the
+                // tab-chip / sidebar spinners do not pin on a dead pane.
+                await send(.paneProgressBusyChanged(paneID, false))
               case .paneInfoChanged(let paneID, .progress(let state, _)):
                 // OSC 9;4 progress reports drive the per-pane "executing"
                 // signal. Any non-REMOVE state (set / indeterminate /
@@ -638,6 +656,44 @@ struct RootFeature {
                 path: resolvedWorktreePath
               )))
         )
+        // T10: forward selection delta into the branch switcher so the
+        // next popover open re-fetches against the new worktree path.
+        // `resolvedWorktreePath` already resolves to nil when either id is
+        // nil, which the reducer treats as a full caches+ids reset.
+        //
+        // Phase B: also compute the "blocked branches" map — branches
+        // checked out in OTHER worktrees of the same Project, keyed by
+        // branch short-name → that worktree's folder name. The popover
+        // greys these rows so users see the constraint before clicking.
+        let blockedBranches: [String: String] = {
+          guard
+            let projectID = selection.projectID,
+            let worktreeID = selection.worktreeID
+          else { return [:] }
+          let snapshot = hierarchyClient.snapshot()
+          guard
+            let project = snapshot.projects.first(where: { $0.id == projectID })
+          else { return [:] }
+          var map: [String: String] = [:]
+          for worktree in project.worktrees {
+            // The active worktree's own branch is never "blocked from
+            // itself"; detached worktrees (branch == nil) cannot block.
+            if worktree.id == worktreeID { continue }
+            guard let branch = worktree.branch else { continue }
+            map[branch] = worktree.name
+          }
+          return map
+        }()
+        effects.append(
+          .send(
+            .branchSwitcher(
+              .worktreeChanged(
+                projectID: selection.projectID,
+                worktreeID: selection.worktreeID,
+                path: resolvedWorktreePath,
+                blockedBranches: blockedBranches
+              )))
+        )
         // v2 GitHub integration (0013 M4): when the active Project changes, ask
         // GitHubFeature to batch-fetch PR data for every branch in that Project.
         // The reducer runs one `gh api graphql` for the whole repo instead of
@@ -680,6 +736,12 @@ struct RootFeature {
         else { return .none }
         let worktreePath = catalog.projects.first(where: { $0.id == projectID })?
           .worktrees.first(where: { $0.id == worktreeID })?.path
+        // T10: route the HEAD-change into the branch switcher ONLY when
+        // the watched worktree matches the one the popover currently
+        // backs. Reducers run on the main actor, so reading
+        // `state.branchSwitcher.worktreeID` here is the authoritative
+        // value at dispatch time — no captured-snapshot races.
+        let shouldForwardToBranchSwitcher = worktreeID == state.branchSwitcher.worktreeID
         return .run {
           [projectReconciler, client = hierarchyClient, monitor = worktreeLocalDiffMonitor] send in
           // HEAD moved → the cached `git diff HEAD --shortstat` numbers are
@@ -698,6 +760,9 @@ struct RootFeature {
             Self.makeActiveProjectGitHubRefresh(client: client)
           }) {
             await send(.gitHub(action))
+          }
+          if shouldForwardToBranchSwitcher {
+            await send(.branchSwitcher(.headChangedForCurrentWorktree))
           }
         }
 
@@ -956,7 +1021,17 @@ struct RootFeature {
                 )))
           )
 
-        case .runScriptRequested(let scriptID, let projectID, let worktreeID):
+        case .runScriptRequested(let scriptID):
+          // Resolve target Project + Worktree from `state.selection` at
+          // handle-time — the SwiftUI Menu's NSMenuItem actions and the
+          // `.keyboardShortcut`-bridged chord can hold stale closure
+          // captures after a worktree switch, which previously fired the
+          // script against the wrong worktree. Same fix pattern as
+          // `pickEditorFromMenu` above.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
           let client = hierarchyClient
           let presenter = settingsWindowPresenter
           return .run { send in
@@ -1041,6 +1116,25 @@ struct RootFeature {
         return .none
 
       case .diff:
+        return .none
+
+      case .branchSwitcher(.delegate(.openDiffViewerOnHistoryTab(let worktreeID, _))):
+        // T10: "View all" from the recent-commits section. Force the in-app
+        // inspector visible regardless of the user's default Git Viewer
+        // preference — the follow-up `.diff(.tabSelected(.history))` dispatch
+        // only makes sense in-app (external viewers like Tower / Fork have no
+        // History-tab analogue), so we bypass the 3-tier Git Viewer
+        // resolution that `.diffInspectorToggledForCurrentWorktree` runs.
+        // Idempotent when the inspector is already visible:
+        // `setWorktreeDiffInspectorVisible(_, true)` no-ops on already-visible
+        // worktrees per HierarchyClient's contract.
+        hierarchyClient.setWorktreeDiffInspectorVisible(worktreeID, true)
+        // Pending (T11/T12): after T11 adds `.diff(.tabSelected(.history))`,
+        // dispatch it here so "View all" lands the user on the History tab.
+        return .none
+
+      case .branchSwitcher:
+        // Sub-feature transitions handled by the Scope; ignore in root.
         return .none
 
       case .activeAgents(.rowTapped(let paneID)):

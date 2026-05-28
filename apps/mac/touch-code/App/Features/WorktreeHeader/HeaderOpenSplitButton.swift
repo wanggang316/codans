@@ -5,10 +5,9 @@ import TouchCodeCore
 /// Native toolbar split button: primary action opens the resolved
 /// default editor; the chevron half lists every installed editor. Uses
 /// SwiftUI's `Menu(content:label:primaryAction:)` so macOS provides the
-/// system split-button chrome, hover state, and chevron — same pattern
-/// supacode's `openMenu` follows. Resolution + delegate routing flow
-/// through `WorktreeHeaderFeature`, keeping the open side-effect on
-/// `RootFeature`.
+/// system split-button chrome, hover state, and chevron. Resolution +
+/// delegate routing flow through `WorktreeHeaderFeature`, keeping the
+/// open side-effect on `RootFeature`.
 struct HeaderOpenSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
   @Bindable var editorStore: StoreOf<EditorFeature>

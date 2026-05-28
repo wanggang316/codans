@@ -105,12 +105,11 @@ struct WorktreeLifecycleIntegrationTests {
     #expect(afterRemove.count == 1)
   }
 
-  /// Post-2026-04-27: `GitWorktreeClient.removeWorktree` adopts
-  /// supacode's relocate-then-prune strategy. The working directory is
-  /// moved into a per-process trash folder before `git worktree prune
-  /// --expire=now` cleans the metadata, so git's "modified or
-  /// untracked files" guard never trips. The Remove flow is now
-  /// single-step destructive (UI's first confirmation is the only
+  /// `GitWorktreeClient.removeWorktree` uses a relocate-then-prune
+  /// strategy: the working directory is moved into a per-process trash
+  /// folder before `git worktree prune --expire=now` cleans the metadata,
+  /// so git's "modified or untracked files" guard never trips. The Remove
+  /// flow is single-step destructive (UI's first confirmation is the only
   /// gate); this test pins that behavior.
   @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
   func removeSucceedsEvenWithUncommittedChanges() async throws {

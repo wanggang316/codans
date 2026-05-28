@@ -246,7 +246,10 @@ final class HierarchyHandlers {
       }
       let settings = settingsProvider()
       let baseDirectory = settings.worktree.resolveBaseDirectory(
-        forProjectName: project.name,
+        // The path-derived canonical name is the anchor for new worktree
+        // directories — a user-set display name in Settings → General must
+        // not redirect where the CLI proposes to create new worktrees.
+        forProjectName: project.canonicalName,
         projectOverride: settings.projects[project.id]?.worktreesDirectory
       )
       let sanitized = GitWorktreeClient.sanitizeBranchName(branch)

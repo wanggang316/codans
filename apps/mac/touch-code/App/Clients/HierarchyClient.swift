@@ -68,6 +68,12 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ projectID: ProjectID, _ name: String
     ) throws -> Void
+  /// Recolors the Project. `nil` clears the assignment so the UI falls back
+  /// to the system accent. Silent no-op for unknown ids / unchanged values.
+  var setProjectColor:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ color: ProjectColor?
+    ) throws -> Void
 
   // MARK: - Worktree mutations
 
@@ -112,6 +118,17 @@ nonisolated struct HierarchyClient: Sendable {
       _ id: TabID,
       _ inWorktree: WorktreeID, _ inProject: ProjectID,
       _ color: TabColor?
+    ) throws -> Void
+  /// Updates the tab's SF Symbol icon under the `TabIconLock` rules
+  /// (`.auto` ≤ `.script` ≤ `.user`). A write whose `lock` cannot
+  /// override the tab's current lock is a silent no-op — UI consumers
+  /// re-read the tab afterwards if they need to confirm the result.
+  var setTabIcon:
+    @MainActor @Sendable (
+      _ id: TabID,
+      _ inWorktree: WorktreeID, _ inProject: ProjectID,
+      _ icon: String?,
+      _ lock: TabIconLock
     ) throws -> Void
   var reorderTabs:
     @MainActor @Sendable (
@@ -423,8 +440,7 @@ nonisolated struct HierarchyClient: Sendable {
   /// Idempotent: a repeat call with the same value is a true no-op
   /// (no persistence churn). Silent no-op on unknown `paneID`. Consumed
   /// by `AgentBinder` (`docs/exec-plans/active-agents-view.md` T3) that
-  /// derives the kind from `SurfaceInfo.title` / `initialCommand` /
-  /// OSC 9 events.
+  /// derives the kind from foreground job snapshots.
   var setPaneAgentKind: @MainActor @Sendable (_ paneID: PaneID, _ kind: AgentKind?) -> Void
 
   /// Writes `Pane.agentSessionID` (agent-supplied session identifier;
@@ -523,6 +539,9 @@ extension HierarchyClient {
       renameProject: { projectID, name in
         try manager.renameProject(projectID, name: name)
       },
+      setProjectColor: { projectID, color in
+        try manager.setProjectColor(projectID, color: color)
+      },
       createWorktree: { projectID, name, path, branch in
         try manager.createWorktree(in: projectID, name: name, path: path, branch: branch)
       },
@@ -547,6 +566,11 @@ extension HierarchyClient {
       },
       setTabColor: { tabID, worktreeID, projectID, color in
         try manager.setTabColor(tabID, in: worktreeID, in: projectID, color: color)
+      },
+      setTabIcon: { tabID, worktreeID, projectID, icon, lock in
+        try manager.setTabIcon(
+          tabID, in: worktreeID, in: projectID, icon: icon, lock: lock
+        )
       },
       reorderTabs: { worktreeID, projectID, orderedIDs in
         try manager.reorderTabs(
@@ -899,6 +923,15 @@ extension HierarchyClient {
         in: worktreeID, in: projectID,
         name: script.displayName,
         select: script.focus
+      )
+      // Carry the script's resolved SF Symbol onto the spawned tab under
+      // the .script lock. A later auto re-derivation cannot displace it;
+      // a user pick still can. Failures are non-fatal — the tab keeps
+      // running with its default icon.
+      try? manager.setTabIcon(
+        tabID, in: worktreeID, in: projectID,
+        icon: script.resolvedSystemImage,
+        lock: .script
       )
       return try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
@@ -1306,6 +1339,7 @@ extension HierarchyClient: DependencyKey {
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setProjectColor: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     createWorktree: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeWorktree: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     selectProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1315,6 +1349,7 @@ extension HierarchyClient: DependencyKey {
     selectTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     renameTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setTabColor: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setTabIcon: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     reorderTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closeOtherTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closeTabsToRight: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1391,6 +1426,7 @@ extension HierarchyClient: DependencyKey {
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),
+    setProjectColor: unimplemented("HierarchyClient.setProjectColor"),
     createWorktree: unimplemented("HierarchyClient.createWorktree", placeholder: WorktreeID()),
     removeWorktree: unimplemented("HierarchyClient.removeWorktree"),
     selectProject: unimplemented("HierarchyClient.selectProject"),
@@ -1400,6 +1436,7 @@ extension HierarchyClient: DependencyKey {
     selectTab: unimplemented("HierarchyClient.selectTab"),
     renameTab: unimplemented("HierarchyClient.renameTab"),
     setTabColor: unimplemented("HierarchyClient.setTabColor"),
+    setTabIcon: unimplemented("HierarchyClient.setTabIcon"),
     reorderTabs: unimplemented("HierarchyClient.reorderTabs"),
     closeOtherTabs: unimplemented("HierarchyClient.closeOtherTabs"),
     closeTabsToRight: unimplemented("HierarchyClient.closeTabsToRight"),

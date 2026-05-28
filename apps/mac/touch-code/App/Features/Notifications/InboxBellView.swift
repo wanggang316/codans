@@ -26,6 +26,12 @@ struct InboxBellView: View {
 
   @State private var popoverShown = false
   @State private var unreadOnly = true
+  @State private var isHovering = false
+  /// Drives the bell-shake animation on the 0→N and N→N+ unread edges.
+  /// Bumped to a fresh value via `.onChange(of: count)` so each new arrival
+  /// re-fires the same `.keyframeAnimator` from a clean baseline regardless
+  /// of whether the previous shake had finished.
+  @State private var shakeNonce = 0
 
   var body: some View {
     // User-controlled visual filter (Settings → Notifications → In-app → Status-bar bell).
@@ -46,26 +52,74 @@ struct InboxBellView: View {
         Image(systemName: count > 0 ? "bell.fill" : "bell")
           .font(.title3)
           .foregroundStyle(count > 0 ? Color.orange : Color.primary)
+          // The bell glyph is decorative — accessibilityLabel on the
+          // enclosing button (`accessibilityLabel` below) already names
+          // the control, so we hide the image to avoid double-announce.
+          .accessibilityHidden(true)
+          .keyframeAnimator(
+            initialValue: BellShake.zero,
+            trigger: shakeNonce,
+            content: { content, value in
+              content.rotationEffect(.degrees(value.angle), anchor: .top)
+            },
+            // Quick wiggle around the bell's top anchor — mimics a hand-rung
+            // bell. ~0.6 s total, four crossings, decaying amplitude.
+            keyframes: { _ in
+              KeyframeTrack(\BellShake.angle) {
+                CubicKeyframe(-14, duration: 0.08)
+                CubicKeyframe(12, duration: 0.10)
+                CubicKeyframe(-9, duration: 0.10)
+                CubicKeyframe(6, duration: 0.10)
+                CubicKeyframe(-3, duration: 0.10)
+                CubicKeyframe(0, duration: 0.10)
+              }
+            }
+          )
         if count > 0 {
           Text(badgeLabel(count))
             .font(.system(size: 12, weight: .semibold).monospacedDigit())
             .foregroundStyle(.primary)
         }
       }
-      // Optical balance — *not* numeric symmetry. SF Symbols' bell glyph
-      // ships with built-in visual whitespace around the bell shape,
-      // while a tight digit like "3" inks right up to its bounding box.
-      // The same numeric padding therefore reads as "lots of space on
-      // the left, none on the right." Trailing gets extra to compensate.
-      .padding(.leading, 6)
-      .padding(.trailing, 10)
+      // Padding *inside* the capsule. With a count, the bell glyph + digit
+      // need optical-balance compensation — SF Symbols' bell ships with
+      // built-in whitespace while a tight digit like "3" inks right up to
+      // its bounding box, so trailing gets extra. Without a count there is
+      // nothing on the right to compensate for, so the same asymmetric
+      // padding leaves the bell visibly off-center inside the capsule —
+      // collapse to symmetric padding in that case.
+      .padding(.leading, count > 0 ? 6 : 7)
+      .padding(.trailing, count > 0 ? 10 : 7)
       .frame(minHeight: 24)
+      // Capsule chip with a subtle hover-fill. Full-radius corners (Capsule)
+      // make the affordance read as one round target instead of a square
+      // hit area around a bell glyph.
+      .background(
+        Capsule(style: .continuous)
+          .fill(Color.primary.opacity(isHovering ? 0.10 : 0))
+      )
+      .contentShape(Capsule(style: .continuous))
     }
     .buttonStyle(.plain)
+    // Breathing room between the hover capsule and whatever ToolbarItem
+    // (or window-chrome edge) sits to its right. Without this the capsule
+    // fill visually hugs the next element on hover.
+    .padding(.trailing, 4)
+    .onHover { hovering in
+      // Animate the fill only so the shake-on-arrival keyframes aren't
+      // dragged into the hover transition.
+      withAnimation(.easeInOut(duration: 0.12)) { isHovering = hovering }
+    }
     .help(tooltipLabel)
     .accessibilityLabel(accessibilityLabel)
     .onChange(of: popoverTrigger) { _, _ in
       popoverShown = true
+    }
+    // Ring the bell whenever the global unread count climbs. Strict
+    // monotonic-increase gate so marking-as-read (count drops) does NOT
+    // re-trigger the shake; only fresh arrivals (incl. 0→1) do.
+    .onChange(of: count) { old, new in
+      if new > old { shakeNonce &+= 1 }
     }
     .popover(isPresented: $popoverShown, arrowEdge: .top) {
       InboxPopoverContent(
@@ -324,4 +378,14 @@ private struct InboxRowView: View {
   private var relativeAge: String {
     Self.relativeFormatter.localizedString(for: entry.createdAt, relativeTo: Date())
   }
+}
+
+/// Animatable bag of bell-shake state. `Animatable` conformance lets
+/// `KeyframeAnimator` interpolate the angle between keyframes; an enum or a
+/// raw `Double` would also work, but keeping it as a struct leaves room for
+/// e.g. a translation offset alongside the rotation without touching call sites.
+private struct BellShake: Equatable {
+  var angle: Double
+
+  static let zero = BellShake(angle: 0)
 }

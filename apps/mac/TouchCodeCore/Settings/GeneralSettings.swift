@@ -84,6 +84,17 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// controls the auto-open behaviour on the rising edge into `loading`.
   public var agentsViewAutoOpen: Bool
 
+  /// Row density for the ActiveAgents sidebar panel. `normal` (default)
+  /// renders the two-line worktree/project identity column; `compact`
+  /// joins both names on one line and tightens vertical padding.
+  public var agentsViewDisplayMode: AgentsViewDisplayMode
+
+  /// Whether the app uploads anonymous crash and error reports on release
+  /// builds. Default `true`. Debug builds never report regardless of this
+  /// flag. Flipping this off also clears the install identifier so a future
+  /// re-enable starts a fresh anonymous id.
+  public var crashReportsEnabled: Bool
+
   public init(
     appearance: AppearancePreference = .system,
     defaultEditorID: EditorID? = nil,
@@ -96,7 +107,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updatesAutomaticallyDownloadUpdates: Bool = false,
     quitConfirmation: QuitConfirmation = .auto,
     quitAction: QuitAction = .keepRunning,
-    agentsViewAutoOpen: Bool = true
+    agentsViewAutoOpen: Bool = true,
+    agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
+    crashReportsEnabled: Bool = true
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -110,6 +123,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.quitConfirmation = quitConfirmation
     self.quitAction = quitAction
     self.agentsViewAutoOpen = agentsViewAutoOpen
+    self.agentsViewDisplayMode = agentsViewDisplayMode
+    self.crashReportsEnabled = crashReportsEnabled
   }
 
   public static let `default` = GeneralSettings()
@@ -120,6 +135,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case quitConfirmation, quitAction
     case agentsViewAutoOpen
+    case agentsViewDisplayMode
+    case crashReportsEnabled
     /// Retired in favour of `quitConfirmation` + `quitAction`. Still decoded by
     /// `init(from:)` so legacy settings files migrate transparently on first launch.
     case quitStrategy
@@ -190,6 +207,16 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     }
     self.agentsViewAutoOpen =
       try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoOpen) ?? true
+    // Older settings files predate this field. Default to `.normal` so
+    // every existing install keeps the current two-line row layout
+    // until the user opts into compact mode from Settings → General.
+    self.agentsViewDisplayMode =
+      try container.decodeIfPresent(AgentsViewDisplayMode.self, forKey: .agentsViewDisplayMode) ?? .normal
+    // Older settings files predate this field. Default to opt-in to keep
+    // installs already running through one or more releases consistent
+    // with fresh installs; the user can opt out from Settings → General.
+    self.crashReportsEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .crashReportsEnabled) ?? true
   }
 
   /// Explicit encoder so the retired `resumePanesOnLaunch` / `quitStrategy` CodingKeys
@@ -212,5 +239,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encode(quitConfirmation, forKey: .quitConfirmation)
     try container.encode(quitAction, forKey: .quitAction)
     try container.encode(agentsViewAutoOpen, forKey: .agentsViewAutoOpen)
+    try container.encode(agentsViewDisplayMode, forKey: .agentsViewDisplayMode)
+    try container.encode(crashReportsEnabled, forKey: .crashReportsEnabled)
   }
 }

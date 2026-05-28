@@ -17,9 +17,13 @@ import SwiftUI
 struct EmptyProjectStateView: View {
   let onAddProject: () -> Void
 
+  // `.ignoresSafeArea()` extends the fill behind the hidden window-toolbar
+  // chrome so the Ghostty terminal-coloured `NSWindow.backgroundColor`
+  // stain (applied by `WindowAppearanceSetter` for sidebar blending) does
+  // not bleed through the title-bar region in the no-project state.
   var body: some View {
     Color(nsColor: .windowBackgroundColor)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .ignoresSafeArea()
   }
 }
 

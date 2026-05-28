@@ -125,13 +125,6 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // Match the sidebar's own background tone so the footer reads as a
-    // continuation of the sidebar rather than a separate material strip.
-    // NSColor.windowBackgroundColor is the same surface AppKit uses for
-    // the sidebar in `.listStyle(.sidebar)`. It is opaque so it survives
-    // fullscreen without the terminal panes bleeding through that an
-    // earlier `.bar` material attempt (HAN-63) exposed.
-    .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {
