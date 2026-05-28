@@ -158,6 +158,67 @@ public final class SessionReaper {
     return states
   }
 
+  /// Scan the canonical socket directory for daemon files that have NO
+  /// catalog row AND no matching pane in the hierarchy. These are
+  /// filesystem orphans — typically the result of an app crash between
+  /// `spawnDaemonAndConnect` returning and the coordinator persisting
+  /// the row, or a daemon left behind by an older build whose catalog
+  /// schema we no longer understand. Each orphan is killed via the same
+  /// one-shot `.kill` path used by the catalog-orphan branch in `sweep`,
+  /// and the socket file is unlinked.
+  ///
+  /// Run AFTER `sweep` so the catalog reflects the post-prune state:
+  /// `sweep` may have just removed rows whose sockets are unreachable,
+  /// leaving the socket files behind in the rare case the daemon
+  /// survived but our `connect` failed (e.g. EMFILE bursts at launch).
+  /// The FS scan catches those too. Callers without a hierarchy view
+  /// pass the empty set, which collapses the orphan check to "any
+  /// socket with no catalog row".
+  public func sweepFilesystemOrphans(livePaneIDs: Set<PaneID> = []) {
+    let socketDirectory = PaneDaemonBringup.canonicalSocketDirectory()
+    let fm = FileManager.default
+    guard fm.fileExists(atPath: socketDirectory.path) else { return }
+
+    let contents: [URL]
+    do {
+      contents = try fm.contentsOfDirectory(
+        at: socketDirectory,
+        includingPropertiesForKeys: [.isRegularFileKey],
+        options: [.skipsHiddenFiles]
+      )
+    } catch {
+      logger.error(
+        "FS orphan scan failed at \(socketDirectory.path, privacy: .public): \(String(describing: error), privacy: .public)"
+      )
+      return
+    }
+
+    let claimedPaneIDs: Set<PaneID> = Set(
+      coordinator.catalog.sessions.values.map(\.paneID)
+    ).union(livePaneIDs)
+
+    for url in contents {
+      // The socket directory also holds `logs/` and `snapshots/`
+      // subdirectories; filter to regular files whose name parses as a
+      // UUID (zmx writes sockets as `<ZMX_DIR>/<session_name>`, and we
+      // pass `paneID.raw.uuidString` as the session name). Anything else
+      // is foreign and must be left alone.
+      let resourceValues = try? url.resourceValues(forKeys: [.isRegularFileKey])
+      guard resourceValues?.isRegularFile == true else { continue }
+      let name = url.lastPathComponent
+      guard let uuid = UUID(uuidString: name) else { continue }
+      let paneID = PaneID(raw: uuid)
+      if claimedPaneIDs.contains(paneID) { continue }
+
+      logger.notice(
+        "Killing FS-orphan daemon at \(url.path, privacy: .public) (no catalog row, no hierarchy pane)"
+      )
+      Self.sendOneShotKill(socketPath: url.path)
+      _ = Darwin.unlink(url.path)
+      deleteSnapshotFile(for: paneID)
+    }
+  }
+
   /// Scan `snapshotDirectory` for `<uuid>.snap` files and merge them
   /// into the per-paneID state map. Stale snapshots whose paneID is
   /// already `.alive` are deleted from disk so a future sweep does not

@@ -986,12 +986,13 @@ final class AppState {
     )
 
     let reaper = SessionReaper(coordinator: coordinator)
+    let livePaneIDs = Self.livePaneIDs(in: hierarchyManager.catalog)
     do {
       // Pass the current hierarchy's pane ids so the reaper can kill any
       // alive daemon whose paneID no longer maps to a surface — without
       // this, an out-of-sync sessions.json vs hierarchy.json would leak
       // daemons until the 7-day stale window catches them.
-      let states = try reaper.sweep(livePaneIDs: Self.livePaneIDs(in: hierarchyManager.catalog))
+      let states = try reaper.sweep(livePaneIDs: livePaneIDs)
       engine.seedReattachableSessions(states)
     } catch {
       // A corrupt catalog or transient I/O error must not block app
@@ -1001,6 +1002,13 @@ final class AppState {
       Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.reaper")
         .error("SessionReaper.sweep failed: \(String(describing: error), privacy: .public)")
     }
+    // Defense-in-depth: catch daemons whose socket files outlive both
+    // the catalog and the hierarchy (e.g. crash mid-spawn before the row
+    // was persisted, or daemons left by a pre-M6 build whose catalog row
+    // was wiped). Runs after `sweep` so the catalog is already pruned to
+    // the surviving set — anything still on disk after this point is a
+    // true filesystem orphan.
+    reaper.sweepFilesystemOrphans(livePaneIDs: livePaneIDs)
   }
 
   /// Flushes all pending debounced writes. Called by `applicationWillTerminate`.

@@ -54,9 +54,9 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
   - [ ] T5.1 7-day 回收
   - [ ] T5.2 sessions.json flock（拒绝第二 app 实例双连）
 - [ ] **M6 Hardening — durability, defense-in-depth, discoverability, agent state**（2026-05-29 增补）
-  - [ ] T6.1 SessionCoordinator 抽离，承包所有 catalog 写入（重构，行为零变化）
-  - [ ] T6.2 写穿持久化：spawn / attach / detach / close 全部触达 coordinator（R14, AC9）
-  - [ ] T6.3 文件系统兜底 orphan reaper：扫 socket dir → catalog ∪ hierarchy 都没claim 的就 kill（R15, AC10）
+  - [x] T6.1 SessionCoordinator 抽离，承包所有 catalog 写入（重构，行为零变化）— commit 49fba46b
+  - [x] T6.2 写穿持久化：spawn / attach / detach / close 全部触达 coordinator（R14, AC9）— commit 7ee760a0
+  - [x] T6.3 文件系统兜底 orphan reaper：扫 socket dir → catalog ∪ hierarchy 都没claim 的就 kill（R15, AC10）— commit pending
   - [ ] T6.4 Settings → General 加 "Resumable sessions: N + Forget all sessions" 控件（R16, AC11）
   - [ ] T6.5 PersistedAgentRecord 落 sessions.json，launch 时 liveness check 后 seed AgentRegistry（R17, AC12）
 
