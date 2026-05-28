@@ -519,7 +519,9 @@ struct DiffFeatureTests {
       title: String(sha.prefix(7)),
       fallbackPatch: ""
     )
-    await store.receive(.commitDiffSucceededFor(sha: sha, document: expectedDocument))
+    await store.receive(
+      .commitDiffSucceededFor(sha: sha, document: expectedDocument, filePaths: [])
+    )
     if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
       #expect(wrapper.document == expectedDocument)
     } else {
@@ -839,7 +841,9 @@ struct DiffFeatureHistoryTests {
       title: String(sha.prefix(7)),
       fallbackPatch: ""
     )
-    await store.receive(.commitDiffSucceededFor(sha: sha, document: expectedDocument))
+    await store.receive(
+      .commitDiffSucceededFor(sha: sha, document: expectedDocument, filePaths: [])
+    )
     if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
       #expect(wrapper.document == expectedDocument)
     } else {
@@ -994,6 +998,89 @@ struct DiffFeatureHistoryTests {
       // selectedTab stays .history.
     }
     #expect(store.state.selectedTab == .history)
+  }
+
+  // MARK: - 10c. commitMessage lazy fetch + idempotence
+
+  @Test
+  func commitMessageRequestedFetchesAndCaches() async {
+    let sha = "abc1234567890000000000000000000000000000"
+    let full = "subject line\n\nbody paragraph"
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.commitMessage = { requestedSha, _ in
+        #expect(requestedSha == sha)
+        return full
+      }
+    }
+    await store.send(.commitMessageRequested(sha: sha))
+    await store.receive(.commitMessageLoaded(sha: sha, message: full)) { state in
+      state.commitMessageByID[sha] = full
+    }
+  }
+
+  @Test
+  func commitMessageRequestedIsIdempotentOnCachedSha() async {
+    let sha = "abc1234567890000000000000000000000000000"
+    var seed = Self.makeState()
+    seed.commitMessageByID[sha] = "already cached"
+    let store = TestStore(initialState: seed) {
+      DiffFeature()
+    } withDependencies: {
+      // No `commitMessage` stub — an unintended refetch would trip
+      // `unimplemented` and fail the test.
+      $0.gitService = GitServiceClient.testValue
+    }
+    await store.send(.commitMessageRequested(sha: sha))
+    await store.finish()
+  }
+
+  @Test
+  func commitMessageFailedCachesEmptySentinel() async {
+    let sha = "abc1234567890000000000000000000000000000"
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.commitMessage = { _, _ in throw GitError.timedOut }
+    }
+    await store.send(.commitMessageRequested(sha: sha))
+    await store.receive(.commitMessageFailed(sha: sha, error: .timedOut)) { state in
+      // Empty string sentinel — the view falls back to `commit.subject`
+      // and the reducer's idempotence guard short-circuits a retry on
+      // the next hover.
+      state.commitMessageByID[sha] = ""
+    }
+  }
+
+  // MARK: - 10b. commitDiffSucceededFor stores filePaths alongside the document
+
+  @Test
+  func commitDiffSucceededForStoresFilePaths() async {
+    // The action carries the file-path list the drawer file picker renders
+    // in History mode. Verify the reducer routes it into
+    // `commitFilePathsByID` keyed by the same sha as `diffsByCommit`.
+    let sha = "abc1234567890000000000000000000000000000"
+    let doc = DiffDocument(files: [], title: "abc1234", fallbackPatch: "diff ...")
+    let store = TestStore(initialState: Self.makeState()) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+    }
+    // `LoadedDiffDocument` is identity-equatable; use non-exhaustive for
+    // the diffsByCommit field and verify it on the live state below.
+    store.exhaustivity = .off
+    await store.send(
+      .commitDiffSucceededFor(sha: sha, document: doc, filePaths: ["a.swift", "b/c.txt"])
+    )
+    #expect(store.state.commitFilePathsByID[sha] == ["a.swift", "b/c.txt"])
+    if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
+      #expect(wrapper.document == doc)
+    } else {
+      Issue.record("expected diffsByCommit[\(sha)] to be .loaded(...) after success action")
+    }
   }
 
   // MARK: - 11. Load failure surfaces as error

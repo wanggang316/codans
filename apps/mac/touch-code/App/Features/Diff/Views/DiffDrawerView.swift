@@ -21,7 +21,23 @@ struct DiffDrawerView: View {
       Divider()
       content
     }
-    .background(Color(nsColor: .windowBackgroundColor))
+    .background(themeBackground)
+  }
+
+  /// Drawer background tracks Ghostty's terminal theme so the diff surface
+  /// blends with the surrounding panes instead of clashing on
+  /// `.windowBackgroundColor`. Falls back to `.underPageBackgroundColor`
+  /// during runtime bring-up (singleton not yet initialised) — matches
+  /// `LazyPaneHost`'s precedent.
+  ///
+  /// Caveat: the runtime singleton's `backgroundColor()` is evaluated each
+  /// render, but the view doesn't observe the runtime for theme changes.
+  /// A live theme swap won't refresh until the drawer re-renders for some
+  /// other reason. Acceptable for now (theme changes are rare); a future
+  /// pass can subscribe to a runtime publisher.
+  private var themeBackground: Color {
+    let color = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
+    return Color(nsColor: color)
   }
 
   // MARK: - Header
@@ -63,10 +79,16 @@ struct DiffDrawerView: View {
     .padding(.vertical, 8)
   }
 
-  /// File picker is Changes-only. History mode would need file-list
-  /// extraction from the per-commit cache (not yet stored in state); that
-  /// is deferred. Empty file lists also hide the button — no point opening
-  /// a popover with zero rows.
+  /// File picker is enabled for both Changes and History modes:
+  ///   - Changes: shows the live `changedFiles` list (`isPresented`
+  ///     checkmark mirrors `presentedFilePath`).
+  ///   - History: shows the file paths extracted from the loaded commit
+  ///     diff (no checkmark — there's no "current file" concept inside a
+  ///     single commit). Tap dispatches `.commitFileScrollRequested`,
+  ///     today a no-op pending JS bridge wiring.
+  ///
+  /// Empty file lists hide the button — no point opening a popover with
+  /// zero rows.
   private var shouldShowFilePicker: Bool {
     switch store.selectedTab {
     case .changes:
@@ -75,48 +97,91 @@ struct DiffDrawerView: View {
       }
       return false
     case .history:
-      return false
+      guard let sha = store.presentedCommitSha,
+        let paths = store.commitFilePathsByID[sha],
+        !paths.isEmpty
+      else { return false }
+      return true
     }
   }
 
   @ViewBuilder
   private var filePickerContent: some View {
-    if case .loaded(let files) = store.changedFiles {
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 0) {
-          ForEach(files) { file in
-            let isPresented = store.presentedFilePath == file.id
-            Button {
-              store.send(.fileRowTapped(path: file.id))
-              // Dismiss after pick — selection is now visible in the
-              // drawer body so the popover has served its purpose.
-              showFilePicker = false
-            } label: {
-              HStack(spacing: 6) {
-                Image(systemName: isPresented ? "checkmark" : "")
+    switch store.selectedTab {
+    case .changes:
+      if case .loaded(let files) = store.changedFiles {
+        filePickerList(
+          items: files.map(\.id),
+          currentlyPresented: store.presentedFilePath,
+          onTap: { path in
+            store.send(.fileRowTapped(path: path))
+            showFilePicker = false
+          }
+        )
+      } else {
+        Text("No changes")
+          .foregroundStyle(.secondary)
+          .padding(12)
+      }
+    case .history:
+      if let sha = store.presentedCommitSha,
+        let paths = store.commitFilePathsByID[sha]
+      {
+        filePickerList(
+          items: paths,
+          currentlyPresented: nil,
+          onTap: { path in
+            store.send(.commitFileScrollRequested(path: path))
+            showFilePicker = false
+          }
+        )
+      } else {
+        Text("No files")
+          .foregroundStyle(.secondary)
+          .padding(12)
+      }
+    }
+  }
+
+  /// Shared file-picker list renderer. `currentlyPresented == nil` skips
+  /// the checkmark column entirely (History mode), keeping the visual
+  /// surface honest about the lack of per-file selection state.
+  private func filePickerList(
+    items: [String],
+    currentlyPresented: String?,
+    onTap: @escaping (String) -> Void
+  ) -> some View {
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 0) {
+        ForEach(items, id: \.self) { path in
+          let isCurrent = currentlyPresented == path
+          Button {
+            onTap(path)
+          } label: {
+            HStack(spacing: 6) {
+              if isCurrent {
+                Image(systemName: "checkmark")
                   .frame(width: 12)
                   .accessibilityHidden(true)
-                Text(file.id)
-                  .font(.system(.callout, design: .monospaced))
-                  .lineLimit(1)
-                  .truncationMode(.middle)
-                Spacer()
+              } else {
+                Color.clear.frame(width: 12)
               }
-              .padding(.horizontal, 12)
-              .padding(.vertical, 4)
-              .contentShape(.rect)
+              Text(path)
+                .font(.system(.callout, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+              Spacer()
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("diff_drawer.file_picker_row.\(file.id)")
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .contentShape(.rect)
           }
+          .buttonStyle(.plain)
+          .accessibilityIdentifier("diff_drawer.file_picker_row.\(path)")
         }
       }
-      .frame(width: 360, height: min(CGFloat(files.count) * 26 + 16, 320))
-    } else {
-      Text("No changes")
-        .foregroundStyle(.secondary)
-        .padding(12)
     }
+    .frame(width: 360, height: min(CGFloat(items.count) * 26 + 16, 320))
   }
 
   /// Title rendered in the drawer header. Routes on the active tab:

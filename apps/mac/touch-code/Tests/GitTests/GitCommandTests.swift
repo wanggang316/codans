@@ -199,4 +199,9 @@ struct GitCommandTests {
         == ["switch", "-c", "feat/y", "origin/main"]
     )
   }
+
+  @Test
+  func showCommitMessageArgvIsExact() {
+    #expect(GitCommand.showCommitMessage(sha: "abc1234") == ["log", "-1", "--format=%B", "abc1234"])
+  }
 }

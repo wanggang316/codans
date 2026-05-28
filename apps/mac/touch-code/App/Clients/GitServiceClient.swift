@@ -52,6 +52,8 @@ nonisolated struct GitServiceClient: Sendable {
   var renameBranch: @Sendable (String, String, URL) async throws -> Void
   /// `(newName, baseName, repoURL) -> Void`. `git switch -c <new> <base>`.
   var createAndSwitchBranch: @Sendable (String, String, URL) async throws -> Void
+  /// `(sha, repoURL) -> message`. `git log -1 --format=%B <sha>`.
+  var commitMessage: @Sendable (String, URL) async throws -> String
 }
 
 extension GitServiceClient {
@@ -85,6 +87,9 @@ extension GitServiceClient {
       },
       createAndSwitchBranch: { newName, baseName, url in
         try await service.createAndSwitchBranch(name: newName, from: baseName, at: url)
+      },
+      commitMessage: { sha, url in
+        try await service.commitMessage(sha: sha, at: url)
       }
     )
   }
@@ -146,6 +151,10 @@ extension GitServiceClient: DependencyKey {
     ),
     createAndSwitchBranch: unimplemented(
       "GitServiceClient.createAndSwitchBranch"
+    ),
+    commitMessage: unimplemented(
+      "GitServiceClient.commitMessage",
+      placeholder: ""
     )
   )
 }

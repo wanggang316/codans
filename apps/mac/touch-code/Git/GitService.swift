@@ -77,6 +77,12 @@ public nonisolated protocol GitService: Sendable {
   /// remote tracking ref. After success, the worktree's HEAD ref points at
   /// `<newName>`; the existing `WorktreeHeadWatcher` picks up the change.
   func createAndSwitchBranch(name newName: String, from baseName: String, at path: URL) async throws
+
+  /// `git log -1 --format=%B <sha>`. Returns the raw multi-line message
+  /// (subject on first line, then a blank line, then body). Empty body
+  /// is rendered as just the subject. Failure modes (unknown sha, repo
+  /// mismatch) propagate as `GitError.exec`.
+  func commitMessage(sha: String, at path: URL) async throws -> String
 }
 
 extension GitService {

@@ -146,4 +146,13 @@ nonisolated enum GitCommand {
     precondition(!baseName.isEmpty, "new-branch base must be non-empty")
     return ["switch", "-c", name, baseName]
   }
+
+  /// `git log -1 --format=%B <sha>` — fetches the FULL commit message
+  /// (subject + body, raw multi-line). The `%B` format key is the
+  /// canonical "body including subject" specifier. Used by the popover's
+  /// lazy fetch when a row is first hovered.
+  static func showCommitMessage(sha: String) -> [String] {
+    precondition(!sha.isEmpty, "sha must be non-empty")
+    return ["log", "-1", "--format=%B", sha]
+  }
 }

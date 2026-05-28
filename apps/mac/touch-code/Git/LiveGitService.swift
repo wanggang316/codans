@@ -243,6 +243,13 @@ nonisolated final class LiveGitService: GitService {
     )
   }
 
+  func commitMessage(sha: String, at path: URL) async throws -> String {
+    try await ensureIsRepo(at: path)
+    let stdout = try await run(arguments: GitCommand.showCommitMessage(sha: sha), cwd: path)
+    let text = String(data: stdout, encoding: .utf8) ?? ""
+    return text.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   // MARK: - Edge checks
 
   /// Runs `git rev-parse --is-inside-work-tree` and throws `.notARepo` on failure. This is the

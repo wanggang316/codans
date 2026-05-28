@@ -226,4 +226,48 @@ struct LiveGitServiceBranchTests {
       )
     }
   }
+
+  // MARK: - commitMessage
+
+  @Test
+  func commitMessageReturnsTrimmedMultiLineMessage() async throws {
+    let body = "subject line\n\nbody paragraph one\nbody paragraph two\n"
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: Data(body.utf8), stderr: Data(), stdoutOverflow: false),
+    ])
+    let service = LiveGitService(runner: runner)
+    let message = try await service.commitMessage(
+      sha: "deadbeef",
+      at: URL(fileURLWithPath: "/tmp")
+    )
+    // Trailing newline trimmed; multi-line body otherwise preserved verbatim.
+    #expect(message == "subject line\n\nbody paragraph one\nbody paragraph two")
+    let calls = await runner.calls
+    #expect(calls.count == 2)
+    #expect(calls.last?.arguments == ["log", "-1", "--format=%B", "deadbeef"])
+  }
+
+  @Test
+  func commitMessagePropagatesGitErrorForUnknownSha() async {
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
+      .exited(
+        code: 128,
+        stdout: Data(),
+        stderr: Data("fatal: bad revision 'nope'\n".utf8),
+        stdoutOverflow: false
+      ),
+    ])
+    let service = LiveGitService(runner: runner)
+    // `bad revision` is one of the canonical phrases the shared `run` helper
+    // remaps to `.notARepo` (worktree-removed race). The exec branch for
+    // commitMessage thus surfaces as `.notARepo` rather than `.exec`.
+    await #expect(throws: GitError.notARepo) {
+      _ = try await service.commitMessage(
+        sha: "nope",
+        at: URL(fileURLWithPath: "/tmp")
+      )
+    }
+  }
 }

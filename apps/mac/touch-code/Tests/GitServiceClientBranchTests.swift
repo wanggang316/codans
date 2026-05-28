@@ -21,6 +21,7 @@ struct GitServiceClientBranchTests {
     try await client.switchBranch(.remoteTracking(shortName: "origin/x"), url)
     try await client.renameBranch("old/x", "new/x", url)
     try await client.createAndSwitchBranch("feat/y", "main", url)
+    _ = try await client.commitMessage("deadbeef", url)
 
     let calls = fake.recordedCalls()
     #expect(
@@ -31,6 +32,7 @@ struct GitServiceClientBranchTests {
         .switchBranch(.remoteTracking(shortName: "origin/x"), url),
         .renameBranch("old/x", "new/x", url),
         .createAndSwitchBranch("feat/y", "main", url),
+        .commitMessage("deadbeef", url),
       ])
   }
 
@@ -47,6 +49,7 @@ struct GitServiceClientBranchTests {
     _ = client.switchBranch
     _ = client.renameBranch
     _ = client.createAndSwitchBranch
+    _ = client.commitMessage
   }
 }
 
@@ -63,6 +66,7 @@ private final class FakeGitService: GitService, @unchecked Sendable {
     case switchBranch(BranchSwitchTarget, URL)
     case renameBranch(String, String, URL)
     case createAndSwitchBranch(String, String, URL)
+    case commitMessage(String, URL)
   }
 
   private let lock = NSLock()
@@ -124,5 +128,9 @@ private final class FakeGitService: GitService, @unchecked Sendable {
     fatalError()
   }
   func localDiffStats(at worktreePath: URL) async throws -> LocalDiffStats? { fatalError() }
+  func commitMessage(sha: String, at path: URL) async throws -> String {
+    record(.commitMessage(sha, path))
+    return "subject\n\nbody"
+  }
 }
 // swiftlint:enable async_without_await
