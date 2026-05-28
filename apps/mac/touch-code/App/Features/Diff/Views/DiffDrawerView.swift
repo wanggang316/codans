@@ -154,46 +154,65 @@ struct DiffDrawerView: View {
   ) -> some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 0) {
-        ForEach(items, id: \.self) { path in
-          let isCurrent = currentlyPresented == path
-          Button {
-            onTap(path)
-          } label: {
-            HStack(spacing: 8) {
-              if currentlyPresented != nil {
-                if isCurrent {
-                  Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.accentColor)
-                    .frame(width: 16)
-                    .accessibilityHidden(true)
-                } else {
-                  Image(systemName: "circle")
-                    .foregroundStyle(.secondary)
-                    .opacity(0.5)
-                    .frame(width: 16)
-                    .accessibilityHidden(true)
-                }
-              } else {
-                changeTypeBadge(path: path)
-              }
-              Text(path)
-                .font(.system(.callout, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .contentShape(.rect)
-          }
-          .buttonStyle(.plain)
-          .background(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
-          .accessibilityIdentifier("diff_drawer.file_picker_row.\(path)")
+        ForEach(items, id: \.self) { (path: String) in
+          filePickerRow(
+            path: path,
+            isCurrent: currentlyPresented == path,
+            showsCheckmarkColumn: currentlyPresented != nil,
+            onTap: onTap
+          )
         }
       }
       .padding(.vertical, 4)
     }
     .frame(width: 360, height: min(CGFloat(items.count) * 32 + 12, 320))
+  }
+
+  @ViewBuilder
+  private func filePickerRow(
+    path: String,
+    isCurrent: Bool,
+    showsCheckmarkColumn: Bool,
+    onTap: @escaping (String) -> Void
+  ) -> some View {
+    Button {
+      onTap(path)
+    } label: {
+      HStack(spacing: 8) {
+        if showsCheckmarkColumn {
+          checkmarkBadge(isCurrent: isCurrent)
+        } else {
+          changeTypeBadge(path: path)
+        }
+        Text(path)
+          .font(.system(.callout, design: .monospaced))
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 6)
+      .contentShape(.rect)
+    }
+    .buttonStyle(.plain)
+    .background(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
+    .accessibilityIdentifier("diff_drawer.file_picker_row.\(path)")
+  }
+
+  @ViewBuilder
+  private func checkmarkBadge(isCurrent: Bool) -> some View {
+    if isCurrent {
+      Image(systemName: "checkmark.circle.fill")
+        .foregroundStyle(Color.accentColor)
+        .frame(width: 16)
+        .accessibilityHidden(true)
+    } else {
+      Image(systemName: "circle")
+        .foregroundStyle(.secondary)
+        .opacity(0.5)
+        .frame(width: 16)
+        .accessibilityHidden(true)
+    }
   }
 
   /// Badge showing the change type for History-mode files. Looks up the
