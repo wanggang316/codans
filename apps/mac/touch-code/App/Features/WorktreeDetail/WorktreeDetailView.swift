@@ -11,6 +11,11 @@ import TouchCodeCore
 /// that no longer exist after a prune), renders a neutral "Select a
 /// Worktree" prompt.
 struct WorktreeDetailView: View {
+  /// Width of the right-side Diff Inspector when open. The trailing
+  /// toolbar items reserve the same width so RunScript / Open chips
+  /// stay above the worktree content, not above the inspector column.
+  fileprivate static let inspectorWidth: CGFloat = 280
+
   @Bindable var store: StoreOf<WorktreeDetailFeature>
   let selection: HierarchySelection
   /// Scoped editor-feature store; passed in by `ContentView` so the Worktree-header
@@ -137,7 +142,7 @@ struct WorktreeDetailView: View {
         if inspectorVisible {
           Divider()
           DiffInspectorView(store: diffStore)
-            .frame(width: 280)
+            .frame(width: Self.inspectorWidth)
             .transition(.move(edge: .trailing))
         }
       }
@@ -315,6 +320,11 @@ struct WorktreeDetailView: View {
             worktreePath: info.worktree.path
           )
           .buttonStyle(.plain)
+          // Mirrors the macOS 26 path: reserve the inspector's column
+          // width so the action buttons shift left when the panel opens.
+          if inspectorVisible {
+            Color.clear.frame(width: Self.inspectorWidth, height: 1)
+          }
           Button {
             onToggleGitViewer()
           } label: {
@@ -394,6 +404,15 @@ struct WorktreeDetailView: View {
         projectID: address.project,
         worktreePath: info.worktree.path
       )
+    }
+    // Reserve the inspector column's width so the RunScript / Open chips
+    // shift left out from under the open inspector — without this, the
+    // window-wide toolbar parks them above the inspector instead of
+    // above the worktree content.
+    if inspectorVisible {
+      ToolbarItem {
+        Color.clear.frame(width: Self.inspectorWidth, height: 1)
+      }
     }
     ToolbarSpacer(.fixed)
     ToolbarItem {
