@@ -90,6 +90,34 @@ Reference projects: [`zmx`](https://github.com/neurosnap/zmx) (architectural mod
 
 ---
 
+## Update — Hardening (2026-05-29)
+
+After M0–M5 landed and the live + snapshot tiers shipped, a deeper review identified four areas where the current implementation can be made significantly more robust, discoverable, and complete. These additions are layered on top of R1–R13; the original behaviour is unchanged.
+
+### Additional Requirements (Must Have)
+
+- [ ] **R14** — The on-disk session catalog is updated continuously through the runtime (spawn / attach / detach / close), not only at quit. An app crash between two quits leaves the catalog in a state that accurately reflects the daemons that were spawned at crash time.
+- [ ] **R15** — Launch-time orphan reaping has a defense-in-depth tier: when `sessions.json` is missing, corrupt, or stale, any surviving `zmx serve` daemon under the managed socket directory is detected by directory scan and killed if it cannot be claimed by either the session catalog or the hierarchy.
+- [ ] **R16** — The Settings → General pane surfaces a "Resumable sessions: N" count plus a one-click "Forget all sessions" action that kills every recorded daemon, unlinks the sockets, and empties the catalog. This makes the otherwise-invisible resume mechanism debuggable and resettable without leaving the app.
+- [ ] **R17** — Each pane's current agent kind + foreground PID + activity state is persisted alongside its session row and re-seeded into the Active Agents registry on relaunch, after a `kill(pid, 0)` liveness check. The Active Agents sidebar then reflects pre-quit state immediately on launch, without waiting for re-detection from terminal output.
+
+### Additional Acceptance Criteria
+
+- **AC9.** Given a Pane spawned and attached in the current session, when the app crashes (`kill -9 TouchCode`) and is relaunched, then `sessions.json` already contains the pane's row from before the crash, and the daemon reattaches as if a normal quit had occurred.
+
+- **AC10.** Given a corrupted or empty `sessions.json` but two surviving `zmx serve` daemons running under the managed socket directory, when the app launches, then both daemons are detected by directory scan and killed (because no catalog row and no hierarchy entry claims them), their sockets are unlinked, and the launch completes with no resume.
+
+- **AC11.** Given N live resumable sessions across all worktrees, when the user opens Settings → General, then the page shows `Resumable sessions: N` next to a `Forget all sessions` button; confirming the button kills every recorded daemon, removes every catalog row, and the count drops to 0 without app restart.
+
+- **AC12.** Given a Pane was running a recognised agent (Claude Code, Codex, etc.) at quit time, when the app relaunches, then the Active Agents sidebar shows that pane's row with the same agent kind it had at quit. State is derived from a fresh liveness probe on the persisted foreground PID; rows whose PID is dead are dropped (not surfaced as `.finished`).
+
+### Additional Open Questions
+
+- **OQ6.** Should "Forget all sessions" use a confirmation dialog or an undo-toast? Leaning toward dialog because the operation kills running shells.
+- **OQ7.** When the persisted agent's PID is no longer alive at relaunch, do we show the row in a `.finished` state or omit it entirely? Leaning toward omit — stale finished rows at launch are noise.
+
+---
+
 **Downstream artifacts:**
 - `/hs-design` → engineering design (architecture, ghostty patch shape, daemon lifecycle, IPC)
 - `/hs-test-spec` → `docs/user-tests/pane-resume.md` binding to AC1–AC8

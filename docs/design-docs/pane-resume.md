@@ -401,6 +401,176 @@ Cons:
 
 ---
 
+## Hardening — Durability, Defense-in-Depth, Discoverability, Agent State (2026-05-29)
+
+A post-M5 review identified four hardening axes. The architectural piece common to all four is a `SessionCoordinator` that owns the lifetime of catalog mutations; each axis plumbs into it.
+
+### Architectural change: SessionCoordinator
+
+Today, `sessions.json` is mutated from four loosely-coordinated sites:
+
+| Site | When | Operation |
+|---|---|---|
+| `PaneDaemonBringup` | Pane create / reattach | (implicit — not recorded until quit) |
+| `SessionLifecycle.detachAllForQuit` | Quit | full catalog snapshot from surface registry |
+| `SessionReaper.sweep` | Launch | prune dead / stale / orphan rows |
+| `pane.close` IPC handler | Explicit close | remove single row |
+
+The "implicit until quit" path is the structural weakness: a daemon spawned and attached during a session is not on disk until quit, so a crash between two quits loses every spawn that landed in the gap. We introduce a single `@MainActor` coordinator as the only writer of `SessionStore`, leaving the store itself unchanged:
+
+```swift
+@MainActor
+final class SessionCoordinator {
+    init(store: SessionStore, clock: @escaping () -> Date = Date.init)
+
+    // Mutations — all debounced through SessionStore.scheduleSave
+    func recordSpawn(_ session: Session)
+    func recordAttach(_ paneID: PaneID)
+    func recordDetach(_ paneID: PaneID)
+    func recordClose(_ paneID: PaneID)
+    func recordAgent(_ paneID: PaneID, _ record: PersistedAgentRecord?)
+
+    // Read-only access for surfaces that need to inspect the catalog
+    var catalog: SessionCatalog { get }
+
+    // Atomic prune for the launch reaper
+    func applyReaperPrune(_ deadPaneIDs: Set<PaneID>)
+
+    // Quit / flush
+    func flushPending()
+}
+```
+
+Callers go through the coordinator; nobody touches `SessionStore` directly except the coordinator itself and the launch-time bootstrap. `SessionReaper` continues to own probe / kill semantics — only the on-disk write moves to the coordinator.
+
+The refactor is additive: no observable behaviour change. The next four sections all plumb into it.
+
+### Durability — continuous write-through (R14, AC9)
+
+With the coordinator in place, the following lifecycle transitions trigger `scheduleSave`:
+
+| Trigger | Action |
+|---|---|
+| Daemon spawned + socket reachable | `recordSpawn(session)` |
+| Surface attaches to daemon (cold start or reattach) | `recordAttach(paneID)` — bumps `lastAttachedAt` |
+| Surface detaches (explicit or quit live tier) | `recordDetach(paneID)` — bumps `lastAttachedAt` |
+| `tc pane close` / Pane closed via UI | `recordClose(paneID)` — removes row |
+| Reaper prunes at launch | `applyReaperPrune(deadKeys)` |
+
+The 500 ms debounce window collapses bursts (multi-pane bring-up at launch). `applicationWillTerminate` calls `coordinator.flushPending()` to drain the last write.
+
+Crash-survival semantics:
+- Crash after `recordSpawn` but before `recordAttach`: row exists with `lastAttachedAt < createdAt`. Probed for liveness, kept if the socket answers. Harmless.
+- Crash before `recordSpawn`: daemon socket exists on disk but no catalog row. Caught by the FS orphan reaper (next section).
+- Crash during write: `AtomicFileStore.write` uses tmp-file + `rename(2)`, so the old `sessions.json` is preserved intact.
+
+### Defense-in-depth — filesystem orphan reaper (R15, AC10)
+
+The catalog-driven reaper (existing `SessionReaper.sweep` with `livePaneIDs:`) kills daemons that have a row but no surface. The complementary case — surviving daemons with **no** row — needs a directory scan:
+
+```swift
+extension SessionReaper {
+    /// Scan the managed socket directory for `<uuid>.sock` files that
+    /// answer `connect(2)`. Any paneID not present in `claimedPaneIDs`
+    /// (catalog ∪ hierarchy) is treated as an unowned daemon and killed.
+    func filesystemOrphanSweep(claimedPaneIDs: Set<PaneID>) {
+        // 1. List `<paneID>.sock` in `PaneDaemonBringup.canonicalSocketDirectory()`
+        // 2. For each, parse UUID from the stem; skip non-UUID names
+        // 3. If paneID ∈ claimedPaneIDs, leave it alone
+        // 4. Probe socket; if dead, unlink and skip
+        // 5. If alive and unclaimed, sendOneShotKill + unlink
+    }
+}
+```
+
+`claimedPaneIDs` is the union of all paneIDs in the loaded catalog AND all paneIDs in the current hierarchy. We need both: catalog claims rows that haven't yet attached to a surface; hierarchy claims panes whose catalog row may have been lost.
+
+Invoked from `bootstrapSessionStack` after `sweep()` returns the catalog-driven state map.
+
+Failure-tolerance: directory-list errors (ENOENT on first launch, EACCES under a sandbox bug) are logged at `.warning` and no daemons are killed — false-negatives are acceptable, false-positives (killing a non-touch-code daemon by mistake) are not. The socket directory is `~/Library/Caches/touch-code/zmx-sessions/`, owned exclusively by us; the directory check is therefore unambiguous.
+
+### Discoverability — Settings status + Forget-all (R16, AC11)
+
+`SettingsGeneralView` gains a row under the "On quit" picker:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Resumable sessions: 3     [ Forget all sessions… ]       │
+│ Includes daemons that survived the previous quit.        │
+└──────────────────────────────────────────────────────────┘
+```
+
+The count is reactive — driven by an observable on `coordinator.catalog.sessions.count` (`@Observable` property surfaced from the coordinator). When the count changes (write-through landing, reaper running, user clicking Forget), the view updates without restart.
+
+`Forget all sessions…` presents an `NSAlert` (destructive). On confirm:
+1. Read every row from the coordinator's current catalog
+2. For each row, `SessionReaper.sendOneShotKill(socketPath:)` (best-effort, no wait)
+3. Unlink every socket file under the managed directory
+4. `coordinator.applyReaperPrune(allPaneIDs)`
+5. Clear the engine's `pendingReattach` / `pendingRestore` maps so any in-flight surface bring-up fails closed
+
+The dialog text:
+> Forget all resumable sessions?
+> This will terminate all background shells from previous sessions (3 daemons running tail commands, builds, agents, etc.). Currently open panes are not affected.
+
+### Agent state — persistence + restore (R17, AC12)
+
+Augment `Session` with an optional agent record:
+
+```swift
+public struct PersistedAgentRecord: Codable, Equatable, Sendable {
+    /// Agent kind raw value (string) so enum renames in a later release
+    /// don't break decode of an older catalog. Unknown raws are dropped
+    /// at restore time, not at decode time.
+    public let kindRaw: String
+    /// Foreground PID at the moment of the last state change. Subject
+    /// to `kill(pid, 0)` liveness check before reseed.
+    public let pid: Int32
+    /// Agent state raw value (working / waitingForInput / loading / idle).
+    /// `.idle` rows are not persisted — see clearAgent below.
+    public let stateRaw: String
+}
+
+public struct Session: Codable, Equatable, Sendable {
+    // existing fields...
+    public var agent: PersistedAgentRecord?  // nil when no recognised agent in foreground
+}
+```
+
+`SessionCoordinator` surface:
+
+```swift
+extension SessionCoordinator {
+    /// Called by AgentRegistry on every state transition. nil clears.
+    func recordAgent(_ paneID: PaneID, _ record: PersistedAgentRecord?)
+}
+```
+
+Plumbing: `AgentRegistry`'s state-transition path (today's hook into agent state) gets a side effect — `coordinator.recordAgent(paneID, record)`. The hook fires after the registry has updated its in-memory state, so registry state and persisted state stay in sync up to the debounce.
+
+Restore on launch (from `bootstrapSessionStack`, after `sweep()` and FS orphan reaper):
+
+```swift
+for (paneID, state) in states {
+    guard case .alive(let session) = state, let agent = session.agent else { continue }
+    let pid = agent.pid
+    let alive = kill(pid, 0) == 0   // false if ESRCH or EPERM
+    guard alive else { continue }   // OQ7 decision: omit, don't seed .finished
+    registry.seedFromPersistence(
+        paneID: paneID,
+        kindRaw: agent.kindRaw,
+        pid: pid,
+        stateRaw: agent.stateRaw
+    )
+}
+```
+
+Race precedence: any AgentRegistry event arriving from runtime output during the launch window (between bootstrap and first user interaction) wins over the seeded value. This is the same rule the existing `paneOutput`-driven registry uses for late events.
+
+Decode robustness: unknown `kindRaw` or `stateRaw` values (e.g. a downgrade to a build that doesn't know a newer agent kind) are dropped at restore time with a `.notice` log; the row stays in the catalog so a future upgrade can pick it up.
+
+---
+
 **Open Questions** (carried forward to implementation, not blocking spec/design approval)
 
 - **OQ1.** Submodule strategy for zmx: add new submodule pointing at upstream, or vendor by copy-paste? Submodule is preferred (matches ghostty pattern) but it brings Zig build at first-clone overhead. *Leaning:* submodule.

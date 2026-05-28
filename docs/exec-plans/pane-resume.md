@@ -53,6 +53,12 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 - [ ] **M5 Reaper & second-instance defense**
   - [ ] T5.1 7-day 回收
   - [ ] T5.2 sessions.json flock（拒绝第二 app 实例双连）
+- [ ] **M6 Hardening — durability, defense-in-depth, discoverability, agent state**（2026-05-29 增补）
+  - [ ] T6.1 SessionCoordinator 抽离，承包所有 catalog 写入（重构，行为零变化）
+  - [ ] T6.2 写穿持久化：spawn / attach / detach / close 全部触达 coordinator（R14, AC9）
+  - [ ] T6.3 文件系统兜底 orphan reaper：扫 socket dir → catalog ∪ hierarchy 都没claim 的就 kill（R15, AC10）
+  - [ ] T6.4 Settings → General 加 "Resumable sessions: N + Forget all sessions" 控件（R16, AC11）
+  - [ ] T6.5 PersistedAgentRecord 落 sessions.json，launch 时 liveness check 后 seed AgentRegistry（R17, AC12）
 
 ## Surprises & Discoveries
 
@@ -64,6 +70,10 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 - **2026-05-24 (planning)** External backend 内部走 socketpair proxy，不做 SCM_RIGHTS fd-passing。理由：共享 fd 的 read race 难处理；socketpair 一跳 ~1µs，对终端速率不可见。
 - **2026-05-24 (planning)** 第二 app 实例不通过守护进程拒绝（zmx 本身支持多 client，patch 它太冗余）；改成 app 对 `sessions.json` 做 `flock(LOCK_EX | LOCK_NB)`。拿不到锁的第二实例进入"无 resume 模式"：不读 sessions.json、所有 pane 冷启动。简单、纯 Swift。
 - **2026-05-24 (planning)** Snapshot tier 不需要 `ghostty_surface_write_vt` C 入口。让 daemon 自己在 `--restore-from` 时预灌进 ghostty-vt Terminal，app 拿到的字节流仍是 `serializeTerminalState` 输出——两档复用同一条 attach 通道。
+- **2026-05-29 (M6 planning)** 持续持久化不引入新文件，仍是 `sessions.json`；引入 `SessionCoordinator` 作为单一写入入口。理由：分散在四处的 catalog mutation 是 crash-loss 的结构性根因；先单点收口、再加写穿。这条 refactor 自身行为零变化，使后续 T6.2-T6.5 plumbing 各只动一处。
+- **2026-05-29 (M6 planning)** 文件系统 orphan reaper 不复用 `zmx ls`，而是直接扫 `~/Library/Caches/touch-code/zmx-sessions/*.sock`。理由：socket 目录由我们独占，扫描比子进程更轻量；目录是干净的，不会误杀其他工具的 daemon。
+- **2026-05-29 (M6 planning)** Agent 持久化字段（kindRaw / pid / stateRaw）全部存 raw string，不存 enum case。理由：与对方做法一致，让未来 agent 种类增减不破坏旧 catalog 解码。
+- **2026-05-29 (M6 planning)** Restore 时 PID 已死的 agent 直接 drop，不 seed `.finished`。理由：launch 时的 finished 行是噪音，用户没法操作；后续若需 history 视图再单独设计。
 
 ## Outcomes & Retrospective
 
