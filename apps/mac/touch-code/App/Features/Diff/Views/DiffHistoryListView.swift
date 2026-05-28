@@ -17,6 +17,13 @@ struct DiffHistoryListView: View {
   /// when it matches `self`, so a fast cursor move between adjacent rows
   /// doesn't briefly null the value and flicker the popover.
   @State private var hoveredCommitID: String?
+  /// Debounce handle for the hover-to-popover transition. We delay
+  /// `hoveredCommitID` assignment by ~280 ms so that quickly sweeping
+  /// the cursor across many rows does NOT churn an NSPopover show /
+  /// dismiss for each row — that churn previously crashed inside
+  /// `NSMoveHelper._doAnimation` when AppKit's animator picked up a
+  /// stale callback. Cancelled on each fresh hover event and on tap.
+  @State private var hoverDebounce: Task<Void, Never>?
 
   // MARK: - Body
 
@@ -143,24 +150,33 @@ struct DiffHistoryListView: View {
     // doesn't briefly reappear during the transition.
     .simultaneousGesture(
       TapGesture().onEnded {
+        hoverDebounce?.cancel()
         hoveredCommitID = nil
         store.send(.historyCommitTapped(sha: commit.id))
       }
     )
     .onHover { hovering in
-      // Only clear the field if this row owns the current hover, so a
-      // quick cursor move from row A → row B sets `hoveredCommitID = B`
-      // before A's exit handler fires (and A's exit then no-ops because
-      // the field no longer matches).
-      if hovering {
-        hoveredCommitID = commit.id
-        // Lazy-fetch the full commit message on first hover; reducer
-        // guards against duplicate requests.
-        if store.commitMessageByID[commit.id] == nil {
-          store.send(.commitMessageRequested(sha: commit.id))
+      // Always cancel any pending debounce — either the cursor moved
+      // again, or the cursor left the row. We don't want a stale
+      // delayed assignment to re-show a popover after the user has
+      // already moved on.
+      hoverDebounce?.cancel()
+      guard hovering else {
+        if hoveredCommitID == commit.id {
+          hoveredCommitID = nil
         }
-      } else if hoveredCommitID == commit.id {
-        hoveredCommitID = nil
+        return
+      }
+      // Debounced entry: only commit the hover after the cursor rests
+      // for ~280 ms. Fast sweeps across rows don't churn NSPopover.
+      let targetID = commit.id
+      hoverDebounce = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: 280_000_000)
+        if Task.isCancelled { return }
+        hoveredCommitID = targetID
+        if store.commitMessageByID[targetID] == nil {
+          store.send(.commitMessageRequested(sha: targetID))
+        }
       }
     }
     .popover(
