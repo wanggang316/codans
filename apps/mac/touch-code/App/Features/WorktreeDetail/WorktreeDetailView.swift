@@ -315,10 +315,12 @@ struct WorktreeDetailView: View {
             worktreePath: info.worktree.path
           )
           .buttonStyle(.plain)
-          // Mirrors the macOS 26 path: reserve the inspector's column
-          // width so the action buttons shift left when the panel opens.
+          // Mirrors the macOS 26 path: reserve `inspectorWidth -
+          // toggleButtonRegion` so the action buttons end up just left of
+          // the inspector edge instead of pushed past the Git Viewer
+          // toggle.
           if inspectorVisible {
-            Color.clear.frame(width: Self.inspectorWidth, height: 1)
+            Color.clear.frame(width: Self.inspectorWidth - 80, height: 1)
           }
           Button {
             onToggleGitViewer()
@@ -401,13 +403,17 @@ struct WorktreeDetailView: View {
       )
     }
     // Reserve the inspector column's width so the RunScript / Open chips
-    // shift left out from under the open inspector — without this, the
-    // window-wide toolbar parks them above the inspector instead of
-    // above the worktree content.
+    // shift left out from under the open inspector. The reserved width is
+    // `inspectorWidth - toggleButtonRegion` so the Open chip lands just
+    // left of the inspector edge, not pushed all the way past the Git
+    // Viewer toggle. `.sharedBackgroundVisibility(.hidden)` strips the
+    // toolbar's default glass capsule from the empty spacer — otherwise
+    // an empty pill renders between Open and the toggle.
     if inspectorVisible {
       ToolbarItem {
-        Color.clear.frame(width: Self.inspectorWidth, height: 1)
+        Color.clear.frame(width: Self.inspectorWidth - 80, height: 1)
       }
+      .sharedBackgroundVisibility(.hidden)
     }
     ToolbarSpacer(.fixed)
     ToolbarItem {
