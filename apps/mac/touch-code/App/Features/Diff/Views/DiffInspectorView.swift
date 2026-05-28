@@ -3,12 +3,13 @@ import ComposableArchitecture
 import SwiftUI
 import TouchCodeCore
 
-/// Diff inspector column body. Hosts a segmented Changes / History tab
-/// picker; routes the body to either the changed-files list (M5 default)
-/// or the commit-history list (T13). Width is fixed at 280 pt by the
-/// inspector mount in `ContentView`. The header close button is gone in
-/// favour of the toolbar Git Viewer toggle (Phase E), which now owns the
-/// open/close affordance from a more discoverable location.
+/// Diff inspector column body. Hosts a custom full-width Changes /
+/// History tab bar (macOS 26 Tahoe sidebar-tab style); routes the body
+/// to either the changed-files list (M5 default) or the commit-history
+/// list (T13). Width is fixed at 280 pt by the inspector mount in
+/// `ContentView`. The header close button is gone in favour of the
+/// toolbar Git Viewer toggle (Phase E), which now owns the open/close
+/// affordance from a more discoverable location.
 struct DiffInspectorView: View {
   @Bindable var store: StoreOf<DiffFeature>
 
@@ -26,39 +27,53 @@ struct DiffInspectorView: View {
 
   // MARK: - Tab picker
 
-  @ViewBuilder
+  // Custom two-button tab bar instead of `.segmented` Picker: SwiftUI's
+  // segmented style hugs icon-only labels and uses small platform corners,
+  // which clashes with macOS 26 Tahoe's sidebar-tab idiom. A hand-rolled
+  // HStack of buttons lets each segment claim 50% of the inspector width
+  // and adopt a visibly larger corner radius (12pt outer / 8pt inner — the
+  // macOS convention of outer = inner + padding).
   private var tabPicker: some View {
-    // `DiffFeature` is not `BindableAction`-conformant, so `$store.selectedTab`
-    // can't bridge writes straight back into state. A manual `Binding` that
-    // forwards through `.tabSelected` keeps the reducer the sole owner of
-    // `selectedTab`, matching the pattern used by `BranchSwitcherView` and
-    // `DiffStylePicker`.
-    let binding = Binding<DiffFeature.DiffTab>(
-      get: { store.selectedTab },
-      set: { newValue in
-        guard newValue != store.selectedTab else { return }
-        store.send(.tabSelected(newValue))
-      }
-    )
-    // Icon-only segmented control mirrors the Xcode-style right-panel tab
-    // bar idiom. `.help(...)` provides the hover tooltip; the explicit
-    // `.accessibilityLabel` keeps the surface readable for VoiceOver since
-    // the icon alone is ambiguous.
-    Picker("Inspector tab", selection: binding) {
-      Image(systemName: "doc.text")
-        .help("Changes")
-        .accessibilityLabel("Changes")
-        .tag(DiffFeature.DiffTab.changes)
-      Image(systemName: "clock.arrow.circlepath")
-        .help("History")
-        .accessibilityLabel("History")
-        .tag(DiffFeature.DiffTab.history)
+    HStack(spacing: 4) {
+      tabButton(.changes, systemImage: "doc.text", label: "Changes")
+      tabButton(.history, systemImage: "clock.arrow.circlepath", label: "History")
     }
-    .pickerStyle(.segmented)
-    .labelsHidden()
+    .padding(4)
+    .background(
+      RoundedRectangle(cornerRadius: 12)
+        .fill(Color(nsColor: .controlColor).opacity(0.5))
+    )
     .padding(.horizontal, 12)
     .padding(.vertical, 6)
     .accessibilityIdentifier("diff_inspector.tab_picker")
+  }
+
+  @ViewBuilder
+  private func tabButton(
+    _ tab: DiffFeature.DiffTab,
+    systemImage: String,
+    label: String
+  ) -> some View {
+    let isSelected = store.selectedTab == tab
+    Button {
+      if !isSelected {
+        store.send(.tabSelected(tab))
+      }
+    } label: {
+      Image(systemName: systemImage)
+        .font(.body)
+        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+        .frame(maxWidth: .infinity, minHeight: 28)
+        .contentShape(.rect)
+    }
+    .buttonStyle(.plain)
+    .background(
+      RoundedRectangle(cornerRadius: 8)
+        .fill(isSelected ? Color.accentColor : Color.clear)
+    )
+    .help(label)
+    .accessibilityLabel(label)
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 
   // MARK: - Header
