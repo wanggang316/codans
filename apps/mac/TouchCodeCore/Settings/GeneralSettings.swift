@@ -46,6 +46,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// controls the auto-open behaviour on the rising edge into `loading`.
   public var agentsViewAutoOpen: Bool
 
+  /// Row density for the ActiveAgents sidebar panel. `normal` (default)
+  /// renders the two-line worktree/project identity column; `compact`
+  /// joins both names on one line and tightens vertical padding.
+  public var agentsViewDisplayMode: AgentsViewDisplayMode
+
   /// Whether the app uploads anonymous crash and error reports on release
   /// builds. Default `true`. Debug builds never report regardless of this
   /// flag. Flipping this off also clears the install identifier so a future
@@ -63,6 +68,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updatesAutomaticallyCheckForUpdates: Bool = true,
     updatesAutomaticallyDownloadUpdates: Bool = false,
     agentsViewAutoOpen: Bool = true,
+    agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
     crashReportsEnabled: Bool = true
   ) {
     self.appearance = appearance
@@ -75,6 +81,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
     self.agentsViewAutoOpen = agentsViewAutoOpen
+    self.agentsViewDisplayMode = agentsViewDisplayMode
     self.crashReportsEnabled = crashReportsEnabled
   }
 
@@ -85,6 +92,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case agentsViewAutoOpen
+    case agentsViewDisplayMode
     case crashReportsEnabled
   }
 
@@ -108,6 +116,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyDownloadUpdates) ?? false
     self.agentsViewAutoOpen =
       try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoOpen) ?? true
+    // Older settings files predate this field. Default to `.normal` so
+    // every existing install keeps the current two-line row layout
+    // until the user opts into compact mode from Settings → General.
+    self.agentsViewDisplayMode =
+      try container.decodeIfPresent(AgentsViewDisplayMode.self, forKey: .agentsViewDisplayMode) ?? .normal
     // Older settings files predate this field. Default to opt-in to keep
     // installs already running through one or more releases consistent
     // with fresh installs; the user can opt out from Settings → General.
