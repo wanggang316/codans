@@ -119,12 +119,19 @@ jobs:
           /bin/cp -f "$RUNNER_TEMP/touch-code.rb" "$TAP_DIR/Casks/touch-code.rb"
 
           cd "$TAP_DIR"
-          if git diff --quiet -- Casks/touch-code.rb; then
+          git config user.name  "touch-code release bot"
+          git config user.email "noreply@touch-code.app"
+          # Stage first, then diff against HEAD. `git diff --quiet -- <path>`
+          # alone only sees changes to *tracked* files, so a brand-new file
+          # in a freshly bootstrapped (empty) tap would silently exit 0 and
+          # the cask would never get pushed. Stage-then-diff treats untracked
+          # additions as a real change. `--cached` against a missing HEAD
+          # also works: on an empty repo with no commits the diff is always
+          # non-empty, so the first push commits the bootstrap file.
+          git add Casks/touch-code.rb
+          if git diff --cached --quiet -- Casks/touch-code.rb 2>/dev/null; then
             echo "::notice::cask already at ${TAG} in tap — nothing to push"
             exit 0
           fi
-          git config user.name  "touch-code release bot"
-          git config user.email "noreply@touch-code.app"
-          git add Casks/touch-code.rb
           git commit -m "touch-code ${VERSION}"
           git push origin HEAD
