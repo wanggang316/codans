@@ -1,4 +1,5 @@
 // MARK: M5
+import AppKit
 import ComposableArchitecture
 import SwiftUI
 import TouchCodeCore
@@ -12,6 +13,11 @@ import TouchCodeCore
 /// affordance from a more discoverable location.
 struct DiffInspectorView: View {
   @Bindable var store: StoreOf<DiffFeature>
+  /// Ghostty-terminal background color, refreshed on theme reload. Used
+  /// as a low-alpha tint behind the material so the inspector reads as a
+  /// peer of the sidebar (which gets the same tint via
+  /// `ghosttyChromeTint`).
+  @State private var ghosttyTint: NSColor = .windowBackgroundColor
 
   var body: some View {
     VStack(spacing: 0) {
@@ -22,34 +28,42 @@ struct DiffInspectorView: View {
       content
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .background(Color(nsColor: ghosttyTint).opacity(0.18))
     .background(.regularMaterial)
+    .onAppear { refreshGhosttyTint() }
+    .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+      refreshGhosttyTint()
+    }
+  }
+
+  private func refreshGhosttyTint() {
+    ghosttyTint = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
   }
 
   // MARK: - Tab picker
 
-  // Custom two-button tab bar instead of `.segmented` Picker: SwiftUI's
-  // segmented style hugs icon-only labels and uses small platform corners,
-  // which clashes with macOS 26 Tahoe's sidebar-tab idiom. A hand-rolled
-  // HStack of buttons lets each segment claim 50% of the inspector width
-  // and adopt a visibly larger corner radius (12pt outer / 8pt inner — the
-  // macOS convention of outer = inner + padding).
+  /// Sidebar-tab style: a single rounded container holding two segments.
+  /// The selected segment renders as a filled accent capsule that
+  /// visually overlays the divider between segments; the unselected
+  /// segment is borderless. Matches the macOS 26 Tahoe icon-only
+  /// segmented control idiom.
   private var tabPicker: some View {
-    HStack(spacing: 4) {
-      tabButton(.changes, systemImage: "doc.text", label: "Changes")
-      tabButton(.history, systemImage: "clock.arrow.circlepath", label: "History")
+    ZStack {
+      Capsule()
+        .fill(Color(nsColor: .controlColor).opacity(0.55))
+      HStack(spacing: 0) {
+        tabSegment(.changes, systemImage: "doc.text", label: "Changes")
+        tabSegment(.history, systemImage: "clock.arrow.circlepath", label: "History")
+      }
     }
-    .padding(4)
-    .background(
-      RoundedRectangle(cornerRadius: 12)
-        .fill(Color(nsColor: .controlColor).opacity(0.5))
-    )
+    .frame(height: 32)
     .padding(.horizontal, 12)
-    .padding(.vertical, 6)
+    .padding(.vertical, 8)
     .accessibilityIdentifier("diff_inspector.tab_picker")
   }
 
   @ViewBuilder
-  private func tabButton(
+  private func tabSegment(
     _ tab: DiffFeature.DiffTab,
     systemImage: String,
     label: String
@@ -60,17 +74,20 @@ struct DiffInspectorView: View {
         store.send(.tabSelected(tab))
       }
     } label: {
-      Image(systemName: systemImage)
-        .font(.body)
-        .foregroundStyle(isSelected ? Color.white : Color.secondary)
-        .frame(maxWidth: .infinity, minHeight: 28)
-        .contentShape(.rect)
+      ZStack {
+        if isSelected {
+          Capsule()
+            .fill(Color.accentColor)
+            .padding(2)
+        }
+        Image(systemName: systemImage)
+          .font(.body)
+          .foregroundStyle(isSelected ? Color.white : Color.secondary)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(.rect)
     }
     .buttonStyle(.plain)
-    .background(
-      RoundedRectangle(cornerRadius: 8)
-        .fill(isSelected ? Color.accentColor : Color.clear)
-    )
     .help(label)
     .accessibilityLabel(label)
     .accessibilityAddTraits(isSelected ? .isSelected : [])
