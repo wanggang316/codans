@@ -259,11 +259,9 @@ cmd_release() {
   local dmg_path="${release_dir}/TouchCode-${version}.dmg"
   cmd_dmg "${version}"
   log "notarizing DMG"
+  # notarize.sh now refreshes the sidecar in place after stapling, so
+  # cmd_release no longer needs to do it explicitly.
   "${script_dir}/notarize.sh" "${dmg_path}"
-  log "refreshing DMG checksum sidecar after staple"
-  ( cd "$(dirname "${dmg_path}")" \
-    && shasum -a 256 "$(basename "${dmg_path}")" > "${dmg_path}.sha256" )
-  cat "${dmg_path}.sha256"
   log "release ready: ${dmg_path}"
 }
 

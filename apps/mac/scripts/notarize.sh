@@ -98,4 +98,18 @@ fi
 echo "==> stapling ticket onto ${target}"
 xcrun stapler staple "${target}"
 xcrun stapler validate "${target}"
+
+# Stapling mutates the file in place, so any sibling .sha256 emitted
+# before this point (e.g. by make-dmg.sh during cmd_dmg) now refers
+# to pre-staple bytes. Rewrite it here so every caller — including
+# release.yml, which invokes notarize as a discrete step rather than
+# via release.sh cmd_release — leaves a coherent (file, checksum) pair
+# on disk. No-op when no sidecar exists.
+sidecar="${target}.sha256"
+if [ -f "${sidecar}" ]; then
+  ( cd "$(dirname "${target}")" \
+    && shasum -a 256 "$(basename "${target}")" > "$(basename "${sidecar}")" )
+  echo "==> refreshed sidecar: $(cat "${sidecar}")"
+fi
+
 echo "==> ${target} notarized and stapled"
