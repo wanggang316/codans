@@ -189,6 +189,12 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  func setAgentsViewDisplayMode(_ mode: AgentsViewDisplayMode) {
+    guard settings.general.agentsViewDisplayMode != mode else { return }
+    settings.general.agentsViewDisplayMode = mode
+    scheduleSave()
+  }
+
   /// Toggles crash reporting at runtime. Persists the new value to
   /// settings.json. Disabling here is a hint for *future* launches — the
   /// Sentry SDK is bootstrapped once at `init()` from the on-disk value, so

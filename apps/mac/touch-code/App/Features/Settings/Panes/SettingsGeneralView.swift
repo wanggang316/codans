@@ -60,6 +60,13 @@ struct SettingsGeneralView: View {
     )
   }
 
+  private var agentsViewDisplayModeBinding: Binding<AgentsViewDisplayMode> {
+    Binding(
+      get: { settingsStore.settings.general.agentsViewDisplayMode },
+      set: { settingsStore.setAgentsViewDisplayMode($0) }
+    )
+  }
+
   private var crashReportsEnabledBinding: Binding<Bool> {
     Binding(
       get: { settingsStore.settings.general.crashReportsEnabled },
@@ -104,11 +111,6 @@ struct SettingsGeneralView: View {
           editorPickerContent
         }
         .pickerStyle(.menu)
-      } footer: {
-        Text(
-          "Used when opening a directory. Falls back to Finder if the chosen editor "
-            + "is uninstalled later."
-        )
       }
 
       Section {
@@ -124,14 +126,22 @@ struct SettingsGeneralView: View {
         )
       }
 
-      Section {
-        Toggle("Auto-open Agents View", isOn: agentsViewAutoOpenBinding)
-      } footer: {
-        Text("The sidebar panel opens automatically when an agent is running.")
+      Section("Agents View") {
+        Toggle(isOn: agentsViewAutoOpenBinding) {
+          Text("Auto-open")
+          Text("Opens the sidebar panel automatically when an agent is running.")
+        }
+        Picker("Display Mode", selection: agentsViewDisplayModeBinding) {
+          Text("Normal").tag(AgentsViewDisplayMode.normal)
+          Text("Compact").tag(AgentsViewDisplayMode.compact)
+        }
+        .pickerStyle(.menu)
       }
 
       Section {
         Toggle("Send crash reports", isOn: crashReportsEnabledBinding)
+      } header: {
+        Text("Diagnostics")
       } footer: {
         Text(
           "Helps fix problems by uploading anonymous crash details when the app "

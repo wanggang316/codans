@@ -60,6 +60,10 @@ struct ActiveAgentsSidebarPanel: View {
   /// capsule's fade-in and pushes / pops the resize-up-down cursor.
   @State private var strokeHovering = false
 
+  /// Drives per-row layout density (`normal` two-line, `compact`
+  /// one-line) from `Settings → General → Agents View display`.
+  @Environment(SettingsStore.self) private var settingsStore
+
   /// Show the count chip only once the panel holds more than four
   /// agents — for the typical 1-4 entry case the title alone reads
   /// cleaner.
@@ -172,6 +176,7 @@ struct ActiveAgentsSidebarPanel: View {
               projectName: resolved?.project ?? "—",
               worktreeName: resolved?.worktree ?? "—",
               isSelected: item.paneID == focusedPaneID,
+              displayMode: settingsStore.settings.general.agentsViewDisplayMode,
               onTap: { onTapRow(item.paneID) }
             )
           }

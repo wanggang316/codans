@@ -258,6 +258,13 @@ struct HierarchySidebarView: View {
         }
       }
       .clipped()
+      // `activeAgentsPanelOpen` is backed by `@AppStorage`, whose
+      // change notification is delivered through `UserDefaults` and
+      // does not preserve the SwiftUI Transaction set up by
+      // `withAnimation { ... }` at the mutation site. Attaching an
+      // explicit `.animation(_:value:)` here re-establishes the
+      // transition so the panel slides in/out instead of popping.
+      .animation(.easeOut(duration: 0.18), value: activeAgentsPanelOpen)
 
       TagFilterPopoverFooter(
         tags: catalog.tags,
