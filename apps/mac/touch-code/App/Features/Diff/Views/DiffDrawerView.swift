@@ -131,6 +131,16 @@ struct DiffDrawerView: View {
           items: paths,
           currentlyPresented: nil,
           onTap: { path in
+            // Tell the live DiffWebView to scroll to this file. The
+            // reducer action is also dispatched for tests / future
+            // bookkeeping, but the actual scroll happens via this
+            // notification — the reducer can't reach a WKWebView
+            // directly. See `DiffWebViewCoordinator.scrollToFile`.
+            NotificationCenter.default.post(
+              name: .diffScrollToFileRequested,
+              object: nil,
+              userInfo: ["path": path]
+            )
             store.send(.commitFileScrollRequested(path: path))
             showFilePicker = false
           }
@@ -148,16 +158,22 @@ struct DiffDrawerView: View {
   /// badge (M/A/D/R) next to the path. `currentlyPresented == nil` skips
   /// the checkmark column entirely, keeping the visual surface honest.
   ///
-  /// Each row uses a `Button` for reliable tap handling — the previous
-  /// `.simultaneousGesture` approach was a no-op because that modifier
-  /// only fires alongside another active gesture. Inside the popover
-  /// content (not on its anchor), a regular `Button` fires normally.
+  /// Each row has an explicit `.frame(height: rowHeight)` so the
+  /// container's computed height matches the actual content exactly —
+  /// without this the row's intrinsic height varies a few pt between
+  /// items, accumulates into a bottom whitespace strip, and looks
+  /// asymmetric vs the top padding.
+  private static let pickerRowHeight: CGFloat = 32
+  private static let pickerVerticalPadding: CGFloat = 4
+
   private func filePickerList(
     items: [String],
     currentlyPresented: String?,
     onTap: @escaping (String) -> Void
   ) -> some View {
-    ScrollView {
+    let contentHeight =
+      CGFloat(items.count) * Self.pickerRowHeight + Self.pickerVerticalPadding * 2
+    return ScrollView {
       LazyVStack(alignment: .leading, spacing: 0) {
         ForEach(items, id: \.self) { (path: String) in
           filePickerRow(
@@ -168,9 +184,9 @@ struct DiffDrawerView: View {
           )
         }
       }
-      .padding(.vertical, 4)
+      .padding(.vertical, Self.pickerVerticalPadding)
     }
-    .frame(width: 480, height: min(CGFloat(items.count) * 34 + 8, 360))
+    .frame(width: 480, height: min(contentHeight, 360))
   }
 
   @ViewBuilder
@@ -197,7 +213,7 @@ struct DiffDrawerView: View {
           .foregroundStyle(.primary)
       }
       .padding(.horizontal, 16)
-      .padding(.vertical, 8)
+      .frame(height: Self.pickerRowHeight)
       .contentShape(.rect)
     }
     .buttonStyle(.plain)

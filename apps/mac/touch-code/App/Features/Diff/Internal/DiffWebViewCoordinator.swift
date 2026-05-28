@@ -32,6 +32,53 @@ final class DiffWebViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
   /// capture to avoid the coordinator strong-retaining the WebView.
   var evaluator: ((String) -> Void)?
 
+  /// NotificationCenter observer token for `.diffScrollToFileRequested`.
+  /// Owned here so `DiffWebView.dismantleNSView` can detach it cleanly.
+  var scrollObserver: NSObjectProtocol?
+
+  /// Run a JS routine that finds the file's section in the rendered
+  /// diff and scrolls it into view. Multi-strategy DOM walk because the
+  /// vendored YiTong renderer doesn't expose stable file-anchor IDs:
+  ///
+  /// 1. `data-file` / `data-path` / `id` matching the path directly
+  /// 2. Header-ish elements whose text equals or ends with the path
+  /// 3. Any leaf element whose text equals the path
+  ///
+  /// Smooth-scroll into view at block:start so the file's header lands
+  /// at the top of the visible area. No-op if the path can't be found.
+  func scrollToFile(path: String) {
+    let safePath = path
+      .replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "'", with: "\\'")
+    let script = """
+      (function(p){
+        var t = document.getElementById(p)
+          || document.querySelector('[data-file="' + CSS.escape(p) + '"]')
+          || document.querySelector('[data-path="' + CSS.escape(p) + '"]');
+        if (!t) {
+          var headers = document.querySelectorAll(
+            'h1, h2, h3, h4, h5, h6, summary, .file-header, .filename, [class*="file"]'
+          );
+          for (var i = 0; i < headers.length; i++) {
+            var tx = (headers[i].textContent || '').trim();
+            if (tx === p || tx.endsWith(p)) { t = headers[i]; break; }
+          }
+        }
+        if (!t) {
+          var all = document.querySelectorAll('*');
+          for (var j = 0; j < all.length; j++) {
+            if (all[j].children.length > 0) continue;
+            var tx2 = (all[j].textContent || '').trim();
+            if (tx2 === p) { t = all[j]; break; }
+          }
+        }
+        if (t) { t.scrollIntoView({behavior:'smooth', block:'start'}); return true; }
+        return false;
+      })('\(safePath)');
+      """
+    evaluator?(script)
+  }
+
   func userContentController(
     _ userContentController: WKUserContentController,
     didReceive message: WKScriptMessage
