@@ -1,0 +1,25 @@
+{
+  "version" : 3,
+  "projects" : [
+    {
+      "id" : {
+        "raw" : "00000000-0000-0000-0000-0000000B0001"
+      },
+      "name" : "playground",
+      "rootPath" : "__TMP__/repo-multi-branch",
+      "gitRoot" : "__TMP__/repo-multi-branch",
+      "worktrees" : [
+        {
+          "id" : {
+            "raw" : "00000000-0000-0000-0000-0000000C0001"
+          },
+          "name" : "repo-multi-branch",
+          "path" : "__TMP__/repo-multi-branch",
+          "branch" : "feat/header-redesign",
+          "tabs" : []
+        }
+      ]
+    }
+  ],
+  "tags" : []
+}

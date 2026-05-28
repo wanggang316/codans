@@ -60,3 +60,24 @@ personas:
       notifications.commandFinishedThresholdSec: 30
       notifications.moveNotifiedWorktreeToTop: false
       authStatus: denied
+
+  - id: git_branch_navigator
+    role: Developer who switches between feature branches frequently
+    description: >
+      Works across multiple local + remote branches within a single
+      worktree per session, expects to switch in-app rather than
+      dropping to a terminal, and reads the worktree header as the
+      primary "where am I" cue. Comfortable with git's native error
+      messages when a switch fails.
+    defaults:
+      authStatus: authorized
+
+  - id: history_browser
+    role: Contributor reading past commits for context
+    description: >
+      Uses the Diff Viewer's History tab to read commit diffs without
+      modifying the working tree. Often new to a project and unfamiliar
+      with terminal git, so relies on the in-app inspector to navigate
+      the branch's commit history.
+    defaults:
+      authStatus: authorized

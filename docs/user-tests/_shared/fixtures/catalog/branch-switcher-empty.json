@@ -1,0 +1,25 @@
+{
+  "version" : 3,
+  "projects" : [
+    {
+      "id" : {
+        "raw" : "00000000-0000-0000-0000-0000000B0002"
+      },
+      "name" : "playground",
+      "rootPath" : "__TMP__/repo-empty",
+      "gitRoot" : "__TMP__/repo-empty",
+      "worktrees" : [
+        {
+          "id" : {
+            "raw" : "00000000-0000-0000-0000-0000000C0002"
+          },
+          "name" : "repo-empty",
+          "path" : "__TMP__/repo-empty",
+          "branch" : null,
+          "tabs" : []
+        }
+      ]
+    }
+  ],
+  "tags" : []
+}

@@ -1,4 +1,5 @@
 import Foundation
+import TouchCodeCore
 
 /// Argv builder for the Git CLI. Each static method produces the arguments passed to `git` —
 /// never to a shell. `gitExecutable` itself is argv[0] on the Process side; these arrays
@@ -89,5 +90,69 @@ nonisolated enum GitCommand {
   /// the `origin` remote since the GitHub integration does not support multi-remote setups.
   static func remoteGetUrl(remote: String = "origin") -> [String] {
     ["remote", "get-url", remote]
+  }
+
+  /// `git symbolic-ref --short HEAD`. Exit 0 + branch on stdout when HEAD points at a ref;
+  /// exit 1 (no stdout) when HEAD is detached. Caller maps the exit 1 case to "detached".
+  static func symbolicRefShortHead() -> [String] {
+    ["symbolic-ref", "--short", "HEAD"]
+  }
+
+  /// `git for-each-ref … refs/heads refs/remotes` formatted for parser ingestion.
+  /// Fields per record (TAB-separated): full refname, short refname, upstream short name,
+  /// HEAD marker (`*` for current, space otherwise). Records are newline-separated.
+  /// Branch names cannot contain TAB or LF per git ref-naming rules, so the chosen
+  /// separators are unambiguous.
+  static func forEachRefBranches() -> [String] {
+    [
+      "-c", "core.quotePath=false",
+      "for-each-ref",
+      "--format=%(refname)%09%(refname:short)%09%(upstream:short)%09%(HEAD)",
+      "refs/heads", "refs/remotes",
+    ]
+  }
+
+  /// `git switch <name>` for `.local`, `git switch --track <origin/x>` for `.remoteTracking`.
+  /// No `-C` / `--create`; switching to a non-existent local branch must fail with git's
+  /// native error rather than silently create. Returns argv only — caller wraps with the
+  /// shared subprocess runner.
+  static func switchBranch(target: BranchSwitchTarget) -> [String] {
+    switch target {
+    case .local(let name):
+      return ["switch", name]
+    case .remoteTracking(let shortName):
+      return ["switch", "--track", shortName]
+    }
+  }
+
+  /// `git branch -m <oldName> <newName>` — rename any branch. Works on the
+  /// current branch (git's "-m" handles HEAD-ref rewrite atomically) and on
+  /// non-current local branches. Errors (duplicate target, invalid name,
+  /// branch is checked out elsewhere on stale git) surface as
+  /// `GitError.exec` with stderr preserved.
+  static func branchRename(from oldName: String, to newName: String) -> [String] {
+    precondition(!oldName.isEmpty, "branch rename source must be non-empty")
+    precondition(!newName.isEmpty, "branch rename target must be non-empty")
+    return ["branch", "-m", oldName, newName]
+  }
+
+  /// `git switch -c <newName> <baseName>` — create `<newName>` from
+  /// `<baseName>` and switch HEAD to it in one atomic step. Equivalent to
+  /// `git checkout -b <newName> <baseName>` but uses the modern verb.
+  /// `<baseName>` may be a local branch ("main"), a remote tracking ref
+  /// ("origin/feat/x"), or any committish.
+  static func switchCreate(name: String, from baseName: String) -> [String] {
+    precondition(!name.isEmpty, "new-branch name must be non-empty")
+    precondition(!baseName.isEmpty, "new-branch base must be non-empty")
+    return ["switch", "-c", name, baseName]
+  }
+
+  /// `git log -1 --format=%B <sha>` — fetches the FULL commit message
+  /// (subject + body, raw multi-line). The `%B` format key is the
+  /// canonical "body including subject" specifier. Used by the popover's
+  /// lazy fetch when a row is first hovered.
+  static func showCommitMessage(sha: String) -> [String] {
+    precondition(!sha.isEmpty, "sha must be non-empty")
+    return ["log", "-1", "--format=%B", sha]
   }
 }

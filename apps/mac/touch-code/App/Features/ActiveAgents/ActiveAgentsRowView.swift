@@ -43,8 +43,8 @@ struct ActiveAgentsRowView: View {
   var body: some View {
     Button(action: onTap) {
       HStack(alignment: .center, spacing: 10) {
-        // Logo tint darkens to `.primary` on the selected row so it
-        // reads alongside the bolder title.
+        // Logo tint darkens to `.primary` on the selected row — the
+        // primary visual signal that this row is the current focus.
         AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
         identityColumn
         // Compact mode packs status right after identity (no greedy
@@ -98,17 +98,17 @@ struct ActiveAgentsRowView: View {
     case .normal:
       VStack(alignment: .leading, spacing: 2) {
         Text(worktreeName)
-          .font(.callout)
-          .fontWeight(isSelected ? .semibold : .regular)
+          .font(.subheadline)
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
           .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
         Text(projectName)
-          .font(.caption)
+          .font(.caption2)
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
+          .padding(.leading, 8)
       }
     case .compact:
       // Single-line variant: worktree at the leading edge, a small
@@ -122,14 +122,13 @@ struct ActiveAgentsRowView: View {
       // statusColumn keeps the gap to the status icon.
       HStack(spacing: 8) {
         Text(worktreeName)
-          .font(.callout)
-          .fontWeight(isSelected ? .semibold : .regular)
+          .font(.subheadline)
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
           .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
         Text(projectName)
-          .font(.caption)
+          .font(.caption2)
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
@@ -141,8 +140,8 @@ struct ActiveAgentsRowView: View {
   /// - Selected (this pane is the main window's current focus): a
   ///   muted gray fill (per design feedback — orange is reserved for
   ///   "needs attention" / waiting state, accent blue is reserved for
-  ///   progress, so selection rides on neutral grey + bolder title to
-  ///   stand out).
+  ///   progress, so selection rides on neutral grey + a darker logo
+  ///   tint to stand out).
   /// - Hovering (pointer over the row): a softer gray wash so the row
   ///   feels clickable even when not selected.
   /// - Default: clear.
@@ -151,8 +150,8 @@ struct ActiveAgentsRowView: View {
   @ViewBuilder
   private var rowBackground: some View {
     // Selected and hovering share the same soft gray wash — selection
-    // is signalled by the bolder title + darker logo (set elsewhere
-    // in the row), not by a heavier background fill.
+    // is signalled by the darker logo tint (set elsewhere in the row),
+    // not by a heavier background fill.
     if isSelected || isHovering {
       Color.gray.opacity(0.08)
     } else {
