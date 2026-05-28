@@ -79,16 +79,18 @@ struct DiffDrawerView: View {
     .padding(.vertical, 8)
   }
 
-  /// File picker is enabled for both Changes and History modes:
-  ///   - Changes: shows the live `changedFiles` list (`isPresented`
-  ///     checkmark mirrors `presentedFilePath`).
-  ///   - History: shows the file paths extracted from the loaded commit
-  ///     diff (no checkmark — there's no "current file" concept inside a
-  ///     single commit). Tap dispatches `.commitFileScrollRequested`,
-  ///     today a no-op pending JS bridge wiring.
+  /// File picker is only enabled in Changes mode, where it picks the file
+  /// that fills the drawer. Tapping a row dispatches `.fileRowTapped` and
+  /// the drawer re-renders with that file's diff.
   ///
-  /// Empty file lists hide the button — no point opening a popover with
-  /// zero rows.
+  /// In History mode the row would need to scroll the rendered commit
+  /// diff to the matching file section, but the vendored YiTong renderer
+  /// doesn't expose stable file anchors (no data-file / id attributes)
+  /// and reverse-engineering its scrollable container has been brittle.
+  /// Hidden until the renderer ships a real `scrollToFile` API.
+  ///
+  /// Empty file lists also hide the button — no point opening a popover
+  /// with zero rows.
   private var shouldShowFilePicker: Bool {
     switch store.selectedTab {
     case .changes:
@@ -97,11 +99,7 @@ struct DiffDrawerView: View {
       }
       return false
     case .history:
-      guard let sha = store.presentedCommitSha,
-        let paths = store.commitFilePathsByID[sha],
-        !paths.isEmpty
-      else { return false }
-      return true
+      return false
     }
   }
 
