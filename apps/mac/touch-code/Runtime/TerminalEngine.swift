@@ -54,6 +54,15 @@ final class TerminalEngine {
   let ghosttyRuntime: GhosttyRuntime?
   var crashPolicy: CrashPolicy = .default
 
+  /// Continuous write-through to `sessions.json`. Set during
+  /// `bootstrapSessionStack` once the coordinator is alive; nil for
+  /// headless tests and for the "second-instance, no-resume" mode where
+  /// the catalog lock could not be acquired. When non-nil, every fresh
+  /// spawn / reattach / restore upserts a row through `recordLive`, so
+  /// a crash between launches no longer leaves recently-created panes
+  /// invisible to the next launch's reaper.
+  var sessionCoordinator: SessionCoordinator?
+
   /// Daemons that the launch-time `SessionReaper` confirmed are still
   /// reachable. Consumed at most once per paneID: the first
   /// `ensureSurface` call for an alive entry diverts to
@@ -222,6 +231,25 @@ final class TerminalEngine {
       )
     }
     runtime.register(pane: surface)
+    // Continuous catalog write-through: record the live daemon row so a
+    // crash between launches still surfaces this pane to the next launch's
+    // reaper. Recording AFTER `register` keeps the catalog in step with
+    // observable runtime state — if surface bringup throws above, no row
+    // is written and the orphan daemon is left for the FS-orphan reaper.
+    if let coordinator = sessionCoordinator {
+      coordinator.recordLive(
+        Session(
+          paneID: pane.id,
+          socketPath: zmxClient.socketPath,
+          pid: zmxClient.daemonPID,
+          createdAt: zmxClient.createdAt,
+          lastAttachedAt: Date(),
+          command: zmxClient.command,
+          cwd: zmxClient.cwd,
+          zmxVersion: zmxClient.zmxVersion
+        )
+      )
+    }
     foregroundJobPaneIDs.insert(pane.id)
     startForegroundJobPollingIfNeeded()
     surface.onClose = { [weak self] processAlive in

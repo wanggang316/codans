@@ -51,6 +51,21 @@ public final class SessionCoordinator {
     try store.saveNow(snapshot)
   }
 
+  /// Upsert a row for a daemon that just came up (fresh spawn, restore-
+  /// from-snapshot, or reattach). The write goes through the store's
+  /// 500 ms debounce, so a burst of bring-ups at launch coalesces into
+  /// one fsync. Synchronous teardown paths (`replace`, `recordClose`)
+  /// cancel the pending task before writing so this debounced row never
+  /// clobbers an immediate save.
+  ///
+  /// Idempotent: re-recording the same paneID overwrites the row, which
+  /// is exactly the semantics we want when a reattach refreshes
+  /// `lastAttachedAt` or when a crashed pane respawns with a new pid.
+  public func recordLive(_ session: Session) {
+    snapshot.sessions[session.paneID.raw.uuidString] = session
+    store.scheduleSave(snapshot)
+  }
+
   /// Drain any pending debounced save. Pass-through to `SessionStore`
   /// so the quit-time flush goes through one entry point once the
   /// upcoming write-through tier introduces debounced writes.

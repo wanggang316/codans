@@ -973,6 +973,12 @@ final class AppState {
     }
     let coordinator = SessionCoordinator(store: sessionStore, initial: initialCatalog)
     self.sessionCoordinator = coordinator
+    // Wire the coordinator into the engine so every fresh spawn /
+    // reattach / restore writes a row through the debounced store. The
+    // engine builds before this function runs (see `bringUp`), so we set
+    // the property after construction instead of through `init` — the
+    // engine treats nil as "no-resume mode" and silently skips writes.
+    engine.sessionCoordinator = coordinator
     self.sessionLifecycle = SessionLifecycle(
       manager: hierarchyManager,
       ghosttyRuntime: ghostty,
@@ -1028,6 +1034,13 @@ final class AppState {
     shortcutsStore.flush()
     notificationStore.flush()
     catalogStore.flushPending()
+    // Safety net for the SessionStore: the canonical quit path calls
+    // `detachAllForQuit` → `coordinator.replace` → `saveNow` which already
+    // cancels any pending write. This handles the edge case where
+    // termination skips the lifecycle hook (e.g. an unrecoverable error
+    // path tears the app down directly) and a recordLive timer is still
+    // armed. No-op when nothing is pending.
+    sessionCoordinator?.flushPending()
   }
 
   /// Project the live `Catalog` plus `lastFocusedPane` lookup into a

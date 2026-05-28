@@ -190,12 +190,24 @@ public final class SessionStore {
 
   /// Immediate, blocking save. Encodes pretty + sorted keys for stable
   /// diffs in tests and version-control friendliness.
+  ///
+  /// Cancels any in-flight debounced save before writing. Without this,
+  /// a `scheduleSave(stale)` queued earlier could fire 500 ms later and
+  /// overwrite the just-written catalog with the older snapshot — making
+  /// "saveNow" only stick if no debounce had been scheduled. Clearing
+  /// `latestCatalog` after a successful write means a subsequent
+  /// `flushPending` is a no-op (nothing is queued), while `scheduleSave`
+  /// continues to work normally by resetting it to the freshly-queued
+  /// value.
   public func saveNow(_ catalog: SessionCatalog) throws {
+    pendingSaveTask?.cancel()
+    pendingSaveTask = nil
     do {
       try AtomicFileStore.write(catalog, to: fileURL)
     } catch {
       throw SessionStoreError.write(error.localizedDescription)
     }
+    latestCatalog = nil
   }
 
   /// Synchronous flush for app termination. Cancels any pending timer
