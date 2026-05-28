@@ -22,6 +22,7 @@ enum DiffOutboundType: String {
   case renderDocument
   case updateConfiguration
   case teardown
+  case scrollToFile
 }
 
 struct DiffOutboundEnvelope<Payload: Encodable>: Encodable {
@@ -101,6 +102,13 @@ enum DiffWebViewBridge {
   static func encodeTeardown() throws -> String {
     struct Empty: Encodable {}
     return try encodeEnvelope(type: .teardown, payload: Empty())
+  }
+
+  static func encodeScrollToFile(_ path: String) throws -> String {
+    struct ScrollPayload: Encodable {
+      let path: String
+    }
+    return try encodeEnvelope(type: .scrollToFile, payload: ScrollPayload(path: path))
   }
 
   // MARK: - Inbound (web → host)

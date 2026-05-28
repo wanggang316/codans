@@ -79,7 +79,7 @@ struct DiffInspectorView: View {
   // MARK: - Header
 
   private var header: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 6) {
       Text(headerTitle)
         .font(.headline)
       Spacer()

@@ -131,13 +131,8 @@ struct WorktreeDetailView: View {
           if shouldShowDrawer(diff: diffStore.state) {
             DiffDrawerView(store: diffStore)
               .zIndex(80)
-              .transition(.move(edge: .trailing).combined(with: .opacity))
           }
         }
-        .animation(
-          .spring(response: 0.32, dampingFraction: 0.85),
-          value: drawerVisibilityKey(diff: diffStore.state)
-        )
 
         if inspectorVisible {
           Divider()

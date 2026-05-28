@@ -144,7 +144,6 @@ struct DiffHistoryListView: View {
     }
   }
 
-
   // MARK: - Helpers
 
   /// Shared formatter — `RelativeDateTimeFormatter` allocations are non-

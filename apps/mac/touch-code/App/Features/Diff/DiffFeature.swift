@@ -82,6 +82,12 @@ struct DiffFeature {
     /// means the commit had no files (rare — e.g., merge-of-merge or
     /// empty cherry-pick).
     var commitFilePathsByID: [String: [String]] = [:]
+
+    /// Change type (M/A/D/R) for each file in each loaded commit diff. Maps
+    /// `[sha: [path: ChangeStatus]]`. Populated alongside `commitFilePathsByID`
+    /// and cleared on the same lifecycle events. Enables the file-picker popup
+    /// to display change-type badges in History mode.
+    var commitFileChangeTypeByPath: [String: [String: ChangeStatus]] = [:]
   }
 
   /// Routes the inspector's right panel between the Changes list (default,
@@ -185,7 +191,7 @@ struct DiffFeature {
     /// single action instead of composing two sends from the view layer.
     case historyRefreshRequested
     case historyCommitTapped(sha: String)
-    case commitDiffSucceededFor(sha: String, document: DiffDocument, filePaths: [String])
+    case commitDiffSucceededFor(sha: String, document: DiffDocument, filePaths: [String], changeTypes: [String: ChangeStatus])
     case commitDiffFailedFor(sha: String, error: GitError)
     case commitDiffTooLargeFor(sha: String, reason: TooLargeReason, copyCommand: String)
     /// Lazy fetch of the full commit message for the hover popover. Idempotent:
@@ -239,6 +245,7 @@ struct DiffFeature {
         state.diffsByCommit = [:]
         state.commitMessageByID = [:]
         state.commitFilePathsByID = [:]
+        state.commitFileChangeTypeByPath = [:]
         guard worktreeID != nil, let path, !path.isEmpty else {
           state.changedFiles = .idle
           // Cancel any inflight loads from the previous worktree.
@@ -333,6 +340,7 @@ struct DiffFeature {
         state.diffsByCommit = [:]
         state.commitMessageByID = [:]
         state.commitFilePathsByID = [:]
+        state.commitFileChangeTypeByPath = [:]
         return .merge(
           .cancel(id: CancelID.historyPage),
           .cancel(id: CancelID.commitDiff),
@@ -420,9 +428,10 @@ struct DiffFeature {
         state.diffsByCommit[sha] = .loading
         return loadCommitDiff(sha: sha, worktreePath: worktreePath)
 
-      case .commitDiffSucceededFor(let sha, let document, let filePaths):
+      case .commitDiffSucceededFor(let sha, let document, let filePaths, let changeTypes):
         state.diffsByCommit[sha] = .loaded(LoadedDiffDocument(document))
         state.commitFilePathsByID[sha] = filePaths
+        state.commitFileChangeTypeByPath[sha] = changeTypes
         return .none
 
       case .commitDiffFailedFor(let sha, let error):
@@ -470,6 +479,7 @@ struct DiffFeature {
         state.diffsByCommit = [:]
         state.commitMessageByID = [:]
         state.commitFilePathsByID = [:]
+        state.commitFileChangeTypeByPath = [:]
         return .merge(
           .cancel(id: CancelID.historyPage),
           .cancel(id: CancelID.commitDiff)
@@ -584,12 +594,17 @@ struct DiffFeature {
         // exactly what the drawer file-picker wants to render and dispatch
         // for scroll-to-file. See `GitModels.swift` FileChange docstring.
         let filePaths = unified.files.map(\.id)
+        let changeTypes: [String: ChangeStatus] = Dictionary(
+          uniqueKeysWithValues: unified.files.map { fileChange in
+            (fileChange.id, Self.changeStatusFromFileChangeKind(fileChange.kind))
+          }
+        )
         let patch = Self.renderUnifiedDiffAsPatch(unified)
         let title = String(sha.prefix(7))
         let document = await MainActor.run { () -> DiffDocument in
           DiffDocument(files: [], title: title, fallbackPatch: patch)
         }
-        await send(.commitDiffSucceededFor(sha: sha, document: document, filePaths: filePaths))
+        await send(.commitDiffSucceededFor(sha: sha, document: document, filePaths: filePaths, changeTypes: changeTypes))
       } catch let error as GitError {
         await send(.commitDiffFailedFor(sha: sha, error: error))
       } catch {
@@ -597,6 +612,20 @@ struct DiffFeature {
       }
     }
     .cancellable(id: CancelID.commitDiff, cancelInFlight: true)
+  }
+
+  /// Maps a `FileChange.Kind` to a `ChangeStatus` for display in the
+  /// file-picker popup. Handles the Unix diff semantics (added/deleted)
+  /// plus Swift-specific statuses (renamed/copied/typeChanged).
+  private nonisolated static func changeStatusFromFileChangeKind(_ kind: FileChange.Kind) -> ChangeStatus {
+    switch kind {
+    case .added: return .added
+    case .deleted: return .deleted
+    case .modified: return .modified
+    case .renamed: return .renamed
+    case .copied: return .added
+    case .typeChanged: return .modified
+    }
   }
 
   /// Lazy `git log -1 --format=%B <sha>` for the History-list hover popover.

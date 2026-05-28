@@ -43,7 +43,7 @@ struct DiffDrawerView: View {
   // MARK: - Header
 
   private var header: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 8) {
       Text(titleText)
         .font(.system(.callout, design: .monospaced))
         .lineLimit(1)
@@ -51,7 +51,6 @@ struct DiffDrawerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(titleText)
         .accessibilityIdentifier("diff_drawer.title_text")
-      DiffStylePicker(store: store)
       if shouldShowFilePicker {
         Button {
           showFilePicker.toggle()
@@ -66,6 +65,7 @@ struct DiffDrawerView: View {
           filePickerContent
         }
       }
+      DiffStylePicker(store: store)
       Button {
         store.send(.drawerCloseRequested)
       } label: {
@@ -143,9 +143,10 @@ struct DiffDrawerView: View {
     }
   }
 
-  /// Shared file-picker list renderer. `currentlyPresented == nil` skips
-  /// the checkmark column entirely (History mode), keeping the visual
-  /// surface honest about the lack of per-file selection state.
+  /// Shared file-picker list renderer. In Changes mode, shows checkmark +
+  /// file path. In History mode, omits checkmark and shows change-type
+  /// badge (M/A/D/R) next to the path. `currentlyPresented == nil` skips
+  /// the checkmark column entirely, keeping the visual surface honest.
   private func filePickerList(
     items: [String],
     currentlyPresented: String?,
@@ -158,30 +159,79 @@ struct DiffDrawerView: View {
           Button {
             onTap(path)
           } label: {
-            HStack(spacing: 6) {
-              if isCurrent {
-                Image(systemName: "checkmark")
-                  .frame(width: 12)
-                  .accessibilityHidden(true)
+            HStack(spacing: 8) {
+              if currentlyPresented != nil {
+                if isCurrent {
+                  Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.accentColor)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                } else {
+                  Image(systemName: "circle")
+                    .foregroundStyle(.secondary)
+                    .opacity(0.5)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                }
               } else {
-                Color.clear.frame(width: 12)
+                changeTypeBadge(path: path)
               }
               Text(path)
                 .font(.system(.callout, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
-              Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
             .contentShape(.rect)
           }
           .buttonStyle(.plain)
+          .background(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
           .accessibilityIdentifier("diff_drawer.file_picker_row.\(path)")
         }
       }
+      .padding(.vertical, 4)
     }
-    .frame(width: 360, height: min(CGFloat(items.count) * 26 + 16, 320))
+    .frame(width: 360, height: min(CGFloat(items.count) * 32 + 12, 320))
+  }
+
+  /// Badge showing the change type for History-mode files. Looks up the
+  /// status from `store.commitFileChangeTypeByPath[sha][path]` if available;
+  /// falls back to an empty space if the path isn't found. This only
+  /// renders in History mode where the change type is known.
+  private func changeTypeBadge(path: String) -> some View {
+    let statusChar: String
+    if let sha = store.presentedCommitSha,
+      let changeTypes = store.commitFileChangeTypeByPath[sha],
+      let status = changeTypes[path]
+    {
+      switch status {
+      case .modified: statusChar = "M"
+      case .added: statusChar = "A"
+      case .deleted: statusChar = "D"
+      case .renamed: statusChar = "R"
+      }
+    } else {
+      statusChar = ""
+    }
+
+    return Text(statusChar)
+      .font(.system(.caption, design: .monospaced))
+      .fontWeight(.semibold)
+      .foregroundStyle(colorForChangeType(statusChar))
+      .frame(width: 16, alignment: .center)
+      .accessibilityHidden(true)
+  }
+
+  private func colorForChangeType(_ char: String) -> Color {
+    switch char {
+    case "M": return .orange
+    case "A": return .green
+    case "D": return .red
+    case "R": return .blue
+    default: return .secondary
+    }
   }
 
   /// Title rendered in the drawer header. Routes on the active tab:
