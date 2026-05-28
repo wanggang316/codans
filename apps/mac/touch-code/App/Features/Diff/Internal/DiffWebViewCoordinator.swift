@@ -36,44 +36,81 @@ final class DiffWebViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
   /// Owned here so `DiffWebView.dismantleNSView` can detach it cleanly.
   var scrollObserver: NSObjectProtocol?
 
-  /// Run a JS routine that finds the file's section in the rendered
-  /// diff and scrolls it into view. Multi-strategy DOM walk because the
-  /// vendored YiTong renderer doesn't expose stable file-anchor IDs:
+  /// Scroll the rendered diff to the section for `path`. Strategy reflects
+  /// the actual YiTong renderer DOM (verified by inspecting the bundled JS):
   ///
-  /// 1. `data-file` / `data-path` / `id` matching the path directly
-  /// 2. Header-ish elements whose text equals or ends with the path
-  /// 3. Any leaf element whose text equals the path
+  /// - File sections are nested in elements that descend from
+  ///   `[data-diffs-header]` rows whose text content carries the path,
+  ///   plus `[data-header-content]` containers.
+  /// - The file path is rendered as plain text inside the header (often
+  ///   with siblings carrying additions / deletions counts), so an exact
+  ///   `textContent === path` match misses; we need a contains-based walk
+  ///   that prefers shorter, leafier elements.
+  /// - The renderer host renders into a scrollable container that is NOT
+  ///   `document.documentElement`, so `scrollIntoView` from the leaf alone
+  ///   doesn't always work — we walk up to find the nearest ancestor with
+  ///   `overflow-y: auto | scroll` and translate the leaf's top into that
+  ///   container's scrollTop.
   ///
-  /// Smooth-scroll into view at block:start so the file's header lands
-  /// at the top of the visible area. No-op if the path can't be found.
+  /// Logs the outcome to the JS console so the WebKit inspector (DEBUG
+  /// builds set `isInspectable = true`) shows whether a target was found.
   func scrollToFile(path: String) {
     let safePath = path
       .replacingOccurrences(of: "\\", with: "\\\\")
       .replacingOccurrences(of: "'", with: "\\'")
     let script = """
       (function(p){
-        var t = document.getElementById(p)
-          || document.querySelector('[data-file="' + CSS.escape(p) + '"]')
-          || document.querySelector('[data-path="' + CSS.escape(p) + '"]');
-        if (!t) {
-          var headers = document.querySelectorAll(
-            'h1, h2, h3, h4, h5, h6, summary, .file-header, .filename, [class*="file"]'
+        function findTarget(){
+          var hdrs = document.querySelectorAll(
+            '[data-diffs-header], [data-header-content], .file-name, .filename, .file-header, summary, h1, h2, h3, h4, h5, h6'
           );
-          for (var i = 0; i < headers.length; i++) {
-            var tx = (headers[i].textContent || '').trim();
-            if (tx === p || tx.endsWith(p)) { t = headers[i]; break; }
+          var best = null;
+          var bestLen = Infinity;
+          for (var i = 0; i < hdrs.length; i++) {
+            var el = hdrs[i];
+            var t = (el.textContent || '').trim();
+            if (!t) continue;
+            if (t === p || t.endsWith(p) || t.indexOf(p) >= 0) {
+              if (t.length < bestLen) { best = el; bestLen = t.length; }
+            }
           }
-        }
-        if (!t) {
-          var all = document.querySelectorAll('*');
+          if (best) return best;
+          var all = document.querySelectorAll('span, div, td, th, a, button, li');
           for (var j = 0; j < all.length; j++) {
-            if (all[j].children.length > 0) continue;
-            var tx2 = (all[j].textContent || '').trim();
-            if (tx2 === p) { t = all[j]; break; }
+            var e = all[j];
+            if (e.children.length > 3) continue;
+            var tt = (e.textContent || '').trim();
+            if (tt === p) return e;
           }
+          return null;
         }
-        if (t) { t.scrollIntoView({behavior:'smooth', block:'start'}); return true; }
-        return false;
+        function findScroller(node){
+          var n = node;
+          while (n && n !== document.body && n !== document.documentElement) {
+            var s = window.getComputedStyle(n);
+            if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && n.scrollHeight > n.clientHeight) {
+              return n;
+            }
+            n = n.parentElement;
+          }
+          return document.scrollingElement || document.documentElement;
+        }
+        var target = findTarget();
+        if (!target) {
+          console.log('[touch-code/scroll-to-file] no DOM match for path:', p);
+          return false;
+        }
+        var scroller = findScroller(target);
+        var tRect = target.getBoundingClientRect();
+        var sRect = scroller.getBoundingClientRect();
+        var top = (scroller.scrollTop || 0) + (tRect.top - sRect.top) - 8;
+        try {
+          scroller.scrollTo({ top: top, behavior: 'smooth' });
+        } catch (e) {
+          scroller.scrollTop = top;
+        }
+        console.log('[touch-code/scroll-to-file] scrolled to', p, 'top=', top, 'scroller=', scroller);
+        return true;
       })('\(safePath)');
       """
     evaluator?(script)
