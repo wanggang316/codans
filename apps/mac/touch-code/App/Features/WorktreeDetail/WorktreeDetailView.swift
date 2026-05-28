@@ -85,6 +85,18 @@ struct WorktreeDetailView: View {
   /// floating-sidebar overlay to repaint behind.
   @State private var isWindowFullscreen: Bool = false
 
+  /// Local mirror of `inspectorVisible` driven by `.onChange`. The
+  /// `.inspector(isPresented:)` modifier writes back to this binding
+  /// during its open / close animation, so the binding must be owned by
+  /// SwiftUI itself — a Binding bridged onto the TCA-managed `let
+  /// inspectorVisible` parameter would re-read the source-of-truth on
+  /// every render, see the in-progress async transition as a stale
+  /// value, and fire `onToggleGitViewer()` again, slamming the inspector
+  /// back closed the moment it opened. With `@State` here, the
+  /// presentation state lives in SwiftUI and only crosses into TCA via
+  /// the directional `.onChange`s below.
+  @State private var localInspectorVisible: Bool = false
+
   /// View-only projection of the in-flight pending row plus the
   /// repository-side context the loading view needs. Built by
   /// `ContentView` so this struct doesn't depend on TCA state shapes.
@@ -133,12 +145,23 @@ struct WorktreeDetailView: View {
         }
       }
       // System inspector: handles the sidebar material, toolbar extension,
-      // and show/hide animation for free. The binding flips through
-      // `onToggleGitViewer` so the ⌘⇧G chord, menu item, and toolbar
-      // button all stay synchronized with the system column visibility.
-      .inspector(isPresented: inspectorPresentedBinding) {
+      // and show/hide animation for free. Bound to local `@State` and
+      // synced bidirectionally with the TCA-managed `inspectorVisible`
+      // via `.onChange` below — see the `localInspectorVisible` doc
+      // comment for why a direct bridge-binding loops.
+      .inspector(isPresented: $localInspectorVisible) {
         DiffInspectorView(store: diffStore)
           .inspectorColumnWidth(min: 240, ideal: Self.inspectorWidth, max: 480)
+      }
+      .onChange(of: inspectorVisible, initial: true) { _, newValue in
+        if localInspectorVisible != newValue {
+          localInspectorVisible = newValue
+        }
+      }
+      .onChange(of: localInspectorVisible) { _, newValue in
+        if newValue != inspectorVisible {
+          onToggleGitViewer()
+        }
       }
       // Mount project-script shortcut bindings as a 0-sized background of
       // the detail body. The toolbar's run-script Menu can only register
@@ -189,22 +212,6 @@ struct WorktreeDetailView: View {
     } else {
       placeholder
     }
-  }
-
-  /// Bridges `inspectorVisible: Bool` + `onToggleGitViewer: () -> Void`
-  /// to a `Binding<Bool>` that `.inspector(isPresented:)` expects. The
-  /// setter only fires `onToggleGitViewer` when the new value genuinely
-  /// differs from the current state — protects against SwiftUI write-
-  /// after-read cycles that would double-toggle the inspector.
-  private var inspectorPresentedBinding: Binding<Bool> {
-    Binding(
-      get: { inspectorVisible },
-      set: { newValue in
-        if newValue != inspectorVisible {
-          onToggleGitViewer()
-        }
-      }
-    )
   }
 
   /// True iff any visible app window (other than Settings) is currently in
