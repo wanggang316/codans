@@ -147,6 +147,11 @@ struct DiffDrawerView: View {
   /// file path. In History mode, omits checkmark and shows change-type
   /// badge (M/A/D/R) next to the path. `currentlyPresented == nil` skips
   /// the checkmark column entirely, keeping the visual surface honest.
+  ///
+  /// Uses `.simultaneousGesture` instead of `Button` so the popover
+  /// auto-dismiss-on-click doesn't swallow the tap on the row (a known
+  /// SwiftUI popover quirk). The gesture runs alongside the popover
+  /// dismissal so both fire on the same click.
   private func filePickerList(
     items: [String],
     currentlyPresented: String?,
@@ -163,9 +168,9 @@ struct DiffDrawerView: View {
           )
         }
       }
-      .padding(.vertical, 4)
+      .padding(.vertical, 6)
     }
-    .frame(width: 360, height: min(CGFloat(items.count) * 32 + 12, 320))
+    .frame(width: 480, height: min(CGFloat(items.count) * 34 + 16, 360))
   }
 
   @ViewBuilder
@@ -175,27 +180,28 @@ struct DiffDrawerView: View {
     showsCheckmarkColumn: Bool,
     onTap: @escaping (String) -> Void
   ) -> some View {
-    Button {
-      onTap(path)
-    } label: {
-      HStack(spacing: 8) {
-        if showsCheckmarkColumn {
-          checkmarkBadge(isCurrent: isCurrent)
-        } else {
-          changeTypeBadge(path: path)
-        }
-        Text(path)
-          .font(.system(.callout, design: .monospaced))
-          .lineLimit(1)
-          .truncationMode(.middle)
-          .frame(maxWidth: .infinity, alignment: .leading)
+    HStack(spacing: 10) {
+      if showsCheckmarkColumn {
+        checkmarkBadge(isCurrent: isCurrent)
+      } else {
+        changeTypeBadge(path: path)
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .contentShape(.rect)
+      Text(path)
+        .font(.system(.callout, design: .monospaced))
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .buttonStyle(.plain)
-    .background(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .contentShape(.rect)
+    .background(isCurrent ? Color.accentColor.opacity(0.12) : Color.clear)
+    .simultaneousGesture(
+      TapGesture().onEnded {
+        onTap(path)
+      }
+    )
+    .accessibilityAddTraits(.isButton)
     .accessibilityIdentifier("diff_drawer.file_picker_row.\(path)")
   }
 
@@ -204,13 +210,13 @@ struct DiffDrawerView: View {
     if isCurrent {
       Image(systemName: "checkmark.circle.fill")
         .foregroundStyle(Color.accentColor)
-        .frame(width: 16)
+        .frame(width: 18)
         .accessibilityHidden(true)
     } else {
       Image(systemName: "circle")
         .foregroundStyle(.secondary)
-        .opacity(0.5)
-        .frame(width: 16)
+        .opacity(0.4)
+        .frame(width: 18)
         .accessibilityHidden(true)
     }
   }
@@ -236,10 +242,10 @@ struct DiffDrawerView: View {
     }
 
     return Text(statusChar)
-      .font(.system(.caption, design: .monospaced))
-      .fontWeight(.semibold)
+      .font(.system(.footnote, design: .monospaced))
+      .fontWeight(.bold)
       .foregroundStyle(colorForChangeType(statusChar))
-      .frame(width: 16, alignment: .center)
+      .frame(width: 18, alignment: .center)
       .accessibilityHidden(true)
   }
 
