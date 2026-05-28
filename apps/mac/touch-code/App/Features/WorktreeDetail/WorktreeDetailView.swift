@@ -320,7 +320,7 @@ struct WorktreeDetailView: View {
           // the inspector edge instead of pushed past the Git Viewer
           // toggle.
           if inspectorVisible {
-            Color.clear.frame(width: Self.inspectorWidth - 80, height: 1)
+            Color.clear.frame(width: Self.inspectorWidth - 40, height: 1)
           }
           Button {
             onToggleGitViewer()
@@ -411,7 +411,7 @@ struct WorktreeDetailView: View {
     // an empty pill renders between Open and the toggle.
     if inspectorVisible {
       ToolbarItem {
-        Color.clear.frame(width: Self.inspectorWidth - 80, height: 1)
+        Color.clear.frame(width: Self.inspectorWidth - 40, height: 1)
       }
       .sharedBackgroundVisibility(.hidden)
     }

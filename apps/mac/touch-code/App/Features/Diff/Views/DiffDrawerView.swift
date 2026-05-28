@@ -148,10 +148,10 @@ struct DiffDrawerView: View {
   /// badge (M/A/D/R) next to the path. `currentlyPresented == nil` skips
   /// the checkmark column entirely, keeping the visual surface honest.
   ///
-  /// Uses `.simultaneousGesture` instead of `Button` so the popover
-  /// auto-dismiss-on-click doesn't swallow the tap on the row (a known
-  /// SwiftUI popover quirk). The gesture runs alongside the popover
-  /// dismissal so both fire on the same click.
+  /// Each row uses a `Button` for reliable tap handling — the previous
+  /// `.simultaneousGesture` approach was a no-op because that modifier
+  /// only fires alongside another active gesture. Inside the popover
+  /// content (not on its anchor), a regular `Button` fires normally.
   private func filePickerList(
     items: [String],
     currentlyPresented: String?,
@@ -168,9 +168,9 @@ struct DiffDrawerView: View {
           )
         }
       }
-      .padding(.vertical, 6)
+      .padding(.vertical, 4)
     }
-    .frame(width: 480, height: min(CGFloat(items.count) * 34 + 16, 360))
+    .frame(width: 480, height: min(CGFloat(items.count) * 34 + 8, 360))
   }
 
   @ViewBuilder
@@ -180,28 +180,28 @@ struct DiffDrawerView: View {
     showsCheckmarkColumn: Bool,
     onTap: @escaping (String) -> Void
   ) -> some View {
-    HStack(spacing: 10) {
-      if showsCheckmarkColumn {
-        checkmarkBadge(isCurrent: isCurrent)
-      } else {
-        changeTypeBadge(path: path)
+    Button {
+      onTap(path)
+    } label: {
+      HStack(spacing: 10) {
+        if showsCheckmarkColumn {
+          checkmarkBadge(isCurrent: isCurrent)
+        } else {
+          changeTypeBadge(path: path)
+        }
+        Text(path)
+          .font(.system(.callout, design: .monospaced))
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .foregroundStyle(.primary)
       }
-      Text(path)
-        .font(.system(.callout, design: .monospaced))
-        .lineLimit(1)
-        .truncationMode(.middle)
-        .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 8)
+      .contentShape(.rect)
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 8)
-    .contentShape(.rect)
+    .buttonStyle(.plain)
     .background(isCurrent ? Color.accentColor.opacity(0.12) : Color.clear)
-    .simultaneousGesture(
-      TapGesture().onEnded {
-        onTap(path)
-      }
-    )
-    .accessibilityAddTraits(.isButton)
     .accessibilityIdentifier("diff_drawer.file_picker_row.\(path)")
   }
 

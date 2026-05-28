@@ -13,11 +13,6 @@ import TouchCodeCore
 /// affordance from a more discoverable location.
 struct DiffInspectorView: View {
   @Bindable var store: StoreOf<DiffFeature>
-  /// Ghostty-terminal background color, refreshed on theme reload. Used
-  /// as a low-alpha tint behind the material so the inspector reads as a
-  /// peer of the sidebar (which gets the same tint via
-  /// `ghosttyChromeTint`).
-  @State private var ghosttyTint: NSColor = .windowBackgroundColor
 
   var body: some View {
     VStack(spacing: 0) {
@@ -28,16 +23,12 @@ struct DiffInspectorView: View {
       content
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    .background(Color(nsColor: ghosttyTint).opacity(0.18))
-    .background(.regularMaterial)
-    .onAppear { refreshGhosttyTint() }
-    .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-      refreshGhosttyTint()
-    }
-  }
-
-  private func refreshGhosttyTint() {
-    ghosttyTint = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
+    // Use the real AppKit sidebar material (NSVisualEffectView with
+    // `.sidebar` + `.behindWindow`) — SwiftUI's `Material` shim is
+    // layer-bound and can't sample the desktop / windows behind, which
+    // is why `.regularMaterial` rendered flat instead of matching the
+    // left sidebar's true glass.
+    .background(VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow))
   }
 
   // MARK: - Tab picker
@@ -51,6 +42,8 @@ struct DiffInspectorView: View {
     ZStack {
       Capsule()
         .fill(Color(nsColor: .controlColor).opacity(0.55))
+      Capsule()
+        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
       HStack(spacing: 0) {
         tabSegment(.changes, systemImage: "doc.text", label: "Changes")
         tabSegment(.history, systemImage: "clock.arrow.circlepath", label: "History")
