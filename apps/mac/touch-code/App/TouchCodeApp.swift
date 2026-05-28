@@ -549,6 +549,25 @@ final class AppState {
       settings: settings,
       hierarchy: hierarchy
     )
+    // Wire the quit-time agent snapshot into SessionLifecycle now that
+    // both the registry and the engine (PID source) are alive. The
+    // closure is invoked from the lifecycle's `detachLiveTier` path —
+    // running here keeps lifecycle ignorant of `AgentRegistry`'s type.
+    if let lifecycle = self.sessionLifecycle, let registry = self.agentRegistry {
+      lifecycle.agentSnapshotProvider = { [weak engine, weak registry] in
+        guard let registry else { return [] }
+        let now = Date()
+        return registry.entries.map { paneID, entry in
+          PersistedAgentRecord(
+            paneID: paneID,
+            kindRaw: entry.kind.rawValue,
+            stateRaw: entry.state.rawValue,
+            pid: engine?.foregroundProcessGroupID(for: paneID) ?? 0,
+            capturedAt: now
+          )
+        }
+      }
+    }
     // SwiftUI views (e.g. `ProjectGeneralSettingsView`) read `@Dependency(SettingsWriter.self)`
     // directly; that resolution bypasses the per-store `withDependencies` overrides below and
     // would otherwise hit the `liveValue` `fatalError` placeholders. Install the live
@@ -1318,11 +1337,17 @@ final class AppState {
       }
     )
     self.agentRegistry = registry
+    // Pre-seed the registry from the last quit's agent snapshot (M6.T6.5).
+    // Each persisted record carries the foreground PGID at capture time;
+    // `kill(pid, 0)` filters out agents whose processes exited between
+    // launches so we never restore a phantom "waiting for input" badge.
+    Self.seedRestoredAgents(coordinator: self.sessionCoordinator, registry: registry)
     // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
     // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
     // pty child from the previous session can't haunt the panel. The
-    // registry starts empty and refills from AgentBinder events as the
-    // user runs agents in this session.
+    // registry refills from AgentBinder events as the user runs agents in
+    // this session; the seed above only nudges the UI into the right
+    // initial state until the next event lands.
     let binder = AgentBinder(
       client: hierarchy,
       currentAgentKind: { [weak manager] paneID in
@@ -1376,6 +1401,41 @@ final class AppState {
     registry: AgentRegistry
   ) {
     registry.onTerminalEvent(event)
+  }
+
+  /// Filter the previous quit's agent snapshot through a `kill(pid, 0)`
+  /// liveness check and hand the survivors to `AgentRegistry.seedRestored`.
+  /// Records whose pid is gone (ESRCH) or zero are dropped silently —
+  /// the registry should not show "waiting for input" for an agent that
+  /// already exited. Unknown enum raws are likewise skipped: a future
+  /// build could persist values this binary does not recognise, and
+  /// dropping is friendlier than failing the launch.
+  @MainActor
+  private static func seedRestoredAgents(
+    coordinator: SessionCoordinator?,
+    registry: AgentRegistry
+  ) {
+    guard let coordinator else { return }
+    let restored = coordinator.restoredAgents
+    guard !restored.isEmpty else { return }
+    var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentRegistry.AgentRuntimeState)] = []
+    seeds.reserveCapacity(restored.count)
+    for (paneID, record) in restored {
+      guard record.pid > 0 else { continue }
+      if kill(record.pid, 0) != 0 {
+        // ESRCH (no such process) is the expected case here. Any other
+        // errno (EPERM, etc.) is treated the same way — if we cannot
+        // confirm the process is alive, we drop the seed rather than
+        // restore stale state.
+        continue
+      }
+      guard
+        let kind = AgentKind(rawValue: record.kindRaw),
+        let state = AgentRegistry.AgentRuntimeState(rawValue: record.stateRaw)
+      else { continue }
+      seeds.append((paneID: paneID, kind: kind, state: state))
+    }
+    registry.seedRestored(seeds)
   }
 
   /// Active-agents T6: long-running focus observer for `AgentRegistry`.

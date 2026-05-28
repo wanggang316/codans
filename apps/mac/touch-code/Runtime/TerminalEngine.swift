@@ -390,6 +390,17 @@ final class TerminalEngine {
     findPane(paneID)?.tabID
   }
 
+  /// Process-group leader PID of the pane's current foreground job, or
+  /// `nil` when the engine has not yet observed a job for this pane.
+  /// The quit-time agent snapshot reads this so the persisted record
+  /// carries a PID the next launch can pass to `kill(pid, 0)` for
+  /// liveness. PGID is preferred over an individual process PID because
+  /// it tracks the foreground group leader and survives parent/child
+  /// turnover within the same agent invocation.
+  func foregroundProcessGroupID(for paneID: PaneID) -> Int32? {
+    foregroundJobSnapshots[paneID]?.processGroupID
+  }
+
   /// Return a fresh event stream for a new subscriber. Multi-consumer safe:
   /// each call registers its own continuation.
   ///

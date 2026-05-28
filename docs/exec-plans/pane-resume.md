@@ -57,8 +57,8 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
   - [x] T6.1 SessionCoordinator 抽离，承包所有 catalog 写入（重构，行为零变化）— commit 49fba46b
   - [x] T6.2 写穿持久化：spawn / attach / detach / close 全部触达 coordinator（R14, AC9）— commit 7ee760a0
   - [x] T6.3 文件系统兜底 orphan reaper：扫 socket dir → catalog ∪ hierarchy 都没claim 的就 kill（R15, AC10）— commit 695b6b58
-  - [x] T6.4 Settings → General 加 "Resumable sessions: N + Forget all sessions" 控件（R16, AC11）— commit pending
-  - [ ] T6.5 PersistedAgentRecord 落 sessions.json，launch 时 liveness check 后 seed AgentRegistry（R17, AC12）
+  - [x] T6.4 Settings → General 加 "Resumable sessions: N + Forget all sessions" 控件（R16, AC11）— commit 34975538
+  - [x] T6.5 PersistedAgentRecord 落 sessions.json，launch 时 liveness check 后 seed AgentRegistry（R17, AC12）— commit pending
 
 ## Surprises & Discoveries
 

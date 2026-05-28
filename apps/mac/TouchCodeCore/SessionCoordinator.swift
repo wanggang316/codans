@@ -66,6 +66,31 @@ public final class SessionCoordinator {
     store.scheduleSave(snapshot)
   }
 
+  /// Replace the persisted agent map wholesale and persist synchronously.
+  /// The quit-time lifecycle captures every currently-bound agent into a
+  /// fresh dictionary and hands it here; we drop the prior agents in one
+  /// step so a missing entry means "no agent for this pane any more"
+  /// rather than relying on the absence-after-merge semantics of an
+  /// upsert API. Synchronous because we run inside the quit handoff
+  /// where an outstanding debounce must not race the write.
+  public func replaceAgents(_ records: [String: PersistedAgentRecord]) throws {
+    snapshot.agents = records
+    try store.saveNow(snapshot)
+  }
+
+  /// Read-only view of the agent map for the launch-time restore path.
+  /// Keyed by `PaneID` so the caller's liveness check (`kill(pid, 0)`)
+  /// can correlate against the engine's surviving paneIDs without
+  /// re-parsing UUIDs.
+  public var restoredAgents: [PaneID: PersistedAgentRecord] {
+    var out: [PaneID: PersistedAgentRecord] = [:]
+    out.reserveCapacity(snapshot.agents.count)
+    for record in snapshot.agents.values {
+      out[record.paneID] = record
+    }
+    return out
+  }
+
   /// Drain any pending debounced save. Pass-through to `SessionStore`
   /// so the quit-time flush goes through one entry point once the
   /// upcoming write-through tier introduces debounced writes.

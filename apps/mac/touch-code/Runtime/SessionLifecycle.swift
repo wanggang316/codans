@@ -26,6 +26,10 @@ final class SessionLifecycle {
   private let coordinator: SessionCoordinator
   private let now: () -> Date
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.lifecycle")
+  /// Optional agent-state source for quit-time snapshot. Set by AppState
+  /// once the registry is built. Nil branch keeps tests and headless
+  /// callers from needing to wire either of the two new dependencies.
+  var agentSnapshotProvider: (@MainActor () -> [PersistedAgentRecord])?
 
   init(
     manager: HierarchyManager,
@@ -77,6 +81,11 @@ final class SessionLifecycle {
   /// Live tier (M2.T2.1): persist each daemon's catalog row, then send
   /// `.Detach` so the daemons survive the app's exit. The next launch
   /// re-`connect(2)`s the recorded sockets in `SessionReaper.sweep`.
+  ///
+  /// Agent state (if a provider is wired) is captured into the same
+  /// catalog write so the next launch can seed `AgentRegistry` from
+  /// liveness-checked rows — only agent processes that survived the
+  /// quit count, ones we restart fresh otherwise.
   private func detachLiveTier(_ liveClients: [ZmxClient]) {
     let stamp = now()
     var sessions: [String: Session] = [:]
@@ -94,7 +103,17 @@ final class SessionLifecycle {
         zmxVersion: client.zmxVersion
       )
     }
-    persist(catalog: SessionCatalog(version: SessionCatalog.currentVersion, sessions: sessions))
+    var agents: [String: PersistedAgentRecord] = [:]
+    if let provider = agentSnapshotProvider {
+      for record in provider() {
+        agents[record.paneID.raw.uuidString] = record
+      }
+    }
+    persist(catalog: SessionCatalog(
+      version: SessionCatalog.currentVersion,
+      sessions: sessions,
+      agents: agents
+    ))
 
     for client in liveClients {
       client.detach()
