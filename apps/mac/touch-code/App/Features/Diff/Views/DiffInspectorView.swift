@@ -23,23 +23,12 @@ struct DiffInspectorView: View {
       content
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    // Use the real AppKit sidebar material (NSVisualEffectView with
-    // `.sidebar` + `.behindWindow`) — SwiftUI's `Material` shim is
-    // layer-bound and can't sample the desktop / windows behind, which
-    // is why `.regularMaterial` rendered flat instead of matching the
-    // left sidebar's true glass.
-    //
-    // `.ignoresSafeArea(.container, edges: [.top, .bottom])` extends the
-    // material upward into the toolbar safe-area inset (and downward into
-    // any bottom inset) so the inspector reads as a contiguous column
-    // from window-top to window-bottom — the same way
-    // `NavigationSplitView` extends its sidebar behind the toolbar.
-    // Without this, only the body region renders the material and the
-    // toolbar area stays empty, creating a visual split.
-    .background(alignment: .top) {
-      VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
-        .ignoresSafeArea(.container, edges: [.top, .bottom])
-    }
+    // No hand-rolled background: the SwiftUI `.inspector(...)` modifier
+    // host applies the system sidebar material and extends it behind the
+    // toolbar automatically, the same way NavigationSplitView's leading
+    // column does. Painting a VisualEffectBackground on top fights with
+    // the system surface and produces the visible split this column had
+    // before adopting `.inspector`.
   }
 
   // MARK: - Tab picker

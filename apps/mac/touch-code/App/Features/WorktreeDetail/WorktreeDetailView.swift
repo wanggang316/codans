@@ -113,35 +113,33 @@ struct WorktreeDetailView: View {
       WorktreeLoadingView(info: loadingInfo(for: pending))
     } else if let address = resolveAddress() {
       let info = worktreeInfo(for: address)
-      HStack(spacing: 0) {
-        VStack(spacing: 0) {
-          // T10: inline branch-switch error banner. Renders itself only
-          // when `branchSwitcherStore.switchError` is non-nil, so it stays
-          // a zero-height no-op on the happy path. Placed at the top of
-          // the detail body — directly under the window toolbar — so the
-          // banner reads as a "drop-down notification strip" regardless
-          // of which tab / pane is foreground.
-          BranchSwitcherErrorBannerView(store: branchSwitcherStore)
-          tabBarRow(address: address)
-          terminalRegion(address: address)
-        }
-        .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-          if shouldShowDrawer(diff: diffStore.state) {
-            DiffDrawerView(store: diffStore)
-              .zIndex(80)
-          }
-        }
-
-        if inspectorVisible {
-          Divider()
-          DiffInspectorView(store: diffStore)
-            .frame(width: Self.inspectorWidth)
-            .transition(.move(edge: .trailing))
+      VStack(spacing: 0) {
+        // T10: inline branch-switch error banner. Renders itself only
+        // when `branchSwitcherStore.switchError` is non-nil, so it stays
+        // a zero-height no-op on the happy path. Placed at the top of
+        // the detail body — directly under the window toolbar — so the
+        // banner reads as a "drop-down notification strip" regardless
+        // of which tab / pane is foreground.
+        BranchSwitcherErrorBannerView(store: branchSwitcherStore)
+        tabBarRow(address: address)
+        terminalRegion(address: address)
+      }
+      .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .overlay {
+        if shouldShowDrawer(diff: diffStore.state) {
+          DiffDrawerView(store: diffStore)
+            .zIndex(80)
         }
       }
-      .animation(.easeInOut(duration: 0.18), value: inspectorVisible)
+      // System inspector: handles the sidebar material, toolbar extension,
+      // and show/hide animation for free. The binding flips through
+      // `onToggleGitViewer` so the ⌘⇧G chord, menu item, and toolbar
+      // button all stay synchronized with the system column visibility.
+      .inspector(isPresented: inspectorPresentedBinding) {
+        DiffInspectorView(store: diffStore)
+          .inspectorColumnWidth(min: 240, ideal: Self.inspectorWidth, max: 480)
+      }
       // Mount project-script shortcut bindings as a 0-sized background of
       // the detail body. The toolbar's run-script Menu can only register
       // its in-menu `.keyboardShortcut` after the dropdown has been opened
@@ -191,6 +189,22 @@ struct WorktreeDetailView: View {
     } else {
       placeholder
     }
+  }
+
+  /// Bridges `inspectorVisible: Bool` + `onToggleGitViewer: () -> Void`
+  /// to a `Binding<Bool>` that `.inspector(isPresented:)` expects. The
+  /// setter only fires `onToggleGitViewer` when the new value genuinely
+  /// differs from the current state — protects against SwiftUI write-
+  /// after-read cycles that would double-toggle the inspector.
+  private var inspectorPresentedBinding: Binding<Bool> {
+    Binding(
+      get: { inspectorVisible },
+      set: { newValue in
+        if newValue != inspectorVisible {
+          onToggleGitViewer()
+        }
+      }
+    )
   }
 
   /// True iff any visible app window (other than Settings) is currently in
@@ -315,13 +329,6 @@ struct WorktreeDetailView: View {
             worktreePath: info.worktree.path
           )
           .buttonStyle(.plain)
-          // Mirrors the macOS 26 path: reserve `inspectorWidth -
-          // toggleButtonRegion` so the action buttons end up just left of
-          // the inspector edge instead of pushed past the Git Viewer
-          // toggle.
-          if inspectorVisible {
-            Color.clear.frame(width: Self.inspectorWidth - 40, height: 1)
-          }
           Button {
             onToggleGitViewer()
           } label: {
@@ -401,19 +408,6 @@ struct WorktreeDetailView: View {
         projectID: address.project,
         worktreePath: info.worktree.path
       )
-    }
-    // Reserve the inspector column's width so the RunScript / Open chips
-    // shift left out from under the open inspector. The reserved width is
-    // `inspectorWidth - toggleButtonRegion` so the Open chip lands just
-    // left of the inspector edge, not pushed all the way past the Git
-    // Viewer toggle. `.sharedBackgroundVisibility(.hidden)` strips the
-    // toolbar's default glass capsule from the empty spacer — otherwise
-    // an empty pill renders between Open and the toggle.
-    if inspectorVisible {
-      ToolbarItem {
-        Color.clear.frame(width: Self.inspectorWidth - 40, height: 1)
-      }
-      .sharedBackgroundVisibility(.hidden)
     }
     ToolbarSpacer(.fixed)
     ToolbarItem {
