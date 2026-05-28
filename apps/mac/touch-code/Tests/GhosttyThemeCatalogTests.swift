@@ -256,6 +256,46 @@ struct GhosttyThemeCatalogTests {
   }
 
   @Test
+  func previewCapturesBackgroundForegroundAndPalette() throws {
+    let xdg = TemporaryDirectory()
+    let home = emptyHome()
+    _ = try xdg.writeThemeFile(
+      named: "Sample",
+      contents: """
+        background = #102030
+        foreground = #fafbfc
+        cursor-color = #ff0000
+        palette = 0=#000000
+        palette = 1=#db2d20
+        palette = 4=#01a0e4
+        palette = 15=#ffffff
+        """
+    )
+    let catalog = load(xdg: xdg, home: home)
+    let preview = try #require(catalog.previews["Sample"])
+    #expect(preview.background?.r == 0x10 / 255.0)
+    #expect(preview.foreground?.r == 0xFA / 255.0)
+    #expect(preview.cursor?.r == 1.0)
+    #expect(preview.palette[1]?.r == 0xDB / 255.0)
+    #expect(preview.palette[4]?.b == 0xE4 / 255.0)
+    #expect(preview.palette[15]?.r == 1.0)
+    // Unset palette slots stay absent.
+    #expect(preview.palette[7] == nil)
+  }
+
+  @Test
+  func previewIsEmptyButPresentWhenThemeHasNoColorDirectives() throws {
+    let xdg = TemporaryDirectory()
+    let home = emptyHome()
+    _ = try xdg.writeThemeFile(named: "Sparse", contents: "# only a comment\n")
+    let catalog = load(xdg: xdg, home: home)
+    let preview = try #require(catalog.previews["Sparse"])
+    #expect(preview.background == nil)
+    #expect(preview.foreground == nil)
+    #expect(preview.palette.isEmpty)
+  }
+
+  @Test
   func userThemeShadowsGhosttyBundledThemeOfSameName() throws {
     let xdg = TemporaryDirectory()
     let home = TemporaryDirectory()

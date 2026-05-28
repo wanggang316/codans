@@ -12,7 +12,7 @@ import TouchCodeCore
 /// fires `onRenameRequested`, and the parent (`TabBarView`) presents
 /// the editor as a window-attached sheet via `.sheet(item:)`. Keeping
 /// the editor at the bar level avoids per-chip popover state and gives
-/// rename a proper modal surface (matches the Prowl pattern).
+/// rename a proper modal surface.
 struct TabChipView: View {
   let title: String
   let isActive: Bool
@@ -36,27 +36,33 @@ struct TabChipView: View {
   let onCloseAll: () -> Void
   let onRenameRequested: () -> Void
   let onChangeColor: () -> Void
+  let onChangeIcon: () -> Void
   let onCopyID: () -> Void
   let tabColor: TabColor?
+  /// SF Symbol resolved by `Tab.resolvedIcon(autoFallback:)` — `nil`
+  /// hides the leading slot so unlocked tabs without a runtime fallback
+  /// keep the chip clean.
+  var icon: String? = nil
 
   @State private var isHovering = false
   @State private var isPressing = false
 
   var body: some View {
-    // Supacode-style hit layout: the select Button claims the whole
-    // chip rectangle so a click anywhere on the chip selects it; the
-    // close button is overlaid on the trailing edge inside the same
-    // ZStack so it intercepts its own taps without forwarding to the
-    // outer Button. Without this, the previous HStack-of-Button-plus-
-    // sibling layout left dead zones (between the label and the close
-    // glyph, and on either chip-padding strip) that swallowed clicks.
+    // Hit layout: the select Button claims the whole chip rectangle so
+    // a click anywhere on the chip selects it; the close button is
+    // overlaid on the trailing edge inside the same ZStack so it
+    // intercepts its own taps without forwarding to the outer Button.
+    // Without this, an HStack-of-Button-plus-sibling layout leaves dead
+    // zones (between the label and the close glyph, and on either
+    // chip-padding strip) that swallow clicks.
     ZStack(alignment: .trailing) {
       Button(action: onSelect) {
         TabChipLabel(
           title: title,
           isActive: isActive,
           isDirty: isDirty,
-          hasUnreadNotification: hasUnreadNotification
+          hasUnreadNotification: hasUnreadNotification,
+          icon: icon
         )
         // `maxHeight: .infinity` is the load-bearing piece — without
         // it the label collapses to its intrinsic text height (~16pt)
@@ -125,6 +131,7 @@ struct TabChipView: View {
         isLastTab: isLastTab,
         onRename: onRenameRequested,
         onChangeColor: onChangeColor,
+        onChangeIcon: onChangeIcon,
         onCopyID: onCopyID,
         onClose: onClose,
         onCloseOthers: onCloseOthers,

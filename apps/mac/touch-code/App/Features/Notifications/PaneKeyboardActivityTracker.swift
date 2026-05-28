@@ -3,7 +3,7 @@ import TouchCodeCore
 
 /// Records the last user-keystroke timestamp per pane. Reads as
 /// `[PaneID: Date]` snapshots that `NotificationDetector` feeds to
-/// `DetectionTranslator.Context.lastUserKeystrokeAt` so the translator's
+/// `PaneAttentionInterpreter.Context.lastUserKeystrokeAt` so the interpreter's
 /// 1-second `userTypingRecently` suppression can actually fire on real
 /// user input.
 ///
@@ -15,7 +15,7 @@ import TouchCodeCore
 ///
 /// Owned by AppState; the GhosttySurfaceView key delivery site records
 /// keystrokes; the detector reads snapshots when building per-event
-/// translation Contexts; teardown events purge entries.
+/// interpreter contexts; teardown events purge entries.
 @MainActor
 public final class PaneKeyboardActivityTracker {
   private var lastByPane: [PaneID: Date] = [:]

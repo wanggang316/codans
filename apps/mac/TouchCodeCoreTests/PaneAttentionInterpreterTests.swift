@@ -3,17 +3,17 @@ import Testing
 
 @testable import TouchCodeCore
 
-struct DetectionTranslatorTests {
+struct PaneAttentionInterpreterTests {
   // MARK: - paneOutput
 
   @Test
-  func paneOutputMarksProducedAndProducesNoEntry() {
+  func paneOutputMarksProducedAndProducesNoCue() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneOutput(pane, Data()),
       hasProducedOutput: []
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.outputFlag == .markProduced(pane))
   }
 
@@ -22,31 +22,31 @@ struct DetectionTranslatorTests {
   @Test
   func desktopNotificationWithoutPromptCueIsTaskFinished() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .desktopNotification(title: "Build done", body: "5 targets compiled")),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .taskFinished)
-    #expect(step.entry?.title == "Build done")
-    #expect(step.entry?.paneID == pane)
+    #expect(step.cue?.kind == .taskFinished)
+    #expect(step.cue?.title == "Build done")
+    #expect(step.cue?.paneID == pane)
   }
 
   @Test
   func desktopNotificationWithPermissionCueIsWaitingForInput() {
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .desktopNotification(title: "Permission required", body: "")),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .waitingForInput)
+    #expect(step.cue?.kind == .waitingForInput)
   }
 
   @Test
   func desktopNotificationWithTitleSuffixedQuestionMarkIsWaitingForInput() {
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .desktopNotification(title: "Apply migration?", body: "")),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .waitingForInput)
+    #expect(step.cue?.kind == .waitingForInput)
   }
 
   @Test
@@ -54,29 +54,29 @@ struct DetectionTranslatorTests {
     // "Add tests?" is rhetorical informational text in a build summary,
     // not a prompt. The classifier scopes the `?` cue to the title
     // suffix to avoid misclassifying these as waiting-for-input.
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(
         PaneID(),
         .desktopNotification(title: "Build done", body: "5 targets in 2.3s. Add tests?")
       ),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .taskFinished)
+    #expect(step.cue?.kind == .taskFinished)
   }
 
   @Test
   func desktopNotificationWithApprovalCueIsWaitingForInput() {
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .desktopNotification(title: "Approval needed", body: "rm /tmp/x")),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .waitingForInput)
+    #expect(step.cue?.kind == .waitingForInput)
   }
 
   @Test
   func classifyIsCaseInsensitive() {
-    #expect(DetectionTranslator.classify(title: "PERMISSION", body: "") == .waitingForInput)
-    #expect(DetectionTranslator.classify(title: "Done", body: "no cue here") == .taskFinished)
+    #expect(PaneAttentionInterpreter.classify(title: "PERMISSION", body: "") == .waitingForInput)
+    #expect(PaneAttentionInterpreter.classify(title: "Done", body: "no cue here") == .taskFinished)
   }
 
   // MARK: - bellRang
@@ -84,12 +84,12 @@ struct DetectionTranslatorTests {
   @Test
   func bellRangIsWaitingForInput() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .bellRang),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .waitingForInput)
-    #expect(step.entry?.paneID == pane)
+    #expect(step.cue?.kind == .waitingForInput)
+    #expect(step.cue?.paneID == pane)
     #expect(step.outputFlag == .unchanged)
   }
 
@@ -102,30 +102,30 @@ struct DetectionTranslatorTests {
   @Test
   func commandFinishedZeroExitIsTaskFinished() {
     // Default threshold is 10 s; pass 30 s so the event fires.
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(
         PaneID(),
         .commandFinished(exitCode: 0, duration: Self.longDurationNs)
       ),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .taskFinished)
-    #expect(step.entry?.title == "Command finished")
+    #expect(step.cue?.kind == .taskFinished)
+    #expect(step.cue?.title == "Command finished")
     #expect(step.drop == nil)
   }
 
   @Test
   func commandFinishedNonZeroExitMentionsStatus() {
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(
         PaneID(),
         .commandFinished(exitCode: 137, duration: Self.longDurationNs)
       ),
       hasProducedOutput: []
     )
-    #expect(step.entry?.kind == .taskFinished)
-    #expect(step.entry?.title.contains("failed") == true)
-    #expect(step.entry?.title.contains("exit 137") == true)
+    #expect(step.cue?.kind == .taskFinished)
+    #expect(step.cue?.title.contains("failed") == true)
+    #expect(step.cue?.title.contains("exit 137") == true)
   }
 
   // MARK: - commandFinished suppression rules (M4.T1)
@@ -133,139 +133,139 @@ struct DetectionTranslatorTests {
   @Test
   func commandFinishedDisabled_suppressesEvenLongSuccess() {
     let pane = PaneID()
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedEnabled: false,
       commandFinishedThresholdSec: 10
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .commandFinished(exitCode: 0, duration: Self.longDurationNs)),
       context: context
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.drop == .commandFinishedDisabled)
   }
 
   @Test
   func commandFinishedShort_suppressesBelowThreshold() {
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedThresholdSec: 10
     )
     // 5 s < 10 s threshold.
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: 5 * 1_000_000_000)),
       context: context
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.drop == .commandFinishedShort)
   }
 
   @Test
   func commandFinishedExactlyAtThreshold_fires() {
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedThresholdSec: 10
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: 10 * 1_000_000_000)),
       context: context
     )
-    #expect(step.entry != nil)
+    #expect(step.cue != nil)
     #expect(step.drop == nil)
-    #expect(step.entry?.title == "Command finished")
+    #expect(step.cue?.title == "Command finished")
   }
 
   @Test
   func commandFinishedLongSuccess_fires() {
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedThresholdSec: 10
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: Self.longDurationNs)),
       context: context
     )
-    #expect(step.entry?.title == "Command finished")
+    #expect(step.cue?.title == "Command finished")
     #expect(step.drop == nil)
   }
 
   @Test
   func commandCancelledSIGINT_suppressed() {
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedThresholdSec: 10
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .commandFinished(exitCode: 130, duration: Self.longDurationNs)),
       context: context
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.drop == .commandCancelled)
   }
 
   @Test
   func commandCancelledSIGTERM_suppressed() {
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedThresholdSec: 10
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .commandFinished(exitCode: 143, duration: Self.longDurationNs)),
       context: context
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.drop == .commandCancelled)
   }
 
   @Test
   func commandFinishedNonZeroExit_firesWithFailureTitle() {
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedThresholdSec: 10
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .commandFinished(exitCode: 1, duration: Self.longDurationNs)),
       context: context
     )
-    #expect(step.entry != nil)
-    #expect(step.entry?.title.contains("failed") == true)
-    #expect(step.entry?.title.contains("exit 1") == true)
+    #expect(step.cue != nil)
+    #expect(step.cue?.title.contains("failed") == true)
+    #expect(step.cue?.title.contains("exit 1") == true)
   }
 
   @Test
-  func keystrokeWithinOneSecond_suppresses() {
+  func keystrokeWithinSuppressionWindow_suppresses() {
     let pane = PaneID()
     let now = Date()
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
-      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-0.5)],
+      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-2.5)],
       now: now,
       commandFinishedThresholdSec: 1
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .commandFinished(exitCode: 0, duration: 2 * 1_000_000_000)),
       context: context
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.drop == .userTypingRecently)
   }
 
   @Test
-  func keystrokeOlderThanOneSecond_doesNotSuppress() {
+  func keystrokeOutsideSuppressionWindow_doesNotSuppress() {
     let pane = PaneID()
     let now = Date()
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
-      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-1.5)],
+      lastUserKeystrokeAt: [pane: now.addingTimeInterval(-3.5)],
       now: now,
       commandFinishedThresholdSec: 1
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .commandFinished(exitCode: 0, duration: 2 * 1_000_000_000)),
       context: context
     )
-    #expect(step.entry != nil)
+    #expect(step.cue != nil)
     #expect(step.drop == nil)
   }
 
@@ -274,71 +274,71 @@ struct DetectionTranslatorTests {
     let pane = PaneID()
     let otherPane = PaneID()
     let now = Date()
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       lastUserKeystrokeAt: [otherPane: now.addingTimeInterval(-0.1)],
       now: now,
       commandFinishedThresholdSec: 1
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .commandFinished(exitCode: 0, duration: 2 * 1_000_000_000)),
       context: context
     )
-    #expect(step.entry != nil)
+    #expect(step.cue != nil)
     #expect(step.drop == nil)
   }
 
   @Test
   func outOfRangeThresholdInContextDoesNotCrash() {
-    // The translator deliberately does not re-clamp; the input-validation
+    // The interpreter deliberately does not re-clamp; the input-validation
     // contract lives in `NotificationsSettings` decode (and the M3.T1 UI).
     // A zero threshold means every long-enough duration fires.
-    let context = DetectionTranslator.Context(
+    let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedThresholdSec: 0
     )
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: 1_000_000_000)),
       context: context
     )
-    #expect(step.entry != nil)
+    #expect(step.cue != nil)
     #expect(step.drop == nil)
   }
 
   // MARK: - paneExited (deliberately not notified)
 
   @Test
-  func paneExitedCleanProducesNoEntry() {
+  func paneExitedCleanProducesNoCue() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneExited(pane, code: 0, signal: nil),
       hasProducedOutput: [pane]
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     // Cache management still runs so a recreated PaneID can't
     // inherit the prior 'has produced output' gate state.
     #expect(step.outputFlag == .clearProduced(pane))
   }
 
   @Test
-  func paneExitedNonZeroProducesNoEntry() {
+  func paneExitedNonZeroProducesNoCue() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneExited(pane, code: 1, signal: nil),
       hasProducedOutput: [pane]
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.outputFlag == .clearProduced(pane))
   }
 
   @Test
-  func paneExitedBySignalProducesNoEntry() {
+  func paneExitedBySignalProducesNoCue() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneExited(pane, code: 0, signal: 9),
       hasProducedOutput: [pane]
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.outputFlag == .clearProduced(pane))
   }
 
@@ -347,13 +347,13 @@ struct DetectionTranslatorTests {
   @Test
   func paneCrashedSurfacesReason() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneCrashed(pane, reason: "Subprocess panicked"),
       hasProducedOutput: [pane]
     )
-    #expect(step.entry?.kind == .taskFinished)
-    #expect(step.entry?.title == "Pane crashed")
-    #expect(step.entry?.body == "Subprocess panicked")
+    #expect(step.cue?.kind == .taskFinished)
+    #expect(step.cue?.title == "Pane crashed")
+    #expect(step.cue?.body == "Subprocess panicked")
     #expect(step.outputFlag == .clearProduced(pane))
   }
 
@@ -362,62 +362,197 @@ struct DetectionTranslatorTests {
   @Test
   func paneIdleBelowThresholdIsDropped() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
-      .paneIdle(pane, duration: DetectionTranslator.idleThreshold - 1),
+    let step = PaneAttentionInterpreter.interpret(
+      .paneIdle(pane, duration: PaneAttentionInterpreter.idleThreshold - 1),
       hasProducedOutput: [pane]
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.outputFlag == .unchanged)
   }
 
   @Test
   func paneIdleAboveThresholdWithoutPriorOutputIsDropped() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
-      .paneIdle(pane, duration: DetectionTranslator.idleThreshold + 60),
+    let step = PaneAttentionInterpreter.interpret(
+      .paneIdle(pane, duration: PaneAttentionInterpreter.idleThreshold + 60),
       hasProducedOutput: []  // pane has not produced anything yet
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
   }
 
   @Test
   func paneIdleAboveThresholdWithPriorOutputIsTaskFinished() {
     let pane = PaneID()
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneIdle(pane, duration: 45),
       hasProducedOutput: [pane]
     )
-    #expect(step.entry?.kind == .taskFinished)
-    #expect(step.entry?.title == "Pane idle")
-    #expect(step.entry?.body == "No output for 45 s.")
+    #expect(step.cue?.kind == .taskFinished)
+    #expect(step.cue?.title == "Pane idle")
+    #expect(step.cue?.body == "No output for 45 s.")
   }
 
   // MARK: - non-notification events
 
   @Test
-  func untrackedEventsProduceNoEntryAndNoFlagChange() {
+  func untrackedEventsProduceNoCueAndNoFlagChange() {
     let cases: [TerminalEvent] = [
       .paneCreated(PaneID(), TabID()),
       .paneReady(PaneID()),
       .tabActivated(TabID()),
       .worktreeActivated(WorktreeID()),
       .hierarchyMutated(.catalog),
+      .foregroundJobChanged(PaneID(), ForegroundJob(processGroupID: 1, processes: [])),
+      .paneViewportChanged(PaneID(), text: "screen"),
       .configChanged,
     ]
     for event in cases {
-      let step = DetectionTranslator.translate(event, hasProducedOutput: [])
-      #expect(step.entry == nil)
+      let step = PaneAttentionInterpreter.interpret(event, hasProducedOutput: [])
+      #expect(step.cue == nil)
       #expect(step.outputFlag == .unchanged)
     }
   }
 
   @Test
   func paneInfoChangedWithUnrelatedDeltaIsIgnored() {
-    let step = DetectionTranslator.translate(
+    let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(PaneID(), .title("New title")),
       hasProducedOutput: []
     )
-    #expect(step.entry == nil)
+    #expect(step.cue == nil)
     #expect(step.outputFlag == .unchanged)
+  }
+
+  // MARK: - agent activity
+
+  @Test
+  func agentActivityClassifiesSupportedViewportShapes() {
+    let samples: [AgentActivitySample] = [
+      .init(kind: .pi, working: "Working...", blocked: nil, idle: "pi> "),
+      .init(
+        kind: .claudeCode,
+        working: "✢ Editing…",
+        blocked: "Do you want to proceed?\n❯ 1. Yes\n  2. No",
+        idle: "❯ "
+      ),
+      .init(
+        kind: .codex,
+        working: "• Working (12s)",
+        blocked: "Allow command?\n[y/n]",
+        idle: "codex> "
+      ),
+      .init(
+        kind: .gemini,
+        working: "Esc to cancel",
+        blocked: "│ Do you want to proceed",
+        idle: "gemini> "
+      ),
+      .init(
+        kind: .cursorAgent,
+        working: "Ctrl+C to stop",
+        blocked: "Run this command?\nRun (y) (enter)",
+        idle: "cursor> "
+      ),
+      .init(
+        kind: .cline,
+        working: "Esc to interrupt",
+        blocked: "Let Cline use this tool?",
+        idle: "cline> "
+      ),
+      .init(
+        kind: .opencode,
+        working: "Esc to interrupt",
+        blocked: "△ Permission required",
+        idle: "opencode> "
+      ),
+      .init(
+        kind: .copilot,
+        working: "Esc to cancel",
+        blocked: "│ do you want to continue",
+        idle: "copilot> "
+      ),
+      .init(
+        kind: .kimi,
+        working: "thinking",
+        blocked: "approve?",
+        idle: "kimi> "
+      ),
+      .init(
+        kind: .droid,
+        working: "⠋ Esc to stop",
+        blocked: "EXECUTE\nenter to select\n> yes, allow",
+        idle: "droid> "
+      ),
+      .init(
+        kind: .amp,
+        working: "Esc to cancel",
+        blocked: "Waiting for approval\nInvoke tool\nApprove\nAllow all for this session",
+        idle: "amp> "
+      ),
+    ]
+
+    for sample in samples {
+      #expect(activity(sample.kind, sample.working) == .working)
+      if let blocked = sample.blocked {
+        #expect(activity(sample.kind, blocked) == .blocked)
+      }
+      #expect(activity(sample.kind, sample.idle) == .idle)
+    }
+  }
+
+  @Test
+  func codexActivityDetectsWorkingAndBlockedStates() {
+    #expect(
+      activity(.codex, "• Working (12s)") == .working
+    )
+    #expect(
+      activity(.codex, "Allow command?\n[y/n]") == .blocked
+    )
+  }
+
+  @Test
+  func agentActivityUsesRecentNonBlankLines() {
+    let oldWorking = Array(repeating: "• Working (1s)", count: 30).joined(separator: "\n")
+    let recentIdle = oldWorking + "\n\ncodex> "
+    #expect(
+      activity(.codex, recentIdle) == .idle
+    )
+  }
+
+  @Test
+  func claudeWorkingStateIsHeldBriefly() {
+    var lastWorkingAt: Date?
+    let start = Date(timeIntervalSince1970: 1_000)
+    let working = PaneAttentionInterpreter.stabilizeAgentActivity(
+      kind: .claudeCode,
+      previous: .idle,
+      raw: .working,
+      now: start,
+      lastWorkingAt: &lastWorkingAt
+    )
+    #expect(working == .working)
+
+    let held = PaneAttentionInterpreter.stabilizeAgentActivity(
+      kind: .claudeCode,
+      previous: .working,
+      raw: .idle,
+      now: start.addingTimeInterval(0.5),
+      lastWorkingAt: &lastWorkingAt
+    )
+    #expect(held == .working)
+  }
+
+  private func activity(
+    _ kind: AgentKind,
+    _ viewportText: String
+  ) -> PaneAttentionInterpreter.AgentActivityState {
+    PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: viewportText)
+  }
+
+  private struct AgentActivitySample {
+    let kind: AgentKind
+    let working: String
+    let blocked: String?
+    let idle: String
   }
 }

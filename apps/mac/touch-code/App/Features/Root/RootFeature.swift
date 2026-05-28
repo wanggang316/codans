@@ -128,6 +128,7 @@ struct RootFeature {
     case paneCreated
     case paneReady
     case paneOutput
+    case paneViewportChanged
     case paneExited
     case paneCrashed
     case paneClosedByTab
@@ -137,6 +138,7 @@ struct RootFeature {
     case worktreeActivated
     case hierarchyMutated
     case paneInfoChanged
+    case foregroundJobChanged
     case paneActionRequested
     case windowActionRequested
     case configChanged
@@ -146,6 +148,7 @@ struct RootFeature {
       case .paneCreated: self = .paneCreated
       case .paneReady: self = .paneReady
       case .paneOutput: self = .paneOutput
+      case .paneViewportChanged: self = .paneViewportChanged
       case .paneIdle: self = .paneIdle
       case .paneExited: self = .paneExited
       case .paneCrashed: self = .paneCrashed
@@ -155,6 +158,7 @@ struct RootFeature {
       case .worktreeActivated: self = .worktreeActivated
       case .hierarchyMutated: self = .hierarchyMutated
       case .paneInfoChanged: self = .paneInfoChanged
+      case .foregroundJobChanged: self = .foregroundJobChanged
       case .paneActionRequested: self = .paneActionRequested
       case .windowActionRequested: self = .windowActionRequested
       case .configChanged: self = .configChanged
@@ -173,9 +177,9 @@ struct RootFeature {
     /// and calls `hierarchyClient.closePane` to drop the catalog entry.
     case paneLifecycleExited(PaneID)
     /// Forwarded from `paneInfoChanged + .progress(...)` in the engine
-    /// event stream. `isBusy` mirrors the supacode predicate: true for any
-    /// non-`REMOVE` OSC 9;4 state. Drives the tab-chip running spinner
-    /// (via `HierarchyManager.runningPanes`) and the sidebar busy glyph.
+    /// event stream. `isBusy` is true for any non-`REMOVE` OSC 9;4
+    /// state. Drives the tab-chip running spinner (via
+    /// `HierarchyManager.runningPanes`) and the sidebar busy glyph.
     case paneProgressBusyChanged(PaneID, Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the
@@ -452,6 +456,13 @@ struct RootFeature {
                 // still need to remove the Pane from the catalog so the
                 // SplitTree collapses and no stale black rect is rendered.
                 await send(.paneLifecycleExited(paneID))
+              case .paneCrashed(let paneID, _):
+                // The pane stays in the catalog for the user to retry, but
+                // its OSC 9;4 running flag would otherwise leak: a crashing
+                // program rarely gets a chance to emit the REMOVE state
+                // that closes out the indicator. Force-clear so the
+                // tab-chip / sidebar spinners do not pin on a dead pane.
+                await send(.paneProgressBusyChanged(paneID, false))
               case .paneInfoChanged(let paneID, .progress(let state, _)):
                 // OSC 9;4 progress reports drive the per-pane "executing"
                 // signal. Any non-REMOVE state (set / indeterminate /
@@ -1010,7 +1021,17 @@ struct RootFeature {
                 )))
           )
 
-        case .runScriptRequested(let scriptID, let projectID, let worktreeID):
+        case .runScriptRequested(let scriptID):
+          // Resolve target Project + Worktree from `state.selection` at
+          // handle-time — the SwiftUI Menu's NSMenuItem actions and the
+          // `.keyboardShortcut`-bridged chord can hold stale closure
+          // captures after a worktree switch, which previously fired the
+          // script against the wrong worktree. Same fix pattern as
+          // `pickEditorFromMenu` above.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
           let client = hierarchyClient
           let presenter = settingsWindowPresenter
           return .run { send in

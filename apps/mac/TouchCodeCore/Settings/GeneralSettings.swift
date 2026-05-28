@@ -46,6 +46,12 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// controls the auto-open behaviour on the rising edge into `loading`.
   public var agentsViewAutoOpen: Bool
 
+  /// Whether the app uploads anonymous crash and error reports on release
+  /// builds. Default `true`. Debug builds never report regardless of this
+  /// flag. Flipping this off also clears the install identifier so a future
+  /// re-enable starts a fresh anonymous id.
+  public var crashReportsEnabled: Bool
+
   public init(
     appearance: AppearancePreference = .system,
     defaultEditorID: EditorID? = nil,
@@ -56,7 +62,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
     updatesAutomaticallyDownloadUpdates: Bool = false,
-    agentsViewAutoOpen: Bool = true
+    agentsViewAutoOpen: Bool = true,
+    crashReportsEnabled: Bool = true
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -68,6 +75,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
     self.agentsViewAutoOpen = agentsViewAutoOpen
+    self.crashReportsEnabled = crashReportsEnabled
   }
 
   public static let `default` = GeneralSettings()
@@ -77,6 +85,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case agentsViewAutoOpen
+    case crashReportsEnabled
   }
 
   public init(from decoder: Decoder) throws {
@@ -99,5 +108,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyDownloadUpdates) ?? false
     self.agentsViewAutoOpen =
       try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoOpen) ?? true
+    // Older settings files predate this field. Default to opt-in to keep
+    // installs already running through one or more releases consistent
+    // with fresh installs; the user can opt out from Settings → General.
+    self.crashReportsEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .crashReportsEnabled) ?? true
   }
 }

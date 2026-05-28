@@ -201,60 +201,37 @@ last-focused-pane-by-tab, etc.).
 
 ### Agent Identification
 
-This is the trickiest sub-design because libghostty does **not**
-expose the surface's foreground process via `SurfaceInfo`. We rely
-on three signal sources, in fallback order:
+This is backed by the pane's foreground process group. The embedded
+terminal exposes the foreground process group id for each surface; the
+runtime samples the process table, groups processes by that id, and emits
+`TerminalEvent.foregroundJobChanged(PaneID, ForegroundJob)`.
 
-1. **`Pane.initialCommand`** — the command tc spawned the pane with.
-   Already on the model but currently not persisted across relaunch
-   (see `Pane.swift` comment: it's a one-shot replay input). Matched
-   case-insensitively against `AgentKind.commandPatterns` (e.g.,
-   `claude`, `claude-code`, `codex`, `pi`).
-   - Covers panes created by `tc tab new "claude"` and the "New Tab
-     with command" UI affordance — high precision, immediate.
+`AgentKindPatterns` classifies only the foreground job:
 
-2. **`SurfaceInfo.title`** — terminal title updates. All three target
-   agents set the window title to a recognisable prefix at startup
-   (e.g., Claude Code uses `Claude Code`, Codex uses `Codex CLI`,
-   pi uses `pi`). Matched against `AgentKind.titlePatterns`.
-   - Covers panes that came up as a plain shell and had the user
-     subsequently run an agent. Also covers relaunches (since
-     `initialCommand` is gone but the title is re-emitted by the
-     running process).
-   - **Trade-off:** title-based matching is heuristic. Pattern strings
-     ship as a `Sources/TouchCodeCore/AgentKindPatterns.swift` table
-     so test cases can exercise them; future agents that change their
-     title prefix break detection until the table updates.
+- executable basename / process name matches score highest;
+- common runtime wrappers (`node`, `npx`, `python`, `bun`, shells, etc.)
+  are inspected via command-line tokens;
+- generic launcher names can be mapped only when the command line carries
+  a strong agent-specific token.
 
-3. **OSC 9 banner text** — when an agent sends a desktop notification,
-   the title may carry an unambiguous brand string. Used **only** as
-   a tie-breaker when neither (1) nor (2) decided.
-
-If none of the three matches, the pane is simply not bound; it does
-not appear in ActiveAgents.
+Terminal title, initial command, and desktop-notification text are not
+agent-identity signals. If the foreground job does not match a supported
+agent, the pane is unbound and does not appear in ActiveAgents.
 
 **`AgentBinder`** lives in `apps/mac/touch-code/Runtime/AgentBinder.swift`
-(Runtime layer, alongside `HierarchyManager`). It subscribes to:
-- `SurfaceInfo.title` changes (via `@Observable` change tracking
-  through the existing `PaneSurface` observation channel),
-- `TerminalEvent.paneInfoChanged` with `.desktopNotification(...)`,
-- pane lifecycle (`paneCreated`, `paneExited`, `paneCrashed`).
+(Runtime layer, alongside `HierarchyManager`). It consumes foreground job
+snapshots and pane lifecycle (`paneExited`, `paneCrashed`,
+`paneClosedByTab`).
 
-On any of these, it runs `classify(initialCommand, title, notif)` →
-`AgentKind?`. When the result differs from `pane.agentKind`, it
-writes via `HierarchyClient.setPaneAgentKind(paneID, kind)`.
+On every foreground job change, it runs
+`AgentKindPatterns.classify(foregroundJob:) -> AgentKind?`. When the
+result differs from `pane.agentKind`, it writes via
+`HierarchyClient.setPaneAgentKind(paneID, kind)`.
 
-**Sticky binding & rebind.** Once `agentKind` is set, the binder
-holds it until one of:
+**Binding & rebind.** Foreground job changes are authoritative:
+- matching job → bind or rebind to that `AgentKind`;
+- non-matching job → clear `agentKind`;
 - `paneExited` / `paneCrashed` / `paneClosedByTab` → clear field.
-- OSC 133 prompt event (shell returned to top-level prompt) AND the
-  current title pattern matches a *different* agent kind → rebind.
-
-The OSC 133 hook is the only escape valve from sticky identification
-within a live pane; without it, claude-then-codex in the same shell
-would never re-identify. Panes that never see OSC 133 (no shell
-integration) get sticky-identified once and stay that way for their
-lifetime — acceptable for v1.
 
 ### Runtime State Derivation
 
@@ -294,12 +271,19 @@ system):
 | `runningPanes` gains pane | `prevPhase = .loading`; clear `pendingFinished` |
 | `runningPanes` loses pane | if `prevPhase == .loading`, set `pendingFinished = true`; `prevPhase = .idle` |
 | `TerminalEvent.paneIdle` | if `prevPhase == .loading`, set `pendingFinished = true` |
-| `paneExited` / `paneCrashed` | set `pendingFinished = true` (terminal state until cleared) |
+| `paneExited` / `paneCrashed` / `paneClosedByTab` | drop entry and scratch (teardown) |
 | OSC 9 / bell classified as `waitingForInput` (`DetectionTranslator.classify`) | set `waitingForInput = true` |
 | `PaneKeyboardActivityTracker` records key in pane | clear `waitingForInput`; clear `pendingFinished` |
-| `paneOutput` (new bytes) | clear `pendingFinished`; leave `waitingForInput` untouched (agent may be printing the prompt) |
 | Pane gains focus (selection chain points at it AND app frontmost) | clear `pendingFinished`; clear `waitingForInput` |
 | `agentKind` becomes nil | drop entry from registry |
+
+`loading` fires from the running-set channel only, after the bound agent
+has observed user input. Title changes are ignored for runtime-state
+derivation.
+
+A defensive 15 s auto-reset lives one layer down in `PaneSurface`: any non-REMOVE OSC 9;4 state schedules a per-surface task that synthesises a REMOVE if no fresh progress event arrives, so a crashed or stuck emitter cannot pin the badge on `.loading` for the rest of the session.
+
+`paneOutput` is deliberately **not** in the table. The libghostty bridge does not currently forward subprocess bytes onto the engine's output stream (see `PaneSurface.onOutput` — deferred), so the event is effectively dead in production and binding state on it would be a spurious dependency.
 
 Final state is a pure function of the scratch fields plus the live
 `runningPanes` set:
@@ -451,15 +435,11 @@ bell already proved. The split between `AgentRegistry` and
 `ActiveAgentsBadgeView` is deliberately UI-agnostic so an
 NSStatusItem variant is a future swap, not a rebuild.
 
-**E. Live process-name polling via `ps -o comm`.** Would give
-ground-truth identification independent of title strings.
-Rejected because (i) libghostty does not expose the pty child PID
-through `SurfaceInfo` today; getting it would mean a new C-API
-binding; (ii) polling every Pane every N seconds is wasteful versus
-the event-driven `SurfaceInfo.title` subscription that costs zero
-when nothing changes; (iii) when the pty child is `bash`, `ps`
-sees `bash` even though the user is "running claude" — we'd be back
-to needing process-tree walks.
+**E. Live foreground job polling.** Adopted. The runtime reads the PTY
+foreground process group through the embedded terminal API and samples one
+process-table snapshot for all panes in that cycle. This avoids title
+heuristics while still covering agents started from an already-open shell
+and agents launched through runtime wrappers.
 
 **F. Auto-include all panes (no identification step), display as
 `generic` until proven otherwise.** Considered as the
@@ -472,16 +452,14 @@ agents. The product value lives in the curation.
 **Testing.**
 - `AgentKindPatterns` is a pure table → exhaustive unit tests in
   `TouchCodeCoreTests` exercise every pattern against fixture
-  command lines and titles.
+  foreground jobs.
 - `AgentRegistry` state derivation is a pure function from
   (scratch state, signal) → new state → derived state. Tests live
   in `touch-codeTests/Features/ActiveAgentsRegistryTests.swift`,
   driven by hand-built signal sequences (no live runtime).
 - `AgentBinder` is tested against an in-memory `HierarchyClient`
-  spy that records `setPaneAgentKind` calls; tests cover (i)
-  initial detection from `initialCommand`, (ii) detection from
-  title change after a delay, (iii) rebind on OSC 133 + new title,
-  (iv) clear on paneExited.
+  spy that records `setPaneAgentKind` calls; tests cover foreground
+  job bind, rebind, no-op, and clear.
 - UI: snapshot tests on `ActiveAgentsRowView` (each state) and
   `ActiveAgentsBadgeView` (empty / single / multi / mixed).
 

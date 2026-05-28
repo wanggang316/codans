@@ -26,9 +26,9 @@ final class HotkeyRecorderNSView: NSView {
   /// Fired when the user cancels via Esc or by clicking out.
   var onCancel: (() -> Void)?
   /// Fired on every flagsChanged event while recording. The popover-style host uses this
-  /// to render Raycast/supacode-style live keycap previews of the modifier(s) currently
-  /// held down before any non-modifier key produces a chord. Omit on inline hosts that
-  /// don't want the live preview.
+  /// to render Raycast-style live keycap previews of the modifier(s) currently held down
+  /// before any non-modifier key produces a chord. Omit on inline hosts that don't want
+  /// the live preview.
   var onModifiersChanged: ((ModifierMask) -> Void)?
 
   /// Pure validator — extracted so unit tests can exercise it without a running RunLoop.

@@ -89,6 +89,21 @@ struct WorktreeDetailView: View {
   }
 
   var body: some View {
+    detailBody
+      // Paint a low-alpha Ghostty-terminal-background band into the
+      // detail's top + leading safe-area insets. The unified toolbar
+      // (`.toolbarBackground(.hidden)` below) and the macOS 26
+      // floating-sidebar overlay both render their glass material over
+      // the detail content, so painting in those insets is the surface
+      // the chrome actually samples. Without this the chrome is the
+      // neutral system tone regardless of which terminal palette is
+      // active. Skipped in fullscreen because the unified toolbar
+      // collapses and the system reserves no top inset to fill.
+      .ghosttyChromeTint(edges: isWindowFullscreen ? [.leading] : [.top, .leading])
+  }
+
+  @ViewBuilder
+  private var detailBody: some View {
     if let pending = activePendingWorktree {
       WorktreeLoadingView(info: loadingInfo(for: pending))
     } else if let address = resolveAddress() {
@@ -137,13 +152,12 @@ struct WorktreeDetailView: View {
       .background(alignment: .topLeading) {
         ProjectScriptsShortcutBindings(
           store: headerStore,
-          projectID: address.project,
-          worktreeID: address.worktree
+          projectID: address.project
         )
       }
       // On macOS 15+ remove the title slot entirely so default-placement
       // toolbar items can flow leading-to-trailing with `ToolbarSpacer`
-      // controlling the layout (same pattern supacode uses).
+      // controlling the layout.
       // `.navigationTitle("")` still reserves a leading region and would
       // push default-placement items toward the trailing edge — which is
       // why earlier centering attempts collapsed onto the right side.
@@ -156,7 +170,7 @@ struct WorktreeDetailView: View {
       // underneath it. Without this, the toolbar's full-window glass
       // repaints on every toolbar-state change (tab switch rebuilds
       // `worktreeToolbarContent`) and flickers across the area covered
-      // by the translucent sidebar. Same pattern supacode uses.
+      // by the translucent sidebar.
       //
       // HAN-63: re-show the chrome when fullscreen — without it, the
       // sidebar `+` button and detail toolbar render over the terminal
@@ -208,7 +222,7 @@ struct WorktreeDetailView: View {
   /// git-viewer toggle used to live to the right of the tabs (old
   /// `unifiedHeader`); they moved into the window titlebar via
   /// `worktreeToolbarContent(address:)` so the content region gets its
-  /// vertical space back, matching supacode's `.toolbar {}` layout.
+  /// vertical space back.
   @ViewBuilder
   private func tabBarRow(address: Address) -> some View {
     TabBarView(
@@ -244,7 +258,7 @@ struct WorktreeDetailView: View {
   /// viewer toggle on the trailing edge (`.primaryAction`). Mirrors the
   /// layout that used to live as the right cluster of the content-region
   /// header; moving it into `.toolbar {}` reclaims vertical pixels above
-  /// the tab bar and matches macOS native chrome (Xcode, Finder, supacode).
+  /// the tab bar and matches macOS native chrome (Xcode, Finder).
   ///
   /// `ContentView` contributes one additional trailing `ToolbarItem`
   /// (Settings gear) — SwiftUI merges both sources, with Settings rendered
@@ -255,8 +269,8 @@ struct WorktreeDetailView: View {
     info: WorktreeInfo?
   ) -> some ToolbarContent {
     if let info {
-      // macOS 26 follows supacode's pattern: every item in default
-      // placement, ordering plus ToolbarSpacer(.flexible) splits
+      // macOS 26 layout: every item in default placement, ordering
+      // plus ToolbarSpacer(.flexible) splits
       // horizontal space evenly so the status capsule sits visually
       // equidistant between the branch label and the trailing buttons.
       // Pre-26 keeps the older `.navigation` / `.principal` /
@@ -291,8 +305,7 @@ struct WorktreeDetailView: View {
           // renders children leading-to-trailing in declaration order.
           HeaderRunScriptSplitButton(
             store: headerStore,
-            projectID: address.project,
-            worktreeID: info.worktree.id
+            projectID: address.project
           )
           .buttonStyle(.plain)
           HeaderOpenSplitButton(
@@ -358,8 +371,7 @@ struct WorktreeDetailView: View {
     address: Address, info: WorktreeInfo
   ) -> some ToolbarContent {
     // No `.buttonStyle` / no manual padding — each ToolbarItem gets
-    // the toolbar's native glass capsule + hover state. Same pattern as
-    // supacode's openMenu / ScriptMenu.
+    // the toolbar's native glass capsule + hover state.
     //
     // Order: RunScript, Open, Git Viewer toggle. The toggle sits as the
     // rightmost chip — visually furthest from the worktree-header area,
@@ -371,8 +383,7 @@ struct WorktreeDetailView: View {
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,
-        projectID: address.project,
-        worktreeID: info.worktree.id
+        projectID: address.project
       )
     }
     ToolbarSpacer(.fixed)

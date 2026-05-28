@@ -13,6 +13,7 @@ import TouchCodeCore
 /// - `.codex`      → SVG asset `codex` (OpenAI Codex brand glyph).
 /// - `.pi`         → SVG asset `pi` (Inflection pi glyph).
 /// - `.opencode`   → SVG asset `opencode` (opencode brand glyph).
+/// - Other agent kinds map to one template SVG asset each.
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
@@ -53,6 +54,34 @@ struct AgentLogoView: View {
           .scaledToFit()
       case .opencode:
         Image("opencode")
+          .resizable()
+          .scaledToFit()
+      case .gemini:
+        Image("gemini")
+          .resizable()
+          .scaledToFit()
+      case .cursorAgent:
+        Image("cursor-agent")
+          .resizable()
+          .scaledToFit()
+      case .cline:
+        Image("cline")
+          .resizable()
+          .scaledToFit()
+      case .copilot:
+        Image("github-copilot")
+          .resizable()
+          .scaledToFit()
+      case .kimi:
+        Image("kimi")
+          .resizable()
+          .scaledToFit()
+      case .droid:
+        Image("droid")
+          .resizable()
+          .scaledToFit()
+      case .amp:
+        Image("amp")
           .resizable()
           .scaledToFit()
       }

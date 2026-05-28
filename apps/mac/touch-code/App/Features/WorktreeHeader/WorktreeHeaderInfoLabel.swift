@@ -30,7 +30,6 @@ struct WorktreeHeaderInfoLabel: View {
     }()
     let isMainCheckout = worktree.path == project.rootPath
     let isSynthetic = isMainCheckout && project.gitRoot == nil
-    let roleTint: Color = worktree.isPinned ? .orange : .secondary
     let hasUnread = notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
 
     HStack(spacing: 8) {
@@ -41,7 +40,6 @@ struct WorktreeHeaderInfoLabel: View {
         // its role tint rather than swap to the selected-text colour
         // the sidebar uses on the active row.
         isSelected: false,
-        roleTint: roleTint,
         isSynthetic: isSynthetic,
         hasUnreadNotification: hasUnread,
         isDefaultBranch: isMainCheckout && !isSynthetic

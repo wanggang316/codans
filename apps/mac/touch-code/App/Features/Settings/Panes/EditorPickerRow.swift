@@ -44,10 +44,9 @@ enum EditorPickerRow {
   }
 
   /// Redraws an NSImage at the requested point-size square so its
-  /// intrinsic size matches the menu row's expected glyph slot. Mirrors
-  /// the supacode pattern; SwiftUI's `.resizable()` only affects the
-  /// SwiftUI rendering pass, not what AppKit reads when bridging to
-  /// NSMenuItem.
+  /// intrinsic size matches the menu row's expected glyph slot.
+  /// SwiftUI's `.resizable()` only affects the SwiftUI rendering pass,
+  /// not what AppKit reads when bridging to NSMenuItem.
   private static func resized(_ image: NSImage, to side: CGFloat) -> NSImage {
     let size = NSSize(width: side, height: side)
     let resized = NSImage(size: size)

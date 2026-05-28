@@ -69,25 +69,27 @@ struct HierarchySidebarFeatureTests {
   func projectAddWorktreeTappedSeedsToggleDefaultsFromSettings() async {
     let projectID = ProjectID()
     let project = Project(id: projectID, name: "p", rootPath: "/p", gitRoot: "/p")
-    var settings = Settings()
-    settings.worktree.fetchRemoteOnCreate = true
-    settings.worktree.copyIgnoredOnCreate = false
-    settings.worktree.copyUntrackedOnCreate = false
-    settings.projects[projectID] = ProjectSettings(
-      git: GitProjectSettings(
-        worktreeBaseRef: "origin/main",
-        copyIgnoredOnWorktreeCreate: true,
-        copyUntrackedOnWorktreeCreate: true,
-        fetchRemoteOnWorktreeCreate: false
+    let settings: Settings = {
+      var settings = Settings()
+      settings.worktree.fetchRemoteOnCreate = true
+      settings.worktree.copyIgnoredOnCreate = false
+      settings.worktree.copyUntrackedOnCreate = false
+      settings.projects[projectID] = ProjectSettings(
+        git: GitProjectSettings(
+          worktreeBaseRef: "origin/main",
+          copyIgnoredOnWorktreeCreate: true,
+          copyUntrackedOnWorktreeCreate: true,
+          fetchRemoteOnWorktreeCreate: false
+        )
       )
-    )
-    let snap = settings
+      return settings
+    }()
 
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
-      $0[SettingsWriter.self].readSnapshotSync = { snap }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
     }
     store.exhaustivity = .off
 
@@ -113,17 +115,19 @@ struct HierarchySidebarFeatureTests {
   func projectAddWorktreeTappedInheritsGlobalDefaultsWhenProjectOverrideAbsent() async {
     let projectID = ProjectID()
     let project = Project(id: projectID, name: "p", rootPath: "/p", gitRoot: "/p")
-    var settings = Settings()
-    settings.worktree.fetchRemoteOnCreate = false
-    settings.worktree.copyIgnoredOnCreate = true
-    settings.worktree.copyUntrackedOnCreate = true
-    let snap = settings
+    let settings: Settings = {
+      var settings = Settings()
+      settings.worktree.fetchRemoteOnCreate = false
+      settings.worktree.copyIgnoredOnCreate = true
+      settings.worktree.copyUntrackedOnCreate = true
+      return settings
+    }()
 
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
-      $0[SettingsWriter.self].readSnapshotSync = { snap }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
     }
     store.exhaustivity = .off
 

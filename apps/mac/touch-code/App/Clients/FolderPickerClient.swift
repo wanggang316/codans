@@ -32,10 +32,9 @@ extension FolderPickerClient: DependencyKey {
           // picker visually belongs to the requesting context (touch-code's
           // main window in the common Add-Project flow). `runModal` would
           // float a free-standing window that can be dragged behind other
-          // apps and dismissed without closing — supacode uses the same
-          // sheet posture via SwiftUI's `.fileImporter`. We stay on AppKit
-          // so the existing `FolderPickerClient` interface (`async URL?`)
-          // doesn't have to migrate to a SwiftUI binding.
+          // apps and dismissed without closing. Staying on AppKit means the
+          // existing `FolderPickerClient` interface (`async URL?`) does
+          // not have to migrate to a SwiftUI binding.
           let parent = NSApp.keyWindow ?? NSApp.mainWindow
           if let parent {
             panel.beginSheetModal(for: parent) { response in

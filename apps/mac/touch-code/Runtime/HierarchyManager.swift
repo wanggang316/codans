@@ -84,7 +84,8 @@ final class HierarchyManager {
             let pane = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex]
             if pane.agentKind != nil || pane.agentSessionID != nil {
               catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentKind = nil
-              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID = nil
+              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID =
+                nil
               mutated = true
             }
           }
@@ -316,15 +317,34 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  /// Renames the Project in place. Missing project is `.notFound`; an unchanged
-  /// name is a silent no-op (no catalog churn, no save). The caller is
-  /// responsible for trimming / empty-string validation.
+  /// Sets the Project's user-facing display name. Persists onto
+  /// `Project.displayName`; the canonical name (derived from `rootPath`) is
+  /// untouched and remains the worktree-path anchor. Empty / whitespace input
+  /// or a value equal to the canonical name clears the override so the
+  /// catalog never carries a redundant string that just mirrors the path.
+  /// Missing project is `.notFound`; an unchanged value is a silent no-op
+  /// (no catalog churn, no save).
   func renameProject(_ id: ProjectID, name: String) throws {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")
     }
-    guard catalog.projects[projectIndex].name != name else { return }
-    catalog.projects[projectIndex].name = name
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let canonical = catalog.projects[projectIndex].canonicalName
+    let newOverride: String? = (trimmed.isEmpty || trimmed == canonical) ? nil : trimmed
+    guard catalog.projects[projectIndex].displayName != newOverride else { return }
+    catalog.projects[projectIndex].displayName = newOverride
+    store.scheduleSave(catalog)
+  }
+
+  /// Recolors the Project. `nil` clears the assignment so the UI falls back
+  /// to the system accent. Unchanged value is a silent no-op so repeated
+  /// taps on the same swatch don't churn the catalog or debounced save.
+  func setProjectColor(_ id: ProjectID, color: ProjectColor?) throws {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
+      throw HierarchyError.notFound("Project \(id)")
+    }
+    guard catalog.projects[projectIndex].color != color else { return }
+    catalog.projects[projectIndex].color = color
     store.scheduleSave(catalog)
   }
 
@@ -803,9 +823,9 @@ final class HierarchyManager {
           guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
             continue
           }
-          // Idempotent: unchanged value skips persistence so a flood of
-          // identical classifications (e.g. title-update spam on the
-          // same agent) does not wake the 500 ms debounce.
+          // Idempotent: unchanged value skips persistence so repeated
+          // foreground snapshots for the same agent do not wake the
+          // 500 ms debounce.
           guard panes[paneIndex].agentKind != kind else { return }
           catalog.projects[projectIndex]
             .worktrees[worktreeIndex]
@@ -1214,6 +1234,43 @@ final class HierarchyManager {
     else { return }
     catalog.projects[projectIndex]
       .worktrees[worktreeIndex].tabs[tabIndex].color = color
+    store.scheduleSave(catalog)
+  }
+
+  /// Update the tab's SF Symbol icon, subject to the lock precedence in
+  /// `TabIconLock` (`.auto` ≤ `.script` ≤ `.user`). A lower-priority write
+  /// against a higher lock is a silent no-op; a `.user` write with `nil`
+  /// drops the lock back to `.auto` so the runtime fallback takes over
+  /// again. Persists through the same debounced save path as the other
+  /// tab mutators.
+  func setTabIcon(
+    _ id: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID,
+    icon: String?,
+    lock: TabIconLock
+  ) throws {
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+    guard
+      let tabIndex = catalog.projects[projectIndex]
+        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
+    else {
+      throw HierarchyError.notFound("Tab \(id)")
+    }
+    let current = catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex]
+    guard let updated = current.applyingIcon(icon, lock: lock),
+      updated != current
+    else { return }
+    catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex] = updated
     store.scheduleSave(catalog)
   }
 

@@ -5,9 +5,14 @@ import TouchCodeCore
 /// ActiveAgents panel anchored at the sidebar's bottom safe-area inset.
 ///
 /// Visual brief (per design pass):
-/// - Rounded top corners (10pt) — `.regularMaterial` background drawn
-///   inside the rounded shape so the corner contour reads against the
-///   sidebar's native chrome material instead of blending with it.
+/// - Rounded top corners (10pt) — system glass background drawn inside
+///   the rounded shape. The background is a bridged
+///   `NSVisualEffectView` (`.popover` material with `.behindWindow`
+///   blending) rather than a SwiftUI `Material`, so the panel actually
+///   samples the desktop / window beneath it the way native macOS
+///   chrome (popovers, HUD panels, sidebars) does. SwiftUI's
+///   `Material` is a layer-based blur that cannot reach past the
+///   hosting window.
 /// - Header carries no chrome by default: the title sits on top of the
 ///   panel directly. A capsule resize handle fades in only when the
 ///   cursor enters a narrow strip at the very top (16pt tall) — that
@@ -82,7 +87,10 @@ struct ActiveAgentsSidebarPanel: View {
     }
     .frame(height: clampedHeight)
     .frame(maxWidth: .infinity)
-    .background(.ultraThinMaterial, in: shape)
+    .background(
+      VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
+        .clipShape(shape)
+    )
     .overlay(
       shape.stroke(Color.primary.opacity(0.08), lineWidth: 1)
     )

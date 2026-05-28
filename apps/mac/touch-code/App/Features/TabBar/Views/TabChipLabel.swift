@@ -18,6 +18,11 @@ struct TabChipLabel: View {
   /// L2 unread dot. Rendered as a 4 px filled circle immediately before
   /// the title text. Boolean only — no count, no kind distinction.
   var hasUnreadNotification: Bool = false
+  /// Resolved SF Symbol from `Tab.resolvedIcon`. The running-spinner and
+  /// bell still claim their slots first; the icon prefixes the title
+  /// only when those quieter signals are absent so the chip never tries
+  /// to render three leading glyphs at once.
+  var icon: String? = nil
 
   var body: some View {
     HStack(spacing: 4) {
@@ -25,12 +30,16 @@ struct TabChipLabel: View {
         ProgressView()
           .controlSize(.mini)
           .frame(width: 12, height: 12)
-      }
-      if hasUnreadNotification {
+      } else if hasUnreadNotification {
         Image(systemName: "bell.fill")
           .font(.system(size: 8))
           .foregroundStyle(.orange)
           .accessibilityLabel("Has unread notifications")
+      } else if let icon, !icon.isEmpty {
+        Image(systemName: icon)
+          .font(.system(size: 10))
+          .foregroundStyle(isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
+          .accessibilityHidden(true)
       }
       Text(title)
         .lineLimit(1)

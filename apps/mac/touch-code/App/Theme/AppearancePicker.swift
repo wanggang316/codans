@@ -66,6 +66,7 @@ struct AppearancePicker: View {
     }
     .buttonStyle(.plain)
     .contentShape(Rectangle())
+    .focusEffectDisabled()
     .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     .accessibilityLabel(label)
   }

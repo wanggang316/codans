@@ -24,6 +24,7 @@ struct ProjectGeneralSettingsView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Dependency(SettingsWriter.self) private var settingsWriter
+  @Dependency(HierarchyClient.self) private var hierarchyClient
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
 
   /// Branches loaded from the repo on view appearance. `baseRefOptions` is
@@ -41,6 +42,7 @@ struct ProjectGeneralSettingsView: View {
   /// IDs for the Sections — useful for the kind-render tests so they
   /// can assert visibility without inspecting SwiftUI's view tree.
   enum SectionID: String, CaseIterable, Hashable {
+    case general
     case editor
     case gitViewer
     case worktree
@@ -53,7 +55,7 @@ struct ProjectGeneralSettingsView: View {
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
     case .dir:
-      return [.editor, .environment]
+      return [.general, .editor, .environment]
     case .gitRepo:
       return Set(SectionID.allCases)
     }
@@ -139,6 +141,9 @@ struct ProjectGeneralSettingsView: View {
 
   var body: some View {
     Form {
+      if visible.contains(.general) {
+        generalSection
+      }
       if visible.contains(.editor) {
         editorSection
       }
@@ -182,6 +187,60 @@ struct ProjectGeneralSettingsView: View {
     baseRefOptions = loadedRefs
     defaultRemoteBaseRef = loadedAuto
     baseRefOptionsLoaded = true
+  }
+
+  // MARK: - General
+
+  /// Project identity — Title and Color. Writes go through `HierarchyClient`
+  /// because the underlying data lives on `Project` in the catalog, not in
+  /// `settings.json`. Empty / whitespace-only titles revert silently to the
+  /// last accepted name so the catalog never ends up with a blank entry.
+  /// Color is an inline swatch row (No Color + seven named entries) plus a
+  /// system `ColorPicker` that opens NSColorPanel for arbitrary hex.
+  @ViewBuilder
+  private var generalSection: some View {
+    Section("General") {
+      LabeledContent("Name") {
+        ProjectNameField(
+          placeholder: projectCanonicalName,
+          currentOverride: projectDisplayOverride,
+          commit: { newName in
+            try? hierarchyClient.renameProject(projectID, newName)
+          }
+        )
+        .frame(maxWidth: .infinity, minHeight: 22)
+      }
+
+      LabeledContent("Color") {
+        ProjectColorSwatchRow(selection: projectColorBinding)
+      }
+    }
+  }
+
+  /// Path-derived canonical name. Shown as the field's placeholder so the
+  /// user can always see what the project would fall back to if they cleared
+  /// their override. Also feeds the worktree-path preview, so renames stay
+  /// purely cosmetic.
+  private var projectCanonicalName: String {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.canonicalName ?? ""
+  }
+
+  /// User-set display override or `nil` when the project is using the
+  /// canonical name. Drives the field's initial value so a user re-opening
+  /// Settings on a customized project sees their override, not the placeholder.
+  private var projectDisplayOverride: String? {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.displayName
+  }
+
+  private var projectColorBinding: Binding<ProjectColor?> {
+    Binding(
+      get: {
+        hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.color
+      },
+      set: { newValue in
+        try? hierarchyClient.setProjectColor(projectID, newValue)
+      }
+    )
   }
 
   // MARK: - Editor
@@ -355,12 +414,14 @@ struct ProjectGeneralSettingsView: View {
   /// matches the runtime fallback computed in `HierarchySidebarFeature` when
   /// opening the Create Worktree sheet. Routes through
   /// `WorktreeSettings.resolveBaseDirectory` so the inherited preview tracks
-  /// any change to the global default.
+  /// any change to the global default. Anchored on the canonical name so
+  /// renaming the project never moves where new worktrees would land.
   private var defaultWorktreesDirectory: String {
-    let projectName =
-      hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.name ?? "<project>"
+    let canonical =
+      hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.canonicalName
+      ?? "<project>"
     return settingsStore.settings.worktree
-      .resolveBaseDirectory(forProjectName: projectName, projectOverride: nil)
+      .resolveBaseDirectory(forProjectName: canonical, projectOverride: nil)
       .path(percentEncoded: false)
   }
 
@@ -554,5 +615,341 @@ struct ProjectGeneralSettingsView: View {
         store.send(.setWorktreeBaseDirectory(url.path))
       }
     }
+  }
+}
+
+/// Native `NSTextField`-backed name editor. SwiftUI's `TextField` with
+/// `.textFieldStyle(.plain)` in a Form keeps showing a blinking caret after
+/// outside clicks (Form's empty area doesn't propagate as a focus event),
+/// so we drop down to AppKit for reliable "click anywhere → resign first
+/// responder → commit" semantics.
+///
+/// The field surfaces the project's `displayName` override directly: when
+/// the project carries a custom name, the field starts pre-filled with it
+/// so the user can edit in place; when there is no override the field is
+/// empty and the canonical name acts as the placeholder hint.
+///
+/// Commit fires on every keystroke (via `controlTextDidChange`) so the
+/// sidebar / Settings sidebar / window header pick up the new name as
+/// soon as the user types. Trimming + canonical-equality collapse to a
+/// `nil` override lives in `HierarchyManager.renameProject`, so an empty
+/// or whitespace-only field naturally reverts to the canonical name on
+/// each keystroke.
+private struct ProjectNameField: NSViewRepresentable {
+  let placeholder: String
+  let currentOverride: String?
+  let commit: (String) -> Void
+
+  func makeNSView(context: Context) -> NSTextField {
+    let field = NSTextField()
+    field.isBordered = false
+    field.drawsBackground = false
+    field.focusRingType = .none
+    field.alignment = .right
+    field.font = .systemFont(ofSize: NSFont.systemFontSize)
+    field.placeholderString = placeholder
+    field.stringValue = currentOverride ?? ""
+    field.cell?.usesSingleLineMode = true
+    field.cell?.lineBreakMode = .byTruncatingTail
+    field.delegate = context.coordinator
+    context.coordinator.lastAcceptedOverride = currentOverride
+    return field
+  }
+
+  func updateNSView(_ field: NSTextField, context: Context) {
+    if field.placeholderString != placeholder {
+      field.placeholderString = placeholder
+    }
+    context.coordinator.commit = commit
+    // Resync the field's stringValue with the catalog's current override
+    // when the user is not actively editing — otherwise an external rename
+    // (or our own commit) would race with their typing. `currentEditor()`
+    // is non-nil exactly when the field holds first-responder status.
+    let isEditing = field.currentEditor() != nil
+    if !isEditing,
+      context.coordinator.lastAcceptedOverride != currentOverride
+    {
+      field.stringValue = currentOverride ?? ""
+      context.coordinator.lastAcceptedOverride = currentOverride
+    }
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(commit: commit)
+  }
+
+  final class Coordinator: NSObject, NSTextFieldDelegate {
+    var commit: (String) -> Void
+    /// Tracks the override value the field currently mirrors. Used by
+    /// `updateNSView` to detect when an external rename has changed the
+    /// catalog under us and the displayed text needs a quiet refresh.
+    var lastAcceptedOverride: String?
+
+    init(commit: @escaping (String) -> Void) {
+      self.commit = commit
+    }
+
+    /// Fires on every keystroke. We forward the raw `stringValue` to the
+    /// manager unchanged — trimming and the empty/canonical → `nil`
+    /// collapse live in `renameProject`, so the field's text and the
+    /// catalog's `displayName` stay in lockstep without us second-guessing
+    /// what the user is mid-typing (a trim here would eat trailing spaces
+    /// before the user finished a word).
+    func controlTextDidChange(_ notification: Notification) {
+      guard let field = notification.object as? NSTextField else { return }
+      let raw = field.stringValue
+      let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      lastAcceptedOverride = trimmed.isEmpty ? nil : trimmed
+      commit(raw)
+    }
+  }
+}
+
+/// Horizontal palette + custom-color trigger for the General section. Mirrors
+/// the inline swatch row used by Tag Manager: a No-Color sentinel, the
+/// seven Finder palette colors, then a multicolor disc that opens
+/// NSColorPanel for arbitrary hex values.
+///
+/// Selection rules:
+/// - Named / No-Color picks **don't** repaint the rightmost chip; it always
+///   represents "Custom" as a slot, not the current selection.
+/// - Clicking the rightmost chip opens the system color panel. The picked
+///   color becomes the new `selection` AND the chip's fill — so the chip
+///   acts as a recall button for the last hex the user chose.
+/// - The remembered custom hex (`lastCustomHex`) is sticky across named
+///   selections: switch to Red then back to Custom and you land on the
+///   previous hue, not the default.
+private struct ProjectColorSwatchRow: View {
+  @Binding var selection: ProjectColor?
+
+  /// Last hex chosen via the color panel. Seeded from `selection` if the
+  /// project already carries a custom value when the row first appears, so
+  /// the chip reflects state from a prior session.
+  @State private var lastCustomHex: String?
+  /// Holds the NSColorPanel callback target alive across panel-open and
+  /// color-pick events. Cleared on disappear so the panel never calls into
+  /// a freed observer.
+  @State private var panelObserver: ColorPanelObserver?
+
+  var body: some View {
+    HStack(spacing: 8) {
+      noColorChip
+      ForEach(ProjectColor.namedCases, id: \.self) { color in
+        namedChip(color)
+      }
+      customColorChip
+    }
+    .frame(maxWidth: .infinity, alignment: .trailing)
+    .onAppear { seedLastCustomFromSelection() }
+    .onChange(of: selection) { _, _ in seedLastCustomFromSelection() }
+    .onDisappear { detachColorPanelObserver() }
+  }
+
+  /// "No Color" sentinel — clears `selection` to nil so the Project falls
+  /// back to the system accent.
+  @ViewBuilder
+  private var noColorChip: some View {
+    ColorChip(
+      isSelected: selection == nil,
+      action: { selection = nil },
+      accessibilityName: "No Color"
+    ) {
+      Image(systemName: "nosign")
+        .font(.system(size: 12, weight: .regular))
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    }
+  }
+
+  @ViewBuilder
+  private func namedChip(_ color: ProjectColor) -> some View {
+    ColorChip(
+      isSelected: selection == color,
+      action: { selection = color },
+      accessibilityName: color.displayName
+    ) {
+      Circle()
+        .fill(color.swiftUIColor)
+        .frame(width: 16, height: 16)
+        .overlay(
+          Circle().strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+        )
+    }
+  }
+
+  /// Custom-color trigger. Renders either a multicolor disc (no custom
+  /// hex yet) or a solid disc of the last picked hue. Click opens
+  /// `NSColorPanel`; the picked color persists as `.custom(hex:)` and
+  /// becomes the chip's visible fill.
+  @ViewBuilder
+  private var customColorChip: some View {
+    let isSelected: Bool = {
+      if case .custom = selection { return true }
+      return false
+    }()
+    ColorChip(
+      isSelected: isSelected,
+      action: { openColorPanel() },
+      accessibilityName: "Custom Color"
+    ) {
+      customCircleContent
+    }
+    .help("Custom Color…")
+  }
+
+  /// Fill content for the custom chip. Solid color when a custom hex is
+  /// remembered; otherwise a smooth conic rainbow so the chip reads as
+  /// "open the picker" rather than "currently set to something".
+  @ViewBuilder
+  private var customCircleContent: some View {
+    if let hex = lastCustomHex, let color = ProjectColor.parseHex(hex) {
+      Circle()
+        .fill(color)
+        .frame(width: 16, height: 16)
+        .overlay(
+          Circle().strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+        )
+    } else {
+      Circle()
+        .fill(
+          AngularGradient(
+            colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
+            center: .center
+          )
+        )
+        .frame(width: 16, height: 16)
+        .overlay(
+          Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+  }
+
+  // MARK: - NSColorPanel plumbing
+
+  private func openColorPanel() {
+    // Tear down any prior observer first — the panel target is shared global
+    // state, and re-opening must not leave the previous binding wired up.
+    if let existing = panelObserver {
+      existing.unbind(from: NSColorPanel.shared)
+    }
+    let observer = ColorPanelObserver { nsColor in
+      if let hex = ProjectColor.hex(from: nsColor) {
+        lastCustomHex = hex
+        selection = .custom(hex: hex)
+      }
+    }
+    panelObserver = observer
+    let panel = NSColorPanel.shared
+    panel.showsAlpha = false
+    if let hex = lastCustomHex, let nsColor = ProjectColor.nsColor(from: hex) {
+      panel.color = nsColor
+    }
+    observer.bind(to: panel)
+    panel.makeKeyAndOrderFront(nil)
+  }
+
+  /// Avoid leaving a dangling target/action behind us — if the user closes
+  /// the Settings window while the panel is still open, the panel would
+  /// fire `colorDidChange:` into a deallocated observer otherwise.
+  /// `NSColorPanel` doesn't expose its current target, so we conservatively
+  /// detach whenever this row had set one. Setting `target` to `nil` is a
+  /// no-op when something else has taken ownership in the meantime.
+  private func detachColorPanelObserver() {
+    guard let observer = panelObserver else { return }
+    observer.unbind(from: NSColorPanel.shared)
+    panelObserver = nil
+  }
+
+  private func seedLastCustomFromSelection() {
+    if case .custom(let hex) = selection {
+      lastCustomHex = hex
+    }
+  }
+}
+
+/// `NSColorPanel.setTarget(_:)` keeps an `unsafe_unretained` reference, so
+/// the panel callback target must outlive the panel session. Held as the
+/// `@State`-tracked `panelObserver` on `ProjectColorSwatchRow` and detached
+/// on `onDisappear`.
+///
+/// The observer also self-deactivates as soon as the panel begins to close.
+/// `NSColorPanel` fires a final `colorDidChange:` during its close animation
+/// with the panel's current color reset to black; without the guard, that
+/// stray callback would overwrite the just-picked hex with `#000000`. Hooking
+/// `NSWindow.willCloseNotification` (the panel *is* a window) flips
+/// `isActive` ahead of that final action so it's dropped on the floor.
+@MainActor
+private final class ColorPanelObserver: NSObject {
+  let onChange: (NSColor) -> Void
+  private var willCloseToken: NSObjectProtocol?
+  private var isActive: Bool = true
+
+  init(onChange: @escaping (NSColor) -> Void) {
+    self.onChange = onChange
+  }
+
+  func bind(to panel: NSColorPanel) {
+    isActive = true
+    panel.setTarget(self)
+    panel.setAction(#selector(colorDidChange(_:)))
+    willCloseToken = NotificationCenter.default.addObserver(
+      forName: NSWindow.willCloseNotification,
+      object: panel,
+      queue: .main
+    ) { [weak self] _ in
+      self?.isActive = false
+    }
+  }
+
+  func unbind(from panel: NSColorPanel) {
+    isActive = false
+    panel.setTarget(nil)
+    panel.setAction(nil)
+    if let token = willCloseToken {
+      NotificationCenter.default.removeObserver(token)
+      willCloseToken = nil
+    }
+  }
+
+  @objc func colorDidChange(_ sender: NSColorPanel) {
+    guard isActive else { return }
+    onChange(sender.color)
+  }
+}
+
+/// Shared swatch wrapper. Centralises the visual rules — fixed 24pt hit
+/// area, 1pt subdued ring on hover, 1.5pt accent ring when selected — so
+/// every chip in the row stays pixel-aligned regardless of its inner fill
+/// (named color, nosign glyph, conic rainbow, or solid custom hex).
+private struct ColorChip<Content: View>: View {
+  let isSelected: Bool
+  let action: () -> Void
+  let accessibilityName: String
+  @ViewBuilder var content: () -> Content
+
+  @State private var isHovering: Bool = false
+
+  var body: some View {
+    Button(action: action) {
+      ZStack {
+        if isSelected {
+          Circle()
+            .strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
+            .frame(width: 22, height: 22)
+        } else if isHovering {
+          Circle()
+            .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1)
+            .frame(width: 22, height: 22)
+        }
+        content()
+      }
+      .frame(width: 24, height: 24)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovering = $0 }
+    .help(accessibilityName)
+    .accessibilityLabel(accessibilityName)
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 }

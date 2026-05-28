@@ -8,6 +8,41 @@ import TouchCodeCore
 @MainActor
 struct RootFeatureTests {
   @Test
+  func paneCrashedClearsRunningFlag() async {
+    // Crashed panes stay in the catalog for the user to retry. The OSC 9;4
+    // running flag must be force-cleared here because a crashing program
+    // rarely emits the REMOVE state itself, which would otherwise leave
+    // the tab-chip / sidebar spinners pinned on a dead pane forever.
+    let (eventStream, eventContinuation) = AsyncStream<TerminalEvent>.makeStream()
+    let (selectionStream, selectionContinuation) = AsyncStream<HierarchySelection>.makeStream()
+    let paneID = PaneID()
+    let markedIdle = LockIsolated<PaneID?>(nil)
+
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { eventStream }
+      $0.hierarchyClient.selectionChanges = { selectionStream }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.markPaneIdle = { id in
+        markedIdle.withValue { $0 = id }
+      }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.onLaunch)
+    eventContinuation.yield(.paneCrashed(paneID, reason: "test"))
+    await store.receive(\.paneProgressBusyChanged)
+
+    eventContinuation.finish()
+    selectionContinuation.finish()
+    await store.send(.onQuit)
+
+    #expect(markedIdle.value == paneID)
+  }
+
+  @Test
   func onLaunchReceivesEngineEventThenCancels() async {
     let (eventStream, eventContinuation) = AsyncStream<TerminalEvent>.makeStream()
     let (selectionStream, selectionContinuation) = AsyncStream<HierarchySelection>.makeStream()
@@ -513,6 +548,7 @@ struct RootFeatureTests {
       (.paneCreated(pane, tab), .paneCreated),
       (.paneReady(pane), .paneReady),
       (.paneOutput(pane, Data([0x01])), .paneOutput),
+      (.paneViewportChanged(pane, text: "screen"), .paneViewportChanged),
       (.paneIdle(pane, duration: 1), .paneIdle),
       (.paneExited(pane, code: 0, signal: nil), .paneExited),
       (.paneCrashed(pane, reason: "x"), .paneCrashed),
@@ -521,6 +557,7 @@ struct RootFeatureTests {
       (.tabAutoClosed(tab, cause: .other(reason: "x")), .tabAutoClosed),
       (.worktreeActivated(worktree), .worktreeActivated),
       (.hierarchyMutated(.catalog), .hierarchyMutated),
+      (.foregroundJobChanged(pane, ForegroundJob(processGroupID: 1, processes: [])), .foregroundJobChanged),
     ]
     for (event, expected) in cases {
       #expect(RootFeature.LastEventMarker(event) == expected)
