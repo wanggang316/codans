@@ -37,19 +37,19 @@ public final class SessionReaper {
   /// milliseconds covers contended boots without dragging launch.
   private static let probeTimeoutMS: Int32 = 200
 
-  private let sessionStore: SessionStore
+  private let coordinator: SessionCoordinator
   private let snapshotDirectory: URL
   private let staleAfter: TimeInterval
   private let clock: @MainActor () -> Date
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.reaper")
 
   public init(
-    sessionStore: SessionStore,
+    coordinator: SessionCoordinator,
     snapshotDirectory: URL? = nil,
     staleAfter: TimeInterval = SessionConfig.defaultStaleAfter,
     clock: @escaping @MainActor () -> Date = { Date() }
   ) {
-    self.sessionStore = sessionStore
+    self.coordinator = coordinator
     self.snapshotDirectory = snapshotDirectory ?? PaneDaemonBringup.canonicalSnapshotDirectory()
     self.staleAfter = staleAfter
     self.clock = clock
@@ -76,7 +76,7 @@ public final class SessionReaper {
   /// file moved aside), so the typical "no usable catalog" path returns
   /// an empty map without throwing.
   public func sweep(livePaneIDs: Set<PaneID>? = nil) throws -> [PaneID: SessionState] {
-    var catalog = try sessionStore.load()
+    var catalog = coordinator.catalog
 
     let now = clock()
     let staleCutoff = now.addingTimeInterval(-staleAfter)
@@ -134,7 +134,7 @@ public final class SessionReaper {
         catalog.sessions.removeValue(forKey: key)
       }
       do {
-        try sessionStore.saveNow(catalog)
+        try coordinator.replace(catalog)
       } catch {
         // Failing to persist the pruned catalog is non-fatal: the
         // states map is still correct for this launch, and the next

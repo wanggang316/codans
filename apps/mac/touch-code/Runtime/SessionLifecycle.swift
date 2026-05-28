@@ -23,19 +23,19 @@ import os.log
 final class SessionLifecycle {
   private let manager: HierarchyManager
   private let ghosttyRuntime: GhosttyRuntime?
-  private let sessionStore: SessionStore
+  private let coordinator: SessionCoordinator
   private let now: () -> Date
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.lifecycle")
 
   init(
     manager: HierarchyManager,
     ghosttyRuntime: GhosttyRuntime?,
-    sessionStore: SessionStore,
+    coordinator: SessionCoordinator,
     now: @escaping () -> Date = Date.init
   ) {
     self.manager = manager
     self.ghosttyRuntime = ghosttyRuntime
-    self.sessionStore = sessionStore
+    self.coordinator = coordinator
     self.now = now
   }
 
@@ -194,7 +194,7 @@ final class SessionLifecycle {
 
   private func persist(catalog: SessionCatalog) {
     do {
-      try sessionStore.saveNow(catalog)
+      try coordinator.replace(catalog)
     } catch {
       logger.error(
         "Failed to persist sessions.json on quit: \(String(describing: error), privacy: .public)"

@@ -440,6 +440,12 @@ final class AppState {
   /// Reused by `SessionLifecycle` so the quit-time flush and the in-app
   /// reap-on-pane-close path write through a single instance.
   @ObservationIgnored private(set) var sessionStore: SessionStore?
+  /// Single writer that owns the in-memory `SessionCatalog` mirror and is
+  /// the only mutator of `sessions.json` after launch. Bootstrap seeds it
+  /// from `sessionStore.load()`; the launch reaper, the quit-time
+  /// lifecycle, and the `pane.close` IPC handler all route through it.
+  /// nil when the store is unavailable (no-resume mode).
+  @ObservationIgnored private(set) var sessionCoordinator: SessionCoordinator?
   /// Quit-time orchestrator: snapshots every live `ZmxClient` into
   /// `sessions.json` and then sends `.detach` so the daemons survive the
   /// app process. Built in `bringUp` alongside the engine; nil before
@@ -839,11 +845,12 @@ final class AppState {
         appBundle: Self.bundleVersion()
       )
     )
-    // SessionStore backs the `pane.close` reap step. We reuse the shared
-    // instance opened in `bringUp` so the IPC handlers and the quit-time
-    // `SessionLifecycle` flush write through one store; nil falls back to
-    // the handler's "no persistent catalog to reap" path.
-    let sessionStore = self.sessionStore
+    // SessionCoordinator backs the `pane.close` reap step. We reuse the
+    // shared instance built in `bringUp` so the IPC handlers and the
+    // quit-time `SessionLifecycle` flush write through one in-memory
+    // truth; nil falls back to the handler's "no persistent catalog to
+    // reap" path (second-instance no-resume mode).
+    let sessionCoordinator = self.sessionCoordinator
     let hierarchyHandlers = HierarchyHandlers(
       manager: hierarchy,
       envProvider: { projectID in
@@ -865,7 +872,7 @@ final class AppState {
         // `PaneRuntimeProbe` so the handler stays test-injectable.
         terminalEngine?.ghosttyRuntime?.surface(for: paneID)?.zmxClient
       },
-      sessionStore: sessionStore
+      sessionCoordinator: sessionCoordinator
     )
     let terminalHandlers = TerminalHandlers(
       sink: terminalEngine.ghosttyRuntime == nil
@@ -952,13 +959,27 @@ final class AppState {
     }
     self.sessionStore = sessionStore
     guard let sessionStore else { return }
+    // Seed the coordinator's in-memory catalog from disk once at bootstrap.
+    // A read error (corrupt file, EIO under sandbox revoke) degrades to an
+    // empty catalog rather than blocking the launch — same failure mode as
+    // the previous direct-load path inside `SessionReaper.sweep`.
+    let initialCatalog: SessionCatalog
+    do {
+      initialCatalog = try sessionStore.load()
+    } catch {
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session")
+        .error("SessionStore.load failed at bootstrap: \(String(describing: error), privacy: .public)")
+      initialCatalog = .empty
+    }
+    let coordinator = SessionCoordinator(store: sessionStore, initial: initialCatalog)
+    self.sessionCoordinator = coordinator
     self.sessionLifecycle = SessionLifecycle(
       manager: hierarchyManager,
       ghosttyRuntime: ghostty,
-      sessionStore: sessionStore
+      coordinator: coordinator
     )
 
-    let reaper = SessionReaper(sessionStore: sessionStore)
+    let reaper = SessionReaper(coordinator: coordinator)
     do {
       // Pass the current hierarchy's pane ids so the reaper can kill any
       // alive daemon whose paneID no longer maps to a surface — without

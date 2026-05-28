@@ -45,11 +45,11 @@ final class HierarchyHandlers {
   /// `GhosttyRuntime` into the test target.
   private let runtimeProbe: @MainActor (PaneID) -> PaneRuntimeProbe?
   /// Persistent zmx-session catalog accessor. The `pane.close` handler
-  /// loads the catalog, drops the entry for the closed pane, and saves
-  /// synchronously so the on-disk state reflects the kill before the
-  /// RPC returns. Default is `nil` for tests; production wiring passes
-  /// the shared `SessionStore`.
-  private let sessionStore: SessionStore?
+  /// drops the closed pane's row synchronously through the coordinator
+  /// so the on-disk state reflects the kill before the RPC returns.
+  /// Default is `nil` for tests; production wiring passes the shared
+  /// `SessionCoordinator`.
+  private let sessionCoordinator: SessionCoordinator?
   private let logger = Logger(subsystem: "com.touch-code.ipc", category: "hierarchy")
 
   init(
@@ -58,14 +58,14 @@ final class HierarchyHandlers {
     settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
     daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
     runtimeProbe: @escaping @MainActor (PaneID) -> PaneRuntimeProbe? = { _ in nil },
-    sessionStore: SessionStore? = nil
+    sessionCoordinator: SessionCoordinator? = nil
   ) {
     self.manager = manager
     self.envProvider = envProvider
     self.settingsProvider = settingsProvider
     self.daemonKiller = daemonKiller
     self.runtimeProbe = runtimeProbe
-    self.sessionStore = sessionStore
+    self.sessionCoordinator = sessionCoordinator
   }
 
   // MARK: - Error mapping
@@ -505,15 +505,12 @@ final class HierarchyHandlers {
     await daemonKiller(req.paneID)
 
     // Reap the persisted session-catalog entry. Best-effort: a missing
-    // or unreadable file is normal in builds where the daemon writer
-    // path hasn't been wired yet, so we log and continue rather than
-    // failing the RPC.
-    if let store = sessionStore {
+    // coordinator (no-resume mode) or a save failure is non-fatal — log
+    // and continue rather than failing the RPC, which only promises that
+    // the daemon was killed.
+    if let coordinator = sessionCoordinator {
       do {
-        var catalog = try store.load()
-        if catalog.sessions.removeValue(forKey: req.paneID.raw.uuidString) != nil {
-          try store.saveNow(catalog)
-        }
+        try coordinator.recordClose(req.paneID)
       } catch {
         logger.warning(
           "pane.close: sessions.json reap failed: \(String(describing: error), privacy: .public)"
