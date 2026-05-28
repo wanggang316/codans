@@ -211,17 +211,20 @@ final class PaneSurface {
   }
 
   func foregroundProcessGroupID() -> Int32? {
-    guard let surface else { return nil }
-    let value = ghostty_surface_foreground_process_group(surface)
-    guard value > 0, value <= UInt64(Int32.max) else { return nil }
-    return Int32(value)
+    // The C symbol `ghostty_surface_foreground_process_group` lives on the
+    // `v1.3.1-tc` fork branch that adds the `Exec.getProcessInfo` wrapper.
+    // This branch pins the `External backend` fork instead, so the symbol
+    // is not yet available here. Returning nil degrades the Active Agents
+    // foreground detection to output-driven inference — the same behaviour
+    // the codebase had before the wrapper landed on main. To be restored
+    // when the fork merges both branches.
+    guard surface != nil else { return nil }
+    return nil
   }
 
   func childProcessID() -> Int32? {
-    guard let surface else { return nil }
-    let value = ghostty_surface_child_process_id(surface)
-    guard value > 0, value <= UInt64(Int32.max) else { return nil }
-    return Int32(value)
+    guard surface != nil else { return nil }
+    return nil
   }
 
   /// Apply a color scheme to this surface and request a redraw. No-op after `close()`.
