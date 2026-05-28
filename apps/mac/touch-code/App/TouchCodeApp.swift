@@ -147,7 +147,8 @@ struct TouchCodeApp: App {
           SettingsWindowView(
             store: store,
             settingsStore: appState.settingsStore,
-            shortcutsStore: appState.shortcutsStore
+            shortcutsStore: appState.shortcutsStore,
+            sessionCoordinator: appState.sessionCoordinator
           )
           .environment(appState.hierarchyManager)
           .environment(appState.settingsStore)

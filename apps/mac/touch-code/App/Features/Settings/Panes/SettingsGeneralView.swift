@@ -27,6 +27,19 @@ struct SettingsGeneralView: View {
   /// selection over to the Terminal pane so the user can pick light/dark
   /// terminal themes that the Appearance choice will then switch between.
   let onJumpToTerminal: () -> Void
+  /// Persisted-session catalog, threaded from `bootstrapSessionStack`.
+  /// `nil` when the launch acquired no catalog lock (no-resume mode) —
+  /// the corresponding section is hidden in that case so the user does
+  /// not see a count they cannot influence.
+  let sessionCoordinator: SessionCoordinator?
+
+  /// Snapshot of the catalog row count read once when the pane appears
+  /// and recomputed after a "Forget all" action. We avoid an `@Observable`
+  /// dependency on `SessionCoordinator` because the catalog mutates
+  /// from runtime paths (spawn / reattach) that have no business waking
+  /// the settings window — the user opening settings is the only
+  /// trigger we need to reflect.
+  @State private var resumableSessionCount: Int = 0
 
   private var selectionBinding: Binding<EditorID?> {
     Binding(
@@ -141,6 +154,26 @@ struct SettingsGeneralView: View {
         )
       }
 
+      if sessionCoordinator != nil {
+        Section {
+          LabeledContent("Sessions saved for next launch") {
+            Text("\(resumableSessionCount)")
+              .monospacedDigit()
+              .foregroundStyle(.secondary)
+          }
+          Button("Forget all sessions", role: .destructive) {
+            forgetAllSessions()
+          }
+          .disabled(resumableSessionCount == 0)
+        } footer: {
+          Text(
+            "Counts the rows in sessions.json that the next launch would "
+              + "try to reattach. Forget all clears the catalog; any daemon "
+              + "still running is left for the launch-time reaper to clean up."
+          )
+        }
+      }
+
       Section {
         Picker("Default editor", selection: selectionBinding) {
           editorPickerContent
@@ -187,7 +220,34 @@ struct SettingsGeneralView: View {
     }
     .formStyle(.grouped)
     .task { store.send(.refreshRequested) }
-    .onAppear { store.send(.onAppear) }
+    .onAppear {
+      store.send(.onAppear)
+      refreshResumableCount()
+    }
+  }
+
+  /// Read the catalog count once. Called on pane appear so a Forget-all
+  /// from a previous appearance is reflected next time the user opens
+  /// settings, and the count tracks runtime spawns recorded since launch.
+  private func refreshResumableCount() {
+    resumableSessionCount = sessionCoordinator?.catalog.sessions.count ?? 0
+  }
+
+  /// Clear the on-disk catalog. Daemons currently running are not killed
+  /// — they survive in the OS process tree until their own exit. The
+  /// launch-time FS-orphan reaper picks them up if the user quits before
+  /// they shut down on their own.
+  private func forgetAllSessions() {
+    guard let coordinator = sessionCoordinator else { return }
+    do {
+      try coordinator.replace(SessionCatalog(sessions: [:]))
+      resumableSessionCount = 0
+    } catch {
+      // Persist failures are rare (disk full, sandbox revoke) and would
+      // already be logged by the coordinator. The UI keeps the displayed
+      // count so the user sees the operation did not take effect.
+      refreshResumableCount()
+    }
   }
 
   /// Editor picker body — grouped by `EditorPickerRow.sortedGroups` so editors,
@@ -239,7 +299,8 @@ struct SettingsGeneralView: View {
         fileURL: FileManager.default.temporaryDirectory.appending(component: "\(UUID()).json"),
         debounceWindow: .seconds(3600)
       ),
-      onJumpToTerminal: {}
+      onJumpToTerminal: {},
+      sessionCoordinator: nil
     )
     .frame(width: 520, height: 320)
   }
