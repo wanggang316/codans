@@ -28,7 +28,6 @@ struct WorktreeHeaderInfoLabel: View {
       guard let snapshot else { return .noChecks }
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
     }()
-    let isMainCheckout = worktree.path == project.rootPath
     let isSynthetic = isMainCheckout && project.gitRoot == nil
     let hasUnread = notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
 
@@ -59,10 +58,12 @@ struct WorktreeHeaderInfoLabel: View {
           ) {
             BranchSwitcherView(store: branchSwitcherStore)
           }
-        contextRow(isMainCheckout: isMainCheckout)
+        contextRow()
       }
     }
   }
+
+  private var isMainCheckout: Bool { worktree.path == project.rootPath }
 
   // MARK: - Row 1: branch (click target)
 
@@ -84,6 +85,12 @@ struct WorktreeHeaderInfoLabel: View {
         .font(.headline)
         .lineLimit(1)
         .accessibilityIdentifier("worktree_header.branch_text")
+      if worktree.isPinned && !isMainCheckout {
+        Image(systemName: "pin.fill")
+          .font(.caption2)
+          .foregroundStyle(.orange)
+          .accessibilityLabel("Pinned")
+      }
       trailingAffordance
         .frame(width: 12, alignment: .center)
     }
@@ -116,38 +123,25 @@ struct WorktreeHeaderInfoLabel: View {
 
   // MARK: - Row 2: worktree name · project (caption)
 
-  private func contextRow(isMainCheckout: Bool) -> some View {
-    // Pin marker sits between `worktree.name` and the `·` separator so the
-    // visual "pinned" affordance attaches to the worktree (not the
-    // following project name). The orange `pin.fill` still suppresses on
-    // the main checkout where pinning is meaningless.
-    //
+  private func contextRow() -> some View {
     // When the worktree's folder name equals the current branch (a common
     // git-wt pattern: `feat/login` worktree on `feat/login` branch), the
     // folder portion restates row 1. Suppress the folder name + leading
-    // separator and keep only the pin (if any) + project name. Mirrors
-    // the Sidebar's "suppress secondary line when it restates primary"
-    // precedent. Detached HEAD has `worktree.branch == nil`, so the
-    // empty-string comparison won't match any real folder — detached
-    // worktrees keep the full row.
+    // separator and keep only the project name. Mirrors the Sidebar's
+    // "suppress secondary line when it restates primary" precedent.
+    // Detached HEAD has `worktree.branch == nil`, so the empty-string
+    // comparison won't match any real folder — detached worktrees keep
+    // the full row.
+    //
+    // The pin marker lives on row 1 next to the branch name, not here —
+    // the pinned state attaches to the worktree's overall identity, which
+    // row 1 owns as the click target.
     let folderRestatesBranch = worktree.name == (worktree.branch ?? "")
     return HStack(spacing: 4) {
       if !folderRestatesBranch {
         Text(worktree.name)
-        if worktree.isPinned && !isMainCheckout {
-          Image(systemName: "pin.fill")
-            .font(.caption2)
-            .foregroundStyle(.orange)
-            .accessibilityLabel("Pinned")
-        }
         Text("· \(project.name)")
       } else {
-        if worktree.isPinned && !isMainCheckout {
-          Image(systemName: "pin.fill")
-            .font(.caption2)
-            .foregroundStyle(.orange)
-            .accessibilityLabel("Pinned")
-        }
         Text(project.name)
       }
     }
