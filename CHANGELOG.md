@@ -20,6 +20,31 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.3.3] - 2026-05-28
+
+### Added
+
+- **Branch switcher popover.** Click the branch name in the worktree header to open an inline popover listing every local branch with recent-commit context. Switch branches, rename the current branch in place, or see why a branch is blocked — all without leaving the window. Failed switches surface an inline error banner instead of a silent no-op.
+- **History tab in the diff inspector.** A new Changes / History tab pair lives inside the inspector. Selecting a commit renders its full diff in the drawer, the commit message opens in a popover, and the file picker scrolls to the chosen file live.
+- **Custom tab icons.** Right-click a tab chip and pick an SF Symbol; the choice persists across launches. Run-script tabs automatically wear a distinct icon so they're recognisable at a glance.
+- **Compact mode for the Active Agents panel.** Settings → General toggles between full and compact rows, and the panel restores its open / closed state on next launch.
+- **Pull request badge flags merge conflicts.** A PR whose head can no longer merge cleanly into base shows a red warning triangle and red border on its sidebar badge; the hover popover spells out the reason — conflicts, blocked checks, or behind base.
+
+### Changed
+
+- **Worktree header reorganised into two rows** with the pin marker moved next to the branch name; trailing chips slide left smoothly to make room when the diff inspector opens.
+- **Diff inspector redesigned.** Icon-based tab picker, sidebar-tinted material background that matches the project window, dedicated close button on the inspector header, smoother drawer transitions, and a calmer file picker.
+- **Status-bar bell becomes a hover capsule** with a subtle shake when a new notification arrives.
+- **Command-finished notification window widened to 3 seconds**, so a quick keystroke right after the command exits is still treated as user activity instead of registering against the silent prompt.
+- **Active Agents row typography is lighter** and the selected row no longer bolds, matching the rest of the sidebar.
+
+### Fixed
+
+- **Active Agents status stays accurate.** A crashed pane now clears its running flag, and an agent that binds while its pane is already in the foreground is detected reliably instead of getting stuck on idle.
+- **Diff inspector renderer respects the project theme.** The diff body is transparent so the parent Ghostty background shows through instead of a flat white.
+- **Diff Retry actually re-issues the load** instead of leaving the inspector stuck on the error state.
+- **History row hover no longer crashes** the popover animator on rapid mouse-over, and history rows respond to a single click instead of needing a double click.
+
 ## [0.3.2] - 2026-05-27
 
 ### Added
