@@ -28,7 +28,18 @@ struct DiffInspectorView: View {
     // layer-bound and can't sample the desktop / windows behind, which
     // is why `.regularMaterial` rendered flat instead of matching the
     // left sidebar's true glass.
-    .background(VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow))
+    //
+    // `.ignoresSafeArea(.container, edges: [.top, .bottom])` extends the
+    // material upward into the toolbar safe-area inset (and downward into
+    // any bottom inset) so the inspector reads as a contiguous column
+    // from window-top to window-bottom — the same way
+    // `NavigationSplitView` extends its sidebar behind the toolbar.
+    // Without this, only the body region renders the material and the
+    // toolbar area stays empty, creating a visual split.
+    .background(alignment: .top) {
+      VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
+        .ignoresSafeArea(.container, edges: [.top, .bottom])
+    }
   }
 
   // MARK: - Tab picker
