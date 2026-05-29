@@ -72,6 +72,31 @@ struct SessionStoreTests {
     #expect(FileManager.default.fileExists(atPath: ctx.fileURL.path) == false)
   }
 
+  /// Guards the M6.T6.2 race fix: an explicit `saveNow(B)` after an
+  /// earlier `scheduleSave(A)` must cancel the pending debounced task
+  /// so that, when the 500 ms timer would have fired, it does NOT
+  /// resurrect catalog A and overwrite catalog B.
+  @Test
+  func saveNowCancelsPendingDebounce() async throws {
+    let ctx = TempContext()
+    defer { ctx.cleanup() }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let store = try SessionStore(fileURL: ctx.fileURL)
+    let catalogA = Self.singleSessionCatalog(pid: 111, at: now)
+    let catalogB = Self.singleSessionCatalog(pid: 222, at: now.addingTimeInterval(1))
+
+    store.scheduleSave(catalogA)
+    try store.saveNow(catalogB)
+
+    // Wait past the 500 ms debounce — the cancelled task must not fire.
+    try await Task.sleep(nanoseconds: 700_000_000)
+
+    let loaded = try store.load()
+    #expect(loaded == catalogB)
+    #expect(loaded.sessions.values.first?.pid == 222)
+  }
+
   @Test
   func forwardCompatibleVersionReturnsEmpty() throws {
     let ctx = TempContext()
@@ -89,6 +114,26 @@ struct SessionStoreTests {
   }
 
   // MARK: - Helpers
+
+  /// Single-row catalog with a fixed pane id and configurable pid /
+  /// timestamps — handy for tests that want to distinguish two writes
+  /// by content without spelling out the full struct each time.
+  private static func singleSessionCatalog(
+    pid: Int32,
+    at stamp: Date
+  ) -> SessionCatalog {
+    let session = Session(
+      paneID: PaneID(),
+      socketPath: "/tmp/zmx/test-\(pid).sock",
+      pid: pid,
+      createdAt: stamp,
+      lastAttachedAt: stamp,
+      command: ["/bin/zsh"],
+      cwd: "/tmp",
+      zmxVersion: "0.1.0"
+    )
+    return SessionCatalog(sessions: [session.paneID.description: session])
+  }
 
   private struct TempContext {
     let directory: URL
