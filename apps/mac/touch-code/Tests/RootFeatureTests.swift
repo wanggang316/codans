@@ -463,6 +463,11 @@ struct RootFeatureTests {
     }
 
     await store.send(.onLaunch)
+    // 0018 M1: the launch sweep always arms the liveness poll. With an empty
+    // Catalog there is no active Project, so it fires the paused variant
+    // (`pollTargetChanged(nil, ...)`), a no-op state change. Receiving it before
+    // yielding the selection keeps the merged-effect action order deterministic.
+    await store.receive(\.gitHub.pollTargetChanged)
 
     // `worktreeID: nil` is the key: when GitViewerFeature receives a nil-worktree selection
     // it resets state without spawning a diff effect, so the test stays exhaustive without

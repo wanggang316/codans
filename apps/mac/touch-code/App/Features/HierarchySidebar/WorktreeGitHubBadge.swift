@@ -48,7 +48,7 @@ struct WorktreeGitHubBadge<PopoverContent: View>: View {
         PullRequestBadge(
           state: .error(lastError),
           onTap: {
-            store.send(.refreshRequested(worktreeID, branch: branch, worktreePath: worktreePath))
+            store.send(.worktreeRefreshRequested(worktreeID))
           }
         )
       } else {

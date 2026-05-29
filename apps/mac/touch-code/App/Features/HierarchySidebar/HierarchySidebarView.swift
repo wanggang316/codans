@@ -1286,7 +1286,7 @@ struct HierarchySidebarView: View {
         settingsStore.mutateGeneral { $0.defaultMergeStrategy = strategy }
       },
       onRetry: {
-        store.send(.refreshRequested(worktreeID, branch: branch, worktreePath: worktreePath))
+        store.send(.worktreeRefreshRequested(worktreeID))
       }
     )
   }
