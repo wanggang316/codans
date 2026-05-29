@@ -588,17 +588,24 @@ final class TerminalEngine {
   }
 
   private func foregroundJobPollInterval() -> Duration {
+    var sawRunningCommand = false
     for paneID in foregroundJobPaneIDs {
       if hierarchy.catalog.pane(paneID)?.agentKind != nil {
         return .milliseconds(300)
       }
-      if let job = foregroundJobSnapshots[paneID],
-        AgentKindPatterns.classify(foregroundJob: job) != nil
-      {
-        return .milliseconds(300)
+      if let job = foregroundJobSnapshots[paneID] {
+        if AgentKindPatterns.classify(foregroundJob: job) != nil {
+          return .milliseconds(300)
+        }
+        if ForegroundJobClassifier.indicatesRunningCommand(job) {
+          sawRunningCommand = true
+        }
       }
     }
-    return .seconds(2)
+    // A plain command is running somewhere: poll faster so the spinner
+    // appears / clears promptly, but slower than agent panes. Fully idle
+    // panes stay at the cheap 2s cadence.
+    return sawRunningCommand ? .milliseconds(500) : .seconds(2)
   }
 
   private func emitViewportIfNeeded(

@@ -181,6 +181,12 @@ struct RootFeature {
     /// state. Drives the tab-chip running spinner (via
     /// `HierarchyManager.runningPanes`) and the sidebar busy glyph.
     case paneProgressBusyChanged(PaneID, Bool)
+    /// Forwarded from `foregroundJobChanged` in the engine event stream.
+    /// `isBusy` is true when the pane's foreground process group is a real
+    /// non-agent command (see `ForegroundJobClassifier`). A session-level
+    /// "terminal busy" source unioned with OSC 9;4 in the sidebar / tab-chip
+    /// spinner, so plain commands that never emit OSC 9;4 still light it.
+    case paneCommandBusyChanged(PaneID, Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the
     /// directory the user last `cd`'d to rather than its creation-time cwd.
@@ -471,6 +477,13 @@ struct RootFeature {
                 // sidebar busy glyph.
                 let isBusy = state != GHOSTTY_PROGRESS_STATE_REMOVE.rawValue
                 await send(.paneProgressBusyChanged(paneID, isBusy))
+              case .foregroundJobChanged(let paneID, let job):
+                // Foreground process group → session-level "terminal busy".
+                // A non-shell, non-agent command lights the tab-chip /
+                // sidebar spinner even when the program never emits OSC 9;4.
+                // Agents are excluded here; their activity is render-derived.
+                await send(.paneCommandBusyChanged(
+                  paneID, ForegroundJobClassifier.indicatesRunningCommand(job)))
               case .paneInfoChanged(let paneID, .pwd(let pwd)):
                 // libghostty OSC 7 → persist the live cwd so a restart
                 // restores the pane at the directory the user last `cd`'d
@@ -780,6 +793,14 @@ struct RootFeature {
         } else {
           hierarchyClient.markPaneIdle(paneID)
         }
+        return .none
+
+      case .paneCommandBusyChanged(let paneID, let isBusy):
+        // Sibling of `paneProgressBusyChanged` for the foreground-job source.
+        // No reducer state mutation — the dirty flags read straight off
+        // `HierarchyManager.commandBusyPanes` and SwiftUI invalidates via the
+        // chip / sidebar's binding to that runtime set.
+        hierarchyClient.setPaneCommandBusy(paneID, isBusy)
         return .none
 
       case .paneLivePwdChanged(let paneID, let path):

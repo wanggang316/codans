@@ -682,4 +682,32 @@ struct HierarchyManagerTests {
     manager.markPaneRunning(tabAPane2)
     #expect(manager.tabIsDirty(tabA))
   }
+
+  @Test
+  func tabIsDirtyUnionsCommandBusyWithProgress() throws {
+    let (_, _, tabA, _, tabAPane1, tabAPane2, _) = try makeFixtureTwoTabsWithPanes()
+    #expect(!manager.tabIsDirty(tabA))
+
+    // The foreground-command source lights the tab on its own.
+    manager.setPaneCommandBusy(tabAPane1, true)
+    #expect(manager.tabIsDirty(tabA))
+
+    // OSC progress and command sources are independent: clearing one while
+    // the other still holds keeps the tab dirty (no clobbering a shared set).
+    manager.markPaneRunning(tabAPane2)
+    manager.setPaneCommandBusy(tabAPane1, false)
+    #expect(manager.tabIsDirty(tabA))
+
+    manager.markPaneIdle(tabAPane2)
+    #expect(!manager.tabIsDirty(tabA))
+  }
+
+  @Test
+  func closePaneClearsCommandBusyEntry() throws {
+    let (pr, wt, tabA, _, _, tabAPane2, _) = try makeFixtureTwoTabsWithPanes()
+    manager.setPaneCommandBusy(tabAPane2, true)
+    #expect(manager.tabIsDirty(tabA))
+    try manager.closePane(tabAPane2, in: tabA, in: wt, in: pr)
+    #expect(!manager.tabIsDirty(tabA))
+  }
 }

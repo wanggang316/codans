@@ -43,14 +43,19 @@ final class HierarchyManager {
   /// clock-live state that must be rebuilt each launch.
   private var lastFocusedPaneByTab: [TabID: PaneID] = [:]
 
-  /// Runtime-only set of panes that are currently executing a tracked
-  /// command. Driven by C3 hooks in a future milestone; today the only
-  /// writers are the `markPaneRunning` / `markPaneIdle` methods, which no
-  /// caller invokes in production. Reads via `tabIsDirty(_:)` still work
-  /// — they return `false` uniformly until a writer wakes up. Stored as a
-  /// `Set` rather than `[PaneID: Bool]` so absence is the natural "idle"
-  /// signal and `contains` is the only read shape.
+  /// Panes flagged busy by OSC 9;4 progress reports, written by the root
+  /// reducer through `markPaneRunning` / `markPaneIdle`. One of two
+  /// "terminal busy" sources; `tabIsDirty` / `worktreeIsDirty` read the
+  /// union with `commandBusyPanes`. Stored as a `Set` so absence is the
+  /// natural "idle" signal and `contains` is the only read shape.
   private var runningPanes: Set<PaneID> = []
+
+  /// Panes whose foreground process group is a real running command (see
+  /// `ForegroundJobClassifier`), fed by the foreground-job poller through
+  /// the root reducer's `setPaneCommandBusy`. Independent of `runningPanes`
+  /// so the OSC and foreground-job writers never clobber each other's
+  /// insert/remove; the dirty predicates OR the two together.
+  private var commandBusyPanes: Set<PaneID> = []
 
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog
@@ -956,6 +961,7 @@ final class HierarchyManager {
       for pane in worktree.tabs.flatMap({ $0.panes }) {
         runtime.closeSurface(for: pane.id)
         runningPanes.remove(pane.id)
+        commandBusyPanes.remove(pane.id)
       }
       if let idx = catalog.projects[projectIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
         catalog.projects[projectIndex].worktrees[idx].archived = true
@@ -1006,6 +1012,7 @@ final class HierarchyManager {
       for pane in worktree.tabs.flatMap({ $0.panes }) {
         runtime.closeSurface(for: pane.id)
         runningPanes.remove(pane.id)
+        commandBusyPanes.remove(pane.id)
       }
       for tab in worktree.tabs {
         lastFocusedPaneByTab.removeValue(forKey: tab.id)
@@ -1113,6 +1120,7 @@ final class HierarchyManager {
     for pane in tab.panes {
       runtime.closeSurface(for: pane.id)
       runningPanes.remove(pane.id)
+      commandBusyPanes.remove(pane.id)
     }
     lastFocusedPaneByTab.removeValue(forKey: id)
 
@@ -1500,6 +1508,13 @@ final class HierarchyManager {
     runningPanes.remove(paneID)
   }
 
+  /// Sets whether `paneID`'s foreground process group is a running command.
+  /// Idempotent. Fed by the foreground-job poller via the root reducer; the
+  /// dirty predicates OR this with the OSC-driven `runningPanes`.
+  func setPaneCommandBusy(_ paneID: PaneID, _ busy: Bool) {
+    if busy { commandBusyPanes.insert(paneID) } else { commandBusyPanes.remove(paneID) }
+  }
+
   /// True when any pane inside `tabID` is currently marked running.
   /// Reads a runtime set, never touches the catalog.
   func tabIsDirty(_ tabID: TabID) -> Bool {
@@ -1507,13 +1522,13 @@ final class HierarchyManager {
     // walk is pointless. Until the C3 hooks plan starts populating
     // `runningPanes`, this short-circuit means the chip's per-render
     // call is a single set-emptiness check rather than a hierarchy walk.
-    guard !runningPanes.isEmpty else { return false }
+    guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
     // Walk the catalog once to locate the tab; absent tabs read as idle.
     for project in catalog.projects {
       for worktree in project.worktrees {
         guard let tab = worktree.tabs.first(where: { $0.id == tabID })
         else { continue }
-        return tab.panes.contains { runningPanes.contains($0.id) }
+        return tab.panes.contains { runningPanes.contains($0.id) || commandBusyPanes.contains($0.id) }
       }
     }
     return false
@@ -1523,12 +1538,12 @@ final class HierarchyManager {
   /// currently marked running. Sidebar uses this to surface a busy
   /// glyph on the worktree row even when its tab is unfocused.
   func worktreeIsDirty(_ worktreeID: WorktreeID) -> Bool {
-    guard !runningPanes.isEmpty else { return false }
+    guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
       else { continue }
       return worktree.tabs.contains { tab in
-        tab.panes.contains { runningPanes.contains($0.id) }
+        tab.panes.contains { runningPanes.contains($0.id) || commandBusyPanes.contains($0.id) }
       }
     }
     return false
@@ -1661,6 +1676,7 @@ final class HierarchyManager {
 
     runtime.closeSurface(for: paneID)
     runningPanes.remove(paneID)
+    commandBusyPanes.remove(paneID)
     if lastFocusedPaneByTab[tabID] == paneID {
       lastFocusedPaneByTab.removeValue(forKey: tabID)
     }
