@@ -5,20 +5,22 @@ import os.log
 /// path that mutates the on-disk file after launch. `SessionStore` keeps
 /// owning the flock, the atomic-rename pipeline, and the load primitive;
 /// `SessionCoordinator` sits on top, holds the live catalog, and exposes
-/// intent-shaped mutators so the four existing mutation sites (bootstrap,
-/// reaper sweep, quit-time lifecycle, `pane.close` IPC) all route through
-/// one entry point.
+/// intent-shaped mutators so the mutation sites (bootstrap, reaper sweep,
+/// quit-time lifecycle, `pane.close` IPC, runtime spawn/attach) all route
+/// through one entry point.
 ///
-/// This layer is a pure refactor today — each mutator preserves the prior
-/// synchronous-save semantics. The richer surface (`recordSpawn`,
-/// `recordAttach`, `recordDetach`, debounced write-through, agent state)
-/// lands in subsequent M6 tasks; the indirection makes those additions
-/// touch one file instead of four.
+/// `@Observable` so SwiftUI surfaces (e.g. Settings → General's resumable
+/// count) can read `catalog.sessions.count` and re-render when bring-up
+/// paths upsert rows or when Forget-all clears them.
+@Observable
 @MainActor
 public final class SessionCoordinator {
-  private let store: SessionStore
+  @ObservationIgnored private let store: SessionStore
+  /// Backing storage for `catalog`. Reads via the public computed property
+  /// trigger an `@Observable` access notification; writes via `setSnapshot`
+  /// trigger a mutation notification.
   private var snapshot: SessionCatalog
-  private let logger = Logger(
+  @ObservationIgnored private let logger = Logger(
     subsystem: "com.touch-code.runtime",
     category: "runtime.session.coordinator"
   )
@@ -66,16 +68,21 @@ public final class SessionCoordinator {
     store.scheduleSave(snapshot)
   }
 
-  /// Replace the persisted agent map wholesale and persist synchronously.
-  /// The quit-time lifecycle captures every currently-bound agent into a
-  /// fresh dictionary and hands it here; we drop the prior agents in one
-  /// step so a missing entry means "no agent for this pane any more"
-  /// rather than relying on the absence-after-merge semantics of an
-  /// upsert API. Synchronous because we run inside the quit handoff
-  /// where an outstanding debounce must not race the write.
-  public func replaceAgents(_ records: [String: PersistedAgentRecord]) throws {
-    snapshot.agents = records
-    try store.saveNow(snapshot)
+  /// User-initiated "Forget all sessions" from Settings → General.
+  /// Calls `killAndUnlink` for every recorded socket so the daemon
+  /// exits and the socket file is removed, then clears the in-memory
+  /// catalog (sessions + agents) and persists synchronously. The kill
+  /// side-effect lives outside `TouchCodeCore` (it speaks zmx's wire
+  /// protocol over a raw socket), so the caller injects the closure.
+  public func forgetAllSessions(killAndUnlink: (_ socketPath: String) -> Void) throws {
+    for session in snapshot.sessions.values {
+      killAndUnlink(session.socketPath)
+    }
+    var cleared = snapshot
+    cleared.sessions = [:]
+    cleared.agents = [:]
+    snapshot = cleared
+    try store.saveNow(cleared)
   }
 
   /// Read-only view of the agent map for the launch-time restore path.
@@ -92,8 +99,7 @@ public final class SessionCoordinator {
   }
 
   /// Drain any pending debounced save. Pass-through to `SessionStore`
-  /// so the quit-time flush goes through one entry point once the
-  /// upcoming write-through tier introduces debounced writes.
+  /// so the quit-time flush routes through one entry point.
   public func flushPending() {
     store.flushPending()
   }

@@ -148,7 +148,10 @@ struct TouchCodeApp: App {
             store: store,
             settingsStore: appState.settingsStore,
             shortcutsStore: appState.shortcutsStore,
-            sessionCoordinator: appState.sessionCoordinator
+            sessionCoordinator: appState.sessionCoordinator,
+            onForgetAllSessions: {
+              appState.forgetAllPersistedSessions()
+            }
           )
           .environment(appState.hierarchyManager)
           .environment(appState.settingsStore)
@@ -1031,6 +1034,35 @@ final class AppState {
     reaper.sweepFilesystemOrphans(livePaneIDs: livePaneIDs)
   }
 
+  /// User-initiated "Forget all sessions" from Settings → General. Per
+  /// the spec (R16 / AC11), the action must terminate every recorded
+  /// daemon, unlink each socket, AND empty the catalog — otherwise the
+  /// next `detachAllForQuit` rebuilds the catalog from the still-alive
+  /// daemons (`collectLiveClients`) and effectively undoes the "forget".
+  ///
+  /// Order: kill + unlink first, then clear the catalog. If the kill
+  /// step fails per-daemon (already-dead socket, etc.) the launch-time
+  /// FS-orphan reaper catches the leftover. `coordinator.forgetAllSessions`
+  /// drives both steps in one atomic-from-the-UI's-perspective call.
+  func forgetAllPersistedSessions() {
+    guard let coordinator = sessionCoordinator else { return }
+    // Drop in-engine reattach / restore queues too — without this, a
+    // pane that was about to reattach via the seeded `pendingReattach`
+    // entry would still try to connect to a socket we just unlinked.
+    terminalEngine?.dropPendingResumeState()
+    do {
+      try coordinator.forgetAllSessions { socketPath in
+        SessionReaper.sendOneShotKill(socketPath: socketPath)
+        _ = socketPath.withCString { unlink($0) }
+      }
+    } catch {
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.coordinator")
+        .error(
+          "Forget all sessions failed to persist: \(String(describing: error), privacy: .public)"
+        )
+    }
+  }
+
   /// Flushes all pending debounced writes. Called by `applicationWillTerminate`.
   /// Any debounced write that hasn't landed within 500 ms of quit would
   /// otherwise be dropped; each store below has its own debounce, so we
@@ -1403,13 +1435,22 @@ final class AppState {
     registry.onTerminalEvent(event)
   }
 
-  /// Filter the previous quit's agent snapshot through a `kill(pid, 0)`
-  /// liveness check and hand the survivors to `AgentRegistry.seedRestored`.
-  /// Records whose pid is gone (ESRCH) or zero are dropped silently —
-  /// the registry should not show "waiting for input" for an agent that
-  /// already exited. Unknown enum raws are likewise skipped: a future
-  /// build could persist values this binary does not recognise, and
-  /// dropping is friendlier than failing the launch.
+  /// Filter the previous quit's agent snapshot through a liveness check
+  /// and hand the survivors to `AgentRegistry.seedRestored`.
+  ///
+  /// `kill(pid, 0)` alone is not enough: PID slots get recycled (32k
+  /// space on macOS, easily recycled within hours), so a successful
+  /// probe might land on an unrelated new process. We additionally
+  /// pin identity by start time: a process whose start timestamp is
+  /// later than `capturedAt` cannot be the agent we recorded — it must
+  /// have inherited the recycled PID after our quit. Records that fail
+  /// either check are dropped silently rather than corrupting the
+  /// restored state. Unknown enum raws (a future build's `kindRaw` /
+  /// `stateRaw`) are likewise dropped instead of failing the launch.
+  ///
+  /// `pid > 1` guards against the `kill(-1, 0)` / `kill(0, 0)` edge
+  /// cases where the syscall would target a process group instead of
+  /// a single process, masking real liveness with a wide-scope check.
   @MainActor
   private static func seedRestoredAgents(
     coordinator: SessionCoordinator?,
@@ -1421,7 +1462,7 @@ final class AppState {
     var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentRegistry.AgentRuntimeState)] = []
     seeds.reserveCapacity(restored.count)
     for (paneID, record) in restored {
-      guard record.pid > 0 else { continue }
+      guard record.pid > 1 else { continue }
       if kill(record.pid, 0) != 0 {
         // ESRCH (no such process) is the expected case here. Any other
         // errno (EPERM, etc.) is treated the same way — if we cannot
@@ -1429,6 +1470,13 @@ final class AppState {
         // restore stale state.
         continue
       }
+      // PID-recycling defence: the PID slot is occupied, but is it the
+      // same process we captured? A start time later than `capturedAt`
+      // means a different occupant inherited the recycled slot.
+      guard
+        let startedAt = ForegroundJobReader.processStartedAt(pid: record.pid),
+        startedAt <= record.capturedAt
+      else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
         let state = AgentRegistry.AgentRuntimeState(rawValue: record.stateRaw)

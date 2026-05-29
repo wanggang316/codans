@@ -131,6 +131,18 @@ final class TerminalEngine {
     case paneHasNoTab
   }
 
+  /// Drop the queues seeded by `seedReattachableSessions` and any
+  /// pending `.snap` restore so a subsequent `ensureSurface` takes the
+  /// fresh-spawn path. Used by the Settings → "Forget all sessions"
+  /// action: after the recorded daemons are killed and their sockets
+  /// unlinked, leaving the queues populated would have us try to
+  /// `connect(2)` to those vanished sockets the next time the surface
+  /// is built.
+  func dropPendingResumeState() {
+    pendingReattach.removeAll(keepingCapacity: false)
+    pendingRestore.removeAll(keepingCapacity: false)
+  }
+
   /// Seed the engine with the live-daemon catalog produced by
   /// `SessionReaper.sweep()` at launch. Each entry is consumed by the
   /// next `ensureSurface` call for its paneID; subsequent calls for the

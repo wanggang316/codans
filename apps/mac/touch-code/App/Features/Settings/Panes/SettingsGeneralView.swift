@@ -30,16 +30,21 @@ struct SettingsGeneralView: View {
   /// Persisted-session catalog, threaded from `bootstrapSessionStack`.
   /// `nil` when the launch acquired no catalog lock (no-resume mode) —
   /// the corresponding section is hidden in that case so the user does
-  /// not see a count they cannot influence.
+  /// not see a count they cannot influence. `@Observable` so the count
+  /// re-renders when runtime bring-ups upsert rows or when the user
+  /// clicks Forget-all.
   let sessionCoordinator: SessionCoordinator?
+  /// Forget-all-sessions handler injected from the app layer so the
+  /// view does not need to import the zmx socket-kill helper. Receives
+  /// the coordinator so the action can iterate rows + dispatch the
+  /// platform-side teardown (kill each daemon, unlink each socket,
+  /// clear the catalog). Nil in headless previews.
+  let onForgetAllSessions: (() -> Void)?
 
-  /// Snapshot of the catalog row count read once when the pane appears
-  /// and recomputed after a "Forget all" action. We avoid an `@Observable`
-  /// dependency on `SessionCoordinator` because the catalog mutates
-  /// from runtime paths (spawn / reattach) that have no business waking
-  /// the settings window — the user opening settings is the only
-  /// trigger we need to reflect.
-  @State private var resumableSessionCount: Int = 0
+  /// Confirmation alert state for the destructive Forget-all action.
+  /// SwiftUI's `.alert(_:isPresented:)` modifier is the simplest way to
+  /// gate a destructive operation in the Settings form.
+  @State private var showForgetConfirmation: Bool = false
 
   private var selectionBinding: Binding<EditorID?> {
     Binding(
@@ -154,22 +159,37 @@ struct SettingsGeneralView: View {
         )
       }
 
-      if sessionCoordinator != nil {
+      if let coordinator = sessionCoordinator {
+        let count = coordinator.catalog.sessions.count
         Section {
           LabeledContent("Sessions saved for next launch") {
-            Text("\(resumableSessionCount)")
+            Text("\(count)")
               .monospacedDigit()
               .foregroundStyle(.secondary)
           }
-          Button("Forget all sessions", role: .destructive) {
-            forgetAllSessions()
+          Button("Forget all sessions…", role: .destructive) {
+            showForgetConfirmation = true
           }
-          .disabled(resumableSessionCount == 0)
+          .disabled(count == 0 || onForgetAllSessions == nil)
         } footer: {
           Text(
-            "Counts the rows in sessions.json that the next launch would "
-              + "try to reattach. Forget all clears the catalog; any daemon "
-              + "still running is left for the launch-time reaper to clean up."
+            "Counts the rows in sessions.json that the next launch would try "
+              + "to reattach. Forget all kills the recorded daemons, removes their "
+              + "sockets, and empties the catalog — the current panes detach from "
+              + "their daemons and become unrestorable."
+          )
+        }
+        .alert("Forget \(count) saved session\(count == 1 ? "" : "s")?",
+               isPresented: $showForgetConfirmation) {
+          Button("Forget", role: .destructive) {
+            onForgetAllSessions?()
+          }
+          Button("Cancel", role: .cancel) {}
+        } message: {
+          Text(
+            "Each recorded daemon will be terminated and its socket removed. "
+              + "Any pane currently attached to one of these daemons will lose "
+              + "its scrollback and respawn a fresh shell on the next launch."
           )
         }
       }
@@ -220,34 +240,7 @@ struct SettingsGeneralView: View {
     }
     .formStyle(.grouped)
     .task { store.send(.refreshRequested) }
-    .onAppear {
-      store.send(.onAppear)
-      refreshResumableCount()
-    }
-  }
-
-  /// Read the catalog count once. Called on pane appear so a Forget-all
-  /// from a previous appearance is reflected next time the user opens
-  /// settings, and the count tracks runtime spawns recorded since launch.
-  private func refreshResumableCount() {
-    resumableSessionCount = sessionCoordinator?.catalog.sessions.count ?? 0
-  }
-
-  /// Clear the on-disk catalog. Daemons currently running are not killed
-  /// — they survive in the OS process tree until their own exit. The
-  /// launch-time FS-orphan reaper picks them up if the user quits before
-  /// they shut down on their own.
-  private func forgetAllSessions() {
-    guard let coordinator = sessionCoordinator else { return }
-    do {
-      try coordinator.replace(SessionCatalog(sessions: [:]))
-      resumableSessionCount = 0
-    } catch {
-      // Persist failures are rare (disk full, sandbox revoke) and would
-      // already be logged by the coordinator. The UI keeps the displayed
-      // count so the user sees the operation did not take effect.
-      refreshResumableCount()
-    }
+    .onAppear { store.send(.onAppear) }
   }
 
   /// Editor picker body — grouped by `EditorPickerRow.sortedGroups` so editors,
@@ -300,7 +293,8 @@ struct SettingsGeneralView: View {
         debounceWindow: .seconds(3600)
       ),
       onJumpToTerminal: {},
-      sessionCoordinator: nil
+      sessionCoordinator: nil,
+      onForgetAllSessions: nil
     )
     .frame(width: 520, height: 320)
   }

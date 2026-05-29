@@ -345,7 +345,11 @@ public final class SessionReaper {
   /// silent: the caller has already decided to drop this row from
   /// the catalog and unlink the socket file. The next sweep would
   /// catch a daemon that somehow survived the kill.
-  private static func sendOneShotKill(socketPath: String) {
+  ///
+  /// Exposed at module scope so the Settings → "Forget all sessions"
+  /// action can reuse the same helper without re-rolling the IPC
+  /// framing.
+  static func sendOneShotKill(socketPath: String) {
     let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     if fd < 0 { return }
     defer { _ = Darwin.close(fd) }
