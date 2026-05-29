@@ -87,6 +87,34 @@ struct ZmxClientTests {
     #expect(access(socketPath, F_OK) != 0)
   }
 
+  /// `requestKill()` is the synchronous fire-and-forget teardown used by
+  /// the deliberate-pane-destroy path (closeSurface → closeKillingDaemon).
+  /// Unlike `detach()`, which leaves the daemon running, it must send a
+  /// `.kill` frame so the daemon terminates; unlike `kill()`, it returns
+  /// immediately without awaiting the socket's disappearance. This guards
+  /// the M6 review fix that closing a pane no longer leaks its daemon.
+  @Test
+  func requestKillSendsKillFrameWithoutAwaiting() async throws {
+    let socketPath = Self.tempSocketPath()
+    let daemon = MockZmxDaemon(socketPath: socketPath)
+    try daemon.start()
+    defer { daemon.stop() }
+
+    let paneID = PaneID()
+    let client = try await ZmxClient(paneID: paneID, socketPath: socketPath)
+
+    let killArrived = AsyncMessage<Bool>()
+    daemon.onKill = { Task { await killArrived.send(true) } }
+
+    // Synchronous call — the compiler proving no `await` is needed is
+    // itself part of the contract (the teardown path runs on the main
+    // thread and cannot block on the daemon round-trip).
+    client.requestKill()
+
+    let received = try await killArrived.receive(timeout: 2.0)
+    #expect(received)
+  }
+
   // MARK: - Helpers
 
   private static func tempSocketPath() -> String {
