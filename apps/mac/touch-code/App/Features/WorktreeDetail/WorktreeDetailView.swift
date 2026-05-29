@@ -23,6 +23,10 @@ struct WorktreeDetailView: View {
   /// Open-result toasts are driven by `editorStore.state.lastOpenResult` directly from
   /// `ContentView`, so this view no longer accepts a callback (0005 M6c).
   let editorStore: StoreOf<EditorFeature>
+  /// AgentState registry (optional). Threaded down to `TabBarView` so a tab
+  /// chip lights while a bound agent in that tab is `.working` — the same
+  /// registry `ContentView` hands the sidebar, kept in sync by construction.
+  var agentStateStore: AgentStateStore?
   /// T2 Header feature — scoped by `ContentView` from the root. Drives the bell
   /// badge, the Open-in split button's delegate routing, and the Git Viewer toggle.
   let headerStore: StoreOf<WorktreeHeaderFeature>
@@ -250,7 +254,8 @@ struct WorktreeDetailView: View {
       store: store.scope(state: \.tabBar, action: \.tabBar),
       projectID: address.project,
       worktreeID: address.worktree,
-      activeTabID: address.activeTab
+      activeTabID: address.activeTab,
+      agentStateStore: agentStateStore
     )
     .frame(maxWidth: .infinity, alignment: .leading)
     // No solid `.windowBackgroundColor` fill: with the toolbar chrome

@@ -810,13 +810,16 @@ struct HierarchySidebarView: View {
     // click, leave the table off-responder, and the row would stay grey
     // even though state moved.
     let isLifecycleInProgress = store.lifecycleInProgressWorktrees.contains(worktree.id)
-    // Aggregated "any pane in this worktree is executing" signal. Reads through
-    // `HierarchyManager.worktreeIsDirty(_:)`, an `@Observable` getter, so the
-    // spinner appears/disappears automatically as OSC 9;4 progress reports flip
-    // `runningPanes`. Rendered at the leading icon slot (replacing
-    // WorktreeRowIcon) so the row's running indicator lives in the same place
-    // as the lifecycle spinner — one consistent "this row is busy" affordance.
-    let isExecuting = hierarchyManager.worktreeIsDirty(worktree.id)
+    // Aggregated "any pane in this worktree is busy" signal — the union of two
+    // sources: (1) the terminal signal via `HierarchyManager.worktreeIsDirty(_:)`
+    // (OSC 9;4 progress ∪ a running foreground command), and (2) any bound agent
+    // rendered as `.working`. Agents are excluded from the terminal signal (they
+    // stay foreground for their whole session), so this OR is what lights the row
+    // while an agent works without emitting OSC 9;4. Both reads are `@Observable`,
+    // so the spinner tracks either source automatically. Rendered at the leading
+    // icon slot (replacing WorktreeRowIcon) — one consistent "busy" affordance.
+    let isExecuting =
+      hierarchyManager.worktreeIsDirty(worktree.id) || anyAgentWorking(in: worktree)
     let content = HStack(spacing: 6) {
       Group {
         if isLifecycleInProgress {
@@ -1316,6 +1319,18 @@ struct HierarchySidebarView: View {
     guard let entries = agentStateStore?.entries else { return false }
     return entries.values.contains { entry in
       entry.state == .working || entry.state == .blocked
+    }
+  }
+
+  /// True iff any pane in `worktree` hosts a bound agent currently `.working`.
+  /// OR'd into the worktree row's busy spinner so render-derived agent activity
+  /// lights the row even when the program emits no OSC 9;4 and the foreground
+  /// job is the agent itself (deliberately excluded from the terminal signal).
+  /// Only `.working` counts — `.blocked` is "waiting on the user", not busy.
+  private func anyAgentWorking(in worktree: Worktree) -> Bool {
+    guard let entries = agentStateStore?.entries, !entries.isEmpty else { return false }
+    return worktree.tabs.contains { tab in
+      tab.panes.contains { entries[$0.id]?.state == .working }
     }
   }
 

@@ -98,6 +98,7 @@ struct ContentView: View {
         store: store.scope(state: \.detail, action: \.detail),
         selection: store.selection,
         editorStore: store.scope(state: \.editor, action: \.editor),
+        agentStateStore: agentStateStore,
         headerStore: store.scope(state: \.worktreeHeader, action: \.worktreeHeader),
         statusBarStore: store.scope(state: \.statusBar, action: \.statusBar),
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
