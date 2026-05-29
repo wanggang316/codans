@@ -429,19 +429,21 @@ struct WorktreeDetailView: View {
     // items into the main column the way NavigationSplitView's leading
     // toolbar zone does.
     //
-    // The placeholder is rendered unconditionally (not gated on
-    // `inspectorVisible`) so SwiftUI animates the width change from 0 to
-    // the inspector footprint instead of mounting / unmounting the item.
-    // Mount-toggle is instantaneous and reads as a jarring jump on the
-    // chips next to it. `.sharedBackgroundVisibility(.hidden)` strips the
-    // toolbar's default glass capsule so the placeholder never renders as
-    // an empty pill.
-    ToolbarItem {
-      Color.clear
-        .frame(width: inspectorVisible ? Self.inspectorWidth - 40 : 0, height: 1)
-        .animation(.easeInOut(duration: 0.25), value: inspectorVisible)
+    // Mounted only while the inspector is open. A 0-width placeholder
+    // still reserves a `ToolbarItem` slot with its own insets, which
+    // widens the Open↔toggle gap past the Run↔Open gap when the panel is
+    // closed. Gating the item keeps the closed-state spacing symmetric
+    // (a single `ToolbarSpacer(.fixed)` to the toggle, matching the gap
+    // between the other chips). `.sharedBackgroundVisibility(.hidden)`
+    // strips the toolbar's default glass capsule so the spacer never
+    // renders as an empty pill.
+    if inspectorVisible {
+      ToolbarItem {
+        Color.clear
+          .frame(width: Self.inspectorWidth - 40, height: 1)
+      }
+      .sharedBackgroundVisibility(.hidden)
     }
-    .sharedBackgroundVisibility(.hidden)
     ToolbarSpacer(.fixed)
     ToolbarItem {
       Button {
