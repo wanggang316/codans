@@ -6,7 +6,7 @@ import TouchCodeCore
 @testable import TouchCode
 
 @MainActor
-struct AgentRegistryStateTests {
+struct AgentStateStoreTests {
   @Test
   func boundOnlyYieldsIdle() {
     let f = Fixture()
@@ -227,7 +227,7 @@ struct AgentRegistryStateTests {
   func lastTransitionAtTracksStateChanges() {
     let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
     let paneID = PaneID()
-    let registry = AgentRegistry(
+    let registry = AgentStateStore(
       focusedPane: { nil },
       now: { clock.value }
     )
@@ -251,12 +251,12 @@ struct AgentRegistryStateTests {
     let paneID = PaneID()
     let focused = LockIsolated<PaneID?>(nil)
     let nowBox = LockIsolated<Date>(Date(timeIntervalSince1970: 0))
-    let registry: AgentRegistry
+    let registry: AgentStateStore
 
     init() {
       let focused = self.focused
       let nowBox = self.nowBox
-      self.registry = AgentRegistry(
+      self.registry = AgentStateStore(
         focusedPane: { focused.value },
         now: { nowBox.value }
       )

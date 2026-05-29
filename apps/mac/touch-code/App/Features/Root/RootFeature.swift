@@ -351,23 +351,22 @@ struct RootFeature {
     case paneActionRouter(PaneActionRouterFeature.Action)
     case windowActionRouter(WindowActionRouterFeature.Action)
     case diff(DiffFeature.Action)
-    /// T6 (active-agents): rows in the ActiveAgentsPopoverView dispatch
+    /// T6 (active-agents): rows in the AgentStateView dispatch
     /// here. Cross-Project / Worktree / Tab focus belongs to the same
     /// reducer that owns selection state — same precedent as
     /// `.focusHierarchyPath` for inbox-row taps.
-    case activeAgents(ActiveAgentsAction)
+    case agentState(AgentStateAction)
   }
 
-  /// Child action enum for the ActiveAgents popover. `.rowTapped` walks
-  /// the catalog to the (project, worktree, tab) chain containing the
-  /// pane and lands focus on the pane itself. `.popoverDismissRequested`
-  /// is reserved for future use — today the badge view manages its own
-  /// presentation state through the SwiftUI `.popover(isPresented:)`
-  /// closure, but keeping the case in the enum lets a future
-  /// `setActiveAgentsPopoverOpen(_:)` chord land without a reshuffle.
-  enum ActiveAgentsAction: Equatable {
+  /// Child action enum for the agent-state view. `.rowTapped` walks the
+  /// catalog to the (project, worktree, tab) chain containing the pane
+  /// and lands focus on the pane itself. `.dismissRequested` is reserved
+  /// for future use — today the sidebar panel manages its own open state
+  /// via `@AppStorage`, but keeping the case in the enum lets a future
+  /// programmatic close chord land without a reshuffle.
+  enum AgentStateAction: Equatable {
     case rowTapped(PaneID)
-    case popoverDismissRequested
+    case dismissRequested
   }
 
   nonisolated enum CancelID: Sendable {
@@ -1137,7 +1136,7 @@ struct RootFeature {
         // Sub-feature transitions handled by the Scope; ignore in root.
         return .none
 
-      case .activeAgents(.rowTapped(let paneID)):
+      case .agentState(.rowTapped(let paneID)):
         // Walk the live catalog to the (project, worktree, tab) chain
         // containing `paneID` and land focus on the pane. Same shape as
         // `.focusHierarchyPath` — re-read snapshot between mutations so
@@ -1175,7 +1174,7 @@ struct RootFeature {
         hierarchyClient.focusSurfaceView(paneID)
         return .none
 
-      case .activeAgents(.popoverDismissRequested):
+      case .agentState(.dismissRequested):
         // Reserved for future direct close-from-reducer paths (e.g. a
         // ⌘W variant that closes the popover before the chord routes
         // elsewhere). The view manages its own presentation state

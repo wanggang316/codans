@@ -29,8 +29,8 @@ public final class PaneKeyboardActivityTracker {
   public static weak var shared: PaneKeyboardActivityTracker?
 
   /// Optional T6 fan-out: fired AFTER `recordKey` updates the map.
-  /// AppState wires this to `AgentRegistry.onPaneKeyboardActivity` so
-  /// the ActiveAgents state machine clears its sticky `waitingForInput`
+  /// AppState wires this to `AgentStateStore.onPaneKeyboardActivity` so
+  /// the AgentState state machine clears its sticky `waitingForInput`
   /// flag on real typing. The default no-op keeps the tracker
   /// detector-local for existing call sites that don't need the hook.
   public var onActivity: (@MainActor (PaneID) -> Void)?

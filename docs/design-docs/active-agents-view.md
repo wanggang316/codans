@@ -1,4 +1,4 @@
-# Design Doc: ActiveAgents View
+# Design Doc: AgentState View
 
 **Status:** Draft
 **Author:** Gump (with Claude)
@@ -18,14 +18,14 @@ of them answers the question "which agents are alive right now and what
 is each one doing", which is the question the user actually asks before
 deciding where to look next.
 
-This doc designs **ActiveAgents** — an in-app status-bar entry plus
+This doc designs **AgentState** — an in-app status-bar entry plus
 hover popover that lists every Pane currently identified as running a
 known agent and shows its derived runtime state. The popover is the
 single place a user goes to triage agents across all worktrees.
 
 The system that classifies and surfaces *individual transitions* as
 notifications (see [notifications.md](notifications.md)) already exists;
-ActiveAgents is a **parallel, independent consumer** of the same raw
+AgentState is a **parallel, independent consumer** of the same raw
 signals — `HierarchyManager.runningPanes`, the `TerminalEvent` stream,
 and per-surface info from libghostty. It does **not** depend on
 `NotificationStore` and is unaffected by mute/notification settings.
@@ -44,8 +44,8 @@ and per-surface info from libghostty. It does **not** depend on
   as needed.
 - Identification covers **Claude Code**, **Codex** (OpenAI Codex CLI),
   and **pi** (Inflection's pi CLI). All other panes simply do not
-  appear in ActiveAgents.
-- A new `AgentRegistry` owns the per-Pane runtime state machine,
+  appear in AgentState.
+- A new `AgentStateStore` owns the per-Pane runtime state machine,
   driven by `runningPanes`, the `TerminalEvent` stream, and the
   `PaneKeyboardActivityTracker`. Pure runtime state — not persisted.
 - Two new optional fields on `Pane` (`agentKind`, `agentSessionID`)
@@ -56,16 +56,16 @@ and per-surface info from libghostty. It does **not** depend on
 
 - A general-purpose agent FSM with rich transition history — that was
   C6 v1's `AgentStateTracker`, abandoned for being more machinery than
-  the inbox needed. We re-use the lesson: ActiveAgents stores the
+  the inbox needed. We re-use the lesson: AgentState stores the
   minimum derived state per Pane to render the popover, nothing more.
 - Detecting arbitrary agents (aider, custom in-house CLIs, future
   tools) in v1. The kind registry is a hand-maintained allowlist —
   new agents are a code change, not a config change. Generalising
   this is a future-work concern.
-- A new IPC surface or `tc` command. ActiveAgents is in-app only.
+- A new IPC surface or `tc` command. AgentState is in-app only.
 - Re-implementing the notifications inbox UX. The two systems share
-  no UI; muted Panes still appear in ActiveAgents.
-- Cross-window or multi-app behaviour. ActiveAgents is anchored to
+  no UI; muted Panes still appear in AgentState.
+- Cross-window or multi-app behaviour. AgentState is anchored to
   the touch-code main window's `WorktreeHeader`.
 - Status-bar entry as `NSStatusItem` (macOS menu bar / Dynamic-Island
   style). v1 ships an in-app `WorktreeHeader` entry; menu-bar variant
@@ -83,7 +83,7 @@ Three components, all in-process, with a strict one-way dependency:
 ```
    identification           runtime state           UI
  ┌──────────────────┐    ┌─────────────────┐   ┌────────────────────┐
- │  AgentBinder     │───▶│  AgentRegistry  │──▶│ ActiveAgentsView   │
+ │  AgentBinder     │───▶│  AgentStateStore  │──▶│ AgentStateView   │
  │  (writes Pane    │    │  (derives state │   │ + status-bar entry │
  │   fields)        │    │   from events)  │   │  in WorktreeHeader │
  └──────────────────┘    └─────────────────┘   └────────────────────┘
@@ -105,9 +105,9 @@ disposable derivation. Mixing them produced the heavyweight FSM of
 the deprecated C6 v1 design; separating them lets each layer be small.
 
 The second is **independence from notifications**. The notifications
-detector and ActiveAgents share three input streams but answer
+detector and AgentState share three input streams but answer
 different questions. Forcing one to consume the other's outputs
-(e.g., "ActiveAgents reads InboxStore for the `finished` state") would
+(e.g., "AgentState reads InboxStore for the `finished` state") would
 couple mute policy, dedup windows, and rule grammar into a layer that
 should not care about them. Instead, both subscribe to raw signals;
 their outputs never cross.
@@ -141,7 +141,7 @@ explicit `Pane.agentKind` / `Pane.agentSessionID` fields instead.
  │                                                    │                     │
  │                                                    ▼                     │
  │  ┌────────────────────────────────────────────────────────────────────┐  │
- │  │ AgentRegistry (App/Features/ActiveAgents/)                         │  │
+ │  │ AgentStateStore (App/Features/AgentState/)                         │  │
  │  │   Observable [PaneID → AgentEntry]                                 │  │
  │  │   AgentEntry = (kind, sessionID, derivedState, lastTransitionAt)   │  │
  │  │   subscribes: runningPanes diff, TerminalEvent stream,             │  │
@@ -150,7 +150,7 @@ explicit `Pane.agentKind` / `Pane.agentSessionID` fields instead.
  │                            │                                              │
  │             ┌──────────────┴───────────────┐                              │
  │             ▼                              ▼                              │
- │   ActiveAgentsBadgeView           ActiveAgentsPopoverView                 │
+ │   AgentStateView           AgentStateView                 │
  │   (text + icon in                 (list rows, hover bridge)               │
  │    WorktreeHeader)                 click ──▶ HierarchyClient.focusPane    │
  └──────────────────────────────────────────────────────────────────────────┘
@@ -192,7 +192,7 @@ only when non-nil — old `catalog.json` files decode unchanged; downgrade
 to a prior touch-code build silently drops the fields. No migration
 script needed.
 
-**No new persisted runtime state.** The `AgentRegistry`'s derived state
+**No new persisted runtime state.** The `AgentStateStore`'s derived state
 (idle / working / blocked / finished) lives entirely in memory
 and is rebuilt from the event stream on each launch. After relaunch a
 Pane shows `idle` until the next signal arrives — acceptable because
@@ -216,7 +216,7 @@ runtime samples the process table, groups processes by that id, and emits
 
 Terminal title, initial command, and desktop-notification text are not
 agent-identity signals. If the foreground job does not match a supported
-agent, the pane is unbound and does not appear in ActiveAgents.
+agent, the pane is unbound and does not appear in AgentState.
 
 **`AgentBinder`** lives in `apps/mac/touch-code/Runtime/AgentBinder.swift`
 (Runtime layer, alongside `HierarchyManager`). It consumes foreground job
@@ -235,7 +235,7 @@ result differs from `pane.agentKind`, it writes via
 
 ### Runtime State Derivation
 
-`AgentRegistry` (in `App/Features/ActiveAgents/AgentRegistry.swift`,
+`AgentStateStore` (in `App/Features/AgentState/AgentStateStore.swift`,
 `@MainActor @Observable`) holds:
 
 ```swift
@@ -254,7 +254,7 @@ enum AgentRuntimeState {
 }
 
 @MainActor @Observable
-final class AgentRegistry {
+final class AgentStateStore {
     private(set) var entries: [PaneID: AgentEntry] = [:]
     // Internal per-pane scratch state:
     //   rawState: .idle | .working | .blocked  (drives finished detection)
@@ -303,7 +303,7 @@ derive(pane) =
 
 The derivation matches Gump's stated semantic: `finished` is exactly
 "this pane was working and the resulting transition has not been
-acknowledged yet". `AgentRegistry` owns the acknowledgement flag
+acknowledged yet". `AgentStateStore` owns the acknowledgement flag
 locally — it does not read `NotificationStore.readAt`, keeping the
 two subsystems independent.
 
@@ -317,7 +317,7 @@ from different inputs and stay independent.
 
 **Status-bar entry** lives in `WorktreeHeader`, between the existing
 inbox bell (`StatusBarBellView`) and the worktree label. One
-SwiftUI view, `ActiveAgentsBadgeView`, observes the registry and
+SwiftUI view, `AgentStateView`, observes the registry and
 renders:
 
 - **Empty state** (no entries): hidden entirely.
@@ -381,13 +381,13 @@ without an asset.
 |---|---|---|---|
 | `TouchCodeCore` | `AgentKind`, `AgentKindPatterns`, `Pane.agentKind/agentSessionID` | Value types, pattern table | Nothing |
 | `apps/mac/touch-code/Runtime` | `AgentBinder.swift` | Identify agent kind, write Pane fields via `HierarchyClient` | App features layer |
-| `apps/mac/touch-code/App/Features/ActiveAgents` | `AgentRegistry`, `ActiveAgentsBadgeView`, `ActiveAgentsPopoverView`, `ActiveAgentsRowView` | Derived state, UI | Runtime internals; no `NotificationStore` |
-| `apps/mac/touch-code/App/Features/WorktreeHeader` | Updated `WorktreeHeaderView` | Hosts `ActiveAgentsBadgeView` | — |
+| `apps/mac/touch-code/App/Features/AgentState` | `AgentStateStore`, `AgentStateView`, `AgentStateView`, `AgentStateRowView` | Derived state, UI | Runtime internals; no `NotificationStore` |
+| `apps/mac/touch-code/App/Features/WorktreeHeader` | Updated `WorktreeHeaderView` | Hosts `AgentStateView` | — |
 
-**Dependency direction.** `ActiveAgents → TouchCodeCore`,
-`ActiveAgents → HierarchyClient` (read), `ActiveAgents → catalog
-read-only`, `ActiveAgents → PaneKeyboardActivityTracker` (read).
-ActiveAgents does **not** import `Notifications/*`.
+**Dependency direction.** `AgentState → TouchCodeCore`,
+`AgentState → HierarchyClient` (read), `AgentState → catalog
+read-only`, `AgentState → PaneKeyboardActivityTracker` (read).
+AgentState does **not** import `Notifications/*`.
 
 `HierarchyClient` gains exactly two new methods:
 
@@ -414,21 +414,21 @@ optional fields is small; the long-term clarity gain is large.
 **B. Revive C6 v1's per-Pane `AgentStateTracker` FSM with persisted
 transitions.** Provides richer history (e.g., "this agent went
 working → blocked → working three times in the last minute") and a
-persistable timeline. Rejected because ActiveAgents needs exactly
+persistable timeline. Rejected because AgentState needs exactly
 the most recent state — not a transition log — and adding persistence
 back doubles the surface area for a feature whose entire value is "a
 list that's always right *now*". The flag-based derivation above is
 testable in pure Swift with zero I/O.
 
-**C. Couple `finished` to `InboxEntry.readAt`.** ActiveAgents would
+**C. Couple `finished` to `InboxEntry.readAt`.** AgentState would
 look up "is there an unread `taskFinished` InboxEntry for this pane?"
 to decide `finished` vs `idle`. Considered because it would make
-ActiveAgents and the notifications inbox feel "in sync" — clearing
-the inbox row would also clear the green check in ActiveAgents.
+AgentState and the notifications inbox feel "in sync" — clearing
+the inbox row would also clear the green check in AgentState.
 Rejected because (i) it forces a dependency edge from a UI feature
 into the notifications storage layer, exactly the kind of coupling
 the two-consumers-one-signal-source split avoids; (ii) mute/dedup
-policies would then leak into ActiveAgents semantics; (iii) the
+policies would then leak into AgentState semantics; (iii) the
 local flag with identical clear-triggers (focus, keystroke, new
 output) produces the same observable behaviour without the coupling.
 
@@ -437,8 +437,8 @@ output) produces the same observable behaviour without the coupling.
 "Dynamic-Island"-style affordance Gump described. Rejected for v1
 on Gump's call: deferring NSStatusItem keeps work within existing
 SwiftUI hosting and reuses the popover anchoring story the inbox
-bell already proved. The split between `AgentRegistry` and
-`ActiveAgentsBadgeView` is deliberately UI-agnostic so an
+bell already proved. The split between `AgentStateStore` and
+`AgentStateView` is deliberately UI-agnostic so an
 NSStatusItem variant is a future swap, not a rebuild.
 
 **E. Live foreground job polling.** Adopted. The runtime reads the PTY
@@ -459,23 +459,23 @@ agents. The product value lives in the curation.
 - `AgentKindPatterns` is a pure table → exhaustive unit tests in
   `TouchCodeCoreTests` exercise every pattern against fixture
   foreground jobs.
-- `AgentRegistry` state derivation is a pure function from
+- `AgentStateStore` state derivation is a pure function from
   (scratch state, signal) → new state → derived state. Tests live
-  in `touch-codeTests/Features/ActiveAgentsRegistryTests.swift`,
+  in `touch-codeTests/Features/AgentStateRegistryTests.swift`,
   driven by hand-built signal sequences (no live runtime).
 - `AgentBinder` is tested against an in-memory `HierarchyClient`
   spy that records `setPaneAgentKind` calls; tests cover foreground
   job bind, rebind, no-op, and clear.
-- UI: snapshot tests on `ActiveAgentsRowView` (each state) and
-  `ActiveAgentsBadgeView` (empty / single / multi / mixed).
+- UI: snapshot tests on `AgentStateRowView` (each state) and
+  `AgentStateView` (empty / single / multi / mixed).
 
-**Performance.** `AgentRegistry.entries` is keyed by `PaneID`; a
+**Performance.** `AgentStateStore.entries` is keyed by `PaneID`; a
 typical session has <20 panes. State derivation per signal is O(1)
 hashing + Set lookup. The popover renders a list of at most
 ~20 rows; SwiftUI's `LazyVStack` is overkill at this scale, plain
 `VStack` is fine.
 
-**Observability.** `Logger(subsystem: "com.touch-code.activeagents")`
+**Observability.** `Logger(subsystem: "com.touch-code.agentstate")`
 emits `info` on identification (which signal won), `debug` on each
 state transition, `warning` on unbind-by-rebind (helps diagnose
 runaway re-identification loops). No counters / metrics in v1.
@@ -490,9 +490,9 @@ runaway re-identification loops). No counters / metrics in v1.
 - Pulse animation respects `accessibilityReduceMotion`.
 
 **Migration / rollback.** No schema migration (optional fields).
-Disabling ActiveAgents would mean removing the badge view from
+Disabling AgentState would mean removing the badge view from
 `WorktreeHeaderView` and gating registry/binder behind a feature
-flag (`Settings.developer.activeAgentsEnabled`, default `true`).
+flag (`Settings.developer.agentStateEnabled`, default `true`).
 Persisted `agentKind` fields are left in place and ignored if the
 feature is disabled — no data loss.
 
@@ -509,5 +509,5 @@ toggle is easy to add later if user feedback demands it.
 | Multiple writers race on `Pane.agentKind` (binder + manual reset path) | Both writes go through `HierarchyManager` on `@MainActor`; the existing debounced save pipeline already serialises catalog mutations. |
 | Logo assets for Claude / Codex / pi carry brand-mark license constraints | Use the agents' public press / brand kits and the brand glyph only (no wordmark). If a logo's terms are ambiguous, ship a generic glyph for that kind in v1 and revisit before any commercial release. |
 | `paneIdle` 30 s threshold marks a still-thinking agent as `finished` when it goes quiet between tool calls | The same trade-off already governs the inbox `taskFinished` event; if it proves wrong in practice, both consumers benefit from raising the threshold once in `DetectionTranslator.idleThreshold`. |
-| Popover hover-bridge feels fragile on slow gestures | 250 ms open / 150 ms close numbers are tunable in one place (`ActiveAgentsBadgeView`); revisit after first dogfood pass. Click-toggle is always available as a backup. |
-| `AgentRegistry` and `NotificationStore` diverge on what constitutes "the same event" (e.g., one shows finished, the other doesn't) | Documented as expected behaviour — the two systems answer different questions and share only raw signals. Validation: a small test in `touch-codeTests` asserts both systems classify a canned OSC 9 sequence and an OSC 9;4 transition consistently against `DetectionTranslator.classify`. |
+| Popover hover-bridge feels fragile on slow gestures | 250 ms open / 150 ms close numbers are tunable in one place (`AgentStateView`); revisit after first dogfood pass. Click-toggle is always available as a backup. |
+| `AgentStateStore` and `NotificationStore` diverge on what constitutes "the same event" (e.g., one shows finished, the other doesn't) | Documented as expected behaviour — the two systems answer different questions and share only raw signals. Validation: a small test in `touch-codeTests` asserts both systems classify a canned OSC 9 sequence and an OSC 9;4 transition consistently against `DetectionTranslator.classify`. |

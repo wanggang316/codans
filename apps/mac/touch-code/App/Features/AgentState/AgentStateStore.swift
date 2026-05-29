@@ -3,8 +3,8 @@ import OSLog
 import Observation
 import TouchCodeCore
 
-private let registryLogger = Logger(
-  subsystem: "com.touch-code.activeagents", category: "registry"
+private let storeLogger = Logger(
+  subsystem: "com.touch-code.agentstate", category: "store"
 )
 
 /// Runtime-only state machine that derives each bound agent pane's
@@ -12,8 +12,8 @@ private let registryLogger = Logger(
 /// raw `working` / `blocked` / `idle` classifier plus an observed/
 /// unobserved attention bit. Raw state comes from the rendered active
 /// region; `finished` is the display form of an unobserved completion.
-/// Designed to be the single source of truth for the ActiveAgents badge +
-/// popover (T5–T7). Nothing is persisted: every entry is reconstructed
+/// Designed to be the single source of truth for the AgentState badge +
+/// view (T5–T7). Nothing is persisted: every entry is reconstructed
 /// from the live event flow at process start.
 ///
 /// `entries` is keyed by `PaneID` and exposes one `AgentEntry` per
@@ -32,15 +32,15 @@ private let registryLogger = Logger(
 /// looking at it.
 ///
 /// Lifecycle teardown (`paneExited` / `paneCrashed` / `paneClosedByTab`)
-/// drops both the entry and its scratch — the popover row disappears
-/// when the user closes the pane. `onAgentUnbound` does the same
-/// explicitly for the user-driven unbind path. The registry is
+/// drops both the entry and its scratch — the row disappears from the
+/// view when the user closes the pane. `onAgentUnbound` does the same
+/// explicitly for the user-driven unbind path. The store is
 /// silently inert for unbound panes: events arrive, scratch stays
 /// uninitialized, and `entries` never grows.
 @MainActor
 @Observable
-final class AgentRegistry {
-  /// One row in the registry. Pane-keyed via `entries`. `state` and
+final class AgentStateStore {
+  /// One row in the store. Pane-keyed via `entries`. `state` and
   /// `lastTransitionAt` are mutated in place; `kind` and `sessionID`
   /// are immutable for the entry's lifetime (rebind requires
   /// `onAgentUnbound` followed by `onAgentBound`).
@@ -70,7 +70,7 @@ final class AgentRegistry {
   private(set) var entries: [PaneID: AgentEntry] = [:]
 
   /// Per-pane derivation scratch. Kept around for all panes the
-  /// registry has heard about (bound or not) so signals that arrive
+  /// store has heard about (bound or not) so signals that arrive
   /// before an agent is identified still leave the correct raw state
   /// and observation state when `onAgentBound` lands. Dropped on
   /// teardown / unbind.
@@ -139,15 +139,15 @@ final class AgentRegistry {
   // inbox-worthy *event* but not a live activity signal — the agent's
   // current working/blocked/idle state is whatever the rendered region
   // says right now, so the notifications detector consumes those deltas
-  // independently while this registry stays purely render-derived. Reading
+  // independently while this store stays purely render-derived. Reading
   // stable snapshots instead of raw byte output also keeps TUI repaint
   // noise from pinning a pane on `.working`.
 
-  /// Single funnel for the runtime's typed event stream. The registry
+  /// Single funnel for the runtime's typed event stream. The store
   /// reacts only to a small subset (viewport / idle / teardown); other
   /// cases are silent no-ops.
   func onTerminalEvent(_ event: TerminalEvent) {
-    registryLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
+    storeLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
     switch event {
     case .paneIdle(let paneID, _):
       ensureScratch(paneID)
@@ -156,7 +156,7 @@ final class AgentRegistry {
     case .paneExited(let paneID, _, _),
       .paneCrashed(let paneID, _),
       .paneClosedByTab(let paneID, _):
-      // Teardown — registry forgets the pane entirely. Anything
+      // Teardown — store forgets the pane entirely. Anything
       // downstream that wants to remember the last state should
       // snapshot before teardown.
       //
@@ -166,7 +166,7 @@ final class AgentRegistry {
       // `agentUnboundHandler → onAgentUnbound`, which already drops
       // entry + scratch for bound panes. By the time this branch
       // runs the entry is usually gone. This branch is still
-      // load-bearing for callers that drive the registry directly
+      // load-bearing for callers that drive the store directly
       // (tests, future non-binder consumers) without going through
       // AgentBinder. The redundant removeValue for an already-
       // unbound pane is a single `@Observable` no-op write.
@@ -255,7 +255,7 @@ final class AgentRegistry {
   }
 
   /// User-driven unbind path. Drops both the entry and its scratch so
-  /// the row disappears from the popover and subsequent events for
+  /// the row disappears from the view and subsequent events for
   /// this pane become silent no-ops until something rebinds.
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
@@ -368,7 +368,7 @@ final class AgentRegistry {
     guard var entry = entries[paneID] else { return }
     let newState = displayState(for: s)
     guard entry.state != newState else { return }
-    registryLogger.info(
+    storeLogger.info(
       "state-transition pane=\(paneID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public)"
     )
     entry.state = newState

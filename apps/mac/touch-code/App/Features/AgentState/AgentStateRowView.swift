@@ -1,7 +1,7 @@
 import SwiftUI
 import TouchCodeCore
 
-/// One Agent row in the ActiveAgents sidebar panel.
+/// One Agent row in the AgentState sidebar panel.
 ///
 /// Layout (current iteration per design feedback — agent name is now
 /// encoded by the leading logo alone, no longer duplicated in text;
@@ -19,20 +19,20 @@ import TouchCodeCore
 /// The breathing animation on `working` / `blocked` icons is
 /// driven by a local `@State` flag flipped in `.onAppear`; reduce-motion
 /// suppresses the flip so the icon renders at full opacity statically.
-struct ActiveAgentsRowView: View {
+struct AgentStateRowView: View {
   let paneID: PaneID
-  let entry: AgentRegistry.AgentEntry
+  let entry: AgentStateStore.AgentEntry
   let projectName: String
   let worktreeName: String
   /// True when this row's pane is the main window's currently-focused
   /// pane. Renders a native-style selected-row tint so the user can
   /// match the row they're hovering to "the pane I'm looking at".
   /// Defaults false so older call sites that don't pass it (legacy
-  /// popover view, tests) still compile.
+  /// view, tests) still compile.
   var isSelected: Bool = false
   /// Row density — `normal` keeps the two-line identity column;
   /// `compact` joins worktree and project on one line and tightens
-  /// vertical padding. Defaults to `.normal` so the legacy popover
+  /// vertical padding. Defaults to `.normal` so the legacy default
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
   let onTap: () -> Void
@@ -75,7 +75,7 @@ struct ActiveAgentsRowView: View {
     // proxy element that carries the label without collapsing the
     // children-contain semantics needed for sub-element probing.
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("activeAgents.row.\(paneID)")
+    .accessibilityIdentifier("agentState.row.\(paneID)")
     .accessibilityRepresentation {
       Button(accessibilityLabelText, action: onTap)
     }
@@ -86,7 +86,7 @@ struct ActiveAgentsRowView: View {
   /// leading edge and pushes project all the way to the trailing edge
   /// via an internal `Spacer`, so the project name visually right-
   /// aligns against the status icon. The primary line carries the
-  /// `activeAgents.row.<paneID>.headline` accessibility identifier in
+  /// `agentState.row.<paneID>.headline` accessibility identifier in
   /// both modes (the headline contract surface stays on the user-
   /// facing worktree text).
   @ViewBuilder
@@ -99,7 +99,7 @@ struct ActiveAgentsRowView: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+          .accessibilityIdentifier("agentState.row.\(paneID).headline")
         Text(projectName)
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -122,7 +122,7 @@ struct ActiveAgentsRowView: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+          .accessibilityIdentifier("agentState.row.\(paneID).headline")
         Text(projectName)
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -164,7 +164,7 @@ struct ActiveAgentsRowView: View {
     stateIcon
       .font(.caption2)
       .accessibilityElement(children: .ignore)
-      .accessibilityIdentifier("activeAgents.row.\(paneID).state")
+      .accessibilityIdentifier("agentState.row.\(paneID).state")
       .accessibilityLabel(entry.state.rawValue)
   }
 

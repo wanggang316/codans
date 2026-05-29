@@ -6,7 +6,7 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
   public var initialCommand: String?
   public var labels: Set<String>
   /// Coding-agent identity detected at pane creation / refreshed by the
-  /// runtime. Persists across catalog reloads so the ActiveAgents view
+  /// runtime. Persists across catalog reloads so the AgentState view
   /// can render an agent-specific status before any output is observed.
   public var agentKind: AgentKind?
   /// Opaque per-agent session identifier (e.g. the Claude Code session

@@ -131,13 +131,13 @@ struct AgentNotificationConsistencyTests {
     let worktreeID = WorktreeID()
     let tabID = TabID()
 
-    let registry: AgentRegistry
+    let registry: AgentStateStore
     let store: NotificationStore
     let coordinator: NotificationCoordinator
     let detector: NotificationDetector
 
     init() {
-      self.registry = AgentRegistry(focusedPane: { nil })
+      self.registry = AgentStateStore(focusedPane: { nil })
 
       let storeURL = FileManager.default.temporaryDirectory.appending(
         component: "notif-consistency-\(UUID().uuidString).json"
