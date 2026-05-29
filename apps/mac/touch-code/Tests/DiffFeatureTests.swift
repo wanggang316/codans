@@ -520,7 +520,7 @@ struct DiffFeatureTests {
       fallbackPatch: ""
     )
     await store.receive(
-      .commitDiffSucceededFor(sha: sha, document: expectedDocument, filePaths: [])
+      .commitDiffSucceededFor(sha: sha, document: expectedDocument, filePaths: [], changeTypes: [:])
     )
     if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
       #expect(wrapper.document == expectedDocument)
@@ -842,7 +842,7 @@ struct DiffFeatureHistoryTests {
       fallbackPatch: ""
     )
     await store.receive(
-      .commitDiffSucceededFor(sha: sha, document: expectedDocument, filePaths: [])
+      .commitDiffSucceededFor(sha: sha, document: expectedDocument, filePaths: [], changeTypes: [:])
     )
     if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
       #expect(wrapper.document == expectedDocument)
@@ -1073,7 +1073,7 @@ struct DiffFeatureHistoryTests {
     // the diffsByCommit field and verify it on the live state below.
     store.exhaustivity = .off
     await store.send(
-      .commitDiffSucceededFor(sha: sha, document: doc, filePaths: ["a.swift", "b/c.txt"])
+      .commitDiffSucceededFor(sha: sha, document: doc, filePaths: ["a.swift", "b/c.txt"], changeTypes: [:])
     )
     #expect(store.state.commitFilePathsByID[sha] == ["a.swift", "b/c.txt"])
     if case .loaded(let wrapper) = store.state.diffsByCommit[sha] {
