@@ -89,64 +89,6 @@ nonisolated enum JSONOutputParsers {
     return nil
   }
 
-  // MARK: - gh pr view
-
-  /// Parses `gh pr view --json ...`. Returns `nil` when the payload signals "no PR"
-  /// (empty object, `{}`) — `gh` itself exits 1 in that case but stderr-carrying
-  /// handling is the caller's job; this function only deals with well-formed JSON.
-  static func parsePullRequest(_ data: Data) throws -> PullRequestSnapshot? {
-    struct Wire: Decodable {
-      var number: Int?
-      var title: String?
-      var state: PullRequestState?
-      var isDraft: Bool?
-      var headRefName: String?
-      var author: Author?
-      var additions: Int?
-      var deletions: Int?
-      var commits: [CommitStub]?
-      var mergeable: MergeableState?
-      var url: URL?
-      var updatedAt: Date?
-    }
-    struct Author: Decodable {
-      var login: String?
-      var name: String?
-    }
-    struct CommitStub: Decodable {
-      var oid: String?
-    }
-    do {
-      let decoder = JSONDecoder()
-      // gh pr view's `updatedAt` includes fractional seconds; plain `.iso8601` rejects
-      // them. Use the same tolerant strategy the checks + run-list parsers use.
-      decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
-      let wire = try decoder.decode(Wire.self, from: data)
-      guard let number = wire.number, let title = wire.title, let state = wire.state,
-        let headRefName = wire.headRefName, let mergeable = wire.mergeable,
-        let url = wire.url, let updatedAt = wire.updatedAt
-      else {
-        return nil
-      }
-      return PullRequestSnapshot(
-        number: number,
-        title: title,
-        state: state,
-        isDraft: wire.isDraft ?? false,
-        headRefName: headRefName,
-        author: wire.author?.login ?? "",
-        additions: wire.additions ?? 0,
-        deletions: wire.deletions ?? 0,
-        commitCount: wire.commits?.count ?? 0,
-        mergeable: mergeable,
-        url: url,
-        updatedAt: updatedAt
-      )
-    } catch {
-      throw GitHubError.other("pr view decode: \(error)")
-    }
-  }
-
   /// Maps `gh pr checks`' collapsed `state` to the split status + conclusion pair. Unknown
   /// tokens fall through to `.inProgress` with no conclusion so the UI shows "pending" —
   /// better than failing the whole check list on a single unrecognised value.

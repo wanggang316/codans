@@ -75,17 +75,6 @@ nonisolated struct LiveGitHubService: GitHubService {
 
   // MARK: - reads
 
-  func pullRequest(branch: String, worktreePath: URL) async throws -> PullRequestSnapshot? {
-    let cmd = GhCommand.pullRequestView(branch: branch)
-    let outcome = try await runExpecting(cmd, cwd: worktreePath)
-    switch outcome {
-    case .success(let data):
-      return try JSONOutputParsers.parsePullRequest(data)
-    case .noResult:
-      return nil
-    }
-  }
-
   func latestWorkflowRun(branch: String, worktreePath: URL) async throws -> WorkflowRun? {
     let cmd = GhCommand.runListLatest(branch: branch)
     let outcome = try await runExpecting(cmd, cwd: worktreePath)

@@ -11,8 +11,8 @@ import os.log
 /// `gh` on first-view. See exec-plan 0012 M3.
 ///
 /// Mutations flow through explicit Requested → Completed action pairs (merge /
-/// close / markReady / rerunFailedJobs). The Completed branch debounces a per-Worktree
-/// `refreshRequested` to pick up the new server state without hammering gh.
+/// close / markReady / rerunFailedJobs). The Completed branch schedules a delayed
+/// project-level refresh to pick up the new server state without hammering gh.
 @Reducer
 struct GitHubFeature {
   @ObservableState
@@ -35,9 +35,9 @@ struct GitHubFeature {
     /// matching popover button so repeated clicks can't fire multiple `gh` subprocesses.
     var mutating: Set<WorktreeID> = []
 
-    /// Worktree paths observed via `worktreeBecameVisible` / `refreshRequested` /
-    /// `presentPopover`. Stashed here so post-mutation refresh effects can re-issue a
-    /// `refreshRequested` without the completed action having to carry the path.
+    /// Worktree paths observed via `presentPopover` and the mutation requests. Stashed so
+    /// popover-time effects (the latest workflow-run fetch) can resolve a path from a
+    /// WorktreeID alone without the completed action having to carry it.
     var worktreePaths: [WorktreeID: URL] = [:]
 
     /// Which Worktree's popover is visible. `nil` ⇒ no popover.
@@ -113,9 +113,6 @@ struct GitHubFeature {
     case refreshAvailabilityRequested
     case availabilityProbed(GitHubAvailability, probedAt: Date)
 
-    case worktreeBecameVisible(WorktreeID, branch: String, worktreePath: URL)
-    case refreshRequested(WorktreeID, branch: String, worktreePath: URL)
-    case snapshotLoaded(WorktreeID, TaskResult<PullRequestSnapshot?>)
     case workflowRunLoaded(prNumber: Int, TaskResult<WorkflowRun?>)
 
     case presentPopover(WorktreeID, worktreePath: URL)
@@ -233,7 +230,6 @@ struct GitHubFeature {
 
   nonisolated enum CancelID: Hashable, Sendable {
     case availabilityRefresh
-    case snapshot(WorktreeID)
     case workflowRun(prNumber: Int)
     /// One-cancellation-slot for all mutations on a Worktree so a second click while an
     /// operation is in flight cancels the prior run rather than racing it.
@@ -254,9 +250,6 @@ struct GitHubFeature {
   /// Availability result is treated as fresh for 30 s; subsequent `onAppear` / visibility
   /// dispatches within the window skip the probe.
   static let availabilityFreshness: TimeInterval = 30
-
-  /// Snapshot freshness. Under this, a worktreeBecameVisible is a no-op (already cached).
-  static let snapshotFreshness: TimeInterval = 30
 
   // MARK: - active-Project liveness poll cadence (0018 M2)
 
@@ -329,48 +322,7 @@ struct GitHubFeature {
         state.availabilityProbedAt = probedAt
         return .none
 
-      // MARK: - snapshot loading
-
-      case .worktreeBecameVisible(let worktreeID, let branch, let worktreePath):
-        state.worktreePaths[worktreeID] = worktreePath
-        if let loadedAt = state.snapshotLoadedAt[worktreeID],
-          now.timeIntervalSince(loadedAt) < Self.snapshotFreshness,
-          state.snapshots[worktreeID] != nil
-        {
-          return .none  // cached
-        }
-        if state.loading.contains(worktreeID) { return .none }  // already in flight
-        state.loading.insert(worktreeID)
-        return snapshotFetchEffect(worktreeID: worktreeID, branch: branch, worktreePath: worktreePath)
-
-      case .refreshRequested(let worktreeID, let branch, let worktreePath):
-        state.worktreePaths[worktreeID] = worktreePath
-        state.snapshotLoadedAt[worktreeID] = nil  // force re-probe
-        state.loading.insert(worktreeID)
-        return snapshotFetchEffect(worktreeID: worktreeID, branch: branch, worktreePath: worktreePath)
-
-      case .snapshotLoaded(let worktreeID, .success(let snapshot)):
-        state.loading.remove(worktreeID)
-        state.snapshotLoadedAt[worktreeID] = now
-        state.lastError[worktreeID] = nil
-        // 0013 M5: the v2 batched path carries checkRollup inline on the snapshot, so the
-        // per-Worktree prefetch of `gh pr checks` that used to fire here is gone. Views
-        // read `snapshot.checkRollup` directly. v1-path single-branch refreshes (still
-        // reachable via postMutationRefresh) now fill `snapshot.checkRollup` with [] —
-        // acceptable during M5–M6 because the next batched refresh will repopulate it.
-        if let snapshot {
-          state.snapshots[worktreeID] = snapshot
-        } else {
-          state.snapshots[worktreeID] = nil
-        }
-        return .none
-
-      case .snapshotLoaded(let worktreeID, .failure(let error)):
-        state.loading.remove(worktreeID)
-        state.snapshotLoadedAt[worktreeID] = now
-        let ghError = (error as? GitHubError) ?? .other(String(describing: error))
-        state.lastError[worktreeID] = ghError
-        return .none
+      // MARK: - workflow run loading
 
       case .workflowRunLoaded(let prNumber, .success(let run)):
         if let run {
@@ -742,18 +694,6 @@ struct GitHubFeature {
       await send(.availabilityProbed(result, probedAt: now))
     }
     .cancellable(id: CancelID.availabilityRefresh, cancelInFlight: true)
-  }
-
-  private func snapshotFetchEffect(
-    worktreeID: WorktreeID, branch: String, worktreePath: URL
-  ) -> Effect<Action> {
-    .run { send in
-      let result = await TaskResult<PullRequestSnapshot?> {
-        try await gitHub.pullRequest(branch, worktreePath)
-      }
-      await send(.snapshotLoaded(worktreeID, result))
-    }
-    .cancellable(id: CancelID.snapshot(worktreeID), cancelInFlight: true)
   }
 
   private func workflowRunFetchEffect(

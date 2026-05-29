@@ -17,25 +17,6 @@ struct GhCommandTests {
   }
 
   @Test
-  func pullRequestViewArgvListsEveryFieldTheUIConsumes() {
-    let result = GhCommand.pullRequestView(branch: "feature/github01")
-    #expect(result.arguments[0] == "pr")
-    #expect(result.arguments[1] == "view")
-    #expect(result.arguments[2] == "feature/github01")
-    #expect(result.arguments[3] == "--json")
-    let fields = result.arguments[4]
-    // Every field consumed by PullRequestSnapshot must be on the --json list.
-    for required in [
-      "number", "title", "state", "isDraft", "headRefName",
-      "author", "additions", "deletions", "commits",
-      "mergeable", "url", "updatedAt",
-    ] {
-      #expect(fields.contains(required), "--json must include \(required)")
-    }
-    #expect(result.expectedExitCodes == [0, 1])
-  }
-
-  @Test
   func runListLatestArgv() {
     let result = GhCommand.runListLatest(branch: "main")
     #expect(result.arguments[0..<6] == ["run", "list", "--branch", "main", "--limit", "1"])
