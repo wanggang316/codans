@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import os.log
 
 /// Single writer for the in-memory mirror of `sessions.json` and the only
