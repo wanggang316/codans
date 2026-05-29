@@ -18,51 +18,64 @@ public final class SessionStore {
   private var pendingSaveTask: Task<Void, Never>?
   private var latestCatalog: SessionCatalog?
 
-  /// Owning file descriptor for the LOCK_EX|LOCK_NB advisory lock on
-  /// `sessions.json`. Held for the lifetime of the store and released
-  /// from `release()` / `deinit`. `-1` means no lock is held (either
-  /// because acquisition failed and the store was never returned, or
-  /// because `release()` already ran). `nonisolated(unsafe)` so the
-  /// `nonisolated deinit` can close the descriptor without hopping
-  /// back onto the main actor — the fd is a POSIX primitive whose
-  /// only mutation point is `init` / `release()` / `deinit`, and
+  /// Owning file descriptor for the advisory lock on the sidecar
+  /// `sessions.json.lock`. Held for the lifetime of the store and
+  /// released from `release()` / `deinit`. `-1` means no lock is held
+  /// (either because acquisition failed and the store was never
+  /// returned, or because `release()` already ran). `nonisolated(unsafe)`
+  /// so the `nonisolated deinit` can close the descriptor without
+  /// hopping back onto the main actor — the fd is a POSIX primitive
+  /// whose only mutation point is `init` / `release()` / `deinit`, and
   /// those are already serialised by the @MainActor caller.
   private nonisolated(unsafe) var lockFD: Int32 = -1
 
-  /// Acquires an exclusive advisory lock on `fileURL` so a second
-  /// touch-code instance cannot race the catalog. The file is created
-  /// if missing (the directory is expected to already exist — callers
-  /// use `Session.defaultURL()` whose parent is created elsewhere on
-  /// the bring-up path). A successful `flock(LOCK_EX|LOCK_NB)` keeps
-  /// the descriptor open for the lifetime of the store; if `flock`
-  /// fails with `EWOULDBLOCK`/`EAGAIN`, `SessionStoreError.alreadyHeld`
-  /// is thrown and the descriptor is closed — the caller is expected
-  /// to degrade to "no-resume mode".
+  /// Acquires an exclusive advisory lock so a second touch-code instance
+  /// cannot race the catalog.
   ///
-  /// Caveat: `AtomicFileStore.write` (used by `saveNow`) replaces the
-  /// catalog via `rename(2)`, which means our fd ends up holding a
-  /// lock on the *orphaned* inode after the first save. This is fine
-  /// for the second-instance defense at launch (the race is decided
-  /// during `init`, before any save), but two instances launching
-  /// strictly after a save would each see a fresh inode and acquire
-  /// independent locks. The right long-term fix is a sidecar
-  /// `sessions.json.lock` whose inode never changes; tracked for a
-  /// follow-up so the M5.T5 scope stays focused on the launch-race
-  /// guard the brief calls out.
+  /// The lock is taken on a dedicated sidecar file `<fileURL>.lock`, NOT
+  /// on `sessions.json` itself. `AtomicFileStore.write` (used by
+  /// `saveNow`) replaces the catalog via `rename(2)`, which swaps the
+  /// inode out from under any descriptor holding a lock on the old file
+  /// — so locking `sessions.json` directly would let a second instance
+  /// launched after the first save open the fresh inode and acquire its
+  /// own independent lock, defeating the guard. The sidecar is never
+  /// renamed, so its inode is stable for the process lifetime and the
+  /// lock genuinely serialises instances. Locking the sidecar also means
+  /// we no longer create a zero-byte `sessions.json` just to hold the
+  /// lock — `load()` correctly reports `.empty` until the first real
+  /// save, instead of treating the placeholder as a corrupt file.
+  ///
+  /// The parent directory is created if missing so a fresh install
+  /// (where `~/.config/touch-code` does not exist yet) does not fall
+  /// straight into no-resume mode on the `open` ENOENT.
+  ///
+  /// A successful lock keeps the descriptor open for the lifetime of the
+  /// store; if the lock is already held, `SessionStoreError.alreadyHeld`
+  /// is thrown and the descriptor is closed — the caller is expected to
+  /// degrade to "no-resume mode".
   public init(fileURL: URL) throws {
     self.fileURL = fileURL
 
-    // O_RDWR|O_CREAT so we can take the lock even before the catalog
-    // exists. 0o644 mirrors the mode AtomicFileStore writes (it can't
-    // see the existing perms on first save, and there's no security-
-    // sensitive content in sessions.json).
-    let fd = fileURL.path.withCString { path in
+    // Ensure the parent directory exists before opening the lock file.
+    // On a fresh install `~/.config/touch-code` may not have been created
+    // yet; without this the O_CREAT open below fails with ENOENT and the
+    // app drops into no-resume mode for no good reason.
+    let directory = fileURL.deletingLastPathComponent()
+    try? FileManager.default.createDirectory(
+      at: directory, withIntermediateDirectories: true
+    )
+
+    // Lock the sidecar, not the catalog. O_RDWR|O_CREAT so the lock file
+    // is created on first launch. 0o644 — there is no security-sensitive
+    // content in an empty lock file.
+    let lockURL = fileURL.appendingPathExtension("lock")
+    let fd = lockURL.path.withCString { path in
       Darwin.open(path, O_RDWR | O_CREAT, 0o644)
     }
     if fd < 0 {
       let err = errno
       throw SessionStoreError.write(
-        "open(\(fileURL.path)) failed: errno=\(err)"
+        "open(\(lockURL.path)) failed: errno=\(err)"
       )
     }
     // `fcntl(F_SETLK)` with a whole-file `struct flock` gives us the
@@ -90,7 +103,7 @@ public final class SessionStore {
       if err == EAGAIN || err == EWOULDBLOCK || err == EACCES {
         throw SessionStoreError.alreadyHeld
       }
-      throw SessionStoreError.write("fcntl(F_SETLK, \(fileURL.path)) failed: errno=\(err)")
+      throw SessionStoreError.write("fcntl(F_SETLK, \(lockURL.path)) failed: errno=\(err)")
     }
     self.lockFD = fd
   }
