@@ -298,11 +298,18 @@ final class TerminalEngine {
   /// Dispose a pane's surface. Idempotent. Routes through
   /// `handleSurfaceClose` so the lifecycle event is emitted exactly once
   /// whether the close is user-initiated or callback-driven.
+  ///
+  /// Kills the daemon rather than detaching it: reaching here means the
+  /// pane is being destroyed (closed by the user, or its tab/worktree is
+  /// closing, or a crash-loop auto-closed the tab), so the daemon and its
+  /// shell child should not survive. The app-quit path never comes through
+  /// here — it goes through `SessionLifecycle.detachAllForQuit`, which
+  /// decides keep-running vs. snapshot — so resume is unaffected.
   func closeSurface(for paneID: PaneID) {
     guard let runtime = ghosttyRuntime,
       let surface = runtime.surface(for: paneID)
     else { return }
-    surface.close()
+    surface.closeKillingDaemon()
     handleSurfaceClose(paneID: paneID, processAlive: true)
   }
 

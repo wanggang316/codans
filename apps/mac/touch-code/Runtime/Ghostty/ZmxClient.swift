@@ -309,6 +309,19 @@ public final class ZmxClient {
     close()
   }
 
+  /// Send `.kill` and close the control socket WITHOUT awaiting the
+  /// daemon's exit. The daemon terminates on receipt of `.kill` (removing
+  /// its socket during shutdown); we do not block on confirmation because
+  /// this runs on the synchronous pane-teardown path where awaiting would
+  /// stall the caller (often the main thread). Use `kill()` instead when
+  /// the caller genuinely needs to observe the daemon going away (e.g. the
+  /// IPC `pane.close` handler that reports completion to a CLI client).
+  public func requestKill() {
+    if isClosed { return }
+    try? sendFrame(ZmxFrame(tag: .kill, payload: Data()))
+    close()
+  }
+
   /// Send `.kill` and wait for the daemon's socket file to disappear
   /// (or 2s timeout, whichever comes first). The daemon exits in
   /// response to `.kill`; sockets are removed during its shutdown path.

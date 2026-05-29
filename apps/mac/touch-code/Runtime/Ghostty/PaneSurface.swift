@@ -195,11 +195,36 @@ final class PaneSurface {
   /// closed so the daemon control socket releases its end of the socketpair
   /// (libghostty owns the other end and frees it when it disposes the
   /// surface).
+  ///
+  /// This DETACHES rather than kills the daemon: the daemon reads the
+  /// socket EOF as a detach and keeps its PTY child alive. Used by the
+  /// app-quit teardown path (`GhosttyRuntime` disposing every surface as
+  /// the process exits), where daemon disposition has already been decided
+  /// by `SessionLifecycle.detachAllForQuit`. For destroying a pane on
+  /// purpose, use `closeKillingDaemon()`.
   func close() {
+    teardown(killDaemon: false)
+  }
+
+  /// Teardown that first asks the daemon to terminate (`.kill`) before
+  /// releasing the surface. Used when a pane is destroyed deliberately —
+  /// the user closes it, its tab/worktree closes, or a crash-loop
+  /// auto-closes the tab — so the zmx daemon (and its shell child) does
+  /// not outlive a pane that no longer exists. Distinct from `close()`,
+  /// which only detaches so the app-quit path can resume daemons later.
+  func closeKillingDaemon() {
+    teardown(killDaemon: true)
+  }
+
+  private func teardown(killDaemon: Bool) {
     progressResetTask?.cancel()
     progressResetTask = nil
     guard let surface else { return }
-    zmxClient.close()
+    if killDaemon {
+      zmxClient.requestKill()
+    } else {
+      zmxClient.close()
+    }
     ghostty_surface_free(surface)
     self.surface = nil
     view.detachSurface()

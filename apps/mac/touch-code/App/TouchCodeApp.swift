@@ -881,12 +881,28 @@ final class AppState {
       },
       settingsProvider: { settingsStore.settings },
       daemonKiller: { [weak terminalEngine] paneID in
-        // Reach across into the runtime's surface registry to find the
-        // pane's `ZmxClient` and ask it to send `.kill`. ZmxClient.kill
+        // Live-surface path: reach into the runtime's surface registry,
+        // find the pane's `ZmxClient`, and send `.kill`. ZmxClient.kill
         // polls for the daemon control socket to vanish with a bounded
-        // 2 s timeout; no-op when the pane has no live surface.
-        guard let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) else { return }
-        await surface.zmxClient.kill()
+        // 2 s timeout.
+        if let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) {
+          await surface.zmxClient.kill()
+          return
+        }
+        // Cold path: the pane was reattachable from a prior launch but
+        // its surface was never materialized this session, so there is
+        // no live `ZmxClient`. Without a fallback, `pane.close` would
+        // remove the hierarchy + catalog rows while the daemon kept
+        // running with no tracked handle. Use the catalog's recorded
+        // socket to terminate it directly via the same one-shot `.kill`
+        // the reaper uses, then unlink the socket file. The handler
+        // removes the catalog row immediately after this returns.
+        guard
+          let socketPath = sessionCoordinator?.catalog
+            .sessions[paneID.raw.uuidString]?.socketPath
+        else { return }
+        SessionReaper.sendOneShotKill(socketPath: socketPath)
+        _ = socketPath.withCString { unlink($0) }
       },
       runtimeProbe: { [weak terminalEngine] paneID in
         // Same surface-registry walk as `daemonKiller`, but returns the
