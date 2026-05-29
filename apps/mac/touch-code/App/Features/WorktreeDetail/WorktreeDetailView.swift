@@ -45,8 +45,10 @@ struct WorktreeDetailView: View {
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
   /// M5: drives the inline Diff inspector column rendered to the right
-  /// of the detail body. Sourced from `Worktree.diffInspectorVisible` via
-  /// `RootFeature.State.diffInspectorVisible(in:)` in `ContentView`.
+  /// of the detail body. Sourced from the app-level
+  /// `RootFeature.State.diffInspectorVisible` in `ContentView` — a single
+  /// toggle shared across Worktrees, so switching selection keeps the panel
+  /// open/closed and only re-targets its contents.
   let inspectorVisible: Bool
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just

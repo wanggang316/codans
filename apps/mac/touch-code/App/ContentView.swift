@@ -104,7 +104,7 @@ struct ContentView: View {
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         diffStore: store.scope(state: \.diff, action: \.diff),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
-        inspectorVisible: store.state.diffInspectorVisible(in: hierarchyManager.catalog),
+        inspectorVisible: store.diffInspectorVisible,
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
         onToggleGitViewer: { store.send(.diffInspectorToggledForCurrentWorktree) },

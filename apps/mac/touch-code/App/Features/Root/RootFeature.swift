@@ -102,23 +102,14 @@ struct RootFeature {
     /// step. Cleared in `selectionChanged` itself.
     var suppressHistoryPush: Bool = false
 
-    /// T3: live read of the current Worktree's `diffInspectorVisible` against
-    /// a catalog snapshot. Not a cached field — views pass in
-    /// `hierarchyManager.catalog` so SwiftUI's `@Observable` tracking
-    /// re-renders on catalog mutation from any writer (⌘⇧G, Header GV
-    /// button, external API). This avoids the state-divergence risk of
-    /// caching the value on State: both toggle entry points write through
-    /// `HierarchyClient.setWorktreeDiffInspectorVisible`, and the view reads
-    /// the authoritative catalog each render.
-    func diffInspectorVisible(in catalog: Catalog) -> Bool {
-      guard
-        let projectID = selection.projectID,
-        let worktreeID = selection.worktreeID,
-        let project = catalog.projects.first(where: { $0.id == projectID }),
-        let worktree = project.worktrees.first(where: { $0.id == worktreeID })
-      else { return false }
-      return worktree.diffInspectorVisible
-    }
+    /// Whether the Git Viewer (Diff inspector) column is visible. A single
+    /// app-level toggle, mirroring `sidebarVisible`: switching the selected
+    /// Worktree does not change it, so the panel no longer flips open/closed
+    /// as the user moves between Worktrees. The panel's *contents* still
+    /// re-target on selection because `selectionChanged` forwards
+    /// `.diff(.worktreeSelected(...))` every switch. Session-scoped (resets to
+    /// closed on launch), again matching `sidebarVisible`.
+    var diffInspectorVisible: Bool = false
   }
 
   /// Opaque marker for diagnostic logging / tests — the full `TerminalEvent`
@@ -204,10 +195,10 @@ struct RootFeature {
     /// (the focus-driven reconcile path requires a `didBecomeActive`
     /// transition the user never triggers). See HAN-62.
     case worktreeHeadChanged(WorktreeID)
-    /// T3: Toggles the Git Viewer overlay for the current Worktree.
-    /// Sources: Header GV button (T2) + ⌘⇧G (T3 Commands). Optimistically
-    /// flips `state.diffInspectorVisible` and fires
-    /// `HierarchyClient.setWorktreeDiffInspectorVisible` to persist.
+    /// T3: Toggles the built-in Git Viewer overlay. Sources: Header GV button
+    /// (T2) + ⌘⇧G (T3 Commands). Flips the app-level `state.diffInspectorVisible`
+    /// — a single toggle shared across Worktrees (mirrors `sidebarVisible`), so
+    /// the panel no longer flips open/closed when the selection changes.
     case diffInspectorToggledForCurrentWorktree
     /// Sidebar entry point for the Git Viewer (HAN-25 follow-up). Same
     /// resolution as `.diffInspectorToggledForCurrentWorktree` but operates on
@@ -377,6 +368,9 @@ struct RootFeature {
 
   nonisolated enum CancelID: Sendable {
     case events, selectionChanges, projectReconcileFocus, worktreeHeadWatcher
+    /// `NSApplication.didResignActiveNotification` observation — pauses the GitHub
+    /// liveness poll when the app is no longer frontmost (0018 M1).
+    case appResignActive
   }
 
   @Dependency(TerminalClient.self) private var terminalClient
@@ -442,6 +436,12 @@ struct RootFeature {
         // `CancelID.projectReconcileFocus` stops it at quit.
         let focusStream = NotificationCenter.default.notifications(
           named: NSApplication.didBecomeActiveNotification
+        )
+        // 0018 M1: the GitHub liveness poll is gated on the app being frontmost. Resign
+        // pauses the loop (target → nil); become-active re-points it at the active
+        // Project. Held for the app lifetime; `CancelID.appResignActive` stops it at quit.
+        let resignStream = NotificationCenter.default.notifications(
+          named: NSApplication.didResignActiveNotification
         )
         return .merge(
           .run { send in
@@ -515,11 +515,20 @@ struct RootFeature {
           // reflect the post-reconcile branch set.
           .run { [projectReconciler, client = hierarchyClient] send in
             await projectReconciler.reconcileAll()
-            if let action = await MainActor.run(body: {
-              Self.makeActiveProjectGitHubRefresh(client: client)
-            }) {
-              await send(.gitHub(action))
+            let actions: [GitHubFeature.Action] = await MainActor.run {
+              var result: [GitHubFeature.Action] = []
+              if let refresh = Self.makeActiveProjectGitHubRefresh(client: client) {
+                result.append(refresh)
+              }
+              // Arm the liveness poll if the app launched frontmost (0018 M1).
+              result.append(
+                Self.makePollTargetChange(
+                  client: client, appActive: NSApplication.shared.isActive
+                )
+              )
+              return result
             }
+            for action in actions { await send(.gitHub(action)) }
           },
 
           // Re-sync on window focus. Debounced inside the actor. The
@@ -530,14 +539,31 @@ struct RootFeature {
           .run { [projectReconciler, client = hierarchyClient] send in
             for await _ in focusStream {
               await projectReconciler.reconcileAll()
-              if let action = await MainActor.run(body: {
-                Self.makeActiveProjectGitHubRefresh(client: client)
-              }) {
-                await send(.gitHub(action))
+              let actions: [GitHubFeature.Action] = await MainActor.run {
+                var result: [GitHubFeature.Action] = []
+                if let refresh = Self.makeActiveProjectGitHubRefresh(client: client) {
+                  result.append(refresh)
+                }
+                // Re-point the liveness poll at the active Project (app is frontmost
+                // because didBecomeActive just fired) — 0018 M1.
+                result.append(Self.makePollTargetChange(client: client, appActive: true))
+                return result
               }
+              for action in actions { await send(.gitHub(action)) }
             }
           }
           .cancellable(id: CancelID.projectReconcileFocus, cancelInFlight: true),
+
+          // 0018 M1: pause the liveness poll the instant the app resigns active, so a
+          // backgrounded / idle app fires zero `gh api graphql` subprocesses.
+          .run { send in
+            for await _ in resignStream {
+              await send(
+                .gitHub(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: []))
+              )
+            }
+          }
+          .cancellable(id: CancelID.appResignActive, cancelInFlight: true),
 
           // HAN-62: terminal-initiated `git checkout` / `git switch` inside
           // a touch-code pane never fires `didBecomeActive`, so the focus-
@@ -595,7 +621,8 @@ struct RootFeature {
           .cancel(id: CancelID.events),
           .cancel(id: CancelID.selectionChanges),
           .cancel(id: CancelID.projectReconcileFocus),
-          .cancel(id: CancelID.worktreeHeadWatcher)
+          .cancel(id: CancelID.worktreeHeadWatcher),
+          .cancel(id: CancelID.appResignActive)
         )
 
       case .selectionChanged(let selection):
@@ -730,6 +757,21 @@ struct RootFeature {
                 .projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
               ))
           )
+          // 0018 M1: re-point the liveness poll at the newly-activated Project (or pause
+          // it if the app is not frontmost). `projectActivated` above owns the immediate
+          // refresh; this only arms the recurring poll.
+          if NSApplication.shared.isActive {
+            effects.append(
+              .send(
+                .gitHub(
+                  .pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
+                ))
+            )
+          } else {
+            effects.append(
+              .send(.gitHub(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])))
+            )
+          }
         }
         return .merge(effects)
 
@@ -1138,17 +1180,15 @@ struct RootFeature {
       case .diff:
         return .none
 
-      case .branchSwitcher(.delegate(.openDiffViewerOnHistoryTab(let worktreeID, _))):
+      case .branchSwitcher(.delegate(.openDiffViewerOnHistoryTab)):
         // T10: "View all" from the recent-commits section. Force the in-app
         // inspector visible regardless of the user's default Git Viewer
         // preference — the follow-up `.diff(.tabSelected(.history))` dispatch
         // only makes sense in-app (external viewers like Tower / Fork have no
         // History-tab analogue), so we bypass the 3-tier Git Viewer
         // resolution that `.diffInspectorToggledForCurrentWorktree` runs.
-        // Idempotent when the inspector is already visible:
-        // `setWorktreeDiffInspectorVisible(_, true)` no-ops on already-visible
-        // worktrees per HierarchyClient's contract.
-        hierarchyClient.setWorktreeDiffInspectorVisible(worktreeID, true)
+        // Idempotent when the panel is already open.
+        state.diffInspectorVisible = true
         // Pending (T11/T12): after T11 adds `.diff(.tabSelected(.history))`,
         // dispatch it here so "View all" lands the user on the History tab.
         return .none
@@ -1315,12 +1355,11 @@ struct RootFeature {
                 projectID: projectID
               )))
         }
-        let catalog = hierarchyClient.snapshot()
-        let target = !state.diffInspectorVisible(in: catalog)
-        let setter = hierarchyClient.setWorktreeDiffInspectorVisible
-        return .run { _ in
-          await MainActor.run { setter(worktreeID, target) }
-        }
+        // Built-in overlay: flip the single app-level toggle. The panel's
+        // contents follow the current selection via the
+        // `.diff(.worktreeSelected(...))` dispatch in `selectionChanged`.
+        state.diffInspectorVisible.toggle()
+        return .none
 
       case .openGitViewerForWorktreeRequested(let projectID, let worktreeID):
         // Mirrors `.diffInspectorToggledForCurrentWorktree`'s three-tier
@@ -1359,16 +1398,12 @@ struct RootFeature {
                 projectID: projectID
               )))
         }
-        // Built-in inspector lives in the detail column for the *selected* worktree,
-        // so route the click through the same selection flow the keyboard chord
-        // assumes — picking the row first, then flipping its inspector visibility on.
-        let setter = hierarchyClient.setWorktreeDiffInspectorVisible
-        return .merge(
-          .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID))),
-          .run { _ in
-            await MainActor.run { setter(worktreeID, true) }
-          }
-        )
+        // Built-in inspector lives in the detail column for the *selected*
+        // worktree, so route the click through the same selection flow the
+        // keyboard chord assumes — pick the row first, then ensure the
+        // app-level Git Viewer toggle is on (idempotent if already open).
+        state.diffInspectorVisible = true
+        return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
 
       case .openDefaultForCurrentWorktreeRequested:
         guard
@@ -2089,6 +2124,38 @@ struct RootFeature {
       )
     }
     return .projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
+  }
+
+  /// Builds the `.gitHub(.pollTargetChanged)` that drives the active-Project liveness
+  /// poll (0018 M1). Returns a paused target (`nil`) when the app is not frontmost or
+  /// there is no active Project with a git root; otherwise targets the active Project.
+  /// Mirrors `makeActiveProjectGitHubRefresh`'s catalog walk so the poll tracks the same
+  /// branch set the immediate refresh fetches.
+  ///
+  /// `@MainActor` because `client.snapshot()` is main-isolated; callers in `.run`
+  /// closures bridge via `MainActor.run`.
+  @MainActor
+  static func makePollTargetChange(
+    client: HierarchyClient, appActive: Bool
+  ) -> GitHubFeature.Action {
+    let paused = GitHubFeature.Action.pollTargetChanged(
+      nil, gitRoot: nil, worktreeBranches: []
+    )
+    guard appActive else { return paused }
+    let catalog = client.snapshot()
+    guard let projectID = catalog.selectedProjectID,
+      let project = catalog.projects.first(where: { $0.id == projectID }),
+      let gitRootString = project.gitRoot
+    else { return paused }
+    let gitRoot = URL(fileURLWithPath: gitRootString)
+    let pairs = project.worktrees.compactMap { worktree -> GitHubFeature.Action.WorktreeBranchPair? in
+      guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty
+      else { return nil }
+      return GitHubFeature.Action.WorktreeBranchPair(
+        worktreeID: worktree.id, branch: branch
+      )
+    }
+    return .pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
   }
 
   /// Flat list of (projectID, worktreeID) tuples in the order the sidebar

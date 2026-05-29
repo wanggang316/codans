@@ -213,28 +213,6 @@ struct HierarchyManagerTests {
   // and now live on `SettingsStore.mutateProject`; see `SettingsStoreTests` for their
   // coverage.
 
-  @Test
-  func setWorktreeDiffInspectorVisiblePersists() throws {
-    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
-    let worktreeID = try manager.createWorktree(
-      in: projectID, name: "main", path: "/repo", branch: "main"
-    )
-    #expect(manager.catalog.projects[0].worktrees[0].diffInspectorVisible == false)
-
-    manager.setWorktreeDiffInspectorVisible(worktreeID: worktreeID, visible: true)
-    #expect(manager.catalog.projects[0].worktrees[0].diffInspectorVisible == true)
-
-    manager.setWorktreeDiffInspectorVisible(worktreeID: worktreeID, visible: false)
-    #expect(manager.catalog.projects[0].worktrees[0].diffInspectorVisible == false)
-  }
-
-  @Test
-  func setWorktreeDiffInspectorVisibleMissingWorktreeIsSilentNoOp() {
-    let bogus = WorktreeID()
-    manager.setWorktreeDiffInspectorVisible(worktreeID: bogus, visible: true)
-    #expect(manager.catalog.projects.isEmpty)
-  }
-
   // MARK: - P0.2: Project Management mutations
 
   @Test

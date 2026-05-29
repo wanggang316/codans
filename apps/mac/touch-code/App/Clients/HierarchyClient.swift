@@ -219,15 +219,6 @@ nonisolated struct HierarchyClient: Sendable {
   // `SettingsWriter.setProjectWorktreesDirectory`). HierarchyClient is read-only for
   // per-Project preferences (see `snapshot` / `kind`).
 
-  /// Flips `Worktree.diffInspectorVisible` for the given Worktree. Silent no-op on
-  /// unknown `worktreeID`; persists through the standard debounced
-  /// `store.scheduleSave(catalog)` pipeline (T0 §D5). Consumed by the T2
-  /// Header Git Viewer toggle and by T3's overlay presentation binding.
-  var setWorktreeDiffInspectorVisible:
-    @MainActor @Sendable (
-      _ worktreeID: WorktreeID, _ visible: Bool
-    ) -> Void
-
   var snapshot: @MainActor @Sendable () -> Catalog
 
   /// Emits whenever the selection chain `(projectID, worktreeID)` changes
@@ -656,9 +647,6 @@ extension HierarchyClient {
           at: path, ratio: ratio,
           in: tabID, in: worktreeID, in: projectID
         )
-      },
-      setWorktreeDiffInspectorVisible: { worktreeID, visible in
-        manager.setWorktreeDiffInspectorVisible(worktreeID: worktreeID, visible: visible)
       },
       snapshot: { manager.catalog },
       selectionChanges: { makeSelectionStream(manager: manager) },
@@ -1373,7 +1361,6 @@ extension HierarchyClient: DependencyKey {
     focusPane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     focusSurfaceView: { _ in fatalError("HierarchyClient.liveValue not configured") },
     resizeSplit: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setWorktreeDiffInspectorVisible: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     snapshot: { fatalError("HierarchyClient.liveValue not configured") },
     selectionChanges: { AsyncStream { $0.finish() } },
     setWorktreeArchived: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1464,7 +1451,6 @@ extension HierarchyClient: DependencyKey {
     // an `unimplemented` here turns ~all routing tests into noisy stub farms.
     focusSurfaceView: { _ in },
     resizeSplit: unimplemented("HierarchyClient.resizeSplit"),
-    setWorktreeDiffInspectorVisible: unimplemented("HierarchyClient.setWorktreeDiffInspectorVisible"),
     snapshot: unimplemented(
       "HierarchyClient.snapshot",
       placeholder: Catalog()
