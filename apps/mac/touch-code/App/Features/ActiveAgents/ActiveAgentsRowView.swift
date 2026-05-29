@@ -16,7 +16,7 @@ import TouchCodeCore
 /// panel) intentionally does NOT collapse on tap; the row stays visible
 /// after focus so the user can fan-jump between agents.
 ///
-/// The breathing animation on `working` / `waitingForInput` icons is
+/// The breathing animation on `working` / `blocked` icons is
 /// driven by a local `@State` flag flipped in `.onAppear`; reduce-motion
 /// suppresses the flip so the icon renders at full opacity statically.
 struct ActiveAgentsRowView: View {
@@ -169,17 +169,12 @@ struct ActiveAgentsRowView: View {
   }
 
   /// State icon glyph + color. Circle-based visual language for every
-  /// state, with `.symbolEffect(.pulse)` on the two "active" states
-  /// (working, waitingForInput). `.pulse` is SwiftUI 6's symbol
-  /// breathing animation; routes through the symbol renderer so the
-  /// animation survives the row's @Observable rebuild cycle (unlike a
-  /// manual `.opacity` + `.repeatForever` chain, which restarts on
-  /// every parent redraw). Color is `Color.orange` to match the
-  /// inbox bell unread tint (same warning hue across the chrome).
+  /// state. Color is `Color.orange` to match the inbox bell unread tint
+  /// (same warning hue across the chrome).
   @ViewBuilder
   private var stateIcon: some View {
     switch entry.state {
-    case .waitingForInput:
+    case .blocked:
       // Pause-fill glyph — terminal-style "agent has paused for you".
       // Static (no pulse) per design feedback; the orange tint alone
       // carries the "needs your attention" signal. `.imageScale(.large)`
@@ -190,13 +185,13 @@ struct ActiveAgentsRowView: View {
         .imageScale(.large)
         .foregroundStyle(Color.orange)
         .accessibilityHidden(true)
-    case .loading:
+    case .working:
       // Nine-square activity grid — staggered fade-out per cell on a 3 s
       // cycle (bottom-left first → top-right last) reads as "filling in
       // progress" rather than a generic spinner. Reduce motion holds
       // every cell at full opacity. Tint follows `.primary` so the grid
       // is black in light mode / white in dark mode, distinct from the
-      // orange "waiting" icon without competing visually for attention.
+      // orange "blocked" icon without competing visually for attention.
       LoadingGridIcon(size: 16, isAnimating: !reduceMotion)
         .foregroundStyle(.primary)
     case .finished:
@@ -211,25 +206,24 @@ struct ActiveAgentsRowView: View {
   }
 
   /// Human-readable verb for the visible inline state label
-  /// ("working" / "idle" / "waiting" / "finished"). The short form
+  /// ("idle" / "working" / "blocked" / "finished"). The short form
   /// keeps the trailing column compact — the spoken VoiceOver label
   /// uses the long form via `sentenceVerb`.
   private var stateVerb: String {
     switch entry.state {
-    case .waitingForInput: return "waiting"
-    case .loading: return "working"
+    case .blocked: return "blocked"
+    case .working: return "working"
     case .finished: return "finished"
     case .idle: return "idle"
     }
   }
 
-  /// Long-form sentence verb used in the row's VoiceOver label.
-  /// "waiting for input" reads naturally when chained after the
-  /// `<DisplayName>, <Project>, <Worktree>` prefix.
+  /// Long-form sentence verb used in the row's VoiceOver label, chained
+  /// after the `<DisplayName>, <Project>, <Worktree>` prefix.
   private var sentenceVerb: String {
     switch entry.state {
-    case .waitingForInput: return "waiting for input"
-    case .loading: return "working"
+    case .blocked: return "blocked"
+    case .working: return "working"
     case .finished: return "finished"
     case .idle: return "idle"
     }
@@ -244,7 +238,7 @@ struct ActiveAgentsRowView: View {
   }
 }
 
-/// 3×3 activity-grid glyph used for the `.loading` state: nine 4-unit
+/// 3×3 activity-grid glyph used for the `.working` state: nine 4-unit
 /// squares on a 24-unit canvas, each fading from full opacity to 0
 /// over 90 % of a 3 s cycle (then holding at 0 for 10 % before the
 /// next cycle starts). Stagger goes bottom-left → top-right with

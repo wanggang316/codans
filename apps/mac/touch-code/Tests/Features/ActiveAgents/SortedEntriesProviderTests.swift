@@ -8,8 +8,8 @@ import TouchCodeCore
 /// no SwiftUI, no live registry. We build `AgentEntry` values directly
 /// and assert on the output order.
 ///
-/// The triage priority surfaced by the popover is `waitingForInput >
-/// finished > loading > idle` (deliberately distinct from the registry's
+/// The triage priority surfaced by the popover is `blocked >
+/// finished > working > idle` (deliberately distinct from the registry's
 /// derive priority — see the helper's doc comment for why).
 @MainActor
 struct SortedEntriesProviderTests {
@@ -21,30 +21,30 @@ struct SortedEntriesProviderTests {
     #expect(result.isEmpty)
   }
 
-  /// All four states present → output is ordered `waitingForInput,
-  /// finished, loading, idle`. Each entry shares the same
+  /// All four states present → output is ordered `blocked,
+  /// finished, working, idle`. Each entry shares the same
   /// `lastTransitionAt` so only the primary sort key matters here.
   @Test
-  func primaryStateOrderIsWaitingFinishedLoadingIdle() {
+  func primaryStateOrderIsBlockedFinishedWorkingIdle() {
     let now = Date(timeIntervalSince1970: 1_000)
-    let pWait = PaneID()
-    let pLoad = PaneID()
+    let pBlocked = PaneID()
+    let pWorking = PaneID()
     let pFin = PaneID()
     let pIdle = PaneID()
 
     let entries: [PaneID: AgentRegistry.AgentEntry] = [
       pIdle: .init(kind: .claudeCode, sessionID: nil, state: .idle, lastTransitionAt: now),
-      pLoad: .init(kind: .codex, sessionID: nil, state: .loading, lastTransitionAt: now),
-      pWait: .init(kind: .pi, sessionID: nil, state: .waitingForInput, lastTransitionAt: now),
+      pWorking: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: now),
+      pBlocked: .init(kind: .pi, sessionID: nil, state: .blocked, lastTransitionAt: now),
       pFin: .init(kind: .claudeCode, sessionID: nil, state: .finished, lastTransitionAt: now),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
-    #expect(result.map(\.entry.state) == [.waitingForInput, .finished, .loading, .idle])
+    #expect(result.map(\.entry.state) == [.blocked, .finished, .working, .idle])
   }
 
   /// Same state, different `lastTransitionAt` — most-recent first.
-  /// Three `.loading` entries staggered 1s apart.
+  /// Three `.working` entries staggered 1s apart.
   @Test
   func sameStateOrdersByLastTransitionDescending() {
     let t0 = Date(timeIntervalSince1970: 1_000)
@@ -53,9 +53,9 @@ struct SortedEntriesProviderTests {
     let pNew = PaneID()
 
     let entries: [PaneID: AgentRegistry.AgentEntry] = [
-      pOld: .init(kind: .claudeCode, sessionID: nil, state: .loading, lastTransitionAt: t0),
-      pMid: .init(kind: .codex, sessionID: nil, state: .loading, lastTransitionAt: t0.addingTimeInterval(5)),
-      pNew: .init(kind: .pi, sessionID: nil, state: .loading, lastTransitionAt: t0.addingTimeInterval(10)),
+      pOld: .init(kind: .claudeCode, sessionID: nil, state: .working, lastTransitionAt: t0),
+      pMid: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: t0.addingTimeInterval(5)),
+      pNew: .init(kind: .pi, sessionID: nil, state: .working, lastTransitionAt: t0.addingTimeInterval(10)),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
@@ -73,8 +73,8 @@ struct SortedEntriesProviderTests {
     let hi = PaneID(raw: UUID(uuidString: "ffffffff-ffff-ffff-ffff-fffffffffff0")!)
 
     let entries: [PaneID: AgentRegistry.AgentEntry] = [
-      hi: .init(kind: .codex, sessionID: nil, state: .loading, lastTransitionAt: now),
-      lo: .init(kind: .claudeCode, sessionID: nil, state: .loading, lastTransitionAt: now),
+      hi: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: now),
+      lo: .init(kind: .claudeCode, sessionID: nil, state: .working, lastTransitionAt: now),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
@@ -83,19 +83,19 @@ struct SortedEntriesProviderTests {
 
   /// Combined sort: across-state ordering wins over within-state. A
   /// fresh `.idle` (transitioned now) still sorts below a stale
-  /// `.waitingForInput` (transitioned an hour ago).
+  /// `.blocked` (transitioned an hour ago).
   @Test
   func stateOrderBeatsTransitionAge() {
     let t0 = Date(timeIntervalSince1970: 1_000)
-    let staleWaiting = PaneID()
+    let staleBlocked = PaneID()
     let freshIdle = PaneID()
 
     let entries: [PaneID: AgentRegistry.AgentEntry] = [
       freshIdle: .init(kind: .codex, sessionID: nil, state: .idle, lastTransitionAt: t0.addingTimeInterval(3_600)),
-      staleWaiting: .init(kind: .claudeCode, sessionID: nil, state: .waitingForInput, lastTransitionAt: t0),
+      staleBlocked: .init(kind: .claudeCode, sessionID: nil, state: .blocked, lastTransitionAt: t0),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
-    #expect(result.map(\.paneID) == [staleWaiting, freshIdle])
+    #expect(result.map(\.paneID) == [staleBlocked, freshIdle])
   }
 }

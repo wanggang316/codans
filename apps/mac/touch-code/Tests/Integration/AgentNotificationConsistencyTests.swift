@@ -7,7 +7,7 @@ import TouchCodeCore
 @MainActor
 struct AgentNotificationConsistencyTests {
   @Test
-  func oscNineWaitingForInputIsConsistent() async {
+  func oscNineWaitingNotifiesInboxWithoutFlippingLiveState() async {
     let fixture = Fixture()
     let title = "Approve this action?"
     let body = "Yes / No"
@@ -24,14 +24,16 @@ struct AgentNotificationConsistencyTests {
       await fixture.detector.handle(event)
     }
 
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .waitingForInput)
+    // The inbox records the attention event; the live agent state is purely
+    // render-derived and stays idle until the rendered region shows activity.
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .waitingForInput)
     #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
   }
 
   @Test
-  func bellRangIsConsistent() async {
+  func bellRangNotifiesInboxWithoutFlippingLiveState() async {
     let fixture = Fixture()
     let events: [TerminalEvent] = [
       .paneOutput(fixture.paneID, Data()),
@@ -44,7 +46,8 @@ struct AgentNotificationConsistencyTests {
       await fixture.detector.handle(event)
     }
 
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .waitingForInput)
+    // Same decoupling for the bell: inbox-worthy, but not a live signal.
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .waitingForInput)
     #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
@@ -83,7 +86,7 @@ struct AgentNotificationConsistencyTests {
     let working = TerminalEvent.paneViewportChanged(fixture.paneID, text: "• Working (10s)")
     fixture.registry.onTerminalEvent(working)
     await fixture.detector.handle(working)
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .loading)
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .working)
 
     let output = TerminalEvent.paneOutput(fixture.paneID, Data())
     fixture.registry.onTerminalEvent(output)

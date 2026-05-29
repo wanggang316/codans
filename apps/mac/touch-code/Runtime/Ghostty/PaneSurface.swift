@@ -313,6 +313,10 @@ final class PaneSurface {
   }
 
   enum ReadExtent {
+    /// The current interaction region only — excludes scrollback above the
+    /// live screen. Preferred for agent-activity classification so a prompt
+    /// scrolled into history can no longer be mistaken for a live one.
+    case active
     case viewport
     case screen
   }
@@ -322,6 +326,7 @@ final class PaneSurface {
     var text = ghostty_text_s()
     let tag: ghostty_point_tag_e =
       switch extent {
+      case .active: GHOSTTY_POINT_ACTIVE
       case .viewport: GHOSTTY_POINT_VIEWPORT
       case .screen: GHOSTTY_POINT_SCREEN
       }

@@ -6,12 +6,12 @@ import TouchCodeCore
 /// Sort order per spec AC-P4 (see `docs/product-specs/active-agents-view.md`
 /// and `docs/user-tests/active-agents-view.md` UT-AA-P-003):
 ///
-/// 1. Primary: state priority `waitingForInput > finished > loading > idle`.
+/// 1. Primary: state priority `blocked > finished > working > idle`.
 ///    Note this is the *triage* order surfaced to users — the popover answers
 ///    "what needs attention" first, then "what just completed", then "what's
 ///    still running". It is deliberately distinct from the registry's
-///    internal derive priority (`waitingForInput > loading > finished >
-///    idle`), which answers "what is this pane doing right now".
+///    internal derive priority (`blocked > working > finished > idle`),
+///    which answers "what is this pane doing right now".
 /// 2. Secondary: `lastTransitionAt` descending within the same state bucket
 ///    (most-recent transition first).
 /// 3. Tie-break: `PaneID.raw.uuidString` ascending. This keeps the order
@@ -47,9 +47,9 @@ nonisolated enum SortedEntriesProvider {
   /// Lower number = higher priority (sorts earlier in the list).
   private static func priority(_ state: AgentRegistry.AgentRuntimeState) -> Int {
     switch state {
-    case .waitingForInput: return 0
+    case .blocked: return 0
     case .finished: return 1
-    case .loading: return 2
+    case .working: return 2
     case .idle: return 3
     }
   }

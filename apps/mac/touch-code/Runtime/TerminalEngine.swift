@@ -609,7 +609,10 @@ final class TerminalEngine {
     let hasAgentSignal =
       hierarchy.catalog.pane(paneID)?.agentKind != nil
       || AgentKindPatterns.classify(foregroundJob: foregroundJob) != nil
-    guard hasAgentSignal, let text = surface.readText(.viewport) else { return }
+    // Classify against the active interaction region, not the whole viewport:
+    // scrollback that happens to still be visible must not pin the agent on a
+    // stale prompt/spinner.
+    guard hasAgentSignal, let text = surface.readText(.active) else { return }
     guard viewportSnapshots[paneID] != text else { return }
     viewportSnapshots[paneID] = text
     emit(.paneViewportChanged(paneID, text: text))

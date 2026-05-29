@@ -1303,15 +1303,15 @@ struct HierarchySidebarView: View {
   }
 
   /// True iff any bound agent currently demands the user's attention —
-  /// either it's actively working (`.loading`) or it's blocked on a
-  /// user response (`.waitingForInput`). Drives the auto-open of the
+  /// either it's actively working (`.working`) or it's blocked on a
+  /// user response (`.blocked`). Drives the auto-open of the
   /// ActiveAgents sidebar panel via `.onChange`, gated by Settings →
   /// General → `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange`
   /// fires only on real transitions, not on every entry mutation.
   private var anyAgentNeedsAttention: Bool {
     guard let entries = activeAgentsRegistry?.entries else { return false }
     return entries.values.contains { entry in
-      entry.state == .loading || entry.state == .waitingForInput
+      entry.state == .working || entry.state == .blocked
     }
   }
 

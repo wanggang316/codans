@@ -36,10 +36,10 @@ and per-surface info from libghostty. It does **not** depend on
 
 - A status-bar entry in `WorktreeHeader` shows a one-line summary of
   all active agents across all worktrees (e.g., "3 agents working",
-  "Claude is waiting for input").
+  "Claude is blocked").
 - Hovering the entry opens a popover listing one row per agent-bearing
   Pane: agent logo, project + worktree label, derived runtime state
-  (with an animated indicator for `loading`), last-event time.
+  (with an animated indicator for `working`), last-event time.
 - Clicking a row focuses that Pane, switching project / worktree / tab
   as needed.
 - Identification covers **Claude Code**, **Codex** (OpenAI Codex CLI),
@@ -71,7 +71,7 @@ and per-surface info from libghostty. It does **not** depend on
   style). v1 ships an in-app `WorktreeHeader` entry; menu-bar variant
   is future work.
 - Persisting derived runtime state. Only the *binding* (agentKind,
-  agentSessionID) survives relaunch; loading / waiting / finished
+  agentSessionID) survives relaunch; working / blocked / finished
   are recomputed from the live event stream each launch.
 
 ## Design
@@ -193,7 +193,7 @@ to a prior touch-code build silently drops the fields. No migration
 script needed.
 
 **No new persisted runtime state.** The `AgentRegistry`'s derived state
-(loading / waitingForInput / finished / idle) lives entirely in memory
+(idle / working / blocked / finished) lives entirely in memory
 and is rebuilt from the event stream on each launch. After relaunch a
 Pane shows `idle` until the next signal arrives — acceptable because
 relaunch already drops every other in-memory runtime state (busy bit,
@@ -247,19 +247,18 @@ struct AgentEntry {
 }
 
 enum AgentRuntimeState {
-    case waitingForInput
-    case loading           // == "working" in product copy
-    case finished
     case idle
+    case working
+    case blocked
+    case finished
 }
 
 @MainActor @Observable
 final class AgentRegistry {
     private(set) var entries: [PaneID: AgentEntry] = [:]
     // Internal per-pane scratch state:
-    //   prevPhase: .idle | .loading  (drives finished detection)
-    //   pendingFinished: Bool
-    //   waitingForInput: Bool
+    //   rawState: .idle | .working | .blocked  (drives finished detection)
+    //   seen / userInputSeen: Bool
 }
 ```
 
@@ -268,32 +267,38 @@ system):
 
 | Signal | Effect |
 |---|---|
-| `runningPanes` gains pane | `prevPhase = .loading`; clear `pendingFinished` |
-| `runningPanes` loses pane | if `prevPhase == .loading`, set `pendingFinished = true`; `prevPhase = .idle` |
-| `TerminalEvent.paneIdle` | if `prevPhase == .loading`, set `pendingFinished = true` |
+| Rendered active region classifies as `working` (after user input observed) | live state becomes `working` |
+| Rendered active region classifies as `blocked` (agent-specific heuristic) | live state becomes `blocked` |
+| Active → idle transition while the pane is unobserved | live state becomes `finished` |
 | `paneExited` / `paneCrashed` / `paneClosedByTab` | drop entry and scratch (teardown) |
-| OSC 9 / bell classified as `waitingForInput` (`DetectionTranslator.classify`) | set `waitingForInput = true` |
-| `PaneKeyboardActivityTracker` records key in pane | clear `waitingForInput`; clear `pendingFinished` |
-| Pane gains focus (selection chain points at it AND app frontmost) | clear `pendingFinished`; clear `waitingForInput` |
+| `PaneKeyboardActivityTracker` records key in pane | mark seen; optimistically clear a `blocked` state |
+| Pane gains focus (selection chain points at it AND app frontmost) | mark seen; optimistically clear a `blocked` state |
 | `agentKind` becomes nil | drop entry from registry |
 
-`loading` fires from the running-set channel only, after the bound agent
-has observed user input. Title changes are ignored for runtime-state
-derivation.
+Desktop notifications (OSC 9) and the terminal bell are **not** in this
+table. A bell or OS notification is an inbox-worthy *event*, not a live
+activity signal — a bell rings for completion beeps, error tones, and
+finished commands just as often as for genuine prompts. The notifications
+detector consumes those deltas independently; the live agent state is
+whatever the rendered region says right now. This keeps `blocked`
+from sticking when no prompt is actually on screen.
 
-A defensive 15 s auto-reset lives one layer down in `PaneSurface`: any non-REMOVE OSC 9;4 state schedules a per-surface task that synthesises a REMOVE if no fresh progress event arrives, so a crashed or stuck emitter cannot pin the badge on `.loading` for the rest of the session.
+`working` fires only after the bound agent has observed user input and
+its rendered region matches an agent-specific working cue. Title changes
+are ignored for runtime-state derivation.
+
+A defensive 15 s auto-reset lives one layer down in `PaneSurface`: any non-REMOVE OSC 9;4 state schedules a per-surface task that synthesises a REMOVE if no fresh progress event arrives, so a crashed or stuck emitter cannot pin the badge on `.working` for the rest of the session.
 
 `paneOutput` is deliberately **not** in the table. The libghostty bridge does not currently forward subprocess bytes onto the engine's output stream (see `PaneSurface.onOutput` — deferred), so the event is effectively dead in production and binding state on it would be a spurious dependency.
 
-Final state is a pure function of the scratch fields plus the live
-`runningPanes` set:
+Final state is a pure function of the scratch fields:
 
 ```
 derive(pane) =
-    .waitingForInput     if waitingForInput
-    .loading             if runningPanes.contains(paneID)
-    .finished            if pendingFinished
-    .idle                otherwise
+    .blocked     if rendered region classifies as blocked
+    .working     if rendered region classifies as working
+    .finished    if first active → idle transition is unacknowledged
+    .idle        otherwise
 ```
 
 The derivation matches Gump's stated semantic: `finished` is exactly
@@ -302,10 +307,11 @@ acknowledged yet". `AgentRegistry` owns the acknowledgement flag
 locally — it does not read `NotificationStore.readAt`, keeping the
 two subsystems independent.
 
-`DetectionTranslator.classify` is the same pure function the
-notifications detector uses for OSC 9 / bell classification —
-re-exported from `TouchCodeCore` so both consumers share one
-implementation.
+`PaneAttentionInterpreter.classifyAgentActivity` is the agent-specific
+heuristic the registry runs over the rendered active region. The
+notifications detector still owns OSC 9 / bell classification for the
+inbox; the two subsystems share `TouchCodeCore` but derive their states
+from different inputs and stay independent.
 
 ### UI
 
@@ -316,15 +322,15 @@ renders:
 
 - **Empty state** (no entries): hidden entirely.
 - **Single agent**: agent's logo + `"<DisplayName> is <verb>"` —
-  e.g., `"Claude Code is waiting for input"`.
+  e.g., `"Claude Code is blocked"`.
 - **Multiple agents, same state**: small badge + count, e.g.,
   `"3 agents working"`.
 - **Mixed states**: condensed form prioritising the highest-priority
-  state, e.g., `"2 working · 1 waiting"`.
+  state, e.g., `"2 working · 1 blocked"`.
 
-Verb priority for the headline: `waitingForInput > loading > finished > idle`.
+Verb priority for the headline: `blocked > working > finished > idle`.
 The icon pulses (subtle opacity 0.6 ↔ 1.0 over 1.2 s, prefers-reduced-
-motion respected) when any entry is in `loading` or `waitingForInput`.
+motion respected) when any entry is in `working` or `blocked`.
 
 **Hover popover** uses SwiftUI's `.popover(isPresented:)` with a
 `.hovering`-based controller that opens after 250 ms of sustained
@@ -335,7 +341,7 @@ pointer is over it).
 Popover contents:
 - Header: `"Active Agents (<n>)"`
 - Sorted list of all `AgentEntry`s, sorted by:
-  1. State priority: `waitingForInput > finished > loading > idle`
+  1. State priority: `blocked > finished > working > idle`
      (Gump's order — surfaces the rows the user needs to triage
      first; idle drops to bottom).
   2. `lastTransitionAt` descending within the same state bucket.
@@ -344,11 +350,11 @@ Popover contents:
     if asset missing).
   - Title line: `<ProjectName> / <WorktreeName>` (truncated middle).
   - Subtitle: state icon + state label + relative time
-    (`"working · 12s"` / `"waiting · 4m"` / `"finished · just now"` /
+    (`"working · 12s"` / `"blocked · 4m"` / `"finished · just now"` /
     `"idle · 1h"`).
   - State icon set:
-    - `.waitingForInput` → `bell.badge.fill`, amber.
-    - `.loading` → rotating `arrow.triangle.2.circlepath`, accent.
+    - `.blocked` → `bell.badge.fill`, amber.
+    - `.working` → rotating `arrow.triangle.2.circlepath`, accent.
     - `.finished` → `checkmark.circle.fill`, green.
     - `.idle` → `circle`, secondary.
   - Click: dispatches a Root action that walks the catalog to the
@@ -407,7 +413,7 @@ optional fields is small; the long-term clarity gain is large.
 
 **B. Revive C6 v1's per-Pane `AgentStateTracker` FSM with persisted
 transitions.** Provides richer history (e.g., "this agent went
-loading → waiting → loading three times in the last minute") and a
+working → blocked → working three times in the last minute") and a
 persistable timeline. Rejected because ActiveAgents needs exactly
 the most recent state — not a transition log — and adding persistence
 back doubles the surface area for a feature whose entire value is "a
@@ -476,7 +482,7 @@ runaway re-identification loops). No counters / metrics in v1.
 
 **Accessibility.**
 - Status-bar entry: full `accessibilityLabel` covering current
-  headline ("Claude Code is waiting for input"), `accessibilityHint`
+  headline ("Claude Code is blocked"), `accessibilityHint`
   ("Open the active agents popover").
 - Popover rows: `accessibilityLabel` combining agent, worktree,
   state, age. State icons carry `accessibilityHidden(true)` since
