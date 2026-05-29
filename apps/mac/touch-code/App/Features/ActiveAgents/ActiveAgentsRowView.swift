@@ -105,7 +105,6 @@ struct ActiveAgentsRowView: View {
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .padding(.leading, 8)
       }
     case .compact:
       // Single-line variant: worktree at the leading edge, a small
