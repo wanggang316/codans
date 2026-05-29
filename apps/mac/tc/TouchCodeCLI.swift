@@ -7,7 +7,7 @@ import tcKit
 
 @main
 struct TouchCodeCLI: AsyncParsableCommand {
-  static let version = "0.3.3"
+  static let version = "0.3.4"
 
   static let configuration = CommandConfiguration(
     commandName: "tc",
