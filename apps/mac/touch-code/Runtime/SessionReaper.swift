@@ -183,7 +183,7 @@ public final class SessionReaper {
     do {
       contents = try fm.contentsOfDirectory(
         at: socketDirectory,
-        includingPropertiesForKeys: [.isRegularFileKey],
+        includingPropertiesForKeys: [.isDirectoryKey],
         options: [.skipsHiddenFiles]
       )
     } catch {
@@ -199,12 +199,16 @@ public final class SessionReaper {
 
     for url in contents {
       // The socket directory also holds `logs/` and `snapshots/`
-      // subdirectories; filter to regular files whose name parses as a
-      // UUID (zmx writes sockets as `<ZMX_DIR>/<session_name>`, and we
-      // pass `paneID.raw.uuidString` as the session name). Anything else
-      // is foreign and must be left alone.
-      let resourceValues = try? url.resourceValues(forKeys: [.isRegularFileKey])
-      guard resourceValues?.isRegularFile == true else { continue }
+      // subdirectories. We exclude directories rather than requiring a
+      // regular file: zmx's control socket is a Unix domain socket
+      // (`S_IFSOCK`), so `isRegularFile` is FALSE for the very files we
+      // need to reap — gating on it would skip every real daemon. The
+      // UUID-name parse below is the actual identity filter (zmx writes
+      // sockets as `<ZMX_DIR>/<session_name>` and we pass
+      // `paneID.raw.uuidString` as the session name); excluding
+      // directories is only a guard against a stray UUID-named folder.
+      let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey])
+      if resourceValues?.isDirectory == true { continue }
       let name = url.lastPathComponent
       guard let uuid = UUID(uuidString: name) else { continue }
       let paneID = PaneID(raw: uuid)
