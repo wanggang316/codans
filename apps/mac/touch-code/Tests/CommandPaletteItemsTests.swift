@@ -105,6 +105,49 @@ struct CommandPaletteItemsTests {
     #expect(ids.contains("editor.open.zed"))
   }
 
+  // MARK: - Worktree switch targets
+
+  /// Every live Worktree except the selected one becomes a switch target,
+  /// and its subtitle is the Project name so a Project-name query surfaces
+  /// all of that Project's worktrees through the scorer's subtitle band.
+  @Test
+  func worktreeSwitchItemsCarryProjectNameSubtitle() {
+    var catalog = Catalog()
+    var project = Project(name: "Acme", rootPath: "/tmp/acme", gitRoot: "/tmp/acme")
+    let selected = Worktree(name: "main", path: "/tmp/acme/main", branch: "main")
+    let other = Worktree(name: "feature", path: "/tmp/acme/feature", branch: "feature")
+    project.worktrees = [selected, other]
+    catalog.projects = [project]
+    let selection = HierarchySelection(projectID: project.id, worktreeID: selected.id)
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(selection: selection, catalog: catalog)
+    }
+    let switchItem = items.first { $0.id == "worktree.select.\(other.id.raw.uuidString)" }
+    #expect(switchItem != nil)
+    #expect(switchItem?.subtitle == "Acme")
+    // The selected worktree is never offered as its own switch target.
+    #expect(!items.contains { $0.id == "worktree.select.\(selected.id.raw.uuidString)" })
+  }
+
+  /// Archived Worktrees are soft-hidden from the sidebar, so they must not
+  /// appear as Command Palette switch targets either.
+  @Test
+  func archivedWorktreesAreNotSwitchTargets() {
+    var catalog = Catalog()
+    var project = Project(name: "Acme", rootPath: "/tmp/acme", gitRoot: "/tmp/acme")
+    let selected = Worktree(name: "main", path: "/tmp/acme/main", branch: "main")
+    let archived = Worktree(
+      name: "old", path: "/tmp/acme/old", branch: "old", archived: true
+    )
+    project.worktrees = [selected, archived]
+    catalog.projects = [project]
+    let selection = HierarchySelection(projectID: project.id, worktreeID: selected.id)
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(selection: selection, catalog: catalog)
+    }
+    #expect(!items.contains { $0.id == "worktree.select.\(archived.id.raw.uuidString)" })
+  }
+
   // MARK: - Focused pane resolution
 
   @Test
