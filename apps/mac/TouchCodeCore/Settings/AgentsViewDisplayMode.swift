@@ -1,6 +1,6 @@
 import Foundation
 
-/// Row density for the ActiveAgents sidebar panel. `normal` keeps the
+/// Row density for the AgentState sidebar panel. `normal` keeps the
 /// two-line identity column (worktree on top, project beneath) at the
 /// default vertical padding; `compact` collapses both names onto a
 /// single line and tightens the row's vertical padding so more agents

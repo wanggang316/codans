@@ -1,17 +1,17 @@
 import Foundation
 import TouchCodeCore
 
-/// Pure helper that orders `AgentRegistry.entries` for the popover.
+/// Pure helper that orders `AgentStateStore.entries` for the agent-state view.
 ///
 /// Sort order per spec AC-P4 (see `docs/product-specs/active-agents-view.md`
 /// and `docs/user-tests/active-agents-view.md` UT-AA-P-003):
 ///
-/// 1. Primary: state priority `waitingForInput > finished > loading > idle`.
-///    Note this is the *triage* order surfaced to users — the popover answers
+/// 1. Primary: state priority `blocked > finished > working > idle`.
+///    Note this is the *triage* order surfaced to users — the view answers
 ///    "what needs attention" first, then "what just completed", then "what's
 ///    still running". It is deliberately distinct from the registry's
-///    internal derive priority (`waitingForInput > loading > finished >
-///    idle`), which answers "what is this pane doing right now".
+///    internal derive priority (`blocked > working > finished > idle`),
+///    which answers "what is this pane doing right now".
 /// 2. Secondary: `lastTransitionAt` descending within the same state bucket
 ///    (most-recent transition first).
 /// 3. Tie-break: `PaneID.raw.uuidString` ascending. This keeps the order
@@ -22,15 +22,15 @@ import TouchCodeCore
 ///
 /// Pure logic: zero SwiftUI imports, trivially unit-testable. The enum
 /// itself is `nonisolated`; the `sorted` static is `@MainActor` only
-/// because `AgentRegistry.AgentEntry` is MainActor-isolated by the
+/// because `AgentStateStore.AgentEntry` is MainActor-isolated by the
 /// target's default actor (the registry it lives on is `@MainActor`).
 /// Tests run under `@MainActor` to satisfy this — see
 /// `SortedEntriesProviderTests`.
 nonisolated enum SortedEntriesProvider {
   @MainActor
   static func sorted(
-    _ entries: [PaneID: AgentRegistry.AgentEntry]
-  ) -> [(paneID: PaneID, entry: AgentRegistry.AgentEntry)] {
+    _ entries: [PaneID: AgentStateStore.AgentEntry]
+  ) -> [(paneID: PaneID, entry: AgentStateStore.AgentEntry)] {
     entries
       .map { (paneID: $0.key, entry: $0.value) }
       .sorted { lhs, rhs in
@@ -45,11 +45,11 @@ nonisolated enum SortedEntriesProvider {
   }
 
   /// Lower number = higher priority (sorts earlier in the list).
-  private static func priority(_ state: AgentRegistry.AgentRuntimeState) -> Int {
+  private static func priority(_ state: AgentStateStore.AgentRuntimeState) -> Int {
     switch state {
-    case .waitingForInput: return 0
+    case .blocked: return 0
     case .finished: return 1
-    case .loading: return 2
+    case .working: return 2
     case .idle: return 3
     }
   }

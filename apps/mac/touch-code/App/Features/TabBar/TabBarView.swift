@@ -17,6 +17,10 @@ struct TabBarView: View {
   let projectID: ProjectID
   let worktreeID: WorktreeID
   let activeTabID: TabID?
+  /// AgentState registry (optional — previews / tests omit it). OR'd into the
+  /// per-tab busy spinner so a chip lights while a bound agent in that tab is
+  /// `.working`, complementing the terminal signal from `tabIsDirty`.
+  var agentStateStore: AgentStateStore?
   @Environment(HierarchyManager.self) private var hierarchyManager
 
   var body: some View {
@@ -133,15 +137,32 @@ struct TabBarView: View {
     return tab.splitTree.isEmpty ? nil : tab.splitTree
   }
 
+  /// True iff tab `tabID` has a pane hosting a bound agent currently `.working`.
+  /// Static so the `isDirty` closure stays a light value-capture; only `.working`
+  /// counts (`.blocked` is "waiting on the user", not busy).
+  private static func tabHasWorkingAgent(
+    _ tabID: TabID, in worktree: Worktree, store: AgentStateStore?
+  ) -> Bool {
+    guard let entries = store?.entries, !entries.isEmpty,
+      let tab = worktree.tabs.first(where: { $0.id == tabID })
+    else { return false }
+    return tab.panes.contains { entries[$0.id]?.state == .working }
+  }
+
   @ViewBuilder
   private func rowView(for worktree: Worktree) -> some View {
     TabBarRowView(
       tabs: worktree.tabs,
       activeTabID: activeTabID,
-      // Read through the @Observable HierarchyManager so any hook flip
-      // of runningPanes triggers a chip re-render. Works against the
-      // default-false stub on `.liveValue` / unconfigured clients.
-      isDirty: { tabID in hierarchyManager.tabIsDirty(tabID) },
+      // Read through the @Observable HierarchyManager so any flip of the
+      // terminal signal (OSC 9;4 progress ∪ running foreground command)
+      // triggers a chip re-render. OR in the render-derived agent `.working`
+      // state for this tab; reading `agentStateStore.entries` here registers
+      // the @Observable dependency that re-renders the chip on a state flip.
+      isDirty: { tabID in
+        hierarchyManager.tabIsDirty(tabID)
+          || Self.tabHasWorkingAgent(tabID, in: worktree, store: agentStateStore)
+      },
       onSelect: { tabID in
         store.send(
           .tabButtonTapped(

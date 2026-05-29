@@ -174,6 +174,11 @@ nonisolated struct HierarchyClient: Sendable {
   /// Dormant writer — calls `HierarchyManager.markPaneIdle`. No caller
   /// today; lands a real writer with the C3 hooks plan.
   var markPaneIdle: @MainActor @Sendable (_ paneID: PaneID) -> Void
+  /// Writer for the foreground-command busy flag, calling
+  /// `HierarchyManager.setPaneCommandBusy`. The root reducer invokes it when
+  /// the foreground-job poller reports a pane's group started/stopped a
+  /// non-agent command. Unions with OSC 9;4 in `tabIsDirty` / `worktreeIsDirty`.
+  var setPaneCommandBusy: @MainActor @Sendable (_ paneID: PaneID, _ busy: Bool) -> Void
 
   var openPane:
     @MainActor @Sendable (
@@ -213,15 +218,6 @@ nonisolated struct HierarchyClient: Sendable {
   // `SettingsStore.mutateProject` (`SettingsWriter.setProjectDefaultEditor` /
   // `SettingsWriter.setProjectWorktreesDirectory`). HierarchyClient is read-only for
   // per-Project preferences (see `snapshot` / `kind`).
-
-  /// Flips `Worktree.diffInspectorVisible` for the given Worktree. Silent no-op on
-  /// unknown `worktreeID`; persists through the standard debounced
-  /// `store.scheduleSave(catalog)` pipeline (T0 §D5). Consumed by the T2
-  /// Header Git Viewer toggle and by T3's overlay presentation binding.
-  var setWorktreeDiffInspectorVisible:
-    @MainActor @Sendable (
-      _ worktreeID: WorktreeID, _ visible: Bool
-    ) -> Void
 
   var snapshot: @MainActor @Sendable () -> Catalog
 
@@ -596,6 +592,7 @@ extension HierarchyClient {
       lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
       markPaneRunning: { paneID in manager.markPaneRunning(paneID) },
       markPaneIdle: { paneID in manager.markPaneIdle(paneID) },
+      setPaneCommandBusy: { paneID, busy in manager.setPaneCommandBusy(paneID, busy) },
       openPane: { [weak settings] tabID, worktreeID, projectID, cwd, initial in
         // Defensive guard against stale catalog state: when a worktree
         // is deleted outside the app (`git worktree remove`) before
@@ -650,9 +647,6 @@ extension HierarchyClient {
           at: path, ratio: ratio,
           in: tabID, in: worktreeID, in: projectID
         )
-      },
-      setWorktreeDiffInspectorVisible: { worktreeID, visible in
-        manager.setWorktreeDiffInspectorVisible(worktreeID: worktreeID, visible: visible)
       },
       snapshot: { manager.catalog },
       selectionChanges: { makeSelectionStream(manager: manager) },
@@ -1360,13 +1354,13 @@ extension HierarchyClient: DependencyKey {
     lastFocusedPane: { _ in nil },
     markPaneRunning: { _ in },
     markPaneIdle: { _ in },
+    setPaneCommandBusy: { _, _ in },
     openPane: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     splitPane: { _, _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closePane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     focusPane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     focusSurfaceView: { _ in fatalError("HierarchyClient.liveValue not configured") },
     resizeSplit: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setWorktreeDiffInspectorVisible: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     snapshot: { fatalError("HierarchyClient.liveValue not configured") },
     selectionChanges: { AsyncStream { $0.finish() } },
     setWorktreeArchived: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1447,6 +1441,7 @@ extension HierarchyClient: DependencyKey {
     lastFocusedPane: unimplemented("HierarchyClient.lastFocusedPane", placeholder: nil),
     markPaneRunning: unimplemented("HierarchyClient.markPaneRunning"),
     markPaneIdle: unimplemented("HierarchyClient.markPaneIdle"),
+    setPaneCommandBusy: unimplemented("HierarchyClient.setPaneCommandBusy"),
     openPane: unimplemented("HierarchyClient.openPane", placeholder: PaneID()),
     splitPane: unimplemented("HierarchyClient.splitPane", placeholder: PaneID()),
     closePane: unimplemented("HierarchyClient.closePane"),
@@ -1456,7 +1451,6 @@ extension HierarchyClient: DependencyKey {
     // an `unimplemented` here turns ~all routing tests into noisy stub farms.
     focusSurfaceView: { _ in },
     resizeSplit: unimplemented("HierarchyClient.resizeSplit"),
-    setWorktreeDiffInspectorVisible: unimplemented("HierarchyClient.setWorktreeDiffInspectorVisible"),
     snapshot: unimplemented(
       "HierarchyClient.snapshot",
       placeholder: Catalog()

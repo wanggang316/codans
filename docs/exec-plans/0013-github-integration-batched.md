@@ -135,7 +135,7 @@ Net: +40 new tests. Design-doc estimated +50; the difference is M6 subtractions 
 
 ### Follow-ups (filed to be scheduled)
 
-1. **Migrate `postMutationRefresh` to project-level** — after merge/close/markReady/rerun, dispatch `projectRefreshRequested` with a 2 s delay instead of the current single-branch refresh. Requires a WorktreeID → ProjectID lookup plumbed into state, then the single-branch `pullRequest(branch:)` / `snapshotFetchEffect` can be fully removed.
+1. ~~**Migrate `postMutationRefresh` to project-level**~~ — **delivered by 0018 (2026-05-30).** `postMutationRefresh` and the badge/popover retry now resolve the owning Project via a `projectByWorktree` map and dispatch a 2 s delayed `projectRefreshRequested`; the single-branch `pullRequest(branch:)` / `snapshotFetchEffect` surface (and the `worktreeBecameVisible` / `refreshRequested` / `snapshotLoaded` actions, `GhCommand.pullRequestView`, `JSONOutputParsers.parsePullRequest`) is fully removed. Closes DEC-6.
 2. **Wire availability recovery heartbeat** — on availability flip to `.unavailable`, start a 15 s `Task { while … sleep … reprobe }` loop; on recovery, drain `queuedRefreshByProject`.
 3. **M7 — `WorktreeBranchWatcher`** — filesystem watch on `.git/HEAD` per visible Worktree to catch terminal-initiated branch changes within ~1 s instead of waiting for focus-regain reconcile.
 4. **Open Question 4 resolution** — measure whether `checkRollup[].detailsURL` reliably carries a parseable run ID; if yes, drop `latestWorkflowRun` and its state map.

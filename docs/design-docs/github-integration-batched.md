@@ -430,6 +430,7 @@ The v1 freshness window (30 s per snapshot, per Worktree) is deleted. Replaced w
 | Manual refresh | user action (palette, popover refresh button) | refresh Project immediately |
 | `gh` availability recovered from `.unavailable` | `GhAvailabilityCache` | refresh every Project that has a queued refresh request |
 | App became active (optional, behind setting) | `NSApp.didBecomeActiveNotification` | refresh all open Projects, rate-limited to 60s per Project |
+| Active-Project liveness poll | foreground timer, gated on `NSApp.isActive` × the active Project | forced refresh of the active Project on an adaptive cadence (~15 s while a PR has CI in flight or an unsettled merge state, ~60 s once settled); cancelled the instant the app resigns active, so an idle/backgrounded app polls zero times |
 
 **Re-entrancy model.** Each Project carries three state slots:
 
@@ -793,6 +794,8 @@ Poll every Project every N seconds on a background timer.
 - **Upside:** Simple mental model. UI always fresh-ish.
 - **Downside:** Consumes rate limit continuously even when the user is AFK. Battery drain. Adds a "background activity" concept that touch-code otherwise does not have.
 - **Why rejected:** Event-driven is strictly better: same freshness guarantee when the user is interacting, zero cost when idle. The few rare "GitHub state changed without me doing anything" cases are handled by manual refresh (popover reload button) and merge-side delayed refresh.
+
+**Update — a scoped, focus-gated, adaptive poll is adopted.** The "same freshness guarantee when the user is interacting" premise holds only for *local* state: a user typing in a terminal pane is not a GitHub-invalidating event, so check completions, reviews, and merges/closes that originate on GitHub's side have no freshness guarantee under pure event-driven invalidation. The added signal is a single poll that refreshes **only the active Project**, **only while the app is the frontmost application** (cancelled on resign-active), at an **adaptive cadence** (fast only while something is genuinely in flight). Each of D's three objections targets *background, all-Project, runs-while-AFK* polling and is sidestepped by this scoping: an AFK user's app is not frontmost, so it polls zero times — no continuous rate-limit burn, no battery drain, no always-on background-activity concept. The relevant guard against pathological burn is Open Question 5 (rate-limit-aware global backoff). See the "Active-Project liveness poll" row in Caching and Invalidation.
 
 ### E. Persist last snapshot to disk for instant-on-restart
 

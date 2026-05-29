@@ -54,14 +54,15 @@ final class AppearanceApplyingView: NSView {
   }
 
   private func syncGhosttyScheme(reason: String) {
-    // Resolve from the user preference, NOT the view's effective appearance.
-    // `applyAppearance` overrides main-window `appearance` with the value
-    // inferred from the Ghostty terminal background's luminance — that
-    // override cascades back into the view's effective appearance, so
-    // sampling it here would create a feedback loop that drops the user's
-    // picker on the floor whenever the inferred chrome appearance and the
-    // picker disagree (e.g. user picks "Light" but the active Ghostty
-    // palette has a dark background).
+    // Explicit light/dark resolve from the preference *constant*, never from the
+    // view's effective appearance: `applyAppearance` overrides the main window's
+    // `appearance` with the value inferred from the Ghostty terminal
+    // background's luminance, and sampling that back would form a feedback loop
+    // that drops the user's picker whenever the inferred chrome appearance and
+    // the picker disagree (e.g. user picks "Light" but the active Ghostty
+    // palette has a dark background). `.system` is exempt — it leaves
+    // `window.appearance` nil (no override, no loop), so it safely samples the
+    // view's own effective appearance. See `resolveColorScheme`.
     let scheme = resolveColorScheme()
     guard lastPushedGhosttyScheme != scheme else { return }
     lastPushedGhosttyScheme = scheme
@@ -73,16 +74,22 @@ final class AppearanceApplyingView: NSView {
     )
   }
 
-  /// User-picker-driven scheme. `.system` resolves via `NSApp.effectiveAppearance`
-  /// (which follows the OS dark-mode flag when `NSApp.appearance` is nil) so an
-  /// OS-level flip still propagates into Ghostty even though we override the
-  /// main window's `appearance` below.
+  /// User-picker-driven scheme. `.system` reads *this view's* effective
+  /// appearance — which follows the OS dark-mode flag while both
+  /// `NSApp.appearance` and the window's `appearance` are nil. We deliberately
+  /// avoid `NSApp.effectiveAppearance`: inside `viewDidChangeEffectiveAppearance`
+  /// the view's own value is the already-settled, authoritative one, whereas the
+  /// app-level property can lag a runloop turn behind right after
+  /// `NSApp.appearance` is cleared to nil. That lag made the light→system flip
+  /// resolve stale-light, trip the `lastPushedGhosttyScheme` dedup, and never
+  /// push the dark palette — with no second callback to retry (the sidebar
+  /// chrome then kept the light tone until the next explicit toggle).
   private func resolveColorScheme() -> SwiftUI.ColorScheme {
     switch preference {
     case .light: return .light
     case .dark: return .dark
     case .system:
-      let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+      let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
       return isDark ? .dark : .light
     }
   }

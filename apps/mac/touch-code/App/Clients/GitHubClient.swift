@@ -10,7 +10,6 @@ import TouchCodeCore
 /// `@Sendable async` — safe to call from any reducer effect.
 nonisolated struct GitHubClient: Sendable {
   var availability: @Sendable () async -> GitHubAvailability
-  var pullRequest: @Sendable (_ branch: String, _ worktreePath: URL) async throws -> PullRequestSnapshot?
   var latestWorkflowRun: @Sendable (_ branch: String, _ worktreePath: URL) async throws -> WorkflowRun?
   var merge: @Sendable (_ number: Int, _ strategy: MergeStrategy, _ worktreePath: URL) async throws -> Void
   var close: @Sendable (_ number: Int, _ worktreePath: URL) async throws -> Void
@@ -29,7 +28,6 @@ extension GitHubClient {
   static func live(service: any GitHubService = GitHub.makeService()) -> GitHubClient {
     GitHubClient(
       availability: { await service.availability() },
-      pullRequest: { branch, path in try await service.pullRequest(branch: branch, worktreePath: path) },
       latestWorkflowRun: { branch, path in try await service.latestWorkflowRun(branch: branch, worktreePath: path) },
       merge: { number, strategy, path in
         try await service.merge(number: number, strategy: strategy, worktreePath: path)
@@ -56,7 +54,6 @@ extension GitHubClient: DependencyKey {
     // to fail any XCTest case that doesn't manually override per-test, even
     // when the test itself is skipped.
     availability: { .unknown },
-    pullRequest: unimplemented("GitHubClient.pullRequest", placeholder: nil),
     latestWorkflowRun: unimplemented("GitHubClient.latestWorkflowRun", placeholder: nil),
     merge: unimplemented("GitHubClient.merge"),
     close: unimplemented("GitHubClient.close"),

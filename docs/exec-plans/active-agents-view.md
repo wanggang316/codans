@@ -1,4 +1,4 @@
-# ExecPlan: ActiveAgents View
+# ExecPlan: AgentState View
 
 **Status:** Draft
 **Author:** Gump (with Claude)
@@ -16,7 +16,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 - **识别覆盖**：Claude Code、OpenAI Codex CLI、Inflection pi 三家。pane 退出时自动解绑；shell 回到 OSC 133 顶层 prompt 且 title 变成另一已知 Agent 时重新绑定。
 - **独立性**：与现有通知系统并列消费 `runningPanes` + `TerminalEvent` + `PaneKeyboardActivityTracker`，**不**依赖 `NotificationStore`，muted pane 仍然出现在视图里。
 
-技术上落两层结构：`TouchCodeCore` 新增 `AgentKind` 枚举 + `Pane.agentKind` / `Pane.agentSessionID` 两个 optional 字段（前向兼容旧 catalog）；`apps/mac/touch-code/Runtime/AgentBinder` 在 pane 生命周期内识别并写回字段；`apps/mac/touch-code/App/Features/ActiveAgents/AgentRegistry` 维护派生运行态。完整背景见 design doc。
+技术上落两层结构：`TouchCodeCore` 新增 `AgentKind` 枚举 + `Pane.agentKind` / `Pane.agentSessionID` 两个 optional 字段（前向兼容旧 catalog）；`apps/mac/touch-code/Runtime/AgentBinder` 在 pane 生命周期内识别并写回字段；`apps/mac/touch-code/App/Features/AgentState/AgentStateStore` 维护派生运行态。完整背景见 design doc。
 
 ## Progress
 
@@ -30,9 +30,9 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 - [ ] T1 — `AgentKind` + `Pane` 字段 + `AgentKindPatterns` 表（TouchCodeCore）— status: not_started
 - [ ] T2 — `HierarchyClient.setPaneAgentKind` / `setPaneAgentSessionID` 写入器 — status: not_started
 - [ ] T3 — `AgentBinder` 识别器（Runtime 层，订阅 SurfaceInfo + TerminalEvent + 生命周期）— status: not_started
-- [ ] T4 — `AgentRegistry` 派生态机（App/Features/ActiveAgents）+ 单测 — status: not_started
-- [ ] T5 — `ActiveAgentsPopoverView` + `ActiveAgentsRowView`（命令面板入口可达即视为可见）— status: not_started
-- [ ] T6 — `ActiveAgentsBadgeView` 状态栏徽章 + hover bridge + WorktreeHeader 集成 — status: not_started
+- [ ] T4 — `AgentStateStore` 派生态机（App/Features/AgentState）+ 单测 — status: not_started
+- [ ] T5 — `AgentStateView` + `AgentStateRowView`（命令面板入口可达即视为可见）— status: not_started
+- [ ] T6 — `AgentStateView` 状态栏徽章 + hover bridge + WorktreeHeader 集成 — status: not_started
 - [ ] T7 — Logo 资源接入 + 文案优先级 + pulse 动效（含 reduce-motion 分支）— status: not_started
 - [ ] T8 — 跨一致性回归测：`DetectionTranslator.classify` 在两个消费者间一致 — status: not_started
 
@@ -51,8 +51,8 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 ## Decision Log
 
 - **2026-05-22**：识别字段落到 `Pane.agentKind` / `Pane.agentSessionID`（而非 `Pane.labels` 字符串），换取类型安全与子系统解耦，付一次性 Codable 增量。
-- **2026-05-22**：`finished` 仅由 `AgentRegistry` 自己的 `pendingFinished` flag 决定，**不**读 `NotificationStore.readAt`，保留两条消费者独立。
-- **2026-05-22**：状态栏入口先做 in-app `WorktreeHeader` 版，`NSStatusItem` 留作后续。`AgentRegistry` 与 `ActiveAgentsBadgeView` 之间走 `@Observable`，前端壳替换不动数据层。
+- **2026-05-22**：`finished` 仅由 `AgentStateStore` 自己的 `pendingFinished` flag 决定，**不**读 `NotificationStore.readAt`，保留两条消费者独立。
+- **2026-05-22**：状态栏入口先做 in-app `WorktreeHeader` 版，`NSStatusItem` 留作后续。`AgentStateStore` 与 `AgentStateView` 之间走 `@Observable`，前端壳替换不动数据层。
 - **2026-05-22**：`agentSessionID` 字段先开但 v1 不实际抓取——避免 banner-parser 与识别耦合在第一版。
 
 ## Outcomes & Retrospective
@@ -71,23 +71,23 @@ Related documents:
 Key source files:
 
 - `apps/mac/TouchCodeCore/Pane.swift` — 值类型，本计划在此追加 `agentKind` / `agentSessionID` 两个 optional 字段并升级 Codable。
-- `apps/mac/TouchCodeCore/Notifications/DetectionTranslator.swift` — pure 分类函数 `classify(title:body:) -> InboxEntry.Kind`，`AgentRegistry` 与 `NotificationDetector` 共享同一份。
+- `apps/mac/TouchCodeCore/Notifications/DetectionTranslator.swift` — pure 分类函数 `classify(title:body:) -> InboxEntry.Kind`，`AgentStateStore` 与 `NotificationDetector` 共享同一份。
 - `apps/mac/touch-code/Runtime/HierarchyManager.swift` — 持久化、selection chain、`runningPanes` Set 的归属点；本计划新增 `setPaneAgentKind` / `setPaneAgentSessionID` 写入器，复用既有 debounced save pipeline。
 - `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — TCA 依赖注入接口，本计划在 `liveValue` / `testValue` / `unimplemented` 三处分别加两个新方法。
 - `apps/mac/touch-code/Runtime/Ghostty/SurfaceInfo.swift` — `@Observable` per-surface 信息载体；`title` / `lastNotificationTitle` / `bellCount` 为识别与 `waitingForInput` 派生的事件源。注意：**没有 process_info / pid**。
-- `apps/mac/touch-code/Runtime/TerminalEngine.swift` — `AsyncStream<TerminalEvent>` 入口；`AgentBinder` 与 `AgentRegistry` 通过 RootFeature 已有的 fan-out 接到事件。
+- `apps/mac/touch-code/Runtime/TerminalEngine.swift` — `AsyncStream<TerminalEvent>` 入口；`AgentBinder` 与 `AgentStateStore` 通过 RootFeature 已有的 fan-out 接到事件。
 - `apps/mac/touch-code/App/Features/Notifications/PaneKeyboardActivityTracker.swift` — 复用同一 tracker 监听键盘活动，用于 `waitingForInput` / `pendingFinished` 的清除。
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift:170-180,420-435,670-690` — `paneProgressBusyChanged` 流向 `runningPanes` 的现成路径；新 `AgentRegistry` 通过同一个 `engineEventReceived` chain 订阅事件。
+- `apps/mac/touch-code/App/Features/Root/RootFeature.swift:170-180,420-435,670-690` — `paneProgressBusyChanged` 流向 `runningPanes` 的现成路径；新 `AgentStateStore` 通过同一个 `engineEventReceived` chain 订阅事件。
 - `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderView.swift` + `WorktreeHeaderFeature.swift` — 入口宿主；徽章插在既有 `StatusBarBellView`（inbox bell）旁。
-- `apps/mac/touch-code/App/Features/StatusBar/StatusBarFeature.swift` — 已有的 toast 状态栏（与本计划的 ActiveAgents 状态栏概念**不同**：toast 是瞬时通知，ActiveAgents 是常驻徽章）；阅读以避免命名混淆。
+- `apps/mac/touch-code/App/Features/StatusBar/StatusBarFeature.swift` — 已有的 toast 状态栏（与本计划的 AgentState 状态栏概念**不同**：toast 是瞬时通知，AgentState 是常驻徽章）；阅读以避免命名混淆。
 
 术语对齐：
 
 - **Agent** — 在 pane 里跑的、被 `AgentKind` 表识别过的命令行 AI 编程工具（v1 = Claude Code / Codex / pi）。
 - **Identification（绑定）** — 把 `agentKind` 写到 `Pane` 上的过程；持久、跨重启留存、由 `AgentBinder` 独占写入。
-- **Derived state（派生态）** — `loading / waitingForInput / finished / idle`，由 `AgentRegistry` 从事件流推出，纯 in-memory。
+- **Derived state（派生态）** — `loading / waitingForInput / finished / idle`，由 `AgentStateStore` 从事件流推出，纯 in-memory。
 - **Sticky binding（粘性绑定）** — 一旦 `agentKind` 设上，仅在 pane teardown 或 OSC 133 prompt + 新 Agent 模式匹配时解绑/换绑。
-- **Hover bridge** — popover 在徽章与 popover 之间允许鼠标"过桥"而不消失的常见 UI pattern；250 ms 进入延迟、150 ms 出延迟在 `ActiveAgentsBadgeView` 一处集中可调。
+- **Hover bridge** — popover 在徽章与 popover 之间允许鼠标"过桥"而不消失的常见 UI pattern；250 ms 进入延迟、150 ms 出延迟在 `AgentStateView` 一处集中可调。
 
 ## Plan of Work
 
@@ -100,7 +100,7 @@ Key source files:
 1. `Pane` 类型携带 `agentKind: AgentKind?` 与 `agentSessionID: String?`，旧 catalog.json 解码不报错，新写入往返一致。
 2. 一个跑在后台的 `AgentBinder` 已经在监听所有 pane 的 SurfaceInfo / TerminalEvent，会在能识别出 Agent 时把字段写回 catalog。
 
-此 milestone 不出 UI；可通过 dev 设置里**单独**新开的开关 `Settings.developer.activeAgentsDebugLogging` 看到识别日志（仅 dev build；commit log 中明示）。
+此 milestone 不出 UI；可通过 dev 设置里**单独**新开的开关 `Settings.developer.agentStateDebugLogging` 看到识别日志（仅 dev build；commit log 中明示）。
 
 #### T1：`AgentKind` + `Pane` 字段 + 模式表（TouchCodeCore，纯值类型）
 
@@ -237,7 +237,7 @@ final class AgentBinder {
 
 **preconditions**: T1、T2 已 commit。`make mac-build` 绿。
 
-**expected_behavior**: 单测全绿；dev build 启动后在 `~/Library/Logs/touch-code` 能看到 `com.touch-code.activeagents` 类别 info 行（识别命中），手动跑一次 `claude --version` 在新建 tab 里 → catalog.json 出现 `"agentKind": "claude-code"`。
+**expected_behavior**: 单测全绿；dev build 启动后在 `~/Library/Logs/touch-code` 能看到 `com.touch-code.agentstate` 类别 info 行（识别命中），手动跑一次 `claude --version` 在新建 tab 里 → catalog.json 出现 `"agentKind": "claude-code"`。
 
 **verification_steps**:
 1. `make mac-test ARGS="-only-testing:touch-codeTests/AgentBinderTests"` 全绿。
@@ -255,15 +255,15 @@ final class AgentBinder {
 
 ### Milestone M2：派生态机（T4 + T8）
 
-此 milestone 结束时存在一个 `AgentRegistry`：纯 `@MainActor @Observable`，对每个 `pane.agentKind != nil` 的 pane 维护 `AgentEntry`，由事件流驱动状态转移。无 UI。
+此 milestone 结束时存在一个 `AgentStateStore`：纯 `@MainActor @Observable`，对每个 `pane.agentKind != nil` 的 pane 维护 `AgentEntry`，由事件流驱动状态转移。无 UI。
 
-#### T4：`AgentRegistry` + 状态机 + 单测
+#### T4：`AgentStateStore` + 状态机 + 单测
 
-新建 `apps/mac/touch-code/App/Features/ActiveAgents/AgentRegistry.swift`：
+新建 `apps/mac/touch-code/App/Features/AgentState/AgentStateStore.swift`：
 
 ```swift
 @MainActor @Observable
-final class AgentRegistry {
+final class AgentStateStore {
   private(set) var entries: [PaneID: AgentEntry] = [:]
 
   struct AgentEntry: Equatable {
@@ -305,7 +305,7 @@ private enum PrevPhase { case idle, loading }
 
 `onTerminalEvent` 内部对 `.paneInfoChanged(.desktopNotification(t, b))` 调用 `DetectionTranslator.classify(title: t, body: b)`，若 `.waitingForInput` 置位 `waitingForInput = true`；对 `.bellRang` 走同样路径（与 `NotificationDetector` 一致——验证项在 T8）。
 
-测试 `AgentRegistryStateTests`（pure，无运行时）。每个用例构造一系列事件，断言最终 `state` 与 `lastTransitionAt` 变化次数。最低 12 个用例覆盖：
+测试 `AgentStateStoreTests`（pure，无运行时）。每个用例构造一系列事件，断言最终 `state` 与 `lastTransitionAt` 变化次数。最低 12 个用例覆盖：
 
 1. 仅 `onAgentBound` → `idle`。
 2. `bound` → `runningPanes` 加入 → `loading`。
@@ -327,14 +327,14 @@ private enum PrevPhase { case idle, loading }
 **expected_behavior**: 单测全绿；状态机优先级 = `waitingForInput > loading > finished > idle`。
 
 **verification_steps**:
-1. `make mac-test ARGS="-only-testing:touch-codeTests/AgentRegistryStateTests"` 全 12 用例绿。
+1. `make mac-test ARGS="-only-testing:touch-codeTests/AgentStateStoreTests"` 全 12 用例绿。
 
 #### T8：跨消费者一致性回归
 
-新建 `apps/mac/touch-code/Tests/Integration/AgentNotificationConsistencyTests.swift`：构造一个 canned `TerminalEvent` 序列（OSC 9 → bell → OSC 9;4 busy → paneIdle → paneExited），同时喂给 `NotificationDetector` 与 `AgentRegistry`。断言：
+新建 `apps/mac/touch-code/Tests/Integration/AgentNotificationConsistencyTests.swift`：构造一个 canned `TerminalEvent` 序列（OSC 9 → bell → OSC 9;4 busy → paneIdle → paneExited），同时喂给 `NotificationDetector` 与 `AgentStateStore`。断言：
 
 - `NotificationDetector` 产出的 inbox kind 序列 == 设计期望
-- `AgentRegistry` 终态 == 设计期望
+- `AgentStateStore` 终态 == 设计期望
 - 两者对 "这是 waitingForInput 还是 taskFinished" 的分类对每个事件**一致**（通过 `DetectionTranslator.classify` 同一个函数，逻辑等价是必然——但跑一遍把保险锁上）
 
 **fulfills**: —
@@ -349,7 +349,7 @@ private enum PrevPhase { case idle, loading }
 ### M2 Exit Gate
 
 - T4、T8 status=`completed`
-- `AgentRegistryStateTests` 12+ 用例全绿
+- `AgentStateStoreTests` 12+ 用例全绿
 - `AgentNotificationConsistencyTests` 绿
 - `make mac-check` 绿
 - 至少一次 commit
@@ -359,23 +359,23 @@ private enum PrevPhase { case idle, loading }
 
 ### Milestone M3：UI 与集成（T5–T7）
 
-此 milestone 结束时，用户能看到并使用整个 ActiveAgents。徽章在 `WorktreeHeader`，hover 出 popover，点击行跳 pane。
+此 milestone 结束时，用户能看到并使用整个 AgentState。徽章在 `WorktreeHeader`，hover 出 popover，点击行跳 pane。
 
 #### T5：popover + row 视图（先做能看见的，再做精修）
 
 新建：
 
-- `apps/mac/touch-code/App/Features/ActiveAgents/ActiveAgentsPopoverView.swift`：消费 `AgentRegistry` + `HierarchyClient`；用 `SortedEntriesProvider`（局部 helper，纯函数）按状态优先级 + `lastTransitionAt desc` 排序。
-- `ActiveAgentsRowView.swift`：logo + `<Project> / <Worktree>` 中间截断 + state icon + 相对时间（`RelativeDateTimeFormatter`，刷新触发用 `TimelineView`）。
-- `ActiveAgentsBadgeViewModel.swift`：派生 `headline: String`（"3 agents working" / "Claude Code is waiting for input"）、`pulse: Bool`。
+- `apps/mac/touch-code/App/Features/AgentState/AgentStateView.swift`：消费 `AgentStateStore` + `HierarchyClient`；用 `SortedEntriesProvider`（局部 helper，纯函数）按状态优先级 + `lastTransitionAt desc` 排序。
+- `AgentStateRowView.swift`：logo + `<Project> / <Worktree>` 中间截断 + state icon + 相对时间（`RelativeDateTimeFormatter`，刷新触发用 `TimelineView`）。
+- `AgentStateViewModel.swift`：派生 `headline: String`（"3 agents working" / "Claude Code is waiting for input"）、`pulse: Bool`。
 
-点击行 → 发 RootFeature 动作 `.activeAgents(.rowTapped(PaneID))`，reducer 走 selection chain 后调 `hierarchyClient.focusPane(paneID, tabID, worktreeID, projectID)`，再 dispatch `.activeAgents(.popoverDismissRequested)`。
+点击行 → 发 RootFeature 动作 `.agentState(.rowTapped(PaneID))`，reducer 走 selection chain 后调 `hierarchyClient.focusPane(paneID, tabID, worktreeID, projectID)`，再 dispatch `.agentState(.dismissRequested)`。
 
 测试：
 
 - `SortedEntriesProviderTests`（pure 排序）。
-- `ActiveAgentsBadgeViewModelTests`（headline 文案在 0/1/同态多/混态四档）。
-- snapshot：`ActiveAgentsRowView` 四状态 + dark/light。
+- `AgentStateViewModelTests`（headline 文案在 0/1/同态多/混态四档）。
+- snapshot：`AgentStateRowView` 四状态 + dark/light。
 
 **fulfills**: —
 
@@ -385,18 +385,18 @@ private enum PrevPhase { case idle, loading }
 
 **verification_steps**:
 1. `make mac-test ARGS="-only-testing:touch-codeTests/SortedEntriesProviderTests"` 绿。
-2. `make mac-test ARGS="-only-testing:touch-codeTests/ActiveAgentsBadgeViewModelTests"` 绿。
-3. `make mac-test ARGS="-only-testing:touch-codeTests/ActiveAgentsRowSnapshotTests"` 绿（snapshot 基线第一次跑会写入，第二次必须复现）。
+2. `make mac-test ARGS="-only-testing:touch-codeTests/AgentStateViewModelTests"` 绿。
+3. `make mac-test ARGS="-only-testing:touch-codeTests/AgentStateRowSnapshotTests"` 绿（snapshot 基线第一次跑会写入，第二次必须复现）。
 
 #### T6：徽章 + hover bridge + WorktreeHeader 集成
 
-新建 `ActiveAgentsBadgeView.swift`（视图）+ hover 控制器（`@State var isHovering` + `@State var hoverIntent` + 250/150 ms `Task.sleep` 取消语义）。
+新建 `AgentStateView.swift`（视图）+ hover 控制器（`@State var isHovering` + `@State var hoverIntent` + 250/150 ms `Task.sleep` 取消语义）。
 
 挂到 `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderView.swift`：在 `StatusBarBellView` 之后插入；徽章 `.popover` 锚点指向自身。
 
 测试：
 
-- `ActiveAgentsHoverBridgeTests`：用 `TestClock` 跑 250/150 ms 时序，断言"鼠标快速划过 < 250 ms 不开"、"开后离开 < 150 ms 内回到 popover 仍保持"。
+- `AgentStateHoverBridgeTests`：用 `TestClock` 跑 250/150 ms 时序，断言"鼠标快速划过 < 250 ms 不开"、"开后离开 < 150 ms 内回到 popover 仍保持"。
 
 **fulfills**: —
 
@@ -405,7 +405,7 @@ private enum PrevPhase { case idle, loading }
 **expected_behavior**: `make mac-run-app`；在跑着至少一个 agent pane 时鼠标 hover header 中央徽章 → 250 ms 后 popover 出现；点击行 → 该 pane 被 focus。
 
 **verification_steps**:
-1. `make mac-test ARGS="-only-testing:touch-codeTests/ActiveAgentsHoverBridgeTests"` 绿。
+1. `make mac-test ARGS="-only-testing:touch-codeTests/AgentStateHoverBridgeTests"` 绿。
 2. **Manual:** `make mac-run-app`；在 worktree 新开 tab 输入 `claude --help`（仅启动 1s 也行）；header 出现"Claude Code is finished" 或 idle 状态的徽章；hover → popover；点击行 → 跳到对应 pane（zoom + first responder）。
 3. **Manual:** 关闭该 pane → 徽章消失 / 该行消失。
 
@@ -454,7 +454,7 @@ User-tests now live at [docs/user-tests/active-agents-view.md](../user-tests/act
 | T1 | — | 纯值类型 + 模式表；无 UI surface 可探。Unit-test only. |
 | T2 | — | Client/Manager 写入器；无 UI surface 可探。Unit-test only. |
 | T3 | — | Binder 副作用只能在 M3 UI 起来后端到端探测；cases UT-AA-I-* 在 T6 整合后才完整可 probe。 |
-| T4 | — | 派生态机；无 UI surface，行为通过 `AgentRegistryStateTests` 12+ 单测覆盖。 |
+| T4 | — | 派生态机；无 UI surface，行为通过 `AgentStateStoreTests` 12+ 单测覆盖。 |
 | T5 | UT-AA-P-003, UT-AA-P-004 | popover content + within-bucket sort，T5 引入 popover/row 后即可探。 |
 | T6 | UT-AA-B-001, UT-AA-B-002, UT-AA-B-003, UT-AA-B-004, UT-AA-B-005, UT-AA-B-006, UT-AA-B-007, UT-AA-P-001, UT-AA-P-002, UT-AA-C-001, UT-AA-C-002, UT-AA-I-001, UT-AA-I-002, UT-AA-I-003, UT-AA-I-004, UT-AA-N-001, UT-AA-N-002, UT-AA-N-003 | T6 整合 badge + hover bridge + WorktreeHeader 后，绝大多数端到端 case 同时可探；一并落在此处。 |
 | T7 | UT-AA-B-008, UT-AA-A-001, UT-AA-A-002 | reduce-motion + VoiceOver 两条 a11y/动效专用 case。 |
@@ -509,7 +509,7 @@ make mac-run-app
 ### M2 — T4
 
 ```bash
-make mac-test ARGS="-only-testing:touch-codeTests/AgentRegistryStateTests"
+make mac-test ARGS="-only-testing:touch-codeTests/AgentStateStoreTests"
 ```
 
 ### M2 — T8
@@ -522,15 +522,15 @@ make mac-test ARGS="-only-testing:touch-codeTests/AgentNotificationConsistencyTe
 
 ```bash
 make mac-test ARGS="-only-testing:touch-codeTests/SortedEntriesProviderTests"
-make mac-test ARGS="-only-testing:touch-codeTests/ActiveAgentsBadgeViewModelTests"
-make mac-test ARGS="-only-testing:touch-codeTests/ActiveAgentsRowSnapshotTests"
+make mac-test ARGS="-only-testing:touch-codeTests/AgentStateViewModelTests"
+make mac-test ARGS="-only-testing:touch-codeTests/AgentStateRowSnapshotTests"
 # 第一次跑 snapshot 会写基线，二次跑应稳定
 ```
 
 ### M3 — T6 & T7
 
 ```bash
-make mac-test ARGS="-only-testing:touch-codeTests/ActiveAgentsHoverBridgeTests"
+make mac-test ARGS="-only-testing:touch-codeTests/AgentStateHoverBridgeTests"
 make mac-run-app
 # Manual：见 T6 / T7 verification_steps
 ```
@@ -561,17 +561,17 @@ make mac-run-app
 
 - 所有写入器（`setPaneAgentKind` / `setPaneAgentSessionID`）值不变时不 schedule save → 安全重复调用。
 - `AgentBinder` `consider` / `unbind` 是幂等的：重复 `consider` 同 trigger 不重复写；重复 `unbind` 同 pane 在第二次时是 no-op（pane 已无字段或已不存在）。
-- `AgentRegistry` 所有事件入口都 idempotent：重复同 `onRunningPanesChanged(now)`、相同 `onTerminalEvent`、重复 `onAgentBound` 不改变 entry（除非值确实变化）。
+- `AgentStateStore` 所有事件入口都 idempotent：重复同 `onRunningPanesChanged(now)`、相同 `onTerminalEvent`、重复 `onAgentBound` 不改变 entry（除非值确实变化）。
 - **OSC 133 不可达时的兜底**：若 `paneInfoChanged(.promptEnd)` 在当前 libghostty 版本上从未发出（shell 无 integration），重绑路径自然退化为永不触发——这是设计稿明示的"sticky once"行为。后续若需要兜底，可在 `AgentBinder` 加一个 30s title-stable + classify ≠ existing kind 的二级触发（Risk 表已记），但 v1 不做。
 - **catalog migration**：因新字段是 optional，旧 catalog 解码即 nil；写回时仅在非 nil 才编码 → 用户回滚到旧 touch-code 版本，字段被无视且不会破坏 schema。
-- **panic recovery**：若 `AgentRegistry` 某分支出错（理论上不会，纯值），手动重启 app；entries 全部从空重新 derive，最差结果是几秒钟所有 agent 显示 `idle`，下一次事件来时自动归正。
+- **panic recovery**：若 `AgentStateStore` 某分支出错（理论上不会，纯值），手动重启 app；entries 全部从空重新 derive，最差结果是几秒钟所有 agent 显示 `idle`，下一次事件来时自动归正。
 
 ## Artifacts and Notes
 
 参考已有产物：
 
-- `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift` —— 事件 → InboxEntry 的现成 fan-out 写法，`AgentRegistry` 的 `onTerminalEvent` 复用 `DetectionTranslator.classify`，与之并列消费但不依赖之。
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift:637-660` —— 现成的"是否 executing"汇总指标 + busy glyph 渲染逻辑，可作为 `ActiveAgentsBadgeView` 的视觉风格参考。
+- `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift` —— 事件 → InboxEntry 的现成 fan-out 写法，`AgentStateStore` 的 `onTerminalEvent` 复用 `DetectionTranslator.classify`，与之并列消费但不依赖之。
+- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift:637-660` —— 现成的"是否 executing"汇总指标 + busy glyph 渲染逻辑，可作为 `AgentStateView` 的视觉风格参考。
 - `apps/mac/touch-code/App/Features/StatusBar/StatusBarFeature.swift` —— hover bridge 风格（不是同一个东西，但 `ViewThatFits` + 时序状态机的写法可借鉴）。
 
 无原型阶段——所有事件源、`HierarchyClient` 路径、`SurfaceInfo` 字段在现有代码里都已可访问，本计划只是组合它们。**唯一一处需要确认**的是 `paneInfoChanged(.promptEnd)`：design doc 已假设它存在，T3 落地时需先 `grep -rn promptEnd apps/mac/touch-code` 验证；若不存在，按 Idempotence 段的"sticky once"策略落地，OQ-1 跟踪。
@@ -626,11 +626,11 @@ func setPaneAgentSessionID(_ paneID: PaneID, sessionID: String?)
 }
 ```
 
-在 `apps/mac/touch-code/App/Features/ActiveAgents/`：
+在 `apps/mac/touch-code/App/Features/AgentState/`：
 
 ```swift
 @MainActor @Observable
-final class AgentRegistry {
+final class AgentStateStore {
   private(set) var entries: [PaneID: AgentEntry] = [:]
   struct AgentEntry: Equatable { let kind: AgentKind; let sessionID: String?; var state: AgentRuntimeState; var lastTransitionAt: Date }
   enum AgentRuntimeState: String, CaseIterable, Equatable { case waitingForInput, loading, finished, idle }
@@ -645,30 +645,30 @@ final class AgentRegistry {
   func onAgentUnbound(_ paneID: PaneID)
 }
 
-struct ActiveAgentsBadgeView: View {  /* observes AgentRegistry, builds headline */ }
-struct ActiveAgentsPopoverView: View { /* list rows, hover bridge */ }
-struct ActiveAgentsRowView: View {    /* logo + path + state icon + time */ }
+struct AgentStateView: View {  /* observes AgentStateStore, builds headline */ }
+struct AgentStateView: View { /* list rows, hover bridge */ }
+struct AgentStateRowView: View {    /* logo + path + state icon + time */ }
 ```
 
 `RootFeature` 新增 child actions：
 
 ```swift
-case activeAgents(ActiveAgentsAction)
-enum ActiveAgentsAction: Equatable {
+case agentState(AgentStateAction)
+enum AgentStateAction: Equatable {
   case rowTapped(PaneID)
-  case popoverDismissRequested
+  case dismissRequested
   case binderTriggered(PaneID, AgentBinder.Trigger)   // 内部 fan-out
 }
 ```
 
 依赖关系：
 
-- `ActiveAgents → TouchCodeCore`（AgentKind / Pane / DetectionTranslator）
-- `ActiveAgents → HierarchyClient`（read snapshot + focusPane）
-- `ActiveAgents → PaneKeyboardActivityTracker`（read keystroke timestamp）
+- `AgentState → TouchCodeCore`（AgentKind / Pane / DetectionTranslator）
+- `AgentState → HierarchyClient`（read snapshot + focusPane）
+- `AgentState → PaneKeyboardActivityTracker`（read keystroke timestamp）
 - `Runtime/AgentBinder → HierarchyClient`（write agentKind / sessionID）
 - `Runtime/AgentBinder → SurfaceInfo`（read title）
-- **绝不**: `ActiveAgents → Notifications/*`、`Notifications/* → ActiveAgents/*`
+- **绝不**: `AgentState → Notifications/*`、`Notifications/* → AgentState/*`
 
 ## Open Questions
 

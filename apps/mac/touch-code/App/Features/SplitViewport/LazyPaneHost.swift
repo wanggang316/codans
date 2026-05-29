@@ -53,7 +53,12 @@ struct LazyPaneHost: View {
           // menu; placed before `.animation` so the animation envelope
           // wraps the menu modifier too.
           .contextMenu {
-            PaneContextMenu(paneID: store.paneID)
+            PaneContextMenu(
+              paneID: store.paneID,
+              tabID: store.tabID,
+              worktreeID: store.worktreeID,
+              projectID: store.projectID
+            )
           }
           .animation(
             .easeInOut(duration: 0.2),
