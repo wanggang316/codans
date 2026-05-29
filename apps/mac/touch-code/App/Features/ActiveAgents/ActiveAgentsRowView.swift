@@ -47,14 +47,11 @@ struct ActiveAgentsRowView: View {
         // primary visual signal that this row is the current focus.
         AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
         identityColumn
-        // Compact mode packs status right after identity (no greedy
-        // spacer) so the project name and the status icon read as a
-        // single tight unit on the trailing side of the row. Normal
-        // mode keeps the spacer so status pins to the row's right
-        // edge against the two-line identity column.
-        if displayMode == .normal {
-          Spacer(minLength: 8)
-        }
+        // A greedy spacer pins the status icon to the row's trailing
+        // edge in both densities, so the state glyph reads as a single
+        // right-aligned column down the list rather than floating at a
+        // variable offset after each project name.
+        Spacer(minLength: 8)
         statusColumn
       }
       .padding(.horizontal, 12)
