@@ -90,6 +90,7 @@ struct HierarchySidebarView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
+  @Environment(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
 
   /// Tracks whether the `.command` modifier is currently pressed. When held the sidebar
@@ -741,6 +742,7 @@ struct HierarchySidebarView: View {
         hotkeyNumber: hotkeyNumber,
         isSelected: isSelected
       )
+      diffStatsChip(for: worktree, in: project, snapshot: snapshot)
       gitHubBadge(for: worktree, in: project)
       // Trailing chord hint, after both the row content and the optional PR pill so it
       // always pins to the right edge of the row instead of being shoved leftwards by
@@ -776,6 +778,11 @@ struct HierarchySidebarView: View {
       // freshness window internally so list-rerenders don't spawn redundant fetches.
       let url = URL(fileURLWithPath: worktree.path)
       await worktreeStatusMonitor.refresh(worktreeID: worktree.id, path: url)
+      // Uncommitted-edit line counts ride the same trigger so every row
+      // (PR-matched or not) can surface `+N −M` without a separate poll loop.
+      // HEAD-change refresh is wired separately in
+      // `RootFeature.worktreeHeadChanged`.
+      await worktreeLocalDiffMonitor.refresh(worktreeID: worktree.id, path: url)
     }
   }
 
@@ -1149,6 +1156,33 @@ struct HierarchySidebarView: View {
       return "Remove Project “\(name)”?"
     }
     return "Remove Project?"
+  }
+
+  // MARK: - Diff stats chip
+
+  /// Compact `+N −M` chip rendered to the right of the row content. Counts
+  /// come from `WorktreeLocalDiffMonitor` (`git diff HEAD --shortstat`) so
+  /// every worktree — PR-matched or not — surfaces the same "uncommitted
+  /// edits in this worktree" signal. Refresh on HEAD events is wired in
+  /// `RootFeature.worktreeHeadChanged`; row-mount falls back to the
+  /// monitor's freshness window. The titlebar `StatusPullRequestView` still
+  /// shows the PR's pushed `+/−` for the active worktree if users want the
+  /// at-base comparison.
+  @ViewBuilder
+  fileprivate func diffStatsChip(
+    for worktree: Worktree, in project: Project, snapshot: PullRequestSnapshot?
+  ) -> some View {
+    if let local = worktreeLocalDiffMonitor.stats[worktree.id] ?? nil,
+      local.additions > 0 || local.deletions > 0
+    {
+      DiffStatsChip(
+        additions: local.additions,
+        deletions: local.deletions,
+        onTap: { [worktreeID = worktree.id, projectID = project.id] in
+          store.send(.delegate(.openGitViewerRequested(projectID: projectID, worktreeID: worktreeID)))
+        }
+      )
+    }
   }
 
   // MARK: - GitHub badge + popover
