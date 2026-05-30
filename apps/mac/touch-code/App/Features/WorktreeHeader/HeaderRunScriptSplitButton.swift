@@ -110,7 +110,17 @@ struct HeaderRunScriptSplitButton: View {
     let button = Button {
       store.send(.runScriptTapped(scriptID: script.id))
     } label: {
-      Label(script.displayName, systemImage: script.resolvedSystemImage)
+      // Native menu items render their icon as a monochrome template, so the
+      // tint must be baked into a non-template image (see `menuIcon`) — a
+      // plain `Label(_:systemImage:)` would drop the script's colour.
+      Label {
+        Text(script.displayName)
+      } icon: {
+        ScriptTintColorPalette.menuIcon(
+          systemName: script.resolvedSystemImage,
+          tint: script.resolvedTintColor
+        )
+      }
     }
     if let chord = script.keyboardShortcut, chord.isEnabled, chord.keyCode != 0,
       let key = ShortcutDisplay.keyEquivalent(for: chord.keyCode)

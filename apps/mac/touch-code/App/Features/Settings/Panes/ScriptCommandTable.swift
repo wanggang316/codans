@@ -36,10 +36,9 @@ struct ScriptCommandTable: View {
   private let iconColumnWidth: CGFloat = 48
   private let nameColumnWidth: CGFloat = 130
   private let shortcutColumnWidth: CGFloat = 100
-  private let listHeight: CGFloat = 200
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(spacing: 0) {
       VStack(spacing: 0) {
         headerRow
         Divider()
@@ -62,16 +61,15 @@ struct ScriptCommandTable: View {
           .padding(.horizontal, 6)
           .padding(.vertical, 6)
         }
-        .frame(height: listHeight)
+        .frame(maxHeight: .infinity)
       }
       .clipShape(RoundedRectangle(cornerRadius: 8))
 
+      Divider()
       bottomBar
-
-      Text("Click any cell to edit it. Use ↑ ↓ to reorder.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        .padding(.top, 6)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   // MARK: - Header
@@ -125,10 +123,6 @@ struct ScriptCommandTable: View {
       }
 
       Spacer(minLength: 0)
-
-      Text("\(scripts.count) command\(scripts.count == 1 ? "" : "s")")
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
   }
 
@@ -167,9 +161,10 @@ struct ScriptCommandTable: View {
             Label {
               Text(kind.defaultName)
             } icon: {
-              Image(systemName: kind.defaultSystemImage)
-                .foregroundStyle(ScriptTintColorPalette.color(for: kind.defaultTintColor))
-                .accessibilityHidden(true)
+              ScriptTintColorPalette.menuIcon(
+                systemName: kind.defaultSystemImage,
+                tint: kind.defaultTintColor
+              )
             }
           }
         }

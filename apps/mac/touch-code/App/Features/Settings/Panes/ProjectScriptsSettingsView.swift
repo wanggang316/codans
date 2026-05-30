@@ -36,12 +36,28 @@ struct ProjectScriptsSettingsView: View {
     entry?.scripts ?? []
   }
 
+  /// What the table renders. A Project with no Run command of its own always
+  /// shows the built-in Run as a starting default; it materializes into
+  /// `scripts` (via `updateScript`) the first time the user edits it.
+  private var displayedScripts: [ScriptDefinition] {
+    if scripts.contains(where: { $0.kind == .run }) {
+      return scripts
+    }
+    return [.builtinRun] + scripts
+  }
+
   // MARK: - Body
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
+      if let error = store.state.lastWriteFailure, !error.isEmpty {
+        Label(error, systemImage: "exclamationmark.circle.fill")
+          .font(.callout)
+          .foregroundStyle(.red)
+      }
+
       ScriptCommandTable(
-        scripts: scripts,
+        scripts: displayedScripts,
         selectedID: $selectedScriptID,
         onUpdate: updateScript,
         onAdd: addScript,
@@ -51,15 +67,9 @@ struct ProjectScriptsSettingsView: View {
           chordValidator(binding, excludingScriptID: excluding)
         }
       )
-
-      if let error = store.state.lastWriteFailure, !error.isEmpty {
-        Label(error, systemImage: "exclamationmark.circle.fill")
-          .font(.callout)
-          .foregroundStyle(.red)
-      }
     }
     .padding(20)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   /// Reject reserved / conflicting chords at recording time. Order
@@ -127,8 +137,13 @@ struct ProjectScriptsSettingsView: View {
 
   private func updateScript(_ script: ScriptDefinition) {
     var updated = scripts
-    guard let index = updated.firstIndex(where: { $0.id == script.id }) else { return }
-    updated[index] = script
+    if let index = updated.firstIndex(where: { $0.id == script.id }) {
+      updated[index] = script
+    } else {
+      // First edit of the virtual built-in Run: materialize it at the front
+      // so it keeps the position it occupied while still a default.
+      updated.insert(script, at: 0)
+    }
     store.send(.setProjectScripts(updated))
   }
 

@@ -67,6 +67,16 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
     self.keyboardShortcut = keyboardShortcut
   }
 
+  /// Stable id for the built-in Run default. Fixed (not random) so SwiftUI
+  /// identity / selection stay put across renders while the default is still
+  /// virtual, and so a materialized copy keeps one well-known id per Project.
+  public static let builtinRunID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
+
+  /// The built-in Run command every Project shows by default until it defines
+  /// its own Run. Surfaced by the Commands table; it materializes into
+  /// `ProjectSettings.scripts` the first time the user edits it.
+  public static let builtinRun = ScriptDefinition(id: builtinRunID, kind: .run)
+
   /// User-visible label. Falls back to the kind's default when the user
   /// has not named the script.
   public var displayName: String {
