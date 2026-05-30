@@ -12,8 +12,10 @@ import Foundation
 /// - L4 Project   — small unread dot to the right of the project name
 /// - L3 Worktree  — leading row icon swaps to a bell glyph
 /// - L2 Tab       — small unread dot prefixed before the tab title
-/// - L1 Pane      — 2 px coloured top line; amber for waitingForInput
-///                  (overrides green on conflict), green for taskFinished
+/// - L1 Pane      — no chrome. A source pane the user can already see
+///                  (its tab is active — the pane is either focused or a
+///                  visible sibling split) is a sink: the entry stays
+///                  unread in the inbox but emits no roll-up indicator.
 ///
 /// `globalUnreadCount` is the total ungrouped unread count. Only the
 /// status-bar bell badge and the Dock tile badge consume it.
@@ -21,20 +23,17 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
   public let unreadProjects: Set<ProjectID>
   public let unreadWorktrees: Set<WorktreeID>
   public let unreadTabs: Set<TabID>
-  public let paneIndicator: [PaneID: PaneIndicator]
   public let globalUnreadCount: Int
 
   public init(
     unreadProjects: Set<ProjectID> = [],
     unreadWorktrees: Set<WorktreeID> = [],
     unreadTabs: Set<TabID> = [],
-    paneIndicator: [PaneID: PaneIndicator] = [:],
     globalUnreadCount: Int = 0
   ) {
     self.unreadProjects = unreadProjects
     self.unreadWorktrees = unreadWorktrees
     self.unreadTabs = unreadTabs
-    self.paneIndicator = paneIndicator
     self.globalUnreadCount = globalUnreadCount
   }
 
@@ -49,11 +48,9 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
     var unreadProjects: Set<ProjectID> = []
     var unreadWorktrees: Set<WorktreeID> = []
     var unreadTabs: Set<TabID> = []
-    var paneIndicator: [PaneID: PaneIndicator] = [:]
 
     for entry in unread {
-      let level = deepestHiddenLevel(for: entry.source, focus: focus)
-      switch level {
+      switch deepestHiddenLevel(for: entry.source, focus: focus) {
       case .project:
         unreadProjects.insert(entry.source.projectID)
       case .worktree:
@@ -61,16 +58,13 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
       case .tab:
         unreadTabs.insert(entry.source.tabID)
       case .pane:
-        // Amber (waitingForInput) wins over green (taskFinished) on
-        // pane-level conflict — the user being summoned trumps a
-        // background completion.
-        let incoming: PaneIndicator =
-          entry.kind == .waitingForInput ? .waitingForInput : .taskFinished
-        if let existing = paneIndicator[entry.source.paneID] {
-          paneIndicator[entry.source.paneID] = priorityWinner(existing, incoming)
-        } else {
-          paneIndicator[entry.source.paneID] = incoming
-        }
+        // Sink: the source pane is already the deepest level the user can
+        // see (its tab is active — the pane is either focused or a visible
+        // sibling split). There is no pane-level chrome, and surfacing it
+        // at Tab / Worktree / Project would be wrong since the user is
+        // already looking into this tab. The entry stays unread in the
+        // inbox (counted in `globalUnreadCount`) but emits no indicator.
+        break
       }
     }
 
@@ -78,7 +72,6 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
       unreadProjects: unreadProjects,
       unreadWorktrees: unreadWorktrees,
       unreadTabs: unreadTabs,
-      paneIndicator: paneIndicator,
       globalUnreadCount: unread.count
     )
   }
@@ -89,7 +82,9 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
 
   /// Decide which level renders the indicator for one source path. The
   /// rule is "deepest hidden ancestor": walk down from project, stop at
-  /// the first level the user cannot see into.
+  /// the first level the user cannot see into. `.pane` is the terminal
+  /// case — everything above it is visible, so `compute` treats it as an
+  /// indicator-less sink.
   private static func deepestHiddenLevel(
     for source: InboxEntry.SourcePath,
     focus: RollupFocusState
@@ -106,31 +101,11 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
     if !tabIsActive {
       return .tab
     }
-    let paneIsFocused = focus.focusedPaneID == source.paneID
-    if !paneIsFocused {
-      return .pane
-    }
-    // The user is looking directly at the source pane — surface as Pane
-    // anyway so the (transient) indicator is visible until R1 marks it
-    // read on next focus change.
+    // Tab is active: the source pane is visible (focused or a sibling
+    // split), so there is no deeper hidden level. Classify as `.pane`,
+    // which `compute` drops as an indicator-less sink.
     return .pane
   }
-
-  private static func priorityWinner(
-    _ a: PaneIndicator,
-    _ b: PaneIndicator
-  ) -> PaneIndicator {
-    a == .waitingForInput || b == .waitingForInput ? .waitingForInput : .taskFinished
-  }
-}
-
-/// L1 pane top-line colour selector. Mirrors `InboxEntry.Kind` but
-/// excludes the "no indicator" case from the type — a pane simply does
-/// not appear in `RollupIndex.paneIndicator` when it has no unread
-/// entries to surface at the pane level.
-public nonisolated enum PaneIndicator: String, Codable, Sendable, Equatable {
-  case taskFinished
-  case waitingForInput
 }
 
 /// Snapshot of the data the user can currently see in the sidebar /
