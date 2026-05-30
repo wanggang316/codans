@@ -8,10 +8,9 @@ import TouchCodeCore
 /// - **Setup / Archive / Delete** — git-only lifecycle script editors,
 ///   one body of text per phase, edited in place. Hidden when the
 ///   Project is a dir (no git root).
-/// - **Commands** — user-defined `[ScriptDefinition]` rendered as a
-///   compact list of rows (icon + name + first command line + edit /
-///   delete buttons). Add and edit both push a modal sheet whose body
-///   is a System-Settings-style Form (one field per row).
+/// - **Commands** — user-defined `[ScriptDefinition]` rendered as an
+///   inline, spreadsheet-style table (`ScriptCommandTable`): every field
+///   is edited in place via per-cell popovers, no modal edit sheet.
 ///
 /// Reads come from `@Environment(SettingsStore.self)` for live updates;
 /// writes always go through the TCA reducer so test stores can spy on
@@ -20,7 +19,6 @@ struct ProjectScriptsSettingsView: View {
   let projectID: ProjectID
   @Bindable var store: StoreOf<ProjectSettingsFeature>
 
-  @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   /// Resolved system-shortcut map. Drives chord-conflict detection
   /// against every registered CommandID at recording time.
@@ -44,10 +42,10 @@ struct ProjectScriptsSettingsView: View {
     }
   }
 
-  /// Sheet presentation for both Add and Edit. Non-nil = sheet visible
-  /// against this draft. `.sheet(item:)` requires Identifiable, which
-  /// `ScriptDefinition` already conforms to.
-  @State private var editingScript: ScriptDefinition?
+  /// Currently selected command row in the inline table. Drives the
+  /// row highlight and the `−` (remove) button. Lifted out of the table
+  /// so `addScript()` can select the freshly-created row.
+  @State private var selectedScriptID: UUID?
 
   // MARK: - Derived state
 
@@ -65,19 +63,6 @@ struct ProjectScriptsSettingsView: View {
 
   private var visible: Set<SectionID> {
     Self.visibleSections(for: store.state.kind)
-  }
-
-  private var resolvedWorktreeID: WorktreeID? {
-    if let id = store.state.lastFocusedWorktreeID,
-      project?.worktrees.contains(where: { $0.id == id }) == true
-    {
-      return id
-    }
-    return project?.worktrees.first?.id
-  }
-
-  private var project: Project? {
-    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })
   }
 
   // MARK: - Body
@@ -115,7 +100,7 @@ struct ProjectScriptsSettingsView: View {
       }
 
       if visible.contains(.scripts) {
-        scriptsListSection
+        scriptsSection
       }
 
       if let error = store.state.lastWriteFailure, !error.isEmpty {
@@ -126,20 +111,6 @@ struct ProjectScriptsSettingsView: View {
       }
     }
     .formStyle(.grouped)
-    .sheet(item: $editingScript) { editing in
-      ScriptEditorSheet(
-        script: editing,
-        isNew: !scripts.contains(where: { $0.id == editing.id }),
-        validateChord: { binding in
-          chordValidator(binding, excludingScriptID: editing.id)
-        },
-        onSave: { updated in
-          saveEdit(updated)
-          editingScript = nil
-        },
-        onCancel: { editingScript = nil }
-      )
-    }
   }
 
   /// Reject reserved / conflicting chords at recording time. Order
@@ -224,122 +195,74 @@ struct ProjectScriptsSettingsView: View {
     }
   }
 
-  // MARK: - Scripts List Section
+  // MARK: - Scripts Section
 
+  /// Inline command table. The table owns no store access — every
+  /// mutation routes back through the closures so writes stay on the TCA
+  /// path. Row insets are zeroed so the table fills the grouped Section,
+  /// which provides the card chrome seen in the design.
   @ViewBuilder
-  private var scriptsListSection: some View {
-    // Single Section, no icon-led title. Empty-state replaces the rows
-    // when the project has no scripts. The footer hosts the Add button
-    // (text label, not a bare `+` glyph) plus a one-line hint.
+  private var scriptsSection: some View {
     Section {
-      if scripts.isEmpty {
-        Text("No scripts yet — click Add to create one.")
-          .font(.callout)
-          .foregroundStyle(.secondary)
-      } else {
-        ForEach(scripts) { script in
-          ScriptListRow(
-            script: script,
-            canRun: resolvedWorktreeID != nil,
-            onRun: {
-              if let wtID = resolvedWorktreeID {
-                store.send(.runScriptTapped(scriptID: script.id, worktreeID: wtID))
-              }
-            },
-            onEdit: { editingScript = script },
-            onDelete: { deleteScript(id: script.id) }
-          )
-          // Drag-to-reorder. `ForEach.onMove` doesn't paint drag
-          // handles inside a grouped Form on macOS, so we wire the
-          // drag/drop ourselves: each row carries its UUID as the
-          // pasteboard payload and accepts a String drop, computing
-          // the new index by source/target lookup. `ScriptListRow`
-          // exposes a leading grip glyph + uses .onTapGesture (not
-          // Button) for edit, so the mouse-down belongs to the
-          // drag gesture rather than being swallowed by a Button.
-          .draggable(script.id.uuidString)
-          .dropDestination(for: String.self) { items, _ in
-            handleScriptDrop(items: items, targetID: script.id)
-          }
+      ScriptCommandTable(
+        scripts: scripts,
+        selectedID: $selectedScriptID,
+        onUpdate: updateScript,
+        onAdd: addScript,
+        onDelete: deleteScript,
+        onReorder: reorderScript,
+        validateChord: { binding, excluding in
+          chordValidator(binding, excludingScriptID: excluding)
         }
-      }
+      )
+      .listRowInsets(EdgeInsets())
     } footer: {
-      HStack(spacing: 12) {
-        addScriptMenu
-        Spacer()
-        if !scripts.isEmpty {
-          Text("Run from the toolbar, command palette, or keyboard shortcut.")
-            .foregroundStyle(.secondary)
-        }
-      }
+      Text("Click cells to edit icon, name, command, and shortcut inline.")
     }
-  }
-
-  /// Text-labeled "Add" button. Opens a kind picker that excludes
-  /// predefined kinds already in use (so the user can't have two `Run`
-  /// scripts), but always exposes `.custom`. Click → set
-  /// `editingScript` to a freshly-built draft and the sheet handles
-  /// persistence on Save.
-  @ViewBuilder
-  private var addScriptMenu: some View {
-    let usedKinds = Set(scripts.map(\.kind))
-    Menu {
-      ForEach(ScriptKind.allCases, id: \.self) { kind in
-        if kind == .custom || !usedKinds.contains(kind) {
-          Button {
-            editingScript = ScriptDefinition(kind: kind)
-          } label: {
-            Label {
-              Text(kind.defaultName)
-            } icon: {
-              Image(systemName: kind.defaultSystemImage)
-                .foregroundStyle(ScriptTintColorPalette.color(for: kind.defaultTintColor))
-            }
-          }
-        }
-      }
-    } label: {
-      Label("Add", systemImage: "plus")
-    }
-    .menuStyle(.borderlessButton)
-    .fixedSize()
   }
 
   // MARK: - Mutations
 
-  private func saveEdit(_ script: ScriptDefinition) {
+  /// Append a fresh custom command and select it. Defaults to the
+  /// `.custom` kind (the only kind the inline table creates) with a
+  /// unique-ish placeholder name the user edits in place.
+  private func addScript() {
+    let new = ScriptDefinition(kind: .custom, name: "Command \(scripts.count + 1)")
+    store.send(.setProjectScripts(scripts + [new]))
+    selectedScriptID = new.id
+  }
+
+  private func updateScript(_ script: ScriptDefinition) {
     var updated = scripts
-    if let index = updated.firstIndex(where: { $0.id == script.id }) {
-      updated[index] = script
-    } else {
-      // New scripts append to the end of the list — the user can
-      // drag them upward if they want a different priority.
-      updated.append(script)
-    }
+    guard let index = updated.firstIndex(where: { $0.id == script.id }) else { return }
+    updated[index] = script
     store.send(.setProjectScripts(updated))
   }
 
   private func deleteScript(id: UUID) {
-    let updated = scripts.filter { $0.id != id }
+    guard let index = scripts.firstIndex(where: { $0.id == id }) else { return }
+    var updated = scripts
+    updated.remove(at: index)
     store.send(.setProjectScripts(updated))
+    // Keep a sensible row selected after removal so the `−` button and
+    // highlight don't dangle on a deleted id.
+    if selectedScriptID == id {
+      selectedScriptID = updated.isEmpty ? nil : updated[min(index, updated.count - 1)].id
+    }
   }
 
   /// Reorder via drag-drop. Source script is removed and re-inserted at
-  /// the target row's index (above-the-target). Returns true on a real
-  /// reorder so the system can run the success animation.
-  private func handleScriptDrop(items: [String], targetID: UUID) -> Bool {
-    guard let firstID = items.first,
-      let sourceUUID = UUID(uuidString: firstID),
-      sourceUUID != targetID,
-      let sourceIndex = scripts.firstIndex(where: { $0.id == sourceUUID }),
-      let targetIndex = scripts.firstIndex(where: { $0.id == targetID })
-    else { return false }
+  /// the target row's index (above-the-target).
+  private func reorderScript(source: UUID, target: UUID) {
+    guard source != target,
+      let sourceIndex = scripts.firstIndex(where: { $0.id == source }),
+      let targetIndex = scripts.firstIndex(where: { $0.id == target })
+    else { return }
     var updated = scripts
     let moved = updated.remove(at: sourceIndex)
     let insertIndex = min(max(targetIndex, 0), updated.count)
     updated.insert(moved, at: insertIndex)
     store.send(.setProjectScripts(updated))
-    return true
   }
 }
 
@@ -381,137 +304,5 @@ private struct LifecycleEditor: View {
       )
     )
     .frame(height: 90)
-  }
-}
-
-// MARK: - Compact list row
-
-/// One user-defined script as a single Form row. Layout from leading to
-/// trailing:
-///   - 6×6 grip glyph (line.3.horizontal) signalling drag-to-reorder
-///   - script icon
-///   - display name + first command line
-///   - Run / Delete action buttons
-///
-/// The icon + name area uses `.onTapGesture(perform: onEdit)` instead
-/// of wrapping in a Button — a Button's mouse-down is captured by the
-/// system click-recognizer, which steals the drag from the row's
-/// `.draggable` modifier (configured at the call site). With
-/// onTapGesture, mouse-down belongs to the drag gesture and a quick
-/// click still routes to onEdit.
-private struct ScriptListRow: View {
-  let script: ScriptDefinition
-  let canRun: Bool
-  let onRun: () -> Void
-  let onEdit: () -> Void
-  let onDelete: () -> Void
-
-  @State private var showDeleteConfirm = false
-  @State private var isHovering = false
-
-  var body: some View {
-    HStack(spacing: 10) {
-      // Leading grip — visible only on row hover so it doesn't add
-      // permanent chrome; standard macOS drag-handle glyph at .secondary.
-      Image(systemName: "line.3.horizontal")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .frame(width: 14, alignment: .center)
-        .opacity(isHovering ? 1 : 0)
-        .help("Drag to reorder")
-
-      Image(systemName: script.resolvedSystemImage)
-        .frame(width: 18, alignment: .center)
-        .foregroundStyle(ScriptTintColorPalette.color(for: script.resolvedTintColor))
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text(script.displayName)
-          .font(.body)
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-        Text(firstCommandLine)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-      }
-
-      Spacer(minLength: 0)
-
-      // Shortcut column. Reserves a fixed-width slot so chord chips
-      // line up across rows (rendered or not). Empty when the script
-      // has no chord — the slot stays so the action buttons don't
-      // shift between rows. A 16 pt trailing gap follows so the
-      // chord doesn't crowd the Run button.
-      ScriptShortcutColumn(binding: script.keyboardShortcut)
-        .frame(width: 130, alignment: .trailing)
-        .padding(.trailing, 16)
-
-      Button(action: onRun) {
-        Image(systemName: "play.fill")
-      }
-      .buttonStyle(.borderless)
-      .disabled(!canRun)
-      .help(canRun ? "Run \(script.displayName)" : "No worktree available")
-
-      Button(role: .destructive) {
-        showDeleteConfirm = true
-      } label: {
-        Image(systemName: "trash")
-      }
-      .buttonStyle(.borderless)
-      .foregroundStyle(.red)
-      .help("Delete \(script.displayName)")
-      .confirmationDialog(
-        "Delete script \"\(script.displayName)\"?",
-        isPresented: $showDeleteConfirm,
-        titleVisibility: .visible
-      ) {
-        Button("Delete", role: .destructive) { onDelete() }
-        Button("Cancel", role: .cancel) {}
-      }
-    }
-    .padding(.vertical, 4)
-    .contentShape(Rectangle())
-    .onHover { isHovering = $0 }
-    .onTapGesture(perform: onEdit)
-  }
-
-  /// First non-empty line of the script's command, or a placeholder when
-  /// the command is empty (typical for a freshly-created script).
-  private var firstCommandLine: String {
-    let firstLine = script.command
-      .split(whereSeparator: \.isNewline)
-      .first
-      .map { String($0).trimmingCharacters(in: .whitespaces) }
-    if let firstLine, !firstLine.isEmpty {
-      return firstLine
-    }
-    return "(empty)"
-  }
-}
-
-/// Trailing column rendering the script's chord (when bound). Fixed
-/// alignment so chips line up across rows. Renders text-only — the
-/// chord chip lives in the row, not a re-entrant button — to keep
-/// the row click target unambiguous. Sized to be readable at a
-/// glance (callout monospaced) rather than the older caption that
-/// disappeared under typical viewing distance.
-private struct ScriptShortcutColumn: View {
-  let binding: ShortcutBinding?
-
-  var body: some View {
-    if let binding, binding.isEnabled, binding.keyCode != 0 {
-      Text(ShortcutDisplay.chord(for: binding))
-        .font(.callout.monospaced())
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(
-          RoundedRectangle(cornerRadius: 5)
-            .fill(Color.secondary.opacity(0.15))
-        )
-    } else {
-      Color.clear
-    }
   }
 }
