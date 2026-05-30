@@ -284,14 +284,7 @@ private struct LeafView: View {
   /// focused leaf get nothing.
   @ViewBuilder
   private var unfocusedDimOverlay: some View {
-    // Both `colorScheme` and `configReloadTick` are read so SwiftUI tracks
-    // them as body dependencies: the first covers OS / Appearance flips,
-    // the second covers ghostty config-file theme reloads (Settings →
-    // Terminal picker / manual config edit). Without the tick the overlay
-    // keeps the previous theme's wash colour until a focus change or
-    // layout pass forces a rebuild.
-    _ = configReloadTick
-    if isSplit, !isFocused {
+    if shouldDimUnfocusedSplit {
       let runtime = GhosttyRuntime.shared
       let fill = runtime?.unfocusedSplitFill(colorScheme) ?? .windowBackgroundColor
       let opacity = runtime?.unfocusedSplitOpacity() ?? 0.15
@@ -302,5 +295,20 @@ private struct LeafView: View {
           .opacity(opacity)
       }
     }
+  }
+
+  /// `isSplit && !isFocused`, evaluated after reading `configReloadTick` so
+  /// the overlay rebuilds on ghostty config-file theme reloads (Settings →
+  /// Terminal picker / manual config edit). `colorScheme` is read inside the
+  /// overlay via `unfocusedSplitFill(colorScheme)`, covering OS / Appearance
+  /// flips; this read covers the config-reload tick. Without it the overlay
+  /// keeps the previous theme's wash colour until a focus change or layout
+  /// pass forces a rebuild. Reading the tick in this plain computed Bool —
+  /// rather than an inline `let _ =` inside the `@ViewBuilder` — keeps the
+  /// discard out of the result builder (a bare `_ =` does not type-check as a
+  /// builder statement) while still registering the SwiftUI dependency.
+  private var shouldDimUnfocusedSplit: Bool {
+    _ = configReloadTick
+    return isSplit && !isFocused
   }
 }
