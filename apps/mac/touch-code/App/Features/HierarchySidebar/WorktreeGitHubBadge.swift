@@ -34,9 +34,7 @@ struct WorktreeGitHubBadge<PopoverContent: View>: View {
       if let snapshot {
         // 0013 M5: `checkRollup` now travels on the snapshot (populated by the v2
         // batched `gh api graphql` path). No longer read from the retired
-        // `state.checks[prNumber]` dictionary. The `+N −M` chip used to live here
-        // but moved to `HierarchySidebarView.diffStatsChip` so PR-less rows can
-        // surface the same widget against `WorktreeBranchDiffMonitor`.
+        // `state.checks[prNumber]` dictionary.
         let rollup = PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
         PullRequestBadge(
           state: .loaded(snapshot, rollup: rollup),
