@@ -4,139 +4,141 @@ import TouchCodeCore
 
 /// Inline, spreadsheet-style editor for a Project's custom commands.
 ///
-/// Replaces the old compact list + modal `ScriptEditorSheet`: every field
-/// is edited in place. A row exposes four click targets —
-///   - **icon**: opens `ScriptIconPopover` (curated SF Symbol grid + free
-///     text name + Open SF Symbols).
-///   - **name**: an always-editable plain `TextField`.
-///   - **command**: opens `ScriptCommandPopover` (execution target +
-///     multi-line script + close-on-finish).
-///   - **shortcut**: opens the shared `HotkeyRecorderPopover`.
+/// Replaces the old compact list + modal `ScriptEditorSheet`: every field is
+/// edited in place. The layout is a clipped header + scrolling rows block,
+/// with an add/remove bar and an inline hint underneath — the surrounding
+/// grouped `Section` supplies the card chrome.
 ///
-/// The view is intentionally dumb: it never touches the store directly.
-/// Reads come in as `scripts`; every mutation routes back out through the
-/// `onUpdate` / `onAdd` / `onDelete` / `onReorder` closures so the parent
-/// keeps single ownership of the TCA write path. Selection is lifted to the
-/// parent (`selectedID`) so `onAdd` can select the freshly-created row.
+/// Each cell is an `InlineEditableCellButton` that paints a hover/active
+/// border, so the whole row reads as a set of editable cells:
+///   - **icon** → `ScriptIconPopover` (curated SF Symbol grid + free text).
+///   - **name** → click flips the cell into an inline `TextField`.
+///   - **command** → `ScriptCommandPopover` (execution target + script body).
+///   - **shortcut** → the shared `HotkeyRecorderPopover`.
+///
+/// The view never touches the store: reads arrive as `scripts`, mutations
+/// route back through the `onUpdate` / `onAdd` / `onDelete` closures so the
+/// parent keeps single ownership of the TCA write path. Selection is lifted
+/// to the parent so `onAdd` can select the freshly-created row.
 struct ScriptCommandTable: View {
   let scripts: [ScriptDefinition]
   @Binding var selectedID: UUID?
   let onUpdate: (ScriptDefinition) -> Void
   let onAdd: () -> Void
   let onDelete: (UUID) -> Void
-  /// Reorder: move `source` to sit where `target` currently is.
-  let onReorder: (_ source: UUID, _ target: UUID) -> Void
   /// Chord conflict check, excluding the row being edited.
   let validateChord: (ShortcutBinding, _ excluding: UUID) -> HotkeyRecorderPopover.ValidationResult
 
-  /// Leading icon column. Matched between header and rows so titles align.
-  private let iconColumnWidth: CGFloat = 44
-  /// Trailing shortcut column. Fixed so chord chips line up across rows.
-  private let shortcutColumnWidth: CGFloat = 132
+  private let iconColumnWidth: CGFloat = 48
+  private let nameColumnWidth: CGFloat = 130
+  private let shortcutColumnWidth: CGFloat = 100
+  private let listHeight: CGFloat = 200
 
   var body: some View {
-    VStack(spacing: 0) {
-      headerRow
-      Divider()
-      rowsArea
-      Divider()
+    VStack(alignment: .leading, spacing: 10) {
+      VStack(spacing: 0) {
+        headerRow
+        Divider()
+        ScrollView {
+          LazyVStack(spacing: 4) {
+            ForEach(scripts) { script in
+              ScriptCommandRow(
+                script: script,
+                isSelected: selectedID == script.id,
+                iconColumnWidth: iconColumnWidth,
+                nameColumnWidth: nameColumnWidth,
+                shortcutColumnWidth: shortcutColumnWidth,
+                onSelect: { selectedID = script.id },
+                onUpdate: onUpdate,
+                validateChord: { binding in validateChord(binding, script.id) }
+              )
+              .id(script.id)
+            }
+          }
+          .padding(.horizontal, 6)
+          .padding(.vertical, 6)
+        }
+        .frame(height: listHeight)
+      }
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .strokeBorder(Color(nsColor: .separatorColor))
+      )
+
       bottomBar
+
+      Text("Click cells to edit icon, name, command, and shortcut inline.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
   }
 
   // MARK: - Header
 
   private var headerRow: some View {
-    HStack(spacing: 10) {
-      Color.clear.frame(width: iconColumnWidth, height: 1)
-      columnTitle("Name")
-        .frame(minWidth: 80, idealWidth: 140, maxWidth: 200, alignment: .leading)
-      columnTitle("Command")
-        .frame(maxWidth: .infinity, alignment: .leading)
-      columnTitle("Shortcut")
-        .frame(width: shortcutColumnWidth, alignment: .trailing)
+    HStack(spacing: 8) {
+      headerCell("", width: iconColumnWidth, alignment: .center)
+      headerCell("Name", width: nameColumnWidth)
+      headerCell("Command")
+      headerCell("Shortcut", width: shortcutColumnWidth)
     }
     .padding(.horizontal, 14)
-    .padding(.vertical, 10)
+    .padding(.vertical, 8)
+    .font(.headline)
+    .foregroundStyle(.secondary)
   }
-
-  private func columnTitle(_ text: String) -> some View {
-    Text(text)
-      .font(.headline)
-      .foregroundStyle(.secondary)
-  }
-
-  // MARK: - Rows
 
   @ViewBuilder
-  private var rowsArea: some View {
-    if scripts.isEmpty {
-      Text("No commands yet — click + to create one.")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
-        .padding(.horizontal, 14)
+  private func headerCell(_ title: String, width: CGFloat? = nil, alignment: Alignment = .leading) -> some View {
+    if let width {
+      Text(title).frame(width: width, alignment: alignment)
     } else {
-      VStack(spacing: 4) {
-        ForEach(scripts) { script in
-          ScriptCommandRow(
-            script: script,
-            isSelected: selectedID == script.id,
-            iconColumnWidth: iconColumnWidth,
-            shortcutColumnWidth: shortcutColumnWidth,
-            onSelect: { selectedID = script.id },
-            onUpdate: onUpdate,
-            validateChord: { binding in validateChord(binding, script.id) }
-          )
-          .draggable(script.id.uuidString)
-          .dropDestination(for: String.self) { items, _ in
-            guard let first = items.first, let source = UUID(uuidString: first),
-              source != script.id
-            else { return false }
-            onReorder(source, script.id)
-            return true
-          }
-        }
-      }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 6)
-      .frame(maxWidth: .infinity, minHeight: 180, alignment: .top)
+      Text(title).frame(maxWidth: .infinity, alignment: alignment)
     }
   }
 
-  // MARK: - Bottom bar
+  // MARK: - Add / remove bar
 
   private var bottomBar: some View {
-    HStack(spacing: 2) {
+    HStack(spacing: 8) {
       Button(action: onAdd) {
-        Image(systemName: "plus")
-          .frame(width: 24, height: 20)
-          .contentShape(Rectangle())
-          .accessibilityLabel("Add command")
+        ZStack {
+          Image(systemName: "plus")
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
+        }
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle())
+        .accessibilityLabel("Add command")
       }
-      .buttonStyle(.borderless)
+      .buttonStyle(.plain)
       .help("Add command")
 
       Button {
-        if let selectedID { onDelete(selectedID) }
+        if let target = selectedID ?? scripts.last?.id {
+          onDelete(target)
+        }
       } label: {
-        Image(systemName: "minus")
-          .frame(width: 24, height: 20)
-          .contentShape(Rectangle())
-          .accessibilityLabel("Remove selected command")
+        ZStack {
+          Image(systemName: "minus")
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
+        }
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle())
+        .accessibilityLabel("Remove selected command")
       }
-      .buttonStyle(.borderless)
-      .disabled(selectedID == nil)
+      .buttonStyle(.plain)
+      .disabled(scripts.isEmpty)
       .help("Remove selected command")
 
-      Spacer()
+      Spacer(minLength: 0)
 
       Text("\(scripts.count) command\(scripts.count == 1 ? "" : "s")")
-        .font(.callout)
+        .font(.caption)
         .foregroundStyle(.secondary)
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
   }
 }
 
@@ -146,6 +148,7 @@ private struct ScriptCommandRow: View {
   let script: ScriptDefinition
   let isSelected: Bool
   let iconColumnWidth: CGFloat
+  let nameColumnWidth: CGFloat
   let shortcutColumnWidth: CGFloat
   let onSelect: () -> Void
   let onUpdate: (ScriptDefinition) -> Void
@@ -154,52 +157,61 @@ private struct ScriptCommandRow: View {
   @State private var iconPopover = false
   @State private var commandPopover = false
   @State private var shortcutPopover = false
-  @State private var shortcutHovering = false
+  @State private var isEditingName = false
+  @FocusState private var nameFocused: Bool
 
   var body: some View {
-    HStack(spacing: 10) {
-      iconCell
-        .frame(width: iconColumnWidth, alignment: .center)
-
-      nameCell
-        .frame(minWidth: 80, idealWidth: 140, maxWidth: 200, alignment: .leading)
-
-      commandCell
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-      shortcutCell
-        .frame(width: shortcutColumnWidth, alignment: .trailing)
+    HStack(spacing: 8) {
+      rowCell(width: iconColumnWidth, alignment: .center) { iconCell }
+      rowCell(width: nameColumnWidth) { nameCell }
+      rowCell { commandCell }
+      rowCell(width: shortcutColumnWidth) { shortcutCell }
     }
     .padding(.horizontal, 8)
-    .padding(.vertical, 8)
+    .padding(.vertical, 2)
     .background(
       RoundedRectangle(cornerRadius: 8)
-        .fill(isSelected ? Color.accentColor.opacity(0.28) : Color.clear)
+        .fill(isSelected ? Color.accentColor.opacity(0.35) : .clear)
     )
-    .contentShape(Rectangle())
-    .onTapGesture(perform: onSelect)
+    .contentShape(RoundedRectangle(cornerRadius: 8))
     .accessibilityElement(children: .contain)
     .accessibilityAddTraits(.isButton)
+    .onTapGesture(perform: onSelect)
+    .onChange(of: isSelected) { _, selected in
+      if !selected { isEditingName = false }
+    }
+  }
+
+  @ViewBuilder
+  private func rowCell<Content: View>(
+    width: CGFloat? = nil,
+    alignment: Alignment = .leading,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    if let width {
+      content()
+        .frame(width: width, alignment: alignment)
+        .frame(maxHeight: .infinity, alignment: alignment)
+    } else {
+      content()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+    }
   }
 
   // MARK: Icon
 
   private var iconCell: some View {
-    Button {
+    InlineEditableCellButton(isActive: iconPopover, contentAlignment: .center) {
       onSelect()
-      iconPopover = true
+      isEditingName = false
+      commandPopover = false
+      iconPopover.toggle()
     } label: {
       Image(systemName: script.resolvedSystemImage)
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(.primary)
-        .frame(width: 28, height: 22)
-        .background(
-          RoundedRectangle(cornerRadius: 6)
-            .fill(.quaternary)
-        )
-        .accessibilityLabel("Command icon")
+        .foregroundStyle(.secondary)
+        .frame(width: 16, alignment: .center)
+        .accessibilityHidden(true)
     }
-    .buttonStyle(.plain)
     .popover(isPresented: $iconPopover, arrowEdge: .bottom) {
       ScriptIconPopover(
         symbol: Binding(
@@ -212,90 +224,103 @@ private struct ScriptCommandRow: View {
 
   // MARK: Name
 
+  @ViewBuilder
   private var nameCell: some View {
-    TextField(
-      "",
-      text: Binding(
-        get: { script.name },
-        set: {
-          var updated = script
-          updated.name = $0
-          onUpdate(updated)
-        }
-      ),
-      prompt: Text(script.kind.defaultName)
-    )
-    .textFieldStyle(.plain)
-    .font(.body)
+    if isEditingName {
+      InlineEditableFieldContainer(isActive: true) {
+        TextField(
+          "",
+          text: Binding(
+            get: { script.name },
+            set: {
+              var updated = script
+              updated.name = $0
+              onUpdate(updated)
+            }
+          ),
+          prompt: Text(script.kind.defaultName)
+        )
+        .textFieldStyle(.plain)
+        .padding(.leading, -4)
+        .focused($nameFocused)
+        .onSubmit { isEditingName = false }
+      }
+      .onAppear { nameFocused = true }
+      .onChange(of: nameFocused) { _, focused in
+        if !focused { isEditingName = false }
+      }
+    } else {
+      InlineEditableCellButton {
+        onSelect()
+        commandPopover = false
+        iconPopover = false
+        isEditingName = true
+      } label: {
+        Text(script.displayName)
+          .lineLimit(1)
+      }
+    }
   }
 
   // MARK: Command
 
   private var commandCell: some View {
-    Button {
+    InlineEditableCellButton(isActive: commandPopover) {
       onSelect()
-      commandPopover = true
+      isEditingName = false
+      iconPopover = false
+      commandPopover.toggle()
     } label: {
       VStack(alignment: .leading, spacing: 2) {
         Text(ScriptTargetLabel.title(for: script.target))
           .font(.caption)
           .foregroundStyle(.secondary)
         Text(commandPreview)
-          .font(.body)
-          .foregroundStyle(script.command.isEmpty ? .secondary : .primary)
           .lineLimit(1)
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
     .popover(isPresented: $commandPopover, arrowEdge: .bottom) {
-      ScriptCommandPopover(
-        script: script,
-        onUpdate: onUpdate
-      )
+      ScriptCommandPopover(script: script, onUpdate: onUpdate)
     }
+    .help("New Tab opens a new tab. In Place writes into the focused pane. New Split splits it.")
   }
 
   private var commandPreview: String {
-    let firstLine = script.command
-      .split(whereSeparator: \.isNewline)
+    let firstLine =
+      script.command
+      .split(separator: "\n", omittingEmptySubsequences: false)
       .first
-      .map { String($0).trimmingCharacters(in: .whitespaces) }
-    if let firstLine, !firstLine.isEmpty {
-      return firstLine
-    }
-    return "Click to set command script"
+      .map(String.init)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return firstLine.isEmpty ? "Click to set command script" : firstLine
   }
 
   // MARK: Shortcut
 
   private var shortcutCell: some View {
-    Button {
-      onSelect()
-      shortcutPopover = true
-    } label: {
-      shortcutLabel
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .overlay(alignment: .trailing) {
-      if hasShortcut, shortcutHovering {
-        Button {
-          var updated = script
-          updated.keyboardShortcut = nil
-          onUpdate(updated)
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("Clear shortcut")
-        }
-        .buttonStyle(.plain)
-        .help("Clear shortcut")
+    let hasChord: Bool = {
+      if let binding = script.keyboardShortcut, binding.isEnabled, binding.keyCode != 0 {
+        return true
       }
+      return false
+    }()
+    let display: String = {
+      if let binding = script.keyboardShortcut, binding.isEnabled, binding.keyCode != 0 {
+        return ShortcutDisplay.chord(for: binding)
+      }
+      return "Unassigned"
+    }()
+
+    return InlineEditableCellButton(isActive: shortcutPopover) {
+      onSelect()
+      isEditingName = false
+      shortcutPopover.toggle()
+    } label: {
+      Text(display)
+        .font(.body.monospaced())
+        .foregroundStyle(hasChord ? .primary : .secondary)
+        .lineLimit(1)
     }
-    .onHover { shortcutHovering = $0 }
     .popover(isPresented: $shortcutPopover, arrowEdge: .bottom) {
       HotkeyRecorderPopover(
         title: "Shortcut for \(script.displayName)",
@@ -308,26 +333,16 @@ private struct ScriptCommandRow: View {
         onCancel: { shortcutPopover = false }
       )
     }
-  }
-
-  private var hasShortcut: Bool {
-    if let binding = script.keyboardShortcut, binding.isEnabled, binding.keyCode != 0 {
-      return true
+    .contextMenu {
+      if hasChord {
+        Button("Clear Shortcut") {
+          var updated = script
+          updated.keyboardShortcut = nil
+          onUpdate(updated)
+        }
+      }
     }
-    return false
-  }
-
-  @ViewBuilder
-  private var shortcutLabel: some View {
-    if let binding = script.keyboardShortcut, binding.isEnabled, binding.keyCode != 0 {
-      Text(ShortcutDisplay.chord(for: binding))
-        .font(.callout.monospaced())
-        .foregroundStyle(.primary)
-    } else {
-      Text("Unassigned")
-        .font(.callout.monospaced())
-        .foregroundStyle(.secondary)
-    }
+    .help("Click to record a shortcut.")
   }
 }
 
@@ -347,41 +362,38 @@ private enum ScriptTargetLabel {
   static func footer(for target: ScriptTarget) -> String {
     switch target {
     case .newTab: return "Runs in a new terminal tab."
-    case .focused: return "Runs in the focused pane."
-    case .split: return "Splits the focused pane."
+    case .focused: return "Sends input to the focused pane."
+    case .split: return "Runs in a new split of the focused pane."
     }
   }
 }
 
 // MARK: - Icon popover
 
-/// Compact icon picker: a curated SF Symbol grid plus a free-text field for
-/// any symbol installed on the system, with a shortcut to launch SF Symbols.
+/// Curated SF Symbol grid plus a free-text field for any installed symbol,
+/// with a shortcut to launch the SF Symbols app.
 private struct ScriptIconPopover: View {
   @Binding var symbol: String
+  @Environment(\.dismiss) private var dismiss
 
-  private static let curated: [String] = [
+  private static let presets: [String] = [
     "terminal", "terminal.fill", "play.fill", "stop.fill",
     "hammer.fill", "shippingbox.fill", "doc.text.fill", "sparkles",
     "bolt.fill", "flame.fill", "wand.and.stars", "wrench.and.screwdriver.fill",
-    "checkmark.circle.fill", "xmark.circle.fill", "exclamationmark.triangle.fill", "ant.fill",
-    "clock.fill", "arrow.triangle.2.circlepath", "arrow.clockwise", "folder.fill",
+    "checkmark.circle.fill", "xmark.circle.fill", "exclamationmark.triangle.fill", "ladybug.fill",
+    "clock.fill", "repeat", "arrow.clockwise", "folder.fill",
     "archivebox.fill", "paperplane.fill", "cloud.fill", "tray.and.arrow.down.fill",
-    "tray.and.arrow.up.fill", "icloud.and.arrow.up.fill", "square.and.arrow.up.fill", "arrow.triangle.branch",
-    "folder.badge.plus", "doc.badge.plus", "gearshape.fill", "magnifyingglass",
+    "tray.and.arrow.up.fill", "icloud.and.arrow.up.fill", "square.and.arrow.up.fill", "arrow.triangle.2.circlepath",
+    "folder.badge.plus", "doc.badge.plus",
   ]
-
-  private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 10)
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Icon")
         .font(.headline)
-
       Text("Pick from common symbols or enter any SF Symbol name available in your system.")
-        .font(.callout)
+        .font(.caption)
         .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
 
       HStack(spacing: 8) {
         TextField("SF Symbol name", text: $symbol)
@@ -389,45 +401,41 @@ private struct ScriptIconPopover: View {
         Button("Open SF Symbols", action: openSFSymbols)
       }
 
-      LazyVGrid(columns: columns, spacing: 8) {
-        ForEach(Self.curated, id: \.self) { name in
-          cell(name)
+      ScrollView {
+        LazyVGrid(
+          columns: Array(repeating: GridItem(.fixed(24), spacing: 8), count: 10),
+          spacing: 8
+        ) {
+          ForEach(Self.presets, id: \.self) { name in
+            Button {
+              symbol = name
+              dismiss()
+            } label: {
+              Image(systemName: name)
+                .frame(width: 24, height: 24)
+                .accessibilityHidden(true)
+            }
+            .buttonStyle(.plain)
+            .help(name)
+          }
         }
+        .padding(12)
       }
+      .frame(maxHeight: 124)
     }
-    .padding(16)
-    .frame(width: 460)
+    .padding(12)
+    .frame(width: 360)
   }
 
-  @ViewBuilder
-  private func cell(_ name: String) -> some View {
-    let isSelected = name == symbol
-    Button {
-      symbol = name
-    } label: {
-      Image(systemName: name)
-        .font(.body)
-        .foregroundStyle(.primary)
-        .frame(width: 30, height: 26)
-        .background(
-          RoundedRectangle(cornerRadius: 6)
-            .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.clear)
-            .overlay(
-              RoundedRectangle(cornerRadius: 6)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
-            )
-        )
-        .accessibilityLabel(name)
-    }
-    .buttonStyle(.plain)
-    .help(name)
-  }
-
-  /// Best-effort launch of the SF Symbols app. No-op when it isn't installed.
+  /// Launch the SF Symbols app, falling back to the web reference.
   private func openSFSymbols() {
     let workspace = NSWorkspace.shared
     if let url = workspace.urlForApplication(withBundleIdentifier: "com.apple.SFSymbols") {
       workspace.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+      return
+    }
+    if let url = URL(string: "https://developer.apple.com/sf-symbols/") {
+      workspace.open(url)
     }
   }
 }
@@ -442,60 +450,52 @@ private struct ScriptCommandPopover: View {
   let onUpdate: (ScriptDefinition) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 10) {
       Text("Command")
         .font(.headline)
-
       Text("Choose where this command runs and edit the script used by this repository custom command.")
-        .font(.callout)
+        .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
-      HStack(spacing: 12) {
-        Text("Execution")
-          .foregroundStyle(.secondary)
-        Picker("Execution", selection: targetBinding) {
-          Text("New Tab").tag(ScriptTarget.newTab)
-          Text("In Place").tag(ScriptTarget.focused)
-          Text("New Split").tag(ScriptTarget.split)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+      Picker("Execution", selection: targetBinding) {
+        Text("New Tab").tag(ScriptTarget.newTab)
+        Text("In Place").tag(ScriptTarget.focused)
+        Text("New Split").tag(ScriptTarget.split)
       }
+      .pickerStyle(.segmented)
 
       if script.target == .split {
-        HStack(spacing: 12) {
-          Text("Direction")
-            .foregroundStyle(.secondary)
-          Picker("Direction", selection: directionBinding) {
-            Text("Right").tag(ScriptSplitDirection.right)
-            Text("Down").tag(ScriptSplitDirection.down)
-            Text("Left").tag(ScriptSplitDirection.left)
-            Text("Up").tag(ScriptSplitDirection.up)
-          }
-          .pickerStyle(.segmented)
-          .labelsHidden()
+        Picker("Split Direction", selection: directionBinding) {
+          Text("Right").tag(ScriptSplitDirection.right)
+          Text("Down").tag(ScriptSplitDirection.down)
+          Text("Left").tag(ScriptSplitDirection.left)
+          Text("Up").tag(ScriptSplitDirection.up)
         }
+        .pickerStyle(.menu)
+        .help("Direction to split the focused pane.")
       }
 
       PlainCommandEditor(text: commandBinding)
-        .frame(height: 120)
+        .frame(height: 140)
         .overlay(
           RoundedRectangle(cornerRadius: 6)
-            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+            .strokeBorder(Color(nsColor: .separatorColor))
         )
 
       Text(ScriptTargetLabel.footer(for: script.target))
         .font(.caption)
         .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
 
       if script.target != .focused {
         Toggle("Close when finished", isOn: closeBinding)
           .toggleStyle(.checkbox)
+          .help("Closes the spawned tab or split once the command's process exits.")
       }
     }
-    .padding(16)
-    .frame(width: 460)
+    .padding(12)
+    .frame(width: 420)
   }
 
   // MARK: Bindings
@@ -558,6 +558,105 @@ private struct ScriptCommandPopover: View {
         onUpdate(updated)
       }
     )
+  }
+}
+
+// MARK: - Inline cell primitives
+
+/// Cell-sized button that paints a rounded border on hover and a coloured
+/// border while its editor is active, so each table cell reads as a
+/// distinct click target without permanent chrome.
+private struct InlineEditableCellButton<Label: View>: View {
+  let isActive: Bool
+  let activeColor: Color
+  let contentAlignment: Alignment
+  let action: () -> Void
+  @ViewBuilder let label: () -> Label
+
+  @State private var isHovering = false
+
+  init(
+    isActive: Bool = false,
+    activeColor: Color = .accentColor,
+    contentAlignment: Alignment = .leading,
+    action: @escaping () -> Void,
+    @ViewBuilder label: @escaping () -> Label
+  ) {
+    self.isActive = isActive
+    self.activeColor = activeColor
+    self.contentAlignment = contentAlignment
+    self.action = action
+    self.label = label
+  }
+
+  var body: some View {
+    Button(action: action) {
+      label()
+        .frame(maxWidth: .infinity, alignment: contentAlignment)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .frame(maxWidth: .infinity, alignment: contentAlignment)
+    .onHover { isHovering = $0 }
+    .overlay(
+      RoundedRectangle(cornerRadius: 6)
+        .strokeBorder(borderColor, lineWidth: borderWidth)
+    )
+  }
+
+  private var borderColor: Color {
+    if isActive { return activeColor }
+    if isHovering { return Color(nsColor: .tertiaryLabelColor) }
+    return .clear
+  }
+
+  private var borderWidth: CGFloat {
+    (isActive || isHovering) ? 1 : 0
+  }
+}
+
+/// Sibling of `InlineEditableCellButton` for cells that host a live control
+/// (the inline name `TextField`) rather than a tap action.
+private struct InlineEditableFieldContainer<Content: View>: View {
+  let isActive: Bool
+  let activeColor: Color
+  @ViewBuilder let content: () -> Content
+
+  @State private var isHovering = false
+
+  init(
+    isActive: Bool = false,
+    activeColor: Color = .accentColor,
+    @ViewBuilder content: @escaping () -> Content
+  ) {
+    self.isActive = isActive
+    self.activeColor = activeColor
+    self.content = content
+  }
+
+  var body: some View {
+    content()
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 4)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .onHover { isHovering = $0 }
+      .overlay(
+        RoundedRectangle(cornerRadius: 6)
+          .strokeBorder(borderColor, lineWidth: borderWidth)
+      )
+  }
+
+  private var borderColor: Color {
+    if isActive { return activeColor }
+    if isHovering { return Color(nsColor: .tertiaryLabelColor) }
+    return .clear
+  }
+
+  private var borderWidth: CGFloat {
+    (isActive || isHovering) ? 1 : 0
   }
 }
 

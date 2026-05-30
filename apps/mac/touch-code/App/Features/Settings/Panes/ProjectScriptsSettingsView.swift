@@ -199,8 +199,8 @@ struct ProjectScriptsSettingsView: View {
 
   /// Inline command table. The table owns no store access — every
   /// mutation routes back through the closures so writes stay on the TCA
-  /// path. Row insets are zeroed so the table fills the grouped Section,
-  /// which provides the card chrome seen in the design.
+  /// path. The grouped Section supplies the card chrome; the table draws
+  /// its own clipped header + rows block, add/remove bar, and hint.
   @ViewBuilder
   private var scriptsSection: some View {
     Section {
@@ -210,14 +210,16 @@ struct ProjectScriptsSettingsView: View {
         onUpdate: updateScript,
         onAdd: addScript,
         onDelete: deleteScript,
-        onReorder: reorderScript,
         validateChord: { binding, excluding in
           chordValidator(binding, excludingScriptID: excluding)
         }
       )
-      .listRowInsets(EdgeInsets())
-    } footer: {
-      Text("Click cells to edit icon, name, command, and shortcut inline.")
+    } header: {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Commands")
+        Text("Repository-local terminal actions. Command shortcuts take precedence in this repository.")
+          .foregroundStyle(.secondary)
+      }
     }
   }
 
@@ -249,20 +251,6 @@ struct ProjectScriptsSettingsView: View {
     if selectedScriptID == id {
       selectedScriptID = updated.isEmpty ? nil : updated[min(index, updated.count - 1)].id
     }
-  }
-
-  /// Reorder via drag-drop. Source script is removed and re-inserted at
-  /// the target row's index (above-the-target).
-  private func reorderScript(source: UUID, target: UUID) {
-    guard source != target,
-      let sourceIndex = scripts.firstIndex(where: { $0.id == source }),
-      let targetIndex = scripts.firstIndex(where: { $0.id == target })
-    else { return }
-    var updated = scripts
-    let moved = updated.remove(at: sourceIndex)
-    let insertIndex = min(max(targetIndex, 0), updated.count)
-    updated.insert(moved, at: insertIndex)
-    store.send(.setProjectScripts(updated))
   }
 }
 
