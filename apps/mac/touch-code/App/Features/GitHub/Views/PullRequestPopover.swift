@@ -80,22 +80,24 @@ struct PullRequestPopover: View {
   /// Gated on `PullRequestSnapshot.hasMergeConflict` (the same predicate the sidebar /
   /// titlebar pills redden on), so all three surfaces agree on what "conflicted" means.
   private var conflictBanner: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 6) {
+    // Textbook icon + wrapping-text row: the width-filling frame lives on the *HStack*,
+    // and the Text carries only `fixedSize(horizontal: false, vertical: true)`. Putting a
+    // `maxWidth: .infinity` frame on the Text itself defeats `fixedSize` and the sentence
+    // lays out on one line and truncates — which is exactly what happened. `.top`
+    // alignment keeps the icon level with the first line once the text wraps.
+    HStack(alignment: .top, spacing: 6) {
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(.red)
         .accessibilityHidden(true)
-      // `maxWidth: .infinity` (not a trailing Spacer) gives the Text the full
-      // banner width so it wraps within it; `fixedSize(vertical:)` then lets the
-      // banner grow tall enough to show every line instead of truncating.
       Text("Merge conflicts — this branch can't be merged until they're resolved.")
         .font(.caption)
         .foregroundStyle(.primary)
+        .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 8)
     .padding(.vertical, 6)
-    .frame(maxWidth: .infinity)
     .background(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
         .fill(Color.red.opacity(0.12))
