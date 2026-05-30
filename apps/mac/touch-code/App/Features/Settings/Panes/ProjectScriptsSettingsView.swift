@@ -39,17 +39,27 @@ struct ProjectScriptsSettingsView: View {
   // MARK: - Body
 
   var body: some View {
-    Form {
-      scriptsSection
+    VStack(alignment: .leading, spacing: 12) {
+      ScriptCommandTable(
+        scripts: scripts,
+        selectedID: $selectedScriptID,
+        onUpdate: updateScript,
+        onAdd: addScript,
+        onDelete: deleteScript,
+        onMove: moveScript,
+        validateChord: { binding, excluding in
+          chordValidator(binding, excludingScriptID: excluding)
+        }
+      )
 
       if let error = store.state.lastWriteFailure, !error.isEmpty {
-        Section {
-          Label(error, systemImage: "exclamationmark.circle.fill")
-            .foregroundStyle(.red)
-        }
+        Label(error, systemImage: "exclamationmark.circle.fill")
+          .font(.callout)
+          .foregroundStyle(.red)
       }
     }
-    .formStyle(.grouped)
+    .padding(20)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
   }
 
   /// Reject reserved / conflicting chords at recording time. Order
@@ -92,43 +102,27 @@ struct ProjectScriptsSettingsView: View {
     return .ok
   }
 
-  // MARK: - Commands Section
-
-  /// Inline command table. The table owns no store access — every
-  /// mutation routes back through the closures so writes stay on the TCA
-  /// path. The grouped Section supplies the card chrome; the table draws
-  /// its own clipped header + rows block, add/remove bar, and hint.
-  @ViewBuilder
-  private var scriptsSection: some View {
-    Section {
-      ScriptCommandTable(
-        scripts: scripts,
-        selectedID: $selectedScriptID,
-        onUpdate: updateScript,
-        onAdd: addScript,
-        onDelete: deleteScript,
-        validateChord: { binding, excluding in
-          chordValidator(binding, excludingScriptID: excluding)
-        }
-      )
-    } header: {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Commands")
-        Text("Repository-local terminal actions. Command shortcuts take precedence in this repository.")
-          .foregroundStyle(.secondary)
-      }
-    }
-  }
-
   // MARK: - Mutations
 
-  /// Append a fresh custom command and select it. Defaults to the
-  /// `.custom` kind (the only kind the inline table creates) with a
-  /// unique-ish placeholder name the user edits in place.
-  private func addScript() {
-    let new = ScriptDefinition(kind: .custom, name: "Command \(scripts.count + 1)")
+  /// Append a command of the chosen kind and select it. Custom commands get a
+  /// unique-ish placeholder name; predefined kinds fall back to their kind
+  /// name (`displayName`) so the row reads "Run", "Test", etc. until renamed.
+  private func addScript(kind: ScriptKind) {
+    let name = kind == .custom ? "Command \(scripts.count + 1)" : ""
+    let new = ScriptDefinition(kind: kind, name: name)
     store.send(.setProjectScripts(scripts + [new]))
     selectedScriptID = new.id
+  }
+
+  /// Move a command up (`offset == -1`) or down (`offset == 1`) by swapping it
+  /// with its neighbour. Out-of-range moves are ignored.
+  private func moveScript(id: UUID, offset: Int) {
+    guard let index = scripts.firstIndex(where: { $0.id == id }) else { return }
+    let target = index + offset
+    guard target >= 0, target < scripts.count else { return }
+    var updated = scripts
+    updated.swapAt(index, target)
+    store.send(.setProjectScripts(updated))
   }
 
   private func updateScript(_ script: ScriptDefinition) {

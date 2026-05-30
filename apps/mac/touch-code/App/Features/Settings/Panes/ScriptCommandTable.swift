@@ -6,26 +6,30 @@ import TouchCodeCore
 ///
 /// Replaces the old compact list + modal `ScriptEditorSheet`: every field is
 /// edited in place. The layout is a clipped header + scrolling rows block,
-/// with an add/remove bar and an inline hint underneath — the surrounding
-/// grouped `Section` supplies the card chrome.
+/// with an add/remove/reorder bar and an inline hint underneath. No card
+/// chrome — the pane hosts it flush.
 ///
 /// Each cell is an `InlineEditableCellButton` that paints a hover/active
 /// border, so the whole row reads as a set of editable cells:
-///   - **icon** → `ScriptIconPopover` (curated SF Symbol grid + free text).
+///   - **icon** → `ScriptIconPopover` (curated SF Symbol grid + colour swatch).
 ///   - **name** → click flips the cell into an inline `TextField`.
 ///   - **command** → `ScriptCommandPopover` (execution target + script body).
 ///   - **shortcut** → the shared `HotkeyRecorderPopover`.
 ///
 /// The view never touches the store: reads arrive as `scripts`, mutations
-/// route back through the `onUpdate` / `onAdd` / `onDelete` closures so the
-/// parent keeps single ownership of the TCA write path. Selection is lifted
-/// to the parent so `onAdd` can select the freshly-created row.
+/// route back through the `onUpdate` / `onAdd` / `onDelete` / `onMove`
+/// closures so the parent keeps single ownership of the TCA write path.
+/// Selection is lifted to the parent so `onAdd` can select the new row and
+/// the reorder buttons act on the selection.
 struct ScriptCommandTable: View {
   let scripts: [ScriptDefinition]
   @Binding var selectedID: UUID?
   let onUpdate: (ScriptDefinition) -> Void
-  let onAdd: () -> Void
+  /// Append a command of the chosen kind (the `+` menu offers preset kinds).
+  let onAdd: (ScriptKind) -> Void
   let onDelete: (UUID) -> Void
+  /// Move the command with `id` by `offset` rows (−1 up, +1 down).
+  let onMove: (_ id: UUID, _ offset: Int) -> Void
   /// Chord conflict check, excluding the row being edited.
   let validateChord: (ShortcutBinding, _ excluding: UUID) -> HotkeyRecorderPopover.ValidationResult
 
@@ -61,14 +65,10 @@ struct ScriptCommandTable: View {
         .frame(height: listHeight)
       }
       .clipShape(RoundedRectangle(cornerRadius: 8))
-      .overlay(
-        RoundedRectangle(cornerRadius: 8)
-          .strokeBorder(Color(nsColor: .separatorColor))
-      )
 
       bottomBar
 
-      Text("Click cells to edit icon, name, command, and shortcut inline.")
+      Text("Click any cell to edit it. Use ↑ ↓ to reorder.")
         .font(.caption)
         .foregroundStyle(.secondary)
     }
@@ -98,40 +98,31 @@ struct ScriptCommandTable: View {
     }
   }
 
-  // MARK: - Add / remove bar
+  // MARK: - Add / remove / reorder bar
 
   private var bottomBar: some View {
-    HStack(spacing: 8) {
-      Button(action: onAdd) {
-        ZStack {
-          Image(systemName: "plus")
-            .frame(width: 16, height: 16)
-            .accessibilityHidden(true)
-        }
-        .frame(width: 28, height: 28)
-        .contentShape(Rectangle())
-        .accessibilityLabel("Add command")
-      }
-      .buttonStyle(.plain)
-      .help("Add command")
+    let selectedIndex = selectedID.flatMap { id in scripts.firstIndex(where: { $0.id == id }) }
+    return HStack(spacing: 2) {
+      addMenu
 
-      Button {
-        if let target = selectedID ?? scripts.last?.id {
-          onDelete(target)
-        }
-      } label: {
-        ZStack {
-          Image(systemName: "minus")
-            .frame(width: 16, height: 16)
-            .accessibilityHidden(true)
-        }
-        .frame(width: 28, height: 28)
-        .contentShape(Rectangle())
-        .accessibilityLabel("Remove selected command")
+      barButton("minus", label: "Remove selected command", disabled: scripts.isEmpty) {
+        if let target = selectedID ?? scripts.last?.id { onDelete(target) }
       }
-      .buttonStyle(.plain)
-      .disabled(scripts.isEmpty)
-      .help("Remove selected command")
+
+      Divider()
+        .frame(height: 14)
+        .padding(.horizontal, 4)
+
+      barButton("arrow.up", label: "Move command up", disabled: selectedIndex == nil || selectedIndex == 0) {
+        if let id = selectedID { onMove(id, -1) }
+      }
+      barButton(
+        "arrow.down",
+        label: "Move command down",
+        disabled: selectedIndex == nil || selectedIndex == scripts.count - 1
+      ) {
+        if let id = selectedID { onMove(id, 1) }
+      }
 
       Spacer(minLength: 0)
 
@@ -139,6 +130,64 @@ struct ScriptCommandTable: View {
         .font(.caption)
         .foregroundStyle(.secondary)
     }
+  }
+
+  @ViewBuilder
+  private func barButton(
+    _ systemName: String,
+    label: String,
+    disabled: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      ZStack {
+        Image(systemName: systemName)
+          .frame(width: 16, height: 16)
+          .accessibilityHidden(true)
+      }
+      .frame(width: 28, height: 28)
+      .contentShape(Rectangle())
+      .accessibilityLabel(label)
+    }
+    .buttonStyle(.borderless)
+    .disabled(disabled)
+    .help(label)
+  }
+
+  /// `+` menu: offers each preset kind plus Custom. Predefined kinds already
+  /// present are excluded so a Project can't hold two `Run` commands.
+  private var addMenu: some View {
+    let usedKinds = Set(scripts.map(\.kind))
+    return Menu {
+      ForEach(ScriptKind.allCases, id: \.self) { kind in
+        if kind == .custom || !usedKinds.contains(kind) {
+          Button {
+            onAdd(kind)
+          } label: {
+            Label {
+              Text(kind.defaultName)
+            } icon: {
+              Image(systemName: kind.defaultSystemImage)
+                .foregroundStyle(ScriptTintColorPalette.color(for: kind.defaultTintColor))
+                .accessibilityHidden(true)
+            }
+          }
+        }
+      }
+    } label: {
+      ZStack {
+        Image(systemName: "plus")
+          .frame(width: 16, height: 16)
+          .accessibilityHidden(true)
+      }
+      .frame(width: 28, height: 28)
+      .contentShape(Rectangle())
+      .accessibilityLabel("Add command")
+    }
+    .menuStyle(.borderlessButton)
+    .menuIndicator(.hidden)
+    .fixedSize()
+    .help("Add command")
   }
 }
 
@@ -208,17 +257,12 @@ private struct ScriptCommandRow: View {
       iconPopover.toggle()
     } label: {
       Image(systemName: script.resolvedSystemImage)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(ScriptTintColorPalette.color(for: script.resolvedTintColor))
         .frame(width: 16, alignment: .center)
         .accessibilityHidden(true)
     }
     .popover(isPresented: $iconPopover, arrowEdge: .bottom) {
-      ScriptIconPopover(
-        symbol: Binding(
-          get: { script.systemImage ?? script.resolvedSystemImage },
-          set: { onUpdate(script.applyingIcon($0)) }
-        )
-      )
+      ScriptIconPopover(script: script, onUpdate: onUpdate)
     }
   }
 
@@ -368,13 +412,14 @@ private enum ScriptTargetLabel {
   }
 }
 
-// MARK: - Icon popover
+// MARK: - Icon & colour popover
 
-/// Curated SF Symbol grid plus a free-text field for any installed symbol,
-/// with a shortcut to launch the SF Symbols app.
+/// Curated SF Symbol grid + colour swatch row, plus a free-text field for any
+/// installed symbol and a shortcut to launch the SF Symbols app. Colour reuses
+/// the Project colour-swatch design (`ColorChip`).
 private struct ScriptIconPopover: View {
-  @Binding var symbol: String
-  @Environment(\.dismiss) private var dismiss
+  let script: ScriptDefinition
+  let onUpdate: (ScriptDefinition) -> Void
 
   private static let presets: [String] = [
     "terminal", "terminal.fill", "play.fill", "stop.fill",
@@ -387,16 +432,40 @@ private struct ScriptIconPopover: View {
     "folder.badge.plus", "doc.badge.plus",
   ]
 
+  private var symbolBinding: Binding<String> {
+    Binding(
+      get: { script.systemImage ?? script.resolvedSystemImage },
+      set: {
+        var updated = script
+        let trimmed = $0.trimmingCharacters(in: .whitespaces)
+        updated.systemImage = trimmed.isEmpty ? nil : trimmed
+        onUpdate(updated)
+      }
+    )
+  }
+
+  private var tintBinding: Binding<ScriptTintColor> {
+    Binding(
+      get: { script.resolvedTintColor },
+      set: {
+        var updated = script
+        updated.tintColor = $0
+        onUpdate(updated)
+      }
+    )
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("Icon")
+      Text("Icon & Color")
         .font(.headline)
-      Text("Pick from common symbols or enter any SF Symbol name available in your system.")
+      Text("Pick a symbol and colour, or type any SF Symbol name your system has.")
         .font(.caption)
         .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
 
       HStack(spacing: 8) {
-        TextField("SF Symbol name", text: $symbol)
+        TextField("SF Symbol name", text: symbolBinding)
           .textFieldStyle(.roundedBorder)
         Button("Open SF Symbols", action: openSFSymbols)
       }
@@ -408,10 +477,10 @@ private struct ScriptIconPopover: View {
         ) {
           ForEach(Self.presets, id: \.self) { name in
             Button {
-              symbol = name
-              dismiss()
+              symbolBinding.wrappedValue = name
             } label: {
               Image(systemName: name)
+                .foregroundStyle(name == symbolBinding.wrappedValue ? ScriptTintColorPalette.color(for: script.resolvedTintColor) : .primary)
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
             }
@@ -422,6 +491,10 @@ private struct ScriptIconPopover: View {
         .padding(12)
       }
       .frame(maxHeight: 124)
+
+      Divider()
+
+      ScriptTintSwatchRow(selection: tintBinding)
     }
     .padding(12)
     .frame(width: 360)
@@ -440,11 +513,37 @@ private struct ScriptIconPopover: View {
   }
 }
 
+/// Horizontal palette of `ScriptTintColor` swatches, styled with the shared
+/// `ColorChip` so it matches the Project colour-swatch row.
+private struct ScriptTintSwatchRow: View {
+  @Binding var selection: ScriptTintColor
+
+  var body: some View {
+    HStack(spacing: 8) {
+      ForEach(ScriptTintColor.allCases, id: \.self) { tint in
+        ColorChip(
+          isSelected: selection == tint,
+          action: { selection = tint },
+          accessibilityName: tint.rawValue.capitalized,
+          content: {
+            Circle()
+              .fill(ScriptTintColorPalette.color(for: tint))
+              .frame(width: 16, height: 16)
+              .overlay(
+                Circle().strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+              )
+          }
+        )
+      }
+    }
+  }
+}
+
 // MARK: - Command popover
 
 /// Execution target + script body editor. Edits commit live through
 /// `onUpdate`; the shared `SettingsStore` debounce coalesces disk writes,
-/// matching the lifecycle editors elsewhere in this pane.
+/// matching the lifecycle editors elsewhere in Settings.
 private struct ScriptCommandPopover: View {
   let script: ScriptDefinition
   let onUpdate: (ScriptDefinition) -> Void
@@ -657,24 +756,5 @@ private struct InlineEditableFieldContainer<Content: View>: View {
 
   private var borderWidth: CGFloat {
     (isActive || isHovering) ? 1 : 0
-  }
-}
-
-// MARK: - Icon edit helper
-
-extension ScriptDefinition {
-  /// Returns a copy with `systemImage` set to `symbol`. A predefined-kind
-  /// script is flipped to `.custom` (preserving its visible name) so the
-  /// override actually renders — the resolver only honours overrides for
-  /// `.custom`, and the inline table treats every command as customizable.
-  fileprivate func applyingIcon(_ symbol: String) -> ScriptDefinition {
-    var copy = self
-    if copy.kind != .custom {
-      if copy.name.isEmpty { copy.name = copy.kind.defaultName }
-      copy.kind = .custom
-    }
-    let trimmed = symbol.trimmingCharacters(in: .whitespaces)
-    copy.systemImage = trimmed.isEmpty ? nil : trimmed
-    return copy
   }
 }
