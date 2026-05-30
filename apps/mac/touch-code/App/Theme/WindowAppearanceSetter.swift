@@ -127,11 +127,15 @@ final class AppearanceApplyingView: NSView {
       window.contentView?.needsDisplay = true
       window.invalidateShadow()
     }
+    let windowEffectives = NSApp.windows
+      .map { $0.effectiveAppearance.name.rawValue.replacingOccurrences(of: "NSAppearanceName", with: "") }
+      .joined(separator: ",")
     AppearanceDiagnostics.log(
       "app-appearance reason=\(reason) mode=\(preference.rawValue) "
         + "requested=\(appearance?.name.rawValue ?? "nil") "
         + "inferred=\(inferredChromeAppearance?.name.rawValue ?? "nil") "
-        + "effective=\(NSApp.effectiveAppearance.name.rawValue) "
+        + "appEffective=\(NSApp.effectiveAppearance.name.rawValue) "
+        + "windowEffectives=[\(windowEffectives)] "
         + "windowCount=\(NSApp.windows.count)"
     )
   }
