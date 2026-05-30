@@ -1,12 +1,19 @@
 import SwiftUI
 import TouchCodeCore
 
-/// Scene-root wrapper that pairs SwiftUI's `.preferredColorScheme` with the AppKit
-/// `NSApp.appearance` poke emitted by `WindowAppearanceSetter`. Both paths are driven
-/// from the same `AppearancePreference` read through the environment-injected
-/// `SettingsStore`, so SwiftUI and AppKit stay in lock-step on every user toggle or
-/// macOS appearance flip. Placed at the root of each scene so newly opened windows
-/// inherit the current appearance at birth.
+/// Scene-root wrapper that drives the whole app's appearance from a single owner:
+/// the AppKit `WindowAppearanceSetter`, which sets `NSApp.appearance` (and per-window
+/// `appearance`) from the user's `AppearancePreference`.
+///
+/// We deliberately do *not* also apply SwiftUI's `.preferredColorScheme` here. On macOS
+/// `.preferredColorScheme` pins each window's `NSWindow.appearance`, so it fought the
+/// AppKit writer over the same property — and its `nil` ("follow system") case does not
+/// reset a previously-pinned window back to nil. That left an explicit→Auto switch stuck
+/// on the old light/dark scheme: the window never re-resolved, so neither the Ghostty
+/// palette nor SwiftUI's `@Environment(\.colorScheme)` refreshed. With AppKit as the sole
+/// writer of `NSApp.appearance`, SwiftUI derives `colorScheme` from the host window's
+/// effective appearance automatically, and Auto resolves correctly. Placed at the root of
+/// each scene so newly opened windows inherit the current appearance at birth.
 struct AppAppearanceView<Content: View>: View {
   let settingsStore: SettingsStore
   let content: Content
@@ -19,7 +26,6 @@ struct AppAppearanceView<Content: View>: View {
   var body: some View {
     let preference = settingsStore.settings.general.appearance
     content
-      .preferredColorScheme(preference.colorScheme)
       .background {
         WindowAppearanceSetter(preference: preference)
       }
