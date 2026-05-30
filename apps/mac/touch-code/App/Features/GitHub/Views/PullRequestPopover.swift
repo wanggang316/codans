@@ -32,7 +32,6 @@ struct PullRequestPopover: View {
   var body: some View {
     contentView
       .frame(width: 360)
-      .frame(minHeight: 160)
       .padding(12)
       // Toolbar-anchored hosts (status bar) ship a smaller default
       // `controlSize` into the popover than List-row hosts (sidebar),
@@ -85,14 +84,18 @@ struct PullRequestPopover: View {
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(.red)
         .accessibilityHidden(true)
+      // `maxWidth: .infinity` (not a trailing Spacer) gives the Text the full
+      // banner width so it wraps within it; `fixedSize(vertical:)` then lets the
+      // banner grow tall enough to show every line instead of truncating.
       Text("Merge conflicts — this branch can't be merged until they're resolved.")
         .font(.caption)
         .foregroundStyle(.primary)
         .fixedSize(horizontal: false, vertical: true)
-      Spacer(minLength: 0)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 6)
+    .frame(maxWidth: .infinity)
     .background(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
         .fill(Color.red.opacity(0.12))
