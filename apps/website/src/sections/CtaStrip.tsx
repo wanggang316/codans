@@ -9,20 +9,12 @@ export default function CtaStrip() {
   const { t } = useTranslation();
   return (
     <section className="relative overflow-hidden border-t border-line/60 bg-bg py-28 sm:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-0"
-        style={{
-          background:
-            "radial-gradient(700px 280px at 50% 0%, rgba(7,193,96,0.16), transparent 70%)",
-        }}
-      />
       <motion.div
-        initial={{ opacity: 0, y: 24 }}
+        initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, margin: "-80px" }}
-        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-        className="mx-auto max-w-[840px] px-5 text-center sm:px-8"
+        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        className="mx-auto flex max-w-[840px] flex-col items-center px-5 text-center sm:px-8"
       >
         <h3 className="font-mono text-display-2 font-bold text-ink">{t("cta.title")}</h3>
         <p className="mx-auto mt-4 max-w-[520px] text-ink-muted">{t("cta.sub")}</p>
@@ -31,11 +23,10 @@ export default function CtaStrip() {
             href={LINKS.latestDmg}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-wx-500 px-5 text-[14px] font-medium text-[#04231a] shadow-glow transition-colors hover:bg-wx-400"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-acc-500 px-5 text-[14px] font-medium text-white shadow-glow transition-colors hover:bg-acc-400"
           >
             {t("cta.primary")}
           </a>
-          <BrewPill command={BREW_COMMAND} />
           <a
             href={LINKS.repo}
             target="_blank"
@@ -45,12 +36,13 @@ export default function CtaStrip() {
             {t("cta.secondary")} →
           </a>
         </div>
+        <BrewLine command={BREW_COMMAND} />
       </motion.div>
     </section>
   );
 }
 
-function BrewPill({ command }: { command: string }) {
+function BrewLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
     try {
@@ -71,10 +63,10 @@ function BrewPill({ command }: { command: string }) {
       type="button"
       onClick={onCopy}
       title="Click to copy"
-      className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full border border-wx-500/30 bg-wx-500/[0.08] px-5 font-mono text-[13px] text-wx-100 transition-colors hover:border-wx-500/50 hover:bg-wx-500/[0.12]"
+      className="group mt-4 inline-flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 font-mono text-[12.5px] text-ink-muted transition-colors hover:bg-white/[0.04] hover:text-ink"
     >
-      <span className="text-wx-300">{copied ? "✓" : "$"}</span>
-      <span>{copied ? "Copied" : command}</span>
+      <span className="text-acc-300">$</span>
+      <span>{copied ? "Copied to clipboard" : command}</span>
     </button>
   );
 }

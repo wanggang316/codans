@@ -43,7 +43,7 @@ body {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(7, 193, 96, 0.18),
+    rgba(35, 134, 54, 0.16),
     transparent
   );
   pointer-events: none;
@@ -62,8 +62,8 @@ body {
 
 /* Selection */
 ::selection {
-  background: rgba(7, 193, 96, 0.32);
-  color: #E7F8EC;
+  background: rgba(35, 134, 54, 0.34);
+  color: #DAFBE1;
 }
 
 /* Scrollbar (webkit) - quiet */

@@ -1,53 +1,21 @@
-import { useRef, useState } from "react";
+import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
+import { motion } from "framer-motion";
 import { LINKS } from "@/lib/links";
 
 /**
- * v2 Hero. The centerpiece is the real touch-code app screenshot
- * (apps/mac/.../) shipped as /hero-app.png; the previous synthetic
- * AppShell is retired. CTAs go primary (.dmg) / brew capsule (copyable) /
- * GitHub. WeChat brand green drives the accent.
+ * v2 Hero. The centerpiece is the real touch-code app screenshot shipped
+ * as /hero-app.png. Background is intentionally flat (no mouse-tracked
+ * spotlight, no coloured radial wash) — just a faint dot grid — so the
+ * accent green reads as a deliberate mark rather than ambient AI haze.
  */
 export default function Hero() {
   const { t } = useTranslation();
-  const sectionRef = useRef<HTMLDivElement>(null);
-
-  const onMove = (e: React.MouseEvent) => {
-    const el = sectionRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    el.style.setProperty("--mx", `${e.clientX - rect.left}px`);
-    el.style.setProperty("--my", `${e.clientY - rect.top}px`);
-  };
 
   return (
-    <section
-      ref={sectionRef}
-      onMouseMove={onMove}
-      className="relative overflow-hidden pt-28 pb-20 sm:pt-36"
-      style={{ "--mx": "50%", "--my": "30%" } as React.CSSProperties}
-    >
-      {/* Mouse-tracked spotlight */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(600px circle at var(--mx) var(--my), rgba(7,193,96,0.10), transparent 55%)",
-        }}
-      />
-      {/* Top ambient glow */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
-        style={{
-          background:
-            "radial-gradient(900px 480px at 50% 0%, rgba(7,193,96,0.16), transparent 70%)",
-        }}
-      />
-      {/* Faint dot grid */}
-      <div className="dotgrid pointer-events-none absolute inset-0 opacity-[0.30] [mask-image:radial-gradient(800px_500px_at_50%_30%,#000,transparent_70%)]" />
+    <section className="relative overflow-hidden pt-28 pb-20 sm:pt-32">
+      {/* Faint dot grid, masked to fade at the edges. No colour. */}
+      <div className="dotgrid pointer-events-none absolute inset-0 opacity-[0.22] [mask-image:radial-gradient(820px_460px_at_50%_22%,#000,transparent_72%)]" />
 
       <div className="relative mx-auto max-w-[1200px] px-5 sm:px-8">
         {/* Tagline */}
@@ -55,7 +23,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-          className="text-center font-mono text-display-1 font-bold text-ink"
+          className="text-center font-mono text-display-1 font-bold tracking-tight text-ink"
         >
           <RevealLine text={t("hero.tagline")} />
         </motion.h1>
@@ -65,7 +33,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
-          className="mx-auto mt-6 max-w-[640px] text-center text-[17px] leading-relaxed text-ink-muted sm:text-[18px]"
+          className="mx-auto mt-6 max-w-[620px] text-center text-[17px] leading-relaxed text-ink-muted sm:text-[18px]"
         >
           {t("hero.subtitle")}
         </motion.p>
@@ -75,11 +43,13 @@ export default function Hero() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, delay: 0.5 }}
-          className="mt-9 flex flex-wrap items-center justify-center gap-3"
+          className="mt-9 flex flex-col items-center gap-4"
         >
-          <PrimaryCta href={LINKS.latestDmg} label={t("hero.primary_cta")} />
-          <BrewCapsule command={t("hero.brew_install")} />
-          <GhostCta href={LINKS.repo} label={t("hero.secondary_cta")} />
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <PrimaryCta href={LINKS.latestDmg} label={t("hero.primary_cta")} />
+            <GhostCta href={LINKS.repo} label={t("hero.secondary_cta")} />
+          </div>
+          <BrewLine command={t("hero.brew_install")} />
         </motion.div>
 
         {/* App screenshot */}
@@ -89,24 +59,29 @@ export default function Hero() {
   );
 }
 
-// ─── reveal helpers ─────────────────────────────────────────────────────
+// ─── reveal helper (real spaces between words, clip-masked rise-in) ───────
 
 function RevealLine({ text }: { text: string }) {
   const words = text.split(" ");
   return (
     <span className="inline-block">
       {words.map((w, i) => (
-        <span key={i} className="inline-flex overflow-hidden align-bottom">
-          <motion.span
-            initial={{ y: "110%" }}
-            animate={{ y: "0%" }}
-            transition={{ duration: 0.7, delay: 0.15 + i * 0.05, ease: [0.22, 1, 0.36, 1] }}
-            className="inline-block"
-          >
-            {w}
-            {i < words.length - 1 ? " " : ""}
-          </motion.span>
-        </span>
+        <Fragment key={i}>
+          <span className="inline-flex overflow-hidden align-bottom">
+            <motion.span
+              initial={{ y: "110%" }}
+              animate={{ y: "0%" }}
+              transition={{ duration: 0.7, delay: 0.15 + i * 0.05, ease: [0.22, 1, 0.36, 1] }}
+              className="inline-block"
+            >
+              {w}
+            </motion.span>
+          </span>
+          {/* Real, non-clipped space between words — a trailing space
+              inside the inline-block above gets collapsed by the browser,
+              which is what glued the words together. */}
+          {i < words.length - 1 ? " " : ""}
+        </Fragment>
       ))}
     </span>
   );
@@ -121,8 +96,8 @@ function PrimaryCta({ href, label }: { href: string; label: string }) {
       target="_blank"
       rel="noreferrer"
       whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.97 }}
-      className="group relative inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-wx-500 px-5 text-[14px] font-medium text-[#04231a] shadow-glow transition-colors hover:bg-wx-400"
+      whileTap={{ scale: 0.98 }}
+      className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-acc-500 px-5 text-[14px] font-medium text-white shadow-glow transition-colors hover:bg-acc-400"
     >
       <DownloadGlyph />
       <span>{label}</span>
@@ -137,7 +112,7 @@ function GhostCta({ href, label }: { href: string; label: string }) {
       target="_blank"
       rel="noreferrer"
       whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.97 }}
+      whileTap={{ scale: 0.98 }}
       className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full border border-line bg-bg-elev px-5 text-[14px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-bg-card"
     >
       <GitHubGlyph />
@@ -146,37 +121,34 @@ function GhostCta({ href, label }: { href: string; label: string }) {
   );
 }
 
-function BrewCapsule({ command }: { command: string }) {
+/** Small copyable install line under the buttons — the opencode pattern. */
+function BrewLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      // Older browsers without clipboard API: select-fallback via execCommand
       const ta = document.createElement("textarea");
       ta.value = command;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
       ta.remove();
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
   };
   return (
-    <motion.button
+    <button
       type="button"
       onClick={onCopy}
-      whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.97 }}
       title="Click to copy"
-      className="group inline-flex h-11 cursor-pointer items-center gap-2 rounded-full border border-wx-500/30 bg-wx-500/[0.08] px-5 font-mono text-[13px] text-wx-100 transition-colors hover:border-wx-500/50 hover:bg-wx-500/[0.12]"
+      className="group inline-flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 font-mono text-[12.5px] text-ink-muted transition-colors hover:bg-white/[0.04] hover:text-ink"
     >
-      <span className="text-wx-300">{copied ? "✓" : "$"}</span>
-      <span>{copied ? "Copied" : command}</span>
-    </motion.button>
+      <span className="text-acc-300">$</span>
+      <span>{copied ? "Copied to clipboard" : command}</span>
+      <CopyGlyph copied={copied} />
+    </button>
   );
 }
 
@@ -198,70 +170,58 @@ function GitHubGlyph() {
   );
 }
 
-// ─── screenshot showcase with mouse-driven parallax tilt ─────────────────
+function CopyGlyph({ copied }: { copied: boolean }) {
+  if (copied) {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="text-acc-300">
+        <path d="M5 12l4 4 10-10" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      className="opacity-0 transition-opacity group-hover:opacity-100"
+    >
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 012-2h10" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ─── screenshot showcase (static — fades in once, no hover tilt) ─────────
 
 function ScreenshotShowcase() {
-  const ref = useRef<HTMLDivElement>(null);
-  const mx = useMotionValue(0);
-  const my = useMotionValue(0);
-  // Tilt is small so the image stays readable; springs smooth the motion.
-  const rx = useSpring(useTransform(my, [-0.5, 0.5], [3, -3]), { stiffness: 180, damping: 22 });
-  const ry = useSpring(useTransform(mx, [-0.5, 0.5], [-3, 3]), { stiffness: 180, damping: 22 });
-
-  const onMove = (e: React.MouseEvent) => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    mx.set((e.clientX - r.left) / r.width - 0.5);
-    my.set((e.clientY - r.top) / r.height - 0.5);
-  };
-  const onLeave = () => {
-    mx.set(0);
-    my.set(0);
-  };
-
   return (
     <motion.div
-      ref={ref}
-      onMouseMove={onMove}
-      onMouseLeave={onLeave}
       initial={{ opacity: 0, y: 40, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 1.1, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-      style={{ rotateX: rx, rotateY: ry, transformPerspective: 1200 }}
       className="relative mx-auto mt-16 w-full max-w-[1120px]"
     >
-      {/* underglow */}
+      {/* Neutral underglow for depth — no colour. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -inset-x-8 -bottom-16 -top-4 -z-10 opacity-80"
+        className="pointer-events-none absolute -inset-x-6 -bottom-12 -top-2 -z-10"
         style={{
           background:
-            "radial-gradient(720px 240px at 50% 100%, rgba(7,193,96,0.20), transparent 70%)",
+            "radial-gradient(720px 220px at 50% 100%, rgba(255,255,255,0.05), transparent 72%)",
         }}
       />
-      {/* window frame */}
-      <div className="relative overflow-hidden rounded-[14px] border border-white/[0.08] bg-bg-elev shadow-window">
-        {/* Specular highlight that scans on hover */}
-        <div className="group/img relative">
-          <img
-            src="/hero-app.png"
-            alt="touch-code window: sidebar with multiple projects and worktrees, terminal panes, command palette open"
-            width={2400}
-            height={1473}
-            className="block h-auto w-full"
-            draggable={false}
-          />
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover/img:opacity-100"
-            style={{
-              background:
-                "linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.06) 45%, transparent 60%)",
-              mixBlendMode: "screen",
-            }}
-          />
-        </div>
+      <div className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-bg-elev shadow-window">
+        <img
+          src="/hero-app.png"
+          alt="TouchCode window: sidebar with multiple projects and worktrees, terminal panes, and the command palette open"
+          width={2400}
+          height={1473}
+          className="block h-auto w-full"
+          draggable={false}
+        />
       </div>
     </motion.div>
   );

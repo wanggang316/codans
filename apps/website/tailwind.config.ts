@@ -20,31 +20,22 @@ export default {
           DEFAULT: "#1F1F22",
           strong: "#2A2A2F",
         },
-        // WeChat brand green — primary accent for CTAs, focus rings,
-        // command highlights. `wx-500` is the canonical WeChat Pay green.
-        wx: {
-          50: "#E7F8EC",
-          100: "#B8ECC9",
-          200: "#8FE0AB",
-          300: "#5FD389",
-          400: "#2EC465",
-          500: "#07C160",
-          600: "#07B25A",
-          700: "#069A4D",
-          800: "#057440",
-          900: "#04562F",
-        },
-        // Legacy `leaf` retained so worktree-row icons keep their PR-state
-        // tint until each consumer is migrated. New code should reach for
-        // `wx-*` for accents and use plain greens only for terminal
-        // prompt glyphs.
-        leaf: {
-          50: "#E8F3C8",
-          100: "#C5E075",
-          300: "#A7C65C",
-          500: "#83AD40",
-          700: "#547B32",
-          900: "#42692B",
+        // The single accent — GitHub Primer functional green. Calmer and
+        // less neon than WeChat green on a near-black surface, which is the
+        // whole point: it reads as a developer-tool accent, not an AI glow.
+        // `acc-500` (#238636) is GitHub's dark-mode primary-button green;
+        // `acc-300` (#3FB950) is its success-text green for inline marks.
+        acc: {
+          50: "#DAFBE1",
+          100: "#ACEEBB",
+          200: "#6FDD8B",
+          300: "#3FB950",
+          400: "#2EA043",
+          500: "#238636",
+          600: "#1A7F37",
+          700: "#116329",
+          800: "#044F1E",
+          900: "#003D16",
         },
       },
       fontFamily: {
@@ -67,13 +58,13 @@ export default {
         ],
       },
       fontSize: {
-        "display-1": ["clamp(2.75rem, 6vw, 5.25rem)", { lineHeight: "1.02", letterSpacing: "-0.04em" }],
-        "display-2": ["clamp(2rem, 4vw, 3.5rem)", { lineHeight: "1.05", letterSpacing: "-0.03em" }],
+        "display-1": ["clamp(2.75rem, 6vw, 5.25rem)", { lineHeight: "1.04", letterSpacing: "-0.04em" }],
+        "display-2": ["clamp(2rem, 4vw, 3.25rem)", { lineHeight: "1.06", letterSpacing: "-0.03em" }],
       },
       boxShadow: {
-        glow: "0 0 60px -10px rgba(7, 193, 96, 0.35)",
-        "glow-soft": "0 0 80px -20px rgba(7, 193, 96, 0.18)",
-        window: "0 30px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06) inset",
+        glow: "0 8px 30px -10px rgba(35, 134, 54, 0.45)",
+        "glow-soft": "0 0 60px -22px rgba(35, 134, 54, 0.16)",
+        window: "0 40px 90px -30px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset",
       },
       backgroundImage: {
         "grid-faint":
@@ -81,12 +72,10 @@ export default {
       },
       keyframes: {
         blink: { "0%,49%": { opacity: "1" }, "50%,100%": { opacity: "0" } },
-        scan: { "0%": { transform: "translateX(-100%)" }, "100%": { transform: "translateX(100%)" } },
         breathe: { "0%,100%": { opacity: "0.55" }, "50%": { opacity: "1" } },
       },
       animation: {
         blink: "blink 1.1s steps(1) infinite",
-        scan: "scan 2.6s linear infinite",
         breathe: "breathe 3.2s ease-in-out infinite",
       },
     },

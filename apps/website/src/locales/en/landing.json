@@ -1,5 +1,5 @@
 {
-  "brand": "touch-code",
+  "brand": "TouchCode",
   "nav": {
     "changelog": "Changelog",
     "download": "Download",
@@ -12,44 +12,46 @@
     "secondary_cta": "View on GitHub",
     "brew_install": "brew install --cask touch-code"
   },
-  "multi_project": {
-    "title": "Many projects. One window.",
-    "lead": "Side-projects, day-job repos, agents-on-loan — all of them live as first-class Projects in the same tree. No more Cmd-Tab between five Finder windows, no more \"which terminal was claude in?\". Open touch-code and the whole landscape is already there.",
-    "stat": "Built for 1–20 active projects at once."
-  },
-  "worktree": {
-    "title": "Built on git worktrees.",
-    "lead": "Every Worktree is a real on-disk checkout — its own directory, its own terminal, its own agent. Spin one up per task in a single command; merge back without stashing, without context-switching the repo, without losing the dev server that's still running on a sibling branch.",
-    "punchline": "A branch in a directory, not in a stash."
-  },
-  "extensions": {
-    "title": "Extensible where it matters.",
-    "lead": "Five integration points the rest of the app is wired around. Each one starts from the same Project / Worktree address, so the same shortcut means the same thing everywhere.",
-    "cards": {
-      "commands": {
-        "title": "Custom commands & shortcuts",
-        "body": "Bind any per-project script to a chord — `⌃R` runs the right setup.sh whether you're in main, fix/race-cond or a brand-new worktree."
+  "features": {
+    "heading": "什么是 TouchCode？",
+    "intro": "TouchCode 是一款为 Coding Agent 而生的并行开发而生的终端开发环境，把你所有的项目、worktree 和 Coding Agent 优雅的编排进同一个窗口。",
+    "items": [
+      {
+        "title": "原生",
+        "body": "基于 Ghostty 构建，macOS 原生，天生具备 Ghostty 和 macOS 的所有特性"
       },
-      "ide": {
-        "title": "Open in your editor",
-        "body": "VS Code, Cursor, Zed, Xcode, Sublime — auto-detected and routed by Project. One keystroke from any worktree to the right window."
+      {
+        "title": "Agent First",
+        "body": "实时查看每个 Agent 的运行状态"
       },
-      "git": {
-        "title": "Git Viewer overlay",
-        "body": "`⌘⌥G` summons a full diff / history pane on top of the terminal without shrinking the panes below a usable width."
+      {
+        "title": "并行",
+        "body": "项目树 + git worktree + 多 Tab + 终端分屏，让你在一个窗口管理所有工作线程，告别 Cmd-Tab"
       },
-      "agents": {
-        "title": "Agents View",
-        "body": "Every running agent — Claude Code, Codex, pi, opencode — surfaces in one panel with live state: waiting, working, finished, idle. Click a row, you land in that pane."
+      {
+        "title": "自定义命令",
+        "body": "为每个项目绑定专属命令与快捷键，一个 chord 一键执行"
       },
-      "pr": {
-        "title": "Pull request status",
-        "body": "PR snapshots pulled in batch from `gh`. State, checks rollup and reviewers ride on every worktree row, surface again in the titlebar status slot."
+      {
+        "title": "Github",
+        "body": "深度集成 Github，在应用内管理 PR 整个生命周期"
+      },
+      {
+        "title": "Git Viewer",
+        "body": "集成 diff / 历史面板，随时查看变更，无需离开终端"
+      },
+      {
+        "title": "快捷键",
+        "body": "丰富的自定义快捷键，助你效率提升"
+      },
+      {
+        "title": "IDE 集成",
+        "body": "VS Code、Cursor、Zed、Xcode 自动识别，一个快捷键从任意 worktree 打开"
       }
-    }
+    ]
   },
   "cta": {
-    "title": "Get touch-code.",
+    "title": "Get TouchCode.",
     "sub": "Drag into /Applications. The tc shim installs itself on first launch.",
     "primary": "Download .dmg",
     "secondary": "Read the source"
