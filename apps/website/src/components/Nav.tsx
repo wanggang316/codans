@@ -59,7 +59,7 @@ function NavLink({
       rel="noreferrer"
       className={`group relative rounded-md px-3 py-1.5 transition-colors ${
         accent
-          ? "text-leaf-100 hover:text-leaf-50"
+          ? "text-wx-200 hover:text-wx-100"
           : "text-ink/80 hover:text-ink"
       }`}
     >

@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import Button from "@/components/Button";
 import { LINKS } from "@/lib/links";
+
+const BREW_COMMAND = "brew install --cask touch-code";
 
 export default function CtaStrip() {
   const { t } = useTranslation();
@@ -12,7 +14,7 @@ export default function CtaStrip() {
         className="pointer-events-none absolute inset-0 -z-0"
         style={{
           background:
-            "radial-gradient(700px 280px at 50% 0%, rgba(167,198,92,0.16), transparent 70%)",
+            "radial-gradient(700px 280px at 50% 0%, rgba(7,193,96,0.16), transparent 70%)",
         }}
       />
       <motion.div
@@ -25,14 +27,54 @@ export default function CtaStrip() {
         <h3 className="font-mono text-display-2 font-bold text-ink">{t("cta.title")}</h3>
         <p className="mx-auto mt-4 max-w-[520px] text-ink-muted">{t("cta.sub")}</p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Button href={LINKS.latestDmg} variant="primary" size="lg">
+          <a
+            href={LINKS.latestDmg}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-wx-500 px-5 text-[14px] font-medium text-[#04231a] shadow-glow transition-colors hover:bg-wx-400"
+          >
             {t("cta.primary")}
-          </Button>
-          <Button href={LINKS.repo} variant="ghost" size="lg">
+          </a>
+          <BrewPill command={BREW_COMMAND} />
+          <a
+            href={LINKS.repo}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-11 items-center gap-2 rounded-full border border-line bg-bg-elev px-5 text-[14px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-bg-card"
+          >
             {t("cta.secondary")} →
-          </Button>
+          </a>
         </div>
       </motion.div>
     </section>
+  );
+}
+
+function BrewPill({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = command;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      title="Click to copy"
+      className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full border border-wx-500/30 bg-wx-500/[0.08] px-5 font-mono text-[13px] text-wx-100 transition-colors hover:border-wx-500/50 hover:bg-wx-500/[0.12]"
+    >
+      <span className="text-wx-300">{copied ? "✓" : "$"}</span>
+      <span>{copied ? "Copied" : command}</span>
+    </button>
   );
 }
