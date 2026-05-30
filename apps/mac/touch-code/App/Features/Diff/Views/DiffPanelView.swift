@@ -310,22 +310,24 @@ struct DiffPanelView: View {
   @ViewBuilder
   private var changesContent: some View {
     if let path = store.presentedFilePath {
-      switch store.diffsByPath[path] {
-      case .none, .loading?:
-        ProgressView()
-          .controlSize(.small)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      case .loaded(let wrapper)?:
-        DiffRenderedContent(
-          id: path,
-          document: wrapper.document,
-          configuration: makeConfig(),
-          background: themeBackground
-        )
+      let state = store.diffsByPath[path]
+      switch state {
       case .error(let error)?:
         errorBlock(path: path, error: error)
       case .tooLarge(let reason, let copyCommand)?:
         tooLargeBlock(reason: reason, copyCommand: copyCommand)
+      default:
+        // `.none` / `.loading` / `.loaded` all flow through a single
+        // continuously-mounted surface so one spinner spans the whole
+        // fetch→render lifecycle. Routing each state to its own branch
+        // would give them distinct view identities and tear the spinner
+        // down between phases — the visible two-flash gap we avoid here.
+        DiffLoadingContent(
+          id: path,
+          document: state?.loadedDocument,
+          configuration: makeConfig(),
+          background: themeBackground
+        )
       }
     } else {
       // Panel should not have rendered without a presented path; render
@@ -338,23 +340,20 @@ struct DiffPanelView: View {
   @ViewBuilder
   private var historyContent: some View {
     if let sha = store.presentedCommitSha {
-      switch store.diffsByCommit[sha] {
-      case .none, .loading?:
-        ProgressView()
-          .controlSize(.small)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      case .loaded(let wrapper)?:
-        DiffRenderedContent(
-          id: sha,
-          document: wrapper.document,
-          configuration: makeConfig(),
-          background: themeBackground
-        )
+      let state = store.diffsByCommit[sha]
+      switch state {
       case .error(let error)?:
         commitErrorBlock(sha: sha, error: error)
       case .tooLarge(let reason, let copyCommand)?:
         // `tooLargeBlock` is path-agnostic — reuse for the commit-diff path.
         tooLargeBlock(reason: reason, copyCommand: copyCommand)
+      default:
+        DiffLoadingContent(
+          id: sha,
+          document: state?.loadedDocument,
+          configuration: makeConfig(),
+          background: themeBackground
+        )
       }
     } else {
       Color.clear
@@ -466,46 +465,68 @@ struct DiffPanelView: View {
   }
 }
 
-/// Hosts the live diff renderer plus a loading overlay that covers the
-/// WebView's cold-start gap. `DiffRendererView` mounts a `WKWebView` that
-/// must boot the vendored renderer bundle (~9.7 MB) before it paints;
-/// until the renderer reports `renderStateChanged: rendered`
-/// (surfaced as `DiffEvent.didRender`) the surface is transparent, so
-/// without this the user sees a blank flash over the terminal-themed
-/// background on first open.
+extension DiffFeature.DiffEntryState {
+  /// The rendered document, or `nil` while the diff is still being fetched
+  /// (`.loading` / not cached yet). Lets `DiffLoadingContent` treat fetch
+  /// and render as one continuous loading phase.
+  fileprivate var loadedDocument: DiffDocument? {
+    if case .loaded(let wrapper) = self { return wrapper.document }
+    return nil
+  }
+}
+
+/// One continuous loading surface spanning both diff phases: the `git diff`
+/// fetch (`document == nil`) and the WebView render that follows. A single
+/// spinner stays mounted across the whole lifecycle and is torn down only
+/// once the renderer paints, so the user never sees the two-flash gap of a
+/// fetch spinner handing off to a separate render spinner.
 ///
-/// The spinner is revealed only after a short delay so a fast warm
-/// re-render — switching files on an already-booted WebView — never
-/// flickers a spinner over the just-replaced content.
-private struct DiffRenderedContent: View {
-  /// Cheap render identity (file path or commit sha). A change marks a new
+/// Mechanics:
+///   - While `document == nil` the renderer isn't mounted; the spinner
+///     covers the fetch.
+///   - Once the document loads, `DiffRendererView` mounts *underneath* the
+///     same spinner and boots the vendored renderer bundle (~9.7 MB); the
+///     spinner hides only when the renderer reports `renderStateChanged:
+///     rendered` (surfaced as `DiffEvent.didRender`).
+///   - The spinner is revealed after a short delay so a fully-cached,
+///     fast-rendering diff never flashes a spinner at all.
+private struct DiffLoadingContent: View {
+  /// Cheap identity (file path or commit sha). A change marks a new
   /// document as in-flight without an O(bytes) `DiffDocument` comparison.
   let id: String
-  let document: DiffDocument
+  /// `nil` while the diff is still being fetched; non-nil once loaded.
+  let document: DiffDocument?
   let configuration: DiffConfiguration
-  /// Opaque cover painted under the spinner so a slow warm re-render hides
-  /// the stale diff instead of overlaying the spinner on top of it.
+  /// Opaque cover painted under the spinner so the WebView's cold-start
+  /// (and any stale prior diff) stays hidden until the new diff paints.
   let background: Color
 
-  @State private var isRendering = true
+  /// Flips true when the renderer paints `document`. Reset when `id`
+  /// changes so a newly-selected diff shows the spinner again.
+  @State private var rendered = false
   @State private var showSpinner = false
 
+  /// Loading until the document has both loaded *and* painted.
+  private var isLoading: Bool { document == nil || !rendered }
+
   var body: some View {
-    DiffRendererView(document: document, configuration: configuration) { event in
-      switch event {
-      case .didRender:
-        isRendering = false
-      case .didFail(let code, _):
-        // The renderer's in-progress "loading" state arrives as
-        // `.didFail(code: "render_state")` (see `DiffWebViewBridge`); that
-        // is benign and must NOT clear the spinner. Any other failure is
-        // terminal — stop spinning so we don't hang on a blank surface.
-        if code != "render_state" { isRendering = false }
-      default:
-        break
+    ZStack {
+      if let document {
+        DiffRendererView(document: document, configuration: configuration) { event in
+          switch event {
+          case .didRender:
+            rendered = true
+          case .didFail(let code, _):
+            // The renderer's in-progress "loading" state arrives as
+            // `.didFail(code: "render_state")` (see `DiffWebViewBridge`);
+            // that is benign and must NOT clear the spinner. Any other
+            // failure is terminal — stop the spinner so we don't hang.
+            if code != "render_state" { rendered = true }
+          default:
+            break
+          }
+        }
       }
-    }
-    .overlay {
       if showSpinner {
         ZStack {
           background
@@ -513,28 +534,33 @@ private struct DiffRenderedContent: View {
         }
       }
     }
-    .onChange(of: id) { _, _ in isRendering = true }
-    .task(id: RenderToken(id: id, rendering: isRendering)) {
-      guard isRendering else {
+    .onChange(of: id) { _, _ in rendered = false }
+    .task(id: LoadToken(id: id, hasDocument: document != nil, rendered: rendered)) {
+      guard isLoading else {
         showSpinner = false
         return
       }
-      // Delay the reveal so near-instant warm re-renders never flash a
-      // spinner; a cold start always outlasts this and shows it.
+      // Delay the reveal so a fully-cached, fast-rendering diff never
+      // flashes a spinner; slow fetches / cold renders always outlast it.
       try? await Task.sleep(for: .milliseconds(120))
       guard !Task.isCancelled else { return }
       showSpinner = true
-      // Safety net: never spin forever if the renderer goes silent.
-      try? await Task.sleep(for: .seconds(10))
+      // Safety net measured from this fetch/render attempt: never spin
+      // forever if the renderer goes silent after the document loads.
+      try? await Task.sleep(for: .seconds(15))
       guard !Task.isCancelled else { return }
-      isRendering = false
+      rendered = true
     }
   }
 
-  /// `.task(id:)` key: restarts the reveal/timeout cycle whenever a new
-  /// document arrives (`id`) or the in-flight flag flips (`rendering`).
-  private struct RenderToken: Equatable {
+  /// `.task(id:)` key: restarts the reveal/timeout cycle when a new diff is
+  /// selected (`id`), when the fetch completes (`hasDocument`), or when the
+  /// render finishes (`rendered`). `hasDocument` is part of the key so the
+  /// safety timeout re-arms from the moment the document loads, not from
+  /// the start of the fetch.
+  private struct LoadToken: Equatable {
     let id: String
-    let rendering: Bool
+    let hasDocument: Bool
+    let rendered: Bool
   }
 }
