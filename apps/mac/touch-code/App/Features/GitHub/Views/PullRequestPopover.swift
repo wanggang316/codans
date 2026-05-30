@@ -80,11 +80,12 @@ struct PullRequestPopover: View {
   /// Gated on `PullRequestSnapshot.hasMergeConflict` (the same predicate the sidebar /
   /// titlebar pills redden on), so all three surfaces agree on what "conflicted" means.
   private var conflictBanner: some View {
-    // Textbook icon + wrapping-text row: the width-filling frame lives on the *HStack*,
-    // and the Text carries only `fixedSize(horizontal: false, vertical: true)`. Putting a
-    // `maxWidth: .infinity` frame on the Text itself defeats `fixedSize` and the sentence
-    // lays out on one line and truncates — which is exactly what happened. `.top`
-    // alignment keeps the icon level with the first line once the text wraps.
+    // Wrap via `lineLimit`, exactly like the header title (which wraps reliably in this
+    // popover). `fixedSize(vertical:)` does NOT work here: inside the HStack the Text is
+    // sized at its single-line width first, so its "ideal height" is one line and it
+    // truncates ("…resol…") instead of wrapping. `lineLimit(3)` instead tells the layout
+    // the Text may reflow across up to three lines, so it wraps within the available
+    // width. `.top` keeps the icon level with the first line.
     HStack(alignment: .top, spacing: 6) {
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(.red)
@@ -93,7 +94,7 @@ struct PullRequestPopover: View {
         .font(.caption)
         .foregroundStyle(.primary)
         .multilineTextAlignment(.leading)
-        .fixedSize(horizontal: false, vertical: true)
+        .lineLimit(3)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 8)
