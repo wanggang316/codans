@@ -40,7 +40,7 @@ struct RootFeature {
     /// 0014: titlebar-center Worktree Status Bar — owns only the transient
     /// toast slot; PR / motivational forms are view-level projections.
     var statusBar: StatusBarFeature.State = .init()
-    /// Diff inspector + drawer. Receives `worktreeSelected` forwarding from
+    /// Diff inspector + panel. Receives `worktreeSelected` forwarding from
     /// `selectionChanged` below so the changed-files list refreshes when the
     /// user navigates between Worktrees.
     var diff: DiffFeature.State = .init()

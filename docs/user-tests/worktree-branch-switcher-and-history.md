@@ -60,9 +60,9 @@ These accessibility identifiers must be declared by the implementation (per patt
 | `diff_inspector.history_row.<short-sha>` | One row per commit in History tab. |
 | `diff_inspector.history_row_popover.<short-sha>` | Hover popover surfaced from a history row; shows full SHA, subject, author, and date. |
 | `diff_inspector.history_empty_state` | Empty-state element in History tab. |
-| `diff_drawer.title_text` | Left-side title text (file path or `<sha> · <subject>`). |
-| `diff_drawer.file_picker_button` | Header button that opens the changed-files popover (Changes mode only). |
-| `diff_drawer.file_picker_row.<path>` | One row per changed file in the popover; tap switches the drawer to that file's diff. |
+| `diff_panel.title_text` | Left-side title text (file path or `<sha> · <subject>`). |
+| `diff_panel.file_picker_button` | Header button that opens the changed-files popover (Changes mode only). |
+| `diff_panel.file_picker_row.<path>` | One row per changed file in the popover; tap switches the panel to that file's diff. |
 
 ## Ready Signals
 
@@ -366,11 +366,11 @@ In addition to the project's standard "App launched" signal, cases in this docum
 
 **Steps:**
 1. Click `diff_inspector.history_row.<target_sha>`.
-2. Wait until `diff_drawer.title_text` updates to reflect a commit subject (text changes from its prior value OR appears for the first time).
+2. Wait until `diff_panel.title_text` updates to reflect a commit subject (text changes from its prior value OR appears for the first time).
 
 **Assertions:**
-1. (UI) After step 2: `diff_drawer.title_text` matches the regex `^[0-9a-f]{7,12}\s+·\s+.+$`.
-2. (UI) The leading hex group of `diff_drawer.title_text` starts with `<target_sha>` (case-insensitive prefix match).
+1. (UI) After step 2: `diff_panel.title_text` matches the regex `^[0-9a-f]{7,12}\s+·\s+.+$`.
+2. (UI) The leading hex group of `diff_panel.title_text` starts with `<target_sha>` (case-insensitive prefix match).
 3. (UI) The text after the `·` separator equals `expected_subject` (after trimming whitespace).
 4. (UI) The left-side diff renderer shows at least one hunk (presence of any `+`-prefixed line OR `-`-prefixed line in the rendered diff body — or equivalently, the file-header element for at least one file is visible).
 5. (Repo) `git -C <tmp>/repo-multi-branch rev-parse HEAD` is unchanged from the value captured at the end of `UT-BSH-DV-001` (selection must not mutate working state).
@@ -383,7 +383,7 @@ In addition to the project's standard "App launched" signal, cases in this docum
 
 **Preconditions:**
 - State at end of `UT-BSH-DV-002` (a commit is selected in History; left side shows that commit's diff).
-- Note `target_sha` and the prior `diff_drawer.title_text` value.
+- Note `target_sha` and the prior `diff_panel.title_text` value.
 
 **Steps:**
 1. Select the `Changes` segment in `diff_inspector.tab_picker`.
@@ -394,7 +394,7 @@ In addition to the project's standard "App launched" signal, cases in this docum
 **Assertions:**
 1. (UI) After step 2: `diff_inspector.history_list` is hidden AND `diff_inspector.changes_list` (or its empty state) is visible.
 2. (UI) After step 4: the row `diff_inspector.history_row.<target_sha>` is marked as selected (selection trait set OR visibly highlighted vs. its sibling rows).
-3. (UI) After step 4: `diff_drawer.title_text` is unchanged from the value captured in preconditions (no re-fetch flicker; cached diff is reused).
+3. (UI) After step 4: `diff_panel.title_text` is unchanged from the value captured in preconditions (no re-fetch flicker; cached diff is reused).
 
 **Artifacts on FAIL:** `screenshot.png` of the inspector after each step.
 

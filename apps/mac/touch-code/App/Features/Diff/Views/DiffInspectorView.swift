@@ -211,7 +211,7 @@ struct DiffInspectorView: View {
             onOpenTap: { store.send(.fileRowTapped(path: file.id)) },
             onChevronTap: {
               if store.presentedFilePath == file.id {
-                store.send(.drawerCloseRequested)
+                store.send(.panelCloseRequested)
               } else {
                 store.send(.fileRowTapped(path: file.id))
               }

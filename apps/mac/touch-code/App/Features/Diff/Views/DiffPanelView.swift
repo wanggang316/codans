@@ -4,14 +4,14 @@ import ComposableArchitecture
 import SwiftUI
 import TouchCodeCore
 
-/// Drawer that renders one file's diff. Mounted by `WorktreeDetailView`
+/// Panel that renders one file's diff. Mounted by `WorktreeDetailView`
 /// as an overlay on `terminalRegion`; covers the entire terminal area
 /// edge-to-edge while `presentedFilePath != nil`.
-struct DiffDrawerView: View {
+struct DiffPanelView: View {
   @Bindable var store: StoreOf<DiffFeature>
   @Environment(\.colorScheme) private var colorScheme
   /// Drives the changed-files picker popover. Local view state — the
-  /// popover lives entirely inside the drawer header; the store doesn't
+  /// popover lives entirely inside the panel header; the store doesn't
   /// need to know about it.
   @State private var showFilePicker = false
 
@@ -24,7 +24,7 @@ struct DiffDrawerView: View {
     .background(themeBackground)
   }
 
-  /// Drawer background tracks Ghostty's terminal theme so the diff surface
+  /// Panel background tracks Ghostty's terminal theme so the diff surface
   /// blends with the surrounding panes instead of clashing on
   /// `.windowBackgroundColor`. Falls back to `.underPageBackgroundColor`
   /// during runtime bring-up (singleton not yet initialised) — matches
@@ -32,7 +32,7 @@ struct DiffDrawerView: View {
   ///
   /// Caveat: the runtime singleton's `backgroundColor()` is evaluated each
   /// render, but the view doesn't observe the runtime for theme changes.
-  /// A live theme swap won't refresh until the drawer re-renders for some
+  /// A live theme swap won't refresh until the panel re-renders for some
   /// other reason. Acceptable for now (theme changes are rare); a future
   /// pass can subscribe to a runtime publisher.
   private var themeBackground: Color {
@@ -50,7 +50,7 @@ struct DiffDrawerView: View {
         .truncationMode(.head)
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(titleText)
-        .accessibilityIdentifier("diff_drawer.title_text")
+        .accessibilityIdentifier("diff_panel.title_text")
       if shouldShowFilePicker {
         Button {
           showFilePicker.toggle()
@@ -60,14 +60,14 @@ struct DiffDrawerView: View {
         .buttonStyle(.borderless)
         .help("Show changed files")
         .accessibilityLabel("Show changed files")
-        .accessibilityIdentifier("diff_drawer.file_picker_button")
+        .accessibilityIdentifier("diff_panel.file_picker_button")
         .popover(isPresented: $showFilePicker, arrowEdge: .top) {
           filePickerContent
         }
       }
       DiffStylePicker(store: store)
       Button {
-        store.send(.drawerCloseRequested)
+        store.send(.panelCloseRequested)
       } label: {
         Image(systemName: "xmark")
       }
@@ -80,8 +80,8 @@ struct DiffDrawerView: View {
   }
 
   /// File picker is only enabled in Changes mode, where it picks the file
-  /// that fills the drawer. Tapping a row dispatches `.fileRowTapped` and
-  /// the drawer re-renders with that file's diff.
+  /// that fills the panel. Tapping a row dispatches `.fileRowTapped` and
+  /// the panel re-renders with that file's diff.
   ///
   /// In History mode the row would need to scroll the rendered commit
   /// diff to the matching file section, but the vendored YiTong renderer
@@ -216,7 +216,7 @@ struct DiffDrawerView: View {
     }
     .buttonStyle(.plain)
     .background(isCurrent ? Color.accentColor.opacity(0.12) : Color.clear)
-    .accessibilityIdentifier("diff_drawer.file_picker_row.\(path)")
+    .accessibilityIdentifier("diff_panel.file_picker_row.\(path)")
   }
 
   @ViewBuilder
@@ -273,7 +273,7 @@ struct DiffDrawerView: View {
     }
   }
 
-  /// Title rendered in the drawer header. Routes on the active tab:
+  /// Title rendered in the panel header. Routes on the active tab:
   ///   - Changes: the presented file path (already monospaced-friendly).
   ///   - History: `<short-sha> · <subject>` where the short SHA is the
   ///     first 7 characters of the full SHA (matches the UT-BSH-DV-002
@@ -316,14 +316,19 @@ struct DiffDrawerView: View {
           .controlSize(.small)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       case .loaded(let wrapper)?:
-        DiffRendererView(document: wrapper.document, configuration: makeConfig())
+        DiffRenderedContent(
+          id: path,
+          document: wrapper.document,
+          configuration: makeConfig(),
+          background: themeBackground
+        )
       case .error(let error)?:
         errorBlock(path: path, error: error)
       case .tooLarge(let reason, let copyCommand)?:
         tooLargeBlock(reason: reason, copyCommand: copyCommand)
       }
     } else {
-      // Drawer should not have rendered without a presented path; render
+      // Panel should not have rendered without a presented path; render
       // an empty surface as a safety fallback rather than a placeholder
       // string the user is unlikely to ever see.
       Color.clear
@@ -339,7 +344,12 @@ struct DiffDrawerView: View {
           .controlSize(.small)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       case .loaded(let wrapper)?:
-        DiffRendererView(document: wrapper.document, configuration: makeConfig())
+        DiffRenderedContent(
+          id: sha,
+          document: wrapper.document,
+          configuration: makeConfig(),
+          background: themeBackground
+        )
       case .error(let error)?:
         commitErrorBlock(sha: sha, error: error)
       case .tooLarge(let reason, let copyCommand)?:
@@ -412,6 +422,7 @@ struct DiffDrawerView: View {
       Image(systemName: "doc.on.doc")
         .font(.title2)
         .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
       Text("Diff too large to render")
         .font(.headline)
       Text(Self.tooLargeReason(reason))
@@ -452,5 +463,78 @@ struct DiffDrawerView: View {
     case .unparsable: return "Unrecognised diff format"
     case .malformedRemoteURL: return "Malformed remote URL"
     }
+  }
+}
+
+/// Hosts the live diff renderer plus a loading overlay that covers the
+/// WebView's cold-start gap. `DiffRendererView` mounts a `WKWebView` that
+/// must boot the vendored renderer bundle (~9.7 MB) before it paints;
+/// until the renderer reports `renderStateChanged: rendered`
+/// (surfaced as `DiffEvent.didRender`) the surface is transparent, so
+/// without this the user sees a blank flash over the terminal-themed
+/// background on first open.
+///
+/// The spinner is revealed only after a short delay so a fast warm
+/// re-render — switching files on an already-booted WebView — never
+/// flickers a spinner over the just-replaced content.
+private struct DiffRenderedContent: View {
+  /// Cheap render identity (file path or commit sha). A change marks a new
+  /// document as in-flight without an O(bytes) `DiffDocument` comparison.
+  let id: String
+  let document: DiffDocument
+  let configuration: DiffConfiguration
+  /// Opaque cover painted under the spinner so a slow warm re-render hides
+  /// the stale diff instead of overlaying the spinner on top of it.
+  let background: Color
+
+  @State private var isRendering = true
+  @State private var showSpinner = false
+
+  var body: some View {
+    DiffRendererView(document: document, configuration: configuration) { event in
+      switch event {
+      case .didRender:
+        isRendering = false
+      case .didFail(let code, _):
+        // The renderer's in-progress "loading" state arrives as
+        // `.didFail(code: "render_state")` (see `DiffWebViewBridge`); that
+        // is benign and must NOT clear the spinner. Any other failure is
+        // terminal — stop spinning so we don't hang on a blank surface.
+        if code != "render_state" { isRendering = false }
+      default:
+        break
+      }
+    }
+    .overlay {
+      if showSpinner {
+        ZStack {
+          background
+          ProgressView().controlSize(.small)
+        }
+      }
+    }
+    .onChange(of: id) { _, _ in isRendering = true }
+    .task(id: RenderToken(id: id, rendering: isRendering)) {
+      guard isRendering else {
+        showSpinner = false
+        return
+      }
+      // Delay the reveal so near-instant warm re-renders never flash a
+      // spinner; a cold start always outlasts this and shows it.
+      try? await Task.sleep(for: .milliseconds(120))
+      guard !Task.isCancelled else { return }
+      showSpinner = true
+      // Safety net: never spin forever if the renderer goes silent.
+      try? await Task.sleep(for: .seconds(10))
+      guard !Task.isCancelled else { return }
+      isRendering = false
+    }
+  }
+
+  /// `.task(id:)` key: restarts the reveal/timeout cycle whenever a new
+  /// document arrives (`id`) or the in-flight flag flips (`rendering`).
+  private struct RenderToken: Equatable {
+    let id: String
+    let rendering: Bool
   }
 }

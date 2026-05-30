@@ -33,7 +33,7 @@ This document is the honest accounting that replaces the missing runtime pass: e
 branch_switcher.branch_row.<short-name>     branch_switcher.popover
 branch_switcher.commit_row.<short-sha>      branch_switcher.search          [bonus]
 branch_switcher.current_marker              branch_switcher.view_all_button
-branch_switcher.error_banner                diff_drawer.title_text
+branch_switcher.error_banner                diff_panel.title_text
 branch_switcher.error_dismiss_button        diff_inspector.changes_list
 diff_inspector.history_empty_state          diff_inspector.history_error    [bonus]
 diff_inspector.history_list                 diff_inspector.history_row.<short-sha>
