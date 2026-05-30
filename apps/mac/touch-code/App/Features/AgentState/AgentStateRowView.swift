@@ -1,7 +1,7 @@
 import SwiftUI
 import TouchCodeCore
 
-/// One Agent row in the ActiveAgents sidebar panel.
+/// One Agent row in the AgentState sidebar panel.
 ///
 /// Layout (current iteration per design feedback — agent name is now
 /// encoded by the leading logo alone, no longer duplicated in text;
@@ -16,23 +16,23 @@ import TouchCodeCore
 /// panel) intentionally does NOT collapse on tap; the row stays visible
 /// after focus so the user can fan-jump between agents.
 ///
-/// The breathing animation on `working` / `waitingForInput` icons is
+/// The breathing animation on `working` / `blocked` icons is
 /// driven by a local `@State` flag flipped in `.onAppear`; reduce-motion
 /// suppresses the flip so the icon renders at full opacity statically.
-struct ActiveAgentsRowView: View {
+struct AgentStateRowView: View {
   let paneID: PaneID
-  let entry: AgentRegistry.AgentEntry
+  let entry: AgentStateStore.AgentEntry
   let projectName: String
   let worktreeName: String
   /// True when this row's pane is the main window's currently-focused
   /// pane. Renders a native-style selected-row tint so the user can
   /// match the row they're hovering to "the pane I'm looking at".
   /// Defaults false so older call sites that don't pass it (legacy
-  /// popover view, tests) still compile.
+  /// view, tests) still compile.
   var isSelected: Bool = false
   /// Row density — `normal` keeps the two-line identity column;
   /// `compact` joins worktree and project on one line and tightens
-  /// vertical padding. Defaults to `.normal` so the legacy popover
+  /// vertical padding. Defaults to `.normal` so the legacy default
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
   let onTap: () -> Void
@@ -47,14 +47,11 @@ struct ActiveAgentsRowView: View {
         // primary visual signal that this row is the current focus.
         AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
         identityColumn
-        // Compact mode packs status right after identity (no greedy
-        // spacer) so the project name and the status icon read as a
-        // single tight unit on the trailing side of the row. Normal
-        // mode keeps the spacer so status pins to the row's right
-        // edge against the two-line identity column.
-        if displayMode == .normal {
-          Spacer(minLength: 8)
-        }
+        // A greedy spacer pins the status icon to the row's trailing
+        // edge in both densities, so the state glyph reads as a single
+        // right-aligned column down the list rather than floating at a
+        // variable offset after each project name.
+        Spacer(minLength: 8)
         statusColumn
       }
       .padding(.horizontal, 12)
@@ -78,7 +75,7 @@ struct ActiveAgentsRowView: View {
     // proxy element that carries the label without collapsing the
     // children-contain semantics needed for sub-element probing.
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("activeAgents.row.\(paneID)")
+    .accessibilityIdentifier("agentState.row.\(paneID)")
     .accessibilityRepresentation {
       Button(accessibilityLabelText, action: onTap)
     }
@@ -89,7 +86,7 @@ struct ActiveAgentsRowView: View {
   /// leading edge and pushes project all the way to the trailing edge
   /// via an internal `Spacer`, so the project name visually right-
   /// aligns against the status icon. The primary line carries the
-  /// `activeAgents.row.<paneID>.headline` accessibility identifier in
+  /// `agentState.row.<paneID>.headline` accessibility identifier in
   /// both modes (the headline contract surface stays on the user-
   /// facing worktree text).
   @ViewBuilder
@@ -102,13 +99,12 @@ struct ActiveAgentsRowView: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+          .accessibilityIdentifier("agentState.row.\(paneID).headline")
         Text(projectName)
           .font(.caption2)
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .padding(.leading, 8)
       }
     case .compact:
       // Single-line variant: worktree at the leading edge, a small
@@ -126,7 +122,7 @@ struct ActiveAgentsRowView: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .accessibilityIdentifier("activeAgents.row.\(paneID).headline")
+          .accessibilityIdentifier("agentState.row.\(paneID).headline")
         Text(projectName)
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -168,22 +164,17 @@ struct ActiveAgentsRowView: View {
     stateIcon
       .font(.caption2)
       .accessibilityElement(children: .ignore)
-      .accessibilityIdentifier("activeAgents.row.\(paneID).state")
+      .accessibilityIdentifier("agentState.row.\(paneID).state")
       .accessibilityLabel(entry.state.rawValue)
   }
 
   /// State icon glyph + color. Circle-based visual language for every
-  /// state, with `.symbolEffect(.pulse)` on the two "active" states
-  /// (working, waitingForInput). `.pulse` is SwiftUI 6's symbol
-  /// breathing animation; routes through the symbol renderer so the
-  /// animation survives the row's @Observable rebuild cycle (unlike a
-  /// manual `.opacity` + `.repeatForever` chain, which restarts on
-  /// every parent redraw). Color is `Color.orange` to match the
-  /// inbox bell unread tint (same warning hue across the chrome).
+  /// state. Color is `Color.orange` to match the inbox bell unread tint
+  /// (same warning hue across the chrome).
   @ViewBuilder
   private var stateIcon: some View {
     switch entry.state {
-    case .waitingForInput:
+    case .blocked:
       // Pause-fill glyph — terminal-style "agent has paused for you".
       // Static (no pulse) per design feedback; the orange tint alone
       // carries the "needs your attention" signal. `.imageScale(.large)`
@@ -194,13 +185,13 @@ struct ActiveAgentsRowView: View {
         .imageScale(.large)
         .foregroundStyle(Color.orange)
         .accessibilityHidden(true)
-    case .loading:
+    case .working:
       // Nine-square activity grid — staggered fade-out per cell on a 3 s
       // cycle (bottom-left first → top-right last) reads as "filling in
       // progress" rather than a generic spinner. Reduce motion holds
       // every cell at full opacity. Tint follows `.primary` so the grid
       // is black in light mode / white in dark mode, distinct from the
-      // orange "waiting" icon without competing visually for attention.
+      // orange "blocked" icon without competing visually for attention.
       LoadingGridIcon(size: 16, isAnimating: !reduceMotion)
         .foregroundStyle(.primary)
     case .finished:
@@ -215,25 +206,24 @@ struct ActiveAgentsRowView: View {
   }
 
   /// Human-readable verb for the visible inline state label
-  /// ("working" / "idle" / "waiting" / "finished"). The short form
+  /// ("idle" / "working" / "blocked" / "finished"). The short form
   /// keeps the trailing column compact — the spoken VoiceOver label
   /// uses the long form via `sentenceVerb`.
   private var stateVerb: String {
     switch entry.state {
-    case .waitingForInput: return "waiting"
-    case .loading: return "working"
+    case .blocked: return "blocked"
+    case .working: return "working"
     case .finished: return "finished"
     case .idle: return "idle"
     }
   }
 
-  /// Long-form sentence verb used in the row's VoiceOver label.
-  /// "waiting for input" reads naturally when chained after the
-  /// `<DisplayName>, <Project>, <Worktree>` prefix.
+  /// Long-form sentence verb used in the row's VoiceOver label, chained
+  /// after the `<DisplayName>, <Project>, <Worktree>` prefix.
   private var sentenceVerb: String {
     switch entry.state {
-    case .waitingForInput: return "waiting for input"
-    case .loading: return "working"
+    case .blocked: return "blocked"
+    case .working: return "working"
     case .finished: return "finished"
     case .idle: return "idle"
     }
@@ -248,7 +238,7 @@ struct ActiveAgentsRowView: View {
   }
 }
 
-/// 3×3 activity-grid glyph used for the `.loading` state: nine 4-unit
+/// 3×3 activity-grid glyph used for the `.working` state: nine 4-unit
 /// squares on a 24-unit canvas, each fading from full opacity to 0
 /// over 90 % of a 3 s cycle (then holding at 0 for 10 % before the
 /// next cycle starts). Stagger goes bottom-left → top-right with

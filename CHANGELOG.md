@@ -20,6 +20,24 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.3.4] - 2026-05-30
+
+### Added
+
+- **Pull request badges refresh on their own.** While the app is focused, the sidebar and titlebar PR badges pick up remote changes — CI status, review decisions, merges or closes, and freshly-opened PRs — without a manual refresh. Updates arrive faster while checks are still running and ease off once everything settles; polling pauses entirely when the app is in the background.
+- **Worktree and tab spinners light up for any running work.** Spinners now turn on both while a bound agent is working and while a plain command (make, npm, pytest, …) runs in the foreground — not only for programs that emit their own progress signal.
+- **Close item in the pane right-click menu**, matching ⌘W for a tab that holds more than one pane.
+
+### Changed
+
+- **The diff inspector keeps its open/closed state when you switch worktrees** instead of flipping based on each worktree's remembered setting. It still resets to closed on launch.
+
+### Fixed
+
+- **System appearance no longer gets stuck on the light palette.** In System mode, switching the OS from light to dark (for example at night) now repaints the sidebar chrome immediately instead of waiting for a manual theme toggle.
+- **Active Agents status reads only what the terminal shows.** A completion beep or error tone no longer makes a pane look like it's waiting for input; working and blocked state is derived purely from the rendered terminal.
+- **Active Agents and worktree-header alignment polish:** status icons right-align consistently in compact mode, the project line lines up under the branch name, and the worktree header spaces evenly when the diff inspector is closed.
+
 ## [0.3.3] - 2026-05-28
 
 ### Added

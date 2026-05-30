@@ -139,6 +139,27 @@ struct PaneContextMenuTests {
     #expect(call.2 == false)
   }
 
+  // MARK: - close
+
+  /// The "Close" menu item fires the injected `closePane` closure exactly
+  /// once. The closure captures the full pane address at the view call
+  /// site; the model only owns the firing, so this pins that contract.
+  @Test
+  func closeFiresClosePaneOnce() {
+    let (catalog, paneID) = makeCatalog(paneLabels: [])
+    var closeCount = 0
+    let model = PaneContextMenuModel(
+      paneID: paneID,
+      snapshot: { catalog },
+      setLabel: { _, _, _ in },
+      closePane: { closeCount += 1 }
+    )
+
+    model.close()
+
+    #expect(closeCount == 1)
+  }
+
   /// Reading and writing are independent — an unknown pane id snapshots
   /// as `nil` and reports `isMuted == false` (no crash, no spurious
   /// label write). Guards the menu against the rare case where the pane

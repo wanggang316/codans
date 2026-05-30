@@ -6,7 +6,7 @@ import TouchCodeCore
 @testable import TouchCode
 
 @MainActor
-struct AgentRegistryStateTests {
+struct AgentStateStoreTests {
   @Test
   func boundOnlyYieldsIdle() {
     let f = Fixture()
@@ -23,16 +23,16 @@ struct AgentRegistryStateTests {
   }
 
   @Test
-  func workingViewportAfterInputDrivesLoading() {
+  func workingViewportAfterInputDrivesWorking() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
-    #expect(f.registry.entries[f.paneID]?.state == .loading)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 
   @Test
-  func existingBoundAgentCanLoadBeforeCurrentSessionInput() {
+  func existingBoundAgentCanWorkBeforeCurrentSessionInput() {
     let f = Fixture()
     f.registry.onAgentBound(
       f.paneID,
@@ -41,7 +41,7 @@ struct AgentRegistryStateTests {
       assumeUserInputSeen: true
     )
     f.viewport("• Working (10s)")
-    #expect(f.registry.entries[f.paneID]?.state == .loading)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 
   @Test
@@ -53,7 +53,7 @@ struct AgentRegistryStateTests {
     let f = Fixture()
     f.viewport("• Working (10s)")
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
-    #expect(f.registry.entries[f.paneID]?.state == .loading)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 
   @Test
@@ -62,7 +62,7 @@ struct AgentRegistryStateTests {
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
-    #expect(f.registry.entries[f.paneID]?.state == .loading)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
 
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .finished)
@@ -75,7 +75,7 @@ struct AgentRegistryStateTests {
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
-    #expect(f.registry.entries[f.paneID]?.state == .loading)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
 
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .idle)
@@ -121,7 +121,7 @@ struct AgentRegistryStateTests {
   }
 
   @Test
-  func titleChangesDoNotDriveLoadingAfterInput() {
+  func titleChangesDoNotDriveWorkingAfterInput() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
@@ -133,7 +133,10 @@ struct AgentRegistryStateTests {
   }
 
   @Test
-  func waitingForInputDesktopNotificationFlipsState() {
+  func desktopNotificationDoesNotFlipLiveState() {
+    // A desktop notification is an inbox-worthy event, not a live activity
+    // signal. With no rendered activity yet, the live state stays idle —
+    // the notifications inbox records it independently.
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onTerminalEvent(
@@ -142,7 +145,7 @@ struct AgentRegistryStateTests {
         .desktopNotification(title: "Approve this action", body: "Run command?")
       )
     )
-    #expect(f.registry.entries[f.paneID]?.state == .waitingForInput)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   @Test
@@ -150,15 +153,15 @@ struct AgentRegistryStateTests {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.viewport("Allow command?\n[y/n]")
-    #expect(f.registry.entries[f.paneID]?.state == .waitingForInput)
+    #expect(f.registry.entries[f.paneID]?.state == .blocked)
   }
 
   @Test
-  func keyboardActivityClearsWaitingForInput() {
+  func keyboardActivityClearsBlocked() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.viewport("Allow command?\n[y/n]")
-    #expect(f.registry.entries[f.paneID]?.state == .waitingForInput)
+    #expect(f.registry.entries[f.paneID]?.state == .blocked)
 
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("codex> ")
@@ -166,30 +169,30 @@ struct AgentRegistryStateTests {
   }
 
   @Test
-  func keyboardActivityAfterWaitingCueDoesNotRestoreStaleLoading() {
+  func bellDoesNotOverrideWorking() {
+    // The terminal bell rings for many non-input reasons (completion beeps,
+    // error tones, finished commands). It must not pin a working agent into
+    // the blocked state — only the rendered region decides live activity.
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
-    #expect(f.registry.entries[f.paneID]?.state == .loading)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
 
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .bellRang))
-    #expect(f.registry.entries[f.paneID]?.state == .waitingForInput)
-
-    f.registry.onPaneKeyboardActivity(f.paneID)
-    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 
   @Test
-  func waitingForInputBeatsLoading() {
+  func bellDoesNotFlipIdleToBlocked() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
-    f.viewport("• Working (10s)")
-    #expect(f.registry.entries[f.paneID]?.state == .loading)
+    f.viewport("codex> ")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
 
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .bellRang))
-    #expect(f.registry.entries[f.paneID]?.state == .waitingForInput)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   @Test
@@ -224,7 +227,7 @@ struct AgentRegistryStateTests {
   func lastTransitionAtTracksStateChanges() {
     let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
     let paneID = PaneID()
-    let registry = AgentRegistry(
+    let registry = AgentStateStore(
       focusedPane: { nil },
       now: { clock.value }
     )
@@ -235,7 +238,7 @@ struct AgentRegistryStateTests {
     clock.setValue(Date(timeIntervalSince1970: 2_000))
     registry.onPaneKeyboardActivity(paneID)
     registry.onTerminalEvent(.paneViewportChanged(paneID, text: "• Working (10s)"))
-    #expect(registry.entries[paneID]?.state == .loading)
+    #expect(registry.entries[paneID]?.state == .working)
     #expect(registry.entries[paneID]?.lastTransitionAt == Date(timeIntervalSince1970: 2_000))
 
     clock.setValue(Date(timeIntervalSince1970: 3_000))
@@ -248,12 +251,12 @@ struct AgentRegistryStateTests {
     let paneID = PaneID()
     let focused = LockIsolated<PaneID?>(nil)
     let nowBox = LockIsolated<Date>(Date(timeIntervalSince1970: 0))
-    let registry: AgentRegistry
+    let registry: AgentStateStore
 
     init() {
       let focused = self.focused
       let nowBox = self.nowBox
-      self.registry = AgentRegistry(
+      self.registry = AgentStateStore(
         focusedPane: { focused.value },
         now: { nowBox.value }
       )

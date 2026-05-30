@@ -77,14 +77,14 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// quit by default.
   public var quitAction: QuitAction
 
-  /// Whether the ActiveAgents sidebar panel should auto-open whenever any
+  /// Whether the AgentState sidebar panel should auto-open whenever any
   /// bound agent transitions into the `loading` state. Default `true`. When
   /// off, the panel only opens via the sidebar footer's toggle button. The
   /// panel + footer button stay visible regardless; this setting only
   /// controls the auto-open behaviour on the rising edge into `loading`.
   public var agentsViewAutoOpen: Bool
 
-  /// Row density for the ActiveAgents sidebar panel. `normal` (default)
+  /// Row density for the AgentState sidebar panel. `normal` (default)
   /// renders the two-line worktree/project identity column; `compact`
   /// joins both names on one line and tightens vertical padding.
   public var agentsViewDisplayMode: AgentsViewDisplayMode

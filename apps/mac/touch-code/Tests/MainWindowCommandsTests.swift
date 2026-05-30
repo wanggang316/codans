@@ -134,15 +134,11 @@ struct MainWindowCommandsTests {
   @Test
   func commandShiftGDispatchesDiffInspectorToggleForCurrentWorktree() async {
     // Mirrors the ⌘⇧G button body:
-    // `store.send(.diffInspectorToggledForCurrentWorktree)`. The reducer reads
-    // current visibility from the catalog and writes the flipped value via
-    // `hierarchyClient.setWorktreeDiffInspectorVisible`.
+    // `store.send(.diffInspectorToggledForCurrentWorktree)`. The reducer flips
+    // the app-level `state.diffInspectorVisible` for the built-in overlay.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
-    let worktree = Worktree(
-      id: worktreeID, name: "w", path: "/repo",
-      diffInspectorVisible: false
-    )
+    let worktree = Worktree(id: worktreeID, name: "w", path: "/repo")
     let project = Project(
       id: projectID, name: "p", rootPath: "/repo", gitRoot: "/repo",
       worktrees: [worktree]
@@ -154,24 +150,19 @@ struct MainWindowCommandsTests {
       projectID: projectID, worktreeID: worktreeID
     )
 
-    let recorded = LockIsolated<[(WorktreeID, Bool)]>([])
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.setWorktreeDiffInspectorVisible = { wt, v in
-        recorded.withValue { $0.append((wt, v)) }
-      }
       // No external git viewer configured — chord falls through to the
       // built-in overlay toggle that this test covers.
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
     }
 
-    await store.send(.diffInspectorToggledForCurrentWorktree)
+    await store.send(.diffInspectorToggledForCurrentWorktree) {
+      $0.diffInspectorVisible = true
+    }
     await store.finish()
-    #expect(recorded.value.count == 1)
-    #expect(recorded.value.first?.0 == worktreeID)
-    #expect(recorded.value.first?.1 == true)
   }
 
 }

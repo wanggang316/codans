@@ -1,6 +1,6 @@
 import Foundation
 
-/// Coding agents recognised by the ActiveAgents feature. The raw value is
+/// Coding agents recognised by the AgentState feature. The raw value is
 /// the stable identifier persisted in `catalog.json` (see `Pane.agentKind`)
 /// and reported over the wire; the `displayName` is the user-facing label
 /// rendered in the status-bar popover and any future agent-aware UI.

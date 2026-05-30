@@ -83,7 +83,7 @@ final class SessionLifecycle {
   /// re-`connect(2)`s the recorded sockets in `SessionReaper.sweep`.
   ///
   /// Agent state (if a provider is wired) is captured into the same
-  /// catalog write so the next launch can seed `AgentRegistry` from
+  /// catalog write so the next launch can seed `AgentStateStore` from
   /// liveness-checked rows — only agent processes that survived the
   /// quit count, ones we restart fresh otherwise.
   private func detachLiveTier(_ liveClients: [ZmxClient]) {

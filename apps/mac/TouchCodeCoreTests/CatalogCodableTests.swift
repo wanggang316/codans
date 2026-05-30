@@ -63,7 +63,7 @@ struct CatalogCodableTests {
 
   @Test
   func encodeOmitsActiveTagFilterWhenAll() throws {
-    // Symmetric with isPinned/diffInspectorVisible/isExpanded: omit the key
+    // Symmetric with isPinned/isExpanded: omit the key
     // when the value is the decode-time default. Pre-tag catalogs decode
     // to `.all` so writes back stay byte-identical when the filter is
     // unset.
@@ -106,7 +106,7 @@ struct CatalogCodableTests {
   // MARK: - Worktree default-omission round-trips
 
   @Test
-  func encodeOmitsDiffInspectorVisibleWhenFalse() throws {
+  func encodeOmitsArchivedAndIsPinnedWhenFalse() throws {
     let worktree = Worktree(name: "w", path: "/w")
     let project = Project(name: "p", rootPath: "/p", gitRoot: "/p", worktrees: [worktree])
     let catalog = Catalog(projects: [project])
@@ -117,7 +117,8 @@ struct CatalogCodableTests {
     let firstProject = try #require(projects.first)
     let worktrees = try #require(firstProject["worktrees"] as? [[String: Any]])
     let firstWorktree = try #require(worktrees.first)
-    #expect(firstWorktree["diffInspectorVisible"] == nil)
+    #expect(firstWorktree["archived"] == nil)
+    #expect(firstWorktree["isPinned"] == nil)
 
     let decoded = try JSONDecoder().decode(Catalog.self, from: data)
     #expect(decoded == catalog)

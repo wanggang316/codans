@@ -1,8 +1,8 @@
 import SwiftUI
 import TouchCodeCore
 
-/// Per-kind agent logo shared between `ActiveAgentsRowView` (16pt) and
-/// `ActiveAgentsBadgeView` (14pt). Centralises the symbol choice so a
+/// Per-kind agent logo shared between `AgentStateRowView` (16pt) and
+/// `AgentStateView` (14pt). Centralises the symbol choice so a
 /// future swap stays in one file.
 ///
 /// Glyph assignment (all rendered template-style to inherit the

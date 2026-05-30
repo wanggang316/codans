@@ -58,7 +58,7 @@ final class PaneSurface {
   /// within `progressResetTimeout`, the task forces `progressState` /
   /// `progressValue` back to "cleared" and fan-outs a synthetic REMOVE
   /// event so downstream listeners (running-pane set, progress bar,
-  /// AgentRegistry) recover from an emitter that died or crashed
+  /// AgentStateStore) recover from an emitter that died or crashed
   /// without clearing its own state. Cancelled (and replaced) on
   /// every fresh progress delta, in `close()`, and in `deinit`.
   /// `nonisolated(unsafe)` matches the surrounding C-handle storage so
@@ -319,6 +319,10 @@ final class PaneSurface {
   }
 
   enum ReadExtent {
+    /// The current interaction region only — excludes scrollback above the
+    /// live screen. Preferred for agent-activity classification so a prompt
+    /// scrolled into history can no longer be mistaken for a live one.
+    case active
     case viewport
     case screen
   }
@@ -328,6 +332,7 @@ final class PaneSurface {
     var text = ghostty_text_s()
     let tag: ghostty_point_tag_e =
       switch extent {
+      case .active: GHOSTTY_POINT_ACTIVE
       case .viewport: GHOSTTY_POINT_VIEWPORT
       case .screen: GHOSTTY_POINT_SCREEN
       }
@@ -677,7 +682,7 @@ final class PaneSurface {
   /// own); any other state cancels the previous timer and schedules a
   /// fresh one. If the timer fires, the surface synthesises a REMOVE
   /// event so the rest of the system (running-pane set, progress
-  /// overlay, AgentRegistry, sidebar busy glyph) recovers from a
+  /// overlay, AgentStateStore, sidebar busy glyph) recovers from a
   /// stuck emitter without manual intervention.
   private func scheduleProgressReset(currentState: UInt32) {
     progressResetTask?.cancel()

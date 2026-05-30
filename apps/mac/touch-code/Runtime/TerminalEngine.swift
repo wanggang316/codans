@@ -718,17 +718,24 @@ final class TerminalEngine {
   }
 
   private func foregroundJobPollInterval() -> Duration {
+    var sawRunningCommand = false
     for paneID in foregroundJobPaneIDs {
       if hierarchy.catalog.pane(paneID)?.agentKind != nil {
         return .milliseconds(300)
       }
-      if let job = foregroundJobSnapshots[paneID],
-        AgentKindPatterns.classify(foregroundJob: job) != nil
-      {
-        return .milliseconds(300)
+      if let job = foregroundJobSnapshots[paneID] {
+        if AgentKindPatterns.classify(foregroundJob: job) != nil {
+          return .milliseconds(300)
+        }
+        if ForegroundJobClassifier.indicatesRunningCommand(job) {
+          sawRunningCommand = true
+        }
       }
     }
-    return .seconds(2)
+    // A plain command is running somewhere: poll faster so the spinner
+    // appears / clears promptly, but slower than agent panes. Fully idle
+    // panes stay at the cheap 2s cadence.
+    return sawRunningCommand ? .milliseconds(500) : .seconds(2)
   }
 
   private func emitViewportIfNeeded(
@@ -739,7 +746,10 @@ final class TerminalEngine {
     let hasAgentSignal =
       hierarchy.catalog.pane(paneID)?.agentKind != nil
       || AgentKindPatterns.classify(foregroundJob: foregroundJob) != nil
-    guard hasAgentSignal, let text = surface.readText(.viewport) else { return }
+    // Classify against the active interaction region, not the whole viewport:
+    // scrollback that happens to still be visible must not pin the agent on a
+    // stale prompt/spinner.
+    guard hasAgentSignal, let text = surface.readText(.active) else { return }
     guard viewportSnapshots[paneID] != text else { return }
     viewportSnapshots[paneID] = text
     emit(.paneViewportChanged(paneID, text: text))

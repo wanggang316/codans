@@ -84,7 +84,7 @@ struct TouchCodeApp: App {
             notificationRollup: appState.notificationRollup,
             notificationStore: appState.notificationStore,
             osNotifier: appState.osNotifier,
-            activeAgentsRegistry: appState.agentRegistry
+            agentStateStore: appState.agentStateStore
           )
           .frame(minWidth: 800, minHeight: 600)
           .environment(commandKeyObserver)
@@ -399,12 +399,12 @@ final class AppState {
   /// keystrokes, focus, agent bind/unbind) wired in
   /// `startNotificationObservers`. Held long-lived so SwiftUI consumers
   /// outlive any scene reattach.
-  @ObservationIgnored private(set) var agentRegistry: AgentRegistry?
-  /// Long-running focus observer for AgentRegistry. Re-arms on every
+  @ObservationIgnored private(set) var agentStateStore: AgentStateStore?
+  /// Long-running focus observer for AgentStateStore. Re-arms on every
   /// catalog mutation that could change the globally-focused pane and
   /// forwards new ids to `registry.onPaneFocused`. Same re-arming
   /// pattern as `observeFocusedPaneForRead`.
-  @ObservationIgnored private var activeAgentsFocusTask: Task<Void, Never>?
+  @ObservationIgnored private var agentStateFocusTask: Task<Void, Never>?
   /// M5.T1 keystroke side channel: per-pane "last user keystroke at"
   /// timestamps fed into the translator's `userTypingRecently` window.
   /// Strong reference here keeps the tracker alive; the
@@ -555,8 +555,8 @@ final class AppState {
     // Wire the quit-time agent snapshot into SessionLifecycle now that
     // both the registry and the engine (PID source) are alive. The
     // closure is invoked from the lifecycle's `detachLiveTier` path —
-    // running here keeps lifecycle ignorant of `AgentRegistry`'s type.
-    if let lifecycle = self.sessionLifecycle, let registry = self.agentRegistry {
+    // running here keeps lifecycle ignorant of `AgentStateStore`'s type.
+    if let lifecycle = self.sessionLifecycle, let registry = self.agentStateStore {
       lifecycle.agentSnapshotProvider = { [weak engine, weak registry] in
         guard let registry else { return [] }
         let now = Date()
@@ -762,7 +762,7 @@ final class AppState {
     // five-wire fan-out (terminal events / running set / keystrokes /
     // focus / agent bind), and start the long-running drain. Extracted
     // into a helper so this function stays under the lint body length.
-    startActiveAgentsObservers(
+    startAgentStateObservers(
       manager: manager,
       engine: engine,
       hierarchy: hierarchy,
@@ -1095,7 +1095,7 @@ final class AppState {
     dockBadgerTask?.cancel()
     focusReadMarkerTask?.cancel()
     orphanSweepTask?.cancel()
-    activeAgentsFocusTask?.cancel()
+    agentStateFocusTask?.cancel()
     // Drop the M2.T2 observation tokens explicitly so a `didBecomeActive`
     // arriving mid-shutdown cannot wake the coordinator on a half-torn-down
     // settings reader.
@@ -1362,20 +1362,20 @@ final class AppState {
   /// body-length budget. `@discardableResult` so the call site doesn't
   /// have to acknowledge the binder.
   @discardableResult
-  private func startActiveAgentsObservers(
+  private func startAgentStateObservers(
     manager: HierarchyManager,
     engine: TerminalEngine,
     hierarchy: HierarchyClient,
     detector: NotificationDetector,
     keystrokeTracker: PaneKeyboardActivityTracker
   ) -> AgentBinder {
-    // T6: AgentRegistry is the @Observable state machine the badge +
+    // T6: AgentStateStore is the @Observable state machine the badge +
     // popover bind to. Four wires feed it:
     //   1. terminal events  → onTerminalEvent (drain loop below)
     //   2. keystrokes       → onPaneKeyboardActivity (tracker.onActivity)
     //   3. focus changes    → onPaneFocused (observation pump)
     //   4. agent bind/unbind→ onAgentBound / onAgentUnbound (binder handlers)
-    let registry = AgentRegistry(
+    let registry = AgentStateStore(
       focusedPane: { [weak manager] in
         guard let manager else { return nil }
         return Self.currentlyFocusedPane(
@@ -1384,7 +1384,7 @@ final class AppState {
         )
       }
     )
-    self.agentRegistry = registry
+    self.agentStateStore = registry
     // Pre-seed the registry from the last quit's agent snapshot (M6.T6.5).
     // Each persisted record carries the foreground PGID at capture time;
     // `kill(pid, 0)` filters out agents whose processes exited between
@@ -1426,13 +1426,13 @@ final class AppState {
       for await event in detectorEvents {
         await detector.handle(event)
         Self.dispatchToAgentBinder(event: event, binder: binder)
-        Self.dispatchToAgentRegistry(event: event, registry: registry)
+        Self.dispatchToAgentStateStore(event: event, registry: registry)
       }
     }
     // Wire 4: focus tracker. Same re-arming observation pump pattern as
     // `observeFocusedPaneForRead` — fire `onPaneFocused` whenever the
     // globally-focused pane id changes.
-    self.activeAgentsFocusTask = Task { @MainActor in
+    self.agentStateFocusTask = Task { @MainActor in
       await Self.observeFocusedPaneForRegistry(
         catalog: { manager.catalog },
         lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
@@ -1442,17 +1442,17 @@ final class AppState {
     return binder
   }
 
-  /// Drain-loop branch that feeds terminal events into `AgentRegistry`.
+  /// Drain-loop branch that feeds terminal events into `AgentStateStore`.
   @MainActor
-  private static func dispatchToAgentRegistry(
+  private static func dispatchToAgentStateStore(
     event: TerminalEvent,
-    registry: AgentRegistry
+    registry: AgentStateStore
   ) {
     registry.onTerminalEvent(event)
   }
 
   /// Filter the previous quit's agent snapshot through a liveness check
-  /// and hand the survivors to `AgentRegistry.seedRestored`.
+  /// and hand the survivors to `AgentStateStore.seedRestored`.
   ///
   /// `kill(pid, 0)` alone is not enough: PID slots get recycled (32k
   /// space on macOS, easily recycled within hours), so a successful
@@ -1470,12 +1470,12 @@ final class AppState {
   @MainActor
   private static func seedRestoredAgents(
     coordinator: SessionCoordinator?,
-    registry: AgentRegistry
+    registry: AgentStateStore
   ) {
     guard let coordinator else { return }
     let restored = coordinator.restoredAgents
     guard !restored.isEmpty else { return }
-    var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentRegistry.AgentRuntimeState)] = []
+    var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
     seeds.reserveCapacity(restored.count)
     for (paneID, record) in restored {
       guard record.pid > 1 else { continue }
@@ -1495,14 +1495,14 @@ final class AppState {
       else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
-        let state = AgentRegistry.AgentRuntimeState(rawValue: record.stateRaw)
+        let state = AgentStateStore.AgentRuntimeState(rawValue: record.stateRaw)
       else { continue }
       seeds.append((paneID: paneID, kind: kind, state: state))
     }
     registry.seedRestored(seeds)
   }
 
-  /// Active-agents T6: long-running focus observer for `AgentRegistry`.
+  /// Active-agents T6: long-running focus observer for `AgentStateStore`.
   /// Same re-arming `withObservationTracking` pump as
   /// `observeFocusedPaneForRead`: read the globally-focused pane (via
   /// `currentlyFocusedPane`), forward to `registry.onPaneFocused`
@@ -1512,7 +1512,7 @@ final class AppState {
   private static func observeFocusedPaneForRegistry(
     catalog: @escaping @MainActor () -> Catalog,
     lastFocusedPane: @escaping @MainActor (TabID) -> PaneID?,
-    registry: AgentRegistry
+    registry: AgentStateStore
   ) async {
     var last: PaneID?
     while !Task.isCancelled {

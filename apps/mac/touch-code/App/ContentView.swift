@@ -32,7 +32,7 @@ struct ContentView: View {
   /// T6 (active-agents): registry that backs the worktree-toolbar
   /// badge + popover. Optional because `AppState.bringUp` constructs
   /// it lazily; nil renders no badge.
-  let activeAgentsRegistry: AgentRegistry?
+  let agentStateStore: AgentStateStore?
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
@@ -89,8 +89,8 @@ struct ContentView: View {
         revealTrigger: store.revealSelectionTrigger,
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         editorStore: store.scope(state: \.editor, action: \.editor),
-        activeAgentsRegistry: activeAgentsRegistry,
-        onActiveAgentsRowTapped: { paneID in store.send(.activeAgents(.rowTapped(paneID))) }
+        agentStateStore: agentStateStore,
+        onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) }
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {
@@ -98,12 +98,13 @@ struct ContentView: View {
         store: store.scope(state: \.detail, action: \.detail),
         selection: store.selection,
         editorStore: store.scope(state: \.editor, action: \.editor),
+        agentStateStore: agentStateStore,
         headerStore: store.scope(state: \.worktreeHeader, action: \.worktreeHeader),
         statusBarStore: store.scope(state: \.statusBar, action: \.statusBar),
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         diffStore: store.scope(state: \.diff, action: \.diff),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
-        inspectorVisible: store.state.diffInspectorVisible(in: hierarchyManager.catalog),
+        inspectorVisible: store.diffInspectorVisible,
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
         onToggleGitViewer: { store.send(.diffInspectorToggledForCurrentWorktree) },

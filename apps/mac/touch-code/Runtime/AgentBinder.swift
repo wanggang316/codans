@@ -3,7 +3,7 @@ import OSLog
 import TouchCodeCore
 
 private let binderLogger = Logger(
-  subsystem: "com.touch-code.activeagents", category: "binder"
+  subsystem: "com.touch-code.agentstate", category: "binder"
 )
 
 /// Identifies which coding agent is running in each pane and persists
@@ -40,14 +40,14 @@ final class AgentBinder {
   private let client: HierarchyClient
   private let currentAgentKind: @MainActor (PaneID) -> AgentKind?
   /// Optional T6 hook: fired immediately AFTER `setPaneAgentKind` lands
-  /// a non-nil binding. AppState wires this to `AgentRegistry.onAgentBound`
-  /// so the ActiveAgents UI learns about the new agent without a separate
+  /// a non-nil binding. AppState wires this to `AgentStateStore.onAgentBound`
+  /// so the AgentState UI learns about the new agent without a separate
   /// observation pass. Default no-op keeps existing tests / callers
   /// untouched.
   private let agentBoundHandler: @MainActor (PaneID, AgentKind, String?, Bool) -> Void
   /// Companion of `agentBoundHandler` — fires on `unbind(_:)` and on any
   /// path that writes a nil binding through `setPaneAgentKind`. AppState
-  /// wires this to `AgentRegistry.onAgentUnbound`.
+  /// wires this to `AgentStateStore.onAgentUnbound`.
   private let agentUnboundHandler: @MainActor (PaneID) -> Void
   private var presenceByPane: [PaneID: Presence] = [:]
   private var materializedBindings: Set<PaneID> = []
@@ -180,7 +180,7 @@ final class AgentBinder {
   ///     action=<verb> pane=<id8> kind=<old>→<new> pgid=<n> procs=<a,b,c> misses=<m>/<t>
   ///
   /// Stable column names so `log show --predicate
-  /// 'subsystem == "com.touch-code.activeagents" and category == "binder"'`
+  /// 'subsystem == "com.touch-code.agentstate" and category == "binder"'`
   /// stays greppable across releases. Process names are basenames — never
   /// commandLines, which can contain secrets in argv.
   private func logTransition(

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TouchCodeCore
 
-/// ActiveAgents panel anchored at the sidebar's bottom safe-area inset.
+/// AgentState panel anchored at the sidebar's bottom safe-area inset.
 ///
 /// Visual brief (per design pass):
 /// - Rounded top corners (10pt) — system glass background drawn inside
@@ -25,14 +25,14 @@ import TouchCodeCore
 /// - Resize strip (16pt; capsule fades in on hover).
 /// - Title row: "Agents View" + optional `(N)` count chip when N > 4.
 /// - Divider.
-/// - Scrollable list of `ActiveAgentsRowView`s ordered by
+/// - Scrollable list of `AgentStateRowView`s ordered by
 ///   `SortedEntriesProvider`.
 ///
 /// Tapping a row dispatches focus to the corresponding pane (via the
 /// controller's `onTapRow` closure). The panel intentionally stays open
 /// after a row tap so the user can fan-jump between agents.
-struct ActiveAgentsSidebarPanel: View {
-  let registry: AgentRegistry
+struct AgentStateSidebarPanel: View {
+  let registry: AgentStateStore
   let resolveSourcePath: (PaneID) -> (project: String, worktree: String)?
   /// Pane the main window is currently focused on (selection chain bottom).
   /// Drives the selected-row highlight inside the panel so the user can see
@@ -139,7 +139,7 @@ struct ActiveAgentsSidebarPanel: View {
           dragAnchor = nil
         }
     )
-    .accessibilityIdentifier("activeAgents.sidebarPanel.handle")
+    .accessibilityIdentifier("agentState.sidebarPanel.handle")
   }
 
   private var titleBar: some View {
@@ -170,7 +170,7 @@ struct ActiveAgentsSidebarPanel: View {
         LazyVStack(spacing: 0) {
           ForEach(rows, id: \.paneID) { item in
             let resolved = resolveSourcePath(item.paneID)
-            ActiveAgentsRowView(
+            AgentStateRowView(
               paneID: item.paneID,
               entry: item.entry,
               projectName: resolved?.project ?? "—",
@@ -182,7 +182,7 @@ struct ActiveAgentsSidebarPanel: View {
           }
         }
       }
-      .accessibilityIdentifier("activeAgents.sidebarPanel.list")
+      .accessibilityIdentifier("agentState.sidebarPanel.list")
     }
   }
 
@@ -200,6 +200,6 @@ struct ActiveAgentsSidebarPanel: View {
         .padding(.horizontal, 16)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .accessibilityIdentifier("activeAgents.sidebarPanel.emptyState")
+    .accessibilityIdentifier("agentState.sidebarPanel.emptyState")
   }
 }

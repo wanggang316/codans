@@ -23,6 +23,10 @@ struct WorktreeDetailView: View {
   /// Open-result toasts are driven by `editorStore.state.lastOpenResult` directly from
   /// `ContentView`, so this view no longer accepts a callback (0005 M6c).
   let editorStore: StoreOf<EditorFeature>
+  /// AgentState registry (optional). Threaded down to `TabBarView` so a tab
+  /// chip lights while a bound agent in that tab is `.working` — the same
+  /// registry `ContentView` hands the sidebar, kept in sync by construction.
+  var agentStateStore: AgentStateStore?
   /// T2 Header feature — scoped by `ContentView` from the root. Drives the bell
   /// badge, the Open-in split button's delegate routing, and the Git Viewer toggle.
   let headerStore: StoreOf<WorktreeHeaderFeature>
@@ -41,8 +45,10 @@ struct WorktreeDetailView: View {
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
   /// M5: drives the inline Diff inspector column rendered to the right
-  /// of the detail body. Sourced from `Worktree.diffInspectorVisible` via
-  /// `RootFeature.State.diffInspectorVisible(in:)` in `ContentView`.
+  /// of the detail body. Sourced from the app-level
+  /// `RootFeature.State.diffInspectorVisible` in `ContentView` — a single
+  /// toggle shared across Worktrees, so switching selection keeps the panel
+  /// open/closed and only re-targets its contents.
   let inspectorVisible: Bool
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just
@@ -250,7 +256,8 @@ struct WorktreeDetailView: View {
       store: store.scope(state: \.tabBar, action: \.tabBar),
       projectID: address.project,
       worktreeID: address.worktree,
-      activeTabID: address.activeTab
+      activeTabID: address.activeTab,
+      agentStateStore: agentStateStore
     )
     .frame(maxWidth: .infinity, alignment: .leading)
     // No solid `.windowBackgroundColor` fill: with the toolbar chrome
@@ -429,19 +436,21 @@ struct WorktreeDetailView: View {
     // items into the main column the way NavigationSplitView's leading
     // toolbar zone does.
     //
-    // The placeholder is rendered unconditionally (not gated on
-    // `inspectorVisible`) so SwiftUI animates the width change from 0 to
-    // the inspector footprint instead of mounting / unmounting the item.
-    // Mount-toggle is instantaneous and reads as a jarring jump on the
-    // chips next to it. `.sharedBackgroundVisibility(.hidden)` strips the
-    // toolbar's default glass capsule so the placeholder never renders as
-    // an empty pill.
-    ToolbarItem {
-      Color.clear
-        .frame(width: inspectorVisible ? Self.inspectorWidth - 40 : 0, height: 1)
-        .animation(.easeInOut(duration: 0.25), value: inspectorVisible)
+    // Mounted only while the inspector is open. A 0-width placeholder
+    // still reserves a `ToolbarItem` slot with its own insets, which
+    // widens the Open↔toggle gap past the Run↔Open gap when the panel is
+    // closed. Gating the item keeps the closed-state spacing symmetric
+    // (a single `ToolbarSpacer(.fixed)` to the toggle, matching the gap
+    // between the other chips). `.sharedBackgroundVisibility(.hidden)`
+    // strips the toolbar's default glass capsule so the spacer never
+    // renders as an empty pill.
+    if inspectorVisible {
+      ToolbarItem {
+        Color.clear
+          .frame(width: Self.inspectorWidth - 40, height: 1)
+      }
+      .sharedBackgroundVisibility(.hidden)
     }
-    .sharedBackgroundVisibility(.hidden)
     ToolbarSpacer(.fixed)
     ToolbarItem {
       Button {

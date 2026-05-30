@@ -22,62 +22,6 @@ struct JSONOutputParsersTests {
     #expect(result == nil)
   }
 
-  // MARK: - gh pr view
-
-  @Test
-  func parsePullRequestOpenSurfacesAllFields() throws {
-    let data = try Self.loadFixture("gh-pr-view-open")
-    let snapshot = try JSONOutputParsers.parsePullRequest(data)
-    let unwrapped = try #require(snapshot)
-    #expect(unwrapped.number == 1234)
-    #expect(unwrapped.title == "Fix flaky terminal resize test")
-    #expect(unwrapped.state == .open)
-    #expect(unwrapped.isDraft == false)
-    #expect(unwrapped.headRefName == "feature/github01")
-    #expect(unwrapped.author == "gump")
-    #expect(unwrapped.additions == 128)
-    #expect(unwrapped.deletions == 14)
-    #expect(unwrapped.commitCount == 3)
-    #expect(unwrapped.mergeable == .mergeable)
-    #expect(unwrapped.url.absoluteString == "https://github.com/wanggang316/touch-code/pull/1234")
-  }
-
-  @Test
-  func parsePullRequestDraftFlagsIsDraft() throws {
-    let data = try Self.loadFixture("gh-pr-view-draft")
-    let snapshot = try JSONOutputParsers.parsePullRequest(data)
-    let unwrapped = try #require(snapshot)
-    #expect(unwrapped.isDraft == true)
-    #expect(unwrapped.state == .open)
-    #expect(unwrapped.mergeable == .unknown)
-    #expect(unwrapped.commitCount == 1)
-  }
-
-  @Test
-  func parsePullRequestMerged() throws {
-    let data = try Self.loadFixture("gh-pr-view-merged")
-    let snapshot = try JSONOutputParsers.parsePullRequest(data)
-    let unwrapped = try #require(snapshot)
-    #expect(unwrapped.state == .merged)
-    #expect(unwrapped.commitCount == 5)
-  }
-
-  @Test
-  func parsePullRequestClosedCarriesConflictingMergeable() throws {
-    let data = try Self.loadFixture("gh-pr-view-closed")
-    let snapshot = try JSONOutputParsers.parsePullRequest(data)
-    let unwrapped = try #require(snapshot)
-    #expect(unwrapped.state == .closed)
-    #expect(unwrapped.mergeable == .conflicting)
-  }
-
-  @Test
-  func parsePullRequestEmptyObjectReturnsNil() throws {
-    let data = Data("{}".utf8)
-    let snapshot = try JSONOutputParsers.parsePullRequest(data)
-    #expect(snapshot == nil)
-  }
-
   // MARK: - splitCheckState (shared between retired parseChecks and statusCheckRollup)
 
   @Test
@@ -127,10 +71,10 @@ struct JSONOutputParsersTests {
   // MARK: - Malformed input
 
   @Test
-  func parsePullRequestOnNonJSONThrowsGitHubError() {
+  func parseLatestWorkflowRunOnNonJSONThrowsGitHubError() {
     let data = Data("not json".utf8)
     do {
-      _ = try JSONOutputParsers.parsePullRequest(data)
+      _ = try JSONOutputParsers.parseLatestWorkflowRun(data)
       Issue.record("expected .other throw")
     } catch let error as GitHubError {
       if case .other = error { return }
