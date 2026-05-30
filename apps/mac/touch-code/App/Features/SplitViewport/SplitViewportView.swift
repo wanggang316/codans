@@ -206,7 +206,6 @@ private struct LeafView: View {
   /// active Tab has more than one pane. Single-pane Tabs skip the dim
   /// overlay since there is nothing to contrast against.
   let isSplit: Bool
-  @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
   @Environment(HierarchyManager.self) private var hierarchyManager
   /// Pulled in so the dim overlay re-evaluates when the user flips Appearance
   /// (or the OS auto-switches). `unfocusedSplitFill()` resolves against the
@@ -241,7 +240,6 @@ private struct LeafView: View {
         .id(paneID)
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
-        .overlay(alignment: .top) { paneIndicatorLine }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
           configReloadTick &+= 1
         }
@@ -257,7 +255,6 @@ private struct LeafView: View {
         .id(paneID)
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
-        .overlay(alignment: .top) { paneIndicatorLine }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
           configReloadTick &+= 1
         }
@@ -293,7 +290,7 @@ private struct LeafView: View {
     // Terminal picker / manual config edit). Without the tick the overlay
     // keeps the previous theme's wash colour until a focus change or
     // layout pass forces a rebuild.
-    let _ = configReloadTick
+    _ = configReloadTick
     if isSplit, !isFocused {
       let runtime = GhosttyRuntime.shared
       let fill = runtime?.unfocusedSplitFill(colorScheme) ?? .windowBackgroundColor
@@ -304,20 +301,6 @@ private struct LeafView: View {
           .allowsHitTesting(false)
           .opacity(opacity)
       }
-    }
-  }
-
-  /// L1 unread top-line. 2 px tall band overlaid on the top edge of the
-  /// pane chrome. Amber for waitingForInput (overrides green), green for
-  /// taskFinished. Absent from the rollup map → no line.
-  @ViewBuilder
-  private var paneIndicatorLine: some View {
-    if let indicator = notificationRollup?.current.paneIndicator[paneID] {
-      Rectangle()
-        .fill(indicator == .waitingForInput ? Color.orange : Color.green)
-        .frame(height: 2)
-        .accessibilityHidden(true)
-        .allowsHitTesting(false)
     }
   }
 }

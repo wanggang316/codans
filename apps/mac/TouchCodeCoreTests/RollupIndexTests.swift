@@ -53,7 +53,6 @@ struct RollupIndexTests {
     #expect(index.unreadProjects == [p.projectA])
     #expect(index.unreadWorktrees.isEmpty)
     #expect(index.unreadTabs.isEmpty)
-    #expect(index.paneIndicator.isEmpty)
   }
 
   @Test
@@ -71,7 +70,6 @@ struct RollupIndexTests {
     #expect(index.unreadProjects.isEmpty)
     #expect(index.unreadWorktrees == [p.worktreeA1])
     #expect(index.unreadTabs.isEmpty)
-    #expect(index.paneIndicator.isEmpty)
   }
 
   @Test
@@ -107,11 +105,14 @@ struct RollupIndexTests {
     let index = RollupIndex.compute(unread: unread, focus: focus)
 
     #expect(index.unreadTabs == [p.tabA1Inactive])
-    #expect(index.paneIndicator.isEmpty)
   }
 
+  // MARK: - Pane-level sink (active tab → no roll-up indicator)
+
   @Test
-  func paneNotFocusedRollsToPane() {
+  func unfocusedPaneInActiveTabIsSink() {
+    // A sibling split in the active tab: visible to the user, so the entry
+    // emits no roll-up indicator at any level. It still counts as unread.
     let p = Pathset()
     let unread = [
       entry(
@@ -129,49 +130,34 @@ struct RollupIndexTests {
     )
     let index = RollupIndex.compute(unread: unread, focus: focus)
 
-    #expect(index.paneIndicator[p.paneA1ActiveTabUnfocused] == .taskFinished)
+    #expect(index.unreadProjects.isEmpty)
+    #expect(index.unreadWorktrees.isEmpty)
     #expect(index.unreadTabs.isEmpty)
+    #expect(index.globalUnreadCount == 1)
   }
 
-  // MARK: - L1 colour priority
-
   @Test
-  func paneIndicatorAmberWinsOverGreen() {
+  func focusedPaneIsSink() {
+    // The user is looking directly at the source pane. No chrome lights up;
+    // the entry stays unread (cleared later by R1's mark-read on focus).
     let p = Pathset()
-    let pane = p.paneA1ActiveTabUnfocused
+    let pane = p.paneA1ActiveTabFocused
     let unread = [
-      entry(kind: .taskFinished, project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: pane),
-      entry(kind: .waitingForInput, project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: pane),
-      entry(kind: .taskFinished, project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: pane),
+      entry(kind: .waitingForInput, project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: pane)
     ]
     let focus = RollupFocusState(
-      focusedPaneID: p.paneA1ActiveTabFocused,
+      focusedPaneID: pane,
       activeTabID: p.tabA1Active,
       activeWorktreeID: p.worktreeA1,
       activeProjectID: p.projectA,
       expandedProjectIDs: [p.projectA]
     )
     let index = RollupIndex.compute(unread: unread, focus: focus)
-    #expect(index.paneIndicator[pane] == .waitingForInput)
-  }
 
-  @Test
-  func paneIndicatorGreenWhenAllTaskFinished() {
-    let p = Pathset()
-    let pane = p.paneA1ActiveTabUnfocused
-    let unread = [
-      entry(kind: .taskFinished, project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: pane),
-      entry(kind: .taskFinished, project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: pane),
-    ]
-    let focus = RollupFocusState(
-      focusedPaneID: p.paneA1ActiveTabFocused,
-      activeTabID: p.tabA1Active,
-      activeWorktreeID: p.worktreeA1,
-      activeProjectID: p.projectA,
-      expandedProjectIDs: [p.projectA]
-    )
-    let index = RollupIndex.compute(unread: unread, focus: focus)
-    #expect(index.paneIndicator[pane] == .taskFinished)
+    #expect(index.unreadProjects.isEmpty)
+    #expect(index.unreadWorktrees.isEmpty)
+    #expect(index.unreadTabs.isEmpty)
+    #expect(index.globalUnreadCount == 1)
   }
 
   // MARK: - Aggregate
@@ -202,30 +188,5 @@ struct RollupIndexTests {
   func emptyUnreadYieldsEmptyIndex() {
     let index = RollupIndex.compute(unread: [], focus: RollupFocusState())
     #expect(index == .empty)
-  }
-
-  // MARK: - R1 (focus-clears-read) boundary
-
-  @Test
-  func paneIndicatorRemainsUntilEntryIsMarkedRead() {
-    // Even when the user is currently focused on the source pane, the
-    // entry surfaces as `.pane` in the rollup until R1 (the upstream
-    // mark-read pass on focus change) fires. This guards the in-between
-    // frame where the pane has just become focused but the store has
-    // not yet flipped readAt.
-    let p = Pathset()
-    let pane = p.paneA1ActiveTabFocused
-    let unread = [
-      entry(kind: .waitingForInput, project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: pane)
-    ]
-    let focus = RollupFocusState(
-      focusedPaneID: pane,
-      activeTabID: p.tabA1Active,
-      activeWorktreeID: p.worktreeA1,
-      activeProjectID: p.projectA,
-      expandedProjectIDs: [p.projectA]
-    )
-    let index = RollupIndex.compute(unread: unread, focus: focus)
-    #expect(index.paneIndicator[pane] == .waitingForInput)
   }
 }
