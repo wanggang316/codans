@@ -63,6 +63,9 @@ struct PullRequestPopover: View {
   ) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       header(snapshot: snapshot)
+      if snapshot.hasMergeConflict {
+        conflictBanner
+      }
       if !checks.isEmpty {
         Divider()
         checksSection(checks)
@@ -70,6 +73,31 @@ struct PullRequestPopover: View {
       Divider()
       actions(snapshot: snapshot, workflowRun: workflowRun)
     }
+  }
+
+  /// Inline merge-conflict notice. The disabled merge button's tooltip already explains
+  /// *why* merge is off, but that's only discoverable on hover — surfacing the conflict
+  /// as a persistent banner makes the blocker visible the moment the popover opens.
+  /// Gated on `PullRequestSnapshot.hasMergeConflict` (the same predicate the sidebar /
+  /// titlebar pills redden on), so all three surfaces agree on what "conflicted" means.
+  private var conflictBanner: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.red)
+        .accessibilityHidden(true)
+      Text("Merge conflicts — this branch can't be merged until they're resolved.")
+        .font(.caption)
+        .foregroundStyle(.primary)
+        .fixedSize(horizontal: false, vertical: true)
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 6)
+    .background(
+      RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .fill(Color.red.opacity(0.12))
+    )
+    .accessibilityElement(children: .combine)
   }
 
   private func header(snapshot: PullRequestSnapshot) -> some View {

@@ -54,34 +54,9 @@ struct PullRequestBadge: View {
   }
 
   private func loadedBody(snapshot: PullRequestSnapshot, rollup: CheckRollup) -> some View {
-    let tint = snapshot.state.rowTint(isDraft: snapshot.isDraft)
-    let hasConflict = Self.hasMergeConflict(snapshot)
-    // Corner radius matches `StatusPullRequestView.badge` so the sidebar pill
-    // and the titlebar pill read as the same component shape.
-    return HStack(spacing: 2) {
-      if hasConflict {
-        Image(systemName: "exclamationmark.triangle.fill")
-          .font(.system(size: 8))
-          .foregroundStyle(.red)
-          .accessibilityHidden(true)
-      }
-      Text("#\(snapshot.number)")
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(tint)
-    }
-    .padding(.horizontal, 4)
-    .padding(.vertical, 1)
-    .background(
-      RoundedRectangle(cornerRadius: 4, style: .continuous)
-        .stroke(hasConflict ? Color.red.opacity(0.75) : tint.opacity(0.75), lineWidth: 0.75)
-    )
-  }
-
-  /// True when either signal indicates the head branch no longer merges cleanly into the
-  /// base. We check both because the v1 `gh pr view` parser only populates `mergeable`,
-  /// while the v2 batched GraphQL parser also populates the richer `mergeStateStatus`.
-  static func hasMergeConflict(_ snapshot: PullRequestSnapshot) -> Bool {
-    snapshot.mergeable == .conflicting || snapshot.mergeStateStatus == .dirty
+    // Shared with the titlebar via `PullRequestNumberPill` so the `#N` chip — and its
+    // red merge-conflict styling — stays identical across the sidebar and the status bar.
+    PullRequestNumberPill(snapshot: snapshot)
   }
 
   private var loadingBody: some View {
@@ -126,7 +101,7 @@ struct PullRequestBadge: View {
         case .noChecks: return "no checks"
         }
       }()
-      let conflictWord = Self.hasMergeConflict(snapshot) ? ", merge conflicts" : ""
+      let conflictWord = snapshot.hasMergeConflict ? ", merge conflicts" : ""
       return Text(
         "Pull request \(snapshot.number), \(stateWord), \(rollupWord)\(conflictWord). "
           + "Activate to see details."
@@ -142,7 +117,7 @@ struct PullRequestBadge: View {
     switch state {
     case .loaded(let snapshot, _):
       let draftTag = snapshot.isDraft ? " (draft)" : ""
-      let conflictLine = Self.hasMergeConflict(snapshot) ? "\n⚠︎ Has merge conflicts" : ""
+      let conflictLine = snapshot.hasMergeConflict ? "\n⚠︎ Has merge conflicts" : ""
       return "#\(snapshot.number)\(draftTag) \(snapshot.title)\n@\(snapshot.author)\(conflictLine)"
     case .loading:
       return "Loading pull request status…"
