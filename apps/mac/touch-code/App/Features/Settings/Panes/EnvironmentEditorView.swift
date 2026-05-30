@@ -1,65 +1,88 @@
 import SwiftUI
+import TouchCodeCore
 
 /// Reusable key/value editor for `[String: String]` environment-variable
-/// maps. The General pane wraps this with project-id-aware bindings so
+/// maps. The General pane wraps this in a grouped `Section` so each row
+/// renders with native Form chrome (inset card, hairline separators) and
 /// each commit routes through `SettingsWriter.setProjectEnvVar(pid, key,
 /// value)`; M6's per-hook env editor reuses the same component with a
 /// hooks-aware writer.
 ///
+/// `builtins` pins read-only rows above the editable ones for the
+/// variables touch-code injects automatically (e.g. the worktree/root
+/// paths in the Project General pane). They are documentation: the
+/// concrete value is resolved per-pane at spawn time, so the row shows the
+/// variable's meaning rather than a value, and the keys are reserved (see
+/// `EnvVarValidator`). Callers that have no built-ins pass an empty array.
+///
 /// Validation rules (Risk R3 from the design doc):
 ///   - KEY must match POSIX env-var: `^[A-Za-z_][A-Za-z0-9_]*$`.
-///   - KEY must be unique within the editor (the parent map already
-///     guarantees uniqueness on disk; the editor blocks the duplicate
-///     before it commits so the user sees the conflict inline).
+///   - KEY must not collide with a reserved built-in or an existing key.
 ///   - VALUE must not contain `\n` or `\r` — the on-disk JSON is shell-
 ///     sourced by hook runners; embedded newlines break the contract.
 ///
-/// Rows render alphabetically by key on each pass; insertion order is not
-/// preserved (Swift dictionaries don't guarantee it anyway).
+/// Editable rows render alphabetically by key on each pass; insertion
+/// order is not preserved (Swift dictionaries don't guarantee it anyway).
 struct EnvironmentEditorView: View {
   @Binding var envVars: [String: String]
+  /// App-provided, read-only variables pinned above the editable rows.
+  /// Empty for callers (like the hooks editor) that have no built-ins.
+  var builtins: [BuiltinEnvVar] = []
   /// Per-row commit hook. `value == nil` means delete. Wrapping views use
   /// it to fan out into `SettingsWriter.setProjectEnvVar` etc. without
   /// this view knowing about ProjectIDs.
   let onChange: (_ key: String, _ value: String?) -> Void
-  /// Caption rendered under the table. The General pane uses this for the
-  /// "Values are stored in plain text" warning.
-  let footer: String
 
   @State private var draft: Draft?
 
+  /// Each statement below is a sibling row in the host's `Section`, so the
+  /// grouped Form paints native separators and insets between them.
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      ForEach(sortedKeys, id: \.self) { key in
-        existingRow(key: key)
-      }
+    ForEach(builtins, id: \.self) { builtinRow($0) }
 
-      if let draft {
-        draftRow(draft)
-      }
+    ForEach(sortedKeys, id: \.self) { key in
+      existingRow(key: key)
+    }
 
-      HStack {
-        Button {
-          if draft == nil {
-            draft = Draft()
-          }
-        } label: {
-          Label("Add variable", systemImage: "plus")
-        }
-        .buttonStyle(.borderless)
-        Spacer()
-      }
-
-      if !footer.isEmpty {
-        Text(footer)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
+    if let draft {
+      draftRow(draft)
+    } else {
+      addRow
     }
   }
 
+  /// Editable keys, with any reserved built-in name filtered out so a
+  /// stale on-disk entry can't render twice (once locked, once editable).
   private var sortedKeys: [String] {
-    envVars.keys.sorted()
+    envVars.keys
+      .filter { !BuiltinEnvVar.reservedKeys.contains($0) }
+      .sorted()
+  }
+
+  // MARK: - Built-in rows
+
+  /// Read-only row for an app-provided variable. `LabeledContent` gives
+  /// the canonical macOS left-label / right-value layout; the trailing
+  /// lock signals the row is managed by touch-code and can't be edited.
+  @ViewBuilder
+  private func builtinRow(_ builtin: BuiltinEnvVar) -> some View {
+    LabeledContent {
+      HStack(spacing: 6) {
+        Text(builtin.summary)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+        Image(systemName: "lock.fill")
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+          .accessibilityLabel("Read-only")
+      }
+    } label: {
+      Text(builtin.key)
+        .font(.system(.body, design: .monospaced))
+        .textSelection(.enabled)
+    }
+    .help("Provided automatically by touch-code")
   }
 
   // MARK: - Existing rows
@@ -83,18 +106,37 @@ struct EnvironmentEditorView: View {
       Text(key)
         .font(.system(.body, design: .monospaced))
         .frame(width: 180, alignment: .leading)
+        .lineLimit(1)
+        .truncationMode(.middle)
         .textSelection(.enabled)
       TextField("value", text: valueBinding)
         .textFieldStyle(.roundedBorder)
       Button {
         onChange(key, nil)
       } label: {
-        Image(systemName: "xmark.circle.fill")
+        Image(systemName: "minus.circle.fill")
           .foregroundStyle(.secondary)
       }
       .buttonStyle(.borderless)
+      .help("Remove \(key)")
       .accessibilityLabel("Remove \(key)")
     }
+  }
+
+  // MARK: - Add row
+
+  /// Trailing action row that starts a draft. Mirrors the Scripts pane's
+  /// "Add" affordance (text label + `plus`, borderless) and the macOS
+  /// "Add…" rows in System Settings.
+  private var addRow: some View {
+    Button {
+      if draft == nil {
+        draft = Draft()
+      }
+    } label: {
+      Label("Add Variable", systemImage: "plus")
+    }
+    .buttonStyle(.borderless)
   }
 
   // MARK: - Draft row
@@ -126,7 +168,7 @@ struct EnvironmentEditorView: View {
           .textFieldStyle(.roundedBorder)
           .frame(width: 180)
           .overlay(
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: 6)
               .stroke(current.error == nil ? Color.clear : Color.red, lineWidth: 1)
           )
         TextField("value", text: valueBinding)
@@ -135,10 +177,11 @@ struct EnvironmentEditorView: View {
           commitDraft()
         } label: {
           Image(systemName: "checkmark.circle.fill")
-            .foregroundStyle(canCommitDraft ? Color.green : Color.secondary)
+            .foregroundStyle(canCommitDraft ? Color.accentColor : Color.secondary)
         }
         .buttonStyle(.borderless)
         .disabled(!canCommitDraft)
+        .help("Add variable")
         .accessibilityLabel("Commit new variable")
         Button {
           draft = nil
@@ -147,6 +190,7 @@ struct EnvironmentEditorView: View {
             .foregroundStyle(.secondary)
         }
         .buttonStyle(.borderless)
+        .help("Cancel")
         .accessibilityLabel("Discard new variable")
       }
       if let error = current.error {
@@ -202,6 +246,9 @@ nonisolated enum EnvVarValidator {
   ) -> String? {
     if !key.isEmpty, !keyIsValidPOSIX(key) {
       return "Invalid key"
+    }
+    if !key.isEmpty, BuiltinEnvVar.reservedKeys.contains(key) {
+      return "Reserved by touch-code"
     }
     if !key.isEmpty, existing[key] != nil {
       return "Key already exists"

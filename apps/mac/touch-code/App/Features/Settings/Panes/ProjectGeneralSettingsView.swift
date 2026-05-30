@@ -579,15 +579,21 @@ struct ProjectGeneralSettingsView: View {
 
   @ViewBuilder
   private var environmentSection: some View {
-    Section("Environment") {
+    Section {
       EnvironmentEditorView(
         envVars: envVarsBinding,
+        builtins: BuiltinEnvVar.allCases,
         onChange: { key, newValue in
           routes.writeEnvVar(key: key, value: newValue)
-        },
-        footer:
-          "Values are stored in plain text in settings.json. Do not paste credentials "
-          + "you wouldn't keep in a config file."
+        }
+      )
+    } header: {
+      Text("Environment")
+    } footer: {
+      Text(
+        "TOUCHCODE_WORKTREE_PATH and TOUCHCODE_ROOT_PATH are provided automatically for "
+          + "every pane. Values are stored in plain text in settings.json — don't paste "
+          + "credentials you wouldn't keep in a config file."
       )
     }
   }
