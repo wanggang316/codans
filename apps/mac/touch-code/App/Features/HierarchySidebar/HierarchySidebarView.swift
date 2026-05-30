@@ -735,7 +735,14 @@ struct HierarchySidebarView: View {
     // doesn't live inside the row's Button.label. Tapping the badge opens the PR popover
     // without also firing the row-selection action. The leading portion of the row is
     // the Button; the trailing badge sits beside it.
-    return HStack(spacing: 6) {
+    // `spacing: 0`, not 6: the trailing accessories own their own leading gap so the
+    // row's rightmost *visible* element always sits flush at the trailing edge. With a
+    // shared HStack spacing, the no-PR rows' 0-pt `WorktreeGitHubBadge` anchor still
+    // claimed 6 pt of spacing after the diff-stats chip, pushing that chip 6 pt inside
+    // the edge while PR-pill rows stayed flush — a ragged right margin. Each accessory
+    // pads its own leading edge; the empty badge anchor pads nothing, so the chip (or
+    // pill) it trails stays flush.
+    return HStack(spacing: 0) {
       rowSelectionButton(
         worktree: worktree, project: project,
         snapshot: snapshot, rollup: rollup,
@@ -757,6 +764,7 @@ struct HierarchySidebarView: View {
             RoundedRectangle(cornerRadius: 3)
               .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
           )
+          .padding(.leading, 6)
           .accessibilityHidden(true)
       }
     }
@@ -1182,6 +1190,10 @@ struct HierarchySidebarView: View {
           store.send(.delegate(.openGitViewerRequested(projectID: projectID, worktreeID: worktreeID)))
         }
       )
+      // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
+      // not trailing, so the chip's right edge stays flush when it's the row's last
+      // visible accessory.
+      .padding(.leading, 6)
     }
   }
 

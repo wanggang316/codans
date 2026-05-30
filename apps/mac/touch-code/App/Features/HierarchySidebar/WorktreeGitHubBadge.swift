@@ -29,6 +29,10 @@ struct WorktreeGitHubBadge<PopoverContent: View>: View {
     let snapshot = store.snapshots[worktreeID]
     let isLoading = store.loading.contains(worktreeID)
     let lastError = store.lastError[worktreeID]
+    // True when a real pill renders; false for the 0-pt popover anchor. Drives the
+    // leading gap below so the anchor adds no spacing — that's what lets a preceding
+    // diff-stats chip sit flush at the row's trailing edge (see `worktreeRow`).
+    let hasVisiblePill = snapshot != nil || isLoading || lastError != nil
 
     Group {
       if let snapshot {
@@ -59,6 +63,9 @@ struct WorktreeGitHubBadge<PopoverContent: View>: View {
         Color.clear.frame(width: 0, height: 0)
       }
     }
+    // Leading gap from a preceding diff-stats chip — but only when a pill actually shows.
+    // The empty anchor pads nothing so it never nudges the chip off the trailing edge.
+    .padding(.leading, hasVisiblePill ? 6 : 0)
     .onHover { hovering in
       isBadgeHovered = hovering
       reconcileHover()
