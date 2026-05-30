@@ -5,7 +5,7 @@ import TouchCodeCore
 /// Right-panel History tab body. Renders the current branch's commit
 /// history with infinite scroll, per-row selection, and inline error
 /// + empty + loading states. Selecting a row dispatches
-/// `.historyCommitTapped`; the left drawer (T14) reads
+/// `.historyCommitTapped`; the left panel (T14) reads
 /// `presentedCommitSha` to render that commit's full diff.
 ///
 /// Hosted by `DiffInspectorView.historyBody` (T12).

@@ -6,7 +6,7 @@ import TouchCodeCore
 @testable import TouchCode
 
 /// Tests for `DiffFeature` — covers the selection → changed-files load,
-/// per-file diff load with cache, drawer-close cache survival, style
+/// per-file diff load with cache, panel-close cache survival, style
 /// changes, and over-cap handling. The reducer's filesystem reads
 /// (`String(contentsOf:)` for the working-tree side) are exercised against
 /// a per-test temp directory so the cap-checking logic runs end-to-end
@@ -175,10 +175,10 @@ struct DiffFeatureTests {
     }
   }
 
-  // MARK: - Drawer close
+  // MARK: - Panel close
 
   @Test
-  func drawerCloseRequestedClearsPresentationButKeepsCache() async {
+  func panelCloseRequestedClearsPresentationButKeepsCache() async {
     let cachedDoc = DiffDocument(
       files: [
         DiffFile(
@@ -203,16 +203,16 @@ struct DiffFeatureTests {
       $0.gitService = GitServiceClient.testValue
     }
 
-    await store.send(.drawerCloseRequested) { state in
+    await store.send(.panelCloseRequested) { state in
       state.presentedFilePath = nil
     }
     #expect(store.state.diffsByPath["a.swift"] == .loaded(cachedWrapper))
   }
 
-  // MARK: - Drawer close clears both selections (T14)
+  // MARK: - Panel close clears both selections (T14)
 
   @Test
-  func drawerCloseRequestedClearsBothPresentations() async {
+  func panelCloseRequestedClearsBothPresentations() async {
     let store = TestStore(initialState: {
       var s = DiffFeature.State()
       s.presentedFilePath = "src/App.swift"
@@ -224,7 +224,7 @@ struct DiffFeatureTests {
       $0.gitService = GitServiceClient.testValue
     }
 
-    await store.send(.drawerCloseRequested) {
+    await store.send(.panelCloseRequested) {
       $0.presentedFilePath = nil
       $0.presentedCommitSha = nil
     }
@@ -895,7 +895,7 @@ struct DiffFeatureHistoryTests {
 
   @Test
   func historyCommitTappedTogglesPresentedSha() async {
-    // Tapping the currently-presented sha clears the selection (drawer
+    // Tapping the currently-presented sha clears the selection (panel
     // closes). The per-commit cache stays — a future third tap re-presents
     // from cache without a re-fetch.
     let sha = "abc0000000000000000000000000000000000000"
@@ -1059,7 +1059,7 @@ struct DiffFeatureHistoryTests {
 
   @Test
   func commitDiffSucceededForStoresFilePaths() async {
-    // The action carries the file-path list the drawer file picker renders
+    // The action carries the file-path list the panel file picker renders
     // in History mode. Verify the reducer routes it into
     // `commitFilePathsByID` keyed by the same sha as `diffsByCommit`.
     let sha = "abc1234567890000000000000000000000000000"

@@ -290,7 +290,7 @@ This milestone adds the second tab and the new commit-diff path to `DiffFeature`
 
 **T13** creates `apps/mac/touch-code/App/Features/Diff/Views/DiffHistoryListView.swift`. Layout: scrollable LazyVStack of commit rows; each row shows short sha + subject + relative time (use `RelativeDateTimeFormatter`). The last visible row triggers `store.send(.historyLoadNextPageRequested)` via `.onAppear`. Empty state (`store.historyState.commits.isEmpty && store.historyState.loading == false && store.historyState.error == nil`) shows `diff_inspector.history_empty_state` with text "No commits on this branch". Error state shows a retry button that re-issues the failed page. Selected row uses `Color.accentColor.opacity(0.18)` background (matches existing file row selection).
 
-**T14** updates `apps/mac/touch-code/App/Features/Diff/Views/DiffDrawerView.swift`. The drawer reads `store.selectedTab` and renders either the file diff (existing path, gated on `presentedFilePath`) or the commit diff (new path, gated on `presentedCommitSha`). The title element gets the `diff_drawer.title_text` identifier and renders `path` in Changes mode or `"\(shortSha) · \(subject)"` in History mode. The "too large" placeholder reuses the existing copy of the file-mode UI but with the commit-specific copy command.
+**T14** updates `apps/mac/touch-code/App/Features/Diff/Views/DiffDrawerView.swift`. The drawer reads `store.selectedTab` and renders either the file diff (existing path, gated on `presentedFilePath`) or the commit diff (new path, gated on `presentedCommitSha`). The title element gets the `diff_panel.title_text` identifier and renders `path` in Changes mode or `"\(shortSha) · \(subject)"` in History mode. The "too large" placeholder reuses the existing copy of the file-mode UI but with the commit-specific copy command.
 
 **Exit Gate (M4):**
 
@@ -312,7 +312,7 @@ This milestone produces the fixtures the user-test cases need and runs the final
 
 **T16** is the closing pass:
 
-- Declare every `accessibilityIdentifier` named in the user-test seams table. The relevant call sites are: `WorktreeHeaderInfoLabel` (`worktree_header.*`), `BranchSwitcherView` + rows (`branch_switcher.*`), `BranchSwitcherErrorBannerView` (`branch_switcher.error_*`), `DiffInspectorView` (`diff_inspector.tab_picker`, `diff_inspector.changes_list`), `DiffHistoryListView` (`diff_inspector.history_*`), and `DiffDrawerView` (`diff_drawer.title_text`).
+- Declare every `accessibilityIdentifier` named in the user-test seams table. The relevant call sites are: `WorktreeHeaderInfoLabel` (`worktree_header.*`), `BranchSwitcherView` + rows (`branch_switcher.*`), `BranchSwitcherErrorBannerView` (`branch_switcher.error_*`), `DiffInspectorView` (`diff_inspector.tab_picker`, `diff_inspector.changes_list`), `DiffHistoryListView` (`diff_inspector.history_*`), and `DiffDrawerView` (`diff_panel.title_text`).
 - Run `make mac-check` + the full Xcode test suite.
 - Hand the running app + fixtures to `/hs-user-test` to runtime-validate every case in the user-test set. Expected outcome: 21 PASS + 1 MANUAL (VS-003).
 - Update the Progress dashboard's Outcomes & Retrospective section with the final case verdicts and any deferred follow-ups.

@@ -38,7 +38,7 @@ struct WorktreeDetailView: View {
   /// the two surfaces stay in sync by construction.
   let gitHubStore: StoreOf<GitHubFeature>
   /// M6: diff feature store — drives the Diff inspector column and the
-  /// drawer overlay that fills the detail body when a file row is open.
+  /// panel overlay that fills the detail body when a file row is open.
   let diffStore: StoreOf<DiffFeature>
   /// T10: branch popover + switch state. Threaded through to the leading
   /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
@@ -103,6 +103,15 @@ struct WorktreeDetailView: View {
   /// the directional `.onChange`s below.
   @State private var localInspectorVisible: Bool = false
 
+  /// Live width of the open Diff inspector column, measured from its content
+  /// via `.onGeometryChange`. The window toolbar's reserved spacer tracks
+  /// this so the RunScript / Open chips stay pinned to the inspector's left
+  /// edge as the user drags the column between its 240–480 pt bounds. A fixed
+  /// `inspectorWidth` reservation would only line up at the default 280 pt and
+  /// drift on resize. Seeded to `inspectorWidth` so the first frame reserves a
+  /// sane width before the geometry read lands.
+  @State private var inspectorMeasuredWidth: CGFloat = WorktreeDetailView.inspectorWidth
+
   /// View-only projection of the in-flight pending row plus the
   /// repository-side context the loading view needs. Built by
   /// `ContentView` so this struct doesn't depend on TCA state shapes.
@@ -145,8 +154,8 @@ struct WorktreeDetailView: View {
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .overlay {
-        if shouldShowDrawer(diff: diffStore.state) {
-          DiffDrawerView(store: diffStore)
+        if shouldShowPanel(diff: diffStore.state) {
+          DiffPanelView(store: diffStore)
             .zIndex(80)
         }
       }
@@ -158,6 +167,13 @@ struct WorktreeDetailView: View {
       .inspector(isPresented: $localInspectorVisible) {
         DiffInspectorView(store: diffStore)
           .inspectorColumnWidth(min: 240, ideal: Self.inspectorWidth, max: 480)
+          // Feed the live column width back to the toolbar spacer so the
+          // trailing action chips track the inspector's left edge on resize.
+          .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+          } action: { width in
+            inspectorMeasuredWidth = width
+          }
       }
       .onChange(of: inspectorVisible, initial: true) { _, newValue in
         if localInspectorVisible != newValue {
@@ -348,7 +364,7 @@ struct WorktreeDetailView: View {
           // so the action chips shift left. Width is animated rather than
           // mount-toggled so the chips slide instead of jump.
           Color.clear
-            .frame(width: inspectorVisible ? Self.inspectorWidth - 40 : 0, height: 1)
+            .frame(width: inspectorVisible ? max(0, inspectorMeasuredWidth - 40) : 0, height: 1)
             .animation(.easeInOut(duration: 0.25), value: inspectorVisible)
           Button {
             onToggleGitViewer()
@@ -447,7 +463,7 @@ struct WorktreeDetailView: View {
     if inspectorVisible {
       ToolbarItem {
         Color.clear
-          .frame(width: Self.inspectorWidth - 40, height: 1)
+          .frame(width: max(0, inspectorMeasuredWidth - 40), height: 1)
       }
       .sharedBackgroundVisibility(.hidden)
     }
@@ -555,11 +571,11 @@ struct WorktreeDetailView: View {
       .toolbarBackground(.hidden, for: .windowToolbar)
   }
 
-  /// T14: drawer mount-gate. Reads from whichever selection field belongs
+  /// T14: panel mount-gate. Reads from whichever selection field belongs
   /// to the active tab — Changes owns `presentedFilePath`, History owns
   /// `presentedCommitSha`. Without this routing, switching to History and
-  /// selecting a commit wouldn't surface the drawer at all.
-  private func shouldShowDrawer(diff: DiffFeature.State) -> Bool {
+  /// selecting a commit wouldn't surface the panel at all.
+  private func shouldShowPanel(diff: DiffFeature.State) -> Bool {
     switch diff.selectedTab {
     case .changes: return diff.presentedFilePath != nil
     case .history: return diff.presentedCommitSha != nil
@@ -567,18 +583,18 @@ struct WorktreeDetailView: View {
   }
 
   /// SwiftUI `.animation(_:value:)` keys on Equatable. Packing the three
-  /// fields the drawer cares about (active tab + both selections) into a
+  /// fields the panel cares about (active tab + both selections) into a
   /// small Equatable struct re-triggers the spring whenever any of them
   /// changes — including the user toggling tabs while a selection is
   /// open on each side, which should fade between the two diffs.
-  private struct DrawerVisibilityKey: Equatable {
+  private struct PanelVisibilityKey: Equatable {
     let tab: DiffFeature.DiffTab
     let path: String?
     let sha: String?
   }
 
-  private func drawerVisibilityKey(diff: DiffFeature.State) -> DrawerVisibilityKey {
-    DrawerVisibilityKey(
+  private func panelVisibilityKey(diff: DiffFeature.State) -> PanelVisibilityKey {
+    PanelVisibilityKey(
       tab: diff.selectedTab,
       path: diff.presentedFilePath,
       sha: diff.presentedCommitSha

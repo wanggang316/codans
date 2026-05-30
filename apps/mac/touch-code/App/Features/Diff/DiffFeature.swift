@@ -2,14 +2,14 @@ import ComposableArchitecture
 import Foundation
 import TouchCodeCore
 
-/// TCA reducer behind the Diff inspector + drawer.
+/// TCA reducer behind the Diff inspector + panel.
 ///
 /// Owns two separable workflows:
 ///   1. **Changed-files list** — driven by `worktreeSelected(...)`, fetched
 ///      via `GitServiceClient.diffNumstat`. Surfaces in the inspector.
 ///   2. **Per-file diff** — driven by `fileRowTapped(path:)`, fetched
 ///      lazily on first tap, cached in `diffsByPath`. Surfaces in the
-///      drawer.
+///      panel.
 ///
 /// Cancellation:
 ///   - `CancelID.changedFiles` — cancels any prior changed-files load when
@@ -22,7 +22,7 @@ import TouchCodeCore
 /// reducer instance.
 @Reducer
 struct DiffFeature {
-  /// 500 KB. Above this, the drawer renders a "too large" placeholder.
+  /// 500 KB. Above this, the panel renders a "too large" placeholder.
   nonisolated static let maxFileBytes: Int = 500_000
   /// 5 000 lines. Above this on either side, same placeholder.
   nonisolated static let maxFileLines: Int = 5_000
@@ -44,10 +44,10 @@ struct DiffFeature {
     /// the visible flash this flag exists to avoid. Reset on
     /// success / failure and on worktree switch.
     var isRefreshingChanges: Bool = false
-    /// Path of the file currently displayed in the drawer; `nil` = drawer
+    /// Path of the file currently displayed in the panel; `nil` = panel
     /// hidden. Re-tapping the row whose path matches is a no-op.
     var presentedFilePath: String?
-    /// Per-path diff cache. Survives drawer close — only cleared when
+    /// Per-path diff cache. Survives panel close — only cleared when
     /// `worktreeSelected(...)` switches to a different Worktree.
     var diffsByPath: [String: DiffEntryState] = [:]
     /// Mirrors `@AppStorage("diffStyle")`; the picker view writes both.
@@ -73,7 +73,7 @@ struct DiffFeature {
     var presentedCommitSha: String?
 
     /// Per-commit diff cache keyed by full SHA. Mirrors `diffsByPath`'s
-    /// lifecycle: survives drawer close, reset only on worktree switch or
+    /// lifecycle: survives panel close, reset only on worktree switch or
     /// HEAD change. Re-tapping a previously-rendered commit reuses the
     /// cached DiffDocument without re-fetch.
     var diffsByCommit: [String: DiffEntryState] = [:]
@@ -188,7 +188,7 @@ struct DiffFeature {
     case changedFilesSucceeded([ChangedFile])
     case changedFilesFailed(GitError)
     case fileRowTapped(path: String)
-    case drawerCloseRequested
+    case panelCloseRequested
     case diffSucceededFor(path: String, document: DiffDocument)
     case diffFailedFor(path: String, error: GitError)
     case diffTooLargeFor(path: String, reason: TooLargeReason, copyCommand: String)
@@ -221,7 +221,7 @@ struct DiffFeature {
     case commitMessageRequested(sha: String)
     case commitMessageLoaded(sha: String, message: String)
     case commitMessageFailed(sha: String, error: GitError)
-    /// File-row tap inside the History-mode drawer file picker. Today this
+    /// File-row tap inside the History-mode panel file picker. Today this
     /// is a no-op pending the JS bridge wiring for `scrollTo(file:)`. The
     /// reducer arm documents the deferred work inline.
     case commitFileScrollRequested(path: String)
@@ -253,7 +253,7 @@ struct DiffFeature {
       switch action {
       case .worktreeSelected(let projectID, let worktreeID, let path):
         // Switching Worktree drops the prior cache; presentedFilePath
-        // also resets so a stale drawer doesn't linger across switches.
+        // also resets so a stale panel doesn't linger across switches.
         state.projectID = projectID
         state.worktreeID = worktreeID
         state.worktreePath = path
@@ -317,7 +317,7 @@ struct DiffFeature {
 
       case .fileRowTapped(let path):
         state.presentedFilePath = path
-        // Cache hit on `.loaded` / `.tooLarge`: don't refetch (drawer
+        // Cache hit on `.loaded` / `.tooLarge`: don't refetch (panel
         // already shows the right content). `.error` falls through so the
         // Retry button can re-issue the load (FU-T14). `.loading` is the
         // in-flight case and also falls through — `.cancellable(cancelInFlight:
@@ -333,9 +333,9 @@ struct DiffFeature {
         }
         return loadDiff(forPath: path, worktreePath: worktreePath)
 
-      case .drawerCloseRequested:
-        // Closes the drawer regardless of which tab opened it. Both
-        // selection fields are cleared so a future re-open of the drawer
+      case .panelCloseRequested:
+        // Closes the panel regardless of which tab opened it. Both
+        // selection fields are cleared so a future re-open of the panel
         // in either tab starts from no selection. Cache (`diffsByPath` /
         // `diffsByCommit`) is preserved — re-tapping a previously-
         // rendered row hits cache.
@@ -372,7 +372,7 @@ struct DiffFeature {
         // Selection + per-commit caches (diff / message / file paths) are
         // deliberately preserved: a commit's content is sha-stable, so a
         // cached entry for a sha still present in the refreshed list stays
-        // valid — and keeping `presentedCommitSha` avoids slamming the drawer
+        // valid — and keeping `presentedCommitSha` avoids slamming the panel
         // shut mid-refresh. When the list is empty (never-loaded / prior
         // error) fall back to the full loading placeholder via `loading`.
         guard let path = state.worktreePath, !path.isEmpty else { return .none }
@@ -458,12 +458,12 @@ struct DiffFeature {
           return .none
         }
         // Toggle: re-tapping the CURRENTLY-presented sha clears the
-        // selection when the drawer is genuinely *showing* the diff —
+        // selection when the panel is genuinely *showing* the diff —
         // `.loaded` (rendered) or `.tooLarge` (too-large placeholder).
         // `diffsByCommit[sha]` stays so a third tap re-presents from
         // cache instantly. Re-tap on `.error` deliberately falls through
-        // so the in-drawer Retry button (which sends this same action)
-        // re-issues the load instead of closing the drawer; `.loading`
+        // so the in-panel Retry button (which sends this same action)
+        // re-issues the load instead of closing the panel; `.loading`
         // similarly falls through and the cancel-in-flight handles it.
         if state.presentedCommitSha == sha {
           switch state.diffsByCommit[sha] {
@@ -670,7 +670,7 @@ struct DiffFeature {
         let url = URL(fileURLWithPath: worktreePath)
         let unified = try await gitService.commitDiff(url, sha, false)
         // `FileChange.id` is the post-image path (pre-image for deletions);
-        // exactly what the drawer file-picker wants to render and dispatch
+        // exactly what the panel file-picker wants to render and dispatch
         // for scroll-to-file. See `GitModels.swift` FileChange docstring.
         let filePaths = unified.files.map(\.id)
         let changeTypes: [String: ChangeStatus] = Dictionary(
