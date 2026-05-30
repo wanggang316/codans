@@ -20,6 +20,30 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.3.5] - 2026-05-31
+
+### Added
+
+- **Merge conflicts now stand out on every pull-request surface.** A conflicted PR turns its number, border, and warning triangle red — in the sidebar row and the titlebar badge alike — and the hover popover carries a persistent banner spelling out the conflict, so the blocker is visible the moment the popover opens instead of hiding behind a disabled merge button.
+
+### Changed
+
+- **The diff panel shows one continuous spinner from fetch through render.** Opening a diff no longer flashes a spinner, blanks, then flashes a second one while the renderer warms up — it loads in one smooth pass, and a fast cached diff shows no spinner at all.
+- **The Active Agents list stays steady.** A finishing agent settling back to idle no longer yanks the whole list around; rows hold their place and glide into new positions only when the order genuinely changes. A new Settings → General → "Auto-sort" toggle (on by default) lets you freeze the list to insertion order instead.
+- **The pull-request popover sizes to its content** instead of padding empty space below short PRs.
+
+### Removed
+
+- **The per-pane notification strip is gone.** The amber/green line on individual panes was redundant — panes in the active tab are already on screen — so it's been removed. Project, worktree, and tab roll-up indicators are unchanged.
+
+### Fixed
+
+- **Auto appearance refreshes the whole app again.** Switching Appearance to Auto no longer leaves the terminal palette, window chrome, and sidebar stuck on the previous light or dark scheme; the entire app now follows the system the moment you switch.
+- **The Git Viewer no longer flickers on refresh.** Reloading the Changes or History tab keeps the list, its count, and the refresh button on screen while new data loads, then swaps in place — no more blank-and-refill flash.
+- **The History tab reloads when you switch worktrees** instead of clearing and staying empty.
+- **Worktree row trailing chips line up flush** at the right edge, fixing a ragged margin between rows with and without a PR pill.
+- **The Command Palette no longer lists archived worktrees** as switch targets, matching what the sidebar shows.
+
 ## [0.3.4] - 2026-05-30
 
 ### Added
