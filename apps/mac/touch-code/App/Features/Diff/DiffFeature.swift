@@ -37,6 +37,13 @@ struct DiffFeature {
     var worktreePath: String?
 
     var changedFiles: ChangedFilesState = .idle
+    /// True while a `.refreshRequested` revalidation runs with a prior
+    /// `.loaded` list still on screen (stale-while-revalidate). Drives the
+    /// header refresh button's spinner WITHOUT dropping `changedFiles` to
+    /// `.loading` — which would clear the rows and blank the `(n)` count,
+    /// the visible flash this flag exists to avoid. Reset on
+    /// success / failure and on worktree switch.
+    var isRefreshingChanges: Bool = false
     /// Path of the file currently displayed in the drawer; `nil` = drawer
     /// hidden. Re-tapping the row whose path matches is a no-op.
     var presentedFilePath: String?
@@ -124,6 +131,13 @@ struct DiffFeature {
     /// Last load failure, if any. Surfaces in the view as an inline error
     /// row + retry button (T13). Cleared on next successful load.
     var error: GitError?
+
+    /// True while `.historyRefreshRequested` revalidates the first page with
+    /// the existing `commits` kept on screen (stale-while-revalidate). Unlike
+    /// `loading` — which the view turns into a full-surface placeholder when
+    /// `commits` is empty — `refreshing` never clears the list; it only drives
+    /// the header button spinner. Reset on refresh success / failure.
+    var refreshing: Bool = false
   }
 
   enum ChangedFilesState: Equatable {
@@ -190,6 +204,13 @@ struct DiffFeature {
     /// the refresh button and Retry button in `DiffHistoryListView` drive a
     /// single action instead of composing two sends from the view layer.
     case historyRefreshRequested
+    /// First page of a stale-while-revalidate History refresh. Replaces the
+    /// `commits` array wholesale (vs `.historyPageSucceeded`, which appends
+    /// for infinite scroll) so the list swaps atomically without flashing.
+    case historyRefreshSucceeded([Commit], hasMore: Bool)
+    /// A History refresh that failed. Keeps stale `commits` on screen when
+    /// any exist; only promotes to the error surface when the list is empty.
+    case historyRefreshFailed(GitError)
     case historyCommitTapped(sha: String)
     case commitDiffSucceededFor(sha: String, document: DiffDocument, filePaths: [String], changeTypes: [String: ChangeStatus])
     case commitDiffFailedFor(sha: String, error: GitError)
@@ -238,6 +259,7 @@ struct DiffFeature {
         state.worktreePath = path
         state.presentedFilePath = nil
         state.diffsByPath = [:]
+        state.isRefreshingChanges = false
         // History side resets identically. `selectedTab` is NOT touched —
         // the user's tab preference persists across worktree switches.
         state.historyState = .init()
@@ -269,16 +291,28 @@ struct DiffFeature {
         // per-file cache is preserved — refresh is meant for "I just
         // edited files in the worktree, recompute the list," not "I
         // switched Worktrees." (Decision Log D16.)
+        //
+        // Stale-while-revalidate: when a list is already on screen, keep it
+        // (and its `(n)` count) visible and only raise `isRefreshingChanges`
+        // for the button spinner — replacing it with `.loading` would blank
+        // the rows + count and flash. Fall back to the full `.loading`
+        // placeholder only when there's nothing to keep showing (idle/error).
         guard let path = state.worktreePath, !path.isEmpty else { return .none }
-        state.changedFiles = .loading
+        if case .loaded = state.changedFiles {
+          state.isRefreshingChanges = true
+        } else {
+          state.changedFiles = .loading
+        }
         return loadChangedFiles(at: path)
 
       case .changedFilesSucceeded(let files):
         state.changedFiles = .loaded(files)
+        state.isRefreshingChanges = false
         return .none
 
       case .changedFilesFailed(let error):
         state.changedFiles = .error(error)
+        state.isRefreshingChanges = false
         return .none
 
       case .fileRowTapped(let path):
@@ -330,22 +364,25 @@ struct DiffFeature {
         return .none
 
       case .historyRefreshRequested:
-        // Atomic refresh: drop the prior cache + selection, cancel any
-        // in-flight history / commit-diff effects, then re-fire
-        // `.historyAppeared` to kick the first-page load. Same reset shape
-        // as `.headChangedForCurrentWorktree`; the difference is intent —
-        // refresh is user-initiated and unconditionally re-fetches.
-        state.historyState = .init()
-        state.presentedCommitSha = nil
-        state.diffsByCommit = [:]
-        state.commitMessageByID = [:]
-        state.commitFilePathsByID = [:]
-        state.commitFileChangeTypeByPath = [:]
-        return .merge(
-          .cancel(id: CancelID.historyPage),
-          .cancel(id: CancelID.commitDiff),
-          .send(.historyAppeared)
-        )
+        // Stale-while-revalidate: re-fetch the first page while keeping the
+        // current commits on screen so the list never flashes to an empty /
+        // loading placeholder. `refreshing` drives the button spinner; the
+        // atomic swap lands in `.historyRefreshSucceeded`.
+        //
+        // Selection + per-commit caches (diff / message / file paths) are
+        // deliberately preserved: a commit's content is sha-stable, so a
+        // cached entry for a sha still present in the refreshed list stays
+        // valid — and keeping `presentedCommitSha` avoids slamming the drawer
+        // shut mid-refresh. When the list is empty (never-loaded / prior
+        // error) fall back to the full loading placeholder via `loading`.
+        guard let path = state.worktreePath, !path.isEmpty else { return .none }
+        state.historyState.error = nil
+        if state.historyState.commits.isEmpty {
+          state.historyState.loading = true
+        } else {
+          state.historyState.refreshing = true
+        }
+        return loadHistoryFirstPage(at: path, limit: state.historyState.pageLimit)
 
       case .historyAppeared:
         // Idempotent: only trigger first-page load when cache is genuinely
@@ -389,6 +426,28 @@ struct DiffFeature {
       case .historyPageFailed(let error):
         state.historyState.loading = false
         state.historyState.error = error
+        return .none
+
+      case .historyRefreshSucceeded(let commits, let hasMore):
+        // Atomic swap of the whole list — the stale commits were kept on
+        // screen during the refresh and are replaced in one render.
+        state.historyState.commits = commits
+        state.historyState.nextOffset = commits.count
+        state.historyState.hasMore = hasMore
+        state.historyState.loading = false
+        state.historyState.refreshing = false
+        state.historyState.error = nil
+        return .none
+
+      case .historyRefreshFailed(let error):
+        // SWR failure: keep whatever commits are still shown. Only surface
+        // the error when there's nothing to show, otherwise the view's error
+        // branch would replace a still-valid list.
+        state.historyState.loading = false
+        state.historyState.refreshing = false
+        if state.historyState.commits.isEmpty {
+          state.historyState.error = error
+        }
         return .none
 
       case .historyCommitTapped(let sha):
@@ -572,6 +631,26 @@ struct DiffFeature {
         await send(.historyPageFailed(error))
       } catch {
         await send(.historyPageFailed(.unparsable(context: "\(error)")))
+      }
+    }
+    .cancellable(id: CancelID.historyPage, cancelInFlight: true)
+  }
+
+  /// First-page reload for a stale-while-revalidate History refresh. Always
+  /// fetches from offset 0 and reports via `.historyRefreshSucceeded`, which
+  /// replaces the commit list wholesale (vs `loadHistoryPage` → append). Same
+  /// `CancelID.historyPage` slot so a refresh supersedes any in-flight page.
+  private func loadHistoryFirstPage(at worktreePath: String, limit: Int) -> Effect<Action> {
+    .run { [gitService] send in
+      do {
+        let url = URL(fileURLWithPath: worktreePath)
+        let cursor = LogPage.Cursor(offset: 0, limit: limit)
+        let page = try await gitService.log(url, cursor)
+        await send(.historyRefreshSucceeded(page.commits, hasMore: page.hasMore))
+      } catch let error as GitError {
+        await send(.historyRefreshFailed(error))
+      } catch {
+        await send(.historyRefreshFailed(.unparsable(context: "\(error)")))
       }
     }
     .cancellable(id: CancelID.historyPage, cancelInFlight: true)
