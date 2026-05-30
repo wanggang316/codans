@@ -19,22 +19,26 @@ struct ProjectGeneralSettingsViewKindRenderTests {
     #expect(!visible.contains(.gitViewer))
     #expect(!visible.contains(.worktree))
     #expect(!visible.contains(.github))
+    #expect(!visible.contains(.lifecycle))
   }
 
   @Test
   func gitRepoShowsAllSections() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .gitRepo)
     #expect(visible == Set(ProjectGeneralSettingsView.SectionID.allCases))
-    #expect(visible.count == 6)
+    #expect(visible.count == 7)
+    // Worktree-lifecycle script editors live at the bottom of this pane and
+    // are git-only.
+    #expect(visible.contains(.lifecycle))
   }
 
   @Test
   func sectionOrderingIsStableAcrossKinds() {
     // The Form renders Sections in declaration order, not Set order; this
     // test pins the canonical order so a future refactor cannot silently
-    // shuffle sections.
+    // shuffle sections. Lifecycle scripts render last.
     let canonical: [ProjectGeneralSettingsView.SectionID] = [
-      .general, .editor, .gitViewer, .worktree, .github, .environment,
+      .general, .editor, .gitViewer, .worktree, .github, .environment, .lifecycle,
     ]
     #expect(ProjectGeneralSettingsView.SectionID.allCases == canonical)
   }

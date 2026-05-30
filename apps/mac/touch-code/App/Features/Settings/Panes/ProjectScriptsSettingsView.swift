@@ -2,15 +2,12 @@ import ComposableArchitecture
 import SwiftUI
 import TouchCodeCore
 
-/// Project Scripts sub-pane. Renders every group as a sibling grouped
-/// Section in one flat Form — no top-level tab switcher:
+/// Project Commands sub-pane — the user-defined `[ScriptDefinition]`
+/// rendered as an inline, spreadsheet-style table (`ScriptCommandTable`):
+/// every field is edited in place via per-cell popovers, no modal sheet.
 ///
-/// - **Setup / Archive / Delete** — git-only lifecycle script editors,
-///   one body of text per phase, edited in place. Hidden when the
-///   Project is a dir (no git root).
-/// - **Commands** — user-defined `[ScriptDefinition]` rendered as an
-///   inline, spreadsheet-style table (`ScriptCommandTable`): every field
-///   is edited in place via per-cell popovers, no modal edit sheet.
+/// Worktree-lifecycle scripts (Setup / Archive / Delete) live at the bottom
+/// of the General pane, not here.
 ///
 /// Reads come from `@Environment(SettingsStore.self)` for live updates;
 /// writes always go through the TCA reducer so test stores can spy on
@@ -23,24 +20,6 @@ struct ProjectScriptsSettingsView: View {
   /// Resolved system-shortcut map. Drives chord-conflict detection
   /// against every registered CommandID at recording time.
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts: ResolvedShortcutMap
-
-  /// IDs for the sibling Sections; pure visibility logic lives on
-  /// `visibleSections(for:)` so kind-conditional rendering is testable
-  /// without the SwiftUI view tree (mirrors `ProjectGeneralSettingsView`).
-  enum SectionID: String, CaseIterable, Hashable {
-    case lifecycle
-    case scripts
-  }
-
-  /// Lifecycle is git_repo-only; Scripts is always visible.
-  nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
-    switch kind {
-    case .dir:
-      return [.scripts]
-    case .gitRepo:
-      return Set(SectionID.allCases)
-    }
-  }
 
   /// Currently selected command row in the inline table. Drives the
   /// row highlight and the `−` (remove) button. Lifted out of the table
@@ -57,51 +36,11 @@ struct ProjectScriptsSettingsView: View {
     entry?.scripts ?? []
   }
 
-  private var git: GitProjectSettings {
-    entry?.git ?? GitProjectSettings()
-  }
-
-  private var visible: Set<SectionID> {
-    Self.visibleSections(for: store.state.kind)
-  }
-
   // MARK: - Body
 
   var body: some View {
     Form {
-      if visible.contains(.lifecycle) {
-        lifecycleSection(
-          title: "Setup Script",
-          subtitle: "Runs after a new worktree is created.",
-          icon: "truck.box.badge.clock",
-          iconColor: .blue,
-          example: "pnpm install",
-          text: git.createScript?.command ?? "",
-          phase: .setup
-        )
-        lifecycleSection(
-          title: "Archive Script",
-          subtitle: "Runs before a worktree is archived.",
-          icon: "archivebox",
-          iconColor: .orange,
-          example: "docker compose down",
-          text: git.archiveScript?.command ?? "",
-          phase: .archive
-        )
-        lifecycleSection(
-          title: "Delete Script",
-          subtitle: "Runs before a worktree is removed (files still on disk).",
-          icon: "trash",
-          iconColor: .red,
-          example: "docker compose down",
-          text: git.deleteScript?.command ?? "",
-          phase: .delete
-        )
-      }
-
-      if visible.contains(.scripts) {
-        scriptsSection
-      }
+      scriptsSection
 
       if let error = store.state.lastWriteFailure, !error.isEmpty {
         Section {
@@ -148,54 +87,12 @@ struct ProjectScriptsSettingsView: View {
         && sibling.keyboardShortcut?.keyCode == binding.keyCode
         && sibling.keyboardShortcut?.modifiers == binding.modifiers
     }) {
-      return .rejected(message: "In use by script \"\(conflicting.displayName)\".")
+      return .rejected(message: "In use by command \"\(conflicting.displayName)\".")
     }
     return .ok
   }
 
-  // MARK: - Lifecycle Section
-
-  @ViewBuilder
-  private func lifecycleSection(
-    title: String,
-    subtitle: String,
-    icon: String,
-    iconColor: Color,
-    example: String,
-    text: String,
-    phase: SettingsWriter.WorktreeLifecycle
-  ) -> some View {
-    Section {
-      LifecycleEditor(
-        initial: text,
-        onCommit: { newValue in
-          store.send(.setLifecycleScript(phase, newValue))
-        }
-      )
-    } header: {
-      Label {
-        VStack(alignment: .leading, spacing: 0) {
-          Text(title)
-            .font(.body)
-            .bold()
-            .lineLimit(1)
-          Text(subtitle)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-      } icon: {
-        Image(systemName: icon)
-          .foregroundStyle(iconColor)
-          .accessibilityHidden(true)
-      }
-      .labelStyle(.scriptSectionHeader)
-    } footer: {
-      Text("e.g., `\(example)`")
-    }
-  }
-
-  // MARK: - Scripts Section
+  // MARK: - Commands Section
 
   /// Inline command table. The table owns no store access — every
   /// mutation routes back through the closures so writes stay on the TCA
@@ -251,46 +148,5 @@ struct ProjectScriptsSettingsView: View {
     if selectedScriptID == id {
       selectedScriptID = updated.isEmpty ? nil : updated[min(index, updated.count - 1)].id
     }
-  }
-}
-
-// MARK: - Section header label style (used by the lifecycle scripts only)
-
-private struct ScriptSectionHeaderLabelStyle: LabelStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    HStack(spacing: 6) {
-      configuration.icon
-      configuration.title
-    }
-  }
-}
-
-extension LabelStyle where Self == ScriptSectionHeaderLabelStyle {
-  fileprivate static var scriptSectionHeader: ScriptSectionHeaderLabelStyle { .init() }
-}
-
-// MARK: - Lifecycle inline editor
-
-/// Tiny TextEditor wrapper that commits the user's edit to the writer
-/// on each change. Per-keystroke calls are safe: the writer routes
-/// through `SettingsStore.scheduleSave`, which cancels and re-arms a
-/// debounced disk write so a burst of keystrokes only triggers a
-/// single `AtomicFileStore.write` once typing settles.
-private struct LifecycleEditor: View {
-  let initial: String
-  let onCommit: (String) -> Void
-
-  var body: some View {
-    PlainCommandEditor(
-      text: Binding(
-        get: { initial },
-        set: { newValue in
-          if newValue != initial {
-            onCommit(newValue)
-          }
-        }
-      )
-    )
-    .frame(height: 90)
   }
 }

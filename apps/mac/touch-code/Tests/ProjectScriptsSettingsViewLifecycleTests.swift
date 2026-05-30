@@ -5,27 +5,12 @@ import TouchCodeCore
 
 @testable import TouchCode
 
-/// Pure visibility logic for the Scripts pane. The Lifecycle Section is
-/// git-only; the Scripts Section is always present. We exercise
-/// `visibleSections(for:)` directly so the test does not need a SwiftUI
-/// view tree (mirrors `ProjectGeneralSettingsViewKindRenderTests`).
+/// Reducer-level coverage for the worktree-lifecycle script writes. The
+/// editors live at the bottom of the General pane, but the write path is the
+/// shared `ProjectSettingsFeature.setLifecycleScript` action — exercised here
+/// against a `TestStore` so the routing is pinned without a SwiftUI view tree.
 @MainActor
 struct ProjectScriptsSettingsViewLifecycleTests {
-
-  @Test
-  func dirHidesLifecycleSection() {
-    let visible = ProjectScriptsSettingsView.visibleSections(for: .dir)
-    #expect(visible == [.scripts])
-    #expect(!visible.contains(.lifecycle))
-  }
-
-  @Test
-  func gitRepoShowsBothSections() {
-    let visible = ProjectScriptsSettingsView.visibleSections(for: .gitRepo)
-    #expect(visible.contains(.lifecycle))
-    #expect(visible.contains(.scripts))
-    #expect(visible == Set(ProjectScriptsSettingsView.SectionID.allCases))
-  }
 
   @Test
   func setLifecycleScriptForwardsToWriterForEachPhase() async {
