@@ -588,7 +588,7 @@ struct ProjectGeneralSettingsView: View {
         }
       )
     } header: {
-      Text("Environment")
+      Text("Environment Variables")
     } footer: {
       Text(
         "TOUCHCODE_WORKTREE_PATH and TOUCHCODE_ROOT_PATH are provided automatically for "
