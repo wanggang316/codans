@@ -10,7 +10,7 @@
     "subtitle": "一个 macOS 原生窗口，编排所有 worktree 与 Agent。",
     "primary_cta": "下载 macOS 版",
     "secondary_cta": "在 GitHub 查看",
-    "brew_install": "brew install --cask touch-code"
+    "brew_install": "brew install --cask wanggang316/tap/touch-code"
   },
   "features": {
     "heading": "什么是 TouchCode？",

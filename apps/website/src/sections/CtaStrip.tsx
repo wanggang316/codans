@@ -3,8 +3,6 @@ import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { LINKS } from "@/lib/links";
 
-const BREW_COMMAND = "brew install --cask touch-code";
-
 export default function CtaStrip() {
   const { t } = useTranslation();
   return (
@@ -28,7 +26,7 @@ export default function CtaStrip() {
             {t("cta.primary")}
           </a>
         </div>
-        <BrewLine command={BREW_COMMAND} />
+        <BrewLine command={t("hero.brew_install")} />
       </motion.div>
     </section>
   );

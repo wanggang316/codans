@@ -10,7 +10,7 @@
     "subtitle": "One Mac-native window. Many worktrees. Every agent.",
     "primary_cta": "Download for macOS",
     "secondary_cta": "View on GitHub",
-    "brew_install": "brew install --cask touch-code"
+    "brew_install": "brew install --cask wanggang316/tap/touch-code"
   },
   "features": {
     "heading": "What is TouchCode?",
