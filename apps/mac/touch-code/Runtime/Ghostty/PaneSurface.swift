@@ -45,6 +45,12 @@ final class PaneSurface {
   /// pinned to an intermediate (often narrow) first-layout size.
   private var latestCols: UInt16 = 0
   private var latestRows: UInt16 = 0
+  /// Daemon's shell child PID, learned from `.info` after attach. The External
+  /// backend can't report the PTY child PID via libghostty (the symbol is
+  /// stubbed on this branch), so `childProcessID()` hands this to
+  /// `ForegroundJobReader`, which resolves the live foreground process group
+  /// from the shell's `e_tpgid`. 0 until known.
+  private var daemonShellPID: Int32 = 0
   // The C-handle / unsafe-pointer storage below is read from a nonisolated
   // deinit; their non-Sendable types would otherwise reject that access.
   // `nonisolated(unsafe)` is sound here because the deinit only fires once
@@ -204,6 +210,12 @@ final class PaneSurface {
       // otherwise leave the daemon's PTY stuck at the first-reported size.
       // Re-sending the most recent size here makes the final width win.
       self.zmxClient.resize(cols: self.latestCols, rows: self.latestRows)
+      // Learn the daemon's shell PID so foreground/agent detection works (see
+      // `daemonShellPID` / `childProcessID()`). The PID is static for the
+      // session; one probe after attach is enough.
+      if let info = try? await self.zmxClient.requestInfo() {
+        self.daemonShellPID = info.pid
+      }
     }
   }
 
@@ -266,7 +278,12 @@ final class PaneSurface {
 
   func childProcessID() -> Int32? {
     guard surface != nil else { return nil }
-    return nil
+    // The daemon owns the PTY, so its shell child PID (learned via `.info`)
+    // is our window into the foreground process group. `ForegroundJobReader`
+    // reads this PID's `e_tpgid` to find whatever is running in the
+    // foreground — the basis for agent detection and the worktree "working"
+    // indicator. nil until the post-attach `.info` probe lands.
+    return daemonShellPID > 0 ? daemonShellPID : nil
   }
 
   /// Apply a color scheme to this surface and request a redraw. No-op after `close()`.
