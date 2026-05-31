@@ -1454,19 +1454,15 @@ final class AppState {
   /// Filter the previous quit's agent snapshot through a liveness check
   /// and hand the survivors to `AgentStateStore.seedRestored`.
   ///
-  /// `kill(pid, 0)` alone is not enough: PID slots get recycled (32k
-  /// space on macOS, easily recycled within hours), so a successful
-  /// probe might land on an unrelated new process. We additionally
-  /// pin identity by start time: a process whose start timestamp is
-  /// later than `capturedAt` cannot be the agent we recorded — it must
-  /// have inherited the recycled PID after our quit. Records that fail
-  /// either check are dropped silently rather than corrupting the
-  /// restored state. Unknown enum raws (a future build's `kindRaw` /
-  /// `stateRaw`) are likewise dropped instead of failing the launch.
-  ///
-  /// `pid > 1` guards against the `kill(-1, 0)` / `kill(0, 0)` edge
-  /// cases where the syscall would target a process group instead of
-  /// a single process, masking real liveness with a wide-scope check.
+  /// Liveness is keyed on the pane's zmx daemon, not the agent process.
+  /// On the External-backend branch the agent runs inside the daemon's PTY
+  /// (it is a child of the daemon's shell), and `PaneSurface` cannot read a
+  /// foreground PID, so the captured `record.pid` is always `0`. The reaper's
+  /// launch sweep has already probed every recorded socket and left only the
+  /// surviving daemons in `coordinator.catalog.sessions`; a pane present there
+  /// has a reachable daemon, so the agent it hosted is alive too. Agents whose
+  /// daemon did not survive are dropped. Unknown enum raws (a future build's
+  /// `kindRaw` / `stateRaw`) are likewise dropped instead of failing the launch.
   @MainActor
   private static func seedRestoredAgents(
     coordinator: SessionCoordinator?,
@@ -1475,24 +1471,13 @@ final class AppState {
     guard let coordinator else { return }
     let restored = coordinator.restoredAgents
     guard !restored.isEmpty else { return }
+    // Sessions that survived the reaper sweep — their daemons answered
+    // `connect(2)`, so the agents running inside their PTYs are still alive.
+    let aliveSessions = coordinator.catalog.sessions
     var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
     seeds.reserveCapacity(restored.count)
     for (paneID, record) in restored {
-      guard record.pid > 1 else { continue }
-      if kill(record.pid, 0) != 0 {
-        // ESRCH (no such process) is the expected case here. Any other
-        // errno (EPERM, etc.) is treated the same way — if we cannot
-        // confirm the process is alive, we drop the seed rather than
-        // restore stale state.
-        continue
-      }
-      // PID-recycling defence: the PID slot is occupied, but is it the
-      // same process we captured? A start time later than `capturedAt`
-      // means a different occupant inherited the recycled slot.
-      guard
-        let startedAt = ForegroundJobReader.processStartedAt(pid: record.pid),
-        startedAt <= record.capturedAt
-      else { continue }
+      guard aliveSessions[paneID.raw.uuidString] != nil else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
         let state = AgentStateStore.AgentRuntimeState(rawValue: record.stateRaw)
