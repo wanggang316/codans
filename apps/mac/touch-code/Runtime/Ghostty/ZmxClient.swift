@@ -77,8 +77,26 @@ public final class ZmxClient {
   private let infoStream: AsyncStream<ZmxInfoPayload>
   private let infoContinuation: AsyncStream<ZmxInfoPayload>.Continuation
 
-  private var daemonReadTask: Task<Void, Never>?
-  private var surfaceReadTask: Task<Void, Never>?
+  /// Dedicated GCD queue backing the two fd read sources. Kept OFF the Swift
+  /// concurrency cooperative pool on purpose: the read loops previously ran on
+  /// `Task.detached`, which shares the global executor (width == core count).
+  /// Each pane owns two loops, so a handful of panes saturated the pool with
+  /// blocking `read`/`poll` spins and starved every other async task (worktree
+  /// switches, git fetches) into a permanent hang. DispatchSource is
+  /// event-driven, so a thread is borrowed only while bytes are actually ready.
+  private let ioQueue = DispatchQueue(label: "com.touch-code.runtime.zmx.io", qos: .userInitiated)
+  private var daemonReader: FDReader?
+  private var surfaceReader: FDReader?
+  /// Main-actor consumer tasks that drain each reader's `AsyncStream`. The
+  /// `FDReader` produces byte batches on `ioQueue` (off the cooperative pool);
+  /// these tasks process them in FIFO order ON the main actor — matching the
+  /// old `await handleFrame` isolation — and suspend (freeing the thread) when
+  /// no bytes are ready, so neither the pool nor the main thread is monopolised.
+  private var daemonConsumer: Task<Void, Never>?
+  private var surfaceConsumer: Task<Void, Never>?
+  /// Control-socket bytes accumulated across reads until a full frame
+  /// decodes. Main-actor isolated — only `ingestDaemonBytes` touches it.
+  private var daemonPending = Data()
   private var attachContinuation: CheckedContinuation<Void, Error>?
   private var snapshotContinuation: CheckedContinuation<URL, Error>?
   private var killContinuation: CheckedContinuation<Void, Never>?
@@ -352,18 +370,21 @@ public final class ZmxClient {
   public func close() {
     if isClosed { return }
     isClosed = true
-    daemonReadTask?.cancel()
-    daemonReadTask = nil
-    surfaceReadTask?.cancel()
-    surfaceReadTask = nil
-    if controlFD >= 0 {
-      _ = Darwin.shutdown(controlFD, SHUT_RDWR)
-      _ = Darwin.close(controlFD)
-    }
-    if localFD >= 0 {
-      _ = Darwin.shutdown(localFD, SHUT_RDWR)
-      _ = Darwin.close(localFD)
-    }
+    // Half-close to wake the daemon, then tear down the read sources and
+    // their main-actor consumers. The sources own controlFD / localFD and
+    // close them in their cancel handlers — a DispatchSource requires its fd
+    // stay valid until the cancel handler runs, so we must NOT close them
+    // directly here.
+    if controlFD >= 0 { _ = Darwin.shutdown(controlFD, SHUT_RDWR) }
+    if localFD >= 0 { _ = Darwin.shutdown(localFD, SHUT_RDWR) }
+    daemonReader?.cancel()
+    daemonReader = nil
+    surfaceReader?.cancel()
+    surfaceReader = nil
+    daemonConsumer?.cancel()
+    daemonConsumer = nil
+    surfaceConsumer?.cancel()
+    surfaceConsumer = nil
     infoContinuation.finish()
     if let cont = attachContinuation {
       attachContinuation = nil
@@ -424,79 +445,60 @@ public final class ZmxClient {
     }
   }
 
-  /// Spawn the daemon-side read loop. Runs detached at user-initiated
-  /// priority; decoded frames are dispatched back to the main actor for
-  /// state mutation (continuations, AsyncStream yields, local socketpair
-  /// writes).
+  /// Start the daemon-side read source. The `FDReader` drains the control
+  /// socket on `ioQueue` (off the cooperative pool) and yields each batch into
+  /// an `AsyncStream`; the consumer task below drains that stream ON the main
+  /// actor, in FIFO order, so `ingestDaemonBytes` assembles frames with the
+  /// same isolation the old `await handleFrame` had. EOF on the control socket
+  /// (daemon exited / snapshot written) routes to `handleDaemonEOF`.
   private func startDaemonReadLoop() {
-    let fd = controlFD
-    daemonReadTask = Task.detached(priority: .userInitiated) { [weak self] in
-      var pending = Data()
-      let bufferSize = 8192
-      var raw = [UInt8](repeating: 0, count: bufferSize)
-      while !Task.isCancelled {
-        let n = raw.withUnsafeMutableBufferPointer { ptr -> Int in
-          Darwin.read(fd, ptr.baseAddress, bufferSize)
-        }
-        if n > 0 {
-          pending.append(contentsOf: raw.prefix(n))
-          while true {
-            do {
-              guard let frame = try ZmxFraming.decode(buffer: &pending) else { break }
-              await self?.handleFrame(frame)
-            } catch {
-              await self?.handleDecodeError(error)
-              return
-            }
-          }
-          continue
-        }
-        if n == 0 {
-          // Daemon closed the socket (EOF). Resolve any in-flight
-          // snapshot waiter — handleSnapshot shuts the daemon down once
-          // the .snap is written, so EOF is the success signal.
-          await self?.handleDaemonEOF()
-          return
-        }
-        if errno == EINTR { continue }
-        if errno == EAGAIN || errno == EWOULDBLOCK {
-          var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-          _ = withUnsafeMutablePointer(to: &pfd) { Darwin.poll($0, 1, 100) }
-          continue
-        }
-        await self?.handleDaemonEOF()
+    let (stream, continuation) = AsyncStream.makeStream(of: (bytes: Data, eof: Bool).self)
+    daemonReader = FDReader(fd: controlFD, queue: ioQueue) { bytes, eof in
+      continuation.yield((bytes: bytes, eof: eof))
+      if eof { continuation.finish() }
+    }
+    daemonConsumer = Task { @MainActor [weak self] in
+      for await chunk in stream {
+        guard let self else { break }
+        if !chunk.bytes.isEmpty { self.ingestDaemonBytes(chunk.bytes) }
+        if chunk.eof { self.handleDaemonEOF() }
+      }
+    }
+  }
+
+  /// Main-actor frame assembly for control-socket bytes. Accumulates into
+  /// `daemonPending` and drains every complete frame through `handleFrame`.
+  private func ingestDaemonBytes(_ bytes: Data) {
+    if isClosed { return }
+    daemonPending.append(bytes)
+    while true {
+      do {
+        guard let frame = try ZmxFraming.decode(buffer: &daemonPending) else { break }
+        handleFrame(frame)
+      } catch {
+        handleDecodeError(error)
         return
       }
     }
   }
 
-  /// Spawn the surface-side read loop. Reads bytes the libghostty
-  /// External backend wrote into the socketpair, wraps them in `.input`
-  /// frames, and ships them to the daemon. Detached to keep the main
-  /// actor free; control-socket writes happen on the main actor via
-  /// `MainActor.run`.
+  /// Start the surface-side read source. Bytes the libghostty External
+  /// backend writes into the socketpair are drained on `ioQueue` and forwarded
+  /// to the daemon as `.input` frames by the main-actor consumer below.
+  /// Surface EOF (libghostty closed the socketpair) needs no teardown here:
+  /// the `FDReader` cancels itself and closes `localFD`, the stream finishes,
+  /// and the daemon side stays up — matching the pre-DispatchSource behaviour
+  /// where the surface loop simply returned on EOF.
   private func startSurfaceReadLoop() {
-    let fd = localFD
-    surfaceReadTask = Task.detached(priority: .userInitiated) { [weak self] in
-      let bufferSize = 8192
-      var raw = [UInt8](repeating: 0, count: bufferSize)
-      while !Task.isCancelled {
-        let n = raw.withUnsafeMutableBufferPointer { ptr -> Int in
-          Darwin.read(fd, ptr.baseAddress, bufferSize)
-        }
-        if n > 0 {
-          let bytes = Data(raw.prefix(n))
-          await self?.forwardInput(bytes)
-          continue
-        }
-        if n == 0 { return }
-        if errno == EINTR { continue }
-        if errno == EAGAIN || errno == EWOULDBLOCK {
-          var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-          _ = withUnsafeMutablePointer(to: &pfd) { Darwin.poll($0, 1, 100) }
-          continue
-        }
-        return
+    let (stream, continuation) = AsyncStream.makeStream(of: (bytes: Data, eof: Bool).self)
+    surfaceReader = FDReader(fd: localFD, queue: ioQueue) { bytes, eof in
+      continuation.yield((bytes: bytes, eof: eof))
+      if eof { continuation.finish() }
+    }
+    surfaceConsumer = Task { @MainActor [weak self] in
+      for await chunk in stream {
+        guard let self else { break }
+        if !chunk.bytes.isEmpty { self.forwardInput(chunk.bytes) }
       }
     }
   }
@@ -613,5 +615,82 @@ public final class ZmxClient {
       (try? fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false))
       ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
     return base.appendingPathComponent("touch-code/snapshots", isDirectory: true)
+  }
+}
+
+/// Event-driven reader for a single non-blocking fd, backed by a GCD
+/// `DispatchSourceRead` on a caller-supplied queue. Replaces the former
+/// `Task.detached` + blocking `read`/`poll` loops, which ran on the Swift
+/// concurrency cooperative pool (width == core count) and — at two loops per
+/// pane — saturated it once a few panes were open, starving all other async
+/// work (worktree switches, git fetches) into a permanent hang.
+///
+/// Owns its fd: the source's cancel handler performs the `close(2)`, so the
+/// fd stays valid for the source's whole lifetime (a DispatchSource
+/// requirement). `deinit` cancels too, so a dropped reader never leaks the fd.
+///
+/// MUST be `nonisolated`: the module builds with `SWIFT_DEFAULT_ACTOR_ISOLATION
+/// = MainActor`, so an unannotated type is implicitly main-actor isolated. Its
+/// methods then carry a runtime executor check, and the DispatchSource fires
+/// the event handler on `queue` (a background queue) — the check would call
+/// `dispatch_assert_queue(main)` off the main thread and trap. Marking the
+/// type nonisolated keeps `drainAndDeliver` genuinely queue-agnostic.
+private nonisolated final class FDReader: @unchecked Sendable {
+  private let fd: Int32
+  private let source: DispatchSourceRead
+  /// Invoked on the source's serial queue with each drained byte batch. NOT on
+  /// the main actor — it must be `@Sendable` and cheap. ZmxClient implements it
+  /// as a single `AsyncStream.yield`, which bridges, in order, to a main-actor
+  /// consumer task that does the real (main-isolated) frame handling.
+  private let onData: @Sendable (_ bytes: Data, _ eof: Bool) -> Void
+
+  init(
+    fd: Int32,
+    queue: DispatchQueue,
+    onData: @escaping @Sendable (_ bytes: Data, _ eof: Bool) -> Void
+  ) {
+    self.fd = fd
+    self.onData = onData
+    let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+    self.source = source
+    source.setEventHandler { [weak self] in self?.drainAndDeliver() }
+    source.setCancelHandler { _ = Darwin.close(fd) }
+    source.resume()
+  }
+
+  deinit { source.cancel() }
+
+  func cancel() { source.cancel() }
+
+  /// Runs on the source's serial queue. Drains every byte currently available
+  /// (the fd is non-blocking) and hands the batch to `onData`. FIFO order is
+  /// preserved because the queue is serial: handler invocations never overlap.
+  private func drainAndDeliver() {
+    let bufferSize = 8192
+    var raw = [UInt8](repeating: 0, count: bufferSize)
+    var batch = Data()
+    var eof = false
+    readLoop: while true {
+      let n = raw.withUnsafeMutableBufferPointer { ptr -> Int in
+        Darwin.read(fd, ptr.baseAddress, bufferSize)
+      }
+      if n > 0 {
+        batch.append(contentsOf: raw.prefix(n))
+        continue
+      }
+      if n == 0 {
+        eof = true
+        break
+      }
+      switch errno {
+      case EINTR: continue
+      case EAGAIN: break readLoop  // fully drained (EWOULDBLOCK == EAGAIN on Darwin)
+      default: eof = true; break readLoop
+      }
+    }
+    // Stop the source from re-firing forever on an EOF/errored fd.
+    if eof { source.cancel() }
+    if batch.isEmpty && !eof { return }
+    onData(batch, eof)
   }
 }
