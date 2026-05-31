@@ -3,7 +3,7 @@ import TouchCodeCore
 
 /// Records the last user-keystroke timestamp per pane. Reads as
 /// `[PaneID: Date]` snapshots that `NotificationDetector` feeds to
-/// `DetectionTranslator.Context.lastUserKeystrokeAt` so the translator's
+/// `PaneAttentionInterpreter.Context.lastUserKeystrokeAt` so the interpreter's
 /// 1-second `userTypingRecently` suppression can actually fire on real
 /// user input.
 ///
@@ -15,7 +15,7 @@ import TouchCodeCore
 ///
 /// Owned by AppState; the GhosttySurfaceView key delivery site records
 /// keystrokes; the detector reads snapshots when building per-event
-/// translation Contexts; teardown events purge entries.
+/// interpreter contexts; teardown events purge entries.
 @MainActor
 public final class PaneKeyboardActivityTracker {
   private var lastByPane: [PaneID: Date] = [:]
@@ -29,8 +29,8 @@ public final class PaneKeyboardActivityTracker {
   public static weak var shared: PaneKeyboardActivityTracker?
 
   /// Optional T6 fan-out: fired AFTER `recordKey` updates the map.
-  /// AppState wires this to `AgentRegistry.onPaneKeyboardActivity` so
-  /// the ActiveAgents state machine clears its sticky `waitingForInput`
+  /// AppState wires this to `AgentStateStore.onPaneKeyboardActivity` so
+  /// the AgentState state machine clears its sticky `waitingForInput`
   /// flag on real typing. The default no-op keeps the tracker
   /// detector-local for existing call sites that don't need the hook.
   public var onActivity: (@MainActor (PaneID) -> Void)?

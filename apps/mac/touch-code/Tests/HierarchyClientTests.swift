@@ -49,26 +49,6 @@ struct HierarchyClientTests {
   }
 
   @Test
-  func liveSetWorktreeDiffInspectorVisibleTogglesCatalog() throws {
-    let (client, manager) = makeLiveClient()
-    let projectID = client.addProject("p", "/tmp", "/tmp")
-    let worktreeID = try client.createWorktree(projectID, "w", "/tmp/w", "main")
-
-    // Default is false.
-    #expect(manager.catalog.projects[0].worktrees[0].diffInspectorVisible == false)
-
-    client.setWorktreeDiffInspectorVisible(worktreeID, true)
-    #expect(manager.catalog.projects[0].worktrees[0].diffInspectorVisible == true)
-
-    client.setWorktreeDiffInspectorVisible(worktreeID, false)
-    #expect(manager.catalog.projects[0].worktrees[0].diffInspectorVisible == false)
-
-    // Unknown worktreeID is a silent no-op; nothing should crash, state unchanged.
-    client.setWorktreeDiffInspectorVisible(WorktreeID(), true)
-    #expect(manager.catalog.projects[0].worktrees[0].diffInspectorVisible == false)
-  }
-
-  @Test
   func selectionChangesPopulatesProjectAndWorktreeOnSelect() async throws {
     let (client, _) = makeLiveClient()
     // Seed the catalog synchronously BEFORE subscribing so the stream's

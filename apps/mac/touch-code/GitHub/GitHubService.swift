@@ -17,11 +17,6 @@ nonisolated protocol GitHubService: Sendable {
   /// `.unavailable` case of the returned enum. Cached for 30 s by the feature reducer.
   func availability() async -> GitHubAvailability
 
-  /// Returns the PR associated with the given branch at the given worktree, or `nil`
-  /// when the branch has no PR. Throws on mechanical failures (gh missing, timeout,
-  /// decode error, auth error).
-  func pullRequest(branch: String, worktreePath: URL) async throws -> PullRequestSnapshot?
-
   /// Returns the most-recent workflow run for the branch, or `nil` when no run exists.
   func latestWorkflowRun(branch: String, worktreePath: URL) async throws -> WorkflowRun?
 

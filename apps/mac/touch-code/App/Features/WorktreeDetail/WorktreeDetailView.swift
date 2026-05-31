@@ -11,6 +11,11 @@ import TouchCodeCore
 /// that no longer exist after a prune), renders a neutral "Select a
 /// Worktree" prompt.
 struct WorktreeDetailView: View {
+  /// Width of the right-side Diff Inspector when open. The trailing
+  /// toolbar items reserve the same width so RunScript / Open chips
+  /// stay above the worktree content, not above the inspector column.
+  fileprivate static let inspectorWidth: CGFloat = 280
+
   @Bindable var store: StoreOf<WorktreeDetailFeature>
   let selection: HierarchySelection
   /// Scoped editor-feature store; passed in by `ContentView` so the Worktree-header
@@ -18,6 +23,10 @@ struct WorktreeDetailView: View {
   /// Open-result toasts are driven by `editorStore.state.lastOpenResult` directly from
   /// `ContentView`, so this view no longer accepts a callback (0005 M6c).
   let editorStore: StoreOf<EditorFeature>
+  /// AgentState registry (optional). Threaded down to `TabBarView` so a tab
+  /// chip lights while a bound agent in that tab is `.working` — the same
+  /// registry `ContentView` hands the sidebar, kept in sync by construction.
+  var agentStateStore: AgentStateStore?
   /// T2 Header feature — scoped by `ContentView` from the root. Drives the bell
   /// badge, the Open-in split button's delegate routing, and the Git Viewer toggle.
   let headerStore: StoreOf<WorktreeHeaderFeature>
@@ -29,11 +38,17 @@ struct WorktreeDetailView: View {
   /// the two surfaces stay in sync by construction.
   let gitHubStore: StoreOf<GitHubFeature>
   /// M6: diff feature store — drives the Diff inspector column and the
-  /// drawer overlay that fills the detail body when a file row is open.
+  /// panel overlay that fills the detail body when a file row is open.
   let diffStore: StoreOf<DiffFeature>
+  /// T10: branch popover + switch state. Threaded through to the leading
+  /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
+  /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
+  let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
   /// M5: drives the inline Diff inspector column rendered to the right
-  /// of the detail body. Sourced from `Worktree.diffInspectorVisible` via
-  /// `RootFeature.State.diffInspectorVisible(in:)` in `ContentView`.
+  /// of the detail body. Sourced from the app-level
+  /// `RootFeature.State.diffInspectorVisible` in `ContentView` — a single
+  /// toggle shared across Worktrees, so switching selection keeps the panel
+  /// open/closed and only re-targets its contents.
   let inspectorVisible: Bool
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just
@@ -44,6 +59,11 @@ struct WorktreeDetailView: View {
   /// the InboxBellView's row-tap. Wired by `ContentView` so this view
   /// doesn't need to hold the root TCA scope just to fire one action.
   let onFocusHierarchyPath: (InboxEntry.SourcePath) -> Void
+  /// Phase E: toolbar Git Viewer toggle. Wired by `ContentView` to dispatch
+  /// `RootFeature.diffInspectorToggledForCurrentWorktree` so this view
+  /// doesn't need the root store to fire the same action the ⌘⇧G chord
+  /// already triggers (see `MainWindowCommands` "Toggle Git Viewer").
+  let onToggleGitViewer: () -> Void
   /// Bumped by `RootFeature` when the user invokes ⌘U / the "Show Unread
   /// Notifications" menu item. Threaded down to `InboxBellView` whose
   /// `.onChange` opens the popover — same UUID-trigger pattern as
@@ -71,6 +91,27 @@ struct WorktreeDetailView: View {
   /// floating-sidebar overlay to repaint behind.
   @State private var isWindowFullscreen: Bool = false
 
+  /// Local mirror of `inspectorVisible` driven by `.onChange`. The
+  /// `.inspector(isPresented:)` modifier writes back to this binding
+  /// during its open / close animation, so the binding must be owned by
+  /// SwiftUI itself — a Binding bridged onto the TCA-managed `let
+  /// inspectorVisible` parameter would re-read the source-of-truth on
+  /// every render, see the in-progress async transition as a stale
+  /// value, and fire `onToggleGitViewer()` again, slamming the inspector
+  /// back closed the moment it opened. With `@State` here, the
+  /// presentation state lives in SwiftUI and only crosses into TCA via
+  /// the directional `.onChange`s below.
+  @State private var localInspectorVisible: Bool = false
+
+  /// Live width of the open Diff inspector column, measured from its content
+  /// via `.onGeometryChange`. The window toolbar's reserved spacer tracks
+  /// this so the RunScript / Open chips stay pinned to the inspector's left
+  /// edge as the user drags the column between its 240–480 pt bounds. A fixed
+  /// `inspectorWidth` reservation would only line up at the default 280 pt and
+  /// drift on resize. Seeded to `inspectorWidth` so the first frame reserves a
+  /// sane width before the geometry read lands.
+  @State private var inspectorMeasuredWidth: CGFloat = WorktreeDetailView.inspectorWidth
+
   /// View-only projection of the in-flight pending row plus the
   /// repository-side context the loading view needs. Built by
   /// `ContentView` so this struct doesn't depend on TCA state shapes.
@@ -80,36 +121,70 @@ struct WorktreeDetailView: View {
   }
 
   var body: some View {
+    detailBody
+      // Paint a low-alpha Ghostty-terminal-background band into the
+      // detail's top + leading safe-area insets. The unified toolbar
+      // (`.toolbarBackground(.hidden)` below) and the macOS 26
+      // floating-sidebar overlay both render their glass material over
+      // the detail content, so painting in those insets is the surface
+      // the chrome actually samples. Without this the chrome is the
+      // neutral system tone regardless of which terminal palette is
+      // active. Skipped in fullscreen because the unified toolbar
+      // collapses and the system reserves no top inset to fill.
+      .ghosttyChromeTint(edges: isWindowFullscreen ? [.leading] : [.top, .leading])
+  }
+
+  @ViewBuilder
+  private var detailBody: some View {
     if let pending = activePendingWorktree {
       WorktreeLoadingView(info: loadingInfo(for: pending))
     } else if let address = resolveAddress() {
       let info = worktreeInfo(for: address)
-      HStack(spacing: 0) {
-        VStack(spacing: 0) {
-          tabBarRow(address: address)
-          terminalRegion(address: address)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-          if diffStore.state.presentedFilePath != nil {
-            DiffDrawerView(store: diffStore)
-              .zIndex(80)
-              .transition(.move(edge: .trailing).combined(with: .opacity))
-          }
-        }
-        .animation(
-          .spring(response: 0.32, dampingFraction: 0.85),
-          value: diffStore.state.presentedFilePath
-        )
-
-        if inspectorVisible {
-          Divider()
-          DiffInspectorView(store: diffStore)
-            .frame(width: 280)
-            .transition(.move(edge: .trailing))
+      VStack(spacing: 0) {
+        // T10: inline branch-switch error banner. Renders itself only
+        // when `branchSwitcherStore.switchError` is non-nil, so it stays
+        // a zero-height no-op on the happy path. Placed at the top of
+        // the detail body — directly under the window toolbar — so the
+        // banner reads as a "drop-down notification strip" regardless
+        // of which tab / pane is foreground.
+        BranchSwitcherErrorBannerView(store: branchSwitcherStore)
+        tabBarRow(address: address)
+        terminalRegion(address: address)
+      }
+      .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .overlay {
+        if shouldShowPanel(diff: diffStore.state) {
+          DiffPanelView(store: diffStore)
+            .zIndex(80)
         }
       }
-      .animation(.easeInOut(duration: 0.18), value: inspectorVisible)
+      // System inspector: handles the sidebar material, toolbar extension,
+      // and show/hide animation for free. Bound to local `@State` and
+      // synced bidirectionally with the TCA-managed `inspectorVisible`
+      // via `.onChange` below — see the `localInspectorVisible` doc
+      // comment for why a direct bridge-binding loops.
+      .inspector(isPresented: $localInspectorVisible) {
+        DiffInspectorView(store: diffStore)
+          .inspectorColumnWidth(min: 240, ideal: Self.inspectorWidth, max: 480)
+          // Feed the live column width back to the toolbar spacer so the
+          // trailing action chips track the inspector's left edge on resize.
+          .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+          } action: { width in
+            inspectorMeasuredWidth = width
+          }
+      }
+      .onChange(of: inspectorVisible, initial: true) { _, newValue in
+        if localInspectorVisible != newValue {
+          localInspectorVisible = newValue
+        }
+      }
+      .onChange(of: localInspectorVisible) { _, newValue in
+        if newValue != inspectorVisible {
+          onToggleGitViewer()
+        }
+      }
       // Mount project-script shortcut bindings as a 0-sized background of
       // the detail body. The toolbar's run-script Menu can only register
       // its in-menu `.keyboardShortcut` after the dropdown has been opened
@@ -120,13 +195,12 @@ struct WorktreeDetailView: View {
       .background(alignment: .topLeading) {
         ProjectScriptsShortcutBindings(
           store: headerStore,
-          projectID: address.project,
-          worktreeID: address.worktree
+          projectID: address.project
         )
       }
       // On macOS 15+ remove the title slot entirely so default-placement
       // toolbar items can flow leading-to-trailing with `ToolbarSpacer`
-      // controlling the layout (same pattern supacode uses).
+      // controlling the layout.
       // `.navigationTitle("")` still reserves a leading region and would
       // push default-placement items toward the trailing edge — which is
       // why earlier centering attempts collapsed onto the right side.
@@ -139,7 +213,7 @@ struct WorktreeDetailView: View {
       // underneath it. Without this, the toolbar's full-window glass
       // repaints on every toolbar-state change (tab switch rebuilds
       // `worktreeToolbarContent`) and flickers across the area covered
-      // by the translucent sidebar. Same pattern supacode uses.
+      // by the translucent sidebar.
       //
       // HAN-63: re-show the chrome when fullscreen — without it, the
       // sidebar `+` button and detail toolbar render over the terminal
@@ -191,14 +265,15 @@ struct WorktreeDetailView: View {
   /// git-viewer toggle used to live to the right of the tabs (old
   /// `unifiedHeader`); they moved into the window titlebar via
   /// `worktreeToolbarContent(address:)` so the content region gets its
-  /// vertical space back, matching supacode's `.toolbar {}` layout.
+  /// vertical space back.
   @ViewBuilder
   private func tabBarRow(address: Address) -> some View {
     TabBarView(
       store: store.scope(state: \.tabBar, action: \.tabBar),
       projectID: address.project,
       worktreeID: address.worktree,
-      activeTabID: address.activeTab
+      activeTabID: address.activeTab,
+      agentStateStore: agentStateStore
     )
     .frame(maxWidth: .infinity, alignment: .leading)
     // No solid `.windowBackgroundColor` fill: with the toolbar chrome
@@ -227,7 +302,7 @@ struct WorktreeDetailView: View {
   /// viewer toggle on the trailing edge (`.primaryAction`). Mirrors the
   /// layout that used to live as the right cluster of the content-region
   /// header; moving it into `.toolbar {}` reclaims vertical pixels above
-  /// the tab bar and matches macOS native chrome (Xcode, Finder, supacode).
+  /// the tab bar and matches macOS native chrome (Xcode, Finder).
   ///
   /// `ContentView` contributes one additional trailing `ToolbarItem`
   /// (Settings gear) — SwiftUI merges both sources, with Settings rendered
@@ -238,8 +313,8 @@ struct WorktreeDetailView: View {
     info: WorktreeInfo?
   ) -> some ToolbarContent {
     if let info {
-      // macOS 26 follows supacode's pattern: every item in default
-      // placement, ordering plus ToolbarSpacer(.flexible) splits
+      // macOS 26 layout: every item in default placement, ordering
+      // plus ToolbarSpacer(.flexible) splits
       // horizontal space evenly so the status capsule sits visually
       // equidistant between the branch label and the trailing buttons.
       // Pre-26 keeps the older `.navigation` / `.principal` /
@@ -269,10 +344,12 @@ struct WorktreeDetailView: View {
         // group with the action buttons.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
+          // Order matches the macOS 26 path: RunScript, Open, then the
+          // Git Viewer toggle as the rightmost chip. `ToolbarItemGroup`
+          // renders children leading-to-trailing in declaration order.
           HeaderRunScriptSplitButton(
             store: headerStore,
-            projectID: address.project,
-            worktreeID: info.worktree.id
+            projectID: address.project
           )
           .buttonStyle(.plain)
           HeaderOpenSplitButton(
@@ -282,6 +359,22 @@ struct WorktreeDetailView: View {
             worktreePath: info.worktree.path
           )
           .buttonStyle(.plain)
+          // Mirrors the macOS 26 path: window toolbar doesn't reflow when
+          // `.inspector(...)` opens, so reserve the inspector footprint
+          // so the action chips shift left. Width is animated rather than
+          // mount-toggled so the chips slide instead of jump.
+          Color.clear
+            .frame(width: inspectorVisible ? max(0, inspectorMeasuredWidth - 40) : 0, height: 1)
+            .animation(.easeInOut(duration: 0.25), value: inspectorVisible)
+          Button {
+            onToggleGitViewer()
+          } label: {
+            Image(systemName: "sidebar.right")
+          }
+          .buttonStyle(.plain)
+          .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+          .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+          .accessibilityIdentifier("worktree_header.git_viewer_toggle")
         }
       }
     }
@@ -310,7 +403,8 @@ struct WorktreeDetailView: View {
       WorktreeHeaderInfoLabel(
         worktree: info.worktree,
         project: info.project,
-        gitHubStore: gitHubStore
+        gitHubStore: gitHubStore,
+        branchSwitcherStore: branchSwitcherStore
       )
     }
     .sharedBackgroundVisibility(.hidden)
@@ -328,13 +422,19 @@ struct WorktreeDetailView: View {
     address: Address, info: WorktreeInfo
   ) -> some ToolbarContent {
     // No `.buttonStyle` / no manual padding — each ToolbarItem gets
-    // the toolbar's native glass capsule + hover state. Same pattern as
-    // supacode's openMenu / ScriptMenu.
+    // the toolbar's native glass capsule + hover state.
+    //
+    // Order: RunScript, Open, Git Viewer toggle. The toggle sits as the
+    // rightmost chip — visually furthest from the worktree-header area,
+    // matching the user-attached reference. Tooltip flips between
+    // Open/Close based on `inspectorVisible`; the SF Symbol stays
+    // `sidebar.right` for both states since the SF set has no clean
+    // open/closed pair for a right-anchored inspector — the tooltip is
+    // the disambiguator.
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,
-        projectID: address.project,
-        worktreeID: info.worktree.id
+        projectID: address.project
       )
     }
     ToolbarSpacer(.fixed)
@@ -346,6 +446,38 @@ struct WorktreeDetailView: View {
         worktreePath: info.worktree.path
       )
     }
+    // Reserve the inspector column's footprint so RunScript / Open chips
+    // shift left while the panel is open. The window toolbar is global,
+    // not column-scoped — `.inspector(...)` does NOT auto-reflow trailing
+    // items into the main column the way NavigationSplitView's leading
+    // toolbar zone does.
+    //
+    // Mounted only while the inspector is open. A 0-width placeholder
+    // still reserves a `ToolbarItem` slot with its own insets, which
+    // widens the Open↔toggle gap past the Run↔Open gap when the panel is
+    // closed. Gating the item keeps the closed-state spacing symmetric
+    // (a single `ToolbarSpacer(.fixed)` to the toggle, matching the gap
+    // between the other chips). `.sharedBackgroundVisibility(.hidden)`
+    // strips the toolbar's default glass capsule so the spacer never
+    // renders as an empty pill.
+    if inspectorVisible {
+      ToolbarItem {
+        Color.clear
+          .frame(width: max(0, inspectorMeasuredWidth - 40), height: 1)
+      }
+      .sharedBackgroundVisibility(.hidden)
+    }
+    ToolbarSpacer(.fixed)
+    ToolbarItem {
+      Button {
+        onToggleGitViewer()
+      } label: {
+        Image(systemName: "sidebar.right")
+      }
+      .help(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+      .accessibilityLabel(inspectorVisible ? "Close Git Viewer" : "Open Git Viewer")
+      .accessibilityIdentifier("worktree_header.git_viewer_toggle")
+    }
   }
 
   @ToolbarContentBuilder
@@ -354,7 +486,8 @@ struct WorktreeDetailView: View {
       WorktreeHeaderInfoLabel(
         worktree: info.worktree,
         project: info.project,
-        gitHubStore: gitHubStore
+        gitHubStore: gitHubStore,
+        branchSwitcherStore: branchSwitcherStore
       )
     }
     if #available(macOS 26.0, *) {
@@ -436,6 +569,36 @@ struct WorktreeDetailView: View {
     EmptyProjectStateView(onAddProject: onAddProject)
       .modifier(SuppressTitleModifier())
       .toolbarBackground(.hidden, for: .windowToolbar)
+  }
+
+  /// T14: panel mount-gate. Reads from whichever selection field belongs
+  /// to the active tab — Changes owns `presentedFilePath`, History owns
+  /// `presentedCommitSha`. Without this routing, switching to History and
+  /// selecting a commit wouldn't surface the panel at all.
+  private func shouldShowPanel(diff: DiffFeature.State) -> Bool {
+    switch diff.selectedTab {
+    case .changes: return diff.presentedFilePath != nil
+    case .history: return diff.presentedCommitSha != nil
+    }
+  }
+
+  /// SwiftUI `.animation(_:value:)` keys on Equatable. Packing the three
+  /// fields the panel cares about (active tab + both selections) into a
+  /// small Equatable struct re-triggers the spring whenever any of them
+  /// changes — including the user toggling tabs while a selection is
+  /// open on each side, which should fade between the two diffs.
+  private struct PanelVisibilityKey: Equatable {
+    let tab: DiffFeature.DiffTab
+    let path: String?
+    let sha: String?
+  }
+
+  private func panelVisibilityKey(diff: DiffFeature.State) -> PanelVisibilityKey {
+    PanelVisibilityKey(
+      tab: diff.selectedTab,
+      path: diff.presentedFilePath,
+      sha: diff.presentedCommitSha
+    )
   }
 
   /// Maps a `PendingWorktree` row to the view-layer struct the loading

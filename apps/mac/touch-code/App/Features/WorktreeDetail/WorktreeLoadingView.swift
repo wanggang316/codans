@@ -8,9 +8,8 @@ import SwiftUI
 /// `kind` carries either the live progress (running) or the failure
 /// payload (post-`pendingWorktreeFailed`). `removing` is reserved for a
 /// future deletion-with-streaming flow; touch-code currently deletes
-/// without a pending row, so the case is unused but kept symmetric with
-/// supacode's `WorktreeLoadingInfo` to avoid divergence when we wire
-/// that path in.
+/// without a pending row, so the case is unused today and kept here so
+/// the deletion path can land without a schema migration.
 struct WorktreeLoadingInfo: Equatable {
   enum Kind: Equatable {
     case creating(Progress)
@@ -46,10 +45,10 @@ struct WorktreeLoadingInfo: Equatable {
 }
 
 /// Detail-pane loading view for a worktree whose `wt sw` is still
-/// streaming. Mirrors supacode's `WorktreeLoadingView`: large spinner
-/// (or warning glyph on failure), worktree name, optional command
-/// chip, and a 5-line streaming tail with a head-truncated middle so
-/// the latest output stays visible regardless of line length.
+/// streaming. Large spinner (or warning glyph on failure), worktree
+/// name, optional command chip, and a 5-line streaming tail with a
+/// head-truncated middle so the latest output stays visible regardless
+/// of line length.
 struct WorktreeLoadingView: View {
   let info: WorktreeLoadingInfo
 

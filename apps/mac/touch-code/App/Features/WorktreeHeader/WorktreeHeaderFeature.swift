@@ -33,7 +33,16 @@ struct WorktreeHeaderFeature {
     case customEditorsTapped
     case setProjectDefaultEditorTapped(projectID: ProjectID, editorID: EditorID?)
     /// Run script split-button — primary or menu activation. Phase 2.
-    case runScriptTapped(scriptID: UUID, projectID: ProjectID, worktreeID: WorktreeID)
+    ///
+    /// Carries only `scriptID`; `RootFeature` resolves the target Project +
+    /// Worktree from `state.selection` at handle-time. Mirrors the
+    /// `pickEditorFromMenuTapped` pattern: SwiftUI bridges Menu content to
+    /// NSMenuItem actions whose closure captures don't always refresh on
+    /// view rebuild, and the `.keyboardShortcut` chord routes through that
+    /// same path — so a worktree switch could previously fire the script
+    /// against a stale worktreeID. Inline `primaryAction` callers were
+    /// unaffected, but the menu / chord paths were.
+    case runScriptTapped(scriptID: UUID)
     /// "Manage Scripts…" menu footer or primary click on an empty script list.
     /// Carries the source `projectID` so the parent can deep-link into
     /// the Settings window's Project Scripts pane for that project.
@@ -56,9 +65,11 @@ struct WorktreeHeaderFeature {
       /// actions), persists `editorID` as the per-Project default, and opens
       /// the worktree with that editor.
       case pickEditorFromMenu(EditorID)
-      /// Run a user-defined Project script. RootFeature dispatches to
-      /// `HierarchyClient.runScript`.
-      case runScriptRequested(scriptID: UUID, projectID: ProjectID, worktreeID: WorktreeID)
+      /// Run a user-defined Project script. RootFeature resolves the
+      /// target Project + Worktree from `state.selection` at handle-time
+      /// (see `runScriptTapped` for the staleness rationale) and dispatches
+      /// to `HierarchyClient.runScript`.
+      case runScriptRequested(scriptID: UUID)
       /// User asked to manage scripts — open the Settings window AND
       /// deep-link into the Project Scripts pane for the given project.
       /// (Earlier shipped a no-deep-link variant; restored after the
@@ -96,14 +107,8 @@ struct WorktreeHeaderFeature {
               editorID: editorID
             )))
 
-      case .runScriptTapped(let scriptID, let projectID, let worktreeID):
-        return .send(
-          .delegate(
-            .runScriptRequested(
-              scriptID: scriptID,
-              projectID: projectID,
-              worktreeID: worktreeID
-            )))
+      case .runScriptTapped(let scriptID):
+        return .send(.delegate(.runScriptRequested(scriptID: scriptID)))
 
       case .manageScriptsTapped(let projectID):
         return .send(.delegate(.manageScriptsRequested(projectID: projectID)))

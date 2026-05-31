@@ -1,9 +1,9 @@
 import Foundation
 import Testing
 
+@testable import TouchCode
 @testable import TouchCodeCore
 @testable import TouchCodeIPC
-@testable import TouchCode
 
 @MainActor
 struct HierarchyHandlersCreateWorktreeTests {
@@ -149,7 +149,8 @@ struct HierarchyHandlersCreateWorktreeTests {
       Issue.record("expected failure, got \(outcome)")
       return
     }
-    if case .invalidParams = err { } else {
+    if case .invalidParams = err {
+    } else {
       Issue.record("expected invalidParams, got \(err)")
     }
   }

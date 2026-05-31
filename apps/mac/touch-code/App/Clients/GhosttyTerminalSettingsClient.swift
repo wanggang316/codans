@@ -39,6 +39,7 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         darkTheme: nil,
         availableLightThemes: [],
         availableDarkThemes: [],
+        themePreviews: [:],
         warningMessage: nil
       )
     },
@@ -49,6 +50,7 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         darkTheme: draft.darkTheme,
         availableLightThemes: [],
         availableDarkThemes: [],
+        themePreviews: [:],
         warningMessage: nil
       )
     }

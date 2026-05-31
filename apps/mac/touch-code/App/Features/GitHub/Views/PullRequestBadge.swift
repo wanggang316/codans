@@ -54,18 +54,9 @@ struct PullRequestBadge: View {
   }
 
   private func loadedBody(snapshot: PullRequestSnapshot, rollup: CheckRollup) -> some View {
-    let tint = snapshot.state.rowTint(isDraft: snapshot.isDraft)
-    // Corner radius matches `StatusPullRequestView.badge` so the sidebar pill
-    // and the titlebar pill read as the same component shape.
-    return Text("#\(snapshot.number)")
-      .font(.system(size: 10, weight: .semibold))
-      .padding(.horizontal, 4)
-      .padding(.vertical, 1)
-      .foregroundStyle(tint)
-      .background(
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
-          .stroke(tint.opacity(0.75), lineWidth: 0.75)
-      )
+    // Shared with the titlebar via `PullRequestNumberPill` so the `#N` chip — and its
+    // red merge-conflict styling — stays identical across the sidebar and the status bar.
+    PullRequestNumberPill(snapshot: snapshot)
   }
 
   private var loadingBody: some View {
@@ -110,8 +101,10 @@ struct PullRequestBadge: View {
         case .noChecks: return "no checks"
         }
       }()
+      let conflictWord = snapshot.hasMergeConflict ? ", merge conflicts" : ""
       return Text(
-        "Pull request \(snapshot.number), \(stateWord), \(rollupWord). Activate to see details."
+        "Pull request \(snapshot.number), \(stateWord), \(rollupWord)\(conflictWord). "
+          + "Activate to see details."
       )
     case .loading:
       return Text("Loading pull request status")
@@ -124,7 +117,8 @@ struct PullRequestBadge: View {
     switch state {
     case .loaded(let snapshot, _):
       let draftTag = snapshot.isDraft ? " (draft)" : ""
-      return "#\(snapshot.number)\(draftTag) \(snapshot.title)\n@\(snapshot.author)"
+      let conflictLine = snapshot.hasMergeConflict ? "\n⚠︎ Has merge conflicts" : ""
+      return "#\(snapshot.number)\(draftTag) \(snapshot.title)\n@\(snapshot.author)\(conflictLine)"
     case .loading:
       return "Loading pull request status…"
     case .error(let error):

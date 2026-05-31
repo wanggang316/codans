@@ -27,6 +27,7 @@ Every exec plan MUST contain:
 ## Active Plans
 
 <!-- List active plans here -->
+- [0018 — GitHub PR Status Liveness](0018-github-pr-status-liveness.md) — focus-gated adaptive poll of the active Project so remote PR changes (CI, review, merge/close, new PR) surface without manual refresh; reuses `projectRefreshRequested` + in-flight/queued model; pauses when the app is not active; also migrates post-mutation/manual refresh to project-level (closes 0013 DEC-6)
 - [Command Palette (Quick Action)](command-palette.md) — ⌘P fuzzy launcher over Space/Worktree/Pane/Window/Editor commands; procedural item generation, custom fuzzy scorer, TCA delegate routing; reuses existing ghostty `toggle_command_palette` intent
 
 ## Completed Plans

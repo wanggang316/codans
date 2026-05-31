@@ -14,8 +14,10 @@ import TouchCodeCore
 /// by keeping the buttons in the regular SwiftUI view tree.
 struct ProjectScriptsShortcutBindings: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
+  /// Project whose scripts contribute chords. Worktree resolution is
+  /// deferred to `RootFeature` (reads `state.selection` at handle-time);
+  /// this view does not need to know which Worktree is active.
   let projectID: ProjectID
-  let worktreeID: WorktreeID
   @Environment(SettingsStore.self) private var settingsStore
 
   var body: some View {
@@ -31,8 +33,7 @@ struct ProjectScriptsShortcutBindings: View {
       let key = ShortcutDisplay.keyEquivalent(for: chord.keyCode)
     {
       Button {
-        store.send(
-          .runScriptTapped(scriptID: script.id, projectID: projectID, worktreeID: worktreeID))
+        store.send(.runScriptTapped(scriptID: script.id))
       } label: {
         EmptyView()
       }

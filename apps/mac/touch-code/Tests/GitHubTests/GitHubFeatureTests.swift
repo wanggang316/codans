@@ -60,124 +60,6 @@ struct GitHubFeatureTests {
     }
   }
 
-  // MARK: - snapshot loading
-
-  @Test
-  func worktreeBecameVisibleLoadsSnapshot() async {
-    let expected = Self.stubSnapshot(number: 42)
-    let wid = WorktreeID()
-    let store = Self.makeStore { client in
-      client.pullRequest = { _, _ in expected }
-    }
-    await store.send(.worktreeBecameVisible(wid, branch: "feature", worktreePath: Self.path)) {
-      $0.worktreePaths[wid] = Self.path
-      $0.loading.insert(wid)
-    }
-    await store.receive(.snapshotLoaded(wid, .success(expected))) {
-      $0.loading.remove(wid)
-      $0.snapshots[wid] = expected
-      $0.snapshotLoadedAt[wid] = Self.fixedDate
-      $0.lastError[wid] = nil
-    }
-    // 0013 M5 retired the per-Worktree checks prefetch. `snapshot.checkRollup` is now
-    // populated by the v2 batched path; the single-branch refresh still uses the v1
-    // `gh pr view` parser which leaves checkRollup empty (acceptable — next Project
-    // activation refills it).
-  }
-
-  @Test
-  func worktreeBecameVisibleSkipsWhenCached() async {
-    let snap = Self.stubSnapshot(number: 1)
-    let wid = WorktreeID()
-    var seed = GitHubFeature.State()
-    seed.snapshots[wid] = snap
-    seed.snapshotLoadedAt[wid] = Self.fixedDate
-    let store = Self.makeStore(initialState: seed) { client in
-      client.pullRequest = { _, _ in
-        Issue.record("pullRequest must not be called when cache is fresh")
-        return nil
-      }
-    }
-    await store.send(.worktreeBecameVisible(wid, branch: "b", worktreePath: Self.path)) {
-      $0.worktreePaths[wid] = Self.path
-    }
-  }
-
-  @Test
-  func worktreeBecameVisibleWhenLoadingIsNoop() async {
-    let wid = WorktreeID()
-    var seed = GitHubFeature.State()
-    seed.loading.insert(wid)
-    let store = Self.makeStore(initialState: seed) { client in
-      client.pullRequest = { _, _ in
-        Issue.record("pullRequest must not be called when a fetch is already in flight")
-        return nil
-      }
-    }
-    await store.send(.worktreeBecameVisible(wid, branch: "b", worktreePath: Self.path)) {
-      $0.worktreePaths[wid] = Self.path
-    }
-  }
-
-  @Test
-  func refreshRequestedForcesReload() async {
-    let existing = Self.stubSnapshot(number: 1)
-    let refreshed = Self.stubSnapshot(number: 1, title: "updated")
-    let wid = WorktreeID()
-    var seed = GitHubFeature.State()
-    seed.snapshots[wid] = existing
-    seed.snapshotLoadedAt[wid] = Self.fixedDate
-    let store = Self.makeStore(initialState: seed) { client in
-      client.pullRequest = { _, _ in refreshed }
-    }
-    await store.send(.refreshRequested(wid, branch: "b", worktreePath: Self.path)) {
-      $0.worktreePaths[wid] = Self.path
-      $0.snapshotLoadedAt[wid] = nil
-      $0.loading.insert(wid)
-    }
-    await store.receive(.snapshotLoaded(wid, .success(refreshed))) {
-      $0.loading.remove(wid)
-      $0.snapshots[wid] = refreshed
-      $0.snapshotLoadedAt[wid] = Self.fixedDate
-    }
-  }
-
-  @Test
-  func snapshotFailurePopulatesLastError() async {
-    let wid = WorktreeID()
-    let store = Self.makeStore { client in
-      client.pullRequest = { _, _ in throw GitHubError.notAuthenticated(host: "github.com") }
-    }
-    await store.send(.worktreeBecameVisible(wid, branch: "b", worktreePath: Self.path)) {
-      $0.worktreePaths[wid] = Self.path
-      $0.loading.insert(wid)
-    }
-    await store.receive {
-      if case .snapshotLoaded(let w, .failure) = $0, w == wid { return true }
-      return false
-    } assert: {
-      $0.loading.remove(wid)
-      $0.snapshotLoadedAt[wid] = Self.fixedDate
-      $0.lastError[wid] = .notAuthenticated(host: "github.com")
-    }
-  }
-
-  @Test
-  func snapshotLoadedWithNilPRClearsCachedSnapshot() async {
-    let existing = Self.stubSnapshot(number: 1)
-    let wid = WorktreeID()
-    var seed = GitHubFeature.State()
-    seed.snapshots[wid] = existing
-    seed.loading.insert(wid)
-    let store = Self.makeStore(initialState: seed)
-    await store.send(.snapshotLoaded(wid, .success(nil))) {
-      $0.snapshots[wid] = nil
-      $0.snapshotLoadedAt[wid] = Self.fixedDate
-      $0.loading = []
-      $0.lastError[wid] = nil
-    }
-  }
-
   // MARK: - popover
 
   @Test
@@ -220,6 +102,11 @@ struct GitHubFeatureTests {
 
   @Test
   func mergeSucceededEmitsDelegate() async {
+    // Post-mutation refresh is now project-level (0018 M3): it resolves the owning
+    // Project from `projectByWorktree`. This Worktree was never part of a batched
+    // fetch, so `postMutationRefresh` returns `.none` and the only follow-up is the
+    // delegate. A separate test covers the delayed project refresh when the mapping
+    // exists (`postMutationSchedulesDelayedProjectRefresh`).
     let wid = WorktreeID()
     let snap = Self.stubSnapshot(number: 99, state: .open, headRefName: "feature/test")
     var seed = GitHubFeature.State()
@@ -229,7 +116,6 @@ struct GitHubFeatureTests {
         #expect(prNumber == 99)
         #expect(strategy == .squash)
       }
-      client.pullRequest = { _, _ in snap }  // post-mutation refresh call
     }
     await store.send(.mergeRequested(wid, prNumber: 99, strategy: .squash, worktreePath: Self.path)) {
       $0.mutating.insert(wid)
@@ -237,16 +123,8 @@ struct GitHubFeatureTests {
     }
     await store.receive(.mergeCompleted(wid, prNumber: 99, .success(.init()))) {
       $0.mutating.remove(wid)
-      $0.snapshotLoadedAt[wid] = nil
-      $0.loading.insert(wid)
     }
     await store.receive(.delegate(.pullRequestMerged(wid, snapshot: snap)))
-    await store.receive(.snapshotLoaded(wid, .success(snap))) {
-      $0.loading.remove(wid)
-      $0.snapshots[wid] = snap
-      $0.snapshotLoadedAt[wid] = Self.fixedDate
-      $0.lastError[wid] = nil
-    }
   }
 
   @Test
@@ -399,6 +277,7 @@ struct GitHubFeatureTests {
 
   private static func makeStore(
     initialState: GitHubFeature.State = .init(),
+    clock: any Clock<Duration> = ImmediateClock(),
     customize: @MainActor (inout GitHubClient) -> Void = { _ in },
     customizeGit: @MainActor (inout GitServiceClient) -> Void = { _ in }
   ) -> TestStore<GitHubFeature.State, GitHubFeature.Action> {
@@ -406,6 +285,7 @@ struct GitHubFeatureTests {
       GitHubFeature()
     } withDependencies: {
       $0.date = .constant(fixedDate)
+      $0.continuousClock = clock
       var client = GitHubClient.testValue
       customize(&client)
       $0[GitHubClient.self] = client
@@ -428,6 +308,7 @@ struct GitHubFeatureTests {
       }
     }
     await store.send(.projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: [])) {
+      $0.projectWorktreePairs[projectID] = []
       $0.inFlightFetchProjects.insert(projectID)
       $0.projectGitRoots[projectID] = gitRoot
     }
@@ -462,6 +343,8 @@ struct GitHubFeatureTests {
       }
     }
     await store.send(.projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.projectWorktreePairs[projectID] = [pair]
+      $0.projectByWorktree[wid] = projectID
       $0.inFlightFetchProjects.insert(projectID)
       $0.projectGitRoots[projectID] = gitRoot
     }
@@ -494,6 +377,7 @@ struct GitHubFeatureTests {
         projectID, gitRoot: URL(fileURLWithPath: "/tmp/r"), worktreeBranches: []
       )
     ) {
+      $0.projectWorktreePairs[projectID] = []
       $0.queuedRefreshByProject.insert(projectID)
     }
   }
@@ -555,6 +439,8 @@ struct GitHubFeatureTests {
         projectID: projectID, gitRoot: gitRoot, worktreeBranches: [pair]
       )
     ) {
+      $0.projectWorktreePairs[projectID] = [pair]
+      $0.projectByWorktree[wid] = projectID
       $0.inFlightFetchProjects.insert(projectID)
       $0.projectGitRoots[projectID] = gitRoot
     }
@@ -568,5 +454,180 @@ struct GitHubFeatureTests {
         byBranch: [:], seenBranches: ["new-branch"], fetchedAt: Self.fixedDate
       )
     }
+  }
+
+  // MARK: - active-Project liveness poll (0018)
+
+  @Test
+  func pollTargetChangedArmsTickThenFetchesOnAdvance() async {
+    let clock = TestClock()
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let gitRoot = URL(fileURLWithPath: "/tmp/test-repo")
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let returnedSnapshot = Self.stubSnapshot(number: 7, headRefName: "feature/x")
+    let store = Self.makeStore(clock: clock) { client in
+      client.batchPullRequests = { _, _, _, _ in ["feature/x": returnedSnapshot] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
+    }
+    // Arm only — retargeting never fetches immediately (projectActivated owns that).
+    await store.send(.pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.pollTarget = projectID
+      $0.projectGitRoots[projectID] = gitRoot
+      $0.projectWorktreePairs[projectID] = [pair]
+      $0.projectByWorktree[wid] = projectID
+    }
+    // No cached batch yet → idle cadence (60 s). Advancing fires exactly one tick.
+    await clock.advance(by: .seconds(60))
+    await store.receive(.pollTick(projectID)) {
+      $0.inFlightFetchProjects.insert(projectID)
+    }
+    await store.receive { action in
+      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
+      return pid == projectID
+    } assert: {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.snapshotsByProject[projectID] = BatchedPullRequests(
+        host: "github.com", owner: "w", repo: "r",
+        byBranch: ["feature/x": returnedSnapshot],
+        seenBranches: ["feature/x"], fetchedAt: Self.fixedDate
+      )
+      $0.snapshots[wid] = returnedSnapshot
+      $0.snapshotLoadedAt[wid] = Self.fixedDate
+    }
+    // Tear down the re-armed timer so the store has no effect left in flight.
+    await store.send(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])) {
+      $0.pollTarget = nil
+    }
+  }
+
+  @Test
+  func pollPausesWhenTargetNil() async {
+    let clock = TestClock()
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let gitRoot = URL(fileURLWithPath: "/tmp/r")
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "b")
+    let store = Self.makeStore(clock: clock) { client in
+      client.batchPullRequests = { _, _, _, _ in
+        Issue.record("no fetch should fire once the poll is paused")
+        return [:]
+      }
+    }
+    await store.send(.pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.pollTarget = projectID
+      $0.projectGitRoots[projectID] = gitRoot
+      $0.projectWorktreePairs[projectID] = [pair]
+      $0.projectByWorktree[wid] = projectID
+    }
+    await store.send(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])) {
+      $0.pollTarget = nil
+    }
+    // The armed tick was cancelled; advancing well past the cadence fires nothing.
+    await clock.advance(by: .seconds(120))
+  }
+
+  @Test
+  func pollCadenceIsFastWhenAnyCheckIsRunning() {
+    let batched = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: ["b": Self.snapshot(state: .open, checkStatus: .inProgress, merge: .clean)],
+      seenBranches: ["b"], fetchedAt: Self.fixedDate
+    )
+    #expect(GitHubFeature.pollCadence(for: batched) == GitHubFeature.pollCadenceActive)
+  }
+
+  @Test
+  func pollCadenceIsFastWhenMergeStateUnknown() {
+    let batched = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: ["b": Self.snapshot(state: .open, checkStatus: .completed, merge: .unknown)],
+      seenBranches: ["b"], fetchedAt: Self.fixedDate
+    )
+    #expect(GitHubFeature.pollCadence(for: batched) == GitHubFeature.pollCadenceActive)
+  }
+
+  @Test
+  func pollCadenceIsSlowWhenSettled() {
+    let batched = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: ["b": Self.snapshot(state: .open, checkStatus: .completed, merge: .clean)],
+      seenBranches: ["b"], fetchedAt: Self.fixedDate
+    )
+    #expect(GitHubFeature.pollCadence(for: batched) == GitHubFeature.pollCadenceIdle)
+  }
+
+  @Test
+  func pollCadenceIsSlowWhenNoCachedBatch() {
+    #expect(GitHubFeature.pollCadence(for: nil) == GitHubFeature.pollCadenceIdle)
+  }
+
+  @Test
+  func postMutationSchedulesDelayedProjectRefresh() async {
+    let clock = TestClock()
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let gitRoot = URL(fileURLWithPath: "/tmp/r")
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let snap = Self.stubSnapshot(number: 99, state: .open, headRefName: "feature/x")
+    var seed = GitHubFeature.State()
+    seed.snapshots[wid] = snap
+    seed.projectByWorktree[wid] = projectID
+    seed.projectGitRoots[projectID] = gitRoot
+    seed.projectWorktreePairs[projectID] = [pair]
+    let store = Self.makeStore(initialState: seed, clock: clock) { client in
+      client.merge = { _, _, _ in }
+      client.batchPullRequests = { _, _, _, _ in ["feature/x": snap] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
+    }
+    await store.send(.mergeRequested(wid, prNumber: 99, strategy: .squash, worktreePath: Self.path)) {
+      $0.mutating.insert(wid)
+      $0.worktreePaths[wid] = Self.path
+    }
+    await store.receive(.mergeCompleted(wid, prNumber: 99, .success(.init()))) {
+      $0.mutating.remove(wid)
+    }
+    await store.receive(.delegate(.pullRequestMerged(wid, snapshot: snap)))
+    // Delayed 2 s so GitHub settles the write before we read it back.
+    await clock.advance(by: .seconds(2))
+    await store.receive(
+      .projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: [pair])
+    ) {
+      $0.inFlightFetchProjects.insert(projectID)
+    }
+    await store.receive { action in
+      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
+      return pid == projectID
+    } assert: {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.snapshotsByProject[projectID] = BatchedPullRequests(
+        host: "github.com", owner: "w", repo: "r",
+        byBranch: ["feature/x": snap], seenBranches: ["feature/x"], fetchedAt: Self.fixedDate
+      )
+      $0.snapshots[wid] = snap
+      $0.snapshotLoadedAt[wid] = Self.fixedDate
+    }
+  }
+
+  /// Cadence-predicate fixture: an open/settled/in-flight snapshot in one line.
+  private static func snapshot(
+    state: PullRequestState,
+    checkStatus: CheckStatus,
+    merge: MergeStateStatus
+  ) -> PullRequestSnapshot {
+    PullRequestSnapshot(
+      number: 1, title: "t", state: state, isDraft: false, headRefName: "b",
+      author: "a", additions: 0, deletions: 0, commitCount: 1, mergeable: .mergeable,
+      url: URL(string: "https://github.com/w/r/pull/1")!, updatedAt: fixedDate,
+      checkRollup: [
+        CheckResult(
+          name: "build", status: checkStatus,
+          conclusion: checkStatus == .completed ? .success : nil
+        )
+      ],
+      mergeStateStatus: merge
+    )
   }
 }

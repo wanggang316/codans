@@ -32,13 +32,13 @@ struct TagFilterPopoverFooter: View {
   var sortMode: ProjectSortMode?
   var onSortModeChanged: ((ProjectSortMode) -> Void)?
   var onManualSortRequested: (() -> Void)?
-  /// Sidebar-relocated ActiveAgents toggle. nil = hide the button
+  /// Sidebar-relocated AgentState toggle. nil = hide the button
   /// entirely (used in previews / contexts without a registry wired).
-  var onActiveAgentsTapped: (() -> Void)?
+  var onAgentStateTapped: (() -> Void)?
   /// Drives the toggle glyph (filled when open, outlined when closed)
   /// per design — no color shift, no badge dot, the glyph variant is
   /// the only ambient signal the footer carries.
-  var activeAgentsPanelOpen: Bool = false
+  var agentStatePanelOpen: Bool = false
 
   @State private var isSortPopoverPresented = false
 
@@ -87,14 +87,14 @@ struct TagFilterPopoverFooter: View {
         }
       }
       Spacer()
-      if let onActiveAgentsTapped {
-        Button(action: onActiveAgentsTapped) {
+      if let onAgentStateTapped {
+        Button(action: onAgentStateTapped) {
           // Glyph alone communicates open/closed via outline vs fill;
           // no color shift, no badge dot — keeps the footer button
           // chrome visually quiet so the actual panel content does
           // the signalling.
           Image(
-            systemName: activeAgentsPanelOpen
+            systemName: agentStatePanelOpen
               ? "sparkles.rectangle.stack.fill"
               : "sparkles.rectangle.stack"
           )
@@ -104,11 +104,11 @@ struct TagFilterPopoverFooter: View {
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(activeAgentsPanelOpen ? "Hide agents view" : "Show agents view")
+        .help(agentStatePanelOpen ? "Hide agents view" : "Show agents view")
         .accessibilityLabel(
-          activeAgentsPanelOpen ? "Hide agents view" : "Show agents view"
+          agentStatePanelOpen ? "Hide agents view" : "Show agents view"
         )
-        .accessibilityIdentifier("activeAgents.sidebarToggle")
+        .accessibilityIdentifier("agentState.sidebarToggle")
       }
       if let onRefreshTapped {
         Button(action: onRefreshTapped) {
@@ -125,13 +125,6 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    // Match the sidebar's own background tone so the footer reads as a
-    // continuation of the sidebar rather than a separate material strip.
-    // NSColor.windowBackgroundColor is the same surface AppKit uses for
-    // the sidebar in `.listStyle(.sidebar)`. It is opaque so it survives
-    // fullscreen without the terminal panes bleeding through that an
-    // earlier `.bar` material attempt (HAN-63) exposed.
-    .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private func sortHelpText(for mode: ProjectSortMode) -> String {

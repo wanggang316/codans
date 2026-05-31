@@ -60,6 +60,27 @@ struct SettingsGeneralView: View {
     )
   }
 
+  private var agentsViewDisplayModeBinding: Binding<AgentsViewDisplayMode> {
+    Binding(
+      get: { settingsStore.settings.general.agentsViewDisplayMode },
+      set: { settingsStore.setAgentsViewDisplayMode($0) }
+    )
+  }
+
+  private var agentsViewAutoSortBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.agentsViewAutoSort },
+      set: { settingsStore.setAgentsViewAutoSort($0) }
+    )
+  }
+
+  private var crashReportsEnabledBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.crashReportsEnabled },
+      set: { settingsStore.setCrashReportsEnabled($0) }
+    )
+  }
+
   /// Installed git clients surfaced under "Default Git Viewer". Sourced from the
   /// editor feature's `describe()` cache so only installed apps show up; the
   /// `gitClientPriority` filter walks `EditorRegistry`'s git-tool group in its
@@ -97,11 +118,6 @@ struct SettingsGeneralView: View {
           editorPickerContent
         }
         .pickerStyle(.menu)
-      } footer: {
-        Text(
-          "Used when opening a directory. Falls back to Finder if the chosen editor "
-            + "is uninstalled later."
-        )
       }
 
       Section {
@@ -117,10 +133,35 @@ struct SettingsGeneralView: View {
         )
       }
 
+      Section("Agents View") {
+        Toggle(isOn: agentsViewAutoOpenBinding) {
+          Text("Auto-open")
+          Text("Opens the sidebar panel automatically when an agent is running.")
+        }
+        Toggle(isOn: agentsViewAutoSortBinding) {
+          Text("Auto-sort")
+          Text(
+            "Reorders agents by status — needs input, finished, working, "
+              + "then idle. Off keeps them in the order they appeared."
+          )
+        }
+        Picker("Display Mode", selection: agentsViewDisplayModeBinding) {
+          Text("Normal").tag(AgentsViewDisplayMode.normal)
+          Text("Compact").tag(AgentsViewDisplayMode.compact)
+        }
+        .pickerStyle(.menu)
+      }
+
       Section {
-        Toggle("Auto-open Agents View", isOn: agentsViewAutoOpenBinding)
+        Toggle("Send crash reports", isOn: crashReportsEnabledBinding)
+      } header: {
+        Text("Diagnostics")
       } footer: {
-        Text("The sidebar panel opens automatically when an agent is running.")
+        Text(
+          "Helps fix problems by uploading anonymous crash details when the app "
+            + "stops unexpectedly. No file contents, terminal output, or personal "
+            + "information are sent. A change takes effect after the next launch."
+        )
       }
     }
     .formStyle(.grouped)

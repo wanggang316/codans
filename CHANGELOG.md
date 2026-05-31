@@ -20,6 +20,119 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.3.5] - 2026-05-31
+
+### Added
+
+- **Merge conflicts now stand out on every pull-request surface.** A conflicted PR turns its number, border, and warning triangle red — in the sidebar row and the titlebar badge alike — and the hover popover carries a persistent banner spelling out the conflict, so the blocker is visible the moment the popover opens instead of hiding behind a disabled merge button.
+
+### Changed
+
+- **The diff panel shows one continuous spinner from fetch through render.** Opening a diff no longer flashes a spinner, blanks, then flashes a second one while the renderer warms up — it loads in one smooth pass, and a fast cached diff shows no spinner at all.
+- **The Active Agents list stays steady.** A finishing agent settling back to idle no longer yanks the whole list around; rows hold their place and glide into new positions only when the order genuinely changes. A new Settings → General → "Auto-sort" toggle (on by default) lets you freeze the list to insertion order instead.
+- **The pull-request popover sizes to its content** instead of padding empty space below short PRs.
+
+### Removed
+
+- **The per-pane notification strip is gone.** The amber/green line on individual panes was redundant — panes in the active tab are already on screen — so it's been removed. Project, worktree, and tab roll-up indicators are unchanged.
+
+### Fixed
+
+- **Auto appearance refreshes the whole app again.** Switching Appearance to Auto no longer leaves the terminal palette, window chrome, and sidebar stuck on the previous light or dark scheme; the entire app now follows the system the moment you switch.
+- **The Git Viewer no longer flickers on refresh.** Reloading the Changes or History tab keeps the list, its count, and the refresh button on screen while new data loads, then swaps in place — no more blank-and-refill flash.
+- **The History tab reloads when you switch worktrees** instead of clearing and staying empty.
+- **Worktree row trailing chips line up flush** at the right edge, fixing a ragged margin between rows with and without a PR pill.
+- **The Command Palette no longer lists archived worktrees** as switch targets, matching what the sidebar shows.
+
+## [0.3.4] - 2026-05-30
+
+### Added
+
+- **Pull request badges refresh on their own.** While the app is focused, the sidebar and titlebar PR badges pick up remote changes — CI status, review decisions, merges or closes, and freshly-opened PRs — without a manual refresh. Updates arrive faster while checks are still running and ease off once everything settles; polling pauses entirely when the app is in the background.
+- **Worktree and tab spinners light up for any running work.** Spinners now turn on both while a bound agent is working and while a plain command (make, npm, pytest, …) runs in the foreground — not only for programs that emit their own progress signal.
+- **Close item in the pane right-click menu**, matching ⌘W for a tab that holds more than one pane.
+
+### Changed
+
+- **The diff inspector keeps its open/closed state when you switch worktrees** instead of flipping based on each worktree's remembered setting. It still resets to closed on launch.
+
+### Fixed
+
+- **System appearance no longer gets stuck on the light palette.** In System mode, switching the OS from light to dark (for example at night) now repaints the sidebar chrome immediately instead of waiting for a manual theme toggle.
+- **Active Agents status reads only what the terminal shows.** A completion beep or error tone no longer makes a pane look like it's waiting for input; working and blocked state is derived purely from the rendered terminal.
+- **Active Agents and worktree-header alignment polish:** status icons right-align consistently in compact mode, the project line lines up under the branch name, and the worktree header spaces evenly when the diff inspector is closed.
+
+## [0.3.3] - 2026-05-28
+
+### Added
+
+- **Branch switcher popover.** Click the branch name in the worktree header to open an inline popover listing every local branch with recent-commit context. Switch branches, rename the current branch in place, or see why a branch is blocked — all without leaving the window. Failed switches surface an inline error banner instead of a silent no-op.
+- **History tab in the diff inspector.** A new Changes / History tab pair lives inside the inspector. Selecting a commit renders its full diff in the drawer, the commit message opens in a popover, and the file picker scrolls to the chosen file live.
+- **Custom tab icons.** Right-click a tab chip and pick an SF Symbol; the choice persists across launches. Run-script tabs automatically wear a distinct icon so they're recognisable at a glance.
+- **Compact mode for the Active Agents panel.** Settings → General toggles between full and compact rows, and the panel restores its open / closed state on next launch.
+- **Pull request badge flags merge conflicts.** A PR whose head can no longer merge cleanly into base shows a red warning triangle and red border on its sidebar badge; the hover popover spells out the reason — conflicts, blocked checks, or behind base.
+
+### Changed
+
+- **Worktree header reorganised into two rows** with the pin marker moved next to the branch name; trailing chips slide left smoothly to make room when the diff inspector opens.
+- **Diff inspector redesigned.** Icon-based tab picker, sidebar-tinted material background that matches the project window, dedicated close button on the inspector header, smoother drawer transitions, and a calmer file picker.
+- **Status-bar bell becomes a hover capsule** with a subtle shake when a new notification arrives.
+- **Command-finished notification window widened to 3 seconds**, so a quick keystroke right after the command exits is still treated as user activity instead of registering against the silent prompt.
+- **Active Agents row typography is lighter** and the selected row no longer bolds, matching the rest of the sidebar.
+
+### Fixed
+
+- **Active Agents status stays accurate.** A crashed pane now clears its running flag, and an agent that binds while its pane is already in the foreground is detected reliably instead of getting stuck on idle.
+- **Diff inspector renderer respects the project theme.** The diff body is transparent so the parent Ghostty background shows through instead of a flat white.
+- **Diff Retry actually re-issues the load** instead of leaving the inspector stuck on the error state.
+- **History row hover no longer crashes** the popover animator on rapid mouse-over, and history rows respond to a single click instead of needing a double click.
+
+## [0.3.2] - 2026-05-27
+
+### Added
+
+- **Crash reports on release builds.** Crashes are sent to Sentry so post-release regressions can be diagnosed from telemetry instead of needing a repro from the user.
+- **Per-project name and accent color in Settings → General.** Rename a project for display and tag it with an accent color; the sidebar and header reflect the change live.
+- **Project path under the window title** as a subtitle, so sibling clones of the same repo are distinguishable at a glance.
+- **Live color preview in the terminal theme editor.** Adjusting a theme color updates the preview in real time instead of after the panel closes.
+- **Active Agents detects more agent kinds**, including agents launched as foreground jobs (no daemon), so the panel reflects what's actually running.
+
+### Changed
+
+- **Window chrome reacts immediately to theme changes.** Sidebar tint, window background, unfocused-split dim, and detail safe-area insets all refresh in place when the Ghostty theme reloads or the system flips between light and dark, without needing to reopen a window.
+- **Active Agents panel slides up cleanly from the sidebar footer's top edge** instead of from the window bottom, and no longer paints over the footer or interrupts list scrolling.
+- **Theme picker polish in Settings.** Wider hover area, accent-tinted chevron badge, tighter corner radius and right inset, system-style button background, and right-aligned content match the rest of macOS Settings.
+- **Window minimum width widened to 800pt** so the project-path subtitle has room to render.
+
+### Fixed
+
+- **Run-script keyboard chord targets the currently selected worktree** instead of an arbitrary one.
+- **Settings project name updates on every keystroke** rather than waiting for the field to lose focus.
+- **Color panel close no longer applies a stale empty change** when the close callback fires after the panel resets its color.
+- **Active Agents status is steadier.** A focused pane no longer flips to "finished" prematurely, and a pane's startup progress now reads as idle before the agent has received any input.
+- **Pinned worktree rows drop the orange tint override** in both the sidebar and worktree header so they match the rest of the row treatment.
+- **Sidebar list rows no longer bleed under the footer.** The footer adopts the sidebar's material and Ghostty palette so list content can scroll cleanly without showing through.
+
+## [0.3.1] - 2026-05-25
+
+### Added
+
+- **Homebrew install.** `brew install --cask wanggang316/tap/touch-code` installs the notarized build; the app keeps updating itself through Sparkle.
+- **Copy as Pathname / Copy Branch Name** in the worktree right-click menu. The branch entry hides itself for detached-HEAD or folder-only worktrees.
+
+### Changed
+
+- **Agents View row state is steadier.** The working / waiting / finished / idle indicator no longer pins Claude Code panes on "working" when an idle input prompt redraws. Long thinking and streaming stretches still register, and a crashed agent clears itself within 15 seconds.
+- **Sidebar and toolbar tone follow the terminal palette.** Window chrome reads light or dark from the active Ghostty background so the sidebar no longer clashes with the terminal.
+- **Settings window opens at its compact default size** instead of stretching to fit content.
+
+### Fixed
+
+- **No more black title-bar bleed** when no project is open.
+- **Settings → Appearance** no longer paints a system focus ring around the selected theme tile.
+- **Pending worktree rows align with their siblings** under the project header instead of sitting flush-left.
+- **Agents View sidebar uses the system glass panel material** instead of a flat fill.
+
 ## [0.3.0] - 2026-05-24
 
 ### Added

@@ -733,7 +733,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       removeWorktree: { repoRoot, path in
-        // Strategy (after supacode/GitClient.removeWorktree):
+        // Strategy:
         // 1) Try to relocate the worktree directory to a trash folder so
         //    the UI sees it disappear immediately and `git worktree
         //    prune` can clean the metadata without tripping over git's

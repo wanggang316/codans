@@ -55,13 +55,22 @@ enum CommandPaletteItems {
     return items
   }
 
+  /// One "Switch to Worktree" item per live Worktree across every Project,
+  /// excluding the currently selected one. `subtitle` carries the Project
+  /// name so the fuzzy scorer's subtitle band matches a Project-name query —
+  /// typing a Project's name surfaces all of that Project's switch targets
+  /// without a dedicated Project row. Archived Worktrees are omitted (they're
+  /// soft-hidden from the sidebar and reachable only via the Archived sheet);
+  /// deleted Worktrees never reach here because deletion drops them from the
+  /// catalog.
   private static func worktreeSwitchItems(
     selection: HierarchySelection,
     catalog: Catalog
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = []
     for project in catalog.projects {
-      for worktree in project.worktrees where worktree.id != selection.worktreeID {
+      for worktree in project.worktrees
+      where worktree.id != selection.worktreeID && !worktree.archived {
         items.append(
           CommandPaletteItem(
             id: "worktree.select.\(worktree.id.raw.uuidString)",

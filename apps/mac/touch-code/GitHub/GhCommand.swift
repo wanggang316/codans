@@ -21,17 +21,6 @@ nonisolated enum GhCommand {
     (["auth", "status", "--json", "hosts"], [0, 1])
   }
 
-  /// `gh pr view <branch> --json <fields>`. Exit 0 → PR exists; exit 1 → no PR for this
-  /// branch (parsed as `.notAPullRequest` by the caller).
-  static func pullRequestView(branch: String) -> (arguments: [String], expectedExitCodes: Set<Int32>) {
-    let fields = [
-      "number", "title", "state", "isDraft", "headRefName",
-      "author", "additions", "deletions", "commits",
-      "mergeable", "url", "updatedAt",
-    ].joined(separator: ",")
-    return (["pr", "view", branch, "--json", fields], [0, 1])
-  }
-
   /// `gh run list --branch <branch> --limit 1 --json <fields>`. Returns the latest
   /// workflow run for the branch. Empty array → no runs yet (caller returns nil).
   static func runListLatest(branch: String) -> (arguments: [String], expectedExitCodes: Set<Int32>) {

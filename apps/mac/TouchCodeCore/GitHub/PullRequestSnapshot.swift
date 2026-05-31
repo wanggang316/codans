@@ -142,6 +142,17 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
   }
 }
 
+extension PullRequestSnapshot {
+  /// True when either signal indicates the head branch no longer merges cleanly into the
+  /// base. We check both because the v1 `gh pr view` parser only populates `mergeable`,
+  /// while the v2 batched GraphQL parser also populates the richer `mergeStateStatus`.
+  /// Lives on the model so the sidebar pill, the titlebar pill, and the popover banner
+  /// all classify "conflicted" identically instead of each rolling their own predicate.
+  public var hasMergeConflict: Bool {
+    mergeable == .conflicting || mergeStateStatus == .dirty
+  }
+}
+
 /// Lifecycle state of a pull request. Raw values match the GraphQL enum strings that
 /// `gh pr view --json state` emits, so JSON decode is a one-hop pass-through.
 public enum PullRequestState: String, Codable, Sendable, CaseIterable {

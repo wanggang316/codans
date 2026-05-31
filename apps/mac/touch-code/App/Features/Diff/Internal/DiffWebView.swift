@@ -1,6 +1,14 @@
 import SwiftUI
 import WebKit
 
+/// Notification posted by `DiffPanelView` when the user taps a file in
+/// the History-mode picker. Live `DiffWebView` instances subscribe and
+/// scroll the rendered diff to the matching file's section. `userInfo`
+/// carries `path: String`.
+extension Notification.Name {
+  static let diffScrollToFileRequested = Notification.Name("diffScrollToFileRequested")
+}
+
 /// `NSViewRepresentable` host for the vendored YiTong renderer. Loads
 /// `WebAssets/index.html` from the app bundle, registers the
 /// `yitongBridge` script-message handler, and forwards
@@ -39,6 +47,18 @@ struct DiffWebView: NSViewRepresentable {
       webView?.evaluateJavaScript(script, completionHandler: nil)
     }
 
+    // Subscribe to scroll-to-file requests from the History-mode picker.
+    // The observer is held by the coordinator so it lives as long as the
+    // webview and is cleaned up in `dismantleNSView`.
+    context.coordinator.scrollObserver = NotificationCenter.default.addObserver(
+      forName: .diffScrollToFileRequested,
+      object: nil,
+      queue: .main
+    ) { [weak coord = context.coordinator] note in
+      guard let path = note.userInfo?["path"] as? String else { return }
+      coord?.scrollToFile(path: path)
+    }
+
     if let url = Self.indexURL() {
       webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     } else {
@@ -62,6 +82,10 @@ struct DiffWebView: NSViewRepresentable {
     webView.configuration.userContentController.removeScriptMessageHandler(
       forName: DiffWebViewCoordinator.bridgeName
     )
+    if let observer = coordinator.scrollObserver {
+      NotificationCenter.default.removeObserver(observer)
+      coordinator.scrollObserver = nil
+    }
     coordinator.resetSendCache()
   }
 

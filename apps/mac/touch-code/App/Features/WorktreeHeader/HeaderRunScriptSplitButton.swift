@@ -9,14 +9,18 @@ import TouchCodeCore
 /// every menu item route to "Manage Scripts" so users land in a
 /// place where they can create one. Uses
 /// `Menu(content:label:primaryAction:)` so macOS renders the native
-/// split-button chrome — matches supacode's `ScriptMenu` pattern.
+/// split-button chrome.
 ///
 /// Both halves dispatch through `WorktreeHeaderFeature.delegate` so
 /// `RootFeature` owns the `HierarchyClient.runScript` effect.
 struct HeaderRunScriptSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
+  /// Project whose script list the dropdown enumerates. The active
+  /// Worktree is intentionally NOT stored on this view: the chord +
+  /// menu dispatch goes through `RootFeature` which resolves the
+  /// target Worktree from `state.selection` at handle-time, sidestepping
+  /// stale NSMenuItem closure captures on worktree switch.
   let projectID: ProjectID
-  let worktreeID: WorktreeID
   @Environment(SettingsStore.self) private var settingsStore
 
   var body: some View {
@@ -61,8 +65,7 @@ struct HeaderRunScriptSplitButton: View {
       }
     } primaryAction: {
       if let script = primary {
-        store.send(
-          .runScriptTapped(scriptID: script.id, projectID: projectID, worktreeID: worktreeID))
+        store.send(.runScriptTapped(scriptID: script.id))
       } else {
         store.send(.manageScriptsTapped(projectID: projectID))
       }
@@ -105,10 +108,19 @@ struct HeaderRunScriptSplitButton: View {
   @ViewBuilder
   private func menuButton(for script: ScriptDefinition) -> some View {
     let button = Button {
-      store.send(
-        .runScriptTapped(scriptID: script.id, projectID: projectID, worktreeID: worktreeID))
+      store.send(.runScriptTapped(scriptID: script.id))
     } label: {
-      Label(script.displayName, systemImage: script.resolvedSystemImage)
+      // Native menu items render their icon as a monochrome template, so the
+      // tint must be baked into a non-template image (see `menuIcon`) — a
+      // plain `Label(_:systemImage:)` would drop the script's colour.
+      Label {
+        Text(script.displayName)
+      } icon: {
+        ScriptTintColorPalette.menuIcon(
+          systemName: script.resolvedSystemImage,
+          tint: script.resolvedTintColor
+        )
+      }
     }
     if let chord = script.keyboardShortcut, chord.isEnabled, chord.keyCode != 0,
       let key = ShortcutDisplay.keyEquivalent(for: chord.keyCode)

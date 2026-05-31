@@ -51,6 +51,25 @@ final class PaneSurface {
   /// the C→main-queue hop).
   nonisolated(unsafe) private let paneIDUserdata: UnsafeMutablePointer<UInt8>
 
+  /// Defensive auto-reset for OSC 9;4 progress reports. Any non-REMOVE
+  /// state schedules this task; if no fresh progress event arrives
+  /// within `progressResetTimeout`, the task forces `progressState` /
+  /// `progressValue` back to "cleared" and fan-outs a synthetic REMOVE
+  /// event so downstream listeners (running-pane set, progress bar,
+  /// AgentStateStore) recover from an emitter that died or crashed
+  /// without clearing its own state. Cancelled (and replaced) on
+  /// every fresh progress delta, in `close()`, and in `deinit`.
+  /// `nonisolated(unsafe)` matches the surrounding C-handle storage so
+  /// the deinit can cancel without re-entering the MainActor.
+  nonisolated(unsafe) private var progressResetTask: Task<Void, Never>?
+
+  /// Window after which a non-REMOVE OSC 9;4 state is forcibly
+  /// cleared if the emitter has gone silent. Long enough not to step
+  /// on slow tool calls (Claude Code wrapping a multi-minute bash
+  /// command), short enough that an emitter crash doesn't visually
+  /// pin the UI for the rest of the session.
+  private static let progressResetTimeout: Duration = .seconds(15)
+
   /// Engine-provided close callback. Runs when the libghostty surface
   /// reports close (child exited or crashed). `processAlive` is true for
   /// user-initiated close with a live child, false for child-exit triggered
@@ -162,6 +181,7 @@ final class PaneSurface {
   // can race us. Callers still call `close()` first via the close path —
   // this is a leak-prevention safety net.
   deinit {
+    progressResetTask?.cancel()
     if let surface {
       ghostty_surface_free(surface)
     }
@@ -199,6 +219,8 @@ final class PaneSurface {
   /// Explicit teardown. Idempotent. After `close()`, the surface handle is
   /// nil and all subsequent operations no-op.
   func close() {
+    progressResetTask?.cancel()
+    progressResetTask = nil
     guard let surface else { return }
     ghostty_surface_free(surface)
     self.surface = nil
@@ -208,6 +230,20 @@ final class PaneSurface {
   func setFocus(_ focused: Bool) {
     guard let surface else { return }
     ghostty_surface_set_focus(surface, focused)
+  }
+
+  func foregroundProcessGroupID() -> Int32? {
+    guard let surface else { return nil }
+    let value = ghostty_surface_foreground_process_group(surface)
+    guard value > 0, value <= UInt64(Int32.max) else { return nil }
+    return Int32(value)
+  }
+
+  func childProcessID() -> Int32? {
+    guard let surface else { return nil }
+    let value = ghostty_surface_child_process_id(surface)
+    guard value > 0, value <= UInt64(Int32.max) else { return nil }
+    return Int32(value)
   }
 
   /// Apply a color scheme to this surface and request a redraw. No-op after `close()`.
@@ -277,6 +313,10 @@ final class PaneSurface {
   }
 
   enum ReadExtent {
+    /// The current interaction region only — excludes scrollback above the
+    /// live screen. Preferred for agent-activity classification so a prompt
+    /// scrolled into history can no longer be mistaken for a live one.
+    case active
     case viewport
     case screen
   }
@@ -286,6 +326,7 @@ final class PaneSurface {
     var text = ghostty_text_s()
     let tag: ghostty_point_tag_e =
       switch extent {
+      case .active: GHOSTTY_POINT_ACTIVE
       case .viewport: GHOSTTY_POINT_VIEWPORT
       case .screen: GHOSTTY_POINT_SCREEN
       }
@@ -613,6 +654,7 @@ final class PaneSurface {
     case .progress(let state, let value):
       info.progressState = state
       info.progressValue = value
+      scheduleProgressReset(currentState: state)
 
     case .bellRang:
       info.bellCount &+= 1
@@ -625,5 +667,39 @@ final class PaneSurface {
     case .childExited(let code):
       info.lastChildExitCode = code
     }
+  }
+
+  // MARK: - Progress auto-reset
+
+  /// Manage `progressResetTask` against the latest OSC 9;4 state.
+  /// `REMOVE` cancels the pending reset (the emitter cleared on its
+  /// own); any other state cancels the previous timer and schedules a
+  /// fresh one. If the timer fires, the surface synthesises a REMOVE
+  /// event so the rest of the system (running-pane set, progress
+  /// overlay, AgentStateStore, sidebar busy glyph) recovers from a
+  /// stuck emitter without manual intervention.
+  private func scheduleProgressReset(currentState: UInt32) {
+    progressResetTask?.cancel()
+    if currentState == GHOSTTY_PROGRESS_STATE_REMOVE.rawValue {
+      progressResetTask = nil
+      return
+    }
+    progressResetTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: Self.progressResetTimeout)
+      guard let self, !Task.isCancelled else { return }
+      self.forceProgressReset()
+    }
+  }
+
+  /// Apply a synthetic OSC 9;4 REMOVE: update local info and fan-out
+  /// on the engine's event stream so every downstream consumer sees
+  /// the same clear. Re-uses the same `(pane.apply + runtime.emit)`
+  /// shape the decoder uses for real progress reports.
+  private func forceProgressReset() {
+    let cleared = PaneInfoDelta.progress(state: GHOSTTY_PROGRESS_STATE_REMOVE.rawValue, value: nil)
+    info.progressState = GHOSTTY_PROGRESS_STATE_REMOVE.rawValue
+    info.progressValue = nil
+    progressResetTask = nil
+    runtime.emitInfoChanged(paneID, cleared)
   }
 }

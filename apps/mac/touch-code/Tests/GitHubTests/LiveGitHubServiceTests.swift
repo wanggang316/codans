@@ -57,99 +57,6 @@ struct LiveGitHubServiceTests {
     }
   }
 
-  // MARK: - pullRequest
-
-  @Test
-  func pullRequestHappyPathDecodesSnapshot() async throws {
-    let data = try Self.loadFixture("gh-pr-view-open")
-    let runner = RecordingCommandRunner(outcomes: [
-      .exited(code: 0, stdout: data, stderr: Data(), stdoutOverflow: false)
-    ])
-    let service = Self.makeService(runner: runner)
-    let snapshot = try await service.pullRequest(
-      branch: "feature/github01", worktreePath: Self.worktreePath
-    )
-    let unwrapped = try #require(snapshot)
-    #expect(unwrapped.number == 1234)
-    let calls = await runner.calls
-    #expect(calls.first?.cwd == Self.worktreePath)
-    #expect(calls.first?.arguments.prefix(3) == ["pr", "view", "feature/github01"])
-  }
-
-  @Test
-  func pullRequestReturnsNilWhenStderrSaysNoPR() async throws {
-    let stderr = Data("no pull requests found for branch 'foo'\n".utf8)
-    let runner = RecordingCommandRunner(outcomes: [
-      .exited(code: 1, stdout: Data(), stderr: stderr, stdoutOverflow: false)
-    ])
-    let service = Self.makeService(runner: runner)
-    let snapshot = try await service.pullRequest(branch: "foo", worktreePath: Self.worktreePath)
-    #expect(snapshot == nil)
-  }
-
-  @Test
-  func pullRequestThrowsNotAuthenticatedOnAuthStderr() async {
-    let stderr = Data("gh: not logged in to github.com. run `gh auth login`\n".utf8)
-    let runner = RecordingCommandRunner(outcomes: [
-      .exited(code: 1, stdout: Data(), stderr: stderr, stdoutOverflow: false)
-    ])
-    let service = Self.makeService(runner: runner)
-    await #expect(throws: GitHubError.self) {
-      _ = try await service.pullRequest(branch: "foo", worktreePath: Self.worktreePath)
-    }
-  }
-
-  @Test
-  func pullRequestThrowsTimeoutOnRunnerTimeout() async {
-    let runner = RecordingCommandRunner(outcomes: [.timedOut])
-    let service = Self.makeService(runner: runner)
-    await #expect(throws: GitHubError.timeout) {
-      _ = try await service.pullRequest(branch: "foo", worktreePath: Self.worktreePath)
-    }
-  }
-
-  @Test
-  func pullRequestThrowsNotInstalledOnSpawnFailed() async {
-    let runner = RecordingCommandRunner(outcomes: [
-      .spawnFailed(reason: "binary not found: /usr/local/bin/gh")
-    ])
-    let service = Self.makeService(runner: runner)
-    await #expect(throws: GitHubError.notInstalled) {
-      _ = try await service.pullRequest(branch: "foo", worktreePath: Self.worktreePath)
-    }
-  }
-
-  @Test
-  func pullRequestThrowsRateLimitedOnRateLimitStderr() async {
-    let stderr = Data("API rate limit exceeded for user ID\n".utf8)
-    let runner = RecordingCommandRunner(outcomes: [
-      .exited(code: 1, stdout: Data(), stderr: stderr, stdoutOverflow: false)
-    ])
-    let service = Self.makeService(runner: runner)
-    await #expect {
-      _ = try await service.pullRequest(branch: "foo", worktreePath: Self.worktreePath)
-    } throws: { error in
-      guard let ghError = error as? GitHubError else { return false }
-      if case .rateLimited = ghError { return true }
-      return false
-    }
-  }
-
-  @Test
-  func pullRequestThrowsOtherOnOutputOverflow() async {
-    let runner = RecordingCommandRunner(outcomes: [
-      .exited(code: 0, stdout: Data("..".utf8), stderr: Data(), stdoutOverflow: true)
-    ])
-    let service = Self.makeService(runner: runner)
-    await #expect {
-      _ = try await service.pullRequest(branch: "foo", worktreePath: Self.worktreePath)
-    } throws: { error in
-      guard let ghError = error as? GitHubError else { return false }
-      if case .other = ghError { return true }
-      return false
-    }
-  }
-
   // MARK: - latestWorkflowRun
 
   @Test
@@ -226,15 +133,15 @@ struct LiveGitHubServiceTests {
 
   @Test
   func envIsAllowlistedToPathHomeAndForcedLC() async throws {
-    // Exercises the env-filter via any `runExpecting` call — pullRequest is convenient
-    // because gh-pr-view-open is already a first-class fixture.
+    // Exercises the env-filter via any `runExpecting` call — latestWorkflowRun is
+    // convenient because gh-run-list-success is already a first-class fixture.
     let runner = RecordingCommandRunner(outcomes: [
       .exited(
-        code: 0, stdout: try Self.loadFixture("gh-pr-view-open"),
+        code: 0, stdout: try Self.loadFixture("gh-run-list-success"),
         stderr: Data(), stdoutOverflow: false)
     ])
     let service = Self.makeService(runner: runner)
-    _ = try await service.pullRequest(branch: "feature/github01", worktreePath: Self.worktreePath)
+    _ = try await service.latestWorkflowRun(branch: "feature/github01", worktreePath: Self.worktreePath)
     let calls = await runner.calls
     let env = try #require(calls.first?.env)
     #expect(env["LC_ALL"] == "en_US.UTF-8")

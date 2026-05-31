@@ -5,7 +5,7 @@ import SwiftUI
 import TouchCodeCore
 
 private let autoOpenLogger = Logger(
-  subsystem: "com.touch-code.activeagents", category: "autoOpen"
+  subsystem: "com.touch-code.agentstate", category: "autoOpen"
 )
 
 /// Renders the sidebar: a sticky toolbar with "+ Add Project" and a "⋯"
@@ -39,27 +39,54 @@ struct HierarchySidebarView: View {
   /// installed editor). Nil in previews — the submenu falls back to the
   /// shared "Open in Editor" entry alone.
   var editorStore: StoreOf<EditorFeature>?
-  /// ActiveAgents registry. Drives the bottom expandable panel + the
+  /// AgentState registry. Drives the bottom expandable panel + the
   /// 🤖-style toggle button in the footer. Optional so previews / tests
   /// without `AppState.bringUp` wiring omit the panel and the button.
-  var activeAgentsRegistry: AgentRegistry?
-  /// Row-tap dispatcher for the ActiveAgents panel — routes to
-  /// `RootFeature.activeAgents(.rowTapped)`. Closure (rather than direct
+  var agentStateStore: AgentStateStore?
+  /// Row-tap dispatcher for the AgentState panel — routes to
+  /// `RootFeature.agentState(.rowTapped)`. Closure (rather than direct
   /// store write) keeps Sidebar decoupled from Root.
-  var onActiveAgentsRowTapped: (PaneID) -> Void = { _ in }
-  /// Whether the ActiveAgents bottom panel is currently expanded. Driven
-  /// by the footer toggle; closed by default each launch.
-  @State private var activeAgentsPanelOpen = false
+  var onAgentStateRowTapped: (PaneID) -> Void = { _ in }
+  /// Whether the AgentState bottom panel is currently expanded.
+  /// Persisted so the footer toggle's last state survives a relaunch —
+  /// users who keep the panel open during long sessions should not
+  /// re-toggle it after every restart. The auto-open path in
+  /// `onChange(anyAgentNeedsAttention)` still re-opens a closed panel
+  /// when a fresh agent demands attention.
+  ///
+  /// The `@AppStorage` key keeps the legacy `activeAgents.*` string after
+  /// the module was renamed to AgentState, so users' remembered panel
+  /// open/height survives the rename instead of silently resetting.
+  @AppStorage("activeAgents.panel.open") private var agentStatePanelOpen = false
   /// Persisted panel height. The drag handle in
-  /// `ActiveAgentsSidebarPanel` writes to this; the host clamps the
+  /// `AgentStateSidebarPanel` writes to this; the host clamps the
   /// rendered height to `[minHeight, 0.5 * sidebarHeight]`.
-  @AppStorage("activeAgents.panel.height") private var activeAgentsPanelHeight: Double = 200
+  @AppStorage("activeAgents.panel.height") private var agentStatePanelHeight: Double = 200
   /// Live sidebar height, captured via a background GeometryReader on
-  /// `treeBody`. Used to clamp the ActiveAgents panel to at most half
+  /// `treeBody`. Used to clamp the AgentState panel to at most half
   /// the sidebar so the worktree list always retains the other half.
   /// Defaults to a sensible value so the first render before the
   /// background measure lands doesn't pop a too-tall panel.
   @State private var sidebarHeightObservation: Double = 600
+
+  /// Min / max height bounds for the AgentState panel. Kept as a
+  /// type-level constant so both `AgentStateSidebarPanel`'s own clamp
+  /// and the List's bottom spacer-row height share one source.
+  private static let agentStatePanelMinHeight: Double = 140
+
+  /// Effective panel height after clamping to `[minHeight, 0.5 *
+  /// sidebarHeight]`. Mirrors the clamp inside
+  /// `AgentStateSidebarPanel.clampedHeight` so the spacer row inside
+  /// the List can reserve exactly the height the panel occupies. Note:
+  /// `.contentMargins(.bottom, _, for: .scrollContent)` is the
+  /// ScrollView-native modifier for this purpose but `List(.sidebar)`
+  /// on macOS 26 ignores it — see commit 6c1c3631. The invisible
+  /// `Color.clear` row inside `treeBody`'s List is the workaround.
+  private var clampedAgentStatePanelHeight: Double {
+    let minH = Self.agentStatePanelMinHeight
+    let maxH = max(minH, sidebarHeightObservation * 0.5)
+    return min(max(agentStatePanelHeight, minH), maxH)
+  }
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
@@ -159,7 +186,7 @@ struct HierarchySidebarView: View {
 
   var body: some View {
     let catalog = hierarchyManager.catalog
-    // Force `@Observable` subscription to `agentRegistry.entries` even
+    // Force `@Observable` subscription to `agentStateStore.entries` even
     // while the panel is closed and `registry` is never unwrapped in
     // the conditional below. Without this top-level read the body
     // never re-evaluates on entry mutations, and the `.onChange(of:
@@ -179,221 +206,235 @@ struct HierarchySidebarView: View {
       uniqueKeysWithValues: catalog.projects.map { ($0.id, $0.name) }
     )
 
-    // Sidebar body is the List, with a compact filter footer mounted at
-    // the bottom `.safeAreaInset` — a single trailing glyph that opens an
-    // upward popover listing the available tag filters.
-    //
-    // A second piece of bottom inset (above the footer, still inside the
-    // same `.safeAreaInset`) hosts the ActiveAgents panel when expanded.
-    // Stacking both in one VStack keeps the safe-area accounting in sync
-    // — the List automatically shrinks by the panel + footer total so
-    // worktree rows never get clipped behind them.
-    treeBody(projects: visibleProjects)
-      .background(
-        GeometryReader { proxy in
-          Color.clear.preference(
-            key: SidebarHeightPreferenceKey.self,
-            value: proxy.size.height
+    // Sidebar body: the upper ZStack is the only area the
+    // AgentState panel may draw into. Clipping this region is
+    // essential on macOS 26: List overlays can paint past their
+    // allocated frame while a bottom move transition is entering, so
+    // an unclipped panel visually covers the footer sibling below.
+    // With the panel mounted inside this clipped slot, its bottom
+    // transition is cut at the footer's top edge and reads as sliding
+    // up from beneath the fixed footer.
+    VStack(spacing: 0) {
+      ZStack(alignment: .bottom) {
+        treeBody(
+          projects: visibleProjects,
+          bottomInsetHeight: agentStatePanelOpen ? clampedAgentStatePanelHeight : 0
+        )
+          .background(
+            GeometryReader { proxy in
+              Color.clear.preference(
+                key: SidebarHeightPreferenceKey.self,
+                value: proxy.size.height
+              )
+            }
           )
+          .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
+            sidebarHeightObservation = newHeight
+          }
+
+        if agentStatePanelOpen, let registry = agentStateStore {
+          AgentStateSidebarPanel(
+            registry: registry,
+            resolveSourcePath: { paneID in
+              resolveAgentStateSourcePath(
+                paneID: paneID,
+                catalog: hierarchyManager.catalog
+              )
+            },
+            focusedPaneID: currentlyFocusedPaneID(),
+            onTapRow: { paneID in
+              // Panel stays open after a row tap — the user often
+              // fan-jumps between agents and re-opening the panel
+              // each time is friction.
+              onAgentStateRowTapped(paneID)
+            },
+            onClose: {
+              withAnimation(.easeOut(duration: 0.18)) {
+                agentStatePanelOpen = false
+              }
+            },
+            height: $agentStatePanelHeight,
+            minHeight: Self.agentStatePanelMinHeight,
+            maxHeight: max(Self.agentStatePanelMinHeight, sidebarHeightObservation * 0.5)
+          )
+          .zIndex(1)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+      }
+      .clipped()
+      // `agentStatePanelOpen` is backed by `@AppStorage`, whose
+      // change notification is delivered through `UserDefaults` and
+      // does not preserve the SwiftUI Transaction set up by
+      // `withAnimation { ... }` at the mutation site. Attaching an
+      // explicit `.animation(_:value:)` here re-establishes the
+      // transition so the panel slides in/out instead of popping.
+      .animation(.easeOut(duration: 0.18), value: agentStatePanelOpen)
+
+      TagFilterPopoverFooter(
+        tags: catalog.tags,
+        activeFilter: catalog.activeTagFilter,
+        showUntaggedChip: untaggedExists,
+        onAllTapped: { store.send(.allChipTapped) },
+        onTagTapped: { store.send(.tagChipTapped($0)) },
+        onUntaggedTapped: { store.send(.untaggedChipTapped) },
+        onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
+        onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
+        sortMode: catalog.projectSortMode,
+        onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
+        onManualSortRequested: { store.send(.manualSortSheetRequested) },
+        onAgentStateTapped: agentStateStore == nil
+          ? nil
+          : {
+            withAnimation(.easeOut(duration: 0.18)) {
+              agentStatePanelOpen.toggle()
+            }
+          },
+        agentStatePanelOpen: agentStatePanelOpen
+      )
+      .zIndex(2)
+    }
+    // Auto-open the Agents View panel on the rising edge into "any
+    // bound agent is loading" — but only when the user has the
+    // Settings → General toggle on. We do NOT auto-close when the
+    // signal falls back to false; the user keeps the panel open
+    // until they explicitly close it via the footer toggle. The
+    // observed value is a Bool so SwiftUI's `.onChange` fires only
+    // on real transitions (not every dict mutation).
+    .onChange(of: anyAgentNeedsAttention) { oldValue, newValue in
+      autoOpenLogger.debug(
+        "anyAgentNeedsAttention transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.agentStatePanelOpen, privacy: .public)"
+      )
+      guard newValue,
+        settingsStore.settings.general.agentsViewAutoOpen,
+        !agentStatePanelOpen
+      else { return }
+      autoOpenLogger.info("auto-opening Agents View panel")
+      withAnimation(.easeOut(duration: 0.18)) {
+        agentStatePanelOpen = true
+      }
+    }
+    .sheet(
+      isPresented: Binding(
+        get: { store.manualSortSheet != nil },
+        set: { isPresented in
+          if !isPresented {
+            store.send(.manualSortCancelled)
+          }
         }
       )
-      .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
-        sidebarHeightObservation = newHeight
-      }
-      .safeAreaInset(edge: .bottom, spacing: 0) {
-        VStack(spacing: 0) {
-          if activeAgentsPanelOpen, let registry = activeAgentsRegistry {
-            ActiveAgentsSidebarPanel(
-              registry: registry,
-              resolveSourcePath: { paneID in
-                resolveActiveAgentsSourcePath(
-                  paneID: paneID,
-                  catalog: hierarchyManager.catalog
-                )
-              },
-              focusedPaneID: currentlyFocusedPaneID(),
-              onTapRow: { paneID in
-                // Panel stays open after a row tap — the user often
-                // fan-jumps between agents and re-opening the panel
-                // each time is friction.
-                onActiveAgentsRowTapped(paneID)
-              },
-              onClose: {
-                withAnimation(.easeOut(duration: 0.18)) {
-                  activeAgentsPanelOpen = false
-                }
-              },
-              height: $activeAgentsPanelHeight,
-              minHeight: 140,
-              maxHeight: max(140, sidebarHeightObservation * 0.5)
-            )
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+    ) {
+      ManualProjectSortSheetView(projectNames: projectNames, store: store)
+    }
+    .toolbar { sidebarToolbarContent }
+    .sheet(
+      isPresented: Binding(
+        get: { store.createWorktreeSheet != nil },
+        set: { isPresented in
+          if !isPresented {
+            store.send(.createWorktreeSheet(.cancelButtonTapped))
           }
-          TagFilterPopoverFooter(
-            tags: catalog.tags,
-            activeFilter: catalog.activeTagFilter,
-            showUntaggedChip: untaggedExists,
-            onAllTapped: { store.send(.allChipTapped) },
-            onTagTapped: { store.send(.tagChipTapped($0)) },
-            onUntaggedTapped: { store.send(.untaggedChipTapped) },
-            onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
-            onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-            sortMode: catalog.projectSortMode,
-            onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
-            onManualSortRequested: { store.send(.manualSortSheetRequested) },
-            onActiveAgentsTapped: activeAgentsRegistry == nil
-              ? nil
-              : {
-                withAnimation(.easeOut(duration: 0.18)) {
-                  activeAgentsPanelOpen.toggle()
-                }
-              },
-            activeAgentsPanelOpen: activeAgentsPanelOpen
-          )
         }
-      }
-      // Auto-open the Agents View panel on the rising edge into "any
-      // bound agent is loading" — but only when the user has the
-      // Settings → General toggle on. We do NOT auto-close when the
-      // signal falls back to false; the user keeps the panel open
-      // until they explicitly close it via the footer toggle. The
-      // observed value is a Bool so SwiftUI's `.onChange` fires only
-      // on real transitions (not every dict mutation).
-      .onChange(of: anyAgentNeedsAttention) { oldValue, newValue in
-        autoOpenLogger.debug(
-          "anyAgentNeedsAttention transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.activeAgentsPanelOpen, privacy: .public)"
-        )
-        guard newValue,
-          settingsStore.settings.general.agentsViewAutoOpen,
-          !activeAgentsPanelOpen
-        else { return }
-        autoOpenLogger.info("auto-opening Agents View panel")
-        withAnimation(.easeOut(duration: 0.18)) {
-          activeAgentsPanelOpen = true
-        }
-      }
-      .sheet(
-        isPresented: Binding(
-          get: { store.manualSortSheet != nil },
-          set: { isPresented in
-            if !isPresented {
-              store.send(.manualSortCancelled)
-            }
-          }
-        )
+      )
+    ) {
+      if let childStore = store.scope(
+        state: \.createWorktreeSheet,
+        action: \.createWorktreeSheet
       ) {
-        ManualProjectSortSheetView(projectNames: projectNames, store: store)
+        CreateWorktreeSheet(store: childStore)
       }
-      .toolbar { sidebarToolbarContent }
-      .sheet(
-        isPresented: Binding(
-          get: { store.createWorktreeSheet != nil },
-          set: { isPresented in
-            if !isPresented {
-              store.send(.createWorktreeSheet(.cancelButtonTapped))
-            }
-          }
-        )
+    }
+    .confirmationDialog(
+      worktreeRemovalTitle,
+      isPresented: Binding(
+        get: { store.pendingWorktreeRemoval != nil },
+        set: { if !$0 { store.send(.worktreeRemoveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove Worktree", role: .destructive) {
+        store.send(.worktreeRemoveConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.worktreeRemoveCancelled)
+      }
+    } message: {
+      Text(
+        "Closes all panes and deletes the Worktree directory, including any uncommitted changes. This cannot be undone."
+      )
+    }
+    .confirmationDialog(
+      projectRemovalTitle,
+      isPresented: Binding(
+        get: { store.pendingProjectRemoval != nil },
+        set: { if !$0 { store.send(.projectRemoveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove Project", role: .destructive) {
+        store.send(.projectRemoveConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.projectRemoveCancelled)
+      }
+    } message: {
+      Text("Removes the Project and closes all its panes. Files on disk are not affected.")
+    }
+    // Archived Worktrees sheet (opened from Project ⋯ menu).
+    .sheet(
+      isPresented: Binding(
+        get: { store.archivedWorktreesSheet != nil },
+        set: { if !$0 { store.send(.archivedWorktreesSheetDismissed) } }
+      )
+    ) {
+      if let childStore = store.scope(
+        state: \.archivedWorktreesSheet,
+        action: \.archivedWorktreesSheet
       ) {
-        if let childStore = store.scope(
-          state: \.createWorktreeSheet,
-          action: \.createWorktreeSheet
-        ) {
-          CreateWorktreeSheet(store: childStore)
-        }
+        ArchivedWorktreesSheet(store: childStore)
       }
-      .confirmationDialog(
-        worktreeRemovalTitle,
-        isPresented: Binding(
-          get: { store.pendingWorktreeRemoval != nil },
-          set: { if !$0 { store.send(.worktreeRemoveCancelled) } }
-        ),
-        titleVisibility: .visible
-      ) {
-        Button("Remove Worktree", role: .destructive) {
-          store.send(.worktreeRemoveConfirmed)
-        }
-        Button("Cancel", role: .cancel) {
-          store.send(.worktreeRemoveCancelled)
-        }
-      } message: {
-        Text(
-          "Closes all panes and deletes the Worktree directory, including any uncommitted changes. This cannot be undone."
-        )
+    }
+    // First-archive explainer (once per session).
+    .confirmationDialog(
+      "Archive this Worktree?",
+      isPresented: Binding(
+        get: { store.pendingArchiveExplainer != nil },
+        set: { if !$0 { store.send(.worktreeArchiveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Archive") {
+        store.send(.worktreeArchiveConfirmed)
       }
-      .confirmationDialog(
-        projectRemovalTitle,
-        isPresented: Binding(
-          get: { store.pendingProjectRemoval != nil },
-          set: { if !$0 { store.send(.projectRemoveCancelled) } }
-        ),
-        titleVisibility: .visible
-      ) {
-        Button("Remove Project", role: .destructive) {
-          store.send(.projectRemoveConfirmed)
-        }
-        Button("Cancel", role: .cancel) {
-          store.send(.projectRemoveCancelled)
-        }
-      } message: {
-        Text("Removes the Project and closes all its panes. Files on disk are not affected.")
+      Button("Cancel", role: .cancel) {
+        store.send(.worktreeArchiveCancelled)
       }
-      // Archived Worktrees sheet (opened from Project ⋯ menu).
-      .sheet(
-        isPresented: Binding(
-          get: { store.archivedWorktreesSheet != nil },
-          set: { if !$0 { store.send(.archivedWorktreesSheetDismissed) } }
-        )
-      ) {
-        if let childStore = store.scope(
-          state: \.archivedWorktreesSheet,
-          action: \.archivedWorktreesSheet
-        ) {
-          ArchivedWorktreesSheet(store: childStore)
-        }
-      }
-      // First-archive explainer (once per session).
-      .confirmationDialog(
-        "Archive this Worktree?",
-        isPresented: Binding(
-          get: { store.pendingArchiveExplainer != nil },
-          set: { if !$0 { store.send(.worktreeArchiveCancelled) } }
-        ),
-        titleVisibility: .visible
-      ) {
-        Button("Archive") {
-          store.send(.worktreeArchiveConfirmed)
-        }
-        Button("Cancel", role: .cancel) {
-          store.send(.worktreeArchiveCancelled)
-        }
-      } message: {
-        Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
-      }
-      // Prune toast.
-      .alert(
-        "Prune complete",
-        isPresented: Binding(
-          get: { store.pruneToast != nil },
-          set: { if !$0 { store.send(.pruneToastDismissed) } }
-        )
-      ) {
-        Button("OK") { store.send(.pruneToastDismissed) }
-      } message: {
-        Text(store.pruneToast ?? "")
-      }
-      // Lifecycle wrapper failure (archive flag flip / delete teardown).
-      .alert(
-        "Worktree action failed",
-        isPresented: Binding(
-          get: { store.lifecycleErrorToast != nil },
-          set: { if !$0 { store.send(.lifecycleErrorToastDismissed) } }
-        )
-      ) {
-        Button("OK") { store.send(.lifecycleErrorToastDismissed) }
-      } message: {
-        Text(store.lifecycleErrorToast ?? "")
-      }
+    } message: {
+      Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
+    }
+    // Prune toast.
+    .alert(
+      "Prune complete",
+      isPresented: Binding(
+        get: { store.pruneToast != nil },
+        set: { if !$0 { store.send(.pruneToastDismissed) } }
+      )
+    ) {
+      Button("OK") { store.send(.pruneToastDismissed) }
+    } message: {
+      Text(store.pruneToast ?? "")
+    }
+    // Lifecycle wrapper failure (archive flag flip / delete teardown).
+    .alert(
+      "Worktree action failed",
+      isPresented: Binding(
+        get: { store.lifecycleErrorToast != nil },
+        set: { if !$0 { store.send(.lifecycleErrorToastDismissed) } }
+      )
+    ) {
+      Button("OK") { store.send(.lifecycleErrorToastDismissed) }
+    } message: {
+      Text(store.lifecycleErrorToast ?? "")
+    }
   }
 
   // MARK: - Toolbar
@@ -434,7 +475,7 @@ struct HierarchySidebarView: View {
   // MARK: - Tree
 
   @ViewBuilder
-  private func treeBody(projects: [Project]) -> some View {
+  private func treeBody(projects: [Project], bottomInsetHeight: Double) -> some View {
     if projects.isEmpty {
       emptyState
     } else {
@@ -467,6 +508,33 @@ struct HierarchySidebarView: View {
           }
         }
         .listStyle(.sidebar)
+        // Bottom safe-area-inset sized to the live AgentState panel
+        // height (when expanded). Unlike a spacer row, the inset
+        // shrinks the List's underlying `NSScrollView` safe area — so
+        // both the scrollable content AND the overlay scroller stop
+        // above the panel. A spacer row would instead inflate
+        // content-size and leave the scroller trailing behind the
+        // panel (its drag range covers the spacer's blank tail and
+        // the scroller's track is still the full List height).
+        // `.contentMargins(.bottom, _, for: .scrollContent)` is the
+        // ScrollView-native version but `List(.sidebar)` on macOS 26
+        // ignores it — see 6c1c3631. We don't worry about
+        // bleed-through here because the panel (a ZStack sibling) is
+        // a translucent popover material; rows showing through the
+        // inset region are exactly the behind-glass effect we want.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+          if bottomInsetHeight > 0 {
+            Color.clear
+              .frame(height: bottomInsetHeight)
+              .accessibilityHidden(true)
+          }
+        }
+        // Hide the List's own opaque content background so the sidebar
+        // column's system glass overlay shows through — same surface
+        // the floating sidebar samples, so the footer below (rendered
+        // as a sibling in the outer VStack) reads as one continuous
+        // material with the list above it.
+        .scrollContentBackground(.hidden)
         .opacity(sidebarIndentReady ? 1 : 0)
         .background(SidebarIndentZeroer(onReady: { sidebarIndentReady = true }))
         .onChange(of: revealTrigger) { _, _ in
@@ -635,6 +703,11 @@ struct HierarchySidebarView: View {
       onRetry: { store.send(.pendingWorktreeRetryTapped(pending.id)) },
       onDiscard: { store.send(.pendingWorktreeDiscardTapped(pending.id)) }
     )
+    // Match the worktree row's `listRowInsets` so the spinner + name line up
+    // with sibling worktree rows. Without this the row renders flush-left
+    // because the clip-view shift compensated by `leading: 14` (see
+    // `worktreeRow`) is not applied.
+    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
   }
 
@@ -662,7 +735,14 @@ struct HierarchySidebarView: View {
     // doesn't live inside the row's Button.label. Tapping the badge opens the PR popover
     // without also firing the row-selection action. The leading portion of the row is
     // the Button; the trailing badge sits beside it.
-    return HStack(spacing: 6) {
+    // `spacing: 0`, not 6: the trailing accessories own their own leading gap so the
+    // row's rightmost *visible* element always sits flush at the trailing edge. With a
+    // shared HStack spacing, the no-PR rows' 0-pt `WorktreeGitHubBadge` anchor still
+    // claimed 6 pt of spacing after the diff-stats chip, pushing that chip 6 pt inside
+    // the edge while PR-pill rows stayed flush — a ragged right margin. Each accessory
+    // pads its own leading edge; the empty badge anchor pads nothing, so the chip (or
+    // pill) it trails stays flush.
+    return HStack(spacing: 0) {
       rowSelectionButton(
         worktree: worktree, project: project,
         snapshot: snapshot, rollup: rollup,
@@ -684,6 +764,7 @@ struct HierarchySidebarView: View {
             RoundedRectangle(cornerRadius: 3)
               .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
           )
+          .padding(.leading, 6)
           .accessibilityHidden(true)
       }
     }
@@ -729,10 +810,6 @@ struct HierarchySidebarView: View {
     // shared computed property — `gitRoot == nil` + path match is the same
     // pair already used to suppress git affordances elsewhere in this view.
     let isSyntheticWorktree = isMainCheckout && project.gitRoot == nil
-    let roleTint: Color = {
-      if worktree.isPinned { return .orange }
-      return .secondary
-    }()
     // Plain content (no Button wrapping). With native `List(selection:)`,
     // the row's tap is owned by AppKit's NSTableView so the click also
     // promotes the table to first responder — that's what flips the
@@ -741,13 +818,16 @@ struct HierarchySidebarView: View {
     // click, leave the table off-responder, and the row would stay grey
     // even though state moved.
     let isLifecycleInProgress = store.lifecycleInProgressWorktrees.contains(worktree.id)
-    // Aggregated "any pane in this worktree is executing" signal. Reads through
-    // `HierarchyManager.worktreeIsDirty(_:)`, an `@Observable` getter, so the
-    // spinner appears/disappears automatically as OSC 9;4 progress reports flip
-    // `runningPanes`. Rendered at the leading icon slot (replacing
-    // WorktreeRowIcon) so the row's running indicator lives in the same place
-    // as the lifecycle spinner — one consistent "this row is busy" affordance.
-    let isExecuting = hierarchyManager.worktreeIsDirty(worktree.id)
+    // Aggregated "any pane in this worktree is busy" signal — the union of two
+    // sources: (1) the terminal signal via `HierarchyManager.worktreeIsDirty(_:)`
+    // (OSC 9;4 progress ∪ a running foreground command), and (2) any bound agent
+    // rendered as `.working`. Agents are excluded from the terminal signal (they
+    // stay foreground for their whole session), so this OR is what lights the row
+    // while an agent works without emitting OSC 9;4. Both reads are `@Observable`,
+    // so the spinner tracks either source automatically. Rendered at the leading
+    // icon slot (replacing WorktreeRowIcon) — one consistent "busy" affordance.
+    let isExecuting =
+      hierarchyManager.worktreeIsDirty(worktree.id) || anyAgentWorking(in: worktree)
     let content = HStack(spacing: 6) {
       Group {
         if isLifecycleInProgress {
@@ -767,7 +847,7 @@ struct HierarchySidebarView: View {
             .accessibilityLabel("Worktree has a running command")
         } else {
           WorktreeRowIcon(
-            snapshot: snapshot, rollup: rollup, isSelected: isSelected, roleTint: roleTint,
+            snapshot: snapshot, rollup: rollup, isSelected: isSelected,
             isSynthetic: isSyntheticWorktree,
             hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
               && settingsStore.settings.notifications.worktreeBellEnabled,
@@ -855,7 +935,26 @@ struct HierarchySidebarView: View {
     }
     .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
 
-    // Group 2 — Worktree lifecycle. Hidden for the main checkout (W-Q3
+    // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
+    // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
+    // worktrees, detached HEAD) so the menu never offers an empty copy.
+    Divider()
+    Button {
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(worktree.path, forType: .string)
+    } label: {
+      Label("Copy as Pathname", systemImage: "doc.on.doc")
+    }
+    if let branch = worktree.branch {
+      Button {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(branch, forType: .string)
+      } label: {
+        Label("Copy as Branch Name", systemImage: "doc.on.doc")
+      }
+    }
+
+    // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
     // guard: cannot pin / archive / remove the project's root worktree).
     if !isMainCheckout {
       Divider()
@@ -956,7 +1055,7 @@ struct HierarchySidebarView: View {
           }
         }
       } label: {
-        Label("Open in", systemImage: "arrow.up.forward.app")
+        Text("Open in")
       }
     }
   }
@@ -1091,6 +1190,10 @@ struct HierarchySidebarView: View {
           store.send(.delegate(.openGitViewerRequested(projectID: projectID, worktreeID: worktreeID)))
         }
       )
+      // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
+      // not trailing, so the chip's right edge stays flush when it's the row's last
+      // visible accessory.
+      .padding(.leading, 6)
     }
   }
 
@@ -1195,7 +1298,7 @@ struct HierarchySidebarView: View {
         settingsStore.mutateGeneral { $0.defaultMergeStrategy = strategy }
       },
       onRetry: {
-        store.send(.refreshRequested(worktreeID, branch: branch, worktreePath: worktreePath))
+        store.send(.worktreeRefreshRequested(worktreeID))
       }
     )
   }
@@ -1205,28 +1308,48 @@ struct HierarchySidebarView: View {
     if snapshot.state == .merged { return "Pull request already merged" }
     if snapshot.state == .closed { return "Pull request closed" }
     if snapshot.isDraft { return "Pull request is a draft" }
+    // Prefer the richer `mergeStateStatus` reason when GitHub computed it; the legacy
+    // `mergeable` only distinguishes mergeable/conflicting/unknown.
+    switch snapshot.mergeStateStatus {
+    case .dirty: return "Pull request has merge conflicts"
+    case .blocked: return "Merge blocked by required checks or reviews"
+    case .behind: return "Behind base branch — update required before merge"
+    case .clean, .hasHooks, .unstable, .draft, .unknown: break
+    }
     if snapshot.mergeable == .conflicting { return "Pull request has merge conflicts" }
     if snapshot.mergeable == .unknown { return "Merge status unknown — try refresh" }
     return nil
   }
 
   /// True iff any bound agent currently demands the user's attention —
-  /// either it's actively working (`.loading`) or it's blocked on a
-  /// user response (`.waitingForInput`). Drives the auto-open of the
-  /// ActiveAgents sidebar panel via `.onChange`, gated by Settings →
+  /// either it's actively working (`.working`) or it's blocked on a
+  /// user response (`.blocked`). Drives the auto-open of the
+  /// AgentState sidebar panel via `.onChange`, gated by Settings →
   /// General → `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange`
   /// fires only on real transitions, not on every entry mutation.
   private var anyAgentNeedsAttention: Bool {
-    guard let entries = activeAgentsRegistry?.entries else { return false }
+    guard let entries = agentStateStore?.entries else { return false }
     return entries.values.contains { entry in
-      entry.state == .loading || entry.state == .waitingForInput
+      entry.state == .working || entry.state == .blocked
+    }
+  }
+
+  /// True iff any pane in `worktree` hosts a bound agent currently `.working`.
+  /// OR'd into the worktree row's busy spinner so render-derived agent activity
+  /// lights the row even when the program emits no OSC 9;4 and the foreground
+  /// job is the agent itself (deliberately excluded from the terminal signal).
+  /// Only `.working` counts — `.blocked` is "waiting on the user", not busy.
+  private func anyAgentWorking(in worktree: Worktree) -> Bool {
+    guard let entries = agentStateStore?.entries, !entries.isEmpty else { return false }
+    return worktree.tabs.contains { tab in
+      tab.panes.contains { entries[$0.id]?.state == .working }
     }
   }
 
   /// Walks the selection chain (project → worktree → tab) and returns
   /// the pane the user is currently focused on, or nil when the chain
   /// breaks (no project selected, archived worktree, etc.). Used by the
-  /// ActiveAgents sidebar panel to highlight the row corresponding to
+  /// AgentState sidebar panel to highlight the row corresponding to
   /// the pane already in view.
   private func currentlyFocusedPaneID() -> PaneID? {
     let catalog = hierarchyManager.catalog
@@ -1553,7 +1676,7 @@ private struct ProjectTagsMenu: View {
   }
 }
 
-/// Captures the sidebar column's live height so the ActiveAgents bottom
+/// Captures the sidebar column's live height so the AgentState bottom
 /// panel can clamp to half of it. Updated each time SwiftUI re-measures
 /// the sidebar background.
 private struct SidebarHeightPreferenceKey: PreferenceKey {
@@ -1564,15 +1687,16 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
 }
 
 /// Walks the catalog for a paneID and returns the (projectName,
-/// worktreeName) pair the ActiveAgents row needs for its breadcrumb.
+/// worktreeName) pair the AgentState row needs for its breadcrumb.
 /// Returns nil when the pane has been torn down between event delivery
 /// and the next popover render — the row renders an em-dash fallback.
-private func resolveActiveAgentsSourcePath(
+private func resolveAgentStateSourcePath(
   paneID: PaneID,
   catalog: Catalog
 ) -> (project: String, worktree: String)? {
   for project in catalog.projects {
-    for worktree in project.worktrees where worktree.tabs.contains(where: { tab in
+    for worktree in project.worktrees
+    where worktree.tabs.contains(where: { tab in
       tab.panes.contains(where: { $0.id == paneID })
     }) {
       return (project.name, worktree.name)

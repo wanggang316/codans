@@ -23,27 +23,27 @@ import TouchCodeCore
 struct ScriptDefinitionRowExpansionTests {
 
   @Test
-  func switchingKindFromCustomToRunPreservesOverrides() {
+  func overridesWinOverKindDefaults() {
     var script = ScriptDefinition(kind: .custom, name: "X", command: "x")
     script.systemImage = "bolt.fill"
     script.tintColor = .red
+    #expect(script.resolvedSystemImage == "bolt.fill")
+    #expect(script.resolvedTintColor == .red)
 
-    // Simulate the user toggling the kind picker to .run while the
-    // expanded buffer still owns the typed override fields. The buffer
-    // is just a `ScriptDefinition`, so we only need to assert the
-    // model preserves the values.
+    // Switching to a predefined kind keeps the per-command overrides —
+    // `kind` only supplies the default when no override is set, so a
+    // `.run` command can still show a custom icon / colour everywhere.
     script.kind = .run
     #expect(script.systemImage == "bolt.fill")
     #expect(script.tintColor == .red)
-    // Resolver hides them at render time for non-.custom kinds:
-    #expect(script.resolvedSystemImage == ScriptKind.run.defaultSystemImage)
-    #expect(script.resolvedTintColor == ScriptKind.run.defaultTintColor)
-
-    // Flip back to .custom — overrides come back without the user
-    // re-typing.
-    script.kind = .custom
     #expect(script.resolvedSystemImage == "bolt.fill")
     #expect(script.resolvedTintColor == .red)
+
+    // Clearing the overrides falls back to the kind default.
+    script.systemImage = nil
+    script.tintColor = nil
+    #expect(script.resolvedSystemImage == ScriptKind.run.defaultSystemImage)
+    #expect(script.resolvedTintColor == ScriptKind.run.defaultTintColor)
   }
 
   @Test

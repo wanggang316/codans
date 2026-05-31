@@ -24,10 +24,16 @@ struct TabBarFeature {
     let currentColor: TabColor?
   }
 
+  struct IconTarget: Identifiable, Equatable {
+    let id: TabID
+    let currentIcon: String?
+  }
+
   @ObservableState
   struct State: Equatable {
     var renameTarget: RenameTarget?
     var colorTarget: ColorTarget?
+    var iconTarget: IconTarget?
   }
 
   enum Action: Equatable {
@@ -50,6 +56,10 @@ struct TabBarFeature {
     case colorDismissed
     case colorSubmitted(
       TabID, color: TabColor?, inWorktree: WorktreeID, inProject: ProjectID)
+    case iconRequested(TabID, currentIcon: String?)
+    case iconDismissed
+    case iconSubmitted(
+      TabID, icon: String?, inWorktree: WorktreeID, inProject: ProjectID)
     case contextMenuCloseOthers(TabID, inWorktree: WorktreeID, inProject: ProjectID)
     case contextMenuCloseToRight(TabID, inWorktree: WorktreeID, inProject: ProjectID)
     case contextMenuCloseAll(inWorktree: WorktreeID, inProject: ProjectID)
@@ -129,6 +139,19 @@ struct TabBarFeature {
       case .colorSubmitted(let tabID, let color, let worktreeID, let projectID):
         try? hierarchyClient.setTabColor(tabID, worktreeID, projectID, color)
         state.colorTarget = nil
+        return .none
+
+      case .iconRequested(let tabID, let currentIcon):
+        state.iconTarget = IconTarget(id: tabID, currentIcon: currentIcon)
+        return .none
+
+      case .iconDismissed:
+        state.iconTarget = nil
+        return .none
+
+      case .iconSubmitted(let tabID, let icon, let worktreeID, let projectID):
+        try? hierarchyClient.setTabIcon(tabID, worktreeID, projectID, icon, .user)
+        state.iconTarget = nil
         return .none
 
       case .contextMenuCloseOthers(let tabID, let worktreeID, let projectID):

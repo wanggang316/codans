@@ -34,5 +34,14 @@
 	<string>bRg+MnS8YhPSuwCkPXyrJ7RvwtYGy2vH0HR+1h/IUXo=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<key>SentryDSN</key>
+	<!-- xcconfig strips `//` as a comment delimiter, so the URL is split:
+	     the literal `https://` lives here (in the plist, where comments
+	     don't apply), and SENTRY_DSN_REST carries the host + path. The
+	     Swift bootstrap reassembles them. An empty REST yields the
+	     bare scheme, which CrashReporting.Configuration rejects as
+	     missing-DSN — exactly the no-op behaviour we want for
+	     contributors without a configured Secrets.xcconfig. -->
+	<string>https://$(SENTRY_DSN_REST)</string>
 </dict>
 </plist>

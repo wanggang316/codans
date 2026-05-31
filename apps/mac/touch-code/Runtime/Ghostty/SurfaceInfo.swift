@@ -95,8 +95,8 @@ final class SurfaceInfo {
   /// `true` when libghostty's last OSC 9;4 report leaves the surface in
   /// any non-`REMOVE` state — i.e. a tracked operation is in flight,
   /// paused at the finish line, or finished with an error worth flagging.
-  /// Mirrors supacode's `isRunningProgressState` predicate so downstream
-  /// "is this pane busy?" logic stays uniform across the two products.
+  /// The single predicate keeps downstream "is this pane busy?" logic
+  /// consistent across consumers.
   var isProgressBusy: Bool {
     progressState != GHOSTTY_PROGRESS_STATE_REMOVE.rawValue
   }

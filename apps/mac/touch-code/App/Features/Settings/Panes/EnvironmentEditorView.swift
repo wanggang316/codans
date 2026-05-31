@@ -1,188 +1,246 @@
+import AppKit
 import SwiftUI
+import TouchCodeCore
 
 /// Reusable key/value editor for `[String: String]` environment-variable
-/// maps. The General pane wraps this with project-id-aware bindings so
+/// maps. The General pane wraps this in a grouped `Section` so each row
+/// renders with native Form chrome (inset card, hairline separators) and
 /// each commit routes through `SettingsWriter.setProjectEnvVar(pid, key,
 /// value)`; M6's per-hook env editor reuses the same component with a
 /// hooks-aware writer.
 ///
-/// Validation rules (Risk R3 from the design doc):
+/// Layout mirrors the System-Settings idiom: every row is a
+/// `LabeledContent` with a two-line label (monospaced KEY over a secondary
+/// subtitle). `builtins` pins read-only rows for the variables touch-code
+/// injects automatically — their subtitle documents the meaning (the
+/// concrete value resolves per-pane at spawn time) and a trailing button
+/// copies the key. Editable rows show the current value as the subtitle,
+/// open an Add/Edit sheet on tap, and carry a trailing remove button.
+///
+/// Add and Edit both push a modal sheet (`EnvVarEditorSheet`) rather than
+/// editing inline, matching the Scripts pane's editor. The sheet enforces
+/// the validation rules (Risk R3 from the design doc):
 ///   - KEY must match POSIX env-var: `^[A-Za-z_][A-Za-z0-9_]*$`.
-///   - KEY must be unique within the editor (the parent map already
-///     guarantees uniqueness on disk; the editor blocks the duplicate
-///     before it commits so the user sees the conflict inline).
+///   - KEY must not collide with a reserved built-in or an existing key.
 ///   - VALUE must not contain `\n` or `\r` — the on-disk JSON is shell-
 ///     sourced by hook runners; embedded newlines break the contract.
 ///
-/// Rows render alphabetically by key on each pass; insertion order is not
-/// preserved (Swift dictionaries don't guarantee it anyway).
+/// Editable rows render alphabetically by key on each pass; insertion
+/// order is not preserved (Swift dictionaries don't guarantee it anyway).
 struct EnvironmentEditorView: View {
   @Binding var envVars: [String: String]
+  /// App-provided, read-only variables pinned above the editable rows.
+  /// Empty for callers (like the hooks editor) that have no built-ins.
+  var builtins: [BuiltinEnvVar] = []
   /// Per-row commit hook. `value == nil` means delete. Wrapping views use
   /// it to fan out into `SettingsWriter.setProjectEnvVar` etc. without
   /// this view knowing about ProjectIDs.
   let onChange: (_ key: String, _ value: String?) -> Void
-  /// Caption rendered under the table. The General pane uses this for the
-  /// "Values are stored in plain text" warning.
-  let footer: String
 
-  @State private var draft: Draft?
+  /// Drives the Add/Edit sheet. Non-nil = sheet visible against this draft.
+  @State private var editing: EnvVarEdit?
 
+  /// Each statement below is a sibling row in the host's `Section`, so the
+  /// grouped Form paints native separators and insets between them.
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      ForEach(sortedKeys, id: \.self) { key in
-        existingRow(key: key)
-      }
+    ForEach(builtins, id: \.self) { builtinRow($0) }
 
-      if let draft {
-        draftRow(draft)
-      }
-
-      HStack {
-        Button {
-          if draft == nil {
-            draft = Draft()
-          }
-        } label: {
-          Label("Add variable", systemImage: "plus")
-        }
-        .buttonStyle(.borderless)
-        Spacer()
-      }
-
-      if !footer.isEmpty {
-        Text(footer)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
+    ForEach(sortedKeys, id: \.self) { key in
+      existingRow(key: key)
     }
+
+    addRow
   }
 
+  /// Editable keys, with any reserved built-in name filtered out so a
+  /// stale on-disk entry can't render twice (once locked, once editable).
   private var sortedKeys: [String] {
-    envVars.keys.sorted()
+    envVars.keys
+      .filter { !BuiltinEnvVar.reservedKeys.contains($0) }
+      .sorted()
+  }
+
+  // MARK: - Built-in rows
+
+  /// Read-only row for an app-provided variable: monospaced key over a
+  /// secondary description, with a trailing button that copies the key to
+  /// the pasteboard. The value is resolved per-pane at spawn time, so the
+  /// row documents the meaning rather than showing a concrete value.
+  @ViewBuilder
+  private func builtinRow(_ builtin: BuiltinEnvVar) -> some View {
+    LabeledContent {
+      Button {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(builtin.key, forType: .string)
+      } label: {
+        Image(systemName: "doc.on.doc")
+          .accessibilityLabel("Copy \(builtin.key)")
+      }
+      .buttonStyle(.borderless)
+      .help("Copy variable name")
+    } label: {
+      Text(builtin.key).monospaced()
+      Text(builtin.summary)
+    }
   }
 
   // MARK: - Existing rows
 
+  /// Editable variable: monospaced key over its current value. Tapping the
+  /// row opens the edit sheet; the trailing button removes it.
   @ViewBuilder
   private func existingRow(key: String) -> some View {
-    let valueBinding = Binding<String>(
-      get: { envVars[key] ?? "" },
-      set: { newValue in
-        if EnvVarValidator.valueHasNewline(newValue) {
-          // Reject silently here — the textfield UI keeps the typed
-          // characters but the commit-on-blur path filters on the same
-          // rule so nothing reaches disk. Inline error rendered below.
-          return
-        }
-        onChange(key, newValue)
-      }
-    )
-
-    HStack(spacing: 8) {
-      Text(key)
-        .font(.system(.body, design: .monospaced))
-        .frame(width: 180, alignment: .leading)
-        .textSelection(.enabled)
-      TextField("value", text: valueBinding)
-        .textFieldStyle(.roundedBorder)
+    let value = envVars[key] ?? ""
+    LabeledContent {
       Button {
         onChange(key, nil)
       } label: {
-        Image(systemName: "xmark.circle.fill")
+        Image(systemName: "minus.circle.fill")
           .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
       }
       .buttonStyle(.borderless)
+      .help("Remove \(key)")
       .accessibilityLabel("Remove \(key)")
+    } label: {
+      Text(key).monospaced()
+      Text(value.isEmpty ? "—" : value)
     }
+    .contentShape(Rectangle())
+    .onTapGesture {
+      editing = EnvVarEdit(key: key, value: value, isNew: false)
+    }
+    .accessibilityAddTraits(.isButton)
+    .accessibilityHint("Edit value")
   }
 
-  // MARK: - Draft row
+  // MARK: - Add row
 
-  @ViewBuilder
-  private func draftRow(_ current: Draft) -> some View {
-    let keyBinding = Binding<String>(
-      get: { current.key },
-      set: { newValue in
-        var next = current
-        next.key = newValue
-        next.recomputeError(existing: envVars)
-        draft = next
-      }
-    )
-    let valueBinding = Binding<String>(
-      get: { current.value },
-      set: { newValue in
-        var next = current
-        next.value = newValue
-        next.recomputeError(existing: envVars)
-        draft = next
-      }
-    )
+  /// Trailing action row that opens the Add sheet. Mirrors the Scripts
+  /// pane's "Add" affordance (text label + `plus`, borderless) and the
+  /// macOS "Add…" rows in System Settings. The Add/Edit sheet is anchored
+  /// here since this row is always present.
+  private var addRow: some View {
+    Button {
+      editing = EnvVarEdit(key: "", value: "", isNew: true)
+    } label: {
+      Label("Add Variable", systemImage: "plus")
+    }
+    .buttonStyle(.borderless)
+    .sheet(item: $editing) { edit in
+      EnvVarEditorSheet(
+        key: edit.key,
+        value: edit.value,
+        isNew: edit.isNew,
+        existing: envVars,
+        onSave: { newKey, newValue in
+          onChange(newKey, newValue)
+          editing = nil
+        },
+        onCancel: { editing = nil }
+      )
+    }
+  }
+}
 
-    VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 8) {
-        TextField("KEY", text: keyBinding)
-          .textFieldStyle(.roundedBorder)
-          .frame(width: 180)
-          .overlay(
-            RoundedRectangle(cornerRadius: 4)
-              .stroke(current.error == nil ? Color.clear : Color.red, lineWidth: 1)
-          )
-        TextField("value", text: valueBinding)
-          .textFieldStyle(.roundedBorder)
-        Button {
-          commitDraft()
-        } label: {
-          Image(systemName: "checkmark.circle.fill")
-            .foregroundStyle(canCommitDraft ? Color.green : Color.secondary)
+/// In-flight Add/Edit draft. `isNew` distinguishes "creating" (KEY is
+/// editable and validated) from "editing" (KEY is fixed; only the value
+/// changes). Identity is the key, with a stable sentinel for the single
+/// new-variable draft so `.sheet(item:)` presents exactly once.
+private struct EnvVarEdit: Identifiable {
+  var key: String
+  var value: String
+  var isNew: Bool
+
+  var id: String { isNew ? "\u{0}new" : key }
+}
+
+/// Modal sheet for adding or editing one environment variable. Body is a
+/// System-Settings-style grouped `Form`; edits accumulate in local state
+/// and commit through `onSave` only when valid. On edit the KEY is
+/// read-only — renaming is a remove-then-add — so the value is the only
+/// mutable field.
+private struct EnvVarEditorSheet: View {
+  let isNew: Bool
+  /// Current map, used to flag a duplicate KEY when adding.
+  let existing: [String: String]
+  let onSave: (_ key: String, _ value: String) -> Void
+  let onCancel: () -> Void
+
+  @State private var key: String
+  @State private var value: String
+
+  init(
+    key: String,
+    value: String,
+    isNew: Bool,
+    existing: [String: String],
+    onSave: @escaping (_ key: String, _ value: String) -> Void,
+    onCancel: @escaping () -> Void
+  ) {
+    self.isNew = isNew
+    self.existing = existing
+    self.onSave = onSave
+    self.onCancel = onCancel
+    self._key = State(initialValue: key)
+    self._value = State(initialValue: value)
+  }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          LabeledContent("Name") {
+            TextField("EXAMPLE_NAME", text: $key)
+              .textFieldStyle(.roundedBorder)
+              .font(.system(.body, design: .monospaced))
+              .frame(minWidth: 220)
+              .disabled(!isNew)
+          }
+          LabeledContent("Value") {
+            TextField("value", text: $value)
+              .textFieldStyle(.roundedBorder)
+              .frame(minWidth: 220)
+          }
+        } footer: {
+          if let error {
+            Text(error).foregroundStyle(.red)
+          } else if isNew {
+            Text("Letters, digits, and underscores; can't start with a digit.")
+              .foregroundStyle(.secondary)
+          }
         }
-        .buttonStyle(.borderless)
-        .disabled(!canCommitDraft)
-        .accessibilityLabel("Commit new variable")
-        Button {
-          draft = nil
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.secondary)
+      }
+      .formStyle(.grouped)
+      .navigationTitle(isNew ? "Add Variable" : "Edit Variable")
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel", action: onCancel)
         }
-        .buttonStyle(.borderless)
-        .accessibilityLabel("Discard new variable")
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Save") {
+            onSave(key, value)
+          }
+          .keyboardShortcut(.defaultAction)
+          .disabled(!canSave)
+        }
       }
-      if let error = current.error {
-        Text(error)
-          .font(.caption)
-          .foregroundStyle(.red)
-      }
     }
+    .frame(minWidth: 440, idealWidth: 500, minHeight: 220)
   }
 
-  private var canCommitDraft: Bool {
-    guard let current = draft else { return false }
-    return current.error == nil && !current.key.isEmpty
+  /// Inline validation message, or nil when the draft is committable. On
+  /// edit only the value rule applies (the KEY field is disabled and
+  /// already valid); on add the full KEY + value rules run.
+  private var error: String? {
+    if isNew {
+      return EnvVarValidator.errorFor(key: key, value: value, existing: existing)
+    }
+    return EnvVarValidator.valueHasNewline(value) ? "Value cannot contain newlines" : nil
   }
 
-  private func commitDraft() {
-    guard let current = draft, current.error == nil, !current.key.isEmpty else {
-      return
-    }
-    onChange(current.key, current.value)
-    draft = nil
-  }
-
-  // MARK: - Draft state
-
-  /// In-flight unsaved row. Held in `@State` so a half-typed KEY does not
-  /// fan out to the parent's onChange until validation passes and the
-  /// user commits.
-  struct Draft: Equatable {
-    var key: String = ""
-    var value: String = ""
-    var error: String?
-
-    mutating func recomputeError(existing: [String: String]) {
-      error = EnvVarValidator.errorFor(key: key, value: value, existing: existing)
-    }
+  private var canSave: Bool {
+    !key.isEmpty && error == nil
   }
 }
 
@@ -202,6 +260,9 @@ nonisolated enum EnvVarValidator {
   ) -> String? {
     if !key.isEmpty, !keyIsValidPOSIX(key) {
       return "Invalid key"
+    }
+    if !key.isEmpty, BuiltinEnvVar.reservedKeys.contains(key) {
+      return "Reserved by touch-code"
     }
     if !key.isEmpty, existing[key] != nil {
       return "Key already exists"

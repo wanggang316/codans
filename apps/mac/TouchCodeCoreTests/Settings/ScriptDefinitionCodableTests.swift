@@ -56,16 +56,16 @@ struct ScriptDefinitionCodableTests {
   }
 
   @Test
-  func resolvedSystemImageIgnoresOverrideForPredefinedKinds() {
-    // "Kind is the contract" — a `.test` script always renders with the
-    // test icon even if a stale `systemImage` value persists on disk.
+  func resolvedSystemImageHonoursOverrideThenKindDefault() {
+    // A per-command override wins over the kind default, regardless of kind —
+    // so a `.run` command can carry a custom icon everywhere it renders.
     let runScript = ScriptDefinition(
       kind: .run,
       name: "x",
       command: "y",
       systemImage: "questionmark"
     )
-    #expect(runScript.resolvedSystemImage == ScriptKind.run.defaultSystemImage)
+    #expect(runScript.resolvedSystemImage == "questionmark")
 
     let customScript = ScriptDefinition(
       kind: .custom,
@@ -75,19 +75,22 @@ struct ScriptDefinitionCodableTests {
     )
     #expect(customScript.resolvedSystemImage == "star.fill")
 
+    // No override → fall back to the kind default.
+    let runWithoutOverride = ScriptDefinition(kind: .run, name: "x", command: "y")
+    #expect(runWithoutOverride.resolvedSystemImage == ScriptKind.run.defaultSystemImage)
     let customWithoutOverride = ScriptDefinition(kind: .custom, name: "x", command: "y")
     #expect(customWithoutOverride.resolvedSystemImage == ScriptKind.custom.defaultSystemImage)
   }
 
   @Test
-  func resolvedTintColorIgnoresOverrideForPredefinedKinds() {
+  func resolvedTintColorHonoursOverrideThenKindDefault() {
     let testScript = ScriptDefinition(
       kind: .test,
       name: "x",
       command: "y",
       tintColor: .red
     )
-    #expect(testScript.resolvedTintColor == ScriptKind.test.defaultTintColor)
+    #expect(testScript.resolvedTintColor == .red)
 
     let customScript = ScriptDefinition(
       kind: .custom,
@@ -96,6 +99,10 @@ struct ScriptDefinitionCodableTests {
       tintColor: .purple
     )
     #expect(customScript.resolvedTintColor == .purple)
+
+    // No override → fall back to the kind default.
+    let testWithoutOverride = ScriptDefinition(kind: .test, name: "x", command: "y")
+    #expect(testWithoutOverride.resolvedTintColor == ScriptKind.test.defaultTintColor)
   }
 
   @Test

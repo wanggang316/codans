@@ -17,6 +17,7 @@ struct SettingsTerminalFeatureTests {
       darkTheme: dark,
       availableLightThemes: ["Light A", "Light B"],
       availableDarkThemes: ["Dark A", "Dark B"],
+      themePreviews: [:],
       warningMessage: warning
     )
   }

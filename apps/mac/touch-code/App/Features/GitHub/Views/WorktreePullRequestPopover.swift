@@ -87,7 +87,7 @@ struct WorktreePullRequestPopover: View {
         settingsStore.mutateGeneral { $0.defaultMergeStrategy = strategy }
       },
       onRetry: {
-        store.send(.refreshRequested(worktreeID, branch: branch, worktreePath: worktreePath))
+        store.send(.worktreeRefreshRequested(worktreeID))
       }
     )
   }
@@ -97,6 +97,14 @@ struct WorktreePullRequestPopover: View {
     if snapshot.state == .merged { return "Pull request already merged" }
     if snapshot.state == .closed { return "Pull request closed" }
     if snapshot.isDraft { return "Pull request is a draft" }
+    // Prefer the richer `mergeStateStatus` reason when GitHub computed it; the legacy
+    // `mergeable` only distinguishes mergeable/conflicting/unknown.
+    switch snapshot.mergeStateStatus {
+    case .dirty: return "Pull request has merge conflicts"
+    case .blocked: return "Merge blocked by required checks or reviews"
+    case .behind: return "Behind base branch — update required before merge"
+    case .clean, .hasHooks, .unstable, .draft, .unknown: break
+    }
     if snapshot.mergeable == .conflicting { return "Pull request has merge conflicts" }
     if snapshot.mergeable == .unknown { return "Merge status unknown — try refresh" }
     return nil

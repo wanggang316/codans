@@ -1,4 +1,4 @@
-# Product Spec: ActiveAgents View
+# Product Spec: AgentState View
 
 **Status:** Draft
 **Author:** Gump (with Claude)
@@ -9,15 +9,15 @@
 
 touch-code 用户通常同时驱动多个 CLI 编程 Agent（Claude Code、Codex CLI、pi），每个 Agent 占用一个 Pane，散布在不同 Worktree 和 Tab 下。用户随时关心的一句话其实只有一个：「**哪个 Agent 现在在干什么？**」——可今天这个问题在 UI 上无解，用户必须 Tab 之间扫一圈，或在通知收件箱里翻历史。
 
-ActiveAgents 是 `WorktreeHeader` 上的一处常驻状态条徽章 + 悬停浮窗。徽章用一句话概括所有 Agent 的当前总览（"Claude Code is waiting for input" / "3 agents working"）；hover 出 popover 列出每条 Agent，含品牌 logo、所属 Project / Worktree 路径、四态运行态（`waitingForInput` / `loading` / `finished` / `idle`），点击行即把所在 Project → Worktree → Tab 级联激活并把 Pane 拉到 first responder。它不是通知系统——通知讲的是"刚刚发生了什么"，ActiveAgents 讲的是"现在正在发生什么"。
+AgentState 是 `WorktreeHeader` 上的一处常驻状态条徽章 + 悬停浮窗。徽章用一句话概括所有 Agent 的当前总览（"Claude Code is waiting for input" / "3 agents working"）；hover 出 popover 列出每条 Agent，含品牌 logo、所属 Project / Worktree 路径、四态运行态（`waitingForInput` / `loading` / `finished` / `idle`），点击行即把所在 Project → Worktree → Tab 级联激活并把 Pane 拉到 first responder。它不是通知系统——通知讲的是"刚刚发生了什么"，AgentState 讲的是"现在正在发生什么"。
 
 ## Context
 
-三类信号迫使 ActiveAgents 立项：
+三类信号迫使 AgentState 立项：
 
 1. **通知收件箱不解决"现在"问题。** 现有 Notifications 系统记录的是 transition（`taskFinished`、`waitingForInput`），收件箱里 17 条历史事件回答不了"我此刻该去看哪个 pane"。
 2. **侧边栏 busy glyph 只覆盖部分情况。** OSC 9;4 busy 指示器只在 Claude Code 这类显式发 progress report 的 Agent 上亮起；且就算亮了，用户也得自己关联到具体哪个 Agent 在跑什么。
-3. **跨 Worktree 切换成本高。** 用户开 3–8 个 Worktree 是常态；当前要确认 Codex 在 worktree A 上的状态，需要先切到 worktree A 才能看到那个 Pane 的内部。ActiveAgents 把跨 Worktree 的 Agent 状态合并到顶部一处。
+3. **跨 Worktree 切换成本高。** 用户开 3–8 个 Worktree 是常态；当前要确认 Codex 在 worktree A 上的状态，需要先切到 worktree A 才能看到那个 Pane 的内部。AgentState 把跨 Worktree 的 Agent 状态合并到顶部一处。
 
 设计与实施细节已在 design doc 和 exec plan 中固化；本 spec 仅负责"产品意图 + AC"两件事，作为下游 user-tests 与 PR 描述的引用源。
 
@@ -27,10 +27,10 @@ ActiveAgents 是 `WorktreeHeader` 上的一处常驻状态条徽章 + 悬停浮�
 - 作为一名 Agent 用户，当任意一个 Agent 在执行 tool call 时，我希望状态栏徽章可视化地动一下（细微 pulse），表示"有东西在跑"——这样我能从余光里捕获活动信号。
 - 作为一名 Agent 用户，hover 状态栏徽章时我希望弹出一个列表，按重要性排序（等输入 > 在跑 > 刚完成 > 闲置）展示所有 Agent，每条带 logo、`<Project> / <Worktree>` 路径、状态图标和相对时间。
 - 作为一名 Agent 用户，点击列表中的一行，应该一步跳到那个 Pane——切换 Project、切换 Worktree、切 Tab、focus pane 全部一次完成。
-- 作为一名 Agent 用户，当 Claude 弹出 permission prompt 等待我同意，我希望 ActiveAgents 立刻标红/标黄那一行（`waitingForInput` 态），状态栏的 headline 也优先反映这条等待，而不是被"在跑"的同类淹没。
+- 作为一名 Agent 用户，当 Claude 弹出 permission prompt 等待我同意，我希望 AgentState 立刻标红/标黄那一行（`waitingForInput` 态），状态栏的 headline 也优先反映这条等待，而不是被"在跑"的同类淹没。
 - 作为一名重启了 touch-code 的用户，我希望已识别过的 Agent Pane 依然显示对应 logo，不用每次重启都重新识别一遍——也就是说"这个 Pane 是 Claude Code"这件事是持久的，"它现在在等输入"这件事是新派生的。
 - 作为一名 Agent 用户，我希望关掉某个 Agent Pane 后，对应那一行立刻从 popover 消失；如果全部关掉，徽章自身也隐藏。
-- 作为一名对**通知**做了 mute 的 Pane 的用户，我仍然希望该 Pane 在 ActiveAgents 视图里显示——mute 是「别打扰我」，ActiveAgents 是「我主动来看」，两件事是独立的。
+- 作为一名对**通知**做了 mute 的 Pane 的用户，我仍然希望该 Pane 在 AgentState 视图里显示——mute 是「别打扰我」，AgentState 是「我主动来看」，两件事是独立的。
 - 作为一名启用了 macOS "Reduce Motion" 的用户，我希望徽章的 pulse 动效自动停掉，不再忽明忽暗。
 
 ## Requirements
@@ -39,7 +39,7 @@ ActiveAgents 是 `WorktreeHeader` 上的一处常驻状态条徽章 + 悬停浮�
 
 #### 状态栏徽章
 
-- [ ] **AA-B1.** 主窗口 `WorktreeHeader` 显示一处 ActiveAgents 徽章；当没有任何被识别的 Agent Pane 存活时徽章完全隐藏（不占位）。
+- [ ] **AA-B1.** 主窗口 `WorktreeHeader` 显示一处 AgentState 徽章；当没有任何被识别的 Agent Pane 存活时徽章完全隐藏（不占位）。
 - [ ] **AA-B2.** 当**仅一个** Agent Pane 存在时，徽章 headline 为 `<DisplayName> is <verb>`，其中 verb ∈ {`waiting for input`, `working`, `finished`, `idle`}。
 - [ ] **AA-B3.** 当存在**多个 Agent 且全为同一状态**时，headline 为 `<count> agents <verb>`。
 - [ ] **AA-B4.** 当存在**多个 Agent 且状态混合**时，headline 形如 `<n1> <verb1> · <n2> <verb2>`，按优先级 `waitingForInput > loading > finished > idle` 截取前两组。
@@ -63,11 +63,11 @@ ActiveAgents 是 `WorktreeHeader` 上的一处常驻状态条徽章 + 悬停浮�
 
 #### Agent 识别与持久化
 
-- [ ] **AA-I1.** v1 识别 **Claude Code**、**OpenAI Codex CLI**、**Inflection pi** 三类 Agent；其他 Pane 不进入 ActiveAgents。
+- [ ] **AA-I1.** v1 识别 **Claude Code**、**OpenAI Codex CLI**、**Inflection pi** 三类 Agent；其他 Pane 不进入 AgentState。
 - [ ] **AA-I2.** 识别成功后，Pane 的 Agent 类型在 catalog 中持久化；touch-code 重启后无需重新识别即可立即在 popover 中显示对应 logo。
 - [ ] **AA-I3.** Pane 关闭（用户主动 close、子进程退出、崩溃）后，该 Pane 的 Agent 绑定自动清除，对应行从 popover 消失。
 - [ ] **AA-I4.** 同一 Pane 内用户从 Claude 退到 shell 顶层 prompt 后再启动 Codex，应当能被重新识别为 Codex（受 shell-integration 可用性约束——若 shell 不发 OSC 133 prompt-end，识别保持原始 sticky 值，不视作 bug）。
-- [ ] **AA-I5.** 未被识别为已知 Agent 的 Pane 不进入 ActiveAgents 视图——徽章/popover 不展示任何 generic / fallback 行。
+- [ ] **AA-I5.** 未被识别为已知 Agent 的 Pane 不进入 AgentState 视图——徽章/popover 不展示任何 generic / fallback 行。
 
 #### 状态派生
 
@@ -79,9 +79,9 @@ ActiveAgents 是 `WorktreeHeader` 上的一处常驻状态条徽章 + 悬停浮�
 
 #### 与通知系统独立
 
-- [ ] **AA-N1.** 用户在 Pane 上启用了"Mute notifications"的，**仍然**出现在 ActiveAgents 视图里——mute 只压制通知 surface，不影响 ActiveAgents 的展示。
-- [ ] **AA-N2.** ActiveAgents 的 `finished` 态的清除条件**不**读取 `NotificationStore.readAt`——即使收件箱中对应的 `taskFinished` 通知未读，只要用户 focus 了该 Pane / 按了键 / 新 output 出现，ActiveAgents 即转为 `idle`。
-- [ ] **AA-N3.** 关闭通知系统所有 surface（系统通知 + Dock badge + 收件箱）不影响 ActiveAgents 的工作。
+- [ ] **AA-N1.** 用户在 Pane 上启用了"Mute notifications"的，**仍然**出现在 AgentState 视图里——mute 只压制通知 surface，不影响 AgentState 的展示。
+- [ ] **AA-N2.** AgentState 的 `finished` 态的清除条件**不**读取 `NotificationStore.readAt`——即使收件箱中对应的 `taskFinished` 通知未读，只要用户 focus 了该 Pane / 按了键 / 新 output 出现，AgentState 即转为 `idle`。
+- [ ] **AA-N3.** 关闭通知系统所有 surface（系统通知 + Dock badge + 收件箱）不影响 AgentState 的工作。
 
 ### Nice to Have
 
@@ -101,21 +101,21 @@ ActiveAgents 是 `WorktreeHeader` 上的一处常驻状态条徽章 + 悬停浮�
 
 > 以下 AC 仅捕获产品意图，作为下游 `/hs-test-spec` 在 `docs/user-tests/active-agents-view.md` 中编写可执行 case 的引用锚点。不嵌入实现细节。
 
-- **AC1.** Given 主窗口当前无任何已识别 Agent Pane，when 用户查看 `WorktreeHeader`，then ActiveAgents 徽章不可见。
+- **AC1.** Given 主窗口当前无任何已识别 Agent Pane，when 用户查看 `WorktreeHeader`，then AgentState 徽章不可见。
 - **AC2.** Given 一个 Pane 已被识别为 Claude Code 且其前台进程刚开始执行 tool call，when 用户查看徽章，then headline 形如 "Claude Code is working" 且徽章图标在 pulse。
 - **AC3.** Given 上述 Pane 的 tool call 结束（busy 解除），when 用户在另一 Pane 中查看徽章，then headline 在合理时间内（受 paneIdle 阈值约束）变为 "Claude Code is finished"。
-- **AC4.** Given Pane 处于 `finished` 状态，when 用户聚焦到该 Pane（点击或键盘切到），then 该 Pane 的状态在 ActiveAgents 中立即变为 `idle`，徽章 headline 同步更新。
+- **AC4.** Given Pane 处于 `finished` 状态，when 用户聚焦到该 Pane（点击或键盘切到），then 该 Pane 的状态在 AgentState 中立即变为 `idle`，徽章 headline 同步更新。
 - **AC5.** Given Claude Code 在 Pane 上弹出 permission prompt，when 用户查看徽章，then headline 形如 "Claude Code is waiting for input"，对应行图标为琥珀色铃铛——即使同一时刻另一 Agent 处于 working，headline 仍以 waiting 优先。
 - **AC6.** Given 同时存在多个 Agent Pane（例如 Claude + Codex + pi），when 用户 hover 徽章 ≥ 250 ms，then popover 弹出，列表行按状态优先级排序展示所有三条。
 - **AC7.** Given popover 已弹出，when 用户将鼠标从徽章平滑移到 popover 内部，then popover 不关闭；when 用户从 popover 移出 ≥ 150 ms，then popover 淡出。
 - **AC8.** Given popover 弹出且光标悬停于一行尚未点击，when 用户点击该行，then 对应 Project / Worktree / Tab 在主窗口中依次激活、Pane 取得 first responder、popover 关闭。
 - **AC9.** Given 一个 Pane 启动时执行命令 `claude`，when 该 Pane 被创建并经过一次事件循环，then 它在 catalog 中被持久化为 `agentKind=claude-code`，且在下次 touch-code 启动后仍带此标记。
-- **AC10.** Given 该 Pane 关闭（子进程退出），when ActiveAgents 视图刷新，then 对应行从 popover 消失，且 catalog 中的 `agentKind` 被清除。
+- **AC10.** Given 该 Pane 关闭（子进程退出），when AgentState 视图刷新，then 对应行从 popover 消失，且 catalog 中的 `agentKind` 被清除。
 - **AC11.** Given 一个 Pane 不匹配任何已知 Agent 模式（如普通 shell、`make`、`pytest`），when 用户查看徽章/popover，then 该 Pane 既不出现在 popover 中，也不计入徽章 count。
 - **AC12.** Given 一个 Pane 已被通知系统 mute（label 含 `notifications:muted`），when 该 Pane 的 Agent 进入任意非 idle 状态，then 它**仍然**出现在 popover 中并贡献于徽章 count；与通知系统的抑制策略无关。
 - **AC13.** Given 系统 "Reduce Motion" 已开启，when 任意 Agent 处于 `loading` 或 `waitingForInput`，then 徽章图标保持静止（无 pulse）。
 - **AC14.** Given VoiceOver 已开启，when 焦点落在徽章上，then 朗读完整 headline 句子加一句 hint "Open active agents popover"；when 焦点落在 popover 任一行，then 朗读 `<DisplayName>, <Project> <Worktree>, <state>, <relative time>`。
-- **AC15.** Given 用户在同一 Pane 内 `claude` 退出回到 shell 顶层 prompt 后启动 `codex`，**且** shell-integration 正常发出 OSC 133 prompt-end，when ActiveAgents 视图刷新，then 该 Pane 的 `agentKind` 从 `claude-code` 切换为 `codex`，logo 与 displayName 同步更新。
+- **AC15.** Given 用户在同一 Pane 内 `claude` 退出回到 shell 顶层 prompt 后启动 `codex`，**且** shell-integration 正常发出 OSC 133 prompt-end，when AgentState 视图刷新，then 该 Pane 的 `agentKind` 从 `claude-code` 切换为 `codex`，logo 与 displayName 同步更新。
 
 ## Design
 

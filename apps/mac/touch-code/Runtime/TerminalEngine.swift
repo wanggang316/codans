@@ -57,6 +57,24 @@ final class TerminalEngine {
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
   private var crashRings: [PaneID: [Date]] = [:]
+  private let foregroundJobReader: ForegroundJobReader
+  private var foregroundJobPollTask: Task<Void, Never>?
+  private var foregroundJobPaneIDs: Set<PaneID> = []
+  private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
+  private var foregroundJobMisses: [PaneID: UInt8] = [:]
+  private var viewportSnapshots: [PaneID: String] = [:]
+  /// Process-group → resolved foreground job cache. The poll loop hits
+  /// every PGID at ≤300 ms when an agent is bound; the underlying
+  /// `proc_listpids` + `proc_pidinfo` + `KERN_PROCARGS2` triad costs a
+  /// handful of syscalls per group. A short TTL collapses repeated
+  /// queries for the same PGID across consecutive ticks down to one
+  /// real syscall round per `cacheTTL` window.
+  private struct CachedForegroundJob {
+    let job: ForegroundJob
+    let expiresAt: Date
+  }
+  private var foregroundJobCache: [Int32: CachedForegroundJob] = [:]
+  private static let foregroundJobCacheTTL: TimeInterval = 0.75
   private let clock: @Sendable () -> Date
   private var finished = false
 
@@ -66,11 +84,13 @@ final class TerminalEngine {
     store: CatalogStore,
     hierarchy: HierarchyManager,
     ghosttyRuntime: GhosttyRuntime? = nil,
+    foregroundJobReader: ForegroundJobReader = ForegroundJobReader(),
     clock: @escaping @Sendable () -> Date = Date.init
   ) {
     self.store = store
     self.hierarchy = hierarchy
     self.ghosttyRuntime = ghosttyRuntime
+    self.foregroundJobReader = foregroundJobReader
     self.clock = clock
     // Back-pointer so the libghostty action decoder can emit events
     // (paneInfoChanged, paneActionRequested, etc.) onto this engine's
@@ -130,6 +150,8 @@ final class TerminalEngine {
       )
     }
     runtime.register(pane: surface)
+    foregroundJobPaneIDs.insert(pane.id)
+    startForegroundJobPollingIfNeeded()
     surface.onClose = { [weak self] processAlive in
       self?.handleSurfaceClose(paneID: pane.id, processAlive: processAlive)
     }
@@ -251,6 +273,17 @@ final class TerminalEngine {
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
+    foregroundJobPaneIDs.remove(paneID)
+    if let snapshot = foregroundJobSnapshots[paneID] {
+      // Evict the cache entry for the closing pane's PGID so a recycled
+      // group id picked up by a later pane never reads back this pane's
+      // last job description.
+      foregroundJobCache.removeValue(forKey: snapshot.processGroupID)
+    }
+    foregroundJobSnapshots.removeValue(forKey: paneID)
+    foregroundJobMisses.removeValue(forKey: paneID)
+    viewportSnapshots.removeValue(forKey: paneID)
+    stopForegroundJobPollingIfIdle()
   }
 
   private func tabIDForPane(_ paneID: PaneID) -> TabID? {
@@ -325,6 +358,8 @@ final class TerminalEngine {
   func finishEventStream() {
     guard !finished else { return }
     finished = true
+    foregroundJobPollTask?.cancel()
+    foregroundJobPollTask = nil
     // Drain any pending output into the lifecycle-bound path before finishing.
     for (_, buffer) in outputBuffers {
       buffer.flush()
@@ -466,6 +501,129 @@ final class TerminalEngine {
     outputBuffers[paneID] = buffer
     return buffer
   }
+
+  private func startForegroundJobPollingIfNeeded() {
+    guard foregroundJobPollTask == nil else { return }
+    foregroundJobPollTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        self?.pollForegroundJobs()
+        let interval = self?.foregroundJobPollInterval() ?? .seconds(2)
+        try? await Task.sleep(for: interval)
+      }
+    }
+  }
+
+  private func stopForegroundJobPollingIfIdle() {
+    guard foregroundJobPaneIDs.isEmpty else { return }
+    foregroundJobPollTask?.cancel()
+    foregroundJobPollTask = nil
+  }
+
+  private func pollForegroundJobs() {
+    guard let ghosttyRuntime, !foregroundJobPaneIDs.isEmpty else { return }
+
+    var groupByPane: [PaneID: Int32] = [:]
+    for paneID in foregroundJobPaneIDs {
+      guard let surface = ghosttyRuntime.surface(for: paneID),
+        let groupID = foregroundJobReader.resolveProcessGroupID(
+          preferred: surface.foregroundProcessGroupID(),
+          childPID: surface.childProcessID()
+        )
+      else {
+        continue
+      }
+      groupByPane[paneID] = groupID
+    }
+
+    let activeGroupIDs = Set(groupByPane.values)
+    let now = clock()
+    var jobsByGroup: [Int32: ForegroundJob] = [:]
+    var groupIDsToQuery: Set<Int32> = []
+    for groupID in activeGroupIDs {
+      if let cached = foregroundJobCache[groupID], cached.expiresAt > now {
+        jobsByGroup[groupID] = cached.job
+      } else {
+        groupIDsToQuery.insert(groupID)
+      }
+    }
+    let freshJobs = foregroundJobReader.readJobs(processGroupIDs: groupIDsToQuery)
+    let cacheUntil = now.addingTimeInterval(Self.foregroundJobCacheTTL)
+    for (groupID, job) in freshJobs {
+      jobsByGroup[groupID] = job
+      foregroundJobCache[groupID] = CachedForegroundJob(job: job, expiresAt: cacheUntil)
+    }
+    // Drop cache entries for PGIDs we no longer poll — pane teardown,
+    // an agent shell that respawned under a new group id, etc. The OS
+    // can recycle process group ids, so retaining a stale entry beyond
+    // the lifetime of its owning pane risks attributing a future
+    // unrelated group to a long-departed job.
+    foregroundJobCache = foregroundJobCache.filter { activeGroupIDs.contains($0.key) }
+
+    for paneID in foregroundJobPaneIDs {
+      let next: ForegroundJob
+      if let groupID = groupByPane[paneID], let job = jobsByGroup[groupID] {
+        next = job
+      } else {
+        next = ForegroundJob(processGroupID: groupByPane[paneID] ?? 0, processes: [])
+      }
+
+      if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
+        continue
+      }
+      if next.isEmpty {
+        let misses = min((foregroundJobMisses[paneID] ?? 0) + 1, 3)
+        foregroundJobMisses[paneID] = misses
+        guard misses >= 3 else { continue }
+      } else {
+        foregroundJobMisses[paneID] = 0
+      }
+      if foregroundJobSnapshots[paneID] != next {
+        foregroundJobSnapshots[paneID] = next
+        emit(.foregroundJobChanged(paneID, next))
+      }
+      if let surface = ghosttyRuntime.surface(for: paneID) {
+        emitViewportIfNeeded(paneID: paneID, surface: surface, foregroundJob: next)
+      }
+    }
+  }
+
+  private func foregroundJobPollInterval() -> Duration {
+    var sawRunningCommand = false
+    for paneID in foregroundJobPaneIDs {
+      if hierarchy.catalog.pane(paneID)?.agentKind != nil {
+        return .milliseconds(300)
+      }
+      if let job = foregroundJobSnapshots[paneID] {
+        if AgentKindPatterns.classify(foregroundJob: job) != nil {
+          return .milliseconds(300)
+        }
+        if ForegroundJobClassifier.indicatesRunningCommand(job) {
+          sawRunningCommand = true
+        }
+      }
+    }
+    // A plain command is running somewhere: poll faster so the spinner
+    // appears / clears promptly, but slower than agent panes. Fully idle
+    // panes stay at the cheap 2s cadence.
+    return sawRunningCommand ? .milliseconds(500) : .seconds(2)
+  }
+
+  private func emitViewportIfNeeded(
+    paneID: PaneID,
+    surface: PaneSurface,
+    foregroundJob: ForegroundJob
+  ) {
+    let hasAgentSignal =
+      hierarchy.catalog.pane(paneID)?.agentKind != nil
+      || AgentKindPatterns.classify(foregroundJob: foregroundJob) != nil
+    // Classify against the active interaction region, not the whole viewport:
+    // scrollback that happens to still be visible must not pin the agent on a
+    // stale prompt/spinner.
+    guard hasAgentSignal, let text = surface.readText(.active) else { return }
+    guard viewportSnapshots[paneID] != text else { return }
+    viewportSnapshots[paneID] = text
+    emit(.paneViewportChanged(paneID, text: text))
+  }
 }
 
 extension TerminalEvent {
@@ -474,7 +632,7 @@ extension TerminalEvent {
   /// because scrollback retains history.
   fileprivate var isLifecycle: Bool {
     switch self {
-    case .paneOutput, .paneIdle, .paneInfoChanged:
+    case .paneOutput, .paneViewportChanged, .paneIdle, .paneInfoChanged, .foregroundJobChanged:
       return false
     case .paneCreated, .paneReady, .paneExited, .paneCrashed,
       .paneClosedByTab, .tabActivated, .tabAutoClosed,

@@ -39,12 +39,30 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// `updatesAutomaticallyCheckForUpdates` is also true.
   public var updatesAutomaticallyDownloadUpdates: Bool
 
-  /// Whether the ActiveAgents sidebar panel should auto-open whenever any
+  /// Whether the AgentState sidebar panel should auto-open whenever any
   /// bound agent transitions into the `loading` state. Default `true`. When
   /// off, the panel only opens via the sidebar footer's toggle button. The
   /// panel + footer button stay visible regardless; this setting only
   /// controls the auto-open behaviour on the rising edge into `loading`.
   public var agentsViewAutoOpen: Bool
+
+  /// Row density for the AgentState sidebar panel. `normal` (default)
+  /// renders the two-line worktree/project identity column; `compact`
+  /// joins both names on one line and tightens vertical padding.
+  public var agentsViewDisplayMode: AgentsViewDisplayMode
+
+  /// Whether the Agents View reorders rows by status (triage priority:
+  /// needs-input, finished, working, idle). Default `true`. When off, rows
+  /// hold the order they appeared in — new agents append at the end and the
+  /// list never reshuffles. The reorder is debounced and skips decays into
+  /// idle so a completed agent fading out doesn't make the list jump.
+  public var agentsViewAutoSort: Bool
+
+  /// Whether the app uploads anonymous crash and error reports on release
+  /// builds. Default `true`. Debug builds never report regardless of this
+  /// flag. Flipping this off also clears the install identifier so a future
+  /// re-enable starts a fresh anonymous id.
+  public var crashReportsEnabled: Bool
 
   public init(
     appearance: AppearancePreference = .system,
@@ -56,7 +74,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
     updatesAutomaticallyDownloadUpdates: Bool = false,
-    agentsViewAutoOpen: Bool = true
+    agentsViewAutoOpen: Bool = true,
+    agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
+    agentsViewAutoSort: Bool = true,
+    crashReportsEnabled: Bool = true
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -68,6 +89,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
     self.agentsViewAutoOpen = agentsViewAutoOpen
+    self.agentsViewDisplayMode = agentsViewDisplayMode
+    self.agentsViewAutoSort = agentsViewAutoSort
+    self.crashReportsEnabled = crashReportsEnabled
   }
 
   public static let `default` = GeneralSettings()
@@ -77,6 +101,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case agentsViewAutoOpen
+    case agentsViewDisplayMode
+    case agentsViewAutoSort
+    case crashReportsEnabled
   }
 
   public init(from decoder: Decoder) throws {
@@ -99,5 +126,20 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(Bool.self, forKey: .updatesAutomaticallyDownloadUpdates) ?? false
     self.agentsViewAutoOpen =
       try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoOpen) ?? true
+    // Older settings files predate this field. Default to `.normal` so
+    // every existing install keeps the current two-line row layout
+    // until the user opts into compact mode from Settings → General.
+    self.agentsViewDisplayMode =
+      try container.decodeIfPresent(AgentsViewDisplayMode.self, forKey: .agentsViewDisplayMode) ?? .normal
+    // Older settings files predate this field. Default to on so existing
+    // installs keep the status-ordered list they already had; the user can
+    // opt out from Settings → General.
+    self.agentsViewAutoSort =
+      try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoSort) ?? true
+    // Older settings files predate this field. Default to opt-in to keep
+    // installs already running through one or more releases consistent
+    // with fresh installs; the user can opt out from Settings → General.
+    self.crashReportsEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .crashReportsEnabled) ?? true
   }
 }

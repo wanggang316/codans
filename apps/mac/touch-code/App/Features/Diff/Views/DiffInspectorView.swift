@@ -1,61 +1,182 @@
 // MARK: M5
+import AppKit
 import ComposableArchitecture
 import SwiftUI
 import TouchCodeCore
 
-/// Diff inspector column body. Displays the active Worktree's changed
-/// files; tapping a row opens the drawer (M6) for that file. Width is
-/// fixed at 280 pt by the inspector mount in `ContentView`.
+/// Diff inspector column body. Hosts a custom full-width Changes /
+/// History tab bar (macOS 26 Tahoe sidebar-tab style); routes the body
+/// to either the changed-files list (M5 default) or the commit-history
+/// list (T13). Width is fixed at 280 pt by the inspector mount in
+/// `ContentView`. The header close button is gone in favour of the
+/// toolbar Git Viewer toggle (Phase E), which now owns the open/close
+/// affordance from a more discoverable location.
 struct DiffInspectorView: View {
   @Bindable var store: StoreOf<DiffFeature>
 
   var body: some View {
     VStack(spacing: 0) {
+      tabPicker
+      Divider()
       header
       Divider()
       content
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    .background(Color(nsColor: .windowBackgroundColor))
+    // No hand-rolled background: the SwiftUI `.inspector(...)` modifier
+    // host applies the system sidebar material and extends it behind the
+    // toolbar automatically, the same way NavigationSplitView's leading
+    // column does. Painting a VisualEffectBackground on top fights with
+    // the system surface and produces the visible split this column had
+    // before adopting `.inspector`.
+  }
+
+  // MARK: - Tab picker
+
+  /// Sidebar-tab style: a single rounded container holding two segments.
+  /// The selected segment renders as a filled accent capsule that
+  /// visually overlays the divider between segments; the unselected
+  /// segment is borderless. Matches the macOS 26 Tahoe icon-only
+  /// segmented control idiom.
+  private var tabPicker: some View {
+    ZStack {
+      Capsule()
+        .fill(Color(nsColor: .controlColor).opacity(0.55))
+      Capsule()
+        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+      HStack(spacing: 0) {
+        tabSegment(.changes, systemImage: "doc.text", label: "Changes")
+        tabSegment(.history, systemImage: "clock.arrow.circlepath", label: "History")
+      }
+    }
+    .frame(height: 32)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .accessibilityIdentifier("diff_inspector.tab_picker")
+  }
+
+  @ViewBuilder
+  private func tabSegment(
+    _ tab: DiffFeature.DiffTab,
+    systemImage: String,
+    label: String
+  ) -> some View {
+    let isSelected = store.selectedTab == tab
+    Button {
+      if !isSelected {
+        store.send(.tabSelected(tab))
+      }
+    } label: {
+      ZStack {
+        if isSelected {
+          Capsule()
+            .fill(Color.accentColor)
+            .padding(2)
+        }
+        Image(systemName: systemImage)
+          .font(.body)
+          .foregroundStyle(isSelected ? Color.white : Color.secondary)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(.rect)
+    }
+    .buttonStyle(.plain)
+    .help(label)
+    .accessibilityLabel(label)
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 
   // MARK: - Header
 
   private var header: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 6) {
       Text(headerTitle)
         .font(.headline)
+        // The `(n)` count stays mounted across a refresh (stale-while-
+        // revalidate), so n→m is a value change, not a remount — animate it
+        // as rolling digits instead of letting it pop.
+        .contentTransition(.numericText())
+        .animation(.default, value: headerTitle)
       Spacer()
       Button {
-        store.send(.refreshRequested)
+        handleRefresh()
       } label: {
-        Image(systemName: "arrow.clockwise")
+        // Swap the static glyph for a spinner while refreshing instead of
+        // toggling `.disabled` — a disabled glyph dims then re-brightens,
+        // which reads as a flicker. The button stays enabled; re-entry is
+        // safe because the load effects use `cancelInFlight: true`. Fixed
+        // frame so the glyph↔spinner swap doesn't reflow the header row.
+        Group {
+          if isRefreshing {
+            ProgressView()
+              .controlSize(.small)
+          } else {
+            Image(systemName: "arrow.clockwise")
+          }
+        }
+        .frame(width: 16, height: 16)
       }
       .buttonStyle(.borderless)
-      .disabled(isRefreshing)
-      .help("Refresh changed files")
-      .accessibilityLabel("Refresh changed files")
+      .help(refreshHelp)
+      .accessibilityLabel(refreshHelp)
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
   }
 
   private var headerTitle: String {
-    switch store.changedFiles {
-    case .loaded(let files): return "Changes (\(files.count))"
-    default: return "Changes"
+    switch store.selectedTab {
+    case .changes:
+      if case .loaded(let files) = store.changedFiles { return "Changes (\(files.count))" }
+      return "Changes"
+    case .history:
+      // History is paginated; "loaded so far" isn't a meaningful signal.
+      return "History"
     }
   }
 
   private var isRefreshing: Bool {
-    if case .loading = store.changedFiles { return true }
-    return false
+    switch store.selectedTab {
+    case .changes:
+      if case .loading = store.changedFiles { return true }
+      return store.isRefreshingChanges
+    case .history:
+      return store.historyState.loading || store.historyState.refreshing
+    }
+  }
+
+  private var refreshHelp: String {
+    switch store.selectedTab {
+    case .changes: return "Refresh changed files"
+    case .history: return "Refresh history"
+    }
+  }
+
+  private func handleRefresh() {
+    switch store.selectedTab {
+    case .changes:
+      store.send(.refreshRequested)
+    case .history:
+      // Atomic refresh — the reducer resets cache + selection and re-fires
+      // the first-page load in a single arm. See FU-T12.
+      store.send(.historyRefreshRequested)
+    }
   }
 
   // MARK: - Content
 
   @ViewBuilder
   private var content: some View {
+    switch store.selectedTab {
+    case .changes:
+      changesBody
+    case .history:
+      historyBody
+    }
+  }
+
+  @ViewBuilder
+  private var changesBody: some View {
     switch store.changedFiles {
     case .idle:
       placeholder("No worktree selected")
@@ -75,6 +196,11 @@ struct DiffInspectorView: View {
   }
 
   @ViewBuilder
+  private var historyBody: some View {
+    DiffHistoryListView(store: store)
+  }
+
+  @ViewBuilder
   private func fileList(_ files: [ChangedFile]) -> some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 0) {
@@ -85,7 +211,7 @@ struct DiffInspectorView: View {
             onOpenTap: { store.send(.fileRowTapped(path: file.id)) },
             onChevronTap: {
               if store.presentedFilePath == file.id {
-                store.send(.drawerCloseRequested)
+                store.send(.panelCloseRequested)
               } else {
                 store.send(.fileRowTapped(path: file.id))
               }
@@ -95,6 +221,7 @@ struct DiffInspectorView: View {
         }
       }
     }
+    .accessibilityIdentifier("diff_inspector.changes_list")
   }
 
   @ViewBuilder
@@ -113,6 +240,7 @@ struct DiffInspectorView: View {
       Image(systemName: "exclamationmark.triangle")
         .foregroundStyle(.orange)
         .font(.title3)
+        .accessibilityHidden(true)
       Text(Self.errorMessage(error))
         .font(.callout)
         .foregroundStyle(.secondary)

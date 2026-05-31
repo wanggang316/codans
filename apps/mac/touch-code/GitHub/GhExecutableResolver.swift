@@ -80,8 +80,8 @@ actor GhExecutableResolver {
   ///      `/usr/local/bin/gh` on Intel). Covers the 99% `brew install gh` case
   ///      without spawning a subprocess.
   ///   3. Login-shell `which gh`. Loads the user's shell startup files
-  ///      (`.zprofile`, `.bash_profile`, …), so any custom PATH entries resolve.
-  ///      This matches supacode's approach and is the final catch-all.
+  ///      (`.zprofile`, `.bash_profile`, …), so any custom PATH entries
+  ///      resolve. Final catch-all.
   ///
   /// `FileManager` is constructed inside the closure rather than captured, because
   /// `FileManager` is not `Sendable` in Swift 6 strict-concurrency mode.

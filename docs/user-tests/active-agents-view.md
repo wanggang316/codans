@@ -1,9 +1,9 @@
 ---
 name: active-agents-view
-description: User-test set for the ActiveAgents view — in-app status-bar badge + hover popover that lists every Pane running a known agent (Claude Code / Codex / pi) with derived runtime state. Authored by /hs-test-spec. Read docs/user-test-patterns.md for project-wide testing conventions before editing.
+description: User-test set for the AgentState view — in-app status-bar badge + hover popover that lists every Pane running a known agent (Claude Code / Codex / pi) with derived runtime state. Authored by /hs-test-spec. Read docs/user-test-patterns.md for project-wide testing conventions before editing.
 ---
 
-# User Tests: ActiveAgents View
+# User Tests: AgentState View
 
 **Status:** Draft
 **Author:** Gump (with Claude)
@@ -21,14 +21,14 @@ No new persona or fixture was introduced by this document.
 
 Per [user-test-patterns.md](../user-test-patterns.md), this set probes three surfaces:
 
-- **SwiftUI window UI** — the ActiveAgents badge in `WorktreeHeader`, the hover popover, and its rows. Selectors are accessibility identifiers / role+label pairs / unambiguous on-screen text. The required accessibility identifiers (declared by the implementation as a precondition for these cases to be runnable) are:
-  - `activeAgents.badge` — the status-bar entry (the headline view)
-  - `activeAgents.popover` — the popover container
-  - `activeAgents.row.<paneID>` — one identifier per popover row
-  - `activeAgents.row.<paneID>.state` — the state icon in that row, with `accessibilityLabel` ∈ {`waitingForInput`, `loading`, `finished`, `idle`}
-  - `activeAgents.row.<paneID>.headline` — the `<Project> / <Worktree>` line
+- **SwiftUI window UI** — the AgentState badge in `WorktreeHeader`, the hover popover, and its rows. Selectors are accessibility identifiers / role+label pairs / unambiguous on-screen text. The required accessibility identifiers (declared by the implementation as a precondition for these cases to be runnable) are:
+  - `agentState.badge` — the status-bar entry (the headline view)
+  - `agentState.view` — the popover container
+  - `agentState.row.<paneID>` — one identifier per popover row
+  - `agentState.row.<paneID>.state` — the state icon in that row, with `accessibilityLabel` ∈ {`waitingForInput`, `loading`, `finished`, `idle`}
+  - `agentState.row.<paneID>.headline` — the `<Project> / <Worktree>` line
 - **Persisted state** — `~/.config/touch-code/catalog.json` queried with `jq` to verify the `agentKind` / `agentSessionID` fields on a Pane survive a relaunch.
-- **Log stream** — `log stream --predicate 'subsystem == "com.touch-code.activeagents"' …` for identification / state-transition trace lines, used as a ready signal where the UI alone is ambiguous.
+- **Log stream** — `log stream --predicate 'subsystem == "com.touch-code.agentstate"' …` for identification / state-transition trace lines, used as a ready signal where the UI alone is ambiguous.
 
 A "trigger an OSC 9;4 busy report on pane P" step means: drive `printf '\e]9;4;3\a'` into pane P (via the `tc` CLI's pane-input verb or by typing it into the pane chrome); the matching "clear" step drives `printf '\e]9;4;0\a'`. These exact escape sequences are documented in [memory: OSC 9;4 emitter coverage](../../.claude/projects/-Users-wanggang-dev-00-touch-code/memory/project_osc94_emitters.md) and have a manual test recipe verified by Gump on 2026-05-03.
 
@@ -54,10 +54,10 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 
 **Steps:**
 1. Confirm the current focus is the main window (`tc focus` may be used as a no-op trigger to bring it forward).
-2. Inspect the `WorktreeHeader` region for the presence of an element with accessibility identifier `activeAgents.badge`.
+2. Inspect the `WorktreeHeader` region for the presence of an element with accessibility identifier `agentState.badge`.
 
 **Assertions:**
-1. (UI) No element with identifier `activeAgents.badge` exists in the accessibility tree of the main window.
+1. (UI) No element with identifier `agentState.badge` exists in the accessibility tree of the main window.
 2. (UI) The Worktree header layout to the right of the worktree label is unchanged compared to the pre-feature baseline (no empty placeholder, no leading separator).
 
 **Artifacts on FAIL:** `screenshot.png` of the full main window header.
@@ -73,16 +73,16 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - P1 is **not** currently emitting OSC 9;4 busy (idle baseline).
 
 **Steps:**
-1. Verify ready signal: `activeAgents.badge` exists and its accessibility label reads exactly `Claude Code is idle`.
+1. Verify ready signal: `agentState.badge` exists and its accessibility label reads exactly `Claude Code is idle`.
 2. Trigger an OSC 9;4 busy report on P1.
-3. Wait until either (a) the `activeAgents.badge` accessibility label changes from "idle" to "working" OR (b) ≤ 3 seconds have elapsed.
+3. Wait until either (a) the `agentState.badge` accessibility label changes from "idle" to "working" OR (b) ≤ 3 seconds have elapsed.
 
 **Assertions:**
-1. (UI) After step 3: `activeAgents.badge` accessibility label reads exactly `Claude Code is working`.
-2. (UI) The badge's pulse animation is running (the badge has an active `pulseAnimating=true` accessibility trait OR the accessibility identifier `activeAgents.badge.pulse` is present).
-3. (Log) Within the same window, one line under `subsystem:"com.touch-code.activeagents"` `category:"registry"` matches `state-transition.*P1.*idle->loading`.
+1. (UI) After step 3: `agentState.badge` accessibility label reads exactly `Claude Code is working`.
+2. (UI) The badge's pulse animation is running (the badge has an active `pulseAnimating=true` accessibility trait OR the accessibility identifier `agentState.badge.pulse` is present).
+3. (Log) Within the same window, one line under `subsystem:"com.touch-code.agentstate"` `category:"store"` matches `state-transition.*P1.*idle->loading`.
 
-**Artifacts on FAIL:** `screenshot.png`, `catalog.json.snapshot.json`, console log filtered to subsystem `com.touch-code.activeagents`.
+**Artifacts on FAIL:** `screenshot.png`, `catalog.json.snapshot.json`, console log filtered to subsystem `com.touch-code.agentstate`.
 
 #### Case `UT-AA-B-003`: Working → busy cleared → headline reads "finished"
 
@@ -93,11 +93,11 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 
 **Steps:**
 1. Clear the OSC 9;4 busy report on P1 (drive `printf '\e]9;4;0\a'`).
-2. Wait until either (a) the `activeAgents.badge` accessibility label changes from "working" to "finished" OR (b) ≤ 5 seconds have elapsed.
+2. Wait until either (a) the `agentState.badge` accessibility label changes from "working" to "finished" OR (b) ≤ 5 seconds have elapsed.
 
 **Assertions:**
-1. (UI) `activeAgents.badge` accessibility label reads exactly `Claude Code is finished`.
-2. (UI) The badge pulse animation is **not** running (no `pulseAnimating` trait, no `activeAgents.badge.pulse` identifier).
+1. (UI) `agentState.badge` accessibility label reads exactly `Claude Code is finished`.
+2. (UI) The badge pulse animation is **not** running (no `pulseAnimating` trait, no `agentState.badge.pulse` identifier).
 3. (Log) One line matches `state-transition.*P1.*loading->finished`.
 
 **Artifacts on FAIL:** `screenshot.png`, console log.
@@ -115,7 +115,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 2. Wait for ready signal "Pane attached" on P1.
 
 **Assertions:**
-1. (UI) Within ≤ 2 seconds of step 2 ready signal, `activeAgents.badge` accessibility label reads exactly `Claude Code is idle`.
+1. (UI) Within ≤ 2 seconds of step 2 ready signal, `agentState.badge` accessibility label reads exactly `Claude Code is idle`.
 2. (Log) One line matches `state-transition.*P1.*finished->idle` with `trigger=focused`.
 
 **Artifacts on FAIL:** `screenshot.png`, console log.
@@ -132,10 +132,10 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 
 **Steps:**
 1. Drive a `waitingForInput`-class OSC 9 event on P2 (title `"Approve this action"`).
-2. Wait until either (a) the `activeAgents.badge` accessibility label contains the substring "waiting" OR (b) ≤ 3 seconds.
+2. Wait until either (a) the `agentState.badge` accessibility label contains the substring "waiting" OR (b) ≤ 3 seconds.
 
 **Assertions:**
-1. (UI) `activeAgents.badge` accessibility label reads exactly `Codex is waiting for input`.
+1. (UI) `agentState.badge` accessibility label reads exactly `Codex is waiting for input`.
 2. (UI) The badge pulse animation is running.
 
 **Artifacts on FAIL:** `screenshot.png`, console log.
@@ -151,7 +151,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - The user's current focus is on a fourth Pane in a fourth Worktree, all of which have no `agentKind`.
 
 **Steps:**
-1. Read the `activeAgents.badge` accessibility label.
+1. Read the `agentState.badge` accessibility label.
 
 **Assertions:**
 1. (UI) The label reads exactly `3 agents working`.
@@ -171,7 +171,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - No focused agent Pane.
 
 **Steps:**
-1. Read the `activeAgents.badge` accessibility label.
+1. Read the `agentState.badge` accessibility label.
 
 **Assertions:**
 1. (UI) The label reads `1 waiting · 1 working` (priority `waitingForInput > loading > finished > idle`; only the top two non-empty buckets surface; `finished` and `idle` counts are not shown in headline form).
@@ -188,12 +188,12 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - One bound Pane P1=`claude-code` in `loading` state.
 
 **Steps:**
-1. Read the `activeAgents.badge` accessibility label.
+1. Read the `agentState.badge` accessibility label.
 2. Inspect whether the badge declares pulse animation as active.
 
 **Assertions:**
 1. (UI) Label reads `Claude Code is working`.
-2. (UI) The badge has no `pulseAnimating` trait and the identifier `activeAgents.badge.pulse` is absent.
+2. (UI) The badge has no `pulseAnimating` trait and the identifier `agentState.badge.pulse` is absent.
 
 **Artifacts on FAIL:** `screenshot.png` of the full window and the macOS Accessibility settings pane.
 
@@ -211,13 +211,13 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - One bound Pane P1=`claude-code` in `loading`.
 
 **Steps:**
-1. Move the pointer onto the `activeAgents.badge` element and immediately move it off after ≤ 100 ms (a quick sweep).
+1. Move the pointer onto the `agentState.badge` element and immediately move it off after ≤ 100 ms (a quick sweep).
 2. Wait 500 ms.
-3. Move the pointer back onto `activeAgents.badge` and hold for ≥ 400 ms.
+3. Move the pointer back onto `agentState.badge` and hold for ≥ 400 ms.
 
 **Assertions:**
-1. (UI) Between steps 1 and 2: no element with identifier `activeAgents.popover` exists.
-2. (UI) After step 3 holds ≥ 250 ms: an element with identifier `activeAgents.popover` exists and is visible.
+1. (UI) Between steps 1 and 2: no element with identifier `agentState.view` exists.
+2. (UI) After step 3 holds ≥ 250 ms: an element with identifier `agentState.view` exists and is visible.
 3. (UI) The popover header text matches the regular expression `^Active Agents \(\d+\)$`.
 
 **Artifacts on FAIL:** `screenshot.png` at the moment the popover would have appeared and at 500 ms after hover.
@@ -238,9 +238,9 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 5. Wait another 200 ms; check popover presence.
 
 **Assertions:**
-1. (UI) After step 2: `activeAgents.popover` is still visible.
-2. (UI) At the 80 ms checkpoint after step 3: `activeAgents.popover` is still visible (hover-bridge close delay is 150 ms).
-3. (UI) At the 200 ms checkpoint: `activeAgents.popover` is no longer in the accessibility tree.
+1. (UI) After step 2: `agentState.view` is still visible.
+2. (UI) At the 80 ms checkpoint after step 3: `agentState.view` is still visible (hover-bridge close delay is 150 ms).
+3. (UI) At the 200 ms checkpoint: `agentState.view` is no longer in the accessibility tree.
 
 **Artifacts on FAIL:** `screenshot.png` at each checkpoint.
 
@@ -261,7 +261,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 1. Hover the badge for ≥ 300 ms to open the popover.
 
 **Assertions:**
-1. (UI) `activeAgents.popover` contains exactly four rows, identified `activeAgents.row.P1`, `activeAgents.row.P2`, `activeAgents.row.P3`, `activeAgents.row.P4`.
+1. (UI) `agentState.view` contains exactly four rows, identified `agentState.row.P1`, `agentState.row.P2`, `agentState.row.P3`, `agentState.row.P4`.
 2. (UI) The row order top-to-bottom is `P1, P3, P2, P4` (priority `waitingForInput > finished > loading > idle`; tie-break by `lastTransitionAt` desc is exercised in UT-AA-P-004).
 3. (UI) The header text matches `Active Agents (4)`.
 4. (UI) Each row's `<paneID>.state` accessibility label is one of the four state strings.
@@ -306,8 +306,8 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - Popover not yet open.
 
 **Steps:**
-1. Hover `activeAgents.badge` ≥ 300 ms.
-2. Click the row identified `activeAgents.row.<P2-id>`.
+1. Hover `agentState.badge` ≥ 300 ms.
+2. Click the row identified `agentState.row.<P2-id>`.
 3. Wait for ready signal "Pane attached" on P2.
 
 **Assertions:**
@@ -315,7 +315,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 2. (UI) The Worktree selection inside Pj2 is W2.
 3. (UI) The Tab selection inside W2 is T2.
 4. (UI) The first responder is the Ghostty surface view of P2 (verifiable by typing one printable character and observing it appear in P2's terminal output; this character must be `'#'` so it is a no-op inside any shell — pick from patterns doc's "safe characters" list).
-5. (UI) `activeAgents.popover` is no longer in the accessibility tree (popover dismissed by the click).
+5. (UI) `agentState.view` is no longer in the accessibility tree (popover dismissed by the click).
 
 **Artifacts on FAIL:** `screenshot.png`, console log, `catalog.json.snapshot.json` showing `selectedProjectID`/`selectedWorktreeID`/`selectedTabID`/last-focused-pane.
 
@@ -351,16 +351,16 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Steps:**
 1. Create a new Pane via `tc tab new --command claude` (the binary need not resolve; binder uses the recorded `initialCommand` string).
 2. Wait for ready signal "Pane attached" on the new pane.
-3. Wait until either (a) a row appears in `activeAgents.popover` after a hover, OR (b) `~/.config/touch-code/catalog.json`'s pane entry contains `agentKind=claude-code` — whichever first.
+3. Wait until either (a) a row appears in `agentState.view` after a hover, OR (b) `~/.config/touch-code/catalog.json`'s pane entry contains `agentKind=claude-code` — whichever first.
 4. Quit the app cleanly.
 5. Relaunch the app.
 6. Wait for ready signal "App launched".
 
 **Assertions:**
 1. (File) After step 3: `jq '.. | objects | select(.id? and .initialCommand?) | select(.agentKind?)' ~/.config/touch-code/catalog.json` returns at least one row whose `agentKind == "claude-code"` and whose pane ID matches the new pane.
-2. (UI) After step 6: hovering `activeAgents.badge` opens the popover with at least one row, and that row's content names "Claude Code".
+2. (UI) After step 6: hovering `agentState.badge` opens the popover with at least one row, and that row's content names "Claude Code".
 
-**Artifacts on FAIL:** `catalog.json.snapshot.json` taken before quit and after relaunch; console log filtered to `com.touch-code.activeagents`.
+**Artifacts on FAIL:** `catalog.json.snapshot.json` taken before quit and after relaunch; console log filtered to `com.touch-code.agentstate`.
 
 #### Case `UT-AA-I-002`: Closing the Pane clears the binding
 
@@ -374,12 +374,12 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 2. Wait for ready signal: a coordinator log line confirming pane teardown OR the row disappearing from the popover.
 
 **Assertions:**
-1. (UI) The previously bound row no longer exists in `activeAgents.popover`. If this was the only bound Pane, `activeAgents.badge` itself is no longer in the accessibility tree.
+1. (UI) The previously bound row no longer exists in `agentState.view`. If this was the only bound Pane, `agentState.badge` itself is no longer in the accessibility tree.
 2. (File) `jq '.. | objects | select(.id? and .initialCommand?) | .agentKind? // empty' ~/.config/touch-code/catalog.json` returns no rows naming that pane's ID with a non-null `agentKind`.
 
 **Artifacts on FAIL:** `catalog.json.snapshot.json`, console log.
 
-#### Case `UT-AA-I-003`: Unknown command never appears in ActiveAgents
+#### Case `UT-AA-I-003`: Unknown command never appears in AgentState
 
 **Covers AC:** AC11
 
@@ -389,12 +389,12 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Steps:**
 1. Create a new Pane via `tc tab new --command "make all"`.
 2. Wait for ready signal "Pane attached".
-3. Wait 3 seconds, or until the next state-transition log line from `com.touch-code.activeagents` would have fired (whichever first).
+3. Wait 3 seconds, or until the next state-transition log line from `com.touch-code.agentstate` would have fired (whichever first).
 
 **Assertions:**
-1. (UI) `activeAgents.badge` is not in the accessibility tree.
+1. (UI) `agentState.badge` is not in the accessibility tree.
 2. (File) The new pane's `catalog.json` entry has no `agentKind` field (or it is null).
-3. (Log) No log line under `com.touch-code.activeagents` `category:"binder"` matches this pane's ID with a non-empty kind.
+3. (Log) No log line under `com.touch-code.agentstate` `category:"binder"` matches this pane's ID with a non-empty kind.
 
 **Artifacts on FAIL:** `catalog.json.snapshot.json`, console log.
 
@@ -417,14 +417,14 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 2. (UI) The popover row for P1 now shows a Codex logo and display name.
 3. (Log) One line matches `binder.*rebind.*P1.*claude-code->codex`.
 
-**Artifacts on FAIL:** `catalog.json.snapshot.json` before and after, console log filtered to both `com.touch-code.activeagents` and `com.touch-code.ghostty`.
+**Artifacts on FAIL:** `catalog.json.snapshot.json` before and after, console log filtered to both `com.touch-code.agentstate` and `com.touch-code.ghostty`.
 
 **Note on conditional skip:** if the precondition's OSC 133 D ack log line does not appear, the validator reports `inconclusive` with reason `shell-integration unavailable per OQ-1`. The case is **not** marked failed in that scenario — this is the spec-acknowledged limitation.
 
-### Journey AA-N: ActiveAgents is independent of the notifications subsystem
+### Journey AA-N: AgentState is independent of the notifications subsystem
 
 **Persona:** `dev_running_long_task`
-**Outcome:** Muting notifications, disabling notification surfaces, or unread notification state never affects what ActiveAgents shows.
+**Outcome:** Muting notifications, disabling notification surfaces, or unread notification state never affects what AgentState shows.
 
 #### Case `UT-AA-N-001`: Muted Pane still appears in popover
 
@@ -436,12 +436,12 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - P1 currently in `loading`.
 
 **Steps:**
-1. Hover `activeAgents.badge` ≥ 300 ms.
+1. Hover `agentState.badge` ≥ 300 ms.
 
 **Assertions:**
-1. (UI) The popover contains a row `activeAgents.row.<P1-id>` with state `loading`.
+1. (UI) The popover contains a row `agentState.row.<P1-id>` with state `loading`.
 2. (UI) The badge headline contains the verb `working`.
-3. (UI) No element indicating "muted" or a strikethrough on the ActiveAgents row exists (mute is a notification concern, not an ActiveAgents concern; the row presents identically to an unmuted row in the same state).
+3. (UI) No element indicating "muted" or a strikethrough on the AgentState row exists (mute is a notification concern, not an AgentState concern; the row presents identically to an unmuted row in the same state).
 
 **Artifacts on FAIL:** `screenshot.png`, `catalog.json.snapshot.json` showing the labels field.
 
@@ -461,12 +461,12 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 
 **Assertions:**
 1. (UI) P1's row in the popover (if popover is reopened after) shows `idle`, not `finished`.
-2. (File) `notifications.json`'s entry for that `taskFinished` event still has `readAt: null` (ActiveAgents did not touch the notification's read state).
+2. (File) `notifications.json`'s entry for that `taskFinished` event still has `readAt: null` (AgentState did not touch the notification's read state).
 3. (Log) State transition line matches `state-transition.*P1.*finished->idle`.
 
 **Artifacts on FAIL:** `notifications.json.snapshot.json`, `catalog.json.snapshot.json`, console log.
 
-#### Case `UT-AA-N-003`: All notification surfaces off does not break ActiveAgents
+#### Case `UT-AA-N-003`: All notification surfaces off does not break AgentState
 
 **Covers AC:** AC-N3-equivalent (independence from notifications subsystem) — extends AC1/AC2 in the negative
 
@@ -484,14 +484,14 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Assertions:**
 1. (UI) After step 2: badge headline reads `Claude Code is working`, pulse running.
 2. (UI) After step 4: badge headline reads `Claude Code is waiting for input`, pulse running.
-3. (UI) The inbox bell badge has not changed (notifications.json still empty), and Dock badge is unchanged — confirming ActiveAgents wrote nothing through the notifications subsystem.
+3. (UI) The inbox bell badge has not changed (notifications.json still empty), and Dock badge is unchanged — confirming AgentState wrote nothing through the notifications subsystem.
 
-**Artifacts on FAIL:** `screenshot.png`, `notifications.json.snapshot.json`, console log filtered to both `com.touch-code.activeagents` and `com.touch-code.notifications`.
+**Artifacts on FAIL:** `screenshot.png`, `notifications.json.snapshot.json`, console log filtered to both `com.touch-code.agentstate` and `com.touch-code.notifications`.
 
 ### Journey AA-A: Accessibility surface reads complete state
 
 **Persona:** `dev_running_long_task`
-**Outcome:** With VoiceOver enabled, the persona can navigate ActiveAgents and hear a complete description of the badge and each row.
+**Outcome:** With VoiceOver enabled, the persona can navigate AgentState and hear a complete description of the badge and each row.
 
 #### Case `UT-AA-A-001`: Badge VoiceOver label and hint
 
@@ -503,7 +503,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - One bound Pane P1=`claude-code` in `waitingForInput`.
 
 **Steps:**
-1. Move VoiceOver cursor to the `activeAgents.badge` element.
+1. Move VoiceOver cursor to the `agentState.badge` element.
 2. Record the VoiceOver speech output for that focus (capture via VoiceOver's "Copy last spoken phrase" or transcript).
 
 **Assertions:**
@@ -523,7 +523,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - Popover currently open.
 
 **Steps:**
-1. Move VoiceOver cursor onto the `activeAgents.row.<P1-id>` element.
+1. Move VoiceOver cursor onto the `agentState.row.<P1-id>` element.
 2. Capture the spoken phrase.
 
 **Assertions:**

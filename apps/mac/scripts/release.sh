@@ -3,10 +3,11 @@
 # release.sh — orchestrate Touch Code's Developer ID release pipeline.
 #
 # Subcommands:
-#   archive     xcodebuild archive + extract signed .app from xcarchive
-#   notarize    Submit a path to Apple notary, wait, and staple
-#   dmg         Package the exported .app into a signed DMG
-#   release     archive → notarize app → dmg → notarize dmg → staple both
+#   archive          xcodebuild archive + extract signed .app from xcarchive
+#   notarize         Submit a path to Apple notary, wait, and staple
+#   dmg              Package the exported .app into a signed DMG
+#   upload-symbols   Register a Sentry release + upload dSYMs (idempotent)
+#   release          archive → upload-symbols → notarize app → dmg → notarize dmg
 #
 # Usage:
 #   ./scripts/release.sh archive
@@ -51,10 +52,11 @@ print_usage() {
 release.sh — orchestrate Touch Code's Developer ID release pipeline.
 
 Subcommands:
-  archive     xcodebuild archive + extract signed .app from xcarchive
-  notarize    Submit a path to Apple notary, wait, and staple
-  dmg         Package the exported .app into a signed DMG
-  release     archive → notarize app → dmg → notarize dmg → staple both
+  archive          xcodebuild archive + extract signed .app from xcarchive
+  notarize         Submit a path to Apple notary, wait, and staple
+  dmg              Package the exported .app into a signed DMG
+  upload-symbols   Register a Sentry release + upload dSYMs (idempotent)
+  release          archive → upload-symbols → notarize app → dmg → notarize dmg
 
 Usage:
   ./scripts/release.sh archive
@@ -64,6 +66,11 @@ Signing identity is resolved from DEVELOPER_ID_IDENTITY_SHA env if set,
 else autodetected by 'security find-identity' picking the first
 "Developer ID Application" entry. Team ID is resolved from APPLE_TEAM_ID
 (or DEVELOPMENT_TEAM) env, else parsed from the cert's CN.
+
+upload-symbols requires SENTRY_AUTH_TOKEN with scopes project:read,
+project:write, project:releases. Without the token the step is a
+no-op (so contributors without dashboard access still produce a
+notarized DMG).
 EOF
 }
 
@@ -204,8 +211,46 @@ cmd_dmg() {
   printf '%s\n' "${dmg_path}"
 }
 
+cmd_upload_symbols() {
+  [ -d "${archive_path}" ] || die "missing ${archive_path}. Run release.sh archive first."
+  local version
+  version="$(read_marketing_version)"
+  local release_name="touch-code@${version}"
+  local dsym_dir="${archive_path}/dSYMs"
+
+  if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
+    log "SENTRY_AUTH_TOKEN not set — skipping dSYM upload (release ${release_name})"
+    return 0
+  fi
+
+  if [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT:-}" ]; then
+    log "SENTRY_ORG or SENTRY_PROJECT not set — skipping dSYM upload (release ${release_name})"
+    return 0
+  fi
+
+  local sentry_cli
+  if command -v mise >/dev/null 2>&1 && mise exec -- sentry-cli --version >/dev/null 2>&1; then
+    sentry_cli="mise exec -- sentry-cli"
+  elif command -v sentry-cli >/dev/null 2>&1; then
+    sentry_cli="sentry-cli"
+  else
+    log "sentry-cli not found — skipping dSYM upload (install via mise or 'brew install getsentry/tools/sentry-cli')"
+    return 0
+  fi
+
+  log "registering Sentry release ${release_name}"
+  ${sentry_cli} releases new "${release_name}" || die "sentry-cli releases new failed"
+  log "uploading dSYMs from ${dsym_dir}"
+  ${sentry_cli} debug-files upload --include-sources "${dsym_dir}" \
+    || die "sentry-cli debug-files upload failed"
+  ${sentry_cli} releases finalize "${release_name}" || die "sentry-cli releases finalize failed"
+  log "Sentry release ${release_name} ready"
+}
+
 cmd_release() {
   cmd_archive
+  log "uploading debug symbols"
+  cmd_upload_symbols
   log "notarizing app"
   "${script_dir}/notarize.sh" "${app_path}"
   log "packaging DMG"
@@ -214,6 +259,8 @@ cmd_release() {
   local dmg_path="${release_dir}/TouchCode-${version}.dmg"
   cmd_dmg "${version}"
   log "notarizing DMG"
+  # notarize.sh now refreshes the sidecar in place after stapling, so
+  # cmd_release no longer needs to do it explicitly.
   "${script_dir}/notarize.sh" "${dmg_path}"
   log "release ready: ${dmg_path}"
 }
@@ -222,10 +269,11 @@ cmd_release() {
 
 main() {
   case "${1:-}" in
-    archive)   shift; cmd_archive "$@" ;;
-    notarize)  shift; cmd_notarize "$@" ;;
-    dmg)       shift; cmd_dmg "$@" ;;
-    release)   shift; cmd_release "$@" ;;
+    archive)         shift; cmd_archive "$@" ;;
+    notarize)        shift; cmd_notarize "$@" ;;
+    dmg)             shift; cmd_dmg "$@" ;;
+    upload-symbols)  shift; cmd_upload_symbols "$@" ;;
+    release)         shift; cmd_release "$@" ;;
     -h|--help|help|"") print_usage ;;
     *) die "unknown subcommand: ${1}. Run release.sh --help." ;;
   esac

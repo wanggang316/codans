@@ -43,14 +43,19 @@ final class HierarchyManager {
   /// clock-live state that must be rebuilt each launch.
   private var lastFocusedPaneByTab: [TabID: PaneID] = [:]
 
-  /// Runtime-only set of panes that are currently executing a tracked
-  /// command. Driven by C3 hooks in a future milestone; today the only
-  /// writers are the `markPaneRunning` / `markPaneIdle` methods, which no
-  /// caller invokes in production. Reads via `tabIsDirty(_:)` still work
-  /// — they return `false` uniformly until a writer wakes up. Stored as a
-  /// `Set` rather than `[PaneID: Bool]` so absence is the natural "idle"
-  /// signal and `contains` is the only read shape.
+  /// Panes flagged busy by OSC 9;4 progress reports, written by the root
+  /// reducer through `markPaneRunning` / `markPaneIdle`. One of two
+  /// "terminal busy" sources; `tabIsDirty` / `worktreeIsDirty` read the
+  /// union with `commandBusyPanes`. Stored as a `Set` so absence is the
+  /// natural "idle" signal and `contains` is the only read shape.
   private var runningPanes: Set<PaneID> = []
+
+  /// Panes whose foreground process group is a real running command (see
+  /// `ForegroundJobClassifier`), fed by the foreground-job poller through
+  /// the root reducer's `setPaneCommandBusy`. Independent of `runningPanes`
+  /// so the OSC and foreground-job writers never clobber each other's
+  /// insert/remove; the dirty predicates OR the two together.
+  private var commandBusyPanes: Set<PaneID> = []
 
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog
@@ -84,7 +89,8 @@ final class HierarchyManager {
             let pane = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex]
             if pane.agentKind != nil || pane.agentSessionID != nil {
               catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentKind = nil
-              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID = nil
+              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID =
+                nil
               mutated = true
             }
           }
@@ -316,15 +322,34 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  /// Renames the Project in place. Missing project is `.notFound`; an unchanged
-  /// name is a silent no-op (no catalog churn, no save). The caller is
-  /// responsible for trimming / empty-string validation.
+  /// Sets the Project's user-facing display name. Persists onto
+  /// `Project.displayName`; the canonical name (derived from `rootPath`) is
+  /// untouched and remains the worktree-path anchor. Empty / whitespace input
+  /// or a value equal to the canonical name clears the override so the
+  /// catalog never carries a redundant string that just mirrors the path.
+  /// Missing project is `.notFound`; an unchanged value is a silent no-op
+  /// (no catalog churn, no save).
   func renameProject(_ id: ProjectID, name: String) throws {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")
     }
-    guard catalog.projects[projectIndex].name != name else { return }
-    catalog.projects[projectIndex].name = name
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let canonical = catalog.projects[projectIndex].canonicalName
+    let newOverride: String? = (trimmed.isEmpty || trimmed == canonical) ? nil : trimmed
+    guard catalog.projects[projectIndex].displayName != newOverride else { return }
+    catalog.projects[projectIndex].displayName = newOverride
+    store.scheduleSave(catalog)
+  }
+
+  /// Recolors the Project. `nil` clears the assignment so the UI falls back
+  /// to the system accent. Unchanged value is a silent no-op so repeated
+  /// taps on the same swatch don't churn the catalog or debounced save.
+  func setProjectColor(_ id: ProjectID, color: ProjectColor?) throws {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
+      throw HierarchyError.notFound("Project \(id)")
+    }
+    guard catalog.projects[projectIndex].color != color else { return }
+    catalog.projects[projectIndex].color = color
     store.scheduleSave(catalog)
   }
 
@@ -803,9 +828,9 @@ final class HierarchyManager {
           guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
             continue
           }
-          // Idempotent: unchanged value skips persistence so a flood of
-          // identical classifications (e.g. title-update spam on the
-          // same agent) does not wake the 500 ms debounce.
+          // Idempotent: unchanged value skips persistence so repeated
+          // foreground snapshots for the same agent do not wake the
+          // 500 ms debounce.
           guard panes[paneIndex].agentKind != kind else { return }
           catalog.projects[projectIndex]
             .worktrees[worktreeIndex]
@@ -936,6 +961,7 @@ final class HierarchyManager {
       for pane in worktree.tabs.flatMap({ $0.panes }) {
         runtime.closeSurface(for: pane.id)
         runningPanes.remove(pane.id)
+        commandBusyPanes.remove(pane.id)
       }
       if let idx = catalog.projects[projectIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
         catalog.projects[projectIndex].worktrees[idx].archived = true
@@ -986,6 +1012,7 @@ final class HierarchyManager {
       for pane in worktree.tabs.flatMap({ $0.panes }) {
         runtime.closeSurface(for: pane.id)
         runningPanes.remove(pane.id)
+        commandBusyPanes.remove(pane.id)
       }
       for tab in worktree.tabs {
         lastFocusedPaneByTab.removeValue(forKey: tab.id)
@@ -1007,29 +1034,6 @@ final class HierarchyManager {
         .count
     }
     return 0
-  }
-
-  /// Records whether the right-side Git Viewer overlay is visible for this
-  /// Worktree. Visibility persists across app restarts — each Worktree
-  /// remembers its own. Missing `worktreeID` is a silent no-op; unchanged
-  /// value is a silent no-op (no save scheduled). Persists via the
-  /// standard debounced `store.scheduleSave(catalog)` pipeline. The
-  /// `projectID` argument is not required — the method scans all
-  /// Worktrees in the catalog so the caller does not have to thread
-  /// parent IDs through the UI-toggle path.
-  func setWorktreeDiffInspectorVisible(worktreeID: WorktreeID, visible: Bool) {
-    for projectIndex in catalog.projects.indices {
-      guard
-        let worktreeIndex = catalog.projects[projectIndex]
-          .worktrees.firstIndex(where: { $0.id == worktreeID })
-      else { continue }
-      guard
-        catalog.projects[projectIndex].worktrees[worktreeIndex].diffInspectorVisible != visible
-      else { return }
-      catalog.projects[projectIndex].worktrees[worktreeIndex].diffInspectorVisible = visible
-      store.scheduleSave(catalog)
-      return
-    }
   }
 
   // MARK: - Tab mutations
@@ -1093,6 +1097,7 @@ final class HierarchyManager {
     for pane in tab.panes {
       runtime.closeSurface(for: pane.id)
       runningPanes.remove(pane.id)
+      commandBusyPanes.remove(pane.id)
     }
     lastFocusedPaneByTab.removeValue(forKey: id)
 
@@ -1214,6 +1219,43 @@ final class HierarchyManager {
     else { return }
     catalog.projects[projectIndex]
       .worktrees[worktreeIndex].tabs[tabIndex].color = color
+    store.scheduleSave(catalog)
+  }
+
+  /// Update the tab's SF Symbol icon, subject to the lock precedence in
+  /// `TabIconLock` (`.auto` ≤ `.script` ≤ `.user`). A lower-priority write
+  /// against a higher lock is a silent no-op; a `.user` write with `nil`
+  /// drops the lock back to `.auto` so the runtime fallback takes over
+  /// again. Persists through the same debounced save path as the other
+  /// tab mutators.
+  func setTabIcon(
+    _ id: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID,
+    icon: String?,
+    lock: TabIconLock
+  ) throws {
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+    guard
+      let tabIndex = catalog.projects[projectIndex]
+        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
+    else {
+      throw HierarchyError.notFound("Tab \(id)")
+    }
+    let current = catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex]
+    guard let updated = current.applyingIcon(icon, lock: lock),
+      updated != current
+    else { return }
+    catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex] = updated
     store.scheduleSave(catalog)
   }
 
@@ -1443,6 +1485,13 @@ final class HierarchyManager {
     runningPanes.remove(paneID)
   }
 
+  /// Sets whether `paneID`'s foreground process group is a running command.
+  /// Idempotent. Fed by the foreground-job poller via the root reducer; the
+  /// dirty predicates OR this with the OSC-driven `runningPanes`.
+  func setPaneCommandBusy(_ paneID: PaneID, _ busy: Bool) {
+    if busy { commandBusyPanes.insert(paneID) } else { commandBusyPanes.remove(paneID) }
+  }
+
   /// True when any pane inside `tabID` is currently marked running.
   /// Reads a runtime set, never touches the catalog.
   func tabIsDirty(_ tabID: TabID) -> Bool {
@@ -1450,13 +1499,13 @@ final class HierarchyManager {
     // walk is pointless. Until the C3 hooks plan starts populating
     // `runningPanes`, this short-circuit means the chip's per-render
     // call is a single set-emptiness check rather than a hierarchy walk.
-    guard !runningPanes.isEmpty else { return false }
+    guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
     // Walk the catalog once to locate the tab; absent tabs read as idle.
     for project in catalog.projects {
       for worktree in project.worktrees {
         guard let tab = worktree.tabs.first(where: { $0.id == tabID })
         else { continue }
-        return tab.panes.contains { runningPanes.contains($0.id) }
+        return tab.panes.contains { runningPanes.contains($0.id) || commandBusyPanes.contains($0.id) }
       }
     }
     return false
@@ -1466,12 +1515,12 @@ final class HierarchyManager {
   /// currently marked running. Sidebar uses this to surface a busy
   /// glyph on the worktree row even when its tab is unfocused.
   func worktreeIsDirty(_ worktreeID: WorktreeID) -> Bool {
-    guard !runningPanes.isEmpty else { return false }
+    guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
       else { continue }
       return worktree.tabs.contains { tab in
-        tab.panes.contains { runningPanes.contains($0.id) }
+        tab.panes.contains { runningPanes.contains($0.id) || commandBusyPanes.contains($0.id) }
       }
     }
     return false
@@ -1524,7 +1573,11 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: pane, in: worktree, env: env)
+    let rootPath = catalog.projects[projectIndex].rootPath
+    try runtime.ensureSurface(
+      for: pane, in: worktree,
+      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+    )
 
     store.scheduleSave(catalog)
     return paneID
@@ -1568,7 +1621,11 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: newPane, in: worktree, env: env)
+    let rootPath = catalog.projects[projectIndex].rootPath
+    try runtime.ensureSurface(
+      for: newPane, in: worktree,
+      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+    )
 
     store.scheduleSave(catalog)
     return newPaneID
@@ -1604,6 +1661,7 @@ final class HierarchyManager {
 
     runtime.closeSurface(for: paneID)
     runningPanes.remove(paneID)
+    commandBusyPanes.remove(paneID)
     if lastFocusedPaneByTab[tabID] == paneID {
       lastFocusedPaneByTab.removeValue(forKey: tabID)
     }
@@ -1691,7 +1749,11 @@ final class HierarchyManager {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: pane, in: worktree, env: env)
+    let rootPath = catalog.projects[projectIndex].rootPath
+    try runtime.ensureSurface(
+      for: pane, in: worktree,
+      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+    )
   }
 
   func unfocusPane(
@@ -2037,6 +2099,24 @@ final class HierarchyManager {
   nonisolated private static let inheritedTerminalEnvVarsToStrip: [String] = [
     "TERM", "TERMCAP", "TERMINFO", "COLORTERM",
   ]
+
+  /// Merges the per-worktree built-in variables touch-code provides for
+  /// every pane (`TOUCHCODE_WORKTREE_PATH`, `TOUCHCODE_ROOT_PATH`) into
+  /// `env`. Injected here at spawn time — not in `resolvedEnv`, which is
+  /// project-scoped and has no worktree — and written *after* the caller's
+  /// env so a user-defined `envVars` entry of the same name can't shadow
+  /// the real path. Mirrors the read-only rows the Environment editor pins
+  /// and the always-wins ordering `resolvedEnv` uses for the socket path.
+  nonisolated static func injectingBuiltins(
+    _ env: [String: String],
+    worktreePath: String,
+    rootPath: String
+  ) -> [String: String] {
+    var merged = env
+    merged[BuiltinEnvVar.worktreePath.key] = worktreePath
+    merged[BuiltinEnvVar.rootPath.key] = rootPath
+    return merged
+  }
 
   // MARK: - Helpers
 
