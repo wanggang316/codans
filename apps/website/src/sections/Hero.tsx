@@ -177,25 +177,19 @@ function ScreenshotShowcase() {
       transition={{ duration: 1.1, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
       className="relative mx-auto mt-16 w-full max-w-[1120px]"
     >
-      {/* Neutral underglow for depth — no colour. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -inset-x-6 -bottom-12 -top-2 -z-10"
-        style={{
-          background:
-            "radial-gradient(720px 220px at 50% 100%, rgba(255,255,255,0.05), transparent 72%)",
-        }}
+      {/* The screenshot carries its own rounded corners + transparent
+          background, so the wrapper adds no frame, border, or fill — those
+          would draw a rectangle behind the rounded PNG. Depth comes from a
+          `drop-shadow` filter, which follows the image's alpha (the rounded
+          shape) rather than a rectangular box-shadow. */}
+      <img
+        src="/hero-app.png"
+        alt="TouchCode window: sidebar with multiple projects and worktrees, terminal panes, and the command palette open"
+        width={2400}
+        height={1474}
+        className="block h-auto w-full [filter:drop-shadow(0_40px_80px_rgba(0,0,0,0.55))]"
+        draggable={false}
       />
-      <div className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-bg-elev shadow-window">
-        <img
-          src="/hero-app.png"
-          alt="TouchCode window: sidebar with multiple projects and worktrees, terminal panes, and the command palette open"
-          width={2400}
-          height={1473}
-          className="block h-auto w-full"
-          draggable={false}
-        />
-      </div>
     </motion.div>
   );
 }
