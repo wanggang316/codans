@@ -20,6 +20,19 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.0] - 2026-06-01
+
+### Added
+
+- **Terminal panes survive quitting and relaunching the app.** A new Settings → General "Resume panes on launch" toggle (on by default) keeps your panes — and the programs running inside them — alive across an app restart, so you reopen right where you left off. Turn it off and each pane is instead restored from a snapshot of its last screen. Settings shows how many sessions can be resumed and offers a "forget all" action to clear them.
+- **Quitting asks before closing active panes.** Quitting while panes are still doing work now shows a confirmation instead of tearing everything down silently.
+- **The Active Agents panel remembers its agents across launches.** Agents that were running before you quit reappear after relaunch instead of starting from an empty list.
+- **New `tc pane` commands.** `info --json` dumps a pane's full state, `read` gains additional variants, and `close` shuts a pane down — ending its resumable session — from the shell.
+
+### Changed
+
+- **Settings → Scripts is now Settings → Commands, with inline editing.** The pop-up script editor is replaced by an inline table — two-line rows, a per-command color and kind, and a dedicated sheet for environment variables. Every command can reference built-in worktree-path and project-root variables, and project lifecycle scripts now live under General.
+
 ## [0.3.5] - 2026-05-31
 
 ### Added
