@@ -48,10 +48,11 @@ struct ProjectGeneralSettingsView: View {
     case worktree
     case github
     case environment
+    case lifecycle
   }
 
-  /// Pure visibility logic. Git Viewer / Worktree / GitHub gate on
-  /// `kind == .gitRepo`; everything else is always visible.
+  /// Pure visibility logic. Git Viewer / Worktree / GitHub / Lifecycle gate
+  /// on `kind == .gitRepo`; everything else is always visible.
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
     case .dir:
@@ -139,6 +140,10 @@ struct ProjectGeneralSettingsView: View {
     settingsStore.settings.general
   }
 
+  private var git: GitProjectSettings {
+    entry?.git ?? GitProjectSettings()
+  }
+
   var body: some View {
     Form {
       if visible.contains(.general) {
@@ -158,6 +163,9 @@ struct ProjectGeneralSettingsView: View {
       }
       if visible.contains(.environment) {
         environmentSection
+      }
+      if visible.contains(.lifecycle) {
+        lifecycleSections
       }
 
       if let error = store.state.lastWriteFailure, !error.isEmpty {
@@ -579,15 +587,21 @@ struct ProjectGeneralSettingsView: View {
 
   @ViewBuilder
   private var environmentSection: some View {
-    Section("Environment") {
+    Section {
       EnvironmentEditorView(
         envVars: envVarsBinding,
+        builtins: BuiltinEnvVar.allCases,
         onChange: { key, newValue in
           routes.writeEnvVar(key: key, value: newValue)
-        },
-        footer:
-          "Values are stored in plain text in settings.json. Do not paste credentials "
-          + "you wouldn't keep in a config file."
+        }
+      )
+    } header: {
+      Text("Environment Variables")
+    } footer: {
+      Text(
+        "TOUCHCODE_WORKTREE_PATH and TOUCHCODE_ROOT_PATH are provided automatically for "
+          + "every pane. Values are stored in plain text in settings.json — don't paste "
+          + "credentials you wouldn't keep in a config file."
       )
     }
   }
@@ -600,6 +614,83 @@ struct ProjectGeneralSettingsView: View {
       // a separate write path.
       set: { _ in }
     )
+  }
+
+  // MARK: - Worktree Lifecycle Scripts
+
+  /// Git-only lifecycle script editors (Setup / Archive / Delete) rendered at
+  /// the bottom of the pane. Each is one body of shell text run at the
+  /// corresponding worktree phase. Writes route through the shared reducer
+  /// (`setLifecycleScript`), whose debounced disk write coalesces keystrokes.
+  @ViewBuilder
+  private var lifecycleSections: some View {
+    lifecycleSection(
+      title: "Setup Script",
+      subtitle: "Runs after a new worktree is created.",
+      icon: "truck.box.badge.clock",
+      iconColor: .blue,
+      example: "pnpm install",
+      text: git.createScript?.command ?? "",
+      phase: .setup
+    )
+    lifecycleSection(
+      title: "Archive Script",
+      subtitle: "Runs before a worktree is archived.",
+      icon: "archivebox",
+      iconColor: .orange,
+      example: "docker compose down",
+      text: git.archiveScript?.command ?? "",
+      phase: .archive
+    )
+    lifecycleSection(
+      title: "Delete Script",
+      subtitle: "Runs before a worktree is removed (files still on disk).",
+      icon: "trash",
+      iconColor: .red,
+      example: "docker compose down",
+      text: git.deleteScript?.command ?? "",
+      phase: .delete
+    )
+  }
+
+  @ViewBuilder
+  private func lifecycleSection(
+    title: String,
+    subtitle: String,
+    icon: String,
+    iconColor: Color,
+    example: String,
+    text: String,
+    phase: SettingsWriter.WorktreeLifecycle
+  ) -> some View {
+    Section {
+      LifecycleEditor(
+        initial: text,
+        onCommit: { newValue in
+          store.send(.setLifecycleScript(phase, newValue))
+        }
+      )
+    } header: {
+      Label {
+        VStack(alignment: .leading, spacing: 0) {
+          Text(title)
+            .font(.body)
+            .bold()
+            .lineLimit(1)
+          Text(subtitle)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+      } icon: {
+        Image(systemName: icon)
+          .foregroundStyle(iconColor)
+          .accessibilityHidden(true)
+      }
+      .labelStyle(.lifecycleSectionHeader)
+    } footer: {
+      Text("e.g., `\(example)`")
+    }
   }
 
   // MARK: - Helpers
@@ -917,39 +1008,44 @@ private final class ColorPanelObserver: NSObject {
   }
 }
 
-/// Shared swatch wrapper. Centralises the visual rules — fixed 24pt hit
-/// area, 1pt subdued ring on hover, 1.5pt accent ring when selected — so
-/// every chip in the row stays pixel-aligned regardless of its inner fill
-/// (named color, nosign glyph, conic rainbow, or solid custom hex).
-private struct ColorChip<Content: View>: View {
-  let isSelected: Bool
-  let action: () -> Void
-  let accessibilityName: String
-  @ViewBuilder var content: () -> Content
+// MARK: - Lifecycle script section header style
 
-  @State private var isHovering: Bool = false
+/// Icon-led section header used by the worktree-lifecycle script editors.
+private struct LifecycleSectionHeaderLabelStyle: LabelStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HStack(spacing: 6) {
+      configuration.icon
+      configuration.title
+    }
+  }
+}
+
+extension LabelStyle where Self == LifecycleSectionHeaderLabelStyle {
+  fileprivate static var lifecycleSectionHeader: LifecycleSectionHeaderLabelStyle { .init() }
+}
+
+// MARK: - Lifecycle inline editor
+
+/// Tiny editor wrapper that commits the user's edit to the writer on each
+/// change. Per-keystroke calls are safe: the writer routes through
+/// `SettingsStore.scheduleSave`, which cancels and re-arms a debounced disk
+/// write so a burst of keystrokes only triggers a single
+/// `AtomicFileStore.write` once typing settles.
+private struct LifecycleEditor: View {
+  let initial: String
+  let onCommit: (String) -> Void
 
   var body: some View {
-    Button(action: action) {
-      ZStack {
-        if isSelected {
-          Circle()
-            .strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
-            .frame(width: 22, height: 22)
-        } else if isHovering {
-          Circle()
-            .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1)
-            .frame(width: 22, height: 22)
+    PlainCommandEditor(
+      text: Binding(
+        get: { initial },
+        set: { newValue in
+          if newValue != initial {
+            onCommit(newValue)
+          }
         }
-        content()
-      }
-      .frame(width: 24, height: 24)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .onHover { isHovering = $0 }
-    .help(accessibilityName)
-    .accessibilityLabel(accessibilityName)
-    .accessibilityAddTraits(isSelected ? .isSelected : [])
+      )
+    )
+    .frame(height: 90)
   }
 }

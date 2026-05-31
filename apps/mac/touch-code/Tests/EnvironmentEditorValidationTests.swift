@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TouchCodeCore
 
 @testable import TouchCode
 
@@ -53,6 +54,18 @@ struct EnvironmentEditorValidationTests {
       EnvVarValidator.errorFor(key: "FOO", value: "baz", existing: existing)
         == "Key already exists"
     )
+  }
+
+  @Test
+  func reservedBuiltinKeysAreRejected() {
+    // The two app-provided path variables are pinned as read-only rows;
+    // a user can't redefine them as editable entries.
+    for builtin in BuiltinEnvVar.allCases {
+      #expect(
+        EnvVarValidator.errorFor(key: builtin.key, value: "x", existing: [:])
+          == "Reserved by touch-code"
+      )
+    }
   }
 
   @Test

@@ -1,10 +1,9 @@
 import Foundation
 
-/// Category of a `ScriptDefinition`. Drives the default name, SF Symbol icon,
-/// and tint colour when the user does not override them. `.custom` is the only
-/// kind whose `systemImage` / `tintColor` fields on `ScriptDefinition` are
-/// honoured by the resolver — predefined kinds always render with their kind
-/// default ("kind is the contract").
+/// Category of a `ScriptDefinition`. Supplies the default name, SF Symbol icon,
+/// and tint colour. A per-command `systemImage` / `tintColor` override on
+/// `ScriptDefinition` wins over these defaults regardless of kind; the kind
+/// default applies only when no override is set.
 public enum ScriptKind: String, Codable, Sendable, CaseIterable {
   case run
   case test
@@ -25,8 +24,7 @@ public enum ScriptKind: String, Codable, Sendable, CaseIterable {
     }
   }
 
-  /// SF Symbol name resolved by the view layer. Predefined kinds use these
-  /// directly; `.custom` uses `ScriptDefinition.systemImage` when set.
+  /// SF Symbol name used when `ScriptDefinition.systemImage` is not set.
   public var defaultSystemImage: String {
     switch self {
     case .run: return "play.fill"
@@ -38,8 +36,7 @@ public enum ScriptKind: String, Codable, Sendable, CaseIterable {
     }
   }
 
-  /// Tint colour resolved by the view layer. `.custom` uses
-  /// `ScriptDefinition.tintColor` when set.
+  /// Tint colour used when `ScriptDefinition.tintColor` is not set.
   public var defaultTintColor: ScriptTintColor {
     switch self {
     case .run: return .green
