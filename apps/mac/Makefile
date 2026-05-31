@@ -59,10 +59,10 @@ regen-completions: build-cli
 run-app: build
 	@APP=$$(xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug -showBuildSettings 2>/dev/null | awk '$$1=="BUILT_PRODUCTS_DIR"{d=$$3} $$1=="FULL_PRODUCT_NAME"{p=$$3} END{print d "/" p}') && open "$$APP"
 
-archive: generate
+archive: generate build-zmx
 	./scripts/release.sh archive
 
-release: generate
+release: generate build-zmx
 	./scripts/release.sh release
 
 bump-version:
