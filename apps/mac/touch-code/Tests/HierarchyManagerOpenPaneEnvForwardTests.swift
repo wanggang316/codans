@@ -6,10 +6,23 @@ import TouchCodeCore
 
 /// Forwarding contract: the `env` argument passed to
 /// `HierarchyManager.openPane` and `splitPane` reaches the runtime's
-/// `ensureSurface` call unchanged. FakeHierarchyRuntime records the env on
-/// every call so we can assert the exact map made it across.
+/// `ensureSurface` call, augmented with the per-worktree built-in path
+/// variables (`TOUCHCODE_WORKTREE_PATH` / `TOUCHCODE_ROOT_PATH`) that
+/// touch-code injects for every pane. FakeHierarchyRuntime records the env
+/// on every call so we can assert the exact map made it across.
+///
+/// The fixture worktree lives at `/repo` and its Project root at `/tmp`,
+/// so every spawned pane sees those two built-ins on top of the caller's
+/// env.
 @MainActor
 struct HierarchyManagerOpenPaneEnvForwardTests {
+  /// Built-ins injected for the `setupTab` fixture (worktree `/repo`,
+  /// root `/tmp`). Merged into every expected env below.
+  private let builtins: [String: String] = [
+    BuiltinEnvVar.worktreePath.key: "/repo",
+    BuiltinEnvVar.rootPath.key: "/tmp",
+  ]
+
   private func makeManager() -> (HierarchyManager, FakeHierarchyRuntime) {
     let tempURL = FileManager.default.temporaryDirectory
       .appending(component: UUID().uuidString + ".json")
@@ -45,11 +58,11 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
     )
 
     #expect(runtime.ensureSurfaceCalls.count == 1)
-    #expect(runtime.ensureSurfaceCalls[0].env == ["A": "1", "B": "2"])
+    #expect(runtime.ensureSurfaceCalls[0].env == ["A": "1", "B": "2"].merging(builtins) { _, b in b })
   }
 
   @Test
-  func openPaneDefaultEnvIsEmpty() throws {
+  func openPaneDefaultEnvIsBuiltinsOnly() throws {
     let (manager, runtime) = makeManager()
     let (projectID, worktreeID, tabID) = try setupTab(manager)
 
@@ -60,7 +73,8 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
     )
 
     #expect(runtime.ensureSurfaceCalls.count == 1)
-    #expect(runtime.ensureSurfaceCalls[0].env.isEmpty)
+    // No caller env, so the recorded env is exactly the injected built-ins.
+    #expect(runtime.ensureSurfaceCalls[0].env == builtins)
   }
 
   @Test
@@ -83,11 +97,13 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
     )
 
     #expect(runtime.ensureSurfaceCalls.count == 2)
-    #expect(runtime.ensureSurfaceCalls[1].env == ["SPLIT_VAR": "42"])
+    #expect(
+      runtime.ensureSurfaceCalls[1].env == ["SPLIT_VAR": "42"].merging(builtins) { _, b in b }
+    )
   }
 
   @Test
-  func openPaneEmptyEnvProducesEmptyRecordedEnv() throws {
+  func openPaneEmptyEnvStillCarriesBuiltins() throws {
     let (manager, runtime) = makeManager()
     let (projectID, worktreeID, tabID) = try setupTab(manager)
 
@@ -98,6 +114,31 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
       env: [:]
     )
 
-    #expect(runtime.ensureSurfaceCalls[0].env.isEmpty)
+    #expect(runtime.ensureSurfaceCalls[0].env == builtins)
+  }
+
+  /// The built-in path variables are written last, so a user-defined
+  /// `envVars` entry of the same name cannot shadow the real path — the
+  /// runtime mirror of the Environment editor's read-only rows.
+  @Test
+  func builtinPathVarsWinOverUserEnvOfSameName() throws {
+    let (manager, runtime) = makeManager()
+    let (projectID, worktreeID, tabID) = try setupTab(manager)
+
+    _ = try manager.openPane(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/tmp",
+      initialCommand: nil,
+      env: [
+        BuiltinEnvVar.worktreePath.key: "/tampered",
+        BuiltinEnvVar.rootPath.key: "/tampered",
+        "KEEP": "me",
+      ]
+    )
+
+    let env = runtime.ensureSurfaceCalls[0].env
+    #expect(env[BuiltinEnvVar.worktreePath.key] == "/repo")
+    #expect(env[BuiltinEnvVar.rootPath.key] == "/tmp")
+    #expect(env["KEEP"] == "me")
   }
 }

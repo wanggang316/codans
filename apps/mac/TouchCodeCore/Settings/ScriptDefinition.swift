@@ -3,11 +3,10 @@ import Foundation
 /// User-defined script attached to a Project. Surfaced in the Scripts
 /// sub-pane, the Command Palette, and the WorktreeHeader Run split-button.
 ///
-/// `kind` drives the default visual identity (name, icon, tint). For
-/// predefined kinds (`.run` / `.test` / `.deploy` / `.lint` / `.format`)
-/// the `systemImage` / `tintColor` overrides are stored but ignored at
-/// render time — only `.custom` honours them. This keeps "the kind is the
-/// contract" semantic so a list of `.test` scripts looks uniform.
+/// `kind` supplies the *default* visual identity (name, icon, tint). A
+/// per-command `systemImage` / `tintColor` override always wins over the
+/// kind default at render time, so a command can keep its kind (and the
+/// kind-derived name fallback) while showing a custom icon or colour.
 ///
 /// `target` / `direction` / `onFinished` / `focus` describe **how** the
 /// script materializes at run time:
@@ -68,28 +67,35 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
     self.keyboardShortcut = keyboardShortcut
   }
 
+  /// Stable id for the built-in Run default. Fixed (not random) so SwiftUI
+  /// identity / selection stay put across renders while the default is still
+  /// virtual, and so a materialized copy keeps one well-known id per Project.
+  public static let builtinRunID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
+
+  /// The built-in Run command every Project shows by default until it defines
+  /// its own Run. Surfaced by the Commands table; it materializes into
+  /// `ProjectSettings.scripts` the first time the user edits it.
+  public static let builtinRun = ScriptDefinition(id: builtinRunID, kind: .run)
+
   /// User-visible label. Falls back to the kind's default when the user
   /// has not named the script.
   public var displayName: String {
     name.isEmpty ? kind.defaultName : name
   }
 
-  /// SF Symbol used by view-side icons. Predefined kinds always return the
-  /// kind default; `.custom` returns the override when present.
+  /// SF Symbol used by view-side icons. A per-command override wins;
+  /// otherwise the kind default applies.
   public var resolvedSystemImage: String {
-    if kind == .custom, let systemImage, !systemImage.isEmpty {
+    if let systemImage, !systemImage.isEmpty {
       return systemImage
     }
     return kind.defaultSystemImage
   }
 
-  /// Tint colour used by view-side icons / button accents. Predefined kinds
-  /// always return the kind default; `.custom` returns the override.
+  /// Tint colour used by view-side icons / button accents. A per-command
+  /// override wins; otherwise the kind default applies.
   public var resolvedTintColor: ScriptTintColor {
-    if kind == .custom, let tintColor {
-      return tintColor
-    }
-    return kind.defaultTintColor
+    tintColor ?? kind.defaultTintColor
   }
 
   /// Validates `onFinished` against `target`. The UI never writes invalid

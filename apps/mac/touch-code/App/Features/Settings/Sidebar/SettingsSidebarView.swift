@@ -4,7 +4,7 @@ import TouchCodeCore
 
 /// Settings window sidebar. Fixed-order global sections at the top, then a "Projects"
 /// `Section` containing one `DisclosureGroup` per open Project (sorted by name). Each
-/// disclosure exposes the Project's `General` and `Scripts` sub-rows. Kind itself is
+/// disclosure exposes the Project's `General` and `Commands` sub-rows. Kind itself is
 /// **never** surfaced in the UI — no icon, no badge.
 ///
 /// The Project list comes from the live `HierarchyManager` catalog; adding or removing a
@@ -156,7 +156,7 @@ struct SettingsSidebarView: View {
   }
 
   /// Leading icon for Project sub-rows. Matches the global-section icon language where
-  /// intuitive (Scripts → terminal) and drops to a blank for rows whose
+  /// intuitive (Commands → terminal) and drops to a blank for rows whose
   /// icon would add noise rather than signal.
   private func subrowIcon(for section: SettingsSection) -> String {
     switch section {

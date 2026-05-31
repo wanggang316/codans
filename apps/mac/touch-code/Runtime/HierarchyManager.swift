@@ -1573,7 +1573,11 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: pane, in: worktree, env: env)
+    let rootPath = catalog.projects[projectIndex].rootPath
+    try runtime.ensureSurface(
+      for: pane, in: worktree,
+      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+    )
 
     store.scheduleSave(catalog)
     return paneID
@@ -1617,7 +1621,11 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: newPane, in: worktree, env: env)
+    let rootPath = catalog.projects[projectIndex].rootPath
+    try runtime.ensureSurface(
+      for: newPane, in: worktree,
+      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+    )
 
     store.scheduleSave(catalog)
     return newPaneID
@@ -1741,7 +1749,11 @@ final class HierarchyManager {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    try runtime.ensureSurface(for: pane, in: worktree, env: env)
+    let rootPath = catalog.projects[projectIndex].rootPath
+    try runtime.ensureSurface(
+      for: pane, in: worktree,
+      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+    )
   }
 
   func unfocusPane(
@@ -2087,6 +2099,24 @@ final class HierarchyManager {
   nonisolated private static let inheritedTerminalEnvVarsToStrip: [String] = [
     "TERM", "TERMCAP", "TERMINFO", "COLORTERM",
   ]
+
+  /// Merges the per-worktree built-in variables touch-code provides for
+  /// every pane (`TOUCHCODE_WORKTREE_PATH`, `TOUCHCODE_ROOT_PATH`) into
+  /// `env`. Injected here at spawn time — not in `resolvedEnv`, which is
+  /// project-scoped and has no worktree — and written *after* the caller's
+  /// env so a user-defined `envVars` entry of the same name can't shadow
+  /// the real path. Mirrors the read-only rows the Environment editor pins
+  /// and the always-wins ordering `resolvedEnv` uses for the socket path.
+  nonisolated static func injectingBuiltins(
+    _ env: [String: String],
+    worktreePath: String,
+    rootPath: String
+  ) -> [String: String] {
+    var merged = env
+    merged[BuiltinEnvVar.worktreePath.key] = worktreePath
+    merged[BuiltinEnvVar.rootPath.key] = rootPath
+    return merged
+  }
 
   // MARK: - Helpers
 

@@ -21,7 +21,7 @@ public enum SettingsSection: Hashable, Sendable {
   /// (git-only), GitHub (git-only), environment variables. Sections render
   /// conditionally on `ProjectKind` inside `ProjectGeneralSettingsView`.
   case projectGeneral(ProjectID)
-  /// User-defined scripts + worktree-lifecycle scripts (git-only Section).
+  /// User-defined custom commands (the inline command table).
   case projectScripts(ProjectID)
 
   /// Canonical iteration order for global sidebar rows.
@@ -78,7 +78,7 @@ extension SettingsSection {
   public var projectSubrowTitle: String? {
     switch self {
     case .projectGeneral: return "General"
-    case .projectScripts: return "Scripts"
+    case .projectScripts: return "Commands"
     default: return nil
     }
   }
