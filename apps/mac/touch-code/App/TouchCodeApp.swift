@@ -576,26 +576,19 @@ final class AppState {
     // would otherwise hit the `liveValue` `fatalError` placeholders. Install the live
     // implementations as the global defaults before any view body runs so View-side reads
     // find the wired instances. Reducer-side overrides on the Store layer on top of these.
+    // Only the engine/state-dependent clients are prepared here — they need
+    // `engine` / `hierarchy` / `settings`, which exist only after bring-up.
+    // The pure-Foundation built-ins (`date`, clocks, `uuid`) and the stateless
+    // git clients are already prepared in `TouchCodeApp.init`, which also
+    // satisfies the XCTest-host defense (unset keys would otherwise fall back
+    // to `unimplemented`). Re-preparing them here trips swift-dependencies'
+    // "a global dependency can only be prepared a single time" runtime warning,
+    // so they are intentionally not repeated.
     prepareDependencies {
       $0.editorClient = editor
       $0.hierarchyClient = hierarchy
       $0.settingsWriter = .live(settings)
       $0.terminalClient = .live(engine: engine)
-      // Under XCTest host, swift-dependencies defaults unset keys to `testValue` —
-      // most of ours are `unimplemented(...)`, which `Issue.record`s from a detached
-      // Task and crashes once the recording escapes any active test context. Register
-      // the live values explicitly so the host app behaves like production regardless
-      // of the test bundle being loaded.
-      $0.gitService = .live()
-      $0.gitHub = .live()
-      // TCA's built-in dependencies (date, clocks, mainQueue, …) fall back to
-      // `unimplemented` under XCTest. Restore the production defaults so any
-      // detached task in the host app that resolves them doesn't crash the
-      // session via `Issue.record` from an unowned context.
-      $0.date = .init { Date() }
-      $0.continuousClock = ContinuousClock()
-      $0.suspendingClock = SuspendingClock()
-      $0.uuid = .init { UUID() }
     }
 
     // Sparkle bringup: push persisted Updates preferences to the live updater so
