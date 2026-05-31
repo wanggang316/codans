@@ -38,6 +38,13 @@ final class PaneSurface {
   /// its window; the first such delivery drives `attach`, every later
   /// one drives `resize`.
   private var hasAttached: Bool = false
+  /// Most recent grid size libghostty reported via `external_pty_resize`.
+  /// `attach` is deferred onto a `Task`, so a later layout pass can report
+  /// the real window size before `attach` has even sent `.init`; we reconcile
+  /// the daemon to this latest value once `attach` resolves so it never stays
+  /// pinned to an intermediate (often narrow) first-layout size.
+  private var latestCols: UInt16 = 0
+  private var latestRows: UInt16 = 0
   // The C-handle / unsafe-pointer storage below is read from a nonisolated
   // deinit; their non-Sendable types would otherwise reject that access.
   // `nonisolated(unsafe)` is sound here because the deinit only fires once
@@ -180,13 +187,23 @@ final class PaneSurface {
   /// method spawns a Task and returns immediately so the libghostty
   /// action callback doesn't block its calling thread.
   func handleExternalPtyResize(cols: UInt16, rows: UInt16) {
+    latestCols = cols
+    latestRows = rows
     if hasAttached {
       zmxClient.resize(cols: cols, rows: rows)
       return
     }
     hasAttached = true
-    Task { [client = zmxClient] in
-      try? await client.attach(cols: cols, rows: rows)
+    Task { [weak self] in
+      guard let self else { return }
+      try? await self.zmxClient.attach(cols: cols, rows: rows)
+      // Reconcile to the latest grid after the `.init` handshake (and, on
+      // reattach, the daemon's serialized replay). A real-width layout pass
+      // can land while `attach` is suspended on the daemon round-trip; its
+      // `.resize` then races ahead of the deferred `.init`, which would
+      // otherwise leave the daemon's PTY stuck at the first-reported size.
+      // Re-sending the most recent size here makes the final width win.
+      self.zmxClient.resize(cols: self.latestCols, rows: self.latestRows)
     }
   }
 
