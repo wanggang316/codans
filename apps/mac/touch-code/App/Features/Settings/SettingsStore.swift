@@ -183,6 +183,20 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  /// Persist the user's "Confirm before quitting" preference. `applicationShouldTerminate`
+  /// reads this to decide whether to present the quit confirmation dialog at all.
+  func setQuitConfirmation(_ value: QuitConfirmation) {
+    settings.general.quitConfirmation = value
+    scheduleSave()
+  }
+
+  /// Persist the user's "On quit" action. Applied directly when the confirmation dialog is
+  /// skipped, and drives the default-focused button when the dialog IS shown.
+  func setQuitAction(_ value: QuitAction) {
+    settings.general.quitAction = value
+    scheduleSave()
+  }
+
   func setAgentsViewAutoOpen(_ autoOpen: Bool) {
     guard settings.general.agentsViewAutoOpen != autoOpen else { return }
     settings.general.agentsViewAutoOpen = autoOpen

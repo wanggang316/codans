@@ -27,6 +27,24 @@ struct SettingsGeneralView: View {
   /// selection over to the Terminal pane so the user can pick light/dark
   /// terminal themes that the Appearance choice will then switch between.
   let onJumpToTerminal: () -> Void
+  /// Persisted-session catalog, threaded from `bootstrapSessionStack`.
+  /// `nil` when the launch acquired no catalog lock (no-resume mode) —
+  /// the corresponding section is hidden in that case so the user does
+  /// not see a count they cannot influence. `@Observable` so the count
+  /// re-renders when runtime bring-ups upsert rows or when the user
+  /// clicks Forget-all.
+  let sessionCoordinator: SessionCoordinator?
+  /// Forget-all-sessions handler injected from the app layer so the
+  /// view does not need to import the zmx socket-kill helper. Receives
+  /// the coordinator so the action can iterate rows + dispatch the
+  /// platform-side teardown (kill each daemon, unlink each socket,
+  /// clear the catalog). Nil in headless previews.
+  let onForgetAllSessions: (() -> Void)?
+
+  /// Confirmation alert state for the destructive Forget-all action.
+  /// SwiftUI's `.alert(_:isPresented:)` modifier is the simplest way to
+  /// gate a destructive operation in the Settings form.
+  @State private var showForgetConfirmation: Bool = false
 
   private var selectionBinding: Binding<EditorID?> {
     Binding(
@@ -39,6 +57,24 @@ struct SettingsGeneralView: View {
     Binding(
       get: { settingsStore.settings.general.appearance },
       set: { settingsStore.setAppearance($0) }
+    )
+  }
+
+  /// "Confirm before quitting" picker binding. Reads `settings.general.quitConfirmation`;
+  /// writes route through the dedicated setter so the debounced atomic write fires.
+  private var quitConfirmationBinding: Binding<QuitConfirmation> {
+    Binding(
+      get: { settingsStore.settings.general.quitConfirmation },
+      set: { settingsStore.setQuitConfirmation($0) }
+    )
+  }
+
+  /// "On quit" action picker binding. Drives both the no-dialog branch (applied directly)
+  /// and the default-focused button when the dialog IS shown.
+  private var quitActionBinding: Binding<QuitAction> {
+    Binding(
+      get: { settingsStore.settings.general.quitAction },
+      set: { settingsStore.setQuitAction($0) }
     )
   }
 
@@ -111,6 +147,58 @@ struct SettingsGeneralView: View {
             return .handled
           }
         )
+      }
+
+      Section {
+        Picker("Confirm before quitting", selection: quitConfirmationBinding) {
+          Text("Auto (only when panes are running)").tag(QuitConfirmation.auto)
+          Text("Always").tag(QuitConfirmation.always)
+          Text("Never").tag(QuitConfirmation.never)
+        }
+        Picker("On quit", selection: quitActionBinding) {
+          Text("Keep session running").tag(QuitAction.keepRunning)
+          Text("Snapshot and exit").tag(QuitAction.snapshot)
+        }
+      } footer: {
+        Text(
+          "Keep session running lets long-running commands survive the quit; "
+            + "Snapshot saves the screen state and exits."
+        )
+      }
+
+      if let coordinator = sessionCoordinator {
+        let count = coordinator.catalog.sessions.count
+        Section {
+          LabeledContent("Sessions saved for next launch") {
+            Text("\(count)")
+              .monospacedDigit()
+              .foregroundStyle(.secondary)
+          }
+          Button("Forget all sessions…", role: .destructive) {
+            showForgetConfirmation = true
+          }
+          .disabled(count == 0 || onForgetAllSessions == nil)
+        } footer: {
+          Text(
+            "Counts the rows in sessions.json that the next launch would try "
+              + "to reattach. Forget all kills the recorded daemons, removes their "
+              + "sockets, and empties the catalog — the current panes detach from "
+              + "their daemons and become unrestorable."
+          )
+        }
+        .alert("Forget \(count) saved session\(count == 1 ? "" : "s")?",
+               isPresented: $showForgetConfirmation) {
+          Button("Forget", role: .destructive) {
+            onForgetAllSessions?()
+          }
+          Button("Cancel", role: .cancel) {}
+        } message: {
+          Text(
+            "Each recorded daemon will be terminated and its socket removed. "
+              + "Any pane currently attached to one of these daemons will lose "
+              + "its scrollback and respawn a fresh shell on the next launch."
+          )
+        }
       }
 
       Section {
@@ -218,7 +306,9 @@ struct SettingsGeneralView: View {
         fileURL: FileManager.default.temporaryDirectory.appending(component: "\(UUID()).json"),
         debounceWindow: .seconds(3600)
       ),
-      onJumpToTerminal: {}
+      onJumpToTerminal: {},
+      sessionCoordinator: nil,
+      onForgetAllSessions: nil
     )
     .frame(width: 520, height: 320)
   }

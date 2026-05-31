@@ -12,9 +12,10 @@ private let paneHostLogger = Logger(subsystem: "com.touch-code.shell", category:
 /// binds) rather than in the view, which otherwise would fall through to
 /// `TerminalClient.liveValue`'s fatal-stub.
 ///
-/// `terminalClient.ensureSurface` / `.surface` are synchronous `@MainActor`
-/// closures, so the resolve path can mutate state directly — no `.run`
-/// ceremony and no cancellation id to manage.
+/// `terminalClient.ensureSurface` is `async throws` (it spawns the
+/// `zmx serve` daemon and handshakes the control socket), so resolve
+/// runs inside an `Effect.run` and dispatches `.resolveCompleted` /
+/// `.resolveFailed` back into the reducer on completion.
 @Reducer
 struct PaneHostFeature {
   @ObservableState
@@ -43,6 +44,12 @@ struct PaneHostFeature {
     /// keeps re-renders free.
     case task
     case retryButtonTapped
+    /// Internal: the async `ensureSurface` call returned successfully and
+    /// the registry now holds a surface for this pane.
+    case resolveCompleted(SurfaceBox)
+    /// Internal: bring-up failed (zmx spawn, control-socket connect, or
+    /// `ghostty_surface_new`). `reason` is the error's debug description.
+    case resolveFailed(String)
   }
 
   @Dependency(TerminalClient.self) private var terminalClient
@@ -53,46 +60,49 @@ struct PaneHostFeature {
       case .retryButtonTapped:
         state.phase = .loading
         state.surface = nil
-        resolveSurface(state: &state)
-        return .none
+        return resolveSurface(state: state)
       case .task:
-        resolveSurface(state: &state)
+        return resolveSurface(state: state)
+      case .resolveCompleted(let box):
+        state.phase = .ready
+        state.surface = box
+        return .none
+      case .resolveFailed(let message):
+        let paneIDDescription = state.paneID.description
+        paneHostLogger.error(
+          "ensureSurface failed for \(paneIDDescription, privacy: .public): \(message, privacy: .public)"
+        )
+        state.phase = .failed(message)
+        state.surface = nil
         return .none
       }
     }
   }
 
-  private func resolveSurface(state: inout State) {
+  private func resolveSurface(state: State) -> Effect<Action> {
+    // Registry short-circuit on the main thread — when the surface is
+    // already wired (e.g. the prior tab-switch eagerly seeded it via
+    // `selectionChanges`), avoid scheduling an async effect just to
+    // re-discover it.
     if let existing = terminalClient.surface(state.paneID) {
-      state.phase = .ready
-      state.surface = SurfaceBox(surface: existing)
-      return
+      return .send(.resolveCompleted(SurfaceBox(surface: existing)))
     }
-    do {
-      try terminalClient.ensureSurface(
-        state.paneID, state.tabID, state.worktreeID, state.projectID
-      )
-    } catch {
-      let message = String(describing: error)
-      let paneIDDescription = state.paneID.description
-      paneHostLogger.error(
-        "ensureSurface failed for \(paneIDDescription, privacy: .public): \(message, privacy: .public)"
-      )
-      state.phase = .failed(message)
-      state.surface = nil
-      return
-    }
-    if let surface = terminalClient.surface(state.paneID) {
-      state.phase = .ready
-      state.surface = SurfaceBox(surface: surface)
-    } else {
-      let message = "Surface not registered after creation."
-      let paneIDDescription = state.paneID.description
-      paneHostLogger.warning(
-        "\(message, privacy: .public) paneID=\(paneIDDescription, privacy: .public)"
-      )
-      state.phase = .failed(message)
-      state.surface = nil
+    let paneID = state.paneID
+    let tabID = state.tabID
+    let worktreeID = state.worktreeID
+    let projectID = state.projectID
+    return .run { [client = terminalClient] send in
+      do {
+        try await client.ensureSurface(paneID, tabID, worktreeID, projectID)
+      } catch {
+        await send(.resolveFailed(String(describing: error)))
+        return
+      }
+      if let surface = await client.surface(paneID) {
+        await send(.resolveCompleted(SurfaceBox(surface: surface)))
+      } else {
+        await send(.resolveFailed("Surface not registered after creation."))
+      }
     }
   }
 }

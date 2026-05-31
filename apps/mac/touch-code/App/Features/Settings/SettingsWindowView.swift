@@ -13,6 +13,15 @@ struct SettingsWindowView: View {
   let settingsStore: SettingsStore
   /// Strong reference to the shortcuts store so the Shortcuts pane can mutate overrides.
   let shortcutsStore: ShortcutsStore
+  /// Persisted-session catalog accessor, threaded into the General pane so
+  /// the user can see and clear what would be resumed on the next launch.
+  /// `nil` when the launch is running in no-resume mode.
+  let sessionCoordinator: SessionCoordinator?
+  /// Forget-all-sessions action injected from `TouchCodeApp` so the
+  /// Settings pane can dispatch the platform-side teardown (kill each
+  /// recorded daemon, unlink each socket, clear the catalog) without
+  /// importing zmx-socket internals.
+  let onForgetAllSessions: (() -> Void)?
   /// Read for the sidebar's Repositories disclosure + the B8 pruning subscription below.
   @Environment(HierarchyManager.self) private var hierarchyManager
 
@@ -96,7 +105,9 @@ struct SettingsWindowView: View {
       SettingsGeneralView(
         store: store.scope(state: \.general, action: \.general),
         settingsStore: settingsStore,
-        onJumpToTerminal: { store.send(.selectionChanged(.terminal)) }
+        onJumpToTerminal: { store.send(.selectionChanged(.terminal)) },
+        sessionCoordinator: sessionCoordinator,
+        onForgetAllSessions: onForgetAllSessions
       )
     case .github:
       GitHubSettingsView(settingsStore: settingsStore)

@@ -89,6 +89,19 @@ nonisolated struct ForegroundJobReader: Sendable {
     return result == Int32(size) ? info : nil
   }
 
+  /// Process start time as a `Date`. Used by the agent restore path to
+  /// guard against PID recycling: a `kill(pid, 0)` success only says the
+  /// PID slot is occupied, not that it is the same process we captured.
+  /// Combining with the capture timestamp pins identity — a process
+  /// whose start time is later than our capture cannot be the agent we
+  /// recorded. Returns nil when `processBSDInfo` failed upstream.
+  static func processStartedAt(pid: Int32) -> Date? {
+    guard let info = processBSDInfo(pid: pid) else { return nil }
+    let seconds = TimeInterval(info.pbi_start_tvsec)
+    let micros = TimeInterval(info.pbi_start_tvusec) / 1_000_000
+    return Date(timeIntervalSince1970: seconds + micros)
+  }
+
   static func commandName(from info: proc_bsdinfo) -> String? {
     let bytes = withUnsafeBytes(of: info.pbi_comm) { rawBuffer -> [UInt8] in
       Array(rawBuffer)

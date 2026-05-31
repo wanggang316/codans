@@ -16,11 +16,15 @@ nonisolated struct TerminalClient: Sendable {
   /// resolve inside the current catalog. The client takes the full address
   /// so the engine's `ensureSurface(for:in:)` can hand the `Worktree`
   /// struct to ghostty as the surface config's working directory source.
+  ///
+  /// `async throws` because bring-up spawns the `zmx serve` daemon and
+  /// completes a control-socket handshake before libghostty wires the
+  /// External PTY backend onto the new surface.
   var ensureSurface:
     @MainActor @Sendable (
       _ paneID: PaneID, _ inTab: TabID, _ inWorktree: WorktreeID,
       _ inProject: ProjectID
-    ) throws -> Void
+    ) async throws -> Void
   var closeSurface: @MainActor @Sendable (_ paneID: PaneID) -> Void
 
   /// Look up an existing `PaneSurface` registered with the engine. Returns
@@ -63,7 +67,7 @@ extension TerminalClient {
         else {
           throw TerminalClient.Error.worktreeNotFound(worktreeID)
         }
-        _ = try engine.ensureSurface(for: pane, in: worktree)
+        _ = try await engine.ensureSurface(for: pane, in: worktree)
       },
       closeSurface: { paneID in engine.closeSurface(for: paneID) },
       surface: { paneID in engine.ghosttyRuntime?.surface(for: paneID) },

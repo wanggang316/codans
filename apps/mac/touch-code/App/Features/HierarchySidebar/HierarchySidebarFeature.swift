@@ -795,9 +795,13 @@ struct HierarchySidebarFeature {
         .readSnapshotSync()
         .projects[pid]?.git?.createScript?.command
       if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil) {
-        _ = try? hierarchyClient.openPane(
-          tabID, worktreeID, pid, pathString, createCommand
-        )
+        let cwd = pathString
+        let command = createCommand
+        return .run { [client = hierarchyClient] _ in
+          _ = try? await client.openPane(
+            tabID, worktreeID, pid, cwd, command
+          )
+        }
       }
       return .none
 

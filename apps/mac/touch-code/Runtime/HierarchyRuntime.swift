@@ -2,7 +2,11 @@ import Foundation
 import TouchCodeCore
 
 protocol HierarchyRuntime: AnyObject {
-  func ensureSurface(for pane: Pane, in worktree: Worktree, env: [String: String]) throws
+  /// Allocate the libghostty surface for `pane`, spawning the zmx daemon
+  /// that owns the real PTY child first. `async throws` because daemon
+  /// spawn (`zmx serve`) and the subsequent control-socket handshake
+  /// (`ZmxClient.init` + `attach`) are inherently async.
+  func ensureSurface(for pane: Pane, in worktree: Worktree, env: [String: String]) async throws
   func closeSurface(for paneID: PaneID)
   /// Reports whether a live terminal surface is currently registered for
   /// the given pane. Used by force-remove to size the

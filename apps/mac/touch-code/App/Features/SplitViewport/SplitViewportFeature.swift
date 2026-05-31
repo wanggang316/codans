@@ -82,14 +82,16 @@ struct SplitViewportFeature {
         return .none
 
       case .newPaneButtonTapped(let tabID, let worktreeID, let projectID, let cwd):
-        guard
-          let newPaneID = try? hierarchyClient.openPane(
-            tabID, worktreeID, projectID, cwd, nil
-          )
-        else { return .none }
-        // Mirrors PaneActionRouterFeature.newSplit: focus the freshly
-        // opened pane so the user lands on it without an extra click.
+        // `openPane` is async (zmx daemon spawn + control-socket handshake);
+        // hop into an effect so the reducer thread doesn't await. Focus
+        // tail-call mirrors PaneActionRouterFeature.newSplit so the user
+        // lands on the freshly opened pane without an extra click.
         return .run { [client = hierarchyClient] _ in
+          guard
+            let newPaneID = try? await client.openPane(
+              tabID, worktreeID, projectID, cwd, nil
+            )
+          else { return }
           await MainActor.run { client.focusSurfaceView(newPaneID) }
         }
 
@@ -97,12 +99,12 @@ struct SplitViewportFeature {
         let paneID, let direction,
         let tabID, let worktreeID, let projectID, let cwd
       ):
-        guard
-          let newPaneID = try? hierarchyClient.splitPane(
-            paneID, direction, tabID, worktreeID, projectID, cwd, nil
-          )
-        else { return .none }
         return .run { [client = hierarchyClient] _ in
+          guard
+            let newPaneID = try? await client.splitPane(
+              paneID, direction, tabID, worktreeID, projectID, cwd, nil
+            )
+          else { return }
           await MainActor.run { client.focusSurfaceView(newPaneID) }
         }
 

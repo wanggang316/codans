@@ -67,6 +67,16 @@ extension IPC {
     case hierarchySetProjectTags = "hierarchy.setProjectTags"
     case hierarchySetActiveTagFilter = "hierarchy.setActiveTagFilter"
 
+    // pane — explicit-termination verbs that own the zmx daemon
+    // lifecycle (kill + sessions.json reap), distinct from the
+    // detach-only `hierarchy.closePane` mutation above. `pane.info`
+    // and `pane.read` probe the daemon directly so VT-fidelity tests
+    // can assert byte-level state (cursor, modes, serialized history)
+    // that libghostty's parsed-text surface does not expose.
+    case paneClose = "pane.close"
+    case paneInfo = "pane.info"
+    case paneRead = "pane.read"
+
     // terminal
     case terminalSendInput = "terminal.sendInput"
     case terminalSendKey = "terminal.sendKey"

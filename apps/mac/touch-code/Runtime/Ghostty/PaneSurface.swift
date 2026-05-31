@@ -25,6 +25,32 @@ final class PaneSurface {
   let info: SurfaceInfo = SurfaceInfo()
   private(set) var state: State = .initialising
   let view: GhosttySurfaceView
+  /// Owns the zmx daemon client that proxies PTY bytes between
+  /// libghostty's External backend and the resume-friendly daemon
+  /// process. The surface itself does not fork a shell; the daemon
+  /// owns the real PTY child.
+  let zmxClient: ZmxClient
+  /// First-resize bookkeeping. The daemon needs the terminal cell
+  /// dimensions to allocate its PTY child, and that handshake is the
+  /// `attach(cols:rows:)` frame — distinct from steady-state resizes.
+  /// libghostty publishes the dimensions through
+  /// `GHOSTTY_ACTION_EXTERNAL_PTY_RESIZE` once the surface has measured
+  /// its window; the first such delivery drives `attach`, every later
+  /// one drives `resize`.
+  private var hasAttached: Bool = false
+  /// Most recent grid size libghostty reported via `external_pty_resize`.
+  /// `attach` is deferred onto a `Task`, so a later layout pass can report
+  /// the real window size before `attach` has even sent `.init`; we reconcile
+  /// the daemon to this latest value once `attach` resolves so it never stays
+  /// pinned to an intermediate (often narrow) first-layout size.
+  private var latestCols: UInt16 = 0
+  private var latestRows: UInt16 = 0
+  /// Daemon's shell child PID, learned from `.info` after attach. The External
+  /// backend can't report the PTY child PID via libghostty (the symbol is
+  /// stubbed on this branch), so `childProcessID()` hands this to
+  /// `ForegroundJobReader`, which resolves the live foreground process group
+  /// from the shell's `e_tpgid`. 0 until known.
+  private var daemonShellPID: Int32 = 0
   // The C-handle / unsafe-pointer storage below is read from a nonisolated
   // deinit; their non-Sendable types would otherwise reject that access.
   // `nonisolated(unsafe)` is sound here because the deinit only fires once
@@ -34,17 +60,6 @@ final class PaneSurface {
   nonisolated(unsafe) private var surface: ghostty_surface_t?
 
   private let runtime: GhosttyRuntime
-  nonisolated(unsafe) private let workingDirectoryCString: UnsafeMutablePointer<CChar>?
-  /// Heap-allocated key/value C strings backing the env_vars array passed
-  /// to libghostty. `strdup`'d in init, every entry `free`'d in deinit.
-  /// Held on the instance because libghostty does NOT documented-copy the
-  /// `env_vars` buffer; keeping the strings alive matches the
-  /// `working_directory` lifecycle.
-  nonisolated(unsafe) private let envCStrings: [(key: UnsafeMutablePointer<CChar>, value: UnsafeMutablePointer<CChar>)]
-  /// Backing storage for the `ghostty_env_var_s` array. Allocated only
-  /// when the env map is non-empty; a `nil` buffer means the surface
-  /// config receives `env_vars = nil, env_var_count = 0`.
-  nonisolated(unsafe) private let envVarsBuffer: UnsafeMutableBufferPointer<ghostty_env_var_s>?
   /// Heap-allocated uuid_t bytes passed to libghostty as the surface
   /// userdata. close_surface_cb reads these bytes to recover the owning
   /// PaneID without casting to a Swift object pointer (UAF-safe across
@@ -84,39 +99,22 @@ final class PaneSurface {
   init(
     runtime: GhosttyRuntime,
     paneID: PaneID,
-    workingDirectory: String,
-    env: [String: String] = [:],
+    zmxClient: ZmxClient,
     fontSize: Float32 = 13.0
   ) throws {
     guard let app = runtime.app else {
       throw GhosttyError.appInitFailed(
-        reason: "libghostty app not initialized; surface request for pane \(paneID) at \(workingDirectory)"
+        reason: "libghostty app not initialized; surface request for pane \(paneID)"
       )
     }
+    precondition(
+      zmxClient.paneID == paneID,
+      "PaneSurface paneID \(paneID) does not match ZmxClient paneID \(zmxClient.paneID)"
+    )
     self.runtime = runtime
     self.paneID = paneID
-    self.workingDirectoryCString = strdup(workingDirectory)
+    self.zmxClient = zmxClient
     self.view = GhosttySurfaceView(paneID: paneID)
-
-    // Stable C-string ownership for env: each (key, value) is `strdup`'d,
-    // referenced from a `ghostty_env_var_s` in `envVarsBuffer`, and freed
-    // in `deinit`. Empty map → nil buffer → config.env_vars stays nil.
-    let strdupped = Self.makeEnvCStrings(env)
-    self.envCStrings = strdupped
-    if strdupped.isEmpty {
-      self.envVarsBuffer = nil
-    } else {
-      let buffer = UnsafeMutableBufferPointer<ghostty_env_var_s>.allocate(
-        capacity: strdupped.count
-      )
-      for (index, pair) in strdupped.enumerated() {
-        buffer[index] = ghostty_env_var_s(
-          key: UnsafePointer(pair.key),
-          value: UnsafePointer(pair.value)
-        )
-      }
-      self.envVarsBuffer = buffer
-    }
 
     // Allocate 16 bytes to hold the PaneID's uuid bytes as surface userdata.
     self.paneIDUserdata = UnsafeMutablePointer<UInt8>.allocate(capacity: 16)
@@ -136,11 +134,13 @@ final class PaneSurface {
     )
     config.scale_factor = view.backingScaleFactor()
     config.font_size = fontSize
-    config.working_directory = workingDirectoryCString.map { UnsafePointer($0) }
-    if let envBuffer = envVarsBuffer {
-      config.env_vars = envBuffer.baseAddress
-      config.env_var_count = envBuffer.count
-    }
+    // External-PTY mode: the daemon (via ZmxClient) owns the real child
+    // process and proxies bytes through a socketpair. libghostty reads
+    // from / writes to `external_pty_fd` instead of forking its own shell.
+    // `command`, `working_directory`, and `env_vars` are deliberately left
+    // unset — they are honored by libghostty's internal exec backend, not
+    // by the External backend.
+    config.external_pty_fd = zmxClient.externalBackendFD
     config.context = GHOSTTY_SURFACE_CONTEXT_SPLIT
     // Per-surface userdata: opaque pointer to the 16 uuid-bytes of the
     // owning PaneID. The close_surface_cb copies these bytes into a local
@@ -150,14 +150,11 @@ final class PaneSurface {
 
     guard let surface = ghostty_surface_new(app, &config) else {
       // HAN-82: surface the diagnostic context libghostty doesn't return
-      // through its nil-pointer protocol. The pane id, working
-      // directory, and env-var count are the inputs callers can act on
-      // (cwd missing? env too large? same surface request a moment
-      // later succeeded?). `retryable: true` tags it as a transient
-      // failure so the caller knows it can backoff and retry.
+      // through its nil-pointer protocol. `retryable: true` tags it as a
+      // transient failure so the caller knows it can back off and retry.
       throw GhosttyError.surfaceInitFailed(
         reason:
-          "ghostty_surface_new returned nil for pane \(paneID) (workingDirectory=\(workingDirectory), envVarCount=\(strdupped.count))",
+          "ghostty_surface_new returned nil for pane \(paneID) (externalPtyFD=\(zmxClient.externalBackendFD))",
         retryable: true
       )
     }
@@ -185,43 +182,78 @@ final class PaneSurface {
     if let surface {
       ghostty_surface_free(surface)
     }
-    if let ptr = workingDirectoryCString {
-      free(UnsafeMutableRawPointer(ptr))
-    }
-    for pair in envCStrings {
-      free(UnsafeMutableRawPointer(pair.key))
-      free(UnsafeMutableRawPointer(pair.value))
-    }
-    if let buffer = envVarsBuffer {
-      buffer.deallocate()
-    }
     paneIDUserdata.deallocate()
   }
 
-  // MARK: - Env helpers
-
-  /// Allocate a stable `(key, value)` C-string pair for each entry in
-  /// `env`. Returned pointers must be freed with `free`. Pure / nonisolated
-  /// so unit tests can exercise the conversion without spinning a real
-  /// `GhosttyRuntime`.
-  static func makeEnvCStrings(
-    _ env: [String: String]
-  ) -> [(key: UnsafeMutablePointer<CChar>, value: UnsafeMutablePointer<CChar>)] {
-    guard !env.isEmpty else { return [] }
-    // Sort for deterministic ordering — libghostty does not require any
-    // particular order, but stable iteration makes the test surface
-    // predictable and avoids spurious flakiness on dictionary reorderings.
-    return env.sorted(by: { $0.key < $1.key }).map { entry in
-      (key: strdup(entry.key)!, value: strdup(entry.value)!)
+  /// Route a libghostty External-PTY resize event to the daemon. On the
+  /// very first call the (cols, rows) drive `ZmxClient.attach`, which
+  /// sends `.init` to the daemon so it can fork its PTY child;
+  /// subsequent calls drive `ZmxClient.resize`. `attach` is async — the
+  /// daemon round-trips an `.output` frame before resolving — so this
+  /// method spawns a Task and returns immediately so the libghostty
+  /// action callback doesn't block its calling thread.
+  func handleExternalPtyResize(cols: UInt16, rows: UInt16) {
+    latestCols = cols
+    latestRows = rows
+    if hasAttached {
+      zmxClient.resize(cols: cols, rows: rows)
+      return
+    }
+    hasAttached = true
+    Task { [weak self] in
+      guard let self else { return }
+      try? await self.zmxClient.attach(cols: cols, rows: rows)
+      // Reconcile to the latest grid after the `.init` handshake (and, on
+      // reattach, the daemon's serialized replay). A real-width layout pass
+      // can land while `attach` is suspended on the daemon round-trip; its
+      // `.resize` then races ahead of the deferred `.init`, which would
+      // otherwise leave the daemon's PTY stuck at the first-reported size.
+      // Re-sending the most recent size here makes the final width win.
+      self.zmxClient.resize(cols: self.latestCols, rows: self.latestRows)
+      // Learn the daemon's shell PID so foreground/agent detection works (see
+      // `daemonShellPID` / `childProcessID()`). The PID is static for the
+      // session; one probe after attach is enough.
+      if let info = try? await self.zmxClient.requestInfo() {
+        self.daemonShellPID = info.pid
+      }
     }
   }
 
   /// Explicit teardown. Idempotent. After `close()`, the surface handle is
-  /// nil and all subsequent operations no-op.
+  /// nil and all subsequent operations no-op. The owned `ZmxClient` is also
+  /// closed so the daemon control socket releases its end of the socketpair
+  /// (libghostty owns the other end and frees it when it disposes the
+  /// surface).
+  ///
+  /// This DETACHES rather than kills the daemon: the daemon reads the
+  /// socket EOF as a detach and keeps its PTY child alive. Used by the
+  /// app-quit teardown path (`GhosttyRuntime` disposing every surface as
+  /// the process exits), where daemon disposition has already been decided
+  /// by `SessionLifecycle.detachAllForQuit`. For destroying a pane on
+  /// purpose, use `closeKillingDaemon()`.
   func close() {
+    teardown(killDaemon: false)
+  }
+
+  /// Teardown that first asks the daemon to terminate (`.kill`) before
+  /// releasing the surface. Used when a pane is destroyed deliberately —
+  /// the user closes it, its tab/worktree closes, or a crash-loop
+  /// auto-closes the tab — so the zmx daemon (and its shell child) does
+  /// not outlive a pane that no longer exists. Distinct from `close()`,
+  /// which only detaches so the app-quit path can resume daemons later.
+  func closeKillingDaemon() {
+    teardown(killDaemon: true)
+  }
+
+  private func teardown(killDaemon: Bool) {
     progressResetTask?.cancel()
     progressResetTask = nil
     guard let surface else { return }
+    if killDaemon {
+      zmxClient.requestKill()
+    } else {
+      zmxClient.close()
+    }
     ghostty_surface_free(surface)
     self.surface = nil
     view.detachSurface()
@@ -233,17 +265,25 @@ final class PaneSurface {
   }
 
   func foregroundProcessGroupID() -> Int32? {
-    guard let surface else { return nil }
-    let value = ghostty_surface_foreground_process_group(surface)
-    guard value > 0, value <= UInt64(Int32.max) else { return nil }
-    return Int32(value)
+    // The C symbol `ghostty_surface_foreground_process_group` lives on the
+    // `v1.3.1-tc` fork branch that adds the `Exec.getProcessInfo` wrapper.
+    // This branch pins the `External backend` fork instead, so the symbol
+    // is not yet available here. Returning nil degrades the Active Agents
+    // foreground detection to output-driven inference — the same behaviour
+    // the codebase had before the wrapper landed on main. To be restored
+    // when the fork merges both branches.
+    guard surface != nil else { return nil }
+    return nil
   }
 
   func childProcessID() -> Int32? {
-    guard let surface else { return nil }
-    let value = ghostty_surface_child_process_id(surface)
-    guard value > 0, value <= UInt64(Int32.max) else { return nil }
-    return Int32(value)
+    guard surface != nil else { return nil }
+    // The daemon owns the PTY, so its shell child PID (learned via `.info`)
+    // is our window into the foreground process group. `ForegroundJobReader`
+    // reads this PID's `e_tpgid` to find whatever is running in the
+    // foreground — the basis for agent detection and the worktree "working"
+    // indicator. nil until the post-attach `.info` probe lands.
+    return daemonShellPID > 0 ? daemonShellPID : nil
   }
 
   /// Apply a color scheme to this surface and request a redraw. No-op after `close()`.

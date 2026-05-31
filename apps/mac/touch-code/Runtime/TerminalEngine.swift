@@ -54,6 +54,32 @@ final class TerminalEngine {
   let ghosttyRuntime: GhosttyRuntime?
   var crashPolicy: CrashPolicy = .default
 
+  /// Continuous write-through to `sessions.json`. Set during
+  /// `bootstrapSessionStack` once the coordinator is alive; nil for
+  /// headless tests and for the "second-instance, no-resume" mode where
+  /// the catalog lock could not be acquired. When non-nil, every fresh
+  /// spawn / reattach / restore upserts a row through `recordLive`, so
+  /// a crash between launches no longer leaves recently-created panes
+  /// invisible to the next launch's reaper.
+  var sessionCoordinator: SessionCoordinator?
+
+  /// Daemons that the launch-time `SessionReaper` confirmed are still
+  /// reachable. Consumed at most once per paneID: the first
+  /// `ensureSurface` call for an alive entry diverts to
+  /// `PaneDaemonBringup.reattach` and the entry is removed so any later
+  /// recreate (e.g. crash-retry) takes the standard spawn path with a
+  /// fresh daemon.
+  private var pendingReattach: [PaneID: Session] = [:]
+
+  /// Snapshot files left by the previous quit's snapshot tier (M3.T3.2).
+  /// Consumed at most once per paneID: the first `ensureSurface` call
+  /// for a snapshot entry diverts to `PaneDaemonBringup.restore`, which
+  /// spawns a fresh daemon with `--restore-from` so the VT mirror
+  /// pre-fills with the saved bytes before the shell starts. The
+  /// `.snap` file is deleted on a successful restore — a later
+  /// recreate falls through to a vanilla spawn.
+  private var pendingRestore: [PaneID: URL] = [:]
+
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
   private var crashRings: [PaneID: [Date]] = [:]
@@ -105,6 +131,38 @@ final class TerminalEngine {
     case paneHasNoTab
   }
 
+  /// Drop the queues seeded by `seedReattachableSessions` and any
+  /// pending `.snap` restore so a subsequent `ensureSurface` takes the
+  /// fresh-spawn path. Used by the Settings → "Forget all sessions"
+  /// action: after the recorded daemons are killed and their sockets
+  /// unlinked, leaving the queues populated would have us try to
+  /// `connect(2)` to those vanished sockets the next time the surface
+  /// is built.
+  func dropPendingResumeState() {
+    pendingReattach.removeAll(keepingCapacity: false)
+    pendingRestore.removeAll(keepingCapacity: false)
+  }
+
+  /// Seed the engine with the live-daemon catalog produced by
+  /// `SessionReaper.sweep()` at launch. Each entry is consumed by the
+  /// next `ensureSurface` call for its paneID; subsequent calls for the
+  /// same pane fall through to the spawn path. Called once before any
+  /// HierarchyManager-driven pane bring-up.
+  func seedReattachableSessions(_ states: [PaneID: SessionState]) {
+    for (paneID, state) in states {
+      switch state {
+      case .alive(let session):
+        pendingReattach[paneID] = session
+      case .snapshot(let url):
+        pendingRestore[paneID] = url
+      case .dead:
+        // No live daemon and no snapshot — let `ensureSurface` take the
+        // standard spawn path.
+        continue
+      }
+    }
+  }
+
   /// Create a libghostty surface for the given Pane. Idempotent: if a
   /// surface is already registered for the pane, returns the existing one.
   /// Wires the surface's `onClose` to emit the lifecycle event + dispose
@@ -112,12 +170,15 @@ final class TerminalEngine {
   /// Tab — the engine uses the Tab ID in the `.paneCreated` event, so
   /// callers must add the Pane to a Tab via `HierarchyManager.openPane`
   /// (or `splitPane`) before calling this.
+  ///
+  /// `async throws` because pane bring-up first spawns a `zmx serve`
+  /// daemon and then handshakes its control socket; both steps await.
   @discardableResult
   func ensureSurface(
     for pane: Pane,
     in worktree: Worktree,
     env: [String: String] = [:]
-  ) throws -> PaneSurface {
+  ) async throws -> PaneSurface {
     guard let runtime = ghosttyRuntime else { throw SurfaceError.runtimeUnavailable }
     if let existing = runtime.surface(for: pane.id) {
       return existing
@@ -125,6 +186,40 @@ final class TerminalEngine {
     guard let tabID = tabIDForPane(pane.id) else {
       throw SurfaceError.paneHasNoTab
     }
+
+    // Three possible bringup paths, picked by the launch-time reaper:
+    //   1. `.alive` → reattach to a daemon the previous process left
+    //      running (live tier, M2.T2.2). The catalog row was pre-vetted
+    //      via `connect(2)` so we trust the recorded socket.
+    //   2. `.snapshot` → spawn a fresh daemon with `--restore-from`
+    //      pointed at the captured `.snap` (snapshot tier, M3.T3.3).
+    //      The VT mirror pre-fills with the saved buffer before the
+    //      shell starts; the snapshot file is consumed on success.
+    //   3. Neither → standard spawn of a brand-new daemon.
+    // Either way the socketpair must exist before `ghostty_surface_new`,
+    // because libghostty's External backend latches onto
+    // `external_pty_fd` synchronously inside that call.
+    let zmxClient: ZmxClient
+    if let session = pendingReattach.removeValue(forKey: pane.id) {
+      zmxClient = try await PaneDaemonBringup.reattach(
+        paneID: pane.id,
+        session: session
+      )
+    } else if let snapshotURL = pendingRestore.removeValue(forKey: pane.id) {
+      zmxClient = try await PaneDaemonBringup.restore(
+        paneID: pane.id,
+        workingDirectory: pane.workingDirectory,
+        snapshotURL: snapshotURL,
+        env: env
+      )
+    } else {
+      zmxClient = try await PaneDaemonBringup.spawnDaemonAndConnect(
+        paneID: pane.id,
+        workingDirectory: pane.workingDirectory,
+        env: env
+      )
+    }
+
     // HAN-82: `ghostty_surface_new` is observed to fail transiently
     // — the user reported ~10 consecutive failures followed by a clean
     // success with no input change, suggesting an internal race that
@@ -137,19 +232,36 @@ final class TerminalEngine {
       surface = try PaneSurface(
         runtime: runtime,
         paneID: pane.id,
-        workingDirectory: pane.workingDirectory,
-        env: env
+        zmxClient: zmxClient
       )
     } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
       runtime.tick()
       surface = try PaneSurface(
         runtime: runtime,
         paneID: pane.id,
-        workingDirectory: pane.workingDirectory,
-        env: env
+        zmxClient: zmxClient
       )
     }
     runtime.register(pane: surface)
+    // Continuous catalog write-through: record the live daemon row so a
+    // crash between launches still surfaces this pane to the next launch's
+    // reaper. Recording AFTER `register` keeps the catalog in step with
+    // observable runtime state — if surface bringup throws above, no row
+    // is written and the orphan daemon is left for the FS-orphan reaper.
+    if let coordinator = sessionCoordinator {
+      coordinator.recordLive(
+        Session(
+          paneID: pane.id,
+          socketPath: zmxClient.socketPath,
+          pid: zmxClient.daemonPID,
+          createdAt: zmxClient.createdAt,
+          lastAttachedAt: Date(),
+          command: zmxClient.command,
+          cwd: zmxClient.cwd,
+          zmxVersion: zmxClient.zmxVersion
+        )
+      )
+    }
     foregroundJobPaneIDs.insert(pane.id)
     startForegroundJobPollingIfNeeded()
     surface.onClose = { [weak self] processAlive in
@@ -186,11 +298,18 @@ final class TerminalEngine {
   /// Dispose a pane's surface. Idempotent. Routes through
   /// `handleSurfaceClose` so the lifecycle event is emitted exactly once
   /// whether the close is user-initiated or callback-driven.
+  ///
+  /// Kills the daemon rather than detaching it: reaching here means the
+  /// pane is being destroyed (closed by the user, or its tab/worktree is
+  /// closing, or a crash-loop auto-closed the tab), so the daemon and its
+  /// shell child should not survive. The app-quit path never comes through
+  /// here — it goes through `SessionLifecycle.detachAllForQuit`, which
+  /// decides keep-running vs. snapshot — so resume is unaffected.
   func closeSurface(for paneID: PaneID) {
     guard let runtime = ghosttyRuntime,
       let surface = runtime.surface(for: paneID)
     else { return }
-    surface.close()
+    surface.closeKillingDaemon()
     handleSurfaceClose(paneID: paneID, processAlive: true)
   }
 
@@ -288,6 +407,17 @@ final class TerminalEngine {
 
   private func tabIDForPane(_ paneID: PaneID) -> TabID? {
     findPane(paneID)?.tabID
+  }
+
+  /// Process-group leader PID of the pane's current foreground job, or
+  /// `nil` when the engine has not yet observed a job for this pane.
+  /// The quit-time agent snapshot reads this so the persisted record
+  /// carries a PID the next launch can pass to `kill(pid, 0)` for
+  /// liveness. PGID is preferred over an individual process PID because
+  /// it tracks the foreground group leader and survives parent/child
+  /// turnover within the same agent invocation.
+  func foregroundProcessGroupID(for paneID: PaneID) -> Int32? {
+    foregroundJobSnapshots[paneID]?.processGroupID
   }
 
   /// Return a fresh event stream for a new subscriber. Multi-consumer safe:
