@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-/// Notification posted by `DiffDrawerView` when the user taps a file in
+/// Notification posted by `DiffPanelView` when the user taps a file in
 /// the History-mode picker. Live `DiffWebView` instances subscribe and
 /// scroll the rendered diff to the matching file's section. `userInfo`
 /// carries `path: String`.

@@ -64,6 +64,22 @@ struct AgentStateSidebarPanel: View {
   /// one-line) from `Settings → General → Agents View display`.
   @Environment(SettingsStore.self) private var settingsStore
 
+  /// Suppresses the reorder animation for users who opt out of motion.
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  /// Owns the stable, debounced display order. View-local `@State` so it
+  /// survives the host re-creating this struct on every registry mutation,
+  /// and is torn down / reseeded when the panel is collapsed and reopened.
+  /// Reading `order.orderedIDs` in `content` subscribes the view to its
+  /// `@Observable` order changes; `.animation(_:value:)` animates the diff.
+  @State private var order = AgentStateOrderCoordinator()
+
+  /// `Settings → General → Agents View → Auto-sort`. When off the list holds
+  /// insertion order and the coordinator never re-sorts.
+  private var autoSort: Bool {
+    settingsStore.settings.general.agentsViewAutoSort
+  }
+
   /// Show the count chip only once the panel holds more than four
   /// agents — for the typical 1-4 entry case the title alone reads
   /// cleaner.
@@ -99,6 +115,17 @@ struct AgentStateSidebarPanel: View {
       shape.stroke(Color.primary.opacity(0.08), lineWidth: 1)
     )
     .clipShape(shape)
+    // Seed + keep the display order in sync with the registry. Membership
+    // (add / remove) lands immediately; status-driven reordering is
+    // debounced inside the coordinator so the list doesn't flicker as
+    // agents churn through states.
+    .onAppear { order.reconcile(entries: registry.entries, autoSort: autoSort) }
+    .onChange(of: registry.entries) { _, newEntries in
+      order.reconcile(entries: newEntries, autoSort: autoSort)
+    }
+    .onChange(of: autoSort) { _, newValue in
+      order.autoSortChanged(to: newValue, entries: registry.entries)
+    }
   }
 
   private var clampedHeight: Double {
@@ -160,9 +187,28 @@ struct AgentStateSidebarPanel: View {
     .padding(.bottom, 6)
   }
 
+  /// Rows in the coordinator's stable display order, dropping any id whose
+  /// entry has already been removed from the registry (the coordinator
+  /// drops departed panes on its next `reconcile`, so this only guards the
+  /// brief window before that lands).
+  ///
+  /// Before the first `onAppear` seed lands, `orderedIDs` is empty while the
+  /// registry may already hold entries (the panel opens onto agents detected
+  /// while it was closed). Fall back to a triage-sorted snapshot for that one
+  /// frame so the list renders populated immediately instead of flashing the
+  /// empty state.
+  private var orderedRows: [(paneID: PaneID, entry: AgentStateStore.AgentEntry)] {
+    if order.orderedIDs.isEmpty, !registry.entries.isEmpty {
+      return SortedEntriesProvider.sorted(registry.entries)
+    }
+    return order.orderedIDs.compactMap { id in
+      registry.entries[id].map { (paneID: id, entry: $0) }
+    }
+  }
+
   @ViewBuilder
   private var content: some View {
-    let rows = SortedEntriesProvider.sorted(registry.entries)
+    let rows = orderedRows
     if rows.isEmpty {
       emptyState
     } else {
@@ -181,6 +227,12 @@ struct AgentStateSidebarPanel: View {
             )
           }
         }
+        // Animate row insert / remove / move when the order changes.
+        // Scoped to the list so panel resize (height drag) stays
+        // non-animated. Reorders arrive from the coordinator's debounced
+        // re-sort and from immediate membership changes alike; reduce-motion
+        // users get the reorder with no animation.
+        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: order.orderedIDs)
       }
       .accessibilityIdentifier("agentState.sidebarPanel.list")
     }
@@ -193,6 +245,9 @@ struct AgentStateSidebarPanel: View {
       Image(systemName: "sparkles")
         .font(.system(size: 14, weight: .regular))
         .foregroundStyle(.tertiary)
+        // Decorative icon — the adjacent Text carries the meaning, so hide
+        // it from assistive tech (and satisfy `accessibility_label_for_image`).
+        .accessibilityHidden(true)
       Text("Run an agent and it'll show up here.")
         .font(.callout)
         .foregroundStyle(.secondary)

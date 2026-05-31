@@ -103,6 +103,13 @@ struct SettingsGeneralView: View {
     )
   }
 
+  private var agentsViewAutoSortBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.agentsViewAutoSort },
+      set: { settingsStore.setAgentsViewAutoSort($0) }
+    )
+  }
+
   private var crashReportsEnabledBinding: Binding<Bool> {
     Binding(
       get: { settingsStore.settings.general.crashReportsEnabled },
@@ -218,6 +225,13 @@ struct SettingsGeneralView: View {
         Toggle(isOn: agentsViewAutoOpenBinding) {
           Text("Auto-open")
           Text("Opens the sidebar panel automatically when an agent is running.")
+        }
+        Toggle(isOn: agentsViewAutoSortBinding) {
+          Text("Auto-sort")
+          Text(
+            "Reorders agents by status — needs input, finished, working, "
+              + "then idle. Off keeps them in the order they appeared."
+          )
         }
         Picker("Display Mode", selection: agentsViewDisplayModeBinding) {
           Text("Normal").tag(AgentsViewDisplayMode.normal)

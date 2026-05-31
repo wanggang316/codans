@@ -89,6 +89,13 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// joins both names on one line and tightens vertical padding.
   public var agentsViewDisplayMode: AgentsViewDisplayMode
 
+  /// Whether the Agents View reorders rows by status (triage priority:
+  /// needs-input, finished, working, idle). Default `true`. When off, rows
+  /// hold the order they appeared in — new agents append at the end and the
+  /// list never reshuffles. The reorder is debounced and skips decays into
+  /// idle so a completed agent fading out doesn't make the list jump.
+  public var agentsViewAutoSort: Bool
+
   /// Whether the app uploads anonymous crash and error reports on release
   /// builds. Default `true`. Debug builds never report regardless of this
   /// flag. Flipping this off also clears the install identifier so a future
@@ -109,6 +116,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     quitAction: QuitAction = .keepRunning,
     agentsViewAutoOpen: Bool = true,
     agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
+    agentsViewAutoSort: Bool = true,
     crashReportsEnabled: Bool = true
   ) {
     self.appearance = appearance
@@ -124,6 +132,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.quitAction = quitAction
     self.agentsViewAutoOpen = agentsViewAutoOpen
     self.agentsViewDisplayMode = agentsViewDisplayMode
+    self.agentsViewAutoSort = agentsViewAutoSort
     self.crashReportsEnabled = crashReportsEnabled
   }
 
@@ -136,6 +145,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case quitConfirmation, quitAction
     case agentsViewAutoOpen
     case agentsViewDisplayMode
+    case agentsViewAutoSort
     case crashReportsEnabled
     /// Retired in favour of `quitConfirmation` + `quitAction`. Still decoded by
     /// `init(from:)` so legacy settings files migrate transparently on first launch.
@@ -212,6 +222,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     // until the user opts into compact mode from Settings → General.
     self.agentsViewDisplayMode =
       try container.decodeIfPresent(AgentsViewDisplayMode.self, forKey: .agentsViewDisplayMode) ?? .normal
+    // Older settings files predate this field. Default to on so existing
+    // installs keep the status-ordered list they already had; the user can
+    // opt out from Settings → General.
+    self.agentsViewAutoSort =
+      try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoSort) ?? true
     // Older settings files predate this field. Default to opt-in to keep
     // installs already running through one or more releases consistent
     // with fresh installs; the user can opt out from Settings → General.

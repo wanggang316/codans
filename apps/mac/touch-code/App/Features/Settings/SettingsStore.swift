@@ -209,6 +209,12 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  func setAgentsViewAutoSort(_ autoSort: Bool) {
+    guard settings.general.agentsViewAutoSort != autoSort else { return }
+    settings.general.agentsViewAutoSort = autoSort
+    scheduleSave()
+  }
+
   /// Toggles crash reporting at runtime. Persists the new value to
   /// settings.json. Disabling here is a hint for *future* launches — the
   /// Sentry SDK is bootstrapped once at `init()` from the on-disk value, so

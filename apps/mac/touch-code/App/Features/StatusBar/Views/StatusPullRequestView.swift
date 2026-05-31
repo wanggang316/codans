@@ -78,16 +78,11 @@ struct StatusPullRequestView: View {
     }
   }
 
+  /// Shared with the sidebar via `PullRequestNumberPill` so the titlebar `#N` chip is
+  /// pixel-identical to the sidebar row badge — same bordered capsule, same state tint,
+  /// same red merge-conflict treatment — and the two can't drift apart.
   private var badge: some View {
-    Text("#\(snapshot.number)")
-      .font(.caption.monospacedDigit().weight(.semibold))
-      .foregroundStyle(.white)
-      .padding(.horizontal, 6)
-      .padding(.vertical, 2)
-      .background(
-        snapshot.state.badgeFill,
-        in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-      )
+    PullRequestNumberPill(snapshot: snapshot)
   }
 
   /// `+N −M` patch-size indicator next to the `#NN` badge. Gated on

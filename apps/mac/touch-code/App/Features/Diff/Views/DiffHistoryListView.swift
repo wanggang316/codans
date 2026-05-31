@@ -5,7 +5,7 @@ import TouchCodeCore
 /// Right-panel History tab body. Renders the current branch's commit
 /// history with infinite scroll, per-row selection, and inline error
 /// + empty + loading states. Selecting a row dispatches
-/// `.historyCommitTapped`; the left drawer (T14) reads
+/// `.historyCommitTapped`; the left panel (T14) reads
 /// `presentedCommitSha` to render that commit's full diff.
 ///
 /// Hosted by `DiffInspectorView.historyBody` (T12).
@@ -30,8 +30,13 @@ struct DiffHistoryListView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .accessibilityIdentifier("diff_inspector.history_list")
-    .onAppear {
-      // Idempotent on already-loaded / already-loading per reducer guards.
+    .task(id: store.worktreeID) {
+      // Keyed on `worktreeID` so switching Worktrees re-fires the first-page
+      // load: `.worktreeSelected` resets `historyState` but does NOT eagerly
+      // reload (History is lazy), and a plain `.onAppear` won't re-run while
+      // this view stays mounted on the History tab — leaving the list cleared
+      // but never refreshed. Idempotent on already-loaded / already-loading
+      // via the reducer's `.historyAppeared` guards.
       store.send(.historyAppeared)
     }
   }

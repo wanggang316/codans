@@ -2,14 +2,14 @@ import ComposableArchitecture
 import Foundation
 import TouchCodeCore
 
-/// TCA reducer behind the Diff inspector + drawer.
+/// TCA reducer behind the Diff inspector + panel.
 ///
 /// Owns two separable workflows:
 ///   1. **Changed-files list** — driven by `worktreeSelected(...)`, fetched
 ///      via `GitServiceClient.diffNumstat`. Surfaces in the inspector.
 ///   2. **Per-file diff** — driven by `fileRowTapped(path:)`, fetched
 ///      lazily on first tap, cached in `diffsByPath`. Surfaces in the
-///      drawer.
+///      panel.
 ///
 /// Cancellation:
 ///   - `CancelID.changedFiles` — cancels any prior changed-files load when
@@ -22,7 +22,7 @@ import TouchCodeCore
 /// reducer instance.
 @Reducer
 struct DiffFeature {
-  /// 500 KB. Above this, the drawer renders a "too large" placeholder.
+  /// 500 KB. Above this, the panel renders a "too large" placeholder.
   nonisolated static let maxFileBytes: Int = 500_000
   /// 5 000 lines. Above this on either side, same placeholder.
   nonisolated static let maxFileLines: Int = 5_000
@@ -37,10 +37,17 @@ struct DiffFeature {
     var worktreePath: String?
 
     var changedFiles: ChangedFilesState = .idle
-    /// Path of the file currently displayed in the drawer; `nil` = drawer
+    /// True while a `.refreshRequested` revalidation runs with a prior
+    /// `.loaded` list still on screen (stale-while-revalidate). Drives the
+    /// header refresh button's spinner WITHOUT dropping `changedFiles` to
+    /// `.loading` — which would clear the rows and blank the `(n)` count,
+    /// the visible flash this flag exists to avoid. Reset on
+    /// success / failure and on worktree switch.
+    var isRefreshingChanges: Bool = false
+    /// Path of the file currently displayed in the panel; `nil` = panel
     /// hidden. Re-tapping the row whose path matches is a no-op.
     var presentedFilePath: String?
-    /// Per-path diff cache. Survives drawer close — only cleared when
+    /// Per-path diff cache. Survives panel close — only cleared when
     /// `worktreeSelected(...)` switches to a different Worktree.
     var diffsByPath: [String: DiffEntryState] = [:]
     /// Mirrors `@AppStorage("diffStyle")`; the picker view writes both.
@@ -66,7 +73,7 @@ struct DiffFeature {
     var presentedCommitSha: String?
 
     /// Per-commit diff cache keyed by full SHA. Mirrors `diffsByPath`'s
-    /// lifecycle: survives drawer close, reset only on worktree switch or
+    /// lifecycle: survives panel close, reset only on worktree switch or
     /// HEAD change. Re-tapping a previously-rendered commit reuses the
     /// cached DiffDocument without re-fetch.
     var diffsByCommit: [String: DiffEntryState] = [:]
@@ -124,6 +131,13 @@ struct DiffFeature {
     /// Last load failure, if any. Surfaces in the view as an inline error
     /// row + retry button (T13). Cleared on next successful load.
     var error: GitError?
+
+    /// True while `.historyRefreshRequested` revalidates the first page with
+    /// the existing `commits` kept on screen (stale-while-revalidate). Unlike
+    /// `loading` — which the view turns into a full-surface placeholder when
+    /// `commits` is empty — `refreshing` never clears the list; it only drives
+    /// the header button spinner. Reset on refresh success / failure.
+    var refreshing: Bool = false
   }
 
   enum ChangedFilesState: Equatable {
@@ -174,7 +188,7 @@ struct DiffFeature {
     case changedFilesSucceeded([ChangedFile])
     case changedFilesFailed(GitError)
     case fileRowTapped(path: String)
-    case drawerCloseRequested
+    case panelCloseRequested
     case diffSucceededFor(path: String, document: DiffDocument)
     case diffFailedFor(path: String, error: GitError)
     case diffTooLargeFor(path: String, reason: TooLargeReason, copyCommand: String)
@@ -190,6 +204,13 @@ struct DiffFeature {
     /// the refresh button and Retry button in `DiffHistoryListView` drive a
     /// single action instead of composing two sends from the view layer.
     case historyRefreshRequested
+    /// First page of a stale-while-revalidate History refresh. Replaces the
+    /// `commits` array wholesale (vs `.historyPageSucceeded`, which appends
+    /// for infinite scroll) so the list swaps atomically without flashing.
+    case historyRefreshSucceeded([Commit], hasMore: Bool)
+    /// A History refresh that failed. Keeps stale `commits` on screen when
+    /// any exist; only promotes to the error surface when the list is empty.
+    case historyRefreshFailed(GitError)
     case historyCommitTapped(sha: String)
     case commitDiffSucceededFor(sha: String, document: DiffDocument, filePaths: [String], changeTypes: [String: ChangeStatus])
     case commitDiffFailedFor(sha: String, error: GitError)
@@ -200,7 +221,7 @@ struct DiffFeature {
     case commitMessageRequested(sha: String)
     case commitMessageLoaded(sha: String, message: String)
     case commitMessageFailed(sha: String, error: GitError)
-    /// File-row tap inside the History-mode drawer file picker. Today this
+    /// File-row tap inside the History-mode panel file picker. Today this
     /// is a no-op pending the JS bridge wiring for `scrollTo(file:)`. The
     /// reducer arm documents the deferred work inline.
     case commitFileScrollRequested(path: String)
@@ -232,12 +253,13 @@ struct DiffFeature {
       switch action {
       case .worktreeSelected(let projectID, let worktreeID, let path):
         // Switching Worktree drops the prior cache; presentedFilePath
-        // also resets so a stale drawer doesn't linger across switches.
+        // also resets so a stale panel doesn't linger across switches.
         state.projectID = projectID
         state.worktreeID = worktreeID
         state.worktreePath = path
         state.presentedFilePath = nil
         state.diffsByPath = [:]
+        state.isRefreshingChanges = false
         // History side resets identically. `selectedTab` is NOT touched —
         // the user's tab preference persists across worktree switches.
         state.historyState = .init()
@@ -269,21 +291,33 @@ struct DiffFeature {
         // per-file cache is preserved — refresh is meant for "I just
         // edited files in the worktree, recompute the list," not "I
         // switched Worktrees." (Decision Log D16.)
+        //
+        // Stale-while-revalidate: when a list is already on screen, keep it
+        // (and its `(n)` count) visible and only raise `isRefreshingChanges`
+        // for the button spinner — replacing it with `.loading` would blank
+        // the rows + count and flash. Fall back to the full `.loading`
+        // placeholder only when there's nothing to keep showing (idle/error).
         guard let path = state.worktreePath, !path.isEmpty else { return .none }
-        state.changedFiles = .loading
+        if case .loaded = state.changedFiles {
+          state.isRefreshingChanges = true
+        } else {
+          state.changedFiles = .loading
+        }
         return loadChangedFiles(at: path)
 
       case .changedFilesSucceeded(let files):
         state.changedFiles = .loaded(files)
+        state.isRefreshingChanges = false
         return .none
 
       case .changedFilesFailed(let error):
         state.changedFiles = .error(error)
+        state.isRefreshingChanges = false
         return .none
 
       case .fileRowTapped(let path):
         state.presentedFilePath = path
-        // Cache hit on `.loaded` / `.tooLarge`: don't refetch (drawer
+        // Cache hit on `.loaded` / `.tooLarge`: don't refetch (panel
         // already shows the right content). `.error` falls through so the
         // Retry button can re-issue the load (FU-T14). `.loading` is the
         // in-flight case and also falls through — `.cancellable(cancelInFlight:
@@ -299,9 +333,9 @@ struct DiffFeature {
         }
         return loadDiff(forPath: path, worktreePath: worktreePath)
 
-      case .drawerCloseRequested:
-        // Closes the drawer regardless of which tab opened it. Both
-        // selection fields are cleared so a future re-open of the drawer
+      case .panelCloseRequested:
+        // Closes the panel regardless of which tab opened it. Both
+        // selection fields are cleared so a future re-open of the panel
         // in either tab starts from no selection. Cache (`diffsByPath` /
         // `diffsByCommit`) is preserved — re-tapping a previously-
         // rendered row hits cache.
@@ -330,22 +364,25 @@ struct DiffFeature {
         return .none
 
       case .historyRefreshRequested:
-        // Atomic refresh: drop the prior cache + selection, cancel any
-        // in-flight history / commit-diff effects, then re-fire
-        // `.historyAppeared` to kick the first-page load. Same reset shape
-        // as `.headChangedForCurrentWorktree`; the difference is intent —
-        // refresh is user-initiated and unconditionally re-fetches.
-        state.historyState = .init()
-        state.presentedCommitSha = nil
-        state.diffsByCommit = [:]
-        state.commitMessageByID = [:]
-        state.commitFilePathsByID = [:]
-        state.commitFileChangeTypeByPath = [:]
-        return .merge(
-          .cancel(id: CancelID.historyPage),
-          .cancel(id: CancelID.commitDiff),
-          .send(.historyAppeared)
-        )
+        // Stale-while-revalidate: re-fetch the first page while keeping the
+        // current commits on screen so the list never flashes to an empty /
+        // loading placeholder. `refreshing` drives the button spinner; the
+        // atomic swap lands in `.historyRefreshSucceeded`.
+        //
+        // Selection + per-commit caches (diff / message / file paths) are
+        // deliberately preserved: a commit's content is sha-stable, so a
+        // cached entry for a sha still present in the refreshed list stays
+        // valid — and keeping `presentedCommitSha` avoids slamming the panel
+        // shut mid-refresh. When the list is empty (never-loaded / prior
+        // error) fall back to the full loading placeholder via `loading`.
+        guard let path = state.worktreePath, !path.isEmpty else { return .none }
+        state.historyState.error = nil
+        if state.historyState.commits.isEmpty {
+          state.historyState.loading = true
+        } else {
+          state.historyState.refreshing = true
+        }
+        return loadHistoryFirstPage(at: path, limit: state.historyState.pageLimit)
 
       case .historyAppeared:
         // Idempotent: only trigger first-page load when cache is genuinely
@@ -391,6 +428,28 @@ struct DiffFeature {
         state.historyState.error = error
         return .none
 
+      case .historyRefreshSucceeded(let commits, let hasMore):
+        // Atomic swap of the whole list — the stale commits were kept on
+        // screen during the refresh and are replaced in one render.
+        state.historyState.commits = commits
+        state.historyState.nextOffset = commits.count
+        state.historyState.hasMore = hasMore
+        state.historyState.loading = false
+        state.historyState.refreshing = false
+        state.historyState.error = nil
+        return .none
+
+      case .historyRefreshFailed(let error):
+        // SWR failure: keep whatever commits are still shown. Only surface
+        // the error when there's nothing to show, otherwise the view's error
+        // branch would replace a still-valid list.
+        state.historyState.loading = false
+        state.historyState.refreshing = false
+        if state.historyState.commits.isEmpty {
+          state.historyState.error = error
+        }
+        return .none
+
       case .historyCommitTapped(let sha):
         // Guard FIRST: a missing worktree path is a no-op rather than a
         // selection mutation, so the inspector never visually highlights a
@@ -399,12 +458,12 @@ struct DiffFeature {
           return .none
         }
         // Toggle: re-tapping the CURRENTLY-presented sha clears the
-        // selection when the drawer is genuinely *showing* the diff —
+        // selection when the panel is genuinely *showing* the diff —
         // `.loaded` (rendered) or `.tooLarge` (too-large placeholder).
         // `diffsByCommit[sha]` stays so a third tap re-presents from
         // cache instantly. Re-tap on `.error` deliberately falls through
-        // so the in-drawer Retry button (which sends this same action)
-        // re-issues the load instead of closing the drawer; `.loading`
+        // so the in-panel Retry button (which sends this same action)
+        // re-issues the load instead of closing the panel; `.loading`
         // similarly falls through and the cancel-in-flight handles it.
         if state.presentedCommitSha == sha {
           switch state.diffsByCommit[sha] {
@@ -577,6 +636,26 @@ struct DiffFeature {
     .cancellable(id: CancelID.historyPage, cancelInFlight: true)
   }
 
+  /// First-page reload for a stale-while-revalidate History refresh. Always
+  /// fetches from offset 0 and reports via `.historyRefreshSucceeded`, which
+  /// replaces the commit list wholesale (vs `loadHistoryPage` → append). Same
+  /// `CancelID.historyPage` slot so a refresh supersedes any in-flight page.
+  private func loadHistoryFirstPage(at worktreePath: String, limit: Int) -> Effect<Action> {
+    .run { [gitService] send in
+      do {
+        let url = URL(fileURLWithPath: worktreePath)
+        let cursor = LogPage.Cursor(offset: 0, limit: limit)
+        let page = try await gitService.log(url, cursor)
+        await send(.historyRefreshSucceeded(page.commits, hasMore: page.hasMore))
+      } catch let error as GitError {
+        await send(.historyRefreshFailed(error))
+      } catch {
+        await send(.historyRefreshFailed(.unparsable(context: "\(error)")))
+      }
+    }
+    .cancellable(id: CancelID.historyPage, cancelInFlight: true)
+  }
+
   /// Fetches the unified diff for a single commit and packages it into a
   /// `DiffDocument` via the renderer's `fallbackPatch` path. `UnifiedDiff` is
   /// the parsed shape — `FileChange` carries hunks but NOT pre/post-image
@@ -591,7 +670,7 @@ struct DiffFeature {
         let url = URL(fileURLWithPath: worktreePath)
         let unified = try await gitService.commitDiff(url, sha, false)
         // `FileChange.id` is the post-image path (pre-image for deletions);
-        // exactly what the drawer file-picker wants to render and dispatch
+        // exactly what the panel file-picker wants to render and dispatch
         // for scroll-to-file. See `GitModels.swift` FileChange docstring.
         let filePaths = unified.files.map(\.id)
         let changeTypes: [String: ChangeStatus] = Dictionary(

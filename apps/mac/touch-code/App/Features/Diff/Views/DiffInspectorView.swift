@@ -92,14 +92,31 @@ struct DiffInspectorView: View {
     HStack(spacing: 6) {
       Text(headerTitle)
         .font(.headline)
+        // The `(n)` count stays mounted across a refresh (stale-while-
+        // revalidate), so n→m is a value change, not a remount — animate it
+        // as rolling digits instead of letting it pop.
+        .contentTransition(.numericText())
+        .animation(.default, value: headerTitle)
       Spacer()
       Button {
         handleRefresh()
       } label: {
-        Image(systemName: "arrow.clockwise")
+        // Swap the static glyph for a spinner while refreshing instead of
+        // toggling `.disabled` — a disabled glyph dims then re-brightens,
+        // which reads as a flicker. The button stays enabled; re-entry is
+        // safe because the load effects use `cancelInFlight: true`. Fixed
+        // frame so the glyph↔spinner swap doesn't reflow the header row.
+        Group {
+          if isRefreshing {
+            ProgressView()
+              .controlSize(.small)
+          } else {
+            Image(systemName: "arrow.clockwise")
+          }
+        }
+        .frame(width: 16, height: 16)
       }
       .buttonStyle(.borderless)
-      .disabled(isRefreshing)
       .help(refreshHelp)
       .accessibilityLabel(refreshHelp)
     }
@@ -122,9 +139,9 @@ struct DiffInspectorView: View {
     switch store.selectedTab {
     case .changes:
       if case .loading = store.changedFiles { return true }
-      return false
+      return store.isRefreshingChanges
     case .history:
-      return store.historyState.loading
+      return store.historyState.loading || store.historyState.refreshing
     }
   }
 
@@ -194,7 +211,7 @@ struct DiffInspectorView: View {
             onOpenTap: { store.send(.fileRowTapped(path: file.id)) },
             onChevronTap: {
               if store.presentedFilePath == file.id {
-                store.send(.drawerCloseRequested)
+                store.send(.panelCloseRequested)
               } else {
                 store.send(.fileRowTapped(path: file.id))
               }
@@ -223,6 +240,7 @@ struct DiffInspectorView: View {
       Image(systemName: "exclamationmark.triangle")
         .foregroundStyle(.orange)
         .font(.title3)
+        .accessibilityHidden(true)
       Text(Self.errorMessage(error))
         .font(.callout)
         .foregroundStyle(.secondary)

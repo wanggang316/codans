@@ -3,7 +3,7 @@ import SwiftUI
 
 /// One file row inside the inspector. Status badge, head-truncated path,
 /// `+adds -dels`, and an open/closed chevron. Tap on the row body opens
-/// the drawer; tap on the chevron — when this row is currently presented —
+/// the panel; tap on the chevron — when this row is currently presented —
 /// closes it (chevron-as-toggle when open).
 struct DiffFileRow: View {
   let file: ChangedFile
