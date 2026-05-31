@@ -13,40 +13,40 @@
     "brew_install": "brew install --cask touch-code"
   },
   "features": {
-    "heading": "什么是 TouchCode？",
-    "intro": "TouchCode 是一款为 Coding Agent 而生的并行开发而生的终端开发环境，把你所有的项目、worktree 和 Coding Agent 优雅的编排进同一个窗口。",
+    "heading": "What is TouchCode?",
+    "intro": "TouchCode is a terminal development environment built for parallel development with coding agents. It orchestrates all of your projects, worktrees, and coding agents into a single window.",
     "items": [
       {
-        "title": "原生",
-        "body": "基于 Ghostty 构建，macOS 原生，天生具备 Ghostty 和 macOS 的所有特性"
+        "title": "Native",
+        "body": "Built on Ghostty and native to macOS — every Ghostty and macOS capability comes for free."
       },
       {
-        "title": "Agent First",
-        "body": "实时查看每个 Agent 的运行状态"
+        "title": "Agent-first",
+        "body": "See the live running state of every agent in real time."
       },
       {
-        "title": "并行",
-        "body": "项目树 + git worktree + 多 Tab + 终端分屏，让你在一个窗口管理所有工作线程，告别 Cmd-Tab"
+        "title": "Parallel",
+        "body": "Project tree + git worktrees + tabs + split panes let you manage every line of work in one window. No more Cmd-Tab."
       },
       {
-        "title": "自定义命令",
-        "body": "为每个项目绑定专属命令与快捷键，一个 chord 一键执行"
+        "title": "Custom commands",
+        "body": "Bind project-specific commands and shortcuts; one chord runs the right thing."
       },
       {
-        "title": "Github",
-        "body": "深度集成 Github，在应用内管理 PR 整个生命周期"
+        "title": "GitHub",
+        "body": "Deep GitHub integration — manage the whole pull-request lifecycle in-app."
       },
       {
         "title": "Git Viewer",
-        "body": "集成 diff / 历史面板，随时查看变更，无需离开终端"
+        "body": "A built-in diff and history panel. Review changes any time, without leaving the terminal."
       },
       {
-        "title": "快捷键",
-        "body": "丰富的自定义快捷键，助你效率提升"
+        "title": "Keyboard-driven",
+        "body": "A deep set of customizable shortcuts to keep you fast."
       },
       {
-        "title": "IDE 集成",
-        "body": "VS Code、Cursor、Zed、Xcode 自动识别，一个快捷键从任意 worktree 打开"
+        "title": "IDE integration",
+        "body": "VS Code, Cursor, Zed, and Xcode are auto-detected. One shortcut opens any worktree."
       }
     ]
   },

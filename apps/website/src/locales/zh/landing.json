@@ -1,0 +1,67 @@
+{
+  "brand": "TouchCode",
+  "nav": {
+    "changelog": "更新日志",
+    "download": "下载",
+    "github": "GitHub"
+  },
+  "hero": {
+    "tagline": "为 Agent 时代而生的并行开发。",
+    "subtitle": "一个 macOS 原生窗口，编排所有 worktree 与 Agent。",
+    "primary_cta": "下载 macOS 版",
+    "secondary_cta": "在 GitHub 查看",
+    "brew_install": "brew install --cask touch-code"
+  },
+  "features": {
+    "heading": "什么是 TouchCode？",
+    "intro": "TouchCode 是一款为 Coding Agent 而生的并行开发而生的终端开发环境，把你所有的项目、worktree 和 Coding Agent 优雅的编排进同一个窗口。",
+    "items": [
+      {
+        "title": "原生",
+        "body": "基于 Ghostty 构建，macOS 原生，天生具备 Ghostty 和 macOS 的所有特性"
+      },
+      {
+        "title": "Agent First",
+        "body": "实时查看每个 Agent 的运行状态"
+      },
+      {
+        "title": "并行",
+        "body": "项目树 + git worktree + 多 Tab + 终端分屏，让你在一个窗口管理所有工作线程，告别 Cmd-Tab"
+      },
+      {
+        "title": "自定义命令",
+        "body": "为每个项目绑定专属命令与快捷键，一个 chord 一键执行"
+      },
+      {
+        "title": "Github",
+        "body": "深度集成 Github，在应用内管理 PR 整个生命周期"
+      },
+      {
+        "title": "Git Viewer",
+        "body": "集成 diff / 历史面板，随时查看变更，无需离开终端"
+      },
+      {
+        "title": "快捷键",
+        "body": "丰富的自定义快捷键，助你效率提升"
+      },
+      {
+        "title": "IDE 集成",
+        "body": "VS Code、Cursor、Zed、Xcode 自动识别，一个快捷键从任意 worktree 打开"
+      }
+    ]
+  },
+  "cta": {
+    "title": "开始使用 TouchCode。",
+    "sub": "拖入 /Applications 即可。首次启动自动安装 tc 命令。",
+    "primary": "下载 .dmg",
+    "secondary": "阅读源码"
+  },
+  "footer": {
+    "tagline": "为 Agent 时代而生。",
+    "releases": "发布版本",
+    "issues": "问题反馈",
+    "repo": "代码仓库",
+    "license": "MIT",
+    "version": "v0.3.0"
+  }
+}

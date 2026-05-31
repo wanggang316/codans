@@ -37,9 +37,53 @@ export default function Nav() {
           <NavLink href={LINKS.repo} accent>
             {t("nav.github")}
           </NavLink>
+          <LangToggle />
         </nav>
       </div>
     </motion.header>
+  );
+}
+
+/**
+ * EN / 中文 segmented toggle. Drives `i18n.changeLanguage`; the choice is
+ * persisted to localStorage by the listener in i18n.ts. Default is English.
+ */
+function LangToggle() {
+  const { i18n } = useTranslation();
+  const current = i18n.language?.startsWith("zh") ? "zh" : "en";
+  return (
+    <div className="ml-1.5 flex items-center overflow-hidden rounded-full border border-line bg-bg-elev/60 text-[12px]">
+      <LangButton active={current === "en"} onClick={() => i18n.changeLanguage("en")}>
+        EN
+      </LangButton>
+      <span className="h-3.5 w-px bg-line" />
+      <LangButton active={current === "zh"} onClick={() => i18n.changeLanguage("zh")}>
+        中文
+      </LangButton>
+    </div>
+  );
+}
+
+function LangButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-2.5 py-1 transition-colors ${
+        active ? "text-ink" : "text-ink-dim hover:text-ink-muted"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
