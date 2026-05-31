@@ -988,7 +988,8 @@ private final class ColorPanelObserver: NSObject {
       object: panel,
       queue: .main
     ) { [weak self] _ in
-      self?.isActive = false
+      // Posted on `.main` (see `queue:` above).
+      MainActor.assumeIsolated { self?.isActive = false }
     }
   }
 

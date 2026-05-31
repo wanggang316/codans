@@ -634,7 +634,7 @@ struct HierarchySidebarView: View {
         Button {
           var txn = Transaction()
           txn.disablesAnimations = true
-          withTransaction(txn) {
+          _ = withTransaction(txn) {
             store.send(.toggleProjectExpansion(project.id))
           }
         } label: {
@@ -1582,7 +1582,6 @@ private final class _IndentZeroerView: NSView {
       let newClip = _UnclampedClipView()
       newClip.drawsBackground = oldClip.drawsBackground
       newClip.backgroundColor = oldClip.backgroundColor
-      newClip.copiesOnScroll = oldClip.copiesOnScroll
       newClip.documentCursor = oldClip.documentCursor
       scrollView.contentView = newClip
       if scrollView.documentView !== outline { scrollView.documentView = outline }

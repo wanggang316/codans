@@ -191,7 +191,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "addProject requires {name, rootPath}", path: nil))
     }
     do {
-      let id = try manager.addProject(
+      let id = manager.addProject(
         name: req.name,
         rootPath: req.rootPath,
         gitRoot: req.gitRoot

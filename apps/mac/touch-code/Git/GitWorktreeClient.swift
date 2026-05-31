@@ -812,7 +812,7 @@ nonisolated extension GitWorktreeClient {
           cwd: repoRoot
         )
         switch outcome {
-        case .exited(let code, _, let stderr, _) where code == 0:
+        case .exited(let code, _, _, _) where code == 0:
           return
         case .exited(_, _, let stderrData, _):
           throw GitWorktreeError.fetchFailed(

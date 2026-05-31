@@ -51,7 +51,7 @@ struct ContentView: View {
           // click animates the binding update internally, but routing
           // through `store.send` lands the reducer mutation outside
           // that transaction — explicit withAnimation here restores it.
-          withAnimation(.easeOut(duration: 0.2)) {
+          _ = withAnimation(.easeOut(duration: 0.2)) {
             store.send(.toggleSidebarRequested)
           }
         }

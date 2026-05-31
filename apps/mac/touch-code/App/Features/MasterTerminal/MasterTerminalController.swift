@@ -245,8 +245,11 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
       },
       completionHandler: { [weak self] in
         guard let self else { return }
-        self.panel.orderOut(nil)
-        appToRestore?.activate()
+        // AppKit fires animation completion handlers on the main thread.
+        MainActor.assumeIsolated {
+          self.panel.orderOut(nil)
+          appToRestore?.activate()
+        }
       }
     )
   }
