@@ -18,7 +18,7 @@ export default function CtaStrip() {
       >
         <h3 className="font-mono text-display-2 font-bold text-ink">{t("cta.title")}</h3>
         <p className="mx-auto mt-4 max-w-[520px] text-ink-muted">{t("cta.sub")}</p>
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <div className="mt-8 flex items-center justify-center">
           <a
             href={LINKS.latestDmg}
             target="_blank"
@@ -26,14 +26,6 @@ export default function CtaStrip() {
             className="inline-flex h-11 items-center gap-2 rounded-full bg-acc-500 px-5 text-[14px] font-medium text-white shadow-glow transition-colors hover:bg-acc-400"
           >
             {t("cta.primary")}
-          </a>
-          <a
-            href={LINKS.repo}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-11 items-center gap-2 rounded-full border border-line bg-bg-elev px-5 text-[14px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-bg-card"
-          >
-            {t("cta.secondary")} →
           </a>
         </div>
         <BrewLine command={BREW_COMMAND} />

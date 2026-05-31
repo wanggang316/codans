@@ -45,10 +45,7 @@ export default function Hero() {
           transition={{ duration: 0.7, delay: 0.5 }}
           className="mt-9 flex flex-col items-center gap-4"
         >
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <PrimaryCta href={LINKS.latestDmg} label={t("hero.primary_cta")} />
-            <GhostCta href={LINKS.repo} label={t("hero.secondary_cta")} />
-          </div>
+          <PrimaryCta href={LINKS.latestDmg} label={t("hero.primary_cta")} />
           <BrewLine command={t("hero.brew_install")} />
         </motion.div>
 
@@ -105,23 +102,7 @@ function PrimaryCta({ href, label }: { href: string; label: string }) {
   );
 }
 
-function GhostCta({ href, label }: { href: string; label: string }) {
-  return (
-    <motion.a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.98 }}
-      className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full border border-line bg-bg-elev px-5 text-[14px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-bg-card"
-    >
-      <GitHubGlyph />
-      <span>{label}</span>
-    </motion.a>
-  );
-}
-
-/** Small copyable install line under the buttons — the opencode pattern. */
+/** Small copyable install line under the button — the opencode pattern. */
 function BrewLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
@@ -158,14 +139,6 @@ function DownloadGlyph() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
       <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function GitHubGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 .5C5.65.5.5 5.66.5 12.02c0 5.09 3.29 9.4 7.86 10.93.57.11.78-.25.78-.55 0-.27-.01-1-.02-1.95-3.2.7-3.87-1.54-3.87-1.54-.52-1.34-1.28-1.7-1.28-1.7-1.04-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.78 2.71 1.27 3.37.97.1-.76.4-1.27.74-1.56-2.55-.29-5.24-1.28-5.24-5.72 0-1.27.45-2.3 1.19-3.11-.12-.3-.52-1.49.11-3.1 0 0 .98-.32 3.2 1.18a11 11 0 015.83 0c2.22-1.5 3.2-1.18 3.2-1.18.63 1.61.23 2.8.11 3.1.74.81 1.18 1.84 1.18 3.11 0 4.45-2.7 5.42-5.27 5.71.41.36.78 1.07.78 2.16 0 1.56-.01 2.81-.01 3.19 0 .3.21.67.79.55A11.52 11.52 0 0023.5 12.02C23.5 5.66 18.35.5 12 .5z" />
     </svg>
   );
 }
