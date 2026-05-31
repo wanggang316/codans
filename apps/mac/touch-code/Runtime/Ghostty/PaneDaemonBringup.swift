@@ -105,13 +105,31 @@ enum PaneDaemonBringup {
     let cwdURL = URL(fileURLWithPath: workingDirectory)
 
     // Merge the caller-provided env over the inherited process env so
-    // Project-defined env vars (M8) reach the spawned shell while
-    // keeping PATH / HOME / TERM defaults intact. `ZMX_DIR` is pinned
-    // last so callers cannot accidentally redirect the daemon out of
-    // touch-code's canonical cache directory — snapshot path alignment
-    // depends on this being authoritative.
+    // Project-defined env vars (M8) reach the spawned shell while keeping
+    // PATH / HOME intact. Terminal-describing vars are re-injected just
+    // below (see the `TERM` block). `ZMX_DIR` is pinned last so callers
+    // cannot accidentally redirect the daemon out of touch-code's canonical
+    // cache directory — snapshot path alignment depends on this being
+    // authoritative.
     var mergedEnv = ProcessInfo.processInfo.environment
     for (key, value) in env { mergedEnv[key] = value }
+    // libghostty's External backend hands the PTY to the zmx daemon, so the
+    // `TERM` injection ghostty's own Exec backend performs (upstream
+    // termio/Exec.zig — `xterm-ghostty` + `COLORTERM=truecolor`) never runs
+    // for daemon-backed panes. Without it the daemon shell inherits whatever
+    // `TERM` the app process carries; when touch-code is launched from a
+    // non-interactive parent (Xcode's debugserver, `make` → `open`) that is
+    // `TERM=dumb`, which disables starship and breaks every TUI. Re-inject
+    // the values here so the spawned shell sees a capable terminal. The
+    // bundled `xterm-ghostty` entry resolves because `GhosttyBootstrap`
+    // exports `TERMINFO_DIRS` at launch; fall back to `xterm-256color` only
+    // if that export is somehow missing.
+    mergedEnv.removeValue(forKey: "TERMCAP")
+    let ghosttyTerminfoAvailable =
+      mergedEnv["TERMINFO_DIRS"] != nil || mergedEnv["TERMINFO"] != nil
+    mergedEnv["TERM"] = ghosttyTerminfoAvailable ? "xterm-ghostty" : "xterm-256color"
+    mergedEnv["COLORTERM"] = "truecolor"
+    mergedEnv["TERM_PROGRAM"] = "ghostty"
     let zmxDir = canonicalSocketDirectory()
     mergedEnv["ZMX_DIR"] = zmxDir.path
     // zmx's mkdir helper is non-recursive (`mkdirat`), so the parent
