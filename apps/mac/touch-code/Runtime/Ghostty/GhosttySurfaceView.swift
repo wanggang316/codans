@@ -94,7 +94,16 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
 
   init(paneID: PaneID) {
     self.paneID = paneID
-    super.init(frame: .zero)
+    // Seed a sensible non-zero frame (≈100×40 cells) rather than `.zero`.
+    // `PaneSurface.init` binds the surface (→ `attach` → `pushGeometry`)
+    // before the view is in a window, and `pushGeometry` only pushes a
+    // size when `bounds` is non-zero. With a `.zero` frame the surface —
+    // and the shell libghostty's exec backend forks at the surface's grid
+    // size — would start at a placeholder size and only reach the real
+    // size on the first layout pass, producing a visible reflow. A real
+    // initial size lets the shell start close to its final width; the
+    // `autoresizingMask` still snaps the view to the pane on layout.
+    super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
     self.wantsLayer = true
     self.autoresizingMask = [.width, .height]
     registerForDraggedTypes(Array(Self.dropTypes))
