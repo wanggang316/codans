@@ -214,12 +214,6 @@ final class TerminalEngine {
     surface.view.onBecomeFirstResponder = { [weak self] in
       self?.hierarchy.setLastFocusedPane(pane.id, in: tabID)
     }
-    // Lets the view reclaim firstResponder after a SwiftUI split/zoom rebuild
-    // re-attaches it: only the pane the tab last focused should grab keys
-    // back, so a freshly split pane keeps input while its siblings don't.
-    surface.view.shouldClaimFocus = { [weak self] in
-      self?.hierarchy.lastFocusedPane(in: tabID) == pane.id
-    }
     // Right-click menu items raise PaneActionRequest values directly on the
     // view; lift them onto the engine's event stream so they reach
     // PaneActionRouterFeature through the same path as libghostty-decoded
