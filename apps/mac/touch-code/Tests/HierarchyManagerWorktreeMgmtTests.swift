@@ -399,25 +399,33 @@ struct HierarchyManagerWorktreeMgmtTests {
     defer { try? FileManager.default.removeItem(at: alias.url) }
     let canonicalForm = HierarchyManager.canonicalPath(alias.varForm)
     #expect(canonicalForm == HierarchyManager.canonicalPath(alias.privateForm))
-    let projectID = manager.addProject(
-      name: "p", rootPath: canonicalForm, gitRoot: canonicalForm
+
+    // The two aliases canonicalize to the same path, and the per-project
+    // uniqueness guard forbids two worktrees at one canonical path — so
+    // exercise each alias in its own project. Both must store the canonical
+    // form regardless of which alias was fed in.
+    let projectVar = manager.addProject(
+      name: "pv", rootPath: canonicalForm, gitRoot: canonicalForm
     )
-    // Feeding the `/var/...` alias must still store the canonical form.
     let wtIDFromVar = try manager.createWorktree(
-      in: projectID, name: "from-var",
+      in: projectVar, name: "from-var",
       path: alias.varForm, branch: "from-var"
     )
-    let storedFromVar = manager.catalog.projects[0].worktrees
-      .first(where: { $0.id == wtIDFromVar })?.path
+    let storedFromVar = manager.catalog.projects
+      .first(where: { $0.id == projectVar })?
+      .worktrees.first(where: { $0.id == wtIDFromVar })?.path
     #expect(storedFromVar == canonicalForm)
 
-    // Feeding the `/private/var/...` alias stores the same canonical.
+    let projectPrivate = manager.addProject(
+      name: "pp", rootPath: canonicalForm, gitRoot: canonicalForm
+    )
     let wtIDFromPrivate = try manager.createWorktree(
-      in: projectID, name: "from-private",
+      in: projectPrivate, name: "from-private",
       path: alias.privateForm, branch: "from-private"
     )
-    let storedFromPrivate = manager.catalog.projects[0].worktrees
-      .first(where: { $0.id == wtIDFromPrivate })?.path
+    let storedFromPrivate = manager.catalog.projects
+      .first(where: { $0.id == projectPrivate })?
+      .worktrees.first(where: { $0.id == wtIDFromPrivate })?.path
     #expect(storedFromPrivate == canonicalForm)
   }
 
