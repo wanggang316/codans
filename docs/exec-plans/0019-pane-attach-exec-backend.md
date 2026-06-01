@@ -14,13 +14,15 @@ The change replaces how libghostty is wired to the per-Pane `zmx` daemon: instea
 
 ## Progress
 
-- [ ] T0 — Unblock the build: resolve the `GhosttyKit.xcframework` `ProcessXCFramework` failure (duplicate `event.h` header basename) so a clean `make mac-build` succeeds against the `f2851da7` ghostty.
-- [ ] T0b — Land the in-flight double-pane fix on a green build; confirm it compiles end-to-end.
-- [ ] P1 — Add a lightweight `ZmxControlClient` (transient control-socket connection for `.info` / `.history` / `.snapshot`) and a helper that builds the `zmx attach <session>` command string.
-- [ ] P2 — Switch `PaneSurface` to `config.command` (drop `external_pty_fd`); remove the manual resize/attach handshake and the `externalPtyResize` action path; sizing is libghostty's.
-- [ ] P3 — Rework `PaneDaemonBringup` to the attach model (cold/live both = `zmx attach <id>`, daemon upserts).
-- [ ] P4 — Reconnect out-of-band capabilities to `ZmxControlClient`/CLI: quit-time persistence decision, foreground-shell PID, `tc pane read`, kill.
-- [ ] P5 — Delete the legacy I/O `ZmxClient` path; repair + extend the test target; verify resume + foreground detection + no reflow.
+- [x] T0 — Unblock the build: deduplicate the `event.h` / `encoder.h` header basenames in the generated `GhosttyKit.xcframework` (`prepare_xcframework`); clean `make mac-build` → BUILD SUCCEEDED. (commit 4c44e874)
+- [x] T0b — Double-pane fix lands on a green build; compiles end-to-end. (commit cabd5e97)
+- [x] P1 — `ZmxControlClient` (transient control-socket `.info` / `.history` / `.kill`) + `ZmxAttachCommand` (the `zmx attach <session>` command builder). (commit 263ff3cb)
+- [x] P2 — `PaneSurface` uses `config.command` + exec backend (drops `external_pty_fd`, the resize/attach handshake, and the `externalPtyResize` dispatch); sizing is libghostty's. `TerminalEngine.ensureSurface` + `MasterTerminalController` build the exec-backend surface; bringup is the single `zmx attach` invocation (cold/live both upsert — folds in P3). (commit 39c09826)
+- [x] P4 — Out-of-band capabilities rewired off the live client: foreground-shell PID via `ZmxControlClient.info` (retrying probe in `PaneSurface`), `tc pane read` via `ZmxControlProbe`/`ZmxControlClient.history`, `pane.close` kill + quit-time kill via `ZmxControlClient.kill`; quit keeps daemons alive (resume) or kills them (resume off). (folded into 39c09826)
+- [ ] P5 — Remove the now-unused external-PTY path: `ZmxClient`, `PaneDaemonBringup.spawn/restore/reattach`, `TerminalEngine.pendingReattach/pendingRestore/seedReattachableSessions`, and the `SessionReaper` reattach-seeding (keep its orphan-daemon cleanup). Touches the launch path (`TouchCodeApp` bringup, `SessionReaper`) — do with care + build verification.
+- [ ] Tests — Repair the touch-code test target (pre-existing: 22 `openPane`/`splitPane` calls missing `await`; new: tests constructing `PaneSurface(zmxClient:)` / using removed APIs). Add coverage for `ZmxAttachCommand` + `ZmxControlClient`.
+- [ ] Behavioural verification (owner: Gump) — run the app: new pane / split / worktree-switch renders at correct width with no reflow; resume across `cmd-Q` reattaches; foreground/agent indicator still lights; `tc pane read` works.
+- [ ] Follow-up — `QuitAction.snapshot` now means "kill daemons" (resume off); rename the case + its Settings label for clarity.
 
 ## Surprises & Discoveries
 
@@ -32,6 +34,10 @@ The change replaces how libghostty is wired to the per-Pane `zmx` daemon: instea
 - **Resume model: daemon-survives + live re-attach only; drop the disk-snapshot tier.** The existing design (`docs/design-docs/pane-resume.md`) defines two quit-time tiers: keep daemons alive (live), or serialize each daemon's terminal to `<paneID>.snap`, kill it, and replay into a fresh shell on launch (snapshot). The attach model makes live re-attach trivial (re-exec `zmx attach <same-session>`; the daemon upserts). We deliberately retire the disk-snapshot tier: it has no equivalent in the attach command surface (`zmx attach` has no `--restore-from`; only `zmx serve` does), and keeping it would re-introduce a bringup-ordering step the rest of this change removes. Net user-visible effect: the "Resume panes on launch" setting becomes "keep the daemon alive across quit" (on) vs "kill the daemon on quit" (off, fresh next launch). What is lost: restoring visible scrollback into a fresh shell when the daemon is *not* kept alive. `pane-resume.md` must be updated to reflect this.
 - **Out-of-band daemon operations use a transient control-socket client, not the persistent I/O path.** `zmx attach` owns the live byte stream. The app still needs to ask the daemon three things — the shell PID (for foreground/agent detection), the scrollback (for `tc pane read`), and "serialize/exit" (quit-time, only if we keep a serialize option) — so a slim `ZmxControlClient` opens a short-lived connection, sends one framed command, reads the reply, and closes. This reuses `ZmxIPC`/`ZmxFraming` and replaces the heavyweight socketpair-bridging `ZmxClient`.
 - **Reverses a `pane-resume.md` decision.** That doc chose `external_pty_fd` to "eliminate the in-process fork path entirely." The attach model re-introduces an in-process child — but a thin `zmx attach` client, not the shell — in exchange for libghostty owning terminal sizing. The doc will be amended with this rationale.
+
+- **`QuitAction.snapshot` reinterpreted as "kill daemons."** With the disk-snapshot tier gone, the two quit modes are "keep daemons alive" (resume on) and "kill daemons" (resume off). The existing `.snapshot` case now drives the kill path; the enum + its Settings label should be renamed for clarity (tracked as a follow-up) rather than churned mid-refactor.
+
+- **P3 + P4 folded into the P2 commit.** Bringup collapsed to a single `zmx attach` invocation (no spawn/reattach/restore branching), so P3 had no standalone surface; the out-of-band rewiring (P4) had to land with P2 or the build would regress (foreground PID, `tc pane read`, kill all referenced the removed live client). The legacy path is left as dead code and removed in P5 so the functional switch and the deletion stay reviewable as separate commits.
 
 ## Outcomes & Retrospective
 
