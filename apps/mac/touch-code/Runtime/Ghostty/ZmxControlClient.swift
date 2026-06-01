@@ -101,12 +101,22 @@ nonisolated enum ZmxControlClient {
     }
   }
 
-  private static func runQuery(
-    socketPath: String, request: ZmxFrame, expect: ZmxTag, deadlineMs: Int
-  ) throws -> ZmxFrame {
+  /// Best-effort `.kill`: tell a pane's daemon to exit (dropping its PTY
+  /// child). Used when a pane is destroyed for good. Fire-and-forget — the
+  /// daemon closes its socket on `.kill`, so there is no reply to await. A
+  /// missing socket (daemon already gone) is a silent no-op.
+  static func kill(for paneID: PaneID) {
+    let path = socketPath(for: paneID)
+    DispatchQueue.global(qos: .utility).async {
+      guard let fd = try? openConnection(socketPath: path) else { return }
+      defer { Darwin.close(fd) }
+      try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .kill)))
+    }
+  }
+
+  private static func openConnection(socketPath: String) throws -> Int32 {
     let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     if fd < 0 { throw ControlError.socketCreateFailed(errno: errno) }
-    defer { Darwin.close(fd) }
     var noSigPipe: Int32 = 1
     _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
@@ -114,6 +124,7 @@ nonisolated enum ZmxControlClient {
     addr.sun_family = sa_family_t(AF_UNIX)
     let pathBytes = Array(socketPath.utf8CString)
     guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
+      Darwin.close(fd)
       throw ControlError.pathTooLong(socketPath)
     }
     withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
@@ -128,7 +139,19 @@ nonisolated enum ZmxControlClient {
         Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
       }
     }
-    if connected < 0 { throw ControlError.connectFailed(errno: errno) }
+    if connected < 0 {
+      let err = errno
+      Darwin.close(fd)
+      throw ControlError.connectFailed(errno: err)
+    }
+    return fd
+  }
+
+  private static func runQuery(
+    socketPath: String, request: ZmxFrame, expect: ZmxTag, deadlineMs: Int
+  ) throws -> ZmxFrame {
+    let fd = try openConnection(socketPath: socketPath)
+    defer { Darwin.close(fd) }
 
     try sendAll(fd: fd, data: ZmxFraming.encode(request))
 

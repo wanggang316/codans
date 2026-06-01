@@ -17,7 +17,21 @@ public protocol PaneRuntimeProbe: AnyObject, Sendable {
   func readHistory(format: ZmxHistoryFormat) async throws -> Data
 }
 
-extension ZmxClient: PaneRuntimeProbe {}
+/// `PaneRuntimeProbe` backed by transient control-socket queries
+/// (`ZmxControlClient`) to a Pane's daemon. The live byte stream now runs
+/// through the in-surface `zmx attach` client, so `pane.info` / `pane.read`
+/// reach the daemon out-of-band by PaneID rather than through a held client.
+@MainActor
+final class ZmxControlProbe: PaneRuntimeProbe {
+  private let paneID: PaneID
+  init(paneID: PaneID) { self.paneID = paneID }
+  func requestInfo() async throws -> ZmxInfoPayload {
+    try await ZmxControlClient.info(for: paneID)
+  }
+  func readHistory(format: ZmxHistoryFormat) async throws -> Data {
+    try await ZmxControlClient.history(for: paneID, format: format)
+  }
+}
 
 /// Handlers for `hierarchy.*` — both reads (list / describe /
 /// resolveAlias) and mutations (create / activate / close / label).

@@ -244,7 +244,7 @@ enum PaneDaemonBringup {
   /// `Resources/bin/` folder. Tuist's `Embed zmx` build phase
   /// (apps/mac/scripts/embed-zmx.sh) is responsible for putting it
   /// there; absent the resource we cannot proceed.
-  private static func zmxBinaryURL() throws -> URL {
+  static func zmxBinaryURL() throws -> URL {
     guard
       let url = Bundle.main.url(
         forResource: "zmx", withExtension: nil, subdirectory: "bin"

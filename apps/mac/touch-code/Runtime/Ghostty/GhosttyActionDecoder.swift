@@ -557,10 +557,12 @@ extension GhosttyActionDecoder {
       logger.debug("surface action: reload_config (soft: \(soft))")
       return true
 
-    // Bucket 5b — External PTY resize
+    // Bucket 5b — External PTY resize. Inert under the exec backend: the
+    // surface owns a normal local PTY (no `external_pty_fd`), so libghostty
+    // sizes it directly and never emits this action. Kept as a defensive
+    // no-op so a stray delivery is logged rather than unhandled.
     case .externalPtyResize(let cols, let rows):
-      pane.handleExternalPtyResize(cols: cols, rows: rows)
-      logger.debug("surface action: external_pty_resize (cols=\(cols), rows=\(rows))")
+      logger.debug("ignoring external_pty_resize under exec backend (cols=\(cols), rows=\(rows))")
       return true
 
     case .unsupported(let rawTag, let reason):

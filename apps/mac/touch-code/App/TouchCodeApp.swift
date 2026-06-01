@@ -880,36 +880,22 @@ final class AppState {
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
       settingsProvider: { settingsStore.settings },
-      daemonKiller: { [weak terminalEngine] paneID in
-        // Live-surface path: reach into the runtime's surface registry,
-        // find the pane's `ZmxClient`, and send `.kill`. ZmxClient.kill
-        // polls for the daemon control socket to vanish with a bounded
-        // 2 s timeout.
-        if let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) {
-          await surface.zmxClient.kill()
-          return
-        }
-        // Cold path: the pane was reattachable from a prior launch but
-        // its surface was never materialized this session, so there is
-        // no live `ZmxClient`. Without a fallback, `pane.close` would
-        // remove the hierarchy + catalog rows while the daemon kept
-        // running with no tracked handle. Use the catalog's recorded
-        // socket to terminate it directly via the same one-shot `.kill`
-        // the reaper uses, then unlink the socket file. The handler
-        // removes the catalog row immediately after this returns.
-        guard
-          let socketPath = sessionCoordinator?.catalog
-            .sessions[paneID.raw.uuidString]?.socketPath
-        else { return }
-        SessionReaper.sendOneShotKill(socketPath: socketPath)
-        _ = socketPath.withCString { unlink($0) }
+      daemonKiller: { paneID in
+        // Killing a pane's daemon is an out-of-band control `.kill`,
+        // addressable by PaneID alone, so it works whether or not a surface
+        // is live this session (the live byte stream runs through the
+        // in-surface `zmx attach` client, not a held handle). The daemon
+        // removes its own socket on shutdown, so no manual unlink is needed.
+        ZmxControlClient.kill(for: paneID)
       },
       runtimeProbe: { [weak terminalEngine] paneID in
-        // Same surface-registry walk as `daemonKiller`, but returns the
-        // `ZmxClient` directly so `pane.info` / `pane.read` can probe
-        // the daemon for serialized state. `ZmxClient` conforms to
-        // `PaneRuntimeProbe` so the handler stays test-injectable.
-        terminalEngine?.ghosttyRuntime?.surface(for: paneID)?.zmxClient
+        // `pane.info` / `pane.read` probe the daemon out-of-band via its
+        // control socket. Gate on a live surface so we don't hand back a
+        // probe for a pane whose daemon isn't running this session.
+        guard terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil else {
+          return nil
+        }
+        return ZmxControlProbe(paneID: paneID)
       },
       sessionCoordinator: sessionCoordinator
     )

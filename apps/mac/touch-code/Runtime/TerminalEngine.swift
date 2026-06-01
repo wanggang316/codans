@@ -163,6 +163,7 @@ final class TerminalEngine {
     }
   }
 
+  // swiftlint:disable async_without_await
   /// Create a libghostty surface for the given Pane. Idempotent: if a
   /// surface is already registered for the pane, returns the existing one.
   /// Wires the surface's `onClose` to emit the lifecycle event + dispose
@@ -171,14 +172,17 @@ final class TerminalEngine {
   /// callers must add the Pane to a Tab via `HierarchyManager.openPane`
   /// (or `splitPane`) before calling this.
   ///
-  /// `async throws` because pane bring-up first spawns a `zmx serve`
-  /// daemon and then handshakes its control socket; both steps await.
+  /// Stays `async throws` to satisfy the `HierarchyRuntime` protocol (whose
+  /// other conformers await) and because every caller already `await`s it;
+  /// the exec-backend bringup is synchronous now — libghostty forks the
+  /// `zmx attach` child, so there is no daemon round-trip to await here.
   @discardableResult
   func ensureSurface(
     for pane: Pane,
     in worktree: Worktree,
     env: [String: String] = [:]
   ) async throws -> PaneSurface {
+    // swiftlint:enable async_without_await
     guard let runtime = ghosttyRuntime else { throw SurfaceError.runtimeUnavailable }
     if let existing = runtime.surface(for: pane.id) {
       return existing
@@ -187,38 +191,25 @@ final class TerminalEngine {
       throw SurfaceError.paneHasNoTab
     }
 
-    // Three possible bringup paths, picked by the launch-time reaper:
-    //   1. `.alive` → reattach to a daemon the previous process left
-    //      running (live tier, M2.T2.2). The catalog row was pre-vetted
-    //      via `connect(2)` so we trust the recorded socket.
-    //   2. `.snapshot` → spawn a fresh daemon with `--restore-from`
-    //      pointed at the captured `.snap` (snapshot tier, M3.T3.3).
-    //      The VT mirror pre-fills with the saved buffer before the
-    //      shell starts; the snapshot file is consumed on success.
-    //   3. Neither → standard spawn of a brand-new daemon.
-    // Either way the socketpair must exist before `ghostty_surface_new`,
-    // because libghostty's External backend latches onto
-    // `external_pty_fd` synchronously inside that call.
-    let zmxClient: ZmxClient
-    if let session = pendingReattach.removeValue(forKey: pane.id) {
-      zmxClient = try await PaneDaemonBringup.reattach(
-        paneID: pane.id,
-        session: session
-      )
-    } else if let snapshotURL = pendingRestore.removeValue(forKey: pane.id) {
-      zmxClient = try await PaneDaemonBringup.restore(
-        paneID: pane.id,
-        workingDirectory: pane.workingDirectory,
-        snapshotURL: snapshotURL,
-        env: env
-      )
-    } else {
-      zmxClient = try await PaneDaemonBringup.spawnDaemonAndConnect(
-        paneID: pane.id,
-        workingDirectory: pane.workingDirectory,
-        env: env
-      )
-    }
+    // Exec-backend bringup: libghostty forks `zmx attach <session>` and owns
+    // the local PTY plus its sizing (it spawns the child only once a real
+    // post-layout size is known, so the shell never renders at a placeholder
+    // width). zmx `attach` upserts — it reattaches to a surviving daemon
+    // (resume) or creates a fresh one — so cold start and relaunch are the
+    // same invocation; there is no spawn/reattach/restore branching here.
+    // `ZMX_DIR` is pinned, and its directory pre-created (zmx's own mkdir is
+    // non-recursive), so the daemon socket lands where `ZmxControlClient`
+    // looks for it.
+    let session = ZmxAttachCommand.session(for: pane.id)
+    let command = ZmxAttachCommand.build(
+      zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
+      session: session,
+      userCommand: nil
+    )
+    let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
+    try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
+    var surfaceEnv = env
+    surfaceEnv["ZMX_DIR"] = zmxDir.path
 
     // HAN-82: `ghostty_surface_new` is observed to fail transiently
     // — the user reported ~10 consecutive failures followed by a clean
@@ -230,35 +221,32 @@ final class TerminalEngine {
     let surface: PaneSurface
     do {
       surface = try PaneSurface(
-        runtime: runtime,
-        paneID: pane.id,
-        zmxClient: zmxClient
+        runtime: runtime, paneID: pane.id, session: session,
+        command: command, workingDirectory: pane.workingDirectory, env: surfaceEnv
       )
     } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
       runtime.tick()
       surface = try PaneSurface(
-        runtime: runtime,
-        paneID: pane.id,
-        zmxClient: zmxClient
+        runtime: runtime, paneID: pane.id, session: session,
+        command: command, workingDirectory: pane.workingDirectory, env: surfaceEnv
       )
     }
     runtime.register(pane: surface)
-    // Continuous catalog write-through: record the live daemon row so a
-    // crash between launches still surfaces this pane to the next launch's
-    // reaper. Recording AFTER `register` keeps the catalog in step with
-    // observable runtime state — if surface bringup throws above, no row
-    // is written and the orphan daemon is left for the FS-orphan reaper.
+    // Continuous catalog write-through: record the live session so a crash
+    // between launches still surfaces this pane to the next launch's reaper.
+    // The socket path is derivable from the pane id + canonical ZMX_DIR; the
+    // daemon PID is learned lazily via the control `.info` probe.
     if let coordinator = sessionCoordinator {
       coordinator.recordLive(
         Session(
           paneID: pane.id,
-          socketPath: zmxClient.socketPath,
-          pid: zmxClient.daemonPID,
-          createdAt: zmxClient.createdAt,
+          socketPath: ZmxControlClient.socketPath(for: pane.id),
+          pid: 0,
+          createdAt: Date(),
           lastAttachedAt: Date(),
-          command: zmxClient.command,
-          cwd: zmxClient.cwd,
-          zmxVersion: zmxClient.zmxVersion
+          command: [],
+          cwd: pane.workingDirectory,
+          zmxVersion: ""
         )
       )
     }
