@@ -91,6 +91,20 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// flow through the same `PaneActionRouterFeature` that handles libghostty
   /// keybinding-driven splits.
   var onPaneAction: ((PaneActionRequest) -> Void)?
+  /// Returns whether this pane is the one that should hold keyboard focus
+  /// per the app's focus model (the tab's last-focused pane). Wired by
+  /// TerminalEngine. Consulted on re-attachment so the view reclaims
+  /// firstResponder after a SwiftUI split/zoom rebuild drops it — AppKit
+  /// does not auto-promote a re-attached view, and the one-shot
+  /// `focusSurfaceView` path can't cover a rebuild that lands after it ran.
+  var shouldClaimFocus: (() -> Bool)?
+  /// Whether this view has ever been in a window. Distinguishes the initial
+  /// mount (focus handled explicitly elsewhere) from a re-attach.
+  private var hasBeenInWindow = false
+  /// Outstanding next-tick focus reclaim. `nonisolated(unsafe)` so the
+  /// nonisolated deinit can cancel it; only ever touched on the main actor
+  /// otherwise.
+  nonisolated(unsafe) private var pendingFocusClaim: Task<Void, Never>?
 
   init(paneID: PaneID) {
     self.paneID = paneID
@@ -118,7 +132,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   // PaneSurface (2bbee60) and SurfaceInfo. AppKit handles the actual
   // teardown via NSView's dealloc; observers we add are removed when
   // the view leaves its window.
-  deinit {}
+  deinit { pendingFocusClaim?.cancel() }
 
   // MARK: - Drag & drop
 
@@ -316,10 +330,48 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
-    pushGeometry()
-    installTrackingArea()
+    if window == nil {
+      // SwiftUI temporarily detaches a pane while rebuilding the split/zoom
+      // layout. AppKit can clear firstResponder on that path WITHOUT firing
+      // `resignFirstResponder`, leaving libghostty's focus bit (and its
+      // blinking cursor) stuck `true` on a view that can no longer receive
+      // keys — the "cursor shows but typing does nothing" symptom. Clear the
+      // focus bit on detach so a detached pane neither shows a cursor nor
+      // looks focused.
+      pendingFocusClaim?.cancel()
+      pendingFocusClaim = nil
+      if let surface { ghostty_surface_set_focus(surface, false) }
+    } else {
+      pushGeometry()
+      installTrackingArea()
+    }
     rebindWindowOcclusionObserver()
     recomputeOcclusion()
+    // Re-attached after a split/zoom rebuild: AppKit doesn't auto-promote a
+    // re-attached view to firstResponder. If this pane is the one that should
+    // be focused, reclaim it on the next runloop tick (an immediate claim is
+    // unreliable while SwiftUI is mid-mount and `window` may still flip). The
+    // first mount is skipped — initial focus runs through `focusSurfaceView`.
+    if window != nil {
+      if hasBeenInWindow, shouldClaimFocus?() == true {
+        let attachedWindow = window
+        pendingFocusClaim?.cancel()
+        pendingFocusClaim = Task { @MainActor [weak self] in
+          guard let self, !Task.isCancelled,
+            let window = self.window, window === attachedWindow,
+            self.shouldClaimFocus?() == true
+          else { return }
+          let responder = window.firstResponder
+          guard responder !== self else { return }
+          // Only reclaim from no owner or a sibling terminal — never steal
+          // from a text field (inline rename, palette) being typed into.
+          if responder == nil || responder is GhosttySurfaceView {
+            _ = window.makeFirstResponder(self)
+          }
+        }
+      }
+      hasBeenInWindow = true
+    }
   }
 
   override func viewDidHide() {
