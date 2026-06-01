@@ -124,6 +124,63 @@ struct HierarchyManagerTests {
     #expect(fakeRuntime.ensureSurfaceCalls[0].paneID == newPaneID)
   }
 
+  /// Regression guard for the worktree-create double-seed race
+  /// (`fix/resume-bug`). The create-worktree flow seeds its first pane via
+  /// `createPaneRow` from a *synchronous* reducer body so the Pane row is
+  /// observable before the `.selectionChanged` it triggers reaches
+  /// `RootFeature`. If the row only landed after an `await` (as the
+  /// all-in-one async `openPane` does), `autoSeedTabAndPaneIfNeeded` would
+  /// read an empty tab and race in a second pane — the two concurrent
+  /// `zmx serve` spawns then collide and one fails with `zmxServeFailed`.
+  /// So `createPaneRow` must (a) insert the pane synchronously and (b) NOT
+  /// bring the surface up.
+  @Test
+  func createPaneRowInsertsPaneSynchronouslyWithoutSurface() throws {
+    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main"
+    )
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+
+    let paneID = try manager.createPaneRow(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/repo", initialCommand: "echo setup"
+    )
+
+    // Row is observable immediately — no `await`, so an auto-seed snapshot
+    // taken right after this point sees a non-empty tab.
+    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
+    #expect(tab.panes.count == 1)
+    #expect(tab.panes[0].id == paneID)
+    #expect(tab.panes[0].initialCommand == "echo setup")
+    #expect(tab.splitTree.leaves() == [paneID])
+    // The async half (`ensurePaneSurface`) has not run, so no daemon spawn.
+    #expect(fakeRuntime.ensureSurfaceCalls.isEmpty)
+  }
+
+  /// `openPane` stays the all-in-one path: synchronous `createPaneRow`
+  /// followed by the async surface bringup. Exactly one pane, one surface —
+  /// the two-phase split must not double-spawn.
+  @Test
+  func openPaneSeedsRowAndSurfaceExactlyOnce() async throws {
+    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main"
+    )
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+
+    let paneID = try await manager.openPane(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/repo", initialCommand: nil
+    )
+
+    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
+    #expect(tab.panes.count == 1)
+    #expect(tab.panes[0].id == paneID)
+    #expect(fakeRuntime.ensureSurfaceCalls.count == 1)
+    #expect(fakeRuntime.ensureSurfaceCalls[0].paneID == paneID)
+  }
+
   @Test
   func closePaneRemovesFromSplitTree() throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
