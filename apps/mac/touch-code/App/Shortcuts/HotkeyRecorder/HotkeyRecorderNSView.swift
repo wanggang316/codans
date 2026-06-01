@@ -62,7 +62,8 @@ final class HotkeyRecorderNSView: NSView {
   }
 
   deinit {
-    teardownMonitor()
+    // NSView is deallocated on the main thread; teardownMonitor is MainActor.
+    MainActor.assumeIsolated { teardownMonitor() }
   }
 
   // MARK: - Recording control

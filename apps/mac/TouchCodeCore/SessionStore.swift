@@ -200,7 +200,7 @@ public final class SessionStore {
       try? await Task.sleep(nanoseconds: 500_000_000)
       guard !Task.isCancelled else { return }
       guard let self else { return }
-      await self.runPendingSave()
+      self.runPendingSave()
     }
   }
 

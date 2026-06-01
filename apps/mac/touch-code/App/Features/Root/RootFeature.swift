@@ -967,7 +967,7 @@ struct RootFeature {
       case .sidebar(.delegate(.revealExistingProject(let projectID))):
         // Add Project picker hit a duplicate folder — jump the user to
         // the already-registered row.
-        try? hierarchyClient.selectProject(projectID)
+        hierarchyClient.selectProject(projectID)
         return .none
 
       case .sidebar(.delegate(.openTagManager)):
@@ -1208,7 +1208,7 @@ struct RootFeature {
         guard let address = hierarchyClient.addressOf(paneID) else {
           return .none
         }
-        try? hierarchyClient.selectProject(address.projectID)
+        hierarchyClient.selectProject(address.projectID)
         guard
           hierarchyClient.snapshot()
             .projects.first(where: { $0.id == address.projectID })?
@@ -1507,7 +1507,7 @@ struct RootFeature {
         guard hierarchyClient.snapshot().projects.contains(where: { $0.id == source.projectID }) else {
           return .none
         }
-        try? hierarchyClient.selectProject(source.projectID)
+        hierarchyClient.selectProject(source.projectID)
 
         guard
           let project = hierarchyClient.snapshot()

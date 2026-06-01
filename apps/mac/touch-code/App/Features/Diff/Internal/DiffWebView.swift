@@ -56,7 +56,8 @@ struct DiffWebView: NSViewRepresentable {
       queue: .main
     ) { [weak coord = context.coordinator] note in
       guard let path = note.userInfo?["path"] as? String else { return }
-      coord?.scrollToFile(path: path)
+      // Posted on `.main` (see `queue:` above), so this hop is always safe.
+      MainActor.assumeIsolated { coord?.scrollToFile(path: path) }
     }
 
     if let url = Self.indexURL() {

@@ -359,14 +359,14 @@ struct HierarchySidebarFeature {
     // MARK: Row taps
 
     case .projectRowTapped(let projectID):
-      try? hierarchyClient.selectProject(projectID)
+      hierarchyClient.selectProject(projectID)
       return .none
 
     case .worktreeRowTapped(let worktreeID, let projectID):
       // Switching worktrees across Projects must also flip the active
       // Project — otherwise selection keeps reading the previous Project's
       // `selectedWorktreeID` and the detail column never refreshes.
-      try? hierarchyClient.selectProject(projectID)
+      hierarchyClient.selectProject(projectID)
       try? hierarchyClient.selectWorktree(worktreeID, projectID)
       return .none
 
@@ -406,9 +406,9 @@ struct HierarchySidebarFeature {
 
     case .addProjectGitRootResolved(let canonical, let gitRoot):
       let name = (canonical as NSString).lastPathComponent
-      guard !name.isEmpty,
-        let projectID = try? hierarchyClient.addProject(name, canonical, gitRoot)
-      else { return .none }
+      guard !name.isEmpty else { return .none }
+      // addProject is non-throwing and returns a non-optional ProjectID.
+      let projectID = hierarchyClient.addProject(name, canonical, gitRoot)
       return .send(.delegate(.reconcileProjectRequested(projectID)))
 
     // MARK: Tag filter chip footer (M4)
@@ -462,7 +462,7 @@ struct HierarchySidebarFeature {
     // MARK: Project hover chrome
 
     case .reorderProjects(let source, let destination):
-      try? hierarchyClient.reorderProjects(source, destination)
+      hierarchyClient.reorderProjects(source, destination)
       return .none
 
     case .reorderWorktrees(let projectID, let segment, let source, let destination):

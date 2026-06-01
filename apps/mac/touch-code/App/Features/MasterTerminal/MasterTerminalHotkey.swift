@@ -26,7 +26,7 @@ final class MasterTerminalHotkey {
   init(onTrigger: @escaping @MainActor () -> Void) {
     self.callbackBox = CallbackBox(callback: onTrigger)
 
-    var hotKeyID = EventHotKeyID(
+    let hotKeyID = EventHotKeyID(
       signature: Self.hotKeySignature,
       id: Self.hotKeyIdentifier
     )
