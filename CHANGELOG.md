@@ -20,6 +20,20 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.1] - 2026-06-01
+
+### Fixed
+
+- **A freshly split pane accepts input again.** Splitting a pane could leave the
+  new pane showing a blinking cursor while silently dropping every keystroke;
+  it now takes focus and is ready to type into immediately.
+- **Panes open at their final width.** Opening or revisiting a pane — or switching
+  to a worktree that wasn't loaded yet — no longer flashes at the wrong column
+  width and reflows a moment later; the shell renders at the right size from the
+  first frame.
+- **Creating a worktree opens exactly one pane.** Worktree creation could spin up
+  a second, broken pane; it now reliably opens a single working pane.
+
 ## [0.4.0] - 2026-06-01
 
 ### Added
