@@ -70,7 +70,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
-  func archiveTearsDownSurfaces() throws {
+  func archiveTearsDownSurfaces() async throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
@@ -80,7 +80,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     let tabID = try manager.createTab(
       in: worktreeID, in: projectID, name: nil
     )
-    let paneID = try manager.openPane(
+    let paneID = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/repo/feat", initialCommand: nil
     )
@@ -507,7 +507,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
-  func reconcileTearsDownPanesOnAutoArchive() throws {
+  func reconcileTearsDownPanesOnAutoArchive() async throws {
     // Stale-archive must release pty surfaces — same contract as the
     // user-invoked archive path. Without this, libghostty would hold
     // a working dir that no longer exists and fail on the next read.
@@ -523,7 +523,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     let tabID = try manager.createTab(
       in: staleID, in: projectID, name: nil
     )
-    let paneID = try manager.openPane(
+    let paneID = try await manager.openPane(
       in: tabID, in: staleID, in: projectID,
       workingDirectory: "/repo/stale", initialCommand: nil
     )
@@ -567,7 +567,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   // MARK: - runningPaneCount
 
   @Test
-  func runningPaneCountReflectsRuntime() throws {
+  func runningPaneCountReflectsRuntime() async throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
@@ -577,11 +577,11 @@ struct HierarchyManagerWorktreeMgmtTests {
     let tabID = try manager.createTab(
       in: worktreeID, in: projectID, name: nil
     )
-    let paneA = try manager.openPane(
+    let paneA = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/repo/feat", initialCommand: nil
     )
-    let paneB = try manager.splitPane(
+    let paneB = try await manager.splitPane(
       paneA, direction: .right,
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/repo/feat", initialCommand: nil

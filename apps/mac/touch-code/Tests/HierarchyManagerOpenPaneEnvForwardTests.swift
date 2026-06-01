@@ -46,11 +46,11 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   }
 
   @Test
-  func openPaneForwardsEnvToRuntime() throws {
+  func openPaneForwardsEnvToRuntime() async throws {
     let (manager, runtime) = makeManager()
     let (projectID, worktreeID, tabID) = try setupTab(manager)
 
-    _ = try manager.openPane(
+    _ = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/tmp",
       initialCommand: nil,
@@ -62,11 +62,11 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   }
 
   @Test
-  func openPaneDefaultEnvIsBuiltinsOnly() throws {
+  func openPaneDefaultEnvIsBuiltinsOnly() async throws {
     let (manager, runtime) = makeManager()
     let (projectID, worktreeID, tabID) = try setupTab(manager)
 
-    _ = try manager.openPane(
+    _ = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/tmp",
       initialCommand: nil
@@ -78,16 +78,16 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   }
 
   @Test
-  func splitPaneForwardsEnvToRuntime() throws {
+  func splitPaneForwardsEnvToRuntime() async throws {
     let (manager, runtime) = makeManager()
     let (projectID, worktreeID, tabID) = try setupTab(manager)
-    let firstPaneID = try manager.openPane(
+    let firstPaneID = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/tmp",
       initialCommand: nil
     )
 
-    _ = try manager.splitPane(
+    _ = try await manager.splitPane(
       firstPaneID,
       direction: .right,
       in: tabID, in: worktreeID, in: projectID,
@@ -103,11 +103,11 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   }
 
   @Test
-  func openPaneEmptyEnvStillCarriesBuiltins() throws {
+  func openPaneEmptyEnvStillCarriesBuiltins() async throws {
     let (manager, runtime) = makeManager()
     let (projectID, worktreeID, tabID) = try setupTab(manager)
 
-    _ = try manager.openPane(
+    _ = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/tmp",
       initialCommand: nil,
@@ -121,11 +121,11 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   /// `envVars` entry of the same name cannot shadow the real path — the
   /// runtime mirror of the Environment editor's read-only rows.
   @Test
-  func builtinPathVarsWinOverUserEnvOfSameName() throws {
+  func builtinPathVarsWinOverUserEnvOfSameName() async throws {
     let (manager, runtime) = makeManager()
     let (projectID, worktreeID, tabID) = try setupTab(manager)
 
-    _ = try manager.openPane(
+    _ = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/tmp",
       initialCommand: nil,
