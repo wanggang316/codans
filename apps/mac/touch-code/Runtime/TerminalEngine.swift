@@ -63,23 +63,6 @@ final class TerminalEngine {
   /// invisible to the next launch's reaper.
   var sessionCoordinator: SessionCoordinator?
 
-  /// Daemons that the launch-time `SessionReaper` confirmed are still
-  /// reachable. Consumed at most once per paneID: the first
-  /// `ensureSurface` call for an alive entry diverts to
-  /// `PaneDaemonBringup.reattach` and the entry is removed so any later
-  /// recreate (e.g. crash-retry) takes the standard spawn path with a
-  /// fresh daemon.
-  private var pendingReattach: [PaneID: Session] = [:]
-
-  /// Snapshot files left by the previous quit's snapshot tier (M3.T3.2).
-  /// Consumed at most once per paneID: the first `ensureSurface` call
-  /// for a snapshot entry diverts to `PaneDaemonBringup.restore`, which
-  /// spawns a fresh daemon with `--restore-from` so the VT mirror
-  /// pre-fills with the saved bytes before the shell starts. The
-  /// `.snap` file is deleted on a successful restore — a later
-  /// recreate falls through to a vanilla spawn.
-  private var pendingRestore: [PaneID: URL] = [:]
-
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
   private var crashRings: [PaneID: [Date]] = [:]
@@ -129,38 +112,6 @@ final class TerminalEngine {
   enum SurfaceError: Error, Sendable {
     case runtimeUnavailable
     case paneHasNoTab
-  }
-
-  /// Drop the queues seeded by `seedReattachableSessions` and any
-  /// pending `.snap` restore so a subsequent `ensureSurface` takes the
-  /// fresh-spawn path. Used by the Settings → "Forget all sessions"
-  /// action: after the recorded daemons are killed and their sockets
-  /// unlinked, leaving the queues populated would have us try to
-  /// `connect(2)` to those vanished sockets the next time the surface
-  /// is built.
-  func dropPendingResumeState() {
-    pendingReattach.removeAll(keepingCapacity: false)
-    pendingRestore.removeAll(keepingCapacity: false)
-  }
-
-  /// Seed the engine with the live-daemon catalog produced by
-  /// `SessionReaper.sweep()` at launch. Each entry is consumed by the
-  /// next `ensureSurface` call for its paneID; subsequent calls for the
-  /// same pane fall through to the spawn path. Called once before any
-  /// HierarchyManager-driven pane bring-up.
-  func seedReattachableSessions(_ states: [PaneID: SessionState]) {
-    for (paneID, state) in states {
-      switch state {
-      case .alive(let session):
-        pendingReattach[paneID] = session
-      case .snapshot(let url):
-        pendingRestore[paneID] = url
-      case .dead:
-        // No live daemon and no snapshot — let `ensureSurface` take the
-        // standard spawn path.
-        continue
-      }
-    }
   }
 
   // swiftlint:disable async_without_await

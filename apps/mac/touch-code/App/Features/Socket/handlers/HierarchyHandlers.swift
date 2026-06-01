@@ -3,17 +3,16 @@ import TouchCodeCore
 import TouchCodeIPC
 import os
 
-/// Narrow read-only view onto a pane's live zmx daemon. Implemented in
-/// production by an adapter over `ZmxClient`; tests inject a fake so
-/// they exercise the handler's encoding/error paths without spinning
-/// up a real daemon socket.
+/// Narrow read-only view onto a pane's zmx daemon. Implemented in
+/// production by `ZmxControlProbe` (transient control-socket queries via
+/// `ZmxControlClient`); tests inject a fake so they exercise the handler's
+/// encoding/error paths without spinning up a real daemon socket.
 @MainActor
 public protocol PaneRuntimeProbe: AnyObject, Sendable {
-  /// Resolves with the daemon's next `.info` response. Wraps
-  /// `ZmxClient.requestInfo()`.
+  /// Resolves with the daemon's next `.info` response (shell PID + cwd).
   func requestInfo() async throws -> ZmxInfoPayload
   /// Resolves with the raw bytes of the daemon's `.history` response in
-  /// the requested format. Wraps `ZmxClient.readHistory(format:)`.
+  /// the requested format.
   func readHistory(format: ZmxHistoryFormat) async throws -> Data
 }
 

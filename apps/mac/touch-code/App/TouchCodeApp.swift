@@ -1016,9 +1016,10 @@ final class AppState {
       // Pass the current hierarchy's pane ids so the reaper can kill any
       // alive daemon whose paneID no longer maps to a surface — without
       // this, an out-of-sync sessions.json vs hierarchy.json would leak
-      // daemons until the 7-day stale window catches them.
-      let states = try reaper.sweep(livePaneIDs: livePaneIDs)
-      engine.seedReattachableSessions(states)
+      // daemons until the 7-day stale window catches them. The returned
+      // reattach states are no longer consumed: bringup re-attaches every
+      // pane via `zmx attach`, so there is no per-pane reattach queue to seed.
+      _ = try reaper.sweep(livePaneIDs: livePaneIDs)
     } catch {
       // A corrupt catalog or transient I/O error must not block app
       // launch — the worst outcome is a fresh shell per pane, which is
@@ -1048,10 +1049,6 @@ final class AppState {
   /// drives both steps in one atomic-from-the-UI's-perspective call.
   func forgetAllPersistedSessions() {
     guard let coordinator = sessionCoordinator else { return }
-    // Drop in-engine reattach / restore queues too — without this, a
-    // pane that was about to reattach via the seeded `pendingReattach`
-    // entry would still try to connect to a socket we just unlinked.
-    terminalEngine?.dropPendingResumeState()
     do {
       try coordinator.forgetAllSessions { socketPath in
         SessionReaper.sendOneShotKill(socketPath: socketPath)
