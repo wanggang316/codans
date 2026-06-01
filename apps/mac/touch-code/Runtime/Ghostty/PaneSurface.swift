@@ -25,32 +25,25 @@ final class PaneSurface {
   let info: SurfaceInfo = SurfaceInfo()
   private(set) var state: State = .initialising
   let view: GhosttySurfaceView
-  /// Owns the zmx daemon client that proxies PTY bytes between
-  /// libghostty's External backend and the resume-friendly daemon
-  /// process. The surface itself does not fork a shell; the daemon
-  /// owns the real PTY child.
-  let zmxClient: ZmxClient
-  /// First-resize bookkeeping. The daemon needs the terminal cell
-  /// dimensions to allocate its PTY child, and that handshake is the
-  /// `attach(cols:rows:)` frame — distinct from steady-state resizes.
-  /// libghostty publishes the dimensions through
-  /// `GHOSTTY_ACTION_EXTERNAL_PTY_RESIZE` once the surface has measured
-  /// its window; the first such delivery drives `attach`, every later
-  /// one drives `resize`.
-  private var hasAttached: Bool = false
-  /// Most recent grid size libghostty reported via `external_pty_resize`.
-  /// `attach` is deferred onto a `Task`, so a later layout pass can report
-  /// the real window size before `attach` has even sent `.init`; we reconcile
-  /// the daemon to this latest value once `attach` resolves so it never stays
-  /// pinned to an intermediate (often narrow) first-layout size.
-  private var latestCols: UInt16 = 0
-  private var latestRows: UInt16 = 0
-  /// Daemon's shell child PID, learned from `.info` after attach. The External
-  /// backend can't report the PTY child PID via libghostty (the symbol is
-  /// stubbed on this branch), so `childProcessID()` hands this to
-  /// `ForegroundJobReader`, which resolves the live foreground process group
-  /// from the shell's `e_tpgid`. 0 until known.
+  /// zmx session name this surface's shell runs under. libghostty's exec
+  /// backend runs `zmx attach <session>` as the surface command, so the
+  /// real shell lives in a resume-friendly daemon while libghostty owns
+  /// and sizes a normal local PTY. Used to address the daemon's control
+  /// socket for out-of-band queries (`.info` shell PID) and teardown
+  /// (`.kill`).
+  let session: String
+  /// Daemon's shell child PID, learned from a `.info` control query once
+  /// the daemon is up. libghostty's child is the `zmx attach` client, not
+  /// the shell, so `childProcessID()` hands this daemon-side PID to
+  /// `ForegroundJobReader`, which resolves the live foreground process
+  /// group from the shell's `e_tpgid`. 0 until the probe lands.
   private var daemonShellPID: Int32 = 0
+  /// Retrying probe that fills `daemonShellPID`. The daemon socket appears
+  /// shortly after libghostty forks the `zmx attach` child, so the probe
+  /// backs off and retries until the daemon answers or the budget runs out.
+  /// `nonisolated(unsafe)` matches the surrounding C-handle storage so the
+  /// leak-prevention deinit can cancel it without re-entering the MainActor.
+  nonisolated(unsafe) private var shellPIDProbeTask: Task<Void, Never>?
   // The C-handle / unsafe-pointer storage below is read from a nonisolated
   // deinit; their non-Sendable types would otherwise reject that access.
   // `nonisolated(unsafe)` is sound here because the deinit only fires once
@@ -99,7 +92,10 @@ final class PaneSurface {
   init(
     runtime: GhosttyRuntime,
     paneID: PaneID,
-    zmxClient: ZmxClient,
+    session: String,
+    command: String,
+    workingDirectory: String,
+    env: [String: String],
     fontSize: Float32 = 13.0
   ) throws {
     guard let app = runtime.app else {
@@ -107,13 +103,9 @@ final class PaneSurface {
         reason: "libghostty app not initialized; surface request for pane \(paneID)"
       )
     }
-    precondition(
-      zmxClient.paneID == paneID,
-      "PaneSurface paneID \(paneID) does not match ZmxClient paneID \(zmxClient.paneID)"
-    )
     self.runtime = runtime
     self.paneID = paneID
-    self.zmxClient = zmxClient
+    self.session = session
     self.view = GhosttySurfaceView(paneID: paneID)
 
     // Allocate 16 bytes to hold the PaneID's uuid bytes as surface userdata.
@@ -134,27 +126,56 @@ final class PaneSurface {
     )
     config.scale_factor = view.backingScaleFactor()
     config.font_size = fontSize
-    // External-PTY mode: the daemon (via ZmxClient) owns the real child
-    // process and proxies bytes through a socketpair. libghostty reads
-    // from / writes to `external_pty_fd` instead of forking its own shell.
-    // `command`, `working_directory`, and `env_vars` are deliberately left
-    // unset — they are honored by libghostty's internal exec backend, not
-    // by the External backend.
-    config.external_pty_fd = zmxClient.externalBackendFD
     config.context = GHOSTTY_SURFACE_CONTEXT_SPLIT
     // Per-surface userdata: opaque pointer to the 16 uuid-bytes of the
     // owning PaneID. The close_surface_cb copies these bytes into a local
     // UUID so the callback survives the C→main-queue hop even if the
     // PaneSurface object is freed in-between.
     config.userdata = UnsafeMutableRawPointer(paneIDUserdata)
+    // Exec backend: libghostty forks `command` (a `zmx attach <session>`
+    // invocation) and owns the local PTY plus its sizing — it spawns the
+    // child only once a real post-layout size is known, so the shell never
+    // renders at a placeholder width. The attached shell itself lives in
+    // the resume-friendly daemon. `external_pty_fd < 0` keeps the External
+    // backend off. ghostty injects TERM/COLORTERM for the exec child, so
+    // only project env + ZMX_DIR need threading through `env`.
+    config.external_pty_fd = -1
+    let commandC = command.withCString { strdup($0)! }
+    let cwdC = workingDirectory.withCString { strdup($0)! }
+    defer {
+      free(commandC)
+      free(cwdC)
+    }
+    config.command = UnsafePointer(commandC)
+    config.working_directory = UnsafePointer(cwdC)
+    // ghostty copies env vars into its own arena during `ghostty_surface_new`,
+    // so the strdup'd C strings only need to outlive that call.
+    var envVars = env.map { key, value in
+      ghostty_env_var_s(
+        key: key.withCString { strdup($0)! },
+        value: value.withCString { strdup($0)! }
+      )
+    }
+    defer {
+      for envVar in envVars {
+        free(UnsafeMutableRawPointer(mutating: envVar.key))
+        free(UnsafeMutableRawPointer(mutating: envVar.value))
+      }
+    }
 
-    guard let surface = ghostty_surface_new(app, &config) else {
+    let created: ghostty_surface_t? = envVars.withUnsafeMutableBufferPointer { buffer in
+      if let base = buffer.baseAddress, !buffer.isEmpty {
+        config.env_vars = base
+        config.env_var_count = buffer.count
+      }
+      return ghostty_surface_new(app, &config)
+    }
+    guard let surface = created else {
       // HAN-82: surface the diagnostic context libghostty doesn't return
       // through its nil-pointer protocol. `retryable: true` tags it as a
       // transient failure so the caller knows it can back off and retry.
       throw GhosttyError.surfaceInitFailed(
-        reason:
-          "ghostty_surface_new returned nil for pane \(paneID) (externalPtyFD=\(zmxClient.externalBackendFD))",
+        reason: "ghostty_surface_new returned nil for pane \(paneID) (session=\(session))",
         retryable: true
       )
     }
@@ -166,6 +187,7 @@ final class PaneSurface {
     // wins first-responder will flip it back to true via becomeFirstResponder.
     ghostty_surface_set_focus(surface, false)
     self.state = .ready
+    startShellPIDProbe()
   }
 
   // Nonisolated deinit on a MainActor class: chained `isolated deinit`s
@@ -179,42 +201,30 @@ final class PaneSurface {
   // this is a leak-prevention safety net.
   deinit {
     progressResetTask?.cancel()
+    shellPIDProbeTask?.cancel()
     if let surface {
       ghostty_surface_free(surface)
     }
     paneIDUserdata.deallocate()
   }
 
-  /// Route a libghostty External-PTY resize event to the daemon. On the
-  /// very first call the (cols, rows) drive `ZmxClient.attach`, which
-  /// sends `.init` to the daemon so it can fork its PTY child;
-  /// subsequent calls drive `ZmxClient.resize`. `attach` is async — the
-  /// daemon round-trips an `.output` frame before resolving — so this
-  /// method spawns a Task and returns immediately so the libghostty
-  /// action callback doesn't block its calling thread.
-  func handleExternalPtyResize(cols: UInt16, rows: UInt16) {
-    latestCols = cols
-    latestRows = rows
-    if hasAttached {
-      zmxClient.resize(cols: cols, rows: rows)
-      return
-    }
-    hasAttached = true
-    Task { [weak self] in
-      guard let self else { return }
-      try? await self.zmxClient.attach(cols: cols, rows: rows)
-      // Reconcile to the latest grid after the `.init` handshake (and, on
-      // reattach, the daemon's serialized replay). A real-width layout pass
-      // can land while `attach` is suspended on the daemon round-trip; its
-      // `.resize` then races ahead of the deferred `.init`, which would
-      // otherwise leave the daemon's PTY stuck at the first-reported size.
-      // Re-sending the most recent size here makes the final width win.
-      self.zmxClient.resize(cols: self.latestCols, rows: self.latestRows)
-      // Learn the daemon's shell PID so foreground/agent detection works (see
-      // `daemonShellPID` / `childProcessID()`). The PID is static for the
-      // session; one probe after attach is enough.
-      if let info = try? await self.zmxClient.requestInfo() {
-        self.daemonShellPID = info.pid
+  /// Probe the daemon's shell-child PID and cache it in `daemonShellPID`.
+  /// libghostty's exec backend forks the `zmx attach` client asynchronously,
+  /// so the daemon's control socket may not exist for a beat after `init`;
+  /// retry with a short backoff until the daemon answers `.info` or the
+  /// budget runs out. `childProcessID()` returns nil until this lands, which
+  /// the foreground-job poller already tolerates. The PID is static for the
+  /// session's lifetime, so the probe stops on first success.
+  private func startShellPIDProbe() {
+    let paneID = self.paneID
+    shellPIDProbeTask = Task { [weak self] in
+      for _ in 0..<40 {  // ~10s budget at 250ms steps
+        if Task.isCancelled { return }
+        if let info = try? await ZmxControlClient.info(for: paneID), info.pid > 0 {
+          self?.daemonShellPID = info.pid
+          return
+        }
+        try? await Task.sleep(for: .milliseconds(250))
       }
     }
   }
@@ -248,11 +258,15 @@ final class PaneSurface {
   private func teardown(killDaemon: Bool) {
     progressResetTask?.cancel()
     progressResetTask = nil
+    shellPIDProbeTask?.cancel()
+    shellPIDProbeTask = nil
     guard let surface else { return }
+    // Freeing the surface terminates libghostty's `zmx attach` child, which
+    // the daemon reads as a client detach and keeps its PTY child alive
+    // (the resume path). When the pane is being destroyed for good, also
+    // tell the daemon to exit so its shell doesn't outlive the pane.
     if killDaemon {
-      zmxClient.requestKill()
-    } else {
-      zmxClient.close()
+      ZmxControlClient.kill(for: paneID)
     }
     ghostty_surface_free(surface)
     self.surface = nil

@@ -114,15 +114,24 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
       defer { self?.surfaceBringupInFlight = false }
       guard let self else { return }
       do {
-        let client = try await PaneDaemonBringup.spawnDaemonAndConnect(
-          paneID: paneID,
-          workingDirectory: MasterTerminalBootstrap.userDirectory.path,
-          env: [:]
+        // Exec backend: libghostty forks `zmx attach <session>` and owns the
+        // local PTY + sizing; the shell lives in the daemon. Same path as a
+        // regular pane (see TerminalEngine.ensureSurface).
+        let session = ZmxAttachCommand.session(for: paneID)
+        let command = ZmxAttachCommand.build(
+          zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
+          session: session,
+          userCommand: nil
         )
+        let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
+        try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
         let surface = try PaneSurface(
           runtime: self.runtime,
           paneID: paneID,
-          zmxClient: client
+          session: session,
+          command: command,
+          workingDirectory: MasterTerminalBootstrap.userDirectory.path,
+          env: ["ZMX_DIR": zmxDir.path]
         )
         self.installSurface(surface)
       } catch {

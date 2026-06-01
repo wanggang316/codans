@@ -794,13 +794,21 @@ struct HierarchySidebarFeature {
         settingsWriter
         .readSnapshotSync()
         .projects[pid]?.git?.createScript?.command
-      if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil) {
-        let cwd = pathString
-        let command = createCommand
+      // Seed the first pane in two phases. The catalog row (`createPaneRow`)
+      // is inserted SYNCHRONOUSLY here so it is observable before the
+      // `.selectionChanged` that `selectWorktree` above just triggered is
+      // processed. Otherwise `RootFeature.autoSeedTabAndPaneIfNeeded` reads
+      // the still-empty tab and races in a second, redundant pane — and the
+      // two concurrent `zmx serve` spawns collide, the loser surfacing
+      // `zmxServeFailed`. The async zmx-daemon + surface bringup follows in
+      // the effect. The create script rides along as the pane's initialCommand.
+      if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil),
+        let paneID = try? hierarchyClient.createPaneRow(
+          tabID, worktreeID, pid, pathString, createCommand
+        )
+      {
         return .run { [client = hierarchyClient] _ in
-          _ = try? await client.openPane(
-            tabID, worktreeID, pid, cwd, command
-          )
+          try? await client.ensurePaneSurface(paneID, tabID, worktreeID, pid)
         }
       }
       return .none

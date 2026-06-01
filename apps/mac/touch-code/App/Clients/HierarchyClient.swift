@@ -191,6 +191,25 @@ nonisolated struct HierarchyClient: Sendable {
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
       _ workingDirectory: String, _ initialCommand: String?
     ) async throws -> PaneID
+  /// Synchronous catalog half of `openPane`: inserts the Pane row into the
+  /// Tab (split tree + pane array) and persists, without the async zmx
+  /// surface bringup. Callers seeding a pane from a synchronous reducer body
+  /// use this so the Pane is observable before the next `.selectionChanged`
+  /// fires — closing the `RootFeature.autoSeedTabAndPaneIfNeeded` double-seed
+  /// race. Pair with `ensurePaneSurface` to bring the surface up afterwards.
+  var createPaneRow:
+    @MainActor @Sendable (
+      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
+      _ workingDirectory: String, _ initialCommand: String?
+    ) throws -> PaneID
+  /// Async surface-bringup half of `openPane`: spawns the zmx daemon and
+  /// attaches the libghostty surface for an already-inserted Pane row.
+  /// Idempotent — a no-op when the surface already exists.
+  var ensurePaneSurface:
+    @MainActor @Sendable (
+      _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
+      _ inProject: ProjectID
+    ) async throws -> Void
   var closePane:
     @MainActor @Sendable (
       _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
@@ -631,6 +650,22 @@ extension HierarchyClient {
           paneID, direction: direction,
           in: tabID, in: worktreeID, in: projectID,
           workingDirectory: cwd, initialCommand: initial, env: env
+        )
+      },
+      createPaneRow: { tabID, worktreeID, projectID, cwd, initial in
+        try manager.createPaneRow(
+          in: tabID, in: worktreeID, in: projectID,
+          workingDirectory: cwd, initialCommand: initial
+        )
+      },
+      ensurePaneSurface: { [weak settings] paneID, tabID, worktreeID, projectID in
+        // Mirror openPane's M8 env resolution — this is the surface-bringup
+        // half, so Project-defined envVars must still reach the spawned shell.
+        let env: [String: String] =
+          settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
+          ?? [:]
+        try await manager.ensurePaneSurface(
+          paneID, in: tabID, in: worktreeID, in: projectID, env: env
         )
       },
       closePane: { paneID, tabID, worktreeID, projectID in
@@ -1357,6 +1392,8 @@ extension HierarchyClient: DependencyKey {
     setPaneCommandBusy: { _, _ in },
     openPane: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     splitPane: { _, _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    createPaneRow: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    ensurePaneSurface: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closePane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     focusPane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     focusSurfaceView: { _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1444,6 +1481,8 @@ extension HierarchyClient: DependencyKey {
     setPaneCommandBusy: unimplemented("HierarchyClient.setPaneCommandBusy"),
     openPane: unimplemented("HierarchyClient.openPane", placeholder: PaneID()),
     splitPane: unimplemented("HierarchyClient.splitPane", placeholder: PaneID()),
+    createPaneRow: unimplemented("HierarchyClient.createPaneRow", placeholder: PaneID()),
+    ensurePaneSurface: unimplemented("HierarchyClient.ensurePaneSurface"),
     closePane: unimplemented("HierarchyClient.closePane"),
     focusPane: unimplemented("HierarchyClient.focusPane"),
     // Pure visual side-effect (focuses an NSView; no return value, no test

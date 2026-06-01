@@ -1544,6 +1544,44 @@ final class HierarchyManager {
     initialCommand: String?,
     env: [String: String] = [:]
   ) async throws -> PaneID {
+    // Two-phase: the synchronous catalog mutation (`createPaneRow`) lands the
+    // Pane row first, then the async zmx-daemon + libghostty bringup follows
+    // via `ensurePaneSurface`. Splitting the phases lets callers that mutate
+    // the catalog from a synchronous reducer body reserve the row before any
+    // `.selectionChanged` is processed — see `createPaneRow`'s note.
+    let paneID = try createPaneRow(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: workingDirectory, initialCommand: initialCommand
+    )
+    try await ensurePaneSurface(
+      paneID, in: tabID, in: worktreeID, in: projectID, env: env
+    )
+    return paneID
+  }
+
+  /// Synchronous catalog half of `openPane`: allocates a `PaneID`, inserts it
+  /// into the Tab's split tree (a fresh leaf when the tree is empty, else a
+  /// right-split of the first leaf) and pane array, validates invariants, and
+  /// persists — WITHOUT the async zmx-daemon + libghostty surface bringup that
+  /// `ensurePaneSurface` performs.
+  ///
+  /// Split out so a caller mutating the catalog from a *synchronous* reducer
+  /// body can guarantee the Pane row is observable before the next
+  /// `.selectionChanged` is processed. `RootFeature.autoSeedTabAndPaneIfNeeded`
+  /// gates on `tab.panes.isEmpty`; once the create-worktree flow began seeding
+  /// its first pane through the now-async `openPane`, that gate was read against
+  /// a catalog snapshot taken while bringup was still in flight, so auto-seed
+  /// fired a second, redundant pane — and the two concurrent `zmx serve` spawns
+  /// raced, the loser surfacing `zmxServeFailed`. Reserving the row
+  /// synchronously closes that window.
+  @discardableResult
+  func createPaneRow(
+    in tabID: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID,
+    workingDirectory: String,
+    initialCommand: String?
+  ) throws -> PaneID {
     guard
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
         worktreeID: worktreeID,
@@ -1579,13 +1617,6 @@ final class HierarchyManager {
     catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
 
     try tab.validateInvariants()
-
-    let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    try await runtime.ensureSurface(
-      for: pane, in: worktree,
-      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
-    )
 
     store.scheduleSave(catalog)
     return paneID

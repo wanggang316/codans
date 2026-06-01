@@ -40,6 +40,32 @@ module GhosttyKit {
 }
 EOF
   done
+  dedupe_xcframework_headers
+}
+
+# Xcode's `builtin-process-xcframework` rejects an xcframework whose Headers
+# tree carries two files with the same basename: it builds a flat basename map,
+# loses the collided entry, and then fails with `The file "X" doesn't exist`.
+# The vt headers ship both `key/{event,encoder}.h` and `mouse/{event,encoder}.h`,
+# so the mouse-side pair collides. Rename the mouse-side files to unique
+# basenames and rewrite the (path-qualified) `#include`s that reference them.
+# Symbol names are untouched — only header file paths change — so consumers
+# that import the GhosttyKit module are unaffected. Idempotent: the `-f` guards
+# skip a slice that was already deduplicated.
+dedupe_xcframework_headers() {
+  local vt hdr
+  find "${xcframework_path}" -type d -path '*/Headers/ghostty/vt' -print0 |
+    while IFS= read -r -d '' vt; do
+      [ -f "${vt}/mouse/event.h" ] && mv "${vt}/mouse/event.h" "${vt}/mouse/mouse_event.h"
+      [ -f "${vt}/mouse/encoder.h" ] && mv "${vt}/mouse/encoder.h" "${vt}/mouse/mouse_encoder.h"
+      for hdr in "${vt}/mouse.h" "${vt}/mouse/mouse_encoder.h"; do
+        [ -f "${hdr}" ] || continue
+        sed -i '' \
+          -e 's#ghostty/vt/mouse/event.h#ghostty/vt/mouse/mouse_event.h#g' \
+          -e 's#ghostty/vt/mouse/encoder.h#ghostty/vt/mouse/mouse_encoder.h#g' \
+          "${hdr}"
+      done
+    done
 }
 
 ensure_ghostty_checkout() {

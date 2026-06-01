@@ -151,7 +151,7 @@ struct SettingsGeneralView: View {
 
       Section {
         Picker("Confirm before quitting", selection: quitConfirmationBinding) {
-          Text("Auto (only when panes are running)").tag(QuitConfirmation.auto)
+          Text("Auto").tag(QuitConfirmation.auto)
           Text("Always").tag(QuitConfirmation.always)
           Text("Never").tag(QuitConfirmation.never)
         }

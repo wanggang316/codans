@@ -2,23 +2,22 @@ import Foundation
 import TouchCodeCore
 import os.log
 
-/// Quit-time bridge between the live pane runtime and the on-disk
-/// `sessions.json` catalog. T2.1 wires this to `NSApplication.willTerminate`
-/// so that, immediately before AppKit tears the process down, every active
-/// `ZmxClient` is captured into a `SessionCatalog` entry and then issued a
-/// `.detach`. The detach closes only the client side of the control socket —
-/// the zmx daemon survives, keeping its PTY child alive so the next launch
-/// (T2.2) can reattach by socket path.
+/// Quit-time bridge between the live pane runtime and the per-Pane zmx
+/// daemons. Each Pane's shell lives in a daemon that the in-surface
+/// `zmx attach` client connects to; when the app exits, those clients die
+/// and the daemon reads the disconnect as a detach, keeping its PTY child
+/// alive so the next launch can re-`attach` and resume the running shell.
 ///
-/// Catalog write happens BEFORE any detach: if the app dies mid-shutdown
-/// between the two steps, the on-disk record still points at the surviving
-/// daemons, which is the worst the next launch needs to recover.
+/// `detachAllForQuit(action:)` therefore has real work only when resume is
+/// disabled: it kills each live daemon so nothing is left to reattach to.
+/// When resume is enabled the daemons are simply left running — the app
+/// exiting is enough. `sessions.json` is written empty either way: daemon
+/// liveness is recovered by re-attaching from the persisted Pane list on the
+/// next launch, not from a socket catalog.
 ///
-/// `detachAllForQuit(action:)` takes a `TouchCodeCore.QuitAction` — the canonical
-/// declaration lives in `TouchCodeCore` so the UI and the runtime share one definition.
-/// `TouchCodeApp` decides which action to pass (from `settings.general.quitAction` or
-/// the user's dialog choice) so the lifecycle component stays a pure mechanism.
-
+/// `detachAllForQuit(action:)` takes a `TouchCodeCore.QuitAction`; `TouchCodeApp`
+/// decides which action to pass (from `settings.general.quitAction` or the
+/// user's dialog choice) so this component stays a pure mechanism.
 @MainActor
 final class SessionLifecycle {
   private let manager: HierarchyManager
@@ -26,9 +25,9 @@ final class SessionLifecycle {
   private let coordinator: SessionCoordinator
   private let now: () -> Date
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.lifecycle")
-  /// Optional agent-state source for quit-time snapshot. Set by AppState
-  /// once the registry is built. Nil branch keeps tests and headless
-  /// callers from needing to wire either of the two new dependencies.
+  /// Optional agent-state source for the quit-time catalog write. Set by
+  /// AppState once the registry is built. Nil keeps tests and headless
+  /// callers from needing to wire it.
   var agentSnapshotProvider: (@MainActor () -> [PersistedAgentRecord])?
 
   init(
@@ -43,172 +42,45 @@ final class SessionLifecycle {
     self.now = now
   }
 
-  /// Number of live `ZmxClient`s currently held by the runtime's surface registry.
-  /// `TouchCodeApp.applicationShouldTerminate` reads this to decide whether to surface the
-  /// quit confirmation dialog at all — zero panes means there is nothing to ask about.
+  /// Number of live pane surfaces. `TouchCodeApp.applicationShouldTerminate`
+  /// reads this to decide whether to surface the quit confirmation dialog at
+  /// all — zero panes means there is nothing to ask about.
   var liveZmxClientCount: Int {
-    collectLiveClients().count
+    ghosttyRuntime?.allLiveSurfaces().count ?? 0
   }
 
-  /// Capture every live `ZmxClient`'s daemon metadata into a fresh
-  /// `SessionCatalog`, flush it to disk synchronously, then send the requested action on
-  /// each client. `action == .keepRunning` sends `.detach` so the daemons survive the
-  /// parent process exit; `action == .snapshot` triggers a serialised `.snap` write and
-  /// daemon exit.
+  /// Write the quit-time `sessions.json` and, when resume is disabled, kill
+  /// every live daemon.
   ///
-  /// Order is load-bearing in the live-tier branch: persist BEFORE detach. A crash between
-  /// steps still leaves the next launch with enough information to find the surviving
-  /// daemons; a crash before persist leaves nothing, which is no worse than today's
-  /// behaviour.
+  /// - `.keepRunning`: leave the daemons running. The app exiting drops each
+  ///   `zmx attach` client; the daemon detaches and keeps its PTY child, so
+  ///   the next launch re-attaches to the same session and resumes.
+  /// - `.snapshot`: resume is disabled. Kill each live daemon so the next
+  ///   launch starts every pane fresh. (The name predates the move to a
+  ///   live-only resume model; it now means "do not keep daemons running".)
   func detachAllForQuit(action: QuitAction) {
-    let liveClients = collectLiveClients()
-    if liveClients.isEmpty {
-      // Nothing to record — but we still write an empty catalog so the
-      // next launch sees a deterministic file (rather than stale entries
-      // from a prior run with surviving daemons that have since died).
-      persist(catalog: SessionCatalog(version: SessionCatalog.currentVersion, sessions: [:]))
-      return
-    }
+    let surfaces = ghosttyRuntime?.allLiveSurfaces() ?? []
 
-    switch action {
-    case .keepRunning:
-      detachLiveTier(liveClients)
-    case .snapshot:
-      snapshotTier(liveClients)
-    }
-  }
-
-  /// Live tier (M2.T2.1): persist each daemon's catalog row, then send
-  /// `.Detach` so the daemons survive the app's exit. The next launch
-  /// re-`connect(2)`s the recorded sockets in `SessionReaper.sweep`.
-  ///
-  /// Agent state (if a provider is wired) is captured into the same
-  /// catalog write so the next launch can seed `AgentStateStore` from
-  /// liveness-checked rows — only agent processes that survived the
-  /// quit count, ones we restart fresh otherwise.
-  private func detachLiveTier(_ liveClients: [ZmxClient]) {
-    let stamp = now()
-    var sessions: [String: Session] = [:]
-    sessions.reserveCapacity(liveClients.count)
-    for client in liveClients {
-      let key = client.paneID.raw.uuidString
-      sessions[key] = Session(
-        paneID: client.paneID,
-        socketPath: client.socketPath,
-        pid: client.daemonPID,
-        createdAt: client.createdAt,
-        lastAttachedAt: stamp,
-        command: client.command,
-        cwd: client.cwd,
-        zmxVersion: client.zmxVersion
-      )
-    }
+    // Persist agent records so the next launch can liveness-seed
+    // `AgentStateStore`; the session map is written empty because resume
+    // re-attaches from the Pane list rather than a socket catalog.
     var agents: [String: PersistedAgentRecord] = [:]
     if let provider = agentSnapshotProvider {
       for record in provider() {
         agents[record.paneID.raw.uuidString] = record
       }
     }
-    persist(catalog: SessionCatalog(
-      version: SessionCatalog.currentVersion,
-      sessions: sessions,
-      agents: agents
-    ))
+    persist(
+      catalog: SessionCatalog(
+        version: SessionCatalog.currentVersion,
+        sessions: [:],
+        agents: agents
+      ))
 
-    for client in liveClients {
-      client.detach()
+    guard case .snapshot = action else { return }
+    for surface in surfaces {
+      ZmxControlClient.kill(for: surface.paneID)
     }
-  }
-
-  /// Snapshot tier (M3.T3.2): send `.Snapshot` to each daemon, which
-  /// serializes its VT mirror to `<paneID>.snap` and exits. The catalog
-  /// is written empty so a previous live-tier quit's rows do not trick
-  /// the reaper into probing dead sockets — the only state worth
-  /// resurrecting on the next launch lives in the `.snap` files.
-  ///
-  /// All `.Snapshot` round-trips are dispatched in parallel and share
-  /// one wall-clock deadline so a single hung daemon cannot serialise
-  /// the rest. Without parallelism N panes × 5 s/pane could stall quit
-  /// for 5N seconds; with it, total wait is bounded by the slowest
-  /// straggler (capped at the shared budget). Stragglers are logged
-  /// and skipped — losing one pane's snapshot is preferable to
-  /// blocking termination.
-  private func snapshotTier(_ liveClients: [ZmxClient]) {
-    parallelSnapshot(liveClients)
-    // Reset the catalog so a prior live-tier write does not survive into
-    // the next launch's `SessionReaper.sweep` — the daemons it would
-    // reference are now gone. Snapshot-tier resume keys off the `.snap`
-    // files instead.
-    persist(catalog: SessionCatalog(version: SessionCatalog.currentVersion, sessions: [:]))
-  }
-
-  /// Fan out `client.snapshot()` across every live client, then spin
-  /// the runloop until every slot is populated or the shared deadline
-  /// elapses. `willTerminate` runs on the main actor and
-  /// `ZmxClient.snapshot()` is itself MainActor-isolated, so we cannot
-  /// block on a semaphore — that would deadlock the actor before the
-  /// daemon's `EOF` callback can hop back onto it. Spinning
-  /// `RunLoop.main` keeps the MainActor servicing background hops
-  /// (the read-loop EOF handoff, the continuation resume) so each
-  /// snapshot can actually finish.
-  private func parallelSnapshot(_ liveClients: [ZmxClient]) {
-    guard !liveClients.isEmpty else { return }
-    let results = liveClients.map { _ in SnapshotResult() }
-    for (client, slot) in zip(liveClients, results) {
-      Task { @MainActor in
-        do {
-          let url = try await client.snapshot()
-          slot.value = .success(url)
-        } catch {
-          slot.value = .failure(error)
-        }
-      }
-    }
-    let deadline = Date().addingTimeInterval(Self.snapshotTimeoutSeconds)
-    while results.contains(where: { $0.value == nil }) && Date() < deadline {
-      // Service one batch of pending events on the main runloop. Capped
-      // at 50 ms so a stalled snapshot is still bounded by the outer
-      // deadline rather than parking inside Foundation indefinitely.
-      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
-    }
-    for (client, slot) in zip(liveClients, results) {
-      switch slot.value {
-      case .success:
-        continue
-      case .failure(let error):
-        logger.error(
-          "snapshot failed for pane \(client.paneID, privacy: .public): \(String(describing: error), privacy: .public)"
-        )
-      case .none:
-        logger.error(
-          "snapshot timed out for pane \(client.paneID, privacy: .public) (shared \(Self.snapshotTimeoutSeconds)s budget exhausted)"
-        )
-      }
-    }
-  }
-
-  /// Shared wall-clock budget for the fan-out `.Snapshot` round-trip.
-  /// Applies to the whole batch — stragglers past this point are
-  /// logged and skipped so the rest of the snapshots still land.
-  private static let snapshotTimeoutSeconds: TimeInterval = 5.0
-
-  /// Reference-shaped one-shot holder so the Task callback can publish
-  /// its outcome to the runloop-spinning waiter without crossing actor
-  /// isolation on a captured `var`. MainActor-confined writes + reads.
-  @MainActor
-  private final class SnapshotResult {
-    var value: Result<URL, Error>?
-  }
-
-  /// Enumerate every `ZmxClient` whose `PaneSurface` is registered with the
-  /// runtime right now. The runtime's surface registry is the only source of
-  /// truth for "a daemon is actually attached" — the hierarchy catalog lists
-  /// panes whose surfaces have not been built yet (tab activation is lazy),
-  /// and walking the catalog at quit time silently dropped those panes,
-  /// leaving `sessions.json` empty after most cmd-Q invocations.
-  private func collectLiveClients() -> [ZmxClient] {
-    guard let runtime = ghosttyRuntime else { return [] }
-    return runtime.allLiveSurfaces().map { $0.zmxClient }
   }
 
   private func persist(catalog: SessionCatalog) {

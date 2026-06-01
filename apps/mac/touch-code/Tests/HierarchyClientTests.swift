@@ -231,14 +231,14 @@ struct HierarchyClientTests {
   /// Helper: opens a pane in a fresh tab on a fresh worktree and returns the
   /// (projectID, paneID) pair used by the label tests below.
   @MainActor
-  private func makePane() throws -> (HierarchyClient, HierarchyManager, PaneID) {
+  private func makePane() async throws -> (HierarchyClient, HierarchyManager, PaneID) {
     let (client, manager) = makeLiveClient()
     let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "w", path: "/repo/w", branch: "w"
     )
     let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try manager.openPane(
+    let paneID = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/repo/w", initialCommand: nil
     )
@@ -260,8 +260,8 @@ struct HierarchyClientTests {
   }
 
   @Test
-  func setPaneLabelInsertsWhenPresent() throws {
-    let (client, manager, paneID) = try makePane()
+  func setPaneLabelInsertsWhenPresent() async throws {
+    let (client, manager, paneID) = try await makePane()
     #expect(labels(of: paneID, in: manager).contains("notifications:muted") == false)
 
     client.setPaneLabel(paneID, "notifications:muted", true)
@@ -269,8 +269,8 @@ struct HierarchyClientTests {
   }
 
   @Test
-  func setPaneLabelRemovesWhenAbsent() throws {
-    let (client, manager, paneID) = try makePane()
+  func setPaneLabelRemovesWhenAbsent() async throws {
+    let (client, manager, paneID) = try await makePane()
     client.setPaneLabel(paneID, "notifications:muted", true)
     #expect(labels(of: paneID, in: manager).contains("notifications:muted"))
 
@@ -280,8 +280,8 @@ struct HierarchyClientTests {
 
   /// Set semantics: a second insert is idempotent — the label appears once.
   @Test
-  func setPaneLabelIdempotentOnDoubleInsert() throws {
-    let (client, manager, paneID) = try makePane()
+  func setPaneLabelIdempotentOnDoubleInsert() async throws {
+    let (client, manager, paneID) = try await makePane()
     client.setPaneLabel(paneID, "notifications:muted", true)
     client.setPaneLabel(paneID, "notifications:muted", true)
     let labels = labels(of: paneID, in: manager)
@@ -291,8 +291,8 @@ struct HierarchyClientTests {
   /// Set semantics: removing twice leaves the label absent (no crash, no
   /// re-insert).
   @Test
-  func setPaneLabelIdempotentOnDoubleRemove() throws {
-    let (client, manager, paneID) = try makePane()
+  func setPaneLabelIdempotentOnDoubleRemove() async throws {
+    let (client, manager, paneID) = try await makePane()
     client.setPaneLabel(paneID, "notifications:muted", true)
     client.setPaneLabel(paneID, "notifications:muted", false)
     client.setPaneLabel(paneID, "notifications:muted", false)
@@ -312,8 +312,8 @@ struct HierarchyClientTests {
   /// debounce window in CI and the spec calls out the in-memory check as
   /// the primary signal (D-OQ3 decision).
   @Test
-  func setPaneLabelDebouncedDiskWrite() throws {
-    let (client, manager, paneID) = try makePane()
+  func setPaneLabelDebouncedDiskWrite() async throws {
+    let (client, manager, paneID) = try await makePane()
     client.setPaneLabel(paneID, "notifications:muted", true)
     client.setPaneLabel(paneID, "notifications:muted", false)
     client.setPaneLabel(paneID, "notifications:muted", true)
