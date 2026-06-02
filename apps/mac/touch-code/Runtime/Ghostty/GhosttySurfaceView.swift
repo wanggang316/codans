@@ -804,6 +804,8 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     menu.addItem(menuItem("Reset Terminal", #selector(resetTerminal(_:)), symbol: "arrow.trianglehead.2.clockwise"))
     menu.addItem(.separator())
     menu.addItem(NSMenuItem(title: "Copy Pane ID", action: #selector(copyPaneID(_:)), keyEquivalent: ""))
+    menu.addItem(.separator())
+    menu.addItem(menuItem("Close", #selector(closePane(_:)), symbol: "xmark"))
     return menu
   }
 
@@ -831,6 +833,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(paneID.description, forType: .string)
   }
+  @IBAction func closePane(_ sender: Any?) { onPaneAction?(.closePane) }
   @IBAction func splitRight(_ sender: Any?) { onPaneAction?(.newSplit(direction: .right)) }
   @IBAction func splitLeft(_ sender: Any?) { onPaneAction?(.newSplit(direction: .left)) }
   @IBAction func splitDown(_ sender: Any?) { onPaneAction?(.newSplit(direction: .down)) }

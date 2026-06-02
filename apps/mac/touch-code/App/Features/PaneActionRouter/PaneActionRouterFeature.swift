@@ -166,6 +166,38 @@ struct PaneActionRouterFeature {
         }
       }
 
+    case .closePane:
+      guard let address = hierarchyClient.addressOf(paneID) else { return .none }
+      let catalog = hierarchyClient.snapshot()
+      guard
+        let tab = findTab(
+          tabID: address.tabID, worktreeID: address.worktreeID,
+          projectID: address.projectID, in: catalog
+        )
+      else { return .none }
+      // Single-pane tab: closing the last pane should also retire the
+      // now-empty tab, mirroring the ⌘W `close_surface` path in
+      // RootFeature. A zombie tab with no panes shows a blank pane area.
+      if tab.panes.count <= 1 {
+        try? hierarchyClient.closeTab(
+          address.tabID, address.worktreeID, address.projectID
+        )
+        return .none
+      }
+      // Multi-pane tab: resolve the survivor BEFORE mutating the tree so
+      // the leaf identity is still valid, drop the pane, then promote the
+      // survivor's surface to first responder so input follows the close.
+      let focusTarget = tab.splitTree.focusTargetAfterClosing(paneID)
+      try? hierarchyClient.closePane(
+        paneID, address.tabID, address.worktreeID, address.projectID
+      )
+      guard let focusTarget else { return .none }
+      return .run { [client = hierarchyClient] _ in
+        await MainActor.run {
+          client.focusSurfaceView(focusTarget)
+        }
+      }
+
     case .gotoSplit(let direction):
       return gotoSplit(from: paneID, direction: direction)
 
