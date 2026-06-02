@@ -381,15 +381,7 @@ private struct ScriptCommandRow: View {
           updated.keyboardShortcut = binding
           onUpdate(updated)
         },
-        onCancel: { shortcutPopover = false },
-        onClear: hasChord
-          ? {
-            var updated = script
-            updated.keyboardShortcut = nil
-            onUpdate(updated)
-            shortcutPopover = false
-          }
-          : nil
+        onCancel: { shortcutPopover = false }
       )
     }
     .contextMenu {
