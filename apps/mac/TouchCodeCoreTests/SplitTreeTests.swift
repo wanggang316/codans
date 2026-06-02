@@ -241,4 +241,85 @@ struct SplitTreeTests {
     let decoded = try JSONDecoder().decode(SplitTree<PaneID>.self, from: data)
     #expect(decoded == tree)
   }
+
+  // MARK: - moving
+
+  @Test
+  func movingReparentsAndPreservesLeafSet() throws {
+    // Layout: A | (B / C). Move C beside A on the left → C re-parents next to A.
+    let a = PaneID(), b = PaneID(), c = PaneID()
+    let tree = try SplitTree(leaf: a)
+      .inserting(b, at: a, direction: .right)
+      .inserting(c, at: b, direction: .down)
+
+    let moved = try tree.moving(c, relativeTo: a, direction: .left)
+
+    // Leaf *set* is invariant under a move; only the shape changes.
+    #expect(Set(moved.leaves()) == Set([a, b, c]))
+    // C now sits to the left of A, so its path leads with `.left`.
+    let pathC = try #require(moved.path(to: c))
+    #expect(pathC.components.first == .left)
+  }
+
+  @Test
+  func movingInTwoPaneTreeReSplitsInNewDirection() throws {
+    // A | B (horizontal). Move B above A → vertical split with B on top.
+    let a = PaneID(), b = PaneID()
+    let tree = try SplitTree(leaf: a).inserting(b, at: a, direction: .right)
+
+    let moved = try tree.moving(b, relativeTo: a, direction: .up)
+
+    #expect(Set(moved.leaves()) == Set([a, b]))
+    guard case .split(let split) = moved.root else {
+      Issue.record("Expected split root")
+      return
+    }
+    #expect(split.direction == .vertical)
+    // `.up` puts the moved leaf on the `left` (top) side.
+    #expect(split.left == .leaf(b))
+    #expect(split.right == .leaf(a))
+  }
+
+  @Test
+  func movingOntoSelfIsNoop() throws {
+    let a = PaneID(), b = PaneID()
+    let tree = try SplitTree(leaf: a).inserting(b, at: a, direction: .right)
+    #expect(try tree.moving(a, relativeTo: a, direction: .down) == tree)
+  }
+
+  @Test
+  func movingUnknownLeafOrAnchorThrows() throws {
+    let a = PaneID(), b = PaneID(), ghost = PaneID()
+    let tree = try SplitTree(leaf: a).inserting(b, at: a, direction: .right)
+    #expect(throws: SplitTree<PaneID>.SplitError.leafNotFound) {
+      _ = try tree.moving(ghost, relativeTo: a, direction: .right)
+    }
+    #expect(throws: SplitTree<PaneID>.SplitError.leafNotFound) {
+      _ = try tree.moving(a, relativeTo: ghost, direction: .right)
+    }
+  }
+
+  @Test
+  func movingZoomedLeafClearsZoom() throws {
+    let a = PaneID(), b = PaneID(), c = PaneID()
+    let tree = try SplitTree(leaf: a)
+      .inserting(b, at: a, direction: .right)
+      .inserting(c, at: b, direction: .down)
+      .settingZoomed(c)
+
+    let moved = try tree.moving(c, relativeTo: a, direction: .left)
+    #expect(moved.zoomed == nil)
+  }
+
+  @Test
+  func movingNonZoomedLeafKeepsZoom() throws {
+    let a = PaneID(), b = PaneID(), c = PaneID()
+    let tree = try SplitTree(leaf: a)
+      .inserting(b, at: a, direction: .right)
+      .inserting(c, at: b, direction: .down)
+      .settingZoomed(a)
+
+    let moved = try tree.moving(c, relativeTo: b, direction: .right)
+    #expect(moved.zoomed == a)
+  }
 }

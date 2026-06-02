@@ -92,6 +92,22 @@ public nonisolated struct SplitTree<Leaf: Hashable & Codable & Sendable>: Equata
     return Self(root: newRoot, zoomed: newZoomed)
   }
 
+  /// Re-positions an existing `leaf` next to `anchor`, splitting `anchor`
+  /// along `direction`. Implemented as remove-then-insert so the leaf set is
+  /// preserved — only the tree *shape* changes, which keeps a Tab's
+  /// pane-array invariant intact and avoids any surface teardown for the
+  /// moved pane (its terminal stays alive across the move).
+  ///
+  /// A move onto the leaf itself is a no-op. Because `anchor != leaf`, the
+  /// anchor always survives the `removing` step (worst case a singleton
+  /// split collapses onto it), so the subsequent `inserting` can never fail
+  /// on a missing anchor. Zoom on the moved leaf is cleared by `removing`.
+  public func moving(_ leaf: Leaf, relativeTo anchor: Leaf, direction: NewDirection) throws -> Self {
+    guard leaf != anchor else { return self }
+    guard contains(leaf), contains(anchor) else { throw SplitError.leafNotFound }
+    return try removing(leaf).inserting(leaf, at: anchor, direction: direction)
+  }
+
   public func replacing(_ old: Leaf, with new: Leaf) throws -> Self {
     guard let root else { throw SplitError.leafNotFound }
     guard let path = root.path(to: old) else { throw SplitError.leafNotFound }

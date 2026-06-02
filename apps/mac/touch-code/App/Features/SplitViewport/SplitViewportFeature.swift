@@ -44,6 +44,12 @@ struct SplitViewportFeature {
     case resizeSplitRequested(
       SplitTree<PaneID>.Path, ratio: Double,
       inTab: TabID, inWorktree: WorktreeID, inProject: ProjectID)
+    /// Emitted by `PaneDropDelegate` when a pane is dropped onto an edge of
+    /// another pane in the same Tab. Re-positions the dragged pane next to
+    /// the anchor; the moved pane's surface is preserved (no teardown).
+    case movePaneRequested(
+      PaneID, anchor: PaneID, direction: SplitTree<PaneID>.NewDirection,
+      inTab: TabID, inWorktree: WorktreeID, inProject: ProjectID)
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
@@ -122,6 +128,20 @@ struct SplitViewportFeature {
       ):
         try? hierarchyClient.resizeSplit(path, ratio, tabID, worktreeID, projectID)
         return .none
+
+      case .movePaneRequested(
+        let paneID, let anchorID, let direction,
+        let tabID, let worktreeID, let projectID
+      ):
+        try? hierarchyClient.movePane(
+          paneID, anchorID, direction, tabID, worktreeID, projectID
+        )
+        // Keep the moved pane focused after the layout settles — mirrors the
+        // post-split focus tail-call. The surface view needs the rebuilt
+        // hierarchy attached before `makeFirstResponder` takes, so hop async.
+        return .run { [client = hierarchyClient] _ in
+          await MainActor.run { client.focusSurfaceView(paneID) }
+        }
       }
     }
     .forEach(\.paneHosts, action: \.paneHosts) {
