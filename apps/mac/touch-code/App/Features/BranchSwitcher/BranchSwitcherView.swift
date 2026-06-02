@@ -10,9 +10,7 @@ import TouchCodeCore
 /// Layout: 360 pt fixed width, ~480 pt max height, a single `ScrollView`
 /// wrapping the Branches section. The reducer still tracks
 /// `recentCommits` (other surfaces consume it), but this popover no longer
-/// renders them — the inline "History" button on the Branches header opens
-/// the Diff Inspector's History tab via the same `.viewAllCommitsTapped`
-/// action the prior footer button used.
+/// renders them.
 struct BranchSwitcherView: View {
   @Bindable var store: StoreOf<BranchSwitcherFeature>
 
@@ -102,26 +100,13 @@ struct BranchSwitcherView: View {
     }
   }
 
-  /// Branches section header with an inline "History" button on the trailing
-  /// edge. Dispatches the same `.viewAllCommitsTapped` action the old footer
-  /// button used — the reducer's delegate routing (Diff Inspector visible +
-  /// History tab selected) stays unchanged; only the dispatch site moved.
+  /// Branches section header.
   private var branchesSectionHeader: some View {
     HStack {
       Text("Branches")
         .font(.caption)
         .foregroundStyle(.secondary)
       Spacer()
-      Button {
-        store.send(.viewAllCommitsTapped)
-      } label: {
-        Label("History", systemImage: "clock.arrow.circlepath")
-          .font(.caption)
-          .labelStyle(.titleAndIcon)
-      }
-      .buttonStyle(.borderless)
-      .accessibilityIdentifier("branch_switcher.history_button")
-      .help("Open History in Diff Viewer")
     }
     .padding(.horizontal, 12)
   }

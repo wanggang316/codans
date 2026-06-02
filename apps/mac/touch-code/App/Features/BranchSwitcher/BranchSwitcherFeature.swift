@@ -5,9 +5,7 @@ import os.log
 
 /// Drives the branch popover anchored at `WorktreeHeaderInfoLabel` (T9).
 /// Owns the inventory + recent-commits loads, the switch effect, and the
-/// HEAD-change reset path. Cross-feature openings (e.g. "View all" → Diff
-/// Viewer's History tab) are emitted as `Delegate` actions consumed by
-/// `RootFeature` (T10); no direct dependency on DiffFeature.
+/// HEAD-change reset path.
 ///
 /// Cancellation:
 ///   - `CancelID.inventory` / `CancelID.commits` — popover-scoped loads.
@@ -98,17 +96,11 @@ struct BranchSwitcherFeature {
     case newBranchCancelled
     case newBranchSucceeded
     case newBranchFailed(GitError)
-    case viewAllCommitsTapped
     case errorDismissed
     case inventoryLoaded(Result<BranchInventory, GitError>)
     case commitsLoaded(Result<[Commit], GitError>)
     case switchFailed(message: String)
     case headChangedForCurrentWorktree
-    case delegate(Delegate)
-
-    enum Delegate: Equatable {
-      case openDiffViewerOnHistoryTab(worktreeID: WorktreeID, projectID: ProjectID?)
-    }
   }
 
   /// `nonisolated` because TCA's `.cancellable(id:)` requires
@@ -335,15 +327,6 @@ struct BranchSwitcherFeature {
         state.switchError = .message(error.firstLine())
         return .none
 
-      case .viewAllCommitsTapped:
-        guard let worktreeID = state.worktreeID else { return .none }
-        let projectID = state.projectID
-        state.isPopoverOpen = false
-        state.searchQuery = ""
-        return .send(
-          .delegate(.openDiffViewerOnHistoryTab(worktreeID: worktreeID, projectID: projectID))
-        )
-
       case .errorDismissed:
         state.switchError = nil
         return .none
@@ -402,9 +385,6 @@ struct BranchSwitcherFeature {
         state.creatingBranchFrom = nil
         state.newBranchDraft = ""
         state.newBranchInFlight = false
-        return .none
-
-      case .delegate:
         return .none
       }
     }

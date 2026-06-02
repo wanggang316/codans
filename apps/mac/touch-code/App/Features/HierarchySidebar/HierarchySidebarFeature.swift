@@ -290,10 +290,6 @@ struct HierarchySidebarFeature {
       /// Sidebar bottom-bar refresh button. RootFeature routes this to
       /// `ProjectReconciler.reconcileAll(force: true)`.
       case refreshAllProjectsRequested
-      /// Per-row "+N −M" diff-stats chip tap (HAN-25 follow-up). RootFeature
-      /// forwards to `.openGitViewerForWorktreeRequested` which applies the
-      /// project/global default Git Viewer resolution and opens it.
-      case openGitViewerRequested(projectID: ProjectID, worktreeID: WorktreeID)
     }
   }
 

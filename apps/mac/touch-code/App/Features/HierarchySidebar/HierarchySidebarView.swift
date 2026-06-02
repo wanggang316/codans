@@ -1185,10 +1185,7 @@ struct HierarchySidebarView: View {
     {
       DiffStatsChip(
         additions: local.additions,
-        deletions: local.deletions,
-        onTap: { [worktreeID = worktree.id, projectID = project.id] in
-          store.send(.delegate(.openGitViewerRequested(projectID: projectID, worktreeID: worktreeID)))
-        }
+        deletions: local.deletions
       )
       // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
       // not trailing, so the chip's right edge stays flush when it's the row's last

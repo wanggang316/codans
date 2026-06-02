@@ -108,13 +108,6 @@ struct RootFeatureTests {
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
       $0.gitService = GitServiceClient.testValue
-      // Worktree path resolves to a live directory in this catalog, so GitViewer reaches
-      // `workingTreeDiff`. Stub it with an empty diff — the test is not about the diff.
-      $0.gitService.workingTreeDiff = { _, _ in UnifiedDiff(scope: .working, files: []) }
-      // M4: `.selectionChanged` now forwards into `.diff(.worktreeSelected(...))`,
-      // which kicks a `diffNumstat` load. Stub empty so the effect resolves without
-      // hitting `unimplemented`.
-      $0.gitService.diffNumstat = { _ in [] }
       // 0013 M4 wired a `.gitHub(.projectActivated)` dispatch on projectID transitions.
       // This test is exhaustivity=off and not about GitHub, but the fetch effect still
       // runs and touches .date + remoteInfo + batchPullRequests — stub each to no-op.
@@ -128,9 +121,7 @@ struct RootFeatureTests {
       // only the splitViewport tabID mirror.
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
-    // Non-exhaustive: this test is about the splitViewport tabID mirror only; the
-    // downstream `.gitViewer.worktreeSelected` forwarding + its diff effect are
-    // covered by `selectionChangedUpdatesStateAndForwardsToGitViewer`.
+    // Non-exhaustive: this test is about the splitViewport tabID mirror only.
     store.exhaustivity = .off
 
     let selection = HierarchySelection(projectID: projectID, worktreeID: worktreeID)
@@ -140,11 +131,7 @@ struct RootFeatureTests {
     }
   }
 
-  // `inspectorVisibilityTogglesBothWays` removed in T3; the Git Viewer is now
-  // a single app-level toggle (`RootFeature.State.diffInspectorVisible`),
-  // mirroring `sidebarVisible`. Covered below.
-
-  // MARK: - Git Viewer app-level toggle + shortcuts
+  // MARK: - Git Viewer chord (opens external client)
 
   /// Shared catalog fixture for Git Viewer tests. Two Worktrees under one
   /// Project so the selection delta is just the worktree leg.
@@ -168,11 +155,10 @@ struct RootFeatureTests {
   }
 
   @Test
-  func diffInspectorVisibleUnaffectedBySelectionChange() async {
-    // Unified state: the Git Viewer toggle is app-level, so switching the
-    // selected Worktree must NOT change `state.diffInspectorVisible`. The
-    // panel's *contents* re-target via `.diff(.worktreeSelected(...))`, but
-    // its visibility is sticky across switches.
+  func gitViewerChordOpensConfiguredExternalClient() async {
+    // With a global `defaultGitViewerID` pointing at an installed client, the
+    // ⌘⌥G chord resolves it and opens the current worktree there via
+    // `.editor(.openRequested(...))`.
     let projectID = ProjectID()
     let worktreeA = WorktreeID()
     let worktreeB = WorktreeID()
@@ -181,50 +167,47 @@ struct RootFeatureTests {
       worktreeA: worktreeA, worktreeB: worktreeB
     )
 
+    let descriptor = EditorDescriptor(
+      id: "fork",
+      displayName: "Fork",
+      bundleIdentifier: "com.DanPristupov.Fork",
+      launchMode: .directory,
+      appURL: URL(fileURLWithPath: "/Applications/Fork.app"),
+      alternateBundleIdentifiers: []
+    )
     var initial = RootFeature.State()
-    initial.diffInspectorVisible = true
+    initial.selection = HierarchySelection(
+      projectID: projectID, worktreeID: worktreeA
+    )
+    initial.editor.descriptors = [descriptor]
+
+    let settings = Settings(general: GeneralSettings(defaultGitViewerID: "fork"))
 
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.terminalClient.events = { AsyncStream { $0.finish() } }
-      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
-      $0.gitService = GitServiceClient.testValue
-      $0.gitService.workingTreeDiff = { _, _ in UnifiedDiff(scope: .working, files: []) }
-      // M4: `.selectionChanged` forwards into `.diff(.worktreeSelected(...))` which
-      // kicks `diffNumstat`; stub empty so the effect terminates cleanly.
-      $0.gitService.diffNumstat = { _ in [] }
-      // 0013 M4: selectionChanged now dispatches .gitHub(.projectActivated) when the
-      // Project changes. Stub the downstream deps so exhaustivity=off still runs.
-      $0.date = .constant(Date(timeIntervalSince1970: 0))
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      // The resolved `.editor(.openRequested)` runs EditorFeature's open
+      // effect; stub the client + clock so the downstream chain completes
+      // without hitting unimplemented dependencies.
       $0.editorClient = EditorClient.testValue
-      // The gv-fixture worktrees have no tabs, so `autoSeedTabAndPaneIfNeeded`
-      // walks createTab → openPane on each selection switch.
-      $0.hierarchyClient.createTab = { _, _, _ in TabID() }
-      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
+      $0.editorClient.open = { _, id in
+        EditorChoice(id: id ?? "finder", displayName: "x", binaryPath: nil)
+      }
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 
-    let selectionA = HierarchySelection(
-      projectID: projectID, worktreeID: worktreeA
-    )
-    await store.send(.selectionChanged(selectionA)) { $0.selection = selectionA }
-    #expect(store.state.diffInspectorVisible == true)
-
-    let selectionB = HierarchySelection(
-      projectID: projectID, worktreeID: worktreeB
-    )
-    await store.send(.selectionChanged(selectionB)) { $0.selection = selectionB }
-    #expect(store.state.diffInspectorVisible == true)
+    await store.send(.diffInspectorToggledForCurrentWorktree)
+    await store.receive(\.editor.openRequested)
+    await store.finish()
   }
 
   @Test
-  func diffInspectorToggleFlipsAppLevelState() async {
-    // Both entry points (⌘⌥G + Header button) share a single write path that
-    // flips the app-level `state.diffInspectorVisible`. No per-Worktree write.
+  func gitViewerChordIsNoOpWhenNoneSelected() async {
+    // Default Git Viewer = None (defaultGitViewerID == nil): the chord opens
+    // nothing — the built-in overlay no longer exists.
     let projectID = ProjectID()
     let worktreeA = WorktreeID()
     let worktreeB = WorktreeID()
@@ -242,23 +225,16 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      // No external git viewer configured — reducer falls through to the
-      // built-in overlay toggle path that this test covers.
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
     }
 
-    await store.send(.diffInspectorToggledForCurrentWorktree) {
-      $0.diffInspectorVisible = true
-    }
-    await store.send(.diffInspectorToggledForCurrentWorktree) {
-      $0.diffInspectorVisible = false
-    }
+    await store.send(.diffInspectorToggledForCurrentWorktree)
     await store.finish()
   }
 
   @Test
-  func diffInspectorToggleWithoutSelectionIsNoOp() async {
-    // When no Worktree is selected, the toggle must not flip visibility.
+  func gitViewerChordWithoutSelectionIsNoOp() async {
+    // When no Worktree is selected, the chord is a no-op.
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
@@ -267,7 +243,6 @@ struct RootFeatureTests {
     }
     await store.send(.diffInspectorToggledForCurrentWorktree)
     await store.finish()
-    #expect(store.state.diffInspectorVisible == false)
   }
 
   // MARK: - T2 worktreeHeader delegate routing
@@ -469,9 +444,8 @@ struct RootFeatureTests {
     // yielding the selection keeps the merged-effect action order deterministic.
     await store.receive(\.gitHub.pollTargetChanged)
 
-    // `worktreeID: nil` is the key: when GitViewerFeature receives a nil-worktree selection
-    // it resets state without spawning a diff effect, so the test stays exhaustive without
-    // any downstream action chain.
+    // `worktreeID: nil` is the key: the all-nil selection leaves State at its
+    // defaults, so the test stays exhaustive without any downstream diff chain.
     let selection = HierarchySelection(
       projectID: nil,
       worktreeID: nil
@@ -481,11 +455,6 @@ struct RootFeatureTests {
     // no-op observable change; we omit the trailing closure to satisfy the
     // strict no-change check.
     await store.receive(\.selectionChanged)
-    // M4: `.selectionChanged` now forwards into `.diff(.worktreeSelected(...))`
-    // unconditionally so DiffFeature can reset its state for the new (or absent)
-    // Worktree. With `worktreeID: nil`, DiffFeature returns `.cancel(...)` —
-    // no further actions follow.
-    await store.receive(\.diff.worktreeSelected)
     // T10: `.selectionChanged` also forwards into `.branchSwitcher(.worktreeChanged)`.
     // All-nil ids leave State at its defaults (initial state matches the
     // mutation), so the assertion is a no-change receive.
@@ -1015,31 +984,5 @@ struct RootFeatureTests {
     // by asserting no leftover effects produced a `headChangedForCurrentWorktree`.
     await store.send(.worktreeHeadChanged(worktreeB))
     await store.finish()
-  }
-
-  @Test
-  func openDiffViewerOnHistoryTabDelegateMakesInspectorVisible() async {
-    // FU-T10 fix: the `openDiffViewerOnHistoryTab` delegate handler must
-    // bypass the 3-tier Git Viewer resolution and force the in-app inspector
-    // visible by flipping the app-level `state.diffInspectorVisible` on.
-    // Users with an external Git Viewer (Tower / Fork) configured as their
-    // default would otherwise see the external app open instead — and the
-    // follow-up `.diff(.tabSelected(.history))` dispatch would be impossible.
-    let worktreeID = WorktreeID()
-    let projectID = ProjectID()
-
-    let store = TestStore(initialState: RootFeature.State()) {
-      RootFeature()
-    }
-    store.exhaustivity = .off
-
-    await store.send(
-      .branchSwitcher(
-        .delegate(
-          .openDiffViewerOnHistoryTab(worktreeID: worktreeID, projectID: projectID)
-        )))
-    await store.finish()
-
-    #expect(store.state.diffInspectorVisible == true)
   }
 }

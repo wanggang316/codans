@@ -17,12 +17,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
   /// during the v2 → v3 settings migration.
   public var defaultEditor: EditorID?
 
-  /// Per-Project override of the Git Viewer choice driving ⌘⌥G. `nil` =
-  /// inherit `GeneralSettings.defaultGitViewerID`. The enum carries the
-  /// override-to-`.builtin` case so a Project can opt back into the in-app
-  /// overlay even when the global default points at an external client.
-  public var defaultGitViewer: ProjectGitViewerPreference?
-
   /// Per-Project override of the global default worktree base directory.
   /// `nil` = inherit. No-op on `dir` Projects (kept for data-model
   /// uniformity; a future `git init` upgrade would pick it up for free).
@@ -45,14 +39,12 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
 
   public init(
     defaultEditor: EditorID? = nil,
-    defaultGitViewer: ProjectGitViewerPreference? = nil,
     worktreesDirectory: String? = nil,
     envVars: [String: String] = [:],
     scripts: [ScriptDefinition] = [],
     git: GitProjectSettings? = nil
   ) {
     self.defaultEditor = defaultEditor
-    self.defaultGitViewer = defaultGitViewer
     self.worktreesDirectory = worktreesDirectory
     self.envVars = envVars
     self.scripts = scripts
@@ -64,7 +56,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
   /// drops `projects[pid]` entries whose value answers `true` here.
   public var isEffectivelyEmpty: Bool {
     defaultEditor == nil
-      && defaultGitViewer == nil
       && worktreesDirectory == nil
       && envVars.isEmpty
       && scripts.isEmpty
@@ -105,7 +96,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case defaultEditor
-    case defaultGitViewer
     case worktreesDirectory
     case envVars
     case scripts
@@ -115,9 +105,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     self.defaultEditor = try c.decodeIfPresent(EditorID.self, forKey: .defaultEditor)
-    self.defaultGitViewer = try c.decodeIfPresent(
-      ProjectGitViewerPreference.self, forKey: .defaultGitViewer
-    )
     self.worktreesDirectory = try c.decodeIfPresent(String.self, forKey: .worktreesDirectory)
     self.envVars = try c.decodeIfPresent([String: String].self, forKey: .envVars) ?? [:]
     self.scripts = try c.decodeIfPresent([ScriptDefinition].self, forKey: .scripts) ?? []
@@ -129,7 +116,6 @@ public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encodeIfPresent(defaultEditor, forKey: .defaultEditor)
-    try c.encodeIfPresent(defaultGitViewer, forKey: .defaultGitViewer)
     try c.encodeIfPresent(worktreesDirectory, forKey: .worktreesDirectory)
     if !envVars.isEmpty {
       try c.encode(envVars, forKey: .envVars)

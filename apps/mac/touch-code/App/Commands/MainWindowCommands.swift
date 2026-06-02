@@ -17,8 +17,7 @@ import TouchCodeCore
 ///
 /// - `Open PR on GitHub` lives on `⌘⌃G` rather than `⌘⇧G` so it doesn't shadow AppKit's
 ///   default "Find Previous" chord in editable-text contexts (Settings panes, palette
-///   query, hotkey recorder, etc.). In-GitViewer keybindings (`j / k / g / G / …`) gate
-///   on `press.modifiers.isEmpty` and are never shadowed by these ⌘-modified chords.
+///   query, hotkey recorder, etc.).
 /// - `Open Project on GitHub` (HAN-58) takes `⌘⇧G`. This intentionally shadows AppKit's
 ///   "Find Previous" — touch-code's text-input surfaces (palette query, rename sheet,
 ///   hotkey recorder) don't expose Find Next/Previous, so the cost is nil and the chord

@@ -226,8 +226,7 @@ struct EditorFeature {
   ///
   /// Callers: `EditorFeature.openDefaultInCurrentWorktreeRequested`,
   /// `RootFeature.sidebar(.delegate(.openInDefaultEditor))`,
-  /// `RootFeature.worktreeHeader(.delegate(.openEditor))`,
-  /// `GitViewerFeature.editorOpenRequest`.
+  /// `RootFeature.worktreeHeader(.delegate(.openEditor))`.
   nonisolated static func resolveInstalledPreference(
     projectOverride: EditorID?,
     globalDefault: EditorID?,
@@ -304,11 +303,6 @@ nonisolated struct SettingsWriter: Sendable {
   var setDefaultEditorID: @Sendable (EditorID?) async -> Void
   /// Per-Project editor override. `nil` clears.
   var setProjectDefaultEditor: @Sendable (_ projectID: ProjectID, _ editorID: EditorID?) async -> Void
-  /// Per-Project Git Viewer override. `nil` clears (inherit
-  /// `GeneralSettings.defaultGitViewerID`); `.builtin` forces the in-app
-  /// overlay; `.external(id)` opens the named git client.
-  var setProjectDefaultGitViewer:
-    @Sendable (_ projectID: ProjectID, _ override: ProjectGitViewerPreference?) async -> Void
   /// Per-Project worktree base directory override. `nil` clears.
   var setProjectWorktreesDirectory: @Sendable (_ projectID: ProjectID, _ path: String?) async -> Void
 
@@ -348,11 +342,6 @@ extension SettingsWriter {
       setProjectDefaultEditor: { [weak store] pid, id in
         await MainActor.run {
           store?.mutateProject(pid) { $0.defaultEditor = id }
-        }
-      },
-      setProjectDefaultGitViewer: { [weak store] pid, override in
-        await MainActor.run {
-          store?.mutateProject(pid) { $0.defaultGitViewer = override }
         }
       },
       setProjectWorktreesDirectory: { [weak store] pid, path in
@@ -439,7 +428,6 @@ extension SettingsWriter: DependencyKey {
     readSnapshotSync: { fatalError("SettingsWriter.liveValue not configured") },
     setDefaultEditorID: { _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectDefaultEditor: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
-    setProjectDefaultGitViewer: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectWorktreesDirectory: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectGitField: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectEnvVar: { _, _, _ in fatalError("SettingsWriter.liveValue not configured") },
@@ -452,7 +440,6 @@ extension SettingsWriter: DependencyKey {
     readSnapshotSync: unimplemented("SettingsWriter.readSnapshotSync", placeholder: .default),
     setDefaultEditorID: unimplemented("SettingsWriter.setDefaultEditorID"),
     setProjectDefaultEditor: unimplemented("SettingsWriter.setProjectDefaultEditor"),
-    setProjectDefaultGitViewer: unimplemented("SettingsWriter.setProjectDefaultGitViewer"),
     setProjectWorktreesDirectory: unimplemented("SettingsWriter.setProjectWorktreesDirectory"),
     setProjectGitField: unimplemented("SettingsWriter.setProjectGitField"),
     setProjectEnvVar: unimplemented("SettingsWriter.setProjectEnvVar"),

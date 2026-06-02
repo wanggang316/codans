@@ -473,6 +473,14 @@ final class AppState {
   let worktreeHeadWatcher: WorktreeHeadWatcher
   private var worktreeHeadWatcherSyncTask: Task<Void, Never>?
 
+  /// FSEvents observer on each Worktree's working-tree subtree. Refreshes
+  /// the `+N −M` diff chip after in-pane / in-editor edits — changes that
+  /// move `git diff HEAD` without touching `.git/HEAD`, so the head watcher
+  /// never fires for them. Created here so its lifetime tracks the app and
+  /// the catalog-sync task lives inside `bringUp`.
+  let worktreeWorkingTreeWatcher: WorktreeWorkingTreeWatcher
+  private var worktreeWorkingTreeWatcherSyncTask: Task<Void, Never>?
+
   private var socketServer: SocketServer?
   // EditorClient is built inside bringUp() alongside the TCA dependency
   // wiring and then threaded into startIPC() so EditorHandlers and the
@@ -507,6 +515,7 @@ final class AppState {
     self.worktreeStatusMonitor = .live()
     self.worktreeLocalDiffMonitor = .live()
     self.worktreeHeadWatcher = WorktreeHeadWatcher()
+    self.worktreeWorkingTreeWatcher = WorktreeWorkingTreeWatcher()
   }
 
   /// Idempotent: subsequent calls while `store` is already set are no-ops.
@@ -643,6 +652,7 @@ final class AppState {
       // override with a scripted closure.
       $0.projectReconciler = ProjectReconciler(client: hierarchy)
       $0.worktreeHeadWatcher = self.worktreeHeadWatcher
+      $0.worktreeWorkingTreeWatcher = self.worktreeWorkingTreeWatcher
       $0.worktreeLocalDiffMonitor = self.worktreeLocalDiffMonitor
       // Built-in TCA dependencies (`\.date`, `\.continuousClock`, `\.uuid`) are
       // always swapped to `unimplemented` under XCTest regardless of any
@@ -658,6 +668,7 @@ final class AppState {
     }
 
     startHeadWatcherSync()
+    startWorkingTreeWatcherSync()
 
     self.settingsWindowStore = Store(initialState: SettingsWindowFeature.State()) {
       SettingsWindowFeature()
@@ -1081,6 +1092,8 @@ final class AppState {
     didBecomeActiveObserverToken = nil
     worktreeHeadWatcherSyncTask?.cancel()
     worktreeHeadWatcher.stopAll()
+    worktreeWorkingTreeWatcherSyncTask?.cancel()
+    worktreeWorkingTreeWatcher.stopAll()
 
     settingsStore.flush()
     shortcutsStore.flush()
@@ -1256,9 +1269,10 @@ final class AppState {
   }
 
   /// `(worktreeID → path)` for every non-archived Worktree across all
-  /// Projects. Drives `WorktreeHeadWatcher.setWorktrees(_:)`; archived
-  /// rows are filtered out because they are hidden in the sidebar and
-  /// any HEAD change in their on-disk path is irrelevant until the user
+  /// Projects. Drives both `WorktreeHeadWatcher.setWorktrees(_:)` and
+  /// `WorktreeWorkingTreeWatcher.setWorktrees(_:)` (identical watched set);
+  /// archived rows are filtered out because they are hidden in the sidebar
+  /// and any on-disk change in their path is irrelevant until the user
   /// un-archives. Path is the canonical form already stored on the row.
   fileprivate static func headWatcherPairs(from catalog: Catalog) -> [WorktreeID: String] {
     var pairs: [WorktreeID: String] = [:]
@@ -1281,6 +1295,33 @@ final class AppState {
     let manager = hierarchyManager
     let watcher = worktreeHeadWatcher
     worktreeHeadWatcherSyncTask = Task { @MainActor in
+      var last: [WorktreeID: String] = [:]
+      while !Task.isCancelled {
+        let current = Self.headWatcherPairs(from: manager.catalog)
+        if current != last {
+          watcher.setWorktrees(current.map { (id: $0.key, path: $0.value) })
+          last = current
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+          withObservationTracking {
+            _ = Self.headWatcherPairs(from: manager.catalog)
+          } onChange: {
+            cont.resume()
+          }
+        }
+      }
+    }
+  }
+
+  /// Mirror task that keeps `WorktreeWorkingTreeWatcher`'s set in sync with
+  /// the catalog, reusing the same non-archived `(id → path)` projection as
+  /// the HEAD watcher. Same pre-arm-sample / re-arm pattern as
+  /// `startHeadWatcherSync` so a mutation between sync and re-arm is caught.
+  private func startWorkingTreeWatcherSync() {
+    worktreeWorkingTreeWatcherSyncTask?.cancel()
+    let manager = hierarchyManager
+    let watcher = worktreeWorkingTreeWatcher
+    worktreeWorkingTreeWatcherSyncTask = Task { @MainActor in
       var last: [WorktreeID: String] = [:]
       while !Task.isCancelled {
         let current = Self.headWatcherPairs(from: manager.catalog)
