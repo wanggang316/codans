@@ -33,6 +33,11 @@ struct HotkeyRecorderPopover: View {
   /// Called whenever the popover requests dismissal: Escape, close button, post-commit
   /// auto-dismiss, or shake-and-recover when the parent doesn't reset state externally.
   let onCancel: () -> Void
+  /// Optional "Clear" action. When non-nil, the popover shows a Clear button that removes
+  /// the existing chord — used by per-command script shortcuts, where "no shortcut" is a
+  /// valid state. The system Shortcuts page omits this: its rows always carry a schema
+  /// default and use Disable/Enable instead, so clearing has no meaning there.
+  var onClear: (() -> Void)?
 
   enum ValidationResult: Equatable {
     case ok
@@ -85,6 +90,19 @@ struct HotkeyRecorderPopover: View {
             .foregroundStyle(.red)
             .multilineTextAlignment(.center)
         }
+      }
+
+      if let onClear {
+        Divider()
+        Button {
+          dismissTask?.cancel()
+          onClear()
+        } label: {
+          Text("Clear Shortcut")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
       }
     }
     .frame(width: 240)

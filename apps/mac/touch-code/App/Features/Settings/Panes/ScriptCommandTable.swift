@@ -100,11 +100,23 @@ struct ScriptCommandTable: View {
 
   private var bottomBar: some View {
     let selectedIndex = selectedID.flatMap { id in scripts.firstIndex(where: { $0.id == id }) }
+    // The Run command is a per-Project invariant: it can be customized but
+    // never removed. Disable `−` (rather than let it silently no-op) whenever
+    // the row it would delete is the Run.
+    let deletionTargetID = selectedID ?? scripts.last?.id
+    let deletionTargetIsRun =
+      deletionTargetID.flatMap { id in scripts.first(where: { $0.id == id }) }?.kind == .run
     return HStack(spacing: 2) {
       addMenu
 
-      barButton("minus", label: "Remove selected command", disabled: scripts.isEmpty) {
-        if let target = selectedID ?? scripts.last?.id { onDelete(target) }
+      barButton(
+        "minus",
+        label: deletionTargetIsRun
+          ? "Run is the default command and can't be removed"
+          : "Remove selected command",
+        disabled: scripts.isEmpty || deletionTargetIsRun
+      ) {
+        if let deletionTargetID { onDelete(deletionTargetID) }
       }
 
       Divider()
@@ -369,7 +381,15 @@ private struct ScriptCommandRow: View {
           updated.keyboardShortcut = binding
           onUpdate(updated)
         },
-        onCancel: { shortcutPopover = false }
+        onCancel: { shortcutPopover = false },
+        onClear: hasChord
+          ? {
+            var updated = script
+            updated.keyboardShortcut = nil
+            onUpdate(updated)
+            shortcutPopover = false
+          }
+          : nil
       )
     }
     .contextMenu {

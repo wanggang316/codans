@@ -148,6 +148,11 @@ struct ProjectScriptsSettingsView: View {
   }
 
   private func deleteScript(id: UUID) {
+    // The built-in Run is a per-Project invariant: it always exists (virtual
+    // until edited, then materialized under `builtinRunID`) and can only be
+    // customized, never removed. Guard here so the invariant holds regardless
+    // of how the delete was triggered; the `−` button is also disabled for it.
+    guard id != ScriptDefinition.builtinRunID else { return }
     guard let index = scripts.firstIndex(where: { $0.id == id }) else { return }
     var updated = scripts
     updated.remove(at: index)
