@@ -54,6 +54,59 @@ struct ForegroundJobClassifierTests {
     #expect(ForegroundJobClassifier.indicatesRunningCommand(job))
   }
 
+  // MARK: - indicatesGitCommand
+
+  @Test
+  func gitAndGhAreGitCommands() {
+    #expect(ForegroundJobClassifier.indicatesGitCommand(Self.job("git")))
+    #expect(ForegroundJobClassifier.indicatesGitCommand(Self.job("gh")))
+    #expect(
+      ForegroundJobClassifier.indicatesGitCommand(
+        Self.job("/usr/bin/git", commandLine: "git push")))
+  }
+
+  @Test
+  func shellAndPlainCommandsAreNotGitCommands() {
+    #expect(!ForegroundJobClassifier.indicatesGitCommand(Self.job("zsh")))
+    #expect(!ForegroundJobClassifier.indicatesGitCommand(Self.job("-zsh")))
+    #expect(!ForegroundJobClassifier.indicatesGitCommand(Self.job("make")))
+    // VCS TUIs are long-running, not discrete prompt commands — excluded so
+    // a refresh isn't kicked on every keystroke inside them.
+    #expect(!ForegroundJobClassifier.indicatesGitCommand(Self.job("lazygit")))
+  }
+
+  @Test
+  func agentRunningGitIsNotAGitCommand() {
+    // An agent's own git subprocess is render-derived activity, not a prompt
+    // command — defer to agent state, matching `indicatesRunningCommand`.
+    let job = ForegroundJob(
+      processGroupID: 300,
+      processes: [Self.process("claude", pid: 300), Self.process("git", pid: 301)]
+    )
+    #expect(!ForegroundJobClassifier.indicatesGitCommand(job))
+  }
+
+  @Test
+  func gitPushPipelineIsAGitCommand() {
+    // `git push` spawns `git-remote-https`; the top-level `git` is still in
+    // the group, so the job is recognised.
+    let job = ForegroundJob(
+      processGroupID: 300,
+      processes: [
+        Self.process("git", pid: 300, commandLine: "git push"),
+        Self.process("git-remote-https", pid: 301),
+      ]
+    )
+    #expect(ForegroundJobClassifier.indicatesGitCommand(job))
+  }
+
+  @Test
+  func emptyJobIsNotAGitCommand() {
+    #expect(
+      !ForegroundJobClassifier.indicatesGitCommand(
+        ForegroundJob(processGroupID: 0, processes: [])))
+  }
+
   // MARK: - Helpers
 
   private static func job(_ argv0: String, commandLine: String? = nil) -> ForegroundJob {

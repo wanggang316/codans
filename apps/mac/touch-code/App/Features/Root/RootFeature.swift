@@ -24,6 +24,14 @@ struct RootFeature {
     /// observe the stream directly via child-feature subscriptions.
     var lastEvent: LastEventMarker?
 
+    /// Panes whose foreground process group is currently a `git` / `gh`
+    /// command (see `ForegroundJobClassifier.indicatesGitCommand`). A pane
+    /// leaving this set is the trailing edge of a prompt-run VCS command —
+    /// the moment we kick an immediate git + PR refresh for its Project so a
+    /// `gh pr create` / `git push` surfaces in the sidebar within seconds
+    /// instead of waiting for the 60 s liveness poll (0018 M4 follow-up).
+    var panesRunningGitCommand: Set<PaneID> = []
+
     var sidebar: HierarchySidebarFeature.State = .init()
     var detail: WorktreeDetailFeature.State = .init()
     /// T10: Branch popover / switch state. Owned at the root so the HEAD
@@ -165,6 +173,13 @@ struct RootFeature {
     /// "terminal busy" source unioned with OSC 9;4 in the sidebar / tab-chip
     /// spinner, so plain commands that never emit OSC 9;4 still light it.
     case paneCommandBusyChanged(PaneID, Bool)
+    /// Forwarded from `foregroundJobChanged` in the engine event stream.
+    /// `running` is true when the pane's foreground process group is a
+    /// `git` / `gh` command (see `ForegroundJobClassifier.indicatesGitCommand`).
+    /// The reducer tracks the running set and, on the trailing edge (a
+    /// prompt-run VCS command finishing), kicks an immediate git + PR refresh
+    /// for the pane's Project (0018 M4 follow-up).
+    case paneGitCommandActivity(PaneID, running: Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the
     /// directory the user last `cd`'d to rather than its creation-time cwd.
@@ -354,7 +369,7 @@ struct RootFeature {
     case dismissRequested
   }
 
-  nonisolated enum CancelID: Sendable {
+  nonisolated enum CancelID: Hashable, Sendable {
     case events, selectionChanges, projectReconcileFocus, worktreeHeadWatcher
     /// FSEvents working-tree observation that refreshes the `+N −M` chip
     /// after in-pane / in-editor edits (separate from the HEAD watcher).
@@ -362,6 +377,10 @@ struct RootFeature {
     /// `NSApplication.didResignActiveNotification` observation — pauses the GitHub
     /// liveness poll when the app is no longer frontmost (0018 M1).
     case appResignActive
+    /// Debounces the immediate git + PR refresh kicked when a `git` / `gh`
+    /// command finishes in a pane, per owning Project, so a burst of VCS
+    /// commands coalesces into one fetch (0018 M4 follow-up).
+    case gitCommandRefresh(ProjectID)
   }
 
   @Dependency(TerminalClient.self) private var terminalClient
@@ -475,6 +494,11 @@ struct RootFeature {
                 // Agents are excluded here; their activity is render-derived.
                 await send(.paneCommandBusyChanged(
                   paneID, ForegroundJobClassifier.indicatesRunningCommand(job)))
+                // Same source, narrower predicate: track `git` / `gh` commands
+                // so a finishing `gh pr create` / `git push` triggers an
+                // immediate PR + diff refresh (0018 M4 follow-up).
+                await send(.paneGitCommandActivity(
+                  paneID, running: ForegroundJobClassifier.indicatesGitCommand(job)))
               case .paneInfoChanged(let paneID, .pwd(let pwd)):
                 // libghostty OSC 7 → persist the live cwd so a restart
                 // restores the pane at the directory the user last `cd`'d
@@ -861,6 +885,71 @@ struct RootFeature {
         hierarchyClient.setPaneCommandBusy(paneID, isBusy)
         return .none
 
+      case .paneGitCommandActivity(let paneID, let running):
+        // Edge-triggered on the foreground `git` / `gh` set. We act ONLY on
+        // the trailing edge (a command the user ran at the prompt finishing)
+        // and ONLY for panes we previously saw running one — so an idle
+        // shell's unrelated job churn never triggers a fetch.
+        if running {
+          state.panesRunningGitCommand.insert(paneID)
+          return .none
+        }
+        guard state.panesRunningGitCommand.remove(paneID) != nil else { return .none }
+        // Resolve the pane's owning Project + Worktree from the live catalog
+        // (same walk as `worktreeHeadChanged`).
+        let catalog = hierarchyClient.snapshot()
+        let owner = catalog.projects.first { project in
+          project.worktrees.contains { worktree in
+            worktree.tabs.contains { $0.panes.contains { $0.id == paneID } }
+          }
+        }
+        guard
+          let project = owner,
+          let gitRootString = project.gitRoot,
+          let worktree = project.worktrees.first(where: { worktree in
+            worktree.tabs.contains { $0.panes.contains { $0.id == paneID } }
+          })
+        else { return .none }
+        let projectID = project.id
+        let worktreeID = worktree.id
+        let worktreePath = worktree.path
+        let gitRoot = URL(fileURLWithPath: gitRootString)
+        let pairs = project.worktrees.compactMap {
+          worktree -> GitHubFeature.Action.WorktreeBranchPair? in
+          guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty
+          else { return nil }
+          return GitHubFeature.Action.WorktreeBranchPair(
+            worktreeID: worktree.id, branch: branch
+          )
+        }
+        return .run { [projectReconciler, monitor = worktreeLocalDiffMonitor] send in
+          // `git commit` / `git push` move the working-tree diff and the
+          // ahead/behind counts but NOT `.git/HEAD`, so neither the HEAD
+          // watcher nor the working-tree watcher reliably fires for a push —
+          // drop the freshness stamp, refresh the chip, and reconcile now.
+          await MainActor.run { monitor.invalidate(worktreeID: worktreeID) }
+          await monitor.refresh(
+            worktreeID: worktreeID,
+            path: URL(fileURLWithPath: worktreePath)
+          )
+          await projectReconciler.reconcile(projectID: projectID)
+          // PR state lives server-side. Give GitHub ~1.5 s to settle the write
+          // (mirrors the 2 s post-mutation delay), then force a batched fetch.
+          // `projectRefreshRequested` bypasses the 30 s freshness gate so a
+          // just-created PR surfaces in seconds, not on the next 60 s poll tick.
+          // A burst of git commands in the same Project coalesces via the
+          // per-Project cancellable id.
+          try? await Task.sleep(for: .milliseconds(1500))
+          await send(
+            .gitHub(
+              .projectRefreshRequested(
+                projectID, gitRoot: gitRoot, worktreeBranches: pairs
+              )
+            )
+          )
+        }
+        .cancellable(id: CancelID.gitCommandRefresh(projectID), cancelInFlight: true)
+
       case .paneLivePwdChanged(let paneID, let path):
         // No reducer state mutation — the manager writes through to the
         // catalog directly and debounces the disk save via `scheduleSave`.
@@ -868,6 +957,9 @@ struct RootFeature {
         return .none
 
       case .paneLifecycleExited(let paneID):
+        // A pane that exits mid-command never emits its trailing git-edge,
+        // so drop any tracked running-state to keep the set bounded.
+        state.panesRunningGitCommand.remove(paneID)
         // Resolve the pane's address from the live catalog (the engine
         // already unregistered the surface, but the catalog still holds
         // the Pane entity here). Address can be nil if a racing teardown

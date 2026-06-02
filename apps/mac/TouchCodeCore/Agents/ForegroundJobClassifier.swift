@@ -36,4 +36,22 @@ public nonisolated enum ForegroundJobClassifier {
     if normalized.hasPrefix("-") { normalized.removeFirst() }
     return shellNames.contains(normalized)
   }
+
+  /// VCS / forge CLIs whose completion at the shell prompt should kick an
+  /// immediate git + PR status refresh. A finishing `git push` / `git commit`
+  /// moves the diff and ahead/behind counts; a finishing `gh pr create` /
+  /// `gh pr merge` changes server-side PR state — both of which the liveness
+  /// poll would otherwise surface up to a minute later.
+  public static let gitCommandNames: Set<String> = ["git", "gh"]
+
+  /// True when the foreground group is a shell-launched `git` / `gh` command.
+  /// Agent jobs are excluded for the same reason as `indicatesRunningCommand`:
+  /// an agent stays foreground for its whole session and its own git
+  /// subprocesses are render-derived, not a discrete prompt command — so this
+  /// only fires for direct human-in-pane VCS usage.
+  public static func indicatesGitCommand(_ job: ForegroundJob) -> Bool {
+    guard !job.isEmpty else { return false }
+    guard AgentKindPatterns.classify(foregroundJob: job) == nil else { return false }
+    return job.processes.contains { gitCommandNames.contains($0.processName) }
+  }
 }
