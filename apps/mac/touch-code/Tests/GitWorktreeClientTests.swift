@@ -253,6 +253,30 @@ struct GitWorktreeClientTests {
     #expect(err == .commandFailed(command: "git worktree remove", stderr: "some unrecognized error"))
   }
 
+  // MARK: - stderrIndicatesAlreadyRemoved
+
+  @Test
+  func alreadyRemovedDetectsNotAWorkingTree() {
+    // Reproduces the orphaned-node case: the catalog path no longer
+    // maps to a registered worktree, so Remove must be idempotent.
+    #expect(
+      GitWorktreeClient.stderrIndicatesAlreadyRemoved(
+        "fatal: '/Users/u/.prowl/repos/x/feat/gone' is not a working tree"
+      )
+    )
+  }
+
+  @Test
+  func alreadyRemovedRejectsRealFailures() {
+    #expect(!GitWorktreeClient.stderrIndicatesAlreadyRemoved("fatal: '/tmp/x' is locked"))
+    #expect(
+      !GitWorktreeClient.stderrIndicatesAlreadyRemoved(
+        "fatal: '/tmp/x' contains modified or untracked files, use --force to delete it"
+      )
+    )
+    #expect(!GitWorktreeClient.stderrIndicatesAlreadyRemoved("some unrecognized error"))
+  }
+
   // MARK: - parsePorcelainPaths
 
   @Test
