@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import Foundation
 
 /// User-defined script attached to a Project. Surfaced in the Scripts
@@ -74,8 +75,14 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
 
   /// The built-in Run command every Project shows by default until it defines
   /// its own Run. Surfaced by the Commands table; it materializes into
-  /// `ProjectSettings.scripts` the first time the user edits it.
-  public static let builtinRun = ScriptDefinition(id: builtinRunID, kind: .run)
+  /// `ProjectSettings.scripts` the first time the user edits it. Ships with a
+  /// ⌘R default chord — the conventional "Run" accelerator — which the
+  /// materialized copy carries over unless the user clears or rebinds it.
+  public static let builtinRun = ScriptDefinition(
+    id: builtinRunID,
+    kind: .run,
+    keyboardShortcut: ShortcutBinding(keyCode: UInt16(kVK_ANSI_R), modifiers: .command)
+  )
 
   /// User-visible label. Falls back to the kind's default when the user
   /// has not named the script.

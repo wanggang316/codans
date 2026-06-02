@@ -28,7 +28,7 @@ public enum ScriptKind: String, Codable, Sendable, CaseIterable {
   public var defaultSystemImage: String {
     switch self {
     case .run: return "play.fill"
-    case .test: return "checkmark.seal.fill"
+    case .test: return "play.diamond"
     case .deploy: return "paperplane.fill"
     case .lint: return "magnifyingglass"
     case .format: return "wand.and.stars"
