@@ -202,6 +202,21 @@ nonisolated extension GitWorktreeClient {
     )
   }
 
+  /// True when `git worktree remove` stderr signals the path is already
+  /// not a registered worktree — git's "is not a working tree" refusal.
+  /// The Remove flow treats this as success: an orphaned catalog node
+  /// whose backing directory and worktree registration are both already
+  /// gone (e.g. a stale path left by an out-of-band cleanup, or a node
+  /// cross-wired to a directory that no longer exists) has nothing left
+  /// for git to remove. Surfacing a fatal `.commandFailed` here would
+  /// wedge the node permanently — the user can never clear it because
+  /// the very command meant to clear it refuses. Removal is idempotent:
+  /// the desired end-state (no such worktree) is met, so we report
+  /// success and let the caller drop the catalog node.
+  static func stderrIndicatesAlreadyRemoved(_ stderr: String) -> Bool {
+    stderr.lowercased().contains("is not a working tree")
+  }
+
   /// Identifies the created worktree path by diffing `wt ls --json`
   /// snapshots taken immediately before and after `wt sw`. Returns
   /// the single new entry's path; falls back to matching
@@ -738,16 +753,29 @@ nonisolated extension GitWorktreeClient {
         //    the UI sees it disappear immediately and `git worktree
         //    prune` can clean the metadata without tripping over git's
         //    submodule or "modified files" refusals.
-        // 2) If relocate succeeded, run `prune --expire=now`. If prune
-        //    fails for any reason, fall back to `remove --force` against
-        //    the original path (git tolerates a missing worktree dir
-        //    when --force is set).
+        // 2) If relocate succeeded, run `prune --expire=now`. The working
+        //    directory is already gone, so removal has MATERIALLY
+        //    succeeded — any further git cleanup is best-effort and must
+        //    never throw. If prune fails we still try `remove --force` as
+        //    a cleanup pass, but swallow its outcome.
         // 3) If relocate failed (path missing, cross-volume, ENOPERM),
-        //    skip straight to `remove --force <originalPath>`.
+        //    `remove --force <originalPath>` is the REAL removal, so its
+        //    failure is fatal — except the idempotent "is not a working
+        //    tree" case, which `forceRemoveWorktree` already maps to
+        //    success.
         // 4) Schedule async rm-rf of the relocated dir so a large `.git`
         //    (submodule history) does not block the caller.
+        //
+        // The post-relocate "best-effort, never throw" rule is load-
+        // bearing: a throw here aborts the caller before it drops the
+        // catalog row, stranding an orphaned node whose backing directory
+        // no longer exists. That is exactly how an in-app Remove on a
+        // branch-switched, pinned worktree left a row that could never be
+        // deleted again (`remove --force` against the emptied path keeps
+        // failing with "is not a working tree").
         let relocated = relocateWorktreeForRemoval(path)
         if let relocated {
+          scheduleTrashCleanup(relocated)
           let pruneOutcome = await GitWorktreeShell.run(
             executable: GitWorktreeShell.gitURL,
             arguments: [
@@ -757,14 +785,15 @@ nonisolated extension GitWorktreeClient {
             cwd: repoRoot
           )
           if case .exited(let code, _, _, _) = pruneOutcome, code == 0 {
-            scheduleTrashCleanup(relocated)
             return
           }
-          // Prune failed — fall through to forced remove against the
-          // original path (now empty). Still schedule the trash cleanup
-          // so we don't leak even if forced remove also fails.
-          scheduleTrashCleanup(relocated)
+          // Prune failed — try a forced remove as cleanup, but the dir is
+          // already relocated so removal is done regardless of the result.
+          try? await forceRemoveWorktree(repoRoot: repoRoot, path: path)
+          return
         }
+        // Relocate failed: the directory is still in place, so the forced
+        // remove is the actual removal and its failure is fatal.
         try await forceRemoveWorktree(repoRoot: repoRoot, path: path)
       },
 
@@ -933,9 +962,17 @@ nonisolated extension GitWorktreeClient {
     case .exited(let code, _, _, _) where code == 0:
       return
     case .exited(_, _, let stderr, _):
+      let decoded = GitWorktreeShell.decodeUTF8(stderr)
+      // Idempotent Remove: git already doesn't see this path as a
+      // worktree, so the removal goal is satisfied. Returning success
+      // lets the caller drop the (possibly orphaned) catalog node
+      // instead of trapping it behind a fatal error.
+      if stderrIndicatesAlreadyRemoved(decoded) {
+        return
+      }
       throw mapGitStderr(
         command: "git " + args.joined(separator: " "),
-        stderr: GitWorktreeShell.decodeUTF8(stderr)
+        stderr: decoded
       )
     case .timedOut:
       throw GitWorktreeError.commandFailed(

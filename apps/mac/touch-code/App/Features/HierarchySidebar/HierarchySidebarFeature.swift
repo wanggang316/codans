@@ -916,7 +916,8 @@ struct HierarchySidebarFeature {
       do {
         try await client.setWorktreeArchivedWithLifecycle(wid, pid, true)
       } catch {
-        await send(.lifecycleFailed(message: "Archive failed: \(error.localizedDescription)"))
+        let detail = (error as? GitWorktreeError).map(humanReadable) ?? error.localizedDescription
+        await send(.lifecycleFailed(message: "Archive failed: \(detail)"))
       }
       await send(.lifecycleEnded(worktreeID: wid))
     }
