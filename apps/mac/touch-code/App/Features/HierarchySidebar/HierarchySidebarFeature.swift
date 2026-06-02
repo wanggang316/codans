@@ -290,10 +290,6 @@ struct HierarchySidebarFeature {
       /// Sidebar bottom-bar refresh button. RootFeature routes this to
       /// `ProjectReconciler.reconcileAll(force: true)`.
       case refreshAllProjectsRequested
-      /// Per-row "+N −M" diff-stats chip tap (HAN-25 follow-up). RootFeature
-      /// forwards to `.openGitViewerForWorktreeRequested` which applies the
-      /// project/global default Git Viewer resolution and opens it.
-      case openGitViewerRequested(projectID: ProjectID, worktreeID: WorktreeID)
     }
   }
 
@@ -359,14 +355,14 @@ struct HierarchySidebarFeature {
     // MARK: Row taps
 
     case .projectRowTapped(let projectID):
-      try? hierarchyClient.selectProject(projectID)
+      hierarchyClient.selectProject(projectID)
       return .none
 
     case .worktreeRowTapped(let worktreeID, let projectID):
       // Switching worktrees across Projects must also flip the active
       // Project — otherwise selection keeps reading the previous Project's
       // `selectedWorktreeID` and the detail column never refreshes.
-      try? hierarchyClient.selectProject(projectID)
+      hierarchyClient.selectProject(projectID)
       try? hierarchyClient.selectWorktree(worktreeID, projectID)
       return .none
 
@@ -406,9 +402,9 @@ struct HierarchySidebarFeature {
 
     case .addProjectGitRootResolved(let canonical, let gitRoot):
       let name = (canonical as NSString).lastPathComponent
-      guard !name.isEmpty,
-        let projectID = try? hierarchyClient.addProject(name, canonical, gitRoot)
-      else { return .none }
+      guard !name.isEmpty else { return .none }
+      // addProject is non-throwing and returns a non-optional ProjectID.
+      let projectID = hierarchyClient.addProject(name, canonical, gitRoot)
       return .send(.delegate(.reconcileProjectRequested(projectID)))
 
     // MARK: Tag filter chip footer (M4)
@@ -462,7 +458,7 @@ struct HierarchySidebarFeature {
     // MARK: Project hover chrome
 
     case .reorderProjects(let source, let destination):
-      try? hierarchyClient.reorderProjects(source, destination)
+      hierarchyClient.reorderProjects(source, destination)
       return .none
 
     case .reorderWorktrees(let projectID, let segment, let source, let destination):
@@ -794,10 +790,22 @@ struct HierarchySidebarFeature {
         settingsWriter
         .readSnapshotSync()
         .projects[pid]?.git?.createScript?.command
-      if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil) {
-        _ = try? hierarchyClient.openPane(
+      // Seed the first pane in two phases. The catalog row (`createPaneRow`)
+      // is inserted SYNCHRONOUSLY here so it is observable before the
+      // `.selectionChanged` that `selectWorktree` above just triggered is
+      // processed. Otherwise `RootFeature.autoSeedTabAndPaneIfNeeded` reads
+      // the still-empty tab and races in a second, redundant pane — and the
+      // two concurrent `zmx serve` spawns collide, the loser surfacing
+      // `zmxServeFailed`. The async zmx-daemon + surface bringup follows in
+      // the effect. The create script rides along as the pane's initialCommand.
+      if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil),
+        let paneID = try? hierarchyClient.createPaneRow(
           tabID, worktreeID, pid, pathString, createCommand
         )
+      {
+        return .run { [client = hierarchyClient] _ in
+          try? await client.ensurePaneSurface(paneID, tabID, worktreeID, pid)
+        }
       }
       return .none
 
@@ -904,7 +912,8 @@ struct HierarchySidebarFeature {
       do {
         try await client.setWorktreeArchivedWithLifecycle(wid, pid, true)
       } catch {
-        await send(.lifecycleFailed(message: "Archive failed: \(error.localizedDescription)"))
+        let detail = (error as? GitWorktreeError).map(humanReadable) ?? error.localizedDescription
+        await send(.lifecycleFailed(message: "Archive failed: \(detail)"))
       }
       await send(.lifecycleEnded(worktreeID: wid))
     }

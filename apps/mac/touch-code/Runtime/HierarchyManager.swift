@@ -5,6 +5,14 @@ import TouchCodeCore
 enum HierarchyError: Error, Equatable, Sendable {
   case notFound(String)
   case invariantViolation(String)
+  /// `zmx serve <paneID>` exited successfully but printed no socket
+  /// path on stdout. Indicates a daemon-side packaging regression.
+  case zmxServeNoSocketPath
+  /// `zmx serve` failed to launch or exited with a non-zero status.
+  /// `detail` is whatever stderr / spawn error the runner captured.
+  case zmxServeFailed(detail: String)
+  /// The shipped app bundle is missing the embedded `bin/zmx` resource.
+  case zmxBinaryMissing
 }
 
 /// Identifies a reorderable sidebar section under a Project. The full sidebar
@@ -1535,6 +1543,44 @@ final class HierarchyManager {
     workingDirectory: String,
     initialCommand: String?,
     env: [String: String] = [:]
+  ) async throws -> PaneID {
+    // Two-phase: the synchronous catalog mutation (`createPaneRow`) lands the
+    // Pane row first, then the async zmx-daemon + libghostty bringup follows
+    // via `ensurePaneSurface`. Splitting the phases lets callers that mutate
+    // the catalog from a synchronous reducer body reserve the row before any
+    // `.selectionChanged` is processed — see `createPaneRow`'s note.
+    let paneID = try createPaneRow(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: workingDirectory, initialCommand: initialCommand
+    )
+    try await ensurePaneSurface(
+      paneID, in: tabID, in: worktreeID, in: projectID, env: env
+    )
+    return paneID
+  }
+
+  /// Synchronous catalog half of `openPane`: allocates a `PaneID`, inserts it
+  /// into the Tab's split tree (a fresh leaf when the tree is empty, else a
+  /// right-split of the first leaf) and pane array, validates invariants, and
+  /// persists — WITHOUT the async zmx-daemon + libghostty surface bringup that
+  /// `ensurePaneSurface` performs.
+  ///
+  /// Split out so a caller mutating the catalog from a *synchronous* reducer
+  /// body can guarantee the Pane row is observable before the next
+  /// `.selectionChanged` is processed. `RootFeature.autoSeedTabAndPaneIfNeeded`
+  /// gates on `tab.panes.isEmpty`; once the create-worktree flow began seeding
+  /// its first pane through the now-async `openPane`, that gate was read against
+  /// a catalog snapshot taken while bringup was still in flight, so auto-seed
+  /// fired a second, redundant pane — and the two concurrent `zmx serve` spawns
+  /// raced, the loser surfacing `zmxServeFailed`. Reserving the row
+  /// synchronously closes that window.
+  @discardableResult
+  func createPaneRow(
+    in tabID: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID,
+    workingDirectory: String,
+    initialCommand: String?
   ) throws -> PaneID {
     guard
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
@@ -1572,13 +1618,6 @@ final class HierarchyManager {
 
     try tab.validateInvariants()
 
-    let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    try runtime.ensureSurface(
-      for: pane, in: worktree,
-      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
-    )
-
     store.scheduleSave(catalog)
     return paneID
   }
@@ -1592,7 +1631,7 @@ final class HierarchyManager {
     workingDirectory: String,
     initialCommand: String?,
     env: [String: String] = [:]
-  ) throws -> PaneID {
+  ) async throws -> PaneID {
     guard
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
         worktreeID: worktreeID,
@@ -1622,7 +1661,7 @@ final class HierarchyManager {
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
     let rootPath = catalog.projects[projectIndex].rootPath
-    try runtime.ensureSurface(
+    try await runtime.ensureSurface(
       for: newPane, in: worktree,
       env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
     )
@@ -1728,7 +1767,7 @@ final class HierarchyManager {
     in worktreeID: WorktreeID,
     in projectID: ProjectID,
     env: [String: String] = [:]
-  ) throws {
+  ) async throws {
     guard !runtime.hasSurface(for: paneID) else { return }
     guard
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
@@ -1750,7 +1789,7 @@ final class HierarchyManager {
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
     let rootPath = catalog.projects[projectIndex].rootPath
-    try runtime.ensureSurface(
+    try await runtime.ensureSurface(
       for: pane, in: worktree,
       env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
     )
@@ -1812,6 +1851,53 @@ final class HierarchyManager {
     var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
     tab.splitTree = try tab.splitTree.resizing(at: path, ratio: ratio)
     catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
+
+    store.scheduleSave(catalog)
+  }
+
+  /// Re-positions an existing pane next to `anchorID`, splitting the anchor
+  /// along `direction`. Pure split-tree reshape — the moved pane's surface is
+  /// never torn down (its shell keeps running), so unlike `splitPane` /
+  /// `closePane` there is no runtime surface lifecycle here. The pane *set* is
+  /// unchanged, so the leaves-match-panes invariant still holds. A move onto
+  /// the pane itself collapses to a no-op inside `SplitTree.moving`.
+  func movePane(
+    _ paneID: PaneID,
+    relativeTo anchorID: PaneID,
+    direction: SplitTree<PaneID>.NewDirection,
+    in tabID: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID
+  ) throws {
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+
+    guard
+      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
+        $0.id == tabID
+      })
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+
+    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+    guard tab.panes.contains(where: { $0.id == paneID }) else {
+      throw HierarchyError.notFound("Pane \(paneID)")
+    }
+    guard tab.panes.contains(where: { $0.id == anchorID }) else {
+      throw HierarchyError.notFound("Pane \(anchorID)")
+    }
+
+    tab.splitTree = try tab.splitTree.moving(paneID, relativeTo: anchorID, direction: direction)
+    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
+
+    try tab.validateInvariants()
 
     store.scheduleSave(catalog)
   }

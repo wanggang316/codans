@@ -3,6 +3,35 @@ import TouchCodeCore
 import TouchCodeIPC
 import os
 
+/// Narrow read-only view onto a pane's zmx daemon. Implemented in
+/// production by `ZmxControlProbe` (transient control-socket queries via
+/// `ZmxControlClient`); tests inject a fake so they exercise the handler's
+/// encoding/error paths without spinning up a real daemon socket.
+@MainActor
+public protocol PaneRuntimeProbe: AnyObject, Sendable {
+  /// Resolves with the daemon's next `.info` response (shell PID + cwd).
+  func requestInfo() async throws -> ZmxInfoPayload
+  /// Resolves with the raw bytes of the daemon's `.history` response in
+  /// the requested format.
+  func readHistory(format: ZmxHistoryFormat) async throws -> Data
+}
+
+/// `PaneRuntimeProbe` backed by transient control-socket queries
+/// (`ZmxControlClient`) to a Pane's daemon. The live byte stream now runs
+/// through the in-surface `zmx attach` client, so `pane.info` / `pane.read`
+/// reach the daemon out-of-band by PaneID rather than through a held client.
+@MainActor
+final class ZmxControlProbe: PaneRuntimeProbe {
+  private let paneID: PaneID
+  init(paneID: PaneID) { self.paneID = paneID }
+  func requestInfo() async throws -> ZmxInfoPayload {
+    try await ZmxControlClient.info(for: paneID)
+  }
+  func readHistory(format: ZmxHistoryFormat) async throws -> Data {
+    try await ZmxControlClient.history(for: paneID, format: format)
+  }
+}
+
 /// Handlers for `hierarchy.*` — both reads (list / describe /
 /// resolveAlias) and mutations (create / activate / close / label).
 ///
@@ -16,16 +45,40 @@ final class HierarchyHandlers {
   private let manager: HierarchyManager
   private let envProvider: @MainActor (ProjectID) -> [String: String]
   private let settingsProvider: @MainActor () -> Settings
+  /// Closure that sends `.kill` to the zmx daemon backing `paneID` and
+  /// waits for its control socket to disappear. Returns once the daemon
+  /// is gone or the bounded timeout elapses. Injected so handlers stay
+  /// independent of the libghostty surface registry; default is a no-op
+  /// for tests that exercise the catalog-side mutation in isolation.
+  private let daemonKiller: @MainActor (PaneID) async -> Void
+  /// Probe surface for `pane.info` / `pane.read`. Returns a typed
+  /// `PaneRuntimeProbe` view of the live `ZmxClient` for `paneID`, or
+  /// `nil` when no surface is bound (no live daemon to talk to). Kept
+  /// behind a protocol so tests can inject a fake without dragging
+  /// `GhosttyRuntime` into the test target.
+  private let runtimeProbe: @MainActor (PaneID) -> PaneRuntimeProbe?
+  /// Persistent zmx-session catalog accessor. The `pane.close` handler
+  /// drops the closed pane's row synchronously through the coordinator
+  /// so the on-disk state reflects the kill before the RPC returns.
+  /// Default is `nil` for tests; production wiring passes the shared
+  /// `SessionCoordinator`.
+  private let sessionCoordinator: SessionCoordinator?
   private let logger = Logger(subsystem: "com.touch-code.ipc", category: "hierarchy")
 
   init(
     manager: HierarchyManager,
     envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] },
-    settingsProvider: @escaping @MainActor () -> Settings = { Settings() }
+    settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
+    daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
+    runtimeProbe: @escaping @MainActor (PaneID) -> PaneRuntimeProbe? = { _ in nil },
+    sessionCoordinator: SessionCoordinator? = nil
   ) {
     self.manager = manager
     self.envProvider = envProvider
     self.settingsProvider = settingsProvider
+    self.daemonKiller = daemonKiller
+    self.runtimeProbe = runtimeProbe
+    self.sessionCoordinator = sessionCoordinator
   }
 
   // MARK: - Error mapping
@@ -42,6 +95,12 @@ final class HierarchyHandlers {
         return .failed(.notFound(kind: fallbackKind, id: fallbackID.isEmpty ? message : fallbackID))
       case .invariantViolation(let message):
         return .failed(.conflict(reason: message))
+      case .zmxServeNoSocketPath:
+        return .failed(.internal("zmx serve did not report a socket path"))
+      case .zmxServeFailed(let detail):
+        return .failed(.internal("zmx serve failed: \(detail)"))
+      case .zmxBinaryMissing:
+        return .failed(.internal("zmx binary missing from app bundle"))
       }
     }
     return .failed(.internal("\(error)"))
@@ -145,7 +204,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "addProject requires {name, rootPath}", path: nil))
     }
     do {
-      let id = try manager.addProject(
+      let id = manager.addProject(
         name: req.name,
         rootPath: req.rootPath,
         gitRoot: req.gitRoot
@@ -275,7 +334,7 @@ final class HierarchyHandlers {
           message: "openPane requires {projectID, worktreeID, tabID, workingDirectory}", path: nil))
     }
     do {
-      let id = try manager.openPane(
+      let id = try await manager.openPane(
         in: req.tabID,
         in: req.worktreeID,
         in: req.projectID,
@@ -409,6 +468,212 @@ final class HierarchyHandlers {
     }
   }
 
+  /// Handles `pane.close` — the user's explicit termination verb. Sends
+  /// `.kill` to the pane's zmx daemon (bounded ≤ 2 s wait for the
+  /// control socket to vanish), drops the persisted session-catalog
+  /// entry, and removes the pane from the in-memory hierarchy.
+  ///
+  /// Distinct from `hierarchy.closePane`: the latter detaches the
+  /// libghostty surface so a future attach can resume the same daemon;
+  /// this verb guarantees the daemon is gone before returning.
+  ///
+  /// Returns `closed == false` (without raising) when the pane is not
+  /// present in the catalog — the CLI maps that to a non-zero exit so
+  /// scripts can distinguish a successful kill from a missing pane.
+  public func paneClose(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: IPC.PaneCloseRequest
+    do {
+      req = try params.decoded(as: IPC.PaneCloseRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "pane.close requires {paneID}", path: nil))
+    }
+
+    // Resolve the catalog location for `paneID`. Caller-supplied locator
+    // fields take precedence so labels-already-resolved CLI invocations
+    // skip the catalog walk; absent fields fall back to a scan.
+    let locator: PaneLocator?
+    if let tabID = req.tabID, let worktreeID = req.worktreeID, let projectID = req.projectID {
+      locator = PaneLocator(
+        paneID: req.paneID,
+        tabID: tabID,
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    } else {
+      locator = findPaneLocator(req.paneID)
+    }
+
+    guard let locator else {
+      // Pane is not in the catalog. Surface the catalog-state truthfully
+      // so the CLI can tell apart "already closed" from "kill succeeded".
+      let response = IPC.PaneCloseResponse(paneID: req.paneID, closed: false)
+      return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+        ?? .failed(.internal("encode pane.close result"))
+    }
+
+    // Kill the daemon first. ZmxClient.kill polls for socket-file
+    // disappearance with a 2 s cap, so this awaits at most that long
+    // even if the daemon is wedged.
+    await daemonKiller(req.paneID)
+
+    // Reap the persisted session-catalog entry. Best-effort: a missing
+    // coordinator (no-resume mode) or a save failure is non-fatal — log
+    // and continue rather than failing the RPC, which only promises that
+    // the daemon was killed.
+    if let coordinator = sessionCoordinator {
+      do {
+        try coordinator.recordClose(req.paneID)
+      } catch {
+        logger.warning(
+          "pane.close: sessions.json reap failed: \(String(describing: error), privacy: .public)"
+        )
+      }
+    }
+
+    // Tear down the in-memory hierarchy entry. The libghostty surface
+    // close inside `manager.closePane` is now redundant (daemonKiller
+    // already shut the daemon socket), but it stays idempotent so the
+    // call remains the canonical place to update split-tree state.
+    do {
+      try manager.closePane(
+        locator.paneID,
+        in: locator.tabID,
+        in: locator.worktreeID,
+        in: locator.projectID
+      )
+    } catch {
+      return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.description)
+    }
+
+    let response = IPC.PaneCloseResponse(paneID: req.paneID, closed: true)
+    return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+      ?? .failed(.internal("encode pane.close result"))
+  }
+
+  /// Handles `pane.info` — probe the pane's zmx daemon for shell pid,
+  /// pwd, and (when available) cursor + terminal modes. The daemon's
+  /// frozen `.Info` payload only carries `pid` + `cwd` today; `cursor`
+  /// and `modes` are surfaced as `nil` so callers can fall back to
+  /// `pane.read --raw` for byte-faithful assertions.
+  public func paneInfo(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: IPC.PaneInfoRequest
+    do {
+      req = try params.decoded(as: IPC.PaneInfoRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "pane.info requires {paneID}", path: nil))
+    }
+    guard let probe = runtimeProbe(req.paneID) else {
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    }
+    let payload: ZmxInfoPayload
+    do {
+      payload = try await probe.requestInfo()
+    } catch {
+      return .failed(.internal("pane.info: \(error)"))
+    }
+    let response = IPC.PaneInfoResponse(
+      paneID: req.paneID,
+      shellPid: payload.pid,
+      pwd: payload.cwd,
+      cursor: nil,
+      modes: nil
+    )
+    return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+      ?? .failed(.internal("encode pane.info result"))
+  }
+
+  /// Handles `pane.read` — pull serialized terminal state from the
+  /// pane's zmx daemon. The daemon returns the full
+  /// `serializeTerminalState` dump in the requested format (`plain`
+  /// strips ANSI; `vt` keeps them, including cursor / modes / OSC 7).
+  /// `range` and `tail` are applied client-side after the dump arrives.
+  public func paneRead(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: IPC.PaneReadRequest
+    do {
+      req = try params.decoded(as: IPC.PaneReadRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "pane.read requires {paneID}", path: nil))
+    }
+    if let tail = req.tail, tail <= 0 {
+      return .failed(.invalidParams(message: "tail must be a positive integer", path: ["tail"]))
+    }
+    guard let probe = runtimeProbe(req.paneID) else {
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    }
+    let format: ZmxHistoryFormat = req.raw ? .vt : .plain
+    let dump: Data
+    do {
+      dump = try await probe.readHistory(format: format)
+    } catch {
+      return .failed(.internal("pane.read: \(error)"))
+    }
+    let content = String(data: dump, encoding: .utf8) ?? ""
+    let filtered = Self.applyRange(content, range: req.range)
+    let trimmed = Self.applyTail(filtered, tail: req.tail)
+    let response = IPC.PaneReadResponse(
+      paneID: req.paneID,
+      format: req.raw ? .vt : .plain,
+      content: trimmed
+    )
+    return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
+      ?? .failed(.internal("encode pane.read result"))
+  }
+
+  /// Client-side range filtering. The daemon dumps scrollback above
+  /// the viewport followed by the viewport itself; we split on a blank
+  /// row boundary as an approximation since the dump is not annotated
+  /// with the split point. `all` is the canonical (pass-through) shape;
+  /// `visible` / `scrollback` are best-effort filters until the daemon
+  /// learns to label the boundary.
+  static func applyRange(_ content: String, range: IPC.PaneReadRange) -> String {
+    switch range {
+    case .all:
+      return content
+    case .visible, .scrollback:
+      // The daemon's serializer does not currently annotate the
+      // scrollback / viewport boundary. Return the full dump so
+      // callers see everything; the CLI documents this limitation.
+      return content
+    }
+  }
+
+  /// Trim to the last N newline-delimited rows. `nil` is a no-op.
+  static func applyTail(_ content: String, tail: Int?) -> String {
+    guard let tail else { return content }
+    let rows = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    if rows.count <= tail { return content }
+    return rows.suffix(tail).joined(separator: "\n")
+  }
+
+  private struct PaneLocator {
+    let paneID: PaneID
+    let tabID: TabID
+    let worktreeID: WorktreeID
+    let projectID: ProjectID
+  }
+
+  /// Walk the catalog looking for the project/worktree/tab triple that
+  /// owns `paneID`. Returns nil when no project contains a pane with
+  /// that id — caller maps to `closed == false`.
+  private func findPaneLocator(_ paneID: PaneID) -> PaneLocator? {
+    for project in manager.catalog.projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
+          return PaneLocator(
+            paneID: paneID,
+            tabID: tab.id,
+            worktreeID: worktree.id,
+            projectID: project.id
+          )
+        }
+      }
+    }
+    return nil
+  }
+
   public func focusPane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let req: PaneLocatorParams
@@ -428,7 +693,7 @@ final class HierarchyHandlers {
         in: req.worktreeID,
         in: req.projectID
       )
-      try manager.ensurePaneSurface(
+      try await manager.ensurePaneSurface(
         req.id,
         in: req.tabID,
         in: req.worktreeID,

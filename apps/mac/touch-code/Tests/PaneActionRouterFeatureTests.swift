@@ -184,6 +184,77 @@ struct PaneActionRouterFeatureTests {
     #expect(recorded.value?.5 == "/cwd")
   }
 
+  // MARK: - closePane
+
+  /// Closing the only pane in a tab retires the now-empty tab via
+  /// `closeTab` rather than leaving a zombie tab behind. `closePane` must
+  /// NOT fire (the fixture's default catalog has a single-pane tab).
+  @Test
+  func closePaneInSinglePaneTabClosesTab() async {
+    let f = Fixture()
+    let closeTabCall = LockIsolated<(TabID, WorktreeID, ProjectID)?>(nil)
+    let closePaneCalled = LockIsolated(false)
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.snapshot = { f.catalog() }
+      $0.hierarchyClient.closeTab = { tid, wid, pid in
+        closeTabCall.setValue((tid, wid, pid))
+      }
+      $0.hierarchyClient.closePane = { _, _, _, _ in closePaneCalled.setValue(true) }
+    }
+
+    await store.send(.requested(f.paneID, .closePane))
+    #expect(closeTabCall.value?.0 == f.tabID)
+    #expect(closeTabCall.value?.1 == f.worktreeID)
+    #expect(closeTabCall.value?.2 == f.projectID)
+    #expect(closePaneCalled.value == false)
+  }
+
+  /// Closing a pane in a multi-pane tab drops just that pane and hands
+  /// first-responder to the survivor. Two-pane layout (sourcePane |
+  /// rightPane): closing the leftmost leaf focuses `rightPane`.
+  @Test
+  func closePaneInMultiPaneTabClosesPaneAndFocusesSurvivor() async throws {
+    let f = Fixture()
+    let rightPane = PaneID()
+    let twoPaneTab = Tab(
+      id: f.tabID,
+      splitTree: try SplitTree(leaf: f.paneID).inserting(
+        rightPane, at: f.paneID, direction: .right),
+      panes: [
+        Pane(id: f.paneID, workingDirectory: "/cwd"),
+        Pane(id: rightPane, workingDirectory: "/cwd"),
+      ]
+    )
+    let catalog = Catalog(projects: [
+      Project(
+        id: f.projectID, name: "p", rootPath: "/p", gitRoot: "/p",
+        worktrees: [Worktree(id: f.worktreeID, name: "w", path: "/w", tabs: [twoPaneTab])])
+    ])
+
+    let closedPane = LockIsolated<PaneID?>(nil)
+    let focused = LockIsolated<PaneID?>(nil)
+    let closeTabCalled = LockIsolated(false)
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.addressOf = { _ in f.address }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.closePane = { pid, _, _, _ in closedPane.setValue(pid) }
+      $0.hierarchyClient.focusSurfaceView = { pid in focused.setValue(pid) }
+      $0.hierarchyClient.closeTab = { _, _, _ in closeTabCalled.setValue(true) }
+    }
+
+    await store.send(.requested(f.paneID, .closePane))
+    #expect(closedPane.value == f.paneID)
+    #expect(focused.value == rightPane)
+    #expect(closeTabCalled.value == false)
+  }
+
   // MARK: - gotoSplit
 
   /// Two-pane horizontal layout (sourcePane | rightPane). Spatial `.right`

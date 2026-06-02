@@ -262,6 +262,28 @@ final class AgentStateStore {
     scratch.removeValue(forKey: paneID)
   }
 
+  /// Pre-seed the registry from a persisted catalog at launch. Each
+  /// record contributes one `AgentEntry` so the ActiveAgents UI shows
+  /// the correct state immediately rather than starting empty and
+  /// catching up after the first viewport refresh. Unknown enum raws
+  /// (kind or state added in a future build) are skipped silently —
+  /// dropping a stale row is preferable to crashing the launch.
+  ///
+  /// Scratch is initialised with `userInputSeen = true` so the
+  /// restored state cannot be flipped to a synthetic "finished" cue
+  /// before any user interaction; the next real event refines it.
+  func seedRestored(_ records: [(paneID: PaneID, kind: AgentKind, state: AgentRuntimeState)]) {
+    for record in records {
+      entries[record.paneID] = AgentEntry(
+        kind: record.kind,
+        sessionID: nil,
+        state: record.state,
+        lastTransitionAt: now()
+      )
+      scratch[record.paneID] = .fresh(userInputSeen: true)
+    }
+  }
+
   // MARK: - Derivation
 
   /// Raw state derivation. Display-only finished is intentionally not

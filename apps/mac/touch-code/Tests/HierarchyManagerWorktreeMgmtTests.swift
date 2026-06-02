@@ -70,7 +70,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
-  func archiveTearsDownSurfaces() throws {
+  func archiveTearsDownSurfaces() async throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
@@ -80,7 +80,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     let tabID = try manager.createTab(
       in: worktreeID, in: projectID, name: nil
     )
-    let paneID = try manager.openPane(
+    let paneID = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/repo/feat", initialCommand: nil
     )
@@ -399,25 +399,33 @@ struct HierarchyManagerWorktreeMgmtTests {
     defer { try? FileManager.default.removeItem(at: alias.url) }
     let canonicalForm = HierarchyManager.canonicalPath(alias.varForm)
     #expect(canonicalForm == HierarchyManager.canonicalPath(alias.privateForm))
-    let projectID = manager.addProject(
-      name: "p", rootPath: canonicalForm, gitRoot: canonicalForm
+
+    // The two aliases canonicalize to the same path, and the per-project
+    // uniqueness guard forbids two worktrees at one canonical path — so
+    // exercise each alias in its own project. Both must store the canonical
+    // form regardless of which alias was fed in.
+    let projectVar = manager.addProject(
+      name: "pv", rootPath: canonicalForm, gitRoot: canonicalForm
     )
-    // Feeding the `/var/...` alias must still store the canonical form.
     let wtIDFromVar = try manager.createWorktree(
-      in: projectID, name: "from-var",
+      in: projectVar, name: "from-var",
       path: alias.varForm, branch: "from-var"
     )
-    let storedFromVar = manager.catalog.projects[0].worktrees
-      .first(where: { $0.id == wtIDFromVar })?.path
+    let storedFromVar = manager.catalog.projects
+      .first(where: { $0.id == projectVar })?
+      .worktrees.first(where: { $0.id == wtIDFromVar })?.path
     #expect(storedFromVar == canonicalForm)
 
-    // Feeding the `/private/var/...` alias stores the same canonical.
+    let projectPrivate = manager.addProject(
+      name: "pp", rootPath: canonicalForm, gitRoot: canonicalForm
+    )
     let wtIDFromPrivate = try manager.createWorktree(
-      in: projectID, name: "from-private",
+      in: projectPrivate, name: "from-private",
       path: alias.privateForm, branch: "from-private"
     )
-    let storedFromPrivate = manager.catalog.projects[0].worktrees
-      .first(where: { $0.id == wtIDFromPrivate })?.path
+    let storedFromPrivate = manager.catalog.projects
+      .first(where: { $0.id == projectPrivate })?
+      .worktrees.first(where: { $0.id == wtIDFromPrivate })?.path
     #expect(storedFromPrivate == canonicalForm)
   }
 
@@ -507,7 +515,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
-  func reconcileTearsDownPanesOnAutoArchive() throws {
+  func reconcileTearsDownPanesOnAutoArchive() async throws {
     // Stale-archive must release pty surfaces — same contract as the
     // user-invoked archive path. Without this, libghostty would hold
     // a working dir that no longer exists and fail on the next read.
@@ -523,7 +531,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     let tabID = try manager.createTab(
       in: staleID, in: projectID, name: nil
     )
-    let paneID = try manager.openPane(
+    let paneID = try await manager.openPane(
       in: tabID, in: staleID, in: projectID,
       workingDirectory: "/repo/stale", initialCommand: nil
     )
@@ -567,7 +575,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   // MARK: - runningPaneCount
 
   @Test
-  func runningPaneCountReflectsRuntime() throws {
+  func runningPaneCountReflectsRuntime() async throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
@@ -577,11 +585,11 @@ struct HierarchyManagerWorktreeMgmtTests {
     let tabID = try manager.createTab(
       in: worktreeID, in: projectID, name: nil
     )
-    let paneA = try manager.openPane(
+    let paneA = try await manager.openPane(
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/repo/feat", initialCommand: nil
     )
-    let paneB = try manager.splitPane(
+    let paneB = try await manager.splitPane(
       paneA, direction: .right,
       in: tabID, in: worktreeID, in: projectID,
       workingDirectory: "/repo/feat", initialCommand: nil

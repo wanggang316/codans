@@ -31,6 +31,35 @@ nonisolated enum CommandOutcome: Equatable, Sendable {
   case spawnFailed(reason: String)
 }
 
+/// Bounds how many child processes launch concurrently across all callers.
+/// A shared async counting semaphore: `acquire()` suspends once the limit is
+/// reached, and `release()` hands a freed slot directly to the oldest waiter
+/// (FIFO) so the in-flight count never exceeds `limit`.
+private actor SubprocessGate {
+  private let limit: Int
+  private var active = 0
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  init(limit: Int) { self.limit = limit }
+
+  func acquire() async {
+    if active < limit {
+      active += 1
+      return
+    }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func release() {
+    if waiters.isEmpty {
+      active -= 1
+    } else {
+      // Transfer the slot to the next waiter; `active` stays at the limit.
+      waiters.removeFirst().resume()
+    }
+  }
+}
+
 /// Live implementation. Correctness-critical points (see 0005 M2 review feedback):
 ///
 /// - `terminationHandler` is installed **synchronously** before `process.run()`, so an exit
@@ -40,7 +69,37 @@ nonisolated enum CommandOutcome: Equatable, Sendable {
 /// - Pipe drains run on `DispatchQueue.global(qos: .utility)`, not on the Swift cooperative
 ///   pool. Blocking reads from `FileHandle.availableData` won't starve other tasks.
 nonisolated struct FoundationCommandRunner: CommandRunner {
+  /// Caps concurrent child-process launches across every caller. Foundation's
+  /// `Process` / `Pipe` machinery races under heavy concurrent spawning, and
+  /// the launch-time git status/diff fan-out across many worktrees can
+  /// otherwise spawn dozens at once — which intermittently corrupted the heap
+  /// (an `EXC_BAD_ACCESS` that surfaced later in unrelated task allocation).
+  /// A modest cap keeps the fan-out fast while staying clear of that contention.
+  private static let gate = SubprocessGate(limit: 6)
+
   func run(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    maxOutputBytes: Int
+  ) async -> CommandOutcome {
+    await Self.gate.acquire()
+    // `defer` can't await, so release on a detached task — this still runs if
+    // the surrounding task is cancelled or `launch` returns early.
+    defer { Task { await Self.gate.release() } }
+    return await launch(
+      executable: executable,
+      arguments: arguments,
+      env: env,
+      cwd: cwd,
+      timeout: timeout,
+      maxOutputBytes: maxOutputBytes
+    )
+  }
+
+  private func launch(
     executable: URL,
     arguments: [String],
     env: [String: String],

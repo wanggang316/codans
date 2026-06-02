@@ -634,7 +634,7 @@ struct HierarchySidebarView: View {
         Button {
           var txn = Transaction()
           txn.disablesAnimations = true
-          withTransaction(txn) {
+          _ = withTransaction(txn) {
             store.send(.toggleProjectExpansion(project.id))
           }
         } label: {
@@ -1185,10 +1185,7 @@ struct HierarchySidebarView: View {
     {
       DiffStatsChip(
         additions: local.additions,
-        deletions: local.deletions,
-        onTap: { [worktreeID = worktree.id, projectID = project.id] in
-          store.send(.delegate(.openGitViewerRequested(projectID: projectID, worktreeID: worktreeID)))
-        }
+        deletions: local.deletions
       )
       // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
       // not trailing, so the chip's right edge stays flush when it's the row's last
@@ -1582,7 +1579,6 @@ private final class _IndentZeroerView: NSView {
       let newClip = _UnclampedClipView()
       newClip.drawsBackground = oldClip.drawsBackground
       newClip.backgroundColor = oldClip.backgroundColor
-      newClip.copiesOnScroll = oldClip.copiesOnScroll
       newClip.documentCursor = oldClip.documentCursor
       scrollView.contentView = newClip
       if scrollView.documentView !== outline { scrollView.documentView = outline }

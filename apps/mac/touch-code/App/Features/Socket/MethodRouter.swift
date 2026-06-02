@@ -42,9 +42,25 @@ public final class MethodRouter {
     logger.debug("route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
     if let outcome = await routeSystem(request) { return outcome }
     if let outcome = await routeHierarchy(request) { return outcome }
+    if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
     return notWired(request.method)
+  }
+
+  /// `pane.*` namespace — explicit-termination verbs that own the zmx
+  /// daemon lifecycle. Lives next to `hierarchy.*` because both share
+  /// `HierarchyHandlers`, but routed separately so the wire-namespace
+  /// split (`pane.close` vs `hierarchy.closePane`) shows up in the
+  /// dispatch surface.
+  private func routePane(_ request: IPC.Request) async -> RouterOutcome? {
+    guard let h = hierarchyHandlers else { return nil }
+    switch request.method {
+    case .paneClose: return await h.paneClose(request.params)
+    case .paneInfo: return await h.paneInfo(request.params)
+    case .paneRead: return await h.paneRead(request.params)
+    default: return nil
+    }
   }
 
   private func routeHierarchy(_ request: IPC.Request) async -> RouterOutcome? {

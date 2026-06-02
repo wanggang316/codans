@@ -43,5 +43,18 @@
 	     missing-DSN — exactly the no-op behaviour we want for
 	     contributors without a configured Secrets.xcconfig. -->
 	<string>https://$(SENTRY_DSN_REST)</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.touch-code.pane-id</string>
+			<key>UTTypeDescription</key>
+			<string>TouchCode Pane Identifier</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

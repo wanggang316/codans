@@ -20,6 +20,68 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.2] - 2026-06-02
+
+### Added
+
+- **Drag panes to rearrange a split.** Every pane in a multi-pane tab now has a
+  drag handle — drop it onto another pane's top, bottom, left, or right edge to
+  move it there. The pane's shell keeps running across the move; nothing restarts.
+
+### Changed
+
+- **The diff-stat chip updates as you type.** The sidebar's +N −M count used to
+  refresh only on commit, branch switch, or reopening a row — it now reflects
+  uncommitted edits made in any pane or editor within about a second, and the
+  digits roll smoothly to their new values.
+- **The built-in Run command is now permanent and bound to ⌘R.** Run ships with
+  the conventional ⌘R shortcut by default and can no longer be deleted; its remove
+  button is disabled with a tooltip explaining why.
+- **Clearing a command's shortcut moved to the right-click menu.** Clear Shortcut
+  is now a right-click action on the shortcut cell instead of a button inside the
+  recorder popover.
+
+### Removed
+
+- **The built-in Git Viewer has been removed.** The in-app diff and history viewer
+  is gone; the ⌘⌥G shortcut and the Settings → Git Viewer picker now open your
+  configured external client (GitHub Desktop, Sourcetree, Tower, Fork, …) instead,
+  or do nothing if none is selected.
+
+### Fixed
+
+- **Removing a moved or deleted worktree always works now.** Removing a worktree
+  whose folder had been relocated or deleted used to fail with a raw "error 6" and
+  leave the row stuck forever; removal is now reliable and surfaces a readable
+  message if anything genuinely goes wrong.
+
+## [0.4.1] - 2026-06-01
+
+### Fixed
+
+- **A freshly split pane accepts input again.** Splitting a pane could leave the
+  new pane showing a blinking cursor while silently dropping every keystroke;
+  it now takes focus and is ready to type into immediately.
+- **Panes open at their final width.** Opening or revisiting a pane — or switching
+  to a worktree that wasn't loaded yet — no longer flashes at the wrong column
+  width and reflows a moment later; the shell renders at the right size from the
+  first frame.
+- **Creating a worktree opens exactly one pane.** Worktree creation could spin up
+  a second, broken pane; it now reliably opens a single working pane.
+
+## [0.4.0] - 2026-06-01
+
+### Added
+
+- **Terminal panes survive quitting and relaunching the app.** A new Settings → General "Resume panes on launch" toggle (on by default) keeps your panes — and the programs running inside them — alive across an app restart, so you reopen right where you left off. Turn it off and each pane is instead restored from a snapshot of its last screen. Settings shows how many sessions can be resumed and offers a "forget all" action to clear them.
+- **Quitting asks before closing active panes.** Quitting while panes are still doing work now shows a confirmation instead of tearing everything down silently.
+- **The Active Agents panel remembers its agents across launches.** Agents that were running before you quit reappear after relaunch instead of starting from an empty list.
+- **New `tc pane` commands.** `info --json` dumps a pane's full state, `read` gains additional variants, and `close` shuts a pane down — ending its resumable session — from the shell.
+
+### Changed
+
+- **Settings → Scripts is now Settings → Commands, with inline editing.** The pop-up script editor is replaced by an inline table — two-line rows, a per-command color and kind, and a dedicated sheet for environment variables. Every command can reference built-in worktree-path and project-root variables, and project lifecycle scripts now live under General.
+
 ## [0.3.5] - 2026-05-31
 
 ### Added

@@ -147,7 +147,11 @@ struct TouchCodeApp: App {
           SettingsWindowView(
             store: store,
             settingsStore: appState.settingsStore,
-            shortcutsStore: appState.shortcutsStore
+            shortcutsStore: appState.shortcutsStore,
+            sessionCoordinator: appState.sessionCoordinator,
+            onForgetAllSessions: {
+              appState.forgetAllPersistedSessions()
+            }
           )
           .environment(appState.hierarchyManager)
           .environment(appState.settingsStore)
@@ -207,6 +211,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   nonisolated func applicationWillTerminate(_ notification: Notification) {
     MainActor.assumeIsolated {
       appState?.flushAllPersistedState()
+    }
+  }
+
+  /// Gates `cmd-Q` so the daemon-disposition decision can run before AppKit tears the
+  /// process down. The user's `QuitConfirmation` setting decides whether to surface the
+  /// quit confirmation dialog at all; the orthogonal `QuitAction` setting decides what
+  /// the no-dialog branch applies (and which button is default-focused when the dialog
+  /// IS shown).
+  ///
+  /// Returns `.terminateNow` for keepRunning / snapshot so the subsequent
+  /// `willTerminate` hook still fires and the remaining persisted-state flushes run.
+  /// `.cancel` aborts the quit entirely.
+  nonisolated func applicationShouldTerminate(
+    _ sender: NSApplication
+  ) -> NSApplication.TerminateReply {
+    MainActor.assumeIsolated {
+      guard let appState else { return .terminateNow }
+      let lifecycle = appState.sessionLifecycle
+      let activePanes = lifecycle?.liveZmxClientCount ?? 0
+
+      let confirmation = appState.settingsStore.settings.general.quitConfirmation
+      let action = appState.settingsStore.settings.general.quitAction
+
+      let shouldAsk: Bool
+      switch confirmation {
+      case .never: shouldAsk = false
+      case .always: shouldAsk = true
+      case .auto: shouldAsk = activePanes > 0
+      }
+
+      if !shouldAsk {
+        // No dialog — apply the configured action directly. `detachAllForQuit` is a
+        // no-op when there are no live clients, so skipping it for activePanes == 0
+        // is purely an optimisation; the explicit guard keeps the no-panes path cheap.
+        if activePanes > 0 {
+          lifecycle?.detachAllForQuit(action: action)
+        }
+        return .terminateNow
+      }
+
+      let choice = QuitConfirmationDialog.present(
+        paneCount: activePanes,
+        defaultAction: action
+      )
+      switch choice {
+      case .keepRunning:
+        lifecycle?.detachAllForQuit(action: .keepRunning)
+        return .terminateNow
+      case .snapshot:
+        lifecycle?.detachAllForQuit(action: .snapshot)
+        return .terminateNow
+      case .cancel:
+        return .terminateCancel
+      }
     }
   }
 
@@ -381,6 +439,22 @@ final class AppState {
   private let catalogStore: CatalogStore
   private let hierarchyRuntime: GhosttyBackedHierarchyRuntime
   private var ghosttyRuntime: GhosttyRuntime?
+  /// Shared `sessions.json` store. Built lazily in `bringUp` (nil if the
+  /// canonical URL cannot be opened — same fallback the IPC handlers use).
+  /// Reused by `SessionLifecycle` so the quit-time flush and the in-app
+  /// reap-on-pane-close path write through a single instance.
+  @ObservationIgnored private(set) var sessionStore: SessionStore?
+  /// Single writer that owns the in-memory `SessionCatalog` mirror and is
+  /// the only mutator of `sessions.json` after launch. Bootstrap seeds it
+  /// from `sessionStore.load()`; the launch reaper, the quit-time
+  /// lifecycle, and the `pane.close` IPC handler all route through it.
+  /// nil when the store is unavailable (no-resume mode).
+  @ObservationIgnored private(set) var sessionCoordinator: SessionCoordinator?
+  /// Quit-time orchestrator: snapshots every live `ZmxClient` into
+  /// `sessions.json` and then sends `.detach` so the daemons survive the
+  /// app process. Built in `bringUp` alongside the engine; nil before
+  /// then, which keeps the `willTerminate` observer safe to fire early.
+  @ObservationIgnored private(set) var sessionLifecycle: SessionLifecycle?
   /// Per-Worktree "git status is non-clean" cache. The sidebar row's `.task(id:)`
   /// refreshes this lazily; a small dot is drawn next to the row name when dirty.
   let worktreeStatusMonitor: WorktreeStatusMonitor
@@ -398,6 +472,14 @@ final class AppState {
   /// the catalog-sync task lives inside `bringUp`.
   let worktreeHeadWatcher: WorktreeHeadWatcher
   private var worktreeHeadWatcherSyncTask: Task<Void, Never>?
+
+  /// FSEvents observer on each Worktree's working-tree subtree. Refreshes
+  /// the `+N −M` diff chip after in-pane / in-editor edits — changes that
+  /// move `git diff HEAD` without touching `.git/HEAD`, so the head watcher
+  /// never fires for them. Created here so its lifetime tracks the app and
+  /// the catalog-sync task lives inside `bringUp`.
+  let worktreeWorkingTreeWatcher: WorktreeWorkingTreeWatcher
+  private var worktreeWorkingTreeWatcherSyncTask: Task<Void, Never>?
 
   private var socketServer: SocketServer?
   // EditorClient is built inside bringUp() alongside the TCA dependency
@@ -433,12 +515,13 @@ final class AppState {
     self.worktreeStatusMonitor = .live()
     self.worktreeLocalDiffMonitor = .live()
     self.worktreeHeadWatcher = WorktreeHeadWatcher()
+    self.worktreeWorkingTreeWatcher = WorktreeWorkingTreeWatcher()
   }
 
   /// Idempotent: subsequent calls while `store` is already set are no-ops.
   /// SwiftUI may re-run `.task` on scene transitions; the guard prevents
   /// rebuilding the engine + store and leaking the prior runtime.
-  func bringUp() {
+  func bringUp() {  // swiftlint:disable:this function_body_length
     guard store == nil else { return }
     let ghostty = try? GhosttyRuntime()
     self.ghosttyRuntime = ghostty
@@ -449,9 +532,9 @@ final class AppState {
     )
     self.terminalEngine = engine
     hierarchyRuntime.attach(engine: engine)
+    bootstrapSessionStack(ghostty: ghostty, engine: engine)
 
     // SettingsStore loads itself (with v1→v2 migration) during `init(fileURL:)`.
-
     let manager = hierarchyManager
     let settings = settingsStore
 
@@ -478,31 +561,43 @@ final class AppState {
       settings: settings,
       hierarchy: hierarchy
     )
+    // Wire the quit-time agent snapshot into SessionLifecycle now that
+    // both the registry and the engine (PID source) are alive. The
+    // closure is invoked from the lifecycle's `detachLiveTier` path —
+    // running here keeps lifecycle ignorant of `AgentStateStore`'s type.
+    if let lifecycle = self.sessionLifecycle, let registry = self.agentStateStore {
+      lifecycle.agentSnapshotProvider = { [weak engine, weak registry] in
+        guard let registry else { return [] }
+        let now = Date()
+        return registry.entries.map { paneID, entry in
+          PersistedAgentRecord(
+            paneID: paneID,
+            kindRaw: entry.kind.rawValue,
+            stateRaw: entry.state.rawValue,
+            pid: engine?.foregroundProcessGroupID(for: paneID) ?? 0,
+            capturedAt: now
+          )
+        }
+      }
+    }
     // SwiftUI views (e.g. `ProjectGeneralSettingsView`) read `@Dependency(SettingsWriter.self)`
     // directly; that resolution bypasses the per-store `withDependencies` overrides below and
     // would otherwise hit the `liveValue` `fatalError` placeholders. Install the live
     // implementations as the global defaults before any view body runs so View-side reads
     // find the wired instances. Reducer-side overrides on the Store layer on top of these.
+    // Only the engine/state-dependent clients are prepared here — they need
+    // `engine` / `hierarchy` / `settings`, which exist only after bring-up.
+    // The pure-Foundation built-ins (`date`, clocks, `uuid`) and the stateless
+    // git clients are already prepared in `TouchCodeApp.init`, which also
+    // satisfies the XCTest-host defense (unset keys would otherwise fall back
+    // to `unimplemented`). Re-preparing them here trips swift-dependencies'
+    // "a global dependency can only be prepared a single time" runtime warning,
+    // so they are intentionally not repeated.
     prepareDependencies {
       $0.editorClient = editor
       $0.hierarchyClient = hierarchy
       $0.settingsWriter = .live(settings)
       $0.terminalClient = .live(engine: engine)
-      // Under XCTest host, swift-dependencies defaults unset keys to `testValue` —
-      // most of ours are `unimplemented(...)`, which `Issue.record`s from a detached
-      // Task and crashes once the recording escapes any active test context. Register
-      // the live values explicitly so the host app behaves like production regardless
-      // of the test bundle being loaded.
-      $0.gitService = .live()
-      $0.gitHub = .live()
-      // TCA's built-in dependencies (date, clocks, mainQueue, …) fall back to
-      // `unimplemented` under XCTest. Restore the production defaults so any
-      // detached task in the host app that resolves them doesn't crash the
-      // session via `Issue.record` from an unowned context.
-      $0.date = .init { Date() }
-      $0.continuousClock = ContinuousClock()
-      $0.suspendingClock = SuspendingClock()
-      $0.uuid = .init { UUID() }
     }
 
     // Sparkle bringup: push persisted Updates preferences to the live updater so
@@ -557,6 +652,7 @@ final class AppState {
       // override with a scripted closure.
       $0.projectReconciler = ProjectReconciler(client: hierarchy)
       $0.worktreeHeadWatcher = self.worktreeHeadWatcher
+      $0.worktreeWorkingTreeWatcher = self.worktreeWorkingTreeWatcher
       $0.worktreeLocalDiffMonitor = self.worktreeLocalDiffMonitor
       // Built-in TCA dependencies (`\.date`, `\.continuousClock`, `\.uuid`) are
       // always swapped to `unimplemented` under XCTest regardless of any
@@ -572,6 +668,7 @@ final class AppState {
     }
 
     startHeadWatcherSync()
+    startWorkingTreeWatcherSync()
 
     self.settingsWindowStore = Store(initialState: SettingsWindowFeature.State()) {
       SettingsWindowFeature()
@@ -775,12 +872,36 @@ final class AppState {
         appBundle: Self.bundleVersion()
       )
     )
+    // SessionCoordinator backs the `pane.close` reap step. We reuse the
+    // shared instance built in `bringUp` so the IPC handlers and the
+    // quit-time `SessionLifecycle` flush write through one in-memory
+    // truth; nil falls back to the handler's "no persistent catalog to
+    // reap" path (second-instance no-resume mode).
+    let sessionCoordinator = self.sessionCoordinator
     let hierarchyHandlers = HierarchyHandlers(
       manager: hierarchy,
       envProvider: { projectID in
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
-      settingsProvider: { settingsStore.settings }
+      settingsProvider: { settingsStore.settings },
+      daemonKiller: { paneID in
+        // Killing a pane's daemon is an out-of-band control `.kill`,
+        // addressable by PaneID alone, so it works whether or not a surface
+        // is live this session (the live byte stream runs through the
+        // in-surface `zmx attach` client, not a held handle). The daemon
+        // removes its own socket on shutdown, so no manual unlink is needed.
+        ZmxControlClient.kill(for: paneID)
+      },
+      runtimeProbe: { [weak terminalEngine] paneID in
+        // `pane.info` / `pane.read` probe the daemon out-of-band via its
+        // control socket. Gate on a live surface so we don't hand back a
+        // probe for a pane whose daemon isn't running this session.
+        guard terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil else {
+          return nil
+        }
+        return ZmxControlProbe(paneID: paneID)
+      },
+      sessionCoordinator: sessionCoordinator
     )
     let terminalHandlers = TerminalHandlers(
       sink: terminalEngine.ghosttyRuntime == nil
@@ -827,10 +948,133 @@ final class AppState {
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.0"
   }
 
+  /// Open the shared `sessions.json` store once and stand up the quit-time
+  /// `SessionLifecycle` against it. Failure to open is non-fatal — the
+  /// lifecycle stays nil (so `willTerminate` skips the detach pass) and
+  /// the IPC handlers fall back to "no persistent catalog to reap" (their
+  /// existing behaviour). Extracted from `bringUp` to keep that method
+  /// under the SwiftLint function-body cap.
+  ///
+  /// Also drives the launch-time reaper: every catalog row whose daemon
+  /// socket still answers `connect(2)` is seeded into the engine so the
+  /// next `ensureSurface` for that paneID reattaches instead of spawning
+  /// a fresh daemon. Dead rows are pruned from the catalog as part of
+  /// the sweep.
+  private func bootstrapSessionStack(ghostty: GhosttyRuntime?, engine: TerminalEngine) {
+    let sessionStore: SessionStore?
+    do {
+      sessionStore = try SessionStore(fileURL: SessionCatalog.defaultURL())
+    } catch SessionStoreError.alreadyHeld {
+      // Second touch-code instance: the primary process holds the
+      // LOCK_EX on `sessions.json`. Degrade to "no-resume mode" —
+      // every pane cold-starts, the quit-time `SessionLifecycle`
+      // skips its detach/snapshot pass, and the launch-time reaper
+      // is never built. Daemons spawned by this instance are still
+      // `setsid`-detached, but they will not be added to the
+      // catalog and therefore won't be reattached on the next launch.
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session")
+        .info("sessions.json already locked by another instance; entering no-resume mode")
+      self.sessionStore = nil
+      return
+    } catch {
+      // Any other init failure (open(2) refused, flock errno that
+      // isn't EWOULDBLOCK) — log and fall through to the same
+      // no-resume mode. Aligns with the original `try?` semantics:
+      // the worst outcome is a fresh shell per pane.
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session")
+        .error("SessionStore init failed: \(String(describing: error), privacy: .public)")
+      self.sessionStore = nil
+      return
+    }
+    self.sessionStore = sessionStore
+    guard let sessionStore else { return }
+    // Seed the coordinator's in-memory catalog from disk once at bootstrap.
+    // A read error (corrupt file, EIO under sandbox revoke) degrades to an
+    // empty catalog rather than blocking the launch — same failure mode as
+    // the previous direct-load path inside `SessionReaper.sweep`.
+    let initialCatalog: SessionCatalog
+    do {
+      initialCatalog = try sessionStore.load()
+    } catch {
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session")
+        .error("SessionStore.load failed at bootstrap: \(String(describing: error), privacy: .public)")
+      initialCatalog = .empty
+    }
+    let coordinator = SessionCoordinator(store: sessionStore, initial: initialCatalog)
+    self.sessionCoordinator = coordinator
+    // Wire the coordinator into the engine so every fresh spawn /
+    // reattach / restore writes a row through the debounced store. The
+    // engine builds before this function runs (see `bringUp`), so we set
+    // the property after construction instead of through `init` — the
+    // engine treats nil as "no-resume mode" and silently skips writes.
+    engine.sessionCoordinator = coordinator
+    self.sessionLifecycle = SessionLifecycle(
+      manager: hierarchyManager,
+      ghosttyRuntime: ghostty,
+      coordinator: coordinator
+    )
+
+    let reaper = SessionReaper(coordinator: coordinator)
+    let livePaneIDs = Self.livePaneIDs(in: hierarchyManager.catalog)
+    do {
+      // Pass the current hierarchy's pane ids so the reaper can kill any
+      // alive daemon whose paneID no longer maps to a surface — without
+      // this, an out-of-sync sessions.json vs hierarchy.json would leak
+      // daemons until the 7-day stale window catches them. The returned
+      // reattach states are no longer consumed: bringup re-attaches every
+      // pane via `zmx attach`, so there is no per-pane reattach queue to seed.
+      _ = try reaper.sweep(livePaneIDs: livePaneIDs)
+    } catch {
+      // A corrupt catalog or transient I/O error must not block app
+      // launch — the worst outcome is a fresh shell per pane, which is
+      // touch-code's pre-M2 behaviour. Log via os.Logger so a chronic
+      // failure surfaces in Console.
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.reaper")
+        .error("SessionReaper.sweep failed: \(String(describing: error), privacy: .public)")
+    }
+    // Defense-in-depth: catch daemons whose socket files outlive both
+    // the catalog and the hierarchy (e.g. crash mid-spawn before the row
+    // was persisted, or daemons left by a pre-M6 build whose catalog row
+    // was wiped). Runs after `sweep` so the catalog is already pruned to
+    // the surviving set — anything still on disk after this point is a
+    // true filesystem orphan.
+    reaper.sweepFilesystemOrphans(livePaneIDs: livePaneIDs)
+  }
+
+  /// User-initiated "Forget all sessions" from Settings → General. Per
+  /// the spec (R16 / AC11), the action must terminate every recorded
+  /// daemon, unlink each socket, AND empty the catalog — otherwise the
+  /// next `detachAllForQuit` rebuilds the catalog from the still-alive
+  /// daemons (`collectLiveClients`) and effectively undoes the "forget".
+  ///
+  /// Order: kill + unlink first, then clear the catalog. If the kill
+  /// step fails per-daemon (already-dead socket, etc.) the launch-time
+  /// FS-orphan reaper catches the leftover. `coordinator.forgetAllSessions`
+  /// drives both steps in one atomic-from-the-UI's-perspective call.
+  func forgetAllPersistedSessions() {
+    guard let coordinator = sessionCoordinator else { return }
+    do {
+      try coordinator.forgetAllSessions { socketPath in
+        SessionReaper.sendOneShotKill(socketPath: socketPath)
+        _ = socketPath.withCString { unlink($0) }
+      }
+    } catch {
+      Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.coordinator")
+        .error(
+          "Forget all sessions failed to persist: \(String(describing: error), privacy: .public)"
+        )
+    }
+  }
+
   /// Flushes all pending debounced writes. Called by `applicationWillTerminate`.
   /// Any debounced write that hasn't landed within 500 ms of quit would
   /// otherwise be dropped; each store below has its own debounce, so we
   /// drain them explicitly here.
+  ///
+  /// The pane-daemon disposition (detach / snapshot / kill) is handled upstream by
+  /// `AppDelegate.applicationShouldTerminate(_:)` so it can pause for the quit
+  /// confirmation dialog. By the time this runs the daemons are already in their
+  /// chosen post-quit state; we only flush the remaining persisted-state stores here.
   func flushAllPersistedState() {
     // Cancel notification background Tasks first so none can race the
     // final flush by mutating store state mid-write.
@@ -848,11 +1092,20 @@ final class AppState {
     didBecomeActiveObserverToken = nil
     worktreeHeadWatcherSyncTask?.cancel()
     worktreeHeadWatcher.stopAll()
+    worktreeWorkingTreeWatcherSyncTask?.cancel()
+    worktreeWorkingTreeWatcher.stopAll()
 
     settingsStore.flush()
     shortcutsStore.flush()
     notificationStore.flush()
     catalogStore.flushPending()
+    // Safety net for the SessionStore: the canonical quit path calls
+    // `detachAllForQuit` → `coordinator.replace` → `saveNow` which already
+    // cancels any pending write. This handles the edge case where
+    // termination skips the lifecycle hook (e.g. an unrecoverable error
+    // path tears the app down directly) and a recordLive timer is still
+    // armed. No-op when nothing is pending.
+    sessionCoordinator?.flushPending()
   }
 
   /// Project the live `Catalog` plus `lastFocusedPane` lookup into a
@@ -1016,9 +1269,10 @@ final class AppState {
   }
 
   /// `(worktreeID → path)` for every non-archived Worktree across all
-  /// Projects. Drives `WorktreeHeadWatcher.setWorktrees(_:)`; archived
-  /// rows are filtered out because they are hidden in the sidebar and
-  /// any HEAD change in their on-disk path is irrelevant until the user
+  /// Projects. Drives both `WorktreeHeadWatcher.setWorktrees(_:)` and
+  /// `WorktreeWorkingTreeWatcher.setWorktrees(_:)` (identical watched set);
+  /// archived rows are filtered out because they are hidden in the sidebar
+  /// and any on-disk change in their path is irrelevant until the user
   /// un-archives. Path is the canonical form already stored on the row.
   fileprivate static func headWatcherPairs(from catalog: Catalog) -> [WorktreeID: String] {
     var pairs: [WorktreeID: String] = [:]
@@ -1041,6 +1295,33 @@ final class AppState {
     let manager = hierarchyManager
     let watcher = worktreeHeadWatcher
     worktreeHeadWatcherSyncTask = Task { @MainActor in
+      var last: [WorktreeID: String] = [:]
+      while !Task.isCancelled {
+        let current = Self.headWatcherPairs(from: manager.catalog)
+        if current != last {
+          watcher.setWorktrees(current.map { (id: $0.key, path: $0.value) })
+          last = current
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+          withObservationTracking {
+            _ = Self.headWatcherPairs(from: manager.catalog)
+          } onChange: {
+            cont.resume()
+          }
+        }
+      }
+    }
+  }
+
+  /// Mirror task that keeps `WorktreeWorkingTreeWatcher`'s set in sync with
+  /// the catalog, reusing the same non-archived `(id → path)` projection as
+  /// the HEAD watcher. Same pre-arm-sample / re-arm pattern as
+  /// `startHeadWatcherSync` so a mutation between sync and re-arm is caught.
+  private func startWorkingTreeWatcherSync() {
+    worktreeWorkingTreeWatcherSyncTask?.cancel()
+    let manager = hierarchyManager
+    let watcher = worktreeWorkingTreeWatcher
+    worktreeWorkingTreeWatcherSyncTask = Task { @MainActor in
       var last: [WorktreeID: String] = [:]
       while !Task.isCancelled {
         let current = Self.headWatcherPairs(from: manager.catalog)
@@ -1121,11 +1402,17 @@ final class AppState {
       }
     )
     self.agentStateStore = registry
+    // Pre-seed the registry from the last quit's agent snapshot (M6.T6.5).
+    // Each persisted record carries the foreground PGID at capture time;
+    // `kill(pid, 0)` filters out agents whose processes exited between
+    // launches so we never restore a phantom "waiting for input" badge.
+    Self.seedRestoredAgents(coordinator: self.sessionCoordinator, registry: registry)
     // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
     // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
     // pty child from the previous session can't haunt the panel. The
-    // registry starts empty and refills from AgentBinder events as the
-    // user runs agents in this session.
+    // registry refills from AgentBinder events as the user runs agents in
+    // this session; the seed above only nudges the UI into the right
+    // initial state until the next event lands.
     let binder = AgentBinder(
       client: hierarchy,
       currentAgentKind: { [weak manager] paneID in
@@ -1179,6 +1466,42 @@ final class AppState {
     registry: AgentStateStore
   ) {
     registry.onTerminalEvent(event)
+  }
+
+  /// Filter the previous quit's agent snapshot through a liveness check
+  /// and hand the survivors to `AgentStateStore.seedRestored`.
+  ///
+  /// Liveness is keyed on the pane's zmx daemon, not the agent process.
+  /// On the External-backend branch the agent runs inside the daemon's PTY
+  /// (it is a child of the daemon's shell), and `PaneSurface` cannot read a
+  /// foreground PID, so the captured `record.pid` is always `0`. The reaper's
+  /// launch sweep has already probed every recorded socket and left only the
+  /// surviving daemons in `coordinator.catalog.sessions`; a pane present there
+  /// has a reachable daemon, so the agent it hosted is alive too. Agents whose
+  /// daemon did not survive are dropped. Unknown enum raws (a future build's
+  /// `kindRaw` / `stateRaw`) are likewise dropped instead of failing the launch.
+  @MainActor
+  private static func seedRestoredAgents(
+    coordinator: SessionCoordinator?,
+    registry: AgentStateStore
+  ) {
+    guard let coordinator else { return }
+    let restored = coordinator.restoredAgents
+    guard !restored.isEmpty else { return }
+    // Sessions that survived the reaper sweep — their daemons answered
+    // `connect(2)`, so the agents running inside their PTYs are still alive.
+    let aliveSessions = coordinator.catalog.sessions
+    var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
+    seeds.reserveCapacity(restored.count)
+    for (paneID, record) in restored {
+      guard aliveSessions[paneID.raw.uuidString] != nil else { continue }
+      guard
+        let kind = AgentKind(rawValue: record.kindRaw),
+        let state = AgentStateStore.AgentRuntimeState(rawValue: record.stateRaw)
+      else { continue }
+      seeds.append((paneID: paneID, kind: kind, state: state))
+    }
+    registry.seedRestored(seeds)
   }
 
   /// Active-agents T6: long-running focus observer for `AgentStateStore`.
@@ -1264,8 +1587,8 @@ final class GhosttyBackedHierarchyRuntime: HierarchyRuntime {
     self.engine = engine
   }
 
-  func ensureSurface(for pane: Pane, in worktree: Worktree, env: [String: String]) throws {
-    _ = try engine?.ensureSurface(for: pane, in: worktree, env: env)
+  func ensureSurface(for pane: Pane, in worktree: Worktree, env: [String: String]) async throws {
+    _ = try await engine?.ensureSurface(for: pane, in: worktree, env: env)
   }
 
   func closeSurface(for paneID: PaneID) {

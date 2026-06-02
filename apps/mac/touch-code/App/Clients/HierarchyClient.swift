@@ -184,13 +184,32 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
       _ workingDirectory: String, _ initialCommand: String?
-    ) throws -> PaneID
+    ) async throws -> PaneID
   var splitPane:
     @MainActor @Sendable (
       _ paneID: PaneID, _ direction: SplitTree<PaneID>.NewDirection,
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
       _ workingDirectory: String, _ initialCommand: String?
+    ) async throws -> PaneID
+  /// Synchronous catalog half of `openPane`: inserts the Pane row into the
+  /// Tab (split tree + pane array) and persists, without the async zmx
+  /// surface bringup. Callers seeding a pane from a synchronous reducer body
+  /// use this so the Pane is observable before the next `.selectionChanged`
+  /// fires — closing the `RootFeature.autoSeedTabAndPaneIfNeeded` double-seed
+  /// race. Pair with `ensurePaneSurface` to bring the surface up afterwards.
+  var createPaneRow:
+    @MainActor @Sendable (
+      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
+      _ workingDirectory: String, _ initialCommand: String?
     ) throws -> PaneID
+  /// Async surface-bringup half of `openPane`: spawns the zmx daemon and
+  /// attaches the libghostty surface for an already-inserted Pane row.
+  /// Idempotent — a no-op when the surface already exists.
+  var ensurePaneSurface:
+    @MainActor @Sendable (
+      _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
+      _ inProject: ProjectID
+    ) async throws -> Void
   var closePane:
     @MainActor @Sendable (
       _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
@@ -357,6 +376,18 @@ nonisolated struct HierarchyClient: Sendable {
   var resizePane:
     @MainActor @Sendable (
       _ paneID: PaneID, _ direction: ResizeDirection, _ amount: Double
+    ) throws -> Void
+
+  /// Re-positions an existing Pane next to `anchorID`, splitting the anchor
+  /// along `direction`. Pure split-tree reshape — the moved pane's surface
+  /// stays alive (no teardown / re-spawn). Backs the pane drag-and-drop
+  /// gesture; self-moves and unknown ids resolve to a no-op / throw inside
+  /// the manager.
+  var movePane:
+    @MainActor @Sendable (
+      _ paneID: PaneID, _ anchorID: PaneID,
+      _ direction: SplitTree<PaneID>.NewDirection,
+      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
     ) throws -> Void
 
   /// Clears the Tab's zoomed-pane flag. Paired with `focusPane` (which
@@ -615,7 +646,7 @@ extension HierarchyClient {
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
           ?? [:]
-        return try manager.openPane(
+        return try await manager.openPane(
           in: tabID, in: worktreeID, in: projectID,
           workingDirectory: cwd, initialCommand: initial, env: env
         )
@@ -627,10 +658,26 @@ extension HierarchyClient {
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
           ?? [:]
-        return try manager.splitPane(
+        return try await manager.splitPane(
           paneID, direction: direction,
           in: tabID, in: worktreeID, in: projectID,
           workingDirectory: cwd, initialCommand: initial, env: env
+        )
+      },
+      createPaneRow: { tabID, worktreeID, projectID, cwd, initial in
+        try manager.createPaneRow(
+          in: tabID, in: worktreeID, in: projectID,
+          workingDirectory: cwd, initialCommand: initial
+        )
+      },
+      ensurePaneSurface: { [weak settings] paneID, tabID, worktreeID, projectID in
+        // Mirror openPane's M8 env resolution — this is the surface-bringup
+        // half, so Project-defined envVars must still reach the spawned shell.
+        let env: [String: String] =
+          settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
+          ?? [:]
+        try await manager.ensurePaneSurface(
+          paneID, in: tabID, in: worktreeID, in: projectID, env: env
         )
       },
       closePane: { paneID, tabID, worktreeID, projectID in
@@ -728,6 +775,12 @@ extension HierarchyClient {
       },
       resizePane: { paneID, direction, amount in
         try manager.resizePane(paneID, direction: direction, amount: amount)
+      },
+      movePane: { paneID, anchorID, direction, tabID, worktreeID, projectID in
+        try manager.movePane(
+          paneID, relativeTo: anchorID, direction: direction,
+          in: tabID, in: worktreeID, in: projectID
+        )
       },
       unzoomTab: { tabID, worktreeID, projectID in
         try manager.unfocusPane(in: tabID, in: worktreeID, in: projectID)
@@ -849,7 +902,7 @@ extension HierarchyClient {
     let preSubscribedStream: AsyncStream<TerminalEvent>? =
       onFinishedNeeded ? terminalClient?.events() : nil
 
-    let spawnedPaneID = try dispatchScript(
+    let spawnedPaneID = try await dispatchScript(
       script: script,
       worktreeID: worktreeID,
       projectID: projectID,
@@ -899,7 +952,7 @@ extension HierarchyClient {
     env: [String: String],
     manager: HierarchyManager,
     terminalClient: TerminalClient?
-  ) throws -> PaneID? {
+  ) async throws -> PaneID? {
     // initialCommand is replayed by TerminalEngine via `sendInput(command + "\n")`
     // into an interactive shell, so the shell stays at a prompt after the user's
     // command finishes and `paneExited` never fires. When the script has an
@@ -912,7 +965,7 @@ extension HierarchyClient {
       policy: script.resolvedOnFinished
     )
 
-    func openInNewTab() throws -> PaneID {
+    func openInNewTab() async throws -> PaneID {
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID,
         name: script.displayName,
@@ -927,7 +980,7 @@ extension HierarchyClient {
         icon: script.resolvedSystemImage,
         lock: .script
       )
-      return try manager.openPane(
+      return try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
         workingDirectory: cwd,
         initialCommand: spawnCommand,
@@ -937,7 +990,7 @@ extension HierarchyClient {
 
     switch script.target {
     case .newTab:
-      return try openInNewTab()
+      return try await openInNewTab()
 
     case .focused:
       // sendInput needs the focused pane and the terminal runtime; absent
@@ -951,11 +1004,11 @@ extension HierarchyClient {
       runScriptLogger.info(
         "target=.focused fell back to .newTab — \(terminalClient == nil ? "no TerminalClient" : "no focused pane in worktree", privacy: .public)"
       )
-      return try openInNewTab()
+      return try await openInNewTab()
 
     case .split:
       if let anchor = focusedAnchor(worktreeID: worktreeID, in: manager) {
-        return try manager.splitPane(
+        return try await manager.splitPane(
           anchor.paneID,
           direction: mapSplitDirection(script.direction),
           in: anchor.tabID, in: worktreeID, in: projectID,
@@ -967,7 +1020,7 @@ extension HierarchyClient {
       runScriptLogger.info(
         "target=.split fell back to .newTab — no focused pane in worktree"
       )
-      return try openInNewTab()
+      return try await openInNewTab()
     }
   }
 
@@ -1133,7 +1186,7 @@ extension HierarchyClient {
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID, name: tabName
       )
-      paneID = try manager.openPane(
+      paneID = try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
         workingDirectory: cwd,
         initialCommand: wrapped,
@@ -1357,6 +1410,8 @@ extension HierarchyClient: DependencyKey {
     setPaneCommandBusy: { _, _ in },
     openPane: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     splitPane: { _, _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    createPaneRow: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    ensurePaneSurface: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closePane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     focusPane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     focusSurfaceView: { _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1382,6 +1437,7 @@ extension HierarchyClient: DependencyKey {
     moveTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     equalizeTabSplits: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     resizePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    movePane: { _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeArchivedWithLifecycle: { _, _, _ in
@@ -1444,6 +1500,8 @@ extension HierarchyClient: DependencyKey {
     setPaneCommandBusy: unimplemented("HierarchyClient.setPaneCommandBusy"),
     openPane: unimplemented("HierarchyClient.openPane", placeholder: PaneID()),
     splitPane: unimplemented("HierarchyClient.splitPane", placeholder: PaneID()),
+    createPaneRow: unimplemented("HierarchyClient.createPaneRow", placeholder: PaneID()),
+    ensurePaneSurface: unimplemented("HierarchyClient.ensurePaneSurface"),
     closePane: unimplemented("HierarchyClient.closePane"),
     focusPane: unimplemented("HierarchyClient.focusPane"),
     // Pure visual side-effect (focuses an NSView; no return value, no test
@@ -1480,6 +1538,7 @@ extension HierarchyClient: DependencyKey {
     moveTab: unimplemented("HierarchyClient.moveTab"),
     equalizeTabSplits: unimplemented("HierarchyClient.equalizeTabSplits"),
     resizePane: unimplemented("HierarchyClient.resizePane"),
+    movePane: unimplemented("HierarchyClient.movePane"),
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
     setWorktreeArchivedWithLifecycle: unimplemented(

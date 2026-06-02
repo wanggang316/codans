@@ -1,4 +1,4 @@
-.PHONY: help bootstrap build-ghostty generate build run-app format lint check check-rename test clean build-cli archive release bump-version regen-completions
+.PHONY: help bootstrap build-ghostty build-zmx generate build run-app format lint check check-rename test clean build-cli archive release bump-version regen-completions
 
 # Use full Xcode.app when xcode-select points at Command Line Tools only.
 # See DEC-10 in docs/exec-plans/0001-bootstrap-monorepo.md.
@@ -8,6 +8,7 @@ help:
 	@echo "apps/mac Makefile targets (usually invoked via top-level 'make mac-*'):"
 	@echo "  bootstrap        - Init submodules + mise install"
 	@echo "  build-ghostty    - Build GhosttyKit.xcframework (fingerprint-cached)"
+	@echo "  build-zmx        - Build vendored zmx binary (fingerprint-cached)"
 	@echo "  generate         - tuist install + tuist generate"
 	@echo "  build            - Build touch-code app + tc CLI"
 	@echo "  build-cli        - Build tc only"
@@ -28,11 +29,14 @@ bootstrap:
 build-ghostty:
 	./scripts/build-ghostty.sh
 
+build-zmx:
+	./scripts/build-zmx.sh
+
 generate: bootstrap
 	mise exec -- tuist install
 	mise exec -- tuist generate --no-open
 
-build: generate
+build: generate build-zmx
 	xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug build
 	xcodebuild -workspace touch-code.xcworkspace -scheme tc -configuration Debug build
 
@@ -55,10 +59,10 @@ regen-completions: build-cli
 run-app: build
 	@APP=$$(xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug -showBuildSettings 2>/dev/null | awk '$$1=="BUILT_PRODUCTS_DIR"{d=$$3} $$1=="FULL_PRODUCT_NAME"{p=$$3} END{print d "/" p}') && open "$$APP"
 
-archive: generate
+archive: generate build-zmx
 	./scripts/release.sh archive
 
-release: generate
+release: generate build-zmx
 	./scripts/release.sh release
 
 bump-version:

@@ -20,7 +20,14 @@ final class FakeHierarchyRuntime: HierarchyRuntime {
   var livePaneIDs: Set<PaneID> = []
   var currentWorkingDirectories: [PaneID: String] = [:]
 
-  func ensureSurface(for pane: Pane, in worktree: Worktree, env: [String: String]) throws {
+  // swiftlint:disable async_without_await
+  // The `async` keyword is required to conform to `HierarchyRuntime`,
+  // whose `ensureSurface` is `async throws` (the live implementation
+  // spawns a `zmx serve` daemon and awaits its control-socket
+  // handshake). The fake body has no await — keep the marker so lint
+  // doesn't trip on a deliberate protocol-conformance shape mismatch.
+  func ensureSurface(for pane: Pane, in worktree: Worktree, env: [String: String]) async throws {
+    // swiftlint:enable async_without_await
     ensureSurfaceCalls.append(
       SurfaceCall(paneID: pane.id, worktreeID: worktree.id, env: env)
     )

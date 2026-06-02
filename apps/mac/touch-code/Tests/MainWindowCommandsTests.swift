@@ -129,13 +129,14 @@ struct MainWindowCommandsTests {
     await store.finish()
   }
 
-  // MARK: - ⌘⇧G (Toggle Git Viewer)
+  // MARK: - ⌘⇧G (Git Viewer)
 
   @Test
-  func commandShiftGDispatchesDiffInspectorToggleForCurrentWorktree() async {
+  func commandShiftGIsNoOpWhenNoGitViewerConfigured() async {
     // Mirrors the ⌘⇧G button body:
-    // `store.send(.diffInspectorToggledForCurrentWorktree)`. The reducer flips
-    // the app-level `state.diffInspectorVisible` for the built-in overlay.
+    // `store.send(.diffInspectorToggledForCurrentWorktree)`. With the global
+    // `defaultGitViewerID` unset (Default Git Viewer = None) the chord is a
+    // no-op — the built-in overlay no longer exists, so nothing is dispatched.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let worktree = Worktree(id: worktreeID, name: "w", path: "/repo")
@@ -154,14 +155,12 @@ struct MainWindowCommandsTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      // No external git viewer configured — chord falls through to the
-      // built-in overlay toggle that this test covers.
+      // No git viewer configured — chord is a no-op.
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
     }
 
-    await store.send(.diffInspectorToggledForCurrentWorktree) {
-      $0.diffInspectorVisible = true
-    }
+    await store.send(.diffInspectorToggledForCurrentWorktree)
+    // No receive → no .editor(...) dispatched.
     await store.finish()
   }
 

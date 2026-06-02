@@ -1,4 +1,4 @@
-.PHONY: help bootstrap mac-bootstrap mac-build-ghostty mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-clean web-install web-dev web-build web-preview web-typecheck
+.PHONY: help bootstrap mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-clean web-install web-dev web-build web-preview web-typecheck
 
 MAC_APP_DIR := apps/mac
 WEB_DIR     := apps/website
@@ -14,6 +14,7 @@ help:
 	@echo "  mac-release       - Full release pipeline: archive → notarize → DMG → staple"
 	@echo "  mac-bump-version  - VERSION=x.y.z; updates MARKETING_VERSION + build number"
 	@echo "  mac-build-ghostty - Build GhosttyKit.xcframework"
+	@echo "  mac-build-zmx     - Build vendored zmx binary"
 	@echo "  mac-format        - swift-format in-place"
 	@echo "  mac-lint          - swiftlint"
 	@echo "  mac-check         - format + lint"
@@ -31,7 +32,7 @@ bootstrap:
 	git submodule update --init --recursive
 	mise install
 
-mac-bootstrap mac-build-ghostty mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-format mac-lint mac-check mac-test mac-clean:
+mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-format mac-lint mac-check mac-test mac-clean:
 	$(MAKE) -C $(MAC_APP_DIR) $(subst mac-,,$@)
 
 mac-bump-version:

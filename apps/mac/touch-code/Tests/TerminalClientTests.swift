@@ -42,10 +42,10 @@ struct TerminalClientTests {
   }
 
   @Test
-  func liveEnsureSurfaceThrowsWhenAddressUnknown() {
+  func liveEnsureSurfaceThrowsWhenAddressUnknown() async {
     let (client, _) = makeLiveEngine()
     do {
-      try client.ensureSurface(
+      try await client.ensureSurface(
         PaneID(), TabID(), WorktreeID(), ProjectID()
       )
       Issue.record("ensureSurface should throw for unknown address")

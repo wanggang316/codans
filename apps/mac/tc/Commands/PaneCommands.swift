@@ -55,7 +55,8 @@ struct PaneCommand: AsyncParsableCommand {
       PaneReset.self,
       SendCommand.self,
       SendKeyCommand.self,
-      ReadCommand.self,
+      PaneRead.self,
+      PaneInfo.self,
       CaptureCommand.self,
     ]
   )
@@ -152,19 +153,62 @@ struct PaneFocus: AsyncParsableCommand {
 struct PaneClose: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "close",
-    abstract: "Close a pane."
+    abstract: "Close a pane and kill its zmx daemon.",
+    discussion: """
+      Sends `.kill` to the pane's zmx daemon (bounded ≤ 2 s wait for the
+      daemon's control socket to vanish), drops the persisted session
+      catalog entry, and removes the pane from the in-memory hierarchy.
+
+      Distinct from the UI X-button path, which detaches the libghostty
+      surface so a future attach can resume the same daemon. Use this
+      verb when you want the daemon gone.
+      """
   )
 
   @OptionGroup var globals: GlobalOptions
   @OptionGroup var args: PaneLocatorArgs
 
   func run() async throws {
-    await PaneLocatorFlow.run(
-      globals: globals,
-      args: args,
-      method: .hierarchyClosePane,
-      verbLabel: "closed"
-    )
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let paneUUID = try await AliasResolver.resolve(args.pane, kind: .pane, client: client)
+      // Best-effort locator: when the caller didn't override the
+      // project/worktree/tab triple, send only the paneID and let the
+      // handler walk the catalog server-side. Saves a round-trip on the
+      // common `tc pane close <id>` shape.
+      let request: IPC.PaneCloseRequest
+      if args.project != "current" || args.worktree != "current" || args.tab != "current" {
+        let path = try await PaneLocatorFlow.resolvePanePath(
+          paneUUID: paneUUID,
+          args: args,
+          client: client
+        )
+        request = IPC.PaneCloseRequest(
+          paneID: path.paneID,
+          tabID: path.tabID,
+          worktreeID: path.worktreeID,
+          projectID: path.projectID
+        )
+      } else {
+        request = IPC.PaneCloseRequest(paneID: PaneID(raw: paneUUID))
+      }
+      let response: IPC.PaneCloseResponse = try await client.call(.paneClose, params: request)
+      if response.closed {
+        try Renderer.emit(
+          IDMessage(
+            id: paneUUID.uuidString,
+            message: "closed pane \(paneUUID.uuidString)"
+          ),
+          mode: globals.renderMode
+        )
+      } else {
+        throw CLIError(
+          code: .notFound,
+          message: "no pane found for \(paneUUID.uuidString)"
+        )
+      }
+    }
   }
 }
 
@@ -322,6 +366,142 @@ enum PaneLocatorFlow {
       throw CLIError(code: .notFound, message: "pane \(paneUUID.uuidString) not found")
     }
     return path
+  }
+}
+
+struct PaneInfo: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "info",
+    abstract: "Probe a pane's zmx daemon for shell pid, pwd, and (when available) cursor + modes.",
+    discussion: """
+      Round-trips through the pane's zmx daemon rather than the catalog,
+      so a stale catalog row does not leak past as live truth. The
+      daemon's frozen Info payload carries pid + cwd today; cursor and
+      modes are reported as null until a future tag carries them, in
+      which case callers should fall back to `tc pane read --raw` and
+      parse the vt-format dump.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Pane id, @label, or 'current'.")
+  var pane: String = "current"
+
+  func run() async throws {
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let response: IPC.PaneInfoResponse = try await client.call(
+        .paneInfo,
+        params: IPC.PaneInfoRequest(paneID: PaneID(raw: uuid))
+      )
+      try Renderer.emit(PaneInfoRenderable(response: response), mode: globals.renderMode)
+    }
+  }
+}
+
+struct PaneInfoRenderable: Encodable, CustomStringConvertible {
+  let response: IPC.PaneInfoResponse
+  private enum Key: String, CodingKey {
+    case paneID, shellPid, pwd, cursor, modes
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: Key.self)
+    try container.encode(response.paneID.description, forKey: .paneID)
+    try container.encode(response.shellPid, forKey: .shellPid)
+    try container.encode(response.pwd, forKey: .pwd)
+    try container.encode(response.cursor, forKey: .cursor)
+    try container.encode(response.modes, forKey: .modes)
+  }
+
+  var description: String {
+    var lines: [String] = []
+    lines.append("pane:    \(response.paneID.description)")
+    lines.append("shell:   pid=\(response.shellPid)")
+    lines.append("pwd:     \(response.pwd)")
+    if let cursor = response.cursor {
+      lines.append("cursor:  row=\(cursor.row) col=\(cursor.col)")
+    }
+    if let modes = response.modes, !modes.isEmpty {
+      let pairs = modes.sorted { $0.key < $1.key }
+        .map { "\($0.key)=\($0.value ? "on" : "off")" }
+        .joined(separator: " ")
+      lines.append("modes:   \(pairs)")
+    }
+    return lines.joined(separator: "\n")
+  }
+}
+
+struct PaneRead: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "read",
+    abstract: "Read serialized terminal state from a pane's zmx daemon.",
+    discussion: """
+      Returns the daemon's serializeTerminalState dump. Pass --raw for the
+      vt-format dump (ANSI escapes, cursor, modes, OSC 7 preserved);
+      omit it for the plain-text dump. --tail N keeps the last N lines.
+      --range is reserved for future viewport / scrollback splitting; the
+      daemon currently returns the full dump regardless of range.
+      """
+  )
+
+  enum Range: String, ExpressibleByArgument, CaseIterable {
+    case visible
+    case scrollback
+    case all
+  }
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Pane id, @label, or 'current'.")
+  var pane: String = "current"
+  @Flag(name: .long, help: "Return the vt-format dump with ANSI escapes preserved.")
+  var raw: Bool = false
+  @Option(name: .long, help: "Keep only the last N newline-delimited lines.")
+  var tail: Int?
+  @Option(name: .long, help: "Range: visible, scrollback, or all (default).")
+  var range: Range = .all
+
+  func run() async throws {
+    await CommandRunner.run {
+      if let tail, tail <= 0 {
+        throw CLIError(code: .userError, message: "--tail must be a positive integer")
+      }
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let wireRange: IPC.PaneReadRange = {
+        switch range {
+        case .visible: return .visible
+        case .scrollback: return .scrollback
+        case .all: return .all
+        }
+      }()
+      let response: IPC.PaneReadResponse = try await client.call(
+        .paneRead,
+        params: IPC.PaneReadRequest(
+          paneID: PaneID(raw: uuid),
+          range: wireRange,
+          tail: tail,
+          raw: raw
+        )
+      )
+      // --raw dumps the literal byte stream so callers can grep for
+      // ANSI codes; structured renderers (json) get the same content
+      // wrapped in metadata.
+      try Renderer.emitObject(
+        [
+          "paneID": uuid.uuidString,
+          "format": response.format.rawValue,
+          "range": range.rawValue,
+          "content": response.content,
+        ],
+        mode: globals.renderMode
+      ) { obj in
+        obj["content"] as? String ?? ""
+      }
+    }
   }
 }
 

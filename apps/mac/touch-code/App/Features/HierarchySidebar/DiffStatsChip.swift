@@ -7,15 +7,9 @@ import SwiftUI
 /// responder, blue fill, white text) the green/red colours fold to
 /// `.secondary` so the digits stay legible against the highlight rather than
 /// fighting it.
-///
-/// When `onTap` is non-nil the chip wraps in a Button + hairline border so it
-/// reads as tappable (mirrors the chord-hint chip on the right edge of the
-/// row). The tap opens the project's Git Viewer for that worktree — wiring
-/// lives at the call site (`HierarchySidebarView.diffStatsChip`).
 struct DiffStatsChip: View {
   let additions: Int
   let deletions: Int
-  let onTap: (() -> Void)?
 
   @Environment(\.backgroundProminence) private var backgroundProminence
 
@@ -26,34 +20,28 @@ struct DiffStatsChip: View {
     let deletionsTint: AnyShapeStyle =
       isEmphasized ? AnyShapeStyle(.secondary) : AnyShapeStyle(DiffStatColor.deletions)
 
-    let counts = HStack(spacing: 2) {
+    HStack(spacing: 2) {
       if additions > 0 {
-        Text("+\(additions)").foregroundStyle(additionsTint)
+        Text("+\(additions)")
+          .foregroundStyle(additionsTint)
+          // Rolls the digits when the count changes; `value:` gives the
+          // transition direction (count up scrolls one way, down the other).
+          .contentTransition(.numericText(value: Double(additions)))
+          .transition(.opacity)
       }
       if deletions > 0 {
-        Text("−\(deletions)").foregroundStyle(deletionsTint)
+        Text("−\(deletions)")
+          .foregroundStyle(deletionsTint)
+          .contentTransition(.numericText(value: Double(deletions)))
+          .transition(.opacity)
       }
     }
     .font(.system(size: 10).monospacedDigit())
-
-    let bordered =
-      counts
-      .padding(.horizontal, 4)
-      .padding(.vertical, 1)
-      .overlay(
-        RoundedRectangle(cornerRadius: 3)
-          .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-      )
-
-    Group {
-      if let onTap {
-        Button(action: onTap) { bordered }
-          .buttonStyle(.plain)
-          .help("Open Git Viewer")
-      } else {
-        counts
-      }
-    }
+    // Drive the digit roll + appear/disappear fade. Applied outside the `if`
+    // so a 0 ↔ non-0 swap (Text inserted / removed) animates too. System
+    // Reduce Motion degrades `numericText` to a plain fade automatically.
+    .animation(.snappy(duration: 0.28), value: additions)
+    .animation(.snappy(duration: 0.28), value: deletions)
     .accessibilityLabel("\(additions) additions, \(deletions) deletions")
   }
 }

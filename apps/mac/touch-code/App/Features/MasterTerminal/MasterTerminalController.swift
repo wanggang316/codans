@@ -85,40 +85,74 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
 
   // MARK: - Surface
 
+  /// Master-Terminal-scoped PaneID. Synthetic — the panel lives outside
+  /// the Catalog, so this UUID is never persisted, looked up, or routed.
+  /// Stored on the controller (not freshly minted on each bringup
+  /// attempt) so a deferred async surface install reuses the same daemon
+  /// the previous attempt may have already started.
+  private lazy var masterPaneID: PaneID = PaneID(raw: UUID())
+  /// Becomes true once the async bring-up Task has been scheduled so
+  /// repeated summons before the first surface arrives don't fan out
+  /// multiple `zmx serve` daemons.
+  private var surfaceBringupInFlight: Bool = false
+
   /// Build the Ghostty surface once and embed it. Returns the surface
-  /// regardless of whether it was newly built or already existed.
-  /// Returns nil only if surface allocation failed; callers should
-  /// gracefully degrade (panel still slides in, just without content).
+  /// when it is already wired; returns nil while the daemon-backed
+  /// bringup is still in flight. Callers gracefully degrade — the panel
+  /// still slides in, just without terminal content on the first summon.
   private func ensureSurface() -> PaneSurface? {
     if let existing = paneSurface { return existing }
-    do {
-      let surface = try PaneSurface(
-        runtime: runtime,
-        // Synthetic PaneID — Master Terminal lives outside the Catalog,
-        // so this UUID is never persisted, looked up, or routed. It exists
-        // only because PaneSurface's libghostty userdata wiring is
-        // PaneID-shaped.
-        paneID: PaneID(raw: UUID()),
-        workingDirectory: MasterTerminalBootstrap.userDirectory.path
-      )
-      paneSurface = surface
+    scheduleSurfaceBringup()
+    return nil
+  }
 
-      guard let contentView = panel.contentView else { return surface }
-      surface.view.translatesAutoresizingMaskIntoConstraints = false
-      contentView.addSubview(surface.view)
-      NSLayoutConstraint.activate([
-        surface.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-        surface.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-        surface.view.topAnchor.constraint(equalTo: contentView.topAnchor),
-        surface.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-      ])
-      return surface
-    } catch {
-      Logger.masterTerminal.error(
-        "surface allocation failed: \(String(describing: error), privacy: .public)"
-      )
-      return nil
+  private func scheduleSurfaceBringup() {
+    guard !surfaceBringupInFlight else { return }
+    surfaceBringupInFlight = true
+    let paneID = masterPaneID
+    Task { @MainActor [weak self] in
+      defer { self?.surfaceBringupInFlight = false }
+      guard let self else { return }
+      do {
+        // Exec backend: libghostty forks `zmx attach <session>` and owns the
+        // local PTY + sizing; the shell lives in the daemon. Same path as a
+        // regular pane (see TerminalEngine.ensureSurface).
+        let session = ZmxAttachCommand.session(for: paneID)
+        let command = ZmxAttachCommand.build(
+          zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
+          session: session,
+          userCommand: nil
+        )
+        let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
+        try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
+        let surface = try PaneSurface(
+          runtime: self.runtime,
+          paneID: paneID,
+          session: session,
+          command: command,
+          workingDirectory: MasterTerminalBootstrap.userDirectory.path,
+          env: ["ZMX_DIR": zmxDir.path]
+        )
+        self.installSurface(surface)
+      } catch {
+        Logger.masterTerminal.error(
+          "surface allocation failed: \(String(describing: error), privacy: .public)"
+        )
+      }
     }
+  }
+
+  private func installSurface(_ surface: PaneSurface) {
+    paneSurface = surface
+    guard let contentView = panel.contentView else { return }
+    surface.view.translatesAutoresizingMaskIntoConstraints = false
+    contentView.addSubview(surface.view)
+    NSLayoutConstraint.activate([
+      surface.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+      surface.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+      surface.view.topAnchor.constraint(equalTo: contentView.topAnchor),
+      surface.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+    ])
   }
 
   // MARK: - Animation
@@ -220,8 +254,11 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
       },
       completionHandler: { [weak self] in
         guard let self else { return }
-        self.panel.orderOut(nil)
-        appToRestore?.activate()
+        // AppKit fires animation completion handlers on the main thread.
+        MainActor.assumeIsolated {
+          self.panel.orderOut(nil)
+          appToRestore?.activate()
+        }
       }
     )
   }

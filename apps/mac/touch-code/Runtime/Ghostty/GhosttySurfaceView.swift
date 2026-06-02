@@ -91,10 +91,31 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// flow through the same `PaneActionRouterFeature` that handles libghostty
   /// keybinding-driven splits.
   var onPaneAction: ((PaneActionRequest) -> Void)?
+  /// Returns whether this pane is the tab's last-focused one. Wired by
+  /// TerminalEngine; consulted on RE-attachment to reclaim firstResponder
+  /// after a SwiftUI split/zoom rebuild detaches and re-adds the view
+  /// without AppKit restoring focus. Additive — only ever grabs focus back
+  /// for the should-be-focused pane; never clears it.
+  var shouldClaimFocus: (() -> Bool)?
+  /// Distinguishes the initial mount (focus owned by `focusSurfaceView`)
+  /// from a re-attach.
+  private var hasBeenInWindow = false
+  /// Outstanding next-tick focus reclaim. `nonisolated(unsafe)` so the
+  /// nonisolated deinit can cancel it; only touched on the main actor.
+  nonisolated(unsafe) private var pendingFocusClaim: Task<Void, Never>?
 
   init(paneID: PaneID) {
     self.paneID = paneID
-    super.init(frame: .zero)
+    // Seed a sensible non-zero frame (≈100×40 cells) rather than `.zero`.
+    // `PaneSurface.init` binds the surface (→ `attach` → `pushGeometry`)
+    // before the view is in a window, and `pushGeometry` only pushes a
+    // size when `bounds` is non-zero. With a `.zero` frame the surface —
+    // and the shell libghostty's exec backend forks at the surface's grid
+    // size — would start at a placeholder size and only reach the real
+    // size on the first layout pass, producing a visible reflow. A real
+    // initial size lets the shell start close to its final width; the
+    // `autoresizingMask` still snaps the view to the pane on layout.
+    super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
     self.wantsLayer = true
     self.autoresizingMask = [.width, .height]
     registerForDraggedTypes(Array(Self.dropTypes))
@@ -109,7 +130,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   // PaneSurface (2bbee60) and SurfaceInfo. AppKit handles the actual
   // teardown via NSView's dealloc; observers we add are removed when
   // the view leaves its window.
-  deinit {}
+  deinit { pendingFocusClaim?.cancel() }
 
   // MARK: - Drag & drop
 
@@ -311,6 +332,38 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     installTrackingArea()
     rebindWindowOcclusionObserver()
     recomputeOcclusion()
+    guard window != nil else {
+      // Detached during a SwiftUI split/zoom rebuild. Cancel any pending
+      // reclaim; do NOT touch the focus bit (clearing it here raced the
+      // initial-focus path and dropped focus on freshly opened panes).
+      pendingFocusClaim?.cancel()
+      pendingFocusClaim = nil
+      return
+    }
+    // Re-attached after a rebuild. AppKit doesn't auto-promote a re-added
+    // view to firstResponder, so a pane that was focused before the rebuild
+    // ends up with a stale cursor but no key input (its keyDown /
+    // performKeyEquivalent bail on `isFirstResponder == false`). If this is
+    // the tab's focused pane, reclaim firstResponder next tick. Skip the
+    // first mount — `focusSurfaceView` owns initial focus.
+    if hasBeenInWindow, shouldClaimFocus?() == true {
+      let attachedWindow = window
+      pendingFocusClaim?.cancel()
+      pendingFocusClaim = Task { @MainActor [weak self] in
+        guard let self, !Task.isCancelled,
+          let window = self.window, window === attachedWindow,
+          self.shouldClaimFocus?() == true
+        else { return }
+        let responder = window.firstResponder
+        guard responder !== self else { return }
+        // Steal from anything the rebuild left behind (no owner, the window /
+        // content view, a sibling terminal) — but never from a live text
+        // editor (inline rename, command-palette field editor).
+        if responder is NSText || responder is NSTextView { return }
+        _ = window.makeFirstResponder(self)
+      }
+    }
+    hasBeenInWindow = true
   }
 
   override func viewDidHide() {
@@ -751,6 +804,8 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     menu.addItem(menuItem("Reset Terminal", #selector(resetTerminal(_:)), symbol: "arrow.trianglehead.2.clockwise"))
     menu.addItem(.separator())
     menu.addItem(NSMenuItem(title: "Copy Pane ID", action: #selector(copyPaneID(_:)), keyEquivalent: ""))
+    menu.addItem(.separator())
+    menu.addItem(menuItem("Close", #selector(closePane(_:)), symbol: "xmark"))
     return menu
   }
 
@@ -778,6 +833,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(paneID.description, forType: .string)
   }
+  @IBAction func closePane(_ sender: Any?) { onPaneAction?(.closePane) }
   @IBAction func splitRight(_ sender: Any?) { onPaneAction?(.newSplit(direction: .right)) }
   @IBAction func splitLeft(_ sender: Any?) { onPaneAction?(.newSplit(direction: .left)) }
   @IBAction func splitDown(_ sender: Any?) { onPaneAction?(.newSplit(direction: .down)) }

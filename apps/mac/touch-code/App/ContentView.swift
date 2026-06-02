@@ -51,7 +51,7 @@ struct ContentView: View {
           // click animates the binding update internally, but routing
           // through `store.send` lands the reducer mutation outside
           // that transaction — explicit withAnimation here restores it.
-          withAnimation(.easeOut(duration: 0.2)) {
+          _ = withAnimation(.easeOut(duration: 0.2)) {
             store.send(.toggleSidebarRequested)
           }
         }
@@ -102,12 +102,9 @@ struct ContentView: View {
         headerStore: store.scope(state: \.worktreeHeader, action: \.worktreeHeader),
         statusBarStore: store.scope(state: \.statusBar, action: \.statusBar),
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
-        diffStore: store.scope(state: \.diff, action: \.diff),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
-        inspectorVisible: store.diffInspectorVisible,
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
-        onToggleGitViewer: { store.send(.diffInspectorToggledForCurrentWorktree) },
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it

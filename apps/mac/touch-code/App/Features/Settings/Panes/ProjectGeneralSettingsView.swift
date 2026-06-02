@@ -5,8 +5,8 @@ import TouchCodeCore
 
 /// Project General detail pane.
 ///
-/// Sibling Sections rendered in fixed order: Editor, Git Viewer, Worktree,
-/// GitHub, Environment. Git Viewer, Worktree, and GitHub render only when
+/// Sibling Sections rendered in fixed order: Editor, Worktree, GitHub,
+/// Environment. Worktree and GitHub render only when
 /// `ProjectKind == .gitRepo`; the design doc's "kind drives sections, not
 /// labels" rule means we never paint a "this is a git repo" affordance —
 /// the sections simply appear or don't.
@@ -44,14 +44,13 @@ struct ProjectGeneralSettingsView: View {
   enum SectionID: String, CaseIterable, Hashable {
     case general
     case editor
-    case gitViewer
     case worktree
     case github
     case environment
     case lifecycle
   }
 
-  /// Pure visibility logic. Git Viewer / Worktree / GitHub / Lifecycle gate
+  /// Pure visibility logic. Worktree / GitHub / Lifecycle gate
   /// on `kind == .gitRepo`; everything else is always visible.
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
@@ -73,11 +72,6 @@ struct ProjectGeneralSettingsView: View {
 
     func writeDefaultEditor(_ value: EditorID?) {
       let setter = writer.setProjectDefaultEditor
-      Task { await setter(projectID, value) }
-    }
-
-    func writeDefaultGitViewer(_ value: ProjectGitViewerPreference?) {
-      let setter = writer.setProjectDefaultGitViewer
       Task { await setter(projectID, value) }
     }
 
@@ -151,9 +145,6 @@ struct ProjectGeneralSettingsView: View {
       }
       if visible.contains(.editor) {
         editorSection
-      }
-      if visible.contains(.gitViewer) {
-        gitViewerSection
       }
       if visible.contains(.worktree) {
         worktreeSection
@@ -292,74 +283,6 @@ struct ProjectGeneralSettingsView: View {
     Binding(
       get: { entry?.defaultEditor },
       set: { routes.writeDefaultEditor($0) }
-    )
-  }
-
-  // MARK: - Git Viewer
-
-  /// Per-Project Git Viewer override. Three states surfaced as one picker:
-  ///   1. **Global — &lt;name&gt;** (tag `nil`): inherit
-  ///      `GeneralSettings.defaultGitViewerID`.
-  ///   2. **Built-in** (tag `.builtin`): force the in-app overlay even if
-  ///      the global default is an external client.
-  ///   3. Any installed git client (tag `.external(id)`): open the worktree
-  ///      in that app on ⌘⌥G.
-  ///
-  /// Mirrors the Settings → General → Default Git Viewer dropdown but adds
-  /// the inherit sentinel that every other per-Project override in this
-  /// view uses.
-  @ViewBuilder
-  private var gitViewerSection: some View {
-    Section("Git Viewer") {
-      Picker("Default Git Viewer", selection: gitViewerBinding) {
-        Text(gitViewerInheritRowText)
-          .tag(ProjectGitViewerPreference?.none)
-        Label {
-          Text("Built-in")
-        } icon: {
-          Image(systemName: "doc.text.magnifyingglass")
-            .foregroundStyle(.secondary)
-            .accessibilityHidden(true)
-        }
-        .labelStyle(.titleAndIcon)
-        .tag(ProjectGitViewerPreference?(.builtin))
-
-        if !installedGitClients.isEmpty {
-          Section {
-            ForEach(installedGitClients, id: \.id) { descriptor in
-              EditorPickerRow.row(for: descriptor)
-                .tag(ProjectGitViewerPreference?(.external(descriptor.id)))
-            }
-          }
-        }
-      }
-      .pickerStyle(.menu)
-    }
-  }
-
-  /// Composes the "Global — &lt;X&gt;" sentinel label. Resolves the inherited id
-  /// against the current `descriptors` list so the label shows the actual
-  /// client displayName (or "Built-in" when nothing is set).
-  private var gitViewerInheritRowText: String {
-    let inheritedLabel: String = {
-      guard let id = general.defaultGitViewerID else { return "Built-in" }
-      return descriptors.first(where: { $0.id == id })?.displayName ?? id
-    }()
-    return "Global — \(inheritedLabel)"
-  }
-
-  /// Installed git clients, filtered by `EditorRegistry.gitClientPriority`
-  /// in canonical priority order. Same source the Settings → General picker
-  /// uses so both surfaces stay in sync without a shared helper.
-  private var installedGitClients: [EditorDescriptor] {
-    let byID = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.id, $0) })
-    return EditorRegistry.gitClientPriority.compactMap { byID[$0] }
-  }
-
-  private var gitViewerBinding: Binding<ProjectGitViewerPreference?> {
-    Binding(
-      get: { entry?.defaultGitViewer },
-      set: { routes.writeDefaultGitViewer($0) }
     )
   }
 
@@ -988,7 +911,8 @@ private final class ColorPanelObserver: NSObject {
       object: panel,
       queue: .main
     ) { [weak self] _ in
-      self?.isActive = false
+      // Posted on `.main` (see `queue:` above).
+      MainActor.assumeIsolated { self?.isActive = false }
     }
   }
 

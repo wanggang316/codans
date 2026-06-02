@@ -260,31 +260,6 @@ struct BranchSwitcherFeatureTests {
     }
   }
 
-  // MARK: - 6. viewAllCommitsTapped emits delegate + closes popover
-
-  @Test
-  func viewAllCommitsTappedEmitsDelegateAndClosesPopover() async {
-    let projectID = ProjectID()
-    let worktreeID = WorktreeID()
-    var state = Self.makeState(projectID: projectID, worktreeID: worktreeID)
-    state.isPopoverOpen = true
-    state.searchQuery = "main"
-
-    let store = TestStore(initialState: state) {
-      BranchSwitcherFeature()
-    } withDependencies: {
-      $0.gitService = GitServiceClient.testValue
-    }
-
-    await store.send(.viewAllCommitsTapped) { state in
-      state.isPopoverOpen = false
-      state.searchQuery = ""
-    }
-    await store.receive(
-      .delegate(.openDiffViewerOnHistoryTab(worktreeID: worktreeID, projectID: projectID))
-    )
-  }
-
   // MARK: - 7. headChangedForCurrentWorktree clears spinner + caches
 
   @Test

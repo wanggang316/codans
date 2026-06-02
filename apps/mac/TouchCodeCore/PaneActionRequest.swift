@@ -13,6 +13,10 @@ public nonisolated enum PaneActionRequest: Sendable, Equatable {
   case moveTab(offset: Int)
   case gotoTab(target: GotoTabTarget)
   case newSplit(direction: NewSplitDirection)
+  /// Tear down the source pane. The router applies policy: closing the
+  /// last pane in a tab retires the now-empty tab instead, and a surviving
+  /// sibling reclaims focus.
+  case closePane
   case gotoSplit(direction: FocusDirection)
   case resizeSplit(direction: ResizeDirection, amount: Double)
   case equalizeSplits
