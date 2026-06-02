@@ -182,6 +182,13 @@ struct RootFeature {
     /// (the focus-driven reconcile path requires a `didBecomeActive`
     /// transition the user never triggers). See HAN-62.
     case worktreeHeadChanged(WorktreeID)
+    /// Emitted by `WorktreeWorkingTreeWatcher` when a file under a
+    /// worktree's working tree changes (an edit in a pane / editor). Only
+    /// the uncommitted-edit line counts can have shifted — branch / HEAD
+    /// are handled by `worktreeHeadChanged` — so the reducer just refreshes
+    /// that worktree's `+N −M` diff chip. Without this the chip only updated
+    /// on commit / branch-switch or row remount, lagging real edits.
+    case worktreeWorkingTreeChanged(WorktreeID)
     /// Opens the current Worktree in the configured Git Viewer. Sources:
     /// the ⌘⌥G chord, the "Toggle Git Viewer" menu item, and the command
     /// palette. Resolves `general.defaultGitViewerID` to an installed git
@@ -349,6 +356,9 @@ struct RootFeature {
 
   nonisolated enum CancelID: Sendable {
     case events, selectionChanges, projectReconcileFocus, worktreeHeadWatcher
+    /// FSEvents working-tree observation that refreshes the `+N −M` chip
+    /// after in-pane / in-editor edits (separate from the HEAD watcher).
+    case worktreeWorkingTreeWatcher
     /// `NSApplication.didResignActiveNotification` observation — pauses the GitHub
     /// liveness poll when the app is no longer frontmost (0018 M1).
     case appResignActive
@@ -360,6 +370,7 @@ struct RootFeature {
   @Dependency(SettingsWriter.self) private var settingsWriter
   @Dependency(ProjectReconciler.self) private var projectReconciler
   @Dependency(WorktreeHeadWatcher.self) private var worktreeHeadWatcher
+  @Dependency(WorktreeWorkingTreeWatcher.self) private var worktreeWorkingTreeWatcher
   @Dependency(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
   @Dependency(GitHubSnapshotCacheClient.self) private var gitHubSnapshotCache
@@ -559,6 +570,19 @@ struct RootFeature {
           }
           .cancellable(id: CancelID.worktreeHeadWatcher, cancelInFlight: true),
 
+          // Working-tree edits inside a pane / editor change `git diff HEAD`
+          // but not `.git/HEAD`, so the HEAD watcher never fires for them.
+          // `WorktreeWorkingTreeWatcher` taps the working-tree subtree via
+          // FSEvents and yields the changed `WorktreeID`; we forward it for a
+          // targeted diff-chip refresh.
+          .run { [worktreeWorkingTreeWatcher] send in
+            let stream = await MainActor.run { worktreeWorkingTreeWatcher.events() }
+            for await worktreeID in stream {
+              await send(.worktreeWorkingTreeChanged(worktreeID))
+            }
+          }
+          .cancellable(id: CancelID.worktreeWorkingTreeWatcher, cancelInFlight: true),
+
           // 0013 M4 follow-up: hydrate the GitHub integration's in-memory state from
           // its on-disk snapshot cache so the sidebar paints PR badges on the first
           // render pass, without the blank-then-populated flash the user sees when
@@ -602,6 +626,7 @@ struct RootFeature {
           .cancel(id: CancelID.selectionChanges),
           .cancel(id: CancelID.projectReconcileFocus),
           .cancel(id: CancelID.worktreeHeadWatcher),
+          .cancel(id: CancelID.worktreeWorkingTreeWatcher),
           .cancel(id: CancelID.appResignActive)
         )
 
@@ -789,6 +814,26 @@ struct RootFeature {
           if shouldForwardToBranchSwitcher {
             await send(.branchSwitcher(.headChangedForCurrentWorktree))
           }
+        }
+
+      case .worktreeWorkingTreeChanged(let worktreeID):
+        // FSEvents fired for a working-tree edit. Branch / HEAD are
+        // unaffected, so skip the reconcile + GitHub refresh the HEAD path
+        // runs — only the `git diff HEAD --shortstat` numbers can have moved.
+        // Drop the freshness stamp and re-fetch so the chip tracks the edit
+        // instead of waiting for the row to remount.
+        let catalog = hierarchyClient.snapshot()
+        guard
+          let worktreePath = catalog.projects
+            .flatMap(\.worktrees)
+            .first(where: { $0.id == worktreeID })?.path
+        else { return .none }
+        return .run { [monitor = worktreeLocalDiffMonitor] _ in
+          await MainActor.run { monitor.invalidate(worktreeID: worktreeID) }
+          await monitor.refresh(
+            worktreeID: worktreeID,
+            path: URL(fileURLWithPath: worktreePath)
+          )
         }
 
       case .engineEventReceived(let marker):
