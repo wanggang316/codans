@@ -20,6 +20,41 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.2] - 2026-06-02
+
+### Added
+
+- **Drag panes to rearrange a split.** Every pane in a multi-pane tab now has a
+  drag handle — drop it onto another pane's top, bottom, left, or right edge to
+  move it there. The pane's shell keeps running across the move; nothing restarts.
+
+### Changed
+
+- **The diff-stat chip updates as you type.** The sidebar's +N −M count used to
+  refresh only on commit, branch switch, or reopening a row — it now reflects
+  uncommitted edits made in any pane or editor within about a second, and the
+  digits roll smoothly to their new values.
+- **The built-in Run command is now permanent and bound to ⌘R.** Run ships with
+  the conventional ⌘R shortcut by default and can no longer be deleted; its remove
+  button is disabled with a tooltip explaining why.
+- **Clearing a command's shortcut moved to the right-click menu.** Clear Shortcut
+  is now a right-click action on the shortcut cell instead of a button inside the
+  recorder popover.
+
+### Removed
+
+- **The built-in Git Viewer has been removed.** The in-app diff and history viewer
+  is gone; the ⌘⌥G shortcut and the Settings → Git Viewer picker now open your
+  configured external client (GitHub Desktop, Sourcetree, Tower, Fork, …) instead,
+  or do nothing if none is selected.
+
+### Fixed
+
+- **Removing a moved or deleted worktree always works now.** Removing a worktree
+  whose folder had been relocated or deleted used to fail with a raw "error 6" and
+  leave the row stuck forever; removal is now reliable and surfaces a readable
+  message if anything genuinely goes wrong.
+
 ## [0.4.1] - 2026-06-01
 
 ### Fixed
