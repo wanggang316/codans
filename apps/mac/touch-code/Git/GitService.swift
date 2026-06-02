@@ -1,7 +1,7 @@
 import Foundation
 import TouchCodeCore
 
-/// Read-only Git service. Invoked by `GitViewerFeature` (M3) and, in future, by the `git.*` IPC
+/// Read-only Git service. Invoked by `BranchSwitcherFeature` and, in future, by the `git.*` IPC
 /// namespace. All operations are pure with respect to the file system — they never write.
 ///
 /// `nonisolated` so conformers (including `LiveGitService`) can freely be `Sendable` without

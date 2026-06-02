@@ -16,7 +16,6 @@ struct ProjectGeneralSettingsViewKindRenderTests {
     #expect(visible.contains(.general))
     #expect(visible.contains(.editor))
     #expect(visible.contains(.environment))
-    #expect(!visible.contains(.gitViewer))
     #expect(!visible.contains(.worktree))
     #expect(!visible.contains(.github))
     #expect(!visible.contains(.lifecycle))
@@ -26,7 +25,7 @@ struct ProjectGeneralSettingsViewKindRenderTests {
   func gitRepoShowsAllSections() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .gitRepo)
     #expect(visible == Set(ProjectGeneralSettingsView.SectionID.allCases))
-    #expect(visible.count == 7)
+    #expect(visible.count == 6)
     // Worktree-lifecycle script editors live at the bottom of this pane and
     // are git-only.
     #expect(visible.contains(.lifecycle))
@@ -38,7 +37,7 @@ struct ProjectGeneralSettingsViewKindRenderTests {
     // test pins the canonical order so a future refactor cannot silently
     // shuffle sections. Lifecycle scripts render last.
     let canonical: [ProjectGeneralSettingsView.SectionID] = [
-      .general, .editor, .gitViewer, .worktree, .github, .environment, .lifecycle,
+      .general, .editor, .worktree, .github, .environment, .lifecycle,
     ]
     #expect(ProjectGeneralSettingsView.SectionID.allCases == canonical)
   }

@@ -78,10 +78,10 @@ struct SettingsGeneralView: View {
     )
   }
 
-  /// Settings → General → Default Git Viewer binding. `nil` means "use the in-app
-  /// Git Viewer overlay"; any other id names an installed git client from
-  /// `EditorRegistry.gitClientPriority` that should open instead when the user
-  /// invokes the Git Viewer chord (⌘⌥G) or menu item.
+  /// Settings → General → Default Git Viewer binding. `nil` means "None" — the
+  /// Git Viewer chord (⌘⌥G) / menu item does nothing. Any other id names an
+  /// installed git client from `EditorRegistry.gitClientPriority` that the chord
+  /// opens the current worktree in.
   private var gitViewerBinding: Binding<EditorID?> {
     Binding(
       get: { settingsStore.settings.general.defaultGitViewerID },
@@ -215,9 +215,9 @@ struct SettingsGeneralView: View {
         .pickerStyle(.menu)
       } footer: {
         Text(
-          "Drives the Git Viewer chord (⌘⌥G). Built-in shows the in-app overlay; "
-            + "any other choice opens the worktree in that git client. Falls back to "
-            + "the built-in viewer if the chosen client is uninstalled later."
+          "Drives the Git Viewer chord (⌘⌥G). None leaves the chord inactive; "
+            + "any other choice opens the worktree in that git client. Resets to "
+            + "None if the chosen client is uninstalled later."
         )
       }
 
@@ -273,19 +273,12 @@ struct SettingsGeneralView: View {
     }
   }
 
-  /// Default Git Viewer picker body. Leads with the built-in sentinel (tag nil),
+  /// Default Git Viewer picker body. Leads with the "None" sentinel (tag nil),
   /// followed by every installed git client in priority order.
   @ViewBuilder
   private var gitViewerPickerContent: some View {
-    Label {
-      Text("Built-in")
-    } icon: {
-      Image(systemName: "doc.text.magnifyingglass")
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
-    }
-    .labelStyle(.titleAndIcon)
-    .tag(EditorID?(nil))
+    Text("None")
+      .tag(EditorID?(nil))
 
     if !installedGitClients.isEmpty {
       Section {

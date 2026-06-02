@@ -40,10 +40,6 @@ struct RootFeature {
     /// 0014: titlebar-center Worktree Status Bar — owns only the transient
     /// toast slot; PR / motivational forms are view-level projections.
     var statusBar: StatusBarFeature.State = .init()
-    /// Diff inspector + panel. Receives `worktreeSelected` forwarding from
-    /// `selectionChanged` below so the changed-files list refreshes when the
-    /// user navigates between Worktrees.
-    var diff: DiffFeature.State = .init()
     /// 0008: router for tab/split intents decoded from ghostty keybinds.
     var paneActionRouter: PaneActionRouterFeature.State = .init()
     /// 0008: router for window/app-level intents decoded from ghostty keybinds.
@@ -101,15 +97,6 @@ struct RootFeature {
     /// `selectionChanged` does not re-record the navigation as a fresh
     /// step. Cleared in `selectionChanged` itself.
     var suppressHistoryPush: Bool = false
-
-    /// Whether the Git Viewer (Diff inspector) column is visible. A single
-    /// app-level toggle, mirroring `sidebarVisible`: switching the selected
-    /// Worktree does not change it, so the panel no longer flips open/closed
-    /// as the user moves between Worktrees. The panel's *contents* still
-    /// re-target on selection because `selectionChanged` forwards
-    /// `.diff(.worktreeSelected(...))` every switch. Session-scoped (resets to
-    /// closed on launch), again matching `sidebarVisible`.
-    var diffInspectorVisible: Bool = false
   }
 
   /// Opaque marker for diagnostic logging / tests — the full `TerminalEvent`
@@ -195,18 +182,13 @@ struct RootFeature {
     /// (the focus-driven reconcile path requires a `didBecomeActive`
     /// transition the user never triggers). See HAN-62.
     case worktreeHeadChanged(WorktreeID)
-    /// T3: Toggles the built-in Git Viewer overlay. Sources: Header GV button
-    /// (T2) + ⌘⇧G (T3 Commands). Flips the app-level `state.diffInspectorVisible`
-    /// — a single toggle shared across Worktrees (mirrors `sidebarVisible`), so
-    /// the panel no longer flips open/closed when the selection changes.
+    /// Opens the current Worktree in the configured Git Viewer. Sources:
+    /// the ⌘⌥G chord, the "Toggle Git Viewer" menu item, and the command
+    /// palette. Resolves `general.defaultGitViewerID` to an installed git
+    /// client and opens the worktree there; a no-op when nothing is selected
+    /// (Settings → General → Default Git Viewer = None) or the chosen client
+    /// is no longer installed.
     case diffInspectorToggledForCurrentWorktree
-    /// Sidebar entry point for the Git Viewer (HAN-25 follow-up). Same
-    /// resolution as `.diffInspectorToggledForCurrentWorktree` but operates on
-    /// an explicit (projectID, worktreeID) pair rather than the current
-    /// selection — clicking the per-row `+N −M` chip targets that row even when
-    /// it isn't the active selection. Always opens (no toggle-to-close) so the
-    /// affordance reads as a "show me the diff" action.
-    case openGitViewerForWorktreeRequested(projectID: ProjectID, worktreeID: WorktreeID)
     /// T3: ⌘O entry point. Resolves the current Worktree's path from the
     /// catalog snapshot (via `hierarchyClient` — reducer-scoped dependency,
     /// unlike SwiftUI `Commands` structs where `@Dependency` falls through
@@ -347,7 +329,6 @@ struct RootFeature {
     case statusBar(StatusBarFeature.Action)
     case paneActionRouter(PaneActionRouterFeature.Action)
     case windowActionRouter(WindowActionRouterFeature.Action)
-    case diff(DiffFeature.Action)
     /// T6 (active-agents): rows in the AgentStateView dispatch
     /// here. Cross-Project / Worktree / Tab focus belongs to the same
     /// reducer that owns selection state — same precedent as
@@ -393,7 +374,6 @@ struct RootFeature {
     Scope(state: \.sidebar, action: \.sidebar) { HierarchySidebarFeature() }
     Scope(state: \.detail, action: \.detail) { WorktreeDetailFeature() }
     Scope(state: \.branchSwitcher, action: \.branchSwitcher) { BranchSwitcherFeature() }
-    Scope(state: \.diff, action: \.diff) { DiffFeature() }
   }
 
   @ReducerBuilder<State, Action>
@@ -672,10 +652,10 @@ struct RootFeature {
         reconcilePaneHosts(
           &state.detail.splitViewport, selection: selection, tabID: tabID
         )
-        // M4: forward the selection into the Diff feature so the changed-
-        // files list refreshes for the new Worktree. `nil` worktreeID resets
-        // DiffFeature.State to defaults (no fetch).
         var effects: [Effect<Action>] = []
+        // Resolved once and reused by the branch-switcher forwarding below.
+        // `nil` when either id is nil, which downstream reducers treat as a
+        // full caches+ids reset.
         let resolvedWorktreePath: String? = {
           guard
             let projectID = selection.projectID,
@@ -686,15 +666,6 @@ struct RootFeature {
             .projects.first(where: { $0.id == projectID })?
             .worktrees.first(where: { $0.id == worktreeID })?.path
         }()
-        effects.append(
-          .send(
-            .diff(
-              .worktreeSelected(
-                projectID: selection.projectID,
-                worktreeID: selection.worktreeID,
-                path: resolvedWorktreePath
-              )))
-        )
         // T10: forward selection delta into the branch switcher so the
         // next popover open re-fetches against the new worktree path.
         // `resolvedWorktreePath` already resolves to nil when either id is
@@ -974,9 +945,6 @@ struct RootFeature {
         state.tagManagerSheet = TagManagerFeature.State()
         return .none
 
-      case .sidebar(.delegate(.openGitViewerRequested(let projectID, let worktreeID))):
-        return .send(.openGitViewerForWorktreeRequested(projectID: projectID, worktreeID: worktreeID))
-
       // Pending-worktree focus: when the user kicks off creation, snap
       // the detail pane to the WorktreeLoadingView. The child reducer
       // appends the row to `sidebar.pendingWorktrees` first; we mark it
@@ -1177,22 +1145,6 @@ struct RootFeature {
       case .windowActionRouter:
         return .none
 
-      case .diff:
-        return .none
-
-      case .branchSwitcher(.delegate(.openDiffViewerOnHistoryTab)):
-        // T10: "View all" from the recent-commits section. Force the in-app
-        // inspector visible regardless of the user's default Git Viewer
-        // preference — the follow-up `.diff(.tabSelected(.history))` dispatch
-        // only makes sense in-app (external viewers like Tower / Fork have no
-        // History-tab analogue), so we bypass the 3-tier Git Viewer
-        // resolution that `.diffInspectorToggledForCurrentWorktree` runs.
-        // Idempotent when the panel is already open.
-        state.diffInspectorVisible = true
-        // Pending (T11/T12): after T11 adds `.diff(.tabSelected(.history))`,
-        // dispatch it here so "View all" lands the user on the History tab.
-        return .none
-
       case .branchSwitcher:
         // Sub-feature transitions handled by the Scope; ignore in root.
         return .none
@@ -1314,96 +1266,29 @@ struct RootFeature {
           let projectID = state.selection.projectID,
           let worktreeID = state.selection.worktreeID
         else { return .none }
-        // Three-tier Git Viewer resolution for the ⌘⌥G chord:
-        //   1. `projects[pid].defaultGitViewer == .builtin`  → force the
-        //      in-app overlay (overrides any external global default).
-        //   2. `projects[pid].defaultGitViewer == .external(id)` →
-        //      open the worktree in that client (if installed).
-        //   3. `projects[pid].defaultGitViewer == nil` (inherit) →
-        //      fall back to `general.defaultGitViewerID`.
-        // A `.external(id)` that no longer resolves to an installed
-        // descriptor decays to the in-app overlay so the chord never
-        // becomes a silent no-op.
+        // Git Viewer resolution for the ⌘⌥G chord / menu / palette: read the
+        // global `general.defaultGitViewerID`. `nil` (Default Git Viewer =
+        // None) or an id that no longer resolves to an installed descriptor
+        // makes the chord a no-op — the built-in overlay no longer exists.
         let snapshot = settingsWriter.readSnapshotSync()
-        let projectOverride = snapshot.projects[projectID]?.defaultGitViewer
-        let resolvedID: EditorID? = {
-          switch projectOverride {
-          case .builtin:
-            return nil
-          case .external(let id):
-            return id
-          case .none:
-            return snapshot.general.defaultGitViewerID
-          }
-        }()
-        let externalChoice: EditorID? = {
-          guard let resolvedID else { return nil }
-          return state.editor.descriptors.contains(where: { $0.id == resolvedID }) ? resolvedID : nil
-        }()
-        if let externalChoice {
-          let catalog = hierarchyClient.snapshot()
-          guard
-            let path = catalog
-              .projects.first(where: { $0.id == projectID })?
-              .worktrees.first(where: { $0.id == worktreeID })?.path
-          else { return .none }
-          return .send(
-            .editor(
-              .openRequested(
-                editorID: externalChoice,
-                worktreePath: path,
-                projectID: projectID
-              )))
-        }
-        // Built-in overlay: flip the single app-level toggle. The panel's
-        // contents follow the current selection via the
-        // `.diff(.worktreeSelected(...))` dispatch in `selectionChanged`.
-        state.diffInspectorVisible.toggle()
-        return .none
-
-      case .openGitViewerForWorktreeRequested(let projectID, let worktreeID):
-        // Mirrors `.diffInspectorToggledForCurrentWorktree`'s three-tier
-        // resolution but reads an explicit (projectID, worktreeID) so a click
-        // on a non-selected sidebar row still hits the right worktree. Built-in
-        // path forces visibility on (not a toggle) so a "click to open" affordance
-        // never appears to no-op when the inspector was already visible elsewhere.
-        let snapshot = settingsWriter.readSnapshotSync()
-        let projectOverride = snapshot.projects[projectID]?.defaultGitViewer
-        let resolvedID: EditorID? = {
-          switch projectOverride {
-          case .builtin:
-            return nil
-          case .external(let id):
-            return id
-          case .none:
-            return snapshot.general.defaultGitViewerID
-          }
-        }()
-        let externalChoice: EditorID? = {
-          guard let resolvedID else { return nil }
-          return state.editor.descriptors.contains(where: { $0.id == resolvedID }) ? resolvedID : nil
-        }()
-        if let externalChoice {
-          let catalog = hierarchyClient.snapshot()
-          guard
-            let path = catalog
-              .projects.first(where: { $0.id == projectID })?
-              .worktrees.first(where: { $0.id == worktreeID })?.path
-          else { return .none }
-          return .send(
-            .editor(
-              .openRequested(
-                editorID: externalChoice,
-                worktreePath: path,
-                projectID: projectID
-              )))
-        }
-        // Built-in inspector lives in the detail column for the *selected*
-        // worktree, so route the click through the same selection flow the
-        // keyboard chord assumes — pick the row first, then ensure the
-        // app-level Git Viewer toggle is on (idempotent if already open).
-        state.diffInspectorVisible = true
-        return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
+        let resolvedID = snapshot.general.defaultGitViewerID
+        guard
+          let externalChoice = resolvedID,
+          state.editor.descriptors.contains(where: { $0.id == externalChoice })
+        else { return .none }
+        let catalog = hierarchyClient.snapshot()
+        guard
+          let path = catalog
+            .projects.first(where: { $0.id == projectID })?
+            .worktrees.first(where: { $0.id == worktreeID })?.path
+        else { return .none }
+        return .send(
+          .editor(
+            .openRequested(
+              editorID: externalChoice,
+              worktreePath: path,
+              projectID: projectID
+            )))
 
       case .openDefaultForCurrentWorktreeRequested:
         guard

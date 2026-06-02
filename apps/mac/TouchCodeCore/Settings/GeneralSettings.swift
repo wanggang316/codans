@@ -36,11 +36,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// Global default editor. `nil` means "no global default set" — resolution falls back to
   /// the `EditorRegistry.defaultPriority` walk (which always terminates at Finder).
   public var defaultEditorID: EditorID?
-  /// Global default Git viewer. `nil` means "use the built-in Git Viewer overlay"; any
-  /// other value names an installed git client from `EditorRegistry.gitClientPriority`
-  /// (GitHub Desktop, Sourcetree, …) that should open instead when the user invokes the
-  /// Git Viewer chord / menu item. A stored id that is no longer installed is treated
-  /// as `nil` at resolve time and cleaned up by `garbageCollectEditors`.
+  /// Global default Git viewer. `nil` means "not selected" — the Git Viewer chord /
+  /// menu item is a no-op. Any other value names an installed git client from
+  /// `EditorRegistry.gitClientPriority` (GitHub Desktop, Sourcetree, …) that the
+  /// chord opens the current worktree in. A stored id that is no longer installed is
+  /// treated as `nil` at resolve time and cleaned up by `garbageCollectEditors`.
   public var defaultGitViewerID: EditorID?
   /// Global default merge strategy used by the GitHub popover's Merge split-button when no
   /// per-Project `RepositorySettings.defaultMergeStrategy` is set. `nil` means "no global
