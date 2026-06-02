@@ -1855,6 +1855,53 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Re-positions an existing pane next to `anchorID`, splitting the anchor
+  /// along `direction`. Pure split-tree reshape — the moved pane's surface is
+  /// never torn down (its shell keeps running), so unlike `splitPane` /
+  /// `closePane` there is no runtime surface lifecycle here. The pane *set* is
+  /// unchanged, so the leaves-match-panes invariant still holds. A move onto
+  /// the pane itself collapses to a no-op inside `SplitTree.moving`.
+  func movePane(
+    _ paneID: PaneID,
+    relativeTo anchorID: PaneID,
+    direction: SplitTree<PaneID>.NewDirection,
+    in tabID: TabID,
+    in worktreeID: WorktreeID,
+    in projectID: ProjectID
+  ) throws {
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(
+        worktreeID: worktreeID,
+        projectID: projectID
+      )
+    else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+
+    guard
+      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
+        $0.id == tabID
+      })
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+
+    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+    guard tab.panes.contains(where: { $0.id == paneID }) else {
+      throw HierarchyError.notFound("Pane \(paneID)")
+    }
+    guard tab.panes.contains(where: { $0.id == anchorID }) else {
+      throw HierarchyError.notFound("Pane \(anchorID)")
+    }
+
+    tab.splitTree = try tab.splitTree.moving(paneID, relativeTo: anchorID, direction: direction)
+    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
+
+    try tab.validateInvariants()
+
+    store.scheduleSave(catalog)
+  }
+
   // MARK: - Pane address resolution (0008 M5)
 
   /// Resolves a `PaneID` to the full hierarchy address that owns it. Used by

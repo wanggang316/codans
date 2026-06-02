@@ -378,6 +378,18 @@ nonisolated struct HierarchyClient: Sendable {
       _ paneID: PaneID, _ direction: ResizeDirection, _ amount: Double
     ) throws -> Void
 
+  /// Re-positions an existing Pane next to `anchorID`, splitting the anchor
+  /// along `direction`. Pure split-tree reshape — the moved pane's surface
+  /// stays alive (no teardown / re-spawn). Backs the pane drag-and-drop
+  /// gesture; self-moves and unknown ids resolve to a no-op / throw inside
+  /// the manager.
+  var movePane:
+    @MainActor @Sendable (
+      _ paneID: PaneID, _ anchorID: PaneID,
+      _ direction: SplitTree<PaneID>.NewDirection,
+      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
+    ) throws -> Void
+
   /// Clears the Tab's zoomed-pane flag. Paired with `focusPane` (which
   /// sets the zoom) to service `PaneActionRequest.toggleSplitZoom`.
   var unzoomTab:
@@ -763,6 +775,12 @@ extension HierarchyClient {
       },
       resizePane: { paneID, direction, amount in
         try manager.resizePane(paneID, direction: direction, amount: amount)
+      },
+      movePane: { paneID, anchorID, direction, tabID, worktreeID, projectID in
+        try manager.movePane(
+          paneID, relativeTo: anchorID, direction: direction,
+          in: tabID, in: worktreeID, in: projectID
+        )
       },
       unzoomTab: { tabID, worktreeID, projectID in
         try manager.unfocusPane(in: tabID, in: worktreeID, in: projectID)
@@ -1419,6 +1437,7 @@ extension HierarchyClient: DependencyKey {
     moveTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     equalizeTabSplits: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     resizePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    movePane: { _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeArchivedWithLifecycle: { _, _, _ in
@@ -1519,6 +1538,7 @@ extension HierarchyClient: DependencyKey {
     moveTab: unimplemented("HierarchyClient.moveTab"),
     equalizeTabSplits: unimplemented("HierarchyClient.equalizeTabSplits"),
     resizePane: unimplemented("HierarchyClient.resizePane"),
+    movePane: unimplemented("HierarchyClient.movePane"),
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
     setWorktreeArchivedWithLifecycle: unimplemented(
