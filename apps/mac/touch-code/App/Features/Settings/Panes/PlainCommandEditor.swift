@@ -55,9 +55,15 @@ struct PlainCommandEditor: NSViewRepresentable {
 
   func updateNSView(_ scrollView: NSScrollView, context: Context) {
     guard let textView = scrollView.documentView as? NSTextView else { return }
-    // Avoid clobbering the user's selection / typing while they are
-    // editing — only push upstream changes back into the view when the
-    // text genuinely differs (e.g. the parent reset the draft).
+    // While the user is actively editing (the text view is first responder),
+    // never push the binding back into the view. The binding round-trips a
+    // keystroke behind (type → textDidChange → store → re-render → here), so
+    // re-assigning `string` mid-edit reset the contents and yanked the caret
+    // to the start on every character. The text view is the source of truth
+    // while focused; outward sync still flows through `textDidChange`.
+    if textView.window?.firstResponder === textView { return }
+    // Unfocused: apply genuine external changes (e.g. the parent reset the
+    // draft), keeping the caret position as close as possible.
     if textView.string != text {
       let selection = textView.selectedRange()
       textView.string = text
