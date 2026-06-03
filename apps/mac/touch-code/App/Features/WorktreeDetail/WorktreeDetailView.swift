@@ -123,7 +123,8 @@ struct WorktreeDetailView: View {
       .background(alignment: .topLeading) {
         ProjectScriptsShortcutBindings(
           store: headerStore,
-          projectID: address.project
+          projectID: address.project,
+          worktreeID: address.worktree
         )
       }
       // On macOS 15+ remove the title slot entirely so default-placement

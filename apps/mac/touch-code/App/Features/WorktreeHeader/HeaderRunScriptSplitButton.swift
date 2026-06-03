@@ -91,6 +91,12 @@ struct HeaderRunScriptSplitButton: View {
         Image(systemName: primaryIcon)
           .symbolRenderingMode(.palette)
           .foregroundStyle(primaryTint)
+          // play.fill (triangle) and stop.fill (square) have different glyph
+          // widths, so a bare swap made the button reflow on every toggle.
+          // A fixed square footprint keeps the icon column constant and the
+          // `.replace` transition cross-fades the swap instead of popping.
+          .contentTransition(.symbolEffect(.replace))
+          .frame(width: 16, height: 16)
           .accessibilityHidden(true)
         Text(isRunning ? "Stop" : primaryName).lineLimit(1)
       }
