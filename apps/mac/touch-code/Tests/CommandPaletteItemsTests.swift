@@ -107,9 +107,10 @@ struct CommandPaletteItemsTests {
 
   // MARK: - Worktree switch targets
 
-  /// Every live Worktree except the selected one becomes a switch target,
-  /// and its subtitle is the Project name so a Project-name query surfaces
-  /// all of that Project's worktrees through the scorer's subtitle band.
+  /// Every live Worktree except the selected one becomes a switch target.
+  /// Its subtitle is the Project name (for display), and its `searchText`
+  /// carries "<project> <worktree>" so a Project-name query ranks it in the
+  /// title band rather than sinking to the lower subtitle band.
   @Test
   func worktreeSwitchItemsCarryProjectNameSubtitle() {
     var catalog = Catalog()
@@ -125,6 +126,7 @@ struct CommandPaletteItemsTests {
     let switchItem = items.first { $0.id == "worktree.select.\(other.id.raw.uuidString)" }
     #expect(switchItem != nil)
     #expect(switchItem?.subtitle == "Acme")
+    #expect(switchItem?.searchText == "Acme feature")
     // The selected worktree is never offered as its own switch target.
     #expect(!items.contains { $0.id == "worktree.select.\(selected.id.raw.uuidString)" })
   }

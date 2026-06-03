@@ -43,29 +43,31 @@ enum CommandPaletteFuzzyScorer {
     let (pattern, forceContiguous) = stripQuotes(trimmed)
     let needle = pattern.lowercased()
     guard !needle.isEmpty else { return nil }
-
-    let titleLower = item.title.lowercased()
-    let titleChars = Array(titleLower)
-    let titleOriginalChars = Array(item.title)
     let needleChars = Array(needle)
 
-    if let (position, _) = contiguousMatch(title: titleChars, needle: needleChars) {
-      let lengthRatio = (needle.count * 1_000) / max(titleLower.count, 1)
-      let positionBonus = max(0, 200 - position * 10)
-      let priorityBonus = 100 - item.priorityTier
-      return contiguousBase + lengthRatio + positionBonus + priorityBonus
-        + recencyBonus(id: item.id, recency: recency, now: now)
+    // Title-priority match against the visible title AND the hidden
+    // `searchText` (e.g. a worktree item's Project name); the higher of the
+    // two wins so a Project-name query ranks in the title band instead of
+    // sinking to the subtitle band. A decorative title prefix can no longer
+    // out-rank a real `searchText` match.
+    var primary = primaryScore(
+      text: item.title, needleChars: needleChars,
+      forceContiguous: forceContiguous, priorityTier: item.priorityTier
+    )
+    if let searchText = item.searchText,
+      let alt = primaryScore(
+        text: searchText, needleChars: needleChars,
+        forceContiguous: forceContiguous, priorityTier: item.priorityTier
+      ),
+      alt > (primary ?? Int.min)
+    {
+      primary = alt
+    }
+    if let primary {
+      return primary + recencyBonus(id: item.id, recency: recency, now: now)
     }
 
     if forceContiguous { return nil }
-
-    if let score = subsequenceScore(
-      haystack: titleChars, originalHaystack: titleOriginalChars, needle: needleChars
-    ) {
-      let priorityBonus = 100 - item.priorityTier
-      return subsequenceTitleBase + score + priorityBonus
-        + recencyBonus(id: item.id, recency: recency, now: now)
-    }
 
     if let subtitle = item.subtitle {
       let subtitleLowerChars = Array(subtitle.lowercased())
@@ -81,6 +83,36 @@ enum CommandPaletteFuzzyScorer {
       }
     }
 
+    return nil
+  }
+
+  /// Title-band score for a single haystack: contiguous-substring match
+  /// (highest) or subsequence match, recency excluded. Returns `nil` when
+  /// neither matches, or when the query forces contiguous mode and only a
+  /// subsequence exists. Shared by the visible title and the hidden
+  /// `searchText` so both rank in the same bands.
+  private static func primaryScore(
+    text: String,
+    needleChars: [Character],
+    forceContiguous: Bool,
+    priorityTier: Int
+  ) -> Int? {
+    let lower = text.lowercased()
+    let chars = Array(lower)
+    let original = Array(text)
+    if let (position, _) = contiguousMatch(title: chars, needle: needleChars) {
+      let lengthRatio = (needleChars.count * 1_000) / max(lower.count, 1)
+      let positionBonus = max(0, 200 - position * 10)
+      let priorityBonus = 100 - priorityTier
+      return contiguousBase + lengthRatio + positionBonus + priorityBonus
+    }
+    if forceContiguous { return nil }
+    if let score = subsequenceScore(
+      haystack: chars, originalHaystack: original, needle: needleChars
+    ) {
+      let priorityBonus = 100 - priorityTier
+      return subsequenceTitleBase + score + priorityBonus
+    }
     return nil
   }
 
