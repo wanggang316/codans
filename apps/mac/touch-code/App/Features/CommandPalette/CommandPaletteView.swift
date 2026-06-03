@@ -46,7 +46,6 @@ struct CommandPaletteView: View {
         RoundedRectangle(cornerRadius: 10)
           .stroke(Color(nsColor: .tertiaryLabelColor).opacity(0.5), lineWidth: 0.5)
       )
-      .shadow(color: .black.opacity(0.22), radius: 14, y: 5)
       .padding(.top, 80)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -124,7 +123,7 @@ struct CommandPaletteView: View {
     HStack(spacing: 10) {
       Image(systemName: item.icon)
         .frame(width: 20)
-        .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+        .foregroundStyle(.secondary)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(item.title).font(.system(size: 13))
@@ -136,16 +135,15 @@ struct CommandPaletteView: View {
       if let chord = chordDisplay(for: item) {
         Text(chord)
           .font(.system(size: 11, design: .monospaced))
-          .foregroundStyle(selected ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+          .foregroundStyle(.secondary)
       }
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 8)
     .background(
       RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
+        .fill(selected ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : .clear)
     )
-    .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
   }
 
   /// Prefer the registry-derived chord when the item declares a `commandID` and the resolved
