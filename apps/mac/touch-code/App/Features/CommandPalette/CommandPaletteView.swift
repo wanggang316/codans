@@ -16,6 +16,11 @@ struct CommandPaletteView: View {
   /// has no teardown work to do.
   let onDismiss: () -> Void
 
+  /// Corner radii tuned to read like a standard macOS popover (continuous
+  /// corners). The row highlight sits one notch tighter than the outer card.
+  private let cardCornerRadius: CGFloat = 12
+  private let rowCornerRadius: CGFloat = 10
+
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @FocusState private var queryFocused: Bool
 
@@ -41,11 +46,18 @@ struct CommandPaletteView: View {
         }
       }
       .frame(maxWidth: 560)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-      .overlay(
-        RoundedRectangle(cornerRadius: 10)
-          .stroke(Color(nsColor: .tertiaryLabelColor).opacity(0.5), lineWidth: 0.5)
+      // Real AppKit glass (NSVisualEffectView `.popover` / `.behindWindow`),
+      // matching the Agents sidebar panel rather than SwiftUI's layer-bound
+      // `Material` shim.
+      .background(
+        VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
+          .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
       )
+      .overlay(
+        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+          .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
       .padding(.top, 80)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -144,10 +156,10 @@ struct CommandPaletteView: View {
       if selected {
         // System unemphasized-selection gray, deepened one notch with a faint
         // primary overlay so the row reads a touch darker in both color schemes.
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
           .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
           .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
               .fill(Color.primary.opacity(0.06))
           )
       }
