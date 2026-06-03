@@ -1799,8 +1799,36 @@ struct RootFeature {
 
     // Worktree
     case .selectWorktree(let projectID, let worktreeID):
+      // Selecting a worktree from the palette must also land keyboard
+      // focus inside its terminal. A sidebar mouse click gets away with a
+      // bare `selectWorktree` because the user's follow-up click on a pane
+      // establishes first responder; the palette is keyboard-only, so the
+      // dismissed overlay would otherwise leave focus orphaned and the new
+      // worktree visibly "unfocused". Resolve the worktree's active tab and
+      // its remembered (or leftmost) pane, then reuse the `focusHierarchyPath`
+      // cascade (selectProject → selectWorktree → selectTab → focusPane →
+      // focusSurfaceView). Fall back to a bare selection when the worktree
+      // has no pane yet (freshly added, tab/pane not seeded).
+      let catalog = hierarchyClient.snapshot()
+      guard
+        let worktree = catalog
+          .projects.first(where: { $0.id == projectID })?
+          .worktrees.first(where: { $0.id == worktreeID }),
+        let tabID = worktree.selectedTabID ?? worktree.tabs.first?.id,
+        let tab = worktree.tabs.first(where: { $0.id == tabID }),
+        let paneID = hierarchyClient.lastFocusedPane(tabID) ?? tab.splitTree.leaves().first
+      else {
+        return .send(
+          .sidebar(.worktreeRowTapped(worktreeID, inProject: projectID))
+        )
+      }
       return .send(
-        .sidebar(.worktreeRowTapped(worktreeID, inProject: projectID))
+        .focusHierarchyPath(
+          InboxEntry.SourcePath(
+            projectID: projectID, worktreeID: worktreeID,
+            tabID: tabID, paneID: paneID
+          )
+        )
       )
     case .closeCurrentWorktree:
       return .send(.deleteCurrentWorktreeRequested)
