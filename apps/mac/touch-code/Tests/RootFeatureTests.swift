@@ -985,4 +985,93 @@ struct RootFeatureTests {
     await store.send(.worktreeHeadChanged(worktreeB))
     await store.finish()
   }
+
+  // MARK: - Agents-panel row tap reveals the worktree
+
+  @Test
+  func agentStateRowTappedRevealsWorktreeInSidebar() async {
+    // Tapping an Agents-panel row jumps to that pane's worktree; it must also
+    // reveal the worktree in the sidebar — expand the parent project, show
+    // the sidebar, and bump the reveal trigger — so a row scrolled off-screen
+    // (or hidden under a collapsed project) scrolls into view.
+    let pane = Pane(workingDirectory: "/repo")
+    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let worktree = Worktree(name: "main", path: "/repo", tabs: [tab], selectedTabID: tab.id)
+    var project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    project.worktrees = [worktree]
+    var catalog = Catalog()
+    catalog.projects = [project]
+    let address = PaneAddress(
+      projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: pane.id
+    )
+    let expandCalls = LockIsolated<[(ProjectID, Bool)]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.addressOf = { _ in address }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+      $0.hierarchyClient.selectTab = { _, _, _ in }
+      $0.hierarchyClient.focusPane = { _, _, _, _ in }
+      $0.hierarchyClient.focusSurfaceView = { _ in }
+      $0.hierarchyClient.setProjectExpanded = { pid, expanded in
+        expandCalls.withValue { $0.append((pid, expanded)) }
+      }
+    }
+    store.exhaustivity = .off
+
+    let before = store.state.revealSelectionTrigger
+    await store.send(.agentState(.rowTapped(pane.id)))
+    await store.finish()
+
+    #expect(store.state.revealSelectionTrigger != before)
+    #expect(store.state.sidebarVisible)
+    #expect(expandCalls.value.contains { $0.0 == project.id && $0.1 == true })
+  }
+
+  @Test
+  func focusHierarchyPathRevealsWorktreeInSidebar() async {
+    // Notification deep-links — system notifications and the status-bar inbox
+    // bell — funnel through `focusHierarchyPath`. Jumping to the pane must
+    // also reveal its worktree in the sidebar so an off-screen / collapsed
+    // target scrolls into view.
+    let pane = Pane(workingDirectory: "/repo")
+    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let worktree = Worktree(name: "main", path: "/repo", tabs: [tab], selectedTabID: tab.id)
+    var project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    project.worktrees = [worktree]
+    var catalog = Catalog()
+    catalog.projects = [project]
+    let source = InboxEntry.SourcePath(
+      projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: pane.id
+    )
+    let expandCalls = LockIsolated<[(ProjectID, Bool)]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+      $0.hierarchyClient.selectTab = { _, _, _ in }
+      $0.hierarchyClient.focusPane = { _, _, _, _ in }
+      $0.hierarchyClient.focusSurfaceView = { _ in }
+      $0.hierarchyClient.setProjectExpanded = { pid, expanded in
+        expandCalls.withValue { $0.append((pid, expanded)) }
+      }
+    }
+    store.exhaustivity = .off
+
+    let before = store.state.revealSelectionTrigger
+    await store.send(.focusHierarchyPath(source))
+    await store.finish()
+
+    #expect(store.state.revealSelectionTrigger != before)
+    #expect(store.state.sidebarVisible)
+    #expect(expandCalls.value.contains { $0.0 == project.id && $0.1 == true })
+  }
 }
