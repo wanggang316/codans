@@ -11,6 +11,12 @@ struct CommandPaletteItem: Equatable, Identifiable {
   let id: String
   let title: String
   let subtitle: String?
+  /// Extra text matched by the fuzzy scorer at title-level priority but
+  /// never shown in the row. Lets an item rank on terms absent from its
+  /// visible title — e.g. a "Switch to Worktree: <name>" item carries its
+  /// Project name here so a Project-name query surfaces it instead of
+  /// burying it in the lower subtitle band. `nil` matches the title only.
+  let searchText: String?
   let icon: String
   /// Hardcoded display hint, used as a fallback when `commandID` is unset or the env-injected
   /// resolved-shortcut map has no binding for that ID. Registry-tracked actions should pass
@@ -31,6 +37,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     id: String,
     title: String,
     subtitle: String? = nil,
+    searchText: String? = nil,
     icon: String,
     shortcut: KeyEquivalentDescriptor? = nil,
     commandID: CommandID? = nil,
@@ -41,6 +48,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     self.id = id
     self.title = title
     self.subtitle = subtitle
+    self.searchText = searchText
     self.icon = icon
     self.shortcut = shortcut
     self.commandID = commandID

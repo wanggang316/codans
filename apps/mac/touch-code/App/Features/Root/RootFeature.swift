@@ -1304,6 +1304,10 @@ struct RootFeature {
             .worktrees.contains(where: { $0.id == address.worktreeID }) == true
         else { return .none }
         try? hierarchyClient.selectWorktree(address.worktreeID, address.projectID)
+        // Scroll the now-selected worktree into view. Done before the
+        // tab/pane guards so a teardown race that drops the tab still leaves
+        // the worktree revealed.
+        revealWorktreeInSidebar(projectID: address.projectID, state: &state)
         guard
           hierarchyClient.snapshot()
             .projects.first(where: { $0.id == address.projectID })?
@@ -1545,6 +1549,9 @@ struct RootFeature {
         // navigable target via the StatusBar notification taps.
         guard !targetWorktree.archived else { return .none }
         try? hierarchyClient.selectWorktree(source.worktreeID, source.projectID)
+        // Scroll the deep-linked worktree into view before the tab/pane
+        // guards so a teardown race still leaves the worktree revealed.
+        revealWorktreeInSidebar(projectID: source.projectID, state: &state)
 
         guard
           let worktree = hierarchyClient.snapshot()
@@ -1869,6 +1876,20 @@ struct RootFeature {
     }
   }
 
+  /// Reveal the just-selected worktree in the sidebar: expand its parent
+  /// project so the row renders, force the sidebar visible, and bump
+  /// `revealSelectionTrigger` so the sidebar's `onChange` scrolls the row
+  /// into view. Shared by every "jump to a worktree" entry point (command
+  /// palette, Agents-panel row tap, notification deep-link) so a target
+  /// that's scrolled off-screen or hidden under a collapsed project always
+  /// comes into view. The sidebar reads the scroll target from the live
+  /// catalog, so callers must have already committed the worktree selection.
+  private func revealWorktreeInSidebar(projectID: ProjectID, state: inout State) {
+    hierarchyClient.setProjectExpanded(projectID, true)
+    state.sidebarVisible = true
+    state.revealSelectionTrigger = UUID()
+  }
+
   // swiftlint:disable cyclomatic_complexity
   /// Dispatches a Command Palette activation into the feature action
   /// that already implements the command. Every case forwards into a
@@ -1891,6 +1912,10 @@ struct RootFeature {
 
     // Worktree
     case .selectWorktree(let projectID, let worktreeID):
+      // The palette is keyboard-only, so the user can't act on a highlighted
+      // row that's scrolled off-screen or hidden under a collapsed project —
+      // reveal it. Selection itself still routes through the sidebar.
+      revealWorktreeInSidebar(projectID: projectID, state: &state)
       return .send(
         .sidebar(.worktreeRowTapped(worktreeID, inProject: projectID))
       )

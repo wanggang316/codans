@@ -14,6 +14,7 @@ struct CommandPaletteFuzzyScorerTests {
     id: String = "test.item",
     title: String,
     subtitle: String? = nil,
+    searchText: String? = nil,
     priorityTier: Int = 100,
     hiddenWhenQueryEmpty: Bool = false
   ) -> CommandPaletteItem {
@@ -21,6 +22,7 @@ struct CommandPaletteFuzzyScorerTests {
       id: id,
       title: title,
       subtitle: subtitle,
+      searchText: searchText,
       icon: "circle",
       priorityTier: priorityTier,
       hiddenWhenQueryEmpty: hiddenWhenQueryEmpty,
@@ -164,6 +166,59 @@ struct CommandPaletteFuzzyScorerTests {
   func emptyQuerySurfacesHiddenItemsWhenSearched() {
     let hidden = Self.item(id: "b", title: "Close Current Worktree", hiddenWhenQueryEmpty: true)
     #expect(Self.score(hidden, query: "close") != nil)
+  }
+
+  // MARK: - searchText (hidden match source)
+
+  @Test
+  func searchTextMatchesInTitleBand() {
+    // A query that hits only `searchText` (not the visible title) still
+    // ranks in the title bands — here a contiguous hit on the Project name.
+    let item = Self.item(
+      title: "Switch to Worktree: main", subtitle: "shes", searchText: "shes main"
+    )
+    let score = Self.score(item, query: "shes")
+    #expect(score != nil)
+    #expect(score! >= CommandPaletteFuzzyScorer.contiguousBase)
+  }
+
+  @Test
+  func searchTextOutranksDecorativePrefixSubsequence() {
+    // Regression: searching a Project name used to bury that Project's
+    // worktrees. The shared "Switch to Worktree:" prefix lets an unrelated
+    // worktree subsequence-match "shes" (S-witc[h]…Worktr[e]e…[s]upabase),
+    // while the real target only subtitle-matched. With `searchText`
+    // carrying the Project name, the real target wins on a contiguous hit.
+    let target = Self.item(
+      id: "t", title: "Switch to Worktree: main",
+      subtitle: "shes", searchText: "shes main"
+    )
+    let decoy = Self.item(
+      id: "d", title: "Switch to Worktree: supabase",
+      subtitle: "other", searchText: "other supabase"
+    )
+    let t = Self.score(target, query: "shes")
+    let d = Self.score(decoy, query: "shes")
+    #expect(t != nil)
+    #expect(d == nil || t! > d!)
+  }
+
+  @Test
+  func titleStillMatchesWhenSearchTextPresent() {
+    // Adding `searchText` must not cost the visible title its matchability —
+    // "switch" still resolves against the title.
+    let item = Self.item(
+      title: "Switch to Worktree: main", subtitle: "shes", searchText: "shes main"
+    )
+    #expect(Self.score(item, query: "switch") != nil)
+  }
+
+  @Test
+  func searchTextDoesNotMatchUnrelatedQuery() {
+    let item = Self.item(
+      title: "Switch to Worktree: main", subtitle: "shes", searchText: "shes main"
+    )
+    #expect(Self.score(item, query: "zzz") == nil)
   }
 
   // MARK: - Determinism

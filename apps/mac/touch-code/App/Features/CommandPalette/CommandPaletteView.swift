@@ -16,6 +16,11 @@ struct CommandPaletteView: View {
   /// has no teardown work to do.
   let onDismiss: () -> Void
 
+  /// Corner radii tuned to read like a standard macOS popover (continuous
+  /// corners). The row highlight sits one notch tighter than the outer card.
+  private let cardCornerRadius: CGFloat = 12
+  private let rowCornerRadius: CGFloat = 10
+
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @FocusState private var queryFocused: Bool
 
@@ -41,12 +46,20 @@ struct CommandPaletteView: View {
         }
       }
       .frame(maxWidth: 560)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-      .overlay(
-        RoundedRectangle(cornerRadius: 10)
-          .stroke(Color(nsColor: .tertiaryLabelColor).opacity(0.5), lineWidth: 0.5)
+      // Real AppKit glass (NSVisualEffectView). `.withinWindow` samples the
+      // bright app content beneath the overlay rather than the (often darker)
+      // desktop behind the window, and a faint adaptive tint lifts it to a
+      // Spotlight-like frost instead of the gray `.behindWindow` cast.
+      .background(
+        VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
+          .overlay(Color(nsColor: .textBackgroundColor).opacity(0.18))
+          .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
       )
-      .shadow(color: .black.opacity(0.22), radius: 14, y: 5)
+      .overlay(
+        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+          .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
       .padding(.top, 80)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -77,7 +90,15 @@ struct CommandPaletteView: View {
         store.send(.selectionMoved(.down))
         return .handled
       }
-      .onSubmit { store.send(.selectionCommitted) }
+      // Commit on the physical Return key only — NOT via `.onSubmit`, which
+      // also fires when the field resigns first responder. A row click blurs
+      // the field, so an `.onSubmit` here would commit the *selected* row
+      // (recency top) before the click's `.rowTapped` lands, silently
+      // activating the wrong command.
+      .onKeyPress(.return) {
+        store.send(.selectionCommitted)
+        return .handled
+      }
     }
     .padding(.horizontal, 14)
     .frame(height: 48)
@@ -124,7 +145,7 @@ struct CommandPaletteView: View {
     HStack(spacing: 10) {
       Image(systemName: item.icon)
         .frame(width: 20)
-        .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+        .foregroundStyle(.secondary)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(item.title).font(.system(size: 13))
@@ -136,16 +157,23 @@ struct CommandPaletteView: View {
       if let chord = chordDisplay(for: item) {
         Text(chord)
           .font(.system(size: 11, design: .monospaced))
-          .foregroundStyle(selected ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+          .foregroundStyle(.secondary)
       }
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 8)
-    .background(
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
-    )
-    .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+    .background {
+      if selected {
+        // System unemphasized-selection gray, deepened one notch with a faint
+        // primary overlay so the row reads a touch darker in both color schemes.
+        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+          .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+          .overlay(
+            RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+              .fill(Color.primary.opacity(0.06))
+          )
+      }
+    }
   }
 
   /// Prefer the registry-derived chord when the item declares a `commandID` and the resolved

@@ -538,8 +538,23 @@ struct HierarchySidebarView: View {
         .opacity(sidebarIndentReady ? 1 : 0)
         .background(SidebarIndentZeroer(onReady: { sidebarIndentReady = true }))
         .onChange(of: revealTrigger) { _, _ in
-          guard let worktreeID = currentSelection.worktreeID else { return }
-          withAnimation { proxy.scrollTo(worktreeID, anchor: .center) }
+          // Resolve the reveal target from the *live* catalog, not the
+          // `currentSelection` prop — the prop trails state by a render
+          // cycle (see `nativeSelectionBinding`). Palette-driven reveals bump
+          // this trigger in the same tick they switch worktrees (and may
+          // expand a collapsed parent), so the prop still points at the
+          // previous, already-visible row and `scrollTo` looks like a no-op.
+          // Defer one runloop so the selection mutation and any just-expanded
+          // rows have landed before we scroll.
+          Task { @MainActor in
+            let catalog = hierarchyManager.catalog
+            guard
+              let projectID = catalog.selectedProjectID,
+              let worktreeID = catalog.projects
+                .first(where: { $0.id == projectID })?.selectedWorktreeID
+            else { return }
+            withAnimation { proxy.scrollTo(worktreeID, anchor: .center) }
+          }
         }
       }
     }

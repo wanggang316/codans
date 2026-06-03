@@ -76,6 +76,11 @@ enum CommandPaletteItems {
             id: "worktree.select.\(worktree.id.raw.uuidString)",
             title: "Switch to Worktree: \(worktree.name)",
             subtitle: project.name,
+            // Project name first so a Project-name query ranks high (and
+            // earns the leading-position bonus); worktree name included so
+            // it still matches without the decorative "Switch to Worktree:"
+            // prefix that otherwise pollutes fuzzy matching.
+            searchText: "\(project.name) \(worktree.name)",
             icon: "arrow.triangle.branch",
             kind: .selectWorktree(project.id, worktree.id)
           )
