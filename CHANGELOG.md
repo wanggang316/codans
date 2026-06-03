@@ -20,6 +20,40 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.3] - 2026-06-03
+
+### Changed
+
+- **The Run button now doubles as Stop.** While a command is running in its pane,
+  the toolbar Run button turns into a red Stop — click it, or press ⌘., to
+  interrupt the command without closing the pane. Re-running a command reuses its
+  pane instead of piling up new tabs, and the button shows its shortcut while ⌘
+  is held.
+- **The sidebar refreshes right after a commit or git command.** The diff count
+  and pull-request badges used to lag by up to a minute; now committing, pushing,
+  or running a `git` / `gh` command in a pane updates them within a few seconds.
+- **The Command Palette has a new look.** System glass material, rounder corners,
+  a lighter frosted tone, and a calmer neutral-gray selection.
+- **The Command Palette ranks worktrees by project name.** Typing a project name
+  now surfaces that project's worktrees at the top instead of burying them behind
+  unrelated fuzzy matches.
+- **Jumping to a worktree reveals it in the sidebar.** Selecting a worktree from
+  the Command Palette, the Active Agents panel, or a notification now expands its
+  project and scrolls the row into view.
+
+### Fixed
+
+- **The command editor stays put while you type.** In Settings → Commands, the
+  inline editor now focuses when its popover opens, shows the caret immediately,
+  no longer jumps the caret to the start mid-word, and no longer reverts a field
+  you just changed (like New Tab ⇄ In Place) on the next keystroke.
+- **Clicking a Command Palette row runs that row.** Clicking an item no longer
+  occasionally fired the previously-used command instead — only Return commits the
+  highlighted row, and a click runs exactly what you clicked.
+- **First launch shows one consistent tone.** With no project open, the empty
+  window no longer splits into mismatched light and dark areas; it stays on a
+  single neutral system tone regardless of your terminal theme.
+
 ## [0.4.2] - 2026-06-02
 
 ### Added
