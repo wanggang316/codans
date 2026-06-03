@@ -587,6 +587,9 @@ final class HierarchyManager {
         }
       }
       catalog.projects[projectIndex].worktrees[worktreeIndex].archived = archived
+      // Stamp the archive time so the Cleanup auto-delete sweep can age the
+      // Worktree out; clear it on unarchive so a re-archive restarts the clock.
+      catalog.projects[projectIndex].worktrees[worktreeIndex].archivedAt = archived ? Date() : nil
       // After flipping archived → true, the row vanishes from the sidebar but
       // the detail view is still bound to its WorktreeID. Advance the
       // project's selection to the next visible sibling so the detail pane
@@ -604,6 +607,32 @@ final class HierarchyManager {
       store.scheduleSave(catalog)
       return
     }
+  }
+
+  /// Returns the IDs of archived Worktrees in `projectID` whose archive
+  /// timestamp is older than `ttl` seconds — i.e. those due for the Cleanup
+  /// auto-delete sweep. As a side effect, archived rows with no recorded
+  /// timestamp (catalogs from before `archivedAt` existed) are back-filled
+  /// with `now` and saved, so they age from first observation instead of
+  /// being deleted retroactively. Pinned rows are skipped. The returned IDs
+  /// are handed to `HierarchyClient` to perform the actual git removal.
+  func archivedWorktreesDue(in projectID: ProjectID, now: Date, ttl: TimeInterval) -> [WorktreeID] {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else { return [] }
+    var due: [WorktreeID] = []
+    var didBackfill = false
+    let snapshot = catalog.projects[projectIndex].worktrees
+    for (index, worktree) in snapshot.enumerated() where worktree.archived && !worktree.isPinned {
+      guard let archivedAt = worktree.archivedAt else {
+        catalog.projects[projectIndex].worktrees[index].archivedAt = now
+        didBackfill = true
+        continue
+      }
+      if now.timeIntervalSince(archivedAt) >= ttl {
+        due.append(worktree.id)
+      }
+    }
+    if didBackfill { store.scheduleSave(catalog) }
+    return due
   }
 
   /// Flips the Project's sidebar disclosure flag. Persists so the user's
@@ -973,6 +1002,10 @@ final class HierarchyManager {
       }
       if let idx = catalog.projects[projectIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
         catalog.projects[projectIndex].worktrees[idx].archived = true
+        // Stamp the archive time for the Cleanup auto-delete sweep (the loop
+        // guard above only reaches not-yet-archived rows, so this never
+        // overwrites an earlier timestamp).
+        catalog.projects[projectIndex].worktrees[idx].archivedAt = Date()
         archivedCount += 1
       }
     }

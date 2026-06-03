@@ -13,6 +13,15 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
   /// `decodeIfPresent`, and the encode path omits the key when `false` so
   /// existing catalogs round-trip identically.
   public var archived: Bool
+  /// When the Worktree was archived (the moment `archived` last flipped to
+  /// `true`). Drives the Settings → Worktrees → Cleanup "auto-delete after N
+  /// days" sweep. `nil` when the Worktree is not archived; cleared back to
+  /// `nil` on unarchive. Pre-existing archived catalogs decode to `nil` (no
+  /// known timestamp) and are lazily back-filled with the current time the
+  /// first time the sweep observes them, so they are never deleted retroactively.
+  /// The encode path omits the key when `nil` so existing catalogs round-trip
+  /// identically.
+  public var archivedAt: Date?
   /// User-marked "pinned" state. Pinned Worktrees render in their own section
   /// at the top of the Project's row group (below the main checkout). Defaults
   /// to `false`; pre-pin catalogs decode to `false` via `decodeIfPresent`, and
@@ -28,6 +37,7 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     tabs: [Tab] = [],
     selectedTabID: TabID? = nil,
     archived: Bool = false,
+    archivedAt: Date? = nil,
     isPinned: Bool = false
   ) {
     self.id = id
@@ -37,13 +47,14 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     self.tabs = tabs
     self.selectedTabID = selectedTabID
     self.archived = archived
+    self.archivedAt = archivedAt
     self.isPinned = isPinned
   }
 }
 
 extension Worktree: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, path, branch, tabs, selectedTabID, archived, isPinned
+    case id, name, path, branch, tabs, selectedTabID, archived, archivedAt, isPinned
   }
 
   public init(from decoder: Decoder) throws {
@@ -55,6 +66,7 @@ extension Worktree: Codable {
     self.tabs = try container.decodeIfPresent([Tab].self, forKey: .tabs) ?? []
     self.selectedTabID = try container.decodeIfPresent(TabID.self, forKey: .selectedTabID)
     self.archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+    self.archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
     self.isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
   }
 
@@ -71,6 +83,9 @@ extension Worktree: Codable {
     if archived {
       try container.encode(true, forKey: .archived)
     }
+    // Omit `archivedAt` when nil (not archived / unknown) so non-archived
+    // and pre-existing catalogs round-trip identically.
+    try container.encodeIfPresent(archivedAt, forKey: .archivedAt)
     if isPinned {
       try container.encode(true, forKey: .isPinned)
     }
