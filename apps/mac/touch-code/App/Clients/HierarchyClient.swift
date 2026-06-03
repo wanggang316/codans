@@ -985,10 +985,9 @@ extension HierarchyClient {
     }
   }
 
-  /// Sends Ctrl-C to the pane a run script last spawned in `worktreeID`,
-  /// interrupting its foreground command while leaving the pane open for the
-  /// next run. Best-effort: silent no-op when no live run pane is tracked or
-  /// no `TerminalClient` is wired.
+  /// Interrupts (Ctrl-C → SIGINT) the pane a run script last spawned in
+  /// `worktreeID`, leaving the pane open for the next run. Best-effort: silent
+  /// no-op when no live run pane is tracked or no `TerminalClient` is wired.
   @MainActor
   private static func stopScript(
     scriptID: UUID,
@@ -1004,9 +1003,10 @@ extension HierarchyClient {
       )
       return
     }
-    // U+0003 (ETX) is what the terminal turns into SIGINT for the foreground
-    // process group — same as the user pressing Ctrl-C.
-    terminalClient.sendInput(paneID, "\u{3}")
+    // Goes through the key-event path (`ghostty_surface_key`), not `sendInput`'s
+    // text path — the latter filters control bytes, so a literal 0x03 written
+    // as text never reaches the PTY as an interrupt.
+    terminalClient.interrupt(paneID)
   }
 
   /// Materializes a `ScriptDefinition` into a runtime action and returns the

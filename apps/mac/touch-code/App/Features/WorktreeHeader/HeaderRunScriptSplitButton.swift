@@ -92,7 +92,7 @@ struct HeaderRunScriptSplitButton: View {
           .symbolRenderingMode(.palette)
           .foregroundStyle(primaryTint)
           .accessibilityHidden(true)
-        Text(primaryName).lineLimit(1)
+        Text(isRunning ? "Stop" : primaryName).lineLimit(1)
       }
     } primaryAction: {
       if let script = primary {

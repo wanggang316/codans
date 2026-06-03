@@ -457,6 +457,14 @@ final class PaneSurface {
     sendKeyEvent(keycode: keycode, mods: mods, to: surface)
   }
 
+  /// Interrupt the foreground process group (Ctrl-C → SIGINT). Routed through
+  /// the key-event path on purpose: `sendInput`'s `ghostty_surface_text` path
+  /// filters control bytes (see `isControlByte`), so a literal `0x03` written
+  /// as text is dropped and never reaches the PTY as an interrupt.
+  func sendInterrupt() {
+    sendNamedKey(.ctrlC)
+  }
+
   /// Forward raw bytes to the terminal by splitting them into control-byte
   /// key events (Esc, Tab, CR/LF, BS, Ctrl-X) and intervening printable
   /// chunks. This is the path `terminal.sendRawBytes` uses so callers can
