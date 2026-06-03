@@ -1799,6 +1799,16 @@ struct RootFeature {
 
     // Worktree
     case .selectWorktree(let projectID, let worktreeID):
+      // The palette is keyboard-only: after selecting a worktree the user
+      // can't act on a highlighted row that's scrolled off-screen — or
+      // hidden under a collapsed parent project. Expand the parent so the
+      // row renders, force the sidebar visible, then bump
+      // `revealSelectionTrigger` to drive the sidebar's existing
+      // scroll-into-view path (the same one ⌘⇧J and worktree-history
+      // navigation use). Selection itself still routes through the sidebar.
+      hierarchyClient.setProjectExpanded(projectID, true)
+      state.sidebarVisible = true
+      state.revealSelectionTrigger = UUID()
       return .send(
         .sidebar(.worktreeRowTapped(worktreeID, inProject: projectID))
       )
