@@ -135,7 +135,8 @@ struct WorktreeDetailView: View {
       .background(alignment: .topLeading) {
         ProjectScriptsShortcutBindings(
           store: headerStore,
-          projectID: address.project
+          projectID: address.project,
+          worktreeID: address.worktree
         )
       }
       // On macOS 15+ remove the title slot entirely so default-placement
@@ -287,7 +288,8 @@ struct WorktreeDetailView: View {
           // leading-to-trailing in declaration order.
           HeaderRunScriptSplitButton(
             store: headerStore,
-            projectID: address.project
+            projectID: address.project,
+            worktreeID: address.worktree
           )
           .buttonStyle(.plain)
           HeaderOpenSplitButton(
@@ -350,7 +352,8 @@ struct WorktreeDetailView: View {
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,
-        projectID: address.project
+        projectID: address.project,
+        worktreeID: address.worktree
       )
     }
     ToolbarSpacer(.fixed)

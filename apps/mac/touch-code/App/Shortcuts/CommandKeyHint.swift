@@ -16,6 +16,34 @@ extension View {
   func commandKeyHint(_ id: CommandID) -> some View {
     modifier(CommandKeyHintModifier(id: id))
   }
+
+  /// Variant for chords that are NOT backed by a `CommandID` — e.g. a
+  /// per-project run script whose binding lives in settings, or a fixed chord
+  /// like ⌘. for "stop". Pass the already-resolved display string (`nil` shows
+  /// nothing); it is appended after this view while ⌘ is held, matching the
+  /// `commandKeyHint(_:)` convention. The observer dependency lives in the
+  /// modifier, so the hint appears/disappears live even inside a toolbar Menu
+  /// label (where reads in the `label:` closure itself would escape tracking).
+  func commandKeyHint(chord: String?) -> some View {
+    modifier(CommandKeyChordHintModifier(chord: chord))
+  }
+}
+
+private struct CommandKeyChordHintModifier: ViewModifier {
+  let chord: String?
+  @Environment(CommandKeyObserver.self) private var observer
+
+  func body(content: Content) -> some View {
+    HStack(spacing: 6) {
+      content
+      if observer.isCommandHeld, let chord {
+        Text(chord)
+          .font(.caption.monospaced())
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
+      }
+    }
+  }
 }
 
 private struct CommandKeyHintModifier: ViewModifier {

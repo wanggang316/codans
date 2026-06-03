@@ -8,6 +8,10 @@ import TouchCodeCore
 /// `.withDependencies`.
 nonisolated struct TerminalClient: Sendable {
   var sendInput: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
+  /// Interrupt the pane's foreground process (Ctrl-C → SIGINT). Goes through
+  /// the key-event path rather than `sendInput`, whose text path filters
+  /// control bytes. No-op when the pane has no live surface.
+  var interrupt: @MainActor @Sendable (_ paneID: PaneID) -> Void
   var setFocus: @MainActor @Sendable (_ paneID: PaneID, _ focused: Bool) -> Void
   var retryPane: @MainActor @Sendable (_ paneID: PaneID) -> Bool
 
@@ -53,6 +57,9 @@ extension TerminalClient {
       sendInput: { paneID, text in
         engine.ghosttyRuntime?.surface(for: paneID)?.sendInput(text)
       },
+      interrupt: { paneID in
+        engine.ghosttyRuntime?.surface(for: paneID)?.sendInterrupt()
+      },
       setFocus: { paneID, focused in
         engine.ghosttyRuntime?.surface(for: paneID)?.setFocus(focused)
       },
@@ -83,6 +90,7 @@ extension TerminalClient: DependencyKey {
     sendInput: { _, _ in
       fatalError("TerminalClient.liveValue not configured; wire via .withDependencies at app startup")
     },
+    interrupt: { _ in fatalError("TerminalClient.liveValue not configured") },
     setFocus: { _, _ in fatalError("TerminalClient.liveValue not configured") },
     retryPane: { _ in fatalError("TerminalClient.liveValue not configured") },
     ensureSurface: { _, _, _, _ in fatalError("TerminalClient.liveValue not configured") },
@@ -93,6 +101,7 @@ extension TerminalClient: DependencyKey {
 
   static let testValue: TerminalClient = TerminalClient(
     sendInput: unimplemented("TerminalClient.sendInput"),
+    interrupt: unimplemented("TerminalClient.interrupt"),
     setFocus: unimplemented("TerminalClient.setFocus"),
     retryPane: unimplemented("TerminalClient.retryPane", placeholder: false),
     ensureSurface: unimplemented("TerminalClient.ensureSurface"),

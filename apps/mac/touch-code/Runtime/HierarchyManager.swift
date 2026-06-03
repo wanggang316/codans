@@ -1534,6 +1534,59 @@ final class HierarchyManager {
     return false
   }
 
+  // MARK: - Run-script panes
+
+  /// Identity of a dedicated run-script pane: the worktree it lives in plus
+  /// the `ScriptDefinition.id` that spawned it. Keying on both lets each
+  /// script keep its own reusable pane while surviving worktree switches.
+  private struct ScriptPaneKey: Hashable {
+    let worktree: WorktreeID
+    let script: UUID
+  }
+
+  /// Maps a (worktree, script) pair to the pane a `.newTab` / `.split` run
+  /// script last spawned. Lets repeated runs reuse the same pane instead of
+  /// piling up tabs, and lets the Run/Stop toggle find the pane to interrupt.
+  /// Runtime-only — panes do not survive a relaunch.
+  private var scriptRunPanes: [ScriptPaneKey: PaneID] = [:]
+
+  /// The live run pane for `(worktreeID, scriptID)`, or `nil` when none was
+  /// recorded or the recorded pane has since closed. Lazily prunes stale
+  /// entries so callers never act on a dead pane — no need to hook every
+  /// close path.
+  func runScriptPane(worktreeID: WorktreeID, scriptID: UUID) -> PaneID? {
+    let key = ScriptPaneKey(worktree: worktreeID, script: scriptID)
+    guard let paneID = scriptRunPanes[key] else { return nil }
+    if catalog.pane(paneID) == nil {
+      scriptRunPanes.removeValue(forKey: key)
+      return nil
+    }
+    return paneID
+  }
+
+  /// Records the pane a run script spawned so the next run can reuse it.
+  func setRunScriptPane(worktreeID: WorktreeID, scriptID: UUID, paneID: PaneID) {
+    scriptRunPanes[ScriptPaneKey(worktree: worktreeID, script: scriptID)] = paneID
+  }
+
+  /// True when the script's tracked run pane exists AND is currently running a
+  /// foreground command. Drives the toolbar Run⇄Stop toggle; reuses the same
+  /// busy signals (`commandBusyPanes` / `runningPanes`) as the tab spinner so
+  /// the two surfaces agree on what "executing" means.
+  ///
+  /// Pure read — unlike `runScriptPane` it does NOT prune stale entries,
+  /// because this is called from SwiftUI `body` where mutating `@Observable`
+  /// state would warn. A closed run pane reads as not-running here (its
+  /// `catalog.pane` is gone); the stale map entry is pruned later by the
+  /// next `runScriptPane` call on the run/stop effect path.
+  func isScriptRunning(worktreeID: WorktreeID, scriptID: UUID) -> Bool {
+    guard !commandBusyPanes.isEmpty || !runningPanes.isEmpty,
+      let paneID = scriptRunPanes[ScriptPaneKey(worktree: worktreeID, script: scriptID)],
+      catalog.pane(paneID) != nil
+    else { return false }
+    return commandBusyPanes.contains(paneID) || runningPanes.contains(paneID)
+  }
+
   // MARK: - Pane mutations
 
   func openPane(

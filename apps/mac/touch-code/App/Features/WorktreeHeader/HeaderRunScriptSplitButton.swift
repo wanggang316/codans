@@ -21,7 +21,18 @@ struct HeaderRunScriptSplitButton: View {
   /// target Worktree from `state.selection` at handle-time, sidestepping
   /// stale NSMenuItem closure captures on worktree switch.
   let projectID: ProjectID
+  /// Selected Worktree, used *only* to read the live Run/Stop state for this
+  /// view (`HierarchyManager.isScriptRunning`). Dispatch still routes
+  /// scriptID-only through `RootFeature`, which re-resolves the worktree from
+  /// `state.selection` at handle-time — so this read-only capture cannot fire
+  /// a script against the wrong worktree. The view is rebuilt per resolved
+  /// address, so the value tracks the live selection.
+  let worktreeID: WorktreeID
   @Environment(SettingsStore.self) private var settingsStore
+  /// Live busy state for the Run/Stop toggle. `@Observable`, so reads in
+  /// `body` re-render the button when a run pane starts/stops executing —
+  /// same source the tab busy spinner reads.
+  @Environment(HierarchyManager.self) private var hierarchyManager
 
   var body: some View {
     // Read scripts once, here, inside body. Two load-bearing reasons:
@@ -42,9 +53,38 @@ struct HeaderRunScriptSplitButton: View {
     // position would silently undo their manual reorder.
     let primary = scripts.first
     let primaryName = primary?.displayName ?? "Run"
-    let primaryIcon = primary?.resolvedSystemImage ?? ScriptKind.run.defaultSystemImage
-    let primaryTint = ScriptTintColorPalette.color(for: primary?.resolvedTintColor ?? .green)
-    let primaryHelp = primary == nil ? "Manage Scripts…" : "Run \(primaryName)"
+    // Run/Stop toggle: while the primary script's dedicated pane is executing
+    // a foreground command, the button becomes a red Stop that interrupts it
+    // (Ctrl-C) instead of launching another run.
+    let isRunning =
+      primary.map {
+        hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id)
+      } ?? false
+    let primaryIcon =
+      isRunning ? "stop.fill" : (primary?.resolvedSystemImage ?? ScriptKind.run.defaultSystemImage)
+    let primaryTint =
+      isRunning
+      ? ScriptTintColorPalette.color(for: .red)
+      : ScriptTintColorPalette.color(for: primary?.resolvedTintColor ?? .green)
+    let primaryHelp =
+      primary == nil
+      ? "Manage Scripts…" : (isRunning ? "Stop \(primaryName)" : "Run \(primaryName)")
+    // While ⌘ is held the button surfaces its chord (the macOS menu
+    // convention). Idle → the primary script's configured shortcut; running →
+    // the fixed ⌘. stop chord. `commandKeyHint` gates the actual display on ⌘.
+    let primaryChord: String? =
+      isRunning
+      ? "⌘."
+      : primary?.keyboardShortcut.flatMap {
+        $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
+      }
+    // Per-script running flags, read in body so Observation re-renders this
+    // view when a run pane starts/stops. Folded into the Menu `.id` below so
+    // the cached NSMenu's items flip Run⇄Stop instead of staying stale.
+    let runningSignature =
+      scripts
+      .map { hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id) ? "1" : "0" }
+      .joined()
 
     Menu {
       caretMenu(scripts: scripts)
@@ -60,24 +100,38 @@ struct HeaderRunScriptSplitButton: View {
         Image(systemName: primaryIcon)
           .symbolRenderingMode(.palette)
           .foregroundStyle(primaryTint)
+          // play.fill (triangle) and stop.fill (square) have different glyph
+          // widths, so a bare swap made the button reflow on every toggle.
+          // A fixed square footprint keeps the icon column constant and the
+          // `.replace` transition cross-fades the swap instead of popping.
+          .contentTransition(.symbolEffect(.replace))
+          .frame(width: 16, height: 16)
           .accessibilityHidden(true)
-        Text(primaryName).lineLimit(1)
+          // Chord rides right after the icon (left of the chevron), matching
+          // the sibling Open button — anchoring on the trailing edge would let
+          // it merge with the system menu indicator.
+          .commandKeyHint(chord: primaryChord)
+        Text(isRunning ? "Stop" : primaryName).lineLimit(1)
       }
     } primaryAction: {
       if let script = primary {
-        store.send(.runScriptTapped(scriptID: script.id))
+        if isRunning {
+          store.send(.stopScriptTapped(scriptID: script.id))
+        } else {
+          store.send(.runScriptTapped(scriptID: script.id))
+        }
       } else {
         store.send(.manageScriptsTapped(projectID: projectID))
       }
     }
     .menuIndicator(.visible)
-    .accessibilityLabel(primaryName)
+    .accessibilityLabel(isRunning ? "Stop \(primaryName)" : primaryName)
     .help(primaryHelp)
     // Force Menu rebuild when scripts mutate. The signature folds id +
     // displayName + icon + tint + ORDER so add / edit / delete /
     // reorder all invalidate. Without this, NSMenu caches its items
     // across open cycles and Settings-side edits don't reflect here.
-    .id(Self.identitySignature(of: scripts))
+    .id(Self.identitySignature(of: scripts) + "#" + runningSignature)
   }
 
   // MARK: - Caret menu
@@ -107,18 +161,25 @@ struct HeaderRunScriptSplitButton: View {
   /// the system Shortcuts pane uses.
   @ViewBuilder
   private func menuButton(for script: ScriptDefinition) -> some View {
+    // Mirror the primary half: a running script's menu row becomes a red
+    // "Stop …" that interrupts it; the chord (below) toggles the same way.
+    let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
     let button = Button {
-      store.send(.runScriptTapped(scriptID: script.id))
+      if isRunning {
+        store.send(.stopScriptTapped(scriptID: script.id))
+      } else {
+        store.send(.runScriptTapped(scriptID: script.id))
+      }
     } label: {
       // Native menu items render their icon as a monochrome template, so the
       // tint must be baked into a non-template image (see `menuIcon`) — a
       // plain `Label(_:systemImage:)` would drop the script's colour.
       Label {
-        Text(script.displayName)
+        Text(isRunning ? "Stop \(script.displayName)" : script.displayName)
       } icon: {
         ScriptTintColorPalette.menuIcon(
-          systemName: script.resolvedSystemImage,
-          tint: script.resolvedTintColor
+          systemName: isRunning ? "stop.fill" : script.resolvedSystemImage,
+          tint: isRunning ? .red : script.resolvedTintColor
         )
       }
     }

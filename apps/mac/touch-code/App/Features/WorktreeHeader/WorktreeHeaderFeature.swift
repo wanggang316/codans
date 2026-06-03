@@ -43,6 +43,10 @@ struct WorktreeHeaderFeature {
     /// against a stale worktreeID. Inline `primaryAction` callers were
     /// unaffected, but the menu / chord paths were.
     case runScriptTapped(scriptID: UUID)
+    /// Stop half of the Run/Stop toggle. Carries only `scriptID`; RootFeature
+    /// resolves the target Project + Worktree from `state.selection` at
+    /// handle-time, same staleness rationale as `runScriptTapped`.
+    case stopScriptTapped(scriptID: UUID)
     /// "Manage Scripts…" menu footer or primary click on an empty script list.
     /// Carries the source `projectID` so the parent can deep-link into
     /// the Settings window's Project Scripts pane for that project.
@@ -70,6 +74,10 @@ struct WorktreeHeaderFeature {
       /// (see `runScriptTapped` for the staleness rationale) and dispatches
       /// to `HierarchyClient.runScript`.
       case runScriptRequested(scriptID: UUID)
+      /// Stop a running Project script. RootFeature resolves the target
+      /// Project + Worktree from `state.selection` at handle-time (see
+      /// `runScriptRequested`) and dispatches to `HierarchyClient.stopScript`.
+      case stopScriptRequested(scriptID: UUID)
       /// User asked to manage scripts — open the Settings window AND
       /// deep-link into the Project Scripts pane for the given project.
       /// (Earlier shipped a no-deep-link variant; restored after the
@@ -109,6 +117,9 @@ struct WorktreeHeaderFeature {
 
       case .runScriptTapped(let scriptID):
         return .send(.delegate(.runScriptRequested(scriptID: scriptID)))
+
+      case .stopScriptTapped(let scriptID):
+        return .send(.delegate(.stopScriptRequested(scriptID: scriptID)))
 
       case .manageScriptsTapped(let projectID):
         return .send(.delegate(.manageScriptsRequested(projectID: projectID)))
