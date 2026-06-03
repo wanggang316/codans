@@ -43,6 +43,13 @@ struct PlainCommandEditor: NSViewRepresentable {
     textView.drawsBackground = false
     textView.textContainerInset = NSSize(width: 4, height: 4)
     textView.string = text
+    // An NSTextView embedded in a SwiftUI `.popover` does not reliably take
+    // first responder from a click: at the moment the popover opens its window
+    // is not yet key, so the click never installs a caret and the field reads
+    // as unfocusable. Promote it to first responder once it has attached to the
+    // popover window — same "wait for window, then focus" shape the pane-focus
+    // paths use. Retries because the window is nil for the first run-loop ticks.
+    context.coordinator.focusWhenAttached(textView)
     return scrollView
   }
 
@@ -73,6 +80,21 @@ struct PlainCommandEditor: NSViewRepresentable {
     func textDidChange(_ notification: Notification) {
       guard let textView = notification.object as? NSTextView else { return }
       text = textView.string
+    }
+
+    /// Makes `textView` first responder as soon as it joins a window. Hops the
+    /// run loop until the window exists (the popover attaches a few ticks after
+    /// `makeNSView`), capped so a never-attached view can't spin forever.
+    func focusWhenAttached(_ textView: NSTextView, attempt: Int = 0) {
+      guard attempt < 10 else { return }
+      DispatchQueue.main.async { [weak textView] in
+        guard let textView else { return }
+        if let window = textView.window {
+          window.makeFirstResponder(textView)
+        } else {
+          self.focusWhenAttached(textView, attempt: attempt + 1)
+        }
+      }
     }
   }
 }
