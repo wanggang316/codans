@@ -79,7 +79,9 @@ struct WorktreeLoadingView: View {
     }
     .multilineTextAlignment(.center)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(nsColor: .windowBackgroundColor))
+    // Match the Ghostty-stained window chrome, not the neutral system tone,
+    // so the loading body reads as one surface with the sidebar + toolbar.
+    .background(GhosttyBackground())
   }
 
   @ViewBuilder
