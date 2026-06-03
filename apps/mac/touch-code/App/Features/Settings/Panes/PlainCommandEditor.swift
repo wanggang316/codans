@@ -92,14 +92,22 @@ struct PlainCommandEditor: NSViewRepresentable {
     /// run loop until the window exists (the popover attaches a few ticks after
     /// `makeNSView`), capped so a never-attached view can't spin forever.
     func focusWhenAttached(_ textView: NSTextView, attempt: Int = 0) {
-      guard attempt < 10 else { return }
+      guard attempt < 12 else { return }
       DispatchQueue.main.async { [weak textView] in
         guard let textView else { return }
-        if let window = textView.window {
-          window.makeFirstResponder(textView)
-        } else {
+        guard let window = textView.window else {
           self.focusWhenAttached(textView, attempt: attempt + 1)
+          return
         }
+        // The popover window isn't key the instant it appears. First responder
+        // alone then leaves the insertion point un-drawn until the first
+        // keystroke — and the first click gets swallowed by window activation
+        // instead of reaching the text view. Make the window key, take first
+        // responder, and kick the insertion-point timer so the caret shows on
+        // open and a later click lands in an already-key window.
+        window.makeKey()
+        window.makeFirstResponder(textView)
+        textView.updateInsertionPointStateAndRestartTimer(true)
       }
     }
   }
