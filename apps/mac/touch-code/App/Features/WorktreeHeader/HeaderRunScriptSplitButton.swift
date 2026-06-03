@@ -69,6 +69,15 @@ struct HeaderRunScriptSplitButton: View {
     let primaryHelp =
       primary == nil
       ? "Manage Scripts…" : (isRunning ? "Stop \(primaryName)" : "Run \(primaryName)")
+    // While ⌘ is held the button surfaces its chord (the macOS menu
+    // convention). Idle → the primary script's configured shortcut; running →
+    // the fixed ⌘. stop chord. `commandKeyHint` gates the actual display on ⌘.
+    let primaryChord: String? =
+      isRunning
+      ? "⌘."
+      : primary?.keyboardShortcut.flatMap {
+        $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
+      }
     // Per-script running flags, read in body so Observation re-renders this
     // view when a run pane starts/stops. Folded into the Menu `.id` below so
     // the cached NSMenu's items flip Run⇄Stop instead of staying stale.
@@ -98,6 +107,10 @@ struct HeaderRunScriptSplitButton: View {
           .contentTransition(.symbolEffect(.replace))
           .frame(width: 16, height: 16)
           .accessibilityHidden(true)
+          // Chord rides right after the icon (left of the chevron), matching
+          // the sibling Open button — anchoring on the trailing edge would let
+          // it merge with the system menu indicator.
+          .commandKeyHint(chord: primaryChord)
         Text(isRunning ? "Stop" : primaryName).lineLimit(1)
       }
     } primaryAction: {
