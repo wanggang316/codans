@@ -46,11 +46,13 @@ struct CommandPaletteView: View {
         }
       }
       .frame(maxWidth: 560)
-      // Real AppKit glass (NSVisualEffectView `.popover` / `.behindWindow`),
-      // matching the Agents sidebar panel rather than SwiftUI's layer-bound
-      // `Material` shim.
+      // Real AppKit glass (NSVisualEffectView). `.withinWindow` samples the
+      // bright app content beneath the overlay rather than the (often darker)
+      // desktop behind the window, and a faint adaptive tint lifts it to a
+      // Spotlight-like frost instead of the gray `.behindWindow` cast.
       .background(
-        VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
+        VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
+          .overlay(Color(nsColor: .textBackgroundColor).opacity(0.18))
           .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
       )
       .overlay(
