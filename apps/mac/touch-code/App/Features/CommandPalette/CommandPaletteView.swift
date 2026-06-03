@@ -140,10 +140,18 @@ struct CommandPaletteView: View {
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 8)
-    .background(
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(selected ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : .clear)
-    )
+    .background {
+      if selected {
+        // System unemphasized-selection gray, deepened one notch with a faint
+        // primary overlay so the row reads a touch darker in both color schemes.
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+          .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color.primary.opacity(0.06))
+          )
+      }
+    }
   }
 
   /// Prefer the registry-derived chord when the item declares a `commandID` and the resolved
