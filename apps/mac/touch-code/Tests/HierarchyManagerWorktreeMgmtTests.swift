@@ -39,6 +39,58 @@ struct HierarchyManagerWorktreeMgmtTests {
     #expect(worktree?.archived == true)
   }
 
+  // MARK: - archivedAt + auto-delete due (Cleanup)
+
+  @Test
+  func archiveStampsArchivedAtAndUnarchiveClearsIt() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
+    #expect(manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.archivedAt != nil)
+
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: false)
+    #expect(manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.archivedAt == nil)
+  }
+
+  @Test
+  func archivedWorktreesDueReturnsExpiredAndExcludesFresh() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
+
+    // ttl = 7 days. Evaluated "now" only 1 hour after archiving → not due.
+    let oneHourLater = Date().addingTimeInterval(3_600)
+    #expect(manager.archivedWorktreesDue(in: projectID, now: oneHourLater, ttl: 7 * 86_400).isEmpty)
+
+    // Evaluated 8 days later → past the 7-day retention → due.
+    let eightDaysLater = Date().addingTimeInterval(8 * 86_400)
+    #expect(
+      manager.archivedWorktreesDue(in: projectID, now: eightDaysLater, ttl: 7 * 86_400) == [worktreeID]
+    )
+  }
+
+  @Test
+  func archivedWorktreesDueBackfillsMissingTimestampInsteadOfDeleting() {
+    // A pre-existing archived row with no recorded timestamp (catalog from
+    // before `archivedAt` existed) must NOT be deleted retroactively; the
+    // sweep back-fills its timestamp so it ages from first observation.
+    let stale = Worktree(
+      name: "old", path: "/repo/old", branch: "old", archived: true, archivedAt: nil
+    )
+    let project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo", worktrees: [stale])
+    let seeded = HierarchyManager(
+      catalog: Catalog(projects: [project]), store: store, runtime: fakeRuntime
+    )
+
+    let due = seeded.archivedWorktreesDue(in: project.id, now: Date(), ttl: 1)
+    #expect(due.isEmpty)
+    #expect(seeded.catalog.projects[0].worktrees[0].archivedAt != nil)
+  }
+
   @Test
   func archiveIsIdempotent() throws {
     let projectID = manager.addProject(

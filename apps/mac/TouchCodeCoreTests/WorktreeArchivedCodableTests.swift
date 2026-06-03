@@ -43,4 +43,46 @@ struct WorktreeArchivedCodableTests {
     #expect(decoded == worktree)
     #expect(decoded.archived == true)
   }
+
+  // MARK: - archivedAt (Cleanup auto-delete clock)
+
+  @Test
+  func archivedAtOmittedWhenNil() throws {
+    let worktree = Worktree(name: "feature", path: "/tmp/feat", archived: true)
+    let data = try JSONEncoder().encode(worktree)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    #expect(object?["archivedAt"] == nil)
+  }
+
+  @Test
+  func missingArchivedAtDecodesToNil() throws {
+    // Pre-existing archived catalog: `archived` present, no `archivedAt`.
+    let json = #"""
+      {
+        "id": { "raw": "00000000-0000-0000-0000-000000000001" },
+        "name": "feature",
+        "path": "/tmp/feat",
+        "tabs": [],
+        "archived": true
+      }
+      """#
+    let decoded = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
+    #expect(decoded.archived == true)
+    #expect(decoded.archivedAt == nil)
+  }
+
+  @Test
+  func archivedAtRoundTrips() throws {
+    let stamp = Date(timeIntervalSinceReferenceDate: 700_000_000)
+    let worktree = Worktree(
+      name: "feature", path: "/tmp/feat", archived: true, archivedAt: stamp
+    )
+    let data = try JSONEncoder().encode(worktree)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    #expect(object?["archivedAt"] != nil)
+
+    let decoded = try JSONDecoder().decode(Worktree.self, from: data)
+    #expect(decoded == worktree)
+    #expect(decoded.archivedAt == stamp)
+  }
 }

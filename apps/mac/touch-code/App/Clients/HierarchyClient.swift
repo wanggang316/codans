@@ -706,12 +706,13 @@ extension HierarchyClient {
       setProjectExpanded: { projectID, isExpanded in
         manager.setProjectExpanded(projectID: projectID, isExpanded: isExpanded)
       },
-      reconcileDiscoveredWorktrees: { projectID in
+      reconcileDiscoveredWorktrees: { [weak settings] projectID in
         await reconcile(
           projectID: projectID,
           manager: manager,
           gitWorktreeClient: gitWorktreeClient,
-          gitCLI: gitCLI
+          gitCLI: gitCLI,
+          settings: settings
         )
       },
       createWorktreeWithGit: { projectID, name, branch, path in
@@ -720,12 +721,14 @@ extension HierarchyClient {
           name: name, path: path, branch: branch
         )
       },
-      removeWorktreeWithGit: { worktreeID, projectID in
+      removeWorktreeWithGit: { [weak settings] worktreeID, projectID in
+        let deleteRemote = (settings?.settings ?? .default).worktree.deleteRemoteBranchWithWorktree
         try await removeWorktreeWithGit(
           worktreeID: worktreeID,
           projectID: projectID,
           manager: manager,
-          gitWorktreeClient: gitWorktreeClient
+          gitWorktreeClient: gitWorktreeClient,
+          deleteRemoteBranch: deleteRemote
         )
       },
       runningPaneCount: { worktreeID in
@@ -824,7 +827,8 @@ extension HierarchyClient {
         }
         try await removeWorktreeWithGit(
           worktreeID: worktreeID, projectID: projectID,
-          manager: manager, gitWorktreeClient: gitWorktreeClient
+          manager: manager, gitWorktreeClient: gitWorktreeClient,
+          deleteRemoteBranch: snapshot.worktree.deleteRemoteBranchWithWorktree
         )
       },
       promoteWorktree: { projectID, worktreeID, mode in
@@ -1223,7 +1227,8 @@ extension HierarchyClient {
     projectID: ProjectID,
     manager: HierarchyManager,
     gitWorktreeClient: GitWorktreeClient,
-    gitCLI: GitWorktreeCLI
+    gitCLI: GitWorktreeCLI,
+    settings: SettingsStore? = nil
   ) async {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID })
     else { return }
@@ -1258,6 +1263,15 @@ extension HierarchyClient {
         projectID: projectID,
         entries: mapped
       )
+      // Cleanup: auto-delete archived worktrees past their retention period.
+      // Runs on the same launch / window-focus pulse as discovery, so no
+      // separate timer is needed (see Settings → Worktrees → Cleanup).
+      await sweepExpiredArchivedWorktrees(
+        projectID: projectID,
+        manager: manager,
+        gitWorktreeClient: gitWorktreeClient,
+        settings: settings
+      )
     } catch {
       // Log under com.touch-code.hierarchy/reconcile and swallow —
       // never throw, never crash a reconcile (see design doc
@@ -1269,6 +1283,43 @@ extension HierarchyClient {
       reconcileLogger.error(
         "reconcileDiscoveredWorktrees failed: project=\(projectID.raw.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
       )
+    }
+  }
+
+  /// Auto-delete sweep for Settings → Worktrees → Cleanup. No-op unless
+  /// `autoDeleteArchived` is on. Asks the manager for the archived worktrees
+  /// whose retention period has elapsed (the manager also back-fills any
+  /// pre-existing archived rows that lack a timestamp, so they age from first
+  /// observation rather than being deleted retroactively), then removes each
+  /// via the shared git path — honoring `deleteRemoteBranchWithWorktree` so
+  /// the auto-delete behaves like a manual delete. Best-effort per worktree:
+  /// a single failure is logged and the sweep moves on.
+  @MainActor
+  private static func sweepExpiredArchivedWorktrees(
+    projectID: ProjectID,
+    manager: HierarchyManager,
+    gitWorktreeClient: GitWorktreeClient,
+    settings: SettingsStore?
+  ) async {
+    let worktreeSettings = (settings?.settings ?? .default).worktree
+    guard worktreeSettings.autoDeleteArchived else { return }
+    let ttl = TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
+    let deleteRemoteBranch = worktreeSettings.deleteRemoteBranchWithWorktree
+    let due = manager.archivedWorktreesDue(in: projectID, now: Date(), ttl: ttl)
+    for worktreeID in due {
+      do {
+        try await removeWorktreeWithGit(
+          worktreeID: worktreeID,
+          projectID: projectID,
+          manager: manager,
+          gitWorktreeClient: gitWorktreeClient,
+          deleteRemoteBranch: deleteRemoteBranch
+        )
+      } catch {
+        reconcileLogger.error(
+          "auto-delete archived worktree failed: project=\(projectID.raw.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+        )
+      }
     }
   }
 
@@ -1284,7 +1335,8 @@ extension HierarchyClient {
     worktreeID: WorktreeID,
     projectID: ProjectID,
     manager: HierarchyManager,
-    gitWorktreeClient: GitWorktreeClient
+    gitWorktreeClient: GitWorktreeClient,
+    deleteRemoteBranch: Bool
   ) async throws {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
       let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
@@ -1305,6 +1357,13 @@ extension HierarchyClient {
     // out elsewhere (main / shared) — which is exactly when we DON'T
     // want to delete it — so swallowing the error is the safe default.
     if let branch = worktree.branch, !branch.isEmpty {
+      // Delete the remote tracking branch first, while the local branch
+      // (and its upstream config) still exists so the remote can be
+      // resolved. Gated on the user's "Delete remote branch with worktree"
+      // setting; also best-effort.
+      if deleteRemoteBranch {
+        await gitWorktreeClient.deleteRemoteBranchIfExists(gitRootURL, branch)
+      }
       await gitWorktreeClient.deleteBranchIfExists(gitRootURL, branch)
     }
     try manager.removeWorktree(worktreeID, from: projectID)

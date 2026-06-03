@@ -93,6 +93,15 @@ nonisolated struct GitWorktreeClient: Sendable {
   /// (main / shared branch) or never existed, neither of which should
   /// surface as a remove-worktree failure.
   var deleteBranchIfExists: @Sendable (_ repoRoot: URL, _ branch: String) async -> Void
+  /// Best-effort `git push <remote> --delete <branch>` — deletes the remote
+  /// tracking branch when the user opted into "Delete remote branch with
+  /// worktree". The remote is resolved from the branch's configured upstream
+  /// (`%(upstream:remotename)`), falling back to `origin`. MUST be called
+  /// while the local branch still exists so the upstream config is readable;
+  /// `removeWorktreeWithGit` invokes this before `deleteBranchIfExists`.
+  /// Errors are swallowed: a missing remote ref, no upstream, or an offline
+  /// network should never fail the local worktree removal.
+  var deleteRemoteBranchIfExists: @Sendable (_ repoRoot: URL, _ branch: String) async -> Void
   var pruneWorktrees: @Sendable (_ repoRoot: URL) async throws -> Int
 
   var fetchRemote: @Sendable (_ repoRoot: URL, _ remote: String) async throws -> Void
@@ -813,6 +822,37 @@ nonisolated extension GitWorktreeClient {
         )
       },
 
+      deleteRemoteBranchIfExists: { repoRoot, branch in
+        // Resolve the remote this branch tracks. Read it from the local
+        // branch's upstream config while the branch still exists; fall back
+        // to "origin" when there is no configured upstream.
+        let remoteOutcome = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: [
+            "-C", repoRoot.path(percentEncoded: false),
+            "for-each-ref", "--format=%(upstream:remotename)",
+            "refs/heads/\(branch)",
+          ],
+          cwd: repoRoot
+        )
+        var remote = "origin"
+        if case .exited(let code, let data, _, _) = remoteOutcome, code == 0 {
+          let trimmed = GitWorktreeShell.decodeUTF8(data)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          if !trimmed.isEmpty { remote = trimmed }
+        }
+        // Best-effort: git fails if the remote ref is already gone or the
+        // network is unreachable — neither should fail the worktree remove.
+        _ = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: [
+            "-C", repoRoot.path(percentEncoded: false),
+            "push", remote, "--delete", branch,
+          ],
+          cwd: repoRoot
+        )
+      },
+
       pruneWorktrees: { repoRoot in
         // Diff lsWorktrees before/after so the caller can surface an accurate
         // toast. `git worktree prune` itself prints nothing on success.
@@ -1024,6 +1064,7 @@ extension GitWorktreeClient: DependencyKey {
     },
     removeWorktree: unimplemented("GitWorktreeClient.removeWorktree"),
     deleteBranchIfExists: { _, _ in },
+    deleteRemoteBranchIfExists: { _, _ in },
     pruneWorktrees: unimplemented("GitWorktreeClient.pruneWorktrees", placeholder: 0),
     fetchRemote: unimplemented("GitWorktreeClient.fetchRemote"),
     changedFiles: unimplemented("GitWorktreeClient.changedFiles", placeholder: [])

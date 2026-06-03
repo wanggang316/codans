@@ -93,11 +93,6 @@ struct SettingsWorktreeView: View {
         )
       } header: {
         Text("Cleanup")
-      } footer: {
-        Text(
-          "Auto-delete only affects worktrees archived via `tc worktree archive`. "
-            + "Deleted worktrees are unrecoverable."
-        )
       }
     }
     .formStyle(.grouped)
