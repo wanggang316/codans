@@ -1212,6 +1212,18 @@ struct RootFeature {
             }
           }
 
+        case .stopScriptRequested(let scriptID):
+          // Same selection-resolution + staleness rationale as
+          // `runScriptRequested`. `stopScript` is a synchronous, best-effort
+          // MainActor call (sends Ctrl-C to the tracked run pane), so it runs
+          // inline like the pane-busy writers rather than through `.run`.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
+          hierarchyClient.stopScript(scriptID, projectID, worktreeID)
+          return .none
+
         case .manageScriptsRequested(let projectID):
           let presenter = settingsWindowPresenter
           return .run { _ in

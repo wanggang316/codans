@@ -411,6 +411,15 @@ nonisolated struct HierarchyClient: Sendable {
       _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
     ) async throws -> Void
 
+  /// Interrupts a running script by sending Ctrl-C (`\u{3}`) to the pane the
+  /// script last spawned in `worktreeID`. The pane is left open so the next
+  /// run reuses it. Best-effort: a no-op when no run pane is tracked (or it
+  /// has since closed) or no `TerminalClient` is wired.
+  var stopScript:
+    @MainActor @Sendable (
+      _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
+    ) -> Void
+
   // MARK: - Worktree lifecycle wrappers
 
   /// Sets `Worktree.archived`. On `archived: true`, if the project has an
@@ -795,6 +804,14 @@ extension HierarchyClient {
           terminalClient: terminalClient
         )
       },
+      stopScript: { scriptID, _, worktreeID in
+        stopScript(
+          scriptID: scriptID,
+          worktreeID: worktreeID,
+          manager: manager,
+          terminalClient: terminalClient
+        )
+      },
       setWorktreeArchivedWithLifecycle: { [weak settings] worktreeID, projectID, archived in
         let snapshot = settings?.settings ?? .default
         if archived,
@@ -894,11 +911,30 @@ extension HierarchyClient {
     }
     let env = HierarchyManager.resolvedEnv(for: projectID, in: snapshot)
 
+    let onFinishedNeeded = script.resolvedOnFinished != .none
+
+    // Reuse path: if the dedicated run pane from a previous run is still
+    // alive, re-run into it instead of spawning a new tab/pane — this is
+    // what keeps repeated runs on the same pane. Gated on
+    // `onFinished == .none`: a close-on-finish policy tears the pane down,
+    // so there is nothing to reuse and the spawn path below runs instead.
+    if !onFinishedNeeded,
+      script.target == .newTab || script.target == .split,
+      let terminalClient,
+      let existing = manager.runScriptPane(worktreeID: worktreeID, scriptID: scriptID)
+    {
+      if script.focus, let (proj, wt, tab) = manager.addressOf(paneID: existing) {
+        try? manager.selectTab(tab, in: wt, in: proj)
+        manager.focusSurfaceView(for: existing)
+      }
+      terminalClient.sendInput(existing, script.command + "\n")
+      return
+    }
+
     // Subscribe before spawn: events() is broadcast and does not
     // replay. A one-shot script that exits before scheduleOnFinishedAction
     // calls events() would otherwise miss the paneExited and the
     // onFinished policy would never fire.
-    let onFinishedNeeded = script.resolvedOnFinished != .none
     let preSubscribedStream: AsyncStream<TerminalEvent>? =
       onFinishedNeeded ? terminalClient?.events() : nil
 
@@ -911,6 +947,16 @@ extension HierarchyClient {
       manager: manager,
       terminalClient: terminalClient
     )
+
+    // Record the dedicated pane so the next run reuses it and the toolbar
+    // Run/Stop toggle can find it. Only `.newTab` / `.split` create one;
+    // `.focused` returns nil (it writes into the user's focused pane).
+    if let spawnedPaneID,
+      script.target == .newTab || script.target == .split
+    {
+      manager.setRunScriptPane(
+        worktreeID: worktreeID, scriptID: scriptID, paneID: spawnedPaneID)
+    }
 
     if let spawnedPaneID, let stream = preSubscribedStream {
       scheduleOnFinishedAction(
@@ -937,6 +983,30 @@ extension HierarchyClient {
         manager.focusSurfaceView(for: spawnedPaneID)
       }
     }
+  }
+
+  /// Sends Ctrl-C to the pane a run script last spawned in `worktreeID`,
+  /// interrupting its foreground command while leaving the pane open for the
+  /// next run. Best-effort: silent no-op when no live run pane is tracked or
+  /// no `TerminalClient` is wired.
+  @MainActor
+  private static func stopScript(
+    scriptID: UUID,
+    worktreeID: WorktreeID,
+    manager: HierarchyManager,
+    terminalClient: TerminalClient?
+  ) {
+    guard let terminalClient,
+      let paneID = manager.runScriptPane(worktreeID: worktreeID, scriptID: scriptID)
+    else {
+      runScriptLogger.info(
+        "stopScript: no live run pane to interrupt for script \(scriptID, privacy: .public)"
+      )
+      return
+    }
+    // U+0003 (ETX) is what the terminal turns into SIGINT for the foreground
+    // process group — same as the user pressing Ctrl-C.
+    terminalClient.sendInput(paneID, "\u{3}")
   }
 
   /// Materializes a `ScriptDefinition` into a runtime action and returns the
@@ -1440,6 +1510,7 @@ extension HierarchyClient: DependencyKey {
     movePane: { _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeArchivedWithLifecycle: { _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
@@ -1541,6 +1612,7 @@ extension HierarchyClient: DependencyKey {
     movePane: unimplemented("HierarchyClient.movePane"),
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
+    stopScript: unimplemented("HierarchyClient.stopScript"),
     setWorktreeArchivedWithLifecycle: unimplemented(
       "HierarchyClient.setWorktreeArchivedWithLifecycle"
     ),

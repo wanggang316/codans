@@ -275,7 +275,8 @@ struct WorktreeDetailView: View {
           // leading-to-trailing in declaration order.
           HeaderRunScriptSplitButton(
             store: headerStore,
-            projectID: address.project
+            projectID: address.project,
+            worktreeID: address.worktree
           )
           .buttonStyle(.plain)
           HeaderOpenSplitButton(
@@ -338,7 +339,8 @@ struct WorktreeDetailView: View {
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,
-        projectID: address.project
+        projectID: address.project,
+        worktreeID: address.worktree
       )
     }
     ToolbarSpacer(.fixed)
