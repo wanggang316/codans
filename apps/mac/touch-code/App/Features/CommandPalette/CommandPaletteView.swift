@@ -90,7 +90,15 @@ struct CommandPaletteView: View {
         store.send(.selectionMoved(.down))
         return .handled
       }
-      .onSubmit { store.send(.selectionCommitted) }
+      // Commit on the physical Return key only — NOT via `.onSubmit`, which
+      // also fires when the field resigns first responder. A row click blurs
+      // the field, so an `.onSubmit` here would commit the *selected* row
+      // (recency top) before the click's `.rowTapped` lands, silently
+      // activating the wrong command.
+      .onKeyPress(.return) {
+        store.send(.selectionCommitted)
+        return .handled
+      }
     }
     .padding(.horizontal, 14)
     .frame(height: 48)
