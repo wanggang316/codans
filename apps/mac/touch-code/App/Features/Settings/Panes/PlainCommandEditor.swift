@@ -55,6 +55,13 @@ struct PlainCommandEditor: NSViewRepresentable {
 
   func updateNSView(_ scrollView: NSScrollView, context: Context) {
     guard let textView = scrollView.documentView as? NSTextView else { return }
+    // Refresh the coordinator's binding every update — and BEFORE the
+    // first-responder early-return below. The binding's setter closes over the
+    // parent `script`, which is replaced when the user flips the target segment
+    // (or any other field). `makeCoordinator` captured the binding only once,
+    // so without this `textDidChange` would write through a stale `script` and
+    // a keystroke would revert the just-changed segment back to its old value.
+    context.coordinator.text = $text
     // While the user is actively editing (the text view is first responder),
     // never push the binding back into the view. The binding round-trips a
     // keystroke behind (type → textDidChange → store → re-render → here), so
@@ -77,15 +84,19 @@ struct PlainCommandEditor: NSViewRepresentable {
   }
 
   final class Coordinator: NSObject, NSTextViewDelegate {
-    @Binding var text: String
+    /// A plain, re-assignable binding (NOT `@Binding`): the wrapped binding
+    /// closes over the parent's `script`, which is replaced on every edit, so
+    /// `updateNSView` refreshes this to the latest one. Writing through a stale
+    /// binding would carry an outdated `script` and undo sibling-field changes.
+    var text: Binding<String>
 
     init(text: Binding<String>) {
-      self._text = text
+      self.text = text
     }
 
     func textDidChange(_ notification: Notification) {
       guard let textView = notification.object as? NSTextView else { return }
-      text = textView.string
+      text.wrappedValue = textView.string
     }
 
     /// Makes `textView` first responder as soon as it joins a window. Hops the
