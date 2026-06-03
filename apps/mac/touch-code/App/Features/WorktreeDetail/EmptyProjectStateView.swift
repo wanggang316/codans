@@ -17,14 +17,17 @@ import SwiftUI
 struct EmptyProjectStateView: View {
   let onAddProject: () -> Void
 
-  // Fill with the active Ghostty terminal background — the same tone
-  // `WindowAppearanceSetter` stains `NSWindow.backgroundColor` with for
-  // sidebar blending — so the no-project body reads as one continuous
-  // surface with the sidebar + title-bar chrome instead of a white body
-  // framed by the gray stain. `.ignoresSafeArea()` extends the fill behind
-  // the hidden window-toolbar chrome so the title-bar region matches too.
+  // Neutral system tone, deliberately independent of the active Ghostty
+  // palette: with no project there is no terminal to blend against, and a
+  // dark-only Ghostty theme would otherwise paint a dark body next to the
+  // system-appearance (light) sidebar. `.ignoresSafeArea()` extends the
+  // fill behind the hidden window-toolbar chrome so the Ghostty-coloured
+  // `NSWindow.backgroundColor` stain (applied by `WindowAppearanceSetter`
+  // for sidebar blending) does not bleed through the title-bar region.
+  // `WorktreeDetailView` also suppresses the Ghostty chrome-tint band in
+  // this placeholder state so the whole no-project window stays neutral.
   var body: some View {
-    GhosttyBackground()
+    Color(nsColor: .windowBackgroundColor)
       .ignoresSafeArea()
   }
 }

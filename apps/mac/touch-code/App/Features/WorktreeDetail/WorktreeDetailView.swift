@@ -91,7 +91,19 @@ struct WorktreeDetailView: View {
       // neutral system tone regardless of which terminal palette is
       // active. Skipped in fullscreen because the unified toolbar
       // collapses and the system reserves no top inset to fill.
-      .ghosttyChromeTint(edges: isWindowFullscreen ? [.leading] : [.top, .leading])
+      .ghosttyChromeTint(edges: chromeTintEdges)
+  }
+
+  /// Chrome-tint edges for the current detail state. Empty in the
+  /// no-project placeholder: with no terminal on screen there is nothing
+  /// to blend the chrome against, and the active Ghostty palette can be a
+  /// dark-only theme that would clash with the system-appearance sidebar
+  /// and the neutral empty body (gray/dark chrome framing a light window).
+  /// Painting no band keeps the whole no-project window on the system tone.
+  private var chromeTintEdges: Edge.Set {
+    let isPlaceholder = activePendingWorktree == nil && resolveAddress() == nil
+    if isPlaceholder { return [] }
+    return isWindowFullscreen ? [.leading] : [.top, .leading]
   }
 
   @ViewBuilder
