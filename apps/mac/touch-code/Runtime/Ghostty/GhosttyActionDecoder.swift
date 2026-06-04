@@ -111,12 +111,6 @@ enum DecodedSurfaceAction: Sendable, Equatable {
   // the surface's palette against the updated conditional state.
   case reloadConfig(soft: Bool)
 
-  // Bucket 5b — External PTY plumbing. Raised by libghostty's External
-  // backend (config.external_pty_fd > 0) whenever the visible surface size
-  // changes; the embedder must forward the new (cols, rows) to whichever
-  // entity owns the actual PTY (the zmx daemon, via ZmxClient.resize).
-  case externalPtyResize(cols: UInt16, rows: UInt16)
-
   // Bucket 6 — Decode failure / unsupported / unknown tag. The raw tag
   // rides along so the applier can log it without the C struct.
   case unsupported(rawTag: UInt32, reason: String)
@@ -344,13 +338,6 @@ extension GhosttyActionDecoder {
     case GHOSTTY_ACTION_RELOAD_CONFIG:
       return .reloadConfig(soft: action.action.reload_config.soft)
 
-    // External-PTY resize: libghostty's External backend just learned the
-    // surface's visible cell dimensions changed; relay to ZmxClient so the
-    // daemon can `TIOCSWINSZ` its real PTY child.
-    case GHOSTTY_ACTION_EXTERNAL_PTY_RESIZE:
-      let resize = action.action.external_pty_resize
-      return .externalPtyResize(cols: resize.cols, rows: resize.rows)
-
     case GHOSTTY_ACTION_CONFIG_CHANGE:
       return .unsupported(rawTag: action.tag.rawValue, reason: "app-scoped on surface target")
 
@@ -555,14 +542,6 @@ extension GhosttyActionDecoder {
     case .reloadConfig(let soft):
       runtime.reloadSurfaceConfig(paneID: paneID, soft: soft)
       logger.debug("surface action: reload_config (soft: \(soft))")
-      return true
-
-    // Bucket 5b — External PTY resize. Inert under the exec backend: the
-    // surface owns a normal local PTY (no `external_pty_fd`), so libghostty
-    // sizes it directly and never emits this action. Kept as a defensive
-    // no-op so a stray delivery is logged rather than unhandled.
-    case .externalPtyResize(let cols, let rows):
-      logger.debug("ignoring external_pty_resize under exec backend (cols=\(cols), rows=\(rows))")
       return true
 
     case .unsupported(let rawTag, let reason):

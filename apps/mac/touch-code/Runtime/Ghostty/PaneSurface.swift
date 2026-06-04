@@ -136,10 +136,8 @@ final class PaneSurface {
     // invocation) and owns the local PTY plus its sizing — it spawns the
     // child only once a real post-layout size is known, so the shell never
     // renders at a placeholder width. The attached shell itself lives in
-    // the resume-friendly daemon. `external_pty_fd < 0` keeps the External
-    // backend off. ghostty injects TERM/COLORTERM for the exec child, so
-    // only project env + ZMX_DIR need threading through `env`.
-    config.external_pty_fd = -1
+    // the resume-friendly daemon. ghostty injects TERM/COLORTERM for the
+    // exec child, so only project env + ZMX_DIR need threading through `env`.
     let commandC = command.withCString { strdup($0)! }
     let cwdC = workingDirectory.withCString { strdup($0)! }
     defer {
