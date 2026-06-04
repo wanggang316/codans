@@ -22,6 +22,12 @@ and the project does not yet follow semantic versioning — every release until
 
 ## [0.4.3] - 2026-06-03
 
+### Added
+
+- **Automatic cleanup of archived worktrees.** Settings → Worktrees → Cleanup can
+  now auto-delete archived worktrees after a retention window you choose (1 to 30
+  days), and optionally delete a worktree's remote branch when you remove it.
+
 ### Changed
 
 - **The Run button now doubles as Stop.** While a command is running in its pane,
