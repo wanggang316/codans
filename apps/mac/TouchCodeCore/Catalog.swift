@@ -36,11 +36,11 @@ public nonisolated struct Catalog: Equatable, Sendable {
 
   public static let empty = Catalog()
 
-  /// The canonical on-disk location: `~/.config/touch-code/catalog.json`.
+  /// On-disk location: `<AppDirectories.configDirectory>/catalog.json`
+  /// (`~/.config/touch-code/catalog.json` for Release, `…/touch-code-dev/…`
+  /// for Debug — see `AppDirectories`).
   public static func defaultURL(home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)) -> URL {
-    home
-      .appendingPathComponent(".config", isDirectory: true)
-      .appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.configDirectory(home: home)
       .appendingPathComponent("catalog.json", isDirectory: false)
   }
 }

@@ -13,17 +13,17 @@ import TouchCodeCore
 enum PaneDaemonBringup {
   /// Canonical zmx `ZMX_DIR`. The daemon places its control socket here
   /// and writes snapshots into `<ZMX_DIR>/snapshots/<paneID>.snap`. We
-  /// pin this to `~/Library/Caches/touch-code` so the socket path the
-  /// daemon binds lines up byte-for-byte with `ZmxControlClient.socketPath`
-  /// and `SessionReaper`'s launch-time scan — without a pin, zmx falls
-  /// back to `$TMPDIR/zmx-<uid>` (or `$XDG_RUNTIME_DIR/zmx`) which would
-  /// scatter sockets somewhere the reaper has no reason to look.
+  /// pin this to `~/Library/Caches/<AppDirectories.name>` (`touch-code`, or
+  /// `touch-code-dev` for Debug builds) so the socket path the daemon binds
+  /// lines up byte-for-byte with `ZmxControlClient.socketPath` and
+  /// `SessionReaper`'s launch-time scan — without a pin, zmx falls back to
+  /// `$TMPDIR/zmx-<uid>` (or `$XDG_RUNTIME_DIR/zmx`) which would scatter
+  /// sockets somewhere the reaper has no reason to look. The Debug suffix
+  /// keeps a locally-built dev instance's daemons isolated from the
+  /// installed Release's, which is what prevents pane-session crosstalk
+  /// when both run at once (see `AppDirectories`).
   static func canonicalSocketDirectory() -> URL {
-    let fm = FileManager.default
-    let base =
-      (try? fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false))
-      ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
-    return base.appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.cacheDirectory()
   }
 
   /// Directory the daemon writes `<paneID>.snap` into when `.Snapshot`

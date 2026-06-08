@@ -48,13 +48,12 @@ final class ShortcutsStore {
     pendingSaveTask?.cancel()
   }
 
-  /// Canonical on-disk location: `~/.config/touch-code/shortcuts.json`.
+  /// On-disk location: `<AppDirectories.configDirectory>/shortcuts.json`
+  /// (`-dev` suffixed for Debug builds — see `AppDirectories`).
   static func defaultURL(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> URL {
-    home
-      .appendingPathComponent(".config", isDirectory: true)
-      .appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.configDirectory(home: home)
       .appendingPathComponent("shortcuts.json", isDirectory: false)
   }
 

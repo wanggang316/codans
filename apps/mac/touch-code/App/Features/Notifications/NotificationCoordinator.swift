@@ -219,8 +219,8 @@ final class NotificationCoordinator {
   /// to keep retrying on every relaunch.
   func emitQuarantineNotice(
     backupURL: URL,
-    markerURL: URL = URL(fileURLWithPath: NSHomeDirectory())
-      .appendingPathComponent(".config/touch-code/notifications.quarantine-shown")
+    markerURL: URL = AppDirectories.configDirectory()
+      .appendingPathComponent("notifications.quarantine-shown")
   ) async {
     let backupBasename = backupURL.lastPathComponent
 

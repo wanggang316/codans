@@ -43,11 +43,10 @@ public nonisolated struct Settings: Equatable, Sendable {
 
   public static let `default` = Settings()
 
-  /// Canonical on-disk location: `~/.config/touch-code/settings.json`.
+  /// On-disk location: `<AppDirectories.configDirectory>/settings.json`
+  /// (`-dev` suffixed for Debug builds — see `AppDirectories`).
   public static func defaultURL(home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)) -> URL {
-    home
-      .appendingPathComponent(".config", isDirectory: true)
-      .appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.configDirectory(home: home)
       .appendingPathComponent("settings.json", isDirectory: false)
   }
 

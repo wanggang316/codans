@@ -186,7 +186,10 @@ struct ShortcutsStoreTests {
   func defaultURLPointsAtConfigDirectory() {
     let home = URL(fileURLWithPath: "/tmp/fake-home", isDirectory: true)
     let url = ShortcutsStore.defaultURL(home: home)
-    #expect(url.path == "/tmp/fake-home/.config/touch-code/shortcuts.json")
+    // Build-type aware: Debug test runs resolve `AppDirectories.name` to
+    // `touch-code-dev`, Release to `touch-code` — assert against the same
+    // source of truth rather than a hardcoded segment.
+    #expect(url.path == "/tmp/fake-home/.config/\(AppDirectories.name)/shortcuts.json")
   }
 
   // MARK: - Test helpers
