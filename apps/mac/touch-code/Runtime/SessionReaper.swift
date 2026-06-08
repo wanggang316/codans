@@ -41,18 +41,25 @@ public final class SessionReaper {
   private let snapshotDirectory: URL
   private let staleAfter: TimeInterval
   private let clock: @MainActor () -> Date
+  /// The live login session's epoch (audit asid), resolved once per sweep.
+  /// Injected so tests can drive the stranded-daemon branch deterministically
+  /// without a real session change. Returns `nil` when our own session
+  /// vantage is untrustworthy, in which case the sweep skips epoch recycling.
+  private let currentSessionEpoch: @MainActor () -> String?
   private let logger = Logger(subsystem: "com.touch-code.runtime", category: "runtime.session.reaper")
 
   public init(
     coordinator: SessionCoordinator,
     snapshotDirectory: URL? = nil,
     staleAfter: TimeInterval = SessionConfig.defaultStaleAfter,
-    clock: @escaping @MainActor () -> Date = { Date() }
+    clock: @escaping @MainActor () -> Date = { Date() },
+    currentSessionEpoch: @escaping @MainActor () -> String? = { SessionEpoch.current() }
   ) {
     self.coordinator = coordinator
     self.snapshotDirectory = snapshotDirectory ?? PaneDaemonBringup.canonicalSnapshotDirectory()
     self.staleAfter = staleAfter
     self.clock = clock
+    self.currentSessionEpoch = currentSessionEpoch
   }
 
   /// Read the on-disk catalog, probe every entry, and return per-paneID
@@ -80,13 +87,38 @@ public final class SessionReaper {
 
     let now = clock()
     let staleCutoff = now.addingTimeInterval(-staleAfter)
+    // Resolved once per sweep: nil when our own session vantage is
+    // untrustworthy, which disables the stranded branch below so a
+    // degraded launch never mass-recycles otherwise-healthy daemons.
+    let liveEpoch = currentSessionEpoch()
 
     var states: [PaneID: SessionState] = [:]
     var deadKeys: [String] = []
     for (key, session) in catalog.sessions {
       let alive = Self.probe(socketPath: session.socketPath)
       if alive {
-        if session.lastAttachedAt < staleCutoff {
+        if SessionEpoch.isStranded(rowEpoch: session.sessionEpoch, currentEpoch: liveEpoch) {
+          // Stranded daemon: alive on the wire, but stamped with an audit
+          // session id that differs from this launch's live session. It
+          // outlived the login session it was spawned into (logout/login,
+          // fast-user-switch, sleep/wake, or relaunch into an incomplete
+          // session), so every process under it can no longer resolve
+          // identity through the per-session opendirectoryd/keychain XPC —
+          // getpwuid fails and ssh/keychain/gh break for the agent in that
+          // pane. Recycle it exactly like the orphan branch: one-shot kill,
+          // prune the row, drop the socket + snapshot. `ensureSurface` then
+          // respawns a clean daemon in the live session — which is what
+          // makes a relaunch actually heal the pane instead of re-attaching
+          // to the same broken daemon by its stable PaneID. See `SessionEpoch`.
+          logger.notice(
+            "Recycling stranded daemon for pane \(session.paneID, privacy: .public): epoch=\(session.sessionEpoch ?? "nil", privacy: .public) != live=\(liveEpoch ?? "nil", privacy: .public)"
+          )
+          Self.sendOneShotKill(socketPath: session.socketPath)
+          states[session.paneID] = .dead(session)
+          deadKeys.append(key)
+          _ = Darwin.unlink(session.socketPath)
+          deleteSnapshotFile(for: session.paneID)
+        } else if session.lastAttachedAt < staleCutoff {
           // Stale daemon: send `.kill` over a one-shot connection, then
           // treat the entry as dead so the row is pruned and the
           // snapshot file (if any) cleaned up alongside it. We don't

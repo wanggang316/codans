@@ -17,6 +17,15 @@ public nonisolated struct Session: Codable, Equatable, Sendable {
   public var command: [String]
   public var cwd: String
   public var zmxVersion: String
+  /// Audit session id (asid) of the login session this daemon was spawned
+  /// into, stamped via `SessionEpoch.current()`. `nil` for rows written by
+  /// builds before this field existed (decoded via the synthesized
+  /// `decodeIfPresent`, so old catalogs still load) — the reaper treats
+  /// `nil` as "unknown" and never recycles on epoch grounds, so upgrading
+  /// never wipes existing panes. On the next launch the reaper compares
+  /// this to the live session's asid; a mismatch means the daemon outlived
+  /// its login session and is recycled. See `SessionEpoch`.
+  public var sessionEpoch: String?
 
   public init(
     paneID: PaneID,
@@ -26,7 +35,8 @@ public nonisolated struct Session: Codable, Equatable, Sendable {
     lastAttachedAt: Date,
     command: [String],
     cwd: String,
-    zmxVersion: String
+    zmxVersion: String,
+    sessionEpoch: String? = nil
   ) {
     self.paneID = paneID
     self.socketPath = socketPath
@@ -36,6 +46,7 @@ public nonisolated struct Session: Codable, Equatable, Sendable {
     self.command = command
     self.cwd = cwd
     self.zmxVersion = zmxVersion
+    self.sessionEpoch = sessionEpoch
   }
 }
 
