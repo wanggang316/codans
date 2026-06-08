@@ -13,6 +13,11 @@ enum TabBarColors {
   /// is up. Subtle so it reads as affordance, not selection.
   static let hoverBackground: Color = Color.primary.opacity(0.06)
 
+  /// Opaque surface stamped under a chip while it is lifted in a drag, so
+  /// the floating copy fully occludes the chips it passes over instead of
+  /// letting their text bleed through the otherwise-`.clear` idle fill.
+  static let draggingBackground: Color = Color(nsColor: .windowBackgroundColor)
+
   /// Accent-tinted underline sitting on the top edge of the active chip.
   static let activeUnderline: Color = .accentColor
 

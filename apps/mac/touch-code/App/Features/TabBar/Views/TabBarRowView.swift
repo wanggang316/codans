@@ -12,8 +12,8 @@ import TouchCodeCore
 /// accent underline visually carries the boundary.
 ///
 /// Reorder: an in-app `DragGesture` drives a live preview. While dragging,
-/// a local `orderIDs` snapshot is mutated as the dragged chip crosses a
-/// neighbor's midpoint, so siblings reflow under a
+/// a local `orderIDs` snapshot is mutated once the dragged chip overlaps a
+/// neighbor by 50% (the slot boundary), so siblings reflow under a
 /// `spring(response: 0.3, dampingFraction: 0.85)` (macOS Safari-style) —
 /// the dragged chip leaves a transparent gap in the row while a lifted
 /// copy follows the cursor in an overlay. The final permutation is
@@ -167,9 +167,12 @@ struct TabBarRowView: View {
     {
       chipView(for: rendered[index], index: index, count: rendered.count)
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
+        // Opaque base so the lifted copy occludes the chips it floats
+        // over — the chip's own idle fill is `.clear`, which would let
+        // their titles bleed through and overlap.
+        .background(TabBarColors.draggingBackground)
         .scaleEffect(1.03)
         .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
-        .opacity(0.95)
         .allowsHitTesting(false)
         .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
         .zIndex(10)
@@ -202,21 +205,32 @@ struct TabBarRowView: View {
     }
   }
 
-  /// Steps the dragged chip past an adjacent neighbor once the cursor
-  /// crosses that neighbor's midpoint, animating the sibling reflow. One
-  /// step per event is enough — `onChanged` fires densely — and avoids the
-  /// oscillation a midpoint-count scan shows near boundaries.
+  /// Steps the dragged chip past an adjacent neighbor once it overlaps that
+  /// neighbor by 50%, animating the sibling reflow (macOS Safari timing).
+  ///
+  /// The threshold is the midpoint between the dragged chip's own slot
+  /// center and the neighbor's slot center — i.e. the boundary between the
+  /// two slots — not the neighbor's center. Because the dragged chip leaves
+  /// a full-width gap, its center has to travel only half a chip to reach
+  /// that boundary, which is exactly 50% overlap. Using the slot boundary
+  /// (rather than the neighbor's near edge) keeps it oscillation-free: after
+  /// a swap the two slots exchange symmetrically, so the boundary stays put
+  /// even mid-animation and the cursor can't immediately trip the reverse.
+  /// One step per event is enough — `onChanged` fires densely.
   private func updateOrder() {
-    guard let id = draggingID, let current = orderIDs.firstIndex(of: id) else { return }
+    guard let id = draggingID,
+      let current = orderIDs.firstIndex(of: id),
+      let dragged = chipFrames[id]
+    else { return }
     var target = current
     if current < orderIDs.count - 1,
       let next = chipFrames[orderIDs[current + 1]],
-      dragCursorX > next.midX
+      dragCursorX > (dragged.midX + next.midX) / 2
     {
       target = current + 1
     } else if current > 0,
       let prev = chipFrames[orderIDs[current - 1]],
-      dragCursorX < prev.midX
+      dragCursorX < (dragged.midX + prev.midX) / 2
     {
       target = current - 1
     }
