@@ -20,6 +20,14 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.4] - 2026-06-09
+
+### Changed
+
+- Reordering tabs by dragging is now animated live: neighboring tabs slide
+  aside as you drag, and the tab you're holding lifts with a shadow and
+  settles smoothly into its new position.
+
 ## [0.4.3] - 2026-06-03
 
 ### Added
