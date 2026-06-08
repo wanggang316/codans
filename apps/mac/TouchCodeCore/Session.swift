@@ -121,15 +121,14 @@ public nonisolated struct SessionCatalog: Codable, Equatable, Sendable {
 
   public static var empty: SessionCatalog { SessionCatalog() }
 
-  /// Canonical on-disk location: `~/.config/touch-code/sessions.json` —
-  /// the same directory `Catalog.defaultURL()` writes to, so all touch-
-  /// code state lives under one user-visible root.
+  /// On-disk location: `<AppDirectories.configDirectory>/sessions.json` —
+  /// the same directory `Catalog.defaultURL()` writes to, so all touch-code
+  /// state lives under one user-visible root (`-dev` suffixed for Debug
+  /// builds; see `AppDirectories`).
   public static func defaultURL(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> URL {
-    home
-      .appendingPathComponent(".config", isDirectory: true)
-      .appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.configDirectory(home: home)
       .appendingPathComponent("sessions.json", isDirectory: false)
   }
 }

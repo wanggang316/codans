@@ -42,13 +42,12 @@ public final class NotificationStore {
   /// long-running command finishes.
   public static let debounceWindow: Duration = .milliseconds(250)
 
-  /// Canonical on-disk location.
+  /// On-disk location: `<AppDirectories.configDirectory>/notifications.json`
+  /// (`-dev` suffixed for Debug builds — see `AppDirectories`).
   public static func defaultURL(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> URL {
-    home
-      .appendingPathComponent(".config", isDirectory: true)
-      .appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.configDirectory(home: home)
       .appendingPathComponent("notifications.json", isDirectory: false)
   }
 

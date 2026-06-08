@@ -1,4 +1,5 @@
 import Foundation
+import TouchCodeCore
 import os
 
 /// Idempotent first-run setup for the Master Terminal user directory.
@@ -20,9 +21,7 @@ public enum MasterTerminalBootstrap {
   }
 
   public nonisolated static func userDirectory(homeDirectory: URL) -> URL {
-    homeDirectory
-      .appendingPathComponent(".config", isDirectory: true)
-      .appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.configDirectory(home: homeDirectory)
       .appendingPathComponent("master-terminal", isDirectory: true)
   }
 

@@ -27,13 +27,12 @@ nonisolated final class GitHubSnapshotCache: Sendable {
   }
 
   /// Standard on-disk location: sibling of `catalog.json` under
-  /// `~/.config/touch-code/`. Parent directory creation is `AtomicFileStore`'s job.
+  /// `AppDirectories.configDirectory` (`~/.config/touch-code[-dev]/`). Parent
+  /// directory creation is `AtomicFileStore`'s job.
   static func defaultURL(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> URL {
-    home
-      .appendingPathComponent(".config", isDirectory: true)
-      .appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.configDirectory(home: home)
       .appendingPathComponent("github-snapshots.json", isDirectory: false)
   }
 

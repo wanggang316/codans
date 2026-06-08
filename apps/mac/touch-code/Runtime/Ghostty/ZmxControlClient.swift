@@ -67,15 +67,13 @@ nonisolated enum ZmxControlClient {
 
   // MARK: - Transport
 
-  /// Canonical `ZMX_DIR`. Kept byte-identical to
-  /// `PaneDaemonBringup.canonicalSocketDirectory()` (duplicated rather than
-  /// shared so this type stays `nonisolated` and off the main actor).
+  /// Canonical `ZMX_DIR`. Delegates to `AppDirectories.cacheDirectory()` —
+  /// a `nonisolated` Core helper that is the single source of truth shared
+  /// with `PaneDaemonBringup.canonicalSocketDirectory()`, so the two stay
+  /// byte-identical (including the Debug `-dev` suffix) while this type stays
+  /// `nonisolated` and off the main actor.
   private static func canonicalSocketDirectory() -> URL {
-    let fm = FileManager.default
-    let base =
-      (try? fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false))
-      ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
-    return base.appendingPathComponent("touch-code", isDirectory: true)
+    AppDirectories.cacheDirectory()
   }
 
   /// Run the blocking connect/send/read on a background queue and bridge
