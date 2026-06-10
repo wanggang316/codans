@@ -20,6 +20,18 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.5] - 2026-06-10
+
+### Added
+
+- Trae, Trae CN, Qoder, and CodeBuddy join the editors you can open a worktree in.
+
+### Fixed
+
+- After logging out and back in, switching users, or waking from sleep, a pane's
+  terminal could quietly lose access to ssh, gh, and the login keychain; these
+  panes now recover automatically on relaunch instead of needing a brand-new pane.
+
 ## [0.4.4] - 2026-06-09
 
 ### Changed
