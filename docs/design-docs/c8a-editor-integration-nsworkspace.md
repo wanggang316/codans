@@ -134,7 +134,7 @@ struct EditorDescriptor: Identifiable, Equatable, Sendable {
 
 Absence of the descriptor from `describe()` IS the "not installed" signal — no `InstallationStatus` enum needed. `.shellEditor` is always considered installed (it falls back to the shell's resolution of `$EDITOR`).
 
-#### Built-in registry (28 cases)
+#### Built-in registry (34 cases)
 
 | `id` | Display | Bundle ID | Launch mode | Category |
 |---|---|---|---|---|
@@ -144,12 +144,18 @@ Absence of the descriptor from `describe()` IS the "not installed" signal — no
 | `windsurf` | Windsurf | `com.exafunction.windsurf` | directory | editor |
 | `vscodeInsiders` | VSCode Insiders | `com.microsoft.VSCodeInsiders` | directory | editor |
 | `vscodium` | VSCodium | `com.vscodium` | directory | editor |
+| `sublimeText` | Sublime Text | `com.sublimetext.4` (alt `com.sublimetext.3`) | directory | editor |
 | `intellij` | IntelliJ IDEA | `com.jetbrains.intellij` | applicationWithArguments | editor |
 | `webstorm` | WebStorm | `com.jetbrains.WebStorm` | applicationWithArguments | editor |
 | `pycharm` | PyCharm | `com.jetbrains.pycharm` | applicationWithArguments | editor |
 | `rubymine` | RubyMine | `com.jetbrains.rubymine` | applicationWithArguments | editor |
 | `rustrover` | RustRover | `com.jetbrains.rustrover` | applicationWithArguments | editor |
+| `androidStudio` | Android Studio | `com.google.android.studio` | applicationWithArguments | editor |
 | `antigravity` | Antigravity | `com.google.antigravity` | directory | editor |
+| `trae` | Trae | `com.trae.app` | directory | editor |
+| `traeCN` | Trae CN | `cn.trae.app` | directory | editor |
+| `qoder` | Qoder | `com.qoder.ide` | directory | editor |
+| `codebuddy` | CodeBuddy | `com.tencent.codebuddy` (alt `com.tencent.codebuddycn`) | directory | editor |
 | `xcode` | Xcode | `com.apple.dt.Xcode` | directory | editor |
 | `finder` | Finder | `com.apple.finder` | directory | (always) |
 | `ghostty` | Ghostty | `com.mitchellh.ghostty` | directory | terminal |
@@ -171,8 +177,9 @@ Priority lists:
 
 ```swift
 static let editorPriority: [EditorID] = [
-  "cursor", "zed", "vscode", "windsurf", "vscodeInsiders", "vscodium",
-  "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "antigravity",
+  "cursor", "zed", "vscode", "windsurf", "vscodeInsiders", "vscodium", "sublimeText",
+  "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "androidStudio",
+  "antigravity", "trae", "traeCN", "qoder", "codebuddy",
 ]
 static let terminalPriority: [EditorID] = [
   "ghostty", "wezterm", "alacritty", "kitty", "warp", "terminal",
