@@ -1,7 +1,7 @@
 import Foundation
 import TouchCodeCore
 
-/// The C8a 30-entry built-in registry. Every row is a template: `appURL` is always nil and
+/// The C8a 34-entry built-in registry. Every row is a template: `appURL` is always nil and
 /// `alternateBundleIdentifiers` is always empty — the service layer resolves a live `appURL`
 /// against an `AppLauncher` at `describe()` time.
 ///
@@ -96,6 +96,26 @@ nonisolated enum EditorRegistry {
       bundleIdentifier: "com.google.antigravity",
       launchMode: .directory, appURL: nil,
       alternateBundleIdentifiers: []),
+    EditorDescriptor(
+      id: "trae", displayName: "Trae",
+      bundleIdentifier: "com.trae.app",
+      launchMode: .directory, appURL: nil,
+      alternateBundleIdentifiers: []),
+    EditorDescriptor(
+      id: "traeCN", displayName: "Trae CN",
+      bundleIdentifier: "cn.trae.app",
+      launchMode: .directory, appURL: nil,
+      alternateBundleIdentifiers: []),
+    EditorDescriptor(
+      id: "qoder", displayName: "Qoder",
+      bundleIdentifier: "com.qoder.ide",
+      launchMode: .directory, appURL: nil,
+      alternateBundleIdentifiers: []),
+    EditorDescriptor(
+      id: "codebuddy", displayName: "CodeBuddy",
+      bundleIdentifier: "com.tencent.codebuddy",
+      launchMode: .directory, appURL: nil,
+      alternateBundleIdentifiers: ["com.tencent.codebuddycn"]),
     // Xcode + Finder
     EditorDescriptor(
       id: "xcode", displayName: "Xcode",
@@ -187,7 +207,7 @@ nonisolated enum EditorRegistry {
   static let editorPriority: [EditorID] = [
     "cursor", "zed", "vscode", "windsurf", "vscodeInsiders", "vscodium", "sublimeText",
     "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "androidStudio",
-    "antigravity",
+    "antigravity", "trae", "traeCN", "qoder", "codebuddy",
   ]
 
   static let terminalPriority: [EditorID] = [
