@@ -197,7 +197,11 @@ final class TerminalEngine {
           lastAttachedAt: Date(),
           command: [],
           cwd: pane.workingDirectory,
-          zmxVersion: ""
+          zmxVersion: "",
+          // Stamp the live login session so the next launch's reaper can
+          // tell a daemon that outlived its session apart from one still
+          // in the current session. See `SessionEpoch`.
+          sessionEpoch: SessionEpoch.current()
         )
       )
     }
