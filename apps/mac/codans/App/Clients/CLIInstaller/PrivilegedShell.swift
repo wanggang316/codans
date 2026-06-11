@@ -2,10 +2,10 @@ import AppKit
 import Foundation
 
 /// Runs a shell command under macOS administrator privileges via in-process
-/// `NSAppleScript`. Used by `CLIInstallerClient` to install / uninstall
-/// `codans` and `tcode` symlinks under `/usr/local/bin`. In-process AppleScript
-/// makes the auth dialog show the codans app icon and bundle name
-/// instead of a generic `osascript` prompt.
+/// `NSAppleScript`. Used by `CLIInstallerClient` to install / uninstall the
+/// `codans` symlink under `/usr/local/bin`. In-process AppleScript makes the
+/// auth dialog show the codans app icon and bundle name instead of a generic
+/// `osascript` prompt.
 public protocol PrivilegedShell: Sendable {
   /// Runs `command` (a `/bin/sh`-compatible script) with administrator
   /// privileges, surfacing the system auth dialog with `prompt`.

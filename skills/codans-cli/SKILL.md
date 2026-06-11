@@ -15,7 +15,7 @@ tool on top of **git worktree + terminals**, organised as
 
 `codans` is the command-line client that drives the app over a local Unix
 domain socket — the same things the GUI does, scriptable from any shell.
-The binary is installed as `codans` (with an alias `tcode`).
+The binary is installed as `codans`.
 
 ## Before you run anything: check it's installed
 
