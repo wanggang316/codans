@@ -204,7 +204,7 @@ jobs:
         # Same contract as release.yml: registers a Sentry release and
         # ships dSYMs from the .xcarchive. Idempotent across re-runs and
         # no-ops cleanly without SENTRY_AUTH_TOKEN. Note: tip builds and
-        # the matching stable build share `touch-code@<MARKETING_VERSION>`,
+        # the matching stable build share `codans@<MARKETING_VERSION>`,
         # so the dSYM set on Sentry accumulates frames from both — this
         # is correct since both came from the same source tree.
         env:
@@ -220,7 +220,7 @@ jobs:
           AC_API_KEY_P8:    ${{ secrets.AC_API_KEY_P8 }}
         run: |
           ./apps/mac/scripts/release.sh notarize \
-            apps/mac/.build/release/export/TouchCode.app
+            apps/mac/.build/release/export/Codans.app
 
       - name: Build DMG
         run: ./apps/mac/scripts/release.sh dmg
@@ -232,7 +232,7 @@ jobs:
           AC_API_KEY_P8:    ${{ secrets.AC_API_KEY_P8 }}
         run: |
           ./apps/mac/scripts/release.sh notarize \
-            "apps/mac/.build/release/TouchCode-${{ steps.meta.outputs.marketing }}.dmg"
+            "apps/mac/.build/release/Codans-${{ steps.meta.outputs.marketing }}.dmg"
 
       # ---- Tip-channel appcast generation ----
       # `--channel tip` stamps every generated <item> with
@@ -259,10 +259,10 @@ jobs:
           : "${SPARKLE_PRIVATE_KEY:?secret SPARKLE_PRIVATE_KEY not configured}"
           STAGING="$RUNNER_TEMP/appcast-tip-staging"
           mkdir -p "$STAGING"
-          /bin/cp "apps/mac/.build/release/TouchCode-${{ steps.meta.outputs.marketing }}.dmg" "$STAGING/"
+          /bin/cp "apps/mac/.build/release/Codans-${{ steps.meta.outputs.marketing }}.dmg" "$STAGING/"
           # The download URL prefix points at the `tip` GitHub Release
           # (created/updated below). Tip clients' Sparkle download leg
-          # follows `releases/download/tip/TouchCode-X.Y.Z.dmg`.
+          # follows `releases/download/tip/Codans-X.Y.Z.dmg`.
           printf '%s' "$SPARKLE_PRIVATE_KEY" | tr -d ' \n\r\t' \
             | "$SPARKLE_BIN/generate_appcast" \
                 --channel tip \
@@ -288,9 +288,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          DMG="apps/mac/.build/release/TouchCode-${{ steps.meta.outputs.marketing }}.dmg"
+          DMG="apps/mac/.build/release/Codans-${{ steps.meta.outputs.marketing }}.dmg"
           APPCAST="apps/mac/.build/release/appcast-tip.xml"
-          NOTES="Tip build of touch-code at ${{ steps.meta.outputs.short_sha }} (build ${{ steps.meta.outputs.build }}). Pre-release. Subscribe via Settings → Updates → Tip."
+          NOTES="Tip build of codans at ${{ steps.meta.outputs.short_sha }} (build ${{ steps.meta.outputs.build }}). Pre-release. Subscribe via Settings → Updates → Tip."
           # Create-or-edit. Both branches set --prerelease so this release
           # is invisible to releases/latest/... and the canonical client
           # feed (latest stable's appcast.xml) is unaffected by tip cuts.

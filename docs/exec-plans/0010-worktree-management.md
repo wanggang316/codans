@@ -8,13 +8,13 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this change, a user can manage git worktrees from inside touch-code as first-class entities. Clicking a Project's `[+]` opens a Create Worktree sheet with a live branch-name validator, a base-ref dropdown defaulted to the Project's default remote branch (e.g. `origin/main`), and toggles for fetching origin beforehand and copying ignored or untracked files with streaming progress. On success a new Worktree row appears in the sidebar, is selected, and receives a single Tab with one Pane opened in its checkout directory. Worktrees created on the command line outside touch-code appear in the sidebar automatically once T-PROJECT schedules a reconcile (we own the implementation of that call). A worktree's context menu offers Archive, which soft-hides it from the main list and closes its Tabs/Panes without touching disk or git; a Project `⋯` menu opens an Archived Worktrees sheet that lists soft-hidden worktrees with Unarchive and Remove actions. Remove runs `git worktree remove` and fails loudly with the specific uncommitted files on disk; a follow-up Force Remove button upgrades to `--force`, hard-killing any still-running terminal processes in that worktree first. The Project `⋯` menu also exposes Prune, which drops stale git references and sidebar rows with a one-line toast confirming the count. The Project's main checkout is pinned at the top of the list and its Archive/Remove actions are suppressed everywhere.
+After this change, a user can manage git worktrees from inside codans as first-class entities. Clicking a Project's `[+]` opens a Create Worktree sheet with a live branch-name validator, a base-ref dropdown defaulted to the Project's default remote branch (e.g. `origin/main`), and toggles for fetching origin beforehand and copying ignored or untracked files with streaming progress. On success a new Worktree row appears in the sidebar, is selected, and receives a single Tab with one Pane opened in its checkout directory. Worktrees created on the command line outside codans appear in the sidebar automatically once T-PROJECT schedules a reconcile (we own the implementation of that call). A worktree's context menu offers Archive, which soft-hides it from the main list and closes its Tabs/Panes without touching disk or git; a Project `⋯` menu opens an Archived Worktrees sheet that lists soft-hidden worktrees with Unarchive and Remove actions. Remove runs `git worktree remove` and fails loudly with the specific uncommitted files on disk; a follow-up Force Remove button upgrades to `--force`, hard-killing any still-running terminal processes in that worktree first. The Project `⋯` menu also exposes Prune, which drops stale git references and sidebar rows with a one-line toast confirming the count. The Project's main checkout is pinned at the top of the list and its Archive/Remove actions are suppressed everywhere.
 
 ## Progress
 
 - [x] M1 — Submodule: add `apps/mac/ThirdParty/git-wt/` as a git submodule, verify the `wt` script is present and executable (2026-04-21)
-- [x] M2 — Tuist wiring: `scripts/verify-git-wt.sh` (pre) + `scripts/embed-git-wt.sh` (post) + `Project.swift` script entries on the `touch-code` target (2026-04-21, `wt` verified embedded in `touch_code.app/Contents/Resources/git-wt/wt`)
-- [x] M3 — `TouchCodeCore/Worktree.swift`: add `archived: Bool` with backward-compatible Codable; `TouchCodeCoreTests` fixture tests (2026-04-21, 206 tests passing)
+- [x] M2 — Tuist wiring: `scripts/verify-git-wt.sh` (pre) + `scripts/embed-git-wt.sh` (post) + `Project.swift` script entries on the `codans` target (2026-04-21, `wt` verified embedded in `Codans.app/Contents/Resources/git-wt/wt`)
+- [x] M3 — `CodansCore/Worktree.swift`: add `archived: Bool` with backward-compatible Codable; `CodansCoreTests` fixture tests (2026-04-21, 206 tests passing)
 - [x] M4 — `GitWorktreeClient` scaffolding: struct shape, closures, error type, `CreateSpec` / `CreateEvent`, `sanitizeBranchName` helper + argv builder + stderr mapping + porcelain parser (all pure helpers); `DependencyKey` integration with unusable liveValue placeholder (2026-04-21, 18 focused tests passing)
 - [x] M5 — `GitWorktreeClient` live implementation (`wt ls`, `wt sw` streaming create, `git worktree remove`, `git worktree prune`, branch / ref queries, fetch remote, `changedFiles`) (2026-04-21, build green, unit tests still pass)
 - [x] M6 — `GitWorktreeClient` unit tests: argument builder matrix, JSON decode, sanitize, error mapping (2026-04-21, landed together with M4 since all 18 helpers are pure. Live-implementation process-orchestration coverage deferred to M13 integration test — a `FakeProcessRunner` unit for the shell orchestration layer adds no signal beyond M13)
@@ -24,7 +24,7 @@ After this change, a user can manage git worktrees from inside touch-code as fir
 - [x] M10 — `CreateWorktreeSheet` view + wire into `HierarchySidebarView` at the current stub lines 78-83 (2026-04-21, 30 sidebar + create tests green, stub replaced with real child-scoped sheet)
 - [x] M11 — `ArchivedWorktreesFeature` reducer + `ArchivedWorktreesSheet` view; first-archive explainer session flag owned by parent reducer (2026-04-21, sheet-embedded force-remove alert included)
 - [x] M12 — `HierarchySidebarView` & `HierarchySidebarFeature` integration: Archive/Unarchive context-menu entries (main-checkout guard hides Archive + Remove), Project `⋯` menu gains Archived Worktrees sheet opener + Prune + Rename/Remove divider, upgraded Remove path with uncommittedChanges → Force Remove alert → running-terminal warning ladder (W-Q3 three-step); archived worktrees filtered out of main list; Prune toast. Main-actor audit: force-remove's runtime.closeSurface calls happen through manager.tearDownWorktreeSurfaces which is MainActor, via GhosttyBackedHierarchyRuntime (MainActor). ✓ (2026-04-21, existing sidebar suite green; one legacy test updated to record removeWorktreeWithGit instead of removeWorktree)
-- [x] M13 — Integration test in `touch-codeTests/Integration` (temp git repo end-to-end): fullLifecycle (create → ls → safe-remove) + uncommittedChangesBlockSafeRemoveAndForceRemoveSucceeds (2026-04-21, 2 integration tests green against real bundled wt)
+- [x] M13 — Integration test in `codansTests/Integration` (temp git repo end-to-end): fullLifecycle (create → ls → safe-remove) + uncommittedChangesBlockSafeRemoveAndForceRemoveSucceeds (2026-04-21, 2 integration tests green against real bundled wt)
 - [x] M14 — Local validation (lint, tests); push; open PR with reconcile contract embedded in the body (2026-04-21, 855 tests green across 118 suites, swiftlint clean)
 
 ## Surprises & Discoveries
@@ -56,7 +56,7 @@ After this change, a user can manage git worktrees from inside touch-code as fir
   `https://deps.files.ghostty.org/uucode-0.2.0-…tar.gz` with HTTP 400.
   This is a pre-existing environment issue unrelated to T-WORKTREE's
   changes. My script wiring IS correctly reflected in the generated
-  `touch-code.xcodeproj/project.pbxproj` (grep confirms both
+  `codans.xcodeproj/project.pbxproj` (grep confirms both
   `Verify git-wt` and `Embed git-wt` build phases are present); the
   generate + build chain cannot be fully exercised from this worktree
   without the ghostty blob. Deferring end-to-end bundle verification to
@@ -66,7 +66,7 @@ After this change, a user can manage git worktrees from inside touch-code as fir
 ## Decision Log
 
 - **D1** (design doc §Alternatives A): new `GitWorktreeClient` alongside the existing `GitWorktreeCLI` actor. The old actor remains for its current callers but the spec's streaming create + JSON list + base-dir semantics require the bundled `wt` script and async-stream plumbing that does not fit the actor shape.
-- **D2** (design doc §Data Storage, W-Q1): `Worktree.archived` is an in-place `Bool` with `decodeIfPresent ?? false` and omit-when-`false` encode — the exact pattern already used for `gitViewerVisible` at `apps/mac/TouchCodeCore/Worktree.swift:60-66`.
+- **D2** (design doc §Data Storage, W-Q1): `Worktree.archived` is an in-place `Bool` with `decodeIfPresent ?? false` and omit-when-`false` encode — the exact pattern already used for `gitViewerVisible` at `apps/mac/CodansCore/Worktree.swift:60-66`.
 - **D3** (design doc §Create sheet, W-Q2): base-ref dropdown defaults to the Project's default remote branch. When the repo has no remotes or no default branch can be resolved, we fall back to the local `HEAD` ref.
 - **D4** (design doc §Cross-Cutting Concerns → Running-terminal safety, W-Q3): force-remove counts running panes *after* the user confirms the primary Force Remove dialog; if >0, a second confirmation names the count and, on confirm, `runtime.closeSurface(for:)` each pane before the `git worktree remove --force` call.
 - **D5** (design doc §Cross-Cutting Concerns → Branch-name sanitization, W-Q5): collisions at the derived directory name are rejected with a clear sheet error. No auto-suffixing.
@@ -81,10 +81,10 @@ After this change, a user can manage git worktrees from inside touch-code as fir
 
 **All 14 milestones landed (2026-04-21).** Final tree:
 
-- 855 unit + integration tests green across 118 suites (TouchCodeCore /
-  touch-codeTests / tcKitTests / tcTests).
+- 855 unit + integration tests green across 118 suites (CodansCore /
+  codansTests / CodansKitTests / tcTests).
 - `swiftlint` clean.
-- `touch_code.app` builds with `wt` embedded at
+- `Codans.app` builds with `wt` embedded at
   `Contents/Resources/git-wt/wt`; integration tests exercise the full
   Create → List → Safe-Remove → Force-Remove lifecycle against the
   real bundled script.
@@ -138,15 +138,15 @@ External references (read-only, outside this repo):
 
 Key source files in this repo (full repository-relative paths):
 
-- `apps/mac/TouchCodeCore/Worktree.swift` — `Worktree` struct + existing `Codable` pattern with `decodeIfPresent ?? false` and omit-when-default encode. M3 extends it with `archived`.
-- `apps/mac/TouchCodeCore/Project.swift` — `Project` already carries `worktreesDirectory: String?` and `gitRoot: String?`. `supportsWorktrees` gates the feature on `gitRoot != nil`; we do not modify this file.
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — `@MainActor @Observable` catalog owner. Currently offers pure-data `createWorktree` and `removeWorktree`. M7 adds `setWorktreeArchived`, `reconcileDiscoveredWorktrees`, `runningPanelCount`.
-- `apps/mac/touch-code/Runtime/HierarchyRuntime.swift` — protocol with `closeSurface(for paneID:)`; used to tear down terminal surfaces on force-remove.
-- `apps/mac/touch-code/Git/GitWorktreeCLI.swift` — existing actor wrapping `/usr/bin/git`; NOT modified by this plan. Kept for its existing callers and as a fallback if `wt` cannot be located.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — TCA dependency bridge over `HierarchyManager`. M8 appends six new closures at end of file, updates the `liveValue` and `testValue` blocks, and (where safe) registers `GitWorktreeClient` as a dependency.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — sidebar reducer hosting sheets / popovers / confirmation dialogs. M12 composes Create + Archived sub-features, upgrades the remove path, adds Prune + Archive context menu items.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift` — SwiftUI view. M10 replaces the stub sheet at lines 78-83; M12 extends the Project `⋯` menu and the Worktree context menu. **Do not touch lines 66-71** (T-PROJECT's Add Project sheet).
-- `apps/mac/Project.swift` — Tuist manifest. M2 appends two script entries to the `touch-code` app target only.
+- `apps/mac/CodansCore/Worktree.swift` — `Worktree` struct + existing `Codable` pattern with `decodeIfPresent ?? false` and omit-when-default encode. M3 extends it with `archived`.
+- `apps/mac/CodansCore/Project.swift` — `Project` already carries `worktreesDirectory: String?` and `gitRoot: String?`. `supportsWorktrees` gates the feature on `gitRoot != nil`; we do not modify this file.
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — `@MainActor @Observable` catalog owner. Currently offers pure-data `createWorktree` and `removeWorktree`. M7 adds `setWorktreeArchived`, `reconcileDiscoveredWorktrees`, `runningPanelCount`.
+- `apps/mac/codans/Runtime/HierarchyRuntime.swift` — protocol with `closeSurface(for paneID:)`; used to tear down terminal surfaces on force-remove.
+- `apps/mac/codans/Git/GitWorktreeCLI.swift` — existing actor wrapping `/usr/bin/git`; NOT modified by this plan. Kept for its existing callers and as a fallback if `wt` cannot be located.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — TCA dependency bridge over `HierarchyManager`. M8 appends six new closures at end of file, updates the `liveValue` and `testValue` blocks, and (where safe) registers `GitWorktreeClient` as a dependency.
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — sidebar reducer hosting sheets / popovers / confirmation dialogs. M12 composes Create + Archived sub-features, upgrades the remove path, adds Prune + Archive context menu items.
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift` — SwiftUI view. M10 replaces the stub sheet at lines 78-83; M12 extends the Project `⋯` menu and the Worktree context menu. **Do not touch lines 66-71** (T-PROJECT's Add Project sheet).
+- `apps/mac/Project.swift` — Tuist manifest. M2 appends two script entries to the `codans` app target only.
 - `apps/mac/ThirdParty/` — currently holds only `ghostty`. M1 adds `git-wt`.
 
 Terms of art used in this plan:
@@ -176,36 +176,36 @@ Verification:
 
 ### Milestone 2 — Tuist wiring
 
-Two new shell scripts under `apps/mac/scripts/` and two `.pre` / `.post` script entries on the `touch-code` target in `apps/mac/Project.swift`:
+Two new shell scripts under `apps/mac/scripts/` and two `.pre` / `.post` script entries on the `codans` target in `apps/mac/Project.swift`:
 
 - `scripts/verify-git-wt.sh` — asserts `${SRCROOT}/ThirdParty/git-wt/wt` exists and is executable; on failure prints `error: missing ${wt_script}. run: git submodule update --init apps/mac/ThirdParty/git-wt` and exits non-zero. Modeled exactly on supacode's script of the same name.
 - `scripts/embed-git-wt.sh` — at build time copies `${SRCROOT}/ThirdParty/git-wt/wt` into `${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/git-wt/wt` (creating the directory) and `chmod +x`es the result. Modeled on supacode's `embed-runtime-assets.sh` minus the theme/CLI parts.
 
-In `apps/mac/Project.swift`, the `touch-code` app target (target definition starts at line 202) grows a `scripts: [.pre(...), .post(...)]` argument ordered as:
+In `apps/mac/Project.swift`, the `codans` app target (target definition starts at line 202) grows a `scripts: [.pre(...), .post(...)]` argument ordered as:
 
 - `.pre(script: "\"${SRCROOT}/scripts/verify-git-wt.sh\"", name: "Verify git-wt", basedOnDependencyAnalysis: false)`
 - `.post(script: "\"${SRCROOT}/scripts/embed-git-wt.sh\"", name: "Embed git-wt", inputPaths: [.file("ThirdParty/git-wt/wt")], outputPaths: ["$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/git-wt/wt"], basedOnDependencyAnalysis: false)`
 
-After this milestone, `tuist generate` in `apps/mac/` succeeds and `xcodebuild` produces a `touch-code.app` whose bundle resources contain `git-wt/wt`. Verification — run from `apps/mac/`:
+After this milestone, `tuist generate` in `apps/mac/` succeeds and `xcodebuild` produces a `codans.app` whose bundle resources contain `git-wt/wt`. Verification — run from `apps/mac/`:
 
     tuist generate --no-open
-    xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug build -quiet
+    xcodebuild -workspace codans.xcworkspace -scheme codans -configuration Debug build -quiet
     # locate the built .app and grep its resources
-    find ~/Library/Developer/Xcode/DerivedData -name 'touch-code.app' -type d -maxdepth 6 | head -1 | xargs -I{} test -x {}/Contents/Resources/git-wt/wt && echo ok
+    find ~/Library/Developer/Xcode/DerivedData -name 'codans.app' -type d -maxdepth 6 | head -1 | xargs -I{} test -x {}/Contents/Resources/git-wt/wt && echo ok
     # expect: ok
 
 Commit: `feat(worktree): bundle git-wt via pre-verify + post-embed Tuist scripts`.
 
 ### Milestone 3 — `Worktree.archived` data field
 
-Edit `apps/mac/TouchCodeCore/Worktree.swift`:
+Edit `apps/mac/CodansCore/Worktree.swift`:
 
 - Add `public var archived: Bool` stored property, default `false`, to the struct and to the memberwise `init`.
 - Extend `CodingKeys` with `.archived`.
 - In `init(from:)`, decode with `try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false`.
 - In `encode(to:)`, only emit the key when the value is `true` — matches the existing `gitViewerVisible` treatment at lines 60-66.
 
-Add tests to `apps/mac/TouchCodeCoreTests/` (new file `WorktreeArchivedCodableTests.swift`):
+Add tests to `apps/mac/CodansCoreTests/` (new file `WorktreeArchivedCodableTests.swift`):
 
 1. Decoding a JSON object with no `archived` key yields `archived == false`.
 2. Encoding a default-initialized Worktree (archived = false) produces JSON with NO `archived` key.
@@ -213,11 +213,11 @@ Add tests to `apps/mac/TouchCodeCoreTests/` (new file `WorktreeArchivedCodableTe
 
 After this milestone, the data model can represent archived state without breaking any existing catalog read. Commit: `feat(worktree): add archived flag to Worktree with backward-compatible Codable`.
 
-Verification: `xcodebuild test -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests -destination 'platform=macOS' -quiet` reports the three new tests passing and zero regressions.
+Verification: `xcodebuild test -workspace codans.xcworkspace -scheme CodansCoreTests -destination 'platform=macOS' -quiet` reports the three new tests passing and zero regressions.
 
 ### Milestone 4 — `GitWorktreeClient` scaffolding
 
-Create `apps/mac/touch-code/Git/GitWorktreeClient.swift`. In this milestone we build the *type* without the live implementation wiring, so the test target can link it before M5 writes the live body.
+Create `apps/mac/codans/Git/GitWorktreeClient.swift`. In this milestone we build the *type* without the live implementation wiring, so the test target can link it before M5 writes the live body.
 
 Contents:
 
@@ -235,7 +235,7 @@ Verification: app builds; a focused unit test (`GitWorktreeClientSanitizeTests`)
 
 ### Milestone 5 — `GitWorktreeClient` live implementation
 
-Fill in the `liveValue` in `apps/mac/touch-code/Git/GitWorktreeClient.swift`. Each closure binds to a private top-level `async` function. Implementation lives in the same file (single-file module for the client, mirroring `EditorClient.swift` style).
+Fill in the `liveValue` in `apps/mac/codans/Git/GitWorktreeClient.swift`. Each closure binds to a private top-level `async` function. Implementation lives in the same file (single-file module for the client, mirroring `EditorClient.swift` style).
 
 Private helpers:
 
@@ -268,7 +268,7 @@ After this milestone, the live client can be exercised from a manual spike (atta
 
 ### Milestone 6 — `GitWorktreeClient` unit tests
 
-New file `apps/mac/touch-code/Tests/Git/GitWorktreeClientTests.swift`. Uses an in-memory `FakeProcessRunner` — NOT the live implementation — so these run hermetically without `/usr/bin/git` or the bundled `wt`.
+New file `apps/mac/codans/Tests/Git/GitWorktreeClientTests.swift`. Uses an in-memory `FakeProcessRunner` — NOT the live implementation — so these run hermetically without `/usr/bin/git` or the bundled `wt`.
 
 Cases:
 
@@ -285,15 +285,15 @@ Commit: `test(git): unit-cover GitWorktreeClient argv + parse + error mapping`.
 
 ### Milestone 7 — `HierarchyManager` additions
 
-Edit `apps/mac/touch-code/Runtime/HierarchyManager.swift`:
+Edit `apps/mac/codans/Runtime/HierarchyManager.swift`:
 
 - Add `func setWorktreeArchived(_ id: WorktreeID, archived: Bool) throws` — locates the Worktree, guards `worktree.path != project.rootPath` (throwing `HierarchyError.invariantViolation("Cannot archive main checkout")`), sets the flag, on `archived == true` iterates the Worktree's Panes and calls `runtime.closeSurface(for:)` for each, and schedules save. Idempotent: if the current value already matches, return without saving.
 - Add `func reconcileDiscoveredWorktrees(projectID:inSpace:entries: [GitWtEntry])` — the actual merge logic, called synchronously by a wrapper that does the IO. Takes canonicalized entries; appends a new `Worktree` for each entry not matched by `standardizedFileURL.path`. Never removes or mutates existing rows. Returns the count of appended rows.
 - Add `func runningPanelCount(worktreeID: WorktreeID) -> Int` — sum of `panes.count` across the Worktree's Tabs whose Panes have live surfaces. Because `HierarchyRuntime` does not today expose a "pane is alive" query, we extend `HierarchyRuntime` with `func hasSurface(for paneID: PaneID) -> Bool` and sum matches. (Rationale: simpler than making the manager track liveness; the runtime is the source of truth.)
 
-Extend `apps/mac/touch-code/Runtime/HierarchyRuntime.swift` with the new `hasSurface` method; update the default implementations (`touch-code/Runtime/Ghostty/*.swift` and `FakeHierarchyRuntime.swift`) accordingly.
+Extend `apps/mac/codans/Runtime/HierarchyRuntime.swift` with the new `hasSurface` method; update the default implementations (`codans/Runtime/Ghostty/*.swift` and `FakeHierarchyRuntime.swift`) accordingly.
 
-Add tests to `apps/mac/touch-code/Tests/Harness/HierarchyManagerArchiveTests.swift`:
+Add tests to `apps/mac/codans/Tests/Harness/HierarchyManagerArchiveTests.swift`:
 
 - `testSetWorktreeArchivedPersists` / `testSetWorktreeArchivedMainCheckoutThrows`.
 - `testSetWorktreeArchivedClosesSurfaces` — using the existing `FakeHierarchyRuntime` assert `closeSurface` calls.
@@ -305,7 +305,7 @@ Commit: `feat(hierarchy): add archive / reconcile-append / running-pane-count`.
 
 ### Milestone 8 — `HierarchyClient` closures
 
-Edit `apps/mac/touch-code/App/Clients/HierarchyClient.swift`. **Insertions ONLY at end of file**, before the closing brace of `HierarchyClient`. Append six new closures to the struct definition and update `liveValue` / `testValue`. The live implementation calls `GitWorktreeClient` for the IO parts:
+Edit `apps/mac/codans/App/Clients/HierarchyClient.swift`. **Insertions ONLY at end of file**, before the closing brace of `HierarchyClient`. Append six new closures to the struct definition and update `liveValue` / `testValue`. The live implementation calls `GitWorktreeClient` for the IO parts:
 
 - `setWorktreeArchived: @MainActor @Sendable (WorktreeID, Bool) throws -> Void`.
 - `reconcileDiscoveredWorktrees: @MainActor @Sendable (ProjectID, SpaceID) async -> Void` — resolves the Project, reads `gitRoot`, calls `gitWorktreeClient.lsWorktrees`, canonicalizes, forwards to manager's `reconcileDiscoveredWorktrees(projectID:inSpace:entries:)`. Swallows and logs `GitWorktreeError` (never throws).
@@ -313,7 +313,7 @@ Edit `apps/mac/touch-code/App/Clients/HierarchyClient.swift`. **Insertions ONLY 
 - `removeWorktreeWithGit: @MainActor @Sendable (WorktreeID, ProjectID, SpaceID, force: Bool) async throws -> Void` — resolves worktree, runs `gitWorktreeClient.removeWorktree(repoRoot:, path:, force:)`, on success calls manager's `removeWorktree`. On `force == true`, first `runtime.closeSurface(for:)` every Pane of the Worktree (accessed via manager) so the terminal is hard-killed before git removes the directory. `GitWorktreeError.uncommittedChanges` and `.commandFailed` are re-thrown for the sidebar feature to surface.
 - `runningPanelCount: @MainActor @Sendable (WorktreeID) -> Int` — one-line forward to manager.
 
-Keep the existing `createWorktree` / `removeWorktree` closures intact — they're still called from `HierarchySidebarFeature.worktreeRemoveConfirmed` today, and we migrate those call sites to the `*WithGit` variants in M12. By the end of M12 the legacy `removeWorktree` closure may become unused for app code; we keep it until the CLI path (`tc worktree rm`, if it exists) is audited — out of scope.
+Keep the existing `createWorktree` / `removeWorktree` closures intact — they're still called from `HierarchySidebarFeature.worktreeRemoveConfirmed` today, and we migrate those call sites to the `*WithGit` variants in M12. By the end of M12 the legacy `removeWorktree` closure may become unused for app code; we keep it until the CLI path (`codans worktree rm`, if it exists) is audited — out of scope.
 
 Update the `testValue` block with `unimplemented(...)` placeholders for each new closure.
 
@@ -326,7 +326,7 @@ Commit: `feat(hierarchy-client): expose worktree git + reconcile closures`.
 
 ### Milestone 9 — `CreateWorktreeFeature`
 
-New file `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeFeature.swift`. TCA reducer, one-file. Modeled on supacode's `WorktreeCreationPromptFeature` but with added streaming progress state.
+New file `apps/mac/codans/App/Features/HierarchySidebar/CreateWorktreeFeature.swift`. TCA reducer, one-file. Modeled on supacode's `WorktreeCreationPromptFeature` but with added streaming progress state.
 
 State:
 
@@ -369,7 +369,7 @@ Commit: `feat(sidebar): CreateWorktreeFeature reducer`.
 
 ### Milestone 10 — `CreateWorktreeSheet` view + sidebar wiring
 
-New file `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeSheet.swift`. SwiftUI view. Fields:
+New file `apps/mac/codans/App/Features/HierarchySidebar/CreateWorktreeSheet.swift`. SwiftUI view. Fields:
 
 - `TextField("Branch name")` bound to `branchNameDraft`; inline `Text(state.validationError)` below.
 - `Picker` for base-ref (options from `baseRefOptions`, default to `selectedBaseRef ?? automaticBaseRef`).
@@ -378,7 +378,7 @@ New file `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeSheet.
 - Banner area showing `submitError`.
 - Footer: `Cancel` + `Create` (disabled when validation fails or `isSubmitting`).
 
-Edit `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
+Edit `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
 
 - Replace the stub sheet at lines 78-83 (the `stubSheet(title: "Add Worktree", ...)`) with a presentation of `CreateWorktreeSheet` bound to the new `addWorktreeSheet` payload. The sheet is shown when `store.addWorktreeSheet != nil`.
 - Do NOT touch lines 66-71 (T-PROJECT's Add Project stub).
@@ -393,8 +393,8 @@ Verification (manual at this point): build app, click `+` on a Project, sheet op
 
 New files:
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/ArchivedWorktreesFeature.swift` — reducer. State: `projectID`, `spaceID`, transient `archiveError: String?`. Actions: `.unarchiveTapped(WorktreeID)`, `.removeTapped(WorktreeID)`, `.removeSafeCompleted(Result<Void, GitWorktreeError>)`, `.forceRemoveRequested(WorktreeID)`, `.forceRemoveConfirmed(WorktreeID)`, `.delegate(.dismiss)`.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/ArchivedWorktreesSheet.swift` — SwiftUI view. Reads the current Project's archived worktrees live from `HierarchyManager.catalog` (no standing subscription; read on each render). Empty-state mimics supacode's `ContentUnavailableView`. Each row shows branch + relative path + Unarchive / Remove buttons.
+- `apps/mac/codans/App/Features/HierarchySidebar/ArchivedWorktreesFeature.swift` — reducer. State: `projectID`, `spaceID`, transient `archiveError: String?`. Actions: `.unarchiveTapped(WorktreeID)`, `.removeTapped(WorktreeID)`, `.removeSafeCompleted(Result<Void, GitWorktreeError>)`, `.forceRemoveRequested(WorktreeID)`, `.forceRemoveConfirmed(WorktreeID)`, `.delegate(.dismiss)`.
+- `apps/mac/codans/App/Features/HierarchySidebar/ArchivedWorktreesSheet.swift` — SwiftUI view. Reads the current Project's archived worktrees live from `HierarchyManager.catalog` (no standing subscription; read on each render). Empty-state mimics supacode's `ContentUnavailableView`. Each row shows branch + relative path + Unarchive / Remove buttons.
 
 `HierarchySidebarFeature` gains:
 
@@ -426,7 +426,7 @@ Commit: `feat(sidebar): Archive + Prune menu items + force-remove upgrade path`.
 
 ### Milestone 13 — Integration test
 
-New file `apps/mac/touch-code/Tests/Integration/WorktreeLifecycleIntegrationTests.swift`. Spawns a scratch git repo under `FileManager.default.temporaryDirectory.appending("touch-code-wt-" + UUID().uuidString)`, init+commit a file, then exercises the full path against the *real* `GitWorktreeClient.liveValue`:
+New file `apps/mac/codans/Tests/Integration/WorktreeLifecycleIntegrationTests.swift`. Spawns a scratch git repo under `FileManager.default.temporaryDirectory.appending("codans-wt-" + UUID().uuidString)`, init+commit a file, then exercises the full path against the *real* `GitWorktreeClient.liveValue`:
 
 1. `createWorktreeStream(spec:)` with `copyIgnored = false, copyUntracked = false, fetchOrigin = false, baseRef = current-branch`. Collect stream events, assert `.finished(path)`.
 2. `lsWorktrees` returns two entries (main + new).
@@ -436,7 +436,7 @@ New file `apps/mac/touch-code/Tests/Integration/WorktreeLifecycleIntegrationTest
 6. Add an uncommitted file in a fresh worktree; safe-remove throws `.uncommittedChanges([path])`; force-remove succeeds.
 7. Tear-down removes the scratch repo.
 
-Guard the whole class with `XCTSkip("wt script not bundled in test target")` when `Bundle.main.url(forResource: "wt", withExtension: nil, subdirectory: "git-wt")` is `nil`. Tuist's test target has the same resource embed as the app target (no additional wiring — `embed-git-wt.sh` runs on the `touch-code` app and the test target is an extension; if the test host is the app this "just works"). If the test target proves to be hostless, we add a minimal post-script to the tests target too — decided at build time.
+Guard the whole class with `XCTSkip("wt script not bundled in test target")` when `Bundle.main.url(forResource: "wt", withExtension: nil, subdirectory: "git-wt")` is `nil`. Tuist's test target has the same resource embed as the app target (no additional wiring — `embed-git-wt.sh` runs on the `codans` app and the test target is an extension; if the test host is the app this "just works"). If the test target proves to be hostless, we add a minimal post-script to the tests target too — decided at build time.
 
 Commit: `test(worktree): integration test — create / ls / archive / remove`.
 
@@ -445,7 +445,7 @@ Commit: `test(worktree): integration test — create / ls / archive / remove`.
 Manual checklist (expand from design doc §Testing):
 
 - [ ] `apps/mac/Makefile`'s `lint` and `test` targets pass; no SwiftLint warnings on new files.
-- [ ] Build + launch the app; verify the Create Worktree sheet opens, validates live, creates a real worktree on the touch-code repo itself.
+- [ ] Build + launch the app; verify the Create Worktree sheet opens, validates live, creates a real worktree on the codans repo itself.
 - [ ] External `git worktree add` via terminal → window focus → row appears (after T-PROJECT schedules a reconcile; we validate via calling `hierarchyClient.reconcileDiscoveredWorktrees(projectID:inSpace:)` from a debug hook).
 - [ ] Archive → row disappears from main list, appears in Archived sheet.
 - [ ] Force-remove with a running `top` pane in that worktree; confirm dialogs fire in order; row is gone after confirm.
@@ -469,7 +469,7 @@ Exact commands per milestone. Run all from `apps/mac/` unless noted. Each step i
 
 **M1:**
 
-    cd /Users/wanggang/.worktree/repos/touch-code/feat/worktree-mgmt
+    cd /Users/wanggang/.worktree/repos/codans/feat/worktree-mgmt
     git submodule add https://github.com/khoi/git-wt.git apps/mac/ThirdParty/git-wt
     # Pin to supacode's current revision:
     SUPACODE_SHA=$(git -C /Users/wanggang/dev/opensource/supacode/Resources/git-wt rev-parse HEAD)
@@ -485,16 +485,16 @@ Exact commands per milestone. Run all from `apps/mac/` unless noted. Each step i
 Write `scripts/verify-git-wt.sh` + `scripts/embed-git-wt.sh` (both `chmod +x`). Edit `apps/mac/Project.swift` adding the two script entries. Then:
 
     tuist generate --no-open
-    xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug build -quiet
+    xcodebuild -workspace codans.xcworkspace -scheme codans -configuration Debug build -quiet
     # after build, confirm:
-    APP=$(find ~/Library/Developer/Xcode/DerivedData -name 'touch-code.app' -type d -maxdepth 6 | head -1)
+    APP=$(find ~/Library/Developer/Xcode/DerivedData -name 'codans.app' -type d -maxdepth 6 | head -1)
     test -x "$APP/Contents/Resources/git-wt/wt" && echo embed-ok
     /commit
 
 **M3–M13:** each milestone ends with its own test invocation, e.g.
 
-    xcodebuild test -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests -destination 'platform=macOS' -quiet   # M3
-    xcodebuild test -workspace touch-code.xcworkspace -scheme touch-codeTests -destination 'platform=macOS' -quiet     # M6, M7, M8, M9, M11, M12, M13
+    xcodebuild test -workspace codans.xcworkspace -scheme CodansCoreTests -destination 'platform=macOS' -quiet   # M3
+    xcodebuild test -workspace codans.xcworkspace -scheme codansTests -destination 'platform=macOS' -quiet     # M6, M7, M8, M9, M11, M12, M13
 
 After each green run:
 
@@ -510,7 +510,7 @@ After each green run:
 
 ## Validation and Acceptance
 
-The plan is complete when every box in Progress is checked, the PR is open, and the following behaviors observably pass on a real macOS machine with the touch-code repo open as a Project:
+The plan is complete when every box in Progress is checked, the PR is open, and the following behaviors observably pass on a real macOS machine with the codans repo open as a Project:
 
 - Click `+` on a Project → sheet opens within 500 ms, base-ref dropdown populated, branch-name live validator rejects `feature (with space)` and accepts `feature/new-work`.
 - Enable "Copy ignored" on a tree with a sizable `.gitignore` → progress lines stream in the sheet while `wt` runs; Create button re-enables only on completion; new row visible, new tab + pane in its directory.
@@ -583,7 +583,7 @@ External tools / libraries:
 - `/usr/bin/git` — assumed present (macOS default; Xcode CLT ships it).
 - Existing TCA `ComposableArchitecture` package (already in the project).
 
-In `apps/mac/touch-code/Git/GitWorktreeClient.swift`, define:
+In `apps/mac/codans/Git/GitWorktreeClient.swift`, define:
 
     nonisolated struct GitWorktreeClient: Sendable {
       var lsWorktrees: @Sendable (_ repoRoot: URL) async throws -> [GitWtEntry]
@@ -599,13 +599,13 @@ In `apps/mac/touch-code/Git/GitWorktreeClient.swift`, define:
       var changedFiles: @Sendable (_ worktreeRoot: URL) async throws -> [String]
     }
 
-In `apps/mac/TouchCodeCore/Worktree.swift`, the stored property and Codable extensions must compile such that:
+In `apps/mac/CodansCore/Worktree.swift`, the stored property and Codable extensions must compile such that:
 
     let wt = Worktree(... archived: true)                // default-false memberwise still works too
     let data = try JSONEncoder().encode(wt)              // emits "archived": true
     let wt2 = try JSONDecoder().decode(Worktree.self, from: data)
     XCTAssertEqual(wt, wt2)
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`, the struct closures listed in the Milestone 8 section are all additions at end of file; none of the existing closures move.
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`, the struct closures listed in the Milestone 8 section are all additions at end of file; none of the existing closures move.
 
-In `apps/mac/Project.swift`, the `touch-code` target's `scripts:` argument is added with exactly the two entries described in Milestone 2; no other target changes.
+In `apps/mac/Project.swift`, the `codans` target's `scripts:` argument is added with exactly the two entries described in Milestone 2; no other target changes.

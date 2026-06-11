@@ -1,6 +1,6 @@
 name: update-homebrew-cask
 
-# Publishes touch-code's Homebrew cask to wanggang316/homebrew-tap whenever
+# Publishes codans's Homebrew cask to wanggang316/homebrew-tap whenever
 # a stable GitHub Release is published. We trigger on `release: published`
 # (not on tag push) so the cask only updates after the DMG asset is
 # publicly downloadable — the cask's `url` would otherwise 404 until the
@@ -71,7 +71,7 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.meta.outputs.version }}"
           TAG="${{ steps.meta.outputs.tag }}"
-          DMG="TouchCode-${VERSION}.dmg"
+          DMG="Codans-${VERSION}.dmg"
 
           # release.yml uploads both the .dmg and a .dmg.sha256 sidecar
           # (emitted by apps/mac/scripts/release.sh). Pull both and
@@ -96,9 +96,9 @@ jobs:
           ./scripts/render-cask.sh \
             "${{ steps.meta.outputs.version }}" \
             "${{ steps.dmg.outputs.sha256 }}" \
-            "$RUNNER_TEMP/touch-code.rb"
+            "$RUNNER_TEMP/codans.rb"
           echo "--- rendered cask ---"
-          cat "$RUNNER_TEMP/touch-code.rb"
+          cat "$RUNNER_TEMP/codans.rb"
 
       - name: Push cask to wanggang316/homebrew-tap
         if: steps.meta.outputs.skip != 'true'
@@ -116,11 +116,11 @@ jobs:
             "$TAP_DIR"
 
           mkdir -p "$TAP_DIR/Casks"
-          /bin/cp -f "$RUNNER_TEMP/touch-code.rb" "$TAP_DIR/Casks/touch-code.rb"
+          /bin/cp -f "$RUNNER_TEMP/codans.rb" "$TAP_DIR/Casks/codans.rb"
 
           cd "$TAP_DIR"
-          git config user.name  "touch-code release bot"
-          git config user.email "noreply@touch-code.app"
+          git config user.name  "codans release bot"
+          git config user.email "noreply@codans.app"
           # Stage first, then diff against HEAD. `git diff --quiet -- <path>`
           # alone only sees changes to *tracked* files, so a brand-new file
           # in a freshly bootstrapped (empty) tap would silently exit 0 and
@@ -128,10 +128,10 @@ jobs:
           # additions as a real change. `--cached` against a missing HEAD
           # also works: on an empty repo with no commits the diff is always
           # non-empty, so the first push commits the bootstrap file.
-          git add Casks/touch-code.rb
-          if git diff --cached --quiet -- Casks/touch-code.rb 2>/dev/null; then
+          git add Casks/codans.rb
+          if git diff --cached --quiet -- Casks/codans.rb 2>/dev/null; then
             echo "::notice::cask already at ${TAG} in tap — nothing to push"
             exit 0
           fi
-          git commit -m "touch-code ${VERSION}"
+          git commit -m "codans ${VERSION}"
           git push origin HEAD

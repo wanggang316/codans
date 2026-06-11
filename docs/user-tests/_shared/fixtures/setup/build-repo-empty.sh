@@ -30,7 +30,7 @@ export GIT_COMMITTER_EMAIL='test@example.com'
 
 BASE_EPOCH=1767225600  # 2026-01-01T00:00:00Z
 
-WORK_DIR="$(mktemp -d -t touch-code-fixture-empty.XXXXXX)"
+WORK_DIR="$(mktemp -d -t codans-fixture-empty.XXXXXX)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 REPO_DIR="${WORK_DIR}/repo"

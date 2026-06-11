@@ -87,7 +87,7 @@ filtering. We choose Tags because:
 **Multi-window vs. single-window.** Multi-window costs us a
 per-window-state surface (`CatalogWindow`, `selectedSpaceID`,
 implicitly per-window `activeTagFilter` if we'd kept it) and has *no*
-production callers today. The user's mental model of touch-code is "the
+production callers today. The user's mental model of codans is "the
 project terminal," not "a workspace I open multiple of." We collapse to
 single-window because:
 
@@ -114,8 +114,8 @@ see *Alternatives* §4 for the rejected hybrid models.
                                     │ tagFilterChanged / tagAddedToProject
                                     ▼
                       ┌───────────────────────────┐
-   tc tag ────────────│  HierarchyManager (+Tag)  │
-   tc project tag     │  catalog mutations,       │
+   codans tag ────────────│  HierarchyManager (+Tag)  │
+   codans project tag     │  catalog mutations,       │
                       │  debounced save           │
                       └─────────────┬─────────────┘
                                     │
@@ -227,7 +227,7 @@ migrations independently testable.
 **Rollback**: writes are v3-only, but the v2 decoder remains for one
 release. Downgrading from a v3 build to a v2 build will fail-loud
 (`unsupportedVersion(3)`); we accept this — the user's escape hatch is
-restoring `~/.config/touch-code/catalog.json` from Time Machine.
+restoring `~/.config/codans/catalog.json` from Time Machine.
 
 ### 3.4 Sidebar UX
 
@@ -274,13 +274,13 @@ restoring `~/.config/touch-code/catalog.json` from Time Machine.
 
 | Component | Owns | Does Not Own |
 |---|---|---|
-| `TouchCodeCore.Tag` / `TagID` / `TagFilter` | Pure value types, Codable | Persistence, UI |
-| `TouchCodeCore.Catalog` (v3) | Schema, migration | Mutation policy |
+| `CodansCore.Tag` / `TagID` / `TagFilter` | Pure value types, Codable | Persistence, UI |
+| `CodansCore.Catalog` (v3) | Schema, migration | Mutation policy |
 | `HierarchyManager` | Tag CRUD, `setProjectTags`, `setActiveTagFilter` | Sidebar state |
 | `HierarchyClient` | Closure surface for the manager | TCA reducer logic |
 | `HierarchySidebarFeature` | Chip bar state, filter dispatch, project rows | Tag CRUD UI |
 | `TagManagerFeature` (new) | CRUD sheet, rename/recolor/delete | Filter state |
-| `tc` CLI | `tc tag`, `tc project tag` | Domain validation (delegated to manager via IPC) |
+| `codans` CLI | `codans tag`, `codans project tag` | Domain validation (delegated to manager via IPC) |
 
 `HierarchyClient` gains: `createTag`, `renameTag`, `recolorTag`,
 `removeTag`, `setProjectTags(projectID, Set<TagID>)`,
@@ -290,37 +290,37 @@ tests) are removed.
 
 ### 3.6 IPC / Socket Handlers
 
-`apps/mac/touch-code/App/Features/Socket/handlers/HierarchyHandlers.swift`
+`apps/mac/codans/App/Features/Socket/handlers/HierarchyHandlers.swift`
 loses its `space.*` RPCs and gains `tag.*` and `project.tag.*`. Schema
-versioning on the wire is implicit (touch-code app and `tc` CLI ship as a
+versioning on the wire is implicit (codans app and `codans` CLI ship as a
 unit), so no protocol negotiation needed.
 
 ### 3.7 CLI Surface
 
 ```
-tc tag list
-tc tag create <name> [--color red|orange|yellow|green|blue|purple|grey]
-tc tag rename <id|name> <new-name>
-tc tag recolor <id|name> <color>
-tc tag remove  <id|name>
+codans tag list
+codans tag create <name> [--color red|orange|yellow|green|blue|purple|grey]
+codans tag rename <id|name> <new-name>
+codans tag recolor <id|name> <color>
+codans tag remove  <id|name>
 
-tc project tag add    <project-id|name> <tag-id|name>...
-tc project tag remove <project-id|name> <tag-id|name>...
-tc project list [--tag <id|name>] [--untagged]
+codans project tag add    <project-id|name> <tag-id|name>...
+codans project tag remove <project-id|name> <tag-id|name>...
+codans project list [--tag <id|name>] [--untagged]
 ```
 
 Resolution by `name` is best-effort (first match, case-fold);
 ambiguous names emit a warning and require `--id`. Symmetric with
-existing `tc project` resolution behavior.
+existing `codans project` resolution behavior.
 
 ### 3.8 Single-Window Enforcement
 
-Three concrete changes in `TouchCodeApp.swift`:
+Three concrete changes in `CodansApp.swift`:
 
 ```swift
 // Was: WindowGroup { … }
 // Now:
-Window("touch-code", id: TouchCodeApp.mainWindowID) { … }
+Window("codans", id: CodansApp.mainWindowID) { … }
 ```
 
 - `WindowGroup` allows the user to spawn multiple instances via the
@@ -334,7 +334,7 @@ Window("touch-code", id: TouchCodeApp.mainWindowID) { … }
   Without this, the menu still shows (and ⌘N still fires) but the
   binding becomes a no-op, which is worse UX than removing it entirely.
 
-- Dock icon click and `open -a touch-code` from Terminal both route
+- Dock icon click and `open -a codans` from Terminal both route
   through `NSApplicationDelegate.applicationShouldHandleReopen(_:hasVisibleWindows:)`;
   the default behavior with `Window(id:)` is to re-show the existing
   window, which is what we want. No code addition needed.
@@ -344,11 +344,11 @@ Window("touch-code", id: TouchCodeApp.mainWindowID) { … }
 - **⌘W** closes (hides) the main window. The app stays running with its
   IPC stack, Ghostty surfaces, and notification observer alive.
   Re-clicking the dock icon re-shows the window. This is the standard
-  "long-lived background app" pattern — touch-code hosts terminal
+  "long-lived background app" pattern — codans hosts terminal
   sessions, and a stray ⌘W must not kill them.
 - **⌘Q** quits, gated by a confirmation dialog. `AppDelegate` overrides
   `applicationShouldTerminate(_:)`: present an `NSAlert`
-  ("Quit touch-code? Running terminal sessions will end.") with
+  ("Quit codans? Running terminal sessions will end.") with
   *Quit* / *Cancel*; return `.terminateNow` on confirm,
   `.terminateCancel` on cancel. The alert is suppressed when no
   Worktree has open Panes (clean exit, no work to lose) — matches the
@@ -444,14 +444,14 @@ ask.
 
 ### 5.2 Backward compatibility (CLI, IPC)
 
-- `tc space *` subcommands print a friendly deprecation error pointing
-  at `tc tag` for one release, then disappear. The error message
-  includes the equivalent `tc tag` invocation when one exists.
+- `codans space *` subcommands print a friendly deprecation error pointing
+  at `codans tag` for one release, then disappear. The error message
+  includes the equivalent `codans tag` invocation when one exists.
 - IPC `space.*` RPCs are removed outright — there is no out-of-process
-  consumer other than `tc` (shipped in lockstep).
-- Multi-window CLI: there is no `tc window` command today, so nothing
-  to deprecate. If `tc focus` ever grew a `--window <id>` flag, it
-  would be removed; current `tc focus` operates on whatever window
+  consumer other than `codans` (shipped in lockstep).
+- Multi-window CLI: there is no `codans window` command today, so nothing
+  to deprecate. If `codans focus` ever grew a `--window <id>` flag, it
+  would be removed; current `codans focus` operates on whatever window
   hosts the resolved Pane, which still works under single-window.
 
 ### 5.3 Testing
@@ -482,7 +482,7 @@ ask.
 | Users with deep Space muscle memory bounce off the new model | Migration preserves Space names verbatim as Tag names; first-launch toast: "Your spaces are now tags. Click a chip to filter." Single dismissible message, no settings flag. |
 | Power users miss ⌘1–⌘9 jump | Documented in CHANGELOG; if real demand surfaces, future PR can bind 1–9 to "toggle filter to Nth tag (single-select)". Leaving the slots unbound for now is reversible. |
 | Migration corrupts a catalog | Catalog write is atomic (existing `CatalogStore` writes to temp + rename); migration runs in-memory before the first save. Worst case the user sees an unmigrated v2 catalog after a failed launch — they can roll back to the previous build. We commit the migration logic with the v2 fixture test before any UI work. |
-| Tag rename loses CLI references | `TagID` is the canonical handle; `tc` accepts `name` only as a convenience and warns on ambiguity. Scripts written against IDs are stable across renames. |
+| Tag rename loses CLI references | `TagID` is the canonical handle; `codans` accepts `name` only as a convenience and warns on ambiguity. Scripts written against IDs are stable across renames. |
 | Removing Space breaks downstream code we missed | The 135-file Space scope is enumerated in the exec plan; CI grep gate (`! grep -r 'SpaceID\\|\\bSpace\\b' apps/mac --include='*.swift'`) blocks merge until clean. Gate dropped after the refactor lands. |
 | User has multiple main windows open at upgrade time | The new build won't read `catalog.windows`; on first launch only one window is created (`Window(id:)`). Any visual "second window" the user had open simply doesn't reappear after restart. No data loss — Tab/Pane state is owned by Worktree, not by Window. |
 | AppleScript or external tooling depends on multi-window | None known. If discovered post-ship, the path is to expose a single window-id stable handle rather than re-introduce the `WindowGroup`. |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# release.sh — orchestrate Touch Code's Developer ID release pipeline.
+# release.sh — orchestrate Codans's Developer ID release pipeline.
 #
 # Subcommands:
 #   archive          xcodebuild archive + extract signed .app from xcarchive
@@ -35,12 +35,12 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 srcroot="$(cd "${script_dir}/.." && pwd)"
 
 release_dir="${srcroot}/.build/release"
-archive_path="${release_dir}/TouchCode.xcarchive"
+archive_path="${release_dir}/Codans.xcarchive"
 export_dir="${release_dir}/export"
-app_path="${export_dir}/TouchCode.app"
+app_path="${export_dir}/Codans.app"
 
-workspace="${srcroot}/touch-code.xcworkspace"
-scheme="touch-code"
+workspace="${srcroot}/codans.xcworkspace"
+scheme="Codans"
 
 # ----- helpers ------------------------------------------------------------
 
@@ -49,7 +49,7 @@ log() { echo "==> $*"; }
 
 print_usage() {
   cat <<'EOF'
-release.sh — orchestrate Touch Code's Developer ID release pipeline.
+release.sh — orchestrate Codans's Developer ID release pipeline.
 
 Subcommands:
   archive          xcodebuild archive + extract signed .app from xcarchive
@@ -166,9 +166,9 @@ cmd_archive() {
   # entire IDE-distribution code path while preserving the signature
   # produced by xcodebuild archive.
   log "extracting signed app from ${archive_path}"
-  /bin/cp -R "${archive_path}/Products/Applications/TouchCode.app" "${export_dir}/"
+  /bin/cp -R "${archive_path}/Products/Applications/Codans.app" "${export_dir}/"
 
-  [ -d "${app_path}" ] || die "TouchCode.app not found inside the xcarchive"
+  [ -d "${app_path}" ] || die "Codans.app not found inside the xcarchive"
 
   # Re-sign nested helpers. xcodebuild's deep signing leaves any
   # framework-bundled XPC services (e.g. Sparkle's Installer.xpc and
@@ -206,7 +206,7 @@ cmd_dmg() {
   local version="${1:-$(read_marketing_version)}"
   local identity_sha
   identity_sha="$(resolve_identity_sha)"
-  local dmg_path="${release_dir}/TouchCode-${version}.dmg"
+  local dmg_path="${release_dir}/Codans-${version}.dmg"
   "${script_dir}/make-dmg.sh" "${app_path}" "${dmg_path}" "${identity_sha}"
   printf '%s\n' "${dmg_path}"
 }
@@ -215,7 +215,7 @@ cmd_upload_symbols() {
   [ -d "${archive_path}" ] || die "missing ${archive_path}. Run release.sh archive first."
   local version
   version="$(read_marketing_version)"
-  local release_name="touch-code@${version}"
+  local release_name="codans@${version}"
   local dsym_dir="${archive_path}/dSYMs"
 
   if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
@@ -256,7 +256,7 @@ cmd_release() {
   log "packaging DMG"
   local version
   version="$(read_marketing_version)"
-  local dmg_path="${release_dir}/TouchCode-${version}.dmg"
+  local dmg_path="${release_dir}/Codans-${version}.dmg"
   cmd_dmg "${version}"
   log "notarizing DMG"
   # notarize.sh now refreshes the sidecar in place after stapling, so

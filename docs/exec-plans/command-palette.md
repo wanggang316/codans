@@ -8,7 +8,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this change, a touch-code user can:
+After this change, a codans user can:
 
 - Press **⌘P** from anywhere in the main window and see a floating search box at the top-center of the active window.
 - Type a few characters and see a fuzzy-ranked list of every command currently available — Space switching, Worktree switching, "Open in default editor", "Toggle Git Viewer", split/new-tab/focus pane actions, new/close window, open settings — without needing to remember which menu hosts each.
@@ -144,14 +144,14 @@ Related documents:
 
 Key source files to read (in this order) before M1:
 
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — the parent reducer. Lines 17–42 hold the `State` struct the palette extends; line 46 is the `@Presents var spaceManagerSheet` pattern the palette mirrors; lines 135–137 (`spaceManagerSheetShown`, `spaceManagerSheet(PresentationAction<…>)`, `switchToSpaceAtIndex`) are the Action shape precedent; line 421 is the `panelActionRouter(.delegate)` no-op branch that M5 replaces; the `.ifLet(\.$spaceManagerSheet, …)` at line 486 is where `.ifLet(\.$commandPalette, …)` lands.
-- `apps/mac/touch-code/App/Features/SpaceManager/SpaceManagerFeature.swift` — **read for shape only, do not edit**. This is the cleanest in-tree example of a `@Presents`-hosted child reducer. The new feature's file layout (`State` / `Action` / `body: some Reducer` / `Delegate`) matches this one.
-- `apps/mac/touch-code/App/Commands/MainWindowCommands.swift` — the `CommandGroup(after: .newItem)` block. A new `Button("Quick Action…") { store.send(.commandPalette(.togglePresented)) }.keyboardShortcut("p", modifiers: .command)` is inserted *above* the existing ⌘E / ⌘⇧G / ⌘K block.
-- `apps/mac/touch-code/App/ContentView.swift` — the overlay host. The palette overlay is mounted in the same `ZStack` that already carries the Git Viewer overlay, with `.zIndex(100)` so it sits above it.
-- `apps/mac/touch-code/App/Features/PaneActionRouter/PaneActionRouterFeature.swift` — lines 37–43 declare `Delegate.commandPaletteToggleRequested`; lines 179–180 emit it. Nothing changes here; M5 just connects the delegate to a real action in `RootFeature`.
-- `apps/mac/TouchCodeCore/PaneActionRequest.swift` and `apps/mac/TouchCodeCore/WindowActionRequest.swift` — the public enums `CommandPaletteItem.Kind` wraps. **Do not edit these enums**. Every case is reachable from the palette by adding a `Kind.panelAction(case)` or `Kind.windowAction(case)` item to `build(for:)`.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — lines 268–274 (`HierarchySelection`) confirm the selection does not carry a pane ID; palette routing resolves the focused pane by walking `Tab.selectedPanelID` from the catalog snapshot. No client changes.
-- `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift` — look up `State.descriptors` and `State.globalDefault`; the palette item builder reads both to emit `Kind.openCurrentWorktreeIn(EditorID)` items for each installed editor.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — the parent reducer. Lines 17–42 hold the `State` struct the palette extends; line 46 is the `@Presents var spaceManagerSheet` pattern the palette mirrors; lines 135–137 (`spaceManagerSheetShown`, `spaceManagerSheet(PresentationAction<…>)`, `switchToSpaceAtIndex`) are the Action shape precedent; line 421 is the `panelActionRouter(.delegate)` no-op branch that M5 replaces; the `.ifLet(\.$spaceManagerSheet, …)` at line 486 is where `.ifLet(\.$commandPalette, …)` lands.
+- `apps/mac/codans/App/Features/SpaceManager/SpaceManagerFeature.swift` — **read for shape only, do not edit**. This is the cleanest in-tree example of a `@Presents`-hosted child reducer. The new feature's file layout (`State` / `Action` / `body: some Reducer` / `Delegate`) matches this one.
+- `apps/mac/codans/App/Commands/MainWindowCommands.swift` — the `CommandGroup(after: .newItem)` block. A new `Button("Quick Action…") { store.send(.commandPalette(.togglePresented)) }.keyboardShortcut("p", modifiers: .command)` is inserted *above* the existing ⌘E / ⌘⇧G / ⌘K block.
+- `apps/mac/codans/App/ContentView.swift` — the overlay host. The palette overlay is mounted in the same `ZStack` that already carries the Git Viewer overlay, with `.zIndex(100)` so it sits above it.
+- `apps/mac/codans/App/Features/PaneActionRouter/PaneActionRouterFeature.swift` — lines 37–43 declare `Delegate.commandPaletteToggleRequested`; lines 179–180 emit it. Nothing changes here; M5 just connects the delegate to a real action in `RootFeature`.
+- `apps/mac/CodansCore/PaneActionRequest.swift` and `apps/mac/CodansCore/WindowActionRequest.swift` — the public enums `CommandPaletteItem.Kind` wraps. **Do not edit these enums**. Every case is reachable from the palette by adding a `Kind.panelAction(case)` or `Kind.windowAction(case)` item to `build(for:)`.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — lines 268–274 (`HierarchySelection`) confirm the selection does not carry a pane ID; palette routing resolves the focused pane by walking `Tab.selectedPanelID` from the catalog snapshot. No client changes.
+- `apps/mac/codans/App/Features/Editor/EditorFeature.swift` — look up `State.descriptors` and `State.globalDefault`; the palette item builder reads both to emit `Kind.openCurrentWorktreeIn(EditorID)` items for each installed editor.
 
 Terms of art:
 
@@ -162,8 +162,8 @@ Terms of art:
 
 Test target layout:
 
-- `apps/mac/touch-code/Tests/` — home for `CommandPaletteFeatureTests` (new), `CommandPaletteItemsTests` (new), `RootFeatureCommandPaletteRoutingTests` (new).
-- `apps/mac/TouchCodeCoreTests/` — home for `CommandPaletteFuzzyScorerTests` (new). Scorer has no TCA dependency, so it belongs in Core tests; follow the placement of existing pure-function tests (e.g. `CatalogCodableTests`).
+- `apps/mac/codans/Tests/` — home for `CommandPaletteFeatureTests` (new), `CommandPaletteItemsTests` (new), `RootFeatureCommandPaletteRoutingTests` (new).
+- `apps/mac/CodansCoreTests/` — home for `CommandPaletteFuzzyScorerTests` (new). Scorer has no TCA dependency, so it belongs in Core tests; follow the placement of existing pure-function tests (e.g. `CatalogCodableTests`).
 
 ## Plan of Work
 
@@ -175,19 +175,19 @@ Before any edit, confirm the working tree builds clean on the current branch:
 
 ```
 make -C apps/mac lint
-xcodebuild build -scheme touch-code -destination 'platform=macOS'
+xcodebuild build -scheme codans -destination 'platform=macOS'
 ```
 
 Record any pre-existing lint or test failures so the post-work comparison is apples-to-apples. If unrelated failures exist, escalate before touching code — the palette should not silently inherit regressions.
 
 ### Milestone 1 — Data types (no behavior)
 
-Create the feature directory `apps/mac/touch-code/App/Features/CommandPalette/` and drop in two files with types only:
+Create the feature directory `apps/mac/codans/App/Features/CommandPalette/` and drop in two files with types only:
 
 - `CommandPaletteItem.swift` — `struct CommandPaletteItem: Equatable, Identifiable` with fields `id: String`, `title: String`, `subtitle: String?`, `icon: String`, `shortcut: KeyEquivalentDescriptor?`, `priorityTier: Int`, `hiddenWhenQueryEmpty: Bool`, `kind: Kind`. The `Kind` enum lists the 16 cases named in design doc §3.3.1. All enums conform to `Equatable`; nothing is public because the feature is internal to the macOS target.
 - `KeyEquivalentDescriptor.swift` — a `struct { let keys: [String] }` used only for display (e.g. rendering `"⌘⇧G"` on a row). Not a real `SwiftUI.KeyEquivalent` — the view converts it to a `Text` label at render time.
 
-No reducer, no view yet. Verify by `xcodebuild build -scheme touch-code`: the new files compile as dead code. No behavior change visible.
+No reducer, no view yet. Verify by `xcodebuild build -scheme codans`: the new files compile as dead code. No behavior change visible.
 
 ### Milestone 2 — Vertical slice with three commands
 
@@ -236,7 +236,7 @@ Replace the M2 stub `CommandPaletteFuzzyScorer.score` with the real implementati
 4. Add recency bonus: `R * 0.5^(ageDays / 7)` capped at 30 days; `R` chosen so a recent-but-subsequence match loses to a never-used contiguous match.
 5. Quoted-query rule: when `query` starts and ends with `"`, skip subsequence mode entirely — contiguous only.
 
-Add `CommandPaletteFuzzyScorerTests` in `apps/mac/TouchCodeCoreTests/` with table-driven cases:
+Add `CommandPaletteFuzzyScorerTests` in `apps/mac/CodansCoreTests/` with table-driven cases:
 
 - Contiguous `"git"` on "Toggle Git Viewer" outranks subsequence `"gtv"` on the same.
 - Prefix `"ope"` outranks suffix `"ngs"` on "Open Settings".
@@ -244,7 +244,7 @@ Add `CommandPaletteFuzzyScorerTests` in `apps/mac/TouchCodeCoreTests/` with tabl
 - Quoted query `"\"git view\""` drops subsequence-only matches.
 - Deterministic on identical input (sort stable).
 
-Verify: `xcodebuild test -scheme touch-code -only-testing:TouchCodeCoreTests/CommandPaletteFuzzyScorerTests` expects all cases passing.
+Verify: `xcodebuild test -scheme codans -only-testing:CodansCoreTests/CommandPaletteFuzzyScorerTests` expects all cases passing.
 
 ### Milestone 4 — Recency
 
@@ -324,22 +324,22 @@ Manual QA matrix:
 - Type "settings" / "git" / "personal" / "new tab" / "split right" / "open in zed" — each yields the expected item at rank 1 and Enter executes it.
 - Type garbage → "No matching commands" empty-state shows; Enter is silent; Esc closes.
 - Close palette, reopen → recently-used commands float to the top.
-- Delete a Space whose `selectSpace` command had recency, reopen → the stale recency entry is pruned (assert via `defaults read com.touch-code commandPaletteRecency`).
+- Delete a Space whose `selectSpace` command had recency, reopen → the stale recency entry is pruned (assert via `defaults read com.codans commandPaletteRecency`).
 - Configure ghostty `toggle_command_palette` on a key combo → pressing it opens the palette.
 - Open palette, then click into a terminal pane → palette dismisses; ghostty receives the click normally.
 
-Run `make -C apps/mac lint` and `xcodebuild test -scheme touch-code -destination 'platform=macOS'` — all green.
+Run `make -C apps/mac lint` and `xcodebuild test -scheme codans -destination 'platform=macOS'` — all green.
 
 Open a PR against `main` from the `feature/command-p` branch with the title `feat(palette): add Command Palette (⌘P)` and a summary that links to the design doc.
 
 ## Concrete Steps
 
-From the repo root `/Users/wanggang/.prowl/repos/touch-code/feature/command-p`:
+From the repo root `/Users/wanggang/.prowl/repos/codans/feature/command-p`:
 
 ```
 # M0 baseline
 make -C apps/mac lint
-xcodebuild build -scheme touch-code -destination 'platform=macOS,arch=arm64' 2>&1 | xcbeautify
+xcodebuild build -scheme codans -destination 'platform=macOS,arch=arm64' 2>&1 | xcbeautify
 ```
 
 Expected: lint exits 0, build succeeds. Record any pre-existing failures in Surprises & Discoveries.
@@ -347,10 +347,10 @@ Expected: lint exits 0, build succeeds. Record any pre-existing failures in Surp
 ```
 # After each milestone
 make -C apps/mac mac-check          # swift-format + swiftlint
-xcodebuild test -scheme touch-code \
+xcodebuild test -scheme codans \
   -destination 'platform=macOS,arch=arm64' \
-  -only-testing:touch-codeTests \
-  -only-testing:TouchCodeCoreTests 2>&1 | xcbeautify
+  -only-testing:codansTests \
+  -only-testing:CodansCoreTests 2>&1 | xcbeautify
 ```
 
 Expected: 0 failing tests. New test files appear in the output as they are added.
@@ -366,12 +366,12 @@ make -C apps/mac mac-run-app
 # M5 ghostty hook smoke
 # in ~/.config/ghostty/config (or per-worktree override):
 #   keybind = ctrl+shift+p=toggle_command_palette
-# then in a touch-code terminal pane, press ctrl+shift+p → palette opens
+# then in a codans terminal pane, press ctrl+shift+p → palette opens
 ```
 
 ```
 # M6 recency inspection
-defaults read com.touch-code commandPaletteRecency
+defaults read com.codans commandPaletteRecency
 ```
 
 Expected: a dictionary mapping stable command IDs (e.g. `app.open-settings`) to Unix timestamps.
@@ -402,7 +402,7 @@ The remaining types, reducer, and scorer compile as inert code.
 Recency data lives under UserDefaults key `commandPaletteRecency`. To reset during development:
 
 ```
-defaults delete com.touch-code commandPaletteRecency
+defaults delete com.codans commandPaletteRecency
 ```
 
 If a milestone's build fails, revert the milestone's edits and run `make -C apps/mac mac-check`; the tree returns to the previous green state.
@@ -412,7 +412,7 @@ If a milestone's build fails, revert the milestone's edits and run `make -C apps
 Expected file additions at completion:
 
 ```
-apps/mac/touch-code/App/Features/CommandPalette/
+apps/mac/codans/App/Features/CommandPalette/
   CommandPaletteFeature.swift
   CommandPaletteItem.swift
   CommandPaletteItems.swift
@@ -420,26 +420,26 @@ apps/mac/touch-code/App/Features/CommandPalette/
   CommandPaletteView.swift
   KeyEquivalentDescriptor.swift
 
-apps/mac/touch-code/Tests/
+apps/mac/codans/Tests/
   CommandPaletteFeatureTests.swift
   CommandPaletteItemsTests.swift
   RootFeatureCommandPaletteRoutingTests.swift
 
-apps/mac/TouchCodeCoreTests/
+apps/mac/CodansCoreTests/
   CommandPaletteFuzzyScorerTests.swift
 ```
 
 Edits to existing files:
 
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — ~50 lines added (State field, action cases, `.ifLet` composition, `route(_:)`, `resolveFocusedPanelID`, replace `line 421` no-op).
-- `apps/mac/touch-code/App/Commands/MainWindowCommands.swift` — ~6 lines added (new Button, ⌘P binding, inserted at the top of `CommandGroup(after: .newItem)`).
-- `apps/mac/touch-code/App/ContentView.swift` — ~6 lines added (overlay mount inside existing ZStack).
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — ~50 lines added (State field, action cases, `.ifLet` composition, `route(_:)`, `resolveFocusedPanelID`, replace `line 421` no-op).
+- `apps/mac/codans/App/Commands/MainWindowCommands.swift` — ~6 lines added (new Button, ⌘P binding, inserted at the top of `CommandGroup(after: .newItem)`).
+- `apps/mac/codans/App/ContentView.swift` — ~6 lines added (overlay mount inside existing ZStack).
 
-No edits expected to: `PaneActionRouterFeature.swift`, `PaneActionRequest.swift`, `WindowActionRequest.swift`, `HierarchyClient.swift`, `EditorFeature.swift`, `SettingsWindowPresenter`, `TouchCodeApp.swift`, `GhosttyActionDecoder.swift`.
+No edits expected to: `PaneActionRouterFeature.swift`, `PaneActionRequest.swift`, `WindowActionRequest.swift`, `HierarchyClient.swift`, `EditorFeature.swift`, `SettingsWindowPresenter`, `CodansApp.swift`, `GhosttyActionDecoder.swift`.
 
 ## Interfaces and Dependencies
 
-In `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItem.swift`, define:
+In `apps/mac/codans/App/Features/CommandPalette/CommandPaletteItem.swift`, define:
 
 ```swift
 struct CommandPaletteItem: Equatable, Identifiable {
@@ -476,7 +476,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItems.swift`:
+In `apps/mac/codans/App/Features/CommandPalette/CommandPaletteItems.swift`:
 
 ```swift
 enum CommandPaletteItems {
@@ -488,7 +488,7 @@ enum CommandPaletteItems {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteFuzzyScorer.swift`:
+In `apps/mac/codans/App/Features/CommandPalette/CommandPaletteFuzzyScorer.swift`:
 
 ```swift
 enum CommandPaletteFuzzyScorer {
@@ -501,7 +501,7 @@ enum CommandPaletteFuzzyScorer {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteFeature.swift`:
+In `apps/mac/codans/App/Features/CommandPalette/CommandPaletteFeature.swift`:
 
 ```swift
 @Reducer
@@ -535,7 +535,7 @@ struct CommandPaletteFeature {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Root/RootFeature.swift`, extend:
+In `apps/mac/codans/App/Features/Root/RootFeature.swift`, extend:
 
 ```swift
 @Presents var commandPalette: CommandPaletteFeature.State?
@@ -568,6 +568,6 @@ Dependencies:
 
 - **The Composable Architecture** — already a target dependency; uses `@Reducer`, `@ObservableState`, `@Presents`, `@Shared(.appStorage(…))`, `Scope`, `.ifLet(_:action:)`, `PresentationAction`.
 - **SwiftUI** — `ZStack`, `TextField`, `List`, `FocusState`, `.onKeyPress`, `.ultraThinMaterial`. All available on macOS 14+; the app's `Tuist.swift` already pins `compatibleXcodeVersions: .upToNextMajor("26.0")` which ships with macOS 14+ SDKs.
-- **TouchCodeCore** — `PaneActionRequest`, `WindowActionRequest`, `Catalog`, `Space`, `Project`, `Worktree`, `SpaceID`, `ProjectID`, `WorktreeID`, `PaneID`, `TabID`. Imported, not modified.
+- **CodansCore** — `PaneActionRequest`, `WindowActionRequest`, `Catalog`, `Space`, `Project`, `Worktree`, `SpaceID`, `ProjectID`, `WorktreeID`, `PaneID`, `TabID`. Imported, not modified.
 
 No new third-party dependencies. No new Swift Package additions.

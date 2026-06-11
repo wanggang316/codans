@@ -1,0 +1,14 @@
+{
+  "number": 99,
+  "title": "WIP: refactor command palette",
+  "state": "OPEN",
+  "isDraft": true,
+  "headRefName": "wip/palette-refactor",
+  "author": {"login": "gump", "name": "Gump"},
+  "additions": 42,
+  "deletions": 7,
+  "commits": [{"oid": "abc123"}],
+  "mergeable": "UNKNOWN",
+  "url": "https://github.com/wanggang316/codans/pull/99",
+  "updatedAt": "2026-04-23T04:00:00Z"
+}

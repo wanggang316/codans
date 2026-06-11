@@ -9,13 +9,13 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this plan lands, a touch-code user can:
+After this plan lands, a codans user can:
 
-- Open touch-code and see **a single flat list of all their projects** in the sidebar — no Space switcher, no nested grouping, no concept of "current workspace."
+- Open codans and see **a single flat list of all their projects** in the sidebar — no Space switcher, no nested grouping, no concept of "current workspace."
 - **Tag any project** with one or more colored labels (`#client-acme`, `#urgent`, `#archive-candidate`) via the project's right-click menu, and pick the colors from the macOS Finder 7-color palette.
 - **Filter the sidebar** by clicking colored chips in a footer at the bottom of the sidebar — `[All]`, one chip per Tag, plus `[Untagged]` when at least one project has no tags. Multi-select is OR (Finder/Reminders semantics). The active filter persists across relaunch.
 - **Manage tags globally** through a dedicated TagManager sheet: create, rename, recolor, delete (deletion cascades to remove the tag from every project but never deletes project data).
-- **Drive everything from `tc` CLI**: `tc tag list/create/rename/recolor/remove`, `tc project tag add/remove`, `tc project list --tag <name> | --untagged`.
+- **Drive everything from `codans` CLI**: `codans tag list/create/rename/recolor/remove`, `codans project tag add/remove`, `codans project list --tag <name> | --untagged`.
 - **Run a single main window**: ⌘W hides it (the app keeps running with IPC + Ghostty surfaces alive); ⌘Q is gated by a confirmation dialog that names how many running terminal sessions will end. Settings remains a separate window, opened via ⌘,.
 
 Existing data is migrated losslessly: each prior Space becomes a same-named Tag (with a color cycled from the palette), every project that lived in that Space inherits that tag, and the previously-active Space becomes the initial filter. A single first-launch toast explains the change.
@@ -23,20 +23,20 @@ Existing data is migrated losslessly: each prior Space becomes a same-named Tag 
 ## Progress
 
 - [x] M0 — Baseline: rebase, capture pre-existing lint + test status — 2026-04-27
-- [x] M1 — TouchCodeCore: introduce `Tag` / `TagID` / `TagColor` / `TagFilter` value types (additive, no integration) — 2026-04-27 commit 4d67c91
-- [x] M2 — Catalog v3 schema flip + v2→v3 migration + Space/CatalogWindow removal (production build-clean; touch-codeTests builds clean)
+- [x] M1 — CodansCore: introduce `Tag` / `TagID` / `TagColor` / `TagFilter` value types (additive, no integration) — 2026-04-27 commit 4d67c91
+- [x] M2 — Catalog v3 schema flip + v2→v3 migration + Space/CatalogWindow removal (production build-clean; codansTests builds clean)
   - [x] M2.1a Project.tagIDs — commit 1a0d7e3
   - [x] M2.1b Catalog v3 + migration + Space.swift deletion — commit ec43426
   - [x] M2.1c TerminalEvent / HookEnvelope / NotificationInboxAggregation / Worktree comments — included in ec43426
   - [x] M2.2 CatalogCodableTests rewrite + v2→v3 migration tests + IPC type updates — commit 060b3e6
   - [x] M2.3 HierarchyManager surface flip — commit 9ef04c4 (subagent)
   - [x] M2.4 HierarchyClient surface flip — commit 9ef04c4 (same subagent)
-  - [x] M2.5–M2.11 RootFeature, Sidebar, SpaceManager deletion, CommandPalette, MainWindowCommands, Socket handlers, tc CLI, TouchCodeApp seed removal — commit 0fc0b1d (subagent) + 971ddf9 (orchestrator final pass)
-  - [x] M2.12 Test sweep across `apps/mac/touch-code/Tests/` — `xcodebuild build-for-testing -workspace touch-code.xcworkspace -scheme touch-code -destination 'platform=macOS'` succeeds
+  - [x] M2.5–M2.11 RootFeature, Sidebar, SpaceManager deletion, CommandPalette, MainWindowCommands, Socket handlers, codans CLI, CodansApp seed removal — commit 0fc0b1d (subagent) + 971ddf9 (orchestrator final pass)
+  - [x] M2.12 Test sweep across `apps/mac/codans/Tests/` — `xcodebuild build-for-testing -workspace codans.xcworkspace -scheme codans -destination 'platform=macOS'` succeeds
 - [x] M3 — Single-window enforcement (Window(id:) + cmd+N suppressed + cmd+Q confirmation gate) — commit cd4a153
 - [x] M4 — Sidebar chip footer + filter wiring (TagChipFooter + filteredProjects + cmd+F focus) — commit da39c8e
 - [x] M5 — TagManagerFeature + project-row Tag editor (Tag dots + Tags submenu + sheet) — commit 341e4da
-- [x] M6 — tc CLI tag commands + IPC handlers (tag.* + project.tag.* RPCs + tc tag/tc project tag/list --tag) — commit 32c01b8
+- [x] M6 — codans CLI tag commands + IPC handlers (tag.* + project.tag.* RPCs + codans tag/codans project tag/list --tag) — commit 32c01b8
 - [x] M7 — First-launch toast + docs sweep + gate cleanup
   - [x] product-spec.md / architecture.md / CHANGELOG.md sweep — commit 7dfbda8
   - [x] First-launch toast — **moot** after the no-compat cleanup. The
@@ -51,26 +51,26 @@ Existing data is migrated losslessly: each prior Space becomes a same-named Tag 
 - [ ] Final code review pass via agent-skills:code-reviewer
 
 **Verification (2026-04-27 21:32):**
-- `xcodebuild build -scheme touch-code -destination 'platform=macOS'` ✅ BUILD SUCCEEDED
-- `xcodebuild build -scheme tc -destination 'platform=macOS'` ✅ BUILD SUCCEEDED
-- `xcodebuild build-for-testing -scheme touch-code -destination 'platform=macOS'` ✅ TEST BUILD SUCCEEDED
-- `xcodebuild test -scheme TouchCodeCore -destination 'platform=macOS'` ✅ 333/333 passed in 45 suites
+- `xcodebuild build -scheme codans -destination 'platform=macOS'` ✅ BUILD SUCCEEDED
+- `xcodebuild build -scheme codans -destination 'platform=macOS'` ✅ BUILD SUCCEEDED
+- `xcodebuild build-for-testing -scheme codans -destination 'platform=macOS'` ✅ TEST BUILD SUCCEEDED
+- `xcodebuild test -scheme CodansCore -destination 'platform=macOS'` ✅ 333/333 passed in 45 suites
 - `make -C apps/mac check-no-space-residue` ✅ no residue
-- (touch-codeTests host-app run still crashes on Ghostty config load — pre-existing, see Surprises §M0)
+- (codansTests host-app run still crashes on Ghostty config load — pre-existing, see Surprises §M0)
 
 ## Surprises & Discoveries
 
 - **2026-04-27, M0**: `make -C apps/mac check` reports **42 pre-existing lint errors** spanning `Toast/`, `GitHub/Views/`, `PaneSurface.swift`, `GhosttyActionDecoder.swift`, `RootFeature.swift`, several test files, and `NotificationCoordinatorTests`/`TrackerRegistry` (inclusive-language + TODO violations). None of these are in files this plan modifies, so they are accepted baseline noise. Captured in `/tmp/m0-lint-baseline.txt`. **Action**: don't gate any milestone on `make check` going green; instead use `make build` + targeted `swiftlint lint <new-files>` + `xcodebuild test`. The `mac-no-space-residue` gate added in M2 is a `grep`, independent of swiftlint, so it still works.
-- **2026-04-27, M0**: The `make test` target in `apps/mac/Makefile` is a stub (`@echo "no tests yet"`). Tests run via `xcodebuild test -scheme touch-code -destination 'platform=macOS'` directly. Plan's Concrete Steps section now says `xcodebuild test ...` not `make test`.
+- **2026-04-27, M0**: The `make test` target in `apps/mac/Makefile` is a stub (`@echo "no tests yet"`). Tests run via `xcodebuild test -scheme codans -destination 'platform=macOS'` directly. Plan's Concrete Steps section now says `xcodebuild test ...` not `make test`.
 - **2026-04-27, M0**: Make targets are `build/lint/format/check/test/clean/...` (no `mac-` prefix); the `mac-*` shorthand is at the top-level `Makefile` only. Plan's Concrete Steps uses `make -C apps/mac <target>` which is the correct form for all milestones.
-- **2026-04-27, M0**: `xcodebuild test -project ...` fails with `Unable to find module dependency: 'ArgumentParser'` because Tuist resolves SwiftPM into the **workspace**. Use `-workspace apps/mac/touch-code.xcworkspace` instead. Build then succeeds, but test host (`touch-code` app launched in test mode) crashes with `Signal 11: Backtracing from 0x288e20734...` during Ghostty config file load — `[default] reading configuration file path=/Users/wanggang/.config/ghostty/config` is the last log line before the crash. **Pre-existing**, not introduced by this plan. Workaround: scope tests with `-only-testing:TouchCodeCoreTests` (unit layer; no host app).
+- **2026-04-27, M0**: `xcodebuild test -project ...` fails with `Unable to find module dependency: 'ArgumentParser'` because Tuist resolves SwiftPM into the **workspace**. Use `-workspace apps/mac/codans.xcworkspace` instead. Build then succeeds, but test host (`codans` app launched in test mode) crashes with `Signal 11: Backtracing from 0x288e20734...` during Ghostty config file load — `[default] reading configuration file path=/Users/wanggang/.config/ghostty/config` is the last log line before the crash. **Pre-existing**, not introduced by this plan. Workaround: scope tests with `-only-testing:CodansCoreTests` (unit layer; no host app).
 
 ## Decision Log
 
 - **D1** (planning, 2026-04-27): Catalog v3 schema flip is **atomic in M2** rather than additive-with-shims. Carrying both `spaces` and `tags` in parallel during a transition window would force every reader (HierarchyManager, sidebar, CLI, IPC handlers) to handle two shapes; the shim cost exceeds the cost of one large mechanical PR. The migration is in-place inside `Catalog.init(from:)`, so the on-disk transition is also atomic.
 - **D2** (planning, 2026-04-27): The big-bang PR (M2) accepts a "tags exist in the model but the UI shows neither chip footer nor TagManager" transitional state until M4/M5 land. During this window the sidebar renders a flat project list and inherited tags are read-only. We deliberately avoid a placeholder chip footer in M2 — placeholder UI is its own bug surface.
 - **D3** (planning, 2026-04-27): Single-window (M3) ships **before** the schema flip (M2) is **wrong** — M3's ⌘Q confirmation reads `HierarchyManager.catalog`, which is shape-stable across the refactor, but M3 also touches `MainWindowCommands` which M2 will gut (removing ⌘K / ⌘1–⌘9 Space bindings). Sequencing M3 after M2 lets MainWindowCommands settle into one shape rather than two. **Final order: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7.**
-- **D4** (planning, 2026-04-27): `tc space *` is **removed outright** in M2, not deprecated with a stub. `tc` ships in lockstep with the app, so external scripts can't span versions. CHANGELOG documents the removal in M7.
+- **D4** (planning, 2026-04-27): `codans space *` is **removed outright** in M2, not deprecated with a stub. `codans` ships in lockstep with the app, so external scripts can't span versions. CHANGELOG documents the removal in M7.
 - **D5** (planning, 2026-04-27): A temporary CI grep gate lands in M2 (`! grep -r 'SpaceID\|\bSpace\b\|CatalogWindow' apps/mac --include='*.swift'`) and is removed in M7. The gate is a Makefile target invoked from `make mac-check`, not a separate workflow file.
 - **D6** (planning, 2026-04-27): The v2 read path (decoder branch in `Catalog.init(from:)`) survives one release. M7 does **not** remove it — that removal is a follow-up after enough users have migrated. Logged in M7's outcomes and tracked separately.
 - **D7** (planning, 2026-04-27): M2 is the only milestone that benefits from parallel agent dispatch. The schema flip is one focused unit (one author), but the ~120 mechanical fix-ups across features (sidebar, command palette, settings panes, tests) are independent. Per the user's `agent-teams-for-splittable-work` memory: dispatch a small team after the core schema lands compile-broken, each agent owning a feature directory.
@@ -92,27 +92,27 @@ Related documents:
 
 Key source files (read in this order before M1):
 
-- `apps/mac/TouchCodeCore/Space.swift` — domain type to delete in M2.
-- `apps/mac/TouchCodeCore/Project.swift` — gains `tagIDs: Set<TagID>` (Codable as sorted `[TagID]` for stable diffs). Existing `loadState` transient field shows the pattern for fields excluded from `Codable`.
-- `apps/mac/TouchCodeCore/Catalog.swift` — schema lives here. M2 bumps `currentVersion` to 3 and rewrites `init(from:)` to support the chained v1→v2→v3 migration. The existing v1→v2 logic and `DecodingIssue.unsupportedVersion` enum are the reference for this shape.
-- `apps/mac/TouchCodeCore/IDs.swift` — `HierarchyID` protocol and ID structs. M1 adds `TagID`; M2 removes `SpaceID`.
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — the only mutator of `Catalog`. Currently exposes `createSpace`, `renameSpace`, `removeSpace`, `selectSpace`, `setSpaceLastActiveWorktree`, `reorderSpaces`. M2 swaps these for `createTag`, `renameTag`, `recolorTag`, `removeTag`, `setProjectTags(projectID:Set<TagID>)`, `setActiveTagFilter(TagFilter)`. The `removeTag` cascade reads every project's `tagIDs` and removes the dropped TagID — non-destructive (no Project deletion).
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — TCA dependency surface; closure list is appended-only by master's parallel-conflict rule. In M2 we cannot follow that rule (the surface is being inverted), so M2 explicitly waives it for the Space→Tag swap and reverts to append-only afterward.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — line ~720 is the `spaceFooter`; M2 removes the footer and its associated state (`isSpacePopoverPresented`, all `spacePopover*` actions). M4 reattaches a new chip footer at the same `safeAreaInset` mount point in `HierarchySidebarView.swift` (currently line 139).
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift` — `.safeAreaInset(edge: .bottom)` host; the spaceFooter view at line 720 is replaced view-by-view in M4 by `tagChipFooter`.
-- `apps/mac/touch-code/App/Features/SpaceManager/` — entire directory deleted in M2. M5 creates a sibling `apps/mac/touch-code/App/Features/TagManager/` with `TagManagerFeature.swift` + `TagManagerView.swift`.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — `@Presents var spaceManagerSheet` removed in M2; `@Presents var tagManagerSheet` added in M5. The `.switchToSpaceAtIndex(Int)` action and `openSpaceSwitcherRequested` action are removed in M2 with no replacement.
-- `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItems.swift` — Space-scoped items removed in M2; tag-scoped items deferred to a follow-up if needed (out of plan scope).
-- `apps/mac/touch-code/App/Commands/MainWindowCommands.swift` — ⌘K and ⌘1–⌘9 bindings removed in M2; ⌘F binding added in M4.
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — `WindowGroup` flipped to `Window(id:)` in M3; first-run seed branch (currently seeds "Personal" Space) removed in M2; toast trigger added in M7.
-- `apps/mac/touch-code/App/AppDelegate` (declared inline at the bottom of `TouchCodeApp.swift`) — M3 adds `applicationShouldTerminate` confirmation and overrides `applicationShouldTerminateAfterLastWindowClosed` to `false`.
-- `apps/mac/touch-code/App/Features/Socket/handlers/HierarchyHandlers.swift` — `space.*` RPCs removed in M2; `tag.*` and `project.tag.*` added in M6.
-- `apps/mac/tc/Commands/HierarchyCommands.swift` — `tc space` subcommands removed in M2; new `tc tag` + `tc project tag` subcommands added in M6.
-- `apps/mac/TouchCodeCoreTests/CatalogCodableTests.swift` — golden-test pattern for catalog (de)serialization. M2 adds a v2 fixture (`Tests/Fixtures/catalog-v2.json`) loaded by a new `catalog_v2_to_v3_migration_*` test family.
+- `apps/mac/CodansCore/Space.swift` — domain type to delete in M2.
+- `apps/mac/CodansCore/Project.swift` — gains `tagIDs: Set<TagID>` (Codable as sorted `[TagID]` for stable diffs). Existing `loadState` transient field shows the pattern for fields excluded from `Codable`.
+- `apps/mac/CodansCore/Catalog.swift` — schema lives here. M2 bumps `currentVersion` to 3 and rewrites `init(from:)` to support the chained v1→v2→v3 migration. The existing v1→v2 logic and `DecodingIssue.unsupportedVersion` enum are the reference for this shape.
+- `apps/mac/CodansCore/IDs.swift` — `HierarchyID` protocol and ID structs. M1 adds `TagID`; M2 removes `SpaceID`.
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — the only mutator of `Catalog`. Currently exposes `createSpace`, `renameSpace`, `removeSpace`, `selectSpace`, `setSpaceLastActiveWorktree`, `reorderSpaces`. M2 swaps these for `createTag`, `renameTag`, `recolorTag`, `removeTag`, `setProjectTags(projectID:Set<TagID>)`, `setActiveTagFilter(TagFilter)`. The `removeTag` cascade reads every project's `tagIDs` and removes the dropped TagID — non-destructive (no Project deletion).
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — TCA dependency surface; closure list is appended-only by master's parallel-conflict rule. In M2 we cannot follow that rule (the surface is being inverted), so M2 explicitly waives it for the Space→Tag swap and reverts to append-only afterward.
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — line ~720 is the `spaceFooter`; M2 removes the footer and its associated state (`isSpacePopoverPresented`, all `spacePopover*` actions). M4 reattaches a new chip footer at the same `safeAreaInset` mount point in `HierarchySidebarView.swift` (currently line 139).
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift` — `.safeAreaInset(edge: .bottom)` host; the spaceFooter view at line 720 is replaced view-by-view in M4 by `tagChipFooter`.
+- `apps/mac/codans/App/Features/SpaceManager/` — entire directory deleted in M2. M5 creates a sibling `apps/mac/codans/App/Features/TagManager/` with `TagManagerFeature.swift` + `TagManagerView.swift`.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — `@Presents var spaceManagerSheet` removed in M2; `@Presents var tagManagerSheet` added in M5. The `.switchToSpaceAtIndex(Int)` action and `openSpaceSwitcherRequested` action are removed in M2 with no replacement.
+- `apps/mac/codans/App/Features/CommandPalette/CommandPaletteItems.swift` — Space-scoped items removed in M2; tag-scoped items deferred to a follow-up if needed (out of plan scope).
+- `apps/mac/codans/App/Commands/MainWindowCommands.swift` — ⌘K and ⌘1–⌘9 bindings removed in M2; ⌘F binding added in M4.
+- `apps/mac/codans/App/CodansApp.swift` — `WindowGroup` flipped to `Window(id:)` in M3; first-run seed branch (currently seeds "Personal" Space) removed in M2; toast trigger added in M7.
+- `apps/mac/codans/App/AppDelegate` (declared inline at the bottom of `CodansApp.swift`) — M3 adds `applicationShouldTerminate` confirmation and overrides `applicationShouldTerminateAfterLastWindowClosed` to `false`.
+- `apps/mac/codans/App/Features/Socket/handlers/HierarchyHandlers.swift` — `space.*` RPCs removed in M2; `tag.*` and `project.tag.*` added in M6.
+- `apps/mac/codans-cli/Commands/HierarchyCommands.swift` — `codans space` subcommands removed in M2; new `codans tag` + `codans project tag` subcommands added in M6.
+- `apps/mac/CodansCoreTests/CatalogCodableTests.swift` — golden-test pattern for catalog (de)serialization. M2 adds a v2 fixture (`Tests/Fixtures/catalog-v2.json`) loaded by a new `catalog_v2_to_v3_migration_*` test family.
 
 Terms of art:
 
-- **Catalog**: the persisted top-level state object at `~/.config/touch-code/catalog.json`. One file, debounced atomic write (existing `CatalogStore`).
+- **Catalog**: the persisted top-level state object at `~/.config/codans/catalog.json`. One file, debounced atomic write (existing `CatalogStore`).
 - **HierarchyManager**: the single MainActor-owned mutator of `Catalog`. Every state change in the app routes through one of its methods; views never mutate `Catalog` directly.
 - **HierarchyClient**: TCA `@Dependency` wrapper over HierarchyManager — a struct of closures that reducers call instead of holding a reference to the manager. Lets tests substitute a mock implementation.
 - **TagFilter**: a sum type (`.all`, `.tags(Set<TagID>)`, `.untagged`) that drives sidebar visibility. Stored on `Catalog`, mutated via `HierarchyManager.setActiveTagFilter`.
@@ -127,13 +127,13 @@ Before any edit, capture the baseline so post-work comparisons are apples-to-app
 
 The branch is already `refactor/rm-space`. Confirm `git status` is clean and `git log --oneline -5` matches the recent commit list. No rebase needed unless `main` has moved during planning.
 
-### Milestone 1 — Tag value types in TouchCodeCore
+### Milestone 1 — Tag value types in CodansCore
 
 Goal: introduce the new value types in isolation. After this milestone, the types exist, are Codable, and have unit tests, but no consumer references them yet. Compiles and ships green; zero behavior change.
 
 Files added:
 
-- `apps/mac/TouchCodeCore/Tag.swift` — defines `Tag`, `TagColor`, `TagFilter`. Sketch:
+- `apps/mac/CodansCore/Tag.swift` — defines `Tag`, `TagColor`, `TagFilter`. Sketch:
 
   ```swift
   public nonisolated struct Tag: Equatable, Codable, Sendable, Identifiable {
@@ -155,7 +155,7 @@ Files added:
   }
   ```
 
-- `apps/mac/TouchCodeCore/IDs.swift` — append `TagID`:
+- `apps/mac/CodansCore/IDs.swift` — append `TagID`:
 
   ```swift
   public nonisolated struct TagID: HierarchyID {
@@ -166,9 +166,9 @@ Files added:
 
   `SpaceID` stays untouched in M1 (removed in M2).
 
-- `apps/mac/TouchCodeCoreTests/TagTests.swift` — round-trip Codable for `Tag`, exhaustive case coverage for `TagColor.allCases`, round-trip for each `TagFilter` case (including `.tags(Set<TagID>)` with deterministic on-disk ordering), and a test that asserts encoding `.tags([a, b])` and `.tags([b, a])` produces byte-identical JSON (set semantics + sorted on disk).
+- `apps/mac/CodansCoreTests/TagTests.swift` — round-trip Codable for `Tag`, exhaustive case coverage for `TagColor.allCases`, round-trip for each `TagFilter` case (including `.tags(Set<TagID>)` with deterministic on-disk ordering), and a test that asserts encoding `.tags([a, b])` and `.tags([b, a])` produces byte-identical JSON (set semantics + sorted on disk).
 
-Verify: `xcodebuild build -scheme touch-code` succeeds; `xcodebuild test -scheme TouchCodeCoreTests` shows the new test count green; `git diff --stat` touches three files.
+Verify: `xcodebuild build -scheme codans` succeeds; `xcodebuild test -scheme CodansCoreTests` shows the new test count green; `git diff --stat` touches three files.
 
 Commit one PR (PR-1) at this milestone boundary. Per `feedback_commit_only_my_files`, stage explicit paths only.
 
@@ -178,7 +178,7 @@ Goal: collapse the 5-level hierarchy to 4, replace Space with Tag throughout, re
 
 This is the largest milestone. Order within the PR:
 
-**M2.1 — Schema (TouchCodeCore changes only).** Edit `apps/mac/TouchCodeCore/Catalog.swift` to bump `currentVersion = 3`, replace the property set, and rewrite `init(from:)`:
+**M2.1 — Schema (CodansCore changes only).** Edit `apps/mac/CodansCore/Catalog.swift` to bump `currentVersion = 3`, replace the property set, and rewrite `init(from:)`:
 
 ```swift
 public nonisolated struct Catalog: Equatable, Sendable {
@@ -236,11 +236,11 @@ if version <= 2 {
 self.version = Catalog.currentVersion
 ```
 
-Edit `apps/mac/TouchCodeCore/Project.swift`: add `var tagIDs: Set<TagID>` with default `[]`. Codable: encode as sorted `[TagID]` (matches existing `isPinned`-on-Worktree pattern of "default omits the key"; if `tagIDs.isEmpty`, omit). Decode `decodeIfPresent([TagID].self) ?? []` then `Set(...)`.
+Edit `apps/mac/CodansCore/Project.swift`: add `var tagIDs: Set<TagID>` with default `[]`. Codable: encode as sorted `[TagID]` (matches existing `isPinned`-on-Worktree pattern of "default omits the key"; if `tagIDs.isEmpty`, omit). Decode `decodeIfPresent([TagID].self) ?? []` then `Set(...)`.
 
-**Delete** `apps/mac/TouchCodeCore/Space.swift` entirely. Remove `SpaceID` from `IDs.swift`. Remove `CatalogWindow` struct from `Catalog.swift`. Remove `Catalog.windows` and `Catalog.selectedSpaceID` properties.
+**Delete** `apps/mac/CodansCore/Space.swift` entirely. Remove `SpaceID` from `IDs.swift`. Remove `CatalogWindow` struct from `Catalog.swift`. Remove `Catalog.windows` and `Catalog.selectedSpaceID` properties.
 
-**M2.2 — Migration tests.** Add `apps/mac/TouchCodeCoreTests/Fixtures/catalog-v2.json` with a hand-written 2-Space catalog (one Space with 2 Projects + 1 Worktree each, one Space with 0 projects, `selectedSpaceID` set to the second Space, one CatalogWindow entry). Extend `CatalogCodableTests` with:
+**M2.2 — Migration tests.** Add `apps/mac/CodansCoreTests/Fixtures/catalog-v2.json` with a hand-written 2-Space catalog (one Space with 2 Projects + 1 Worktree each, one Space with 0 projects, `selectedSpaceID` set to the second Space, one CatalogWindow entry). Extend `CatalogCodableTests` with:
 
 - `migration_v2_to_v3_produces_one_tag_per_space`
 - `migration_v2_to_v3_assigns_each_project_its_space_tag`
@@ -252,7 +252,7 @@ Edit `apps/mac/TouchCodeCore/Project.swift`: add `var tagIDs: Set<TagID>` with d
 
 Each test loads the fixture via `Catalog.init(from: JSONDecoder().decode(...))` and asserts shape — no I/O.
 
-**M2.3 — HierarchyManager surface flip.** In `apps/mac/touch-code/Runtime/HierarchyManager.swift`:
+**M2.3 — HierarchyManager surface flip.** In `apps/mac/codans/Runtime/HierarchyManager.swift`:
 
 - Delete: `createSpace`, `renameSpace`, `removeSpace`, `selectSpace`, `setSpaceLastActiveWorktree`, `reorderSpaces`, `drainLegacyOverrides` (if Space-coupled — verify; if it operates on per-Project legacy fields it stays).
 - Add:
@@ -270,21 +270,21 @@ Each test loads the fixture via `Catalog.init(from: JSONDecoder().decode(...))` 
 
   Each method ends with `store.scheduleSave(catalog)`. `removeTag`'s cascade is critical — failing to normalize `activeTagFilter` would leave a stale TagID in the persisted filter and the sidebar would silently filter to nothing.
 
-**M2.4 — HierarchyClient surface flip.** In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`, replace every Space-named closure with the Tag equivalents above, plus `setProjectTags` and `setActiveTagFilter`. This breaks the append-only convention; document the waiver in the PR description so T-PROJECT / T-WORKTREE child branches know to rebase. Update `live`, `liveValue`, `testValue` factories.
+**M2.4 — HierarchyClient surface flip.** In `apps/mac/codans/App/Clients/HierarchyClient.swift`, replace every Space-named closure with the Tag equivalents above, plus `setProjectTags` and `setActiveTagFilter`. This breaks the append-only convention; document the waiver in the PR description so T-PROJECT / T-WORKTREE child branches know to rebase. Update `live`, `liveValue`, `testValue` factories.
 
 **M2.5 — RootFeature surgery.** Remove `@Presents var spaceManagerSheet`, action cases `.spaceManagerSheetShown`, `.spaceManagerSheet(...)`, `.switchToSpaceAtIndex`, `.openSpaceSwitcherRequested`, and the `.ifLet` for `spaceManagerSheet`. Remove the corresponding sidebar delegate handler. **Do not yet** add `tagManagerSheet` — that arrives in M5.
 
 **M2.6 — Sidebar flattening.** In `HierarchySidebarFeature.swift`: remove `isSpacePopoverPresented`, all `spacePopover*` actions, the `spaceFooterTapped` action, the `handleSpaceSwitch` helper, and any `setSpaceLastActiveWorktree` calls. The sidebar now reads `catalog.projects` directly (was `catalog.spaces.flatMap { $0.projects }`). In `HierarchySidebarView.swift`: delete the `spaceFooter` function and remove the `.safeAreaInset(edge: .bottom)` modifier entirely (M4 reinstates it with `tagChipFooter`).
 
-**M2.7 — SpaceManager removal.** Delete `apps/mac/touch-code/App/Features/SpaceManager/` recursively (`SpaceManagerFeature.swift`, `SpaceManagerView.swift`, plus associated tests under `apps/mac/touch-code/Tests/`). Update the Tuist `Project.swift` if it explicitly enumerates this directory.
+**M2.7 — SpaceManager removal.** Delete `apps/mac/codans/App/Features/SpaceManager/` recursively (`SpaceManagerFeature.swift`, `SpaceManagerView.swift`, plus associated tests under `apps/mac/codans/Tests/`). Update the Tuist `Project.swift` if it explicitly enumerates this directory.
 
-**M2.8 — Command palette + commands cleanup.** In `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItems.swift`: remove every Space-scoped item. In `apps/mac/touch-code/App/Commands/MainWindowCommands.swift`: remove the ⌘K binding and the ⌘1–⌘9 loop. Leave `CommandGroup(after: .newItem)` in place (M3 will hang the `replacing: .newItem` group); leave ⌘E / ⌘⇧G alone.
+**M2.8 — Command palette + commands cleanup.** In `apps/mac/codans/App/Features/CommandPalette/CommandPaletteItems.swift`: remove every Space-scoped item. In `apps/mac/codans/App/Commands/MainWindowCommands.swift`: remove the ⌘K binding and the ⌘1–⌘9 loop. Leave `CommandGroup(after: .newItem)` in place (M3 will hang the `replacing: .newItem` group); leave ⌘E / ⌘⇧G alone.
 
-**M2.9 — IPC handlers.** In `apps/mac/touch-code/App/Features/Socket/handlers/HierarchyHandlers.swift`: remove every `space.*` RPC. Do **not** add `tag.*` or `project.tag.*` here — those land with their CLI in M6 to keep the wire surface and CLI surface co-evolving in one PR.
+**M2.9 — IPC handlers.** In `apps/mac/codans/App/Features/Socket/handlers/HierarchyHandlers.swift`: remove every `space.*` RPC. Do **not** add `tag.*` or `project.tag.*` here — those land with their CLI in M6 to keep the wire surface and CLI surface co-evolving in one PR.
 
-**M2.10 — CLI cleanup.** In `apps/mac/tc/Commands/HierarchyCommands.swift`: delete the `tc space` subcommand tree. The `tc focus` / `tc project` / etc. trees stay. M6 adds `tc tag`.
+**M2.10 — CLI cleanup.** In `apps/mac/codans-cli/Commands/HierarchyCommands.swift`: delete the `codans space` subcommand tree. The `codans focus` / `codans project` / etc. trees stay. M6 adds `codans tag`.
 
-**M2.11 — TouchCodeApp seed branch.** In `apps/mac/touch-code/App/TouchCodeApp.swift`: remove the "Personal" Space seed in `init()` (currently lines 173–179 per design-doc reference). The migration handles existing data; for fresh installs an empty catalog is fine — the sidebar shows an empty project list with an "Add Project…" affordance. Do not add a default Tag seed.
+**M2.11 — CodansApp seed branch.** In `apps/mac/codans/App/CodansApp.swift`: remove the "Personal" Space seed in `init()` (currently lines 173–179 per design-doc reference). The migration handles existing data; for fresh installs an empty catalog is fine — the sidebar shows an empty project list with an "Add Project…" affordance. Do not add a default Tag seed.
 
 **M2.12 — Test sweep.** Update or delete every test that references Space:
 
@@ -299,7 +299,7 @@ Each test loads the fixture via `Catalog.init(from: JSONDecoder().decode(...))` 
 ```makefile
 mac-no-space-residue:
 	@if grep -rn 'SpaceID\|\bSpace\b\|CatalogWindow\|spacePopover\|spaceFooter' \
-	    --include='*.swift' apps/mac/TouchCodeCore apps/mac/TouchCodeCoreTests apps/mac/touch-code apps/mac/tc; then \
+	    --include='*.swift' apps/mac/CodansCore apps/mac/CodansCoreTests apps/mac/codans apps/mac/codans; then \
 	  echo "Space residue found"; exit 1; fi
 ```
 
@@ -307,9 +307,9 @@ Wire it into `mac-check` so `make mac-check` fails on residue. M7 removes both.
 
 **Acceptance for M2:**
 
-- `xcodebuild build -scheme touch-code` succeeds.
+- `xcodebuild build -scheme codans` succeeds.
 - `xcodebuild test` shows all green; specifically `CatalogCodableTests` shows the new migration tests passing.
-- Launch the app against a real v2 catalog (a backup of the user's `~/.config/touch-code/catalog.json` before this work began) and verify: the sidebar shows the flat project list, every project is present, tags can be observed on rows (M4 surfaces them visually — for M2 alone, log them or assert via a debug menu/printout; or skip visual proof until M4 and rely on the migration test).
+- Launch the app against a real v2 catalog (a backup of the user's `~/.config/codans/catalog.json` before this work began) and verify: the sidebar shows the flat project list, every project is present, tags can be observed on rows (M4 surfaces them visually — for M2 alone, log them or assert via a debug menu/printout; or skip visual proof until M4 and rely on the migration test).
 - `make mac-check` passes including the new `mac-no-space-residue` gate.
 
 PR-2 is the heart of the refactor. Per D7, the implementer may dispatch sub-agents in parallel after M2.1–M2.4 land compile-broken: each agent owns one feature directory and fixes the resulting compile errors. The implementer integrates and runs the full test sweep before opening the PR.
@@ -320,13 +320,13 @@ Goal: collapse `WindowGroup` to `Window(id:)`, suppress ⌘N, route close-vs-qui
 
 Files touched (3):
 
-- `apps/mac/touch-code/App/TouchCodeApp.swift`:
+- `apps/mac/codans/App/CodansApp.swift`:
 
   ```swift
   static let mainWindowID = "main"
 
   // body:
-  Window("touch-code", id: TouchCodeApp.mainWindowID) {
+  Window("codans", id: CodansApp.mainWindowID) {
     // existing AppAppearanceView { ContentView(...) } body
   }
   .windowStyle(.titleBar)
@@ -340,7 +340,7 @@ Files touched (3):
   }
   ```
 
-- The existing `AppDelegate` (declared at the bottom of `TouchCodeApp.swift`) gains:
+- The existing `AppDelegate` (declared at the bottom of `CodansApp.swift`) gains:
 
   ```swift
   nonisolated func applicationShouldTerminateAfterLastWindowClosed(
@@ -361,7 +361,7 @@ Files touched (3):
       } ?? false
       guard hasOpenPanes else { return .terminateNow }
       let alert = NSAlert()
-      alert.messageText = "Quit touch-code?"
+      alert.messageText = "Quit codans?"
       alert.informativeText = "Running terminal sessions will end."
       alert.addButton(withTitle: "Quit")
       alert.addButton(withTitle: "Cancel")
@@ -373,14 +373,14 @@ Files touched (3):
   }
   ```
 
-- `apps/mac/touch-code/App/Commands/MainWindowCommands.swift`: no edits in M3 (the ⌘K and ⌘1–⌘9 bindings were already removed in M2). M4 will add ⌘F here.
+- `apps/mac/codans/App/Commands/MainWindowCommands.swift`: no edits in M3 (the ⌘K and ⌘1–⌘9 bindings were already removed in M2). M4 will add ⌘F here.
 
 **Acceptance for M3:**
 
 - Launch the app. The system menu's File menu does not contain "New Window" (the ⌘N binding is suppressed). Right-clicking the dock icon shows the standard menu without "New Window".
-- Open a Worktree with a Pane. Press ⌘W — the window hides; the dock icon stays bouncing-free; the menu bar still shows touch-code's app menu.
+- Open a Worktree with a Pane. Press ⌘W — the window hides; the dock icon stays bouncing-free; the menu bar still shows codans's app menu.
 - Click the dock icon — the window re-shows with prior layout.
-- Press ⌘Q — an alert appears: *"Quit touch-code? Running terminal sessions will end."* Clicking Cancel returns to the app; clicking Quit terminates.
+- Press ⌘Q — an alert appears: *"Quit codans? Running terminal sessions will end."* Clicking Cancel returns to the app; clicking Quit terminates.
 - Close all Panes (or test with an empty catalog). Press ⌘Q — the app quits without prompting.
 
 PR-3 lands.
@@ -391,7 +391,7 @@ Goal: reattach a footer at the sidebar's `.safeAreaInset(edge: .bottom)`, render
 
 Files touched (~5):
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`:
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`:
 
   - State: read `catalog.activeTagFilter` from environment (no copy in feature state — same single-source-of-truth pattern as the prior space surface).
   - Actions: `.tagChipTapped(TagID)`, `.allChipTapped`, `.untaggedChipTapped`, `.tagFilterFocusRequested` (⌘F).
@@ -402,7 +402,7 @@ Files touched (~5):
     - `untaggedChipTapped`: `setActiveTagFilter(.untagged)`.
     - `tagFilterFocusRequested`: emit a delegate (or use `@FocusState` wired in the view) that focuses the chip footer.
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
 
   - Reattach `.safeAreaInset(edge: .bottom)` with a new `tagChipFooter(catalog:)` view.
   - `tagChipFooter` lays out chips inside a horizontally-scrolling `ScrollView(.horizontal)`: leading `[All]` chip, then `ForEach(catalog.tags) { tag in chip(tag) }`, then `[Untagged]` chip when `catalog.projects.contains { $0.tagIDs.isEmpty }`.
@@ -414,9 +414,9 @@ Files touched (~5):
     - `.tags(set)` → projects where `!$0.tagIDs.isDisjoint(with: set)` (OR)
     - `.untagged` → projects where `$0.tagIDs.isEmpty`
 
-- `apps/mac/touch-code/App/Commands/MainWindowCommands.swift`: add a hidden `Button("Filter Tags") { store.send(.tagFilterFocusRequested) }.keyboardShortcut("f", modifiers: .command)` in the existing `CommandGroup(after: .newItem)`.
+- `apps/mac/codans/App/Commands/MainWindowCommands.swift`: add a hidden `Button("Filter Tags") { store.send(.tagFilterFocusRequested) }.keyboardShortcut("f", modifiers: .command)` in the existing `CommandGroup(after: .newItem)`.
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/TagChipFooter.swift` (new) — extracted view if `tagChipFooter` exceeds ~80 lines; otherwise inline.
+- `apps/mac/codans/App/Features/HierarchySidebar/TagChipFooter.swift` (new) — extracted view if `tagChipFooter` exceeds ~80 lines; otherwise inline.
 
 - Tests in `HierarchySidebarFeatureTests`: chip-tap toggles the filter (every state-machine transition); `[All]` / `[Untagged]` are mutually exclusive with `.tags`; ⌘F dispatches the focus action.
 
@@ -435,7 +435,7 @@ Goal: surface CRUD. After this milestone users can create/rename/recolor/delete 
 
 Files added (~4) and touched (~4):
 
-- `apps/mac/touch-code/App/Features/TagManager/TagManagerFeature.swift` (new):
+- `apps/mac/codans/App/Features/TagManager/TagManagerFeature.swift` (new):
 
   ```swift
   @Reducer struct TagManagerFeature {
@@ -467,13 +467,13 @@ Files added (~4) and touched (~4):
 
   Reducer behavior mirrors the deleted SpaceManagerFeature shape: rename trim+empty guard, removal captures `affectedProjectCount` at tap time, recolor is fire-and-forget, no last-tag protection (deleting the only tag is legal — Untagged is a valid catalog state).
 
-- `apps/mac/touch-code/App/Features/TagManager/TagManagerView.swift` (new): NavigationStack-hosted List, each row shows a color swatch (popover with the 7 palette options), inline-editable name, trash button. Confirmation dialog: *"Remove tag '<name>'? <N> project(s) will lose this tag. Project data is not affected."*
+- `apps/mac/codans/App/Features/TagManager/TagManagerView.swift` (new): NavigationStack-hosted List, each row shows a color swatch (popover with the 7 palette options), inline-editable name, trash button. Confirmation dialog: *"Remove tag '<name>'? <N> project(s) will lose this tag. Project data is not affected."*
 
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift`: re-add a `@Presents var tagManagerSheet: TagManagerFeature.State?` plus its presentation action, ifLet, and a delegate handler `.openTagManager` from sidebar.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift`: re-add a `@Presents var tagManagerSheet: TagManagerFeature.State?` plus its presentation action, ifLet, and a delegate handler `.openTagManager` from sidebar.
 
-- `apps/mac/touch-code/App/ContentView.swift`: a second `.sheet(item:)` for `tagManagerSheet`, mirroring the existing settings sheet host.
+- `apps/mac/codans/App/ContentView.swift`: a second `.sheet(item:)` for `tagManagerSheet`, mirroring the existing settings sheet host.
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
 
   - Project row context menu gains `Menu("Tags")` with one `Toggle` per existing tag (driven by `client.setProjectTags`) plus a divider, "New Tag…" (opens a small inline picker — quickest path: a sheet hosted on the row), and "Edit Tags…" (sends `.delegate(.openTagManager)`).
   - Tag chip footer (M4) gains a trailing "+" button that also opens TagManager — discoverability for users who never right-click a row.
@@ -488,35 +488,35 @@ Files added (~4) and touched (~4):
 
 PR-5 lands.
 
-### Milestone 6 — `tc` CLI surface and IPC handlers
+### Milestone 6 — `codans` CLI surface and IPC handlers
 
 Goal: bring the CLI to parity with the GUI. After this milestone every Tag operation is scriptable.
 
 Files touched (~6):
 
-- `apps/mac/touch-code/App/Features/Socket/handlers/HierarchyHandlers.swift`: add RPC methods `tag.list`, `tag.create`, `tag.rename`, `tag.recolor`, `tag.remove`, `project.tag.add`, `project.tag.remove`, `project.list` (with optional `tag` and `untagged` filter args). Each delegates to `HierarchyManager` and returns the canonical post-op snapshot (matching the existing `space.*` RPC return convention).
-- `apps/mac/tc/Commands/HierarchyCommands.swift`: add `tc tag` subcommand tree and extend `tc project` with `tag add/remove` and `list --tag/--untagged`. Resolution-by-name follows the existing `tc project` pattern (best-effort case-fold; ambiguity warns and requires `--id`).
-- `apps/mac/tc/` CLI tests (whatever the existing pattern is — likely `tc/Tests/` if present): one test per subcommand verifying argument parsing and IPC roundtrip via a fake socket server. Match whatever pattern the existing `tc project` / `tc focus` tests follow.
+- `apps/mac/codans/App/Features/Socket/handlers/HierarchyHandlers.swift`: add RPC methods `tag.list`, `tag.create`, `tag.rename`, `tag.recolor`, `tag.remove`, `project.tag.add`, `project.tag.remove`, `project.list` (with optional `tag` and `untagged` filter args). Each delegates to `HierarchyManager` and returns the canonical post-op snapshot (matching the existing `space.*` RPC return convention).
+- `apps/mac/codans-cli/Commands/HierarchyCommands.swift`: add `codans tag` subcommand tree and extend `codans project` with `tag add/remove` and `list --tag/--untagged`. Resolution-by-name follows the existing `codans project` pattern (best-effort case-fold; ambiguity warns and requires `--id`).
+- `apps/mac/codans/` CLI tests (whatever the existing pattern is — likely `codans/Tests/` if present): one test per subcommand verifying argument parsing and IPC roundtrip via a fake socket server. Match whatever pattern the existing `codans project` / `codans focus` tests follow.
 
 Sketch:
 
 ```
-tc tag list [--json]
-tc tag create <name> [--color red|orange|yellow|green|blue|purple|grey]
-tc tag rename <id|name> <new-name>
-tc tag recolor <id|name> <color>
-tc tag remove <id|name>
-tc project tag add <project> <tag>...
-tc project tag remove <project> <tag>...
-tc project list [--tag <tag>] [--untagged] [--json]
+codans tag list [--json]
+codans tag create <name> [--color red|orange|yellow|green|blue|purple|grey]
+codans tag rename <id|name> <new-name>
+codans tag recolor <id|name> <color>
+codans tag remove <id|name>
+codans project tag add <project> <tag>...
+codans project tag remove <project> <tag>...
+codans project list [--tag <tag>] [--untagged] [--json]
 ```
 
 **Acceptance for M6:**
 
-- `make mac-build` produces both the app and the `tc` binary.
-- `tc tag list --json` returns the post-migration tag set.
-- `tc tag create urgent --color red && tc project tag add acme-web urgent` then `tc project list --tag urgent` shows `acme-web`.
-- `tc tag remove urgent` cascades; `tc project list` no longer reports `urgent` for any project.
+- `make mac-build` produces both the app and the `codans` binary.
+- `codans tag list --json` returns the post-migration tag set.
+- `codans tag create urgent --color red && codans project tag add acme-web urgent` then `codans project list --tag urgent` shows `acme-web`.
+- `codans tag remove urgent` cascades; `codans project list` no longer reports `urgent` for any project.
 - Foreground GUI is updated live — the chip footer adds/removes chips reflecting CLI actions (the existing socket → catalog → SwiftUI publish pipeline handles this).
 
 PR-6 lands.
@@ -527,16 +527,16 @@ Goal: the user-facing finish line. After this milestone the change is announced 
 
 Files touched (~5):
 
-- `apps/mac/touch-code/App/TouchCodeApp.swift` or `apps/mac/touch-code/App/Features/Root/RootFeature.swift`: on first run after migration, present a single non-blocking toast: *"Your spaces are now tags. Click a chip in the sidebar to filter projects."* — single line, dismiss-on-tap, auto-dismiss after 8s. Suppression flag `onboarding.tagsToastShown: true` stored via the existing `SettingsStore`. Toast is suppressed if the catalog has zero tags (fresh install with no migration).
-- `apps/mac/touch-code/Settings/Settings.swift` (or wherever `Settings` keys live): add `onboarding.tagsToastShown: Bool` (default `false`).
+- `apps/mac/codans/App/CodansApp.swift` or `apps/mac/codans/App/Features/Root/RootFeature.swift`: on first run after migration, present a single non-blocking toast: *"Your spaces are now tags. Click a chip in the sidebar to filter projects."* — single line, dismiss-on-tap, auto-dismiss after 8s. Suppression flag `onboarding.tagsToastShown: true` stored via the existing `SettingsStore`. Toast is suppressed if the catalog has zero tags (fresh install with no migration).
+- `apps/mac/codans/Settings/Settings.swift` (or wherever `Settings` keys live): add `onboarding.tagsToastShown: Bool` (default `false`).
 - `docs/product-spec.md`: replace the "Space / Project / Worktree / Tab / Pane hierarchy" mention with the 4-level hierarchy and tag classification.
 - `docs/architecture.md`: update the codemap section that describes Space/Project to reflect Tag.
 - `apps/mac/Makefile`: remove the `mac-no-space-residue` target and its inclusion in `mac-check`.
-- `CHANGELOG.md` (root): one-line entries for "Spaces are now tags", "Single main window with hide-on-close", "tc CLI: tc space removed; tc tag added".
+- `CHANGELOG.md` (root): one-line entries for "Spaces are now tags", "Single main window with hide-on-close", "codans CLI: codans space removed; codans tag added".
 
 **Acceptance for M7:**
 
-- Wipe `~/.config/touch-code/onboarding-tags-toast-flag` (or whatever the suppression key resolves to) and launch — toast appears. Dismiss. Relaunch — no toast.
+- Wipe `~/.config/codans/onboarding-tags-toast-flag` (or whatever the suppression key resolves to) and launch — toast appears. Dismiss. Relaunch — no toast.
 - `docs/product-spec.md` and `docs/architecture.md` no longer contain "Space" outside of historical references.
 - `make mac-check` passes; `grep "mac-no-space-residue" apps/mac/Makefile` returns empty.
 - CHANGELOG entries present.
@@ -545,7 +545,7 @@ PR-7 lands. Refactor complete.
 
 ## Concrete Steps
 
-From the worktree root `/Users/wanggang/.prowl/repos/touch-code/refactor/rm-space`:
+From the worktree root `/Users/wanggang/.prowl/repos/codans/refactor/rm-space`:
 
 ```bash
 # M0 — baseline
@@ -560,11 +560,11 @@ make -C apps/mac mac-test               # full test sweep
 git diff --stat                         # eyeball file count vs plan estimate
 
 # M2 specifically — verify migration with a real catalog
-cp ~/.config/touch-code/catalog.json /tmp/catalog-v2-snapshot.json   # ONCE, before M2
+cp ~/.config/codans/catalog.json /tmp/catalog-v2-snapshot.json   # ONCE, before M2
 # … after M2 lands and you launch …
-diff <(jq .version /tmp/catalog-v2-snapshot.json) <(jq .version ~/.config/touch-code/catalog.json)
+diff <(jq .version /tmp/catalog-v2-snapshot.json) <(jq .version ~/.config/codans/catalog.json)
 # expected: 2 → 3
-jq '.tags | length' ~/.config/touch-code/catalog.json
+jq '.tags | length' ~/.config/codans/catalog.json
 # expected: equals the prior space count
 ```
 
@@ -578,7 +578,7 @@ Mapped to design-doc resolved questions:
 
 | Item | Proof site |
 |------|-----------|
-| Existing v2 catalog migrates to v3 with one tag per space | M2.2 `migration_v2_to_v3_*` tests + manual diff of `~/.config/touch-code/catalog.json` |
+| Existing v2 catalog migrates to v3 with one tag per space | M2.2 `migration_v2_to_v3_*` tests + manual diff of `~/.config/codans/catalog.json` |
 | Each migrated project carries its prior space's tag | M2.2 `migration_v2_to_v3_assigns_each_project_its_space_tag` + post-launch sidebar inspection |
 | `selectedSpaceID` becomes the initial filter | M2.2 `migration_v2_to_v3_uses_selectedSpaceID_for_initial_filter` |
 | Multi-window catalog collapses cleanly | M2.2 `migration_v2_to_v3_falls_back_to_first_window_filter_when_selectedSpaceID_is_nil` |
@@ -590,7 +590,7 @@ Mapped to design-doc resolved questions:
 | Project context menu Tags submenu toggles tag membership | M5 manual + extended sidebar test |
 | TagManager: create/rename/recolor/delete with cascade | M5 manual + `TagManagerFeatureTests` |
 | Deleting a tag normalizes the active filter | M2.3 `removeTag` test + M5 manual |
-| `tc tag *` and `tc project tag *` work end-to-end | M6 CLI tests + manual transcript |
+| `codans tag *` and `codans project tag *` work end-to-end | M6 CLI tests + manual transcript |
 | First-launch toast appears once | M7 manual: wipe flag, relaunch, dismiss, relaunch |
 | `make mac-check` passes including the residue gate | After M2; gate removed in M7 |
 
@@ -598,7 +598,7 @@ Mapped to design-doc resolved questions:
 
 - **M0 baseline** is read-only.
 - **M1** is purely additive; reverting the PR removes the new types with no consumer impact.
-- **M2** migration is one-shot per catalog: once `~/.config/touch-code/catalog.json` is rewritten to v3, the v2 decoder branch is no longer hit. The v2 decoder remains in code, so reverting the M2 PR makes the build read v3 catalogs as v2 and **fail** (`unsupportedVersion(3)`). User recovery: restore `/tmp/catalog-v2-snapshot.json` (taken pre-M2 per Concrete Steps) over `~/.config/touch-code/catalog.json` and downgrade the build.
+- **M2** migration is one-shot per catalog: once `~/.config/codans/catalog.json` is rewritten to v3, the v2 decoder branch is no longer hit. The v2 decoder remains in code, so reverting the M2 PR makes the build read v3 catalogs as v2 and **fail** (`unsupportedVersion(3)`). User recovery: restore `/tmp/catalog-v2-snapshot.json` (taken pre-M2 per Concrete Steps) over `~/.config/codans/catalog.json` and downgrade the build.
 - **M3** is purely UI-layer; reverting the PR restores `WindowGroup` with no data impact.
 - **M4–M7** are additive over M2's foundation; each is independently revertable.
 - `HierarchyManager.removeTag` cascade is idempotent — re-removing an already-removed TagID is a no-op (the cascade walks projects and sets are set semantics).
@@ -607,7 +607,7 @@ Mapped to design-doc resolved questions:
 
 ## Artifacts and Notes
 
-Sample fixture (M2.2) `apps/mac/TouchCodeCoreTests/Fixtures/catalog-v2.json`:
+Sample fixture (M2.2) `apps/mac/CodansCoreTests/Fixtures/catalog-v2.json`:
 
 ```json
 {
@@ -650,7 +650,7 @@ catalog.activeTagFilter == .tags([tagDayJob.id])  // selectedSpaceID, not first-
 
 Sample ⌘Q dialog (M3):
 
-> *Quit touch-code?*
+> *Quit codans?*
 >
 > *Running terminal sessions will end.*
 >
@@ -662,7 +662,7 @@ Sample first-launch toast (M7):
 
 ## Interfaces and Dependencies
 
-In `apps/mac/TouchCodeCore/Tag.swift`, define:
+In `apps/mac/CodansCore/Tag.swift`, define:
 
 ```swift
 public struct Tag: Equatable, Codable, Sendable, Identifiable
@@ -674,11 +674,11 @@ public enum TagFilter: Equatable, Codable, Sendable {
 }
 ```
 
-In `apps/mac/TouchCodeCore/IDs.swift`, add `public struct TagID: HierarchyID`. **Remove** `SpaceID` in M2.
+In `apps/mac/CodansCore/IDs.swift`, add `public struct TagID: HierarchyID`. **Remove** `SpaceID` in M2.
 
-In `apps/mac/TouchCodeCore/Project.swift`, add `public var tagIDs: Set<TagID>` (Codable as sorted `[TagID]`, omitted when empty).
+In `apps/mac/CodansCore/Project.swift`, add `public var tagIDs: Set<TagID>` (Codable as sorted `[TagID]`, omitted when empty).
 
-In `apps/mac/TouchCodeCore/Catalog.swift`, the v3 shape:
+In `apps/mac/CodansCore/Catalog.swift`, the v3 shape:
 
 ```swift
 public struct Catalog: Equatable, Sendable {
@@ -692,7 +692,7 @@ public struct Catalog: Equatable, Sendable {
 
 `Catalog.init(from:)` accepts versions 1, 2, 3 and chains migrations. `Space`, `SpaceID`, `CatalogWindow` are removed.
 
-In `apps/mac/touch-code/Runtime/HierarchyManager.swift`, the new mutation surface:
+In `apps/mac/codans/Runtime/HierarchyManager.swift`, the new mutation surface:
 
 ```swift
 func createTag(name: String, color: TagColor) -> TagID
@@ -703,9 +703,9 @@ func setProjectTags(_ projectID: ProjectID, tags: Set<TagID>)
 func setActiveTagFilter(_ filter: TagFilter)
 ```
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`, mirror each method as a closure on the dependency surface. Update `live`, `liveValue`, `testValue`. M2 explicitly waives the append-only convention; M5+ resumes append-only.
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`, mirror each method as a closure on the dependency surface. Update `live`, `liveValue`, `testValue`. M2 explicitly waives the append-only convention; M5+ resumes append-only.
 
-In `apps/mac/touch-code/App/Features/TagManager/TagManagerFeature.swift`, define:
+In `apps/mac/codans/App/Features/TagManager/TagManagerFeature.swift`, define:
 
 ```swift
 @Reducer struct TagManagerFeature {
@@ -717,7 +717,7 @@ In `apps/mac/touch-code/App/Features/TagManager/TagManagerFeature.swift`, define
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Socket/handlers/HierarchyHandlers.swift`, the new RPCs:
+In `apps/mac/codans/App/Features/Socket/handlers/HierarchyHandlers.swift`, the new RPCs:
 
 ```
 tag.list, tag.create, tag.rename, tag.recolor, tag.remove,
@@ -725,12 +725,12 @@ project.tag.add, project.tag.remove,
 project.list (with optional tag / untagged filters)
 ```
 
-In `apps/mac/tc/Commands/HierarchyCommands.swift`, the new subcommands:
+In `apps/mac/codans-cli/Commands/HierarchyCommands.swift`, the new subcommands:
 
 ```
-tc tag list|create|rename|recolor|remove
-tc project tag add|remove
-tc project list [--tag] [--untagged]
+codans tag list|create|rename|recolor|remove
+codans project tag add|remove
+codans project list [--tag] [--untagged]
 ```
 
-External dependencies: none added. All new code uses `ComposableArchitecture`, `SwiftUI`, `AppKit`, `TouchCodeCore`, `os.log`, `Foundation`.
+External dependencies: none added. All new code uses `ComposableArchitecture`, `SwiftUI`, `AppKit`, `CodansCore`, `os.log`, `Foundation`.

@@ -1,6 +1,6 @@
 # Crash reporting
 
-TouchCode uses Sentry to capture uncaught crashes (Mach exceptions, POSIX
+Codans uses Sentry to capture uncaught crashes (Mach exceptions, POSIX
 signals, `NSException`) and Swift errors on release builds, with the
 stack trace symbolicated against the dSYMs produced by the same archive.
 The SDK never runs in DEBUG builds and can be turned off per-install.
@@ -18,7 +18,7 @@ design rationale and the alternatives that were considered.
 - `sendDefaultPii = false` — Sentry's auto-collected IP and device-name
   fields are off.
 - The per-install identifier is a random UUID stored in `UserDefaults`
-  under `app.touch-code.install-id`. It is not derived from device
+  under `com.gumpw.codans.install-id`. It is not derived from device
   hardware, account, or filesystem state.
 - `SystemHangFilter` drops events whose every stack frame is in a known
   macOS / AppKit noise list (`mach_msg`, `__CFRunLoopRun`, Mission
@@ -31,7 +31,7 @@ design rationale and the alternatives that were considered.
 release.sh release
  │
  ├── archive               xcodebuild archive (.xcarchive + dSYMs)
- ├── upload-symbols        sentry-cli registers touch-code@<version> + uploads dSYMs
+ ├── upload-symbols        sentry-cli registers codans@<version> + uploads dSYMs
  ├── notarize app          Apple notary + staple
  ├── dmg                   sign DMG
  └── notarize DMG          Apple notary + staple
@@ -116,7 +116,7 @@ single-place edit.)
 
 4. **Cut a release.** `release.sh release` performs `upload-symbols`
    between archive and notarize; verify the dashboard shows the
-   release `touch-code@<MARKETING_VERSION>` with the dSYMs attached.
+   release `codans@<MARKETING_VERSION>` with the dSYMs attached.
 
 5. **Smoke test from a release build** by invoking `SentrySDK.crash()`
    from a DEBUG-only menu item or `lldb`. The first event for that
@@ -126,7 +126,7 @@ single-place edit.)
 
 - **As a user:** Settings → General → Send crash reports (off).
   Takes effect on next launch (the SDK is bootstrapped once in
-  `TouchCodeApp.init()`).
+  `CodansApp.init()`).
 - **As a contributor without a DSN:** the bootstrap detects an
   empty `SentryDSN` Info.plist value and short-circuits. No additional
   configuration is needed; your release-mode build simply does not
@@ -136,9 +136,9 @@ single-place edit.)
 
 | Concern | Path |
 |---|---|
-| Bootstrap | `apps/mac/touch-code/App/Telemetry/CrashReporting.swift` |
-| Install id | `apps/mac/touch-code/App/Telemetry/InstallIdentifier.swift` |
-| Noise filter | `apps/mac/touch-code/App/Telemetry/SystemHangFilter.swift` |
+| Bootstrap | `apps/mac/codans/App/Telemetry/CrashReporting.swift` |
+| Install id | `apps/mac/codans/App/Telemetry/InstallIdentifier.swift` |
+| Noise filter | `apps/mac/codans/App/Telemetry/SystemHangFilter.swift` |
 | Settings toggle | `general.crashReportsEnabled` in `Settings/GeneralSettings.swift` |
 | DSN plumbing | `Configurations/Secrets.xcconfig` → `mac-Info.plist` `SentryDSN` |
 | Release symbol upload | `apps/mac/scripts/release.sh` `upload-symbols` |

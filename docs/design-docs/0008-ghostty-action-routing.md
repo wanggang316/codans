@@ -16,7 +16,7 @@ The host decides whether to consume each action (return `true`) or let
 Ghostty fall back to its default (almost always a no-op — libghostty has
 no UI of its own for these).
 
-Today, touch-code's `action_cb` is a hardcoded stub that always returns
+Today, codans's `action_cb` is a hardcoded stub that always returns
 `false`:
 
 ```swift
@@ -36,7 +36,7 @@ is supposed to *do* in response to a ghostty event never happens.
 
 ### Scope of this design
 
-Route **all** ghostty actions touch-code has a meaningful mapping for,
+Route **all** ghostty actions codans has a meaningful mapping for,
 not an incremental subset. Rationale:
 
 1. The decoder's shape is identical across buckets; adding 10 more cases
@@ -84,7 +84,7 @@ concrete mapping spelled out under "Goals" below.
 
 ### Goals
 
-Route every ghostty action touch-code has a meaningful mapping for,
+Route every ghostty action codans has a meaningful mapping for,
 organized into four buckets. Each case must either succeed (return
 `true`), be explicitly and intentionally a no-op with a log line
 (return `false`), or lift an intent onto the `TerminalEvent` stream for
@@ -128,9 +128,9 @@ runtime config object directly; kept separate in the decoder.)
 
 ### Non-Goals
 
-- **User-configurable touch-code action binding table.** First version
-  hardcodes 1:1 ghostty-action → touch-code-operation. A user-editable
-  binding table (map a ghostty action to a touch-code method / IPC call)
+- **User-configurable codans action binding table.** First version
+  hardcodes 1:1 ghostty-action → codans-operation. A user-editable
+  binding table (map a ghostty action to a codans method / IPC call)
   is a separate design.
 - **Clipboard read/write/confirm callbacks** (`read_clipboard_cb`,
   `confirm_read_clipboard_cb`, `write_clipboard_cb`). Separate doc.
@@ -275,7 +275,7 @@ private func paneID(fromSurface surface: ghostty_surface_t) -> PaneID? {
 }
 ```
 
-#### `GhosttyActionDecoder` (new, `apps/mac/touch-code/Runtime/Ghostty/`)
+#### `GhosttyActionDecoder` (new, `apps/mac/codans/Runtime/Ghostty/`)
 
 Single module that knows the `ghostty_action_tag` + union shape.
 Everyone else consumes typed Swift enums. Illustrative skeleton:
@@ -371,7 +371,7 @@ enum GhosttyActionDecoder {
       // as intentional no-op.
       return false
     case GHOSTTY_ACTION_TOGGLE_QUICK_TERMINAL:
-      // Quick-terminal is ghostty's global-hotkey HUD; touch-code's UX
+      // Quick-terminal is ghostty's global-hotkey HUD; codans's UX
       // does not currently offer this. Explicit no-op.
       return false
     case GHOSTTY_ACTION_TOGGLE_VISIBILITY:
@@ -562,7 +562,7 @@ or `emit(.windowAction*)`; info cases write `pane.apply(delta)` +
 
 #### New `TerminalEvent` cases
 
-Add to `TouchCodeCore/TerminalEvent.swift`:
+Add to `CodansCore/TerminalEvent.swift`:
 
 ```swift
 public nonisolated enum TerminalEvent: Sendable {
@@ -576,7 +576,7 @@ public nonisolated enum TerminalEvent: Sendable {
 
 #### `PaneInfoDelta`, `PaneActionRequest`, `WindowActionRequest` (Core)
 
-In `TouchCodeCore/Pane/`:
+In `CodansCore/Pane/`:
 
 ```swift
 public enum PaneInfoDelta: Sendable, Equatable {
@@ -654,7 +654,7 @@ boundary.
 
 Two new lightweight TCA features:
 
-**`PaneActionRouterFeature`** (`apps/mac/touch-code/App/Features/PaneActionRouter/`)
+**`PaneActionRouterFeature`** (`apps/mac/codans/App/Features/PaneActionRouter/`)
 subscribes to `panelActionRequested`. Resolves `PaneID` →
 `(SpaceID, ProjectID, WorktreeID, TabID)` via a small addition to
 `HierarchyClient.addressOf(paneID:)`, then dispatches:
@@ -673,7 +673,7 @@ subscribes to `panelActionRequested`. Resolves `PaneID` →
 | `.presentTerminal` | `UIClient.focusTerminalInMainWindow` |
 | `.toggleCommandPalette` | send root reducer `Action.commandPalette(.toggle)` |
 
-**`WindowActionRouterFeature`** (`apps/mac/touch-code/App/Features/WindowActionRouter/`)
+**`WindowActionRouterFeature`** (`apps/mac/codans/App/Features/WindowActionRouter/`)
 subscribes to `windowActionRequested`. Maps onto:
 
 | Request | Action |
@@ -690,7 +690,7 @@ subscribes to `windowActionRequested`. Maps onto:
 | `.checkForUpdates` | `UpdatesClient.checkNow` (Sparkle) |
 | `.openConfig` | `EditorClient.openFile("~/.config/ghostty/config")` via user's default editor |
 
-`WindowService` is a new `apps/mac/touch-code/App/Clients/WindowService.swift`
+`WindowService` is a new `apps/mac/codans/App/Clients/WindowService.swift`
 — thin wrapper over `NSApp.keyWindow`, the app's window registry, and
 the Space-to-window mapping (1:1 per current plan).
 
@@ -745,10 +745,10 @@ persistence only tracks stable hierarchy.
 
 | Layer | File | Responsibility |
 |---|---|---|
-| **Core** | `TouchCodeCore/TerminalEvent.swift` | Add `.panelInfoChanged`, `.panelActionRequested`, `.windowActionRequested`, `.configChanged` cases |
-| **Core** | `TouchCodeCore/Pane/PaneInfoDelta.swift` (new) | Info-update enum |
-| **Core** | `TouchCodeCore/Pane/PaneActionRequest.swift` (new) | Pane intent enum + typed sub-enums |
-| **Core** | `TouchCodeCore/Pane/WindowActionRequest.swift` (new) | Window intent enum + typed sub-enums |
+| **Core** | `CodansCore/TerminalEvent.swift` | Add `.panelInfoChanged`, `.panelActionRequested`, `.windowActionRequested`, `.configChanged` cases |
+| **Core** | `CodansCore/Pane/PaneInfoDelta.swift` (new) | Info-update enum |
+| **Core** | `CodansCore/Pane/PaneActionRequest.swift` (new) | Pane intent enum + typed sub-enums |
+| **Core** | `CodansCore/Pane/WindowActionRequest.swift` (new) | Window intent enum + typed sub-enums |
 | **Runtime** | `Runtime/Ghostty/GhosttyRuntime.swift` | Replace action stub; add `handleAction`, `paneID(fromSurface:)`, `applyClonedConfig`, `reloadConfig`, `toggleBackgroundOpacity` |
 | **Runtime** | `Runtime/Ghostty/GhosttyActionDecoder.swift` (new) | The one module that touches `ghostty_action_tag` — everything else speaks typed Swift |
 | **Runtime** | `Runtime/Ghostty/PaneSurface.swift` | Add `SurfaceInfo`, `apply(_:)`, `markExited` |
@@ -804,7 +804,7 @@ active-worktree checks).
 
 Emit `NSNotification` from the C callback; features listen.
 
-**Cons — rejected:** touch-code's architecture forbids inter-reducer
+**Cons — rejected:** codans's architecture forbids inter-reducer
 NSNotification (untyped payloads, no ordering guarantees, no type-safety
 across modules); and there is no ordering relative to existing
 lifecycle events already on `TerminalEvent`, so consumers wanting both
@@ -835,10 +835,10 @@ cross module boundaries cleanly; decoder duplication risk.
 
 ### Observability
 
-- `os.Logger` category `com.touch-code.runtime.action`. Every decoded
+- `os.Logger` category `com.gumpw.codans.runtime.action`. Every decoded
   action logs at `.debug` with `(paneID, tag)`. Unsupported branch logs
   at `.info` with the tag int.
-- `tc system.status` gains a `ghostty.actions` section: per-tag counter
+- `codans system.status` gains a `ghostty.actions` section: per-tag counter
   of observed actions in the current session. Makes "agent asks why
   their keybind didn't work" diagnosable with one command.
 - `GhosttyRuntime` exposes `var unhandledActionCounts: [UInt32: Int]`
@@ -860,7 +860,7 @@ cross module boundaries cleanly; decoder duplication risk.
 - **Integration — engine.** `TerminalEngineTests` feeds synthetic
   `TerminalEvent.panelActionRequested` emits; asserts fan-out.
 - **Smoke — manual.** libghostty binding end-to-end is not driveable
-  from `tc`. Checklist of ~15 `keybind` configs → observed effects must
+  from `codans`. Checklist of ~15 `keybind` configs → observed effects must
   pass on a dev build before release.
   Checklist lives in the exec plan.
 
@@ -889,7 +889,7 @@ cross module boundaries cleanly; decoder duplication risk.
 
 ### Rollout
 
-- Launch-arg gate `TOUCH_CODE_DISABLE_ACTION_ROUTING=1` for the first
+- Launch-arg gate `CODANS_DISABLE_ACTION_ROUTING=1` for the first
   release; hotfix escape hatch if a regression slips through manual
   smoke. Remove the gate two releases later.
 - Per-bucket landing order: Info → Effect → Tab/Split intent → Window
@@ -902,7 +902,7 @@ cross module boundaries cleanly; decoder duplication risk.
 |---|---|
 | **Action firehose overwhelms fan-out.** Chatty TUI fires `SET_TITLE`/`PWD`/`PROGRESS_REPORT` on every prompt. | `.bufferingNewest(256)` on `TerminalEvent`. Emit `.panelInfoChanged` only when the field actually changed (memo via `apply` diff). Lifecycle events stay unbuffered. |
 | **Thread-safety bug**: action callback fires non-main; userdata race with `PaneSurface` deinit. | `ghostty_surface_userdata` returns the 16-byte allocation that lives as long as the surface; decode copies bytes before any main hop. Registry access is @MainActor. |
-| **Unknown action flood.** Future libghostty versions emit tags we haven't seen. | Default branch logs `.info` + bumps bounded counter; `tc system.status` surfaces top unknown tags; schedule an agent sweep to add decoder cases. |
+| **Unknown action flood.** Future libghostty versions emit tags we haven't seen. | Default branch logs `.info` + bumps bounded counter; `codans system.status` surfaces top unknown tags; schedule an agent sweep to add decoder cases. |
 | **Router becomes a god-reducer.** Every new action expands `PaneActionRouterFeature` until it knows everything. | Only intents go through routers. Info / effect stay in Runtime. If a new intent's servicing logic exceeds ~20 lines, extract to its own reducer composed into the router. |
 | **Window intent without multi-window model.** `NEW_WINDOW` today maps to a single NSWindow app model; behavior may need to change when multi-window arch question lands. | `WindowService` is the single seam; revising multi-window touches one file. `WindowActionRouterFeature` is intentionally thin so rewrites are cheap. |
 | **Double-consumption.** A future feature also subscribes to `panelActionRequested` and double-runs the mutation. | Exclusivity is documented in `architecture.md` §Architectural Invariants: `panelActionRequested` and `windowActionRequested` are consumed by their named routers only. Code review gate. |

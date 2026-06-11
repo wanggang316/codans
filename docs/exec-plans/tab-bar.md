@@ -8,7 +8,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this change, a touch-code user can:
+After this change, a codans user can:
 
 - See a polished Tab bar — an active tab is marked by a 2-pt accent underline, hover reveals a three-state background, the close button hides at rest, dividers sit between chips, and titles truncate gracefully instead of pushing neighbors off-screen.
 - Right-click any tab and choose **Rename / Close / Close Others / Close to the Right / Close All**. Rename opens an inline `TextField`, commit with `Return`, cancel with `Esc`; focus returns to the previously focused pane afterwards.
@@ -30,7 +30,7 @@ Timestamp format: `YYYY-MM-DD`. Update as each item closes.
 - [x] T1.1 Extract `TabBarMetrics` and `TabBarColors` under `App/Features/TabBar/Style/`. (2026-04-24, `8c7c7e5`)
 - [x] T1.2 Split `TabBarView` into `TabBarView` (container) + `TabBarRowView` (HStack) + `TabChipView` (one chip) + `TabChipLabel` + `TabChipCloseButton` + `TabChipBackground`. Pure refactor, pre-split visuals preserved. (2026-04-24, `135a980`)
 - [x] T1.3 Three-state chip background (idle / hover / active+press) with 2-pt top underline on the active chip; hover-revealed close button; thin divider between idle chips. (2026-04-24, `72db8d2`)
-- [x] T1.4 Snapshot test suite — `TabChipSnapshotTests` in `apps/mac/touch-code/Tests/` — covers the five chip background states + a row composite. Dirty case deferred to M3 (lands with the writer). (2026-04-24, `013fc4c`)
+- [x] T1.4 Snapshot test suite — `TabChipSnapshotTests` in `apps/mac/codans/Tests/` — covers the five chip background states + a row composite. Dirty case deferred to M3 (lands with the writer). (2026-04-24, `013fc4c`)
 - [x] T1.5 `TabBarFeatureTests` remains green on the two deterministic cases; `make build` succeeds; `swiftlint` clean on every new Tab-bar file. Pre-existing `GhosttyThemeCatalog` + `newTabButtonCallsCreateTab` suite-level flake are baseline issues (see Surprises). (2026-04-24)
 
 ### M2 — Interactions (right-click, drag, middle-click, shortcuts, overflow, trailing splits)
@@ -62,8 +62,8 @@ Timestamp format: `YYYY-MM-DD`. Update as each item closes.
 - **Baseline lint violations pre-date M1** (2026-04-24): `make -C apps/mac lint` surfaces ~13 violations in files outside the Tab-bar scope (`GitHub/`, `HierarchySidebarView`, `Ghostty*.swift`, `PaneSurface`, etc.). None of my new Tab-bar files introduce violations; the baseline is red independently. Matches T0 M7 precedent — escalated in commit messages but not fixed here.
 - **Baseline Ghostty-theme tests fail** (2026-04-24): `GhosttyThemeCatalogTests` reports 9 failing cases (`emptyDirectoryYieldsEmptyArrays`, `alphabeticalSortUsesLocalizedStandardCompare`, `singleDarkThemeClassifiedAsDark`, …). All assert against the Ghostty theme directory contents and are orthogonal to the Tab bar — same-arch baseline on an untouched `TabBarMetrics.swift` commit reproduces the failures. Recorded as baseline.
 - **`newTabButtonCallsCreateTab` is a suite-order flake** (2026-04-24): Running the case in isolation passes; running all three `TabBarFeatureTests` together records an `HierarchyClient.snapshot` unimplemented-issue on the new-tab case because the test does not stub the post-`createTab` snapshot/openPane chain. Predates this milestone — stash + rerun on a pre-T1.2 tree shows the same symptom. M2's broader test sweep will patch the stub when it adds the new action coverage.
-- **`Tab` name shadowing with SwiftUI.Tab**: SwiftUI's `TabView` ecosystem exposes a `Tab` type that collides with `TouchCodeCore.Tab` in implicit-import scope. Addressed by fully-qualifying to `TouchCodeCore.Tab` in `TabBarRowView`; the original `TabBarView` already hit + handled this shadow, so the pattern is established.
-- **Tuist `buildableFolders` requires child paths** (2026-04-24): Adding `App/Features/TabBar/Style/` and `App/Features/TabBar/Views/` did *not* need a Project.swift edit — the top-level `"touch-code/App"` entry is folder-referenced and picks up new subdirectories recursively for non-test targets. But the test target explicitly lists its subfolders (`Tests/Hooks`, `Tests/Socket`, …), so I kept `TabChipSnapshotTests.swift` flat under `Tests/` rather than creating a `Tests/Snapshots/` subfolder that would have required a Project.swift edit.
+- **`Tab` name shadowing with SwiftUI.Tab**: SwiftUI's `TabView` ecosystem exposes a `Tab` type that collides with `CodansCore.Tab` in implicit-import scope. Addressed by fully-qualifying to `CodansCore.Tab` in `TabBarRowView`; the original `TabBarView` already hit + handled this shadow, so the pattern is established.
+- **Tuist `buildableFolders` requires child paths** (2026-04-24): Adding `App/Features/TabBar/Style/` and `App/Features/TabBar/Views/` did *not* need a Project.swift edit — the top-level `"codans/App"` entry is folder-referenced and picks up new subdirectories recursively for non-test targets. But the test target explicitly lists its subfolders (`Tests/Hooks`, `Tests/Socket`, …), so I kept `TabChipSnapshotTests.swift` flat under `Tests/` rather than creating a `Tests/Snapshots/` subfolder that would have required a Project.swift edit.
 - **Disk exhaustion on `/tmp` mid-session** (2026-04-24): Tool runtime's task output directory on `/private/tmp` ran out of space during the M1 verification pass, blocking Bash entirely. Unblocked by the user after a host-side cleanup. Not repro-able from the plan steps alone — an environmental hiccup, not a signal about the code.
 
 ## Decision Log
@@ -106,7 +106,7 @@ Timestamp format: `YYYY-MM-DD`. Update as each item closes.
 ### M2 — 2026-04-24 — shipped on `feature/tab-and-pane`
 
 **Shipped:**
-- Manager / client API surface: `renameTab`, `reorderTabs`, `closeOtherTabs`, `closeTabsToRight`, `closeAllTabs`, `selectAdjacentTab` — all exposed through `HierarchyClient` with the matching live / liveValue / testValue scaffolding. `TabAdjacency` enum lives in `TouchCodeCore`.
+- Manager / client API surface: `renameTab`, `reorderTabs`, `closeOtherTabs`, `closeTabsToRight`, `closeAllTabs`, `selectAdjacentTab` — all exposed through `HierarchyClient` with the matching live / liveValue / testValue scaffolding. `TabAdjacency` enum lives in `CodansCore`.
 - `TabBarFeature.Action`: six new cases (renameSubmitted, contextMenuCloseOthers, contextMenuCloseToRight, contextMenuCloseAll, dragReorderEnded, middleClicked) plus `trailingSplitRequested(direction:...)` for the trailing split buttons. Reducer stays stateless; every case is a one-line forward or resolver.
 - Chip interactions: right-click context menu (Rename / Close / Close Others [disabled single-tab] / Close to the Right [disabled last-tab] / Close All), inline `TextField` rename (Return commits, Esc discards), middle-click close (NSViewRepresentable bridge), drag-to-reorder (single `dragReorderEnded` dispatch on drop, spring settle).
 - Row-level: `TabBarOverflowScroll` wraps the chip row with a hidden-scrollbar horizontal ScrollView, 16-pt leading/trailing gradient shadows that fade in only when the row overflows either edge, and a `ScrollViewReader.scrollTo(id, anchor: .center)` on `activeTabID` changes (easeInOut 0.15s). Trailing accessories (`+` / split-right / split-down) stay pinned outside the scroll.
@@ -189,17 +189,17 @@ Related documents:
 
 Key source files:
 
-- `apps/mac/touch-code/App/Features/TabBar/TabBarView.swift` — today's 78-line container. M1 splits it.
-- `apps/mac/touch-code/App/Features/TabBar/TabBarFeature.swift` — current 55-line reducer with three actions. M2 adds new actions here.
-- `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift:82` — `tabBarRow(address:)` that mounts `TabBarView`; unchanged except for replacing `.padding(.horizontal, 8).padding(.vertical, 4)` with the container's own padding after M1.
-- `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailFeature.swift:14,19,24` — existing `Scope(state: \.tabBar, action: \.tabBar)` wiring. Untouched.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — add six closures in M2 + three in M3 (see Interfaces section).
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — add five methods in M2 (`renameTab`, `reorderTabs`, `closeOtherTabs`, `closeTabsToRight`, `closeAllTabs`, `selectAdjacentTab`) + five in M3 (focus memory + dirty). `moveTab(offset:)` at line 875 already exists; keep it for menu-driven moves.
-- `apps/mac/touch-code/App/Commands/MainWindowCommands.swift` — add the five new tab shortcuts as a new `CommandGroup`. Keep the existing `CommandGroup(after: .newItem)` untouched.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — add Root-level resolver actions (see D2) alongside `openDefaultForCurrentWorktreeRequested` (line 138).
-- `apps/mac/touch-code/Tests/TabBarFeatureTests.swift` — extend with every new action; mock `HierarchyClient` to assert the forwarded call shape.
-- `apps/mac/touch-code/Tests/HierarchyManagerTests.swift` — extend with new manager methods + invariants.
-- `apps/mac/touch-code/Tests/Snapshots/` — new suite `TabChipSnapshotTests.swift` (folder may not exist yet; Tuist's `buildableFolders` recurses, so no project edit needed).
+- `apps/mac/codans/App/Features/TabBar/TabBarView.swift` — today's 78-line container. M1 splits it.
+- `apps/mac/codans/App/Features/TabBar/TabBarFeature.swift` — current 55-line reducer with three actions. M2 adds new actions here.
+- `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailView.swift:82` — `tabBarRow(address:)` that mounts `TabBarView`; unchanged except for replacing `.padding(.horizontal, 8).padding(.vertical, 4)` with the container's own padding after M1.
+- `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailFeature.swift:14,19,24` — existing `Scope(state: \.tabBar, action: \.tabBar)` wiring. Untouched.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — add six closures in M2 + three in M3 (see Interfaces section).
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — add five methods in M2 (`renameTab`, `reorderTabs`, `closeOtherTabs`, `closeTabsToRight`, `closeAllTabs`, `selectAdjacentTab`) + five in M3 (focus memory + dirty). `moveTab(offset:)` at line 875 already exists; keep it for menu-driven moves.
+- `apps/mac/codans/App/Commands/MainWindowCommands.swift` — add the five new tab shortcuts as a new `CommandGroup`. Keep the existing `CommandGroup(after: .newItem)` untouched.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — add Root-level resolver actions (see D2) alongside `openDefaultForCurrentWorktreeRequested` (line 138).
+- `apps/mac/codans/Tests/TabBarFeatureTests.swift` — extend with every new action; mock `HierarchyClient` to assert the forwarded call shape.
+- `apps/mac/codans/Tests/HierarchyManagerTests.swift` — extend with new manager methods + invariants.
+- `apps/mac/codans/Tests/Snapshots/` — new suite `TabChipSnapshotTests.swift` (folder may not exist yet; Tuist's `buildableFolders` recurses, so no project edit needed).
 
 ### Terms of art
 
@@ -220,19 +220,19 @@ Orientation: the three milestones align with the design doc's three layers and a
 
 **Work.**
 
-1. Create `apps/mac/touch-code/App/Features/TabBar/Style/TabBarMetrics.swift` as an `enum TabBarMetrics` with `static let barHeight: CGFloat = 32`, `chipHeight: CGFloat = 28`, `chipMinWidth: CGFloat = 120`, `chipMaxWidth: CGFloat = 220`, `chipHorizontalPadding: CGFloat = 8`, `activeUnderlineHeight: CGFloat = 2`, `closeButtonSize: CGFloat = 16`, `dividerWidth: CGFloat = 1`, `dividerHeight: CGFloat = 16`, `chipCornerRadius: CGFloat = 6`, `hoverDelay: Duration = .milliseconds(350)`, `reorderMovementThreshold: CGFloat = 3`. Enum not struct — no initialization.
-2. Create `apps/mac/touch-code/App/Features/TabBar/Style/TabBarColors.swift` as `enum TabBarColors` with static `Color` properties: `idleBg = .clear`, `hoverBg = Color.primary.opacity(0.06)`, `activeBg = Color(nsColor: .controlBackgroundColor)`, `activeUnderline = .accentColor`, `divider = Color(nsColor: .separatorColor).opacity(0.7)`, `closeButtonFg = Color.primary.opacity(0.7)`.
-3. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabChipBackground.swift` — a pure view that takes `isActive: Bool`, `isHovering: Bool`, `isPressing: Bool` and draws `RoundedRectangle(cornerRadius: TabBarMetrics.chipCornerRadius)` with top-only corners, the correct background fill per state, plus a `Rectangle()` of `TabBarMetrics.activeUnderlineHeight` at `.top` alignment when `isActive`. Top-only corners: `UnevenRoundedRectangle(topLeadingRadius: cr, topTrailingRadius: cr)` (iOS 16+ / macOS 13+).
-4. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabChipCloseButton.swift`. Takes `isHovering: Bool`, `isActive: Bool`, `action: () -> Void`. Renders a 16×16 circle with an `xmark` SF Symbol, visible only when `isHovering || isActive`. Uses `.buttonStyle(.borderless)` and explicit `.help("Close tab")`. Opacity transition `easeInOut(0.10s)`.
-5. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabChipLabel.swift`. Takes `title: String`, `isDirty: Bool` (default `false` — rendered path-only in M1). Renders `HStack(spacing: 4)`: if `isDirty`, a `ProgressView().controlSize(.mini).frame(width: 12, height: 12)` leading; otherwise no leading element. Trailing: `Text(title).lineLimit(1).truncationMode(.middle).font(.system(size: 12, weight: .regular))`.
-6. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabChipView.swift`. Composes background + label + close button. Owns `@State private var isHovering = false` and `@State private var isPressing = false`. Wraps content in `.onHover { isHovering = $0 }` and a minimal press-tracking button style. No context menu, no drag gesture, no middle-click in M1 — those come in M2. Dispatches tap to `onSelect: () -> Void` and close-button to `onClose: () -> Void`; both are closures passed from the parent (avoids importing `ComposableArchitecture` here).
-7. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabBarRowView.swift`. An `HStack(spacing: 0)` that iterates the tabs, interleaves `Divider()` (1-pt × 16-pt, colored per `TabBarColors.divider`) between adjacent non-active chips, and returns a `.frame(maxWidth: .infinity, alignment: .leading)`. Computes per-chip width: `floor((containerWidth − trailingWidth) / tabCount)` clamped to `[chipMinWidth, chipMaxWidth]`. Container width is read via `GeometryReader`.
-8. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabBarTrailingAccessories.swift`. In M1, render only the `+` button (`Image(systemName: "plus")`, `.buttonStyle(.borderless)`, dispatches new-tab action). Split-right and split-down buttons + hover preview come in M2.
-9. Rewrite `apps/mac/touch-code/App/Features/TabBar/TabBarView.swift` as a thin container: reads `Worktree.tabs` from `HierarchyManager`, mounts `TabBarRowView` + `TabBarTrailingAccessories`, passes closures that send `store.send(.tabButtonTapped)` / `.closeButtonTapped` / `.newTabButtonTapped`. Height fixed to `TabBarMetrics.barHeight`; top edge flush with the pane area.
-10. Update `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift:82-93` (`tabBarRow(address:)`) — replace the outer `.padding(.horizontal, 8).padding(.vertical, 4)` with zero padding (the new `TabBarView` owns its own internal padding).
-11. Create `apps/mac/touch-code/Tests/Snapshots/TabChipSnapshotTests.swift` — five cases covering idle / hover / active / active+hover / dirty (dirty uses `isDirty: true` via the view's `init`; M1 does not flip this from the client). Use the project's existing snapshot-testing harness if present; otherwise gate the file behind `#if canImport(SnapshotTesting)` so it's opt-in.
+1. Create `apps/mac/codans/App/Features/TabBar/Style/TabBarMetrics.swift` as an `enum TabBarMetrics` with `static let barHeight: CGFloat = 32`, `chipHeight: CGFloat = 28`, `chipMinWidth: CGFloat = 120`, `chipMaxWidth: CGFloat = 220`, `chipHorizontalPadding: CGFloat = 8`, `activeUnderlineHeight: CGFloat = 2`, `closeButtonSize: CGFloat = 16`, `dividerWidth: CGFloat = 1`, `dividerHeight: CGFloat = 16`, `chipCornerRadius: CGFloat = 6`, `hoverDelay: Duration = .milliseconds(350)`, `reorderMovementThreshold: CGFloat = 3`. Enum not struct — no initialization.
+2. Create `apps/mac/codans/App/Features/TabBar/Style/TabBarColors.swift` as `enum TabBarColors` with static `Color` properties: `idleBg = .clear`, `hoverBg = Color.primary.opacity(0.06)`, `activeBg = Color(nsColor: .controlBackgroundColor)`, `activeUnderline = .accentColor`, `divider = Color(nsColor: .separatorColor).opacity(0.7)`, `closeButtonFg = Color.primary.opacity(0.7)`.
+3. Create `apps/mac/codans/App/Features/TabBar/Views/TabChipBackground.swift` — a pure view that takes `isActive: Bool`, `isHovering: Bool`, `isPressing: Bool` and draws `RoundedRectangle(cornerRadius: TabBarMetrics.chipCornerRadius)` with top-only corners, the correct background fill per state, plus a `Rectangle()` of `TabBarMetrics.activeUnderlineHeight` at `.top` alignment when `isActive`. Top-only corners: `UnevenRoundedRectangle(topLeadingRadius: cr, topTrailingRadius: cr)` (iOS 16+ / macOS 13+).
+4. Create `apps/mac/codans/App/Features/TabBar/Views/TabChipCloseButton.swift`. Takes `isHovering: Bool`, `isActive: Bool`, `action: () -> Void`. Renders a 16×16 circle with an `xmark` SF Symbol, visible only when `isHovering || isActive`. Uses `.buttonStyle(.borderless)` and explicit `.help("Close tab")`. Opacity transition `easeInOut(0.10s)`.
+5. Create `apps/mac/codans/App/Features/TabBar/Views/TabChipLabel.swift`. Takes `title: String`, `isDirty: Bool` (default `false` — rendered path-only in M1). Renders `HStack(spacing: 4)`: if `isDirty`, a `ProgressView().controlSize(.mini).frame(width: 12, height: 12)` leading; otherwise no leading element. Trailing: `Text(title).lineLimit(1).truncationMode(.middle).font(.system(size: 12, weight: .regular))`.
+6. Create `apps/mac/codans/App/Features/TabBar/Views/TabChipView.swift`. Composes background + label + close button. Owns `@State private var isHovering = false` and `@State private var isPressing = false`. Wraps content in `.onHover { isHovering = $0 }` and a minimal press-tracking button style. No context menu, no drag gesture, no middle-click in M1 — those come in M2. Dispatches tap to `onSelect: () -> Void` and close-button to `onClose: () -> Void`; both are closures passed from the parent (avoids importing `ComposableArchitecture` here).
+7. Create `apps/mac/codans/App/Features/TabBar/Views/TabBarRowView.swift`. An `HStack(spacing: 0)` that iterates the tabs, interleaves `Divider()` (1-pt × 16-pt, colored per `TabBarColors.divider`) between adjacent non-active chips, and returns a `.frame(maxWidth: .infinity, alignment: .leading)`. Computes per-chip width: `floor((containerWidth − trailingWidth) / tabCount)` clamped to `[chipMinWidth, chipMaxWidth]`. Container width is read via `GeometryReader`.
+8. Create `apps/mac/codans/App/Features/TabBar/Views/TabBarTrailingAccessories.swift`. In M1, render only the `+` button (`Image(systemName: "plus")`, `.buttonStyle(.borderless)`, dispatches new-tab action). Split-right and split-down buttons + hover preview come in M2.
+9. Rewrite `apps/mac/codans/App/Features/TabBar/TabBarView.swift` as a thin container: reads `Worktree.tabs` from `HierarchyManager`, mounts `TabBarRowView` + `TabBarTrailingAccessories`, passes closures that send `store.send(.tabButtonTapped)` / `.closeButtonTapped` / `.newTabButtonTapped`. Height fixed to `TabBarMetrics.barHeight`; top edge flush with the pane area.
+10. Update `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailView.swift:82-93` (`tabBarRow(address:)`) — replace the outer `.padding(.horizontal, 8).padding(.vertical, 4)` with zero padding (the new `TabBarView` owns its own internal padding).
+11. Create `apps/mac/codans/Tests/Snapshots/TabChipSnapshotTests.swift` — five cases covering idle / hover / active / active+hover / dirty (dirty uses `isDirty: true` via the view's `init`; M1 does not flip this from the client). Use the project's existing snapshot-testing harness if present; otherwise gate the file behind `#if canImport(SnapshotTesting)` so it's opt-in.
 
-**Acceptance.** `make -C apps/mac lint` clean. `xcodebuild test -scheme touch-code` green — `TabBarFeatureTests` unchanged, new `TabChipSnapshotTests` green. Visual: open the app, switch tabs, hover chips, close a chip. Behavior identical to `main`; visuals match the design-doc spec.
+**Acceptance.** `make -C apps/mac lint` clean. `xcodebuild test -scheme codans` green — `TabBarFeatureTests` unchanged, new `TabChipSnapshotTests` green. Visual: open the app, switch tabs, hover chips, close a chip. Behavior identical to `main`; visuals match the design-doc spec.
 
 ### Milestone 2 — Interactions
 
@@ -254,11 +254,11 @@ Orientation: the three milestones align with the design doc's three layers and a
    - `dragReorderEnded(orderedIDs: [TabID], inWorktree:..., inProject:..., inSpace:...)`
    - `middleClicked(TabID, ...)` — forwards to `closeTab`.
    - `shortcutNewTab(...)`, `shortcutCloseActive(...)`, `shortcutSelectIndex(Int, ...)`, `shortcutSelectAdjacent(TabAdjacency, ...)`.
-4. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabChipContextMenu.swift` — a `ViewModifier` or `@ViewBuilder` that attaches `.contextMenu { … }` with Rename / Close / Close Others (disabled when `tabs.count <= 1`) / Close to the Right (disabled when the chip is the last tab) / Close All. Each item dispatches the matching `TabBarFeature.Action`. Rename opens an inline `TextField` via a per-chip `@State var editingTitle: String?` owned by `TabChipView`; commit sends `renameSubmitted`, `Esc` resets `editingTitle` to nil.
-5. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabChipMiddleClickView.swift` — `NSViewRepresentable` wrapping a bespoke `NSView` override of `otherMouseUp(with:)` (middle-mouse-button up). Exposes an `onMiddleClick: () -> Void` closure. Attach as a background to `TabChipView`.
+4. Create `apps/mac/codans/App/Features/TabBar/Views/TabChipContextMenu.swift` — a `ViewModifier` or `@ViewBuilder` that attaches `.contextMenu { … }` with Rename / Close / Close Others (disabled when `tabs.count <= 1`) / Close to the Right (disabled when the chip is the last tab) / Close All. Each item dispatches the matching `TabBarFeature.Action`. Rename opens an inline `TextField` via a per-chip `@State var editingTitle: String?` owned by `TabChipView`; commit sends `renameSubmitted`, `Esc` resets `editingTitle` to nil.
+5. Create `apps/mac/codans/App/Features/TabBar/Views/TabChipMiddleClickView.swift` — `NSViewRepresentable` wrapping a bespoke `NSView` override of `otherMouseUp(with:)` (middle-mouse-button up). Exposes an `onMiddleClick: () -> Void` closure. Attach as a background to `TabChipView`.
 6. In `TabBarRowView`, add a `DragGesture(minimumDistance: TabBarMetrics.reorderMovementThreshold)` that translates pointer deltas into chip-order updates locally (`@State var draggingOffset: [TabID: CGFloat]`), and on `.onEnded` computes the final ordered IDs and dispatches `dragReorderEnded`. Use `withAnimation(.spring(response: 0.3, dampingFraction: 0.85))` for the drop.
-7. Create `apps/mac/touch-code/App/Features/TabBar/Views/TabBarOverflowScroll.swift` — wraps `TabBarRowView` in a horizontal `ScrollView(.horizontal, showsIndicators: false)` + `ScrollViewReader`. On `.onChange(of: activeTabID)` calls `proxy.scrollTo(activeTabID, anchor: .center)` inside `withAnimation(.easeInOut(duration: 0.15))`. Tracks `contentOffset` via `.onScrollGeometryChange` (macOS 14+; fall back to reading a `GeometryReader` on the inner HStack if the host macOS is lower — project currently pins Xcode 26.0, so the newer API is available). Renders two 16-pt `LinearGradient`-filled rectangles as overlays: left fade visible when `contentOffset > 0`, right fade when `contentOffset < maxOffset`.
-8. Extend `TabBarTrailingAccessories` — add split-right (`Image(systemName: "rectangle.split.2x1")`) and split-down (`Image(systemName: "rectangle.split.1x2")`) buttons. Each dispatches to the existing `PaneActionRouter` via a closure on the parent (or directly via `HierarchyClient.splitPane` if the active pane is resolvable). Create `apps/mac/touch-code/App/Features/TabBar/Views/SplitPreviewPopoverView.swift` — a miniature of the current `Tab.splitTree` rendered with scaled-down rectangles labelled by initial pane command. Trigger with `.onHover { hovering in if hovering { Task { try? await Task.sleep(for: TabBarMetrics.hoverDelay); showPreview = true } } else { showPreview = false } }` + `.popover(isPresented: $showPreview) { SplitPreviewPopoverView(...) }`. Cancellable via `.task` identity or a debounce boolean.
+7. Create `apps/mac/codans/App/Features/TabBar/Views/TabBarOverflowScroll.swift` — wraps `TabBarRowView` in a horizontal `ScrollView(.horizontal, showsIndicators: false)` + `ScrollViewReader`. On `.onChange(of: activeTabID)` calls `proxy.scrollTo(activeTabID, anchor: .center)` inside `withAnimation(.easeInOut(duration: 0.15))`. Tracks `contentOffset` via `.onScrollGeometryChange` (macOS 14+; fall back to reading a `GeometryReader` on the inner HStack if the host macOS is lower — project currently pins Xcode 26.0, so the newer API is available). Renders two 16-pt `LinearGradient`-filled rectangles as overlays: left fade visible when `contentOffset > 0`, right fade when `contentOffset < maxOffset`.
+8. Extend `TabBarTrailingAccessories` — add split-right (`Image(systemName: "rectangle.split.2x1")`) and split-down (`Image(systemName: "rectangle.split.1x2")`) buttons. Each dispatches to the existing `PaneActionRouter` via a closure on the parent (or directly via `HierarchyClient.splitPane` if the active pane is resolvable). Create `apps/mac/codans/App/Features/TabBar/Views/SplitPreviewPopoverView.swift` — a miniature of the current `Tab.splitTree` rendered with scaled-down rectangles labelled by initial pane command. Trigger with `.onHover { hovering in if hovering { Task { try? await Task.sleep(for: TabBarMetrics.hoverDelay); showPreview = true } } else { showPreview = false } }` + `.popover(isPresented: $showPreview) { SplitPreviewPopoverView(...) }`. Cancellable via `.task` identity or a debounce boolean.
 9. `RootFeature` — add resolver actions beside `openDefaultForCurrentWorktreeRequested`:
    - `newTabForCurrentWorktree`
    - `closeActiveTabForCurrentWorktree`
@@ -275,7 +275,7 @@ Orientation: the three milestones align with the design doc's three layers and a
     - `selectAdjacentWrapsAtBothEnds`, `selectAdjacentReturnsNilOnEmpty`
 12. Extend `RootFeatureTests` with the four new resolver actions — verify each forwards the right `TabBarFeature.Action` when a worktree is selected, and is a no-op when no worktree is selected.
 
-**Acceptance.** `make -C apps/mac lint` clean. Full test suite green (`xcodebuild test -scheme touch-code`). Manual smoke script in the PR description passes. In the running app:
+**Acceptance.** `make -C apps/mac lint` clean. Full test suite green (`xcodebuild test -scheme codans`). Manual smoke script in the PR description passes. In the running app:
 
 - Right-click a chip → context menu has five items with correct enable/disable states.
 - Rename: commit persists; `Esc` reverts; terminal regains first-responder status (verify by typing into a pane immediately after commit).
@@ -330,7 +330,7 @@ git status
 # Baseline tests green
 make -C apps/mac mac-generate
 make -C apps/mac mac-lint
-xcodebuild -project apps/mac/touch-code.xcodeproj -scheme touch-code \
+xcodebuild -project apps/mac/codans.xcodeproj -scheme codans \
   -destination 'platform=macOS' test | xcbeautify
 # Expected: BUILD SUCCEEDED; 0 failing tests.
 ```
@@ -341,17 +341,17 @@ If the baseline is red, fix or revert before proceeding — do not build new wor
 
 ```bash
 make -C apps/mac mac-lint
-xcodebuild -project apps/mac/touch-code.xcodeproj -scheme touch-code \
+xcodebuild -project apps/mac/codans.xcodeproj -scheme codans \
   -destination 'platform=macOS' test | xcbeautify
 ```
 
 ### M2 Task 1 — add five manager methods
 
-Edit `apps/mac/touch-code/Runtime/HierarchyManager.swift`, append methods after line 596 (`selectTab`). Then:
+Edit `apps/mac/codans/Runtime/HierarchyManager.swift`, append methods after line 596 (`selectTab`). Then:
 
 ```bash
-xcodebuild -project apps/mac/touch-code.xcodeproj -scheme touch-code \
-  -destination 'platform=macOS' test -only-testing:touch_code-tests/HierarchyManagerTests \
+xcodebuild -project apps/mac/codans.xcodeproj -scheme codans \
+  -destination 'platform=macOS' test -only-testing:Codans-tests/HierarchyManagerTests \
   | xcbeautify
 ```
 
@@ -372,14 +372,14 @@ Menu **File** (or wherever the `CommandGroup(after: .newItem)` lands) should lis
 Edit `HierarchyManager.swift`, run:
 
 ```bash
-xcodebuild -project apps/mac/touch-code.xcodeproj -scheme touch-code \
-  -destination 'platform=macOS' test -only-testing:touch_code-tests/HierarchyManagerTests \
+xcodebuild -project apps/mac/codans.xcodeproj -scheme codans \
+  -destination 'platform=macOS' test -only-testing:Codans-tests/HierarchyManagerTests \
   | xcbeautify
 ```
 
 ## Validation and Acceptance
 
-- After M1: `git diff main…HEAD -- apps/mac/touch-code/App/Features/TabBar` shows the split across ten files. The app launches, the bar renders with the new visuals, and every pre-existing test in `TabBarFeatureTests` passes unchanged. `TabChipSnapshotTests` has five green cases.
+- After M1: `git diff main…HEAD -- apps/mac/codans/App/Features/TabBar` shows the split across ten files. The app launches, the bar renders with the new visuals, and every pre-existing test in `TabBarFeatureTests` passes unchanged. `TabChipSnapshotTests` has five green cases.
 - After M2: every row in the M2 Acceptance subsection is demonstrable in a fresh app launch. `HierarchyManagerTests` has ≥ 10 new cases; `TabBarFeatureTests` ≥ 8 new cases; `RootFeatureTests` ≥ 4 new cases. `make -C apps/mac mac-lint` clean.
 - After M3: switching tabs restores the pane that was focused in the target tab (verified by manual smoke and by `focusRestoresLastFocusedPane`). `tabIsDirty` round-trips through the client in a `TestStore` case. Spinners never render in production because no writer exists yet.
 
@@ -401,7 +401,7 @@ Rollback per milestone:
 
 Expected file tree at end of plan:
 
-    apps/mac/touch-code/App/Features/TabBar/
+    apps/mac/codans/App/Features/TabBar/
     ├── TabBarFeature.swift                 (reducer + new actions)
     ├── TabBarView.swift                    (thin container)
     ├── Style/
@@ -421,18 +421,18 @@ Expected file tree at end of plan:
 
 Test tree:
 
-    apps/mac/touch-code/Tests/
+    apps/mac/codans/Tests/
     ├── TabBarFeatureTests.swift            (extended)
     ├── HierarchyManagerTests.swift         (extended)
     ├── RootFeatureTests.swift              (extended)
     └── Snapshots/
         └── TabChipSnapshotTests.swift      (new)
 
-No prototyping was needed pre-plan — the visual contract, drag semantics, and focus-memory approach each have direct precedent in the current codebase (shortcut resolver pattern in `mw-t3-gitviewer-overlay-shortcuts`, `@Observable` runtime maps in `HierarchyManager`, NSViewRepresentable bridging in `apps/mac/touch-code/App/Features/PaneContainer/`).
+No prototyping was needed pre-plan — the visual contract, drag semantics, and focus-memory approach each have direct precedent in the current codebase (shortcut resolver pattern in `mw-t3-gitviewer-overlay-shortcuts`, `@Observable` runtime maps in `HierarchyManager`, NSViewRepresentable bridging in `apps/mac/codans/App/Features/PaneContainer/`).
 
 ## Interfaces and Dependencies
 
-### `apps/mac/touch-code/Runtime/HierarchyManager.swift`
+### `apps/mac/codans/Runtime/HierarchyManager.swift`
 
 New public methods (append to the existing `HierarchyManager`):
 
@@ -479,7 +479,7 @@ func markPaneIdle(_ paneID: PaneID)
 func tabIsDirty(_ tabID: TabID) -> Bool
 ```
 
-### `apps/mac/touch-code/App/Clients/HierarchyClient.swift`
+### `apps/mac/codans/App/Clients/HierarchyClient.swift`
 
 New closures (add nine; match the live / test / liveValue scaffolding in the existing file):
 
@@ -520,7 +520,7 @@ var markPaneRunning:    @MainActor @Sendable (_ paneID: PaneID) -> Void
 var markPaneIdle:       @MainActor @Sendable (_ paneID: PaneID) -> Void
 ```
 
-`TabAdjacency` is a new public enum in `TouchCodeCore` alongside `ResizeDirection`:
+`TabAdjacency` is a new public enum in `CodansCore` alongside `ResizeDirection`:
 
 ```
 public enum TabAdjacency: Sendable, Equatable {
@@ -529,7 +529,7 @@ public enum TabAdjacency: Sendable, Equatable {
 }
 ```
 
-### `apps/mac/touch-code/App/Features/TabBar/TabBarFeature.swift`
+### `apps/mac/codans/App/Features/TabBar/TabBarFeature.swift`
 
 Extend `Action` with:
 
@@ -563,7 +563,7 @@ case shortcutSelectAdjacent(
 
 Reducer stays stateless; every case is a single `try?` call into the matching `hierarchyClient` closure.
 
-### `apps/mac/touch-code/App/Features/Root/RootFeature.swift`
+### `apps/mac/codans/App/Features/Root/RootFeature.swift`
 
 Add alongside `openDefaultForCurrentWorktreeRequested`:
 
@@ -576,7 +576,7 @@ case selectAdjacentTabForCurrentWorktree(TabAdjacency)
 
 Each resolver looks up the current `(space, project, worktree, activeTab)` from `hierarchyClient.snapshot()` and forwards to `.worktreeDetail(.tabBar(...))`. No-op when any level of the selection is `nil`.
 
-### `apps/mac/touch-code/App/Commands/MainWindowCommands.swift`
+### `apps/mac/codans/App/Commands/MainWindowCommands.swift`
 
 Add a second `CommandGroup` (or extend the existing one; both are acceptable):
 
@@ -622,4 +622,4 @@ CommandGroup(after: .newItem) {
 }
 ```
 
-Dependencies used (all already in the repo): SwiftUI, AppKit (for `NSViewRepresentable`), Observation, Foundation, ComposableArchitecture, TouchCodeCore. No new third-party packages.
+Dependencies used (all already in the repo): SwiftUI, AppKit (for `NSViewRepresentable`), Observation, Foundation, ComposableArchitecture, CodansCore. No new third-party packages.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# render-cask.sh — stamp version + sha256 into Casks/touch-code.rb.
+# render-cask.sh — stamp version + sha256 into Casks/codans.rb.
 #
-# Source of truth lives at Casks/touch-code.rb; this script regex-replaces
+# Source of truth lives at Casks/codans.rb; this script regex-replaces
 # the `version "..."` and `sha256 "..."` lines and writes the rendered cask
 # to stdout (or to an output path).
 #
@@ -13,8 +13,8 @@
 #   <sha256>   lowercase 64-hex digest of the published DMG
 #
 # Examples:
-#   ./scripts/render-cask.sh 0.3.0 "$(shasum -a 256 TouchCode-0.3.0.dmg | awk '{print $1}')"
-#   ./scripts/render-cask.sh 0.3.0 abc...def /tmp/touch-code.rb
+#   ./scripts/render-cask.sh 0.3.0 "$(shasum -a 256 Codans-0.3.0.dmg | awk '{print $1}')"
+#   ./scripts/render-cask.sh 0.3.0 abc...def /tmp/codans.rb
 #
 set -euo pipefail
 
@@ -30,7 +30,7 @@ output="${3:-/dev/stdout}"
   || { echo "error: sha256 must be 64 lowercase hex chars (got: $sha256)" >&2; exit 1; }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-template="${script_dir}/../Casks/touch-code.rb"
+template="${script_dir}/../Casks/codans.rb"
 [ -f "$template" ] || { echo "error: missing $template" >&2; exit 1; }
 
 # Use Python for substitution: sed -i has different flags on BSD vs GNU,

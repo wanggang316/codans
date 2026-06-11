@@ -1,22 +1,22 @@
 PASS
 
-Probe driven by controller via computer-use+CLI (feature-build `tc pane send --raw`).
-M1 build: ~/Library/Developer/Xcode/DerivedData/touch-code-chgukochxcibwaglczplbvhgcaqu/Build/Products/Debug/TouchCode.app
+Probe driven by controller via computer-use+CLI (feature-build `codans pane send --raw`).
+M1 build: ~/Library/Developer/Xcode/DerivedData/codans-chgukochxcibwaglczplbvhgcaqu/Build/Products/Debug/Codans.app
 HEAD commit at probe time: 16ba84c
 
 Steps executed:
   1. Killed prior feature-build run (PID 72477 from J-001)
-  2. Seeded ~/.config/touch-code/notifications.json with a 3-entry top-level
+  2. Seeded ~/.config/codans/notifications.json with a 3-entry top-level
      JSON array (legacy bare-array shape; 2 entries unread, 1 entry with
      readAt set to mark as read)
-  3. open TouchCode.app (PID 89914)
+  3. open Codans.app (PID 89914)
   4. Waited 5s for launch
   5. Inspected file post-launch — already in envelope shape (size 2016 bytes,
      up from 832 of the seed; loader/saver ran during boot — likely the
      NotificationStore init's sweep path causing a scheduleSave even when
      no entries mutated. Acceptable: case asserts "next save rewrites in
      envelope" and that condition is met.)
-  6. tc pane send --pane 42328BAD-... --raw "1b5d393b777269746500"
+  6. codans pane send --pane 42328BAD-... --raw "1b5d393b777269746500"
      (OSC 9 with body "write")
   7. sleep 3
   8. jq probes

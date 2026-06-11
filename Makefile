@@ -4,12 +4,12 @@ MAC_APP_DIR := apps/mac
 WEB_DIR     := apps/website
 
 help:
-	@echo "touch-code top-level Makefile (delegates to $(MAC_APP_DIR)/Makefile):"
+	@echo "codans top-level Makefile (delegates to $(MAC_APP_DIR)/Makefile):"
 	@echo "  bootstrap         - Init submodules + mise install"
-	@echo "  mac-generate      - Generate touch-code.xcworkspace from Tuist"
-	@echo "  mac-build         - Build mac app + tc CLI"
-	@echo "  mac-build-cli     - Build tc CLI only"
-	@echo "  mac-run-app       - Build and launch touch-code.app"
+	@echo "  mac-generate      - Generate codans.xcworkspace from Tuist"
+	@echo "  mac-build         - Build mac app + codans CLI"
+	@echo "  mac-build-cli     - Build codans CLI only"
+	@echo "  mac-run-app       - Build and launch codans.app"
 	@echo "  mac-archive       - Release archive + Developer ID export"
 	@echo "  mac-release       - Full release pipeline: archive → notarize → DMG → staple"
 	@echo "  mac-bump-version  - VERSION=x.y.z; updates MARKETING_VERSION + build number"

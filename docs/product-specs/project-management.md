@@ -6,25 +6,25 @@
 
 ## Summary
 
-A **Project** is a single git repository — or in a minority case, a scratch folder — that the user has registered with touch-code. Projects live inside a Space and own Worktrees (or a single synthetic "main" Worktree when the Project is not git-backed). This spec covers the full Project management lifecycle: adding an existing local repository, viewing its health, renaming, configuring per-Project preferences (default editor, worktree storage path), reordering inside a Space, and removing it from touch-code. A Project registration is pure bookkeeping in `catalog.json` — touch-code **never moves, copies, or deletes files on disk** as part of Project management.
+A **Project** is a single git repository — or in a minority case, a scratch folder — that the user has registered with codans. Projects live inside a Space and own Worktrees (or a single synthetic "main" Worktree when the Project is not git-backed). This spec covers the full Project management lifecycle: adding an existing local repository, viewing its health, renaming, configuring per-Project preferences (default editor, worktree storage path), reordering inside a Space, and removing it from codans. A Project registration is pure bookkeeping in `catalog.json` — codans **never moves, copies, or deletes files on disk** as part of Project management.
 
 ## User Stories
 
 - As a developer onboarding a new repository, I want to pick a folder on disk and register it as a Project so it shows up in the sidebar and I can start opening terminals in its Worktrees.
-- As a user who already uses git worktrees outside touch-code, I want the app to detect the existing worktrees of a newly-added Project so they appear alongside the main checkout without extra setup.
+- As a user who already uses git worktrees outside codans, I want the app to detect the existing worktrees of a newly-added Project so they appear alongside the main checkout without extra setup.
 - As a user whose repo is in an unusual state (missing, moved, not a git repo), I want the sidebar to clearly mark the Project as failed and explain why so I can fix or remove it without confusion.
 - As a user with several Projects per Space, I want to reorder them in the sidebar so my most-used Project sits at the top.
 - As a user with project-specific tooling preferences, I want to set a default editor for each Project so "Open in ▾" defaults to the right app per repo.
 - As a user with one-off scratch folders, I want to register a non-git folder as a Project so I can still open terminals in it, even though Worktree features don't apply.
-- As a user cleaning up, I want to remove a Project from touch-code without deleting the repository on disk.
+- As a user cleaning up, I want to remove a Project from codans without deleting the repository on disk.
 
 ## Requirements
 
 ### Must Have
 
 - [ ] **Add Project — pick existing folder.** Sidebar "+ Add Project" button opens a macOS folder picker (`NSOpenPanel`). The chosen folder is validated and classified as one of:
-  - **Git repo** — folder contains `.git/` (or is a git worktree pointing back to a main repo); touch-code records `rootPath` and resolved `gitRoot`, and enumerates existing worktrees.
-  - **Non-git folder** — folder does not contain a git repository; touch-code records `rootPath` only, with `gitRoot = nil`. A single synthetic "main" Worktree pointing at `rootPath` is created; the sidebar "+ Worktree" affordance is disabled for this Project.
+  - **Git repo** — folder contains `.git/` (or is a git worktree pointing back to a main repo); codans records `rootPath` and resolved `gitRoot`, and enumerates existing worktrees.
+  - **Non-git folder** — folder does not contain a git repository; codans records `rootPath` only, with `gitRoot = nil`. A single synthetic "main" Worktree pointing at `rootPath` is created; the sidebar "+ Worktree" affordance is disabled for this Project.
 - [ ] **Scope check.** The chosen folder must not already be registered as a Project in any Space; if it is, surface an inline error with a "Reveal existing Project" action.
 - [ ] **Project name.** Default name is the folder's last path component; user can edit the name inline at add-time and later via rename. Max 64 chars, min 1 char after trim.
 - [ ] **Worktree discovery on add.** For a git-backed Project, populate the Worktree list by reading existing `git worktree list` output via the bundled `git-wt` helper. The main checkout is always present; pre-existing worktrees appear in the sidebar immediately.
@@ -32,11 +32,11 @@ A **Project** is a single git repository — or in a minority case, a scratch fo
   - `ready` — Project resolved; Worktrees visible.
   - `loading` — initial scan or reconcile in progress (brief, usually sub-second).
   - `failed(reason)` — path missing, not a git repo anymore, or scan error. Reasons shown as a human-readable message in a failure row with "Retry" / "Remove" actions.
-- [ ] **Reconcile on app launch and on window focus.** For every registered Project, re-check existence and refresh the Worktree list. New worktrees added outside touch-code appear; removed worktrees are pruned from the sidebar (with the same "Project last-active Worktree" safety behavior the model already handles).
+- [ ] **Reconcile on app launch and on window focus.** For every registered Project, re-check existence and refresh the Worktree list. New worktrees added outside codans appear; removed worktrees are pruned from the sidebar (with the same "Project last-active Worktree" safety behavior the model already handles).
 - [ ] **Rename Project** inline from the sidebar row context menu. Same validation as add-time.
 - [ ] **Reorder Projects** inside a Space by drag. Order is persisted and honored across launches.
 - [ ] **Per-Project default editor.** A per-Project override for the Worktree-header "Open in ▾" default; falls back to the global default editor when unset. Already specified by C8; this spec references the existing contract.
-- [ ] **Per-Project worktree storage path.** Editable in a "Project options" surface. Default value is `~/.touch-code/repos/<project-name>/`. Users can override per Project (e.g. point at a sibling of the repo). Empty / invalid paths are rejected inline. See [Worktree Management spec](worktree-management.md) for how this path is consumed.
+- [ ] **Per-Project worktree storage path.** Editable in a "Project options" surface. Default value is `~/.codans/repos/<project-name>/`. Users can override per Project (e.g. point at a sibling of the repo). Empty / invalid paths are rejected inline. See [Worktree Management spec](worktree-management.md) for how this path is consumed.
 - [ ] **Remove Project.** Context-menu action on a Project row, with confirmation. Removal is **data-only**:
   - Unregisters the Project from the Space in `catalog.json`.
   - Closes all tabs and panels belonging to the Project's Worktrees.
@@ -58,8 +58,8 @@ A **Project** is a single git repository — or in a minority case, a scratch fo
 - **Given** the user picks a folder that is already registered as a Project in any Space, **when** they confirm, **then** the add is rejected with an inline error and a "Reveal existing Project" action jumps to the existing row.
 - **Given** a Project whose on-disk folder was deleted since last launch, **when** the app starts, **then** the Project appears with status `failed(reason: "folder no longer exists at <path>")` and offers "Retry" and "Remove" actions.
 - **Given** a Project in `failed` state, **when** the user clicks "Retry" after fixing the folder, **then** the state resolves to `ready` without re-entering the Add Project flow.
-- **Given** a git-backed Project with three pre-existing worktrees created outside touch-code, **when** the Project is added, **then** all three worktrees appear in the sidebar immediately with correct branch labels.
-- **Given** the user renames a Project, **when** they confirm, **then** the Project row, terminal tab titles, and any Project references in header text update immediately. The worktrees directory default (`~/.touch-code/repos/<project-name>/`) is **not** auto-renamed — existing worktree paths on disk are preserved untouched.
+- **Given** a git-backed Project with three pre-existing worktrees created outside codans, **when** the Project is added, **then** all three worktrees appear in the sidebar immediately with correct branch labels.
+- **Given** the user renames a Project, **when** they confirm, **then** the Project row, terminal tab titles, and any Project references in header text update immediately. The worktrees directory default (`~/.codans/repos/<project-name>/`) is **not** auto-renamed — existing worktree paths on disk are preserved untouched.
 - **Given** the user removes a Project, **when** they confirm, **then** the Project disappears from the sidebar, all its terminals are closed, and the repository folder and its worktree directories remain on disk unmodified.
 - **Given** a Project has a per-Project default editor set to Cursor, **when** the user clicks the Worktree-header "Open in" button without a picker, **then** Cursor opens — not the global default.
 - **Given** a user edits the worktree storage path to `/tmp/wt-custom/<name>` in Project options, **when** they next create a Worktree for that Project, **then** the new worktree is created under that path.
@@ -75,7 +75,7 @@ A **Project** is a single git repository — or in a minority case, a scratch fo
 ### Out of Scope (v1)
 
 - **Clone from URL** — no network-backed Project creation. Users who want to clone run `git clone` in a terminal (or in a future version) and then register the resulting folder.
-- **Initialize a new repo** (`git init`) from inside touch-code.
+- **Initialize a new repo** (`git init`) from inside codans.
 - **Import from GitHub / GitLab integration.**
 - **Move a Project between Spaces.**
 - **Bulk operations** (add many folders at once, remove all Projects in a Space with one action).
@@ -93,7 +93,7 @@ A **Project** is a single git repository — or in a minority case, a scratch fo
 This spec is deliberately product-facing; it does not prescribe TCA shapes, reducer structure, or persistence wiring. Relevant references for the follow-up design doc:
 
 - **supacode** — `RepositoryPersistenceClient` persists just the list of roots; the full Repository state is computed on launch (`/Users/wanggang/dev/opensource/supacode/supacode/Clients/Repositories/RepositoryPersistenceClient.swift`). supacode's "FailedRepositoryRow" is the `failed(reason)` UX we're adopting.
-- **Existing code** — `TouchCodeCore/Project.swift` already has `rootPath`, `gitRoot`, `worktreesDirectory`, `defaultEditor`, and `supportsWorktrees`. The data model is adequate; the gap is user-facing flow and reconciliation.
+- **Existing code** — `CodansCore/Project.swift` already has `rootPath`, `gitRoot`, `worktreesDirectory`, `defaultEditor`, and `supportsWorktrees`. The data model is adequate; the gap is user-facing flow and reconciliation.
 - **C8 editor override** — per-Project default editor is already wired through `HierarchyClient.setDefaultEditor`; this spec only affirms its UI surface belongs in Project options.
 
 ## Open Questions

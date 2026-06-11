@@ -6,11 +6,11 @@
 
 ## Summary
 
-A **Worktree** is a `git worktree` of a Project — a concrete branch checkout on disk with its own directory and its own Tab/Pane layout. touch-code is built around the workflow of running multiple features in parallel, one Worktree per feature, each with its own terminal and agent. This spec covers the full user-facing Worktree lifecycle: creating a Worktree (branch name + base ref + optional fetch), listing pre-existing ones, switching between them, archiving (soft-hide, reversible), removing (physical delete with safety checks), and pruning stale entries. Worktree operations run through the bundled `git-wt` helper (the same one supacode uses), which wraps `git worktree` with better defaults and streaming output.
+A **Worktree** is a `git worktree` of a Project — a concrete branch checkout on disk with its own directory and its own Tab/Pane layout. codans is built around the workflow of running multiple features in parallel, one Worktree per feature, each with its own terminal and agent. This spec covers the full user-facing Worktree lifecycle: creating a Worktree (branch name + base ref + optional fetch), listing pre-existing ones, switching between them, archiving (soft-hide, reversible), removing (physical delete with safety checks), and pruning stale entries. Worktree operations run through the bundled `git-wt` helper (the same one supacode uses), which wraps `git worktree` with better defaults and streaming output.
 
 ## Background: why `git-wt`
 
-Rather than shelling out to `git worktree` directly, touch-code bundles the open-source [`git-wt`](https://github.com/khoi/git-wt) helper as a submodule (same as supacode). It covers the common create/list/remove surface with:
+Rather than shelling out to `git worktree` directly, codans bundles the open-source [`git-wt`](https://github.com/khoi/git-wt) helper as a submodule (same as supacode). It covers the common create/list/remove surface with:
 
 - JSON-formatted listing (cleaner than parsing porcelain output),
 - sensible path defaults,
@@ -23,11 +23,11 @@ This spec describes the user-facing behavior; the `git-wt` dependency is noted h
 
 - As a developer starting a new feature, I want to create a Worktree by specifying a branch name and base ref so I can spin up an isolated checkout without typing the full `git worktree add` incantation.
 - As a user with uncommitted tooling (`.env`, `node_modules`) in the current checkout, I want an option to copy ignored and/or untracked files into the new Worktree so it's immediately runnable.
-- As a user returning to a Project, I want existing worktrees — including those I created on the CLI outside touch-code — to show up automatically in the sidebar.
+- As a user returning to a Project, I want existing worktrees — including those I created on the CLI outside codans — to show up automatically in the sidebar.
 - As a user switching between features, I want clicking a Worktree in the sidebar to instantly activate its tabs, panes, and terminal state.
 - As a user finishing a feature, I want to **archive** a Worktree to hide it from the main list without deleting files, so I can come back if I need to re-run or re-reference it.
 - As a user cleaning up, I want to **remove** a Worktree — physically delete the directory and deregister the branch from git — with a safety check for uncommitted changes and a confirmation dialog.
-- As a user whose worktrees got deleted outside touch-code, I want a **prune** action that clears stale git references and orphaned sidebar rows.
+- As a user whose worktrees got deleted outside codans, I want a **prune** action that clears stale git references and orphaned sidebar rows.
 - As a user who made a mistake, I want to **unarchive** a previously archived Worktree and restore it to the main list.
 - As a user experimenting, I want to see the current branch, local change count, and last-modified time on each Worktree row so I can decide what to work on next.
 
@@ -44,13 +44,13 @@ This spec describes the user-facing behavior; the `git-wt` dependency is noted h
   - **Copy ignored files** (optional toggle, default off). Passes `--copy-ignored` to `git-wt`.
   - **Copy untracked files** (optional toggle, default off). Passes `--copy-untracked` to `git-wt`.
 - [ ] **Streaming progress.** When `copyIgnored` or `copyUntracked` is enabled, the sheet shows live output lines from `git-wt` so large copies don't look frozen.
-- [ ] **Worktree path derivation.** The on-disk path is computed as `<Project.worktreesDirectory>/<sanitized-branch-name>`, where `Project.worktreesDirectory` defaults to `~/.touch-code/repos/<project-name>/` (per [Project Management spec](project-management.md)). Branch-name sanitization: replace `/` with `-` and strip characters invalid on macOS filesystems.
+- [ ] **Worktree path derivation.** The on-disk path is computed as `<Project.worktreesDirectory>/<sanitized-branch-name>`, where `Project.worktreesDirectory` defaults to `~/.codans/repos/<project-name>/` (per [Project Management spec](project-management.md)). Branch-name sanitization: replace `/` with `-` and strip characters invalid on macOS filesystems.
 - [ ] **Post-create selection.** On success, the new Worktree is added to the sidebar, selected, and a single Tab with a single Pane opens in its directory.
 - [ ] **Create failure handling.** On failure, the sheet stays open with a human-readable error (branch exists / ref not found / filesystem error / `git fetch` failed); no partial state is left in `catalog.json`.
 
 #### List / discover
 
-- [ ] **Discover existing worktrees.** On Project add and on reconcile (app launch + window focus), query `git-wt ls --json` and merge results into the sidebar. Worktrees created on the CLI outside touch-code appear without user action.
+- [ ] **Discover existing worktrees.** On Project add and on reconcile (app launch + window focus), query `git-wt ls --json` and merge results into the sidebar. Worktrees created on the CLI outside codans appear without user action.
 - [ ] **Main-checkout present.** The Project's main checkout is always listed as the first Worktree row. It is the only Worktree that cannot be removed or archived from the app.
 - [ ] **Per-Worktree metadata.** Each row surfaces:
   - branch name (or detached HEAD indicator),
@@ -87,7 +87,7 @@ This spec describes the user-facing behavior; the `git-wt` dependency is noted h
   - the row disappears from the sidebar and from the archived list (if applicable),
   - any open Tabs/Panes of that Worktree are closed.
 - [ ] **Remove failure handling.** On failure, leave the Worktree in place with the git error message in a banner; never leave catalog and disk out of sync.
-- [ ] **Main checkout cannot be removed** from within touch-code; the context-menu entry is hidden for that row.
+- [ ] **Main checkout cannot be removed** from within codans; the context-menu entry is hidden for that row.
 
 #### Prune
 
@@ -96,7 +96,7 @@ This spec describes the user-facing behavior; the `git-wt` dependency is noted h
 #### Safety and reconciliation
 
 - [ ] **Uncommitted-changes check before remove.** Safe remove surfaces the specific reason ("3 uncommitted files in <path>") instead of a generic error, so users can make an informed choice before force-removing.
-- [ ] **External deletion resilience.** If a Worktree's directory is deleted outside touch-code, the reconcile on window focus marks the row as stale and offers a one-click "Prune" — never a crash, never a silent state mismatch.
+- [ ] **External deletion resilience.** If a Worktree's directory is deleted outside codans, the reconcile on window focus marks the row as stale and offers a one-click "Prune" — never a crash, never a silent state mismatch.
 
 ### Nice to Have
 
@@ -112,7 +112,7 @@ This spec describes the user-facing behavior; the `git-wt` dependency is noted h
 
 ### Create
 
-- **Given** a Project with `worktreesDirectory` at the default `~/.touch-code/repos/<project-name>/`, **when** the user creates a Worktree named `feature/login` from base `origin/main`, **then** a new directory appears at `~/.touch-code/repos/<project-name>/feature-login/`, a Worktree row is added to the sidebar, and a terminal opens in that directory.
+- **Given** a Project with `worktreesDirectory` at the default `~/.codans/repos/<project-name>/`, **when** the user creates a Worktree named `feature/login` from base `origin/main`, **then** a new directory appears at `~/.codans/repos/<project-name>/feature-login/`, a Worktree row is added to the sidebar, and a terminal opens in that directory.
 - **Given** the user types a branch name that already exists locally, **when** they attempt to create, **then** the Create button is disabled and an inline error reads "Branch 'x' already exists".
 - **Given** the user types an invalid branch name (e.g. with spaces), **when** the live validator runs, **then** the error "Branch name is invalid" appears and the Create button is disabled.
 - **Given** the user enables "Copy ignored" on a repo with a 500 MB `node_modules`, **when** creation runs, **then** the sheet streams progress lines and the Create button re-enables only on completion; the resulting Worktree has `node_modules/` in place.
@@ -120,7 +120,7 @@ This spec describes the user-facing behavior; the `git-wt` dependency is noted h
 
 ### List / switch
 
-- **Given** a user manually ran `git worktree add` outside touch-code, **when** they focus the touch-code window, **then** the new Worktree appears in the sidebar within the reconcile cycle.
+- **Given** a user manually ran `git worktree add` outside codans, **when** they focus the codans window, **then** the new Worktree appears in the sidebar within the reconcile cycle.
 - **Given** two Worktrees on the same branch at different paths, **when** they are listed, **then** each row shows the relative path so the user can disambiguate.
 - **Given** the user clicks an inactive Worktree row, **when** it becomes active, **then** the header branch label updates and the Worktree's saved Tabs/Panes restore.
 
@@ -138,14 +138,14 @@ This spec describes the user-facing behavior; the `git-wt` dependency is noted h
 
 ### Prune
 
-- **Given** a Worktree whose directory was deleted from disk outside touch-code, **when** the user triggers Prune on the Project, **then** the stale row disappears and a toast reports "Pruned 1 stale worktree".
+- **Given** a Worktree whose directory was deleted from disk outside codans, **when** the user triggers Prune on the Project, **then** the stale row disappears and a toast reports "Pruned 1 stale worktree".
 
 ## Scope
 
 ### In Scope
 
 - Create with branch name + base ref + optional fetch + optional copy-ignored/untracked.
-- Auto-discover worktrees created outside touch-code.
+- Auto-discover worktrees created outside codans.
 - Switch Worktree with full state restoration.
 - Archive / unarchive (soft, reversible).
 - Safe remove + force remove with explicit confirmation.
@@ -177,7 +177,7 @@ References for the follow-up design:
 
 - **supacode** — `GitClient` (`/Users/wanggang/dev/opensource/supacode/supacode/Clients/Git/GitClient.swift`) is the canonical shape for a `git-wt`-backed client, including `createWorktreeStream` for streaming progress and `worktrees(for:)` for listing. The `WorktreeCreationPromptFeature` reducer mirrors the sheet's validation flow almost one-to-one. supacode's archive feature in `RepositoriesFeature` (`archiveWorktreeConfirmed`, `unarchiveWorktree`, `ArchivedWorktreesDetailView`) is the archive UX we're borrowing.
 - **`git-wt` tool** — <https://github.com/khoi/git-wt>. Bundle as a submodule under `apps/mac/ThirdParty/git-wt/` (mirroring supacode's `Resources/git-wt`), invoked with `Bundle.main.url(forResource:)`.
-- **Existing code** — `HierarchyClient.createWorktree` and `HierarchyClient.removeWorktree` are data-only right now; they will be extended (or replaced) to run the actual git operations via a new `GitWorktreeClient`. `TouchCodeCore/Worktree.swift` will need a new `archived: Bool` field (default false; Codable `decodeIfPresent ?? false` to keep existing catalogs compatible).
+- **Existing code** — `HierarchyClient.createWorktree` and `HierarchyClient.removeWorktree` are data-only right now; they will be extended (or replaced) to run the actual git operations via a new `GitWorktreeClient`. `CodansCore/Worktree.swift` will need a new `archived: Bool` field (default false; Codable `decodeIfPresent ?? false` to keep existing catalogs compatible).
 
 ## Open Questions
 

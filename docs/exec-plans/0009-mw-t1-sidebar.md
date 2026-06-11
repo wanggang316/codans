@@ -8,13 +8,13 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this change, a user opening touch-code sees the new Sidebar layout from the spec: a toolbar with `+ Add Project`, the active Space's Projects as collapsible sections whose headers reveal `+` / `⋯` on hover, Worktree rows marked active with `●` and inactive with `○` plus a trailing dot when there are unread agent notifications, and a pinned Space footer that opens a popover for switching between Spaces or creating a new one. Right-clicking a Worktree gives them three real actions — Remove Worktree (with confirmation), Reveal in Finder, Open in default editor — each wired to a real side effect rather than a stub. Switching Spaces remembers where the user was: leaving Space A writes its current Worktree to `Space.lastActiveWorktreeID`, and returning to A restores that Worktree as selected (falling back to the Project's selected Worktree if the remembered one was removed while the user was away). Creating a new Space from the popover auto-generates a unique `"Untitled Space [N]"` name so the user can tell fresh Spaces apart before renaming.
+After this change, a user opening codans sees the new Sidebar layout from the spec: a toolbar with `+ Add Project`, the active Space's Projects as collapsible sections whose headers reveal `+` / `⋯` on hover, Worktree rows marked active with `●` and inactive with `○` plus a trailing dot when there are unread agent notifications, and a pinned Space footer that opens a popover for switching between Spaces or creating a new one. Right-clicking a Worktree gives them three real actions — Remove Worktree (with confirmation), Reveal in Finder, Open in default editor — each wired to a real side effect rather than a stub. Switching Spaces remembers where the user was: leaving Space A writes its current Worktree to `Space.lastActiveWorktreeID`, and returning to A restores that Worktree as selected (falling back to the Project's selected Worktree if the remembered one was removed while the user was away). Creating a new Space from the popover auto-generates a unique `"Untitled Space [N]"` name so the user can tell fresh Spaces apart before renaming.
 
 ## Progress
 
 - [ ] M1 — HierarchyManager.renameProject + HierarchyClient.renameProject / setSpaceLastActiveWorktree closures; unit coverage
 - [ ] M2 — FinderClient dependency (liveValue + testValue); registered on app startup
-- [ ] M3 — Catalog.panelWorktreeIndex() visibility bump to public; TouchCodeCore re-export confirmed via test
+- [ ] M3 — Catalog.panelWorktreeIndex() visibility bump to public; CodansCore re-export confirmed via test
 - [ ] M4 — nextUntitledSpaceName pure helper + 4-branch unit test
 - [ ] M5 — HierarchySidebarFeature state/action expansion (popover, sheet stubs, confirmation, context-menu actions, delegate) + reducer logic
 - [ ] M6 — HierarchySidebarFeature reducer tests (Space switch write/restore/stale, worktree-tap idempotence, context-menu, rename Project, new-Space creation)
@@ -56,19 +56,19 @@ Related documents:
 
 Key source files (full repository-relative paths):
 
-- `apps/mac/TouchCodeCore/Notifications/NotificationInboxAggregation.swift` — Pure aggregation helpers `unreadCount(forWorktree:in:)`, `hasUnread(forProject:in:)`, `hasUnread(forSpace:in:)`, `notifications(forWorktree:in:)` plus the `Catalog.panelWorktreeIndex()` / `paneIDs(inWorktree:)` resolvers. M3 promotes `panelWorktreeIndex()` from default-`internal` to `public`.
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — `@MainActor @Observable` owner of catalog mutations; exposes `createSpace`, `renameSpace`, `removeSpace`, `addProject`, `removeProject`, `selectProject`, `createWorktree`, `removeWorktree`, `selectWorktree`, `setSpaceLastActiveWorktree`, `setWorktreeGitViewerVisible`. M1 adds `renameProject(_:in:name:)`.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — TCA dependency-injection wrapper exposing closures that the reducers call. M1 adds `renameProject` and `setSpaceLastActiveWorktree` closures + their `liveValue` / `testValue` / `unimplemented(...)` entries (three edits per closure, mechanical).
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — Current reducer holding `expandedSpaceIDs` / `expandedProjectIDs` + row-tap forwarders. M4 adds the file-private `nextUntitledSpaceName(in:)` helper; M5 expands state/actions/reducer.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift` — Current SwiftUI view rendering two `DisclosureGroup` layers from `hierarchyManager.catalog`. M7 rewrites the body.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — TCA composition root. M8 removes `SidebarMode`, `state.sidebarMode`, `.sidebarModeChanged` action, `state.inbox`, the `.inbox` Scope, `case .inbox(...)` branches, and the `.onAppear` doc-comment referring to them. Adds the sidebar `.delegate` handler.
-- `apps/mac/touch-code/App/ContentView.swift` — Host view; already renders `HierarchySidebarView` unconditionally since T0. M7 adds `.environment(inboxStore)` so the sidebar view can read the inbox directly. M8-follower: delete `.onChange(of: store.selection)` references that depend on `state.sidebarMode` (none — T0 already cleared those).
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — App startup; registers dependency closures via `.withDependencies`. M2 adds the `FinderClient` registration; M7 passes `inboxStore` into `ContentView.environment(inboxStore)`.
-- `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift` — Existing editor-open reducer; sidebar delegate routes into its `.openRequested(editorID: nil, worktreePath: ..., projectID: ...)` action. No edits to this file.
-- `apps/mac/touch-code/Notifications/InboxStore.swift` — `@MainActor @Observable` store. No code edits; M7 references it through SwiftUI `@Environment(InboxStore.self)`.
-- `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` — Existing `TestStore` coverage using Swift Testing (`@Test`, `@MainActor`, `LockIsolated` recorders). M6 augments with the new reducer branches.
-- `apps/mac/touch-code/Tests/RootFeatureTests.swift` — Covers the Root reducer; M9 prunes any assertions that reference the deleted `SidebarMode` / `.sidebarModeChanged` / `state.inbox`.
-- `apps/mac/TouchCodeCoreTests/NotificationInboxAggregationTests.swift` — Existing pure-aggregation coverage. M9 adds one case mirroring the sidebar's concrete call pattern.
+- `apps/mac/CodansCore/Notifications/NotificationInboxAggregation.swift` — Pure aggregation helpers `unreadCount(forWorktree:in:)`, `hasUnread(forProject:in:)`, `hasUnread(forSpace:in:)`, `notifications(forWorktree:in:)` plus the `Catalog.panelWorktreeIndex()` / `paneIDs(inWorktree:)` resolvers. M3 promotes `panelWorktreeIndex()` from default-`internal` to `public`.
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — `@MainActor @Observable` owner of catalog mutations; exposes `createSpace`, `renameSpace`, `removeSpace`, `addProject`, `removeProject`, `selectProject`, `createWorktree`, `removeWorktree`, `selectWorktree`, `setSpaceLastActiveWorktree`, `setWorktreeGitViewerVisible`. M1 adds `renameProject(_:in:name:)`.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — TCA dependency-injection wrapper exposing closures that the reducers call. M1 adds `renameProject` and `setSpaceLastActiveWorktree` closures + their `liveValue` / `testValue` / `unimplemented(...)` entries (three edits per closure, mechanical).
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — Current reducer holding `expandedSpaceIDs` / `expandedProjectIDs` + row-tap forwarders. M4 adds the file-private `nextUntitledSpaceName(in:)` helper; M5 expands state/actions/reducer.
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift` — Current SwiftUI view rendering two `DisclosureGroup` layers from `hierarchyManager.catalog`. M7 rewrites the body.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — TCA composition root. M8 removes `SidebarMode`, `state.sidebarMode`, `.sidebarModeChanged` action, `state.inbox`, the `.inbox` Scope, `case .inbox(...)` branches, and the `.onAppear` doc-comment referring to them. Adds the sidebar `.delegate` handler.
+- `apps/mac/codans/App/ContentView.swift` — Host view; already renders `HierarchySidebarView` unconditionally since T0. M7 adds `.environment(inboxStore)` so the sidebar view can read the inbox directly. M8-follower: delete `.onChange(of: store.selection)` references that depend on `state.sidebarMode` (none — T0 already cleared those).
+- `apps/mac/codans/App/CodansApp.swift` — App startup; registers dependency closures via `.withDependencies`. M2 adds the `FinderClient` registration; M7 passes `inboxStore` into `ContentView.environment(inboxStore)`.
+- `apps/mac/codans/App/Features/Editor/EditorFeature.swift` — Existing editor-open reducer; sidebar delegate routes into its `.openRequested(editorID: nil, worktreePath: ..., projectID: ...)` action. No edits to this file.
+- `apps/mac/codans/Notifications/InboxStore.swift` — `@MainActor @Observable` store. No code edits; M7 references it through SwiftUI `@Environment(InboxStore.self)`.
+- `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift` — Existing `TestStore` coverage using Swift Testing (`@Test`, `@MainActor`, `LockIsolated` recorders). M6 augments with the new reducer branches.
+- `apps/mac/codans/Tests/RootFeatureTests.swift` — Covers the Root reducer; M9 prunes any assertions that reference the deleted `SidebarMode` / `.sidebarModeChanged` / `state.inbox`.
+- `apps/mac/CodansCoreTests/NotificationInboxAggregationTests.swift` — Existing pure-aggregation coverage. M9 adds one case mirroring the sidebar's concrete call pattern.
 
 Terms of art (defined where first used in this plan):
 
@@ -86,7 +86,7 @@ The work is organized as ten milestones, sliced vertically so each milestone end
 
 At the end of this milestone the feature reducer will be able to call `hierarchyClient.renameProject(projectID, inSpace: spaceID, name: "New")` and `hierarchyClient.setSpaceLastActiveWorktree(spaceID, worktreeID)` without touching `HierarchyManager` directly. The manager's existing mutation shape (`findProjectIndices` + `store.scheduleSave(catalog)`) extends cleanly.
 
-Edit `apps/mac/touch-code/Runtime/HierarchyManager.swift`. Add the following method in the `// MARK: - Project mutations` block, immediately after `func removeProject`:
+Edit `apps/mac/codans/Runtime/HierarchyManager.swift`. Add the following method in the `// MARK: - Project mutations` block, immediately after `func removeProject`:
 
 ```swift
 func renameProject(_ id: ProjectID, in spaceID: SpaceID, name: String) throws {
@@ -101,7 +101,7 @@ func renameProject(_ id: ProjectID, in spaceID: SpaceID, name: String) throws {
 
 No trimming / empty-string validation — the reducer does that before calling. Matches `renameSpace`'s contract (empty strings are the caller's problem).
 
-Edit `apps/mac/touch-code/App/Clients/HierarchyClient.swift`. Insert two closure properties between `removeProject` and `createWorktree` so the Project-mutation group stays contiguous:
+Edit `apps/mac/codans/App/Clients/HierarchyClient.swift`. Insert two closure properties between `removeProject` and `createWorktree` so the Project-mutation group stays contiguous:
 
 ```swift
 var renameProject: @MainActor @Sendable (
@@ -115,15 +115,15 @@ var setSpaceLastActiveWorktree: @MainActor @Sendable (
 
 In the `live(manager:)` initializer add the two corresponding forwarders. In both `liveValue` and `testValue` static properties add the matching stubs — `fatalError("HierarchyClient.liveValue not configured")` and `unimplemented("HierarchyClient.renameProject")` / `unimplemented("HierarchyClient.setSpaceLastActiveWorktree")`. Pattern is identical to existing entries; no new file.
 
-Extend `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` with one smoke test that `renameProject` forwarding works (will be superseded by reducer tests in M6 but serves as the dependency-shape check here). Skip until M6 if the reducer integration already covers it.
+Extend `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift` with one smoke test that `renameProject` forwarding works (will be superseded by reducer tests in M6 but serves as the dependency-shape check here). Skip until M6 if the reducer integration already covers it.
 
-Acceptance: build `touch-code` scheme succeeds; the new closures appear in the client definition and testValue; `xcodebuild test -scheme touch-code` still passes (no regressions).
+Acceptance: build `codans` scheme succeeds; the new closures appear in the client definition and testValue; `xcodebuild test -scheme codans` still passes (no regressions).
 
 ### Milestone 2: FinderClient dependency
 
 After this milestone the reducer can call `finderClient.reveal(path)` and the live implementation opens Finder to the given directory.
 
-Create `apps/mac/touch-code/App/Clients/FinderClient.swift`:
+Create `apps/mac/codans/App/Clients/FinderClient.swift`:
 
 ```swift
 import AppKit
@@ -160,15 +160,15 @@ extension DependencyValues {
 
 `liveValue` is a concrete bridge rather than the `fatalError(...)` pattern used by clients that need runtime wiring — `NSWorkspace.shared` is always available on macOS so we avoid unnecessary `.withDependencies` ceremony. Follows the "pattern matches need, not ritual" principle in CLAUDE.md.
 
-Add the new file to `apps/mac/Project.swift`'s `touch-code` target `buildableFolders` if the existing `touch-code/App/Clients` folder isn't already recursively included — check by running `xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -list` after `make mac-generate`. In practice the folder is buildable (see T0 adding `HierarchyClient` there without Project.swift edits); expect no change.
+Add the new file to `apps/mac/Project.swift`'s `codans` target `buildableFolders` if the existing `codans/App/Clients` folder isn't already recursively included — check by running `xcodebuild -workspace codans.xcworkspace -scheme codans -list` after `make mac-generate`. In practice the folder is buildable (see T0 adding `HierarchyClient` there without Project.swift edits); expect no change.
 
-Acceptance: `make mac-generate && xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code -configuration Debug build` succeeds.
+Acceptance: `make mac-generate && xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans -configuration Debug build` succeeds.
 
 ### Milestone 3: Catalog.panelWorktreeIndex() becomes public
 
 After this milestone `HierarchySidebarView` can build the `[PaneID: WorktreeID]` index once per render pass and feed it into inline aggregation code, amortizing the rebuild across Worktree and Project dots.
 
-Edit `apps/mac/TouchCodeCore/Notifications/NotificationInboxAggregation.swift`. Change:
+Edit `apps/mac/CodansCore/Notifications/NotificationInboxAggregation.swift`. Change:
 
 ```swift
 extension Catalog {
@@ -189,13 +189,13 @@ extension Catalog {
 
 The two resolver helpers `worktreeIDs(inProject:)` / `worktreeIDs(inSpace:)` stay `internal` — they're internal-only conveniences.
 
-Acceptance: `xcodebuild -scheme TouchCodeCore build` succeeds and `xcodebuild test -scheme TouchCodeCore` passes. Touching accessibility only.
+Acceptance: `xcodebuild -scheme CodansCore build` succeeds and `xcodebuild test -scheme CodansCore` passes. Touching accessibility only.
 
 ### Milestone 4: nextUntitledSpaceName pure helper
 
 After this milestone the sidebar reducer computes unique names for `+ New Space` without touching disk; four unit tests cover the naming rule.
 
-Append to `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` (file-private, below the reducer struct):
+Append to `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` (file-private, below the reducer struct):
 
 ```swift
 /// Returns the smallest-index unused "Untitled Space [N]" name given the
@@ -229,20 +229,20 @@ func nextUntitledSpaceName(in spaces: [Space]) -> String {
 }
 ```
 
-Add tests in `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` (same file, new `@Suite` or top-level `@Test`s; match existing style with standalone `@Test func xxx()` declarations):
+Add tests in `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift` (same file, new `@Suite` or top-level `@Test`s; match existing style with standalone `@Test func xxx()` declarations):
 
 1. Empty catalog → `"Untitled Space"`.
 2. One `Space(name: "Untitled Space")` → `"Untitled Space 2"`.
 3. `"Untitled Space"` + `"Untitled Space 3"` → `"Untitled Space 2"` (hole fill).
 4. `"Untitled Space 2"` only, no bare → `"Untitled Space"` (bare wins).
 
-Acceptance: `xcodebuild test -scheme touch-code` runs and the four new tests pass.
+Acceptance: `xcodebuild test -scheme codans` runs and the four new tests pass.
 
 ### Milestone 5: HierarchySidebarFeature reducer expansion
 
 After this milestone the reducer exposes all the new state and actions the view needs, and its reducer body implements every branch — Space switch, worktree-tap with dedup, context menu paths, Project mutations, stub-sheet presentation, Space popover, and delegate emission. No view changes yet.
 
-Edit `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`. Add the new struct types (`AddProjectSheet`, `AddWorktreeSheet`, `RenameProjectSheet`, `PendingWorktreeRemoval`) as top-level declarations inside the same file (keeps them colocated with the feature they serve). Extend `State` with the five new properties from the design doc §State Shape. Add the new `Action` cases from §Action Surface, including `Delegate` and its two cases.
+Edit `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`. Add the new struct types (`AddProjectSheet`, `AddWorktreeSheet`, `RenameProjectSheet`, `PendingWorktreeRemoval`) as top-level declarations inside the same file (keeps them colocated with the feature they serve). Extend `State` with the five new properties from the design doc §State Shape. Add the new `Action` cases from §Action Surface, including `Delegate` and its two cases.
 
 The reducer keeps only `@Dependency(HierarchyClient.self)`. `FinderClient` and `EditorClient` are NOT injected here — side effects for Reveal in Finder and Open in default editor route through `.delegate` to `RootFeature`, which holds those dependencies.
 
@@ -275,13 +275,13 @@ Implement each action branch in the Reduce block. Guidance per branch:
 
 Net file delta: one ~250-line feature file becomes a ~450-line one. No test regressions; existing test file still compiles against the expanded `Action` enum because no existing cases are removed.
 
-Acceptance: build `touch-code` scheme green; existing tests in `HierarchySidebarFeatureTests` still pass (no new assertions yet).
+Acceptance: build `codans` scheme green; existing tests in `HierarchySidebarFeatureTests` still pass (no new assertions yet).
 
 ### Milestone 6: HierarchySidebarFeature reducer tests
 
 After this milestone TestStore drives every new action path and asserts correct dependency calls.
 
-Augment `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` with the seven test cases in the design doc §Testing strategy:
+Augment `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift` with the seven test cases in the design doc §Testing strategy:
 
 1. `spaceSwitchWritesOldAndRestoresNew` — catalog fixture with Space A (W1 selected) and Space B (`lastActiveWorktreeID = W4`); `spaceRowTapped(B)` triggers a recorder chain: `setSpaceLastActiveWorktree(A, W1)`, `selectSpace(B)`, `selectWorktree(W4, Q, B)`.
 2. `spaceSwitchWithStaleLastActiveClearsAndFallsBack` — Space B's `lastActiveWorktreeID` is a fresh random `WorktreeID` not in the catalog; assert `setSpaceLastActiveWorktree(B, nil)` is called and `selectWorktree` is NOT called (`Project.selectedWorktreeID` path handles the rest via the existing snapshot observation).
@@ -296,13 +296,13 @@ Augment `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` with the 
 
 Each test follows the existing Swift Testing pattern (`@MainActor`, `@Test func xxx() async`, `LockIsolated<...>()` recorders, `withDependencies` overrides). `hierarchyClient.snapshot` gets overridden to return a hand-crafted `Catalog` per case; all other closures are overridden with recorders as needed.
 
-Acceptance: `xcodebuild test -scheme touch-code` runs and all seven new tests pass in addition to the existing four.
+Acceptance: `xcodebuild test -scheme codans` runs and all seven new tests pass in addition to the existing four.
 
 ### Milestone 7: HierarchySidebarView rewrite
 
 After this milestone the sidebar UI matches the spec. This is the largest single file change but mostly mechanical SwiftUI composition.
 
-Rewrite `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift`. The target structure is the one laid out in the design doc §View Composition:
+Rewrite `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift`. The target structure is the one laid out in the design doc §View Composition:
 
 ```
 VStack(spacing: 0) {
@@ -340,23 +340,23 @@ Specifics to get right:
 11. Rename-Project sheet: `TextField("Project name", text: <binding>)` bound via `Binding(get: { store.renameProjectSheet?.draft ?? "" }, set: { store.send(.projectRenameDraftChanged($0)) })` + `HStack { Button("Cancel") { store.send(.projectRenameCancelled) }; Button("Rename") { store.send(.projectRenameConfirmed) }.keyboardShortcut(.defaultAction).disabled(emptyDraft) }`.
 12. Confirmation dialogs: use `.confirmationDialog("Remove Worktree", isPresented: ...)` with `Button("Remove", role: .destructive) { store.send(.worktreeRemoveConfirmed) }`. Bind `isPresented` to a computed `Binding` over `state.pendingWorktreeRemoval != nil`.
 
-Commit in M7 also updates `apps/mac/touch-code/App/ContentView.swift` with:
+Commit in M7 also updates `apps/mac/codans/App/ContentView.swift` with:
 ```swift
 .environment(hierarchyManager)
 .environment(settingsStore)
 .environment(inboxStore)
 ```
-and threads `inboxStore` down from `TouchCodeApp.bringUp()` where `ContentView` is instantiated. Check `TouchCodeApp.swift` for the instantiation site — T0 already wires `hierarchyManager` and `settingsStore` the same way; follow the pattern.
+and threads `inboxStore` down from `CodansApp.bringUp()` where `ContentView` is instantiated. Check `CodansApp.swift` for the instantiation site — T0 already wires `hierarchyManager` and `settingsStore` the same way; follow the pattern.
 
 Add three `#Preview` blocks at the bottom of the file (empty Space, populated with unread, Space popover open). These don't need to assert anything; they serve as smoke previews and exercise the view's dependency on an `InboxStore` fixture.
 
-Acceptance: `make mac-generate && make mac-build` succeeds. Running the app shows the new sidebar layout. `xcodebuild test -scheme touch-code` still passes.
+Acceptance: `make mac-generate && make mac-build` succeeds. Running the app shows the new sidebar layout. `xcodebuild test -scheme codans` still passes.
 
 ### Milestone 8: RootFeature delegate routing + SidebarMode deletion
 
 After this milestone the sidebar's delegate actions produce real effects and all T0-era dead plumbing is gone.
 
-Edit `apps/mac/touch-code/App/Features/Root/RootFeature.swift`:
+Edit `apps/mac/codans/App/Features/Root/RootFeature.swift`:
 
 1. Delete `nonisolated enum SidebarMode: String, Equatable, CaseIterable, Sendable { case hierarchy; case inbox }` and the long comment block preceding it (lines 15-26).
 2. Remove `var sidebarMode: SidebarMode = .hierarchy` from `State`.
@@ -369,9 +369,9 @@ Edit `apps/mac/touch-code/App/Features/Root/RootFeature.swift`:
 9. Add `@Dependency(FinderClient.self) private var finderClient` under the existing dependency declarations.
 10. Add a new switch branch catching the sidebar delegate. It's a nested case — `case .sidebar(.delegate(let delegateAction)):` — so the existing `case .sidebar:` catch-all (which returns `.none`) must come *after* this more-specific one.
 
-    `EditorFeature.Action.openRequested(editorID:worktreePath:projectID:)` takes a **non-optional** `EditorID` (see `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift:58`). The sidebar delegate carries no editor ID — "Open in default editor" implies "resolve the chain first". We inline the resolution in the delegate handler. T2 will later hoist this into an `EditorFeature.resolveDefault(...)` helper when it rebases; for now, keep it inline with a one-line comment pointing to that follow-up.
+    `EditorFeature.Action.openRequested(editorID:worktreePath:projectID:)` takes a **non-optional** `EditorID` (see `apps/mac/codans/App/Features/Editor/EditorFeature.swift:58`). The sidebar delegate carries no editor ID — "Open in default editor" implies "resolve the chain first". We inline the resolution in the delegate handler. T2 will later hoist this into an `EditorFeature.resolveDefault(...)` helper when it rebases; for now, keep it inline with a one-line comment pointing to that follow-up.
 
-    Resolution chain (mirrors `WorktreeHeaderOpenButton.currentDefaultLabel` at `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderOpenButton.swift:106`): per-Project `defaultEditor` → `state.editor.globalDefault` → Finder. Each tier is accepted only if a matching descriptor is in `state.editor.descriptors` and reports `isInstalled == true`; otherwise fall through.
+    Resolution chain (mirrors `WorktreeHeaderOpenButton.currentDefaultLabel` at `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderOpenButton.swift:106`): per-Project `defaultEditor` → `state.editor.globalDefault` → Finder. Each tier is accepted only if a matching descriptor is in `state.editor.descriptors` and reports `isInstalled == true`; otherwise fall through.
 
     ```swift
     case .sidebar(.delegate(.openInDefaultEditor(let path, let projectID))):
@@ -413,7 +413,7 @@ Edit `apps/mac/touch-code/App/Features/Root/RootFeature.swift`:
 
     This branch depends on `state.editor.descriptors` and `state.editor.globalDefault` being populated. Both are hydrated by `EditorFeature.onAppear`, which `WorktreeHeaderOpenButton.task` dispatches lazily on first view mount. If the user triggers the context menu before the header has ever been rendered, `descriptors` will be empty and the resolution chain falls through to `EditorRegistry.finderID` — always installed, safe. M8 originally added `return .send(.editor(.onAppear))` to `RootFeature.onLaunch`'s `.merge(...)` to prime the cache eagerly, but **this was reverted in M9** (see Decision Log D11): the live `EditorService.describe()` path runs `MainActor.assumeIsolated { ... }` on a background Task, and under the xctest host that assertion trips `dispatch_assert_queue_fail` (Signal 5) during test bootstrap before any test runs. The `finderID` fallback covers the worst-case context-menu-before-header-render path; investigating a MainActor-safe way to prime the cache (e.g. await-based refresh off the view's `.task`) is a follow-up.
 
-    Add the `EditorRegistry.finderID` constant in `apps/mac/touch-code/App/Clients/Editor/EditorRegistry.swift`:
+    Add the `EditorRegistry.finderID` constant in `apps/mac/codans/App/Clients/Editor/EditorRegistry.swift`:
 
     ```swift
     extension EditorRegistry {
@@ -423,21 +423,21 @@ Edit `apps/mac/touch-code/App/Features/Root/RootFeature.swift`:
     }
     ```
 
-Edit `apps/mac/touch-code/App/ContentView.swift`: no structural change is needed for M8 — `ContentView` didn't read `sidebarMode` or `state.inbox` directly. Re-verify by searching the file after the RootFeature edits and fixing any dangling reference.
+Edit `apps/mac/codans/App/ContentView.swift`: no structural change is needed for M8 — `ContentView` didn't read `sidebarMode` or `state.inbox` directly. Re-verify by searching the file after the RootFeature edits and fixing any dangling reference.
 
-`TouchCodeApp.swift` currently passes `.finderClient` nowhere; the `DependencyKey.liveValue` default is non-fatal (it's a concrete `NSWorkspace` bridge), so no `.withDependencies { $0.finderClient = ... }` line is strictly required. Leave it as the dependency-system default. Document this with a one-line comment near the other client registrations so future maintainers can see the intentional omission.
+`CodansApp.swift` currently passes `.finderClient` nowhere; the `DependencyKey.liveValue` default is non-fatal (it's a concrete `NSWorkspace` bridge), so no `.withDependencies { $0.finderClient = ... }` line is strictly required. Leave it as the dependency-system default. Document this with a one-line comment near the other client registrations so future maintainers can see the intentional omission.
 
-Acceptance: full workspace build succeeds; `xcodebuild test -scheme touch-code` passes.
+Acceptance: full workspace build succeeds; `xcodebuild test -scheme codans` passes.
 
 ### Milestone 9: Collateral test sweep
 
 After this milestone every test target builds and passes; no references to deleted RootFeature surface area remain.
 
-Edit `apps/mac/touch-code/Tests/RootFeatureTests.swift`: delete any `@Test` that references `sidebarMode`, `.sidebarModeChanged`, `state.inbox`, or `.inbox(...)` actions. Keep any tests that cover other Root reducer behavior (onLaunch streams, selectionChanged → gitViewer forward, inspectorVisibilityToggled). Search by `grep -n "sidebarMode\|sidebar.*Mode\|\\.inbox\\|state.inbox" apps/mac/touch-code/Tests/RootFeatureTests.swift` and remove one test at a time, re-running the scheme after each deletion to confirm no other tests rely on a shared fixture.
+Edit `apps/mac/codans/Tests/RootFeatureTests.swift`: delete any `@Test` that references `sidebarMode`, `.sidebarModeChanged`, `state.inbox`, or `.inbox(...)` actions. Keep any tests that cover other Root reducer behavior (onLaunch streams, selectionChanged → gitViewer forward, inspectorVisibilityToggled). Search by `grep -n "sidebarMode\|sidebar.*Mode\|\\.inbox\\|state.inbox" apps/mac/codans/Tests/RootFeatureTests.swift` and remove one test at a time, re-running the scheme after each deletion to confirm no other tests rely on a shared fixture.
 
-Edit `apps/mac/TouchCodeCoreTests/NotificationInboxAggregationTests.swift`: add one new `@Test` `aggregationMatchesSidebarRenderCallPattern` that rebuilds the `panelWorktreeIndex` once from the catalog fixture and then calls `unreadCount(forWorktree:)` + `hasUnread(forProject:)` for every Worktree / Project in the fixture, asserting the counts match an expected tuple. Serves as a canary that the public-visibility bump actually works through the module boundary.
+Edit `apps/mac/CodansCoreTests/NotificationInboxAggregationTests.swift`: add one new `@Test` `aggregationMatchesSidebarRenderCallPattern` that rebuilds the `panelWorktreeIndex` once from the catalog fixture and then calls `unreadCount(forWorktree:)` + `hasUnread(forProject:)` for every Worktree / Project in the fixture, asserting the counts match an expected tuple. Serves as a canary that the public-visibility bump actually works through the module boundary.
 
-Acceptance: all three schemes green (`TouchCodeCore`, `touch-code`, `tc`). `make mac-lint` passes.
+Acceptance: all three schemes green (`CodansCore`, `codans`, `codans`). `make mac-lint` passes.
 
 ### Milestone 10: Verify + PR
 
@@ -447,11 +447,11 @@ After this milestone the branch is pushed and a PR is open against `feature/main
 2. Run `make mac-lint` (must be clean). If T0-era `async_without_await` suppressions are still in place that's fine.
 3. Run the three test schemes in parallel:
    ```
-   xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme TouchCodeCore -configuration Debug
-   xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code -configuration Debug
-   xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme tcKit -configuration Debug
+   xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme CodansCore -configuration Debug
+   xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans -configuration Debug
+   xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme CodansKit -configuration Debug
    ```
-4. Smoke-test the app manually: `make mac-run-app`. Verify by hand: Space footer popover opens, clicking `+ New Space` creates `"Untitled Space 2"` the second time, switching between two Spaces (each with a Worktree) restores the last-active Worktree, right-click a Worktree → Remove shows confirmation, Reveal opens Finder, Open in default editor opens the configured editor. Unread dots: write a test notification via `tc` CLI or by manipulating the inbox file directly — acceptable to skip this if the bell integration is deferred to T2's own verification.
+4. Smoke-test the app manually: `make mac-run-app`. Verify by hand: Space footer popover opens, clicking `+ New Space` creates `"Untitled Space 2"` the second time, switching between two Spaces (each with a Worktree) restores the last-active Worktree, right-click a Worktree → Remove shows confirmation, Reveal opens Finder, Open in default editor opens the configured editor. Unread dots: write a test notification via `codans` CLI or by manipulating the inbox file directly — acceptable to skip this if the bell integration is deferred to T2's own verification.
 5. Stage and `/commit` any last changes per milestone (if not already committed each milestone).
 6. `git push -u origin feat/mw-sidebar`.
 7. `gh pr create --base feature/main-window --title "T1: sidebar redesign + Space switcher" --body-file <path>` — body references the design doc and this ExecPlan, lists T0 contracts consumed (Space.lastActiveWorktreeID, notification aggregation helpers, HierarchyManager setters), lists integration points with T2/T3 (none; HierarchySidebarView is isolated), and includes the verification transcript.
@@ -459,19 +459,19 @@ After this milestone the branch is pushed and a PR is open against `feature/main
 
 ## Concrete Steps
 
-Run from the worktree root `/Users/wanggang/.worktree/repos/touch-code/feat/mw-sidebar`.
+Run from the worktree root `/Users/wanggang/.worktree/repos/codans/feat/mw-sidebar`.
 
 Baseline verification before starting (to catch pre-existing breakage):
 ```
 make mac-generate
 make mac-lint
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code -configuration Debug -quiet
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans -configuration Debug -quiet
 ```
-Expected: lint clean (T0 suppressions are in place); `touch-code` scheme passes with 11 `HierarchySidebarFeature` tests.
+Expected: lint clean (T0 suppressions are in place); `codans` scheme passes with 11 `HierarchySidebarFeature` tests.
 
 After each milestone:
 ```
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme <scheme> -configuration Debug -quiet
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme <scheme> -configuration Debug -quiet
 ```
 Expected output tail: `** TEST SUCCEEDED **`.
 
@@ -498,9 +498,9 @@ Coordination:
 
 Verification:
 - make mac-lint                     → clean
-- xcodebuild test ... TouchCodeCore → ** TEST SUCCEEDED **
-- xcodebuild test ... touch-code    → ** TEST SUCCEEDED **
-- xcodebuild test ... tcKit         → ** TEST SUCCEEDED **
+- xcodebuild test ... CodansCore → ** TEST SUCCEEDED **
+- xcodebuild test ... codans    → ** TEST SUCCEEDED **
+- xcodebuild test ... CodansKit         → ** TEST SUCCEEDED **
 
 Manual walkthrough: [fill in from M10 step 4].
 ```
@@ -511,8 +511,8 @@ The feature is accepted iff **all** of the following hold:
 
 1. `make mac-lint` exits 0 with no new findings relative to T0's baseline.
 2. Each of the three test schemes ends with `** TEST SUCCEEDED **`.
-3. `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` contains at least eleven tests (pre-existing four + seven new), all passing.
-4. `apps/mac/TouchCodeCoreTests/NotificationInboxAggregationTests.swift` gains one new test and it passes.
+3. `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift` contains at least eleven tests (pre-existing four + seven new), all passing.
+4. `apps/mac/CodansCoreTests/NotificationInboxAggregationTests.swift` gains one new test and it passes.
 5. Manual walkthrough (scripted in M10 step 4) completes without regression. Specifically:
    - Creating a second new Space yields a name `"Untitled Space 2"` distinct from the first.
    - Switching between two Spaces, each holding a distinct selected Worktree, restores the right Worktree on return.
@@ -542,13 +542,13 @@ The worktree's base branch is `feature/main-window` — PRs target it, not `main
 
 ## Interfaces and Dependencies
 
-In `apps/mac/touch-code/Runtime/HierarchyManager.swift`, the following method must exist:
+In `apps/mac/codans/Runtime/HierarchyManager.swift`, the following method must exist:
 
 ```swift
 func renameProject(_ id: ProjectID, in spaceID: SpaceID, name: String) throws
 ```
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`, the struct gains:
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`, the struct gains:
 
 ```swift
 var renameProject: @MainActor @Sendable (
@@ -562,7 +562,7 @@ var setSpaceLastActiveWorktree: @MainActor @Sendable (
 
 with matching entries in `liveValue`, `testValue`, and `live(manager:)`.
 
-In `apps/mac/touch-code/App/Clients/FinderClient.swift` (new file):
+In `apps/mac/codans/App/Clients/FinderClient.swift` (new file):
 
 ```swift
 nonisolated struct FinderClient: Sendable {
@@ -572,7 +572,7 @@ nonisolated struct FinderClient: Sendable {
 
 with `DependencyKey.liveValue` bound to `NSWorkspace.activateFileViewerSelecting` and `testValue` bound to `unimplemented("FinderClient.reveal")`. Exposed via `DependencyValues.finderClient`.
 
-In `apps/mac/TouchCodeCore/Notifications/NotificationInboxAggregation.swift`:
+In `apps/mac/CodansCore/Notifications/NotificationInboxAggregation.swift`:
 
 ```swift
 extension Catalog {
@@ -580,7 +580,7 @@ extension Catalog {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`, at file scope:
+In `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`, at file scope:
 
 ```swift
 // File-private pure helper. Exposed to tests via @testable import.
@@ -591,14 +591,14 @@ The reducer's `State` must gain `isSpacePopoverPresented`, `addProjectSheet`, `a
 
 The reducer's `Action` must gain every case listed in §Action Surface of the design doc plus the Project-remove-confirmation pair. The nested `enum Delegate: Equatable` has two cases: `openInDefaultEditor(worktreePath: String, projectID: ProjectID?)` and `revealInFinder(path: String)`.
 
-In `apps/mac/touch-code/App/Features/Root/RootFeature.swift`:
+In `apps/mac/codans/App/Features/Root/RootFeature.swift`:
 
 - The `SidebarMode` enum, `state.sidebarMode`, `state.inbox`, the `.inbox` `Scope`, `case sidebarModeChanged`, and `case inbox(...)` branches are **removed**.
 - A `@Dependency(FinderClient.self)` is added.
 - Two new reducer branches handle `.sidebar(.delegate(.openInDefaultEditor(...)))` and `.sidebar(.delegate(.revealInFinder(...)))`. The open-in-editor branch inlines the per-Project-override → global-default → `EditorRegistry.finderID` resolution chain and dispatches `.editor(.openRequested(editorID: resolved, ...))` — `editorID` is non-optional (D9).
 - `.onLaunch` was planned to gain a `.send(.editor(.onAppear))` in its `.merge(...)` to prime `state.editor.descriptors` / `.globalDefault` before the sidebar's first context-menu invocation. **Reverted in M9** due to an xctest-host crash on `LiveEditorService.describe`'s `MainActor.assumeIsolated` from a background Task (see D11). The sidebar's context-menu "Open in default editor" path already tolerates an empty descriptor cache by falling through to `EditorRegistry.finderID` (always installed). Follow-up: investigate a MainActor-safe eager prime (e.g. dispatched from the view's `.task` rather than the reducer's launch effect).
 
-In `apps/mac/touch-code/App/Clients/Editor/EditorRegistry.swift`, the extension adds:
+In `apps/mac/codans/App/Clients/Editor/EditorRegistry.swift`, the extension adds:
 
 ```swift
 extension EditorRegistry {
@@ -606,4 +606,4 @@ extension EditorRegistry {
 }
 ```
 
-In `apps/mac/touch-code/App/ContentView.swift`, `.environment(inboxStore)` is added to the modifier chain attached to `NavigationSplitView`. `TouchCodeApp.bringUp()` passes `inboxStore` into the `ContentView(...)` initializer alongside `hierarchyManager` and `settingsStore` — the `ContentView` init signature gains an `inboxStore: InboxStore` parameter.
+In `apps/mac/codans/App/ContentView.swift`, `.environment(inboxStore)` is added to the modifier chain attached to `NavigationSplitView`. `CodansApp.bringUp()` passes `inboxStore` into the `ContentView(...)` initializer alongside `hierarchyManager` and `settingsStore` — the `ContentView` init signature gains an `inboxStore: InboxStore` parameter.

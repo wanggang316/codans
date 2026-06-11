@@ -57,7 +57,7 @@ Each step is a single `/commit`. Commits land on
   `uucode-0.2.0`). The T1 workaround (copy `apps/mac/.build/ghostty/`
   from a sibling worktree) is disallowed for this agent by master's
   hard constraint. Resolution: copy from the main repo checkout at
-  `~/dev/00/touch-code/apps/mac/.build/ghostty/` (not a sub-agent
+  `~/dev/00/codans/apps/mac/.build/ghostty/` (not a sub-agent
   worktree; fingerprint matches). Logged under Outcomes for future
   T3/T4 waves.
 - **No other surprises.** Code edits mapped 1:1 to the plan; all four
@@ -79,7 +79,7 @@ Each step is a single `/commit`. Commits land on
 
 ## Outcomes & Retrospective
 
-**Automated coverage — all green.** `xcodebuild ... -scheme touch-code
+**Automated coverage — all green.** `xcodebuild ... -scheme codans
 test` runs 540 tests across 74 suites post-T2 (baseline 536 + 4 new
 coordinator tests), all PASS. `make mac-lint` zero violations after the
 Step-4 async_without_await fix. `make mac-format` is idempotent on a
@@ -141,7 +141,7 @@ mutate API, `NotificationSettingsReader` protocol,
 cache-copy step (T1 Surprise) repeats in this worktree: `tuist
 generate` fails on the ghostty `uucode-0.2.0` HTTP 400 unless the
 prebuilt `apps/mac/.build/ghostty/` tree is seeded from the main repo
-checkout at `~/dev/00/touch-code/apps/mac/.build/ghostty/`. The
+checkout at `~/dev/00/codans/apps/mac/.build/ghostty/`. The
 sibling-worktree copy variant in T1 is forbidden here per master's
 hard constraint ("不得触及其他子 Agent 的 worktree"); the main-repo
 path respects the constraint and has a matching fingerprint.
@@ -166,30 +166,30 @@ Related documents:
 
 Modified (logic change):
 
-- `apps/mac/touch-code/Notifications/OSNotifier.swift` — protocol
+- `apps/mac/codans/Notifications/OSNotifier.swift` — protocol
   signature + adapter body.
-- `apps/mac/touch-code/Notifications/NotificationCoordinator.swift` —
+- `apps/mac/codans/Notifications/NotificationCoordinator.swift` —
   `handle(output:)` gates + `consumeUnreadPublisher` source swap +
   new internal `handleUnread(_:)` test hook.
-- `apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift` —
+- `apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift` —
   body replace (placeholder → real UI).
 
 Modified (tests):
 
-- `apps/mac/touch-code/Tests/NotificationsTests/NotificationCoordinatorTests.swift` —
+- `apps/mac/codans/Tests/NotificationsTests/NotificationCoordinatorTests.swift` —
   `Self.make` gains four optional params; `MockOSNotifier.post` captures
   `playSound`; four new `@Test` functions.
 
 Unchanged (read-only, dependency surfaces):
 
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` —
   reader conformance already ships all four fields.
-- `apps/mac/touch-code/App/Features/Settings/NotificationSettingsReader.swift` —
+- `apps/mac/codans/App/Features/Settings/NotificationSettingsReader.swift` —
   protocol frozen in T1; no changes.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsWindowView.swift` —
   detail switch frozen; `SettingsGeneralView` precedent for
   `settingsStore:` injection already routes the instance to the pane.
-- `apps/mac/TouchCodeCore/Settings/NotificationsSettings.swift` —
+- `apps/mac/CodansCore/Settings/NotificationsSettings.swift` —
   all four UI toggles already declared in T1.
 
 ### Dependencies / order
@@ -213,12 +213,12 @@ existing?" triage later.
 
 ```
 make mac-generate
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 make mac-lint
 ```
 
-Also `xcodebuild -scheme TouchCodeCore` if TouchCodeCoreTests touch
+Also `xcodebuild -scheme CodansCore` if CodansCoreTests touch
 any notification-adjacent file (spot-check only).
 
 **Verification.** All three commands finish with `** TEST SUCCEEDED **`
@@ -231,11 +231,11 @@ surface tiny so Step 2 is "pure wiring" and reviewable independently.
 
 **Files touched.**
 
-- `apps/mac/touch-code/Notifications/OSNotifier.swift`
-- `apps/mac/touch-code/Notifications/NotificationCoordinator.swift`
+- `apps/mac/codans/Notifications/OSNotifier.swift`
+- `apps/mac/codans/Notifications/NotificationCoordinator.swift`
   (one call-site update: pass `playSound: true` as a stub literal —
   real wiring comes in Step 2)
-- `apps/mac/touch-code/Tests/NotificationsTests/NotificationCoordinatorTests.swift`
+- `apps/mac/codans/Tests/NotificationsTests/NotificationCoordinatorTests.swift`
   (`MockOSNotifier.post` adds `playSound` capture — see below)
 
 **Concrete edits.**
@@ -281,8 +281,8 @@ design promised is now honoured, and each is guarded by a new test.
 
 **Files touched.**
 
-- `apps/mac/touch-code/Notifications/NotificationCoordinator.swift`
-- `apps/mac/touch-code/Tests/NotificationsTests/NotificationCoordinatorTests.swift`
+- `apps/mac/codans/Notifications/NotificationCoordinator.swift`
+- `apps/mac/codans/Tests/NotificationsTests/NotificationCoordinatorTests.swift`
 
 **Concrete edits — coordinator.**
 
@@ -421,7 +421,7 @@ Body (HEREDOC):
 > behaviour).
 
 **Verification.**
-`xcodebuild -scheme touch-code ... test` green, all four new tests pass,
+`xcodebuild -scheme codans ... test` green, all four new tests pass,
 no existing test regresses. `make mac-lint` / `make mac-format` clean.
 
 ### Step 3 — Replace `NotificationsSettingsView` body
@@ -432,8 +432,8 @@ Step 2.
 
 **Files touched.**
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift`
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsWindowView.swift`
   (pass `settingsStore:` to the pane — matches
   `SettingsGeneralView(store:settingsStore:)`)
 
@@ -492,7 +492,7 @@ Alert modifier on the pane root:
   Button("Open System Settings") { openSystemNotificationsPreferences() }
   Button("Cancel", role: .cancel) { }
 } message: {
-  Text("macOS is blocking notifications for touch-code. Open System "
+  Text("macOS is blocking notifications for codans. Open System "
      + "Settings and allow notifications, then return here.")
 }
 ```
@@ -517,7 +517,7 @@ private func openSystemNotificationsPreferences() {
     "x-apple.systempreferences:com.apple.preference.notifications")
   if let anchored, NSWorkspace.shared.open(anchored) { return }
   if let bare, NSWorkspace.shared.open(bare) { return }
-  Logger(subsystem: "com.touch-code.ui", category: "notifications-pane")
+  Logger(subsystem: "com.gumpw.codans.ui", category: "notifications-pane")
     .error("Could not open System Settings notifications pane; both URLs rejected.")
 }
 ```
@@ -551,11 +551,11 @@ and log the outcome. Each item gets a PASS / FAIL marker in
 **Manual checklist (run against a Debug build launched via `make mac-run-app`).**
 
 - **AC1 — Permission denied alert.** Pre-condition: macOS Notifications
-  for touch-code set to "Don't allow". Open Settings → Notifications →
+  for codans set to "Don't allow". Open Settings → Notifications →
   flip "System notifications" on. Expect: modal alert "Notifications
   blocked" with "Open System Settings" + "Cancel". Click "Open System
   Settings". Expect: macOS System Settings opens at Notifications
-  (ideally anchored to touch-code, otherwise at the top-level
+  (ideally anchored to codans, otherwise at the top-level
   Notifications pane — both PASS).
 
 - **AC2 — In-app off suppresses in-app surface.** Toggle In-app
@@ -565,7 +565,7 @@ and log the outcome. Each item gets a PASS / FAIL marker in
   badge.
 
 - **AC3 — Sound + System both on, permission granted.** Pre-condition:
-  System Settings → Notifications → touch-code = Allow. Toggle Sound +
+  System Settings → Notifications → codans = Allow. Toggle Sound +
   System on. Trigger a completed transition. Expect: macOS banner
   appears with default notification sound.
 
@@ -575,7 +575,7 @@ and log the outcome. Each item gets a PASS / FAIL marker in
   (regardless of unread count).
 
 - **AC5 — Reveal rules.json.** Click "Reveal rules.json in Finder".
-  Expect: Finder opens `~/.config/touch-code/detection-rules.json`
+  Expect: Finder opens `~/.config/codans/detection-rules.json`
   selected. If the file was missing pre-click, it is created from the
   bundled defaults before reveal (no "Finder opened on nothing" mode).
 
@@ -588,7 +588,7 @@ separately from feature commits.
 
 ```
 make mac-generate
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 make mac-lint
 make mac-format  # idempotent check — should be a no-op by now
@@ -657,7 +657,7 @@ convention (matches T1's history).
 Before the Final step, every line below must be green:
 
 - `make mac-generate` succeeds (Tuist still clean).
-- `xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+- `xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS'`
   ⇒ `** TEST SUCCEEDED **`.
 - `make mac-lint` — zero violations.

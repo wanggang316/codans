@@ -35,7 +35,7 @@ branch has been rebased onto the post-T3 `feature/settings-base` tip.
 - [ ] Step 0 — Wait-for-T3 gate (no code; master handshake)
 - [ ] Step 1 — `HierarchyManager.setWorktreesDirectory` + `findProjectAnySpace` + `setDefaultEditorAnySpace` sibling + `HierarchyManagerTests` extension
 - [ ] Step 2 — `HierarchyClient` + 2 closures (live + test + fatalError stubs) + `HierarchyClientTests` extension
-- [ ] Step 3 — `HookConfigClient` TCA dependency + live wiring in `TouchCodeApp`
+- [ ] Step 3 — `HookConfigClient` TCA dependency + live wiring in `CodansApp`
 - [ ] Step 4 — `RepositorySettingsFeature` reducer + `classify` pure helper + `RepositorySettingsFeatureTests` + `RepositoryHookClassifyTests`
 - [ ] Step 5 — `SettingsWindowFeature.State.repositoryPanes` + `.forEach` composition + `projectsChanged` pruning + `SettingsWindowView` detail-switch scope (plus `SettingsWindowFeatureTests` extension)
 - [ ] Step 6 — `RepositoryGeneralSettingsView` + `RepositoryHooksSettingsView` body replacements (consume `HookMergeView` and related T3 symbols)
@@ -74,41 +74,41 @@ Related documents:
 
 Key source files this plan touches:
 
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — the `@MainActor`
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — the `@MainActor`
   Catalog owner. Gains `setWorktreesDirectory(_, for:)`,
   `setDefaultEditorAnySpace(_, for:)`, and a private
   `findProjectAnySpace(_:)` helper (Step 1). Today it already owns
   `setDefaultEditor(_, for:, in:)` which we leave intact.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — the TCA
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — the TCA
   dependency struct. Gains two projectID-only closures
   (`setRepositoryDefaultEditor`, `setRepositoryWorktreeBaseDirectory`) with
   live bridges, fatalError-backed liveValue stubs, and unimplemented
   testValue stubs (Step 2).
-- `apps/mac/touch-code/App/Clients/HookConfigClient.swift` — new file;
+- `apps/mac/codans/App/Clients/HookConfigClient.swift` — new file;
   narrow TCA dependency wrapping the shared `HookConfigStore` so the
   reducer's load effect is injectable (Step 3).
-- `apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
+- `apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
   — new reducer (Step 4). Holds `projectID` + `hooksLoad` +
   `lastWriteFailure`; exposes actions documented in the Design doc API
   section.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift` —
   the T1 window reducer. Gains
   `repositoryPanes: IdentifiedArrayOf<RepositorySettingsFeature.State>`,
   a `.repositoryPane(IdentifiedActionOf<…>)` action case, a `.forEach`
   composition, and the extra pruning branch inside `projectsChanged`
   (Step 5). Do not change `selection`, `general`, or the `windowClosed`
   branch.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsWindowView.swift` —
   the detail switch. Only the two Repository cases change; they now scope
   into `\.repositoryPanes[id: projectID]` and fall back to `EmptyView()`
   on the 1-frame gap between Project-removed and selection-reset (Step 5).
   All six global-section cases stay byte-identical.
-- `apps/mac/touch-code/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`
   and `…/RepositoryHooksSettingsView.swift` — the two placeholder pane
   views. Step 6 replaces their bodies while keeping the `struct …: View
   { let projectID: ProjectID; … }` outer shape the T1 detail switch
   depends on (adds a `store:` parameter in addition to `projectID`).
-- `apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift` —
+- `apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift` —
   **owned by T3, not T4.** This plan references `HookMergeView`,
   `HookRow`, `HookSource`, `TrailingAction`, and `HookRowBuilder.make` as
   imports from the same module. T4 does not create a stub; the Execute
@@ -166,9 +166,9 @@ On receiving `EXECUTE_GREEN`:
 ```
 git fetch origin feature/settings-base
 git rebase origin/feature/settings-base
-ls apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift
-grep -n 'public struct HookMergeView' apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift
-grep -n 'public enum HookRowBuilder' apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift
+ls apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift
+grep -n 'public struct HookMergeView' apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift
+grep -n 'public enum HookRowBuilder' apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift
 ```
 
 Expect: `HookMergeView.swift` exists; the two greps each return one line.
@@ -182,8 +182,8 @@ sequencing.
 ### Step 1 — HierarchyManager internal mutators
 
 Scope: add three items to
-`apps/mac/touch-code/Runtime/HierarchyManager.swift`, and extend
-`apps/mac/touch-code/Tests/HierarchyManagerTests.swift`.
+`apps/mac/codans/Runtime/HierarchyManager.swift`, and extend
+`apps/mac/codans/Tests/HierarchyManagerTests.swift`.
 
 Add the private helper first. Near the existing
 `findProjectIndices(projectID:, spaceID:)` private func (around line 649),
@@ -237,7 +237,7 @@ Do not touch the existing two-ID `setDefaultEditor(_, for:, in:)` — the
 WorktreeHeader dropdown still calls it.
 
 Tests — extend
-`apps/mac/touch-code/Tests/HierarchyManagerTests.swift` (follow the file's
+`apps/mac/codans/Tests/HierarchyManagerTests.swift` (follow the file's
 existing pattern; each test constructs a manager with one Space + one
 Project fixture):
 
@@ -257,8 +257,8 @@ Verification:
 ```
 cd apps/mac
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
-  -configuration Debug test -only-testing:touch-codeTests/HierarchyManagerTests \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
+  -configuration Debug test -only-testing:codansTests/HierarchyManagerTests \
   -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -270,8 +270,8 @@ Commit message:
 ### Step 2 — HierarchyClient two new closures
 
 Scope: edit
-`apps/mac/touch-code/App/Clients/HierarchyClient.swift` and extend
-`apps/mac/touch-code/Tests/HierarchyClientTests.swift`.
+`apps/mac/codans/App/Clients/HierarchyClient.swift` and extend
+`apps/mac/codans/Tests/HierarchyClientTests.swift`.
 
 In the struct body, add two closures (place them next to
 `setDefaultEditor` around line 96–99):
@@ -317,8 +317,8 @@ Verification:
 
 ```
 cd apps/mac
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
-  -configuration Debug test -only-testing:touch-codeTests/HierarchyClientTests \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
+  -configuration Debug test -only-testing:codansTests/HierarchyClientTests \
   -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -330,15 +330,15 @@ Commit message:
 ### Step 3 — HookConfigClient TCA dependency
 
 Scope: add
-`apps/mac/touch-code/App/Clients/HookConfigClient.swift` (new file) and
-wire its `liveValue` in `apps/mac/touch-code/App/TouchCodeApp.swift`.
+`apps/mac/codans/App/Clients/HookConfigClient.swift` (new file) and
+wire its `liveValue` in `apps/mac/codans/App/CodansApp.swift`.
 
 File contents (new):
 
 ```swift
 import ComposableArchitecture
 import Foundation
-import TouchCodeCore
+import CodansCore
 
 /// Narrow TCA dependency over `HookConfigStore` — the T4 Repository
 /// Hooks pane reducer reads hooks.json through these closures so the
@@ -393,7 +393,7 @@ extension DependencyValues {
 }
 ```
 
-Wiring in `TouchCodeApp.swift`: locate the existing `.withDependencies`
+Wiring in `CodansApp.swift`: locate the existing `.withDependencies`
 block that binds `HierarchyClient.live(manager:)` and add an adjacent
 binding `$0.hookConfigClient = .live(store: appState.hookConfigStore)`.
 (The `hookConfigStore` field already exists on `AppState` for C3 hook
@@ -408,7 +408,7 @@ Verification:
 ```
 cd apps/mac
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug build -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -421,9 +421,9 @@ Commit message:
 ### Step 4 — RepositorySettingsFeature + classify helper + tests
 
 Scope: add
-`apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
+`apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
 (new) and
-`apps/mac/touch-code/Tests/Settings/RepositorySettingsFeatureTests.swift`
+`apps/mac/codans/Tests/Settings/RepositorySettingsFeatureTests.swift`
 (new directory under Tests).
 
 `RepositorySettingsFeature.swift` contents (prose summary — the exact
@@ -522,9 +522,9 @@ Verification:
 ```
 cd apps/mac
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test \
-  -only-testing:touch-codeTests/RepositorySettingsFeatureTests \
+  -only-testing:codansTests/RepositorySettingsFeatureTests \
   -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -536,9 +536,9 @@ Commit message:
 ### Step 5 — Wire feature into the window shell
 
 Scope: modify
-`apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`,
+`apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`,
 `.../SettingsWindowView.swift`, and extend
-`apps/mac/touch-code/Tests/SettingsWindowFeatureTests.swift`.
+`apps/mac/codans/Tests/SettingsWindowFeatureTests.swift`.
 
 In `SettingsWindowFeature`:
 
@@ -626,9 +626,9 @@ Verification:
 ```
 cd apps/mac
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test \
-  -only-testing:touch-codeTests/SettingsWindowFeatureTests \
+  -only-testing:codansTests/SettingsWindowFeatureTests \
   -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -640,7 +640,7 @@ Commit message:
 ### Step 6 — Replace the two pane view bodies
 
 Scope: rewrite
-`apps/mac/touch-code/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`
+`apps/mac/codans/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`
 and `…/RepositoryHooksSettingsView.swift`.
 
 #### RepositoryGeneralSettingsView
@@ -774,12 +774,12 @@ Verification:
 ```
 cd apps/mac
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
-Expect `** TEST SUCCEEDED **` across every scheme (touch-code,
-TouchCodeCore, tcKit, tc). No new tests pass/fail, but prior steps stay
+Expect `** TEST SUCCEEDED **` across every scheme (codans,
+CodansCore, CodansKit, codans). No new tests pass/fail, but prior steps stay
 green.
 
 Commit message:
@@ -885,7 +885,7 @@ gh pr create --base feature/settings-base \
 
 ## Test plan
 
-- [x] `xcodebuild test` on touch-code scheme — RepositorySettingsFeatureTests,
+- [x] `xcodebuild test` on codans scheme — RepositorySettingsFeatureTests,
       HierarchyManagerTests (extended), HierarchyClientTests (extended),
       SettingsWindowFeatureTests (extended) all green.
 - [x] Manual QA walk across spec Acceptance Criteria for Repository
@@ -901,7 +901,7 @@ Push the PR URL back via prowl: `PR_READY: <url>`.
 ## Concrete Steps
 
 Working directory for all commands: `apps/mac/` (repository root:
-`/Users/wanggang/.worktree/repos/touch-code/feat/settings-repositories`).
+`/Users/wanggang/.worktree/repos/codans/feat/settings-repositories`).
 
 ### Generate Tuist project
 
@@ -915,7 +915,7 @@ commit that adds/removes a file; no need to run when only editing.
 ### Build sanity check
 
 ```
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug build -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -924,13 +924,13 @@ Expected: `** BUILD SUCCEEDED **`.
 ### Full test matrix (run before Final)
 
 ```
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme tcKitTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansKitTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme tcTests \
+xcodebuild -workspace codans.xcworkspace -scheme tcTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -985,7 +985,7 @@ as Global.
 
 **Repository Hooks — reveal hatch.** With no hooks.json on disk: click
 "Reveal hooks.json in Finder". Observable: Finder opens with
-`~/.config/touch-code/hooks.json` selected; the file is a valid
+`~/.config/codans/hooks.json` selected; the file is a valid
 `{"version": 1, "subscriptions": []}` document.
 
 **Test matrix green.** `xcodebuild test` across all four schemes
@@ -1022,7 +1022,7 @@ push + one `gh pr create` at Final. The PR is targeted to
 `feature/settings-base`, not `main`; no production branch is touched.
 
 If the T3 rebase in Step 0 succeeds but
-`ls apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift`
+`ls apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift`
 returns nothing, the rebase picked up the wrong tip. Run
 `git log --oneline -5 origin/feature/settings-base` to identify the
 actual HEAD, and push `BLOCKED: … (feature/settings-base HEAD
@@ -1087,14 +1087,14 @@ The following types and signatures must exist at the end of the plan.
 Consumers (manual QA, other waves) depend on these verbatim.
 
 In
-`apps/mac/touch-code/Runtime/HierarchyManager.swift`:
+`apps/mac/codans/Runtime/HierarchyManager.swift`:
 
     func setWorktreesDirectory(_ path: String?, for projectID: ProjectID) throws
     func setDefaultEditorAnySpace(_ editorID: EditorID?, for projectID: ProjectID) throws
     private func findProjectAnySpace(_ projectID: ProjectID) -> (Int, Int)?
 
 In
-`apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+`apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
     var setRepositoryDefaultEditor:
       @MainActor @Sendable (_ projectID: ProjectID, _ editorID: EditorID?) throws -> Void
@@ -1102,7 +1102,7 @@ In
       @MainActor @Sendable (_ projectID: ProjectID, _ path: String?) throws -> Void
 
 In
-`apps/mac/touch-code/App/Clients/HookConfigClient.swift` (new):
+`apps/mac/codans/App/Clients/HookConfigClient.swift` (new):
 
     nonisolated struct HookConfigClient: Sendable {
       var load: @MainActor @Sendable () async throws -> HookConfig
@@ -1117,7 +1117,7 @@ In
     }
 
 In
-`apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
+`apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
 (new):
 
     @Reducer
@@ -1148,7 +1148,7 @@ In
     }
 
 In
-`apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`
+`apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`
 (modified):
 
     @ObservableState struct State: Equatable {
@@ -1208,6 +1208,6 @@ External libraries used (no new dependencies):
   matching inside `classify`.
 
 No new SPM packages, no Tuist `Project.swift` edits (the Tuist
-`buildableFolders` already cover `touch-code/App/Clients/`,
-`touch-code/App/Features/Settings/`, `touch-code/Tests/Settings/`;
+`buildableFolders` already cover `codans/App/Clients/`,
+`codans/App/Features/Settings/`, `codans/Tests/Settings/`;
 verified in T1 Step 0 and unchanged since).

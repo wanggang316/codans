@@ -1,14 +1,14 @@
-# touch-code
+# codans
 
-A native macOS app that orchestrates terminals into a four-level hierarchy — Project → Worktree → Tab → Pane — for CLI-agent power users. Ships with the `tc` companion CLI and a published Agent Skill, all built from a Tuist-managed monorepo.
+A native macOS app that orchestrates terminals into a four-level hierarchy — Project → Worktree → Tab → Pane — for CLI-agent power users. Ships with the `codans` companion CLI and a published Agent Skill, all built from a Tuist-managed monorepo.
 
 ## Install
 
 ```bash
-brew install --cask wanggang316/tap/touch-code
+brew install --cask wanggang316/tap/codans
 ```
 
-The cask installs `TouchCode.app` into `/Applications` and symlinks the embedded `tc` CLI into Homebrew's `bin`. Subsequent updates flow through the in-app Sparkle updater; `brew upgrade --cask touch-code` also picks up new stable releases.
+The cask installs `Codans.app` into `/Applications` and symlinks the embedded `codans` CLI into Homebrew's `bin`. Subsequent updates flow through the in-app Sparkle updater; `brew upgrade --cask codans` also picks up new stable releases.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ make bootstrap            # init submodules (ghostty, git-wt) + mise install
 
 # Generate + build + run
 make mac-generate         # tuist install + tuist generate (builds Ghostty xcframework)
-make mac-build            # build TouchCode.app + tc CLI
+make mac-build            # build Codans.app + codans CLI
 make mac-run-app          # build + open the app
 ```
 
@@ -36,9 +36,9 @@ make mac-run-app          # build + open the app
 | Command | Description |
 |---|---|
 | `make bootstrap` | Init submodules + `mise install` |
-| `make mac-generate` | Generate `touch-code.xcworkspace` from Tuist |
-| `make mac-build` | Build the Mac app + `tc` CLI |
-| `make mac-run-app` | Build and launch `TouchCode.app` |
+| `make mac-generate` | Generate `codans.xcworkspace` from Tuist |
+| `make mac-build` | Build the Mac app + `codans` CLI |
+| `make mac-run-app` | Build and launch `Codans.app` |
 | `make mac-lint` | Run `swiftlint --quiet` |
 | `make mac-check` | `swift-format` in-place + lint |
 | `make mac-test` | Run test bundles (placeholder) |

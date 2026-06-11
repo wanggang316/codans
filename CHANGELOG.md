@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to touch-code are documented in this file.
+All notable changes to codans are documented in this file.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project does not yet follow semantic versioning — every release until
@@ -19,6 +19,72 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 ### Security
+
+## [0.4.6] - 2026-06-11
+
+### Changed
+
+- **Renamed the product from "touch-code" to "Codans."** The app is now `Codans.app` with bundle id `com.gumpw.codans`, the CLI binary and command are `codans` (was `tc`), and the Homebrew cask is `codans`. On-disk state moves to `~/.config/codans`, `~/Library/Caches/codans`, `~/.codans/repos`, and the control socket to `/tmp/codans-<uid>.sock`. No migration is performed — existing `touch-code` state, worktrees, and installed CLI are left in place and must be removed or re-created manually.
+
+## [0.4.5] - 2026-06-10
+
+### Added
+
+- Trae, Trae CN, Qoder, and CodeBuddy join the editors you can open a worktree in.
+
+### Fixed
+
+- After logging out and back in, switching users, or waking from sleep, a pane's
+  terminal could quietly lose access to ssh, gh, and the login keychain; these
+  panes now recover automatically on relaunch instead of needing a brand-new pane.
+
+## [0.4.4] - 2026-06-09
+
+### Changed
+
+- Reordering tabs by dragging is now animated live: neighboring tabs slide
+  aside as you drag, and the tab you're holding lifts with a shadow and
+  settles smoothly into its new position.
+
+## [0.4.3] - 2026-06-03
+
+### Added
+
+- **Automatic cleanup of archived worktrees.** Settings → Worktrees → Cleanup can
+  now auto-delete archived worktrees after a retention window you choose (1 to 30
+  days), and optionally delete a worktree's remote branch when you remove it.
+
+### Changed
+
+- **The Run button now doubles as Stop.** While a command is running in its pane,
+  the toolbar Run button turns into a red Stop — click it, or press ⌘., to
+  interrupt the command without closing the pane. Re-running a command reuses its
+  pane instead of piling up new tabs, and the button shows its shortcut while ⌘
+  is held.
+- **The sidebar refreshes right after a commit or git command.** The diff count
+  and pull-request badges used to lag by up to a minute; now committing, pushing,
+  or running a `git` / `gh` command in a pane updates them within a few seconds.
+- **The Command Palette has a new look.** System glass material, rounder corners,
+  a lighter frosted tone, and a calmer neutral-gray selection.
+- **The Command Palette ranks worktrees by project name.** Typing a project name
+  now surfaces that project's worktrees at the top instead of burying them behind
+  unrelated fuzzy matches.
+- **Jumping to a worktree reveals it in the sidebar.** Selecting a worktree from
+  the Command Palette, the Active Agents panel, or a notification now expands its
+  project and scrolls the row into view.
+
+### Fixed
+
+- **The command editor stays put while you type.** In Settings → Commands, the
+  inline editor now focuses when its popover opens, shows the caret immediately,
+  no longer jumps the caret to the start mid-word, and no longer reverts a field
+  you just changed (like New Tab ⇄ In Place) on the next keystroke.
+- **Clicking a Command Palette row runs that row.** Clicking an item no longer
+  occasionally fired the previously-used command instead — only Return commits the
+  highlighted row, and a click runs exactly what you clicked.
+- **First launch shows one consistent tone.** With no project open, the empty
+  window no longer splits into mismatched light and dark areas; it stays on a
+  single neutral system tone regardless of your terminal theme.
 
 ## [0.4.2] - 2026-06-02
 
@@ -76,7 +142,7 @@ and the project does not yet follow semantic versioning — every release until
 - **Terminal panes survive quitting and relaunching the app.** A new Settings → General "Resume panes on launch" toggle (on by default) keeps your panes — and the programs running inside them — alive across an app restart, so you reopen right where you left off. Turn it off and each pane is instead restored from a snapshot of its last screen. Settings shows how many sessions can be resumed and offers a "forget all" action to clear them.
 - **Quitting asks before closing active panes.** Quitting while panes are still doing work now shows a confirmation instead of tearing everything down silently.
 - **The Active Agents panel remembers its agents across launches.** Agents that were running before you quit reappear after relaunch instead of starting from an empty list.
-- **New `tc pane` commands.** `info --json` dumps a pane's full state, `read` gains additional variants, and `close` shuts a pane down — ending its resumable session — from the shell.
+- **New `codans pane` commands.** `info --json` dumps a pane's full state, `read` gains additional variants, and `close` shuts a pane down — ending its resumable session — from the shell.
 
 ### Changed
 
@@ -179,7 +245,7 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **Homebrew install.** `brew install --cask wanggang316/tap/touch-code` installs the notarized build; the app keeps updating itself through Sparkle.
+- **Homebrew install.** `brew install --cask wanggang316/tap/codans` installs the notarized build; the app keeps updating itself through Sparkle.
 - **Copy as Pathname / Copy Branch Name** in the worktree right-click menu. The branch entry hides itself for detached-HEAD or folder-only worktrees.
 
 ### Changed
@@ -214,10 +280,10 @@ and the project does not yet follow semantic versioning — every release until
 - Notification banners lead with `【project · worktree】` so banners from different projects sharing a branch name (`main`, `dev`) are distinguishable.
 - Create Worktree sheet seeds its Copy gitignored / Copy untracked / Fetch from origin toggles from per-project and global Worktree settings, instead of always starting unchecked.
 - Project Settings → Worktree gains a "fetch from origin on create" override that inherits the global default when left unset.
-- `tc worktree new` plants the new worktree in the project's configured worktrees directory by default, matching the GUI's Create Worktree sheet. Pass `--path` to override.
+- `codans worktree new` plants the new worktree in the project's configured worktrees directory by default, matching the GUI's Create Worktree sheet. Pass `--path` to override.
 - Inbox rows lead with the project · worktree breadcrumb, fold title and body onto one line below, and reveal the jump arrow only on hover.
 - The task-finished notification dot is green instead of yellow; the orange waiting-for-input dot still carries the urgent signal.
-- Front-facing product name is unified as **TouchCode** across menus, About, and Settings.
+- Front-facing product name is unified as **Codans** across menus, About, and Settings.
 
 ### Removed
 
@@ -226,8 +292,8 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 - System notification banners play sound again when the user has Sound enabled.
-- `tc worktree new` rejects duplicate paths and names instead of stacking orphan rows on retried calls. Pass `--reuse-existing` to make repeated `new` calls idempotent, or `tc worktree rm --by-path <path>` to clean up rows accumulated before the guard.
-- `tc pane new` failures now carry a human-readable reason describing what went wrong, and retry once for transient libghostty surface-init races that previously bubbled up an opaque error.
+- `codans worktree new` rejects duplicate paths and names instead of stacking orphan rows on retried calls. Pass `--reuse-existing` to make repeated `new` calls idempotent, or `codans worktree rm --by-path <path>` to clean up rows accumulated before the guard.
+- `codans pane new` failures now carry a human-readable reason describing what went wrong, and retry once for transient libghostty surface-init races that previously bubbled up an opaque error.
 
 ## [0.2.4] - 2026-05-21
 
@@ -377,7 +443,7 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **`tc pane send-key`, `send --raw`, `capture`, and `reset`.** New CLI
+- **`codans pane send-key`, `send --raw`, `capture`, and `reset`.** New CLI
   commands for sending arbitrary keystrokes, sending raw bytes verbatim,
   dumping the visible buffer, and resetting a pane. `send-key` accepts a
   positional pane id just like `send`.
@@ -398,7 +464,7 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **`tc pane send` and `send-key` no longer steal focus by default.**
+- **`codans pane send` and `send-key` no longer steal focus by default.**
   Pass `--focus` to bring the pane forward.
 - **Worktrees sidebar icon.** Lighter, stroked git-branch glyph that
   sits better next to the other sidebar rows.
@@ -418,11 +484,11 @@ and the project does not yet follow semantic versioning — every release until
 - **Reading a pane no longer changes focus.**
 - **Scripts that close their tab or pane on finish honor the policy
   reliably.**
-- **Pane redraws after `tc pane reset`** instead of showing the stale
+- **Pane redraws after `codans pane reset`** instead of showing the stale
   buffer.
 - **Worktree directory path right-aligned** in the project general
   settings.
-- **Socket-bind failures surface in the system log** so a stuck `tc`
+- **Socket-bind failures surface in the system log** so a stuck `codans`
   is diagnosable.
 
 ## [0.1.7] - 2026-05-11
@@ -436,7 +502,7 @@ and the project does not yet follow semantic versioning — every release until
 
 - **Copy Tab ID / Copy Pane ID.** Right-click a tab or terminal pane to
   copy its unique ID to the clipboard — handy for scripting and
-  debugging with `tc`.
+  debugging with `codans`.
 
 ### Changed
 
@@ -459,7 +525,7 @@ and the project does not yet follow semantic versioning — every release until
   backed by Sparkle, with a stable/tip channel picker and
   auto-check/download toggles persisted across launches. Menu bar gains
   an Update Channel submenu for quick switching.
-- **`tc read` command** prints the visible terminal buffer of a pane to
+- **`codans read` command** prints the visible terminal buffer of a pane to
   stdout.
 - **App icon in About window** replaces the generic terminal glyph.
 - **Unfocused pane dim now mirrors Ghostty's `unfocused-split`
@@ -467,7 +533,7 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **`tc` CLI surface redesigned.** `rpc` subcommand removed, `ls`
+- **`codans` CLI surface redesigned.** `rpc` subcommand removed, `ls`
   renamed to `tree`, completions hidden, and output hierarchy aligned
   with the Prowl convention.
 - **DMG install arrow redrawn as a chevron** to match macOS convention.
@@ -483,9 +549,9 @@ and the project does not yet follow semantic versioning — every release until
   longer crashes.
 - **Pane cursor follows focus on `gotoSplit` navigation** instead of
   lagging behind.
-- **`tc tree` / `tc focus` show live working-directory paths** from the
+- **`codans tree` / `codans focus` show live working-directory paths** from the
   running Ghostty surface instead of stale state.
-- **Archived worktrees hidden from `tc tree` output.**
+- **Archived worktrees hidden from `codans tree` output.**
 - **Worktree display-name editing preserves user input** instead of
   reverting to the directory name.
 - **DMG volume icon corners rounded with squircle mask.**

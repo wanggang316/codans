@@ -47,7 +47,7 @@ Worktree detail header 当前把 `Worktree.branch` 渲染成纯文本副标题�
 
 四块改动，按依赖顺序：
 
-1. **Service 层**（`Git/`）：新增 3 个 `GitService` 方法 + 2 个 `GitCommand` argv + 1 个 `GitOutputParser` 解析器 + 1 组 `TouchCodeCore` 模型（`BranchRef` / `BranchInventory` / `BranchSwitchTarget`）。
+1. **Service 层**（`Git/`）：新增 3 个 `GitService` 方法 + 2 个 `GitCommand` argv + 1 个 `GitOutputParser` 解析器 + 1 组 `CodansCore` 模型（`BranchRef` / `BranchInventory` / `BranchSwitchTarget`）。
 2. **新 Reducer**（`App/Features/BranchSwitcher/`）：`BranchSwitcherFeature` 独立于 `WorktreeHeaderFeature`，承载 popover 全部状态与副作用。
 3. **Header 视图**（`WorktreeHeaderInfoLabel`）：改成两行 + 整行可点击 + spinner 槽位；popover 内容由 `BranchSwitcherView` 提供。
 4. **Diff Viewer**（`DiffFeature` / `DiffInspectorView`）：扩展 state 引入 `selectedTab` + `historyState` + `presentedCommitSha`，view 顶部加 segmented control，新增 `DiffHistoryListView`，左侧 drawer 根据 tab 选源。
@@ -112,7 +112,7 @@ func listAllBranches(at path: URL) async throws -> BranchInventory
 func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws
 ```
 
-#### Model additions (in `TouchCodeCore/Git/GitModels.swift`)
+#### Model additions (in `CodansCore/Git/GitModels.swift`)
 
 ```swift
 public nonisolated struct BranchRef: Equatable, Hashable, Sendable {
@@ -258,7 +258,7 @@ Trade-off: caching across popover open/close means the second `popoverTapped` re
 ### Component Boundaries
 
 ```
-TouchCodeCore (Git models)
+CodansCore (Git models)
   └── BranchRef, BranchInventory, BranchSwitchTarget   (new)
 
 Git/

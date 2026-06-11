@@ -16,14 +16,14 @@ depends_on:
 ## Context and Scope
 
 T1 froze the Settings window shell, persistence, and 7 pane view files. The
-Developer pane (`apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsView.swift`)
+Developer pane (`apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsView.swift`)
 is currently `Text("TODO: supplied by T3")`. T3 replaces that body with the
 spec M6 controls and ships the reusable `HookMergeView` component that T4
 will compose in the Repository Hooks pane.
 
 In scope (spec M6):
 
-1. **M6.1 — `tc` CLI install status + Install / Uninstall / Retry.**
+1. **M6.1 — `codans` CLI install status + Install / Uninstall / Retry.**
 2. **M6.2 — User hooks list (read-only)** with a "Reveal hooks.json in Finder" entry.
 3. **M6.3 — Diagnostics** — Reveal settings.json, Reveal hooks.json, Copy app version.
 
@@ -36,23 +36,23 @@ Out of scope (explicitly not T3):
 
 Reference files (read-only from T3's perspective):
 
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` — exposes
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` — exposes
   `mutateDeveloper` and `settings.developer.cli.lastInstallAttemptAt`.
-- `apps/mac/TouchCodeCore/Settings/DeveloperSettings.swift` — already carries
+- `apps/mac/CodansCore/Settings/DeveloperSettings.swift` — already carries
   `DeveloperCLISettings.lastInstallAttemptAt`.
-- `apps/mac/touch-code/Hooks/HookConfigStore.swift` — provides `load() throws -> HookConfig`.
-- `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift` — value type the pane renders.
-- `apps/mac/TouchCodeCore/Hooks/HookConfig.swift` — provides `defaultURL()`.
-- `apps/mac/tcKit/HomeScopeGuard.swift` — reusable symlink-safety guard.
-- `apps/mac/tcKit/SkillBundleLocator.swift` — model for locating bundled assets.
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — `AppState.bundleVersion()` / `hookConfigStore`.
+- `apps/mac/codans/Hooks/HookConfigStore.swift` — provides `load() throws -> HookConfig`.
+- `apps/mac/CodansCore/Hooks/HookSubscription.swift` — value type the pane renders.
+- `apps/mac/CodansCore/Hooks/HookConfig.swift` — provides `defaultURL()`.
+- `apps/mac/CodansKit/HomeScopeGuard.swift` — reusable symlink-safety guard.
+- `apps/mac/CodansKit/SkillBundleLocator.swift` — model for locating bundled assets.
+- `apps/mac/codans/App/CodansApp.swift` — `AppState.bundleVersion()` / `hookConfigStore`.
 
 ## Goals and Non-Goals
 
 ### Goals
 
 - Ship M6.1 / M6.2 / M6.3 end-to-end in the Developer pane.
-- Install `tc` to `~/.local/bin/tc` + peer `~/.local/bin/tcode` symlink via a
+- Install `codans` to `~/.local/bin/codans` + peer `~/.local/bin/tcode` symlink via a
   sudo-free, Home-scoped installer. Never touch `/usr/local/bin`.
 - Provide a clean, idempotent `CLIInstallerClient` with unit-test coverage
   for install / uninstall / failure-with-retry.
@@ -66,7 +66,7 @@ Reference files (read-only from T3's perspective):
 ### Non-Goals
 
 - Editing hooks through the window (spec N3 is explicitly v1-out-of-scope).
-- Starting / stopping the running app, or restarting `tc` on install.
+- Starting / stopping the running app, or restarting `codans` on install.
 - First-launch CLI auto-install (C4 exec-plan 0003 M8 item — separate wave).
 - Changing `DeveloperSettings` schema — the existing
   `DeveloperCLISettings.lastInstallAttemptAt` slot is reused unchanged.
@@ -78,7 +78,7 @@ Reference files (read-only from T3's perspective):
 ## Decisions
 
 - **D1 (Open Question #1 from product spec — resolved in C4 D3 + architecture
-  Open Q #3): install target is `~/.local/bin/tc`, never `/usr/local/bin`.**
+  Open Q #3): install target is `~/.local/bin/codans`, never `/usr/local/bin`.**
   T3 inherits this decision without introducing admin-priv prompts. If the
   directory is missing it is created (`0755`, standard). No shell-rc
   PATH editing is performed in T3 — if `~/.local/bin` is not on `$PATH`, the
@@ -88,13 +88,13 @@ Reference files (read-only from T3's perspective):
   and better owned by a dedicated wave. **Confirm or override this
   inheritance before I leave Design.** If master wants admin-priv
   `/usr/local/bin`, I redo the risk/test plan.
-- **D2 — Shared helpers live in `TouchCodeCore`.** A new
-  `TouchCodeCore/CLI/CLIBundleLocator.swift` sits alongside
-  `SkillBundleLocator` for app-bundle resolution of the built `tc`. This lets
+- **D2 — Shared helpers live in `CodansCore`.** A new
+  `CodansCore/CLI/CLIBundleLocator.swift` sits alongside
+  `SkillBundleLocator` for app-bundle resolution of the built `codans`. This lets
   the unit test harness fake the bundle path without a synthesized .app.
-- **D3 — `CLIInstallerClient` lives in the app target** (not tcKit), because
-  it is only invoked from SwiftUI, never from the `tc` binary itself.
-  Placement: `apps/mac/touch-code/App/Clients/CLIInstallerClient.swift`,
+- **D3 — `CLIInstallerClient` lives in the app target** (not CodansKit), because
+  it is only invoked from SwiftUI, never from the `codans` binary itself.
+  Placement: `apps/mac/codans/App/Clients/CLIInstallerClient.swift`,
   parallel to `EditorClient.swift` / `InboxClient.swift`.
 - **D4 — Dependency injection through `@Environment`, not through
   `SettingsWindowView`'s constructor.** The T1-frozen switch does already
@@ -105,7 +105,7 @@ Reference files (read-only from T3's perspective):
   - `@Environment(DeveloperPaneDependencies.self) private var deps`
   where `DeveloperPaneDependencies` is a small `@Observable final class`
   carrying the hook-config loader closure and the CLIInstallerClient. The
-  Settings scene body (`TouchCodeApp.body` inside `Window("Settings", ...)`)
+  Settings scene body (`CodansApp.body` inside `Window("Settings", ...)`)
   installs them via `.environment(...)`; one line per injection, zero
   changes to `SettingsWindowView.swift`'s detail switch.
 - **D5 — Hook list is read-on-demand.** `HookConfigStore` is not
@@ -125,7 +125,7 @@ Reference files (read-only from T3's perspective):
 
 ```
 ┌─ DeveloperSettingsView ────────────────────────────────────────────┐
-│  ┌─ tc CLI section (M6.1) ────────────────────────────────────────┐ │
+│  ┌─ codans CLI section (M6.1) ────────────────────────────────────────┐ │
 │  │  CLIInstallStatusCard(viewModel: CLIInstallViewModel)         │ │
 │  │   — status pill, Install/Uninstall/Retry, error disclosure    │ │
 │  └────────────────────────────────────────────────────────────────┘ │
@@ -184,7 +184,7 @@ touches the real filesystem.
 final class CLIInstallerClient {
   struct Paths {
     var localBin: URL           // default ~/.local/bin
-    var tcSymlink: URL          // default ~/.local/bin/tc
+    var tcSymlink: URL          // default ~/.local/bin/codans
     var tcodeSymlink: URL       // default ~/.local/bin/tcode
     var bundledTcBinary: URL    // resolved via CLIBundleLocator
     static let `default`: Paths
@@ -194,7 +194,7 @@ final class CLIInstallerClient {
     case unknown                      // probing
     case notInstalled                 // neither symlink exists (or exists but points elsewhere)
     case installed(at: URL, pointsToBundle: Bool)
-    case collision(owner: URL)        // tc on PATH in a non-touch-code location
+    case collision(owner: URL)        // codans on PATH in a non-codans location
     case failed(CLIInstallError, lastAttempt: Date?)
   }
 
@@ -216,13 +216,13 @@ final class CLIInstallerClient {
   /// maps every failure into `.failed`. Safe to call at view-appear.
   func probe() -> InstallStatus
 
-  /// Creates `~/.local/bin` if missing, symlinks tc + tcode. Idempotent — returns
+  /// Creates `~/.local/bin` if missing, symlinks codans + tcode. Idempotent — returns
   /// `.installed(...)` if links already point at our bundle. Updates the
   /// mutated `lastInstallAttemptAt` passthrough closure so the caller can
   /// persist through `SettingsStore.mutateDeveloper`.
   func install() -> Result<InstallStatus, CLIInstallError>
 
-  /// Removes tc + tcode symlinks if and only if they point at our bundle.
+  /// Removes codans + tcode symlinks if and only if they point at our bundle.
   /// Returns `.notInstalled` on success; refuses to delete foreign files.
   func uninstall() -> Result<InstallStatus, CLIInstallError>
 }
@@ -235,13 +235,13 @@ Contract rules:
   against a tmp directory.
 - Home-scope enforcement reuses `HomeScopeGuard.isInsideHome(_:)` to
   guarantee no symlink is written outside `$HOME`.
-- **"Foreign file at `~/.local/bin/tc`"** is treated as `collision`, not
+- **"Foreign file at `~/.local/bin/codans`"** is treated as `collision`, not
   `installed`. We never overwrite a file we did not create. Uninstall on
   collision is a no-op; install on collision refuses unless user confirms
   (a confirmation alert fires from the view layer; the client returns
   `.destinationExistsNotOurs` and the view decides whether to retry). **v1
-  picks "refuse silently"** — the error line shows "Another `tc` exists at
-  /opt/homebrew/bin/tc; rename it or run `tc install-cli --force-tc` from
+  picks "refuse silently"** — the error line shows "Another `codans` exists at
+  /opt/homebrew/bin/codans; rename it or run `codans install-cli --force-tc` from
   the CLI". Aligns with C4's `--force-tc` flag (deferred from T3).
 
 #### `CLIInstallViewModel` — view-model bound to the pane (new)
@@ -253,7 +253,7 @@ on every attempt.
 
 #### `HookMergeView` — **public / frozen API for T4 reuse**
 
-Location: `apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift`.
+Location: `apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift`.
 
 ```swift
 /// One row in the Hooks list. Immutable value type; pane owners compose it from
@@ -331,7 +331,7 @@ change flows back through master.
 ### Component layout (final tree after T3 lands)
 
 ```
-apps/mac/touch-code/App/
+apps/mac/codans/App/
 ├── Clients/
 │   └── CLIInstallerClient.swift          (new)
 └── Features/Settings/
@@ -343,16 +343,16 @@ apps/mac/touch-code/App/
         │   └── DiagnosticsSection.swift
         └── HookMergeView.swift           (new — FROZEN API for T4)
 
-apps/mac/TouchCodeCore/CLI/
+apps/mac/CodansCore/CLI/
 └── CLIBundleLocator.swift                (new — mirrors SkillBundleLocator)
 
-apps/mac/touch-code/Tests/Developer/      (new directory)
+apps/mac/codans/Tests/Developer/      (new directory)
 ├── CLIInstallerClientTests.swift
 └── HookRowBuilderTests.swift
 ```
 
 `CLIInstallerClient` stays in the app target for dependency direction: it
-needs `@MainActor` + `SkillFileSystem` (already in tcKit) but no AppKit
+needs `@MainActor` + `SkillFileSystem` (already in CodansKit) but no AppKit
 beyond the view layer's `NSWorkspace.activateFileViewerSelecting` /
 `NSPasteboard`. The view layer owns those — the client doesn't.
 
@@ -379,8 +379,8 @@ HookConfigStore ──load()──▶ deps.loadHookConfig()
 
 ### Testing strategy
 
-- **`CLIInstallerClientTests`** — new file under `apps/mac/touch-code/Tests/Developer/`.
-  Fixture: a tmp directory standing in for `~`, a fake "bundled tc" file.
+- **`CLIInstallerClientTests`** — new file under `apps/mac/codans/Tests/Developer/`.
+  Fixture: a tmp directory standing in for `~`, a fake "bundled codans" file.
   Cases (one XCTestCase method each):
   1. `probe_freshFilesystem_returnsNotInstalled`
   2. `install_createsBothSymlinks_statusBecomesInstalled`
@@ -397,8 +397,8 @@ HookConfigStore ──load()──▶ deps.loadHookConfig()
   derivation branch (short command / long command / no matchPattern /
   scope-based summary / enabled-vs-disabled inversion).
 - **Manual verification** — walk spec Acceptance Criteria "Developer 分段"
-  (5 items) on a fresh `~/.config/touch-code/` install.
-- `xcodebuild test -scheme touch-code` must remain green (T1 tests +
+  (5 items) on a fresh `~/.config/codans/` install.
+- `xcodebuild test -scheme codans` must remain green (T1 tests +
   new tests). `make lint` clean. `make format` clean.
 
 ### Security / safety
@@ -406,13 +406,13 @@ HookConfigStore ──load()──▶ deps.loadHookConfig()
 - All writes occur under `$HOME`; `HomeScopeGuard.isInsideHome(_:)` is the
   gatekeeper. No admin-priv code path.
 - Symlinks are only ever deleted if they resolve to our own bundled binary.
-  Foreign `tc` remains untouched.
+  Foreign `codans` remains untouched.
 - `~/.local/bin` is created with mode `0755` (via `FileManager.createDirectory`
   default); inherited. No sensitive data written by the installer.
 - Pasteboard write for "Copy app version" carries only the version string;
   pasteboard overrides `.string` (type `.string`), not rich content.
 - Reveal actions use `NSWorkspace.activateFileViewerSelecting(_:)`; the
-  target URL is always a canonical `~/.config/touch-code/*.json` path.
+  target URL is always a canonical `~/.config/codans/*.json` path.
   If the file does not exist, `HookConfig.defaultURL()` / `Settings.defaultURL()`
   helpers create the parent directory + empty file through the existing
   atomic-rename path (AtomicFileStore), matching spec Acceptance Criteria
@@ -421,9 +421,9 @@ HookConfigStore ──load()──▶ deps.loadHookConfig()
 
 ### Observability
 
-- `Logger(subsystem: "com.touch-code.ui", category: "settings-developer")` —
+- `Logger(subsystem: "com.gumpw.codans.ui", category: "settings-developer")` —
   one info log per install / uninstall attempt (outcome only, no paths
-  beyond the install-root `~/.local/bin/tc`).
+  beyond the install-root `~/.local/bin/codans`).
 - No telemetry / network access.
 
 ### Rollback
@@ -434,7 +434,7 @@ HookConfigStore ──load()──▶ deps.loadHookConfig()
 
 ## Risks
 
-- **R1: Bundled `tc` binary is not where we think it is.** Tuist's
+- **R1: Bundled `codans` binary is not where we think it is.** Tuist's
   `commandLineTool`-as-dependency placement inside the `.app` is not
   asserted today. CLIBundleLocator mirrors SkillBundleLocator's 3-phase
   resolution (env var → `Bundle.main.resourceURL`/`Contents/MacOS` sibling
@@ -464,7 +464,7 @@ HookConfigStore ──load()──▶ deps.loadHookConfig()
 - Pros: Matches macOS platform tradition; `/usr/local/bin` is almost always
   on `$PATH` out of the box.
 - Cons: Prompts an admin dialog; conflicts with C4 D3 + architecture Open Q
-  #3; gets touch-code into SIP-adjacent territory; uninstall needs another
+  #3; gets codans into SIP-adjacent territory; uninstall needs another
   prompt; CI / hermetic tests cannot exercise it. Worse fit for "ship now
   / low friction" and contradicts a decision already propagated into
   `docs/product-spec.md` and `docs/architecture.md`.
@@ -480,13 +480,13 @@ HookConfigStore ──load()──▶ deps.loadHookConfig()
   existing public surface intact.
 - Verdict: Rejected — small abstraction is worth the testability.
 
-### A3. Push `CLIInstallerClient` into `tcKit`
+### A3. Push `CLIInstallerClient` into `CodansKit`
 
 - Pros: Co-locates CLI code.
-- Cons: tcKit is linked into the `tc` binary itself. Shipping a SwiftUI-
-  coupled service there would violate the dependency direction (tcKit
-  depends on TouchCodeCore + TouchCodeIPC + ArgumentParser only). Keep
-  tcKit pure; the installer is an app-side client.
+- Cons: CodansKit is linked into the `codans` binary itself. Shipping a SwiftUI-
+  coupled service there would violate the dependency direction (CodansKit
+  depends on CodansCore + CodansIPC + ArgumentParser only). Keep
+  CodansKit pure; the installer is an app-side client.
 - Verdict: Rejected.
 
 ### A4. Merge `HookMergeView` into a generic `SettingsReadonlyList`

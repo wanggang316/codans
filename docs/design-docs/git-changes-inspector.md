@@ -111,7 +111,7 @@ DiffRendererView (NSViewRepresentable)
 Vendored web assets:
 
 ```
-apps/mac/touch-code/App/Features/Diff/WebAssets/
+apps/mac/codans/App/Features/Diff/WebAssets/
 ├── index.html
 ├── renderer.js
 ├── renderer.css
@@ -138,7 +138,7 @@ surface as `DiffEvent.didFail(code: "protocol_mismatch", ...)`.
 
 ## Public API
 
-`apps/mac/touch-code/App/Features/Diff/Public.swift`:
+`apps/mac/codans/App/Features/Diff/Public.swift`:
 
 ```swift
 public struct DiffDocument: Equatable, Sendable {
@@ -206,7 +206,7 @@ public struct DiffRendererView: View {
 
 ## TCA State
 
-`apps/mac/touch-code/App/Features/Diff/DiffFeature.swift`:
+`apps/mac/codans/App/Features/Diff/DiffFeature.swift`:
 
 ```swift
 @Reducer
@@ -269,7 +269,7 @@ button.
 
 ## Component Boundaries
 
-### New module — `apps/mac/touch-code/App/Features/Diff/`
+### New module — `apps/mac/codans/App/Features/Diff/`
 
 ```
 Diff/
@@ -313,14 +313,14 @@ User-facing strings ("Git Viewer", menu item label) unchanged in v1.
 ### Deleted
 
 ```
-apps/mac/touch-code/App/Features/GitViewer/             ← entire directory
-apps/mac/touch-code/Tests/GitViewerFeatureTests.swift
-apps/mac/touch-code/Tests/GitViewerLargeDiffCommandTests.swift
-apps/mac/touch-code/Tests/GitViewerSnapshotTests.swift
-apps/mac/touch-code/Tests/WorktreeDetailViewLayoutTests.swift
-apps/mac/touch-code/Tests/Performance/GitViewerReducerPerformanceTests.swift
-apps/mac/touch-code/Tests/Performance/DiffParsePerformanceBaselineTests.swift   ← decided per parser ownership at execution
-apps/mac/touch-code/Tests/Performance/fixtures/diff-1000-lines.txt              ← decided alongside
+apps/mac/codans/App/Features/GitViewer/             ← entire directory
+apps/mac/codans/Tests/GitViewerFeatureTests.swift
+apps/mac/codans/Tests/GitViewerLargeDiffCommandTests.swift
+apps/mac/codans/Tests/GitViewerSnapshotTests.swift
+apps/mac/codans/Tests/WorktreeDetailViewLayoutTests.swift
+apps/mac/codans/Tests/Performance/GitViewerReducerPerformanceTests.swift
+apps/mac/codans/Tests/Performance/DiffParsePerformanceBaselineTests.swift   ← decided per parser ownership at execution
+apps/mac/codans/Tests/Performance/fixtures/diff-1000-lines.txt              ← decided alongside
 docs/design-docs/c7-git-viewer.md
 docs/design-docs/mw-t3-gitviewer-overlay-shortcuts.md
 docs/exec-plans/mw-t3-gitviewer-overlay-shortcuts.md
@@ -402,7 +402,7 @@ horizontal room than a middle-column file list would permit.
 ## Vendoring & License
 
 Vendored from YiTong v0.1.0 (Apache-2.0).
-`apps/mac/touch-code/App/Features/Diff/WebAssets/LICENSE` contains the
+`apps/mac/codans/App/Features/Diff/WebAssets/LICENSE` contains the
 Apache-2.0 license text plus a NOTICE listing:
 
 - Portions derived from YiTong (https://github.com/onevcat/YiTong), © onevcat, Apache-2.0

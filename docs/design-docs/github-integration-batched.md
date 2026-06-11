@@ -15,7 +15,7 @@ This document replaces the v1 fetch model with a **repository-batched GraphQL fe
 
 Repository state at design time:
 
-- v1 code is live in `touch-code/GitHub/` and `touch-code/App/Features/GitHub/`. All tests pass; feature is in production use.
+- v1 code is live in `codans/GitHub/` and `codans/App/Features/GitHub/`. All tests pass; feature is in production use.
 - `GhExecutableResolver`, `CommandRunner` wrapping, env allowlist, and `GhCommand` argv builder are reusable verbatim. The substitution is limited to the **query body** (replaces `pr view` / `pr checks` with `gh api graphql`) and the **dispatch surface** (replaces per-row `.task` with reducer-owned effects keyed by project).
 - `RepositorySettings` (GitHub integration toggle, merge strategy, post-merge action) is unchanged.
 - The persistence story is unchanged — still memory-only, still reset on app launch.
@@ -30,12 +30,12 @@ This document is the source of truth for the v2 execution model and the migratio
 - Fetch PR metadata + aggregated check results in **one network round-trip per repository**, so CI health paints with the PR snapshot instead of arriving second.
 - Replace per-row `.task(id:)` dispatch with reducer-owned project-level effects driven by explicit invalidation events (Worktree appearance, branch change, post-write mutation, manual refresh).
 - Keep all v1 user-facing surfaces pixel-for-pixel identical — badge, popover, context menu, palette entries, Settings — so the refactor is invisible unless the user is measuring latency.
-- Preserve every v1 non-functional guarantee: zero in-app HTTP, zero Keychain use, zero token material in touch-code, zero hidden network work from SwiftUI view bodies.
+- Preserve every v1 non-functional guarantee: zero in-app HTTP, zero Keychain use, zero token material in codans, zero hidden network work from SwiftUI view bodies.
 
 **Non-Goals**
 
 - **No direct GitHub REST/GraphQL HTTP.** We continue to delegate to `gh` — specifically `gh api graphql`, which runs the query against `gh`'s authenticated HTTP stack. The only thing that changes is the query body.
-- **No OAuth in touch-code.** `gh auth login` remains the sole authentication path; tokens live in `gh`'s config store; we never read them.
+- **No OAuth in codans.** `gh auth login` remains the sole authentication path; tokens live in `gh`'s config store; we never read them.
 - **No webhooks, server push, or background polling.** Invalidation is event-driven (defined below), not time-driven.
 - **No review threads, comments, issues, discussions, or actions dashboards.** Scope remains PR metadata + aggregated check rollup.
 - **No disk persistence of PR state.** Snapshots are memory-only. One exception tracked in Open Questions: caching last-known snapshot to show instantly on restart, explicitly deferred.
@@ -72,7 +72,7 @@ Three load-bearing decisions, covered in [Alternatives Considered](#alternatives
 
 ```
       ┌──────────────────────────────────────────────────────────────────┐
-      │  touch-code app window                                           │
+      │  codans app window                                           │
       │                                                                  │
       │  ┌──────────────────┐   ┌───────────────────────────────────┐    │
       │  │  Sidebar         │   │  GitHubFeature (TCA reducer)      │    │
@@ -87,7 +87,7 @@ Three load-bearing decisions, covered in [Alternatives Considered](#alternatives
       │         │               ┌─ GitHubClient (DI) ─                   │
       │         │               ▼                                        │
       │  ┌──────────────────┐   ┌────────────────────────────────┐       │
-      │  │  Branch watcher  │──▶│  touch-code/GitHub/            │       │
+      │  │  Branch watcher  │──▶│  codans/GitHub/            │       │
       │  │  (HEAD filesys)  │   │    · GitHubService (proto)     │       │
       │  └──────────────────┘   │    · LiveGitHubService         │ ──────┼──┐
       │                         │      ├ buildBatchedQuery()     │       │  │
@@ -695,7 +695,7 @@ Six phases, each a separate PR or commit group. Each produces a green build + gr
 
 ### Phase 1 — Add `RemoteInfo` + `GitService.remoteInfo(at:)`
 
-- New DTO in `TouchCodeCore/Git/RemoteInfo.swift`.
+- New DTO in `CodansCore/Git/RemoteInfo.swift`.
 - Parser + `GitService.remoteInfo(at:)` method + `LiveGitService` wiring.
 - Tests: 8 URL variants (ssh, https, ssh://, with/without .git, github.com + enterprise host).
 - No behavior change — this is a new method; nothing calls it yet.
@@ -785,21 +785,21 @@ Implement an in-app HTTP client + OAuth device-flow + Keychain storage. Same bat
 
 - **Upside:** ~300 ms faster per fetch (no fork). Full control over retries, rate limits, proxy config.
 - **Downside:** ~1500 lines of code we don't currently have: OAuth device flow, token storage, token refresh, rate-limit backoff, custom error taxonomy, Enterprise host switcher UI, token-revoke handling, "re-auth" surface. Security-sensitive; subject to audit. Duplicates functionality `gh` already does correctly.
-- **Why rejected:** The `gh api graphql` call adds ~100–150 ms of subprocess cost per chunk. With 3 concurrent chunks, that overhead is ~200 ms total per Project-refresh. Paying a 1500-line engineering bill to shave ~200 ms is the wrong trade. Revisit if touch-code ever needs real-time PR updates, review threads, or cross-repo aggregation.
+- **Why rejected:** The `gh api graphql` call adds ~100–150 ms of subprocess cost per chunk. With 3 concurrent chunks, that overhead is ~200 ms total per Project-refresh. Paying a 1500-line engineering bill to shave ~200 ms is the wrong trade. Revisit if codans ever needs real-time PR updates, review threads, or cross-repo aggregation.
 
 ### D. Periodic background polling instead of event-driven invalidation
 
 Poll every Project every N seconds on a background timer.
 
 - **Upside:** Simple mental model. UI always fresh-ish.
-- **Downside:** Consumes rate limit continuously even when the user is AFK. Battery drain. Adds a "background activity" concept that touch-code otherwise does not have.
+- **Downside:** Consumes rate limit continuously even when the user is AFK. Battery drain. Adds a "background activity" concept that codans otherwise does not have.
 - **Why rejected:** Event-driven is strictly better: same freshness guarantee when the user is interacting, zero cost when idle. The few rare "GitHub state changed without me doing anything" cases are handled by manual refresh (popover reload button) and merge-side delayed refresh.
 
 **Update — a scoped, focus-gated, adaptive poll is adopted.** The "same freshness guarantee when the user is interacting" premise holds only for *local* state: a user typing in a terminal pane is not a GitHub-invalidating event, so check completions, reviews, and merges/closes that originate on GitHub's side have no freshness guarantee under pure event-driven invalidation. The added signal is a single poll that refreshes **only the active Project**, **only while the app is the frontmost application** (cancelled on resign-active), at an **adaptive cadence** (fast only while something is genuinely in flight). Each of D's three objections targets *background, all-Project, runs-while-AFK* polling and is sidestepped by this scoping: an AFK user's app is not frontmost, so it polls zero times — no continuous rate-limit burn, no battery drain, no always-on background-activity concept. The relevant guard against pathological burn is Open Question 5 (rate-limit-aware global backoff). See the "Active-Project liveness poll" row in Caching and Invalidation.
 
 ### E. Persist last snapshot to disk for instant-on-restart
 
-Write `state.snapshotsByProject` to `~/.config/touch-code/github-cache.json` on change; read on launch to paint badges before the first fetch completes.
+Write `state.snapshotsByProject` to `~/.config/codans/github-cache.json` on change; read on launch to paint badges before the first fetch completes.
 
 - **Upside:** Sidebar badges visible instantly after launch, even before `gh api graphql` runs.
 - **Downside:** Stale data for up to one fetch cycle. Adds a "but the app showed X and now it shows Y" class of bug reports. Doubles the file-IO surface (another file to manage, migrate, recover).
@@ -811,7 +811,7 @@ Write `state.snapshotsByProject` to `~/.config/touch-code/github-cache.json` on 
 
 All v1 guarantees preserved:
 
-- No token material in touch-code; `gh` owns auth.
+- No token material in codans; `gh` owns auth.
 - Subprocess argv is `(executable, [args])` — no shell interpretation.
 - GraphQL query is passed as a single `-f query=<body>` argument (gh handles the HTTP POST body). The query body itself contains user-derived branch names; these are GraphQL-string-escaped before interpolation. Branch names failing the escape are dropped with a log-line.
 - No outbound network from the app — all HTTP through `gh`.
@@ -823,7 +823,7 @@ New attack-surface considerations:
 
 ### Observability
 
-- `os.Logger` subsystem `com.touch-code.github`, category `batch` (new).
+- `os.Logger` subsystem `com.gumpw.codans.github`, category `batch` (new).
 - Every batched call logs: Project ID + chunk count + branch count + duration + exit code at `.debug`.
 - GraphQL errors (response contains `"errors": [...]`) logged at `.error` with the first error's message.
 - Fork-PR filter decisions logged at `.debug` with `privacy: .private(mask: .hash)` on branch names.

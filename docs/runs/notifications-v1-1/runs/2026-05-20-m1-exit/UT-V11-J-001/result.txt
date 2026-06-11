@@ -1,14 +1,14 @@
 PASS
 
-Probe driven by controller via computer-use+CLI (feature-build `tc pane send --raw`).
-M1 build: ~/Library/Developer/Xcode/DerivedData/touch-code-chgukochxcibwaglczplbvhgcaqu/Build/Products/Debug/TouchCode.app
+Probe driven by controller via computer-use+CLI (feature-build `codans pane send --raw`).
+M1 build: ~/Library/Developer/Xcode/DerivedData/codans-chgukochxcibwaglczplbvhgcaqu/Build/Products/Debug/Codans.app
 HEAD commit at probe time: 16ba84c
 
 Steps executed:
   1. Backed up user's 500-entry inbox to notifications.json.user-backup-pre-m1-probe
-  2. rm -f ~/.config/touch-code/notifications.json (fresh-install precondition)
-  3. open TouchCode.app (PID 72477, socket /tmp/touch-code-dev-501.sock)
-  4. tc pane send --pane 42328BAD-7119-4891-AE6C-0B55A334CBA9 --raw "1b5d393b68656c6c6f07"
+  2. rm -f ~/.config/codans/notifications.json (fresh-install precondition)
+  3. open Codans.app (PID 72477, socket /tmp/codans-dev-501.sock)
+  4. codans pane send --pane 42328BAD-7119-4891-AE6C-0B55A334CBA9 --raw "1b5d393b68656c6c6f07"
      (OSC 9 = ESC ] 9 ; hello BEL, 10 raw bytes)
   5. sleep 3 (covers 250ms inbox debounce + JIT)
   6. jq probes

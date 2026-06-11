@@ -69,12 +69,12 @@ the largest two are ~22 KB.
 ## Catalog seeds
 
 `catalog/branch-switcher*.json` files conform to
-`TouchCodeCore.Catalog`'s `Codable` shape (`catalog.json` schema v3). One
+`CodansCore.Catalog`'s `Codable` shape (`catalog.json` schema v3). One
 `"playground"` project, one worktree, both pointing at the placeholder
 `__TMP__/repo-multi-branch` (or `repo-empty` / `repo-detached`). The
 **`__TMP__` placeholder is replaced by the test runner with the actual
 per-run tmpdir** before the file is written to
-`~/.config/touch-code/catalog.json` and the app is launched.
+`~/.config/codans/catalog.json` and the app is launched.
 
 Fixed UUIDs are used for project + worktree IDs so generated configs
 are diff-stable and the test runner can reference identifiers without
@@ -114,7 +114,7 @@ Then:
 
 1. Read `catalog/branch-switcher.json`, replace every `__TMP__` with the
    absolute path of `$TMPDIR`, and write the result to
-   `~/.config/touch-code/catalog.json` (atomically, mode 0600).
+   `~/.config/codans/catalog.json` (atomically, mode 0600).
 2. Launch the app.
 
 On teardown:

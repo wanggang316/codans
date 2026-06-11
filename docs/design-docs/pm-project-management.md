@@ -10,7 +10,7 @@
 (add existing local folder, health, rename, per-Project options, reorder,
 remove). Today the sidebar has stub sheets for both Add Project and Add
 Worktree (see `HierarchySidebarView.swift:60-71`) and a rename-project sheet
-that already works. The data layer in `TouchCodeCore/Project.swift` already
+that already works. The data layer in `CodansCore/Project.swift` already
 carries `rootPath`, `gitRoot`, `worktreesDirectory`, `defaultEditor`, and
 `supportsWorktrees: Bool`; `HierarchyManager` already exposes
 `addProject`/`removeProject`/`renameProject`/`setDefaultEditor`. The gap is
@@ -28,7 +28,7 @@ Two external references drive the approach:
   `Features/Repositories/Views/FailedRepositoryRow.swift` is the failure-row
   UX being adopted; `RepositoriesFeature` reducer contains the
   reconcile / add / remove patterns.
-- **Existing TouchCode code** — `GitWorktreeCLI.discoverGitRoot` +
+- **Existing Codans code** — `GitWorktreeCLI.discoverGitRoot` +
   `listWorktrees` already exist and are reused as-is.
 
 ## Goals and Non-Goals
@@ -56,7 +56,7 @@ Two external references drive the approach:
 
 - Clone from URL (spec Out-of-Scope).
 - `git init` on an empty folder (spec Out-of-Scope).
-- Any change to `TouchCodeCore/Worktree.swift` or `Space.swift` — owned by
+- Any change to `CodansCore/Worktree.swift` or `Space.swift` — owned by
   other parallel branches.
 - Create-Worktree sheet — `worktreesDirectory` override is edited only in
   Project Options (W-Q4 = a); the Create-Worktree sheet is T-WORKTREE's.
@@ -134,7 +134,7 @@ single source of truth — no new flag.
 
 ```
  ┌──────────────────────────────────────────────────────────────┐
- │                     Mac App (TouchCode)                      │
+ │                     Mac App (Codans)                      │
  │                                                              │
  │  ┌────────────────────┐  ┌──────────────────────┐            │
  │  │ HierarchySidebar   │  │ WorktreeHeaderView   │            │
@@ -159,7 +159,7 @@ single source of truth — no new flag.
  │             │              (T-WORKTREE owns; append-only)    │
  │             │                       │                        │
  │             ▼                       │                        │
- │     ~/.config/touch-code/           │                        │
+ │     ~/.config/codans/           │                        │
  │        catalog.json                 ▼                        │
  │                            ┌────────────────┐                │
  │                            │ GitWorktreeCLI │──► /usr/bin/git│
@@ -180,7 +180,7 @@ single source of truth — no new flag.
 
 #### Project data-model extension
 
-`TouchCodeCore/Project.swift` grows a transient load-state field. Not
+`CodansCore/Project.swift` grows a transient load-state field. Not
 `Codable`; not sent over the engine persistence pipeline. `HierarchyManager`
 owns all writes.
 
@@ -217,7 +217,7 @@ func reorderProjects(in spaceID: SpaceID,
 func setProjectWorktreesDirectory(_ path: String?,
                                   projectID: ProjectID,
                                   spaceID: SpaceID) throws
-// nil clears override → falls back to ~/.touch-code/repos/<name>/.
+// nil clears override → falls back to ~/.codans/repos/<name>/.
 // Persists.
 
 func isPathRegistered(canonical path: String) -> (SpaceID, ProjectID)?
@@ -417,7 +417,7 @@ resolved path in exchange for a simpler identity story.
 | `WorktreeHeaderView` | Branch label + chrome when supported | Deciding when to show |
 
 Dependency direction: `App/Features` → `App/Clients` → `Runtime` →
-`TouchCodeCore`. Views and reducers never import `GitWorktreeCLI`
+`CodansCore`. Views and reducers never import `GitWorktreeCLI`
 directly. The ProjectReconciler reaches `HierarchyManager` exclusively
 through `HierarchyClient` closures. `GitWorktreeCLI` is used only at
 add-time inside `AddProjectFeature` to classify a picked folder as git
@@ -525,7 +525,7 @@ exists.
 
 `reconcileDiscoveredWorktrees` swallows its own errors per contract; it
 does not surface git failures to the Project level. Per-Worktree
-staleness (e.g. an on-disk worktree that was removed outside touch-code)
+staleness (e.g. an on-disk worktree that was removed outside codans)
 is T-WORKTREE's render-time concern.
 
 The Add Project path has its own localized error surfaces independent
@@ -568,7 +568,7 @@ and "Remove".
 
 ### Observability
 
-Reconciler logs via `os.Logger(subsystem: "touch-code",
+Reconciler logs via `os.Logger(subsystem: "codans",
 category: "ProjectReconciler")` at `.debug` for start/finish,
 `.info` for state transitions, `.error` for failure reasons. No new
 telemetry surface; it's a local app.

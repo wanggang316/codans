@@ -52,27 +52,27 @@ reducer surface that the other two rely on.
 
 Reference files (read for this design):
 
-- `apps/mac/TouchCodeCore/Project.swift` — `Project` struct, carries
+- `apps/mac/CodansCore/Project.swift` — `Project` struct, carries
   `defaultEditor`, `worktreesDirectory`, `gitRoot`. `supportsWorktrees`
   derived property is the implicit kind flag today.
-- `apps/mac/TouchCodeCore/Catalog.swift` — v1; `garbageCollectEditors`
+- `apps/mac/CodansCore/Catalog.swift` — v1; `garbageCollectEditors`
   walks `Project.defaultEditor` at load.
-- `apps/mac/TouchCodeCore/Settings/Settings.swift` — v2; holds
+- `apps/mac/CodansCore/Settings/Settings.swift` — v2; holds
   `repositories: [ProjectID: RepositorySettings]`, string-keyed JSON.
-- `apps/mac/TouchCodeCore/Settings/RepositorySettings.swift` — three fields
+- `apps/mac/CodansCore/Settings/RepositorySettings.swift` — three fields
   today (`defaultMergeStrategy`, `postMergeAction`, `githubDisabled`).
-- `apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
+- `apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
   — the implemented T4 reducer with `classifyHooks` / `isRepositoryScope`.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`
   — `repositoryPanes: IdentifiedArrayOf<…>` composition.
-- `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsSection.swift` —
   `.repositoryGeneral(ProjectID)` / `.repositoryHooks(ProjectID)` cases.
-- `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift` — `Scope` enum with
+- `apps/mac/CodansCore/Hooks/HookSubscription.swift` — `Scope` enum with
   7 cases; Codable uses `{ kind, value }` discriminated form.
-- `apps/mac/TouchCodeCore/Hooks/HookConfig.swift` — v1; decoder rejects
+- `apps/mac/CodansCore/Hooks/HookConfig.swift` — v1; decoder rejects
   non-v1 files.
-- `apps/mac/touch-code/Hooks/HookDispatcher.swift`,
-  `apps/mac/touch-code/App/Features/Socket/handlers/HookHandlers.swift` —
+- `apps/mac/codans/Hooks/HookDispatcher.swift`,
+  `apps/mac/codans/App/Features/Socket/handlers/HookHandlers.swift` —
   exhaustive `switch` on `Scope` — adding cases forces compile-time coverage.
 
 ## Goals and Non-Goals
@@ -126,7 +126,7 @@ Reference files (read for this design):
 
 - **No in-window hook editing.** Adding / enabling / disabling hooks via
   the Settings window remains out of scope; the Reveal-in-Finder hatch
-  stays. Hook authoring still happens through `hooks.json` or `tc hook`.
+  stays. Hook authoring still happens through `hooks.json` or `codans hook`.
 - **No per-Worktree settings.** Override hierarchy in v1 is global →
   project. A future v2 may introduce worktree-level overrides; the
   `Optional<T>` shape of every override field is chosen so that extension
@@ -207,14 +207,14 @@ before we build `git_repo` / `plain_dir` UI branching on top.
 │                                                               │
 ├── Stores (disk) ──────────────────────────────────────────────┤
 │                                                               │
-│  ~/.config/touch-code/settings.json  v3  ◀─ SettingsStore    │
+│  ~/.config/codans/settings.json  v3  ◀─ SettingsStore    │
 │      { version: 3, projects: { <pid>: ProjectSettings } }    │
 │                                                               │
-│  ~/.config/touch-code/catalog.json   v2  ◀─ HierarchyManager │
+│  ~/.config/codans/catalog.json   v2  ◀─ HierarchyManager │
 │      Project { id, name, rootPath, gitRoot, worktrees, ... } │
 │      (defaultEditor and worktreesDirectory removed)          │
 │                                                               │
-│  ~/.config/touch-code/hooks.json     v2  ◀─ HookConfigStore  │
+│  ~/.config/codans/hooks.json     v2  ◀─ HookConfigStore  │
 │      Scope: + .projectID, + .projectPathGlob                 │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
@@ -594,7 +594,7 @@ is rebuilt from disk scanning anyway).
 
 ```
 apps/mac/
-├── TouchCodeCore/
+├── CodansCore/
 │   ├── Project.swift                          (field removal + kind derivation)
 │   ├── Catalog.swift                          (v2 version bump, GC walk move)
 │   ├── Settings/
@@ -605,7 +605,7 @@ apps/mac/
 │       ├── HookSubscription.swift             (+2 Scope cases, fail-soft Kind)
 │       └── HookConfig.swift                   (v2)
 │
-├── touch-code/
+├── codans/
 │   ├── App/Features/Settings/
 │   │   ├── SettingsSection.swift              (project* cases)
 │   │   ├── ProjectSettingsFeature.swift       (RENAMED; uses SettingsStore for writes)
@@ -783,7 +783,7 @@ sub-pane (General / Git / GitHub / Hooks / Scripts / Env).
   current kind doesn't expose (defense-in-depth vs. stale state where a
   project flipped from `gitRepo` to `plainDir` while Settings was open).
 - **Golden-file migration tests**: check-in a v2 `settings.json` +
-  v1 `catalog.json` fixture under `apps/mac/touch-code/Tests/Fixtures/`
+  v1 `catalog.json` fixture under `apps/mac/codans/Tests/Fixtures/`
   and assert round-trip through bringUp produces a byte-stable v3 output
   plus expected v2 catalog.
 
@@ -814,10 +814,10 @@ sub-pane (General / Git / GitHub / Hooks / Scripts / Env).
 
 ### Observability
 
-- `Logger(subsystem: "com.touch-code.persistence", category: "settings")`
+- `Logger(subsystem: "com.gumpw.codans.persistence", category: "settings")`
   gets two new log sites: migration v2→v3 (info), unparseable project
   key (warning, existing).
-- `Logger(subsystem: "com.touch-code.hooks", category: "config")` gets
+- `Logger(subsystem: "com.gumpw.codans.hooks", category: "config")` gets
   the unknown-scope-kind warning site.
 - Settings window: no change.
 
@@ -873,15 +873,15 @@ sub-pane (General / Git / GitHub / Hooks / Scripts / Env).
   crashes, next boot re-runs the fold on the now-clean catalog (which
   has `nil` for the two fields), producing no duplicates. Tested via a
   `simulateCrashAfterCatalogWrite` golden-file test.
-- **R3: Hook scope addition breaks CLI (`tc hook install`).** The CLI
-  validates scope JSON against the shared Codable model. An older `tc`
+- **R3: Hook scope addition breaks CLI (`codans hook install`).** The CLI
+  validates scope JSON against the shared Codable model. An older `codans`
   binary writing v1 scope to a v2-capable app is fine (additive).
-  A newer `tc` binary writing v2 scope to an older app reads as
+  A newer `codans` binary writing v2 scope to an older app reads as
   "unknown kind" and gets dropped with a warning — data loss.
-  **Mitigation:** `tc --version` → app-version handshake on `tc hook
-  install`. If `tc` knows it's writing `projectID` / `projectPathGlob`
+  **Mitigation:** `codans --version` → app-version handshake on `codans hook
+  install`. If `codans` knows it's writing `projectID` / `projectPathGlob`
   and the running app predates v2, refuse with a clear error
-  pointing to the app upgrade. Ship the `tc` version bump in the same
+  pointing to the app upgrade. Ship the `codans` version bump in the same
   PR as the app change.
 - **R4: Plain_dir kind drift.** `ProjectKind` is derived from `gitRoot
   != nil`. If a running app's cached `Project` snapshot has a stale
@@ -905,6 +905,6 @@ sub-pane (General / Git / GitHub / Hooks / Scripts / Env).
 None as of this Draft. Assumptions listed in the chat alongside this
 doc (project-settings.md is a new file superseding the old one;
 three-schema bump is coordinated; ProjectKind is derived; rename is
-cascading; no local `.touch-code.json` variant) have been confirmed
+cascading; no local `.codans.json` variant) have been confirmed
 verbally. Anything that surfaces during planning or implementation
 goes here with the next Amendments section.

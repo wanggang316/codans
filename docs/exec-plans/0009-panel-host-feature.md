@@ -8,7 +8,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this change, opening touch-code with a saved catalog that contains panes no longer crashes with `TerminalClient.liveValue not configured`. The underlying architectural fix is: pane surface lifecycle (first-resolve, retry, failure-rendering) is owned by a TCA reducer, not by a SwiftUI view body calling `@Dependency(TerminalClient.self)` out of scope. `LazyPaneHost` becomes a pure renderer driven by a scoped `Store<PaneHostFeature>`; the fatal-stub seam that currently guards `TerminalClient.liveValue` stays in place and no longer gets punched through at app launch.
+After this change, opening codans with a saved catalog that contains panes no longer crashes with `TerminalClient.liveValue not configured`. The underlying architectural fix is: pane surface lifecycle (first-resolve, retry, failure-rendering) is owned by a TCA reducer, not by a SwiftUI view body calling `@Dependency(TerminalClient.self)` out of scope. `LazyPaneHost` becomes a pure renderer driven by a scoped `Store<PaneHostFeature>`; the fatal-stub seam that currently guards `TerminalClient.liveValue` stays in place and no longer gets punched through at app launch.
 
 ## Progress
 
@@ -23,7 +23,7 @@ After this change, opening touch-code with a saved catalog that contains panes n
 
 - **`@Reducer` + `some ReducerOf<Self>` → "circular reference" error.** The `@Reducer` macro expansion couldn't resolve `ReducerOf<Self>` for the body's return type. Switched to `some Reducer<State, Action>` (the form every other reducer in this project uses) and the macro expanded cleanly. Logged here because the error message (`circular reference` in a generated `@__swiftmacro_…` file) gives no hint that the cause is the return-type style.
 - **`inout State` + `Logger` string interpolation.** Accessing `state.paneID.description` inside `panelHostLogger.error("… \(state.paneID.description, privacy: .public) …")` inside `resolveSurface(state: inout State)` errors with "escaping autoclosure captures 'inout' parameter 'state'" — the privacy-annotated interpolation is an autoclosure. Fix: bind `let panelIDDescription = state.paneID.description` before the log call.
-- **Pre-existing test-host crash shadows the verification path.** `xcodebuild test` bootstrap crashes in `EditorClient.live → MainActor.assumeIsolated` (PR #30 code), unrelated to this plan. Integration verification therefore relied on launching the live app against `~/.config/touch-code/catalog.json`; confirmed by `log show` that the `TerminalClient.liveValue not configured` fatal-error no longer fires. Test-host crash should be filed as its own issue.
+- **Pre-existing test-host crash shadows the verification path.** `xcodebuild test` bootstrap crashes in `EditorClient.live → MainActor.assumeIsolated` (PR #30 code), unrelated to this plan. Integration verification therefore relied on launching the live app against `~/.config/codans/catalog.json`; confirmed by `log show` that the `TerminalClient.liveValue not configured` fatal-error no longer fires. Test-host crash should be filed as its own issue.
 
 ## Decision Log
 
@@ -35,7 +35,7 @@ After this change, opening touch-code with a saved catalog that contains panes n
 
 ## Outcomes & Retrospective
 
-Opening `touch-code` via `open $APP` (which triggers macOS window restoration with the pre-existing `~/.config/touch-code/catalog.json` containing real Space → Project → Worktree → Tab → Pane data) now settles into a live session. `log show --predicate 'process == "touch_code"'` no longer contains `touch_code/TerminalClient.swift:85: Fatal error: TerminalClient.liveValue not configured`. Architecturally, no SwiftUI view in the project now reads `@Dependency(TerminalClient.self)`; the fatal-stub seam is intact and its only role is to guard against future regressions. `LazyPaneHost` dropped from ~115 lines of view-embedded side-effect logic to ~75 lines of pure rendering; the decision tree is exercised by `PanelHostFeatureTests` via `TestStore`.
+Opening `codans` via `open $APP` (which triggers macOS window restoration with the pre-existing `~/.config/codans/catalog.json` containing real Space → Project → Worktree → Tab → Pane data) now settles into a live session. `log show --predicate 'process == "Codans"'` no longer contains `Codans/TerminalClient.swift:85: Fatal error: TerminalClient.liveValue not configured`. Architecturally, no SwiftUI view in the project now reads `@Dependency(TerminalClient.self)`; the fatal-stub seam is intact and its only role is to guard against future regressions. `LazyPaneHost` dropped from ~115 lines of view-embedded side-effect logic to ~75 lines of pure rendering; the decision tree is exercised by `PanelHostFeatureTests` via `TestStore`.
 
 Outstanding (not in scope for this plan):
 - Pre-existing test-host crash in `EditorClient.live → MainActor.assumeIsolated` blocks `xcodebuild test` for the app bundle regardless of what tests are being exercised. Needs a separate fix on that client's threading contract.
@@ -44,12 +44,12 @@ Outstanding (not in scope for this plan):
 ## Context and Orientation
 
 Related:
-- `apps/mac/touch-code/App/TouchCodeApp.swift:227` — `Store.init(withDependencies:) { $0.terminalClient = .live(...) }` sets the reducer-scoped dependency that the new `PaneHostFeature` will consume.
-- `apps/mac/touch-code/App/Clients/TerminalClient.swift:78-103` — fatalError stubs for `liveValue` that the current `LazyPaneHost` hits via `@Dependency` outside reducer scope.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift:120-124` — existing comment acknowledges the exact failure mode in `Commands` structs; the LazyPaneHost bug is the same class.
-- `apps/mac/touch-code/App/Features/SplitViewport/LazyPaneHost.swift` — current SwiftUI-view-driven ensureSurface; to be rewritten as pure renderer.
-- `apps/mac/touch-code/App/Features/SplitViewport/SplitViewportFeature.swift` — parent reducer that will host the new `IdentifiedArrayOf<PaneHostFeature.State>`.
-- `apps/mac/touch-code/App/Features/SplitViewport/SplitViewportView.swift` — view boundary that bridges `HierarchyManager`'s catalog into the reducer via a sync action, and scopes child stores by `PaneID`.
+- `apps/mac/codans/App/CodansApp.swift:227` — `Store.init(withDependencies:) { $0.terminalClient = .live(...) }` sets the reducer-scoped dependency that the new `PaneHostFeature` will consume.
+- `apps/mac/codans/App/Clients/TerminalClient.swift:78-103` — fatalError stubs for `liveValue` that the current `LazyPaneHost` hits via `@Dependency` outside reducer scope.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift:120-124` — existing comment acknowledges the exact failure mode in `Commands` structs; the LazyPaneHost bug is the same class.
+- `apps/mac/codans/App/Features/SplitViewport/LazyPaneHost.swift` — current SwiftUI-view-driven ensureSurface; to be rewritten as pure renderer.
+- `apps/mac/codans/App/Features/SplitViewport/SplitViewportFeature.swift` — parent reducer that will host the new `IdentifiedArrayOf<PaneHostFeature.State>`.
+- `apps/mac/codans/App/Features/SplitViewport/SplitViewportView.swift` — view boundary that bridges `HierarchyManager`'s catalog into the reducer via a sync action, and scopes child stores by `PaneID`.
 
 Terms:
 - **Surface**: a `PaneSurface` instance owned by `TerminalEngine`'s registry. One per live Pane.
@@ -60,7 +60,7 @@ Terms:
 
 ### Milestone 1 — PaneHostFeature
 
-Add `App/Features/SplitViewport/PaneHostFeature.swift`. Introduce `SurfaceBox` (local to the file) wrapping `PaneSurface` with identity-based `Equatable`. State holds `paneID`, the full `(spaceID, projectID, worktreeID, tabID)` address, `phase: Phase`, and `surface: SurfaceBox?`. `Action`: `.task`, `.resolved(SurfaceBox)`, `.failed(String)`, `.retryButtonTapped`. Reducer uses `@Dependency(TerminalClient.self)`; on `.task` or `.retryButtonTapped`, short-circuits via `terminalClient.surface(paneID)` and otherwise runs `.run { send in … }` over `ensureSurface + surface`, cancellable by `CancelID.ensure(paneID)` with `cancelInFlight: true`. Verify at the end of M1: the file compiles in isolation (swift build of tcKit target or `xcodebuild` on the scheme); no behavioural change yet.
+Add `App/Features/SplitViewport/PaneHostFeature.swift`. Introduce `SurfaceBox` (local to the file) wrapping `PaneSurface` with identity-based `Equatable`. State holds `paneID`, the full `(spaceID, projectID, worktreeID, tabID)` address, `phase: Phase`, and `surface: SurfaceBox?`. `Action`: `.task`, `.resolved(SurfaceBox)`, `.failed(String)`, `.retryButtonTapped`. Reducer uses `@Dependency(TerminalClient.self)`; on `.task` or `.retryButtonTapped`, short-circuits via `terminalClient.surface(paneID)` and otherwise runs `.run { send in … }` over `ensureSurface + surface`, cancellable by `CancelID.ensure(paneID)` with `cancelInFlight: true`. Verify at the end of M1: the file compiles in isolation (swift build of CodansKit target or `xcodebuild` on the scheme); no behavioural change yet.
 
 ### Milestone 2 — SplitViewportFeature integration
 
@@ -68,7 +68,7 @@ Extend `SplitViewportFeature.State` with `panelHosts: IdentifiedArrayOf<PaneHost
 
 ### Milestone 3 — LazyPaneHost view rewrite
 
-Rewrite `LazyPaneHost` to take `let store: StoreOf<PaneHostFeature>`. Body: `switch store.phase` → loading/ready/failed panes; `.task { store.send(.task) }`. Remove `@Dependency`, `@State var state`, `ensureSurface()` method, and internal `LoadState` enum. Retry button dispatches `.retryButtonTapped`. Keep the existing logger subsystem name (`com.touch-code.shell` / `lazy-pane`) so telemetry tags are stable, but emit only from reducer logging (TBD if needed — not required for M3). Acceptance: file compiles, no behavioural wiring yet from parent view.
+Rewrite `LazyPaneHost` to take `let store: StoreOf<PaneHostFeature>`. Body: `switch store.phase` → loading/ready/failed panes; `.task { store.send(.task) }`. Remove `@Dependency`, `@State var state`, `ensureSurface()` method, and internal `LoadState` enum. Retry button dispatches `.retryButtonTapped`. Keep the existing logger subsystem name (`com.gumpw.codans.shell` / `lazy-pane`) so telemetry tags are stable, but emit only from reducer logging (TBD if needed — not required for M3). Acceptance: file compiles, no behavioural wiring yet from parent view.
 
 ### Milestone 4 — SplitViewportView wiring
 
@@ -85,13 +85,13 @@ New `Tests/PanelHostFeatureTests.swift` using `TestStore`:
 
 Retire or rewrite `Tests/LazyPanelHostTests.swift` — the outcome-enum helper is now redundant. Replace with a brief smoke test that `LazyPaneHost(store:)` renders the expected view for each phase (snapshot-free; assert on store state propagating to body via `store.withState`). If the smoke test is awkward to write without a render host, delete the file.
 
-Acceptance: `cd apps/mac && xcodebuild -workspace ... test -only-testing:touch-codeTests/PanelHostFeatureTests` passes.
+Acceptance: `cd apps/mac && xcodebuild -workspace ... test -only-testing:codansTests/PanelHostFeatureTests` passes.
 
 ### Milestone 6 — End-to-end verification
 
 `make generate && make run-app`. Confirm:
-1. App launches against the existing `~/.config/touch-code/catalog.json` (which contains real worktrees + tabs + panes) without crashing.
-2. `log show --predicate 'process == "touch_code"' --last 1m` shows no `TerminalClient.liveValue not configured`.
+1. App launches against the existing `~/.config/codans/catalog.json` (which contains real worktrees + tabs + panes) without crashing.
+2. `log show --predicate 'process == "Codans"' --last 1m` shows no `TerminalClient.liveValue not configured`.
 3. Surfaces render, tabs switch, pane close/split still works.
 4. Killing the surface (e.g. `exit` inside shell) moves phase into `.failed` with the "Retry" button, and retry succeeds when the underlying condition clears.
 
@@ -105,15 +105,15 @@ cd apps/mac && make build
 cd apps/mac && make generate && make run-app
 
 # After M5: tests
-cd apps/mac && xcodebuild -workspace touch-code.xcworkspace \
-  -scheme touch-code -configuration Debug \
-  test -only-testing:touch-codeTests
+cd apps/mac && xcodebuild -workspace codans.xcworkspace \
+  -scheme codans -configuration Debug \
+  test -only-testing:codansTests
 ```
 
 ## Validation and Acceptance
 
 - Unit: `PanelHostFeatureTests` passes all five cases above. `LazyPanelHostTests` is removed or reduced to a stub smoke.
-- Integration: launching the existing catalog (`~/.config/touch-code/catalog.json` with `work.myskills.main` tabs) via `open $APP` does not emit `TerminalClient.liveValue` in `log show`. Surfaces restore; tab switches don't re-create surfaces (engine registry retains them).
+- Integration: launching the existing catalog (`~/.config/codans/catalog.json` with `work.myskills.main` tabs) via `open $APP` does not emit `TerminalClient.liveValue` in `log show`. Surfaces restore; tab switches don't re-create surfaces (engine registry retains them).
 - Regression: existing `RootFeatureTests`, `SplitViewport`-adjacent tests, and `PaneActionRouterFeatureTests` still pass.
 
 ## Idempotence and Recovery
@@ -125,12 +125,12 @@ All code edits are additive or in-place rewrites; no data migrations. If a miles
 Reference crash line to clear after fix:
 
 ```
-touch_code/TerminalClient.swift:85: Fatal error: TerminalClient.liveValue not configured
+Codans/TerminalClient.swift:85: Fatal error: TerminalClient.liveValue not configured
 ```
 
 ## Interfaces and Dependencies
 
-In `apps/mac/touch-code/App/Features/SplitViewport/PaneHostFeature.swift`, define:
+In `apps/mac/codans/App/Features/SplitViewport/PaneHostFeature.swift`, define:
 
 ```swift
 @Reducer
@@ -164,4 +164,4 @@ struct SurfaceBox: Equatable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/SplitViewport/SplitViewportFeature.swift`, extend `State` and `Action` as in Milestone 2. Reducer composition uses `.forEach(\.panelHosts, action: \.panelHosts) { PaneHostFeature() }` (TCA 1.23.1).
+In `apps/mac/codans/App/Features/SplitViewport/SplitViewportFeature.swift`, extend `State` and `Action` as in Milestone 2. Reducer composition uses `.forEach(\.panelHosts, action: \.panelHosts) { PaneHostFeature() }` (TCA 1.23.1).

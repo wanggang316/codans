@@ -15,17 +15,17 @@
 
 ## Context and Scope
 
-touch-code already publishes a stable Worktree-selection stream and a per-Worktree read-only git viewer (C7). What it still cannot answer, without leaving the app, is the question the user asks *after* "what changed here?" — namely "does the PR for this worktree still pass CI, and can I merge it?"
+codans already publishes a stable Worktree-selection stream and a per-Worktree read-only git viewer (C7). What it still cannot answer, without leaving the app, is the question the user asks *after* "what changed here?" — namely "does the PR for this worktree still pass CI, and can I merge it?"
 
 This design adds a narrow, PR-centric GitHub surface that attaches to the existing Worktree model. It does **not** replace the terminal — every action stays one keystroke away from the underlying `gh` invocation — and it does **not** grow into a GitHub client. The intent is a glanceable badge + a focused popover + a few command-palette actions, nothing more.
 
 Repository state at design time:
 
 - No GitHub code exists yet. Branch `feature/github01` is greenfield.
-- `touch-code/Git/` holds the C7 read-only `git` data layer plus `FoundationCommandRunner` — the subprocess runner with timeout / SIGTERM→SIGKILL ladder / pipe backpressure that this design will re-use verbatim for `gh`.
-- `Worktree` has a nullable `branch: String?` (see `TouchCodeCore/Worktree.swift`); Project has a `gitRoot`. There is no `owner/repo` field on any domain type — `gh`'s cwd-based resolution makes that unnecessary.
-- `RepositorySettings` is declared but explicitly reserved-empty (see `TouchCodeCore/Settings/RepositorySettings.swift`); the file comment invites additive fields without a schema version bump. Natural home for per-Project GitHub preferences.
-- The broad shape of the integration — subprocess-wrapped `gh`, per-Worktree PR snapshots, inline badge + popover + palette actions, optional archive-on-merge — is a shape that has been validated on a comparable macOS tool the author maintains; that prior validation informs the scope cuts taken below but no code is copied verbatim, because touch-code's sidebar, command palette, and settings conventions differ.
+- `codans/Git/` holds the C7 read-only `git` data layer plus `FoundationCommandRunner` — the subprocess runner with timeout / SIGTERM→SIGKILL ladder / pipe backpressure that this design will re-use verbatim for `gh`.
+- `Worktree` has a nullable `branch: String?` (see `CodansCore/Worktree.swift`); Project has a `gitRoot`. There is no `owner/repo` field on any domain type — `gh`'s cwd-based resolution makes that unnecessary.
+- `RepositorySettings` is declared but explicitly reserved-empty (see `CodansCore/Settings/RepositorySettings.swift`); the file comment invites additive fields without a schema version bump. Natural home for per-Project GitHub preferences.
+- The broad shape of the integration — subprocess-wrapped `gh`, per-Worktree PR snapshots, inline badge + popover + palette actions, optional archive-on-merge — is a shape that has been validated on a comparable macOS tool the author maintains; that prior validation informs the scope cuts taken below but no code is copied verbatim, because codans's sidebar, command palette, and settings conventions differ.
 
 This document is the source of truth for *how* v1 GitHub integration is structured and *why* it delegates to `gh` rather than talking to the API directly. It does not specify the v2 IPC surface, agent-facing `github.*` methods, or any diff rendering.
 
@@ -39,7 +39,7 @@ This document is the source of truth for *how* v1 GitHub integration is structur
 - Offer a **Settings pane** that: (a) detects `gh` installation + auth status and surfaces clear remediation copy when missing, (b) lets the user pick default merge strategy and post-merge Worktree action (none / archive / delete), (c) toggles the whole feature off per-Project.
 - Reuse `FoundationCommandRunner`. No new subprocess infrastructure, no new timeout/signal code.
 - Reuse the hybrid TCA + `@Observable` + `*Client` shape that C7 established. Anything a feature reducer calls goes through a typed TCA `DependencyKey` client.
-- Stay inside `touch-code/GitHub/` (in-app module) with pure-function parsers and Decodable DTOs that *could* later move to `TouchCodeCore` if a CLI/iOS consumer needs them. Do not pre-move them.
+- Stay inside `codans/GitHub/` (in-app module) with pure-function parsers and Decodable DTOs that *could* later move to `CodansCore` if a CLI/iOS consumer needs them. Do not pre-move them.
 
 **Non-Goals**
 
@@ -47,7 +47,7 @@ This document is the source of truth for *how* v1 GitHub integration is structur
 - **No issues, reviews, discussions, notifications inbox, codespaces, actions dashboard, releases, projects, gists.** PR-only.
 - **No in-app diff rendering for PRs.** "View diff" is `gh pr view --web`. C7's diff viewer is working-tree/log/staged — unrelated.
 - **No webhooks, no server push, no background polling thread.** All refresh is user-initiated (open popover, invoke command) or event-triggered (worktree selection change, merge/close action completion + short debounce).
-- **No IPC surface (`github.*` methods)** in v1. `tc` already has shell access to `gh` inside any Pane, which is the strictly-better scripted interface. Reserve the namespace (see [Seams](#seams-for-future-work)).
+- **No IPC surface (`github.*` methods)** in v1. `codans` already has shell access to `gh` inside any Pane, which is the strictly-better scripted interface. Reserve the namespace (see [Seams](#seams-for-future-work)).
 - **No GitHub Enterprise multi-host UI.** Read the default host from `gh auth status`; if the user has multiple hosts configured, we use the default and document the limitation.
 - **No merge-conflict resolution, no branch rebase, no force-push, no PR creation.** Creation is explicitly deferred to a sibling design (the existing terminal + `gh pr create` is sufficient for v1).
 - **No persistence of PR state to disk.** Memory-only, reset on app launch. Tokens live in `gh`'s config. We store zero secret material.
@@ -57,13 +57,13 @@ This document is the source of truth for *how* v1 GitHub integration is structur
 
 ### Overview
 
-The integration is a single in-app folder, `touch-code/GitHub/`, that mirrors C7's three-layer shape:
+The integration is a single in-app folder, `codans/GitHub/`, that mirrors C7's three-layer shape:
 
-1. **Data layer** (`touch-code/GitHub/`) — pure Swift: `GitHubService` protocol + `LiveGitHubService` implementation. Live impl runs `gh` via the existing `CommandRunner`, parses stdout JSON into Decodable DTOs, translates mechanical `CommandOutcome` values into a domain `GitHubError` enum. No state, no caching, no mutation.
+1. **Data layer** (`codans/GitHub/`) — pure Swift: `GitHubService` protocol + `LiveGitHubService` implementation. Live impl runs `gh` via the existing `CommandRunner`, parses stdout JSON into Decodable DTOs, translates mechanical `CommandOutcome` values into a domain `GitHubError` enum. No state, no caching, no mutation.
 
-2. **Client boundary** (`touch-code/App/Clients/GitHubClient.swift`) — TCA `DependencyKey` wrapper mirroring `GitServiceClient` shape. Each protocol method becomes a `@Sendable` async closure; tests inject `.testValue` with `unimplemented(…)` placeholders.
+2. **Client boundary** (`codans/App/Clients/GitHubClient.swift`) — TCA `DependencyKey` wrapper mirroring `GitServiceClient` shape. Each protocol method becomes a `@Sendable` async closure; tests inject `.testValue` with `unimplemented(…)` placeholders.
 
-3. **Feature layer** (`touch-code/App/Features/GitHub/`) — a TCA feature, `GitHubFeature`, that owns: per-Project PR snapshot map (`[WorktreeID: PullRequestSnapshot]`), availability cache (30 s TTL on `gh auth status`), debounced refresh after user actions, and delegate actions consumed by sidebar / command palette / settings.
+3. **Feature layer** (`codans/App/Features/GitHub/`) — a TCA feature, `GitHubFeature`, that owns: per-Project PR snapshot map (`[WorktreeID: PullRequestSnapshot]`), availability cache (30 s TTL on `gh auth status`), debounced refresh after user actions, and delegate actions consumed by sidebar / command palette / settings.
 
 Three load-bearing decisions, covered in [Alternatives Considered](#alternatives-considered):
 
@@ -71,7 +71,7 @@ Three load-bearing decisions, covered in [Alternatives Considered](#alternatives
 
 2. **On-demand per-Worktree fetch; GraphQL batch only as a named Phase 2.** v1 lazily fetches a PR snapshot when a Worktree becomes visible in the sidebar viewport or gains selection. This avoids the complexity of a batched GraphQL query (aliased-per-branch, dynamic-keyed decoding, chunked concurrency) until there is measured latency to justify it. See [Risks](#risks) for the sidebar-population burst concern.
 
-3. **Memory-only state, no disk, no IPC in v1.** PR snapshots are rebuilt on app launch. `tc`'s scripted surface for GitHub is plain `gh` inside any Pane (already better than anything we would expose), which lets us keep the IPC wire surface frozen and defer the `github.*` method design until real workflows appear.
+3. **Memory-only state, no disk, no IPC in v1.** PR snapshots are rebuilt on app launch. `codans`'s scripted surface for GitHub is plain `gh` inside any Pane (already better than anything we would expose), which lets us keep the IPC wire surface frozen and defer the `github.*` method design until real workflows appear.
 
 Why this is enough. The PR-status question is read-mostly, low-volume (the user checks a handful of Worktrees per session), user-initiated (no background polling), and the authoritative data lives on GitHub's servers. A reducer + a subprocess + a 30-second availability cache covers the hot path. We are not building a PR database.
 
@@ -79,7 +79,7 @@ Why this is enough. The PR-status question is read-mostly, low-volume (the user 
 
 ```
       ┌────────────────────────────────────────────────────────────────┐
-      │  touch-code app window                                         │
+      │  codans app window                                         │
       │                                                                │
       │  ┌──────────────────┐    ┌─────────────────────────────────┐   │
       │  │  Sidebar         │    │  GitHubFeature (TCA reducer)    │   │
@@ -89,7 +89,7 @@ Why this is enough. The PR-status question is read-mostly, low-volume (the user 
       │         ▲   │                           │ GitHubClient (DI)    │
       │    badge│   │tap → popover              ▼                      │
       │    actions  │                ┌───────────────────────────┐     │
-      │             ▼                │  touch-code/GitHub/       │     │
+      │             ▼                │  codans/GitHub/       │     │
       │  ┌──────────────────┐        │   ├ GitHubService (proto) │     │
       │  │ PRPopoverView    │        │   ├ LiveGitHubService     │ ────┼──┐
       │  │ CommandPalette   │───────▶│   ├ JSONOutputParsers     │     │  │
@@ -340,7 +340,7 @@ Registers as a new sidebar entry in the existing Settings window, alphabetically
 │  Per-Project overrides                                     │
 │  Select a Project above to override these defaults.        │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │  touch-code                                           │  │
+│  │  codans                                           │  │
 │  │  Merge strategy: ○ Use default (Squash)               │  │
 │  │                  ● Custom  [ Rebase and merge ▾ ]     │  │
 │  │  After merge:    ● Use default (Archive)              │  │
@@ -388,7 +388,7 @@ This avoids the well-known anti-pattern of interrupting first-launch flow with a
 #### Theming
 
 - Light/Dark/Increased-contrast all supported through asset-catalog `ColorRole`s — new tokens: `prState.open`, `prState.draft`, `prState.merged`, `prState.closed`, `prCheck.passing`, `prCheck.failing`, `prCheck.pending`.
-- State-color hues follow GitHub's conventional palette (green / gray / purple / red) but saturation is dropped ~20% vs. GitHub.com to cohabit with the existing muted-chrome of touch-code's sidebar.
+- State-color hues follow GitHub's conventional palette (green / gray / purple / red) but saturation is dropped ~20% vs. GitHub.com to cohabit with the existing muted-chrome of codans's sidebar.
 - Accent-color override (user's macOS global accent) only affects focus rings and the Merge primary button — state colors are semantic and do not follow the accent.
 
 ### Data Storage
@@ -408,7 +408,7 @@ Nothing else is persisted. No PR snapshots, no tokens, no caches, no ETag tables
 ### Component Boundaries
 
 ```
-touch-code/GitHub/                        (in-app module, new)
+codans/GitHub/                        (in-app module, new)
   ├ GitHubService.swift                   protocol
   ├ LiveGitHubService.swift               wraps CommandRunner + JSON decoders
   ├ GhExecutableResolver.swift            actor-serialized `which gh` with in-flight dedup
@@ -418,10 +418,10 @@ touch-code/GitHub/                        (in-app module, new)
   ├ GitHubAvailability.swift              enum: .unknown | .available(host) | .unavailable(reason)
   └ GitHubError.swift                     throwable, includes user-facing message
 
-touch-code/App/Clients/
+codans/App/Clients/
   └ GitHubClient.swift                    TCA DependencyKey (mirrors GitServiceClient)
 
-touch-code/App/Features/GitHub/
+codans/App/Features/GitHub/
   ├ GitHubFeature.swift                   TCA reducer
   ├ Views/
   │   ├ PullRequestBadge.swift            sidebar-row capsule (Surface 1)
@@ -434,19 +434,19 @@ touch-code/App/Features/GitHub/
   └ Theme/
       └ PullRequestStateColors.swift      ColorRole tokens (prState.*, prCheck.*)
 
-TouchCodeCore/
+CodansCore/
   ├ Settings/RepositorySettings.swift     add defaultMergeStrategy, postMergeAction
   └ Settings/MergeStrategy.swift          enum (moved here, not app-local, because
-                                          tc could script merges in v2)
+                                          codans could script merges in v2)
   └ Settings/MergedWorktreeAction.swift   enum
 ```
 
 **Dependency rules:**
 
-- `touch-code/GitHub/` may import only `TouchCodeCore` + Foundation. No TCA, no SwiftUI.
-- `App/Clients/GitHubClient.swift` imports TCA + `touch-code/GitHub/` types + `TouchCodeCore`. No UI.
-- `App/Features/GitHub/` imports TCA + SwiftUI + the client. Never `touch-code/GitHub/` directly.
-- `touch-code/Git/` and `touch-code/GitHub/` must stay siblings — GitHub must not depend on Git; they happen to share `CommandRunner` which lives in `Git/` today. **Before implementation starts, move `CommandRunner.swift` out of `Git/` into a new `touch-code/Process/` (or similar)** so neither module leaks into the other. Alternative: leave `CommandRunner` where it is and import `Git` from `GitHub` — rejected because it implies a conceptual dependency that does not exist.
+- `codans/GitHub/` may import only `CodansCore` + Foundation. No TCA, no SwiftUI.
+- `App/Clients/GitHubClient.swift` imports TCA + `codans/GitHub/` types + `CodansCore`. No UI.
+- `App/Features/GitHub/` imports TCA + SwiftUI + the client. Never `codans/GitHub/` directly.
+- `codans/Git/` and `codans/GitHub/` must stay siblings — GitHub must not depend on Git; they happen to share `CommandRunner` which lives in `Git/` today. **Before implementation starts, move `CommandRunner.swift` out of `Git/` into a new `codans/Process/` (or similar)** so neither module leaks into the other. Alternative: leave `CommandRunner` where it is and import `Git` from `GitHub` — rejected because it implies a conceptual dependency that does not exist.
 
 **Why no separate Tuist target:** same rationale as every other in-app module (Runtime, Hooks, Git, App/Features/*). Folder-level boundary enforced by review; promote only if a test bundle or second consumer arrives.
 
@@ -456,7 +456,7 @@ Reserved without wiring:
 
 - **`github.*` IPC namespace.** `IPC.Method` gets no new cases in v1. When v2 lands — e.g., agent-invoked `github.pr.describe` for scripted PR checks — handlers plug into `MethodRouter.routeGitHub(...)` alongside the existing editor / hierarchy / terminal routers.
 - **Batched GraphQL.** `LiveGitHubService.pullRequest(...)` currently shells out once per Worktree. A `batchPullRequests([branch], worktreePath)` method can be added via `gh api graphql` with an aliased-per-branch query (25 branches per request, capped concurrency) if sidebar population becomes slow — see Risks below for the trigger.
-- **Move of DTOs into `TouchCodeCore`.** If/when `tc` exposes `github.*`, `PullRequestSnapshot` and friends move from `touch-code/GitHub/` to `TouchCodeCore` so `tc` can decode without depending on the app target. No circular dep risk; they are already pure value types.
+- **Move of DTOs into `CodansCore`.** If/when `codans` exposes `github.*`, `PullRequestSnapshot` and friends move from `codans/GitHub/` to `CodansCore` so `codans` can decode without depending on the app target. No circular dep risk; they are already pure value types.
 
 ## Alternatives Considered
 
@@ -496,14 +496,14 @@ Zero UI beyond a Settings checkbox + doctor page.
 
 ### Security
 
-- **No secret material in touch-code.** Tokens live in `gh`'s config store. We never read `~/.config/gh/hosts.yml`.
+- **No secret material in codans.** Tokens live in `gh`'s config store. We never read `~/.config/gh/hosts.yml`.
 - **Subprocess argument safety.** All `gh` invocations are `(executable, [argv])` — no shell, no string interpolation. User-supplied tokens are branch names and commit SHAs; those are passed as argv elements and validated before use (branch matches `git check-ref-format`; SHA is `[0-9a-f]{7,40}`). Mirrors C7's handling.
-- **Log hygiene.** `os.Logger` category `com.touch-code.github`. Never log PR titles / branch names / emails at `.info` (may contain confidential project info); use `.debug` with `privacy: .private` on those fields.
+- **Log hygiene.** `os.Logger` category `com.gumpw.codans.github`. Never log PR titles / branch names / emails at `.info` (may contain confidential project info); use `.debug` with `privacy: .private` on those fields.
 - **No outbound network from the app.** All HTTP goes through `gh`; app stays off the network. Simplifies the firewall / sandbox story.
 
 ### Observability
 
-- `os.Logger` subsystem `com.touch-code.github`, per-method category (`resolver`, `service`, `feature`).
+- `os.Logger` subsystem `com.gumpw.codans.github`, per-method category (`resolver`, `service`, `feature`).
 - Every `gh` invocation logs argv + cwd + duration + exit code at `.debug`. No stdout/stderr logging at info — too big, may be sensitive.
 - Availability probe failures log the reason at `.info` (install missing, auth missing, wrong host) — these are user-actionable and worth surfacing in Console.app.
 
@@ -537,11 +537,11 @@ Additive. `RepositorySettings` gets two optional fields with decode-if-present f
 
 ### Rollback plan
 
-The feature is entirely additive with a per-Project toggle. Disabling the toggle makes badges + popovers + palette actions disappear; deleting the `touch-code/GitHub/` folder + three references in `RootFeature`/`SettingsFeature`/`CommandPalette` removes it entirely. No data migration needed for rollback.
+The feature is entirely additive with a per-Project toggle. Disabling the toggle makes badges + popovers + palette actions disappear; deleting the `codans/GitHub/` folder + three references in `RootFeature`/`SettingsFeature`/`CommandPalette` removes it entirely. No data migration needed for rollback.
 
 ## Risks
 
-- **R1: `gh` output schema changes between versions.** Mitigation: DTOs use `decodeIfPresent` for every non-critical field + a versioned fixture suite + a one-line note in `README`/docs pinning the tested `gh` major version. We accept that a `gh` breaking change will require a touch-code release; this is a trade we make explicitly in exchange for not running our own API client.
+- **R1: `gh` output schema changes between versions.** Mitigation: DTOs use `decodeIfPresent` for every non-critical field + a versioned fixture suite + a one-line note in `README`/docs pinning the tested `gh` major version. We accept that a `gh` breaking change will require a codans release; this is a trade we make explicitly in exchange for not running our own API client.
 
 - **R2: Sidebar-population subprocess burst.** On a Project with 15 Worktrees, selecting it fires 15 `gh` processes. Mitigation: `GitHubFeature` caps in-flight fetches at 3 (per-Project `TaskGroup`) and enqueues the rest. If this proves visibly slow in practice, switch to the batched GraphQL path (already seam-reserved). Decision gate: measurable P50 > 500 ms for full badge population on a realistic Project.
 
@@ -551,9 +551,9 @@ The feature is entirely additive with a per-Project toggle. Disabling the toggle
 
 - **R5: `gh` invocation deadlocks or hangs.** Mitigation: every call inherits `FoundationCommandRunner`'s 20-second default timeout + SIGTERM→SIGKILL ladder. No call can hang the UI.
 
-- **R6: `CommandRunner` move (from `touch-code/Git/` to `touch-code/Process/`) breaks C7.** Mitigation: the move is mechanical (rename + update 2 importers); land it as a prep commit with full C7 test suite passing before touching GitHub code. If the move proves disruptive, fall back to leaving `CommandRunner` in `Git/` and adding a `@_exported import` shim — strictly worse but reversible.
+- **R6: `CommandRunner` move (from `codans/Git/` to `codans/Process/`) breaks C7.** Mitigation: the move is mechanical (rename + update 2 importers); land it as a prep commit with full C7 test suite passing before touching GitHub code. If the move proves disruptive, fall back to leaving `CommandRunner` in `Git/` and adding a `@_exported import` shim — strictly worse but reversible.
 
-- **R7: User runs touch-code without `gh` installed and finds no feature.** Mitigation: first-run onboarding detects missing `gh` and offers the `brew install gh` copy-to-clipboard plus a "Configure later" dismiss; after that, only the Settings pane banner surfaces the state. The rest of the app is unaffected.
+- **R7: User runs codans without `gh` installed and finds no feature.** Mitigation: first-run onboarding detects missing `gh` and offers the `brew install gh` copy-to-clipboard plus a "Configure later" dismiss; after that, only the Settings pane banner surfaces the state. The rest of the app is unaffected.
 
 ## Open Questions
 

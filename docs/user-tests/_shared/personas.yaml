@@ -1,4 +1,4 @@
-# Shared Personas for touch-code user-tests.
+# Shared Personas for codans user-tests.
 #
 # Each persona names a stable identity that cases reference by ID. Adding a
 # new persona is cheap; reusing one prevents two cases from independently

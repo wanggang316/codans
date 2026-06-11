@@ -21,7 +21,7 @@ No user-visible UX change; all fixes are resilience / correctness / operability.
 ## Progress
 
 - [x] T1 — (e) `WorktreeLifecycleIntegrationTests` switch from `#require(wtAvailable(), …)` (counts as failure) to `.enabled(if: Self.wtBundled)` trait (counts as skip) — needed `nonisolated` on the static let because the @MainActor struct would otherwise make the predicate MainActor-isolated and the trait context is Sendable; 2 tests pass in 2.1s
-- [x] T2 — (d) `HierarchyClient.reconcile` catch wires an `os_log` `Logger.error(...)` call; comment updated. Subsystem `com.touch-code.hierarchy`, category `reconcile` (matches SettingsStore / CatalogStore / IPC handlers' `com.touch-code.<area>` convention). `OSLog` import added.
+- [x] T2 — (d) `HierarchyClient.reconcile` catch wires an `os_log` `Logger.error(...)` call; comment updated. Subsystem `com.gumpw.codans.hierarchy`, category `reconcile` (matches SettingsStore / CatalogStore / IPC handlers' `com.gumpw.codans.<area>` convention). `OSLog` import added.
 - [x] T3 — (b) `GitWorktreeClient.mapGitStderr` regexes all case-insensitive (inline `(?i)` on the two regex branches; `stderr.lowercased()` branches unchanged); three mixed-case tests added (uppercase / title-case for branchExists, mixed for invalidBranchName). 21 tests in suite, all green.
 - [x] T4 — (a) `GitWorktreeShell.runStream` exposes `onSpawn` callback; `createWorktreeStream`'s `continuation.onTermination` terminates the captured Process via `CreateWorktreeProcessBox` (NSLock-backed) before task cancellation; `makeLive(onCreateWorktreeSpawn:)` adds an optional test seam letting the integration test capture a weak Process reference and assert `!isRunning` within 2 s of cancel. Test completes in ~350 ms — far under deadline, no flake risk from wt speed. 3 integration tests green.
 - [x] T5 — (c) `createWorktreeStream` picks the new worktree path by diffing `wt ls --json` before/after via `pickNewWorktreePath` static pure helper; `stdoutLast` retained only as tiebreaker for multi-entry diffs. 5 unit tests cover clean diff / empty diff / multiple-new-w-fallback / multiple-new-no-match / trailing-slash canonicalization. `fullLifecycle` integration test extended with an assertion that the returned path shows up in `wt ls --json` output. 26 unit + 3 integration = 29 tests green.
@@ -36,8 +36,8 @@ No user-visible UX change; all fixes are resilience / correctness / operability.
 - **D1** — Test-skip pattern (task e): the project already has the
   pattern `.enabled(if: Self.xxxEnabled)` with `static let xxxEnabled = {
   ... }()` at type init (see
-  `apps/mac/touch-code/Tests/GitTests/LiveGitServiceIntegrationTests.swift:12-16`
-  and `apps/mac/touch-code/Tests/EditorTests/LiveProcessSpawnerIntegrationTests.swift:20`).
+  `apps/mac/codans/Tests/GitTests/LiveGitServiceIntegrationTests.swift:12-16`
+  and `apps/mac/codans/Tests/EditorTests/LiveProcessSpawnerIntegrationTests.swift:20`).
   We reuse it rather than introducing `throw XCTSkip`. Swift Testing's
   `.enabled(if:)` trait evaluates the predicate at test discovery, so a
   false value produces a clean "skipped" count. The predicate calls
@@ -69,9 +69,9 @@ No user-visible UX change; all fixes are resilience / correctness / operability.
   that already use `stderr.lowercased()` stay untouched — their patterns
   are English literals that don't interact with captures.
 - **D5** — Logger subsystem naming (task d): follow the project's
-  existing convention. `grep -n "Logger(subsystem" apps/mac/touch-code/`
+  existing convention. `grep -n "Logger(subsystem" apps/mac/codans/`
   picks up the authoritative spelling during T2. If no prior art exists,
-  default to `com.touch-code.hierarchy` / category `reconcile` and
+  default to `com.gumpw.codans.hierarchy` / category `reconcile` and
   declare at file scope for `HierarchyClient.swift`.
 - **D6** — Task ordering: land the test-only fixes first (T1, T2, T3)
   so the fast-feedback suite is clean before touching the streaming
@@ -120,28 +120,28 @@ Related documents:
 - Product spec: `docs/product-specs/worktree-management.md`
 - Design doc: `docs/design-docs/worktree-management-design.md`
 - Predecessor plan (merged in PR #20): `docs/exec-plans/0010-worktree-management.md`
-- Issue: <https://github.com/wanggang316/touch-code/issues/24>
-- PR #20 (merged squash): <https://github.com/wanggang316/touch-code/pull/20>
+- Issue: <https://github.com/wanggang316/codans/issues/24>
+- PR #20 (merged squash): <https://github.com/wanggang316/codans/pull/20>
 
 Key source files (full repository-relative paths):
 
-- `apps/mac/touch-code/Git/GitWorktreeClient.swift` — owns the
+- `apps/mac/codans/Git/GitWorktreeClient.swift` — owns the
   `GitWorktreeClient` Sendable struct, `GitWorktreeShell.runStream`,
   `createWorktreeStream` closure, `mapGitStderr` helper. Tasks **a**,
   **b**, **c** all edit this file.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — holds the
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — holds the
   `reconcile(...)` helper with the silent-swallow catch. Task **d**
   adds a logger call here only. Note: this file has grown significantly
   since PR #20 (T-PROJECT + T-SPACE additions); our edit is purely
   additive inside the existing `reconcile` private static method.
-- `apps/mac/touch-code/Tests/GitWorktreeClientTests.swift` — unit
+- `apps/mac/codans/Tests/GitWorktreeClientTests.swift` — unit
   tests for the pure helpers. Tasks **b** and **c** add cases here.
-- `apps/mac/touch-code/Tests/Integration/WorktreeLifecycleIntegrationTests.swift`
+- `apps/mac/codans/Tests/Integration/WorktreeLifecycleIntegrationTests.swift`
   — end-to-end integration test against a temp git repo + bundled
   `wt`. Tasks **a**, **c**, **e** all touch this file (add a cancel
   test; assert diff-based path round-trips through a real `wt ls`;
   switch from `#require` to `.enabled(if:)`).
-- Reference pattern for skip-trait: `apps/mac/touch-code/Tests/GitTests/LiveGitServiceIntegrationTests.swift:11-20`
+- Reference pattern for skip-trait: `apps/mac/codans/Tests/GitTests/LiveGitServiceIntegrationTests.swift:11-20`
   — canonical `.enabled(if: Self.xxxEnabled)` + `static let xxxEnabled
   = { ... }()` pattern.
 
@@ -169,7 +169,7 @@ final lint + push + PR open.
 
 ### T1 — `.enabled(if:)` skip trait (Issue #24 e)
 
-In `apps/mac/touch-code/Tests/Integration/WorktreeLifecycleIntegrationTests.swift`,
+In `apps/mac/codans/Tests/Integration/WorktreeLifecycleIntegrationTests.swift`,
 replace the top-of-body `try #require(wtAvailable(), "wt script not
 bundled in test target")` in both test methods with a Swift Testing
 trait. The existing `wtAvailable()` instance method becomes a `static
@@ -177,11 +177,11 @@ let wtBundled: Bool = { Bundle.main.url(forResource: "wt",
 withExtension: nil, subdirectory: "git-wt") != nil }()` and each
 `@Test` gains `.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled)`.
 
-Verification: `xcodebuild test -scheme touch-code-Workspace -only-testing:touch-codeTests/WorktreeLifecycleIntegrationTests`
+Verification: `xcodebuild test -scheme codans-Workspace -only-testing:codansTests/WorktreeLifecycleIntegrationTests`
 on a host where `wt` IS bundled → both tests run + pass. On a
 hypothetical host without bundling, both show as "skipped" at test
 discovery. We can't easily simulate the unbundled host locally (the
-app build embeds `wt` into `touch_code.app/Contents/Resources/git-wt/`
+app build embeds `wt` into `Codans.app/Contents/Resources/git-wt/`
 and the test host inherits), so the plan accepts type-discovery
 correctness as sufficient evidence.
 
@@ -189,9 +189,9 @@ Commit message (verbatim): `test(worktree): skip integration tests via .enabled(
 
 ### T2 — Logger in `HierarchyClient.reconcile` catch (Issue #24 d)
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
-1. Before editing, run `grep -n "Logger(subsystem" apps/mac/touch-code/`
+1. Before editing, run `grep -n "Logger(subsystem" apps/mac/codans/`
    to pick the project's existing subsystem naming (decision D5).
 2. At file scope (between the imports and the `extension
    HierarchyClient`), add
@@ -208,7 +208,7 @@ In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
 4. Update the catch's leading comment to describe what's logged —
    drop the "Follow-up PR wires a Logger call" breadcrumb.
 
-Verification: `xcodebuild build -scheme touch-code` succeeds; no test
+Verification: `xcodebuild build -scheme codans` succeeds; no test
 regressions. Manual spot-check that a synthetic throw from
 `gitWorktreeClient.lsWorktrees` produces a log line via `log stream
 --predicate 'subsystem == "<project-subsystem>"'`.
@@ -217,7 +217,7 @@ Commit message: `fix(hierarchy): log reconcileDiscoveredWorktrees failures via o
 
 ### T3 — `mapGitStderr` case-insensitive (Issue #24 b)
 
-In `apps/mac/touch-code/Git/GitWorktreeClient.swift`, the two
+In `apps/mac/codans/Git/GitWorktreeClient.swift`, the two
 case-sensitive regex branches inside `mapGitStderr`:
 
 ```swift
@@ -234,13 +234,13 @@ if let match = stderr.firstMatch(of: /(?i)'([^']+)' is not a valid branch name/)
 
 Swift Regex literals accept inline flags — verified against the Swift
 Regex documentation and in-repo usage in
-`apps/mac/touch-code/Git/GitOutputParser.swift` (which already uses
+`apps/mac/codans/Git/GitOutputParser.swift` (which already uses
 Regex literals for git output parsing). The existing three
 lowercased-stderr branches (`unknown revision`, `bad revision`,
 `is locked`, `contains modified or untracked files`) stay as-is —
 they run on `stderr.lowercased()` and don't interact with captures.
 
-In `apps/mac/touch-code/Tests/GitWorktreeClientTests.swift`, extend
+In `apps/mac/codans/Tests/GitWorktreeClientTests.swift`, extend
 the existing stderr-mapping tests with mixed-case fixtures. Keep
 the existing tests; add siblings:
 
@@ -251,7 +251,7 @@ the existing tests; add siblings:
 The existing `testStderrMapsBranchExists` and
 `testStderrMapsInvalidBranchName` cover the lowercase default path.
 
-Verification: `xcodebuild test -only-testing:touch-codeTests/GitWorktreeClientTests`
+Verification: `xcodebuild test -only-testing:codansTests/GitWorktreeClientTests`
 reports the full 18 + 3 = 21-test suite green.
 
 Commit message: `fix(git): make mapGitStderr case-insensitive for branch-name errors`.
@@ -264,7 +264,7 @@ terminate the captured Process.
 
 **Part 1: `runStream` gets an `onSpawn` parameter.** In
 `GitWorktreeShell.runStream` (around
-`apps/mac/touch-code/Git/GitWorktreeClient.swift:241`):
+`apps/mac/codans/Git/GitWorktreeClient.swift:241`):
 
 ```swift
 static func runStream(
@@ -476,15 +476,15 @@ which proves the returned path is a real entry in `wt ls --json`, not
 some parsed-stdout accident.
 
 Verification:
-`xcodebuild test -only-testing:touch-codeTests/GitWorktreeClientTests
--only-testing:touch-codeTests/WorktreeLifecycleIntegrationTests` green.
+`xcodebuild test -only-testing:codansTests/GitWorktreeClientTests
+-only-testing:codansTests/WorktreeLifecycleIntegrationTests` green.
 
 Commit message: `fix(git): derive created worktree path from wt ls diff, not stdoutLast`.
 
 ### T6 — Validation + PR
 
 1. `cd apps/mac && make lint` — expect zero warnings.
-2. `xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code-Workspace -destination 'platform=macOS'` — all four schemes green.
+2. `xcodebuild test -workspace codans.xcworkspace -scheme codans-Workspace -destination 'platform=macOS'` — all four schemes green.
 3. `git push -u origin fix/worktree-followups`.
 4. `gh pr create --base feature/hierarchy-management --title "Worktree Management follow-ups (Issue #24)" --body-file <body>`. Body lists (a)–(e), each with commit SHA, ends with "Closes #24".
 5. `prowl send` to master with `PR_READY: <url>`.
@@ -496,22 +496,22 @@ Exact commands per task. Run from `apps/mac/` unless noted.
 **T1:**
 
     # Edit WorktreeLifecycleIntegrationTests.swift — add static let + .enabled(if:) on both tests
-    xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code-Workspace -destination 'platform=macOS' -only-testing:touch-codeTests/WorktreeLifecycleIntegrationTests
+    xcodebuild test -workspace codans.xcworkspace -scheme codans-Workspace -destination 'platform=macOS' -only-testing:codansTests/WorktreeLifecycleIntegrationTests
     # Expect: 2 tests passed / 0 failed; no #require.
     /commit
 
 **T2:**
 
-    grep -n "Logger(subsystem" apps/mac/touch-code/  # pick the right subsystem name
+    grep -n "Logger(subsystem" apps/mac/codans/  # pick the right subsystem name
     # Edit HierarchyClient.swift — add reconcileLogger at file scope + Logger.error() in catch
-    xcodebuild build -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug
+    xcodebuild build -workspace codans.xcworkspace -scheme codans -configuration Debug
     /commit
 
 **T3:**
 
     # Edit GitWorktreeClient.swift — add (?i) to the two branch regexes
     # Edit GitWorktreeClientTests.swift — add three mixed-case tests
-    xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code-Workspace -destination 'platform=macOS' -only-testing:touch-codeTests/GitWorktreeClientTests
+    xcodebuild test -workspace codans.xcworkspace -scheme codans-Workspace -destination 'platform=macOS' -only-testing:codansTests/GitWorktreeClientTests
     # Expect: 21 tests passed / 0 failed.
     /commit
 
@@ -521,7 +521,7 @@ Exact commands per task. Run from `apps/mac/` unless noted.
     #   - runStream gains onSpawn callback (default noop)
     #   - createWorktreeStream wires onSpawn → ProcessBox → onTermination
     # Add createStreamCancellationTerminatesWtProcess to WorktreeLifecycleIntegrationTests.swift
-    xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code-Workspace -destination 'platform=macOS' -only-testing:touch-codeTests/WorktreeLifecycleIntegrationTests
+    xcodebuild test -workspace codans.xcworkspace -scheme codans-Workspace -destination 'platform=macOS' -only-testing:codansTests/WorktreeLifecycleIntegrationTests
     # Expect: 3 tests passed; cancel test completes within 10 s and the worktree dir doesn't exist.
     /commit
 
@@ -532,13 +532,13 @@ Exact commands per task. Run from `apps/mac/` unless noted.
     #   - Rework createWorktreeStream to diff lsWorktrees snapshots
     # Edit GitWorktreeClientTests.swift — 4 pickNewWorktreePath cases
     # Edit WorktreeLifecycleIntegrationTests.swift fullLifecycle to assert ls contains created path
-    xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code-Workspace -destination 'platform=macOS' -only-testing:touch-codeTests/GitWorktreeClientTests -only-testing:touch-codeTests/WorktreeLifecycleIntegrationTests
+    xcodebuild test -workspace codans.xcworkspace -scheme codans-Workspace -destination 'platform=macOS' -only-testing:codansTests/GitWorktreeClientTests -only-testing:codansTests/WorktreeLifecycleIntegrationTests
     /commit
 
 **T6:**
 
     cd apps/mac && make lint
-    xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code-Workspace -destination 'platform=macOS'
+    xcodebuild test -workspace codans.xcworkspace -scheme codans-Workspace -destination 'platform=macOS'
     git push -u origin fix/worktree-followups
     gh pr create --base feature/hierarchy-management --title "Worktree Management follow-ups (Issue #24)" --body-file - <<'EOF'
     <body: 5 items with commit SHAs, "Closes #24">
@@ -628,7 +628,7 @@ branch has no other collaborators.
 
 No new external dependencies. Internal APIs touched:
 
-In `apps/mac/touch-code/Git/GitWorktreeClient.swift`:
+In `apps/mac/codans/Git/GitWorktreeClient.swift`:
 
     // T4 — new parameter, default preserves existing callers
     static func runStream(
@@ -647,7 +647,7 @@ In `apps/mac/touch-code/Git/GitWorktreeClient.swift`:
       fallbackStdoutLast: String
     ) -> URL?
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
     // T2 — new file-scope Logger
     private let reconcileLogger = Logger(subsystem: <chosen subsystem>, category: "reconcile")

@@ -1,13 +1,13 @@
 ---
 name: release
-description: Cut a touch-code stable release. Bump MARKETING_VERSION in Project.xcconfig, promote CHANGELOG [Unreleased] to a dated version section, commit, tag vX.Y.Z, and push to trigger the GitHub Actions Developer-ID release pipeline. Use when shipping a new stable build.
+description: Cut a codans stable release. Bump MARKETING_VERSION in Project.xcconfig, promote CHANGELOG [Unreleased] to a dated version section, commit, tag vX.Y.Z, and push to trigger the GitHub Actions Developer-ID release pipeline. Use when shipping a new stable build.
 ---
 
-# release: Cut a touch-code stable release
+# release: Cut a codans stable release
 
 ## Overview
 
-A stable touch-code release is **a tag push**. The
+A stable codans release is **a tag push**. The
 `.github/workflows/release.yml` pipeline keys off `v*` tags: it builds,
 signs (Developer ID), notarizes, generates a Sparkle-signed
 `appcast.xml`, and drafts a GitHub Release with the DMG attached. CI
@@ -40,7 +40,7 @@ pushes, and verifies CI started.
 | Release CI | `.github/workflows/release.yml` (tag-triggered on `v*`) |
 | Tag format | `vX.Y.Z` annotated |
 | Distribution unit | DMG (notarized + stapled). Sparkle clients update from the same DMG. |
-| Canonical Sparkle feed | `https://github.com/wanggang316/touch-code/releases/latest/download/appcast.xml` — always served from the most recent non-prerelease release |
+| Canonical Sparkle feed | `https://github.com/wanggang316/codans/releases/latest/download/appcast.xml` — always served from the most recent non-prerelease release |
 | Past bump style | `chore(release): bump to X.Y.Z` (xcconfig only) |
 
 `MARKETING_VERSION` is **not** strict SemVer pre-1.0 — every release is a
@@ -121,7 +121,7 @@ In priority order — when rules conflict, earlier ones win:
    or — for bugs — the symptom that's now gone. Skip the mechanism.
    - Good: "Tabs remember their color across restarts."
      "Pane no longer flickers when switching tabs with the sidebar floating."
-   - Bad: "Persist `Tab.colorToken` to `TouchCodeCore.TabState`."
+   - Bad: "Persist `Tab.colorToken` to `CodansCore.TabState`."
      "Fix race in `PaneHostView` state-restoration."
 
 2. **Clarity beats brevity.** Be concise once the entry is clear. If
