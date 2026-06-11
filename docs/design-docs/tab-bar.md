@@ -10,7 +10,7 @@ The terminal Tab bar is the horizontal row of per-tab chips that sits between th
 
 - `TabBarView` renders an `HStack(spacing: 4)` of chips (text + close `xmark`) plus a trailing `+` button. Active tab shows a `RoundedRectangle(cr: 4)` accent-tinted background; no hover state, no underline indicator, no truncation discipline.
 - `TabBarFeature` dispatches exactly three actions — `newTabButtonTapped`, `tabButtonTapped`, `closeButtonTapped` — each a one-line forward through `HierarchyClient`.
-- `Tab` (`apps/mac/TouchCodeCore/Tab.swift`) is pure data: `id / name? / splitTree / panes`.
+- `Tab` (`apps/mac/CodansCore/Tab.swift`) is pure data: `id / name? / splitTree / panes`.
 - `HierarchyManager` already owns `createTab / closeTab / selectTab / moveTab(offset:)` plus `runningPaneCount(worktreeID:)`.
 - No rename, no right-click menu, no drag reorder, no keyboard shortcuts for tab operations, no overflow handling (too-many tabs clip), no trailing split affordance, no focus memory when switching tabs, no per-pane busy visualization.
 
@@ -114,7 +114,7 @@ Dirty indicator: a 12 × 12 pt progress spinner (`ProgressView().controlSize(.mi
 
 ### Component Boundaries
 
-Split `apps/mac/touch-code/App/Features/TabBar/` into:
+Split `apps/mac/codans/App/Features/TabBar/` into:
 
 ```
 TabBar/
@@ -196,7 +196,7 @@ enum Action: Equatable {
 }
 ```
 
-Reducer stays stateless. All side effects are synchronous `try?` calls into `HierarchyClient`; errors are logged via `Logger("com.touch-code.tab-bar")` and swallowed (tab-bar failures are rare and dead-end).
+Reducer stays stateless. All side effects are synchronous `try?` calls into `HierarchyClient`; errors are logged via `Logger("com.gumpw.codans.tab-bar")` and swallowed (tab-bar failures are rare and dead-end).
 
 ### Data Storage
 
@@ -246,7 +246,7 @@ func setLastFocusedPane(_ paneID: PaneID?, in tabID: TabID)
 - Drag-reorder via keyboard uses VoiceOver actions `"Move left"` / `"Move right"` tied to the `moveTab(offset:)` API.
 - Dirty spinner is redundant — the word `(running)` is appended to the accessibility label when `tabIsDirty`.
 
-**Observability.** A single `Logger("com.touch-code.tab-bar")` logs structured events for create / close / rename / reorder. No personally identifying info — titles are logged at `.private(mask: .hash)` since users may embed paths or hostnames.
+**Observability.** A single `Logger("com.gumpw.codans.tab-bar")` logs structured events for create / close / rename / reorder. No personally identifying info — titles are logged at `.private(mask: .hash)` since users may embed paths or hostnames.
 
 **Testing strategy.**
 - `TabBarFeatureTests`: `TestStore`-backed cases per new action. Mock `HierarchyClient` asserts the forwarded call shape.

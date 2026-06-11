@@ -37,25 +37,25 @@ remains a reserved-empty slot. T4 does **not** move data between files.
 
 Reference files (read for this design):
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`,
+- `apps/mac/codans/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`,
   `RepositoryHooksSettingsView.swift` — placeholder bodies T4 replaces.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`,
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`,
   `SettingsWindowView.swift`, `Sidebar/SettingsSidebarView.swift` — T1 shell.
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` — writer of
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` — writer of
   settings.json (v2); not touched here except via read-only reads of descriptors/general.
-- `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift` — already owns
+- `apps/mac/codans/App/Features/Editor/EditorFeature.swift` — already owns
   descriptor discovery + `.setProjectOverride(projectID:spaceID:editorID:)`.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift`,
-  `apps/mac/touch-code/Runtime/HierarchyManager.swift` — mutate Catalog;
+- `apps/mac/codans/App/Clients/HierarchyClient.swift`,
+  `apps/mac/codans/Runtime/HierarchyManager.swift` — mutate Catalog;
   exposes `setDefaultEditor(_,for:in:)` today; T4 adds `setWorktreesDirectory`.
-- `apps/mac/touch-code/Hooks/HookConfigStore.swift`,
-  `apps/mac/TouchCodeCore/Hooks/HookConfig.swift`,
-  `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift` — hooks.json reader +
+- `apps/mac/codans/Hooks/HookConfigStore.swift`,
+  `apps/mac/CodansCore/Hooks/HookConfig.swift`,
+  `apps/mac/CodansCore/Hooks/HookSubscription.swift` — hooks.json reader +
   `HookSubscription.Scope` cases that drive Global/Repository classification.
-- `apps/mac/TouchCodeCore/Project.swift` — carries `defaultEditor: String?`,
+- `apps/mac/CodansCore/Project.swift` — carries `defaultEditor: String?`,
   `worktreesDirectory: String?`, and the `worktrees: [Worktree]` list the
   hook classification rule walks.
-- `apps/mac/touch-code/App/Clients/FinderClient.swift` — reveal escape hatch.
+- `apps/mac/codans/App/Clients/FinderClient.swift` — reveal escape hatch.
 
 Adjacent work:
 
@@ -381,7 +381,7 @@ follows, evaluated against the target Project's `worktrees`:
 `fnmatch` maps to `NSString.range(of:options: .regularExpression)` with
 POSIX-glob-to-regex translation, consistent with how
 `HookExecutor` evaluates path globs today (verified in
-`apps/mac/touch-code/Hooks/HookExecutor.swift` — spot check reveals
+`apps/mac/codans/Hooks/HookExecutor.swift` — spot check reveals
 `pathMatches` helper using the same primitive).
 
 Classification is a pure helper — its only output is `HookSource`:
@@ -436,7 +436,7 @@ entries, so if T4's tests or future waves accidentally touch
 
 ```
 apps/mac/
-└── touch-code/
+└── codans/
     └── App/
         ├── Features/
         │   └── Settings/
@@ -452,12 +452,12 @@ apps/mac/
             ├── HierarchyClient.swift        (modified: +2 closures)
             └── HookConfigClient.swift       (NEW)
 
-apps/mac/touch-code/Runtime/
+apps/mac/codans/Runtime/
 └── HierarchyManager.swift                   (modified: +setWorktreesDirectory,
                                                           +findProjectAnySpace helper,
                                                           +setDefaultEditorAnySpace sibling)
 
-apps/mac/touch-code/Tests/
+apps/mac/codans/Tests/
 ├── Settings/
 │   └── RepositorySettingsFeatureTests.swift  (NEW)
 ├── HierarchyClientTests.swift               (extend)
@@ -728,7 +728,7 @@ This is T1 Alternative A1 — hoist `Project.defaultEditor` and
 ### Observability
 
 - `RepositorySettingsFeature` uses `Logger(subsystem:
-  "com.touch-code.settings", category: "repository-pane")`. Logs a line
+  "com.gumpw.codans.settings", category: "repository-pane")`. Logs a line
   per write success/failure and per hook load outcome.
 - No new metrics. Settings-window interactions are infrequent and
   user-initiated.
@@ -801,7 +801,7 @@ All three Design-time open questions resolved — see Decisions below.
   `HookMergeView` public API frozen per T3's approved Design. T4
   consumes `HookRow`, `HookSource`, `HookMergeView`, `TrailingAction`,
   and `HookRowBuilder.make(from:source:)` verbatim from
-  `apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift`.
+  `apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift`.
   The T4 reducer's own types are strictly (a) a pure
   `classify(_:, for:) -> HookSource` helper and (b) a `HooksLoad`
   enum whose `.loaded` payload is `[HookRow]` — T3's public type, not

@@ -14,10 +14,10 @@ This is a living document. Update `Progress`, `Surprises & Discoveries`,
 After this change the Developer section of the Settings window is fully
 functional per product-spec M6:
 
-- **M6.1 — `tc` CLI card.** Status pill (Not installed / Installed /
+- **M6.1 — `codans` CLI card.** Status pill (Not installed / Installed /
   Failed / Collision). Install / Uninstall / Retry buttons. Errors
   surface inline with an actionable message. Installation lives at
-  `~/.local/bin/tc` + peer `~/.local/bin/tcode` symlink — sudo-free,
+  `~/.local/bin/codans` + peer `~/.local/bin/tcode` symlink — sudo-free,
   HomeScopeGuard-fenced, idempotent.
 - **M6.2 — Hooks list (read-only).** Renders the user's `hooks.json`
   subscriptions through the frozen `HookMergeView` component (one row
@@ -43,7 +43,7 @@ Hooks pane without waiting for T3 to finish.
       (new files only — no UI integration yet). One `/commit`.
 - [ ] Step 3 — **DeveloperPaneDependencies + DeveloperSettingsView body
       replacement + CLIInstallStatusCard + DiagnosticsSection + scene-level
-      `.environment(...)` wiring in `TouchCodeApp.swift`**. One `/commit`.
+      `.environment(...)` wiring in `CodansApp.swift`**. One `/commit`.
 - [ ] Step 4 — Polish: Hooks Reload button, PATH amber advisory, copy
       edits, manual QA fixups (commit only if a QA finding needs fixing).
 - [ ] Step 5 — Final: push + `gh pr create --base feature/settings-base`.
@@ -78,26 +78,26 @@ Related documents:
 
 **New files (created by this plan):**
 
-- `apps/mac/TouchCodeCore/CLI/CLIBundleLocator.swift` — 3-phase resolver for the bundled `tc` binary.
-- `apps/mac/touch-code/App/Clients/CLIInstallerClient.swift` — sudo-free installer.
-- `apps/mac/touch-code/App/Features/Settings/DeveloperPaneDependencies.swift` — `@Observable` DI container.
-- `apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift` — **FROZEN API for T4**.
-- `apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsSubviews/CLIInstallStatusCard.swift`
-- `apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsSubviews/DiagnosticsSection.swift`
-- `apps/mac/touch-code/Tests/Developer/CLIInstallerClientTests.swift`
-- `apps/mac/touch-code/Tests/Developer/HookRowBuilderTests.swift`
+- `apps/mac/CodansCore/CLI/CLIBundleLocator.swift` — 3-phase resolver for the bundled `codans` binary.
+- `apps/mac/codans/App/Clients/CLIInstallerClient.swift` — sudo-free installer.
+- `apps/mac/codans/App/Features/Settings/DeveloperPaneDependencies.swift` — `@Observable` DI container.
+- `apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift` — **FROZEN API for T4**.
+- `apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsSubviews/CLIInstallStatusCard.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsSubviews/DiagnosticsSection.swift`
+- `apps/mac/codans/Tests/Developer/CLIInstallerClientTests.swift`
+- `apps/mac/codans/Tests/Developer/HookRowBuilderTests.swift`
 
 **Modified files:**
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsView.swift` — body replaced (signature unchanged).
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — one-line `.environment(...)` on the Settings `Window` scene; `AppState` exposes a lazily-built `DeveloperPaneDependencies`.
+- `apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsView.swift` — body replaced (signature unchanged).
+- `apps/mac/codans/App/CodansApp.swift` — one-line `.environment(...)` on the Settings `Window` scene; `AppState` exposes a lazily-built `DeveloperPaneDependencies`.
 
 **Explicitly NOT touched:**
 
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift` — detail switch is T1-frozen.
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` — public API unchanged.
-- Any `TouchCodeCore/Settings/*.swift` — schema unchanged (T3 reuses `DeveloperCLISettings.lastInstallAttemptAt` already in v2).
-- Any `TouchCodeCore/Hooks/*` or `apps/mac/touch-code/Hooks/HookConfigStore.swift` — consumed read-only.
+- `apps/mac/codans/App/Features/Settings/SettingsWindowView.swift` — detail switch is T1-frozen.
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` — public API unchanged.
+- Any `CodansCore/Settings/*.swift` — schema unchanged (T3 reuses `DeveloperCLISettings.lastInstallAttemptAt` already in v2).
+- Any `CodansCore/Hooks/*` or `apps/mac/codans/Hooks/HookConfigStore.swift` — consumed read-only.
 - T2 / T4 pane bodies (Notifications / RepositoryGeneral / RepositoryHooks).
 
 ### Terms of art
@@ -105,10 +105,10 @@ Related documents:
 - **Frozen contract.** Symbols introduced in Step 1 (`HookMergeView`, `HookRow`,
   `HookSource`, `TrailingAction`, `HookRowBuilder`) are frozen from that commit
   forward — T4 consumes them verbatim. Any change goes through master.
-- **Owned install.** A symlink at `~/.local/bin/tc` whose target resolves to
-  the `tc` binary inside our running `.app` bundle (canonicalised). Anything
+- **Owned install.** A symlink at `~/.local/bin/codans` whose target resolves to
+  the `codans` binary inside our running `.app` bundle (canonicalised). Anything
   else is *foreign*: the installer never writes over it and never deletes it.
-- **HomeScopeGuard.** Existing `apps/mac/tcKit/HomeScopeGuard.swift`, reused
+- **HomeScopeGuard.** Existing `apps/mac/CodansKit/HomeScopeGuard.swift`, reused
   unchanged. Rejects any destination whose ancestor chain contains a symlink
   that escapes `$HOME`, including dangling ones.
 
@@ -123,9 +123,9 @@ Run at `apps/mac/`:
 
 ```
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 make lint
 make format   # should be a no-op on a freshly merged T1
@@ -135,14 +135,14 @@ Expected: all `** TEST SUCCEEDED **`, `make lint` clean, `make format`
 idempotent. Record outputs in `Decision Log` so any later failure can be
 attributed to T3 rather than a pre-existing issue.
 
-Also verify `TouchCodeCore/CLI/` is recursed by Tuist's
-`buildableFolders: ["TouchCodeCore", "TouchCodeCore/Hooks"]` — T1 already
+Also verify `CodansCore/CLI/` is recursed by Tuist's
+`buildableFolders: ["CodansCore", "CodansCore/Hooks"]` — T1 already
 proved recursion empirically in its ExecPlan Step 0 (see
-`docs/exec-plans/settings-base.md`). A drop of `TouchCodeCore/CLI/_probe.swift`
-containing `// probe`, `make generate`, and `grep _probe apps/mac/touch-code.xcodeproj/project.pbxproj`
+`docs/exec-plans/settings-base.md`). A drop of `CodansCore/CLI/_probe.swift`
+containing `// probe`, `make generate`, and `grep _probe apps/mac/codans.xcodeproj/project.pbxproj`
 confirms. Delete the probe. If it does **not** pick up, add
-`"TouchCodeCore/CLI"` to the `TouchCodeCore` target's `buildableFolders` and
-land the `chore(mac): declare TouchCodeCore/CLI as a buildable folder`
+`"CodansCore/CLI"` to the `CodansCore` target's `buildableFolders` and
+land the `chore(mac): declare CodansCore/CLI as a buildable folder`
 commit before Step 1.
 
 ### Step 1 — HookMergeView + contract types (pure additive; unblocks T4)
@@ -152,11 +152,11 @@ file changes.
 
 New files:
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift` —
+- `apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift` —
 
   ```swift
   import SwiftUI
-  import TouchCodeCore
+  import CodansCore
 
   public struct HookRow: Identifiable, Hashable, Sendable {
     public let id: UUID
@@ -231,7 +231,7 @@ New files:
   - Empty state shows `emptyStateTitle` + optional `emptyStateMessage`
     in a centred VStack (`.secondary` foreground).
 
-- `apps/mac/touch-code/Tests/Developer/HookRowBuilderTests.swift` — unit
+- `apps/mac/codans/Tests/Developer/HookRowBuilderTests.swift` — unit
   tests, pure + hermetic:
 
   1. `buildsShortCommandDisplayNameVerbatim` — subscription with a 40-char
@@ -254,11 +254,11 @@ Commit message: `feat(settings): add HookMergeView reusable component for T3/T4`
 
 ```
 make -C apps/mac generate
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug build -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' \
-  -only-testing:touch-codeTests/HookRowBuilderTests | xcbeautify
+  -only-testing:codansTests/HookRowBuilderTests | xcbeautify
 make -C apps/mac lint
 ```
 
@@ -271,12 +271,12 @@ Single `/commit`. New files only; no UI integration yet.
 
 New files:
 
-- `apps/mac/TouchCodeCore/CLI/CLIBundleLocator.swift`:
+- `apps/mac/CodansCore/CLI/CLIBundleLocator.swift`:
 
   ```swift
   import Foundation
 
-  /// Resolves the app-bundled `tc` binary's URL, mirroring
+  /// Resolves the app-bundled `codans` binary's URL, mirroring
   /// SkillBundleLocator's 3-phase discovery.
   public enum CLIBundleLocator {
     public enum LocatorError: Error, Equatable {
@@ -284,7 +284,7 @@ New files:
     }
 
     public enum EnvKey {
-      public static let binary = "TOUCH_CODE_CLI_BINARY"   // dev override
+      public static let binary = "CODANS_CLI_BINARY"   // dev override
     }
 
     public static func locateBinary(
@@ -295,15 +295,15 @@ New files:
   ```
 
   Resolution order:
-  1. `$TOUCH_CODE_CLI_BINARY` if set and pointing at an existing file.
-  2. `<Bundle.main.executableURL>.deletingLastPathComponent().appendingPathComponent("tc")`
+  1. `$CODANS_CLI_BINARY` if set and pointing at an existing file.
+  2. `<Bundle.main.executableURL>.deletingLastPathComponent().appendingPathComponent("codans")`
      — sibling inside `Contents/MacOS/`. This is Tuist's default placement
      when an `.app` depends on a `commandLineTool` target.
   3. Repo walk from the current executable upward, searching
-     `<ancestor>/.build/**/tc` — dev runs via `xcodebuild`/`swift build`.
+     `<ancestor>/.build/**/codans` — dev runs via `xcodebuild`/`swift build`.
      Reuses the same 12-level walk as `SkillBundleLocator.repoWalk`.
 
-- `apps/mac/touch-code/App/Clients/CLIInstallerClient.swift` — shape exactly
+- `apps/mac/codans/App/Clients/CLIInstallerClient.swift` — shape exactly
   per design doc §`CLIInstallerClient`. Highlights:
 
   - `@MainActor final class CLIInstallerClient`.
@@ -312,7 +312,7 @@ New files:
     `CLIBundleLocator.locateBinary()`; propagates binary-missing through
     `.failed` in `probe()` rather than throwing at init.
   - All mutation through the existing `SkillFileSystem` protocol (from
-    `apps/mac/tcKit/SkillInstaller.swift`). `RealSkillFileSystem` is the
+    `apps/mac/CodansKit/SkillInstaller.swift`). `RealSkillFileSystem` is the
     default; tests inject an in-memory fake or a tmp-rooted real one.
   - **HomeScopeGuard at every mutating path.** `install`, `uninstall`,
     *and* `probe` all run every candidate URL through
@@ -347,9 +347,9 @@ New files:
     compares canonicalised paths. The pane renders the amber advisory
     when this returns `false` *and* status is `.installed`.
 
-- `apps/mac/touch-code/Tests/Developer/CLIInstallerClientTests.swift` —
+- `apps/mac/codans/Tests/Developer/CLIInstallerClientTests.swift` —
   all eight cases from the design doc's Testing strategy, each using a
-  freshly-created `tmpDirectoryURL()` home + a stub `tc` binary:
+  freshly-created `tmpDirectoryURL()` home + a stub `codans` binary:
 
   1. `probe_freshFilesystem_returnsNotInstalled`
   2. `install_createsBothSymlinks_statusBecomesInstalled`
@@ -357,7 +357,7 @@ New files:
   4. `install_whenDestExistsAndIsForeign_returnsDestinationExistsNotOurs`
   5. `uninstall_whenInstalledByUs_removesBothAndReturnsNotInstalled`
   6. `uninstall_whenForeignPresent_refusesAndReturnsCollision`
-     (foreign `tc`, calling `uninstall()` returns status
+     (foreign `codans`, calling `uninstall()` returns status
      `.collision(owner:)` and leaves the file in place)
   7. `install_failure_thenRetry_succeeds` — first call: inject a
      `SkillFileSystem` whose `createSymbolicLink` throws once; assert
@@ -371,8 +371,8 @@ New files:
 
   Test helpers (in-file):
 
-  - `makeTempHome() -> URL` creates a disposable dir + a stub `tc` file
-    at `<tmp>/bundledTcBin/tc` with mode `0755`.
+  - `makeTempHome() -> URL` creates a disposable dir + a stub `codans` file
+    at `<tmp>/bundledTcBin/codans` with mode `0755`.
   - `installer(at home: URL, fs: SkillFileSystem = RealSkillFileSystem()) -> CLIInstallerClient`
     constructs the client with overridden paths and fs.
 
@@ -382,13 +382,13 @@ Commit message: `feat(settings): add CLIInstallerClient (HomeScopeGuard-fenced) 
 
 ```
 make -C apps/mac generate
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' \
-  -only-testing:touch-codeTests/CLIInstallerClientTests | xcbeautify
+  -only-testing:codansTests/CLIInstallerClientTests | xcbeautify
 # Full test matrix still green:
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 make -C apps/mac lint
 ```
@@ -402,12 +402,12 @@ Single `/commit`. This is the step that makes the UI real.
 
 New files:
 
-- `apps/mac/touch-code/App/Features/Settings/DeveloperPaneDependencies.swift`:
+- `apps/mac/codans/App/Features/Settings/DeveloperPaneDependencies.swift`:
 
   ```swift
   import Foundation
   import Observation
-  import TouchCodeCore
+  import CodansCore
 
   @MainActor @Observable
   final class DeveloperPaneDependencies {
@@ -448,7 +448,7 @@ New files:
   `CFBundleShortVersionString` / `CFBundleVersion`, mirroring
   `AppState.bundleVersion()`.
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsSubviews/CLIInstallStatusCard.swift`:
+- `apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsSubviews/CLIInstallStatusCard.swift`:
 
   Encapsulates M6.1. Owns a `@State var status: CLIInstallerClient.InstallStatus = .unknown`,
   a `@State var lastError: CLIInstallerClient.CLIInstallError? = nil`, and a
@@ -456,15 +456,15 @@ New files:
   - Status pill using `HookSource`-style coloured `Circle` + label.
   - Primary button: `Install` (when `.notInstalled`), `Uninstall` (when
     `.installed`), `Retry` (when `.failed`).
-  - Secondary button: `Open in Finder` showing `~/.local/bin/tc` (visible
+  - Secondary button: `Open in Finder` showing `~/.local/bin/codans` (visible
     only when installed).
   - Error disclosure: expandable row showing `errorDescription`
     (`LocalizedError` conformance is added to `CLIInstallError` in the
     same file).
   - PATH amber advisory: when `status == .installed(..., pointsToBundle: true)`
     and `installer.isLocalBinOnPath(...) == false`, a label reading
-    `"tc installed but ~/.local/bin is not on PATH. Add it to your
-    shell profile to run \`tc\` directly."` in `.orange`/`.secondary`
+    `"codans installed but ~/.local/bin is not on PATH. Add it to your
+    shell profile to run \`codans\` directly."` in `.orange`/`.secondary`
     (matches the rest of the pane's caption styling).
   - On `.task`: `status = installer.probe()` (synchronous; never throws).
   - On Install button: set `isBusy`, call `installer.install()`, update
@@ -474,7 +474,7 @@ New files:
     invariant).
   - On Uninstall: symmetric to Install.
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsSubviews/DiagnosticsSection.swift`:
+- `apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsSubviews/DiagnosticsSection.swift`:
 
   Three `Button`s (Reveal settings.json / Reveal hooks.json / Copy app
   version) arranged horizontally with `.buttonStyle(.bordered)`. Each
@@ -484,7 +484,7 @@ New files:
 
 Replaced file:
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsView.swift` —
+- `apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsView.swift` —
   type name, accessibility, and `#Preview` target are preserved:
 
   ```swift
@@ -533,7 +533,7 @@ Replaced file:
 
 Modified files:
 
-- `apps/mac/touch-code/App/TouchCodeApp.swift`:
+- `apps/mac/codans/App/CodansApp.swift`:
 
   - Add a lazy `developerPaneDependencies` to `AppState`, built after
     `bringUp()` / `startIPC()` so `hookConfigStore` is available. Declare
@@ -568,7 +568,7 @@ Modified files:
   - One-line `.environment(...)` on the Settings `Window` scene body:
 
     ```swift
-    Window("Settings", id: TouchCodeApp.settingsWindowID) {
+    Window("Settings", id: CodansApp.settingsWindowID) {
       if let store = appState.settingsWindowStore,
          let deps = appState.developerPaneDependencies {
         SettingsWindowView(store: store, settingsStore: appState.settingsStore)
@@ -592,9 +592,9 @@ Automated:
 
 ```
 make -C apps/mac generate
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 make -C apps/mac lint
 make -C apps/mac format   # idempotent no-op expected
@@ -609,19 +609,19 @@ bullets):
 2. **M6.1.a** — Status pill initially reads **Not installed** with an
    `Install` button. Click Install. After ~100 ms the pill flips to
    **Installed** and the button becomes `Uninstall`. Verify
-   `ls -l ~/.local/bin/tc ~/.local/bin/tcode` → both are symlinks,
-   targets point at the live `.app`'s `Contents/MacOS/tc`.
+   `ls -l ~/.local/bin/codans ~/.local/bin/tcode` → both are symlinks,
+   targets point at the live `.app`'s `Contents/MacOS/codans`.
 3. **M6.1.b** — With Step 2 installed, click Uninstall. Pill returns to
-   **Not installed**; `~/.local/bin/tc` and `tcode` disappear.
-4. **M6.1.c** — Preseed a foreign file at `~/.local/bin/tc` (e.g.
-   `echo '#!/bin/sh' > ~/.local/bin/tc`); reopen Developer; click
+   **Not installed**; `~/.local/bin/codans` and `tcode` disappear.
+4. **M6.1.c** — Preseed a foreign file at `~/.local/bin/codans` (e.g.
+   `echo '#!/bin/sh' > ~/.local/bin/codans`); reopen Developer; click
    Install. Card shows Collision error + retry button; no files
    clobbered. Remove the foreign file, click Retry → Installed.
 5. **M6.2** — `hooks.json` empty: Hooks list shows the empty-state
    message + Reveal button. Seed a subscription:
 
    ```jsonc
-   // ~/.config/touch-code/hooks.json
+   // ~/.config/codans/hooks.json
    {
      "version": 1,
      "subscriptions": [
@@ -635,7 +635,7 @@ bullets):
    `notify`, event `pane.output`, match summary `error.*`. Toggle
    `"disabled": true` in the file, Reload → dot greys out.
 6. **M6.3** — Click Reveal settings.json → Finder highlights
-   `~/.config/touch-code/settings.json`. Click Reveal hooks.json → same.
+   `~/.config/codans/settings.json`. Click Reveal hooks.json → same.
    Click Copy app version → `pbpaste` matches `<short> (Build <build>)`
    (e.g. `0.1.0 (Build 1)`).
 7. **PATH advisory.** Ensure `~/.local/bin` is not on `$PATH` (a typical
@@ -643,7 +643,7 @@ bullets):
    under the status pill. Add `~/.local/bin` to PATH, relaunch the app,
    advisory disappears.
 8. **`lastInstallAttemptAt` persists.** After an install, inspect
-   `jq .developer.cli.lastInstallAttemptAt ~/.config/touch-code/settings.json`
+   `jq .developer.cli.lastInstallAttemptAt ~/.config/codans/settings.json`
    — the value is a recent ISO-8601 timestamp. Wait ≥ 600 ms after
    click so the 500 ms debounce flushes; alternatively quit the app to
    force `flushAllPersistedState()`.
@@ -672,13 +672,13 @@ Run the full acceptance gauntlet:
 
 ```
 make -C apps/mac generate
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme tcKitTests \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme CodansKitTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme tcTests \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme tcTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 make -C apps/mac lint
 make -C apps/mac format
@@ -691,14 +691,14 @@ Then:
 ```
 git push -u origin feat/settings-developer
 gh pr create --base feature/settings-base \
-  --title "feat(settings): Developer pane — tc CLI install, hooks view, diagnostics (T3)" \
+  --title "feat(settings): Developer pane — codans CLI install, hooks view, diagnostics (T3)" \
   --body-file - <<'EOF'
 ## Summary
 
 - Deliver the Developer section of the Settings window per product-spec
   M6.1 / M6.2 / M6.3.
 - Add `CLIInstallerClient` — a sudo-free, HomeScopeGuard-fenced installer
-  that symlinks `tc` + `tcode` into `~/.local/bin/`, idempotent, with a
+  that symlinks `codans` + `tcode` into `~/.local/bin/`, idempotent, with a
   PATH advisory when `~/.local/bin` isn't exported.
 - Publish the frozen `HookMergeView` component (`HookRow` / `HookSource`
   / `TrailingAction` / `HookRowBuilder`) for T3 (Global-only rendering)
@@ -716,7 +716,7 @@ Frozen for T4: `HookMergeView`, `HookRow`, `HookSource`, `TrailingAction`,
 
 ## Test plan
 
-- [x] `xcodebuild test` — touch-code / TouchCodeCoreTests / tcKitTests / tcTests
+- [x] `xcodebuild test` — codans / CodansCoreTests / CodansKitTests / tcTests
 - [x] `make lint` + `make format` clean
 - [x] Manual QA of spec Acceptance Criteria §Developer (5 bullets):
       Not installed → Install → Installed; Uninstall; Install failure +
@@ -744,20 +744,20 @@ make generate
 ### Build the app (sanity)
 
 ```
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug build -destination 'platform=macOS' | xcbeautify
 ```
 
 ### Full test matrix
 
 ```
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme tcKitTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansKitTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme tcTests \
+xcodebuild -workspace codans.xcworkspace -scheme tcTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -771,27 +771,27 @@ make run-app
 
 ```
 mkdir -p ~/.local/bin
-printf '#!/bin/sh\necho foreign\n' > ~/.local/bin/tc
-chmod +x ~/.local/bin/tc
+printf '#!/bin/sh\necho foreign\n' > ~/.local/bin/codans
+chmod +x ~/.local/bin/codans
 # Then open Settings > Developer and attempt Install.
 ```
 
-Restore afterwards: `rm ~/.local/bin/tc`.
+Restore afterwards: `rm ~/.local/bin/codans`.
 
 ## Validation and Acceptance
 
 Each item maps to spec §Acceptance Criteria — Developer.
 
-- **tc unavailable, then installed.** Fresh home (no `~/.local/bin/tc`).
+- **codans unavailable, then installed.** Fresh home (no `~/.local/bin/codans`).
   Open Settings → Developer. Pill: `Not installed`. Click Install. Pill:
-  `Installed`. `readlink ~/.local/bin/tc` points into the running `.app`.
+  `Installed`. `readlink ~/.local/bin/codans` points into the running `.app`.
 - **Uninstall round-trip.** Post-install, click Uninstall. Symlinks
   removed; pill flips back; a fresh Install works.
-- **Collision safety.** Pre-seeded foreign `~/.local/bin/tc`. Install
+- **Collision safety.** Pre-seeded foreign `~/.local/bin/codans`. Install
   surfaces `Collision` without clobbering. Removing the foreign file +
   Retry installs normally.
 - **`lastInstallAttemptAt` persisted.** `jq .developer.cli.lastInstallAttemptAt
-  ~/.config/touch-code/settings.json` shows a recent ISO-8601 timestamp
+  ~/.config/codans/settings.json` shows a recent ISO-8601 timestamp
   after any Install / Uninstall attempt.
 - **Hooks list mirrors hooks.json.** With a seeded subscription, the
   row's event / displayName / matchSummary / enabled render according to
@@ -827,7 +827,7 @@ returns `.installed` with no filesystem change. `uninstall()` from
 `.notInstalled` returns `.notInstalled`. Foreign files are never
 overwritten.
 
-If `make generate` fails because `TouchCodeCore/CLI` isn't picked up
+If `make generate` fails because `CodansCore/CLI` isn't picked up
 (Step 0 pathological result), land the explicit `buildableFolders`
 append **before** Step 1's content commit. Recovery is a forward-only
 chore commit; nothing destructive.
@@ -837,9 +837,9 @@ chore commit; nothing destructive.
 ### Expected on-disk layout after Install
 
 ```
-~/.local/bin/tc     → <path to running .app>/Contents/MacOS/tc       # symlink
-~/.local/bin/tcode  → <path to running .app>/Contents/MacOS/tc       # symlink (peer)
-~/.config/touch-code/settings.json
+~/.local/bin/codans     → <path to running .app>/Contents/MacOS/codans       # symlink
+~/.local/bin/tcode  → <path to running .app>/Contents/MacOS/codans       # symlink (peer)
+~/.config/codans/settings.json
 {
   "developer": { "cli": { "lastInstallAttemptAt": "2026-04-21T13:05:02Z" } },
   ...
@@ -848,12 +848,12 @@ chore commit; nothing destructive.
 
 ### Example CLIInstallError surface strings (Step 3)
 
-- `.bundleMissing(url)` → "`tc` binary not found in app bundle. Please
-  reinstall touch-code."
+- `.bundleMissing(url)` → "`codans` binary not found in app bundle. Please
+  reinstall codans."
 - `.directoryCreateFailed(url, desc)` → "Could not create `\(url.path)`:
   `\(desc)`."
-- `.destinationExistsNotOurs(url)` → "Another `tc` exists at
-  `\(url.path)`. Rename it, then retry — touch-code will not overwrite
+- `.destinationExistsNotOurs(url)` → "Another `codans` exists at
+  `\(url.path)`. Rename it, then retry — codans will not overwrite
   a tool it didn't install."
 - `.destinationOutsideHome(url)` → "Refusing to write outside your home
   directory: `\(url.path)`."
@@ -862,7 +862,7 @@ chore commit; nothing destructive.
 - `.uninstallFailed(url, desc)` → "Could not remove `\(url.path)`:
   `\(desc)`."
 - `.pathNotOnSearchPath(checked:)` → (amber advisory, not error)
-  `"tc installed, but ~/.local/bin is not on PATH. Add
+  `"codans installed, but ~/.local/bin is not on PATH. Add
    `export PATH=\"$HOME/.local/bin:$PATH\"` to your shell profile."`
 
 ## Interfaces and Dependencies
@@ -871,7 +871,7 @@ Symbols whose shape is frozen the moment Step 1 lands (T4 depends on
 these verbatim):
 
 ```swift
-// apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift
+// apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift
 
 public struct HookRow: Identifiable, Hashable, Sendable {
   public let id: UUID
@@ -913,7 +913,7 @@ public enum HookRowBuilder {
 Symbols introduced by T3 but T3-internal (not frozen for T4):
 
 ```swift
-// apps/mac/TouchCodeCore/CLI/CLIBundleLocator.swift
+// apps/mac/CodansCore/CLI/CLIBundleLocator.swift
 public enum CLIBundleLocator {
   public enum LocatorError: Error, Equatable { case binaryNotFound }
   public enum EnvKey { public static let binary: String }
@@ -921,7 +921,7 @@ public enum CLIBundleLocator {
                                   environment: [String: String]) throws -> URL
 }
 
-// apps/mac/touch-code/App/Clients/CLIInstallerClient.swift
+// apps/mac/codans/App/Clients/CLIInstallerClient.swift
 @MainActor
 final class CLIInstallerClient {
   struct Paths { /* see Step 2 */ }
@@ -936,7 +936,7 @@ final class CLIInstallerClient {
   func isLocalBinOnPath() -> Bool
 }
 
-// apps/mac/touch-code/App/Features/Settings/DeveloperPaneDependencies.swift
+// apps/mac/codans/App/Features/Settings/DeveloperPaneDependencies.swift
 @MainActor @Observable
 final class DeveloperPaneDependencies { /* see Step 3 */ }
 struct BundleVersion: Equatable, Sendable { var short, build: String; var display: String }
@@ -947,9 +947,9 @@ External dependencies used (no additions):
 - `SwiftUI` — `@Environment`, `NavigationSplitView`-embedded panes, `Button`,
   `Label`, `Menu`, `ScrollView`.
 - `Observation` — `@Observable` on `DeveloperPaneDependencies`.
-- `TouchCodeCore` — `HookConfig`, `HookSubscription`, `Settings`,
+- `CodansCore` — `HookConfig`, `HookSubscription`, `Settings`,
   `ProjectID`, `AtomicFileStore`.
-- `tcKit` — `SkillFileSystem`, `RealSkillFileSystem`, `HomeScopeGuard`.
+- `CodansKit` — `SkillFileSystem`, `RealSkillFileSystem`, `HomeScopeGuard`.
 - `AppKit` — `NSWorkspace`, `NSPasteboard` (production-only, behind
   closures in `DeveloperPaneDependencies` so unit tests never reach them).
 

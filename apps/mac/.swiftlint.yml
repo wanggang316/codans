@@ -1,17 +1,17 @@
 strict: true
 
 included:
-  - touch-code
-  - tc
-  - tcKit
-  - TouchCodeCore
-  - TouchCodeCoreTests
-  - TouchCodeIPC
+  - codans
+  - codans-cli
+  - CodansKit
+  - CodansCore
+  - CodansCoreTests
+  - CodansIPC
 excluded:
   - ThirdParty/ghostty
   - .build
-  - touch-code.xcodeproj
-  - touch-code.xcworkspace
+  - codans.xcodeproj
+  - codans.xcworkspace
 
 disabled_rules:
   - file_length
@@ -31,7 +31,7 @@ opt_in_rules:
 inclusive_language:
   # "master" is allowed: it appears in the Master Terminal feature
   # (the privileged summon-by-hotkey panel that drives the pane fleet
-  # via the tc CLI). The term is product-naming, not a git-branch / DB
+  # via the codans CLI). The term is product-naming, not a git-branch / DB
   # source-of-truth metaphor.
   override_allowed_terms:
     - master

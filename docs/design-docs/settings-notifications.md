@@ -26,10 +26,10 @@ persisted but inert.
 
 Reference files this change touches:
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift` — body replace.
-- `apps/mac/touch-code/Notifications/NotificationCoordinator.swift` — wire three toggles + swap Dock badge source.
-- `apps/mac/touch-code/Notifications/OSNotifier.swift` — extend `post` with `playSound:`.
-- `apps/mac/touch-code/Tests/NotificationsTests/NotificationCoordinatorTests.swift` — three new tests.
+- `apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift` — body replace.
+- `apps/mac/codans/Notifications/NotificationCoordinator.swift` — wire three toggles + swap Dock badge source.
+- `apps/mac/codans/Notifications/OSNotifier.swift` — extend `post` with `playSound:`.
+- `apps/mac/codans/Tests/NotificationsTests/NotificationCoordinatorTests.swift` — three new tests.
 
 Out of scope (T3 / T4 / future):
 
@@ -53,7 +53,7 @@ Out of scope (T3 / T4 / future):
   "Open System Settings" button that deep-links to the Notifications
   pane in macOS System Settings.
 - G3 — Mute-rules summary (M5.5): read-only count + "Reveal rules.json
-  in Finder" button reveals `~/.config/touch-code/detection-rules.json`.
+  in Finder" button reveals `~/.config/codans/detection-rules.json`.
 - G4 — Wire `NotificationCoordinator`:
   - G4a — `dockBadgeEnabled` replaces `mute.badgeEnabled` as the
     authority for the Dock badge branch in `consumeUnreadPublisher`.
@@ -196,7 +196,7 @@ System notifications toggle is flipped to `true`:
   router outputs post correctly. Reverting the toggle would force the
   user to flip it again after granting — bad UX.
 
-Alert body: "Notifications are blocked for touch-code. Open System
+Alert body: "Notifications are blocked for codans. Open System
 Settings to allow them." Buttons:
 
 - "Open System Settings" (default) — opens
@@ -211,7 +211,7 @@ Settings to allow them." Buttons:
 
 **Decision:** `inAppEnabled == false` suppresses `inbox.append` inside
 `NotificationCoordinator.handle(output:)`. The inbox (bell popover + unread
-list) IS the in-app surface touch-code has; suppressing it satisfies spec
+list) IS the in-app surface codans has; suppressing it satisfies spec
 M5.1's acceptance criterion ("主窗口不出现应用内通知横幅") by removing the
 only in-app surface the app exposes today.
 
@@ -311,7 +311,7 @@ The pane reads `settingsStore.settings.notifications.mute` (already
 exposed via the reader's `mute` property) and renders counts. The
 "Reveal rules.json in Finder" button reveals
 `ConfigPaths.detectionRules()` (absolute path
-`~/.config/touch-code/detection-rules.json`). If the file does not exist
+`~/.config/codans/detection-rules.json`). If the file does not exist
 yet, `DefaultRules.installIfMissing` is invoked first (mirroring the
 behaviour `RuleStore.reloadAndRematerialise` already relies on) so the
 reveal target is real. This sidesteps the "Finder opens on nothing"
@@ -379,7 +379,7 @@ Verification commands (T2 PR gate):
 
 ```
 make mac-generate
-xcodebuild -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace apps/mac/codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 make mac-lint
 make mac-format
@@ -466,7 +466,7 @@ reader it captures.
 ### Observability
 
 - No new log categories. The coordinator already logs under
-  `com.touch-code.notifications / coordinator`; add one `.debug` line
+  `com.gumpw.codans.notifications / coordinator`; add one `.debug` line
   on the "systemEnabled off drops OS post" branch so the drop is
   visible during test triage. Similarly one `.debug` on the `inAppEnabled`
   drop path.

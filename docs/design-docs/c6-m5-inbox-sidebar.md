@@ -55,7 +55,7 @@ is picked. The view + reducer interfaces below are slot-agnostic.
 
 ## What lands
 
-Under `apps/mac/touch-code/Notifications/Views/`:
+Under `apps/mac/codans/Notifications/Views/`:
 
 - `InboxSidebar.swift` — root view. 320pt pane. Entry animation TBD
   per §Sidebar slot above (overlay transition vs. primary-sidebar
@@ -271,7 +271,7 @@ UI-level (deferred to a later task):
 
 - `AppReducer` root composition with a `@Presents` slot for the
   `InboxFeature`.
-- `DeeplinkRouter` in `apps/mac/touch-code/App/Features/Deeplink/`
+- `DeeplinkRouter` in `apps/mac/codans/App/Features/Deeplink/`
   (architecture §URL scheme pinned the path but the file doesn't
   exist yet on main).
 - Toolbar host in `MainView` (today `MainView` is a single

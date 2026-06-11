@@ -6,7 +6,7 @@
 
 ## Summary
 
-Redesign touch-code's main window into a two-column layout: a left **Sidebar** that lists Projects and their Worktrees and pins a Space switcher at the bottom, and a right **Detail** area with a Header row above the terminal showing the current branch, a notification bell, an "Open in external tool" picker, and a git-viewer toggle. The terminal itself (Tab bar + split Panes) stays as it is. This spec describes observable behavior and requirements only — implementation choices are left to the follow-up design phase.
+Redesign codans's main window into a two-column layout: a left **Sidebar** that lists Projects and their Worktrees and pins a Space switcher at the bottom, and a right **Detail** area with a Header row above the terminal showing the current branch, a notification bell, an "Open in external tool" picker, and a git-viewer toggle. The terminal itself (Tab bar + split Panes) stays as it is. This spec describes observable behavior and requirements only — implementation choices are left to the follow-up design phase.
 
 ## Layout Overview
 

@@ -15,7 +15,7 @@
 
 ## Summary
 
-touch-code 提供一个独立的「设置」窗口，承载全局偏好与按 Project 的覆盖设置。
+codans 提供一个独立的「设置」窗口，承载全局偏好与按 Project 的覆盖设置。
 窗口使用左侧侧栏 + 右侧详情的双列布局：侧栏列出全局分段（General /
 Notifications / Developer / Shortcuts / Updates / About）与 Projects 子树，
 详情区渲染当前选中分段的内容。每个 Project 的子行按 kind 条件渲染：
@@ -31,7 +31,7 @@ Environment），`dir` 暴露 4 个（省略 Git & Worktree、GitHub）。
 
 ## Vocabulary
 
-- **Project** 是 touch-code 内部模型（见 `docs/product-spec.md` 的 C2）中的一个
+- **Project** 是 codans 内部模型（见 `docs/product-spec.md` 的 C2）中的一个
   git 仓库绑定。**设置窗口** UI 中，侧栏将这类条目展示为 **Repositories**；
   两者指的是同一类对象。
 - **Section**（分段）指侧栏中的一行。任一时刻最多一个分段被选中。
@@ -54,7 +54,7 @@ Environment），`dir` 暴露 4 个（省略 Git & Worktree、GitHub）。
 │ ℹ  About             │                                               │
 │                      │                                               │
 │ ── Repositories ──   │                                               │
-│ ▶ touch-code         │                                               │
+│ ▶ codans         │                                               │
 │ ▼ some-project       │                                               │
 │    General           │                                               │
 │    Hooks             │                                               │
@@ -74,9 +74,9 @@ Environment），`dir` 暴露 4 个（省略 Git & Worktree、GitHub）。
   自定义编辑器配置在新窗口中以相同的交互存在，已有配置不丢失。
 - 作为依赖代理通知的用户，我希望在通知分段里能一眼看到系统通知权限的状态，
   当权限被拒时能用一个入口跳到系统设置。
-- 作为 `tc` CLI 的用户，我希望在设置窗口里能一键安装 / 卸载 `tc`，不必到
+- 作为 `codans` CLI 的用户，我希望在设置窗口里能一键安装 / 卸载 `codans`，不必到
   文档里找 shell 命令。
-- 作为已经依赖 `~/.config/touch-code/` 下手改配置的用户，我希望设置窗口里
+- 作为已经依赖 `~/.config/codans/` 下手改配置的用户，我希望设置窗口里
   提供 "Reveal in Finder" 等逃生入口，让我随时跳到文件原位继续手工编辑。
 - 作为使用设置的用户，我希望我做出的改动会被持久化，且不会因为不同功能
   之间互相写入同一份配置文件而丢失其中任何一项。
@@ -110,7 +110,7 @@ Environment），`dir` 暴露 4 个（省略 Git & Worktree、GitHub）。
   5. **Mute rules**（静音规则摘要）— 只读展示当前生效的静音规则计数；
      "Reveal rules.json in Finder" 入口让用户手改。
 - [ ] **M6 — Developer 分段。** 承载以下控件：
-  1. **`tc` CLI** — 显示当前安装状态（Installed / Not installed / Failed）；
+  1. **`codans` CLI** — 显示当前安装状态（Installed / Not installed / Failed）；
      提供 Install / Uninstall 按钮。操作失败时显示错误摘要与重试按钮。
   2. **Hooks**（Hook 列表）— 只读列出用户 Hook 的名称、启用状态、匹配
      条件摘要；提供 "Reveal hooks.json in Finder" 入口让用户手改。
@@ -169,7 +169,7 @@ Environment），`dir` 暴露 4 个（省略 Git & Worktree、GitHub）。
 - Updates 更新通道（自动检查、通道切换、自动下载）— 占位分段。
 - GitHub 集成、仓库 avatar 获取、贡献者信息展示。
 - 分析 / 崩溃上报 开关。
-- Skill 安装器 UI（touch-code Agent Skill 的安装 / 卸载由 CLI 驱动，
+- Skill 安装器 UI（codans Agent Skill 的安装 / 卸载由 CLI 驱动，
   不进入设置窗口）。
 - Worktree 创建策略（是否自动 fetch、是否拷贝 ignored / untracked 文件、
   PR 合并策略等）。
@@ -222,7 +222,7 @@ Environment），`dir` 暴露 4 个（省略 Git & Worktree、GitHub）。
 
 ### Developer 分段
 
-- 给定 `tc` 未安装，当用户进入 Developer，则 CLI 行显示 "Not installed"
+- 给定 `codans` 未安装，当用户进入 Developer，则 CLI 行显示 "Not installed"
   和一个 Install 按钮。
 - 给定用户点击 Install 且安装成功，则该行变为 "Installed"，按钮变为
   Uninstall。
@@ -280,7 +280,7 @@ Environment），`dir` 暴露 4 个（省略 Git & Worktree、GitHub）。
 
 ## Open Questions
 
-1. **CLI 安装目标路径** — `tc` 安装到系统路径（需要系统授权对话框）还是
+1. **CLI 安装目标路径** — `codans` 安装到系统路径（需要系统授权对话框）还是
    用户级路径（无授权但需要 PATH 配合）？将影响 Developer 分段中 Install
    按钮的授权提示与错误处理方式。
 2. **Appearance 控件视觉状态** — 既然 Appearance 引擎未实装，控件是以

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# make-dmg.sh — package a signed TouchCode.app into a Developer-ID-
+# make-dmg.sh — package a signed Codans.app into a Developer-ID-
 # signed DMG using only hdiutil + codesign + iconutil (no brew dep).
 #
 # The DMG ships with a custom volume icon (derived from the app icon
-# source PNG) and a side-by-side Finder layout: TouchCode.app on the
+# source PNG) and a side-by-side Finder layout: Codans.app on the
 # left, /Applications symlink on the right. We stage as UDRW, mount,
 # script Finder, then convert to UDZO.
 #
@@ -20,19 +20,19 @@ identity="${3:?usage: make-dmg.sh <app> <out-dmg> <signing-identity>}"
 [ -d "${app_path}" ] || { echo "error: ${app_path} is not a directory" >&2; exit 1; }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-icon_src="${script_dir}/../touch-code/App/AppIcon.icon/Assets/2.png"
+icon_src="${script_dir}/../codans/App/AppIcon.icon/Assets/2.png"
 [ -f "${icon_src}" ] || { echo "error: source icon ${icon_src} missing" >&2; exit 1; }
 
-vol_name="Touch Code"
+vol_name="Codans"
 
 # Refuse to wrap an unsigned (or improperly-signed) .app in a signed
 # DMG. codesign --strict --deep walks the entire bundle and catches
-# unsigned helpers (e.g., a stale tc) that would otherwise sail through
+# unsigned helpers (e.g., a stale codans) that would otherwise sail through
 # to a notarization failure 30 minutes from now.
 echo "==> verifying ${app_path} signature before staging"
 codesign --verify --deep --strict --verbose=2 "${app_path}"
 
-work_dir="$(mktemp -d -t touch-code-dmg)"
+work_dir="$(mktemp -d -t codans-dmg)"
 stage_dir="${work_dir}/stage"
 rw_dmg="${work_dir}/build.dmg"
 mkdir -p "${stage_dir}"
@@ -107,7 +107,7 @@ SWIFT
 # it pre-mount loses the file before convert.
 echo "==> generating volume icon from ${icon_src}"
 volume_icon="${work_dir}/VolumeIcon.icns"
-iconset="${work_dir}/touch-code.iconset"
+iconset="${work_dir}/codans.iconset"
 mkdir -p "${iconset}"
 # The source PNG is opaque RGB, so a plain sips downscale produces a
 # square-cornered volume icon on the desktop. Mask each iconset entry
@@ -192,7 +192,7 @@ tell application "Finder"
     set text size of viewOptions to 13
     set label position of viewOptions to bottom
     set background picture of viewOptions to file ".background:background.png"
-    set position of item "TouchCode.app" of container window to {170, 180}
+    set position of item "Codans.app" of container window to {170, 180}
     set position of item "Applications" of container window to {490, 180}
     update without registering applications
     delay 1

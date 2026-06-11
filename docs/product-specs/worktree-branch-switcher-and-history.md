@@ -56,7 +56,7 @@
 ```
 ┌─────────────────────────────────────────────┐
 │ {icon}  feat/git-branch-update  ⌄ / ⟳        │   row 1 — branch (hover → underline; click → popover)
-│         repos/touch-code · touch-code        │   row 2 — folder · project (caption)
+│         repos/codans · codans        │   row 2 — folder · project (caption)
 └─────────────────────────────────────────────┘
 ```
 
@@ -147,7 +147,7 @@
 
 新增 / 修改：
 
-- `TouchCodeCore/Git/GitModels.swift`：
+- `CodansCore/Git/GitModels.swift`：
   - `struct BranchRef { let name: String; let isRemote: Bool; let upstream: String? }`
   - `struct BranchInventory { let current: String?; let local: [BranchRef]; let remote: [BranchRef] }`
 - `Git/GitService.swift`：

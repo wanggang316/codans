@@ -6,7 +6,7 @@
 
 ## 1. Context and Scope
 
-touch-code exposes its functionality through three disjoint surfaces today:
+codans exposes its functionality through three disjoint surfaces today:
 
 - SwiftUI menu bar bindings in `App/Commands/MainWindowCommands.swift` (`⌘E`,
   `⌘⇧G`, `⌘K`, `⌘1`–`⌘9`).
@@ -29,10 +29,10 @@ dedicated entry point elsewhere.
 Two pieces of plumbing already anticipate this feature:
 
 - `PaneActionRequest.toggleCommandPalette`
-  (`apps/mac/TouchCodeCore/PaneActionRequest.swift`) is decoded from
+  (`apps/mac/CodansCore/PaneActionRequest.swift`) is decoded from
   ghostty's `toggle_command_palette` action.
 - `PaneActionRouterFeature.Delegate.commandPaletteToggleRequested`
-  (`apps/mac/touch-code/App/Features/PaneActionRouter/PaneActionRouterFeature.swift:42`)
+  (`apps/mac/codans/App/Features/PaneActionRouter/PaneActionRouterFeature.swift:42`)
   is emitted when that intent arrives. `RootFeature:421` currently consumes
   it as an explicit no-op.
 
@@ -267,7 +267,7 @@ position, alphabetical. Deterministic on identical input.
 
 ### 3.4 Component Boundaries
 
-New files, all under `apps/mac/touch-code/App/Features/CommandPalette/`:
+New files, all under `apps/mac/codans/App/Features/CommandPalette/`:
 
 - `CommandPaletteFeature.swift` — reducer, state, actions, delegate enum.
 - `CommandPaletteItem.swift` — `Item` struct + `Kind` enum; no behavior.
@@ -422,7 +422,7 @@ composition time.
 command already has a one-to-one match to an existing action. A registry
 buys extensibility we have no evidence we need, at the cost of:
 
-- New protocol in `TouchCodeCore` (cross-target public API surface).
+- New protocol in `CodansCore` (cross-target public API surface).
 - Each feature pays a boilerplate tax (`contributions` var, catalog
   dependency, caching policy).
 - The ordering and dedup logic has to move into the registry — currently
@@ -458,7 +458,7 @@ appear animation.
 Spotlight-style always-on-top window that survives window focus changes.
 
 **Rejected for v1.** Extra complexity (AppKit bridging, NSWindow lifetime,
-manual key-window management) for a capability we don't need — touch-code
+manual key-window management) for a capability we don't need — codans
 is a single-window app; opening the palette from another app is not a
 goal. If multi-window lands later, revisit.
 
@@ -509,7 +509,7 @@ pattern in the same parent.
 All command activations log a structured event:
 
 ```swift
-static let logger = Logger(subsystem: "com.touch-code.command-palette",
+static let logger = Logger(subsystem: "com.gumpw.codans.command-palette",
                            category: "activate")
 ```
 
@@ -530,8 +530,8 @@ filesystem paths.
 
 ### 5.3 Testing Strategy
 
-- **`CommandPaletteFuzzyScorerTests`** (`TouchCodeCoreTests` or
-  `apps/mac/touch-code/Tests/`): table-driven — pairs of `(item, query)`
+- **`CommandPaletteFuzzyScorerTests`** (`CodansCoreTests` or
+  `apps/mac/codans/Tests/`): table-driven — pairs of `(item, query)`
   with expected rank ordering. Covers contiguous vs subsequence,
   separator bonus, recency float, quoted-contiguous mode.
 - **`CommandPaletteItemsTests`**: `build(for:)` against synthetic

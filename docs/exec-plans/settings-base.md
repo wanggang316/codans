@@ -10,7 +10,7 @@ to date as work proceeds.
 
 ## Purpose
 
-After this change a user who runs touch-code can press `⌘,` (or pick
+After this change a user who runs codans can press `⌘,` (or pick
 *Settings…* from the app menu) and see a standalone **Settings** window
 with a six-item sidebar (General / Notifications / Developer / Shortcuts
 / Updates / About), a `Repositories` disclosure tree listing their open
@@ -18,7 +18,7 @@ projects, and a General pane that lets them change Appearance, pick a
 Default editor, and manage Built-in / Custom editor entries. Closing
 the main window does not close Settings; closing Settings clears
 sidebar selection but preserves draft state; re-opening defaults to
-General. Under the hood, `~/.config/touch-code/settings.json` has a
+General. Under the hood, `~/.config/codans/settings.json` has a
 single writer (`SettingsStore`), exists at schema `version: 2`, and
 auto-upgrades any existing v1 file (editor-only, notifications-only,
 or combined) on first launch without user intervention — the v1 file
@@ -38,7 +38,7 @@ before opening the PR against `feature/settings-base`.
 
 - [x] Step 0 — Tuist buildableFolders verification (probes confirmed recursion — no commit)
 - [x] Step 1a — Rename v1 Settings → LegacyEditorSettings (prep commit to free namespace)
-- [x] Step 1 — Add `TouchCodeCore/Settings/` v2 types + SettingsCodableTests
+- [x] Step 1 — Add `CodansCore/Settings/` v2 types + SettingsCodableTests
 - [x] Step 2 — Add contract surfaces (enum / protocol / 4 placeholder panes / ComingSoonPane)
 - [x] Step 3 — Migration scaffolding (LegacyV1Settings + SettingsMigration + SettingsMigrationTests)
 - [x] Step 4 — SettingsStore v2 refactor + C6 coordinator rewire + delete NotificationSettingsStore
@@ -50,8 +50,8 @@ before opening the PR against `feature/settings-base`.
 ## Surprises & Discoveries
 
 - **Swift filename collision between v1 and v2 `Settings`.** Both structs had
-  the public type name `Settings`; the v1 file `TouchCodeCore/Editor/Settings.swift`
-  couldn't coexist with a new `TouchCodeCore/Settings/Settings.swift`.
+  the public type name `Settings`; the v1 file `CodansCore/Editor/Settings.swift`
+  couldn't coexist with a new `CodansCore/Settings/Settings.swift`.
   Compiler error was
   `filename "Settings.swift" used twice`. Resolved by renaming the v1 file
   to `LegacyEditorSettings.swift` + the type to `LegacyEditorSettings` in a
@@ -62,7 +62,7 @@ before opening the PR against `feature/settings-base`.
   files in `project.pbxproj`, so the initial grep-based check looked
   like a miss. Empirical probe (add a deliberate compile-error file
   inside the subfolder, build the target, observe the error) confirmed
-  recursion works for `TouchCodeCore/`, `touch-code/App/Features/Settings/Panes/`,
+  recursion works for `CodansCore/`, `codans/App/Features/Settings/Panes/`,
   and `.../Sidebar/`. No `Project.swift` edit required.
 - **GhosttyKit.xcframework had never been built in this worktree.** First
   `tuist generate` failed on a ghostty dependency-fetch HTTP 400. Copying
@@ -89,7 +89,7 @@ before opening the PR against `feature/settings-base`.
 - **Step 6 removed the per-button ⌘, shortcut.** Plan didn't explicitly
   call this out; decision made on the spot because two competing bindings
   to the same chord would be non-deterministic.
-- **Co-located `AuthorizationStatusCache` in `TouchCodeCore/Settings/NotificationsSettings.swift`.**
+- **Co-located `AuthorizationStatusCache` in `CodansCore/Settings/NotificationsSettings.swift`.**
   Plan stage placed it with the v2 NotificationsSettings struct (Step 1) rather than leaving
   it in the deleted `NotificationSettingsStore.swift`. No material difference; note for
   future readers looking for where C6 auth-status persistence lives.
@@ -102,7 +102,7 @@ before opening the PR against `feature/settings-base`.
 ## Outcomes & Retrospective
 
 **Automated coverage — all green.** Four xcodebuild test schemes ran
-locally: `touch-code`, `TouchCodeCore`, `tcKit`, `tc`. All four produced
+locally: `codans`, `CodansCore`, `CodansKit`, `codans`. All four produced
 `** TEST SUCCEEDED **`. New test coverage:
 
 - `SettingsCodableTests` — 5 tests (default round-trip, minimal-JSON
@@ -128,7 +128,7 @@ launch. The upgrade-compatibility scenario was partially automated via
 staged in `/tmp/tctest-*` but not click-verified.
 
 **M13 single-writer invariant achieved.** Only `SettingsStore` writes
-`~/.config/touch-code/settings.json` now; `NotificationSettingsStore`
+`~/.config/codans/settings.json` now; `NotificationSettingsStore`
 is deleted. Per-Repo catalog data (`Project.defaultEditor`,
 `Project.worktreesDirectory`) remains in `catalog.json` per design D1.
 
@@ -165,74 +165,74 @@ Related documents:
 
 Current (to be refactored or deleted):
 
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` —
   owner of v1 `Settings` (editor-only). Gets rewritten in Step 4.
-- `apps/mac/touch-code/App/Features/Settings/SettingsSheetFeature.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsSheetFeature.swift` —
   `.sheet`-presented reducer. Deleted in Step 6.
-- `apps/mac/touch-code/App/Features/Settings/SettingsSheetView.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsSheetView.swift` —
   Done-button chrome host. Deleted in Step 6.
-- `apps/mac/touch-code/App/Features/Settings/SettingsEditorSection.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsEditorSection.swift` —
   today's editor UI. Contents lift to
   `Panes/SettingsGeneralView.swift` in Step 5; file deleted in Step 6.
-- `apps/mac/touch-code/Notifications/NotificationSettingsStore.swift` —
+- `apps/mac/codans/Notifications/NotificationSettingsStore.swift` —
   the second writer of `settings.json`. Deleted in Step 4 together
-  with its `TouchCodeSettings` / `NotificationsSettings` types (the
-  latter is re-introduced in `TouchCodeCore/Settings/` with a superset
+  with its `CodansSettings` / `NotificationsSettings` types (the
+  latter is re-introduced in `CodansCore/Settings/` with a superset
   shape in Step 1).
-- `apps/mac/touch-code/Notifications/NotificationCoordinator.swift` —
+- `apps/mac/codans/Notifications/NotificationCoordinator.swift` —
   reads/mutates settings. Rewired to
   `NotificationSettingsReader` + mutate closure in Step 4.
-- `apps/mac/touch-code/Notifications/C6AppBootstrap.swift` — construction
+- `apps/mac/codans/Notifications/C6AppBootstrap.swift` — construction
   site for the coordinator. Signature changes in Step 4.
-- `apps/mac/touch-code/App/Clients/InboxClient.swift` — one
+- `apps/mac/codans/App/Clients/InboxClient.swift` — one
   `muteRule` closure currently calls `NotificationSettingsStore.mutate`.
   Switched to `SettingsStore.mutateNotifications` in Step 4.
-- `apps/mac/touch-code/App/Clients/EditorClient.swift` — reads
+- `apps/mac/codans/App/Clients/EditorClient.swift` — reads
   `settings.defaultEditorID` / `settings.customEditors`. Updated to
   `settings.general.*` in Step 4.
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — scene graph. Gains
+- `apps/mac/codans/App/CodansApp.swift` — scene graph. Gains
   `Window(id: "settings")` + `CommandGroup(replacing: .appSettings)`
   in Step 5. Loses `notificationSettingsStore` field in Step 4.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — loses
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — loses
   `settingsSheet` in Step 6; delegate `showCustomEditorsSettings`
   rerouted to the new `SettingsWindowPresenter`.
-- `apps/mac/TouchCodeCore/Editor/Settings.swift` — v1 `Settings`
+- `apps/mac/CodansCore/Editor/Settings.swift` — v1 `Settings`
   struct. Deleted in Step 4 once nothing references it; replaced by
-  `TouchCodeCore/Settings/Settings.swift` from Step 1.
+  `CodansCore/Settings/Settings.swift` from Step 1.
 - `apps/mac/Project.swift` — the Tuist project. Inspected in Step 0;
   amended only if buildableFolders turn out to be non-recursive.
 
 New files introduced (paths final):
 
-- `apps/mac/TouchCodeCore/Settings/Settings.swift` — v2 root Codable
-- `apps/mac/TouchCodeCore/Settings/GeneralSettings.swift`
-- `apps/mac/TouchCodeCore/Settings/NotificationsSettings.swift`
-- `apps/mac/TouchCodeCore/Settings/DeveloperSettings.swift`
-- `apps/mac/TouchCodeCore/Settings/RepositorySettings.swift` (empty struct)
-- `apps/mac/TouchCodeCore/Settings/AppearancePreference.swift`
-- `apps/mac/TouchCodeCore/Settings/LegacyV1Settings.swift` (Step 3)
-- `apps/mac/TouchCodeCore/Settings/SettingsMigration.swift` (Step 3)
-- `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`
-- `apps/mac/touch-code/App/Features/Settings/NotificationSettingsReader.swift`
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift`
-- `apps/mac/touch-code/App/Features/Settings/Sidebar/SettingsSidebarView.swift`
-- `apps/mac/touch-code/App/Features/Settings/Panes/ComingSoonPane.swift`
-- `apps/mac/touch-code/App/Features/Settings/Panes/SettingsGeneralView.swift`
-- `apps/mac/touch-code/App/Features/Settings/Panes/AboutSettingsView.swift`
-- `apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift`
+- `apps/mac/CodansCore/Settings/Settings.swift` — v2 root Codable
+- `apps/mac/CodansCore/Settings/GeneralSettings.swift`
+- `apps/mac/CodansCore/Settings/NotificationsSettings.swift`
+- `apps/mac/CodansCore/Settings/DeveloperSettings.swift`
+- `apps/mac/CodansCore/Settings/RepositorySettings.swift` (empty struct)
+- `apps/mac/CodansCore/Settings/AppearancePreference.swift`
+- `apps/mac/CodansCore/Settings/LegacyV1Settings.swift` (Step 3)
+- `apps/mac/CodansCore/Settings/SettingsMigration.swift` (Step 3)
+- `apps/mac/codans/App/Features/Settings/SettingsSection.swift`
+- `apps/mac/codans/App/Features/Settings/NotificationSettingsReader.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsWindowView.swift`
+- `apps/mac/codans/App/Features/Settings/Sidebar/SettingsSidebarView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/ComingSoonPane.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/SettingsGeneralView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/AboutSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift`
   *(placeholder; T2 replaces body)*
-- `apps/mac/touch-code/App/Features/Settings/Panes/DeveloperSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/DeveloperSettingsView.swift`
   *(placeholder; T3 replaces body)*
-- `apps/mac/touch-code/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/RepositoryGeneralSettingsView.swift`
   *(placeholder; T4 replaces body)*
-- `apps/mac/touch-code/App/Features/Settings/Panes/RepositoryHooksSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/RepositoryHooksSettingsView.swift`
   *(placeholder; T4 replaces body)*
-- `apps/mac/touch-code/App/Clients/SettingsWindowPresenter.swift` —
+- `apps/mac/codans/App/Clients/SettingsWindowPresenter.swift` —
   TCA dependency wrapping `EnvironmentValues.openWindow`
-- `apps/mac/TouchCodeCoreTests/SettingsCodableTests.swift`
-- `apps/mac/TouchCodeCoreTests/SettingsMigrationTests.swift`
-- `apps/mac/touch-code/Tests/SettingsWindowFeatureTests.swift`
+- `apps/mac/CodansCoreTests/SettingsCodableTests.swift`
+- `apps/mac/CodansCoreTests/SettingsMigrationTests.swift`
+- `apps/mac/codans/Tests/SettingsWindowFeatureTests.swift`
 
 ### Terms of art
 
@@ -253,9 +253,9 @@ New files introduced (paths final):
   branch off `feat/settings-shell@<after-step-2>` immediately.
 - **Tuist `buildableFolders`** — a property in `apps/mac/Project.swift`
   that lists the folders a target compiles. Observed behaviour is
-  recursive — `TouchCodeCore/Editor/` and `TouchCodeCore/Notifications/`
+  recursive — `CodansCore/Editor/` and `CodansCore/Notifications/`
   compile today without being listed, implied by the single
-  `"TouchCodeCore"` entry. Step 0 verifies this empirically before
+  `"CodansCore"` entry. Step 0 verifies this empirically before
   relying on it for Step 1.
 
 ## Plan of Work
@@ -278,49 +278,49 @@ stable (Step 4), so Steps 5–6 follow Step 4 naturally.
 
 #### Step 0: Verify Tuist buildableFolders recursion
 
-Before creating `TouchCodeCore/Settings/`, run `make -C apps/mac
+Before creating `CodansCore/Settings/`, run `make -C apps/mac
 generate` against a temporary probe file to confirm Tuist auto-picks
-up new subfolders under `TouchCodeCore/` without editing
+up new subfolders under `CodansCore/` without editing
 `apps/mac/Project.swift`.
 
-Rationale: the `TouchCodeCore` target lists
-`buildableFolders: ["TouchCodeCore", "TouchCodeCore/Hooks"]` yet the
-`TouchCodeCore/Editor/` and `TouchCodeCore/Notifications/` subfolders
+Rationale: the `CodansCore` target lists
+`buildableFolders: ["CodansCore", "CodansCore/Hooks"]` yet the
+`CodansCore/Editor/` and `CodansCore/Notifications/` subfolders
 clearly compile today — so recursion is the presumed behaviour, but
 unverified. If the probe shows the new subfolder is NOT picked up,
-edit `apps/mac/Project.swift` to add `"TouchCodeCore/Settings"` to
+edit `apps/mac/Project.swift` to add `"CodansCore/Settings"` to
 the target's buildableFolders and commit that edit as Step 0; Step 1
 then lands on a known-good Tuist config. If the probe shows recursion
 works, discard the probe file and proceed with no commit for Step 0.
 
 Exact procedure:
 
-1. `touch apps/mac/TouchCodeCore/Settings/_probe.swift` with content
+1. `touch apps/mac/CodansCore/Settings/_probe.swift` with content
    `// probe`.
 2. Run `make -C apps/mac generate`.
 3. Open the generated project: check whether
-   `touch-code.xcodeproj/project.pbxproj` contains `_probe.swift` as
-   a member of the `TouchCodeCore` group sources.
-   `grep -q _probe.swift apps/mac/touch-code.xcodeproj/project.pbxproj
+   `codans.xcodeproj/project.pbxproj` contains `_probe.swift` as
+   a member of the `CodansCore` group sources.
+   `grep -q _probe.swift apps/mac/codans.xcodeproj/project.pbxproj
    && echo RECURSES || echo NEEDS-EXPLICIT-ENTRY`.
 4. Delete the probe file.
 5. If result was `NEEDS-EXPLICIT-ENTRY`, edit `Project.swift`'s
-   `TouchCodeCore` target to append `"TouchCodeCore/Settings"` to
+   `CodansCore` target to append `"CodansCore/Settings"` to
    `buildableFolders`; re-run generate; commit with
-   `chore(mac): declare TouchCodeCore/Settings as a buildable folder`.
+   `chore(mac): declare CodansCore/Settings as a buildable folder`.
    Otherwise skip the commit.
 
-Same probe applies under `touch-code/App/Features/Settings/Panes/`
-and `Sidebar/` — the `touch-code` app target lists
-`"touch-code/App"` plus a handful of explicit subfolders. If the
+Same probe applies under `codans/App/Features/Settings/Panes/`
+and `Sidebar/` — the `codans` app target lists
+`"codans/App"` plus a handful of explicit subfolders. If the
 probe shows recursion works, no further action. If it requires
-explicit entries, add `"touch-code/App/Features/Settings/Panes"` and
-`"touch-code/App/Features/Settings/Sidebar"` to the app target's
+explicit entries, add `"codans/App/Features/Settings/Panes"` and
+`"codans/App/Features/Settings/Sidebar"` to the app target's
 buildableFolders in the same Step 0 commit.
 
-#### Step 1: Add `TouchCodeCore/Settings/` v2 Codable types
+#### Step 1: Add `CodansCore/Settings/` v2 Codable types
 
-Create six files under `apps/mac/TouchCodeCore/Settings/` that
+Create six files under `apps/mac/CodansCore/Settings/` that
 together define the v2 schema. No runtime wiring changes in this step.
 
 - `AppearancePreference.swift` — enum with cases `.system`, `.light`,
@@ -331,7 +331,7 @@ together define the v2 schema. No runtime wiring changes in this step.
   init with defaults so `try? container.decode(GeneralSettings.self)`
   with empty JSON yields a valid default.
 - `NotificationsSettings.swift` — **superset** of the current
-  `TouchCodeSettings.notifications` shape. Fields: `mute: MuteSettings
+  `CodansSettings.notifications` shape. Fields: `mute: MuteSettings
   = .defaults`, `authStatus: AuthorizationStatusCache = .notDetermined`,
   `neverPrompt: Bool = false`, `notNowUntil: Date? = nil`,
   `inAppEnabled: Bool = true`, `systemEnabled: Bool = true`,
@@ -339,12 +339,12 @@ together define the v2 schema. No runtime wiring changes in this step.
   All new fields default to safe values so a decode of a legacy object
   with only the original four keys still succeeds. Reuses `MuteSettings`
   and `AuthorizationStatusCache` from
-  `apps/mac/TouchCodeCore/Notifications/MuteSettings.swift` and
-  `apps/mac/touch-code/Notifications/NotificationSettingsStore.swift`
+  `apps/mac/CodansCore/Notifications/MuteSettings.swift` and
+  `apps/mac/codans/Notifications/NotificationSettingsStore.swift`
   — the latter enum is copied into this file (same cases) because it
   currently lives in the app target and Step 4 will delete the old
   file; co-locating it with `NotificationsSettings` in
-  `TouchCodeCore/Settings/` is the natural home.
+  `CodansCore/Settings/` is the natural home.
 - `DeveloperSettings.swift` — struct with
   `cli: DeveloperCLISettings = .init()` where `DeveloperCLISettings`
   is a nested struct holding `lastInstallAttemptAt: Date? = nil`.
@@ -363,7 +363,7 @@ together define the v2 schema. No runtime wiring changes in this step.
     public var repositories: [ProjectID: RepositorySettings]
 
     public static let `default` = Settings(...)
-    public static func defaultURL(home: URL = ...) -> URL    // = ~/.config/touch-code/settings.json
+    public static func defaultURL(home: URL = ...) -> URL    // = ~/.config/codans/settings.json
   }
 
   extension Settings {
@@ -383,11 +383,11 @@ together define the v2 schema. No runtime wiring changes in this step.
   }
   ```
 
-  `ProjectID` comes from `apps/mac/TouchCodeCore/IDs.swift` and
+  `ProjectID` comes from `apps/mac/CodansCore/IDs.swift` and
   already derives `Codable` from its UUID `RawValue` — no custom
   coding.
 
-Tests — create `apps/mac/TouchCodeCoreTests/SettingsCodableTests.swift`:
+Tests — create `apps/mac/CodansCoreTests/SettingsCodableTests.swift`:
 
 - Round-trip `Settings.default` through encode→decode; assert equality.
 - Encode `Settings.default` to canonical JSON (sorted keys, pretty),
@@ -405,7 +405,7 @@ Commit message: `feat(core): add Settings v2 Codable types`.
 
 ```
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -418,7 +418,7 @@ Seven new files, all self-contained, all in the app target. None are
 wired into the existing runtime — they exist so T2/T3/T4 can
 `import`-and-switch against them.
 
-1. `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`:
+1. `apps/mac/codans/App/Features/Settings/SettingsSection.swift`:
 
    ```swift
    public enum SettingsSection: Hashable, Sendable {
@@ -436,7 +436,7 @@ wired into the existing runtime — they exist so T2/T3/T4 can
    to; views reconstruct the sidebar repository rows from
    `HierarchyManager.catalog`.
 
-2. `apps/mac/touch-code/App/Features/Settings/NotificationSettingsReader.swift`:
+2. `apps/mac/codans/App/Features/Settings/NotificationSettingsReader.swift`:
 
    ```swift
    @MainActor
@@ -454,7 +454,7 @@ wired into the existing runtime — they exist so T2/T3/T4 can
 
    No conformances yet. Step 4 adds the `SettingsStore` conformance.
 
-3. `apps/mac/touch-code/App/Features/Settings/Panes/ComingSoonPane.swift`:
+3. `apps/mac/codans/App/Features/Settings/Panes/ComingSoonPane.swift`:
 
    ```swift
    struct ComingSoonPane: View {
@@ -489,7 +489,7 @@ Commit message: `feat(settings): freeze contract surfaces for T2/T3/T4`.
 
 ```
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug build -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -506,7 +506,7 @@ about implicit-return etc. apply).
 
 Two new files and one test file. Still no runtime wiring.
 
-- `apps/mac/TouchCodeCore/Settings/LegacyV1Settings.swift`:
+- `apps/mac/CodansCore/Settings/LegacyV1Settings.swift`:
 
   ```swift
   /// Permissive Codable for legacy settings.json. Every field is
@@ -527,7 +527,7 @@ Two new files and one test file. Still no runtime wiring.
   }
   ```
 
-- `apps/mac/TouchCodeCore/Settings/SettingsMigration.swift`:
+- `apps/mac/CodansCore/Settings/SettingsMigration.swift`:
 
   ```swift
   enum SettingsMigration {
@@ -549,7 +549,7 @@ Two new files and one test file. Still no runtime wiring.
   (§Migration algorithm step 3). `load` wraps `AtomicFileStore.read`
   with the v2-first / legacy-fallback / rename-aside sequence.
 
-- `apps/mac/TouchCodeCoreTests/SettingsMigrationTests.swift` — five
+- `apps/mac/CodansCoreTests/SettingsMigrationTests.swift` — five
   tests, one per design-doc fixture:
 
   1. `migratesEditorOnlyV1` — seeds `{"version":1,"defaultEditorID":"vscode","customEditors":[...]}`,
@@ -570,7 +570,7 @@ Two new files and one test file. Still no runtime wiring.
 Commit message: `feat(core): add v1→v2 settings migration (scaffolding)`.
 
 **Verification for Step 3.** Run `make generate` + the
-`TouchCodeCoreTests` scheme; expect 5 new tests passed + all prior
+`CodansCoreTests` scheme; expect 5 new tests passed + all prior
 Codable tests still passing.
 
 ### Phase B — Unified persistence
@@ -586,63 +586,63 @@ Per master instruction #3, the refactor and the deletion land together.
 Files modified / deleted (full list, so the implementer can budget):
 
 Modified:
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` — full rewrite.
-- `apps/mac/touch-code/App/Clients/EditorClient.swift` — switch to
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` — full rewrite.
+- `apps/mac/codans/App/Clients/EditorClient.swift` — switch to
   `settings.general.defaultEditorID` / `settings.general.customEditors`.
-- `apps/mac/touch-code/App/Clients/InboxClient.swift` — `muteRule`
+- `apps/mac/codans/App/Clients/InboxClient.swift` — `muteRule`
   routes through `settingsStore.mutateNotifications { $0.mute.mutedRuleIDs.insert(...) }`.
-- `apps/mac/touch-code/Notifications/NotificationCoordinator.swift` —
+- `apps/mac/codans/Notifications/NotificationCoordinator.swift` —
   init takes `reader: any NotificationSettingsReader` + `mutate: @MainActor @Sendable (inout NotificationsSettings) -> Void`
   instead of the concrete `NotificationSettingsStore`. Internally
   replace `settings.settings.notifications.<X>` reads with `reader.<X>`,
   and `settings.mutate { $0.notifications... }` calls with
   `mutate { $0... }`.
-- `apps/mac/touch-code/Notifications/C6AppBootstrap.swift` —
+- `apps/mac/codans/Notifications/C6AppBootstrap.swift` —
   parameters switch from `settingsStore: NotificationSettingsStore?`
   to `settings: SettingsStore`. Pass `settings` to
   `NotificationCoordinator`'s reader+mutate parameters.
   `flushPendingWrites()` calls `settings.flush()`.
-- `apps/mac/touch-code/App/TouchCodeApp.swift` —
+- `apps/mac/codans/App/CodansApp.swift` —
   `AppState.notificationSettingsStore` field removed;
   `InboxClient.live(inbox: …, settings: settingsStore)`;
   `flushAllPersistedState()` flushes `settingsStore` once;
   `startNotifications` passes `settingsStore` into
   `C6AppBootstrap.start(settings: settingsStore, …)`.
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` owns
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` owns
   `Settings` v2 directly and calls `SettingsMigration.load` in its
   initialiser; exposes the full mutate API from design-doc §API;
   conforms to `NotificationSettingsReader`.
 
 Deleted:
-- `apps/mac/touch-code/Notifications/NotificationSettingsStore.swift`
+- `apps/mac/codans/Notifications/NotificationSettingsStore.swift`
   (file — everything the app used lives now on `SettingsStore` +
   `NotificationSettingsReader`).
-- `apps/mac/TouchCodeCore/Editor/Settings.swift` (v1 Settings struct).
+- `apps/mac/CodansCore/Editor/Settings.swift` (v1 Settings struct).
   `CustomEditor` / `CommandTemplate` / `EditorID` stay in
   `EditorStorageModels.swift` / `EditorValidators.swift` — those
   files are unchanged.
 
 Tests:
-- `apps/mac/touch-code/Tests/SettingsStoreTests.swift` — rewritten.
+- `apps/mac/codans/Tests/SettingsStoreTests.swift` — rewritten.
   Cover: each mutate API schedules a save; `flush` writes-through;
   `saveNow` skips the debounce; corrupt file on disk backed aside;
   writes produce canonical pretty-printed JSON; empty RepositorySettings
   entries GC on save.
-- `apps/mac/touch-code/Tests/NotificationsTests/NotificationSettingsStoreTests.swift` —
+- `apps/mac/codans/Tests/NotificationsTests/NotificationSettingsStoreTests.swift` —
   **deleted** (its subject class is gone).
-- `apps/mac/touch-code/Tests/NotificationsTests/C6AppBootstrapTests.swift` —
+- `apps/mac/codans/Tests/NotificationsTests/C6AppBootstrapTests.swift` —
   updated assertions. One new test: `coordinatorReceivesReaderWiredToSettingsStore`
   — mutates `settingsStore.mutateNotifications { $0.mute.mutedRuleIDs.insert("r") }`,
   asserts `bootstrap.coordinator`'s reader reports the update.
-- `apps/mac/touch-code/Tests/NotificationsTests/NotificationCoordinatorTests.swift` —
+- `apps/mac/codans/Tests/NotificationsTests/NotificationCoordinatorTests.swift` —
   fixtures switch from a fake `NotificationSettingsStore` to a
   hand-rolled `FakeSettingsReader` (class implementing the protocol)
   plus a `MutateRecorder` closure. No coordinator logic under test
   actually changes.
-- `apps/mac/touch-code/Tests/NotificationsTests/InboxClientLiveTests.swift` —
+- `apps/mac/codans/Tests/NotificationsTests/InboxClientLiveTests.swift` —
   wires `InboxClient.live` with a `SettingsStore()` fixture rather
   than `NotificationSettingsStore()`.
-- `apps/mac/touch-code/Tests/NotificationsTests/C6EndToEndTests.swift` —
+- `apps/mac/codans/Tests/NotificationsTests/C6EndToEndTests.swift` —
   end-to-end helper that used to construct `NotificationSettingsStore`
   now constructs `SettingsStore`; no behavioural change expected.
 
@@ -658,7 +658,7 @@ Implementation notes:
   small extension with eight computed properties reading
   `settings.notifications.*`. Reads are `@MainActor` — the protocol
   is declared `@MainActor` so consumers must hop on, matching today.
-- The old `TouchCodeSettings.DecodingIssue.unsupportedVersion` path
+- The old `CodansSettings.DecodingIssue.unsupportedVersion` path
   in `NotificationSettingsStore` is gone — migration moves this
   responsibility to `SettingsMigration.load` (Step 3).
 
@@ -668,9 +668,9 @@ Commit message: `refactor(settings): unify settings.json on v2 with Notification
 
 ```
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -689,19 +689,19 @@ popover still renders (nothing user-facing should have changed yet).
 The step that actually makes the Settings window visible.
 
 Files added:
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift` —
   `@Reducer` with the shape described in design-doc §SettingsWindowFeature.
   Scopes `general` to `EditorFeature` so the General pane can reuse
   the existing reducer. `selectionChanged` and `windowClosed` are the
   only bespoke actions. No child-feature placeholders are wired yet
   (T2/T3/T4 add those).
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsWindowView.swift` —
   root `NavigationSplitView`; sidebar column is `SettingsSidebarView`;
   detail column is the switch over `effectiveSection` (design-doc
   §`SettingsWindowView` detail switch). Minimum frame sizes:
   `minWidth: 750, minHeight: 500` with the sidebar column's
   `navigationSplitViewColumnWidth(min: 220, ideal: 240)`.
-- `apps/mac/touch-code/App/Features/Settings/Sidebar/SettingsSidebarView.swift` —
+- `apps/mac/codans/App/Features/Settings/Sidebar/SettingsSidebarView.swift` —
   renders the six global rows in fixed order, then a `Section("Repositories")`
   containing a sorted `DisclosureGroup` per open Project (pulled from
   `HierarchyManager.catalog` via `@Environment(HierarchyManager.self)`).
@@ -709,33 +709,33 @@ Files added:
   `.repositoryGeneral(projectID)` / `.repositoryHooks(projectID)` on
   selection. Disclosure state is local `@State` keyed by `ProjectID`
   so it survives window close (per M16, draft state is preserved).
-- `apps/mac/touch-code/App/Features/Settings/Panes/SettingsGeneralView.swift` —
+- `apps/mac/codans/App/Features/Settings/Panes/SettingsGeneralView.swift` —
   three sections stacked vertically: Appearance (Picker with D3 caption
   "Preview — themes will ship in a later release."), Default editor
   (picker lifted from `SettingsEditorSection.swift`), Built-in / Custom
   editors lists (lifted from same file, including the `AddCustomEditorSheet`
   subview). The view is driven by `store.scope(state: \.general, action: \.general)`.
-- `apps/mac/touch-code/App/Features/Settings/Panes/AboutSettingsView.swift` —
+- `apps/mac/codans/App/Features/Settings/Panes/AboutSettingsView.swift` —
   reads `Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName")`
   (fallback `CFBundleName`), `CFBundleShortVersionString`,
   `CFBundleVersion`, `NSHumanReadableCopyright`. Missing keys omit
   the corresponding line (no constant fallback, per D2). Website
   placeholder link as inactive `Text`.
-- `apps/mac/touch-code/App/Clients/SettingsWindowPresenter.swift` —
+- `apps/mac/codans/App/Clients/SettingsWindowPresenter.swift` —
   new TCA dependency. `struct SettingsWindowPresenter: Sendable { var open: @MainActor @Sendable () -> Void }`.
   `liveValue` `fatalError`s; actual value injected in Step 5 via
   `.withDependencies { $0.settingsWindowPresenter = .init(open: { openWindow(id: "settings") }) }`
-  at `TouchCodeApp.body` — mirrors the `EditorClient` wiring pattern.
+  at `CodansApp.body` — mirrors the `EditorClient` wiring pattern.
   `Root Feature`'s delegate rerouting in Step 6 relies on this client
   existing.
-- `apps/mac/touch-code/Tests/SettingsWindowFeatureTests.swift` — tests
+- `apps/mac/codans/Tests/SettingsWindowFeatureTests.swift` — tests
   (a) selecting `.notifications` updates `state.selection`;
   (b) `windowClosed` resets `state.selection` to nil; (c) after
   `windowClosed` the effective section is `.general` on re-render
   (view-level test via `ViewStore.publisher`).
 
 Files modified:
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — `body` gains a
+- `apps/mac/codans/App/CodansApp.swift` — `body` gains a
   `Window("Settings", id: "settings") { ... }` scene and
   `CommandGroup(replacing: .appSettings) { Button("Settings…") {
    openWindow(id: "settings") } .keyboardShortcut(",", modifiers: .command) }`
@@ -758,7 +758,7 @@ Commit message: `feat(settings): add Settings window scene, General and About pa
 
 ```
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -785,12 +785,12 @@ Cleanup — the sheet path disappears now that the window covers every
 use case.
 
 Files deleted:
-- `apps/mac/touch-code/App/Features/Settings/SettingsSheetFeature.swift`
-- `apps/mac/touch-code/App/Features/Settings/SettingsSheetView.swift`
-- `apps/mac/touch-code/App/Features/Settings/SettingsEditorSection.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsSheetFeature.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsSheetView.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsEditorSection.swift`
 
 Files modified:
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` —
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` —
   remove `@Presents var settingsSheet`, `case settingsSheetShown`,
   `case settingsSheet(PresentationAction<…>)`, and the corresponding
   reducer branches (`case .settingsSheetShown`, `case .settingsSheet(...)`).
@@ -805,7 +805,7 @@ Files modified:
 
   (the `@Dependency` declaration at the top of the struct).
   Drop the `.ifLet(\.$settingsSheet, action: \.settingsSheet) { SettingsSheetFeature() }` from the body.
-- `apps/mac/touch-code/Tests/RootFeatureTests.swift` — delete any
+- `apps/mac/codans/Tests/RootFeatureTests.swift` — delete any
   `settingsSheet` presentation assertions; add one test
   `showCustomEditorsSettingsOpensSettingsWindow` that overrides
   `settingsWindowPresenter` with a recorder and asserts the `.open()`
@@ -817,7 +817,7 @@ Commit message: `refactor(settings): retire Settings sheet path`.
 
 ```
 make generate
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -849,7 +849,7 @@ this plan is responsible for and record outcomes in this plan's
 8. **Repository General / Hooks** — placeholder visible (T4 scope).
 9. **Persistence & consistency** — manual: change Appearance to Dark,
    change Default editor, close window, quit app, relaunch; both
-   persist. Change `~/.config/touch-code/settings.json` directly
+   persist. Change `~/.config/codans/settings.json` directly
    (mute rule), relaunch; change reflected.
 10. **Upgrade compatibility** — seed a v1 editor-only file + a v1
     notifications-only file + a combined file in three clean home
@@ -870,7 +870,7 @@ Otherwise the plan moves straight to Final.
 ## Concrete Steps
 
 Working directory for all commands: `apps/mac/`
-(repository: `/Users/wanggang/.worktree/repos/touch-code/feat/settings-shell`).
+(repository: `/Users/wanggang/.worktree/repos/codans/feat/settings-shell`).
 
 ### Generate Tuist project
 
@@ -883,7 +883,7 @@ Expected tail: `Project generated at …`, no errors.
 ### Build the app (sanity check)
 
 ```
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug build -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -892,13 +892,13 @@ Expected: `** BUILD SUCCEEDED **`.
 ### Run the full test matrix
 
 ```
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme tcKitTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansKitTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme tcTests \
+xcodebuild -workspace codans.xcworkspace -scheme tcTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -921,15 +921,15 @@ make run-app
 ### Seed a legacy settings file for upgrade QA
 
 ```
-mkdir -p /tmp/tctest-editor/.config/touch-code
-cat > /tmp/tctest-editor/.config/touch-code/settings.json <<'JSON'
+mkdir -p /tmp/tctest-editor/.config/codans
+cat > /tmp/tctest-editor/.config/codans/settings.json <<'JSON'
 {"version":1,"defaultEditorID":"vscode","customEditors":[]}
 JSON
 HOME=/tmp/tctest-editor make run-app
 # Quit the app, then:
-ls /tmp/tctest-editor/.config/touch-code/
+ls /tmp/tctest-editor/.config/codans/
 # Expect: settings.json (v2 on disk), settings.json.v1-<ts>
-jq .version /tmp/tctest-editor/.config/touch-code/settings.json
+jq .version /tmp/tctest-editor/.config/codans/settings.json
 # Expect: 2
 ```
 
@@ -961,7 +961,7 @@ gh pr create --base feature/settings-base --title "feat(settings): window shell 
 
 ## Test plan
 
-- [x] `xcodebuild test` across touch-code / TouchCodeCoreTests / tcKitTests / tcTests
+- [x] `xcodebuild test` across codans / CodansCoreTests / CodansKitTests / tcTests
 - [x] Manual QA walk of spec Acceptance Criteria (T1 slice) — see
       ExecPlan §Outcomes
 - [x] Upgrade QA in three clean `HOME` directories (editor-only /
@@ -1035,7 +1035,7 @@ entirely. The v1 backup is not touched on a second load.
 If the Tuist `buildableFolders` verification in Step 0 lands in the
 wrong state (recursion assumed but actually not working), the symptom
 in Step 1 is a missing-symbol compile error on `Settings` v2. Recovery:
-add the explicit `"TouchCodeCore/Settings"` entry to
+add the explicit `"CodansCore/Settings"` entry to
 `apps/mac/Project.swift`, re-run `make generate`, retry the build.
 That recovery commit should land **before** the Step 1 commit on the
 history, so amend the order by `git rebase -i` only if no subsequent
@@ -1087,14 +1087,14 @@ step, after every local gate has passed.
 
 ### Example backup filename
 
-    ~/.config/touch-code/settings.json.v1-20260421-121503
+    ~/.config/codans/settings.json.v1-20260421-121503
 
 ## Interfaces and Dependencies
 
 The following types and signatures must exist at the end of the plan.
 T2/T3/T4 depend on these verbatim.
 
-In `apps/mac/TouchCodeCore/Settings/Settings.swift`:
+In `apps/mac/CodansCore/Settings/Settings.swift`:
 
     public struct Settings: Equatable, Codable, Sendable {
       public static let currentVersion: Int        // = 2
@@ -1114,7 +1114,7 @@ In the same module, `GeneralSettings`, `NotificationsSettings`,
 `DeveloperSettings`, `RepositorySettings`, and `AppearancePreference`
 as specified in Step 1.
 
-In `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`:
+In `apps/mac/codans/App/Features/Settings/SettingsSection.swift`:
 
     public enum SettingsSection: Hashable, Sendable {
       case general, notifications, developer, shortcuts, updates, about
@@ -1123,7 +1123,7 @@ In `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`:
       public static let globals: [SettingsSection]
     }
 
-In `apps/mac/touch-code/App/Features/Settings/NotificationSettingsReader.swift`:
+In `apps/mac/codans/App/Features/Settings/NotificationSettingsReader.swift`:
 
     @MainActor
     protocol NotificationSettingsReader: AnyObject {
@@ -1137,7 +1137,7 @@ In `apps/mac/touch-code/App/Features/Settings/NotificationSettingsReader.swift`:
       var dockBadgeEnabled: Bool { get }
     }
 
-In `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift`:
+In `apps/mac/codans/App/Features/Settings/SettingsStore.swift`:
 
     @MainActor @Observable
     final class SettingsStore: NotificationSettingsReader {
@@ -1167,7 +1167,7 @@ In `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift`:
       func flush()
     }
 
-In `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`:
+In `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`:
 
     @Reducer
     struct SettingsWindowFeature {
@@ -1182,7 +1182,7 @@ In `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`:
       }
     }
 
-In `apps/mac/touch-code/App/Clients/SettingsWindowPresenter.swift`:
+In `apps/mac/codans/App/Clients/SettingsWindowPresenter.swift`:
 
     struct SettingsWindowPresenter: Sendable, DependencyKey {
       var open: @MainActor @Sendable () -> Void

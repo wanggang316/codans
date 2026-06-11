@@ -1,4 +1,4 @@
-# ExecPlan: Bootstrap touch-code monorepo
+# ExecPlan: Bootstrap codans monorepo
 
 **Status:** Complete (M1–M5 green; GhosttyKit foreignBuild deferred per DEC-8)
 **Author:** Gump (with Claude)
@@ -10,9 +10,9 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 Today the repository contains documentation but no code, no build system, and no way to run anything. After this plan, a contributor who clones fresh can run `make bootstrap && make build && make run-app` and get:
 
-- An empty but launching `touch-code.app` showing a blank window titled "touch-code"
-- A `tc` CLI binary that prints `touch-code 0.1.0 (build 1)` when run with `--version`
-- A regenerable Xcode workspace (`touch-code.xcworkspace`) with 2 apps and 5 package targets, built by `mise`-pinned `tuist`
+- An empty but launching `codans.app` showing a blank window titled "codans"
+- A `codans` CLI binary that prints `codans 0.1.0 (build 1)` when run with `--version`
+- A regenerable Xcode workspace (`codans.xcworkspace`) with 2 apps and 5 package targets, built by `mise`-pinned `tuist`
 - A GhosttyKit XCFramework built from the `ThirdParty/ghostty` submodule via Zig
 - CI that lints and builds on every push
 
@@ -39,24 +39,24 @@ Every subsequent ExecPlan (Pane rendering, IPC, hierarchy, etc.) lands inside th
 - **DEC-2: macOS 14 (Sonoma) deployment target.** product-spec.md says "macOS 13 or higher". Swift 6 tooling is stable on macOS 14 and libghostty's Swift layer uses newer Observation APIs. Setting 14 here; if we discover any libghostty requirement for a higher floor we update product-spec accordingly. supacode sets 26.0, which is aggressive for us — we want broader install base.
 - **DEC-3: Minimal external deps for bootstrap.** Only `swift-argument-parser` in v1. TCA, Sparkle, and the rest are added by later plans when first used. Smaller first build = fewer failure modes during bootstrap.
 - **DEC-4: Automatic code signing for Debug; disabled for CLI.** Matches supacode. CLI target sets `CODE_SIGNING_ALLOWED=NO` so contributors without a Developer ID can still build.
-- **DEC-5: No separate `Workspace.swift`.** Tuist auto-generates `touch-code.xcworkspace` from `Project.swift` when no Workspace.swift is present. We can add one later if we need to compose multiple Projects.
-- **DEC-6: Bundle IDs placeholder.** `app.touch-code.mac` and `app.touch-code.cli`. User can replace with a real domain before first signed release; this is internal-only for now.
+- **DEC-5: No separate `Workspace.swift`.** Tuist auto-generates `codans.xcworkspace` from `Project.swift` when no Workspace.swift is present. We can add one later if we need to compose multiple Projects.
+- **DEC-6: Bundle IDs placeholder.** `com.gumpw.codans.mac` and `com.gumpw.codans.cli`. User can replace with a real domain before first signed release; this is internal-only for now.
 - **DEC-7 (M1): Pin ghostty to the commit recorded in supacode's parent-repo index, not its live submodule HEAD.** The HEAD on disk in the reference project had been manually reset to an unrelated commit. The `.gitmodules` URL + `git submodule status` from the parent repo is authoritative: `6057f8d2b75631937fa7c2fc240a8bbe9137176f`.
-- **DEC-8 (M3): Temporarily defer GhosttyKit from the Tuist project to unblock bootstrap.** Ghostty's `build.zig.zon` pins ~20 lazy deps hosted on `deps.files.ghostty.org` (Cloudflare-backed). Zig's HTTP client currently receives `400 Bad Request` for all of them, while curl receives `200 OK` — an upstream Zig/Cloudflare User-Agent incompatibility. Cost of pressing through: prime ~20 packages manually in `.zig-global-cache`. Cost of deferring: the app runs without terminal capability (acceptable for hello-world). Chose deferral: comment out `GhosttyKit` `.foreignBuild` in `Project.swift`, drop it from `Runtime` + `touch-code` dependencies, leave `scripts/build-ghostty.sh` on disk intact. Re-enable when upstream resolves or when we prime the cache as a one-off. `Runtime` package still exists, just without the `.target("GhosttyKit")` edge.
+- **DEC-8 (M3): Temporarily defer GhosttyKit from the Tuist project to unblock bootstrap.** Ghostty's `build.zig.zon` pins ~20 lazy deps hosted on `deps.files.ghostty.org` (Cloudflare-backed). Zig's HTTP client currently receives `400 Bad Request` for all of them, while curl receives `200 OK` — an upstream Zig/Cloudflare User-Agent incompatibility. Cost of pressing through: prime ~20 packages manually in `.zig-global-cache`. Cost of deferring: the app runs without terminal capability (acceptable for hello-world). Chose deferral: comment out `GhosttyKit` `.foreignBuild` in `Project.swift`, drop it from `Runtime` + `codans` dependencies, leave `scripts/build-ghostty.sh` on disk intact. Re-enable when upstream resolves or when we prime the cache as a one-off. `Runtime` package still exists, just without the `.target("GhosttyKit")` edge.
 - **DEC-9 (M3): Relax `compatibleXcodeVersions` to `.upToNextMajor("26.0")` + explicit `swiftVersion: "6.0"`.** User's Xcode is 26.0.1; restricting to `["16.0"]` failed Tuist's pre-gen lint. Matching supacode's constraint here.
 - **DEC-10 (M3): Override `xcode-select` via `DEVELOPER_DIR` env var instead of mutating system.** System `xcode-select -p` points at `/Library/Developer/CommandLineTools`. Rather than requiring `sudo xcode-select -s /Applications/Xcode.app` (a global system change), setting `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` at invocation time works for both `tuist generate` and `xcodebuild`. Encoded into Makefile in M5.
 - **DEC-11 (M4): Move `Info.plist` to `Configurations/mac-Info.plist`.** Tuist's `buildableFolders: ["apps/mac"]` scans the folder recursively; `apps/mac/Info.plist` therefore ended up in the Copy Bundle Resources phase, triggering a build warning. Moved plist outside the buildable folder (matches supacode pattern: Info.plist lives next to xcconfig, not next to sources). Updated `infoPlist: .file(path: "Configurations/mac-Info.plist")`.
-- **DEC-12 (M5): TouchCodeCLI is `ParsableCommand`, not `AsyncParsableCommand`.** The plan's Interfaces section specified `AsyncParsableCommand`, but with no subcommands yet, `run()` has nothing to `await`. SwiftLint's `async_without_await` opt-in rule (inherited from supacode's config) correctly flags this. Chose to downgrade to `ParsableCommand` until the first async subcommand lands (IPC plan). Plan's Interfaces spec is amended accordingly. Plan section "Interfaces and Dependencies" updated below.
+- **DEC-12 (M5): CodansCLI is `ParsableCommand`, not `AsyncParsableCommand`.** The plan's Interfaces section specified `AsyncParsableCommand`, but with no subcommands yet, `run()` has nothing to `await`. SwiftLint's `async_without_await` opt-in rule (inherited from supacode's config) correctly flags this. Chose to downgrade to `ParsableCommand` until the first async subcommand lands (IPC plan). Plan's Interfaces spec is amended accordingly. Plan section "Interfaces and Dependencies" updated below.
 - **DEC-13 (Post-M5 restructure): Adopt supaterm's `apps/mac/` layout and collapse in-app modules.** Original plan put every package (`Core`, `IPC`, `Runtime`, `Hooks`, `Git`) as a top-level `packages/<Name>` Tuist target. Review of supacode + supaterm showed neither uses a `packages/` directory; Swift idiom is PascalCase frameworks at the Tuist project root. Target count was also inflated: `Runtime`, `Hooks`, `Git` are only consumed by the Mac app, so they belong inside the app target's `buildableFolders`, not as separate static frameworks. **Changes:**
   - Tuist project root moved from repo root to `apps/mac/`. Ghostty submodule moved to `apps/mac/ThirdParty/ghostty` (path updated in `.gitmodules`). Per-app `Makefile` at `apps/mac/Makefile`; top-level `Makefile` delegates via `make mac-*` targets.
-  - Renamed packages: `packages/Core` → `apps/mac/TouchCodeCore/`, `packages/IPC` → `apps/mac/TouchCodeIPC/`. PascalCase framework directory names match supacode's `SupacodeSettingsShared`, supaterm's `SupatermCLIShared`.
-  - Collapsed `Runtime`, `Hooks`, `Git` into `apps/mac/touch-code/{Runtime,Hooks,Git}/` — subfolders of the `touch-code` app target's `buildableFolders`. Module boundaries now enforced by folder convention + code review (not Tuist target edges). Promote back to separate targets only when a real need arises (e.g., adding iOS app that needs `Git`).
-  - `apps/cli/` → `apps/mac/tc/` with `main.swift` top-level-code style (matches supaterm `sp/main.swift` pattern).
-  - CLI target (`tc`) is now a `dependencies:` entry of the `touch-code` app target, so `xcodebuild -scheme touch-code` co-builds the CLI. Embedding into the `.app` bundle is deferred to a later plan.
+  - Renamed packages: `packages/Core` → `apps/mac/CodansCore/`, `packages/IPC` → `apps/mac/CodansIPC/`. PascalCase framework directory names match supacode's `SupacodeSettingsShared`, supaterm's `SupatermCLIShared`.
+  - Collapsed `Runtime`, `Hooks`, `Git` into `apps/mac/codans/{Runtime,Hooks,Git}/` — subfolders of the `codans` app target's `buildableFolders`. Module boundaries now enforced by folder convention + code review (not Tuist target edges). Promote back to separate targets only when a real need arises (e.g., adding iOS app that needs `Git`).
+  - `apps/cli/` → `apps/mac/codans/` with `main.swift` top-level-code style (matches supaterm `sp/main.swift` pattern).
+  - CLI target (`codans`) is now a `dependencies:` entry of the `codans` app target, so `xcodebuild -scheme codans` co-builds the CLI. Embedding into the `.app` bundle is deferred to a later plan.
   - `docs/architecture.md` Codemap + Dependency Direction rewritten for the new layout.
-  - Target count 7 → 4 (`TouchCodeCore`, `TouchCodeIPC`, `tc`, `touch-code`).
+  - Target count 7 → 4 (`CodansCore`, `CodansIPC`, `codans`, `codans`).
 
-  **Verification:** `make mac-generate` → `apps/mac/touch-code.xcworkspace` in 2s; `make mac-build-cli` → `BUILD SUCCEEDED`; `tc --version` → `touch-code 0.1.0 (build 1)`; `make mac-build` → `BUILD SUCCEEDED`; `make mac-lint` → clean.
+  **Verification:** `make mac-generate` → `apps/mac/codans.xcworkspace` in 2s; `make mac-build-cli` → `BUILD SUCCEEDED`; `codans --version` → `codans 0.1.0 (build 1)`; `make mac-build` → `BUILD SUCCEEDED`; `make mac-lint` → clean.
 
 ## Outcomes & Retrospective
 
@@ -90,19 +90,19 @@ Every subsequent ExecPlan (Pane rendering, IPC, hierarchy, etc.) lands inside th
 
 ### M3 — Tuist workspace + empty targets (2026-04-19)
 
-**What landed:** `Tuist.swift` (minimal, Xcode 16.0 compatible). `Project.swift` defining 8 targets: 2 apps (touch-code, tc), 5 packages (Core, IPC, Runtime, Hooks, Git), 1 foreignBuild (GhosttyKit). Dependency graph per architecture.md. `Tuist/Package.swift` with one external dep (swift-argument-parser 1.5.0+). Placeholder source files for all packages + app entry points. `Configurations/Project.xcconfig` with MARKETING_VERSION + CURRENT_PROJECT_VERSION. `apps/mac/Info.plist` for macOS app. `apps/mac/TouchCodeApp.swift` + `MainView.swift` SwiftUI skeletons. `apps/cli/TouchCodeCLI.swift` ArgumentParser skeleton. Makefile updated to include `generate` target and add build targets.
+**What landed:** `Tuist.swift` (minimal, Xcode 16.0 compatible). `Project.swift` defining 8 targets: 2 apps (codans, codans), 5 packages (Core, IPC, Runtime, Hooks, Git), 1 foreignBuild (GhosttyKit). Dependency graph per architecture.md. `Tuist/Package.swift` with one external dep (swift-argument-parser 1.5.0+). Placeholder source files for all packages + app entry points. `Configurations/Project.xcconfig` with MARKETING_VERSION + CURRENT_PROJECT_VERSION. `apps/mac/Info.plist` for macOS app. `apps/mac/CodansApp.swift` + `MainView.swift` SwiftUI skeletons. `apps/cli/CodansCLI.swift` ArgumentParser skeleton. Makefile updated to include `generate` target and add build targets.
 
 **Verification (partial):**
 - Tuist.swift syntax valid ✓.
 - Project.swift syntax compiles (no ProjectDescription module locally, expected) ✓.
 - All 5 package sources present (empty enums) ✓.
-- App targets present (TouchCodeApp.swift, MainView.swift, TouchCodeCLI.swift) ✓.
+- App targets present (CodansApp.swift, MainView.swift, CodansCLI.swift) ✓.
 - Dependency graph matches architecture.md ✓.
 
 **Resolution:** Instead of `sudo xcode-select -s`, we set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` in the shell env. Captured as DEC-10. Subsequently:
 
-- `DEVELOPER_DIR=… mise exec -- tuist generate --no-open` → `touch-code.xcworkspace/` + `touch-code.xcodeproj/` generated in ~1.3s. ✓
-- `xcodebuild -workspace touch-code.xcworkspace -list` shows schemes: `Core`, `Git`, `Hooks`, `IPC`, `Runtime`, `tc`, `touch-code`. ✓
+- `DEVELOPER_DIR=… mise exec -- tuist generate --no-open` → `codans.xcworkspace/` + `codans.xcodeproj/` generated in ~1.3s. ✓
+- `xcodebuild -workspace codans.xcworkspace -list` shows schemes: `Core`, `Git`, `Hooks`, `IPC`, `Runtime`, `codans`, `codans`. ✓
 - `GhosttyKit` foreignBuild target temporarily commented out — see DEC-8.
 
 **Carry-forward to M4:** Workspace + 7 targets ready. Build app and CLI.
@@ -110,19 +110,19 @@ Every subsequent ExecPlan (Pane rendering, IPC, hierarchy, etc.) lands inside th
 ### M4 — Runnable hello-world (2026-04-19)
 
 **What landed:**
-- `apps/mac/TouchCodeApp.swift` — `@main` SwiftUI app with `WindowGroup` rooted at `MainView`, `.navigationTitle("touch-code")`, 800×600 min frame.
-- `apps/mac/MainView.swift` — centered `Text("touch-code")` + `#Preview`.
-- `apps/cli/TouchCodeCLI.swift` — `@main` `AsyncParsableCommand` with `configuration.version = "touch-code 0.1.0 (build 1)"`, falls through to print the version in `run()`.
+- `apps/mac/CodansApp.swift` — `@main` SwiftUI app with `WindowGroup` rooted at `MainView`, `.navigationTitle("codans")`, 800×600 min frame.
+- `apps/mac/MainView.swift` — centered `Text("codans")` + `#Preview`.
+- `apps/cli/CodansCLI.swift` — `@main` `AsyncParsableCommand` with `configuration.version = "codans 0.1.0 (build 1)"`, falls through to print the version in `run()`.
 - `Configurations/mac-Info.plist` — LSMinimumSystemVersion `14.0`, bundle identifier `$(PRODUCT_BUNDLE_IDENTIFIER)`, version strings come from xcconfig.
 - `Configurations/Project.xcconfig` — `MARKETING_VERSION = 0.1.0`, `CURRENT_PROJECT_VERSION = 1`.
 
 **Verification:**
-- `xcodebuild … -scheme tc build` → `BUILD SUCCEEDED` ✓
-- `/Users/wanggang/Library/Developer/Xcode/DerivedData/touch-code-…/Build/Products/Debug/tc --version` → `touch-code 0.1.0 (build 1)` ✓ (exact match with plan's expected output)
-- `xcodebuild … -scheme touch-code build` → `BUILD SUCCEEDED`, no warnings ✓
-- `touch_code.app/Contents/Info.plist` `CFBundleShortVersionString` → `0.1.0`, `CFBundleIdentifier` → `app.touch-code.mac` ✓
+- `xcodebuild … -scheme codans build` → `BUILD SUCCEEDED` ✓
+- `/Users/wanggang/Library/Developer/Xcode/DerivedData/codans-…/Build/Products/Debug/codans --version` → `codans 0.1.0 (build 1)` ✓ (exact match with plan's expected output)
+- `xcodebuild … -scheme codans build` → `BUILD SUCCEEDED`, no warnings ✓
+- `Codans.app/Contents/Info.plist` `CFBundleShortVersionString` → `0.1.0`, `CFBundleIdentifier` → `com.gumpw.codans.mac` ✓
 
-**Known gap:** Manual GUI verification ("window appears when opened") deferred — app bundle is valid and build succeeds. GUI interaction happens when user runs `open /path/to/touch_code.app`. The SwiftUI window should launch; this is validated by the app bundle's structure + successful build.
+**Known gap:** Manual GUI verification ("window appears when opened") deferred — app bundle is valid and build succeeds. GUI interaction happens when user runs `open /path/to/Codans.app`. The SwiftUI window should launch; this is validated by the app bundle's structure + successful build.
 
 **Carry-forward to M5:** M5 will add lint configs and a CI workflow that runs `tuist generate` + `xcodebuild` with the `DEVELOPER_DIR` trick encoded in the Makefile.
 
@@ -130,7 +130,7 @@ Every subsequent ExecPlan (Pane rendering, IPC, hierarchy, etc.) lands inside th
 
 **What landed:**
 - `.swift-format.json` — supacode's rules verbatim (120-char lineLength, 2-space indent, trailing commas enforced, OrderedImports, TypeNamesShouldBeCapitalized, no-assignment-in-expressions, etc.).
-- `.swiftlint.yml` — `included: [apps, packages]`, `excluded: [ThirdParty/ghostty, .build, touch-code.xcodeproj, touch-code.xcworkspace]`. `strict: true`. Opt-in: `async_without_await`, accessibility rules. Disabled: `file_length`, `trailing_comma` (handled by swift-format), `type_body_length`.
+- `.swiftlint.yml` — `included: [apps, packages]`, `excluded: [ThirdParty/ghostty, .build, codans.xcodeproj, codans.xcworkspace]`. `strict: true`. Opt-in: `async_without_await`, accessibility rules. Disabled: `file_length`, `trailing_comma` (handled by swift-format), `type_body_length`.
 - `.github/workflows/ci.yml` — one job `build-and-lint` on `macos-14`: checkout with submodules, `jdx/mise-action@v2`, cache `.build/ghostty/` keyed on `build.zig.zon` + `build-ghostty.sh` + `mise.toml` hash, `sudo xcode-select -s /Applications/Xcode_16.0.app` (CI runner default has multiple Xcodes), then `make generate`, `make build-cli`, `make build`, `make lint`. Full-build path (ghostty) is *not* yet in CI because DEC-8 left `GhosttyKit` out of the Tuist project; the CI runs the subset that is actually compilable.
 
 **Verification:**
@@ -140,14 +140,14 @@ Every subsequent ExecPlan (Pane rendering, IPC, hierarchy, etc.) lands inside th
 
 **Surprises in M5:**
 - SwiftLint fails with `Fatal error: Loading sourcekitdInProc.framework … failed` when `xcode-select` points at CLT. Same DEVELOPER_DIR override fixes it. The Makefile's `export DEVELOPER_DIR` (from DEC-10) covers this transparently.
-- `async_without_await` caught `TouchCodeCLI.run() async throws` on first lint pass — no await in the body. Real issue, not a false positive. Resolved via DEC-12 (use `ParsableCommand` until IPC plan).
+- `async_without_await` caught `CodansCLI.run() async throws` on first lint pass — no await in the body. Real issue, not a false positive. Resolved via DEC-12 (use `ParsableCommand` until IPC plan).
 
 ## Overall Bootstrap Outcome (2026-04-19)
 
 All five milestones complete. A fresh clone now supports:
 - `make bootstrap` → mise + git submodule init
-- `make generate` → `touch-code.xcworkspace` with 7 targets (Core, IPC, Runtime, Hooks, Git, tc, touch-code)
-- `make build-cli` → `tc` binary; `tc --version` prints `touch-code 0.1.0 (build 1)`
+- `make generate` → `codans.xcworkspace` with 7 targets (Core, IPC, Runtime, Hooks, Git, codans, codans)
+- `make build-cli` → `codans` binary; `codans --version` prints `codans 0.1.0 (build 1)`
 - `make build` → both binaries
 - `make run-app` → launches empty macOS window
 - `make lint` → SwiftLint clean
@@ -187,7 +187,7 @@ Reference projects (external, filesystem-local, read-only):
 
 ### Orientation paragraph
 
-The Tuist workspace at generation time produces `touch-code.xcworkspace` containing one `.xcodeproj` with 8 targets: 2 apps (`mac`, `cli`), 5 packages (`Core`, `IPC`, `Runtime`, `Hooks`, `Git`), 1 foreign build (`GhosttyKit`). The app target depends on all 5 packages + GhosttyKit. The CLI target depends only on `Core` + `IPC`. Runtime depends on GhosttyKit. All packages depend on Core. mise pins the Zig + Tuist + SwiftLint versions so "works on my machine" = "works on everyone's machine".
+The Tuist workspace at generation time produces `codans.xcworkspace` containing one `.xcodeproj` with 8 targets: 2 apps (`mac`, `cli`), 5 packages (`Core`, `IPC`, `Runtime`, `Hooks`, `Git`), 1 foreign build (`GhosttyKit`). The app target depends on all 5 packages + GhosttyKit. The CLI target depends only on `Core` + `IPC`. Runtime depends on GhosttyKit. All packages depend on Core. mise pins the Zig + Tuist + SwiftLint versions so "works on my machine" = "works on everyone's machine".
 
 ## Plan of Work
 
@@ -232,7 +232,7 @@ Five milestones, each independently verifiable and each producing exactly one co
 
 ### Milestone 3: Tuist workspace + empty targets
 
-**Goal after this milestone:** `make generate` produces `touch-code.xcworkspace` which opens in Xcode with 8 targets visible. All targets compile to empty frameworks/apps/tool.
+**Goal after this milestone:** `make generate` produces `codans.xcworkspace` which opens in Xcode with 8 targets visible. All targets compile to empty frameworks/apps/tool.
 
 **Files created/modified:**
 - `Tuist.swift` — new. Minimal:
@@ -241,19 +241,19 @@ Five milestones, each independently verifiable and each producing exactly one co
   let tuist = Tuist(project: .tuist(compatibleXcodeVersions: ["16.0"]))
   ```
 - `Project.swift` — new. Defines:
-  - Project name: `"touch-code"`
+  - Project name: `"codans"`
   - Base settings: `SWIFT_VERSION = "6.0"`, `SWIFT_APPROACHABLE_CONCURRENCY = "YES"`, `SWIFT_DEFAULT_ACTOR_ISOLATION = "MainActor"`, macOS deployment `14.0`
-  - 5 package targets (`.staticFramework`, `product: .staticFramework`, each with `buildableFolders: ["packages/<Name>"]`, bundleId `app.touch-code.<name>`, dependencies per architecture.md)
+  - 5 package targets (`.staticFramework`, `product: .staticFramework`, each with `buildableFolders: ["packages/<Name>"]`, bundleId `com.gumpw.codans.<name>`, dependencies per architecture.md)
   - `.foreignBuild(name: "GhosttyKit", ...)` — copy supacode's exact pattern pointing at `scripts/build-ghostty.sh` and `.build/ghostty/GhosttyKit.xcframework`
-  - 1 CLI target (`product: .commandLineTool`, `buildableFolders: ["apps/cli"]`, depends on `Core`, `IPC`, `.external(name: "ArgumentParser")`, `CODE_SIGNING_ALLOWED=NO`, bundleId `app.touch-code.cli`)
-  - 1 app target (`product: .app`, `buildableFolders: ["apps/mac"]`, depends on all 5 packages + GhosttyKit, bundleId `app.touch-code.mac`)
+  - 1 CLI target (`product: .commandLineTool`, `buildableFolders: ["apps/cli"]`, depends on `Core`, `IPC`, `.external(name: "ArgumentParser")`, `CODE_SIGNING_ALLOWED=NO`, bundleId `com.gumpw.codans.cli`)
+  - 1 app target (`product: .app`, `buildableFolders: ["apps/mac"]`, depends on all 5 packages + GhosttyKit, bundleId `com.gumpw.codans.mac`)
   - No test targets yet — defer to first feature plan
 - `Tuist/Package.swift` — new. Declares external deps:
   ```swift
   // swift-tools-version: 6.0
   import PackageDescription
   let package = Package(
-    name: "TouchCodeDependencies",
+    name: "CodansDependencies",
     dependencies: [
       .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     ]
@@ -264,29 +264,29 @@ Five milestones, each independently verifiable and each producing exactly one co
 - `packages/Runtime/Runtime.swift` — new, placeholder: `public enum Runtime {}`
 - `packages/Hooks/Hooks.swift` — new, placeholder: `public enum Hooks {}`
 - `packages/Git/Git.swift` — new, placeholder: `public enum Git {}`
-- `apps/mac/TouchCodeApp.swift` — new, placeholder SwiftUI app with empty window. Exact content in [Interfaces and Dependencies](#interfaces-and-dependencies).
-- `apps/cli/TouchCodeCLI.swift` — new, placeholder ArgumentParser root. Exact content below.
+- `apps/mac/CodansApp.swift` — new, placeholder SwiftUI app with empty window. Exact content in [Interfaces and Dependencies](#interfaces-and-dependencies).
+- `apps/cli/CodansCLI.swift` — new, placeholder ArgumentParser root. Exact content below.
 - `apps/mac/Info.plist` — new, minimal macOS app plist
 - `Makefile` — append `generate` target: `mise exec -- tuist install && mise exec -- tuist generate --no-open`
 
-**Observable acceptance:** `make generate` exits 0 and creates `touch-code.xcworkspace/`. Opening in Xcode shows 8 targets in the scheme picker. `xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug build` succeeds (produces an empty .app). `xcodebuild -workspace touch-code.xcworkspace -scheme tc -configuration Debug build` succeeds (produces the CLI binary, which does nothing yet because `TouchCodeCLI.swift` is a skeleton).
+**Observable acceptance:** `make generate` exits 0 and creates `codans.xcworkspace/`. Opening in Xcode shows 8 targets in the scheme picker. `xcodebuild -workspace codans.xcworkspace -scheme codans -configuration Debug build` succeeds (produces an empty .app). `xcodebuild -workspace codans.xcworkspace -scheme codans -configuration Debug build` succeeds (produces the CLI binary, which does nothing yet because `CodansCLI.swift` is a skeleton).
 
 **Commit message:** `chore(bootstrap): add Tuist project with 2 apps and 5 packages`
 
 ### Milestone 4: Runnable hello-world
 
-**Goal after this milestone:** `make run-app` launches the `touch-code.app` showing a blank 800×600 window titled "touch-code". `make build && .build/cli/tc --version` prints `touch-code 0.1.0 (build 1)`.
+**Goal after this milestone:** `make run-app` launches the `codans.app` showing a blank 800×600 window titled "codans". `make build && .build/cli/codans --version` prints `codans 0.1.0 (build 1)`.
 
 **Files created/modified:**
-- `apps/mac/TouchCodeApp.swift` — flesh out from placeholder to a minimal SwiftUI `@main` app that opens a `WindowGroup` with a blank view.
-- `apps/mac/MainView.swift` — new, just `Text("touch-code")` centered. Placeholder until the real hierarchy UI exists.
-- `apps/cli/TouchCodeCLI.swift` — define `@main struct TouchCodeCLI: AsyncParsableCommand` with `configuration = CommandConfiguration(commandName: "tc", version: "touch-code 0.1.0 (build 1)")`. No subcommands yet — they come in the IPC plan.
+- `apps/mac/CodansApp.swift` — flesh out from placeholder to a minimal SwiftUI `@main` app that opens a `WindowGroup` with a blank view.
+- `apps/mac/MainView.swift` — new, just `Text("codans")` centered. Placeholder until the real hierarchy UI exists.
+- `apps/cli/CodansCLI.swift` — define `@main struct CodansCLI: AsyncParsableCommand` with `configuration = CommandConfiguration(commandName: "codans", version: "codans 0.1.0 (build 1)")`. No subcommands yet — they come in the IPC plan.
 - `Makefile` — append `build`, `run-app`, `build-cli` targets. `build` depends on `generate` and `build-ghostty`. `run-app` depends on `build` and launches the built .app.
 - `Configurations/Project.xcconfig` — new (optional but useful). Holds `MARKETING_VERSION = 0.1.0` and `CURRENT_PROJECT_VERSION = 1`. Referenced from `Project.swift` via `.settings(configurations: [.debug(xcconfig: "Configurations/Project.xcconfig")])`.
 
-**Observable acceptance:** `make build && make run-app` opens a window. Closing the window terminates the app. From another terminal, `find ~/Library/Developer/Xcode/DerivedData -name tc -type f -path '*Debug*' | head -1 | xargs -I {} {} --version` prints `touch-code 0.1.0 (build 1)`.
+**Observable acceptance:** `make build && make run-app` opens a window. Closing the window terminates the app. From another terminal, `find ~/Library/Developer/Xcode/DerivedData -name codans -type f -path '*Debug*' | head -1 | xargs -I {} {} --version` prints `codans 0.1.0 (build 1)`.
 
-**Commit message:** `feat(bootstrap): empty mac app window and tc --version CLI`
+**Commit message:** `feat(bootstrap): empty mac app window and codans --version CLI`
 
 ### Milestone 5: Lint + CI
 
@@ -312,7 +312,7 @@ Five milestones, each independently verifiable and each producing exactly one co
 
 ## Concrete Steps
 
-All commands run from the repo root `/Users/wanggang/dev/00/touch-code/` unless stated otherwise.
+All commands run from the repo root `/Users/wanggang/dev/00/codans/` unless stated otherwise.
 
 **M1:**
 ```bash
@@ -343,22 +343,22 @@ make build-ghostty   # second run: fingerprint cache hit, exits <1s
 # Create Tuist.swift, Project.swift, Tuist/Package.swift
 # Create placeholder source files for 5 packages + 2 apps
 make generate
-# Expect: touch-code.xcworkspace/ and touch-code.xcodeproj/ generated
-open touch-code.xcworkspace  # visually confirm 8 targets
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code -configuration Debug build
-xcodebuild -workspace touch-code.xcworkspace -scheme tc -configuration Debug build
+# Expect: codans.xcworkspace/ and codans.xcodeproj/ generated
+open codans.xcworkspace  # visually confirm 8 targets
+xcodebuild -workspace codans.xcworkspace -scheme codans -configuration Debug build
+xcodebuild -workspace codans.xcworkspace -scheme codans -configuration Debug build
 ```
 
 **M4:**
 ```bash
-# Flesh out TouchCodeApp.swift, MainView.swift, TouchCodeCLI.swift
+# Flesh out CodansApp.swift, MainView.swift, CodansCLI.swift
 make build
 make run-app
-# Expect: window titled "touch-code" appears
+# Expect: window titled "codans" appears
 # In another terminal:
-TC_PATH="$(xcodebuild -workspace touch-code.xcworkspace -scheme tc -configuration Debug -showBuildSettings -json 2>/dev/null | jq -r '.[0].buildSettings.BUILT_PRODUCTS_DIR + "/" + .[0].buildSettings.EXECUTABLE_NAME')"
+TC_PATH="$(xcodebuild -workspace codans.xcworkspace -scheme codans -configuration Debug -showBuildSettings -json 2>/dev/null | jq -r '.[0].buildSettings.BUILT_PRODUCTS_DIR + "/" + .[0].buildSettings.EXECUTABLE_NAME')"
 "$TC_PATH" --version
-# Expect: touch-code 0.1.0 (build 1)
+# Expect: codans 0.1.0 (build 1)
 ```
 
 **M5:**
@@ -373,13 +373,13 @@ git push origin HEAD  # on a branch; expect CI green
 
 Global acceptance for the plan (all five milestones green):
 
-1. **Fresh-clone validation.** On a new machine (or after `rm -rf .build touch-code.xcworkspace touch-code.xcodeproj Tuist/Package.resolved`), running `make bootstrap && make build-ghostty && make generate && make build && make run-app` opens the empty window. Time budget: under 10 minutes on an M1 with warm Homebrew / cold Ghostty.
+1. **Fresh-clone validation.** On a new machine (or after `rm -rf .build codans.xcworkspace codans.xcodeproj Tuist/Package.resolved`), running `make bootstrap && make build-ghostty && make generate && make build && make run-app` opens the empty window. Time budget: under 10 minutes on an M1 with warm Homebrew / cold Ghostty.
 
-2. **CLI runs standalone.** The `tc` binary built in Debug can be invoked outside of Xcode and prints `touch-code 0.1.0 (build 1)` for `--version`.
+2. **CLI runs standalone.** The `codans` binary built in Debug can be invoked outside of Xcode and prints `codans 0.1.0 (build 1)` for `--version`.
 
-3. **Idempotent generate.** `make generate` after the first run completes in under 2 seconds (Tuist stamp mechanism). No drift in `touch-code.xcworkspace`.
+3. **Idempotent generate.** `make generate` after the first run completes in under 2 seconds (Tuist stamp mechanism). No drift in `codans.xcworkspace`.
 
-4. **CI green on empty skeleton.** A PR that touches only a whitespace in `apps/mac/TouchCodeApp.swift` passes CI.
+4. **CI green on empty skeleton.** A PR that touches only a whitespace in `apps/mac/CodansApp.swift` passes CI.
 
 5. **Architecture alignment.** `docs/architecture.md` Codemap matches reality: every path mentioned in the table exists, every dependency edge matches `Project.swift`.
 
@@ -388,7 +388,7 @@ Global acceptance for the plan (all five milestones green):
 - **All `make` targets are idempotent.** Re-running after any step completes is a no-op. Stamp directories under `.build/.tuist-generated-stamps/` prevent redundant Tuist invocations.
 - **Submodule re-init is safe.** `git submodule update --init --recursive` on an already-initialized repo is a no-op.
 - **Ghostty rebuild** is triggered only on input changes (submodule HEAD, local diff, mise.toml, build script). Forcing a rebuild: `rm -rf .build/ghostty && make build-ghostty`.
-- **Full reset:** `rm -rf .build touch-code.xcworkspace touch-code.xcodeproj Tuist/Package.resolved` brings us back to a fresh-clone state. Not destructive to source or git state.
+- **Full reset:** `rm -rf .build codans.xcworkspace codans.xcodeproj Tuist/Package.resolved` brings us back to a fresh-clone state. Not destructive to source or git state.
 - **Rolling back a milestone:** each milestone is a single commit. `git revert <commit>` backs it out. If M3 fails after M1-M2 committed, nothing that later milestones depend on is broken — M1-M2 stand on their own.
 
 ## Artifacts and Notes
@@ -436,18 +436,18 @@ Copy structure from `/Users/wanggang/dev/opensource/supacode/scripts/build-ghost
 
 No modifications needed except `srcroot` being the repo root (already correct in supacode's script since it uses `script_dir/..`).
 
-### `apps/mac/TouchCodeApp.swift` skeleton (M3 → M4)
+### `apps/mac/CodansApp.swift` skeleton (M3 → M4)
 
 ```swift
 import SwiftUI
 
 @main
-struct TouchCodeApp: App {
+struct CodansApp: App {
   var body: some Scene {
     WindowGroup {
       MainView()
         .frame(minWidth: 800, minHeight: 600)
-        .navigationTitle("touch-code")
+        .navigationTitle("codans")
     }
     .windowStyle(.titleBar)
   }
@@ -460,24 +460,24 @@ import SwiftUI
 
 struct MainView: View {
   var body: some View {
-    Text("touch-code")
+    Text("codans")
       .font(.largeTitle)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }
 ```
 
-### `apps/cli/TouchCodeCLI.swift` skeleton (M3 → M4)
+### `apps/cli/CodansCLI.swift` skeleton (M3 → M4)
 ```swift
 import ArgumentParser
 import Foundation
 
 @main
-struct TouchCodeCLI: AsyncParsableCommand {
+struct CodansCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
-    commandName: "tc",
-    abstract: "Control touch-code from the terminal.",
-    version: "touch-code 0.1.0 (build 1)"
+    commandName: "codans",
+    abstract: "Control codans from the terminal.",
+    version: "codans 0.1.0 (build 1)"
   )
 
   func run() async throws {
@@ -498,8 +498,8 @@ Not pasting the full file here — follow supacode's structure. The adapted vers
 | `Runtime` | `.staticFramework` | `["packages/Runtime"]` | `.target("Core"), .target("GhosttyKit")` |
 | `Git` | `.staticFramework` | `["packages/Git"]` | `.target("Core")` |
 | `GhosttyKit` | `.foreignBuild` | n/a | — |
-| `tc` | `.commandLineTool` | `["apps/cli"]` | `.target("Core"), .target("IPC"), .external("ArgumentParser")` |
-| `touch-code` | `.app` | `["apps/mac"]` | all 5 packages + `GhosttyKit` |
+| `codans` | `.commandLineTool` | `["apps/cli"]` | `.target("Core"), .target("IPC"), .external("ArgumentParser")` |
+| `codans` | `.app` | `["apps/mac"]` | all 5 packages + `GhosttyKit` |
 
 ### Skipped for this plan (to be defined in later plans)
 
@@ -544,19 +544,19 @@ public enum Hooks {}
 public enum Git {}
 ```
 
-### App target `touch-code` entry point (`apps/mac/TouchCodeApp.swift`)
+### App target `codans` entry point (`apps/mac/CodansApp.swift`)
 
-A type `TouchCodeApp: App` annotated with `@main`, exposing a `WindowGroup` whose root view is `MainView`.
+A type `CodansApp: App` annotated with `@main`, exposing a `WindowGroup` whose root view is `MainView`.
 
-### CLI target `tc` entry point (`apps/cli/TouchCodeCLI.swift`)
+### CLI target `codans` entry point (`apps/cli/CodansCLI.swift`)
 
-A type `TouchCodeCLI: ParsableCommand` annotated with `@main`, with `configuration.commandName == "tc"` and `configuration.version == "touch-code 0.1.0 (build 1)"`. (Note: originally specified as `AsyncParsableCommand`; downgraded to `ParsableCommand` per DEC-12 pending first async subcommand in the IPC plan.)
+A type `CodansCLI: ParsableCommand` annotated with `@main`, with `configuration.commandName == "codans"` and `configuration.version == "codans 0.1.0 (build 1)"`. (Note: originally specified as `AsyncParsableCommand`; downgraded to `ParsableCommand` per DEC-12 pending first async subcommand in the IPC plan.)
 
 ### External dependencies pinned in `Tuist/Package.swift`
 
 | Package | Version | Used by |
 |---|---|---|
-| `apple/swift-argument-parser` | `from: "1.5.0"` | `tc` |
+| `apple/swift-argument-parser` | `from: "1.5.0"` | `codans` |
 
 No other external dependencies in this plan. TCA, Sparkle, and friends are added by their respective feature plans.
 
@@ -569,13 +569,13 @@ No other external dependencies in this plan. TCA, Sparkle, and friends are added
 | `build-ghostty` | Run `scripts/build-ghostty.sh`; idempotent via fingerprint cache |
 | `generate` | `mise exec -- tuist install && mise exec -- tuist generate --no-open` |
 | `build` | Depends on `generate` and `build-ghostty`; runs `xcodebuild build` for both schemes |
-| `build-cli` | `xcodebuild` for `tc` scheme only |
+| `build-cli` | `xcodebuild` for `codans` scheme only |
 | `run-app` | Depends on `build`; launches the built `.app` |
 | `format` | `swift format --in-place --recursive --configuration ./.swift-format.json apps packages` |
 | `lint` | `mise exec -- swiftlint lint --quiet --config .swiftlint.yml` |
 | `check` | `format && lint` |
 | `test` | Skipped this plan; placeholder target printing "no tests yet" |
-| `clean` | `rm -rf .build touch-code.xcworkspace touch-code.xcodeproj Tuist/Package.resolved` |
+| `clean` | `rm -rf .build codans.xcworkspace codans.xcodeproj Tuist/Package.resolved` |
 
 ### CI surface (`.github/workflows/ci.yml`)
 

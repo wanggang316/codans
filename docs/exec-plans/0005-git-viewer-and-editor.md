@@ -8,26 +8,26 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this plan lands, a contributor who `make mac-build && make mac-run-app` can inspect their Git state and hand off to their editor without leaving touch-code:
+After this plan lands, a contributor who `make mac-build && make mac-run-app` can inspect their Git state and hand off to their editor without leaving codans:
 
 - Selecting any Git-backed Worktree in the sidebar surfaces a **read-only** viewer showing working-tree diff, staged diff, the last 100 commits, and the diff of any commit the user clicks. Keyboard navigation (`j`/`k`/`Tab`/`Enter`) works throughout. A 1 000-line diff renders in under 200 ms from the moment `git` returns; a 50 000-line diff is replaced by a placeholder with a one-click "Copy command" that produces `cd '<abs-path>' && git …` on the clipboard.
-- A dropdown on the Worktree header ("Open in ▾") and a `tc open [--in <editor>] [<worktree>]` CLI both open the current Worktree **directory** in the user's default editor (VSCode / Cursor / Zed / Xcode / Sublime / Finder, or any user-defined template). The default is resolvable globally and per-Project; Settings exposes the registry with an installed/missing marker for each editor. Errors (editor CLI not on `PATH`, non-zero exit, 5-second timeout, unresolved Worktree in `tc open`) surface as toasts or CLI stderr — no silent fallthrough.
+- A dropdown on the Worktree header ("Open in ▾") and a `codans open [--in <editor>] [<worktree>]` CLI both open the current Worktree **directory** in the user's default editor (VSCode / Cursor / Zed / Xcode / Sublime / Finder, or any user-defined template). The default is resolvable globally and per-Project; Settings exposes the registry with an installed/missing marker for each editor. Errors (editor CLI not on `PATH`, non-zero exit, 5-second timeout, unresolved Worktree in `codans open`) surface as toasts or CLI stderr — no silent fallthrough.
 - Both features are wired to C2's `HierarchyManager` as pure consumers — they read `Worktree.path` and `Project.defaultEditor`, and they mutate nothing about the hierarchy. A crash, timeout, or malformed `git` output in one never affects the other.
 
-This is the first plan that gives touch-code real workflow value beyond "a terminal orchestrator": a user can inspect changes and hop to their editor in-app, which closes the loop with a CLI coding-agent session.
+This is the first plan that gives codans real workflow value beyond "a terminal orchestrator": a user can inspect changes and hop to their editor in-app, which closes the loop with a CLI coding-agent session.
 
 ## Progress
 
-- [x] M1  — Pure data models in `TouchCodeCore` + `TouchCodeIPC` (Git + Editor value types; Codable round-trip tests; template/ID validators; placeholder error) — 2026-04-20
-- [x] M2  — `touch-code/Git/` service layer (`GitService` protocol, `LiveGitService` with `Process`, `DiffParser`, `GitOutputParser`, env stripping, output caps, timeout, error surface) — 2026-04-20
+- [x] M1  — Pure data models in `CodansCore` + `CodansIPC` (Git + Editor value types; Codable round-trip tests; template/ID validators; placeholder error) — 2026-04-20
+- [x] M2  — `codans/Git/` service layer (`GitService` protocol, `LiveGitService` with `Process`, `DiffParser`, `GitOutputParser`, env stripping, output caps, timeout, error surface) — 2026-04-20
 - [x] M3  — `GitViewerFeature` TCA reducer + `GitServiceClient` DependencyKey + `EditorServiceFacade` placeholder + `TestStore`-driven reducer tests (no UI yet) — 2026-04-20
 - [x] M4a — SwiftUI viewer shell (`GitViewerView`, `CommitLogView`, `FileChangeListView`, `UnifiedDiffView`, keyboard bindings, viewer-region wiring) — 2026-04-20
 - [x] M4b — Snapshot harness (`swift-snapshot-testing`) + 50k-line cap `LargeDiffPlaceholderView` + POSIX-quoted Copy-command helper + filter state/view/`/` keybinding — 2026-04-20 (snapshot reference PNGs deferred to M4b.1 follow-up per DEC-20)
-- [x] M5  — `touch-code/App/Clients/Editor/` service layer (`EditorService`, `EditorRegistry`, `PathProber`, `ProcessSpawner`, env whitelist, 5 s spawn contract) — 2026-04-20 (landed out of order; M3/M4 still block on 0002 M5 TCA bring-up)
+- [x] M5  — `codans/App/Clients/Editor/` service layer (`EditorService`, `EditorRegistry`, `PathProber`, `ProcessSpawner`, env whitelist, 5 s spawn contract) — 2026-04-20 (landed out of order; M3/M4 still block on 0002 M5 TCA bring-up)
 - [x] M6  — `EditorFeature` TCA + Settings editor section + per-Project override + Worktree header `Open in ▾` button + `SettingsStore` wiring; deletes M3's `EditorServiceFacade` placeholder — 2026-04-20 (landed as M6a + M6b)
-- [x] M7a — `editor.*` IPC wire types (`EditorOpenRequest`, `EditorOpenResponse`, `EditorDescribeResponse`, `EditorSetDefaultRequest`/`Response`) + `EditorIPCError` wire-safe codes in `TouchCodeIPC/Editor/`; the `tc open` CLI + `IPCClient` helper were landed by plan 0003 on `origin/worktree-design+c3-c4-hooks-cli` (see DEC-21) — 2026-04-20
-- [x] M7b — `EditorHandlers` class under `touch-code/App/Features/Socket/` routes `editor.describe` / `editor.open` / `editor.setDefault` through `EditorClient` + `HierarchyClient`, maps `EditorError` → `EditorIPCError` at the handler boundary, and resolves Worktree via explicit `worktreeID` or `paneID` traversal of the catalog snapshot. 12-test `EditorHandlersTests` covers descriptor mapping, worktree resolution (both paths + all fail modes), error taxonomy, and per-Project setDefault writes. `MethodRouter` registration + `InMemoryIPCServer` end-to-end integration test deferred to post-0003-merge reconciliation (DEC-21) — 2026-04-20
-- [x] M8  — Reducer-dispatch performance baseline (`GitViewerReducerPerformanceTests` measures `.diffSucceeded` dispatch against a 20 ms P95 design budget; parse baseline from M8 groundwork stays authoritative at P95 ≈ 10 ms). `architecture.md` codemap extended with `touch-code/App/Clients/Editor/`, `touch-code/App/Features/GitViewer/`, `touch-code/App/Features/WorktreeHeader/`, `touch-code/App/Features/Socket/`. Product-spec OQ7 closed; C7 and C8 promoted to `Shipped / Beta`. IPC end-to-end test (`TcOpenE2ETests`) deferred to the 0003 merge per DEC-21 — `EditorHandlers` is unit-tested in isolation today. — 2026-04-20
+- [x] M7a — `editor.*` IPC wire types (`EditorOpenRequest`, `EditorOpenResponse`, `EditorDescribeResponse`, `EditorSetDefaultRequest`/`Response`) + `EditorIPCError` wire-safe codes in `CodansIPC/Editor/`; the `codans open` CLI + `IPCClient` helper were landed by plan 0003 on `origin/worktree-design+c3-c4-hooks-cli` (see DEC-21) — 2026-04-20
+- [x] M7b — `EditorHandlers` class under `codans/App/Features/Socket/` routes `editor.describe` / `editor.open` / `editor.setDefault` through `EditorClient` + `HierarchyClient`, maps `EditorError` → `EditorIPCError` at the handler boundary, and resolves Worktree via explicit `worktreeID` or `paneID` traversal of the catalog snapshot. 12-test `EditorHandlersTests` covers descriptor mapping, worktree resolution (both paths + all fail modes), error taxonomy, and per-Project setDefault writes. `MethodRouter` registration + `InMemoryIPCServer` end-to-end integration test deferred to post-0003-merge reconciliation (DEC-21) — 2026-04-20
+- [x] M8  — Reducer-dispatch performance baseline (`GitViewerReducerPerformanceTests` measures `.diffSucceeded` dispatch against a 20 ms P95 design budget; parse baseline from M8 groundwork stays authoritative at P95 ≈ 10 ms). `architecture.md` codemap extended with `codans/App/Clients/Editor/`, `codans/App/Features/GitViewer/`, `codans/App/Features/WorktreeHeader/`, `codans/App/Features/Socket/`. Product-spec OQ7 closed; C7 and C8 promoted to `Shipped / Beta`. IPC end-to-end test (`TcOpenE2ETests`) deferred to the 0003 merge per DEC-21 — `EditorHandlers` is unit-tested in isolation today. — 2026-04-20
 
 Each unchecked entry will be updated with a completion timestamp in the form `— 2026-MM-DD` when the milestone lands (matching the convention established in `0002`).
 
@@ -43,40 +43,40 @@ Each unchecked entry will be updated with a completion timestamp in the form `�
 
 ## Decision Log
 
-- **DEC-1 (pre-M1, 2026-04-20): M3 facade throws `EditorPlaceholderError.notYetImplemented` rather than `fatalError` or a no-op.** Three options were considered. (a) Throw a dedicated `EditorPlaceholderError.notYetImplemented` added to `TouchCodeCore/Editor/` in M1 — **chosen**. Pro: the UI path is complete (error → toast) from M3 onward; no crash if an early build of M3 ships before M5. Con: adds one enum case that becomes unused after M5. (b) Return a synthetic `EditorChoiceDTO` as if success — rejected: the user would see "success" but no editor would open, which is a worse lie than a surfaced error. (c) `fatalError` in `liveValue` — rejected: violates the project's no-crash-in-UI-paths discipline and forces callers to guard against a placeholder in a way that would leak into the real code.
+- **DEC-1 (pre-M1, 2026-04-20): M3 facade throws `EditorPlaceholderError.notYetImplemented` rather than `fatalError` or a no-op.** Three options were considered. (a) Throw a dedicated `EditorPlaceholderError.notYetImplemented` added to `CodansCore/Editor/` in M1 — **chosen**. Pro: the UI path is complete (error → toast) from M3 onward; no crash if an early build of M3 ships before M5. Con: adds one enum case that becomes unused after M5. (b) Return a synthetic `EditorChoiceDTO` as if success — rejected: the user would see "success" but no editor would open, which is a worse lie than a surfaced error. (c) `fatalError` in `liveValue` — rejected: violates the project's no-crash-in-UI-paths discipline and forces callers to guard against a placeholder in a way that would leak into the real code.
 - **DEC-2 (pre-M4, 2026-04-20): Snapshot harness is `pointfreeco/swift-snapshot-testing`, pinned in `apps/mac/Tuist/Package.swift`.** Rejected alternatives: Apple's newer Swift Testing snapshot helpers (not yet broadly adopted in our reference projects; churn risk on macOS 15 image APIs) and hand-rolled `XCTAssertEqual(view.snapshot, fixture)` (reinvents the harness). Point-Free's library matches the TCA stack we already pulled in via `swift-composable-architecture`, runs under XCTest, and supports both `ViewImageConfig` and `PreviewLayout` — enough for M4b. The dep is added once in M4b; no M3/M5 dependency.
-- **DEC-3 (pre-M7, 2026-04-20): M7 is split into M7a (IPC wire types + `tc open` parser + `IPCClient` helper) and M7b (`SocketServer` dispatch of `editor.*`).** M7a has zero socket-server dependency and is fully unit-testable via a fake `IPCClient`. M7b requires a `SocketServer` implementation; the plan of record is that `SocketServer` lands in the in-flight C3+C4 exec plan (to be numbered `0003-hooks-and-cli.md`) currently being drafted in a sibling worktree. If `0003`'s SocketServer has not landed by the time M7b is ready, M7b itself lands a narrow editor-only dispatcher under `apps/mac/touch-code/App/Features/Socket/` and records the fallback in this Decision Log so the C3+C4 plan knows to generalise rather than reimplement. No reverse dependency: C3+C4 does not need anything from this plan.
-- **DEC-4 (pre-M1, 2026-04-20): Multiple commits per milestone, not one-per-milestone.** This plan follows the existing `0002` convention and the user's per-small-feature commit cadence (see [feedback memory](../../.claude/projects/-Users-wanggang-dev-00-touch-code/memory/feedback_commit_cadence.md)). Each "Expected commits" line corresponds to one independently-buildable, test-passing chunk. The /commit skill invocation cadence remains "after each small feature change", not "after each milestone". Review-round feedback suggesting 1-commit/milestone was declined on this basis.
-- **DEC-5 (M1, 2026-04-20): One `TouchCodeIPC` DTO round-trip test hosted in `TouchCodeCoreTests`, not a new `TouchCodeIPCTests` target.** The plan specified a single test (both variants of `EditorInstallationStatusDTO`). Standing up a dedicated Tuist test target for one file would cost more than it protects. Added `TouchCodeIPC` as a dependency of `TouchCodeCoreTests`; the new `EditorIPCTypesTests.swift` sits beside the existing Codable tests. A future ExecPlan that adds substantial IPC coverage (e.g. 0003 for C3+C4) should promote the tests to their own target; at that point update this Decision Log accordingly.
+- **DEC-3 (pre-M7, 2026-04-20): M7 is split into M7a (IPC wire types + `codans open` parser + `IPCClient` helper) and M7b (`SocketServer` dispatch of `editor.*`).** M7a has zero socket-server dependency and is fully unit-testable via a fake `IPCClient`. M7b requires a `SocketServer` implementation; the plan of record is that `SocketServer` lands in the in-flight C3+C4 exec plan (to be numbered `0003-hooks-and-cli.md`) currently being drafted in a sibling worktree. If `0003`'s SocketServer has not landed by the time M7b is ready, M7b itself lands a narrow editor-only dispatcher under `apps/mac/codans/App/Features/Socket/` and records the fallback in this Decision Log so the C3+C4 plan knows to generalise rather than reimplement. No reverse dependency: C3+C4 does not need anything from this plan.
+- **DEC-4 (pre-M1, 2026-04-20): Multiple commits per milestone, not one-per-milestone.** This plan follows the existing `0002` convention and the user's per-small-feature commit cadence (see [feedback memory](../../.claude/projects/-Users-wanggang-dev-00-codans/memory/feedback_commit_cadence.md)). Each "Expected commits" line corresponds to one independently-buildable, test-passing chunk. The /commit skill invocation cadence remains "after each small feature change", not "after each milestone". Review-round feedback suggesting 1-commit/milestone was declined on this basis.
+- **DEC-5 (M1, 2026-04-20): One `CodansIPC` DTO round-trip test hosted in `CodansCoreTests`, not a new `CodansIPCTests` target.** The plan specified a single test (both variants of `EditorInstallationStatusDTO`). Standing up a dedicated Tuist test target for one file would cost more than it protects. Added `CodansIPC` as a dependency of `CodansCoreTests`; the new `EditorIPCTypesTests.swift` sits beside the existing Codable tests. A future ExecPlan that adds substantial IPC coverage (e.g. 0003 for C3+C4) should promote the tests to their own target; at that point update this Decision Log accordingly.
 - **DEC-6 (M2, 2026-04-20): Rename `whitelist` → `allowlist` and `forbidden` naming retained.** The project's `.swiftlint.yml` enables the `inclusive_language` rule. The 0005 design doc uses the term "whitelist" in prose; this plan continues to use it in the doc, but the *Swift API* in `GitProcessEnv` (and, in M5, `EditorEnv`) uses `allowlist`. Tests renamed accordingly (`allowlistedKeysPropagate`, `resultContainsOnlyAllowlistAndForced`, `missingAllowlistedKeysOmittedRatherThanEmpty`). The `forbidden` naming is retained since SwiftLint does not flag it.
 - **DEC-7 (M2, 2026-04-20): `DiffParser.FileBuilder.consumeHeaderLine` split into three sub-handlers to satisfy the cyclomatic-complexity lint.** Rather than disable the linter inline (which tripped the adjacent `orphaned_doc_comment` / `superfluous_disable_command` rules), factored the `hasPrefix` cascade into `consumeModeLine`, `consumeRenameOrCopyLine`, and `consumeBinaryOrDiffHeaderLine`. Each sub-handler is small, still mirrors git's documented grammar, and the public entry point reads as a short decision tree. Net line count increased slightly; readability gain justifies the split.
-- **DEC-8 (M2, 2026-04-20): `touch-code/Git/` types declared `nonisolated` explicitly.** The `touch-code` app target has `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` (workspace-wide default for UI code). Pure helpers (`GitProcessEnv`, `GitCommand`, `DiffParser`, `GitOutputParser`, `Git`, `GitError`) and the `GitService` protocol + `LiveGitService` conformance are explicitly `nonisolated` so they (a) compose with `Sendable` cleanly and (b) can be called from any actor, including `nonisolated` test contexts. This matches the pattern `TouchCodeCore` uses at the module level (with `SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated` on that target) and is the per-declaration equivalent for app-target code that should stay actor-independent.
+- **DEC-8 (M2, 2026-04-20): `codans/Git/` types declared `nonisolated` explicitly.** The `codans` app target has `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` (workspace-wide default for UI code). Pure helpers (`GitProcessEnv`, `GitCommand`, `DiffParser`, `GitOutputParser`, `Git`, `GitError`) and the `GitService` protocol + `LiveGitService` conformance are explicitly `nonisolated` so they (a) compose with `Sendable` cleanly and (b) can be called from any actor, including `nonisolated` test contexts. This matches the pattern `CodansCore` uses at the module level (with `SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated` on that target) and is the per-declaration equivalent for app-target code that should stay actor-independent.
 - **DEC-9 (M2, 2026-04-20): Integration tests gated via Swift Testing's `.enabled(if:)` trait, not a thrown skip error.** Initial attempt used `throw SkipTest.notEnabled` at the top of each `@Test` function — Swift Testing 1.x interprets that as a failure, not a skip. Switched to `@Test(.enabled(if: integrationEnabled))` reading `ProcessInfo.processInfo.environment["TC_RUN_GIT_INTEGRATION_TESTS"] == "1"`. Note that `xcodebuild test` does not forward shell environment to the test runner by default; engineers enable integration tests by setting the env var in Xcode's scheme (Test action → Environment Variables) or by running tests from a terminal that exports the var before invoking Xcode. The tests themselves are correctly gated and skip cleanly in default CI runs.
-- **DEC-10 (M2-fix, 2026-04-20): Introduced `CommandRunner` protocol as a testability seam in `touch-code/Git/`.** Review feedback on `LiveGitService` flagged two races in the inline `Foundation.Process` plumbing (termination-handler assigned inside `Task.detached`; pipe drains on the cooperative pool). Fixed by (a) installing the handler synchronously before `process.run()` via `AsyncStream.makeStream()`, and (b) moving pipe drains to `DispatchQueue.global(qos: .utility)`. Both fixes live in a new `FoundationCommandRunner` (the default) + `RecordingCommandRunner` (test double). `LiveGitService` now calls the runner protocol, which enables negative-path unit tests (`LiveGitServiceRunnerTests` covers `.timedOut` / `.outputTooLarge` / `.exec` / `.notARepo` / `.gitMissing` / invalid-SHA rejection / env-allowlist assertions) without a real git subprocess. The same race + drain fix was applied in-place to `FoundationProcessSpawner` in the editor module (M5), kept module-local rather than shared to preserve the touch-code/Git ↔ touch-code/App/Clients/Editor boundary.
+- **DEC-10 (M2-fix, 2026-04-20): Introduced `CommandRunner` protocol as a testability seam in `codans/Git/`.** Review feedback on `LiveGitService` flagged two races in the inline `Foundation.Process` plumbing (termination-handler assigned inside `Task.detached`; pipe drains on the cooperative pool). Fixed by (a) installing the handler synchronously before `process.run()` via `AsyncStream.makeStream()`, and (b) moving pipe drains to `DispatchQueue.global(qos: .utility)`. Both fixes live in a new `FoundationCommandRunner` (the default) + `RecordingCommandRunner` (test double). `LiveGitService` now calls the runner protocol, which enables negative-path unit tests (`LiveGitServiceRunnerTests` covers `.timedOut` / `.outputTooLarge` / `.exec` / `.notARepo` / `.gitMissing` / invalid-SHA rejection / env-allowlist assertions) without a real git subprocess. The same race + drain fix was applied in-place to `FoundationProcessSpawner` in the editor module (M5), kept module-local rather than shared to preserve the codans/Git ↔ codans/App/Clients/Editor boundary.
 - **DEC-11 (M2-fix, 2026-04-20): `.notARepo` detection via `rev-parse --is-inside-work-tree`, not stderr substring match.** Every `GitService` entry point now starts with `ensureIsRepo(at:)` — a separate `git rev-parse --is-inside-work-tree` call whose exit code authoritatively reports repo-ness. Stderr substring matching retained only as a narrow fallback (`fatal: not a git repository` + `fatal: bad revision` + `fatal: Not a valid object name`) for the race where the worktree vanishes between pre-check and actual command. Default `gitExecutable` changed from `/usr/bin/env` (PATH-dependent) to `/usr/bin/git` (absolute) — removing a small PATH-attack surface that the env allowlist otherwise closed at the subprocess boundary. `git show <sha>` now appends `--` after the SHA to close the SHA-vs-path argv ambiguity per git's documented grammar.
 - **DEC-12 (M2-fix, 2026-04-20): `GitOutputParser` throws `.unparsable` on unparseable commit dates, not epoch-0 fallback.** A silent fallback would render `1970-01-01` in the UI whenever git emits an unexpected date shape; failing loudly surfaces the real problem. Also added `-c core.quotePath=false` to every argv that returns paths (log / diff / show / status) so non-ASCII paths arrive as UTF-8 rather than octal-escaped by git's default quoting.
-- **DEC-13 (pre-M5, 2026-04-20): M5 landed out of order before M3/M4/M4a/M4b.** Those milestones require TCA wired in `Tuist/Package.swift`, which is a deliverable of the in-flight `0002 M5` plan. M5 (editor service layer) has no TCA dependency — its service protocol, registry, prober, spawner, and models live under `touch-code/App/Clients/Editor/` but don't import TCA. Landing M5 now means the next review cycle has both service-layer slices (Git from M2 + Editor from M5) available for end-to-end integration planning, rather than waiting for `0002 M5`. M3/M4/M6/M7a/M7b/M8 still require TCA and remain paused.
+- **DEC-13 (pre-M5, 2026-04-20): M5 landed out of order before M3/M4/M4a/M4b.** Those milestones require TCA wired in `Tuist/Package.swift`, which is a deliverable of the in-flight `0002 M5` plan. M5 (editor service layer) has no TCA dependency — its service protocol, registry, prober, spawner, and models live under `codans/App/Clients/Editor/` but don't import TCA. Landing M5 now means the next review cycle has both service-layer slices (Git from M2 + Editor from M5) available for end-to-end integration planning, rather than waiting for `0002 M5`. M3/M4/M6/M7a/M7b/M8 still require TCA and remain paused.
 - **DEC-14 (M5, 2026-04-20): `LiveEditorService` uses concrete-return-not-`async` for `describe` / `resolve`.** The `EditorService` protocol declares both as `async` so a future path-probing implementation can do disk I/O off the main actor. The M5 live implementation is synchronous (registry merge is in-memory), and SwiftLint's `async_without_await` rule flags bare-async methods. Swift permits a sync method to satisfy an async protocol requirement — dropped `async` from the live + test impls; callers still write `await service.describe()` with the actor-hop semantics intact. The `TestEditorService` follows the same shape for the same reason.
 - **DEC-15 (M5.1, 2026-04-20): `PathProber` caching deferred to M6.** `LiveEditorService.describe()` rebuilds the registry and re-probes `$PATH` on every call — there is no cache at M5. The design's cache + refresh triggers (settings-open, custom-editor edit, `editor.describe` IPC) require a mutable `@Observable` cache that M6's `EditorFeature` owns alongside its Settings-UI refresh actions. Documented here so the M5.1 review surface doesn't lose the deferred work. M6 lands `CachingPathProber` (or an equivalent layer inside `LiveEditorService`) plus the three refresh triggers.
 - **DEC-16 (M5.1, 2026-04-20): Finder fallback in `LiveEditorService.resolve` prefers installed over missing.** C8 review flagged that a naive `registry.first { $0.id == "finder" }` returns Finder even when `.missingBinary` — the dropdown would then label a broken editor as the resolved default. Fix: search for an installed-and-Finder descriptor first; fall back to a missing-Finder descriptor only if the installed one doesn't exist. In practice `/usr/bin/open` is always on macOS, so the installed branch always wins; the fallback documents the semantics and keeps `open()`'s `.notInstalled` path correct if Finder somehow goes missing.
 - **DEC-17 (M8 groundwork, 2026-04-20): `pointfreeco/swift-snapshot-testing` pinned at `from: "1.17.0"` in `apps/mac/Tuist/Package.swift`.** Resolved eagerly (M8 groundwork) rather than waiting for M4b so the dependency surface stabilises before TCA-dependent work starts. No target depends on it yet — M4b adds the test-target wiring. DEC-2 originally committed to this library; DEC-17 pins the exact floor version.
 - **DEC-18 (M8 groundwork, 2026-04-20): Performance baseline: 50 samples with 5 warm-ups discarded, P95-asserted, per-machine.** Refined from "10 samples" in the original plan. 10 samples are statistically insufficient for a stable P95 under ARC / cache / scheduler variance. 5 warm-up samples drop the cold-cache outliers. Baseline is per-machine gitignored — each contributor and CI runner captures its own. Assertion uses `max(designBudget, baseline.p95 × 1.25)` so the design-ceiling stays the upper bound even when a faster machine produces a tighter baseline. `TC_PERF_BASELINE=capture` environment variable distinguishes capture mode from assert mode so a baseline refresh is intentional.
 - **DEC-19 (M4a.1, 2026-04-20): `git show <sha>` argv places `-w` before `--`, not after.** The M4a cut of `GitCommand.diff` appended `-w` via `base + ["-w"]` after the `.commit` base already ended with `sha, "--"`. Git treats everything after `--` as pathspec, so the flag became a silent filter for a path literally named `-w` rather than enabling ignore-whitespace. Fix rewrote the builder to accumulate into a mutable `args` array, splicing `-w` before the trailing `sha, "--"` pair. New `GitCommandTests.commitDiffWithIgnoreWhitespacePlacesFlagBeforeDashDash` locks the ordering contract; every `DiffKind` case is exercised. The M3 review's `whitespaceToggleReissuesDiffWithFlagPassedThrough` test only proved the Bool reached the client — which is why the argv bug slipped through initially. Lesson: plumb-through tests must reach the last observable boundary (argv), not just the penultimate one (protocol closure).
-- **DEC-20 (M4b, 2026-04-20): Snapshot reference PNGs deferred to M4b.1 follow-up.** The M4b landing wires the full snapshot infrastructure: `SnapshotTesting` dep in `Tuist/Package.swift`, `SnapshotTesting` dependency on the `touch-codeTests` target, `GitViewerSnapshotTests.swift` with 6 fixture-generated tests (log populated, working diff 10 files, commit diff rename+binary+added, `.notARepo` empty state, `.diffTooLarge` placeholder with a space in the path, `.exec` error in the file list), and an `NSHostingView`-based `makeHostingView` helper. **Reference PNGs are not checked in**: a record-mode dry run crashed because `NSHostingView` renders `List` + `@FocusState` without a presentation-window context. Generating the baseline either (a) hosts the view inside a dummy `NSWindow` in a harness helper, or (b) snapshots individual column subviews (`CommitLogView`, `FileChangeListView`, `UnifiedDiffView`) instead of the composite viewer — both are proper M4b.1 work. Tests are env-gated (`TC_RUN_SNAPSHOT_TESTS=1`) and skip cleanly in default runs.
-- **DEC-21 (M7, 2026-04-20): `MethodRouter` registration of `editor.*` handlers deferred to post-0003-merge reconciliation.** Plan 0003 (C3+C4 hooks-and-CLI) has CLOSED on `origin/worktree-design+c3-c4-hooks-cli` but has not yet merged to `main`. That branch ships the `SocketServer`, `MethodRouter`, `InMemoryIPCServer`, the `tc open` CLI, and reserves the `editor.open` method slot (via their M7.1 reconciliation commit 3cf35a5). On this branch, landing only the app-side handler class (`EditorHandlers`) + wire types + error codes lets us validate the handler in isolation (12 tests, all green) without pulling in the full socket stack, which has a divergent repo layout versus ours (the 0003 branch was cut pre-`apps/mac` refactor 307712). The MethodRouter wiring is a mechanical two-line drop-in at merge time: `router.register(.editorOpen) { try await handlers.open(...) }` plus equivalents for `.editorDescribe` and `.editorSetDefault`. The M7b "narrow fallback dispatcher" path from DEC-3 is NOT implemented — a temporary SocketServer stub would be overwritten at merge time and would exercise code the final plan discards. **Reconciliation checklist at merge time:** (a) import `TouchCodeIPC.IPC.Method` enum from 0003 (or merge our `EditorIPCMethod` constants into it), (b) instantiate `EditorHandlers` in `AppBootstrap` with `EditorClient` + `HierarchyClient` from the live dependency container, (c) register the three methods on the shared `MethodRouter`, (d) add one integration test that round-trips `editor.open` through `InMemoryIPCServer` asserting the handler's `EditorIPCError.spawnFailed` → `IPCError` mapping. The M8 performance + acceptance tests assume this wiring is live.
+- **DEC-20 (M4b, 2026-04-20): Snapshot reference PNGs deferred to M4b.1 follow-up.** The M4b landing wires the full snapshot infrastructure: `SnapshotTesting` dep in `Tuist/Package.swift`, `SnapshotTesting` dependency on the `codansTests` target, `GitViewerSnapshotTests.swift` with 6 fixture-generated tests (log populated, working diff 10 files, commit diff rename+binary+added, `.notARepo` empty state, `.diffTooLarge` placeholder with a space in the path, `.exec` error in the file list), and an `NSHostingView`-based `makeHostingView` helper. **Reference PNGs are not checked in**: a record-mode dry run crashed because `NSHostingView` renders `List` + `@FocusState` without a presentation-window context. Generating the baseline either (a) hosts the view inside a dummy `NSWindow` in a harness helper, or (b) snapshots individual column subviews (`CommitLogView`, `FileChangeListView`, `UnifiedDiffView`) instead of the composite viewer — both are proper M4b.1 work. Tests are env-gated (`TC_RUN_SNAPSHOT_TESTS=1`) and skip cleanly in default runs.
+- **DEC-21 (M7, 2026-04-20): `MethodRouter` registration of `editor.*` handlers deferred to post-0003-merge reconciliation.** Plan 0003 (C3+C4 hooks-and-CLI) has CLOSED on `origin/worktree-design+c3-c4-hooks-cli` but has not yet merged to `main`. That branch ships the `SocketServer`, `MethodRouter`, `InMemoryIPCServer`, the `codans open` CLI, and reserves the `editor.open` method slot (via their M7.1 reconciliation commit 3cf35a5). On this branch, landing only the app-side handler class (`EditorHandlers`) + wire types + error codes lets us validate the handler in isolation (12 tests, all green) without pulling in the full socket stack, which has a divergent repo layout versus ours (the 0003 branch was cut pre-`apps/mac` refactor 307712). The MethodRouter wiring is a mechanical two-line drop-in at merge time: `router.register(.editorOpen) { try await handlers.open(...) }` plus equivalents for `.editorDescribe` and `.editorSetDefault`. The M7b "narrow fallback dispatcher" path from DEC-3 is NOT implemented — a temporary SocketServer stub would be overwritten at merge time and would exercise code the final plan discards. **Reconciliation checklist at merge time:** (a) import `CodansIPC.IPC.Method` enum from 0003 (or merge our `EditorIPCMethod` constants into it), (b) instantiate `EditorHandlers` in `AppBootstrap` with `EditorClient` + `HierarchyClient` from the live dependency container, (c) register the three methods on the shared `MethodRouter`, (d) add one integration test that round-trips `editor.open` through `InMemoryIPCServer` asserting the handler's `EditorIPCError.spawnFailed` → `IPCError` mapping. The M8 performance + acceptance tests assume this wiring is live.
 
 ## Outcomes & Retrospective
 
 ### M1 — Pure data models (2026-04-20)
 
 **What landed:**
-- `apps/mac/TouchCodeCore/Git/` — `GitModels.swift` (Commit + computed `shortID`, DiffScope, UnifiedDiff, FileChange + Kind, DiffHunk, DiffLine + Kind, LogPage + Cursor, WorkingTreeStatus + Entry with custom `Character` Codable), `GitShaValidator.swift` (accept 7..64 hex, case-insensitive; reject non-hex/whitespace/empty/overlong).
-- `apps/mac/TouchCodeCore/Editor/` — `EditorStorageModels.swift` (EditorID typealias, CommandTemplate with `dirPlaceholder = "{dir}"` constant, CustomEditor), `EditorValidators.swift` (CommandTemplate.validate throwing EditorTemplateError; CustomEditor.validatedID enforcing `[a-z][a-z0-9_-]{1,31}` via scalar iteration), `EditorPlaceholderError.swift` (single case `.notYetImplemented` for the M3 facade).
-- `apps/mac/TouchCodeIPC/Editor/` — `EditorIPCTypes.swift` (EditorDescriptorDTO + Origin, EditorChoiceDTO, EditorInstallationStatusDTO), `EditorIPCMethods.swift` (three `editor.*` string constants).
-- `apps/mac/TouchCodeCoreTests/` — `GitModelsCodableTests.swift` (20 tests: shortID SHA-1/SHA-256, every FileChange.Kind, DiffLine.Kind parity, DiffScope variants, LogPage merge + root + pagination, WorkingTreeStatus entries + UTF-8 paths), `GitShaValidatorTests.swift` (10 tests), `EditorValidatorsTests.swift` (17 tests covering template validation + ID regex boundaries), `EditorIPCTypesTests.swift` (2 tests, both DTO variants).
-- `apps/mac/Project.swift` — `TouchCodeCoreTests` now also depends on `TouchCodeIPC` (see DEC-5).
+- `apps/mac/CodansCore/Git/` — `GitModels.swift` (Commit + computed `shortID`, DiffScope, UnifiedDiff, FileChange + Kind, DiffHunk, DiffLine + Kind, LogPage + Cursor, WorkingTreeStatus + Entry with custom `Character` Codable), `GitShaValidator.swift` (accept 7..64 hex, case-insensitive; reject non-hex/whitespace/empty/overlong).
+- `apps/mac/CodansCore/Editor/` — `EditorStorageModels.swift` (EditorID typealias, CommandTemplate with `dirPlaceholder = "{dir}"` constant, CustomEditor), `EditorValidators.swift` (CommandTemplate.validate throwing EditorTemplateError; CustomEditor.validatedID enforcing `[a-z][a-z0-9_-]{1,31}` via scalar iteration), `EditorPlaceholderError.swift` (single case `.notYetImplemented` for the M3 facade).
+- `apps/mac/CodansIPC/Editor/` — `EditorIPCTypes.swift` (EditorDescriptorDTO + Origin, EditorChoiceDTO, EditorInstallationStatusDTO), `EditorIPCMethods.swift` (three `editor.*` string constants).
+- `apps/mac/CodansCoreTests/` — `GitModelsCodableTests.swift` (20 tests: shortID SHA-1/SHA-256, every FileChange.Kind, DiffLine.Kind parity, DiffScope variants, LogPage merge + root + pagination, WorkingTreeStatus entries + UTF-8 paths), `GitShaValidatorTests.swift` (10 tests), `EditorValidatorsTests.swift` (17 tests covering template validation + ID regex boundaries), `EditorIPCTypesTests.swift` (2 tests, both DTO variants).
+- `apps/mac/Project.swift` — `CodansCoreTests` now also depends on `CodansIPC` (see DEC-5).
 
-**Verification:** `xcodebuild test -scheme TouchCodeCore` → 80 tests in 7 suites, all passed in 0.178 s. `make mac-lint` clean. Grep for platform imports under `TouchCodeCore` / `TouchCodeIPC` returned zero matches.
+**Verification:** `xcodebuild test -scheme CodansCore` → 80 tests in 7 suites, all passed in 0.178 s. `make mac-lint` clean. Grep for platform imports under `CodansCore` / `CodansIPC` returned zero matches.
 
 **Surprises:** Workspace regeneration initially blocked on the Zig CDN (same flaky 400 as 0001 DEC-8). Resolved by running `apps/mac/scripts/prime-zig-cache.sh` to seed `.build/ghostty/.zig-global-cache/p/` via `curl`-then-`zig-fetch`. Captured in Surprises & Discoveries so M2+ sessions remember the primer step.
 
@@ -85,10 +85,10 @@ Each unchecked entry will be updated with a completion timestamp in the form `�
 ### M2 — Git service layer (2026-04-20)
 
 **What landed:**
-- `apps/mac/touch-code/Git/` — `GitService.swift` (protocol, `nonisolated` + `Sendable`), `GitCommand.swift` (argv builder with the design's exact argument lists), `GitProcessEnv.swift` (allowlist `PATH`/`HOME`, forced `LC_ALL=C.UTF-8`, forbidden `GIT_*` keys, debug-only precondition), `LiveGitService.swift` (Process-backed implementation with 16 MiB output cap, 10 s timeout, SIGTERM→SIGKILL escalation, `notARepo` detection), `DiffParser.swift` (unified-diff state machine with added/deleted/modified/renamed/copied/typeChanged/binary/mode-only/no-newline-at-EOF classification, 50 000-line cutoff), `GitOutputParser.swift` (null-delimited log parser supporting SHA-1/SHA-256, merges, roots, UTF-8 names; porcelain-v1 `-z` status parser with rename/copy handling), `GitError.swift` (seven-case error enum). `Git.swift` namespace now exposes `Git.makeService()` factory.
-- `apps/mac/touch-code/Tests/GitTests/` — `DiffParserTests.swift` (15 tests covering every FileChange.Kind, hunk header variants, empty-new-file, no-newline-at-EOF, multiple files, 50 001-line cap), `GitOutputParserTests.swift` (11 tests covering linear/merge/root/UTF-8 logs + clean/mixed/rename/UTF-8 status), `GitProcessEnvTests.swift` (6 tests locking whitelist, forced, SHELL-stripping, forbidden-stripping, result composition, missing-parent behaviour), `LiveGitServiceIntegrationTests.swift` (5 tests gated by `.enabled(if: TC_RUN_GIT_INTEGRATION_TESTS=1)` — logs, diffs, status against a scratch repo).
+- `apps/mac/codans/Git/` — `GitService.swift` (protocol, `nonisolated` + `Sendable`), `GitCommand.swift` (argv builder with the design's exact argument lists), `GitProcessEnv.swift` (allowlist `PATH`/`HOME`, forced `LC_ALL=C.UTF-8`, forbidden `GIT_*` keys, debug-only precondition), `LiveGitService.swift` (Process-backed implementation with 16 MiB output cap, 10 s timeout, SIGTERM→SIGKILL escalation, `notARepo` detection), `DiffParser.swift` (unified-diff state machine with added/deleted/modified/renamed/copied/typeChanged/binary/mode-only/no-newline-at-EOF classification, 50 000-line cutoff), `GitOutputParser.swift` (null-delimited log parser supporting SHA-1/SHA-256, merges, roots, UTF-8 names; porcelain-v1 `-z` status parser with rename/copy handling), `GitError.swift` (seven-case error enum). `Git.swift` namespace now exposes `Git.makeService()` factory.
+- `apps/mac/codans/Tests/GitTests/` — `DiffParserTests.swift` (15 tests covering every FileChange.Kind, hunk header variants, empty-new-file, no-newline-at-EOF, multiple files, 50 001-line cap), `GitOutputParserTests.swift` (11 tests covering linear/merge/root/UTF-8 logs + clean/mixed/rename/UTF-8 status), `GitProcessEnvTests.swift` (6 tests locking whitelist, forced, SHELL-stripping, forbidden-stripping, result composition, missing-parent behaviour), `LiveGitServiceIntegrationTests.swift` (5 tests gated by `.enabled(if: TC_RUN_GIT_INTEGRATION_TESTS=1)` — logs, diffs, status against a scratch repo).
 
-**Verification:** `xcodebuild test -scheme touch-code` → 43 tests in 5 suites, all passed in 5.578 s (integration tests correctly skipped). `make mac-lint` clean after rename + refactor.
+**Verification:** `xcodebuild test -scheme codans` → 43 tests in 5 suites, all passed in 5.578 s (integration tests correctly skipped). `make mac-lint` clean after rename + refactor.
 
 **Surprises:**
 - The app target defaults to `@MainActor`. Pure helpers had to be marked `nonisolated` explicitly (DEC-8). Nested types (`FileBuilder`, `HunkBuilder`, `HunkHeader`) also need per-declaration `nonisolated` — the enclosing enum's attribute does not propagate.
@@ -101,10 +101,10 @@ Each unchecked entry will be updated with a completion timestamp in the form `�
 ### M5 — Editor service layer (2026-04-20, landed out of order)
 
 **What landed:**
-- `apps/mac/touch-code/App/Clients/Editor/` — `EditorService.swift` (protocol), `EditorService+Live.swift` (LiveEditorService, four-tier resolution with no silent fallthrough, argv construction via `{dir}` substitution), `EditorService+Test.swift` (in-memory TestEditorService actor), `EditorRegistry.swift` (exact 6-entry allowlist + merge-with-customs), `EditorModels.swift` (EditorDescriptor + EditorChoice + InstallationStatus + DTO bridges), `EditorError.swift` (7 cases matching the design), `ProcessSpawner.swift` (protocol + FoundationProcessSpawner with the same race + drain fix from DEC-10 + RecordingProcessSpawner actor test double), `PathProber.swift` (protocol + LivePathProber + FakePathProber), `EditorEnv.swift` (PATH/HOME allowlist, LC_ALL forced, SHELL/EDITOR/VISUAL/GIT_* forbidden — `SHELL` explicitly in forbidden per C8 v2), `SpawnContract.swift` (5 s timeout + 1 s SIGTERM grace constants).
-- `apps/mac/touch-code/Tests/EditorTests/` — `EditorRegistryTests.swift` (9 tests locking the 6-entry table + custom-merge + ID-collision rejection), `PathProberTests.swift` (5 tests), `EditorServiceResolutionTests.swift` (6 tests covering the four-tier fallback chain + the critical no-silent-fallthrough assertion), `EditorServiceSpawnTests.swift` (10 tests covering argv per built-in, `{dir}` literal substitution, env allowlist, cwd, exit 0 / non-zero / timeout / spawn-failed / not-a-directory branches), `EditorEnvTests.swift` (6 tests symmetric to GitProcessEnvTests).
+- `apps/mac/codans/App/Clients/Editor/` — `EditorService.swift` (protocol), `EditorService+Live.swift` (LiveEditorService, four-tier resolution with no silent fallthrough, argv construction via `{dir}` substitution), `EditorService+Test.swift` (in-memory TestEditorService actor), `EditorRegistry.swift` (exact 6-entry allowlist + merge-with-customs), `EditorModels.swift` (EditorDescriptor + EditorChoice + InstallationStatus + DTO bridges), `EditorError.swift` (7 cases matching the design), `ProcessSpawner.swift` (protocol + FoundationProcessSpawner with the same race + drain fix from DEC-10 + RecordingProcessSpawner actor test double), `PathProber.swift` (protocol + LivePathProber + FakePathProber), `EditorEnv.swift` (PATH/HOME allowlist, LC_ALL forced, SHELL/EDITOR/VISUAL/GIT_* forbidden — `SHELL` explicitly in forbidden per C8 v2), `SpawnContract.swift` (5 s timeout + 1 s SIGTERM grace constants).
+- `apps/mac/codans/Tests/EditorTests/` — `EditorRegistryTests.swift` (9 tests locking the 6-entry table + custom-merge + ID-collision rejection), `PathProberTests.swift` (5 tests), `EditorServiceResolutionTests.swift` (6 tests covering the four-tier fallback chain + the critical no-silent-fallthrough assertion), `EditorServiceSpawnTests.swift` (10 tests covering argv per built-in, `{dir}` literal substitution, env allowlist, cwd, exit 0 / non-zero / timeout / spawn-failed / not-a-directory branches), `EditorEnvTests.swift` (6 tests symmetric to GitProcessEnvTests).
 
-**Verification:** `xcodebuild test -scheme touch-code` → 90 tests in 13 suites, all passed in 5.57 s. `make mac-lint` clean.
+**Verification:** `xcodebuild test -scheme codans` → 90 tests in 13 suites, all passed in 5.57 s. `make mac-lint` clean.
 
 **Carry-forward to M6 + M7:** Service protocol + registry + test spawner are ready. M6 wires `EditorClient` (DependencyKey) around `LiveEditorService`; the live factory closes over `SettingsStore` + `HierarchyManager` reads. M7a maps `editor.open` IPC to `LiveEditorService.open` via the `EditorChoice.toDTO()` / `EditorDescriptor.toDTO()` bridges already in place.
 
@@ -126,7 +126,7 @@ Each unchecked entry will be updated with a completion timestamp in the form `�
 
 ### M7 — EditorHandlers + `editor.*` IPC wire types + error codes (2026-04-20)
 
-**What landed:** `TouchCodeIPC/Editor/EditorIPCTypes.swift` expanded with `EditorOpenRequest` / `EditorOpenResponse` / `EditorDescribeResponse` / `EditorSetDefaultRequest` / `EditorSetDefaultResponse`. New `EditorIPCError.swift` with 8 wire-safe numeric codes (100–107; `.unknownProject = 107` added post-review because `setDefault` callers ask about Projects, not Worktrees). `touch-code/App/Features/Socket/EditorHandlers.swift` routes `editor.describe` / `editor.open` / `editor.setDefault` through `EditorClient` + `HierarchyClient`; resolves Worktree via explicit `worktreeID` OR `paneID` traversal of the catalog snapshot; translates `EditorError` → `EditorIPCError` at the handler boundary so the app-tier error type never crosses the socket.
+**What landed:** `CodansIPC/Editor/EditorIPCTypes.swift` expanded with `EditorOpenRequest` / `EditorOpenResponse` / `EditorDescribeResponse` / `EditorSetDefaultRequest` / `EditorSetDefaultResponse`. New `EditorIPCError.swift` with 8 wire-safe numeric codes (100–107; `.unknownProject = 107` added post-review because `setDefault` callers ask about Projects, not Worktrees). `codans/App/Features/Socket/EditorHandlers.swift` routes `editor.describe` / `editor.open` / `editor.setDefault` through `EditorClient` + `HierarchyClient`; resolves Worktree via explicit `worktreeID` OR `paneID` traversal of the catalog snapshot; translates `EditorError` → `EditorIPCError` at the handler boundary so the app-tier error type never crosses the socket.
 
 **Verification:** 13 `EditorHandlersTests` green (including the post-review parameterized test that exercises `.nonZeroExit` / `.timedOut` / `.badTemplate` / `.notADirectory` through the live call path). 242 total tests across 34 suites green. `make mac-lint` clean.
 
@@ -134,7 +134,7 @@ Each unchecked entry will be updated with a completion timestamp in the form `�
 
 ### M8 — Reducer perf + docs close-out (2026-04-20)
 
-**What landed:** `GitViewerReducerPerformanceTests.measureDiffSucceededDispatch` measures the `.diffSucceeded(_)` reducer dispatch wall-clock against a 20 ms P95 design budget (5 % of the 200 ms whole-pipeline budget), using the same 50-sample / 5-warm-up / ContinuousClock machinery as the M8-groundwork `DiffParsePerformanceBaselineTests`. Baseline file merges `reducer_ms` alongside the existing `parse_ms` entry. Architecture codemap extended with entries for `touch-code/App/Clients/Editor/`, `touch-code/App/Features/GitViewer/`, `touch-code/App/Features/WorktreeHeader/`, and `touch-code/App/Features/Socket/`. Product-spec Open Question #7 marked resolved; C7 and C8 maturity promoted from `Planned / Alpha` to `Shipped / Beta`.
+**What landed:** `GitViewerReducerPerformanceTests.measureDiffSucceededDispatch` measures the `.diffSucceeded(_)` reducer dispatch wall-clock against a 20 ms P95 design budget (5 % of the 200 ms whole-pipeline budget), using the same 50-sample / 5-warm-up / ContinuousClock machinery as the M8-groundwork `DiffParsePerformanceBaselineTests`. Baseline file merges `reducer_ms` alongside the existing `parse_ms` entry. Architecture codemap extended with entries for `codans/App/Clients/Editor/`, `codans/App/Features/GitViewer/`, `codans/App/Features/WorktreeHeader/`, and `codans/App/Features/Socket/`. Product-spec Open Question #7 marked resolved; C7 and C8 maturity promoted from `Planned / Alpha` to `Shipped / Beta`.
 
 **Verification:** Full suite 242/34 green. Gated perf + snapshot tests skip cleanly in default runs. `make mac-lint` clean.
 
@@ -148,7 +148,7 @@ Related documents (all in this repo):
 - **Design docs — authoritative for every decision; this plan implements, it does not relitigate:**
   - [docs/design-docs/c7-git-viewer.md](../design-docs/c7-git-viewer.md)
   - [docs/design-docs/c8-editor-integration.md](../design-docs/c8-editor-integration.md)
-- **Architecture** — [docs/architecture.md](../architecture.md). Relevant invariants: hybrid TCA + `@Observable` with TCA for feature flows; atomic-rename JSON with top-level `version`; `tc` is stateless and talks to the app over `TouchCodeIPC`; all identifiers are UUIDs.
+- **Architecture** — [docs/architecture.md](../architecture.md). Relevant invariants: hybrid TCA + `@Observable` with TCA for feature flows; atomic-rename JSON with top-level `version`; `codans` is stateless and talks to the app over `CodansIPC`; all identifiers are UUIDs.
 - **Upstream plan — prerequisite for M3–M8:** [docs/exec-plans/0002-terminal-and-hierarchy.md](0002-terminal-and-hierarchy.md). M2 of that plan has landed (`CatalogStore`, `HierarchyManager`); M3–M6 are pending and bring up `GhosttyKit`, `TerminalEngine`, TCA wiring, the sidebar, and Git worktree operations. M3 of *this* plan (the first TCA-touching milestone) must not start before 0002's M5 has added TCA to `Tuist/Package.swift`.
 
 Reference projects (read-only; borrow first, deviate with a stated reason):
@@ -162,11 +162,11 @@ Reference projects (read-only; borrow first, deviate with a stated reason):
 
 Repository state at plan start:
 
-- `apps/mac/Project.swift` already defines `TouchCodeCore`, `TouchCodeCoreTests`, `TouchCodeIPC`, `GhosttyKit` (foreignBuild, currently enabled via `0002 DEC-8` follow-up), `tc`, `touch-code`, `touch-codeTests`.
-- `apps/mac/touch-code/Git/` contains exactly one file: `Git.swift` with `public enum Git {}`. Every Git-module source in M2 lands here.
-- `apps/mac/touch-code/App/Clients/` does not yet exist. It is created by this plan (first by `0002 M5` for `HierarchyClient` / `TerminalClient`; this plan adds `GitServiceClient.swift` and `Editor/` alongside).
-- `apps/mac/TouchCodeIPC/IPC.swift` contains `public enum IPC {}` only. M7 is the first substantive content.
-- `apps/mac/tc/main.swift` is the ArgumentParser root with only a `--version` print. M7 adds the first subcommand.
+- `apps/mac/Project.swift` already defines `CodansCore`, `CodansCoreTests`, `CodansIPC`, `GhosttyKit` (foreignBuild, currently enabled via `0002 DEC-8` follow-up), `codans`, `codans`, `codansTests`.
+- `apps/mac/codans/Git/` contains exactly one file: `Git.swift` with `public enum Git {}`. Every Git-module source in M2 lands here.
+- `apps/mac/codans/App/Clients/` does not yet exist. It is created by this plan (first by `0002 M5` for `HierarchyClient` / `TerminalClient`; this plan adds `GitServiceClient.swift` and `Editor/` alongside).
+- `apps/mac/CodansIPC/IPC.swift` contains `public enum IPC {}` only. M7 is the first substantive content.
+- `apps/mac/codans/main.swift` is the ArgumentParser root with only a `--version` print. M7 adds the first subcommand.
 
 **Terminology used in this plan** (defined once; used as-is below):
 
@@ -178,57 +178,57 @@ Repository state at plan start:
 - **`{dir}` substitution** — the literal four-character token `{dir}` inside a `CommandTemplate.args` array, replaced at spawn time with the absolute Worktree path. Substitution is at the argv-slot level; there is no shell, no quoting, no expansion.
 - **POSIX-quoted path** — `'…'` single-quoted with internal `'` rewritten as `'\''`. Applied only to the path inside a `cd`-prefixed Copy-command string on the clipboard; never to argv.
 
-**Orientation paragraph.** The plan slices vertically where each slice is user-visible, and horizontally where a shared data layer needs a separate acceptance bar. M1 is a horizontal foundation (pure types, no UI) that both features draw from, because both want the same Codable/Equatable/Sendable guarantees and the same test story. M2 and M5 are the two "service layer" slices — one per feature, each ending with a service that can be driven from tests without any UI. M3/M4 then build C7's TCA feature then its SwiftUI view, ending at the moment the user sees a working viewer inside the app shell. M6 mirrors that for C8 with the Worktree-header button and Settings editor section. M7 extends to the CLI and IPC surface so `tc open` works from inside any Pane. M8 is the acceptance milestone: cross-feature integration tests, a performance smoke, and a dogfooding checklist. Each milestone produces at least one commit matching the repo's post-feature-commit cadence (per [Memory](../../.claude/projects/-Users-wanggang-dev-00-touch-code/memory/feedback_commit_cadence.md)).
+**Orientation paragraph.** The plan slices vertically where each slice is user-visible, and horizontally where a shared data layer needs a separate acceptance bar. M1 is a horizontal foundation (pure types, no UI) that both features draw from, because both want the same Codable/Equatable/Sendable guarantees and the same test story. M2 and M5 are the two "service layer" slices — one per feature, each ending with a service that can be driven from tests without any UI. M3/M4 then build C7's TCA feature then its SwiftUI view, ending at the moment the user sees a working viewer inside the app shell. M6 mirrors that for C8 with the Worktree-header button and Settings editor section. M7 extends to the CLI and IPC surface so `codans open` works from inside any Pane. M8 is the acceptance milestone: cross-feature integration tests, a performance smoke, and a dogfooding checklist. Each milestone produces at least one commit matching the repo's post-feature-commit cadence (per [Memory](../../.claude/projects/-Users-wanggang-dev-00-codans/memory/feedback_commit_cadence.md)).
 
 ## Plan of Work
 
-### Milestone 1: Pure data models in TouchCodeCore + TouchCodeIPC
+### Milestone 1: Pure data models in CodansCore + CodansIPC
 
-**Goal after this milestone.** Every Codable value type shared by C7, C8, and the IPC wire lives in the two leaf frameworks. `TouchCodeCore` holds the Git domain types and the editor-storage types (because `settings.json` persists them). `TouchCodeIPC` holds the two editor DTOs (`EditorDescriptor`, `EditorChoice`) the CLI deserialises from the socket. No file touches the app target. Zero imports of AppKit / SwiftUI / GhosttyKit / `Foundation.Process`.
+**Goal after this milestone.** Every Codable value type shared by C7, C8, and the IPC wire lives in the two leaf frameworks. `CodansCore` holds the Git domain types and the editor-storage types (because `settings.json` persists them). `CodansIPC` holds the two editor DTOs (`EditorDescriptor`, `EditorChoice`) the CLI deserialises from the socket. No file touches the app target. Zero imports of AppKit / SwiftUI / GhosttyKit / `Foundation.Process`.
 
 This milestone is deliberately schema-heavy and logic-light. Its job is to pin every `Codable` shape before any runtime code depends on it, and to prove that validators (template, editor ID, SHA) are correct before a UI can mis-route bad input.
 
 **Work.**
 
-Under `apps/mac/TouchCodeCore/Git/` (new subfolder; the existing folder layout is flat, but per [architecture.md](../architecture.md) a Git subfolder is idiomatic), create:
+Under `apps/mac/CodansCore/Git/` (new subfolder; the existing folder layout is flat, but per [architecture.md](../architecture.md) a Git subfolder is idiomatic), create:
 
 - `GitModels.swift` — `Commit`, `DiffScope`, `UnifiedDiff`, `FileChange` (and nested `FileChange.Kind`), `DiffHunk`, `DiffLine` (and nested `DiffLine.Kind`), `LogPage` (and nested `LogPage.Cursor`), `WorkingTreeStatus` (and nested `WorkingTreeStatus.Entry`). All `public`, all `Equatable`, `Hashable` where it composes, `Sendable`, and `Codable`. `Commit.shortID` is a **computed property** (`String(id.prefix(7))`), per the design's review-round fix — never stored, always derived.
 - `GitShaValidator.swift` — `public enum GitShaValidator { public static func isValid(_ s: String) -> Bool }` returning true iff `s` matches `^[0-9a-fA-F]{7,64}$`. Pure function. Callers: the service layer (M2) before issuing `git show <sha>` and the reducer (M3) before emitting `.commitSelected`.
 
-Under `apps/mac/TouchCodeCore/Editor/` (new subfolder), create:
+Under `apps/mac/CodansCore/Editor/` (new subfolder), create:
 
 - `EditorStorageModels.swift` — `public typealias EditorID = String`, `public struct CommandTemplate: Equatable, Sendable, Codable { let binary: String; let args: [String] }`, `public struct CustomEditor: Equatable, Sendable, Codable, Identifiable { var id: EditorID; var displayName: String; var template: CommandTemplate }`.
 - `EditorValidators.swift` — two validators: `CustomEditor.validatedID(_:) throws -> EditorID` (matches `^[a-z][a-z0-9_-]{1,31}$` per design Resolved Item #9), and `CommandTemplate.validate() throws` (non-empty `binary`; `args` contains **exactly one** literal `"{dir}"` element). Both throw a new `public enum EditorTemplateError: Error, Equatable { case emptyBinary; case missingDirPlaceholder; case duplicateDirPlaceholder; case invalidID(String) }`.
-- `EditorPlaceholderError.swift` — **one** public case: `public enum EditorPlaceholderError: Error, Equatable { case notYetImplemented }`. This is the error the M3 `EditorServiceFacade.liveValue` throws before M5 lands the real service. It lives in `TouchCodeCore` so M3 can throw it without importing any app-tier type, and it stays after M5 deletes its only caller (benign, zero-site; optional M6 clean-up may remove it). Flagged in Decision Log (DEC-1).
+- `EditorPlaceholderError.swift` — **one** public case: `public enum EditorPlaceholderError: Error, Equatable { case notYetImplemented }`. This is the error the M3 `EditorServiceFacade.liveValue` throws before M5 lands the real service. It lives in `CodansCore` so M3 can throw it without importing any app-tier type, and it stays after M5 deletes its only caller (benign, zero-site; optional M6 clean-up may remove it). Flagged in Decision Log (DEC-1).
 
-Under `apps/mac/TouchCodeIPC/Editor/` (new subfolder), create:
+Under `apps/mac/CodansIPC/Editor/` (new subfolder), create:
 
 - `EditorIPCTypes.swift` — `public struct EditorDescriptorDTO`, `public struct EditorChoiceDTO`, `public struct EditorInstallationStatusDTO` (enum with `.installed(resolvedBinary: URL)` and `.missingBinary(expected: String)`). These are the wire types returned from `editor.describe` and `editor.open`. Codable, Equatable, Sendable. No methods beyond initialisers.
-- `EditorIPCMethods.swift` — `public enum EditorIPCMethod { public static let describe = "editor.describe"; public static let open = "editor.open"; public static let setDefault = "editor.setDefault" }`. String constants; the full JSON-RPC envelope lives in later plans (CLI design doc will pin that; we declare only the method names so `tc` and the app agree).
+- `EditorIPCMethods.swift` — `public enum EditorIPCMethod { public static let describe = "editor.describe"; public static let open = "editor.open"; public static let setDefault = "editor.setDefault" }`. String constants; the full JSON-RPC envelope lives in later plans (CLI design doc will pin that; we declare only the method names so `codans` and the app agree).
 
 No Git IPC types in M1 (the design's Seam §`git.*` IPC namespace says the IPC surface is deferred to a later plan; we do not populate it).
 
-Tests under `apps/mac/TouchCodeCoreTests/`:
+Tests under `apps/mac/CodansCoreTests/`:
 
 - `GitModelsCodableTests.swift` — round-trip every struct with both minimal and fully populated fixtures. One fixture per `FileChange.Kind` case, one per `DiffLine.Kind` case, `LogPage` with a merge commit (two parents) and a root commit (zero parents). Assert `Commit.shortID == id.prefix(7)` for SHA-1 (40 chars) and SHA-256 (64 chars) inputs.
 - `GitShaValidatorTests.swift` — accept: 7-char lowercase, 7-char uppercase, 40-char SHA-1, 64-char SHA-256. Reject: 6-char, 65-char, non-hex (`g`), empty, whitespace-padded.
 - `EditorValidatorsTests.swift` — accept `CommandTemplate(binary: "code", args: ["{dir}"])`, `(binary: "open", args: ["-a", "Xcode", "{dir}"])`. Reject: empty binary, zero `{dir}` tokens, two `{dir}` tokens. Accept IDs `"vscode"`, `"my-editor"`, `"a_b_c"`; reject `"1abc"` (leading digit), `"Vscode"` (uppercase), `""`, `"a"` (too short — below 2-char minimum), and `"a" + String(repeating: "a", count: 32)` (33 chars — above the 32-char upper bound).
 
-No tests for `TouchCodeIPC` DTOs in M1 beyond a single Codable round-trip covering both variants of `EditorInstallationStatusDTO`. (Deeper IPC tests arrive with M7.)
+No tests for `CodansIPC` DTOs in M1 beyond a single Codable round-trip covering both variants of `EditorInstallationStatusDTO`. (Deeper IPC tests arrive with M7.)
 
-**Observable acceptance.** From the repo root, `make mac-generate && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme TouchCodeCoreTests | xcbeautify` ends with `Test Suite 'All tests' passed` and the test count increases by the number of new cases above. `make mac-lint` is clean. A grep that would catch a regression: `grep -r 'import AppKit\|import SwiftUI\|import GhosttyKit\|import Foundation.Process' apps/mac/TouchCodeCore apps/mac/TouchCodeIPC` returns zero matches.
+**Observable acceptance.** From the repo root, `make mac-generate && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme CodansCoreTests | xcbeautify` ends with `Test Suite 'All tests' passed` and the test count increases by the number of new cases above. `make mac-lint` is clean. A grep that would catch a regression: `grep -r 'import AppKit\|import SwiftUI\|import GhosttyKit\|import Foundation.Process' apps/mac/CodansCore apps/mac/CodansIPC` returns zero matches.
 
 **Expected commit.** `feat(core): Git and editor data models + validators`.
 
-### Milestone 2: Git service layer in touch-code/Git/
+### Milestone 2: Git service layer in codans/Git/
 
-**Goal after this milestone.** A protocol-backed `GitService` exists in `touch-code/Git/`; a live implementation shells out to `git` with the design's exact argv, applies output caps and timeouts, strips `GIT_*` env, and returns the M1 value types. A pure `DiffParser` turns `git diff` bytes into a `UnifiedDiff`. A pure `GitOutputParser` turns null-delimited `git log` and `git status --porcelain=v1 -z` bytes into their M1 shapes. All of this runs under unit tests with no app-target dependency.
+**Goal after this milestone.** A protocol-backed `GitService` exists in `codans/Git/`; a live implementation shells out to `git` with the design's exact argv, applies output caps and timeouts, strips `GIT_*` env, and returns the M1 value types. A pure `DiffParser` turns `git diff` bytes into a `UnifiedDiff`. A pure `GitOutputParser` turns null-delimited `git log` and `git status --porcelain=v1 -z` bytes into their M1 shapes. All of this runs under unit tests with no app-target dependency.
 
 This milestone is a horizontal slice inside C7 only. It ends with a service we can drive from the reducer in M3 without touching any UI.
 
 **Work.**
 
-Under `apps/mac/touch-code/Git/`, create the files named in [c7-git-viewer.md §Component Boundaries](../design-docs/c7-git-viewer.md#component-boundaries):
+Under `apps/mac/codans/Git/`, create the files named in [c7-git-viewer.md §Component Boundaries](../design-docs/c7-git-viewer.md#component-boundaries):
 
 - `GitService.swift` — the `public protocol GitService: Sendable` from the design (§API Design). Five async-throws methods: `log`, `workingTreeDiff`, `stagedDiff`, `commitDiff`, `status`.
 - `GitCommand.swift` — `enum GitCommand { static func log(limit: Int, skip: Int) -> [String]; static func diff(kind: DiffKind, sha: String?, ignoreWhitespace: Bool) -> [String]; static func status() -> [String] }`. Produces argv arrays (without the leading executable) using the exact strings from the design doc §API Design table. `DiffKind` is a local enum (`.workingTree`, `.staged`, `.commit(sha:)`) hidden inside this file.
@@ -241,26 +241,26 @@ Under `apps/mac/touch-code/Git/`, create the files named in [c7-git-viewer.md §
 
 Update `Git.swift` (currently `public enum Git {}`) to re-export the service factory: `public extension Git { static func makeService(gitExecutable: URL? = nil) -> any GitService }`. No behaviour change for existing callers.
 
-Tests under `apps/mac/touch-code/Tests/GitTests/` (new subfolder of the existing `touch-code/Tests/` which already hosts `HierarchyManagerTests.swift`; the `touch-codeTests` Tuist target's `buildableFolders` is `["touch-code/Tests"]` so the subfolder is picked up automatically):
+Tests under `apps/mac/codans/Tests/GitTests/` (new subfolder of the existing `codans/Tests/` which already hosts `HierarchyManagerTests.swift`; the `codansTests` Tuist target's `buildableFolders` is `["codans/Tests"]` so the subfolder is picked up automatically):
 
-- `DiffParserTests.swift` — fixture-driven. Fixtures under `apps/mac/touch-code/Tests/GitTests/Fixtures/`: `diff-added.txt`, `diff-deleted.txt`, `diff-modified.txt`, `diff-renamed.txt`, `diff-copied.txt`, `diff-binary.txt`, `diff-modechange.txt`, `diff-empty-newfile.txt`, `diff-no-newline-eof.txt`, `diff-merge-combined.txt`, `diff-crlf-mixed.txt`, `diff-too-large.txt` (50 001 lines). Assert the `UnifiedDiff` matches an embedded Swift literal expected value.
+- `DiffParserTests.swift` — fixture-driven. Fixtures under `apps/mac/codans/Tests/GitTests/Fixtures/`: `diff-added.txt`, `diff-deleted.txt`, `diff-modified.txt`, `diff-renamed.txt`, `diff-copied.txt`, `diff-binary.txt`, `diff-modechange.txt`, `diff-empty-newfile.txt`, `diff-no-newline-eof.txt`, `diff-merge-combined.txt`, `diff-crlf-mixed.txt`, `diff-too-large.txt` (50 001 lines). Assert the `UnifiedDiff` matches an embedded Swift literal expected value.
 - `GitOutputParserTests.swift` — fixtures `log-linear.txt`, `log-merge.txt`, `log-root-only.txt`, `status-clean.txt`, `status-mixed.txt`, `status-utf8-paths.txt`. Assert parsed values.
 - `GitProcessEnvTests.swift` — pass in a parent env with all forbidden keys set; assert output has only `PATH`, `HOME`, `LC_ALL`; assert a precondition failure when one leaks through (guarded by `#if DEBUG`).
-- `LiveGitServiceIntegrationTests.swift` — gated behind `TC_RUN_GIT_INTEGRATION_TESTS=1` (skip via `try XCTSkipIf` reading `ProcessInfo.environment`). Creates a temp repo under `NSTemporaryDirectory()/touch-code-git-<UUID>/`, runs `git init`, writes files, commits them, and asserts `service.log` / `service.workingTreeDiff` / `service.commitDiff` return expected values. Cleans up via `FileManager.default.removeItem` in a `tearDown`.
+- `LiveGitServiceIntegrationTests.swift` — gated behind `TC_RUN_GIT_INTEGRATION_TESTS=1` (skip via `try XCTSkipIf` reading `ProcessInfo.environment`). Creates a temp repo under `NSTemporaryDirectory()/codans-git-<UUID>/`, runs `git init`, writes files, commits them, and asserts `service.log` / `service.workingTreeDiff` / `service.commitDiff` return expected values. Cleans up via `FileManager.default.removeItem` in a `tearDown`.
 
-**Observable acceptance.** `xcodebuild test -scheme touch-codeTests` includes the new parser-test cases and all pass. Integration tests pass locally under `TC_RUN_GIT_INTEGRATION_TESTS=1`. `make mac-lint` clean. A grep that guards the module's purity: `grep -rn 'import AppKit\|import SwiftUI\|import ComposableArchitecture\|import GhosttyKit' apps/mac/touch-code/Git` returns zero matches.
+**Observable acceptance.** `xcodebuild test -scheme codansTests` includes the new parser-test cases and all pass. Integration tests pass locally under `TC_RUN_GIT_INTEGRATION_TESTS=1`. `make mac-lint` clean. A grep that guards the module's purity: `grep -rn 'import AppKit\|import SwiftUI\|import ComposableArchitecture\|import GhosttyKit' apps/mac/codans/Git` returns zero matches.
 
 **Expected commits.** `feat(git): GitService protocol + LiveGitService over Process`, `feat(git): unified-diff + log parsers with fixtures`.
 
 ### Milestone 3: C7 TCA feature (reducer, no UI)
 
-**Goal after this milestone.** A `GitViewerFeature` reducer exists in `apps/mac/touch-code/App/Features/GitViewer/`, a `GitServiceClient` `DependencyKey` sits next to the other clients added by `0002 M5`, and `TestStore`-driven tests prove scope transitions, pagination, request cancellation on scope change, error surfacing, and editor-open action delegation. No SwiftUI yet.
+**Goal after this milestone.** A `GitViewerFeature` reducer exists in `apps/mac/codans/App/Features/GitViewer/`, a `GitServiceClient` `DependencyKey` sits next to the other clients added by `0002 M5`, and `TestStore`-driven tests prove scope transitions, pagination, request cancellation on scope change, error surfacing, and editor-open action delegation. No SwiftUI yet.
 
-**Prerequisite.** `0002 M5` must have landed. That plan is the one that adds `swift-composable-architecture` to `apps/mac/Tuist/Package.swift` and introduces `apps/mac/touch-code/App/Clients/HierarchyClient.swift` + `TerminalClient.swift`. If M3 here is attempted before that, abandon and wait — do not add TCA ourselves, per the Decision Log discipline from `0002 DEC-3`.
+**Prerequisite.** `0002 M5` must have landed. That plan is the one that adds `swift-composable-architecture` to `apps/mac/Tuist/Package.swift` and introduces `apps/mac/codans/App/Clients/HierarchyClient.swift` + `TerminalClient.swift`. If M3 here is attempted before that, abandon and wait — do not add TCA ourselves, per the Decision Log discipline from `0002 DEC-3`.
 
 **Work.**
 
-Under `apps/mac/touch-code/App/Clients/`, create `GitServiceClient.swift`:
+Under `apps/mac/codans/App/Clients/`, create `GitServiceClient.swift`:
 
     import ComposableArchitecture
     import Foundation
@@ -279,16 +279,16 @@ Under `apps/mac/touch-code/App/Clients/`, create `GitServiceClient.swift`:
     }
     extension DependencyValues { var gitService: GitServiceClient { … } }
 
-Under `apps/mac/touch-code/App/Features/GitViewer/`, create `GitViewerFeature.swift` implementing the reducer sketched in [c7-git-viewer.md §API Design](../design-docs/c7-git-viewer.md#api-design). Concrete contents:
+Under `apps/mac/codans/App/Features/GitViewer/`, create `GitViewerFeature.swift` implementing the reducer sketched in [c7-git-viewer.md §API Design](../design-docs/c7-git-viewer.md#api-design). Concrete contents:
 
 - `@Reducer struct GitViewerFeature` with the exact `State` and `Action` from the design, plus two TCA cancellation IDs (`LogCancelID`, `DiffCancelID`) used to cancel stale effects when scope changes.
 - `LogState = .idle | .loading | .loaded(LogPage) | .error(GitError)` and `DiffState = .idle | .loading | .loaded(UnifiedDiff) | .error(GitError)` nested enums.
 - `PaneFocus = .list | .files | .hunks` and `Direction = .up | .down | .home | .end` nested enums.
 - Body: scope changes cancel any in-flight request and issue the new one via `@Dependency(\.gitService)`. `.fileSelected` updates `selectedFilePath` (no git invocation). `.commitSelected(sha:)` transitions to `.commit(sha:)` scope after `GitShaValidator.isValid` passes. `.openInEditorRequested` delegates to `@Dependency(\.editorService)` **without blocking** the reducer — fire-and-forget effect, but the effect itself awaits the service call so errors surface via `.editorOpenResult(Result<EditorChoice, EditorError>)` (a new action added here for completeness; the service is introduced in M5 so M3 wires to a protocol + `@Dependency` placeholder that M5 fills).
 
-To avoid a forward dependency on M5's `EditorService`, M3 defines a *minimal* placeholder `protocol EditorServiceFacade: Sendable { func openDirectory(_ url: URL, preferred: EditorID?, projectID: ProjectID?) async throws -> EditorChoiceDTO }` in `apps/mac/touch-code/App/Clients/EditorServiceFacade.swift`. The `testValue` implementation is `unimplemented()` (TCA's `XCTFail`-on-call); the `liveValue` **throws `EditorPlaceholderError.notYetImplemented`** (a one-case error added to `TouchCodeCore/Editor/` in M1) — never `fatalError`, never a UI-crasher. If a `.openInEditorRequested` action fires between M3 landing and M5 landing, the reducer receives a clean `Result.failure` and the UI renders it as a toast. M5 replaces the facade with the real `EditorClient` and the case becomes benign-unused (optional M6 clean-up). See [Decision Log §DEC-1](#decision-log) for why option (a) (placeholder error) was chosen over option (b) (live no-op returning a synthetic `EditorChoiceDTO`).
+To avoid a forward dependency on M5's `EditorService`, M3 defines a *minimal* placeholder `protocol EditorServiceFacade: Sendable { func openDirectory(_ url: URL, preferred: EditorID?, projectID: ProjectID?) async throws -> EditorChoiceDTO }` in `apps/mac/codans/App/Clients/EditorServiceFacade.swift`. The `testValue` implementation is `unimplemented()` (TCA's `XCTFail`-on-call); the `liveValue` **throws `EditorPlaceholderError.notYetImplemented`** (a one-case error added to `CodansCore/Editor/` in M1) — never `fatalError`, never a UI-crasher. If a `.openInEditorRequested` action fires between M3 landing and M5 landing, the reducer receives a clean `Result.failure` and the UI renders it as a toast. M5 replaces the facade with the real `EditorClient` and the case becomes benign-unused (optional M6 clean-up). See [Decision Log §DEC-1](#decision-log) for why option (a) (placeholder error) was chosen over option (b) (live no-op returning a synthetic `EditorChoiceDTO`).
 
-Tests under `apps/mac/touch-code/Tests/GitViewerTests/` (new subfolder):
+Tests under `apps/mac/codans/Tests/GitViewerTests/` (new subfolder):
 
 - `GitViewerFeatureTests.swift` using `TestStore`:
   - `test_worktreeSelected_triggersStatusAndLog`: dispatch `.worktreeSelected(wt.id)`, assert effects request `status` and `log(offset: 0)`.
@@ -300,7 +300,7 @@ Tests under `apps/mac/touch-code/Tests/GitViewerTests/` (new subfolder):
   - `test_error_toasts`: inject a `GitError.exec(1, "fatal: not a git repository")`; assert state ends in `.diff(.error(...))`.
   - `test_worktreeReselected_clearsStaleState`: changing Worktree while a diff is loaded must reset state before issuing new effects.
 
-**Observable acceptance.** `xcodebuild test -scheme touch-codeTests` adds the viewer tests and all pass. `make mac-build` still succeeds (the app compiles even though no view consumes the feature yet). No runtime user-visible change.
+**Observable acceptance.** `xcodebuild test -scheme codansTests` adds the viewer tests and all pass. `make mac-build` still succeeds (the app compiles even though no view consumes the feature yet). No runtime user-visible change.
 
 **Expected commits.** `feat(app): GitServiceClient dependency + EditorServiceFacade placeholder`, `feat(app): GitViewerFeature TCA reducer + TestStore coverage`.
 
@@ -310,12 +310,12 @@ Tests under `apps/mac/touch-code/Tests/GitViewerTests/` (new subfolder):
 
 **Work.**
 
-Under `apps/mac/touch-code/App/Features/GitViewer/Views/` (new subfolder), create:
+Under `apps/mac/codans/App/Features/GitViewer/Views/` (new subfolder), create:
 
 - `GitViewerView.swift` — root three-pane `SwiftUI.View`. Uses whatever state-binding idiom `0002 M5` establishes for its other features (typically `@Bindable var store: StoreOf<GitViewerFeature>`). Pane layout: left column 280 pt (list), center 300 pt (file list; only when scope is `.log` with a commit selected, otherwise hidden), right column flex (hunks). Scope switcher sits at the top as a segmented control bound to `.scope`.
 - `CommitLogView.swift` — `List` over `state.log.page?.commits ?? []`. Each row is `Commit.shortID` (monospace, dimmed), `authorName`, `subject` (truncating tail), `date` (relative-time formatter). `.onAppear` of the last row dispatches `.logScrolledToBottom`.
 - `FileChangeListView.swift` — `List` over `state.diff.unifiedDiff?.files ?? []`. Row is `[kindGlyph] [path]  +N −M`. Glyphs: `A`, `M`, `D`, `R→`, `C→`, `T`. Selection drives `.fileSelected(path:)`.
-- `UnifiedDiffView.swift` — `ScrollView` with a single `LazyVStack(spacing: 0)` over the selected file's `hunks.flatMap(\.lines)`. Each line is an `HStack { oldLineNumber; newLineNumber; marker; Text(line.text).monospaced() }`. Marker is `+` / `-` / ` ` / `\` (no-newline). Colour via `Theme.git.{added,removed,context}` tokens (a new `Theme.git` namespace under `apps/mac/touch-code/App/Theme/ThemeGit.swift`).
+- `UnifiedDiffView.swift` — `ScrollView` with a single `LazyVStack(spacing: 0)` over the selected file's `hunks.flatMap(\.lines)`. Each line is an `HStack { oldLineNumber; newLineNumber; marker; Text(line.text).monospaced() }`. Marker is `+` / `-` / ` ` / `\` (no-newline). Colour via `Theme.git.{added,removed,context}` tokens (a new `Theme.git` namespace under `apps/mac/codans/App/Theme/ThemeGit.swift`).
 - `GitViewerKeybindings.swift` — a `.focused` / `.onKeyPress` modifier chain wired to `Direction` actions: `j`/`k` → `.keyboardNavigation(.up/.down)`, `g` → `.home`, `G` → `.end`, `Tab` → `.paneFocusCycled`, `Enter` → `.commitSelected(shortID)` in log, `.openInEditorRequested` in files/hunks, `r` → `.refreshRequested`, `1`/`2`/`3` → `.scopeChanged(.working|.staged|.log)`, `.` → `.whitespaceToggled`, `/` → `.filterFocused`.
 
 App-shell wiring (relies on the sidebar / tab bar from `0002 M5` already existing):
@@ -337,11 +337,11 @@ No snapshot tests in M4a. The reducer tests from M3 already cover state transiti
 
 Add `pointfreeco/swift-snapshot-testing` to `apps/mac/Tuist/Package.swift` (see [DEC-2](#decision-log) for why this library). Pin the version to whichever the TCA dep pulls in transitively at install time; fall back to a float like `"1.17.0"` if TCA does not transitively depend on it.
 
-Under `apps/mac/touch-code/App/Features/GitViewer/Views/`, create:
+Under `apps/mac/codans/App/Features/GitViewer/Views/`, create:
 
 - `LargeDiffPlaceholderView.swift` — renders when `diffState == .error(GitError.diffTooLarge)`. Shows per-file summary rows (`[kind] [path]  +N −M`) and a "Copy command" button.
 
-Under `apps/mac/touch-code/App/Features/GitViewer/` (alongside the reducer), create:
+Under `apps/mac/codans/App/Features/GitViewer/` (alongside the reducer), create:
 
 - `LargeDiffCommand.swift` — pure helper:
 
@@ -361,7 +361,7 @@ Tests:
   | `/a/b's/c` | `.commit(sha:"deadbee")` | `cd '/a/b'\''s/c' && git show --no-color deadbee` |
   | `/x` | `.log` | (helper throws `LargeDiffCommandError.logScopeUnsupported`) |
 
-- `GitViewerSnapshotTests.swift` under `apps/mac/touch-code/Tests/GitViewerTests/Snapshots/` — four happy-path snapshots (log populated, working diff with 10 files, commit diff with rename+binary+added, `.notARepo` empty state) plus two error-path snapshots (`.diffTooLarge` placeholder with a path containing a space, `.exec` error toast). Stored reference images live under the same folder with the default `.png` suffix the library produces.
+- `GitViewerSnapshotTests.swift` under `apps/mac/codans/Tests/GitViewerTests/Snapshots/` — four happy-path snapshots (log populated, working diff with 10 files, commit diff with rename+binary+added, `.notARepo` empty state) plus two error-path snapshots (`.diffTooLarge` placeholder with a path containing a space, `.exec` error toast). Stored reference images live under the same folder with the default `.png` suffix the library produces.
 
 **Observable acceptance.** `pbpaste` after pressing "Copy command" on a synthetic 60 000-line diff (generated by `yes 'x' | head -n 60001 > bigfile && git add bigfile && git commit -m big`) returns exactly the string the table above predicts for the current worktree path. Snapshot tests pass on the CI runner. `make mac-lint` clean.
 
@@ -369,13 +369,13 @@ Tests:
 
 ### Milestone 5: C8 editor service layer
 
-**Goal after this milestone.** `touch-code/App/Clients/Editor/` exists with a complete `EditorService`, its live implementation, the six-entry allowlist, a pure `PathProber`, and a `ProcessSpawner` that isolates `Foundation.Process` for testability. Every path — resolution, spawn, error — is unit-tested without invoking a real editor, plus a single integration test invokes `/usr/bin/open`.
+**Goal after this milestone.** `codans/App/Clients/Editor/` exists with a complete `EditorService`, its live implementation, the six-entry allowlist, a pure `PathProber`, and a `ProcessSpawner` that isolates `Foundation.Process` for testability. Every path — resolution, spawn, error — is unit-tested without invoking a real editor, plus a single integration test invokes `/usr/bin/open`.
 
 This milestone is symmetric to M2 but for C8: it ends with a service ready to drive, and it does not touch the UI.
 
 **Work.**
 
-Under `apps/mac/touch-code/App/Clients/Editor/`, create the files named in [c8-editor-integration.md §Component Boundaries](../design-docs/c8-editor-integration.md#component-boundaries):
+Under `apps/mac/codans/App/Clients/Editor/`, create the files named in [c8-editor-integration.md §Component Boundaries](../design-docs/c8-editor-integration.md#component-boundaries):
 
 - `EditorService.swift` — the protocol. Three async methods (`describe`, `resolve`, `open`).
 - `EditorService+Live.swift` — `LiveEditorService` (struct holding a `ProcessSpawner`, a `PathProber`, and closures that read the global default + custom editors from `SettingsStore` and the per-Project override from `HierarchyManager`). `resolve` implements the four-tier fallback chain from the design with **no silent fallthrough**. `open` runs the resolved template through `ProcessSpawner`.
@@ -417,7 +417,7 @@ Under `apps/mac/touch-code/App/Clients/Editor/`, create the files named in [c8-e
 - `EditorEnv.swift` — `enum EditorEnv { static let whitelist: [String] = ["PATH", "HOME"]; static let forced: [String: String] = ["LC_ALL": "C.UTF-8"]; static let forbidden: Set<String> = ["SHELL", "EDITOR", "VISUAL", "GIT_DIR", "GIT_CONFIG", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_ASKPASS", "JAVA_TOOL_OPTIONS"]; static func build(from parent: [String: String]) -> [String: String] }`. Symmetric to `GitProcessEnv` (M2); keeps the env-stripping discipline visible side-by-side so a reviewer can see both are aligned (per C8 review feedback — `SHELL` is stripped here; this was fixed in the design's round-2 review).
 - `SpawnContract.swift` — `enum SpawnContract { static let timeout: Duration = .seconds(5); static let sigtermGrace: Duration = .seconds(1) }`. One source of truth for both numbers.
 
-Tests under `apps/mac/touch-code/Tests/EditorTests/` (new subfolder):
+Tests under `apps/mac/codans/Tests/EditorTests/` (new subfolder):
 
 - `EditorRegistryTests.swift` — assert the six built-in descriptors match the design's table byte-for-byte (IDs, display names, argv templates). Assert `merged(with:)` rejects `CustomEditor(id: "vscode", …)` with `.invalidID("vscode")` error surfaced as `EditorError.badTemplate`.
 - `EditorValidatorsTests.swift` — already covered in M1; no duplication here.
@@ -439,7 +439,7 @@ Tests under `apps/mac/touch-code/Tests/EditorTests/` (new subfolder):
   - `.spawnFailed(reason: "ENOENT")` → `EditorError.spawnFailed(reason: "ENOENT")`.
 - `LiveProcessSpawnerIntegrationTests.swift` — gated by `TC_RUN_EDITOR_INTEGRATION_TESTS=1`. Spawns `/usr/bin/open` with argv `["open", NSTemporaryDirectory()]` and asserts `ProcessOutcome.exited(code: 0, …)`.
 
-**Observable acceptance.** `xcodebuild test -scheme touch-codeTests` runs the editor tests; all pass. Under `TC_RUN_EDITOR_INTEGRATION_TESTS=1`, the live-spawn smoke test launches Finder on the tmp directory and passes. `make mac-lint` clean. No UI change yet.
+**Observable acceptance.** `xcodebuild test -scheme codansTests` runs the editor tests; all pass. Under `TC_RUN_EDITOR_INTEGRATION_TESTS=1`, the live-spawn smoke test launches Finder on the tmp directory and passes. `make mac-lint` clean. No UI change yet.
 
 **Expected commits.** `feat(editor): EditorService + allowlist + ProcessSpawner`, `feat(editor): PathProber + env whitelist + spawn contract`.
 
@@ -449,22 +449,22 @@ Tests under `apps/mac/touch-code/Tests/EditorTests/` (new subfolder):
 
 **Work.**
 
-Under `apps/mac/touch-code/App/Clients/`:
+Under `apps/mac/codans/App/Clients/`:
 
 - `EditorClient.swift` — parallel to `GitServiceClient`. `DependencyKey`-conforming struct with `describe`, `resolve`, `open` closures. `liveValue` is built from `LiveEditorService` plus the project/settings lookup closures.
 - Replace the M3 placeholder `EditorServiceFacade` with a real one backed by `EditorClient.open`. Delete `EditorServiceFacade.swift` and update `GitViewerFeature` to `@Dependency(\.editorClient)` directly.
 
-Under `apps/mac/touch-code/App/Features/Editor/`:
+Under `apps/mac/codans/App/Features/Editor/`:
 
 - `EditorFeature.swift` — a small TCA reducer that owns the "describe + resolve" state for the dropdown and Settings section. `State` carries `available: [EditorDescriptor]`, `globalDefault: EditorID?`, `customEditors: [CustomEditor]`. Actions: `.onAppear`, `.describeResponse(...)`, `.setGlobalDefault(EditorID?)`, `.addCustomEditor(CustomEditor)`, `.updateCustomEditor(id: EditorID, CustomEditor)`, `.removeCustomEditor(EditorID)`. The reducer persists changes through `SettingsStore`.
 
-Under `apps/mac/touch-code/App/Features/Settings/`:
+Under `apps/mac/codans/App/Features/Settings/`:
 
-- `SettingsStore.swift` — `@MainActor @Observable` class managing `~/.config/touch-code/settings.json` via `AtomicFileStore`. Stores `{ version: 1, defaultEditorID: String?, customEditors: [CustomEditor] }`. Debounces writes with the same 500 ms pattern as `CatalogStore` (0002 M2). Decode failure backs up to `settings.json.broken-<ISO8601>`.
+- `SettingsStore.swift` — `@MainActor @Observable` class managing `~/.config/codans/settings.json` via `AtomicFileStore`. Stores `{ version: 1, defaultEditorID: String?, customEditors: [CustomEditor] }`. Debounces writes with the same 500 ms pattern as `CatalogStore` (0002 M2). Decode failure backs up to `settings.json.broken-<ISO8601>`.
 - `SettingsEditorSection.swift` — SwiftUI form. A `Picker` bound to the global default. A `List` of custom editors with a sheet-based editor supporting inline validation against `CommandTemplate.validate` and `CustomEditor.validatedID`. A "Refresh editor detection" button that calls `editorClient.describe` and re-renders installed/missing markers.
 - `SettingsFeature.swift` (if this does not already exist from 0002 M5, create minimally; otherwise add the editor section as a child).
 
-Under `apps/mac/touch-code/App/Features/WorktreeHeader/` (new feature folder; documented in design as "not yet in architecture.md" per the C8 review fix):
+Under `apps/mac/codans/App/Features/WorktreeHeader/` (new feature folder; documented in design as "not yet in architecture.md" per the C8 review fix):
 
 - `WorktreeHeaderOpenButton.swift` — A `Menu` view that renders `editorFeature.state.available` as rows (disabled rows for `.missingBinary`), plus a "Custom…" sub-menu surfacing `customEditors`, plus a "Set as default…" action. Clicking a row dispatches `.openInEditor(id)` which resolves to `editorClient.open(directory: worktree.path, preferred: id, projectID: project.id)`. The dropdown's current label is the resolved editor's `displayName` for the active Worktree (obtained via `editorClient.resolve`).
 
@@ -488,16 +488,16 @@ Tests:
 
 **Expected commits.** `feat(editor): EditorClient TCA bridge + EditorFeature`, `feat(settings): SettingsStore + editors section`, `feat(app): Worktree-header Open-in dropdown`, `feat(runtime): setDefaultEditor through HierarchyClient`.
 
-### Milestone 7a: `editor.*` IPC wire types + `tc open` subcommand
+### Milestone 7a: `editor.*` IPC wire types + `codans open` subcommand
 
-**Goal after this milestone.** `tc open [--in <editor>] [<worktree>]` parses correctly, the Worktree-resolution order is exercised in tests, and every envelope crosses the wire correctly against a **fake** IPC client. No real socket is exercised here; M7b wires the app side. Landing M7a independently is safe because nothing beyond the CLI target and the IPC wire types changes.
+**Goal after this milestone.** `codans open [--in <editor>] [<worktree>]` parses correctly, the Worktree-resolution order is exercised in tests, and every envelope crosses the wire correctly against a **fake** IPC client. No real socket is exercised here; M7b wires the app side. Landing M7a independently is safe because nothing beyond the CLI target and the IPC wire types changes.
 
 **Work.**
 
-Under `apps/mac/TouchCodeIPC/Editor/`, expand `EditorIPCTypes.swift` (created in M1) with request/response envelopes:
+Under `apps/mac/CodansIPC/Editor/`, expand `EditorIPCTypes.swift` (created in M1) with request/response envelopes:
 
     public struct EditorOpenRequest: Codable, Equatable, Sendable {
-      public var worktreeID: UUID?           // nil means: resolve via TOUCH_CODE_PANE_ID
+      public var worktreeID: UUID?           // nil means: resolve via CODANS_PANE_ID
       public var preferred: EditorID?
       public var paneID: UUID?              // app uses this to resolve worktreeID when above is nil
     }
@@ -514,7 +514,7 @@ Under `apps/mac/TouchCodeIPC/Editor/`, expand `EditorIPCTypes.swift` (created in
 
 Add `EditorIPCError.swift` — wraps the app's `EditorError` into wire-safe codes: `.unresolvedWorktree = 100`, `.notInstalled = 101`, `.nonZeroExit = 102`, `.timedOut = 103`, `.spawnFailed = 104`, `.badTemplate = 105`, `.notADirectory = 106`. The JSON-RPC `{ error: { code, message } }` envelope re-uses this code table.
 
-Under `apps/mac/tc/Commands/` (new subfolder — update `tc` target's `buildableFolders` accordingly), create `OpenCommand.swift`:
+Under `apps/mac/codans-cli/Commands/` (new subfolder — update `codans` target's `buildableFolders` accordingly), create `OpenCommand.swift`:
 
     struct OpenCommand: ParsableCommand {
       static let configuration = CommandConfiguration(
@@ -527,9 +527,9 @@ Under `apps/mac/tc/Commands/` (new subfolder — update `tc` target's `buildable
       func run() throws { /* … */ }
     }
 
-`run()` resolves the Worktree ID in order: (1) explicit `--worktree`/positional; (2) `ProcessInfo.processInfo.environment["TOUCH_CODE_PANE_ID"]` passed via the IPC envelope's `paneID` field; (3) neither → print `"error: no worktree (pass <worktree> or run from inside a touch-code Pane)"` to stderr and `throw ExitCode(2)`. For (1) and (2), it issues `editor.open` via a lightweight `IPCClient` helper under `apps/mac/tc/IPCClient.swift`.
+`run()` resolves the Worktree ID in order: (1) explicit `--worktree`/positional; (2) `ProcessInfo.processInfo.environment["CODANS_PANE_ID"]` passed via the IPC envelope's `paneID` field; (3) neither → print `"error: no worktree (pass <worktree> or run from inside a codans Pane)"` to stderr and `throw ExitCode(2)`. For (1) and (2), it issues `editor.open` via a lightweight `IPCClient` helper under `apps/mac/codans/IPCClient.swift`.
 
-Also under `apps/mac/tc/`, add `IPCClient.swift` — a thin helper that encodes requests to JSON and decodes responses. Protocol-based so tests inject a `RecordingIPCClient`:
+Also under `apps/mac/codans/`, add `IPCClient.swift` — a thin helper that encodes requests to JSON and decodes responses. Protocol-based so tests inject a `RecordingIPCClient`:
 
     protocol IPCClient: Sendable {
       func call<Request: Encodable, Response: Decodable>(
@@ -537,43 +537,43 @@ Also under `apps/mac/tc/`, add `IPCClient.swift` — a thin helper that encodes 
       ) async throws -> Response
     }
 
-Update `apps/mac/tc/main.swift` to include `OpenCommand.self` in its subcommands array.
+Update `apps/mac/codans/main.swift` to include `OpenCommand.self` in its subcommands array.
 
-Tests (host the tests under `touch-codeTests` — see DEC-3 note about declining to add a `tcTests` target in this plan):
+Tests (host the tests under `codansTests` — see DEC-3 note about declining to add a `tcTests` target in this plan):
 
 - `OpenCommandParseTests.swift` — `ArgumentParser` tests:
-  - `tc open --in vscode main-worktree` → `(editorID: "vscode", worktree: "main-worktree")`.
-  - `tc open` with no args → `(editorID: nil, worktree: nil)`.
-  - `tc open --in xcode` → `(editorID: "xcode", worktree: nil)`.
+  - `codans open --in vscode main-worktree` → `(editorID: "vscode", worktree: "main-worktree")`.
+  - `codans open` with no args → `(editorID: nil, worktree: nil)`.
+  - `codans open --in xcode` → `(editorID: "xcode", worktree: nil)`.
 - `OpenCommandResolutionTests.swift` — drive with a `RecordingIPCClient` fake and a synthetic env:
-  - With `TOUCH_CODE_PANE_ID = <uuid>` set → asserts the call payload is `EditorOpenRequest(worktreeID: nil, preferred: "vscode", paneID: <uuid>)`.
+  - With `CODANS_PANE_ID = <uuid>` set → asserts the call payload is `EditorOpenRequest(worktreeID: nil, preferred: "vscode", paneID: <uuid>)`.
   - With no env and no positional → asserts stderr contains `"no worktree"`, exit code 2, **zero** IPC calls on the recorder.
   - With explicit positional `main-worktree` → asserts the call payload resolves through the name. (Names are resolved server-side in M7b; the CLI passes the positional through as a `hierarchy.resolveWorktree` pre-call, or as a `worktreeID?` + a separate name field — leave this as a minor design choice for M7b.)
 
 **Observable acceptance.** `make mac-build-cli`. From a regular terminal:
 
-    tc open
-    # stderr: "error: no worktree (pass <worktree> or run from inside a touch-code Pane)"
+    codans open
+    # stderr: "error: no worktree (pass <worktree> or run from inside a codans Pane)"
     # exit code: 2
     echo $?
     # 2
 
-    tc open --help
+    codans open --help
     # stdout: usage message with --in option and worktree argument
 
-Unit tests pass under `xcodebuild test -scheme touch-codeTests`. `make mac-lint` clean.
+Unit tests pass under `xcodebuild test -scheme codansTests`. `make mac-lint` clean.
 
-**Expected commits.** `feat(ipc): editor.* wire types + error codes`, `feat(tc): open subcommand + IPCClient helper`.
+**Expected commits.** `feat(ipc): editor.* wire types + error codes`, `feat(codans): open subcommand + IPCClient helper`.
 
 ### Milestone 7b: `SocketServer` dispatch of `editor.*`
 
-**Goal after this milestone.** `tc open` from inside a Pane actually opens the editor end-to-end. Method dispatch lives in the `SocketServer`; the `editor.*` handlers bridge to `EditorClient` and `HierarchyClient`.
+**Goal after this milestone.** `codans open` from inside a Pane actually opens the editor end-to-end. Method dispatch lives in the `SocketServer`; the `editor.*` handlers bridge to `EditorClient` and `HierarchyClient`.
 
-**Prerequisite.** Per [DEC-3](#decision-log), the plan of record is that `SocketServer` is delivered by `docs/exec-plans/0003-hooks-and-cli.md` (the in-flight C3+C4 plan). Before starting M7b, check whether `0003` has landed a `SocketServer` with a method-dispatch hook. If yes, M7b only adds `editor.*` handlers under an existing dispatch map. If no, M7b lands a narrow editor-only dispatcher under `apps/mac/touch-code/App/Features/Socket/` with just enough socket-accept + JSON-RPC framing to drive the three `editor.*` methods, and Decision Log records the fallback (so `0003` generalises instead of reimplementing).
+**Prerequisite.** Per [DEC-3](#decision-log), the plan of record is that `SocketServer` is delivered by `docs/exec-plans/0003-hooks-and-cli.md` (the in-flight C3+C4 plan). Before starting M7b, check whether `0003` has landed a `SocketServer` with a method-dispatch hook. If yes, M7b only adds `editor.*` handlers under an existing dispatch map. If no, M7b lands a narrow editor-only dispatcher under `apps/mac/codans/App/Features/Socket/` with just enough socket-accept + JSON-RPC framing to drive the three `editor.*` methods, and Decision Log records the fallback (so `0003` generalises instead of reimplementing).
 
 **Work (when `0003` SocketServer is present).**
 
-Under `apps/mac/touch-code/App/Features/Socket/`, extend the existing dispatch map with three handlers:
+Under `apps/mac/codans/App/Features/Socket/`, extend the existing dispatch map with three handlers:
 
 - `editor.describe` → call `editorClient.describe()` → wrap in `EditorDescribeResponse`.
 - `editor.open` → if `request.worktreeID == nil`, resolve via `request.paneID → HierarchyManager.pane(byID: …).parentWorktreeID`; if still nil, return `EditorIPCError.unresolvedWorktree` (code 100). Otherwise resolve the `Worktree.path`, call `editorClient.open(directory:preferred:projectID:)`, wrap in `EditorOpenResponse`.
@@ -581,30 +581,30 @@ Under `apps/mac/touch-code/App/Features/Socket/`, extend the existing dispatch m
 
 **Work (fallback, when `0003` has not landed).**
 
-Under `apps/mac/touch-code/App/Features/Socket/`, add:
+Under `apps/mac/codans/App/Features/Socket/`, add:
 
-- `SocketServer.swift` — minimal `@MainActor` class that listens on `TOUCH_CODE_SOCKET_PATH ?? "/tmp/touch-code-$UID.sock"` using `SwiftNIO`'s `ServerBootstrap` (or a `dispatch_io`-based hand-rolled server if adding SwiftNIO is contentious — prefer the SwiftNIO path, it's how supaterm does it; record as a decision). Accepts connections; frames length-prefixed JSON per the architecture doc; dispatches to a method map that contains only the three `editor.*` entries. All non-editor methods return `-32601 Method not found`.
+- `SocketServer.swift` — minimal `@MainActor` class that listens on `CODANS_SOCKET_PATH ?? "/tmp/codans-$UID.sock"` using `SwiftNIO`'s `ServerBootstrap` (or a `dispatch_io`-based hand-rolled server if adding SwiftNIO is contentious — prefer the SwiftNIO path, it's how supaterm does it; record as a decision). Accepts connections; frames length-prefixed JSON per the architecture doc; dispatches to a method map that contains only the three `editor.*` entries. All non-editor methods return `-32601 Method not found`.
 - `SocketServerLifecycle.swift` — starts the server at app launch; stops cleanly on `applicationWillTerminate`.
 - **Explicitly note in Decision Log** that this is a narrow editor-only dispatcher, so `0003` replaces rather than extends it.
 
 Tests:
 
 - `SocketServerEditorDispatchTests.swift` — synthetic JSON-RPC envelope in, parsed response out. Cover: `editor.describe` returns the registry; `editor.open` with missing IDs surfaces code 100; `editor.open` with a valid worktree ID invokes the recording `EditorClient.testValue` with the expected args.
-- `TcOpenE2ETests.swift` (gated behind `TC_RUN_IPC_INTEGRATION_TESTS=1`) — spin up a real `SocketServer` on a temp socket path; spawn `tc open` as a subprocess with `TOUCH_CODE_SOCKET_PATH` overridden; assert stdout `"opened <name> in Finder"` and exit 0.
+- `TcOpenE2ETests.swift` (gated behind `TC_RUN_IPC_INTEGRATION_TESTS=1`) — spin up a real `SocketServer` on a temp socket path; spawn `codans open` as a subprocess with `CODANS_SOCKET_PATH` overridden; assert stdout `"opened <name> in Finder"` and exit 0.
 
-**Observable acceptance.** Build `tc` and the app via `make mac-build`. Launch the app, open a Pane, then inside it:
+**Observable acceptance.** Build `codans` and the app via `make mac-build`. Launch the app, open a Pane, then inside it:
 
-    tc open
+    codans open
     # stdout: "opened <Worktree name> in <Editor display>"
     # exit code 0
 
-    tc open --in zed
+    codans open --in zed
     # opens Zed on the current Worktree directory
 
-    tc open some-other-worktree --in finder
+    codans open some-other-worktree --in finder
     # opens Finder on the named Worktree
 
-**Expected commits.** `feat(ipc): editor.* method handlers`, `feat(app): SocketServer editor dispatch (+ fallback scaffold if 0003 hasn't landed)`, `test(ipc): end-to-end tc open smoke`.
+**Expected commits.** `feat(ipc): editor.* method handlers`, `feat(app): SocketServer editor dispatch (+ fallback scaffold if 0003 hasn't landed)`, `test(ipc): end-to-end codans open smoke`.
 
 ### Milestone 8: Cross-feature integration + performance + docs close-out
 
@@ -614,8 +614,8 @@ Tests:
 
 Tests:
 
-- `apps/mac/touch-code/Tests/Integration/GitViewerEditorIntegrationTests.swift` — `TestStore` spanning `RootFeature` with real `GitViewerFeature`, real `EditorFeature`, real `HierarchyManager`, and a `RecordingProcessSpawner` + mock `GitService`. Scenario: launch → select Worktree → scope `.log` → pick commit → press `Enter` → assert the editor dispatcher is called with the resolved editor ID and the Worktree path.
-- `apps/mac/touch-code/Tests/Performance/GitViewerPerformanceTests.swift` — measures parse + reducer-state-update wall-clock via `ContinuousClock.Instant` against a checked-in synthetic 1 000-line `git diff` fixture (`Tests/Performance/fixtures/diff-1000-lines.txt`). Gated by `TC_RUN_PERFORMANCE_TESTS=1`.
+- `apps/mac/codans/Tests/Integration/GitViewerEditorIntegrationTests.swift` — `TestStore` spanning `RootFeature` with real `GitViewerFeature`, real `EditorFeature`, real `HierarchyManager`, and a `RecordingProcessSpawner` + mock `GitService`. Scenario: launch → select Worktree → scope `.log` → pick commit → press `Enter` → assert the editor dispatcher is called with the resolved editor ID and the Worktree path.
+- `apps/mac/codans/Tests/Performance/GitViewerPerformanceTests.swift` — measures parse + reducer-state-update wall-clock via `ContinuousClock.Instant` against a checked-in synthetic 1 000-line `git diff` fixture (`Tests/Performance/fixtures/diff-1000-lines.txt`). Gated by `TC_RUN_PERFORMANCE_TESTS=1`.
 
   **Baseline collection (one-shot per machine; CI runners capture their own):**
   - Take **50 samples**, discard the **first 5** as warm-up (cold caches skew P95).
@@ -635,12 +635,12 @@ Tests:
   **Why 50 samples + warm-up discard + P95**: 10 samples are insufficient for a stable P95; Swift's ARC, cache warmth, and macOS scheduler all introduce variance. 5 warm-up samples drop the cold-cache outliers without lengthening CI. P95 (not max) absorbs a single adversarial schedule without masking real regressions.
 
   **Why clock = `ContinuousClock.Instant`**: monotonic, nanosecond-resolution, immune to wall-clock changes during the run. `os_signpost` captures the same data but its summary-mode output is not addressable from test assertions — we emit both (signposts for Instruments correlation, clock for assertions).
-- `apps/mac/touch-code/Tests/Integration/EditorFallbackChainTests.swift` — end-to-end exercises the fallback chain: (a) per-project override set + editor installed → opens the override; (b) per-project override set + editor missing → surfaces `.notInstalled` without falling through to global; (c) no override, global set, installed → opens global; (d) nothing set → opens Finder.
-- `apps/mac/touch-code/Tests/Integration/IPCEditorTests.swift` — spins up a real `SocketServer` on a temp socket path, runs `tc open` as a subprocess against it with a `TOUCH_CODE_SOCKET_PATH` override, asserts the response envelope round-trip.
+- `apps/mac/codans/Tests/Integration/EditorFallbackChainTests.swift` — end-to-end exercises the fallback chain: (a) per-project override set + editor installed → opens the override; (b) per-project override set + editor missing → surfaces `.notInstalled` without falling through to global; (c) no override, global set, installed → opens global; (d) nothing set → opens Finder.
+- `apps/mac/codans/Tests/Integration/IPCEditorTests.swift` — spins up a real `SocketServer` on a temp socket path, runs `codans open` as a subprocess against it with a `CODANS_SOCKET_PATH` override, asserts the response envelope round-trip.
 
 Documentation close-out:
 
-- `docs/architecture.md` — add `touch-code/Git/` and `touch-code/App/Clients/Editor/` to the in-app module table; add `touch-code/App/Features/WorktreeHeader/` to the features list (per C8 review note).
+- `docs/architecture.md` — add `codans/Git/` and `codans/App/Clients/Editor/` to the in-app module table; add `codans/App/Features/WorktreeHeader/` to the features list (per C8 review note).
 - `docs/product-spec.md` — update Open Question #7 entry to `(Resolved by docs/design-docs/c8-editor-integration.md.)`; mark C7 and C8 as `Beta` in the capability maturity column once the acceptance walkthrough passes.
 - `docs/design-docs/README.md` — no change (already updated).
 - `docs/exec-plans/README.md` — confirm 0005 is listed with a one-line description.
@@ -648,14 +648,14 @@ Documentation close-out:
 Dogfooding acceptance walkthrough (to be appended to `Outcomes & Retrospective` once run):
 
 1. `make mac-generate && make mac-build && make mac-run-app`.
-2. Add the touch-code repo as a Project; select the current branch's Worktree.
+2. Add the codans repo as a Project; select the current branch's Worktree.
 3. Toggle the Git viewer. See the last 100 commits in < 500 ms on a warm cache.
 4. Press `1` → working-tree diff; `2` → staged; `3` → log; `Enter` on a commit → its diff. All transitions under one frame.
 5. Press `Enter` on a file row → Worktree opens in the default editor (Finder on a fresh install).
 6. Open Settings → Editors → pick Zed as global default (if installed) → confirm `settings.json` updates.
 7. Right-click the Project → "Set default editor" → Cursor → confirm `catalog.json` updates.
 8. Click the Worktree-header "Open in ▾" → Cursor → Cursor opens the directory.
-9. From a Pane: `tc open` → editor opens; `tc open --in finder` → Finder opens; `exit` the pane, run `tc open` from a regular shell → exit 2 with the documented stderr line.
+9. From a Pane: `codans open` → editor opens; `codans open --in finder` → Finder opens; `exit` the pane, run `codans open` from a regular shell → exit 2 with the documented stderr line.
 
 **Observable acceptance.** All tests pass (including the gated performance + integration ones). Every step above is green. Architecture and product-spec changes land in a single commit alongside the test additions.
 
@@ -663,16 +663,16 @@ Dogfooding acceptance walkthrough (to be appended to `Outcomes & Retrospective` 
 
 ## Concrete Steps
 
-Run every command from the repository root (`/Users/wanggang/dev/00/touch-code`) unless otherwise noted. Steps are grouped by milestone. Keep the Progress section updated as each step completes.
+Run every command from the repository root (`/Users/wanggang/dev/00/codans`) unless otherwise noted. Steps are grouped by milestone. Keep the Progress section updated as each step completes.
 
 ### M1 steps
 
-    # Write sources under TouchCodeCore/Git, TouchCodeCore/Editor, TouchCodeIPC/Editor; update Project.swift if needed
+    # Write sources under CodansCore/Git, CodansCore/Editor, CodansIPC/Editor; update Project.swift if needed
     make mac-generate
 
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme TouchCodeCoreTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme CodansCoreTests | xcbeautify
     # Expected tail: "Test Suite 'All tests' passed at ..."
 
     make mac-lint
@@ -683,24 +683,24 @@ Run every command from the repository root (`/Users/wanggang/dev/00/touch-code`)
     # Assumes 0002 M3+ has landed (GhosttyKit enabled; app target builds).
     make mac-generate
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests | xcbeautify
 
     # Integration smoke (needs `git`):
     TC_RUN_GIT_INTEGRATION_TESTS=1 \
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/LiveGitServiceIntegrationTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/LiveGitServiceIntegrationTests | xcbeautify
 
 ### M3 steps
 
     # Prerequisite: 0002 M5 has landed (TCA is in Package.swift).
     make mac-generate
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/GitViewerFeatureTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/GitViewerFeatureTests | xcbeautify
 
 ### M4a steps
 
@@ -716,24 +716,24 @@ Run every command from the repository root (`/Users/wanggang/dev/00/touch-code`)
     make mac-generate
 
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/LargeDiffCommandTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/LargeDiffCommandTests | xcbeautify
 
 ### M5 steps
 
     make mac-generate
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/EditorServiceResolutionTests \
-                      -only-testing touch-codeTests/EditorServiceSpawnTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/EditorServiceResolutionTests \
+                      -only-testing codansTests/EditorServiceSpawnTests | xcbeautify
 
     TC_RUN_EDITOR_INTEGRATION_TESTS=1 \
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/LiveProcessSpawnerIntegrationTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/LiveProcessSpawnerIntegrationTests | xcbeautify
 
 ### M6 steps
 
@@ -742,44 +742,44 @@ Run every command from the repository root (`/Users/wanggang/dev/00/touch-code`)
     # Manual: verify dropdown, settings section, per-Project override persistence.
 
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/EditorFeatureTests \
-                      -only-testing touch-codeTests/SettingsStoreTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/EditorFeatureTests \
+                      -only-testing codansTests/SettingsStoreTests | xcbeautify
 
 ### M7a steps
 
-    make mac-build-cli       # builds tc; no app dependency needed for M7a
-    # From a regular terminal (no TOUCH_CODE_PANE_ID):
-    tc open
-    # Expected: stderr "error: no worktree (pass <worktree> or run from inside a touch-code Pane)"
+    make mac-build-cli       # builds codans; no app dependency needed for M7a
+    # From a regular terminal (no CODANS_PANE_ID):
+    codans open
+    # Expected: stderr "error: no worktree (pass <worktree> or run from inside a codans Pane)"
     echo $?
     # 2
 
-    tc open --help
+    codans open --help
     # Expected: usage text with --in option and <worktree> argument
 
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/OpenCommandParseTests \
-                      -only-testing touch-codeTests/OpenCommandResolutionTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/OpenCommandParseTests \
+                      -only-testing codansTests/OpenCommandResolutionTests | xcbeautify
 
 ### M7b steps
 
     # First, check whether 0003's SocketServer has landed. If no, we land the fallback narrow dispatcher.
-    grep -rl 'class SocketServer' apps/mac/touch-code/App/Features/Socket/ 2>/dev/null || echo "0003 SocketServer NOT landed — using fallback dispatcher"
+    grep -rl 'class SocketServer' apps/mac/codans/App/Features/Socket/ 2>/dev/null || echo "0003 SocketServer NOT landed — using fallback dispatcher"
 
-    make mac-build           # builds tc + app
+    make mac-build           # builds codans + app
     # Launch the app via `make mac-run-app`, open a Pane, then inside that Pane:
-    tc open
+    codans open
     # Expected: stdout "opened <name> in Finder", exit 0.
 
     TC_RUN_IPC_INTEGRATION_TESTS=1 \
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/TcOpenE2ETests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/TcOpenE2ETests | xcbeautify
 
 ### M8 steps
 
@@ -789,23 +789,23 @@ Run every command from the repository root (`/Users/wanggang/dev/00/touch-code`)
     TC_RUN_PERFORMANCE_TESTS=1 \
     TC_PERF_BASELINE=capture \
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/GitViewerPerformanceTests | xcbeautify
-    cat apps/mac/touch-code/Tests/Performance/baseline.json
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/GitViewerPerformanceTests | xcbeautify
+    cat apps/mac/codans/Tests/Performance/baseline.json
     # Expected: JSON with samples.parse_ms.p95 < 80 and samples.reducer_ms.p95 < 20 on an M1.
 
     # 2. Default mode — assert current P95 ≤ max(designBudget, baseline.p95 × 1.25).
     TC_RUN_PERFORMANCE_TESTS=1 \
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests \
-                      -only-testing touch-codeTests/GitViewerPerformanceTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests \
+                      -only-testing codansTests/GitViewerPerformanceTests | xcbeautify
 
     # 3. Full integration + acceptance.
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-      xcodebuild test -workspace apps/mac/touch-code.xcworkspace \
-                      -scheme touch-codeTests | xcbeautify
+      xcodebuild test -workspace apps/mac/codans.xcworkspace \
+                      -scheme codansTests | xcbeautify
 
     # 4. Run the dogfooding walkthrough from the Milestone 8 section above.
 
@@ -820,9 +820,9 @@ After all eight milestones land, a fresh contributor can observe:
 5. A synthetic 60 000-line diff shows the placeholder with a "Copy command" button whose output is the expected `cd '<abs-path>' && git …` (with POSIX-quoted paths for paths containing spaces or apostrophes).
 6. Clicking "Open in ▾" on the Worktree header lists the six built-ins with accurate installed/missing state, plus any configured custom editors.
 7. Choosing an installed editor opens the Worktree **directory** in that editor within 5 s; choosing a missing built-in shows the exact design-mandated error ("Visual Studio Code CLI (`code`) not found on PATH. Install via 'Shell Command: Install code command in PATH' in VSCode's Command Palette.").
-8. From inside a Pane, `tc open` opens the default editor; `tc open --in zed` opens Zed; `tc open some-other-worktree` targets a named Worktree. From a regular shell, `tc open` exits 2 with the exact stderr line.
+8. From inside a Pane, `codans open` opens the default editor; `codans open --in zed` opens Zed; `codans open some-other-worktree` targets a named Worktree. From a regular shell, `codans open` exits 2 with the exact stderr line.
 9. Settings → Editors shows the registry, allows adding a custom editor with validation, and persists through relaunch.
-10. `xcodebuild test -scheme TouchCodeCoreTests` and `-scheme touch-codeTests` all green. `make mac-lint` clean.
+10. `xcodebuild test -scheme CodansCoreTests` and `-scheme codansTests` all green. `make mac-lint` clean.
 
 Failure on any of the above blocks sign-off.
 
@@ -831,11 +831,11 @@ Failure on any of the above blocks sign-off.
 Every milestone is re-runnable.
 
 - **Regenerate workspace.** `make mac-generate` is idempotent; safe after any `Project.swift` edit.
-- **Reset settings.** `mv ~/.config/touch-code/settings.json ~/.config/touch-code/settings.json.bak` forces default settings on next launch. A corrupt file is automatically backed up to `settings.json.broken-<timestamp>`.
+- **Reset settings.** `mv ~/.config/codans/settings.json ~/.config/codans/settings.json.bak` forces default settings on next launch. A corrupt file is automatically backed up to `settings.json.broken-<timestamp>`.
 - **Reset the viewer's in-flight work.** The viewer is stateless across launches; no reset needed. If a `git` subprocess hangs (should be caught by the 10 s timeout), `pkill -f '^git ' -n` kills the most recent child.
 - **Reset the path-probe cache.** No on-disk state; the cache is process-local. Relaunch the app or open Settings → Editors → "Refresh editor detection".
-- **Recover from a custom-editor template that breaks the dropdown.** Edit `~/.config/touch-code/settings.json` manually to remove the offending `customEditors` entry; relaunch.
-- **Unwind a failed `tc open`.** No rollback needed; the command is spawn-only and never mutates state.
+- **Recover from a custom-editor template that breaks the dropdown.** Edit `~/.config/codans/settings.json` manually to remove the offending `customEditors` entry; relaunch.
+- **Unwind a failed `codans open`.** No rollback needed; the command is spawn-only and never mutates state.
 - **Recover from an accidentally-committed `GIT_*` env leak.** The `GitProcessEnv.build` assertions fail-fast in debug; any leak is surfaced immediately during testing.
 
 None of the steps modify global state (no `xcode-select`, no PATH mutation, no `launchctl` entries).
@@ -854,7 +854,7 @@ When work begins, log in Decision Log any adjustment to these assumptions. Plann
 
 The following types, functions, and signatures must exist by plan completion. Names are binding — later plans reference them.
 
-**`TouchCodeCore/Git/`** (pure Swift; zero platform imports):
+**`CodansCore/Git/`** (pure Swift; zero platform imports):
 
     public struct Commit: Equatable, Hashable, Codable, Sendable, Identifiable {
       public let id: String                  // full SHA-1 or SHA-256
@@ -902,7 +902,7 @@ The following types, functions, and signatures must exist by plan completion. Na
     }
     public enum GitShaValidator { public static func isValid(_ s: String) -> Bool }
 
-**`TouchCodeCore/Editor/`**:
+**`CodansCore/Editor/`**:
 
     public typealias EditorID = String
     public struct CommandTemplate: Equatable, Codable, Sendable {
@@ -918,7 +918,7 @@ The following types, functions, and signatures must exist by plan completion. Na
       case emptyBinary; case missingDirPlaceholder; case duplicateDirPlaceholder; case invalidID(String)
     }
 
-**`TouchCodeIPC/Editor/`**:
+**`CodansIPC/Editor/`**:
 
     public struct EditorDescriptorDTO: Codable, Equatable, Sendable { … }
     public struct EditorChoiceDTO: Codable, Equatable, Sendable { … }
@@ -936,7 +936,7 @@ The following types, functions, and signatures must exist by plan completion. Na
       public static let setDefault = "editor.setDefault"
     }
 
-**`touch-code/Git/`** (app-target; imports `TouchCodeCore` + Foundation):
+**`codans/Git/`** (app-target; imports `CodansCore` + Foundation):
 
     public protocol GitService: Sendable {
       func log(at path: URL, page: LogPage.Cursor) async throws -> LogPage
@@ -948,7 +948,7 @@ The following types, functions, and signatures must exist by plan completion. Na
     public enum GitError: Error, Equatable { … }
     public extension Git { static func makeService(gitExecutable: URL? = nil) -> any GitService }
 
-**`touch-code/App/Clients/`**:
+**`codans/App/Clients/`**:
 
     struct GitServiceClient: Sendable { … }                         // DependencyKey
     struct EditorClient: Sendable { … }                             // DependencyKey
@@ -956,7 +956,7 @@ The following types, functions, and signatures must exist by plan completion. Na
       var setDefaultEditor: @MainActor @Sendable (ProjectID, EditorID?) -> Void { get set }
     }
 
-**`touch-code/App/Clients/Editor/`**:
+**`codans/App/Clients/Editor/`**:
 
     public protocol EditorService: Sendable {
       func describe() async -> [EditorDescriptor]
@@ -979,7 +979,7 @@ The following types, functions, and signatures must exist by plan completion. Na
     enum ProcessOutcome: Equatable { case exited(code: Int32, stderr: String); case timedOut; case spawnFailed(reason: String) }
     protocol PathProber: Sendable { func locate(binaryName: String) -> URL? }
 
-**`touch-code/App/Features/GitViewer/`**:
+**`codans/App/Features/GitViewer/`**:
 
     @Reducer struct GitViewerFeature {
       struct State: Equatable { … }
@@ -987,15 +987,15 @@ The following types, functions, and signatures must exist by plan completion. Na
     }
     struct GitViewerView: View { let store: StoreOf<GitViewerFeature>; var body: some View }
 
-**`touch-code/App/Features/Editor/`**:
+**`codans/App/Features/Editor/`**:
 
     @Reducer struct EditorFeature { … }
 
-**`touch-code/App/Features/WorktreeHeader/`**:
+**`codans/App/Features/WorktreeHeader/`**:
 
     struct WorktreeHeaderOpenButton: View { … }
 
-**`touch-code/App/Features/Settings/`**:
+**`codans/App/Features/Settings/`**:
 
     @MainActor @Observable final class SettingsStore {
       init(fileURL: URL = Settings.defaultURL())
@@ -1006,13 +1006,13 @@ The following types, functions, and signatures must exist by plan completion. Na
     }
     struct SettingsEditorSection: View { … }
 
-**`tc/Commands/`**:
+**`codans-cli/Commands/`**:
 
     struct OpenCommand: ParsableCommand { … }
 
 **External dependencies added by this plan**: `pointfreeco/swift-snapshot-testing` (pinned in M4b; see [DEC-2](#decision-log)). `swift-composable-architecture` is assumed already present via `0002 M5`.
 
-**Tuist targets added by this plan**: none. All tests land under the existing `TouchCodeCoreTests` and `touch-codeTests` targets, whose `buildableFolders` pick up new subfolders automatically. A dedicated `tcTests` target is deliberately declined in M7a; if later needed, it becomes a Decision Log entry at implementation time.
+**Tuist targets added by this plan**: none. All tests land under the existing `CodansCoreTests` and `codansTests` targets, whose `buildableFolders` pick up new subfolders automatically. A dedicated `tcTests` target is deliberately declined in M7a; if later needed, it becomes a Decision Log entry at implementation time.
 
 **Prerequisite ordering.**
 

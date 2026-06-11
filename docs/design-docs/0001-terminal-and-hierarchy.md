@@ -7,7 +7,7 @@
 
 ## Context and Scope
 
-touch-code orchestrates terminals around a five-level hierarchy (Space → Project → Worktree → Tab → Pane). Two capabilities from [product-spec.md](../product-spec.md) form the foundation on which every other capability is built:
+codans orchestrates terminals around a five-level hierarchy (Space → Project → Worktree → Tab → Pane). Two capabilities from [product-spec.md](../product-spec.md) form the foundation on which every other capability is built:
 
 - **C1 — Terminal engine.** libghostty-based multi-pane rendering and Pane lifecycle management.
 - **C2 — Five-level hierarchy.** The data model, persistence, and navigation surface for Spaces, Projects, Worktrees, Tabs, and Panes, including split layouts inside a Tab.
@@ -16,7 +16,7 @@ They are coupled: every Pane is both a libghostty surface (C1) and a leaf in the
 
 Repository state at the time of this design:
 
-- Bootstrap is complete (exec-plan [0001](../exec-plans/0001-bootstrap-monorepo.md)). Tuist targets `TouchCodeCore`, `TouchCodeIPC`, `tc`, `touch-code` exist; `touch-code/{App,Runtime,Hooks,Git}` are empty subfolders.
+- Bootstrap is complete (exec-plan [0001](../exec-plans/0001-bootstrap-monorepo.md)). Tuist targets `CodansCore`, `CodansIPC`, `codans`, `codans` exist; `codans/{App,Runtime,Hooks,Git}` are empty subfolders.
 - `GhosttyKit.xcframework` is temporarily deferred (DEC-8). The Pane rendering design assumes it is present when this plan implements; the bootstrap plan will re-enable it.
 - Hybrid state management and IPC conventions are fixed by [architecture.md](../architecture.md). This design conforms to those invariants and does not relitigate them.
 
@@ -50,7 +50,7 @@ This document is the source of truth for how Pane lifecycle, the hierarchy tree,
 
 The design is organised around three ideas:
 
-1. **The hierarchy is a tree of value types with stable UUIDs; mutations go through a single `@Observable` manager.** Space, Project, Worktree, Tab, and Pane are plain Codable structs with `id: UUID`. All structural mutation (insert Worktree, move Tab, split Pane) flows through `HierarchyManager` — an `@Observable` class in `touch-code/Runtime`. The manager is the single writer; UI and features read via bindings.
+1. **The hierarchy is a tree of value types with stable UUIDs; mutations go through a single `@Observable` manager.** Space, Project, Worktree, Tab, and Pane are plain Codable structs with `id: UUID`. All structural mutation (insert Worktree, move Tab, split Pane) flows through `HierarchyManager` — an `@Observable` class in `codans/Runtime`. The manager is the single writer; UI and features read via bindings.
 
 2. **The Runtime owns libghostty. Everything else reads or commands it.** `GhosttyRuntime` wraps the process-global `ghostty_app_t`. Each Pane owns a `PaneSurface` wrapping one `ghostty_surface_t`. Pane lifecycle (create / ready / output / idle / exit) is emitted as an `AsyncStream<TerminalEvent>`. The TCA app shell subscribes to events and translates them to actions; it never mutates surfaces directly. This hybrid boundary matches supacode's proven pattern (`TerminalClient` bridging TCA ↔ `@Observable`) and [architecture.md § State Management](../architecture.md).
 
@@ -79,7 +79,7 @@ The design is organised around three ideas:
                            │ render/input│
                            ▼             ▼
         ┌─────────────────────────────────────────────────┐
-        │  touch-code/Runtime  (C1)   @Observable         │
+        │  codans/Runtime  (C1)   @Observable         │
         │                                                 │
         │   GhosttyRuntime  ── owns ──▶  ghostty_app_t    │
         │      │                                          │
@@ -91,7 +91,7 @@ The design is organised around three ideas:
         │                                                 │
         │   AsyncStream<TerminalEvent> ─────────────────▶ (to Hooks C3, TCA app shell)
         │                                                 │
-        │   CatalogStore ─▶ ~/.config/touch-code/         │
+        │   CatalogStore ─▶ ~/.config/codans/         │
         │                   ├── catalog.json   (tree)     │
         │                   └── settings.json  (prefs)    │
         └─────────────────────────────────────────────────┘
@@ -99,14 +99,14 @@ The design is organised around three ideas:
                            │ IPC (Unix socket, JSON-RPC)
                            │
                 ┌─────────────────────┐
-                │  tc  (C4, separate) │
+                │  codans  (C4, separate) │
                 └─────────────────────┘
 ```
 
 External boundaries touched by C1+C2:
 
 - **libghostty (via GhosttyKit XCFramework)** — in-process C API. Single direction of trust (we trust ghostty's escape sequence handling, throughput, and crash boundaries).
-- **File system** — `~/.config/touch-code/catalog.json` (written atomic-rename). For non-git Projects and worktree directories, we also read the user's chosen directories under their home or explicit paths.
+- **File system** — `~/.config/codans/catalog.json` (written atomic-rename). For non-git Projects and worktree directories, we also read the user's chosen directories under their home or explicit paths.
 - **`git` CLI via `Process`** — read-only discovery of branches and worktrees for Project/Worktree CRUD. No write operations (commit/merge/etc. are explicitly out of scope per product-spec; `git worktree add` is a write but is a structural operation, see Component Boundaries).
 
 ### API Design
@@ -127,7 +127,7 @@ Key `HierarchyClient` commands (sketch — exact enum in implementation):
 
 Key `TerminalClient` commands:
 
-- `sendInput(paneID, text)`, `sendKey(paneID, key)` — text injection for cross-pane messaging (`tc send`, `tc broadcast`)
+- `sendInput(paneID, text)`, `sendKey(paneID, key)` — text injection for cross-pane messaging (`codans send`, `codans broadcast`)
 - `setFocus(paneID)` — keyboard focus (distinct from hierarchy "selected pane" — kept together in practice but separated here for clarity)
 - `scroll(paneID, lines)`, `clearScrollback(paneID)` — surface controls
 
@@ -155,11 +155,11 @@ The CLI design doc (a sibling design doc) will pin exact payloads. C1+C2 commit 
 
 - `hierarchy.*` — Space/Project/Worktree/Tab CRUD, selection, listing
 - `terminal.*` — Pane open/close/split/focus/send/broadcast
-- `system.get_context` — returns the Pane UUID associated with the calling process (via `TOUCH_CODE_PANE_ID` env var); used so `tc` run inside a Pane knows its own identity
+- `system.get_context` — returns the Pane UUID associated with the calling process (via `CODANS_PANE_ID` env var); used so `codans` run inside a Pane knows its own identity
 
 ### Data Storage
 
-All persistent state lives in `~/.config/touch-code/`:
+All persistent state lives in `~/.config/codans/`:
 
 | File | Owner | Schema version |
 |---|---|---|
@@ -214,7 +214,7 @@ Tab {
 Pane {
   id: UUID
   workingDirectory: String  // seeded on create; Pane's shell may cwd away from it
-  initialCommand: String?   // optional command seeded at Pane start (for `tc send`)
+  initialCommand: String?   // optional command seeded at Pane start (for `codans send`)
   // Scrollback / cursor state are NOT persisted. They are live-only under Runtime.PanelState.
 }
 
@@ -228,7 +228,7 @@ SplitTree<PaneID> = Node {
 
 **Access patterns.** Read on launch (one large read). Write on any structural mutation (debounced — see below). Hot path reads of Pane scrollback are **not** on this file; they never leave memory.
 
-**Writing.** Atomic-rename via `TouchCodeCore/Persistence.swift`: encode → temp file in same directory → fsync temp → `rename(2)` over original. Per [architecture.md § Persistence](../architecture.md), readers abort on unknown `version` (no silent upgrade).
+**Writing.** Atomic-rename via `CodansCore/Persistence.swift`: encode → temp file in same directory → fsync temp → `rename(2)` over original. Per [architecture.md § Persistence](../architecture.md), readers abort on unknown `version` (no silent upgrade).
 
 **Write debouncing.** Structural mutations can arrive in bursts (opening 5 Panes across 2 Tabs in a scripted agent session). Debounce with a 500ms trailing timer, with an immediate flush on `applicationWillTerminate` and on Worktree switch. This keeps the file on disk closely coupled to user-visible state without hot-looping.
 
@@ -237,20 +237,20 @@ SplitTree<PaneID> = Node {
 ### Component Boundaries
 
 ```
-touch-code/Runtime (in-app module)
+codans/Runtime (in-app module)
 ├── GhosttyRuntime           ─ owns ghostty_app_t; initialises once per process
 ├── PaneSurface             ─ one per Pane; owns ghostty_surface_t + PanelState (@Observable)
 ├── HierarchyManager         ─ @Observable; single writer of the tree; owns SplitTree mutations
 ├── CatalogStore             ─ atomic-rename JSON load/save; debounced writes
 └── TerminalEngine           ─ façade; exposes AsyncStream<TerminalEvent>; holds the two managers
 
-TouchCodeCore (static framework)
+CodansCore (static framework)
 ├── IDs (SpaceID, ProjectID, WorktreeID, TabID, PaneID — all UUID newtypes)
 ├── Domain value types (Space, Project, Worktree, Tab, Pane structs — Codable, Equatable, Sendable)
 ├── SplitTree<PaneID>       ─ pure value type (no UI, no AppKit import)
 └── Persistence              ─ atomic-rename JSON helper; version-checked decoder
 
-touch-code/App (in-app module; TCA)
+codans/App (in-app module; TCA)
 ├── HierarchyClient          ─ TCA-visible command/event surface (DependencyKey)
 ├── TerminalClient           ─ TCA-visible input/focus surface (DependencyKey)
 ├── HierarchyCatalogFeature  ─ sidebar tree; reads @Observable bindings
@@ -259,11 +259,11 @@ touch-code/App (in-app module; TCA)
 
 **Dependency rules** (on top of [architecture.md § Dependency Direction](../architecture.md)):
 
-- `TouchCodeCore` has the domain types and `SplitTree`. Zero AppKit / SwiftUI / Ghostty imports — it must be buildable as a pure-Swift static framework so it is safe to import from `tc` (which must never import Runtime).
-- `SplitTree<PaneID>` lives in `TouchCodeCore` (not in supaterm's `Features/Terminal/Models/`) because persistence demands it be buildable outside the app target.
-- `touch-code/Runtime` is the only module that imports `GhosttyKit`. `App`, `Hooks`, `Git` all see Panes through `HierarchyManager` state + event stream.
+- `CodansCore` has the domain types and `SplitTree`. Zero AppKit / SwiftUI / Ghostty imports — it must be buildable as a pure-Swift static framework so it is safe to import from `codans` (which must never import Runtime).
+- `SplitTree<PaneID>` lives in `CodansCore` (not in supaterm's `Features/Terminal/Models/`) because persistence demands it be buildable outside the app target.
+- `codans/Runtime` is the only module that imports `GhosttyKit`. `App`, `Hooks`, `Git` all see Panes through `HierarchyManager` state + event stream.
 - `HierarchyManager` is the **single writer** of the tree. Features never mutate structs directly — they call `HierarchyClient` commands.
-- `tc` (CLI) never imports Runtime; it talks to the app via IPC, which internally calls `HierarchyClient` / `TerminalClient`.
+- `codans` (CLI) never imports Runtime; it talks to the app via IPC, which internally calls `HierarchyClient` / `TerminalClient`.
 
 **What each component is NOT responsible for:**
 
@@ -384,13 +384,13 @@ A Space is global; any window can show any Space; multi-window is a viewport ont
 
 ### Observability
 
-- `os.Logger` category `com.touch-code.runtime` for Pane lifecycle and libghostty integration; `com.touch-code.hierarchy` for tree mutations; `com.touch-code.persistence` for catalog load/save.
+- `os.Logger` category `com.gumpw.codans.runtime` for Pane lifecycle and libghostty integration; `com.gumpw.codans.hierarchy` for tree mutations; `com.gumpw.codans.persistence` for catalog load/save.
 - Every structural mutation logs the operation name and affected ID at `.info`. Hot-path Pane output does not log.
 - Crash reason from ghostty (when provided) is captured in `.paneCrashed` and logged.
 
 ### Testing strategy
 
-- **`TouchCodeCore` (pure)** — full unit coverage. Every `SplitTree` operation has a table-driven test (adapt supaterm's SplitTree tests). Codable round-trip for every domain type.
+- **`CodansCore` (pure)** — full unit coverage. Every `SplitTree` operation has a table-driven test (adapt supaterm's SplitTree tests). Codable round-trip for every domain type.
 - **`HierarchyManager`** — unit-tested with an in-memory `CatalogStore` and a fake `GhosttyRuntime` that only tracks surface create/destroy calls. No live libghostty needed.
 - **Runtime surface integration** — a small XCTest suite that spins up a real `GhosttyRuntime`, opens a Pane running `/bin/sh -c "echo hi"`, verifies `.paneReady` and `.paneExited` fire. Gated behind `TC_RUN_GHOSTTY_TESTS=1` so CI can opt in once GhosttyKit is re-enabled (DEC-8 of bootstrap plan).
 - **UI** — SwiftUI snapshot tests for sidebar + tab bar are sufficient for C1+C2. Pane rendering itself is libghostty's responsibility.
@@ -408,7 +408,7 @@ A Space is global; any window can show any Space; multi-window is a viewport ont
 ### Seams left for later capabilities
 
 - **C3 Hooks** subscribes to the AsyncStream<TerminalEvent>. No code change in Runtime.
-- **C4 CLI** calls `HierarchyClient` / `TerminalClient` via IPC method dispatch. IPC types live in `TouchCodeIPC`; the dispatcher maps methods to client calls.
+- **C4 CLI** calls `HierarchyClient` / `TerminalClient` via IPC method dispatch. IPC types live in `CodansIPC`; the dispatcher maps methods to client calls.
 - **C6 Notifications** subscribes to `.paneIdle` + Hooks' agent-state events.
 - **C7 Git viewer** reads `Worktree.path` from `HierarchyManager`; uses its own read-only data layer.
 - **C8 Editor integration** reads `Worktree.path` + `Project.defaultEditor`; invokes editor CLI. Zero feedback loop to C1+C2.
@@ -428,6 +428,6 @@ A Space is global; any window can show any Space; multi-window is a viewport ont
 At approval the following defaults are locked. Revisit via amendment only.
 
 1. **Pane title heuristic.** `Tab.name` derives from the focused Pane's last non-empty OSC 2 title, falling back to working-directory basename when absent. Users can override via rename.
-2. **`tc send` cross-pane input semantics.** Default sends text followed by `\n`. A `--raw` flag suppresses the newline for raw byte injection.
+2. **`codans send` cross-pane input semantics.** Default sends text followed by `\n`. A `--raw` flag suppresses the newline for raw byte injection.
 3. **Persistence debounce window.** 500ms trailing debounce on structural mutations; synchronous flush on `applicationWillTerminate` and on Worktree switch.
-4. **Window close with unsaved hierarchy.** Last window close does **not** terminate the app; the app keeps running headless so `tc` clients remain served. Explicit Quit from the menu terminates. A future setting toggle may expose this; not in v1.
+4. **Window close with unsaved hierarchy.** Last window close does **not** terminate the app; the app keeps running headless so `codans` clients remain served. Explicit Quit from the menu terminates. A future setting toggle may expose this; not in v1.

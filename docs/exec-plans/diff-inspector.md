@@ -10,7 +10,7 @@ proceeds.
 
 ## Purpose
 
-After this plan completes, a touch-code user can:
+After this plan completes, a codans user can:
 
 - Press ⌘⇧G (or click the Header GV button) on any Worktree and see a
   280 pt right-edge **Diff inspector** listing that Worktree's working-tree
@@ -88,7 +88,7 @@ After this plan completes, a touch-code user can:
   Bridge Protocol v1 table (`setOptions` / `render`) does not match the
   actual vendored JS in renderer.js, which expects `updateConfiguration`
   / `renderDocument` / `initialize` / `teardown`. Discovered while
-  inspecting `apps/mac/touch-code/App/Features/Diff/WebAssets/renderer.js`
+  inspecting `apps/mac/codans/App/Features/Diff/WebAssets/renderer.js`
   before writing `DiffWebViewBridge`. We honour the JS — the bundle is
   Apache-2.0 NOTICE-clean and we agreed not to patch it. Captured in
   Decision Log D8–D11.
@@ -119,17 +119,17 @@ After this plan completes, a touch-code user can:
 - **M7 — Persisted JSON keys are part of the API surface (2026-04-29)**:
   M1's `toggleGitViewer` → `toggleDiffInspector` rename also rewrote the
   `CommandID` raw value, which is the JSON key in
-  `~/.config/touch-code/shortcuts.json`. Renaming it would silently
+  `~/.config/codans/shortcuts.json`. Renaming it would silently
   orphan every existing user override of ⌘⇧G. Fixed by keeping the
   Swift identifier renamed but pinning the raw value back to
   `"toggleGitViewer"`. See D28.
 
 ## Decision Log
 
-- **D1** (M0, 2026-04-29): Kept `Tests/Performance/DiffParsePerformanceBaselineTests.swift` and its fixture. Reason: `DiffParser` is defined in `apps/mac/touch-code/Git/DiffParser.swift` (the git-domain module), not in the deleted GitViewer feature; the perf test exercises that domain parser, which still lives.
+- **D1** (M0, 2026-04-29): Kept `Tests/Performance/DiffParsePerformanceBaselineTests.swift` and its fixture. Reason: `DiffParser` is defined in `apps/mac/codans/Git/DiffParser.swift` (the git-domain module), not in the deleted GitViewer feature; the perf test exercises that domain parser, which still lives.
 - **D2** (M0, 2026-04-29): Kept `docs/exec-plans/0005-git-viewer-and-editor.md`. Reason: Status: `Completed (2026-04-20)`. The doc is a historical archive that covers both GitViewer (M1–M4, M8 — superseded) and Editor (M5–M7 — still load-bearing reference). Per plan's "decided per editor-portion at execution" guidance, leave the file as-is.
 - **D3** (M0, 2026-04-29): Deleted `docs/design-docs/c7-git-viewer.md`. Reason: 100% GitViewer content with no editor cross-cuts.
-- **D4** (M0, 2026-04-29): Deleted `apps/mac/touch-code/App/Theme/MainWindowConstants.swift` (only contained `gvOverlayWidth` / `gvOverlayMinTerminalWidth`). Plan didn't list it explicitly but its sole consumers are gone.
+- **D4** (M0, 2026-04-29): Deleted `apps/mac/codans/App/Theme/MainWindowConstants.swift` (only contained `gvOverlayWidth` / `gvOverlayMinTerminalWidth`). Plan didn't list it explicitly but its sole consumers are gone.
 - **D5** (M2, 2026-04-29): YiTong's git tag is `0.1.0` (not `v0.1.0` as the design doc said). The `--ref v0.1.0` form via `gh api` 404s; the working URL is `repos/onevcat/YiTong/contents/<path>?ref=0.1.0`. Plan's Concrete Steps M2 transcript updated implicitly — runners on this plan should use `0.1.0` (no `v` prefix).
 - **D6** (M2, 2026-04-29): `Public.swift`'s `DiffRendererView` ships an inert SwiftUI placeholder body in M2 (M3 wires the WKWebView). The placeholder lets `Public.swift` compile + ship the public surface independently of the bridge work, which keeps M2 a self-contained commit.
 - **D7** (M2, 2026-04-29): `DiffPublicTests` is annotated `@MainActor` because the project compiles with main-actor-default isolation (SwiftUI `View` types push the isolation onto sibling types in the same import graph). The test alternative — `nonisolated` initializers on `DiffConfiguration` — would have leaked into the public surface contract.
@@ -142,7 +142,7 @@ After this plan completes, a touch-code user can:
 - **D14** (M3, 2026-04-29): The Coordinator queues outbound `renderDocument` / `updateConfiguration` messages until the `ready` event arrives, then flushes; stale `renderDocument`s in the queue are de-duped (only the latest survives) so we don't flash through outdated content during initial load.
 - **D15** (M3, 2026-04-29): `DiffConfiguration.appearance == .automatic` doesn't have a direct renderer equivalent — the JS expects `resolvedAppearance: "dark" | "light"`. M3 resolves `.automatic` → `"light"`. M5/M6 will plumb `@Environment(\.colorScheme)` to resolve this dynamically at the SwiftUI boundary before passing to `DiffWebView`.
 - **D16** (M4, 2026-04-29): `refreshRequested` re-fetches the changed-files list using the cached `worktreePath` and *preserves* the per-file diff cache (`diffsByPath` not cleared). Rationale: refresh is "I just edited files in the worktree, recompute the list," not "I switched Worktrees" — surviving file caches stay correct (the per-file diff is recomputed on row-tap if needed). Switching Worktrees still drops everything via `worktreeSelected`.
-- **D17** (M4, 2026-04-29): `ChangedFile` / `ChangeStatus` are `public nonisolated` so the `GitService` protocol (also `public`) can return `[ChangedFile]` from `diffNumstat`. Lives in `DiffFeature.swift` rather than `Public.swift` (sealed surface from M3) or a new file under `TouchCodeCore` — keeping the row model adjacent to the reducer that owns its lifecycle.
+- **D17** (M4, 2026-04-29): `ChangedFile` / `ChangeStatus` are `public nonisolated` so the `GitService` protocol (also `public`) can return `[ChangedFile]` from `diffNumstat`. Lives in `DiffFeature.swift` rather than `Public.swift` (sealed surface from M3) or a new file under `CodansCore` — keeping the row model adjacent to the reducer that owns its lifecycle.
 - **D18** (M4, 2026-04-29): `loadDiff` reads the working-tree side via `String(contentsOf:)` (filesystem) rather than through a new `GitServiceClient` closure. The HEAD side goes through `showFileAtHEAD` because `git show HEAD:<path>` is the only correct way to read a non-current blob, but the working-tree side is just a file read — adding a client seam there would just be a `Process` round-trip via `git show :<path>` for no test benefit (tests use temp directories with real files).
 - **D19** (M4, 2026-04-29): `loadDiff` hops onto `MainActor` via `MainActor.run` to construct `DiffFile` / `DiffDocument`. Those types' initializers inherit the App target's MainActor default isolation (SwiftUI `View`-adjacent code in `Public.swift`), and the `.run` closure runs nonisolated. Per the constraint not to touch `Public.swift`, the hop lives in `DiffFeature` instead.
 - **D20** (M4, 2026-04-29): `RootFeatureTests.onLaunchExhaustivelyPropagatesSelectionFromStream` updated to receive the new `.diff(.worktreeSelected)` action and to drop the no-op state-change closure on `.selectionChanged` (TestStore reports "no observable modification" when the assigned value matches the existing default). Two other tests (`selectionChangedMirrorsActiveTabFromSnapshot`, `diffInspectorVisibleTracksSelectionAgainstCatalog`) had `gitService.diffNumstat = { _ in [] }` added to their dependency stubs — both run with `exhaustivity = .off`, so the change just neutralizes the new "Unimplemented" issues that the M4 forwarding triggered. Net: full-suite issue count drops from 48 (M3 baseline) to 47.
@@ -181,7 +181,7 @@ Shiki + `kpdecker/jsdiff`.
 
 **Verification:**
 
-- `mise exec -- xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code` — `Test run with 1094 tests in 139 suites failed after ~18s with 47 issues`. The 47 issues are pre-existing baseline failures (themes / command-palette-run-script / color-parsing / `RootFeatureTests.diffInspectorVisibleTracksSelectionAgainstCatalog` due to unstubbed `HierarchyClient.openPane`/`createTab`); none introduced by this PR.
+- `mise exec -- xcodebuild test -workspace codans.xcworkspace -scheme codans` — `Test run with 1094 tests in 139 suites failed after ~18s with 47 issues`. The 47 issues are pre-existing baseline failures (themes / command-palette-run-script / color-parsing / `RootFeatureTests.diffInspectorVisibleTracksSelectionAgainstCatalog` due to unstubbed `HierarchyClient.openPane`/`createTab`); none introduced by this PR.
 - All Diff* test suites pass: `DiffPublicTests` (3), `DiffWebViewBridgeTests` (12), `DiffWebViewCoordinatorTests` (5), `DiffFeatureTests` (12), `DiffWebAssetsManifestTests` (1).
 - Code review by `agent-skills:code-reviewer` returned `REQUEST CHANGES`; all critical (C1) + important (I1–I5) + the I-related suggestion (S2, S6) items addressed in commit 9 (`5bee4e3`).
 
@@ -209,7 +209,7 @@ Related documents:
 - Architecture doc: `docs/architecture.md`. Golden rules:
   `docs/golden-rules.md`.
 - Reference patterns:
-  - `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteView.swift` —
+  - `apps/mac/codans/App/Features/CommandPalette/CommandPaletteView.swift` —
     the existing scrim+overlay composition we mirror for the drawer's
     z-stacked overlay attachment style.
   - `~/dev/opensource/Prowl/supacode/Features/DiffView/DiffWindowContentView.swift` —
@@ -221,29 +221,29 @@ Related documents:
 
 Key source files in this repo:
 
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — owns
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — owns
   `gitViewerOverlayVisible(in:)`, `gitViewerToggledForCurrentWorktree`,
   `toggleGitViewer`, and the `Scope(state: \.gitViewer, action: \.gitViewer)
   { GitViewerFeature() }` mount. M1 renames every `gitViewer*` identifier
   here; M0 stubs the scope mount.
-- `apps/mac/touch-code/App/ContentView.swift` — composes the
+- `apps/mac/codans/App/ContentView.swift` — composes the
   `NavigationSplitView`. M5 attaches `.inspector(isPresented:)` to the
   detail column.
-- `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift` —
+- `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailView.swift` —
   hosts the `terminalRegion`. M6 attaches the drawer overlay.
-- `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderFeature.swift` —
+- `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderFeature.swift` —
   owns `gitViewerToggleTapped` and its delegate. M1 renames.
-- `apps/mac/touch-code/App/Features/WorktreeHeader/HeaderGitViewerToggle.swift` —
+- `apps/mac/codans/App/Features/WorktreeHeader/HeaderGitViewerToggle.swift` —
   the toolbar button view. M1 renames file + type.
-- `apps/mac/TouchCodeCore/Worktree.swift` — owns the persisted
+- `apps/mac/CodansCore/Worktree.swift` — owns the persisted
   `gitViewerVisible: Bool` and its `CodingKeys`. M1 renames the property
   and the JSON key together (no alias decode).
-- `apps/mac/TouchCodeCore/HierarchyClient.swift` — owns
+- `apps/mac/CodansCore/HierarchyClient.swift` — owns
   `setWorktreeGitViewerVisible`. M1 renames the method.
-- `apps/mac/touch-code/App/Shortcuts/` — owns the ⌘⇧G shortcut catalog
+- `apps/mac/codans/App/Shortcuts/` — owns the ⌘⇧G shortcut catalog
   entry whose command id is `toggleGitViewer`. M1 renames.
-- `apps/mac/touch-code/App/Features/GitViewer/` — entire directory deleted
-  in M0. M2+ creates `apps/mac/touch-code/App/Features/Diff/` from scratch.
+- `apps/mac/codans/App/Features/GitViewer/` — entire directory deleted
+  in M0. M2+ creates `apps/mac/codans/App/Features/Diff/` from scratch.
 
 Terms of art used in this plan:
 
@@ -255,7 +255,7 @@ Terms of art used in this plan:
 - **Vendored web bundle** — the four files (`index.html`, `renderer.js`,
   `renderer.css`, `manifest.json`) copied from YiTong v0.1.0's
   `Sources/YiTongWebAssets/Resources/` into our repo at
-  `apps/mac/touch-code/App/Features/Diff/WebAssets/`. We do not modify
+  `apps/mac/codans/App/Features/Diff/WebAssets/`. We do not modify
   these files in v1.
 - **Inspector** — the SwiftUI third column attached via the macOS 14+
   `.inspector(isPresented:)` modifier on the detail-column subtree.
@@ -287,7 +287,7 @@ the duration of this PR's branch.
 
 The work, in narrative order:
 
-1. Delete the directory `apps/mac/touch-code/App/Features/GitViewer/`
+1. Delete the directory `apps/mac/codans/App/Features/GitViewer/`
    and these test files: `GitViewerFeatureTests.swift`,
    `GitViewerLargeDiffCommandTests.swift`, `GitViewerSnapshotTests.swift`,
    `WorktreeDetailViewLayoutTests.swift`,
@@ -326,7 +326,7 @@ The work, in narrative order:
    / `MainWindowConstants.gv*` references. Drop `MainWindowConstants`
    itself if empty after removal.
 7. Run `mise exec -- xcodebuild build-for-testing -workspace
-   apps/mac/touch-code.xcworkspace -scheme touch-code -destination
+   apps/mac/codans.xcworkspace -scheme codans -destination
    'platform=macOS,arch=arm64'` until it returns `TEST BUILD SUCCEEDED`.
    Run the full test suite; the only delta against `origin/main` should
    be the deleted tests.
@@ -348,13 +348,13 @@ zero behavioral changes.
 
 The work:
 
-1. In `apps/mac/TouchCodeCore/Worktree.swift`, rename the property
+1. In `apps/mac/CodansCore/Worktree.swift`, rename the property
    `gitViewerVisible` → `diffInspectorVisible` and the `CodingKeys` case
    `gitViewerVisible` → `diffInspectorVisible`. Update both the
    `init(from:)` decode and the `encode(to:)` paths so the JSON key on
    disk is `diffInspectorVisible`. Remove all references to the old key
    name in this file.
-2. In `apps/mac/TouchCodeCore/HierarchyClient.swift`, rename
+2. In `apps/mac/CodansCore/HierarchyClient.swift`, rename
    `setWorktreeGitViewerVisible` → `setWorktreeDiffInspectorVisible`.
    Update the closure type, all call sites, and any test doubles in the
    live + test variants.
@@ -369,7 +369,7 @@ The work:
 5. Rename the file `HeaderGitViewerToggle.swift` →
    `HeaderDiffInspectorToggle.swift`, the type inside, and all
    references in the toolbar item construction in `WorktreeDetailView.swift`.
-6. In the shortcut catalog (`apps/mac/touch-code/App/Shortcuts/...`),
+6. In the shortcut catalog (`apps/mac/codans/App/Shortcuts/...`),
    rename the command id `toggleGitViewer` → `toggleDiffInspector`.
    This is a string id; the bound action keypath also changes
    accordingly.
@@ -397,7 +397,7 @@ and register the asset resources with Tuist so they ship in the bundle.
 
 The work:
 
-1. Create directory `apps/mac/touch-code/App/Features/Diff/` and
+1. Create directory `apps/mac/codans/App/Features/Diff/` and
    subdirectories `Internal/`, `Views/`, `WebAssets/`.
 2. Source the four files from the upstream YiTong v0.1.0 release:
    - `index.html`
@@ -407,21 +407,21 @@ The work:
    Use `gh api repos/onevcat/YiTong/contents/Sources/YiTongWebAssets/Resources/<file>
    --ref v0.1.0 -H 'Accept: application/vnd.github.raw'` (or pin to the
    commit SHA referenced in `manifest.json`). Save into
-   `apps/mac/touch-code/App/Features/Diff/WebAssets/`. Do not modify the
+   `apps/mac/codans/App/Features/Diff/WebAssets/`. Do not modify the
    files.
 3. Create `WebAssets/LICENSE` containing the Apache-2.0 license text plus
    the NOTICE block listed in the design doc's Vendoring & License
    section. Create or amend top-level `NOTICES.md` to point to this file.
-4. Create `apps/mac/touch-code/App/Features/Diff/Public.swift`
+4. Create `apps/mac/codans/App/Features/Diff/Public.swift`
    containing the public types from the design doc's Public API section
    verbatim. Implement `DiffRendererView.body` as a placeholder
    (`Color.gray` + `Text("DiffRendererView placeholder")`) — M3 fills it
    in.
 5. Update Tuist project (`apps/mac/Project.swift`) to include the new
-   directory in the touch-code target sources and the `WebAssets/`
+   directory in the codans target sources and the `WebAssets/`
    directory as resources. Run `make -C apps/mac generate` to regenerate
    the Xcode project. Verify `xcodebuild ...` build succeeds and the
-   `touch_code.app` bundle includes the four web-asset files at
+   `Codans.app` bundle includes the four web-asset files at
    `Contents/Resources/WebAssets/` (or wherever Tuist places copy-bundle
    resources).
 6. Add a single smoke unit test `Tests/DiffPublicTests.swift` asserting
@@ -430,7 +430,7 @@ The work:
    pins the API contract.
 
 Acceptance: build succeeds; the new test passes; `unzip -l
-DerivedData/.../touch_code.app | grep WebAssets` shows the four files
+DerivedData/.../Codans.app | grep WebAssets` shows the four files
 plus LICENSE.
 
 Commit message: `feat(diff): vendor YiTong web bundle and add public API
@@ -667,19 +667,19 @@ Commit messages: `test(diff): add drawer smoke UI test` (for M7 step 2),
 ## Concrete Steps
 
 All commands run from the repo root unless noted. The repo root is
-`/Users/wanggang/.prowl/repos/touch-code/refactor/git`.
+`/Users/wanggang/.prowl/repos/codans/refactor/git`.
 
 ### Common build / test commands
 
 ```
 $ cd apps/mac
 $ mise exec -- xcodebuild build-for-testing \
-    -workspace touch-code.xcworkspace -scheme touch-code \
+    -workspace codans.xcworkspace -scheme codans \
     -destination 'platform=macOS,arch=arm64' 2>&1 | tail -5
 # expected: ** TEST BUILD SUCCEEDED **
 
 $ mise exec -- xcodebuild test \
-    -workspace touch-code.xcworkspace -scheme touch-code \
+    -workspace codans.xcworkspace -scheme codans \
     -destination 'platform=macOS,arch=arm64' 2>&1 | tail -10
 # expected: ** TEST SUCCEEDED ** (modulo pre-existing baseline failures)
 
@@ -695,16 +695,16 @@ $ /commit
 ### M2 specifics — fetching vendored assets
 
 ```
-$ mkdir -p apps/mac/touch-code/App/Features/Diff/WebAssets
+$ mkdir -p apps/mac/codans/App/Features/Diff/WebAssets
 $ for f in index.html renderer.js renderer.css manifest.json; do \
     gh api repos/onevcat/YiTong/contents/Sources/YiTongWebAssets/Resources/$f \
        --ref v0.1.0 -H 'Accept: application/vnd.github.raw' \
-       > apps/mac/touch-code/App/Features/Diff/WebAssets/$f; \
+       > apps/mac/codans/App/Features/Diff/WebAssets/$f; \
   done
-$ wc -l apps/mac/touch-code/App/Features/Diff/WebAssets/*
+$ wc -l apps/mac/codans/App/Features/Diff/WebAssets/*
 # expected: nonzero line counts; renderer.js is the largest (~50–100 KB)
 
-$ cat apps/mac/touch-code/App/Features/Diff/WebAssets/manifest.json
+$ cat apps/mac/codans/App/Features/Diff/WebAssets/manifest.json
 # expected: { "rendererVersion": "...", "protocolVersion": 1, "files": [...] }
 ```
 
@@ -712,8 +712,8 @@ $ cat apps/mac/touch-code/App/Features/Diff/WebAssets/manifest.json
 
 ```
 $ mise exec -- xcodebuild test \
-    -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
-    -only-testing:touch-code/DiffWebViewBridgeTests \
+    -workspace apps/mac/codans.xcworkspace -scheme codans \
+    -only-testing:codans/DiffWebViewBridgeTests \
     -destination 'platform=macOS,arch=arm64'
 # expected: all DiffWebViewBridgeTests tests pass (>= 6)
 ```
@@ -812,7 +812,7 @@ violations in touched files; the new XCUITest from M7 passes.
 
 ## Interfaces and Dependencies
 
-In `apps/mac/touch-code/App/Features/Diff/Public.swift`:
+In `apps/mac/codans/App/Features/Diff/Public.swift`:
 
 ```swift
 public struct DiffDocument: Equatable, Sendable { ... }
@@ -830,7 +830,7 @@ public struct DiffRendererView: View { ... }
 
 (Field-by-field signatures live in the design doc.)
 
-In `apps/mac/touch-code/App/Features/Diff/Internal/DiffWebViewBridge.swift`:
+In `apps/mac/codans/App/Features/Diff/Internal/DiffWebViewBridge.swift`:
 
 ```swift
 struct DiffWebViewBridge {
@@ -841,7 +841,7 @@ struct DiffWebViewBridge {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Diff/DiffFeature.swift`:
+In `apps/mac/codans/App/Features/Diff/DiffFeature.swift`:
 
 ```swift
 @Reducer
@@ -853,7 +853,7 @@ struct DiffFeature {
 }
 ```
 
-In `apps/mac/TouchCodeCore/Worktree.swift`:
+In `apps/mac/CodansCore/Worktree.swift`:
 
 ```swift
 public struct Worktree: Codable, Equatable, Sendable {
@@ -863,7 +863,7 @@ public struct Worktree: Codable, Equatable, Sendable {
 }
 ```
 
-In `apps/mac/TouchCodeCore/HierarchyClient.swift`:
+In `apps/mac/CodansCore/HierarchyClient.swift`:
 
 ```swift
 public struct HierarchyClient {

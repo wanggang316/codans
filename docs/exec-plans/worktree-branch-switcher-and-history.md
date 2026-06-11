@@ -8,7 +8,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this change, a user in `touch-code` can switch the current Worktree's branch and browse the branch's commit history without leaving the app. The Worktree detail header becomes the entry point: row 1 shows the current branch name and a chevron, row 2 shows `folder · project`. Clicking row 1 reveals a popover listing every local and remote branch (current marked, click to switch) and the 10 most recent commits, with a "View all" button. The Diff Viewer's right panel gains a Changes / History segmented control — Changes preserves today's behaviour, History lists the current branch's commits, and clicking a commit renders that commit's full diff in the existing left-side renderer. The whole flow stays inside the app and reuses the existing HEAD-change observer so the UI refreshes without bespoke reload plumbing.
+After this change, a user in `codans` can switch the current Worktree's branch and browse the branch's commit history without leaving the app. The Worktree detail header becomes the entry point: row 1 shows the current branch name and a chevron, row 2 shows `folder · project`. Clicking row 1 reveals a popover listing every local and remote branch (current marked, click to switch) and the 10 most recent commits, with a "View all" button. The Diff Viewer's right panel gains a Changes / History segmented control — Changes preserves today's behaviour, History lists the current branch's commits, and clicking a commit renders that commit's full diff in the existing left-side renderer. The whole flow stays inside the app and reuses the existing HEAD-change observer so the UI refreshes without bespoke reload plumbing.
 
 ## Progress
 
@@ -43,9 +43,9 @@ After this change, a user in `touch-code` can switch the current Worktree's bran
 
 #### M1 — Git service layer
 
-- [x] T1: Add `BranchRef`, `BranchInventory`, `BranchSwitchTarget` to `TouchCodeCore/Git/GitModels.swift` (+ tests) — `8952cf9a`
-- [x] T2: Add argv builders to `apps/mac/touch-code/Git/GitCommand.swift` (+ tests) — `1c2d911b`
-- [x] T3: Add `GitOutputParser.parseBranchInventory` to `apps/mac/touch-code/Git/GitOutputParser.swift` (+ tests) — `123eb519`
+- [x] T1: Add `BranchRef`, `BranchInventory`, `BranchSwitchTarget` to `CodansCore/Git/GitModels.swift` (+ tests) — `8952cf9a`
+- [x] T2: Add argv builders to `apps/mac/codans/Git/GitCommand.swift` (+ tests) — `1c2d911b`
+- [x] T3: Add `GitOutputParser.parseBranchInventory` to `apps/mac/codans/Git/GitOutputParser.swift` (+ tests) — `123eb519`
 - [x] T4: Add `currentBranch / listAllBranches / switchBranch` to `GitService` + `LiveGitService` (+ tests) — `f9e97f1e`
 - [x] T5: Extend `App/Clients/GitServiceClient.swift` with three new closures + `unimplemented` test values — `1604e4f2`
 
@@ -86,7 +86,7 @@ After this change, a user in `touch-code` can switch the current Worktree's bran
 
 All 16 tasks across 5 milestones shipped on `feat/git_branch_update` between the initial planning commit (`0e0b9fdd`) and the M5 closer (this commit), in the order recorded in the [Handoff log](#handoff-log). The end-state runtime surface:
 
-- **M1 (T1–T5):** `BranchRef` / `BranchInventory` / `BranchSwitchTarget` types in `TouchCodeCore`; three new methods on `GitService`/`LiveGitService` (`currentBranch`, `listAllBranches`, `switchBranch`); the matching `GitServiceClient` closures with `unimplemented` test values; argv builders + `parseBranchInventory` with sort + pin + filter rules.
+- **M1 (T1–T5):** `BranchRef` / `BranchInventory` / `BranchSwitchTarget` types in `CodansCore`; three new methods on `GitService`/`LiveGitService` (`currentBranch`, `listAllBranches`, `switchBranch`); the matching `GitServiceClient` closures with `unimplemented` test values; argv builders + `parseBranchInventory` with sort + pin + filter rules.
 - **M2 (T6–T8):** `BranchSwitcherFeature` reducer (open/load/switch/error/delegate), `BranchSwitcherView` + row sub-views, `BranchSwitcherErrorBannerView`.
 - **M3 (T9–T10):** Two-row `WorktreeHeaderInfoLabel` with branch button + popover host, BranchSwitcher mounted at `WorktreeDetailView`, `WorktreeHeadWatcher` events forwarded into BranchSwitcher + DiffFeature, `openDiffViewerOnHistoryTab` delegate routed via `RootFeature`.
 - **M4 (T11–T14):** `DiffTab`/`HistoryState`/`presentedCommitSha`/`diffsByCommit` on `DiffFeature`, segmented Changes/History picker, `DiffHistoryListView` (header + list + empty/error/load-more), drawer renders either file diff or commit diff with the `<sha> · <subject>` title.
@@ -94,10 +94,10 @@ All 16 tasks across 5 milestones shipped on `feat/git_branch_update` between the
 
 ### Static gate
 
-- Workspace: `apps/mac/touch-code.xcworkspace`, scheme `touch-code`.
+- Workspace: `apps/mac/codans.xcworkspace`, scheme `codans`.
 - Full suite: **914 tests** across 103 suites. Outcome: **913 passing, 1 pre-existing flake** (`HierarchyManagerWorktreeMgmtTests.createWorktreeStoresCanonicalizedPath` — host-symlink-dependent invariant introduced by HAN-82 `ae17377e`, unrelated to branch-switcher work; passes in isolation).
-- `TouchCodeCore` scheme: **374 tests**, 3 pre-existing failures in `ShortcutSchemaAuditTests` (modifier-mask golden + missing CommandID coverage — unrelated to branch-switcher).
-- `tcKit` scheme: passing.
+- `CodansCore` scheme: **374 tests**, 3 pre-existing failures in `ShortcutSchemaAuditTests` (modifier-mask golden + missing CommandID coverage — unrelated to branch-switcher).
+- `CodansKit` scheme: passing.
 - `make mac-check` (swiftlint + swift-format): passing.
 
 No regression in any branch-switcher / Diff-history test from FU-T6, FU-T14, T15, or T16.
@@ -161,20 +161,20 @@ Related documents:
 
 Key source files (read before editing the matching task):
 
-- `apps/mac/TouchCodeCore/Git/GitModels.swift` — domain models for git data crossing the service ↔ app boundary; `Commit`, `LogPage`, `WorkingTreeStatus`, `ChangedFile`, `RemoteInfo`. New `BranchRef` / `BranchInventory` / `BranchSwitchTarget` types land here. Pure `Sendable`, no UI or service references.
-- `apps/mac/touch-code/Git/GitService.swift` — `nonisolated public protocol GitService: Sendable` listing every read-only git method the app calls. Three new methods are added at the bottom.
-- `apps/mac/touch-code/Git/LiveGitService.swift` — `Process`-backed implementation. Every method goes through the `CommandRunner` seam with the 16 MiB output cap + 10 s timeout already configured. Pattern to mirror for the new methods.
-- `apps/mac/touch-code/Git/GitCommand.swift` — pure argv builders. Two new builders (`symbolicRefShortHead`, `forEachRefBranches`) are added alongside a small switch helper for `BranchSwitchTarget`.
-- `apps/mac/touch-code/Git/GitOutputParser.swift` — `nonisolated enum GitOutputParser` with parsers for log, status, and diff numstat. One new parser (`parseBranchInventory`) is added.
-- `apps/mac/touch-code/App/Clients/GitServiceClient.swift` — TCA dependency wrapper over `GitService`. Adds three `@Sendable` closures + matching `unimplemented` test values.
-- `apps/mac/touch-code/Runtime/WorktreeHeadWatcher.swift` — debounced file-system observer on each Worktree's `.git/HEAD`. We do **not** change this file; we subscribe to its existing `events()` stream from `RootFeature` and forward into the two reducers below.
-- `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderInfoLabel.swift` — toolbar leading-cluster view. Rewritten to a two-row layout with the branch row hosting the new popover.
-- `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderFeature.swift` — unchanged. Branch state goes into a new sibling reducer (see design doc Alt 1 for the rejected alternative).
-- `apps/mac/touch-code/App/Features/Diff/DiffFeature.swift` — TCA reducer for the Diff inspector and drawer. Extended in-place (no child reducer) per design doc Alt 5.
-- `apps/mac/touch-code/App/Features/Diff/Views/DiffInspectorView.swift` — right-panel host. Wraps the existing body in a tab router.
-- `apps/mac/touch-code/App/Features/Diff/Views/DiffDrawerView.swift` — left-side diff renderer. Adapted to accept either a file path or a commit sha + subject for its title.
-- `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift` — host that mounts the toolbar and the Diff inspector. The new `BranchSwitcherFeature` store is scoped here at the leading toolbar item.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — root reducer; already runs the `WorktreeHeadWatcher.events()` loop. New: forward each event to BranchSwitcher + Diff scopes and handle the BranchSwitcher delegate that opens the Diff Viewer on the History tab.
+- `apps/mac/CodansCore/Git/GitModels.swift` — domain models for git data crossing the service ↔ app boundary; `Commit`, `LogPage`, `WorkingTreeStatus`, `ChangedFile`, `RemoteInfo`. New `BranchRef` / `BranchInventory` / `BranchSwitchTarget` types land here. Pure `Sendable`, no UI or service references.
+- `apps/mac/codans/Git/GitService.swift` — `nonisolated public protocol GitService: Sendable` listing every read-only git method the app calls. Three new methods are added at the bottom.
+- `apps/mac/codans/Git/LiveGitService.swift` — `Process`-backed implementation. Every method goes through the `CommandRunner` seam with the 16 MiB output cap + 10 s timeout already configured. Pattern to mirror for the new methods.
+- `apps/mac/codans/Git/GitCommand.swift` — pure argv builders. Two new builders (`symbolicRefShortHead`, `forEachRefBranches`) are added alongside a small switch helper for `BranchSwitchTarget`.
+- `apps/mac/codans/Git/GitOutputParser.swift` — `nonisolated enum GitOutputParser` with parsers for log, status, and diff numstat. One new parser (`parseBranchInventory`) is added.
+- `apps/mac/codans/App/Clients/GitServiceClient.swift` — TCA dependency wrapper over `GitService`. Adds three `@Sendable` closures + matching `unimplemented` test values.
+- `apps/mac/codans/Runtime/WorktreeHeadWatcher.swift` — debounced file-system observer on each Worktree's `.git/HEAD`. We do **not** change this file; we subscribe to its existing `events()` stream from `RootFeature` and forward into the two reducers below.
+- `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderInfoLabel.swift` — toolbar leading-cluster view. Rewritten to a two-row layout with the branch row hosting the new popover.
+- `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderFeature.swift` — unchanged. Branch state goes into a new sibling reducer (see design doc Alt 1 for the rejected alternative).
+- `apps/mac/codans/App/Features/Diff/DiffFeature.swift` — TCA reducer for the Diff inspector and drawer. Extended in-place (no child reducer) per design doc Alt 5.
+- `apps/mac/codans/App/Features/Diff/Views/DiffInspectorView.swift` — right-panel host. Wraps the existing body in a tab router.
+- `apps/mac/codans/App/Features/Diff/Views/DiffDrawerView.swift` — left-side diff renderer. Adapted to accept either a file path or a commit sha + subject for its title.
+- `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailView.swift` — host that mounts the toolbar and the Diff inspector. The new `BranchSwitcherFeature` store is scoped here at the leading toolbar item.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — root reducer; already runs the `WorktreeHeadWatcher.events()` loop. New: forward each event to BranchSwitcher + Diff scopes and handle the BranchSwitcher delegate that opens the Diff Viewer on the History tab.
 
 Terms used in this plan (defined here so the reader does not need to chase them down):
 
@@ -195,9 +195,9 @@ The work is sliced vertically inside each milestone: a slice (data → effect �
 
 This milestone teaches `GitService` to read the branch inventory, read the current branch, and switch to a target branch. Nothing in the UI changes yet; at the end, a Swift REPL or a test can call the new client methods and get back real values from a checked-out repository.
 
-**T1** adds the three new types to `apps/mac/TouchCodeCore/Git/GitModels.swift`: `BranchRef` (`shortName`, `isRemote`, `upstream`), `BranchInventory` (`current`, `local`, `remote`), and the input enum `BranchSwitchTarget` (`.local(name:)`, `.remoteTracking(shortName:)`). All three are `public nonisolated`, `Equatable`, and `Sendable`. Tests are unit-level — Equatable round-trips and a tiny encode/decode sanity check if `Codable` is required by existing tests (verify by reading `TouchCodeCoreTests` headers before implementing).
+**T1** adds the three new types to `apps/mac/CodansCore/Git/GitModels.swift`: `BranchRef` (`shortName`, `isRemote`, `upstream`), `BranchInventory` (`current`, `local`, `remote`), and the input enum `BranchSwitchTarget` (`.local(name:)`, `.remoteTracking(shortName:)`). All three are `public nonisolated`, `Equatable`, and `Sendable`. Tests are unit-level — Equatable round-trips and a tiny encode/decode sanity check if `Codable` is required by existing tests (verify by reading `CodansCoreTests` headers before implementing).
 
-**T2** appends two static helpers to `apps/mac/touch-code/Git/GitCommand.swift`:
+**T2** appends two static helpers to `apps/mac/codans/Git/GitCommand.swift`:
 
 ```swift
 static func symbolicRefShortHead() -> [String]                  // ["symbolic-ref", "--short", "HEAD"]
@@ -207,11 +207,11 @@ static func switchBranch(target: BranchSwitchTarget) -> [String]
 
 The `forEachRefBranches` format string is `%(refname)%09%(refname:short)%09%(upstream:short)%09%(HEAD)`, record-separated by newline. Verify the `--format` string with a small test that runs against a fixture repo (or, if process-level tests are forbidden by CI, just snapshot the argv output).
 
-**T3** adds `parseBranchInventory(_ bytes: Data, currentMarker: Character = "*") throws -> BranchInventory` to `apps/mac/touch-code/Git/GitOutputParser.swift`. Behaviour: split on `\n`, drop empty lines, per line split on `\t` into 4 fields, classify `refs/heads/*` as local and `refs/remotes/<remote>/*` as remote, drop refs ending in `/HEAD` on the remote side, mark current via `%(HEAD)` == `*`, sort each list ascending by `shortName`, then if `current` is in local pull it to position 0. Unit tests cover: empty input → empty inventory with nil current; single local; mixed local + remote; `origin/HEAD` filtered; current marker placement; sort order; UTF-8 branch names (Chinese / emoji); tab/newline inside the input that should never occur — confirm parser throws `GitError.unparsable` instead of silently corrupting.
+**T3** adds `parseBranchInventory(_ bytes: Data, currentMarker: Character = "*") throws -> BranchInventory` to `apps/mac/codans/Git/GitOutputParser.swift`. Behaviour: split on `\n`, drop empty lines, per line split on `\t` into 4 fields, classify `refs/heads/*` as local and `refs/remotes/<remote>/*` as remote, drop refs ending in `/HEAD` on the remote side, mark current via `%(HEAD)` == `*`, sort each list ascending by `shortName`, then if `current` is in local pull it to position 0. Unit tests cover: empty input → empty inventory with nil current; single local; mixed local + remote; `origin/HEAD` filtered; current marker placement; sort order; UTF-8 branch names (Chinese / emoji); tab/newline inside the input that should never occur — confirm parser throws `GitError.unparsable` instead of silently corrupting.
 
 **T4** wires the new operations through both layers. In `GitService.swift`, append the three method signatures with documentation comments matching the design doc's API Design block verbatim (kept short). In `LiveGitService.swift`, implement them following the existing pattern: `ensureIsRepo(at:)` first, build argv via `GitCommand`, call the shared private `run(arguments:cwd:)`, parse the bytes, return. For `currentBranch`, treat exit code `1` from `symbolic-ref --short HEAD` as detached and return `nil` (do **not** throw); any other non-zero exit re-throws via the existing `GitError.exec` path. For `switchBranch`, no body parsing — just discard stdout on success and let the existing exit-code → `GitError.exec` mapping carry stderr to the caller. Unit tests use a mock `CommandRunner` that records argv + cwd + env and returns a scripted `CommandOutcome`: assert argv matches the `GitCommand` outputs, assert detached HEAD returns nil, assert non-zero exit throws `GitError.exec(code, stderr)` with stderr preserved verbatim.
 
-**T5** adds the three closures to `apps/mac/touch-code/App/Clients/GitServiceClient.swift`:
+**T5** adds the three closures to `apps/mac/codans/App/Clients/GitServiceClient.swift`:
 
 ```swift
 var currentBranch:   @Sendable (URL) async throws -> String?
@@ -225,14 +225,14 @@ Update both `live(service:)` and `testValue`. The `testValue` uses `unimplemente
 
 - Every task ends with an atomic commit on `feat/git_branch_update`.
 - `make mac-check` passes (swiftlint + swift-format).
-- All new unit tests pass: `xcodebuild test -scheme touch-code -testPlan Default` (or whatever the repo's invocation is — verify in `Makefile`).
+- All new unit tests pass: `xcodebuild test -scheme codans -testPlan Default` (or whatever the repo's invocation is — verify in `Makefile`).
 - No runtime user-test coverage yet (no UI surface exists).
 
 ### Milestone 2 — BranchSwitcherFeature reducer + view
 
 This milestone builds the reducer and views that drive the popover. Nothing on screen yet — `WorktreeDetailView` does not mount the feature until M3. The exit signal is "the TestStore tests all pass and `BranchSwitcherView` previews render in Xcode".
 
-**T6** creates `apps/mac/touch-code/App/Features/BranchSwitcher/BranchSwitcherFeature.swift`. The reducer follows the design doc's state outline and action list. Implementation notes:
+**T6** creates `apps/mac/codans/App/Features/BranchSwitcher/BranchSwitcherFeature.swift`. The reducer follows the design doc's state outline and action list. Implementation notes:
 
 - State fields: `worktreeID`, `worktreePath`, `inventory`, `inventoryLoading`, `recentCommits`, `commitsLoading`, `isPopoverOpen`, `isSwitching`, `searchQuery`, `switchError`. `SwitchError` is a small enum `case message(String)`.
 - Actions: `worktreeChanged(WorktreeID?, String?)`, `popoverTapped`, `popoverDismissed`, `searchQueryChanged(String)`, `branchTapped(BranchSwitchTarget)`, `viewAllCommitsTapped`, `errorDismissed`, `inventoryLoaded(Result<BranchInventory, GitError>)`, `commitsLoaded(Result<[Commit], GitError>)`, `switchFailed(message: String)`, `headChangedForCurrentWorktree`, `delegate(Delegate)`. `Delegate.openDiffViewerOnHistoryTab(WorktreeID, ProjectID?)`.
@@ -253,12 +253,12 @@ This milestone builds the reducer and views that drive the popover. Nothing on s
 
 This milestone replaces the static branch subtitle with the new two-row layout, hosts the popover, and wires HEAD events + the "View all" delegate. After this milestone, a user can open the app, click the branch in the toolbar, see the popover, switch branches, and see the header refresh.
 
-**T9** rewrites `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderInfoLabel.swift`. The signature gains a `@Bindable var branchSwitcherStore: StoreOf<BranchSwitcherFeature>`. Row 1: `HStack` of `WorktreeRowIcon` (existing) + `Text(branchTitle)` + spinner-or-chevron. Row 2: `Text("\(worktree.name) · \(project.name)")` in caption style. The whole row 1 is wrapped in a `Button { branchSwitcherStore.send(.popoverTapped) }` styled as a plain content button with hover affordance via `.onHover` (matches existing chrome). The button anchors a `.popover(isPresented: $branchSwitcherStore.isPopoverOpen.animation()) { BranchSwitcherView(store: branchSwitcherStore) }`. `branchTitle` reads `worktree.branch` if present; else `"(detached HEAD)"` — extension OQ-D1 deferred.
+**T9** rewrites `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderInfoLabel.swift`. The signature gains a `@Bindable var branchSwitcherStore: StoreOf<BranchSwitcherFeature>`. Row 1: `HStack` of `WorktreeRowIcon` (existing) + `Text(branchTitle)` + spinner-or-chevron. Row 2: `Text("\(worktree.name) · \(project.name)")` in caption style. The whole row 1 is wrapped in a `Button { branchSwitcherStore.send(.popoverTapped) }` styled as a plain content button with hover affordance via `.onHover` (matches existing chrome). The button anchors a `.popover(isPresented: $branchSwitcherStore.isPopoverOpen.animation()) { BranchSwitcherView(store: branchSwitcherStore) }`. `branchTitle` reads `worktree.branch` if present; else `"(detached HEAD)"` — extension OQ-D1 deferred.
 
 **T10** completes the wiring:
 
-- In `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift`, add a new `let branchSwitcherStore: StoreOf<BranchSwitcherFeature>` to the view, pass it into `WorktreeHeaderInfoLabel`, and render the `BranchSwitcherErrorBannerView` under the toolbar when `branchSwitcherStore.switchError != nil`.
-- In `apps/mac/touch-code/App/Features/Root/RootFeature.swift`, register a `BranchSwitcherFeature` scope keyed by the active worktree id (one live store per visible detail view). On every `WorktreeHeadWatcher.events()` tick, send `.headChangedForCurrentWorktree` to the matching BranchSwitcher store AND `.headChangedForCurrentWorktree` (new) to the Diff store. Handle `BranchSwitcher.Action.delegate.openDiffViewerOnHistoryTab(worktreeID, projectID)` by issuing whatever existing root-level action opens the Diff Viewer (verify the action name in `RootFeature` before implementing — likely `.toggleGitViewer` or similar), followed by `.diff(.tabSelected(.history))`.
+- In `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailView.swift`, add a new `let branchSwitcherStore: StoreOf<BranchSwitcherFeature>` to the view, pass it into `WorktreeHeaderInfoLabel`, and render the `BranchSwitcherErrorBannerView` under the toolbar when `branchSwitcherStore.switchError != nil`.
+- In `apps/mac/codans/App/Features/Root/RootFeature.swift`, register a `BranchSwitcherFeature` scope keyed by the active worktree id (one live store per visible detail view). On every `WorktreeHeadWatcher.events()` tick, send `.headChangedForCurrentWorktree` to the matching BranchSwitcher store AND `.headChangedForCurrentWorktree` (new) to the Diff store. Handle `BranchSwitcher.Action.delegate.openDiffViewerOnHistoryTab(worktreeID, projectID)` by issuing whatever existing root-level action opens the Diff Viewer (verify the action name in `RootFeature` before implementing — likely `.toggleGitViewer` or similar), followed by `.diff(.tabSelected(.history))`.
 - Update the `WorktreeDetailView` mount sites in `RootView` (or wherever the detail view is constructed) to pass the new scoped store.
 
 After this milestone the user-visible flow works for the happy path (UT-BSH-HD-001, UT-BSH-HD-002, UT-BSH-BP-001..005, UT-BSH-BP-008..009). UT-BSH-BP-005..009 depend on the rest of M3 being live but predate M4. UT-BSH-DV-* is still gated on M4.
@@ -274,7 +274,7 @@ After this milestone the user-visible flow works for the happy path (UT-BSH-HD-0
 
 This milestone adds the second tab and the new commit-diff path to `DiffFeature`. Parallel to M2 / M3; merges cleanly because the only shared call surface is `GitServiceClient.log` and `commitDiff`, both unchanged by M1.
 
-**T11** extends `apps/mac/touch-code/App/Features/Diff/DiffFeature.swift`:
+**T11** extends `apps/mac/codans/App/Features/Diff/DiffFeature.swift`:
 
 - State additions: `enum DiffTab { case changes, history }`, `var selectedTab: DiffTab = .changes`, `struct HistoryState { var commits: [Commit]; var nextOffset: Int; var pageLimit: Int = 50; var loading: Bool; var hasMore: Bool; var error: GitError? }`, `var historyState: HistoryState = .init()`, `var presentedCommitSha: String?`, `var diffsByCommit: [String: DiffEntryState] = [:]`.
 - Actions: `tabSelected(DiffTab)`, `historyAppeared`, `historyLoadNextPageRequested`, `historyPageSucceeded([Commit], hasMore: Bool)`, `historyPageFailed(GitError)`, `historyCommitTapped(sha: String, subject: String)`, `commitDiffSucceededFor(sha: String, document: DiffDocument)`, `commitDiffFailedFor(sha: String, error: GitError)`, `commitDiffTooLargeFor(sha: String, reason: TooLargeReason, copyCommand: String)`, `headChangedForCurrentWorktree`.
@@ -283,14 +283,14 @@ This milestone adds the second tab and the new commit-diff path to `DiffFeature`
 - `historyAppeared` is a no-op when `historyState.commits.isEmpty == false || historyState.loading`; otherwise emits the first page load. `historyLoadNextPageRequested` is gated on `hasMore && !loading`.
 - `commitDiff` loading reuses the existing size-cap logic (`maxFileBytes` / `maxFileLines`); if the raw diff body exceeds caps, emit `commitDiffTooLargeFor` with a `copyCommand` of `cd <worktree> && git show <sha>`.
 
-**T12** updates `apps/mac/touch-code/App/Features/Diff/Views/DiffInspectorView.swift`:
+**T12** updates `apps/mac/codans/App/Features/Diff/Views/DiffInspectorView.swift`:
 
 - Header replaces today's `Text(headerTitle) + refresh button` with a `Picker("Tab", selection: $store.selectedTab) { ... }.pickerStyle(.segmented)`. Refresh button stays but its target is the active tab (refresh = `refreshRequested` on Changes, `historyAppeared` with cache cleared on History).
 - Content `switch store.selectedTab` routes to either the existing Changes body or the new `DiffHistoryListView`.
 
-**T13** creates `apps/mac/touch-code/App/Features/Diff/Views/DiffHistoryListView.swift`. Layout: scrollable LazyVStack of commit rows; each row shows short sha + subject + relative time (use `RelativeDateTimeFormatter`). The last visible row triggers `store.send(.historyLoadNextPageRequested)` via `.onAppear`. Empty state (`store.historyState.commits.isEmpty && store.historyState.loading == false && store.historyState.error == nil`) shows `diff_inspector.history_empty_state` with text "No commits on this branch". Error state shows a retry button that re-issues the failed page. Selected row uses `Color.accentColor.opacity(0.18)` background (matches existing file row selection).
+**T13** creates `apps/mac/codans/App/Features/Diff/Views/DiffHistoryListView.swift`. Layout: scrollable LazyVStack of commit rows; each row shows short sha + subject + relative time (use `RelativeDateTimeFormatter`). The last visible row triggers `store.send(.historyLoadNextPageRequested)` via `.onAppear`. Empty state (`store.historyState.commits.isEmpty && store.historyState.loading == false && store.historyState.error == nil`) shows `diff_inspector.history_empty_state` with text "No commits on this branch". Error state shows a retry button that re-issues the failed page. Selected row uses `Color.accentColor.opacity(0.18)` background (matches existing file row selection).
 
-**T14** updates `apps/mac/touch-code/App/Features/Diff/Views/DiffDrawerView.swift`. The drawer reads `store.selectedTab` and renders either the file diff (existing path, gated on `presentedFilePath`) or the commit diff (new path, gated on `presentedCommitSha`). The title element gets the `diff_panel.title_text` identifier and renders `path` in Changes mode or `"\(shortSha) · \(subject)"` in History mode. The "too large" placeholder reuses the existing copy of the file-mode UI but with the commit-specific copy command.
+**T14** updates `apps/mac/codans/App/Features/Diff/Views/DiffDrawerView.swift`. The drawer reads `store.selectedTab` and renders either the file diff (existing path, gated on `presentedFilePath`) or the commit diff (new path, gated on `presentedCommitSha`). The title element gets the `diff_panel.title_text` identifier and renders `path` in Changes mode or `"\(shortSha) · \(subject)"` in History mode. The "too large" placeholder reuses the existing copy of the file-mode UI but with the commit-specific copy command.
 
 **Exit Gate (M4):**
 
@@ -355,11 +355,11 @@ Expected: `swift-format` writes any reformat in place, `swiftlint` reports no wa
 Run a focused test target during development of T4:
 
 ```
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code-tests \
-  -only-testing:touch-codeTests/LiveGitServiceBranchTests | xcbeautify
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans-tests \
+  -only-testing:codansTests/LiveGitServiceBranchTests | xcbeautify
 ```
 
-Expected (sample): a transcript ending in `** TEST SUCCEEDED **`; a non-zero exit indicates a failure. Verify the scheme + target name with `xcodebuild -list -workspace apps/mac/touch-code.xcworkspace` before running.
+Expected (sample): a transcript ending in `** TEST SUCCEEDED **`; a non-zero exit indicates a failure. Verify the scheme + target name with `xcodebuild -list -workspace apps/mac/codans.xcworkspace` before running.
 
 Full app build for smoke test:
 
@@ -437,7 +437,7 @@ Hold these in the Surprises & Discoveries section if anything unexpected surface
 
 The end-state interfaces that must exist after this plan:
 
-In `apps/mac/TouchCodeCore/Git/GitModels.swift`:
+In `apps/mac/CodansCore/Git/GitModels.swift`:
 
 ```swift
 public nonisolated struct BranchRef: Equatable, Hashable, Sendable {
@@ -460,7 +460,7 @@ public nonisolated enum BranchSwitchTarget: Equatable, Sendable {
 }
 ```
 
-In `apps/mac/touch-code/Git/GitService.swift`, appended to the protocol:
+In `apps/mac/codans/Git/GitService.swift`, appended to the protocol:
 
 ```swift
 func currentBranch(at path: URL) async throws -> String?
@@ -468,7 +468,7 @@ func listAllBranches(at path: URL) async throws -> BranchInventory
 func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws
 ```
 
-In `apps/mac/touch-code/Git/GitCommand.swift`, appended:
+In `apps/mac/codans/Git/GitCommand.swift`, appended:
 
 ```swift
 static func symbolicRefShortHead() -> [String]
@@ -476,13 +476,13 @@ static func forEachRefBranches() -> [String]
 static func switchBranch(target: BranchSwitchTarget) -> [String]
 ```
 
-In `apps/mac/touch-code/Git/GitOutputParser.swift`, appended:
+In `apps/mac/codans/Git/GitOutputParser.swift`, appended:
 
 ```swift
 static func parseBranchInventory(_ bytes: Data, currentMarker: Character = "*") throws -> BranchInventory
 ```
 
-In `apps/mac/touch-code/App/Clients/GitServiceClient.swift`, three new stored closures (with both `live(service:)` and `testValue` populated):
+In `apps/mac/codans/App/Clients/GitServiceClient.swift`, three new stored closures (with both `live(service:)` and `testValue` populated):
 
 ```swift
 var currentBranch:   @Sendable (URL) async throws -> String?
@@ -490,13 +490,13 @@ var listAllBranches: @Sendable (URL) async throws -> BranchInventory
 var switchBranch:    @Sendable (BranchSwitchTarget, URL) async throws -> Void
 ```
 
-In `apps/mac/touch-code/App/Features/BranchSwitcher/`:
+In `apps/mac/codans/App/Features/BranchSwitcher/`:
 
 - `BranchSwitcherFeature` reducer with the state / action / delegate surface listed in T6.
 - `BranchSwitcherView`, `BranchRowView`, `RecentCommitRowView` SwiftUI views.
 - `BranchSwitcherErrorBannerView` SwiftUI view.
 
-In `apps/mac/touch-code/App/Features/Diff/DiffFeature.swift`:
+In `apps/mac/codans/App/Features/Diff/DiffFeature.swift`:
 
 - `enum DiffTab { case changes, history }`
 - `struct HistoryState { var commits: [Commit]; var nextOffset: Int; var pageLimit: Int = 50; var loading: Bool; var hasMore: Bool; var error: GitError? }`

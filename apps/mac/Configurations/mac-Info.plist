@@ -11,9 +11,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>TouchCode</string>
+	<string>Codans</string>
 	<key>CFBundleDisplayName</key>
-	<string>TouchCode</string>
+	<string>Codans</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,7 +29,7 @@
 	<key>NSPrincipalClass</key>
 	<string>$(PRINCIPAL_CLASS)</string>
 	<key>SUFeedURL</key>
-	<string>https://github.com/wanggang316/touch-code/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/wanggang316/codans/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>bRg+MnS8YhPSuwCkPXyrJ7RvwtYGy2vH0HR+1h/IUXo=</string>
 	<key>SUEnableAutomaticChecks</key>
@@ -47,9 +47,9 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.touch-code.pane-id</string>
+			<string>com.gumpw.codans.pane-id</string>
 			<key>UTTypeDescription</key>
-			<string>TouchCode Pane Identifier</string>
+			<string>Codans Pane Identifier</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>

@@ -34,8 +34,8 @@ All three personas were added to `docs/user-tests/_shared/personas.yaml` as part
 - App started; ready signal "App launched" per patterns doc
 - A pane exists in worktree W1 of project P1 that is **not** the user's current focus (focus is on a different worktree's pane)
 - `notifications.inAppEnabled = true`, `notifications.systemEnabled = true`, `authStatus = authorized`
-- The inbox file `~/.config/touch-code/notifications.json` exists with `entries: []`
-- A way to drive a single OSC 9 desktop-notification event on the unfocused pane (e.g., a script the persona can paste into that pane via the `tc` CLI's pane-input verb, or a shell command on the pane that runs `printf '\033]9;hello\007'`)
+- The inbox file `~/.config/codans/notifications.json` exists with `entries: []`
+- A way to drive a single OSC 9 desktop-notification event on the unfocused pane (e.g., a script the persona can paste into that pane via the `codans` CLI's pane-input verb, or a shell command on the pane that runs `printf '\033]9;hello\007'`)
 
 **Steps:**
 1. Trigger one OSC 9 event on the unfocused pane.
@@ -44,7 +44,7 @@ All three personas were added to `docs/user-tests/_shared/personas.yaml` as part
 4. Toggle "In-app notifications" off.
 5. Wait for the toggle's switch role to read "off".
 6. Trigger a second OSC 9 event on the same unfocused pane.
-7. Wait either ≤ 3 seconds OR until the next log line under subsystem `com.touch-code.notifications` category `coordinator` is emitted, whichever comes first.
+7. Wait either ≤ 3 seconds OR until the next log line under subsystem `com.gumpw.codans.notifications` category `coordinator` is emitted, whichever comes first.
 
 **Assertions:**
 1. (UI) After step 2: Dock badge label is `1`.
@@ -57,7 +57,7 @@ All three personas were added to `docs/user-tests/_shared/personas.yaml` as part
 **Artifacts on FAIL:**
 - `screenshot.png` of the worktree status bar and Dock at the time of the failed assertion
 - `notifications.json.snapshot.json`
-- `console.log` filtered to subsystem `com.touch-code.notifications`
+- `console.log` filtered to subsystem `com.gumpw.codans.notifications`
 
 #### Case `UT-V11-CP-002`: A dropped event never resurfaces after the toggle flips back on
 
@@ -228,7 +228,7 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 
 **Preconditions:**
 - Settings → Notifications open
-- `~/.config/touch-code/detection-rules.json` may or may not exist beforehand
+- `~/.config/codans/detection-rules.json` may or may not exist beforehand
 
 **Steps:**
 1. Click "Reveal rules.json in Finder…" in the Mute rules section.
@@ -237,9 +237,9 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 **Assertions:**
 1. (UI) Finder is the frontmost application.
 2. (UI) Finder's active window shows `detection-rules.json` selected (highlighted).
-3. (File) `~/.config/touch-code/detection-rules.json` exists on disk after the click (was created with defaults if previously absent).
+3. (File) `~/.config/codans/detection-rules.json` exists on disk after the click (was created with defaults if previously absent).
 
-**Artifacts on FAIL:** screenshot of Finder; output of `ls -la ~/.config/touch-code/detection-rules.json`.
+**Artifacts on FAIL:** screenshot of Finder; output of `ls -la ~/.config/codans/detection-rules.json`.
 
 ### Journey P: Denied permission surfaces an actionable alert
 
@@ -251,7 +251,7 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 **Covers AC:** AC-V11-P1
 
 **Preconditions:**
-- macOS notification authorization for touch-code is currently **denied** (set via System Settings before app launch)
+- macOS notification authorization for codans is currently **denied** (set via System Settings before app launch)
 - App started; Settings → Notifications open
 - `systemEnabled = false`
 
@@ -280,7 +280,7 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 **Assertions:**
 1. (UI) System Settings is the frontmost application.
 2. (UI) The active pane in System Settings is "Notifications" — verified by the pane title or breadcrumb visible at the top of the System Settings window.
-3. (UI) The pane shows either the touch-code app's row (newer macOS) **or** the top-level Notifications listing (older macOS) — either is an acceptable landing per the spec's fallback clause; the case PASSES on either.
+3. (UI) The pane shows either the codans app's row (newer macOS) **or** the top-level Notifications listing (older macOS) — either is an acceptable landing per the spec's fallback clause; the case PASSES on either.
 
 **Artifacts on FAIL:** screenshot of System Settings.
 
@@ -320,7 +320,7 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 
 **Assertions:**
 1. (UI) The context menu's "Mute notifications" row now displays a checkmark.
-2. (File) `~/.config/touch-code/catalog.json` — within a 1-second observation window after the menu close — the pane P's `labels` array contains the string `notifications:muted`. (Catalog persistence is debounced; the in-memory state changes immediately but disk write follows within the project's standard catalog debounce window.)
+2. (File) `~/.config/codans/catalog.json` — within a 1-second observation window after the menu close — the pane P's `labels` array contains the string `notifications:muted`. (Catalog persistence is debounced; the in-memory state changes immediately but disk write follows within the project's standard catalog debounce window.)
 
 **Artifacts on FAIL:** screenshot of the context menu re-opened; `catalog.json.snapshot.json` captured shortly after the click.
 
@@ -533,7 +533,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 
 **Assertions:**
 1. (UI) After the wait, the sidebar shows W3 as the first row under P1's worktree group.
-2. (File) `~/.config/touch-code/catalog.json` — within the catalog's standard debounce window — shows W3 as the first element of P1's `worktrees` array.
+2. (File) `~/.config/codans/catalog.json` — within the catalog's standard debounce window — shows W3 as the first element of P1's `worktrees` array.
 
 **Artifacts on FAIL:** screenshot of the sidebar before and after; `catalog.json.snapshot.json`.
 
@@ -644,7 +644,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 **Covers AC:** AC-V11-J1
 
 **Preconditions:**
-- No `~/.config/touch-code/notifications.json` file on disk
+- No `~/.config/codans/notifications.json` file on disk
 - App launched fresh
 
 **Steps:**
@@ -653,7 +653,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 3. Wait ≥ 1 second beyond the inbox debounce window so the file has been written.
 
 **Assertions:**
-1. (File) `~/.config/touch-code/notifications.json` exists.
+1. (File) `~/.config/codans/notifications.json` exists.
 2. (File) `jq 'has("version") and has("entries")' notifications.json` returns `true`.
 3. (File) `jq '.version' notifications.json` returns `1`.
 4. (File) `jq '.entries | type' notifications.json` returns `"array"` and `.entries | length` returns `1`.
@@ -665,7 +665,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 **Covers AC:** AC-V11-J2
 
 **Preconditions:**
-- `~/.config/touch-code/notifications.json` seeded with a top-level JSON array containing exactly 3 inbox entries in the v1.0 shape (no `version` key wrapping the array). Two entries are unread, one is read.
+- `~/.config/codans/notifications.json` seeded with a top-level JSON array containing exactly 3 inbox entries in the v1.0 shape (no `version` key wrapping the array). Two entries are unread, one is read.
 - App not running
 
 **Steps:**
@@ -688,9 +688,9 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 **Covers AC:** AC-V11-J3, D-OQ1 (Inbox reset toast)
 
 **Preconditions:**
-- `~/.config/touch-code/notifications.json` seeded with envelope `{ "version": 99, "entries": [ /* 2 entries */ ] }` — a version greater than any the current build understands
+- `~/.config/codans/notifications.json` seeded with envelope `{ "version": 99, "entries": [ /* 2 entries */ ] }` — a version greater than any the current build understands
 - App not running
-- No file matching `notifications.json.bak-*` exists in `~/.config/touch-code/`
+- No file matching `notifications.json.bak-*` exists in `~/.config/codans/`
 
 **Steps:**
 1. Launch the app fresh.
@@ -698,13 +698,13 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 3. Open the status-bar bell popover.
 
 **Assertions:**
-1. (File) A new file matching `~/.config/touch-code/notifications.json.bak-*` exists, with content equal to the seeded forward-version JSON.
-2. (File) `~/.config/touch-code/notifications.json` either does not exist yet (no save fired) **or** exists in envelope shape with `.version == 1`.
+1. (File) A new file matching `~/.config/codans/notifications.json.bak-*` exists, with content equal to the seeded forward-version JSON.
+2. (File) `~/.config/codans/notifications.json` either does not exist yet (no save fired) **or** exists in envelope shape with `.version == 1`.
 3. (UI) The bell popover lists exactly 1 row: the "Inbox reset" entry. Its title reads "Inbox reset" (or equivalent wording established by the implementation, observable in the popover row's title text); its body references the backup file's basename.
 4. (UI) Clicking the "Inbox reset" row marks it read and lands the user somewhere safe (the inbox popover stays open, or the focus does not jump to a missing pane). The case PASSES as long as no crash occurs.
 5. (Negative) Relaunching the app a second time (without seeding a new forward-version file) does **not** add a second "Inbox reset" row.
 
-**Artifacts on FAIL:** `ls -la ~/.config/touch-code/notifications.json*`; bell popover screenshot.
+**Artifacts on FAIL:** `ls -la ~/.config/codans/notifications.json*`; bell popover screenshot.
 
 ### Journey L: Coordinator drop logging is unobtrusive at default
 
@@ -720,7 +720,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 - An unfocused pane available
 
 **Steps:**
-1. Start `log stream` with the default level filter (`level: default`) and subsystem `com.touch-code.notifications`. Do **not** add `--debug`.
+1. Start `log stream` with the default level filter (`level: default`) and subsystem `com.gumpw.codans.notifications`. Do **not** add `--debug`.
 2. Trigger 3 notification-worthy events on the unfocused pane.
 3. Wait 5 seconds.
 4. Stop `log stream` and inspect captured lines.
@@ -813,11 +813,11 @@ Every spec Acceptance Criterion appears here with ≥ 1 covering case. The three
 - Added persona `quiet_user` to `docs/user-tests/_shared/personas.yaml`
 - Bootstrapped `docs/user-test-patterns.md` (no prior project-wide testing-conventions doc existed; the file documents surfaces, allowed selectors, ready signals, fixture seeding, time / clock conventions, and artifacts-on-FAIL defaults).
 
-No feature-local fixtures were introduced; every case seeds its own state from inline file paths under `~/.config/touch-code/`. If the cases prove burdensome to replay, a future revision can extract `_shared/fixtures/notifications/`.
+No feature-local fixtures were introduced; every case seeds its own state from inline file paths under `~/.config/codans/`. If the cases prove burdensome to replay, a future revision can extract `_shared/fixtures/notifications/`.
 
 ## Open Questions
 
-1. Several cases assume a documented way to deliver a single OSC 9 event into an unfocused pane (e.g., via the `tc` CLI's pane-input verb, or by scripting via shell). The exact mechanism is left to the runner — the patterns doc names file inspection and `log stream` as the universal fallback. **Default:** the runner picks; no case will be rejected for using a different OSC 9 delivery mechanism as long as the assertions remain observable.
+1. Several cases assume a documented way to deliver a single OSC 9 event into an unfocused pane (e.g., via the `codans` CLI's pane-input verb, or by scripting via shell). The exact mechanism is left to the runner — the patterns doc names file inspection and `log stream` as the universal fallback. **Default:** the runner picks; no case will be rejected for using a different OSC 9 delivery mechanism as long as the assertions remain observable.
 2. `UT-V11-CF-005` requires asserting a keystroke into pane P landed within a 1-second window before a known time-anchored event. On a manual run this is best-effort; on an automated run the runner needs to inject the keystroke at a deterministic moment. **Default:** manual runs accept a generous re-take policy (3 attempts before FAIL); automated runs use a fake clock if available.
 3. `UT-V11-S-003`'s "no system sound played" assertion depends on the runner's ability to either capture audio or inspect the macOS notification request. **Default:** if neither is available in the runner, the case FAILS soft (marked Inconclusive rather than PASS/FAIL) and the runner must record the limitation.
 

@@ -10,14 +10,14 @@ The main-window UI redesign (see `docs/product-specs/ui-main-window-redesign.md`
 
 Concretely T0 must:
 
-1. Extend `TouchCodeCore` models so per-Space last-active-Worktree restoration and per-Worktree Git-Viewer visibility can be persisted and mutated through the normal Catalog path.
+1. Extend `CodansCore` models so per-Space last-active-Worktree restoration and per-Worktree Git-Viewer visibility can be persisted and mutated through the normal Catalog path.
 2. Expose an aggregation API over the existing agent-notification inbox so the Header bell (T2) and Sidebar unread dots (T1) can render unread state at Worktree / Project / Space granularity without either feature duplicating the `PaneID → WorktreeID` join.
 3. Remove the current Hierarchy ↔ Inbox Picker from `ContentView` so the sidebar column is unambiguously the hierarchy tree. The C6 InboxSidebar feature is kept as a component (T2 will likely reuse its row-rendering inside the bell popover).
 
 Existing state we build on:
 
-- `Catalog` / `Space` / `Project` / `Worktree` / `Tab` / `Pane` value types in `apps/mac/TouchCodeCore/`. `Catalog` already uses a versioned Codable shape; `Space` and `Worktree` do not yet have custom `init(from:)` / `encode(to:)`, so forward-compatibility is currently "whatever the synthesized Codable does with missing keys" — for optionals that is `nil`, which is lossy if a new required field is added.
-- `NotificationInbox` (TouchCodeCore, pure value type) and `InboxStore` (app-side, `@MainActor`, owns debounced persistence + unread signal). `AgentNotification.paneID` is the only hierarchy pointer; the inbox is *not* pre-joined with the Catalog.
+- `Catalog` / `Space` / `Project` / `Worktree` / `Tab` / `Pane` value types in `apps/mac/CodansCore/`. `Catalog` already uses a versioned Codable shape; `Space` and `Worktree` do not yet have custom `init(from:)` / `encode(to:)`, so forward-compatibility is currently "whatever the synthesized Codable does with missing keys" — for optionals that is `nil`, which is lossy if a new required field is added.
+- `NotificationInbox` (CodansCore, pure value type) and `InboxStore` (app-side, `@MainActor`, owns debounced persistence + unread signal). `AgentNotification.paneID` is the only hierarchy pointer; the inbox is *not* pre-joined with the Catalog.
 - `ContentView.sidebarColumn` switches on `RootFeature.State.sidebarMode` to render either `HierarchySidebarView` or `InboxSidebarView`; the toolbar exposes a `modeTogglePicker` for the user.
 - `HierarchyManager` already owns catalog mutations and persistence; new model fields plug into that existing pipeline.
 
@@ -46,7 +46,7 @@ Existing state we build on:
 
 The Catalog extensions are small Codable-shape evolutions on `Space` and `Worktree`. Both structs switch from synthesized Codable to explicit `init(from:)` / `encode(to:)` so the new optional fields decode with documented defaults when absent and are written out when set. Mutation goes through `HierarchyManager`, matching the existing path for `Space.selectedProjectID` etc.
 
-Aggregation of notifications by Worktree / Project / Space is implemented as **pure helpers on `NotificationInbox`** that take the `Catalog` as an explicit argument. This keeps TouchCodeCore stateless and unit-testable without MainActor. Mutation helpers (`markRead(forWorktree:in:)`, `dismissAll()`) live on `InboxStore` because they must schedule saves and publish the unread signal. The "signatures listed in the task brief" are honored *semantically*; the concrete signatures take the catalog explicitly because the `PaneID → WorktreeID` join requires it and we prefer an explicit dependency over a hidden one.
+Aggregation of notifications by Worktree / Project / Space is implemented as **pure helpers on `NotificationInbox`** that take the `Catalog` as an explicit argument. This keeps CodansCore stateless and unit-testable without MainActor. Mutation helpers (`markRead(forWorktree:in:)`, `dismissAll()`) live on `InboxStore` because they must schedule saves and publish the unread signal. The "signatures listed in the task brief" are honored *semantically*; the concrete signatures take the catalog explicitly because the `PaneID → WorktreeID` join requires it and we prefer an explicit dependency over a hidden one.
 
 The `ContentView` Picker removal is purely a SwiftUI deletion. `RootFeature.State.sidebarMode` is kept as an internal-only property (so existing reducer tests and the hierarchy/inbox scope wiring keep compiling), but its public action `sidebarModeChanged` becomes unused for now — we leave the plumbing rather than remove it, since T2 may choose to repurpose `inbox` state for the bell popover.
 
@@ -60,7 +60,7 @@ The `ContentView` Picker removal is purely a SwiftUI deletion. `RootFeature.Stat
           │ reads                     │ reads                     │ reads/writes
           ▼                           ▼                            ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│ TouchCodeCore (pure)                                                    │
+│ CodansCore (pure)                                                    │
 │   Space.lastActiveWorktreeID       NotificationInbox                    │
 │   Worktree.gitViewerVisible          .unreadCount(forWorktree:in:)      │
 │   Catalog (Codable, versioned)       .hasUnread(forProject:in:)         │
@@ -81,7 +81,7 @@ The `ContentView` Picker removal is purely a SwiftUI deletion. `RootFeature.Stat
 
 #### 1. Catalog model extensions
 
-`Space` (TouchCodeCore):
+`Space` (CodansCore):
 
 ```swift
 public struct Space {
@@ -95,7 +95,7 @@ public struct Space {
 
 Semantics: when the window re-activates this Space, the shell restores this Worktree as selected. `nil` → fall back to `selectedProjectID`'s selected worktree (existing logic). Cleared (set back to `nil`) if the referenced Worktree no longer exists at save time — left as a follow-up for T1; T0 does not prune.
 
-`Worktree` (TouchCodeCore):
+`Worktree` (CodansCore):
 
 ```swift
 public struct Worktree {
@@ -130,7 +130,7 @@ Both mutations:
 
 #### 3. Aggregation API on `NotificationInbox`
 
-Pure extension in TouchCodeCore:
+Pure extension in CodansCore:
 
 ```swift
 public extension NotificationInbox {
@@ -199,7 +199,7 @@ extension InboxStore {
 
 ### Data Storage
 
-On-disk shape at `~/.config/touch-code/catalog.json`:
+On-disk shape at `~/.config/codans/catalog.json`:
 
 - Top-level `Catalog.version` stays at `1`. The two new fields are additive keys on `spaces[].…` (`lastActiveWorktreeID`) and `spaces[].projects[].worktrees[].…` (`gitViewerVisible`). Older readers (if any) that don't know these keys simply drop them on re-save — acceptable since the on-disk contract is "one writer per install".
 - We do **not** bump `Catalog.currentVersion`. Bump would force users' existing catalogs through a migration path for a zero-risk additive change — disproportionate. Forward-compat: when a field with the *same* name but different shape is introduced, that's when we bump.
@@ -212,21 +212,21 @@ Backward-compat tests go in `CatalogCodableTests` (new file or appended): decode
 
 | Component | Owns | Does not own |
 |---|---|---|
-| `TouchCodeCore/Space` | Model fields + Codable | Runtime mutation / persistence |
-| `TouchCodeCore/Worktree` | Model fields + Codable | Runtime mutation / persistence |
-| `TouchCodeCore/Catalog` | Pane→Worktree resolution helpers | Mutation API |
-| `TouchCodeCore/NotificationInbox` | Pure aggregation helpers | Mutation (those are on `InboxStore`) |
+| `CodansCore/Space` | Model fields + Codable | Runtime mutation / persistence |
+| `CodansCore/Worktree` | Model fields + Codable | Runtime mutation / persistence |
+| `CodansCore/Catalog` | Pane→Worktree resolution helpers | Mutation API |
+| `CodansCore/NotificationInbox` | Pure aggregation helpers | Mutation (those are on `InboxStore`) |
 | `apps/mac/.../HierarchyManager` | `setSpaceLastActiveWorktree`, `setWorktreeGitViewerVisible` | UI, notifications |
 | `apps/mac/.../InboxStore` | `markRead(forWorktree:in:)`, `dismissAll` | Catalog shape |
 | `apps/mac/.../ContentView` | Sidebar/Detail composition | `sidebarMode` toggle UI (deleted) |
 | `apps/mac/.../RootFeature` | Reserves `SidebarMode` enum for T2 | Actively dispatches mode changes |
 
-Dependency direction stays: `app-side` → `TouchCodeCore`, never the other way.
+Dependency direction stays: `app-side` → `CodansCore`, never the other way.
 
 ## Alternatives Considered
 
 **(A) Add aggregation API directly on `InboxStore` only, no pure helpers.**
-Rejected: `InboxStore` is MainActor, which forces every test to `@MainActor` just to exercise aggregation logic. The aggregation is pure given `(inbox, catalog)` — putting it in TouchCodeCore gives free unit coverage and lets T2 compose it (e.g. on a snapshot inside a reducer) without crossing the MainActor boundary.
+Rejected: `InboxStore` is MainActor, which forces every test to `@MainActor` just to exercise aggregation logic. The aggregation is pure given `(inbox, catalog)` — putting it in CodansCore gives free unit coverage and lets T2 compose it (e.g. on a snapshot inside a reducer) without crossing the MainActor boundary.
 
 **(B) Pre-join notifications with WorktreeID at append time and store `worktreeID` on `AgentNotification`.**
 Rejected: panes can move between tabs, and tabs between worktrees; the pointer would go stale and would also require a migration of existing inbox JSON. The current "paneID + render-time join" is the simpler invariant; we keep it and pay the O(n) cost at aggregation time, which is bounded by the 500-row cap.

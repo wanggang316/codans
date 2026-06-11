@@ -10,22 +10,22 @@
 
 ## Context and Orientation
 
-**Specification:** [product-spec.md](../product-spec.md) — "Worktree-level directory open, driven by dropdown or `tc open` CLI."
+**Specification:** [product-spec.md](../product-spec.md) — "Worktree-level directory open, driven by dropdown or `codans open` CLI."
 
 **Related Design Docs:**
 - [c8-editor-integration.md](../design-docs/c8-editor-integration.md) — Previous design (now superseded).
 - [c8a-editor-integration-nsworkspace.md](../design-docs/c8a-editor-integration-nsworkspace.md) — This plan's full rationale, trade-offs, and specifications.
 
-**Architecture Context:** [docs/architecture.md](../architecture.md) — Tuist monorepo, in-app modules under `touch-code/App/`, folder-level boundaries between Runtime/Hooks/Git/App.
+**Architecture Context:** [docs/architecture.md](../architecture.md) — Tuist monorepo, in-app modules under `codans/App/`, folder-level boundaries between Runtime/Hooks/Git/App.
 
 **Key Existing Code Paths:**
-- **EditorService** — `apps/mac/touch-code/App/Clients/Editor/{EditorService.swift, EditorService+Live.swift, EditorService+Test.swift}`
-- **Registry** — `apps/mac/touch-code/App/Clients/Editor/EditorRegistry.swift`
-- **Models** — `apps/mac/touch-code/App/Clients/Editor/EditorModels.swift`
-- **IPC Handlers** — `apps/mac/touch-code/App/Features/Socket/EditorHandlers.swift`
-- **Settings UI** — `apps/mac/touch-code/App/Features/Settings/Panes/` (add new pane for editor default)
-- **Project Options** — `apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
-- **Pane spawning** — `apps/mac/touch-code/Runtime/Pane*.swift` (verify `.editor` spawn capability)
+- **EditorService** — `apps/mac/codans/App/Clients/Editor/{EditorService.swift, EditorService+Live.swift, EditorService+Test.swift}`
+- **Registry** — `apps/mac/codans/App/Clients/Editor/EditorRegistry.swift`
+- **Models** — `apps/mac/codans/App/Clients/Editor/EditorModels.swift`
+- **IPC Handlers** — `apps/mac/codans/App/Features/Socket/EditorHandlers.swift`
+- **Settings UI** — `apps/mac/codans/App/Features/Settings/Panes/` (add new pane for editor default)
+- **Project Options** — `apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
+- **Pane spawning** — `apps/mac/codans/Runtime/Pane*.swift` (verify `.editor` spawn capability)
 
 **Deliverables:**
 1. 28-entry built-in registry with bundle IDs, display names, and launch modes.
@@ -168,7 +168,7 @@ Verify that the Pane primitive exists: "create Pane at path with initial stdin i
 *Outcome:* Document whether the capability exists today or must be built. If doesn't exist, flag for Phase 2 decision (drop `.editor` from registry vs. build the primitive).
 
 *Verification:*
-- Read `apps/mac/touch-code/Runtime/Pane*.swift` to understand Pane creation and stdin routing.
+- Read `apps/mac/codans/Runtime/Pane*.swift` to understand Pane creation and stdin routing.
 - Check if there's already a method like `Pane.create(at: URL, initialInput: String)` or equivalent.
 - If missing, estimate effort to add it; flag as a blocker for C8a `.editor` delivery.
 
@@ -179,7 +179,7 @@ Understand the current storage structure so migration logic is precise.
 *Outcome:* Identify all places `customEditors` is referenced; map Project model fields.
 
 *Verification:*
-- Read `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift`.
+- Read `apps/mac/codans/App/Features/Settings/SettingsStore.swift`.
 - Confirm where `customEditors` array is stored and decoded.
 - Confirm Project's `defaultEditor` field exists.
 - Identify where settings are loaded at startup.
@@ -214,7 +214,7 @@ Define the static 28-entry registry with all bundle IDs, display names, and laun
 - Spot-check 3–4 entries: `cursor` → `com.todesktop.230313mzl4w4u92`, `vscode` → `com.microsoft.VSCode`, `.editor` → empty bundleID, `.editor` → `.shellEditor` launch mode.
 
 *Files modified:*
-- `apps/mac/touch-code/App/Clients/Editor/EditorRegistry.swift` — replace entire file.
+- `apps/mac/codans/App/Clients/Editor/EditorRegistry.swift` — replace entire file.
 
 ---
 
@@ -234,7 +234,7 @@ Add `LaunchMode` enum; update `EditorDescriptor` and `EditorChoice` shapes.
 - Confirm no code outside EditorModels references the removed `argv` field (should find zero matches if we're following the plan).
 
 *Files modified:*
-- `apps/mac/touch-code/App/Clients/Editor/EditorModels.swift` — update shapes.
+- `apps/mac/codans/App/Clients/Editor/EditorModels.swift` — update shapes.
 
 ---
 
@@ -251,7 +251,7 @@ Define the NSWorkspace abstraction protocol and live implementation.
 - Quick smoke test: `LiveAppLauncher().urlForApplication(bundleIdentifier: "com.apple.finder")` returns a non-nil URL at runtime.
 
 *Files created:*
-- `apps/mac/touch-code/App/Clients/Editor/AppLauncher.swift`.
+- `apps/mac/codans/App/Clients/Editor/AppLauncher.swift`.
 
 ---
 
@@ -275,7 +275,7 @@ Remove: `.nonZeroExit`, `.timedOut`, `.spawnFailed`, `.badTemplate`, `.unresolve
 - Grep `EditorError` across the codebase; verify no code references removed cases (should find zero if old code is deleted).
 
 *Files modified:*
-- `apps/mac/touch-code/App/Clients/Editor/EditorError.swift` — replace entire file.
+- `apps/mac/codans/App/Clients/Editor/EditorError.swift` — replace entire file.
 
 ---
 
@@ -366,7 +366,7 @@ struct LiveEditorService: EditorService {
 - Integration smoke test (gated by env var): actually open a temp directory in Finder via NSWorkspace.
 
 *Files modified:*
-- `apps/mac/touch-code/App/Clients/Editor/EditorService+Live.swift` — replace entire file.
+- `apps/mac/codans/App/Clients/Editor/EditorService+Live.swift` — replace entire file.
 
 ---
 
@@ -396,7 +396,7 @@ struct TestEditorService: EditorService {
 - Can be instantiated and used in TCA tests.
 
 *Files modified:*
-- `apps/mac/touch-code/App/Clients/Editor/EditorService+Test.swift` — replace entire file.
+- `apps/mac/codans/App/Clients/Editor/EditorService+Test.swift` — replace entire file.
 
 ---
 
@@ -405,10 +405,10 @@ struct TestEditorService: EditorService {
 Remove Process, PathProber, SpawnContract, EditorEnv, and custom-editor types.
 
 *Outcome:* Files deleted:
-- `apps/mac/touch-code/App/Clients/Editor/PathProber.swift`
-- `apps/mac/touch-code/App/Clients/Editor/ProcessSpawner.swift`
-- `apps/mac/touch-code/App/Clients/Editor/SpawnContract.swift`
-- `apps/mac/touch-code/App/Clients/Editor/EditorEnv.swift`
+- `apps/mac/codans/App/Clients/Editor/PathProber.swift`
+- `apps/mac/codans/App/Clients/Editor/ProcessSpawner.swift`
+- `apps/mac/codans/App/Clients/Editor/SpawnContract.swift`
+- `apps/mac/codans/App/Clients/Editor/EditorEnv.swift`
 
 Remove from `EditorModels.swift`:
 - `CustomEditor` type
@@ -471,7 +471,7 @@ Category separators between editor / xcode+finder / terminal / git-client / `.ed
 - Verify icons are non-nil and visible.
 
 *Files created/modified:*
-- `apps/mac/touch-code/App/Features/Settings/Panes/GeneralEditorSettingsView.swift` — new.
+- `apps/mac/codans/App/Features/Settings/Panes/GeneralEditorSettingsView.swift` — new.
 - Update `SettingsWindowView.swift` or similar to include this pane in the "General" section.
 
 ---
@@ -512,7 +512,7 @@ Section("Editor") {
 - Preview: confirm "↩ Use global default" is the first option, followed by installed editors.
 
 *Files modified:*
-- `apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift` — add Editor section.
+- `apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift` — add Editor section.
 
 ---
 
@@ -562,13 +562,13 @@ The key pattern: caller pre-filters the project default if installed; service ne
 - Integration test: send IPC request, verify response shape matches design doc.
 
 *Files modified:*
-- `apps/mac/touch-code/App/Features/Socket/EditorHandlers.swift` — replace entire file.
+- `apps/mac/codans/App/Features/Socket/EditorHandlers.swift` — replace entire file.
 
 ---
 
 **Task 4.4: Update IPC wire types**
 
-Ensure `TouchCodeIPC/Editor/` types match the new shapes.
+Ensure `CodansIPC/Editor/` types match the new shapes.
 
 *Outcome:* 
 - Remove `argv: [String]` from `EditorChoicePayload`.
@@ -580,7 +580,7 @@ Ensure `TouchCodeIPC/Editor/` types match the new shapes.
 - Round-trip test: encode an `EditorDescriptor`, decode it, verify fields match.
 
 *Files modified:*
-- `apps/mac/TouchCodeIPC/Editor/` (if it exists) or update the IPC definitions wherever they live.
+- `apps/mac/CodansIPC/Editor/` (if it exists) or update the IPC definitions wherever they live.
 
 ---
 
@@ -623,7 +623,7 @@ private func migrateSettings() {
 - Integration test: load a real settings file, verify no errors.
 
 *Files modified:*
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` — add migration method called at load.
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` — add migration method called at load.
 
 ---
 
@@ -655,8 +655,8 @@ And in the Settings pane effect:
 - Integration test: call `clearDescribeCache()`, verify next `describe()` call re-probes.
 
 *Files modified:*
-- `apps/mac/touch-code/App/Clients/Editor/EditorService.swift` — add cache-clear method.
-- `apps/mac/touch-code/App/Clients/Editor/EditorService+Live.swift` — implement it.
+- `apps/mac/codans/App/Clients/Editor/EditorService.swift` — add cache-clear method.
+- `apps/mac/codans/App/Clients/Editor/EditorService+Live.swift` — implement it.
 - Settings pane feature reducer — call on pane appear.
 
 ---
@@ -860,8 +860,8 @@ Grep for references to removed C8 types and ensure they're cleaned up.
 
 Run:
 ```bash
-grep -r "ProcessSpawner" apps/mac/touch-code --include="*.swift"
-grep -r "PathProber" apps/mac/touch-code --include="*.swift"
+grep -r "ProcessSpawner" apps/mac/codans --include="*.swift"
+grep -r "PathProber" apps/mac/codans --include="*.swift"
 # etc.
 ```
 
@@ -932,7 +932,7 @@ Once Teams A–C complete and merge incrementally:
 - *Mitigation:* Manual smoke test on one JetBrains IDE in each release.
 - *Task:* Addressed in Task 6.3 (automated test coverage).
 
-**Risk R4: First-install race (Cursor installed while touch-code is running)**
+**Risk R4: First-install race (Cursor installed while codans is running)**
 - *Mitigation:* `describe()` re-probes on Settings-appear and IPC call; cache is not persistent.
 - *Task:* Addressed in Task 5.2 (cache refresh on Settings pane appear).
 
@@ -957,7 +957,7 @@ Before marking C8a implementation complete:
 - [ ] Settings pane shows only installed editors; Project Options picker works end-to-end.
 - [ ] IPC methods `editor.describe`, `editor.open`, `editor.setGlobalDefault`, `editor.setProjectDefault` all respond correctly.
 - [ ] Migration: legacy settings load without error; stale IDs reset to nil.
-- [ ] CLI `tc open [path] [--in <editor>]` works correctly.
+- [ ] CLI `codans open [path] [--in <editor>]` works correctly.
 - [ ] Manual smoke test: open a directory in VSCode, Finder, and one terminal app.
 
 ---
@@ -978,7 +978,7 @@ Present this plan for approval. On approval:
 ### 2026-04-22 — Phase 1 complete
 
 **Task 1.1 — Pane `.editor` primitive check:** **Partial.** Building blocks exist:
-- `PaneSurface.sendInput(_ text: String)` — `apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift:118`, fully exposed, production-ready.
+- `PaneSurface.sendInput(_ text: String)` — `apps/mac/codans/Runtime/Ghostty/PaneSurface.swift:118`, fully exposed, production-ready.
 - `HierarchyManager.openPanel(workingDirectory:initialCommand:)` — accepts both parameters; stores `initialCommand` on the Pane; flows through IPC.
 
 **Missing:** `TerminalEngine.ensureSurface()` does not forward `pane.initialCommand` to the newly created `PaneSurface`. **3-line fix** required — added as Task 4d in the task list.
@@ -987,21 +987,21 @@ Present this plan for approval. On approval:
 
 **Task 1.2 — SettingsStore + Project audit:**
 
-- `GeneralSettings` at `apps/mac/TouchCodeCore/Settings/GeneralSettings.swift`: has `defaultEditorID: EditorID?` (where `EditorID = String`) and `customEditors: [CustomEditor]`.
-- Settings loader: `SettingsMigration.load(from:)` at `apps/mac/TouchCodeCore/Settings/SettingsMigration.swift` — handles v1→v2 atomic migration with `.broken-<timestamp>` backup on failure.
-- Logger: `Logger(subsystem: "com.touch-code.persistence", category: "settings")`.
+- `GeneralSettings` at `apps/mac/CodansCore/Settings/GeneralSettings.swift`: has `defaultEditorID: EditorID?` (where `EditorID = String`) and `customEditors: [CustomEditor]`.
+- Settings loader: `SettingsMigration.load(from:)` at `apps/mac/CodansCore/Settings/SettingsMigration.swift` — handles v1→v2 atomic migration with `.broken-<timestamp>` backup on failure.
+- Logger: `Logger(subsystem: "com.gumpw.codans.persistence", category: "settings")`.
 - `customEditors` references only in SettingsStore (UI-local: `addCustomEditor`/`updateCustomEditor`/`removeCustomEditor`). **No runtime callers outside settings UI** — migration is safe.
-- `Project.defaultEditor` at `apps/mac/TouchCodeCore/Project.swift:21` is already `String?`; no type change needed. Written via `HierarchyManager.setDefaultEditor` / `setDefaultEditorAnySpace` — both persist via `store.scheduleSave(catalog)`.
+- `Project.defaultEditor` at `apps/mac/CodansCore/Project.swift:21` is already `String?`; no type change needed. Written via `HierarchyManager.setDefaultEditor` / `setDefaultEditorAnySpace` — both persist via `store.scheduleSave(catalog)`.
 
 **Decision:** Add `garbageCollectEditors()` method on `Settings` (mutating) invoked in `SettingsStore.__init__` after the `SettingsMigration.load()` call. Similarly normalize `Project.defaultEditor` during catalog load.
 
 **Task 1.3 — HierarchyClient API review:**
 
-- **`project(containing:)` does NOT exist.** Use `isPathRegistered(canonical: String) -> (SpaceID, ProjectID)?` — synchronous, `@MainActor`, location `apps/mac/touch-code/Runtime/HierarchyManager.swift:219`.
+- **`project(containing:)` does NOT exist.** Use `isPathRegistered(canonical: String) -> (SpaceID, ProjectID)?` — synchronous, `@MainActor`, location `apps/mac/codans/Runtime/HierarchyManager.swift:219`.
 - **Must canonicalize the path first** via `HierarchyManager.canonicalPath(_:)` (resolves symlinks; critical for `/tmp` vs `/private/var/...` on macOS).
 - Once `(spaceID, projectID)` known, read `Project.defaultEditor` by walking `hierarchyClient.snapshot().spaces[...].projects[...]`.
 - **Write:** `setRepositoryDefaultEditor(_ projectID: ProjectID, _ editorID: EditorID?) throws` — works across all Spaces (no SpaceID arg needed); throws `HierarchyError.notFound` on unknown projectID.
-- `EditorID = String` (typealias in `TouchCodeCore/Editor/EditorStorageModels.swift`).
+- `EditorID = String` (typealias in `CodansCore/Editor/EditorStorageModels.swift`).
 - TCA wiring: `@Dependency(\.hierarchyClient)` already registered via `DependencyKey`.
 
 **Decision:** IPC handler (`EditorHandlers.swift`) imports `HierarchyClient`; for `editor.open` without `preferred`, it calls `isPathRegistered(canonical: HierarchyManager.canonicalPath(path))` and reads `.defaultEditor` from the catalog snapshot. Service signature unchanged.
@@ -1029,7 +1029,7 @@ Seven post-merge fixes applied after Codex review, landed in two commits:
 - **P1-1** (`describe()` filters `.shellEditor`): the registry entry stays but is suppressed from `describe()` so it can no longer be saved as a default that always fails to launch. Filtering is reversible — remove the `continue` when a Pane-aware open path lands. Tests: `EditorServiceResolutionTests.describeReturnsInstalledOnlyAndExcludesShellEditor`, `EditorServiceLaunchTests.shellEditorIsUnreachableFromOpenInV1`.
 - **P1-2** (JetBrains launch API): `AppLauncher` gained `openApplication(at:configuration:)`; `.applicationWithArguments` routes through it so `configuration.arguments` actually reach the IDE. Tests: `EditorServiceLaunchTests.applicationWithArgumentsLaunchRoutesThroughOpenApplicationWithDirPathArgument`, `allJetBrainsIDsUseOpenApplicationBranch`.
 - **P2-3** (priority cascade respected): reducers hand `nil` (not `"finder"`) to the service when neither override nor global default applies, so the service's priority walk picks the first installed editor. New helper: `EditorFeature.resolveInstalledPreference`.
-- **P2-4** (subdirectory project lookup): `HierarchyManager.project(containing:)` + `HierarchyClient.projectContaining` — `tc open` inside a Project subdirectory now honors the Project's default editor. Deepest-match disambiguation when Projects nest.
+- **P2-4** (subdirectory project lookup): `HierarchyManager.project(containing:)` + `HierarchyClient.projectContaining` — `codans open` inside a Project subdirectory now honors the Project's default editor. Deepest-match disambiguation when Projects nest.
 - **P2-5** (Git Viewer honors project override): `GitViewerFeature.editorOpenRequest` looks up `projectID.defaultEditor` and filters through installed descriptors before handing `preferred` to the service.
 - **P2-6** ("Automatic" row in Settings): `SettingsGeneralView` gained a sentinel `EditorID?(nil)` row so users can clear the global default after picking something.
 - **P2-7** (Finder priority bug, design doc bug): `defaultPriority` moved Finder to the tail — previously Finder sat mid-list, shadowing every terminal and git client in auto-resolution since Finder is always installed. Design doc `c8a-editor-integration-nsworkspace.md` also corrected.

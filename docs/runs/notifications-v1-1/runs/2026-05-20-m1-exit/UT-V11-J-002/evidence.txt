@@ -1,7 +1,7 @@
 Probes executed
 ===============
 
-1) tc status (same as J-001):
+1) codans status (same as J-001):
    server             0.2.3
    uptime             32887.8s
    connectedClients   0
@@ -12,7 +12,7 @@ Probes executed
          else {top_type:"object", keys:keys, version:.version,
                entries_type:(.entries|type),
                entries_count:(.entries|length)} end' \
-       ~/.config/touch-code/notifications.json
+       ~/.config/codans/notifications.json
    {
      "top_type": "array",
      "count": 500
@@ -26,12 +26,12 @@ Probes executed
 
 3) M1 feature build artefacts:
    - apps/mac/.build/  -> only `ghostty/` and `release/` (a v0.2.3
-     xcarchive dated 2026-05-06), no touch-code.app from the M1 branch.
-   - apps/mac/build/   -> empty of touch-code.app.
-   - ~/Library/Developer/Xcode/DerivedData/touch-code-*  -> no
-     touch-code.app product (Xcode index-build is running but no
+     xcarchive dated 2026-05-06), no codans.app from the M1 branch.
+   - apps/mac/build/   -> empty of codans.app.
+   - ~/Library/Developer/Xcode/DerivedData/codans-*  -> no
+     codans.app product (Xcode index-build is running but no
      archived/built product is present).
-   - /Applications/touch-code.app -> does not exist.
+   - /Applications/codans.app -> does not exist.
 
 What this run cannot tell you
 =============================
@@ -44,11 +44,11 @@ What this run cannot tell you
 
 To re-run for PASS/FAIL
 =======================
-- Back up the user's real ~/.config/touch-code/notifications.json:
-    mv ~/.config/touch-code/notifications.json \
-       ~/.config/touch-code/notifications.json.user-backup-2026-05-20
+- Back up the user's real ~/.config/codans/notifications.json:
+    mv ~/.config/codans/notifications.json \
+       ~/.config/codans/notifications.json.user-backup-2026-05-20
 - Seed a fresh 3-entry bare-array fixture (2 unread / 1 read) at
-  ~/.config/touch-code/notifications.json (per the brief's documented
+  ~/.config/codans/notifications.json (per the brief's documented
   v1.0 entry shape).
 - Quit the running release app.
 - Build and launch the M1 build:
@@ -56,12 +56,12 @@ To re-run for PASS/FAIL
 - Wait for the "App launched" ready signal, open the bell popover and
   confirm it shows 3 rows with unread badge "2".
 - Drive one notification-worthy event onto an unfocused pane (e.g.,
-  `tc pane send <id> $'\033]9;hello\007'`).
+  `codans pane send <id> $'\033]9;hello\007'`).
 - Wait > 1 s past the inbox debounce.
 - Inspect with jq:
     jq 'has("version") and has("entries")
         and (.version == 1)
         and (.entries | length == 4)' \
-      ~/.config/touch-code/notifications.json
+      ~/.config/codans/notifications.json
   Expected: true.
 - After the run, restore the user's backed-up file.

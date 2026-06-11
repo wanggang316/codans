@@ -45,7 +45,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 - **`PendingWorktree` 字段最小化**：本任务只放 `id` / `projectID` / `displayName` 三个 stub 字段；`spaceID` / `spec` / `status` / `lastProgressLine` / `startedAt` 由 task03 补齐。在 `PendingWorktree.swift` 里加注释 `// stub — task03 will replace with full schema; see worktree-sidebar-ordering.md §pending 段`。
 - **`worktreePinToggleTapped` 不动**：task01 plan 已确定保留 `HierarchyClient.setWorktreePinned(WorktreeID, Bool)` 签名不变，落位逻辑（pin → pinned 段尾；unpin → unpinned 段顶）下沉到 `HierarchyManager.setWorktreePinned` 内部。task02 视图层与 reducer 对该路径无任何改动。
 - **task01 未 merge 时的工作切分**：M1–M3、M5 的 ordering 测试可独立完成；M4 forwarder + 对应测试需要 task01 暴露 `reorderWorktrees` 闭包与 `WorktreeSegment` enum 后才能编译；那之前在 view 端把 `.onMove` 闭包注释成 `// TODO(task01): wire reorderWorktrees forwarder once HierarchyClient exposes it.` 并保留 ForEach 段落结构。Phase 切换详见 §Plan of Work / §Validation。
-- **ordering 测试单独成文件**：新建 `apps/mac/touch-code/Tests/HierarchySidebarOrderingTests.swift`，与现有 `HierarchySidebarFeatureTests.swift` 同 target；理由是 ordering 用例只测 `HierarchySidebarView.orderedSidebarRows` 这个纯静态函数，不依赖 `TestStore`，单文件聚焦更容易给 task03 扩展。reducer forwarder 测试仍补在 `HierarchySidebarFeatureTests.swift`，因为它需要 `TestStore` 与 `HierarchyClient` mock，跟现有用例同质。
+- **ordering 测试单独成文件**：新建 `apps/mac/codans/Tests/HierarchySidebarOrderingTests.swift`，与现有 `HierarchySidebarFeatureTests.swift` 同 target；理由是 ordering 用例只测 `HierarchySidebarView.orderedSidebarRows` 这个纯静态函数，不依赖 `TestStore`，单文件聚焦更容易给 task03 扩展。reducer forwarder 测试仍补在 `HierarchySidebarFeatureTests.swift`，因为它需要 `TestStore` 与 `HierarchyClient` mock，跟现有用例同质。
 - **PR 形态：等 Phase B 完成再开单 PR**（不开 [Phase A only] WIP PR）。理由：Phase A 净增 < 200 行，等 Phase B 再开能让 codex 一次评审完整切片，避免两轮 review 噪音；task03 在 task01 / task02 都未 merge 时也无法实际接入，提早开 WIP PR 不解锁下游。如 task01 长时间不动（> 1 工作日）再回来重新评估。
 
 ## Outcomes & Retrospective
@@ -58,16 +58,16 @@ Related documents:
 
 - Main design doc: [`docs/design-docs/worktree-sidebar-ordering.md`](../design-docs/worktree-sidebar-ordering.md) — §段语义详述、§渲染合并、§Component Boundaries、§Alternatives Considered 第 4 处。
 - Repo 顶层指引：[`CLAUDE.md`](../../CLAUDE.md)、[`docs/golden-rules.md`](../golden-rules.md)。
-- 协调协议：`/tmp/touch-code-bootstrap-02.md`（master ↔ sub-agent，本 ExecPlan 即对应 bootstrap §你的任务）。
+- 协调协议：`/tmp/codans-bootstrap-02.md`（master ↔ sub-agent，本 ExecPlan 即对应 bootstrap §你的任务）。
 
 Key source files (touched 或被读):
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift` — 当前包含 `orderedVisibleWorktrees(in:)`（行 50–56）和 `treeBody / projectSection / worktreeRow` 渲染链；本任务把渲染层切换到 `[SidebarRow]`。
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — TCA reducer；新增 `reorderWorktrees(projectID:segment:from:to:)` action，改造 `worktreePinToggleTapped` 派发路径。
-- `apps/mac/touch-code/App/Features/HierarchySidebar/SidebarRow.swift` — **新建**。承载 `enum SidebarRow` + `PendingWorktree` / `PendingWorktreeID` stub。
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — **task01 owns**，本任务只读。task02 假设 task01 新增：`reorderWorktrees: @MainActor @Sendable (_ projectID: ProjectID, _ inSpace: SpaceID, _ segment: WorktreeSegment, _ from: IndexSet, _ to: Int) throws -> Void` 与 `enum WorktreeSegment: Sendable { case pinned; case unpinned }`。`inSpace: SpaceID` 与现有 `reorderProjects(_ inSpace:, _ from:, _ to:)` / `removeWorktreeWithGit(_, _ inProject:, _ inSpace:, _ force:)` 等"动 worktree/project 必带 inSpace"的约定对齐。**`setWorktreePinned: @MainActor @Sendable (_ worktreeID: WorktreeID, _ isPinned: Bool) -> Void` 签名保留不变**（grep 自 `HierarchyClient.swift:194` 与 `HierarchyManager.swift:366`），落位逻辑由 task01 在 `HierarchyManager.setWorktreePinned` 内部完成；task02 不消费该接口。
-- `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` — 现有 reducer 测试集，扩展 ordering + forwarder 用例。
-- `apps/mac/TouchCodeCore/Worktree.swift` / `Project.swift` — 模型只读，schema 不变。
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift` — 当前包含 `orderedVisibleWorktrees(in:)`（行 50–56）和 `treeBody / projectSection / worktreeRow` 渲染链；本任务把渲染层切换到 `[SidebarRow]`。
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — TCA reducer；新增 `reorderWorktrees(projectID:segment:from:to:)` action，改造 `worktreePinToggleTapped` 派发路径。
+- `apps/mac/codans/App/Features/HierarchySidebar/SidebarRow.swift` — **新建**。承载 `enum SidebarRow` + `PendingWorktree` / `PendingWorktreeID` stub。
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — **task01 owns**，本任务只读。task02 假设 task01 新增：`reorderWorktrees: @MainActor @Sendable (_ projectID: ProjectID, _ inSpace: SpaceID, _ segment: WorktreeSegment, _ from: IndexSet, _ to: Int) throws -> Void` 与 `enum WorktreeSegment: Sendable { case pinned; case unpinned }`。`inSpace: SpaceID` 与现有 `reorderProjects(_ inSpace:, _ from:, _ to:)` / `removeWorktreeWithGit(_, _ inProject:, _ inSpace:, _ force:)` 等"动 worktree/project 必带 inSpace"的约定对齐。**`setWorktreePinned: @MainActor @Sendable (_ worktreeID: WorktreeID, _ isPinned: Bool) -> Void` 签名保留不变**（grep 自 `HierarchyClient.swift:194` 与 `HierarchyManager.swift:366`），落位逻辑由 task01 在 `HierarchyManager.setWorktreePinned` 内部完成；task02 不消费该接口。
+- `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift` — 现有 reducer 测试集，扩展 ordering + forwarder 用例。
+- `apps/mac/CodansCore/Worktree.swift` / `Project.swift` — 模型只读，schema 不变。
 
 Term:
 
@@ -81,7 +81,7 @@ Term:
 
 ### Phase A — 独立部分（可立即开始）
 
-1. **新建 `SidebarRow.swift`**（M1）。文件位置 `apps/mac/touch-code/App/Features/HierarchySidebar/SidebarRow.swift`。内容三块：
+1. **新建 `SidebarRow.swift`**（M1）。文件位置 `apps/mac/codans/App/Features/HierarchySidebar/SidebarRow.swift`。内容三块：
    - `struct PendingWorktreeID: Hashable, Sendable { let raw: UUID; init(raw: UUID = UUID()) { self.raw = raw } }`
    - `struct PendingWorktree: Equatable, Identifiable { let id: PendingWorktreeID; let projectID: ProjectID; let displayName: String }` — 加文件头 doc-comment 标注 `// stub — task03 replaces with full schema (see worktree-sidebar-ordering.md §pending 段).`
    - `enum SidebarRow: Identifiable { case worktree(Worktree); case pending(PendingWorktree); var id: String { switch self { case .worktree(let w): return "wt:\(w.id.raw)"; case .pending(let p): return "pending:\(p.id.raw)" } } }`
@@ -107,7 +107,7 @@ Term:
    - 实现路径：在 `projectSection` 里把 `orderedSidebarRows(...)` 拆成两个 worktree-only 切片（`pinnedRows`、`unpinnedRows`）和一个 `pendingRows`（task02 内永远为空数组），分别挂三个 `ForEach`。pinned 和 unpinned 的 `ForEach` 各调用 `.onMove { source, destination in store.send(.reorderWorktrees(projectID: project.id, inSpace: space.id, segment: .pinned/.unpinned, from: source, to: destination)) }`。
    - **task01 未 merge 时**：`.onMove` 闭包写为 `// TODO(task01): wire reorderWorktrees forwarder once HierarchyClient exposes it; SidebarRow + ForEach 已就位.`，保留 ForEach 结构使 layout 等同于今天（不引入 visual regression）。
 
-5. **Ordering 测试**（M5 第 1 部分）。**新建** `apps/mac/touch-code/Tests/HierarchySidebarOrderingTests.swift`（与 `HierarchySidebarFeatureTests.swift` 同 target）加：
+5. **Ordering 测试**（M5 第 1 部分）。**新建** `apps/mac/codans/Tests/HierarchySidebarOrderingTests.swift`（与 `HierarchySidebarFeatureTests.swift` 同 target）加：
    - `orderedSidebarRowsReturnsSixRowsAndCorrectSegmentOrder`：构造 1 main + 2 pinned + 3 unpinned + 0 pending 的 Project，期望 6 行且段顺序 `[main, pinned, pinned, unpinned, unpinned, unpinned]`。
    - `orderedSidebarRowsPlacesPendingBetweenPinnedAndUnpinned`：1 main + 1 pinned + 2 pending（projectID 命中）+ 2 unpinned，期望 6 行；pending 行 `id` 前缀为 `"pending:"`，worktree 行前缀 `"wt:"`（验证契约）。
    - `orderedSidebarRowsFiltersOutOtherProjectPending`：传入两个 pending，一个 projectID 命中、一个不命中，期望只渲染命中那条。
@@ -154,7 +154,7 @@ Term:
 
 ## Concrete Steps
 
-工作目录：`/Users/wanggang/.worktree/repos/touch-code/feat/worktree-sidebar-segments`
+工作目录：`/Users/wanggang/.worktree/repos/codans/feat/worktree-sidebar-segments`
 
 ```bash
 # Phase A 完成后：
@@ -226,11 +226,11 @@ Phase B 完成定义：
 
 ## Interfaces and Dependencies
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/SidebarRow.swift`, define:
+In `apps/mac/codans/App/Features/HierarchySidebar/SidebarRow.swift`, define:
 
 ```swift
 import Foundation
-import TouchCodeCore
+import CodansCore
 
 struct PendingWorktreeID: Hashable, Sendable {
   let raw: UUID
@@ -258,7 +258,7 @@ enum SidebarRow: Identifiable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift`, add:
+In `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift`, add:
 
 ```swift
 static func orderedSidebarRows(
@@ -269,7 +269,7 @@ static func orderedSidebarRows(
 
 实现按 design doc §渲染合并 原文（main + pinned + projectPending + rest）。`orderedVisibleWorktrees(in:)` 改写为 `orderedSidebarRows(project: project, pendings: []).compactMap { ... }` 以兼容 hotkey 枚举路径。
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`, add:
+In `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`, add:
 
 ```swift
 case reorderWorktrees(

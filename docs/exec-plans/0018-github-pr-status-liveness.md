@@ -41,7 +41,7 @@ Landing commits: `8c37fc93` (plan), `2691ef31` (M1–M3 reducer + RootFeature wi
 
 ### S-1 (2026-05-30): Pre-existing test-target breakage blocked the M3 build
 
-The `touch-codeTests` target did not compile at HEAD before this work started: commit `9e7e198e` had added a `changeTypes: [String: ChangeStatus]` parameter to `DiffFeature.Action.commitDiffSucceededFor` but left three test call sites in `DiffFeatureTests.swift` (≈ lines 523, 845, 1076) on the old signature. Because the whole test target must compile before any filtered subset runs, this masked the GitHub work entirely. Fixed in `a7f08fed` by passing `changeTypes: [:]` at the three sites — independent of 0018, but a prerequisite for verifying it.
+The `codansTests` target did not compile at HEAD before this work started: commit `9e7e198e` had added a `changeTypes: [String: ChangeStatus]` parameter to `DiffFeature.Action.commitDiffSucceededFor` but left three test call sites in `DiffFeatureTests.swift` (≈ lines 523, 845, 1076) on the old signature. Because the whole test target must compile before any filtered subset runs, this masked the GitHub work entirely. Fixed in `a7f08fed` by passing `changeTypes: [:]` at the three sites — independent of 0018, but a prerequisite for verifying it.
 
 ### S-2 (2026-05-30): `worktreePaths` is now write-only state
 
@@ -81,7 +81,7 @@ The M1 RootFeature wiring (the `didResignActiveNotification` stream, `makePollTa
 
 ### 2026-05-30 — M1–M3 + M5 delivered; M4 deferred
 
-**Delivered.** The active Project's PR data now refreshes on its own while touch-code is the frontmost app, with zero polling cost when it is not:
+**Delivered.** The active Project's PR data now refreshes on its own while codans is the frontmost app, with zero polling cost when it is not:
 
 - **M1** — a single-slot cancellable poll (`CancelID.poll`) re-issues `projectRefreshRequested` for the active Project on a clock-driven timer, gated on app-active via `pollTargetChanged`. Resigning active dispatches `pollTargetChanged(nil)`, which cancels the loop; becoming active or switching Projects re-points it.
 - **M2** — the cadence is chosen per tick from the target's last snapshot: ~15 s while any open PR has unsettled merge state or a non-completed check, ~60 s once settled. The idle cadence still runs (while foreground) so remote merges/closes/new PRs surface within ~60 s.
@@ -90,7 +90,7 @@ The M1 RootFeature wiring (the `didResignActiveNotification` stream, `makePollTa
 
 **Deferred.** M4 (terminal command-detection immediate refresh) — see DEC-3.
 
-**Verification.** The whole `touch-codeTests` target compiles and the GitHub + Root suites pass (`** TEST SUCCEEDED **`). A pre-existing, unrelated test-target break had to be fixed first to even reach the GitHub tests — see S-1.
+**Verification.** The whole `codansTests` target compiles and the GitHub + Root suites pass (`** TEST SUCCEEDED **`). A pre-existing, unrelated test-target break had to be fixed first to even reach the GitHub tests — see S-1.
 
 **Lessons.**
 - The original v2 design's rejection of polling (Alternative D) was sound *for its scope* (background, all-Project, AFK). Re-reading the objections showed every one of them keys on properties this poll deliberately lacks — the right move was to scope and gate, not to relitigate the rejection. (DEC-1.)
@@ -104,16 +104,16 @@ Related documents:
 - Prior plan: `docs/exec-plans/0013-github-integration-batched.md` — DEC-6 and "Future work #1" describe the postMutationRefresh→project-level migration that M3 here delivers.
 
 Key source files:
-- `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift` — TCA reducer owning PR snapshot state. Already has `projectRefreshRequested`, the per-Project in-flight/queued re-entrancy model, `enqueueProjectFetch`, `projectGitRoots`, and the `CancelID` enum. This plan adds a poll target + tick actions and a cadence helper here.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — observes `HierarchyManager` selection changes and `NSApplication.didBecomeActiveNotification` in `onLaunch` (lines ~430–528). Already builds `WorktreeBranchPair` lists for `projectActivated` (`makeActiveProjectGitHubRefresh`, ~2055). This plan adds a `didResignActiveNotification` observation and a helper that drives the poll target from (app-active × active-project).
-- `apps/mac/touch-code/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift` + `App/Features/StatusBar/StatusBarView.swift` — consumers that read `store.snapshots[worktreeID]`. Unchanged; they repaint automatically as the poll refreshes that dict.
-- `apps/mac/touch-code/TouchCodeCore/GitHub/PullRequestSnapshot.swift` + `CheckResult.swift` — the model the cadence predicate inspects (`PullRequestState` = open/merged/closed, `isDraft`, `checkRollup: [CheckResult]` with `CheckStatus` = queued/inProgress/waiting/pending/completed, `mergeStateStatus`).
+- `apps/mac/codans/App/Features/GitHub/GitHubFeature.swift` — TCA reducer owning PR snapshot state. Already has `projectRefreshRequested`, the per-Project in-flight/queued re-entrancy model, `enqueueProjectFetch`, `projectGitRoots`, and the `CancelID` enum. This plan adds a poll target + tick actions and a cadence helper here.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — observes `HierarchyManager` selection changes and `NSApplication.didBecomeActiveNotification` in `onLaunch` (lines ~430–528). Already builds `WorktreeBranchPair` lists for `projectActivated` (`makeActiveProjectGitHubRefresh`, ~2055). This plan adds a `didResignActiveNotification` observation and a helper that drives the poll target from (app-active × active-project).
+- `apps/mac/codans/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift` + `App/Features/StatusBar/StatusBarView.swift` — consumers that read `store.snapshots[worktreeID]`. Unchanged; they repaint automatically as the poll refreshes that dict.
+- `apps/mac/codans/CodansCore/GitHub/PullRequestSnapshot.swift` + `CheckResult.swift` — the model the cadence predicate inspects (`PullRequestState` = open/merged/closed, `isDraft`, `checkRollup: [CheckResult]` with `CheckStatus` = queued/inProgress/waiting/pending/completed, `mergeStateStatus`).
 
 Orientation. The data already flows correctly: a forced `projectRefreshRequested` runs one batched `gh api graphql`, writes `snapshotsByProject[P]`, and projects each branch into the per-Worktree `snapshots` dict the views read. The only thing missing is a clock that re-issues that forced refresh while the user is looking at the app. This plan supplies that clock, gated so it costs nothing when the app is not foreground.
 
 Definitions:
 - **Active Project** — `Catalog.selectedProjectID`'s Project.
-- **App-active** — the touch-code application is the frontmost macOS app (`NSApplication.shared.isActive`; transitions via `didBecomeActiveNotification` / `didResignActiveNotification`).
+- **App-active** — the codans application is the frontmost macOS app (`NSApplication.shared.isActive`; transitions via `didBecomeActiveNotification` / `didResignActiveNotification`).
 - **In-flight (for cadence)** — a PR with `state == .open` and either `mergeStateStatus == .unknown` (GitHub still computing) or any `checkRollup` entry whose `status != .completed`.
 - **Poll target** — the single Project the loop currently refreshes; `nil` means the loop is paused.
 
@@ -218,8 +218,8 @@ Targeted tests during development:
 
 ```
 # from apps/mac — adjust to the project's test invocation
-xcodebuild test -scheme touch-code -only-testing:touch-codeTests/GitHubFeatureTests
-xcodebuild test -scheme touch-code -only-testing:touch-codeTests/RootFeatureTests
+xcodebuild test -scheme codans -only-testing:codansTests/GitHubFeatureTests
+xcodebuild test -scheme codans -only-testing:codansTests/RootFeatureTests
 ```
 
 Expected: the new `GitHubFeatureTests` poll cases pass; existing GitHub + Root suites stay green.
@@ -227,7 +227,7 @@ Expected: the new `GitHubFeatureTests` poll cases pass; existing GitHub + Root s
 ## Validation and Acceptance
 
 Behavioural, app-active:
-1. Select a Project with an open PR whose CI is running. Watch the badge's check overlay flip from running to its final color within ~15 s of CI finishing, with no interaction. Expected: one `gh api graphql` roughly every 15 s while CI runs (verify via `log stream --predicate 'subsystem == "com.touch-code.github"'`).
+1. Select a Project with an open PR whose CI is running. Watch the badge's check overlay flip from running to its final color within ~15 s of CI finishing, with no interaction. Expected: one `gh api graphql` roughly every 15 s while CI runs (verify via `log stream --predicate 'subsystem == "com.gumpw.codans.github"'`).
 2. With all PRs settled, confirm the cadence relaxes to ~60 s.
 3. Merge a PR from github.com in a browser; within ~60 s the sidebar row flips to merged while the app is foreground.
 4. cmd-tab to another app; confirm via the log stream that no further batched fetches fire. cmd-tab back; fetches resume.
@@ -244,7 +244,7 @@ The poll is a single cancellable effect (`CancelID.poll`); re-arming with `cance
 
 ## Interfaces and Dependencies
 
-In `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift`:
+In `apps/mac/codans/App/Features/GitHub/GitHubFeature.swift`:
 
     // State
     var pollTarget: ProjectID?
@@ -265,7 +265,7 @@ In `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift`:
     // Dependency
     @Dependency(\.continuousClock) var clock
 
-In `apps/mac/touch-code/App/Features/Root/RootFeature.swift`:
+In `apps/mac/codans/App/Features/Root/RootFeature.swift`:
 
     @MainActor
     static func makePollTargetChange(

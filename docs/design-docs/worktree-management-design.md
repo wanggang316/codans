@@ -8,7 +8,7 @@
 
 ## Context and Scope
 
-touch-code already has a sidebar tree (Space → Project → Worktree), a data-only
+codans already has a sidebar tree (Space → Project → Worktree), a data-only
 `HierarchyManager.createWorktree` / `removeWorktree`, a minimal `GitWorktreeCLI`
 (direct `git worktree` shell-out with porcelain parsing), and a stub
 "Add Worktree" sheet wired at `HierarchySidebarView.swift:78-83`. Remove goes
@@ -313,9 +313,9 @@ Codable:
 - `encode(to:)`: emit only when `true` (`if archived { try container.encode(true, forKey: .archived) }`).
 
 This pattern is already established in `Worktree.gitViewerVisible`
-(file `TouchCodeCore/Worktree.swift:60-66`) — existing catalogs round-trip
+(file `CodansCore/Worktree.swift:60-66`) — existing catalogs round-trip
 identically until a user archives their first worktree. A unit test in
-`TouchCodeCoreTests` asserts a pre-0007 fixture decodes with `archived ==
+`CodansCoreTests` asserts a pre-0007 fixture decodes with `archived ==
 false`, encodes back with no `archived` key, and a fixture with
 `"archived": true` round-trips.
 
@@ -332,24 +332,24 @@ are the whole migration story.
 ### Component Boundaries
 
 ```
-TouchCodeCore/
+CodansCore/
   Worktree.swift             ← add `archived`; owner: T-WORKTREE
 
-touch-code/Git/
+codans/Git/
   GitWorktreeClient.swift    ← NEW; app-layer, depends on Bundle + Process
   GitWorktreeCLI.swift       ← unchanged; fallback for non-bundled builds
 
-touch-code/Runtime/
+codans/Runtime/
   HierarchyManager.swift     ← add setWorktreeArchived,
                                reconcileDiscoveredWorktrees,
                                runningPanelCount helper
                                (all MainActor, no git I/O)
 
-touch-code/App/Clients/
+codans/App/Clients/
   HierarchyClient.swift      ← APPEND new closures (at file end, per scope
                                contract); keep existing closures intact
 
-touch-code/App/Features/HierarchySidebar/
+codans/App/Features/HierarchySidebar/
   HierarchySidebarView.swift ← REPLACE lines 78-83 stub with
                                CreateWorktreeSheet presentation; append
                                ArchivedWorktrees sheet + Prune toast;
@@ -423,10 +423,10 @@ those scripts also handle).
    the `wt` script into `${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/git-wt/wt`
    and `chmod +x`es it. `inputPaths` = source `wt`; `outputPaths` =
    destination path, so Xcode tracks change-based incremental rebuilds.
-4. `Project.swift` edits, scoped to the `touch-code` app target only:
+4. `Project.swift` edits, scoped to the `codans` app target only:
    ```
    .target(
-     name: "touch-code",
+     name: "codans",
      ...,
      scripts: [
        .pre(script: "\"${SRCROOT}/scripts/verify-git-wt.sh\"",
@@ -467,7 +467,7 @@ to `/usr/bin/git` directly — the spec requires the bundled `git-wt` script
 for JSON listing / base-dir semantics / streaming copy, which is a
 different executable with different flag conventions. Mixing both in one
 type obscures which tool a given operation actually uses. A second client
-co-located in `touch-code/Git/` is cheaper to keep correct.
+co-located in `codans/Git/` is cheaper to keep correct.
 
 ### B. Archive as a separate `[Worktree]` array on `Project`
 
@@ -568,9 +568,9 @@ directory. Choose a different branch name."). No auto-suffixing.
 
 Three test layers:
 
-1. **Unit (`TouchCodeCoreTests`)** — `Worktree` Codable round-trip for
+1. **Unit (`CodansCoreTests`)** — `Worktree` Codable round-trip for
    the `archived` field; pre-0007 fixture decodes with `archived == false`.
-2. **Unit (`touch-codeTests`)** — `GitWorktreeClient`:
+2. **Unit (`codansTests`)** — `GitWorktreeClient`:
    - argument builder (`makeCreateArguments`) for all flag combinations;
    - JSON decode of `wt ls --json` into `[GitWtEntry]` with bare-repo
      filter;
@@ -578,8 +578,8 @@ Three test layers:
      `weird:name` → `weirdname`);
    - error mapping — a fake `ProcessRunner` that returns a scripted stderr
      produces the right `GitWorktreeError` case.
-3. **Integration (`touch-codeTests/Integration`)** — a temp git repo
-   (`/tmp/touch-code-wt-<uuid>`, teardown in `addTeardownBlock`) goes
+3. **Integration (`codansTests/Integration`)** — a temp git repo
+   (`/tmp/codans-wt-<uuid>`, teardown in `addTeardownBlock`) goes
    through create → lsWorktrees → archive → unarchive → removeWorktree.
    Uses the real bundled `wt` if `Bundle.main` resolves it; otherwise the
    integration test is skipped (`XCTSkip("wt script not bundled in test
@@ -590,7 +590,7 @@ Three test layers:
 Manual verification checklist added to the PR body:
 
 - [ ] Create Worktree on a real repo, no copy flags → succeeds <3 s.
-- [ ] Create with `--copy-ignored` on touch-code itself (node_modules
+- [ ] Create with `--copy-ignored` on codans itself (node_modules
       absent, so it's small; use a JS project for large-copy manual).
 - [ ] Create with an invalid branch name → Create button disabled, error
       visible.

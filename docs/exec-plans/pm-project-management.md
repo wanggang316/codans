@@ -68,32 +68,32 @@ Related documents:
 
 Key source files (full repository-relative paths):
 
-- `apps/mac/TouchCodeCore/Project.swift` — `Project` value type. P0.1 adds transient `loadState` and hand-rolled `Codable`. **Conflict file — owned by this branch.**
-- `apps/mac/TouchCodeCore/Worktree.swift` — owned by T-WORKTREE (adds `archived`). **Do not touch.**
-- `apps/mac/TouchCodeCore/Space.swift` — **Do not touch.**
-- `apps/mac/TouchCodeCore/Catalog.swift` — unchanged by this plan.
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — P0.2 appends four new methods after existing Project mutations.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — P0.3 appends four owned closures and one consumed-stub closure (for T-WORKTREE's `reconcileDiscoveredWorktrees`). All additions at file end to minimize merge conflict.
-- `apps/mac/touch-code/Git/GitWorktreeCLI.swift` — existing actor with `discoverGitRoot` + `listWorktrees`. Consumed **only** by `AddProjectFeature` for add-time git/non-git classification. The reconciler does not import this file.
-- `apps/mac/touch-code/App/Clients/FolderPickerClient.swift` — **new file**. NSOpenPanel bridge. P1.1.
-- `apps/mac/touch-code/Runtime/ProjectReconciler.swift` — **new file**. Actor. P1.2.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift` — current view. P2.2 replaces **only** lines 66-71 (Add-Project stub) with the real sheet. **Lines 78-83 (Add-Worktree stub) untouched — T-WORKTREE territory.** P3.2 rewires the `⋯` menu. P5.1 gates `+` chrome. P5.3 updates Remove-Project dialog copy. P6.1 adds `.onMove`. P7.2 swaps in `FailedProjectRow`.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — P3.3 removes rename state/actions. P2.x / P3.x add `.addProjectSheet(...)` delegation and `.projectOptionsTapped`.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/AddProjectFeature.swift` — **new file**. P2.1.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/AddProjectSheet.swift` — **new file**. P2.2.
-- `apps/mac/touch-code/App/Features/ProjectOptions/ProjectOptionsFeature.swift` — **new file**. P3.1.
-- `apps/mac/touch-code/App/Features/ProjectOptions/ProjectOptionsSheet.swift` — **new file**. P3.2.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/FailedProjectRow.swift` — **new file**. P7.1.
-- `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderView.swift` — P5.2 gates branch label + GV toggle on `supportsWorktrees`.
-- `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift` — P5.2 caller change.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — P4.1 / P4.2 add reconcile triggers.
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — wires `FolderPickerClient` and the `ProjectReconciler` instance. P1.1 / P1.2 / P4.1.
-- `apps/mac/touch-code/Tests/HierarchyManagerTests.swift` — P0.2 adds coverage.
-- `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift` — P3.3 migrates rename cases out.
-- `apps/mac/touch-code/Tests/ProjectReconcilerTests.swift` — **new file**. P1.2.
-- `apps/mac/touch-code/Tests/AddProjectFeatureTests.swift` — **new file**. P2.1.
-- `apps/mac/touch-code/Tests/ProjectOptionsFeatureTests.swift` — **new file**. P3.1.
-- `apps/mac/TouchCodeCoreTests/ProjectCodableTests.swift` — **new file**. P0.1.
+- `apps/mac/CodansCore/Project.swift` — `Project` value type. P0.1 adds transient `loadState` and hand-rolled `Codable`. **Conflict file — owned by this branch.**
+- `apps/mac/CodansCore/Worktree.swift` — owned by T-WORKTREE (adds `archived`). **Do not touch.**
+- `apps/mac/CodansCore/Space.swift` — **Do not touch.**
+- `apps/mac/CodansCore/Catalog.swift` — unchanged by this plan.
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — P0.2 appends four new methods after existing Project mutations.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — P0.3 appends four owned closures and one consumed-stub closure (for T-WORKTREE's `reconcileDiscoveredWorktrees`). All additions at file end to minimize merge conflict.
+- `apps/mac/codans/Git/GitWorktreeCLI.swift` — existing actor with `discoverGitRoot` + `listWorktrees`. Consumed **only** by `AddProjectFeature` for add-time git/non-git classification. The reconciler does not import this file.
+- `apps/mac/codans/App/Clients/FolderPickerClient.swift` — **new file**. NSOpenPanel bridge. P1.1.
+- `apps/mac/codans/Runtime/ProjectReconciler.swift` — **new file**. Actor. P1.2.
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift` — current view. P2.2 replaces **only** lines 66-71 (Add-Project stub) with the real sheet. **Lines 78-83 (Add-Worktree stub) untouched — T-WORKTREE territory.** P3.2 rewires the `⋯` menu. P5.1 gates `+` chrome. P5.3 updates Remove-Project dialog copy. P6.1 adds `.onMove`. P7.2 swaps in `FailedProjectRow`.
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — P3.3 removes rename state/actions. P2.x / P3.x add `.addProjectSheet(...)` delegation and `.projectOptionsTapped`.
+- `apps/mac/codans/App/Features/HierarchySidebar/AddProjectFeature.swift` — **new file**. P2.1.
+- `apps/mac/codans/App/Features/HierarchySidebar/AddProjectSheet.swift` — **new file**. P2.2.
+- `apps/mac/codans/App/Features/ProjectOptions/ProjectOptionsFeature.swift` — **new file**. P3.1.
+- `apps/mac/codans/App/Features/ProjectOptions/ProjectOptionsSheet.swift` — **new file**. P3.2.
+- `apps/mac/codans/App/Features/HierarchySidebar/FailedProjectRow.swift` — **new file**. P7.1.
+- `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderView.swift` — P5.2 gates branch label + GV toggle on `supportsWorktrees`.
+- `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailView.swift` — P5.2 caller change.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — P4.1 / P4.2 add reconcile triggers.
+- `apps/mac/codans/App/CodansApp.swift` — wires `FolderPickerClient` and the `ProjectReconciler` instance. P1.1 / P1.2 / P4.1.
+- `apps/mac/codans/Tests/HierarchyManagerTests.swift` — P0.2 adds coverage.
+- `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift` — P3.3 migrates rename cases out.
+- `apps/mac/codans/Tests/ProjectReconcilerTests.swift` — **new file**. P1.2.
+- `apps/mac/codans/Tests/AddProjectFeatureTests.swift` — **new file**. P2.1.
+- `apps/mac/codans/Tests/ProjectOptionsFeatureTests.swift` — **new file**. P3.1.
+- `apps/mac/CodansCoreTests/ProjectCodableTests.swift` — **new file**. P0.1.
 
 Terms of art (defined where first used):
 
@@ -111,7 +111,7 @@ The work is organized as nine phases (P0–P8), sliced vertically so each phase 
 
 ### P0 — Data layer and client surface
 
-**P0.1** — Edit `apps/mac/TouchCodeCore/Project.swift`. Add:
+**P0.1** — Edit `apps/mac/CodansCore/Project.swift`. Add:
 
 ```swift
 public enum ProjectLoadState: Equatable, Sendable {
@@ -164,13 +164,13 @@ extension Project {
 }
 ```
 
-Create `apps/mac/TouchCodeCoreTests/ProjectCodableTests.swift` with one round-trip test: decode a canonical v1 `catalog.json` snippet without `loadState`, encode back, assert JSON dictionaries are equal (via `JSONSerialization`, key-order insensitive). One additional test: decoded Project's `loadState == .loading`.
+Create `apps/mac/CodansCoreTests/ProjectCodableTests.swift` with one round-trip test: decode a canonical v1 `catalog.json` snippet without `loadState`, encode back, assert JSON dictionaries are equal (via `JSONSerialization`, key-order insensitive). One additional test: decoded Project's `loadState == .loading`.
 
-Acceptance: `xcodebuild test -scheme TouchCodeCore` green.
+Acceptance: `xcodebuild test -scheme CodansCore` green.
 
 Commit: `feat(pm): add transient Project.loadState with hand-rolled Codable`
 
-**P0.2** — Edit `apps/mac/touch-code/Runtime/HierarchyManager.swift`. Append after `setDefaultEditor`:
+**P0.2** — Edit `apps/mac/codans/Runtime/HierarchyManager.swift`. Append after `setDefaultEditor`:
 
 ```swift
 func setProjectLoadState(
@@ -227,7 +227,7 @@ static func canonical(_ raw: String) -> String {
 
 **Not added:** `replaceWorktrees`. Worktree-list mutation on reconcile is T-WORKTREE's responsibility.
 
-Unit tests in `apps/mac/touch-code/Tests/HierarchyManagerTests.swift`:
+Unit tests in `apps/mac/codans/Tests/HierarchyManagerTests.swift`:
 
 1. `reorderProjects_movesInPlaceAndPersists`
 2. `setProjectLoadState_dedupsAndDoesNotPersist` (verify no `scheduleSave` for identical state)
@@ -236,11 +236,11 @@ Unit tests in `apps/mac/touch-code/Tests/HierarchyManagerTests.swift`:
 5. `isPathRegistered_canonicalizesBeforeMatch`
 6. `isPathRegistered_returnsNilWhenAbsent`
 
-Acceptance: `touch-code` scheme green with +6 tests.
+Acceptance: `codans` scheme green with +6 tests.
 
 Commit: `feat(pm): HierarchyManager load-state / reorder / worktreesDir / isPathRegistered`
 
-**P0.3** — Edit `apps/mac/touch-code/App/Clients/HierarchyClient.swift`. **Append** five new closure properties at the end of the `HierarchyClient` struct body; match with trailing entries in `live(manager:)`, `liveValue`, `testValue` — additive-only placement so this branch and T-WORKTREE can both append without textual conflict.
+**P0.3** — Edit `apps/mac/codans/App/Clients/HierarchyClient.swift`. **Append** five new closure properties at the end of the `HierarchyClient` struct body; match with trailing entries in `live(manager:)`, `liveValue`, `testValue` — additive-only placement so this branch and T-WORKTREE can both append without textual conflict.
 
 Signatures:
 
@@ -282,13 +282,13 @@ reconcileDiscoveredWorktrees: { _, _ in
 
 For `liveValue` (the fatal-error set) and `testValue` (the `unimplemented(...)` set), follow the existing conventions for each.
 
-Acceptance: `touch-code` scheme builds; no test regressions.
+Acceptance: `codans` scheme builds; no test regressions.
 
 Commit: `feat(pm): HierarchyClient — 4 owned closures + consumed reconcileDiscoveredWorktrees stub`
 
 ### P1 — Infrastructure: FolderPicker + Reconciler
 
-**P1.1** — Create `apps/mac/touch-code/App/Clients/FolderPickerClient.swift`:
+**P1.1** — Create `apps/mac/codans/App/Clients/FolderPickerClient.swift`:
 
 ```swift
 import AppKit
@@ -327,15 +327,15 @@ extension DependencyValues {
 }
 ```
 
-Acceptance: `touch-code` scheme builds.
+Acceptance: `codans` scheme builds.
 
 Commit: `feat(pm): FolderPickerClient (NSOpenPanel bridge)`
 
-**P1.2** — Create `apps/mac/touch-code/Runtime/ProjectReconciler.swift`:
+**P1.2** — Create `apps/mac/codans/Runtime/ProjectReconciler.swift`:
 
 ```swift
 import Foundation
-import TouchCodeCore
+import CodansCore
 
 actor ProjectReconciler {
   private let client: HierarchyClient
@@ -403,7 +403,7 @@ Note: `Date()`-based clocking over `any Clock<Duration>` because (a) tests can d
 
 The reconciler does not import `GitWorktreeCLI` or `ProjectScanner`. Its only non-client dependency is `FileManager.default`.
 
-Unit tests in `apps/mac/touch-code/Tests/ProjectReconcilerTests.swift`. All tests use a **recorder-closure** `HierarchyClient` — no real git fixture, no real `catalog.json`, no `GitWorktreeCLI`:
+Unit tests in `apps/mac/codans/Tests/ProjectReconcilerTests.swift`. All tests use a **recorder-closure** `HierarchyClient` — no real git fixture, no real `catalog.json`, no `GitWorktreeCLI`:
 
 1. `reconcile_existingFolder_callsClosureAndSetsReady` — record the three calls in order: `setProjectLoadState(.loading)`, `reconcileDiscoveredWorktrees`, `setProjectLoadState(.ready)`.
 2. `reconcile_missingFolder_setsFailedAndSkipsClosure` — tmpdir that doesn't exist; assert `reconcileDiscoveredWorktrees` is NOT called; `.failed(reason: …)` matches the message format.
@@ -414,15 +414,15 @@ Unit tests in `apps/mac/touch-code/Tests/ProjectReconcilerTests.swift`. All test
 
 These tests pass today (against the no-op stub) and continue to pass after T-WORKTREE's rebase without modification — the recorder doesn't care what the closure does.
 
-Wire the `ProjectReconciler` instance in `apps/mac/touch-code/App/TouchCodeApp.swift` alongside `hierarchyManager` etc. Expose via a new `DependencyKey` on `ProjectReconciler` with `liveValue` constructed from the live `HierarchyClient`.
+Wire the `ProjectReconciler` instance in `apps/mac/codans/App/CodansApp.swift` alongside `hierarchyManager` etc. Expose via a new `DependencyKey` on `ProjectReconciler` with `liveValue` constructed from the live `HierarchyClient`.
 
-Acceptance: `touch-code` scheme green with +6 tests.
+Acceptance: `codans` scheme green with +6 tests.
 
 Commit: `feat(pm): ProjectReconciler actor — stat + client closure + single-flight`
 
 ### P2 — Add Project flow
 
-**P2.1** — Create `apps/mac/touch-code/App/Features/HierarchySidebar/AddProjectFeature.swift`. Reducer with state / actions per design doc §AddProjectFeature. Dependencies: `@Dependency(HierarchyClient.self)`, `@Dependency(FolderPickerClient.self)`, `@Dependency(GitWorktreeCLI.self)` (register via a new `DependencyKey` on `GitWorktreeCLI` if absent; `liveValue = GitWorktreeCLI()`).
+**P2.1** — Create `apps/mac/codans/App/Features/HierarchySidebar/AddProjectFeature.swift`. Reducer with state / actions per design doc §AddProjectFeature. Dependencies: `@Dependency(HierarchyClient.self)`, `@Dependency(FolderPickerClient.self)`, `@Dependency(GitWorktreeCLI.self)` (register via a new `DependencyKey` on `GitWorktreeCLI` if absent; `liveValue = GitWorktreeCLI()`).
 
 Logic:
 
@@ -435,7 +435,7 @@ Logic:
 - `.revealExistingTapped` → delegate `.delegate(.revealExisting(spaceID, projectID))`.
 - `.cancelTapped` → clear state.
 
-Tests in `apps/mac/touch-code/Tests/AddProjectFeatureTests.swift` (TestStore):
+Tests in `apps/mac/codans/Tests/AddProjectFeatureTests.swift` (TestStore):
 
 1. `happyPath_gitFolder_submits` — real temp-dir `git init` fixture for the classification step; recorder asserts `addProject(...)` once with `gitRoot != nil`; delegate `.projectAdded` emitted.
 2. `happyPath_nonGitFolder_submits` — temp dir without `.git`; `gitRoot == nil`.
@@ -444,11 +444,11 @@ Tests in `apps/mac/touch-code/Tests/AddProjectFeatureTests.swift` (TestStore):
 5. `cancelClearsState`.
 6. `pickerCancelled_dismisses`.
 
-Acceptance: `touch-code` scheme green.
+Acceptance: `codans` scheme green.
 
 Commit: `feat(pm): AddProjectFeature reducer + tests`
 
-**P2.2** — Create `apps/mac/touch-code/App/Features/HierarchySidebar/AddProjectSheet.swift` with the UI described in the design doc. Replace `HierarchySidebarView.swift` lines 66-71 (Add Project stub body) with a real `AddProjectSheet(store: …)`. Wire `HierarchySidebarFeature` to scope `AddProjectFeature`.
+**P2.2** — Create `apps/mac/codans/App/Features/HierarchySidebar/AddProjectSheet.swift` with the UI described in the design doc. Replace `HierarchySidebarView.swift` lines 66-71 (Add Project stub body) with a real `AddProjectSheet(store: …)`. Wire `HierarchySidebarFeature` to scope `AddProjectFeature`.
 
 Delegate routing:
 
@@ -463,9 +463,9 @@ Commit: `feat(pm): Add Project sheet — NSOpenPanel + git/non-git classificatio
 
 ### P3 — Project Options sheet (subsumes Rename)
 
-**P3.1** — Create `apps/mac/touch-code/App/Features/ProjectOptions/ProjectOptionsFeature.swift`. State / actions per design doc §ProjectOptionsFeature. Dependencies: `@Dependency(HierarchyClient.self)` only. On `.saveTapped`, sequence `renameProject` → `setDefaultEditor` → `setProjectWorktreesDirectory`; on any throw, keep sheet open, set `validationError`.
+**P3.1** — Create `apps/mac/codans/App/Features/ProjectOptions/ProjectOptionsFeature.swift`. State / actions per design doc §ProjectOptionsFeature. Dependencies: `@Dependency(HierarchyClient.self)` only. On `.saveTapped`, sequence `renameProject` → `setDefaultEditor` → `setProjectWorktreesDirectory`; on any throw, keep sheet open, set `validationError`.
 
-Tests in `apps/mac/touch-code/Tests/ProjectOptionsFeatureTests.swift`:
+Tests in `apps/mac/codans/Tests/ProjectOptionsFeatureTests.swift`:
 
 1. `save_fansOutThreeCalls_inOrder`
 2. `save_skipsRenameIfNameUnchanged`
@@ -474,29 +474,29 @@ Tests in `apps/mac/touch-code/Tests/ProjectOptionsFeatureTests.swift`:
 5. `save_blankName_rejectsAndKeepsSheetOpen`
 6. `save_editorUnchanged_skipsSetDefaultEditor`
 
-Acceptance: `touch-code` scheme green.
+Acceptance: `codans` scheme green.
 
 Commit: `feat(pm): ProjectOptionsFeature reducer + tests`
 
-**P3.2** — Create `apps/mac/touch-code/App/Features/ProjectOptions/ProjectOptionsSheet.swift`. Fields: name, default editor (Picker over `EditorRegistry.descriptors`; first row "Use global default" → `nil`), worktrees directory (TextField; placeholder shows the default `~/.touch-code/repos/<name>/`). Save / Cancel buttons.
+**P3.2** — Create `apps/mac/codans/App/Features/ProjectOptions/ProjectOptionsSheet.swift`. Fields: name, default editor (Picker over `EditorRegistry.descriptors`; first row "Use global default" → `nil`), worktrees directory (TextField; placeholder shows the default `~/.codans/repos/<name>/`). Save / Cancel buttons.
 
 Rewire `⋯` menu in `HierarchySidebarView`'s `ProjectHeaderRow` (lines 506-527). "Rename Project" and any future rename entry point dispatch `.projectOptionsTapped(projectID:, inSpace:)`. Remove the standalone rename sheet presentation block (lines 84-91 and 424-453). Remove the `RenameProjectSheet` struct and its four related actions from `HierarchySidebarFeature`. Add `projectOptionsSheet: ProjectOptionsSheet?` state + `.projectOptionsTapped` action.
 
 Commit: `feat(pm): Project Options sheet — subsumes rename via ⋯ menu`
 
-**P3.3** — Edit `apps/mac/touch-code/Tests/HierarchySidebarFeatureTests.swift`:
+**P3.3** — Edit `apps/mac/codans/Tests/HierarchySidebarFeatureTests.swift`:
 
 - Delete `projectRenamePath` test (and helpers it used exclusively).
 - Grep the test file for `renameProjectSheet` / `.projectRename*` / `RenameProjectSheet` — zero hits.
 - Add a new sidebar-level smoke test `projectOptionsTapped_populatesSheet` asserting state field becomes non-nil (no direct HierarchyClient call from the sidebar reducer).
 
-Acceptance: no orphan references; `touch-code` scheme green.
+Acceptance: no orphan references; `codans` scheme green.
 
 Commit: `test(pm): migrate rename coverage to ProjectOptionsFeature; drop orphan actions`
 
 ### P4 — Reconcile triggers
 
-**P4.1** — Edit `apps/mac/touch-code/App/Features/Root/RootFeature.swift`. Add `@Dependency(ProjectReconciler.self)`. Extend `.onLaunch` merge with `.run { _ in await reconciler.reconcileAll() }`. Handle `HierarchySidebarFeature.Delegate.reconcileProjectRequested(projectID, spaceID)` → `.run { _ in await reconciler.reconcile(projectID, spaceID) }`.
+**P4.1** — Edit `apps/mac/codans/App/Features/Root/RootFeature.swift`. Add `@Dependency(ProjectReconciler.self)`. Extend `.onLaunch` merge with `.run { _ in await reconciler.reconcileAll() }`. Handle `HierarchySidebarFeature.Delegate.reconcileProjectRequested(projectID, spaceID)` → `.run { _ in await reconciler.reconcile(projectID, spaceID) }`.
 
 Commit: `feat(pm): reconcile on app launch + after Add Project`
 
@@ -572,9 +572,9 @@ Commit: `feat(pm): render failed Projects with FailedProjectRow; wire Retry`
 ```
 make mac-generate
 make mac-lint
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme TouchCodeCore -configuration Debug -quiet
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code   -configuration Debug -quiet
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme tcKit        -configuration Debug -quiet
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme CodansCore -configuration Debug -quiet
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans   -configuration Debug -quiet
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme CodansKit        -configuration Debug -quiet
 ```
 
 Expected tail: `** TEST SUCCEEDED **` for each.
@@ -606,7 +606,7 @@ Post `PR_READY: <url>` to master.
 
 **P8.3** — Post-T-WORKTREE-rebase:
 
-Once T-WORKTREE's PR lands on `feature/hierarchy-management`, rebase `feat/project-mgmt` onto the updated base. The only textual conflict target is `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — both branches append to file end; the conflict is mechanical. Resolve by keeping both sets of closures and **removing** our stub for `reconcileDiscoveredWorktrees` in `live(manager:)` — T-WORKTREE's real binding takes over. Leave the `struct`-level property declaration in place (T-WORKTREE will have added theirs; if both exist, collapse to one).
+Once T-WORKTREE's PR lands on `feature/hierarchy-management`, rebase `feat/project-mgmt` onto the updated base. The only textual conflict target is `apps/mac/codans/App/Clients/HierarchyClient.swift` — both branches append to file end; the conflict is mechanical. Resolve by keeping both sets of closures and **removing** our stub for `reconcileDiscoveredWorktrees` in `live(manager:)` — T-WORKTREE's real binding takes over. Leave the `struct`-level property declaration in place (T-WORKTREE will have added theirs; if both exist, collapse to one).
 
 Re-run P8.1's verification. The Add-Project happy path now populates worktrees correctly on first reconcile; the on-focus reconcile picks up worktrees added outside the app. Record results in §Surprises if anything diverges from expectations.
 
@@ -618,14 +618,14 @@ Post `PR_READY: <url>` again.
 
 ## Concrete Steps
 
-Run from `/Users/wanggang/.worktree/repos/touch-code/feat/project-mgmt`.
+Run from `/Users/wanggang/.worktree/repos/codans/feat/project-mgmt`.
 
 Baseline before starting:
 
 ```
 make mac-generate
 make mac-lint
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code -configuration Debug -quiet
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans -configuration Debug -quiet
 ```
 
 Expected: lint clean; existing sidebar + manager tests pass.
@@ -633,7 +633,7 @@ Expected: lint clean; existing sidebar + manager tests pass.
 After each phase:
 
 ```
-xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme <scheme> -configuration Debug -quiet
+xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme <scheme> -configuration Debug -quiet
 ```
 
 Expected tail: `** TEST SUCCEEDED **`.
@@ -665,16 +665,16 @@ Highlights:
 - Remove Project is data-only — files on disk unaffected; dialog says so.
 
 Coordination:
-- Does not touch TouchCodeCore/Worktree.swift (T-WORKTREE).
+- Does not touch CodansCore/Worktree.swift (T-WORKTREE).
 - Additive-only edits to HierarchyClient.swift (all at file end).
 - HierarchySidebarView.swift lines 78-83 untouched.
 - Post-T-WORKTREE-merge rebase: drop the no-op reconcileDiscoveredWorktrees stub.
 
 Verification:
 - make mac-lint                     → clean
-- xcodebuild test … TouchCodeCore   → ** TEST SUCCEEDED **
-- xcodebuild test … touch-code      → ** TEST SUCCEEDED **
-- xcodebuild test … tcKit           → ** TEST SUCCEEDED **
+- xcodebuild test … CodansCore   → ** TEST SUCCEEDED **
+- xcodebuild test … codans      → ** TEST SUCCEEDED **
+- xcodebuild test … CodansKit           → ** TEST SUCCEEDED **
 
 Manual walkthrough: [paste from P8.1].
 ```
@@ -685,7 +685,7 @@ Accepted iff all of the following hold:
 
 1. `make mac-lint` exits 0 with no new findings relative to the branch baseline.
 2. Each of the three test schemes ends with `** TEST SUCCEEDED **`.
-3. Pre-existing `HierarchySidebarFeatureTests` still pass after P3.3's rename-action removal; `grep projectRename apps/mac/touch-code/Tests/` returns zero hits.
+3. Pre-existing `HierarchySidebarFeatureTests` still pass after P3.3's rename-action removal; `grep projectRename apps/mac/codans/Tests/` returns zero hits.
 4. New test files present and green: `ProjectCodableTests.swift`, `ProjectReconcilerTests.swift`, `AddProjectFeatureTests.swift`, `ProjectOptionsFeatureTests.swift`; at least six new cases in `HierarchyManagerTests.swift`.
 5. Manual walkthrough (P8.1) completes without regression for every bullet — noting the bullets explicitly flagged as "worktree list stays empty until T-WORKTREE rebases".
 6. PR opens against `feature/hierarchy-management` (not `main`). Body links spec + design + plan.
@@ -715,7 +715,7 @@ Branch base: `feature/hierarchy-management`. All PRs target that, not `main`.
 
 ## Interfaces and Dependencies
 
-In `apps/mac/TouchCodeCore/Project.swift`:
+In `apps/mac/CodansCore/Project.swift`:
 
 ```swift
 public enum ProjectLoadState: Equatable, Sendable {
@@ -730,19 +730,19 @@ public struct Project: Equatable, Codable, Sendable, Identifiable {
 }
 ```
 
-In `apps/mac/touch-code/Runtime/HierarchyManager.swift`, the four new methods from P0.2 must exist with the shown signatures. No `replaceWorktrees`.
+In `apps/mac/codans/Runtime/HierarchyManager.swift`, the four new methods from P0.2 must exist with the shown signatures. No `replaceWorktrees`.
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`, the struct gains the four **owned** closures from P0.3 plus the **consumed** `reconcileDiscoveredWorktrees` closure (with a no-op `liveValue` stub on this branch). All additions at file end.
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`, the struct gains the four **owned** closures from P0.3 plus the **consumed** `reconcileDiscoveredWorktrees` closure (with a no-op `liveValue` stub on this branch). All additions at file end.
 
-In `apps/mac/touch-code/App/Clients/FolderPickerClient.swift` (new file): `nonisolated struct FolderPickerClient: Sendable { var pick: @MainActor @Sendable (_ prompt: String) async -> URL? }` exposed via `DependencyValues.folderPickerClient`.
+In `apps/mac/codans/App/Clients/FolderPickerClient.swift` (new file): `nonisolated struct FolderPickerClient: Sendable { var pick: @MainActor @Sendable (_ prompt: String) async -> URL? }` exposed via `DependencyValues.folderPickerClient`.
 
-In `apps/mac/touch-code/Runtime/ProjectReconciler.swift` (new file): `actor ProjectReconciler` with `reconcile(projectID:spaceID:)` and `reconcileAll(debounceSeconds:)`. Exposed via `DependencyValues.projectReconciler`. Constructed with `HierarchyClient` + a clock; **no** `GitWorktreeCLI`, **no** scanner protocol.
+In `apps/mac/codans/Runtime/ProjectReconciler.swift` (new file): `actor ProjectReconciler` with `reconcile(projectID:spaceID:)` and `reconcileAll(debounceSeconds:)`. Exposed via `DependencyValues.projectReconciler`. Constructed with `HierarchyClient` + a clock; **no** `GitWorktreeCLI`, **no** scanner protocol.
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/AddProjectFeature.swift` (new file): `@Reducer struct AddProjectFeature` with state / actions per design doc §AddProjectFeature, nested `enum Delegate: Equatable { case projectAdded(ProjectID, SpaceID); case revealExisting(SpaceID, ProjectID) }`. Uses `GitWorktreeCLI.discoverGitRoot` at add-time only.
+In `apps/mac/codans/App/Features/HierarchySidebar/AddProjectFeature.swift` (new file): `@Reducer struct AddProjectFeature` with state / actions per design doc §AddProjectFeature, nested `enum Delegate: Equatable { case projectAdded(ProjectID, SpaceID); case revealExisting(SpaceID, ProjectID) }`. Uses `GitWorktreeCLI.discoverGitRoot` at add-time only.
 
-In `apps/mac/touch-code/App/Features/ProjectOptions/ProjectOptionsFeature.swift` (new file): `@Reducer struct ProjectOptionsFeature` per design doc §ProjectOptionsFeature.
+In `apps/mac/codans/App/Features/ProjectOptions/ProjectOptionsFeature.swift` (new file): `@Reducer struct ProjectOptionsFeature` per design doc §ProjectOptionsFeature.
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`:
+In `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`:
 
 - **Remove** state field `renameProjectSheet: RenameProjectSheet?`.
 - **Remove** actions `.projectRenameTapped`, `.projectRenameDraftChanged`, `.projectRenameConfirmed`, `.projectRenameCancelled`.
@@ -751,15 +751,15 @@ In `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.sw
 - **Add** actions `.projectOptionsTapped(projectID:, inSpace:)`, `.retryProjectTapped(projectID:, inSpace:)`, `.reorderProjects(from:, to:, inSpace:)`, `.addProject(AddProjectFeature.Action)`, `.projectOptions(ProjectOptionsFeature.Action)`.
 - **Extend** `Delegate` enum with `reconcileProjectRequested(ProjectID, SpaceID)`.
 
-In `apps/mac/touch-code/App/Features/Root/RootFeature.swift`:
+In `apps/mac/codans/App/Features/Root/RootFeature.swift`:
 
 - Add `@Dependency(ProjectReconciler.self)`.
 - Extend `.onLaunch` merge with reconciler.reconcileAll + NSApplication.didBecomeActive subscription.
 - Handle `case .sidebar(.delegate(.reconcileProjectRequested(let pid, let sid))):` → run reconcile for that Project.
 
-In `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderView.swift`, the struct gains `let supportsWorktrees: Bool`; branch `Label` and `HeaderGitViewerToggle` are gated on it. `WorktreeDetailView` passes the value.
+In `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderView.swift`, the struct gains `let supportsWorktrees: Bool`; branch `Label` and `HeaderGitViewerToggle` are gated on it. `WorktreeDetailView` passes the value.
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/FailedProjectRow.swift` (new file): the view in P7.1.
+In `apps/mac/codans/App/Features/HierarchySidebar/FailedProjectRow.swift` (new file): the view in P7.1.
 
 **Out of scope for this plan** (from spec):
 

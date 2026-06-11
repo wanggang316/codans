@@ -17,7 +17,7 @@ TerminalEvent ──▶ NotificationDetector ──▶ NotificationStore.append
                                        └─▶ (Dock badge derives from store)
 ```
 
-There is no gate between the detector and the side effects. Settings v3 (`apps/mac/TouchCodeCore/Settings/Settings.swift`) has no `notifications` section at all — the toggles previously specced in [settings-notifications.md](settings-notifications.md) were never persisted and the Settings → Notifications pane (`apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift`) is permission-status-only.
+There is no gate between the detector and the side effects. Settings v3 (`apps/mac/CodansCore/Settings/Settings.swift`) has no `notifications` section at all — the toggles previously specced in [settings-notifications.md](settings-notifications.md) were never persisted and the Settings → Notifications pane (`apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift`) is permission-status-only.
 
 This document covers the v1.1 build that lands the spec at [notifications-v1-1.md](../product-specs/notifications-v1-1.md): a single policy chokepoint (`NotificationCoordinator`) sitting between the detector and the side effects, the `NotificationsSettings` section that the chokepoint reads, the five Settings-pane controls, command-finished threshold/suppression in the pure translation layer, the per-pane mute UI affordance, the worktree-promote behaviour and the underlying `HierarchyClient.reorderWorktrees` mutation API, and a versioned inbox JSON envelope with a backward-compatible loader.
 
@@ -37,7 +37,7 @@ This document covers the v1.1 build that lands the spec at [notifications-v1-1.m
 
 - **NG1.** No new in-app banner / toast surface. The "in-app surface" gated by `inAppEnabled` is the inbox (bell badge + popover + Dock badge), as established in v1.
 - **NG2.** No mute-rules editor. The pane shows counts and a Reveal-in-Finder button; the JSON is hand-edited.
-- **NG3.** No CLI surface for `tc notifications …` in v1.1.
+- **NG3.** No CLI surface for `codans notifications …` in v1.1.
 - **NG4.** No "snooze" / time-bounded mute, no per-event sound choice, no per-pane-type threshold. The only threshold is the global `commandFinishedThresholdSec`.
 - **NG5.** No retroactive surfacing. Notifications dropped while a toggle was off do not reappear when the toggle flips back on.
 - **NG6.** No auto-demote when a promoted worktree returns to zero unread.
@@ -117,7 +117,7 @@ External touchpoints unchanged from v1: `UNUserNotificationCenter`, `NSApp.dockT
 ### Component Boundaries
 
 ```
-TouchCodeCore/
+CodansCore/
   Settings/
     NotificationsSettings.swift                  // NEW — Codable struct, all defaults
   Notifications/
@@ -128,7 +128,7 @@ TouchCodeCore/
     InboxFile.swift                              // NEW — envelope load/save with legacy fallback
     RollupIndex.swift                            // unchanged
 
-touch-code/App/Features/Notifications/
+codans/App/Features/Notifications/
   NotificationCoordinator.swift                  // NEW — policy chokepoint, ~120 LOC
   NotificationsSettingsReader.swift              // NEW — protocol bridging SettingsStore (~20 LOC)
   NotificationDetector.swift                     // CHANGE — emits Candidate to coordinator
@@ -137,18 +137,18 @@ touch-code/App/Features/Notifications/
   DockBadger.swift                               // unchanged
   PaneKeyboardActivityTracker.swift              // NEW — last-keystroke per pane
 
-touch-code/App/Features/Settings/Panes/
+codans/App/Features/Settings/Panes/
   NotificationsSettingsView.swift                // REWRITE — 5 controls + alert + mute summary
 
-touch-code/App/Features/SplitViewport/
+codans/App/Features/SplitViewport/
   LazyPaneHost.swift                             // CHANGE — .contextMenu wrapper
   PaneContextMenu.swift                          // NEW — context-menu content
 
-touch-code/App/Clients/
+codans/App/Clients/
   HierarchyClient.swift                          // EXTEND — reorderWorktrees, setPaneLabel
 ```
 
-Dependency direction is preserved: `Notifications/` depends on `TouchCodeCore.*`, `Settings`, and `HierarchyClient`; it never imports UI types other than the SwiftUI bits in the settings pane and the context menu file.
+Dependency direction is preserved: `Notifications/` depends on `CodansCore.*`, `Settings`, and `HierarchyClient`; it never imports UI types other than the SwiftUI bits in the settings pane and the context menu file.
 
 ### NotificationCoordinator
 
@@ -286,7 +286,7 @@ public struct MuteSettings: Equatable, Sendable, Codable {
 
 - All fields are optional via `decodeIfPresent` defaults. A pre-v1.1 `settings.json` decodes cleanly with `NotificationsSettings.default` filling in.
 - `commandFinishedThresholdSec` decode applies the clamp `max(1, min(3600, value))` and logs a one-line warning on out-of-range loads. The UI input layer enforces the same range upfront so the persisted value is never out of range when written by the app itself.
-- `mute` is a sub-struct kept at v1.1 size: the existing v1 mute-rules JSON file (`detection-rules.json`) is **not** ingested into `settings.json`; the in-`Settings` `mute` is a separately authored cache used only by the summary row. The "Reveal in Finder" button still resolves to `~/.config/touch-code/detection-rules.json` (the v1 cache file).
+- `mute` is a sub-struct kept at v1.1 size: the existing v1 mute-rules JSON file (`detection-rules.json`) is **not** ingested into `settings.json`; the in-`Settings` `mute` is a separately authored cache used only by the summary row. The "Reveal in Finder" button still resolves to `~/.config/codans/detection-rules.json` (the v1 cache file).
 - We deliberately do not collapse the boolean toggles into an enum (e.g. `level: .silent | .inAppOnly | .full`) — the four switches are orthogonal and users have asked for the cross-products that an enum would not express (in-app off + system on for "background-only" mode).
 
 `Settings` integration:
@@ -352,7 +352,7 @@ case .commandFinished(let exitCode, let durationNs):
 
 `Step` grows an optional `drop: DropReason?` field so tests can assert which suppression path fired. The detector / coordinator currently routes `drop != nil` into the same `DropReason` log line as the coordinator's later drops, giving a unified drop log.
 
-`Step.drop` enum cases are a strict subset of `NotificationCoordinator.DropReason` — the same string-coded enum is shared (lives in `TouchCodeCore` so both the pure translator and the app-layer coordinator reference one type).
+`Step.drop` enum cases are a strict subset of `NotificationCoordinator.DropReason` — the same string-coded enum is shared (lives in `CodansCore` so both the pure translator and the app-layer coordinator reference one type).
 
 ### PaneKeyboardActivityTracker
 
@@ -479,7 +479,7 @@ let inAppBinding = Binding<Bool>(
   Button("Open System Settings…") { openSystemNotificationsPane() }
   Button("Cancel", role: .cancel) { }
 } message: {
-  Text("macOS is currently blocking notifications for touch-code. Open System Settings to allow them.")
+  Text("macOS is currently blocking notifications for codans. Open System Settings to allow them.")
 }
 ```
 
@@ -487,7 +487,7 @@ let inAppBinding = Binding<Bool>(
 
 ```swift
 private func openSystemNotificationsPane() {
-  let bundleID = Bundle.main.bundleIdentifier ?? "com.touch-code.touch-code"
+  let bundleID = Bundle.main.bundleIdentifier ?? "com.gumpw.codans.codans"
   let withID = URL(string: "x-apple.systempreferences:com.apple.preference.notifications?id=\(bundleID)")
   let fallback = URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!
   if let withID, NSWorkspace.shared.open(withID) { return }
@@ -511,7 +511,7 @@ The Reveal-in-Finder button calls `NSWorkspace.shared.activateFileViewerSelectin
 
 ### Pane right-click "Mute notifications"
 
-The current pane chrome (`apps/mac/touch-code/App/Features/SplitViewport/LazyPaneHost.swift`) has no `.contextMenu`. We add one at the top of the `content` view:
+The current pane chrome (`apps/mac/codans/App/Features/SplitViewport/LazyPaneHost.swift`) has no `.contextMenu`. We add one at the top of the `content` view:
 
 ```swift
 content
@@ -645,7 +645,7 @@ public nonisolated enum InboxFile {
 
 ### Testing strategy
 
-**Pure layer** (lands in `TouchCodeCoreTests/`):
+**Pure layer** (lands in `CodansCoreTests/`):
 
 | AC ID(s) | Test file | What it asserts |
 |---|---|---|
@@ -653,7 +653,7 @@ public nonisolated enum InboxFile {
 | AC-V11-J1..J3 | `InboxFileTests.swift` (NEW) | Round-trip envelope. Legacy bare array decodes and re-encodes as envelope. Forward-version file is renamed to `.bak-<date>` and load returns empty. Partial / corrupt file returns empty without rename. |
 | AC-V11-S6, S7 | `NotificationsSettingsCodableTests.swift` (NEW) | Defaults round-trip. Missing section in `settings.json` decodes to defaults. Out-of-range `commandFinishedThresholdSec` is clamped on decode. Encoded JSON keys match snake / camel case convention. |
 
-**Coordinator layer** (lands in `apps/mac/touch-code/Tests/Notifications/`):
+**Coordinator layer** (lands in `apps/mac/codans/Tests/Notifications/`):
 
 | AC ID(s) | Test | Approach |
 |---|---|---|
@@ -663,12 +663,12 @@ public nonisolated enum InboxFile {
 | AC-V11-CP focused-pane drop | `focusedSourceDropsBeforeAnySink` | Build candidate with `sourceIsFocused: true`; assert `.dropped(.sourceIsFocused)` and zero collaborator calls. |
 | AC-V11-P1..P2 | `NotificationsSettingsViewTests.swift` (NEW, SwiftUI ViewInspector or snapshot if available) — `deniedAuthShowsAlertOnSystemFlip`, `systemDisabledDisablesSoundRow` | Drive the view with a `FakeReader`; toggle the System binding; assert the alert state flips and the Sound toggle renders disabled. |
 
-**UI / catalog wiring** (lands in `apps/mac/touch-code/Tests/`):
+**UI / catalog wiring** (lands in `apps/mac/codans/Tests/`):
 
 | AC ID(s) | Test |
 |---|---|
 | AC-V11-M1..M4 | `PaneContextMenuTests.swift` (NEW) — read pane labels via fake hierarchy client, assert toggle adds/removes the mute label. Existing inbox-row tests already cover M4 implicitly (label change doesn't touch persisted entries). |
-| AC-V11-J2 acceptance (manual) | Manual smoke recorded in the exec plan: pre-populate `~/.config/touch-code/notifications.json` with the legacy bare-array shape; launch; observe the bell badge matches the legacy file's unread count; force a save; verify `jq .version notifications.json` returns `1`. |
+| AC-V11-J2 acceptance (manual) | Manual smoke recorded in the exec plan: pre-populate `~/.config/codans/notifications.json` with the legacy bare-array shape; launch; observe the bell badge matches the legacy file's unread count; force a save; verify `jq .version notifications.json` returns `1`. |
 
 **Test fakes added:**
 
@@ -677,7 +677,7 @@ public nonisolated enum InboxFile {
 - `FakeHierarchyClient` (extension to existing fake) — captures `reorderWorktrees` and `setPaneLabel` calls.
 - `FakeNotificationSettingsReader` — mutable struct fields plus a manual change-fire helper.
 
-The pre-existing `touch-codeTests` target was broken on `main` per [exec-plans/notifications.md §Surprises S1](../exec-plans/notifications.md). The coordinator tests are the first non-trivial app-target Notifications tests we are committing to that target; the v1.1 work includes whatever target-config / `buildableFolders` adjustment that target needs, since the build is no longer optional for v1.1's coverage gates.
+The pre-existing `codansTests` target was broken on `main` per [exec-plans/notifications.md §Surprises S1](../exec-plans/notifications.md). The coordinator tests are the first non-trivial app-target Notifications tests we are committing to that target; the v1.1 work includes whatever target-config / `buildableFolders` adjustment that target needs, since the build is no longer optional for v1.1's coverage gates.
 
 ## Alternatives Considered
 
@@ -747,7 +747,7 @@ Rename to `notifications.v1.json` for the new shape; old `notifications.json` is
 
 ### Observability
 
-- One new log category: drop reasons logged at `.debug` under `subsystem: "com.touch-code.notifications"`, `category: "coordinator"`. Each drop emits one structured line: `drop \(reason) for entry \(entryID) source \(paneID)`.
+- One new log category: drop reasons logged at `.debug` under `subsystem: "com.gumpw.codans.notifications"`, `category: "coordinator"`. Each drop emits one structured line: `drop \(reason) for entry \(entryID) source \(paneID)`.
 - The coordinator's `Decision` return value is the inspectable artefact for tests; production code does not call `handle` for its return.
 - `InboxFile.load` logs one warning when it quarantines a forward-version file (`renamed notifications.json with version=N to notifications.json.bak-<date>`).
 - `DetectionTranslator` is pure; suppression decisions are visible via the `Step.drop` field, which the detector forwards to the same coordinator log.
@@ -787,13 +787,13 @@ Rename to `notifications.v1.json` for the new shape; old `notifications.json` is
 | **`reorderWorktrees` racing with the user's manual drag-reorder.** The user is drag-reordering a worktree at the exact moment a notification fires for that worktree's project. | Both writers are `@MainActor`; they serialise on the actor. The last write wins, which is acceptable — auto-promote losing to an in-progress manual drag is the correct outcome from the user's perspective. |
 | **Forward-version inbox file mistakenly quarantined.** A user runs a v1.2 build, downgrades to v1.1, finds an empty inbox. | The quarantine is a rename, not a delete; the user can restore by renaming `notifications.json.bak-<date>` back. Documented as an Open Question OQ-V11-* in the spec; we accept the trade for now. |
 | **Permission alert flashing on every system-on flip after denial.** A user with denied permission toggles System on/off repeatedly. | The alert fires once per flip-to-on transition; flipping off then on again is a fresh transition. This is the intended behaviour — the alert is informational, not nagware. If users complain, we add a `@State var suppressUntilUserAction` flag in v1.2. |
-| **Mute summary drift from the actual rules file.** `settings.notifications.mute` and `~/.config/touch-code/detection-rules.json` are not the same source of truth. | Documented: the summary is a count cache. The Reveal-in-Finder button is the escape hatch for users who need accuracy. v1.2 may unify the two sources. |
+| **Mute summary drift from the actual rules file.** `settings.notifications.mute` and `~/.config/codans/detection-rules.json` are not the same source of truth. | Documented: the summary is a count cache. The Reveal-in-Finder button is the escape hatch for users who need accuracy. v1.2 may unify the two sources. |
 | **Coordinator and detector both call `bumpProjectActivity`.** Existing detector call + a coordinator add would double-bump. | Coordinator does NOT call `bumpProjectActivity`. Detector keeps its call. Explicit non-duplication. |
 
 ## Resolved Decisions
 
 - **D-OQ1 — Forward-version inbox quarantine surfaces a one-shot user-visible toast on the next launch.** After `InboxFile.load` renames a forward-version file to `notifications.json.bak-<ISO>` and starts the inbox empty, the coordinator posts one synthetic `InboxEntry` of kind `.taskFinished` titled "Inbox reset" with a body pointing at the backup file's basename. The entry uses a synthetic `SourcePath` whose IDs do not resolve in the live catalog, so click-through lands at the deepest existing ancestor (the inbox itself, in practice). The toast fires through the chokepoint exactly once per quarantine event (gated by an idempotency key derived from the backup filename) so a relaunch without a fresh quarantine does not re-fire it.
-- **D-OQ2 — Drop-reason logging is uniformly `.debug`.** No info-level escalation for "first drop of each reason per launch" — the per-reason novelty signal does not survive the user's first restart, and tying log severity to launch-local state makes the log line non-reproducible. Users diagnosing silence enable `.debug` for `subsystem: "com.touch-code.notifications"`, `category: "coordinator"` via `Console.app` filter or `log stream`.
+- **D-OQ2 — Drop-reason logging is uniformly `.debug`.** No info-level escalation for "first drop of each reason per launch" — the per-reason novelty signal does not survive the user's first restart, and tying log severity to launch-local state makes the log line non-reproducible. Users diagnosing silence enable `.debug` for `subsystem: "com.gumpw.codans.notifications"`, `category: "coordinator"` via `Console.app` filter or `log stream`.
 - **D-OQ3 — `setPaneLabel` debounces.** Goes through the existing `CatalogStore.scheduleSave` 500 ms trailing window — same as every other catalog mutation. The in-memory `Catalog` mutates immediately so a re-opened menu reads the new state; only the disk write is debounced. This matches the `setWorktreePinned` / `setWorktreeArchived` precedent and avoids inventing a parallel write cadence for one label.
 
 ---
@@ -803,7 +803,7 @@ Rename to `notifications.v1.json` for the new shape; old `notifications.json` is
 - Product spec: [notifications-v1-1.md](../product-specs/notifications-v1-1.md)
 - v1 design: [notifications.md](notifications.md)
 - v1.1's predecessor for the pane only: [settings-notifications.md](settings-notifications.md) (superseded by this doc)
-- Settings v3 schema: `apps/mac/TouchCodeCore/Settings/Settings.swift`
-- Hierarchy mutation surface: `apps/mac/touch-code/App/Clients/HierarchyClient.swift`
-- Pane chrome host: `apps/mac/touch-code/App/Features/SplitViewport/LazyPaneHost.swift`
-- Inbox primitives: `apps/mac/TouchCodeCore/Notifications/`
+- Settings v3 schema: `apps/mac/CodansCore/Settings/Settings.swift`
+- Hierarchy mutation surface: `apps/mac/codans/App/Clients/HierarchyClient.swift`
+- Pane chrome host: `apps/mac/codans/App/Features/SplitViewport/LazyPaneHost.swift`
+- Inbox primitives: `apps/mac/CodansCore/Notifications/`

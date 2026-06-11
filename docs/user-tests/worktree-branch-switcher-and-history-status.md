@@ -12,7 +12,7 @@ description: Verification status for every UT-BSH-* case in docs/user-tests/work
 
 ## Why this doc exists
 
-The original M5 / T16 exit gate expected `/hs-user-test` to drive every UT-BSH-* case against a running app via accessibility-identifier queries. The repo has the seams in place (17 required identifiers + 2 bonus, see [Seam inventory](#seam-inventory)) and the fixtures landed in T15 (3 git bundles + 3 catalog seeds + restore scripts under `docs/user-tests/_shared/fixtures/`). What is missing is the **runtime probe itself**: there is no XCUITest target in `apps/mac/Project.swift` and no `XCUIApplication`-driven harness anywhere in `apps/mac/touch-code/Tests/`. (`AppearancePreferenceUITests.swift` is misleadingly named — it is a pure unit test of a view-state mapping, not a UI probe.)
+The original M5 / T16 exit gate expected `/hs-user-test` to drive every UT-BSH-* case against a running app via accessibility-identifier queries. The repo has the seams in place (17 required identifiers + 2 bonus, see [Seam inventory](#seam-inventory)) and the fixtures landed in T15 (3 git bundles + 3 catalog seeds + restore scripts under `docs/user-tests/_shared/fixtures/`). What is missing is the **runtime probe itself**: there is no XCUITest target in `apps/mac/Project.swift` and no `XCUIApplication`-driven harness anywhere in `apps/mac/codans/Tests/`. (`AppearancePreferenceUITests.swift` is misleadingly named — it is a pure unit test of a view-state mapping, not a UI probe.)
 
 This document is the honest accounting that replaces the missing runtime pass: every case ID is classified UNIT-COVERED, MANUAL-PENDING, or DEFERRED, citing the real Swift Testing `@Test` function that exercises the behavior (where one exists) and what would have to land to promote a case to AUTOMATED.
 
@@ -27,7 +27,7 @@ This document is the honest accounting that replaces the missing runtime pass: e
 
 ## Seam inventory
 
-17 of 17 required `accessibilityIdentifier` strings declared in the source tree, plus 2 bonus identifiers added during implementation. Verified by `grep -rn accessibilityIdentifier apps/mac/touch-code` against the seams listed in the parent doc:
+17 of 17 required `accessibilityIdentifier` strings declared in the source tree, plus 2 bonus identifiers added during implementation. Verified by `grep -rn accessibilityIdentifier apps/mac/codans` against the seams listed in the parent doc:
 
 ```
 branch_switcher.branch_row.<short-name>     branch_switcher.popover
@@ -58,30 +58,30 @@ The two bonus identifiers (`branch_switcher.search` from T7 and `diff_inspector.
 
 | ID | Status | Evidence | Notes |
 |---|---|---|---|
-| UT-BSH-BP-001 | UNIT-COVERED | `apps/mac/touch-code/Tests/BranchSwitcherFeatureTests.swift::popoverTappedKicksInventoryAndCommitsLoadsInParallel` | Reducer kicks both loads in parallel on `.popoverTapped`; both arrive as separate actions and populate `state.inventory` / `state.recentCommits`. The visible "popover opened with both groups" assertion stays MANUAL-PENDING for the rendered side. |
-| UT-BSH-BP-002 | UNIT-COVERED | `apps/mac/touch-code/Tests/GitTests/GitOutputParserTests.swift::parseBranchInventoryMixedLocalAndRemoteSortedAndPinned` + `parseBranchInventorySingleLocalMarkedCurrent` | Parser pins current branch to position 0 and sorts the rest. Visible "first row is current + checkmark" still MANUAL-PENDING for the rendered marker. |
+| UT-BSH-BP-001 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::popoverTappedKicksInventoryAndCommitsLoadsInParallel` | Reducer kicks both loads in parallel on `.popoverTapped`; both arrive as separate actions and populate `state.inventory` / `state.recentCommits`. The visible "popover opened with both groups" assertion stays MANUAL-PENDING for the rendered side. |
+| UT-BSH-BP-002 | UNIT-COVERED | `apps/mac/codans/Tests/GitTests/GitOutputParserTests.swift::parseBranchInventoryMixedLocalAndRemoteSortedAndPinned` + `parseBranchInventorySingleLocalMarkedCurrent` | Parser pins current branch to position 0 and sorts the rest. Visible "first row is current + checkmark" still MANUAL-PENDING for the rendered marker. |
 | UT-BSH-BP-003 | MANUAL-PENDING | manual probe required | Cap-of-10 enforcement in `BranchSwitcherFeature` (commits load uses `LogPage.Cursor(offset: 0, limit: 10)` per reducer source). No unit test asserts the `limit: 10` arg explicitly; promotion would add an arg-assert in the existing `popoverTappedKicksInventoryAndCommitsLoadsInParallel` test (cheap follow-up, not done in T16). Visible row count + ordering is MANUAL-PENDING. |
-| UT-BSH-BP-004 | UNIT-COVERED | `apps/mac/touch-code/Tests/GitTests/GitOutputParserTests.swift::parseBranchInventoryFiltersOriginHEAD` | Parser drops `origin/HEAD`. Visible "no Remote subsection" rendering is MANUAL-PENDING. |
+| UT-BSH-BP-004 | UNIT-COVERED | `apps/mac/codans/Tests/GitTests/GitOutputParserTests.swift::parseBranchInventoryFiltersOriginHEAD` | Parser drops `origin/HEAD`. Visible "no Remote subsection" rendering is MANUAL-PENDING. |
 
 ### Journey BP-Switch — Switching via the popover
 
 | ID | Status | Evidence | Notes |
 |---|---|---|---|
-| UT-BSH-BP-005 | UNIT-COVERED | `apps/mac/touch-code/Tests/BranchSwitcherFeatureTests.swift::branchTappedSetsSwitchingAndClosesPopoverThenSwitchSucceeds` + `apps/mac/touch-code/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchLocalIssuesPlainSwitch` + `RootFeatureTests.swift::onLaunchExhaustivelyPropagatesSelectionFromStream` (wire-up half) | Reducer closes popover, sets spinner, runs `switchBranch(.local)`, and on `.headChangedForCurrentWorktree` clears the spinner. Live service issues `["switch", "main"]`. Visible "header text updates within 3 s" timing assertion is MANUAL-PENDING. |
-| UT-BSH-BP-006 | UNIT-COVERED | `apps/mac/touch-code/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchRemoteTrackingIssuesTrackFlag` | Service emits `["switch", "--track", "origin/feat/x"]`. The reducer-side mapping of `BranchSwitchTarget.remoteTracking` → local short-name display is not unit-asserted; visible "header shows `feat/new-shell`, not `origin/feat/new-shell`" stays MANUAL-PENDING. |
+| UT-BSH-BP-005 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::branchTappedSetsSwitchingAndClosesPopoverThenSwitchSucceeds` + `apps/mac/codans/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchLocalIssuesPlainSwitch` + `RootFeatureTests.swift::onLaunchExhaustivelyPropagatesSelectionFromStream` (wire-up half) | Reducer closes popover, sets spinner, runs `switchBranch(.local)`, and on `.headChangedForCurrentWorktree` clears the spinner. Live service issues `["switch", "main"]`. Visible "header text updates within 3 s" timing assertion is MANUAL-PENDING. |
+| UT-BSH-BP-006 | UNIT-COVERED | `apps/mac/codans/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchRemoteTrackingIssuesTrackFlag` | Service emits `["switch", "--track", "origin/feat/x"]`. The reducer-side mapping of `BranchSwitchTarget.remoteTracking` → local short-name display is not unit-asserted; visible "header shows `feat/new-shell`, not `origin/feat/new-shell`" stays MANUAL-PENDING. |
 | UT-BSH-BP-007 | MANUAL-PENDING | manual probe required | Fast-path that maps `origin/main` → `.local(name: "main")` when a local `main` exists is in `BranchSwitcherFeature`'s row-tap mapping (per design doc); no dedicated unit test exercises the mapping decision separately from the happy-path tests above. Promotion would add a `branchTappedFastPathsRemoteWhenLocalExists` TestStore test. |
-| UT-BSH-BP-008 | UNIT-COVERED | `apps/mac/touch-code/Tests/BranchSwitcherFeatureTests.swift::branchTappedSurfacesFirstLineOfGitErrorAsBanner` + `apps/mac/touch-code/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchPropagatesDirtyTreeError` | Service throws `GitError.exec(code:1, stderr:)` verbatim; reducer extracts first line into the banner. Visible banner dismiss + spinner clear is asserted at reducer level; rendered banner is MANUAL-PENDING. |
-| UT-BSH-BP-009 | UNIT-COVERED | `apps/mac/touch-code/Tests/BranchSwitcherFeatureTests.swift::viewAllCommitsTappedEmitsDelegateAndClosesPopover` | Reducer closes popover and emits `.delegate(.openDiffViewerOnHistoryTab(worktreeID:, projectID:))`. The root-side handler that turns this delegate into "Diff Viewer opens on History tab" is not exercised by a focused TestStore test (the wire-up is verified indirectly via `RootFeatureTests`). Visible "tab picker selected = History + ≥ 1 commit row" stays MANUAL-PENDING. |
+| UT-BSH-BP-008 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::branchTappedSurfacesFirstLineOfGitErrorAsBanner` + `apps/mac/codans/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchPropagatesDirtyTreeError` | Service throws `GitError.exec(code:1, stderr:)` verbatim; reducer extracts first line into the banner. Visible banner dismiss + spinner clear is asserted at reducer level; rendered banner is MANUAL-PENDING. |
+| UT-BSH-BP-009 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::viewAllCommitsTappedEmitsDelegateAndClosesPopover` | Reducer closes popover and emits `.delegate(.openDiffViewerOnHistoryTab(worktreeID:, projectID:))`. The root-side handler that turns this delegate into "Diff Viewer opens on History tab" is not exercised by a focused TestStore test (the wire-up is verified indirectly via `RootFeatureTests`). Visible "tab picker selected = History + ≥ 1 commit row" stays MANUAL-PENDING. |
 
 ### Journey DV — Diff Viewer History tab
 
 | ID | Status | Evidence | Notes |
 |---|---|---|---|
-| UT-BSH-DV-001 | UNIT-COVERED | `apps/mac/touch-code/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyAppearedTriggersFirstPageLoad` (+ `historyAppearedIsIdempotentWhenLoaded`, `historyAppearedIsIdempotentWhileLoading`) | Reducer kicks first-page load with `cursor.offset == 0, limit == 50` on first `.historyAppeared`; idempotent on repeat. Visible "progress indicator visible within 500 ms" + ">= 10 rows" rendering stays MANUAL-PENDING. |
-| UT-BSH-DV-002 | UNIT-COVERED | `apps/mac/touch-code/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyCommitTappedSetsSelectionAndLoads` + `historyCommitTappedReusesCacheOnRepeat` + `apps/mac/touch-code/Tests/DiffFeatureTests.swift::DiffFeatureTests.historyCommitTappedRetriesAfterError` | Reducer sets `presentedCommitSha`, caches `diffsByCommit[sha]`, builds title `String(sha.prefix(7))`. Visible "`<sha> · <subject>` title format + ≥ 1 hunk rendered" stays MANUAL-PENDING. |
-| UT-BSH-DV-003 | UNIT-COVERED (reducer half) | `apps/mac/touch-code/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.tabSelectedChangesActiveTab` (tab routing) + `historyCommitTappedReusesCacheOnRepeat` (cache survives) + `worktreeSelectedResetsHistorySide` (selectedTab preserved across worktree switch) | Reducer toggles `selectedTab` and preserves `diffsByCommit`. The "row remains selected + title unchanged after toggle" visible assertion stays MANUAL-PENDING. |
-| UT-BSH-DV-004 | UNIT-COVERED | `apps/mac/touch-code/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyLoadNextPageRequestedAppendsAndAdvances` + `historyLoadNextPageRequestedGatedOnHasMore` | Reducer appends second-page commits at the tail, advances `nextOffset`, gates on `hasMore`. Visible "scroll triggers next page + no duplicates" stays MANUAL-PENDING. |
-| UT-BSH-DV-005 | UNIT-COVERED | `apps/mac/touch-code/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyPageFailedCapturesError` (error path; empty path inferred from the `.empty` state in `DiffHistoryListView`) | Reducer surfaces `historyPageFailed` into `historyState.error`. No unit test exercises the empty-success path (empty repo returns `commits: []` with `hasMore: false`); promotion would add a `historyAppearedSucceedsWithEmptyPage` TestStore test. Visible empty-state copy "No commits" stays MANUAL-PENDING. |
+| UT-BSH-DV-001 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyAppearedTriggersFirstPageLoad` (+ `historyAppearedIsIdempotentWhenLoaded`, `historyAppearedIsIdempotentWhileLoading`) | Reducer kicks first-page load with `cursor.offset == 0, limit == 50` on first `.historyAppeared`; idempotent on repeat. Visible "progress indicator visible within 500 ms" + ">= 10 rows" rendering stays MANUAL-PENDING. |
+| UT-BSH-DV-002 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyCommitTappedSetsSelectionAndLoads` + `historyCommitTappedReusesCacheOnRepeat` + `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureTests.historyCommitTappedRetriesAfterError` | Reducer sets `presentedCommitSha`, caches `diffsByCommit[sha]`, builds title `String(sha.prefix(7))`. Visible "`<sha> · <subject>` title format + ≥ 1 hunk rendered" stays MANUAL-PENDING. |
+| UT-BSH-DV-003 | UNIT-COVERED (reducer half) | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.tabSelectedChangesActiveTab` (tab routing) + `historyCommitTappedReusesCacheOnRepeat` (cache survives) + `worktreeSelectedResetsHistorySide` (selectedTab preserved across worktree switch) | Reducer toggles `selectedTab` and preserves `diffsByCommit`. The "row remains selected + title unchanged after toggle" visible assertion stays MANUAL-PENDING. |
+| UT-BSH-DV-004 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyLoadNextPageRequestedAppendsAndAdvances` + `historyLoadNextPageRequestedGatedOnHasMore` | Reducer appends second-page commits at the tail, advances `nextOffset`, gates on `hasMore`. Visible "scroll triggers next page + no duplicates" stays MANUAL-PENDING. |
+| UT-BSH-DV-005 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyPageFailedCapturesError` (error path; empty path inferred from the `.empty` state in `DiffHistoryListView`) | Reducer surfaces `historyPageFailed` into `historyState.error`. No unit test exercises the empty-success path (empty repo returns `commits: []` with `hasMore: false`); promotion would add a `historyAppearedSucceedsWithEmptyPage` TestStore test. Visible empty-state copy "No commits" stays MANUAL-PENDING. |
 
 ### Journey VS — Visual & system integration
 
@@ -125,18 +125,18 @@ To convert MANUAL-PENDING cases to AUTOMATED:
 1. **Add an XCUITest target** to `apps/mac/Project.swift`:
    ```swift
    .target(
-     name: "touch-code-ui-tests",
+     name: "codans-ui-tests",
      destinations: .macOS,
      product: .uiTests,
-     bundleId: "app.touch-code.ui-tests",
+     bundleId: "com.gumpw.codans.ui-tests",
      deploymentTargets: .macOS("26.0"),
-     sources: ["touch-code/UITests/**"],
-     dependencies: [.target(name: "touch-code")]
+     sources: ["codans/UITests/**"],
+     dependencies: [.target(name: "codans")]
    )
    ```
 
 2. **Write a base test class** (`BranchSwitcherUITestCase`) that:
-   - Generates a tmpdir, runs the relevant `restore-repo-*.sh` script, and seeds `~/.config/touch-code/catalog.json` from the matching `branch-switcher*.json` (with `__TMP__` substitution).
+   - Generates a tmpdir, runs the relevant `restore-repo-*.sh` script, and seeds `~/.config/codans/catalog.json` from the matching `branch-switcher*.json` (with `__TMP__` substitution).
    - Launches the app via `XCUIApplication()`, waits for the "App launched" ready signal.
    - Tears down by quitting the app and `rm -rf`ing the tmpdir.
    - Exposes query helpers keyed by the `accessibilityIdentifier` strings declared in [Seam inventory](#seam-inventory).

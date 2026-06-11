@@ -17,7 +17,7 @@ mkdir -p "${OUT_DIR}"
 
 BUNDLE_PATH="${OUT_DIR}/repo-detached.bundle"
 
-WORK_DIR="$(mktemp -d -t touch-code-fixture-detached.XXXXXX)"
+WORK_DIR="$(mktemp -d -t codans-fixture-detached.XXXXXX)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 # 1. Build the multi-branch bundle into the tmp dir, then unbundle it

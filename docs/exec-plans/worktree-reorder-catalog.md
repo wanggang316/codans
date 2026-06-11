@@ -31,14 +31,14 @@ The design rationale, segment semantics, alternatives considered, and the reject
 ## Surprises & Discoveries
 
 - **Test build artifact reuse**: `xcodebuild test-without-building` against an artefact from a different branch can produce phantom failures (signal SEGV during pre-test bootstrap, or stale test bundle). Always run `xcodebuild ... test` (with build) when switching between branches that share `DerivedData`.
-- **Pre-existing flaky tests on `main`**: 8 tests fail on `main` independently of this slice — `HierarchyManagerTests/drainLegacyOverrides*` (3) and 5 in `HierarchySidebarFeatureTests` (the latter trip an `Unimplemented: GitHubClient.batchPullRequests` because the reducer subscribes to a GitHub PR effect that the tests don't stub). Verified by running each suite from `/Users/wanggang/dev/00/touch-code` (commit `1f714b3`, `main`) — same failures. Not in scope for this PR.
+- **Pre-existing flaky tests on `main`**: 8 tests fail on `main` independently of this slice — `HierarchyManagerTests/drainLegacyOverrides*` (3) and 5 in `HierarchySidebarFeatureTests` (the latter trip an `Unimplemented: GitHubClient.batchPullRequests` because the reducer subscribes to a GitHub PR effect that the tests don't stub). Verified by running each suite from `/Users/wanggang/dev/00/codans` (commit `1f714b3`, `main`) — same failures. Not in scope for this PR.
 - **Pre-existing lint violation**: `HierarchyClient.swift` has an `async_without_await` violation on `runScript` that exists on `main` too. Not introduced by this slice.
-- **Build prerequisite**: This worktree's `apps/mac/.build/ghostty` must symlink to a prebuilt copy (e.g., from `/Users/wanggang/dev/00/touch-code/apps/mac/.build/ghostty`) to avoid the ~20 minute Zig + xcframework build. The symlink is per-worktree local state and not committed.
+- **Build prerequisite**: This worktree's `apps/mac/.build/ghostty` must symlink to a prebuilt copy (e.g., from `/Users/wanggang/dev/00/codans/apps/mac/.build/ghostty`) to avoid the ~20 minute Zig + xcframework build. The symlink is per-worktree local state and not committed.
 
 ## Decision Log
 
 - **Closure shape: `(IndexSet, Int)` rather than `[WorktreeID]`.** The bootstrap pre-decides this signature so it mirrors `reorderProjects` (which already takes `IndexSet, Int`) and so SwiftUI's `ForEach.onMove` can forward without translation in task02. Validation against missing IDs degenerates to "any `from` offset out of range, or `to` out of range" given the segment is recomputed from the current catalog snapshot.
-- **`WorktreeSegment` placement: in `HierarchyManager.swift`.** It is a runtime-layer concept (a partition of `Project.worktrees` for ordering purposes), not a model field; placing it next to the manager keeps it out of `TouchCodeCore.Worktree` per the bootstrap's "no model-field changes" hard constraint. Re-export not required — the `HierarchyClient` file already imports `TouchCodeCore` and the manager's module.
+- **`WorktreeSegment` placement: in `HierarchyManager.swift`.** It is a runtime-layer concept (a partition of `Project.worktrees` for ordering purposes), not a model field; placing it next to the manager keeps it out of `CodansCore.Worktree` per the bootstrap's "no model-field changes" hard constraint. Re-export not required — the `HierarchyClient` file already imports `CodansCore` and the manager's module.
 - **`setWorktreePinned` keeps its existing `(WorktreeID, Bool)` signature.** The task allows changing it but does not require it. The HierarchySidebar feature is hands-off (hard constraint), so changing the signature would break the call at `HierarchySidebarFeature.swift:611` without being able to fix that file. The behavioral upgrade (positioning) happens internally.
 - **Boundary algorithm: scan from index 0 for the first row matching the unpinned-segment predicate.** Archived rows are skipped so they do not shift the boundary. See `boundaryIndex(in:project:excluding:)` in Interfaces below.
 
@@ -58,10 +58,10 @@ Related documents:
 
 Key source files:
 
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — `@Observable` runtime that owns the `Catalog`. All catalog mutations flow through it; persistence is a debounced atomic-rename JSON via `store.scheduleSave(catalog)`.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — TCA dependency-injection bridge. Every public manager command has a `@MainActor @Sendable` closure here, plus `liveValue` / `testValue` entries.
-- `apps/mac/touch-code/Tests/HierarchyManagerWorktreeMgmtTests.swift` — pattern reference for manager-level tests; uses `FakeHierarchyRuntime` + a temp-file `CatalogStore` per test.
-- `apps/mac/touch-code/Tests/HierarchyClientTests.swift` — pattern reference for client-level tests.
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — `@Observable` runtime that owns the `Catalog`. All catalog mutations flow through it; persistence is a debounced atomic-rename JSON via `store.scheduleSave(catalog)`.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — TCA dependency-injection bridge. Every public manager command has a `@MainActor @Sendable` closure here, plus `liveValue` / `testValue` entries.
+- `apps/mac/codans/Tests/HierarchyManagerWorktreeMgmtTests.swift` — pattern reference for manager-level tests; uses `FakeHierarchyRuntime` + a temp-file `CatalogStore` per test.
+- `apps/mac/codans/Tests/HierarchyClientTests.swift` — pattern reference for client-level tests.
 
 Terms used in this plan:
 
@@ -75,7 +75,7 @@ How the parts fit together: `HierarchyManager` owns the catalog and exposes pure
 
 The work is a single thin vertical slice across three files plus tests. It lands in one PR. Order of edits below matches the order to write so the Swift compiler stays happy at each save.
 
-**Step 1 — Define `WorktreeSegment`.** In `apps/mac/touch-code/Runtime/HierarchyManager.swift`, immediately above the existing `enum HierarchyError` (top of file, around line 5), add:
+**Step 1 — Define `WorktreeSegment`.** In `apps/mac/codans/Runtime/HierarchyManager.swift`, immediately above the existing `enum HierarchyError` (top of file, around line 5), add:
 
 ```swift
 enum WorktreeSegment: Sendable, Equatable {
@@ -172,7 +172,7 @@ func reorderWorktrees(
 
 The "missing ID" check from the parent design's risk table maps onto the offset-range check here: a stale `IndexSet` produced from a snapshot taken before a row was removed has out-of-range offsets, so the guards drop the whole operation and no partial application happens.
 
-**Step 6 — Add `HierarchyClient.reorderWorktrees` closure.** In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+**Step 6 — Add `HierarchyClient.reorderWorktrees` closure.** In `apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
 1. Append a struct field at the end of the struct definition (after `removeWorktreeWithLifecycle` around line 361). Place under a new `// MARK: - Worktree sidebar ordering (task01)` to keep grep-able:
 
@@ -209,13 +209,13 @@ reorderWorktrees: unimplemented("HierarchyClient.reorderWorktrees")
 
 Order: append at the end of each initializer's argument list. The Swift compiler is positional with named labels here — placing it last keeps diffs minimal and matches the pattern used by previous additions like `removeWorktreeWithLifecycle`.
 
-**Step 7 — Tests.** Add a new `apps/mac/touch-code/Tests/HierarchyManagerReorderTests.swift` (manager-level coverage) and extend `apps/mac/touch-code/Tests/HierarchyClientTests.swift` (client-level smoke). Test cases below in Validation.
+**Step 7 — Tests.** Add a new `apps/mac/codans/Tests/HierarchyManagerReorderTests.swift` (manager-level coverage) and extend `apps/mac/codans/Tests/HierarchyClientTests.swift` (client-level smoke). Test cases below in Validation.
 
 **Verification gate after each step:** the build must compile after step 5 (manager surface is now complete) and after step 6 (client surface complete). Tests come at step 7. `make mac-build` and `make mac-lint` must be green before push.
 
 ## Concrete Steps
 
-Working directory for all commands: `/Users/wanggang/.worktree/repos/touch-code/feat/worktree-reorder-catalog`.
+Working directory for all commands: `/Users/wanggang/.worktree/repos/codans/feat/worktree-reorder-catalog`.
 
 ```bash
 # Build (incremental). Expected: BUILD SUCCEEDED, no warnings introduced.
@@ -228,8 +228,8 @@ make mac-lint
 # Expected (from Tests output):
 #   ✔ HierarchyManagerReorderTests passed
 #   (counts vary; all green)
-xcrun xcodebuild -workspace apps/mac/touch-code.xcworkspace \
-  -scheme touch-code-tests -destination 'platform=macOS' test 2>&1 | xcsift
+xcrun xcodebuild -workspace apps/mac/codans.xcworkspace \
+  -scheme codans-tests -destination 'platform=macOS' test 2>&1 | xcsift
 ```
 
 If `xcsift` is unavailable, fall back to `| xcbeautify`. Both are pinned in mise per `apps/mac/.mise.toml`.
@@ -238,17 +238,17 @@ After tests pass:
 
 ```bash
 git status                       # confirm only the four expected files are modified/new
-git add apps/mac/touch-code/Runtime/HierarchyManager.swift \
-        apps/mac/touch-code/App/Clients/HierarchyClient.swift \
-        apps/mac/touch-code/Tests/HierarchyManagerReorderTests.swift \
-        apps/mac/touch-code/Tests/HierarchyClientTests.swift \
+git add apps/mac/codans/Runtime/HierarchyManager.swift \
+        apps/mac/codans/App/Clients/HierarchyClient.swift \
+        apps/mac/codans/Tests/HierarchyManagerReorderTests.swift \
+        apps/mac/codans/Tests/HierarchyClientTests.swift \
         docs/exec-plans/worktree-reorder-catalog.md
 # Commit cadence per project memory: small commits via /commit after each step.
 ```
 
 ## Validation and Acceptance
 
-A passing run of `xcodebuild test` on the `touch-code-tests` scheme that exercises the cases below is the acceptance signal.
+A passing run of `xcodebuild test` on the `codans-tests` scheme that exercises the cases below is the acceptance signal.
 
 In `HierarchyManagerReorderTests.swift`:
 
@@ -279,8 +279,8 @@ If a test fails on the first green run, prefer adding the missing case to `Hiera
 If the working tree gets confused between steps:
 
 ```bash
-git diff apps/mac/touch-code/Runtime/HierarchyManager.swift
-git diff apps/mac/touch-code/App/Clients/HierarchyClient.swift
+git diff apps/mac/codans/Runtime/HierarchyManager.swift
+git diff apps/mac/codans/App/Clients/HierarchyClient.swift
 ```
 
 `git restore <path>` to revert single files without losing other progress.
@@ -312,7 +312,7 @@ Idempotency guard returns early. catalog unchanged. ✓
 
 After this work, the following must exist:
 
-In `apps/mac/touch-code/Runtime/HierarchyManager.swift`:
+In `apps/mac/codans/Runtime/HierarchyManager.swift`:
 
 ```swift
 enum WorktreeSegment: Sendable, Equatable {
@@ -333,7 +333,7 @@ extension HierarchyManager {
 
 `HierarchyManager.createWorktree` keeps its existing signature; the body inserts at `unpinnedBoundary` instead of appending. `HierarchyManager.setWorktreePinned` keeps its existing signature `(WorktreeID, Bool) -> Void` and behaviorally also performs a position move on flag transitions (no move on idempotent calls).
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
 ```swift
 nonisolated struct HierarchyClient: Sendable {
@@ -349,7 +349,7 @@ nonisolated struct HierarchyClient: Sendable {
 
 `liveValue` traps with the standard "not configured" `fatalError`; `testValue` uses `unimplemented("HierarchyClient.reorderWorktrees")`.
 
-No new third-party dependencies. No changes to the persisted JSON schema (no new `Worktree` fields). No changes to `TouchCodeCore`.
+No new third-party dependencies. No changes to the persisted JSON schema (no new `Worktree` fields). No changes to `CodansCore`.
 
 The contract surface task02 will consume:
 

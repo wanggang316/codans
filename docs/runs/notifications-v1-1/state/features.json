@@ -16,7 +16,7 @@
       "preconditions": "Settings v3 currently has no notifications section. A v1.0 settings.json must decode after this task with settings.notifications == NotificationsSettings.default.",
       "expected_behavior": "A pre-v1.1 settings.json decodes cleanly to defaults; a v1.1 launch persists the notifications section on the next debounced save. No user-visible UI change yet.",
       "verification_steps": [
-        "Manual: launch app with no prior settings.json; quit; jq '.notifications' ~/.config/touch-code/settings.json returns the eight default fields.",
+        "Manual: launch app with no prior settings.json; quit; jq '.notifications' ~/.config/codans/settings.json returns the eight default fields.",
         "Manual: with a v1.0 settings.json that has no notifications key, launch, mutate Appearance, quit, re-inspect; notifications object appears at defaults.",
         "Automated: NotificationsSettingsCodableTests pass — round-trip defaults, clamp out-of-range threshold, missing-section decode."
       ]
@@ -78,7 +78,7 @@
         "UT-V11-L-001"
       ],
       "preconditions": "M1 lands NotificationsSettings + InboxFile. Detector currently calls store.append/banner.post directly. M2.T1 lands the reader protocol.",
-      "expected_behavior": "With hand-edited settings.json, four gates take effect: inAppEnabled gates inbox+dock; systemEnabled gates OS banner; soundEnabled gates the banner's sound; dockBadgeEnabled gates the badge. Drop reasons log at .debug under subsystem com.touch-code.notifications, category coordinator.",
+      "expected_behavior": "With hand-edited settings.json, four gates take effect: inAppEnabled gates inbox+dock; systemEnabled gates OS banner; soundEnabled gates the banner's sound; dockBadgeEnabled gates the badge. Drop reasons log at .debug under subsystem com.gumpw.codans.notifications, category coordinator.",
       "verification_steps": [
         "Manual UT-V11-CP-001 + CP-002 per user-test doc.",
         "Manual UT-V11-S-001..S-005 per user-test doc.",
@@ -122,7 +122,7 @@
       "completed_at": "2026-05-21T12:05:00+08:00",
       "commit": "09f8789",
       "runtime_probe_deferred_to": "M8.T2",
-      "lean_mode_notes": "spec-reviewer ✅; code-reviewer SKIPPED — pure TouchCodeCore layer with 30 real tests passing (19 pre-existing + 11 new) + 3 clearly-bounded files. Lowest-risk task of the plan; review information value < dispatch cost.",
+      "lean_mode_notes": "spec-reviewer ✅; code-reviewer SKIPPED — pure CodansCore layer with 30 real tests passing (19 pre-existing + 11 new) + 3 clearly-bounded files. Lowest-risk task of the plan; review information value < dispatch cost.",
       "milestone": "M4",
       "depends_on": ["M2.T2"],
       "fulfills": [
@@ -257,7 +257,7 @@
       "evidence_dir": "docs/runs/notifications-v1-1/runs/2026-05-21-m8-final/",
       "synthesis": "docs/runs/notifications-v1-1/runs/2026-05-21-m8-final/synthesis.json",
       "tally": "8 passed (runtime probed), 26 inconclusive (covered by static review + unit tests; deferred to manual dogfood or misc-M2 test-target fix), 0 failed",
-      "user_data_safety": "User's 500-entry notifications.json backed up + restored byte-for-byte. Release v0.2.3 relaunched on /tmp/touch-code-501.sock; tc doctor confirms socketReachable=true.",
+      "user_data_safety": "User's 500-entry notifications.json backed up + restored byte-for-byte. Release v0.2.3 relaunched on /tmp/codans-501.sock; codans doctor confirms socketReachable=true.",
       "milestone": "M8",
       "depends_on": [
         "M1.T1",
@@ -300,7 +300,7 @@
       "items": [
         {
           "ref": "M4.T1-followup-coordinator-droppreason-duplicate",
-          "summary": "NotificationCoordinator.DropReason (local enum from M2.T2) is now a duplicate subset of TouchCodeCore.InboxDropReason. Swap the coordinator's local enum to use InboxDropReason. Mechanical rename (case names identical); single-file change to NotificationCoordinator.swift. Defer to post-v1.1 cleanup or M5.T1/M6.T2 sweep if author wants to do it opportunistically.",
+          "summary": "NotificationCoordinator.DropReason (local enum from M2.T2) is now a duplicate subset of CodansCore.InboxDropReason. Swap the coordinator's local enum to use InboxDropReason. Mechanical rename (case names identical); single-file change to NotificationCoordinator.swift. Defer to post-v1.1 cleanup or M5.T1/M6.T2 sweep if author wants to do it opportunistically.",
           "added_at": "2026-05-21T12:05:00+08:00"
         }
       ]
@@ -342,12 +342,12 @@
         },
         {
           "ref": "M2.T1-followup-test-target-broader-breakage",
-          "summary": "The touch-codeTests target's pre-existing build failure is broader than v1.0 Surprise S1 documented. ALL files in touch-code/Tests/** that do @testable import touch_code fail with 'Unable to find module dependency'. Likely a Tuist + Xcode 26 product-type interaction; the `touch-code` app's swiftmodule visibility isn't reaching the unit-test target's @testable import. Production app builds fine via make mac-build. Need separate diagnosis + fix; affects M2.T2 / M3.T1 / M7.T1 / M8.T1 static test execution. Runtime probes via computer-use remain unaffected.",
+          "summary": "The codansTests target's pre-existing build failure is broader than v1.0 Surprise S1 documented. ALL files in codans/Tests/** that do @testable import Codans fail with 'Unable to find module dependency'. Likely a Tuist + Xcode 26 product-type interaction; the `codans` app's swiftmodule visibility isn't reaching the unit-test target's @testable import. Production app builds fine via make mac-build. Need separate diagnosis + fix; affects M2.T2 / M3.T1 / M7.T1 / M8.T1 static test execution. Runtime probes via computer-use remain unaffected.",
           "added_at": "2026-05-20T22:05:00+08:00"
         },
         {
           "ref": "M2.T1-followup-tests-S1-S2",
-          "summary": "Code-reviewer suggested two additional regression tests for SettingsStoreReaderAdapter: (S1) no-op refresh when authStatus unchanged; (S2) burst of mutations to lock the re-arm contract. Deferred per reviewer's explicit recommendation to land alongside M2.T2's test pass once the touch-codeTests target compiles again.",
+          "summary": "Code-reviewer suggested two additional regression tests for SettingsStoreReaderAdapter: (S1) no-op refresh when authStatus unchanged; (S2) burst of mutations to lock the re-arm contract. Deferred per reviewer's explicit recommendation to land alongside M2.T2's test pass once the codansTests target compiles again.",
           "added_at": "2026-05-20T22:05:00+08:00"
         }
       ]
@@ -368,7 +368,7 @@
     },
     {
       "from_task": "M1.T1",
-      "issue": "Project.swift buildableFolders enumerates some TouchCodeCoreTests subfolders redundantly",
+      "issue": "Project.swift buildableFolders enumerates some CodansCoreTests subfolders redundantly",
       "justification": "Tuist materialises buildableFolders as PBXFileSystemSynchronizedRootGroup which is recursive; the explicit subfolder entries are no-ops that the build correctly ignores. Harmless drift, not user-visible, no scope match in v1.1. Recorded for a future docs-cleanup pass if it ever happens.",
       "dismissed_at": "2026-05-20T11:05:00Z"
     }

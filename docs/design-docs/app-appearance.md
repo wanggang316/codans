@@ -6,7 +6,7 @@
 
 ## Context and Scope
 
-touch-code ships a Settings → General → Appearance picker today (`system` / `light` / `dark`), backed by `TouchCodeCore/Settings/AppearancePreference.swift`. The value is persisted by `SettingsStore` but **inert** — the enum's docstring and the picker caption both state "preview only — themes will ship in a later release." This doc designs the "later release," expanded to cover the full visual-theming surface area:
+codans ships a Settings → General → Appearance picker today (`system` / `light` / `dark`), backed by `CodansCore/Settings/AppearancePreference.swift`. The value is persisted by `SettingsStore` but **inert** — the enum's docstring and the picker caption both state "preview only — themes will ship in a later release." This doc designs the "later release," expanded to cover the full visual-theming surface area:
 
 1. **App appearance** — making the existing Light / Dark / System picker actually drive the app's visual chrome, for both SwiftUI-managed and AppKit-hosted surfaces.
 2. **Terminal theme** — a new Settings → Terminal pane that lets the user pick a light-mode palette and a dark-mode palette from Ghostty's bundled theme catalog. The app writes these selections into the user's Ghostty config file and reloads the running runtime so changes take effect immediately.
@@ -17,14 +17,14 @@ The two layers compose: when the app is in dark appearance, Ghostty renders the 
 
 In scope:
 
-- SwiftUI-managed chrome (both `WindowGroup` main window and `Window("Settings")` scene in `TouchCodeApp`).
-- AppKit-hosted surfaces — primarily Ghostty terminal views in `apps/mac/touch-code/Runtime/Ghostty/` and `App/PaneHostView.swift`. These do not inherit SwiftUI's `.preferredColorScheme` automatically.
+- SwiftUI-managed chrome (both `WindowGroup` main window and `Window("Settings")` scene in `CodansApp`).
+- AppKit-hosted surfaces — primarily Ghostty terminal views in `apps/mac/codans/Runtime/Ghostty/` and `App/PaneHostView.swift`. These do not inherit SwiftUI's `.preferredColorScheme` automatically.
 - The Ghostty terminal palette (foreground, background, ANSI colors) controlled via named themes stored in Ghostty's own config file.
 - A new `Terminal` section in the Settings window.
 
 Out of scope:
 
-- A design-token / theme layer for touch-code's own chrome (shared `Color` namespace for brand colors). The existing `App/Theme/ThemeGit.swift` is a local namespace for diff rendering, not a global system, and should stay that way.
+- A design-token / theme layer for codans's own chrome (shared `Color` namespace for brand colors). The existing `App/Theme/ThemeGit.swift` is a local namespace for diff rendering, not a global system, and should stay that way.
 - Syntax-highlighting themes for the editor integration.
 - Font family / font size / close-confirmation controls in the Terminal pane. These ride on the same managed-keys mechanism (see below) and are a natural future extension, but are not in this deliverable.
 - Custom user-defined terminal palettes (hand-tuning individual color values). Users pick from Ghostty's catalog; anyone needing a custom palette can drop a theme file into Ghostty's themes directory and it will appear in the picker.
@@ -50,16 +50,16 @@ Out of scope:
 - `system` mode follows macOS's current appearance and reacts to the OS toggle without user action.
 - Ghostty terminal surfaces follow the chosen app appearance — both the chrome (scrollbar, borders) and the palette (foreground, background, ANSI colors).
 - A Settings → Terminal pane lets the user choose a light-mode palette and a dark-mode palette from the themes Ghostty ships with. Selection takes effect in live terminals immediately.
-- Theme selections persist in the user's Ghostty config file (`~/.config/ghostty/config`), so they apply when Ghostty is used outside touch-code as well.
-- Existing lines in the user's Ghostty config that touch-code does not manage are preserved byte-for-byte.
+- Theme selections persist in the user's Ghostty config file (`~/.config/ghostty/config`), so they apply when Ghostty is used outside codans as well.
+- Existing lines in the user's Ghostty config that codans does not manage are preserved byte-for-byte.
 - The "preview only" caption and docstring are removed.
-- No migration required for existing touch-code `settings.json` files.
+- No migration required for existing codans `settings.json` files.
 
 **Non-Goals**
 
-- A `Theme` struct or semantic color token layer for touch-code's own UI. The existing 54 color sites are predominantly system-semantic and already adapt; a token layer is not justified by current requirements.
+- A `Theme` struct or semantic color token layer for codans's own UI. The existing 54 color sites are predominantly system-semantic and already adapt; a token layer is not justified by current requirements.
 - Hand-tuned per-user terminal palettes edited in-app. Users can still drop theme files into Ghostty's themes directory — those will appear in the picker automatically — but we do not ship a color editor.
-- Sidecar storage of terminal theme choices in touch-code's own `settings.json`. The Ghostty config file is the source of truth; touch-code only reads and writes it.
+- Sidecar storage of terminal theme choices in codans's own `settings.json`. The Ghostty config file is the source of truth; codans only reads and writes it.
 
 ## Design
 
@@ -76,7 +76,7 @@ Chooses the app's overall appearance (Light / Dark / System). Applied via a **du
 The dual-path design is necessary because Ghostty's terminal view is a Metal-backed `NSView` subclass that does not participate in SwiftUI's color-scheme environment, while SwiftUI views that read `@Environment(\.colorScheme)` are not driven by `NSApp.effectiveAppearance`. Both paths must be wired from the same enum value — in a single wrapper (`AppAppearanceView`) — or components silently desynchronize.
 
 **Source of truth B — the user's Ghostty config file (`~/.config/ghostty/config`).**
-Chooses the light-mode palette name and the dark-mode palette name. Owned by Ghostty; touch-code reads and writes a small, bounded set of directives using a **managed-keys** strategy (see below).
+Chooses the light-mode palette name and the dark-mode palette name. Owned by Ghostty; codans reads and writes a small, bounded set of directives using a **managed-keys** strategy (see below).
 
 **The bridge — `GhosttyRuntime.setColorScheme(_:)` (new).**
 A small wrapper view reads `@Environment(\.colorScheme)` (already resolved by path A) and calls `ghostty_app_set_color_scheme` + per-surface `ghostty_surface_set_color_scheme`. This tells Ghostty which of its two configured palettes — light or dark — to render, without reloading the whole config. Cheap, in-memory, synchronous.
@@ -140,7 +140,7 @@ extension AppearancePreference {
 
 Two variants because the SwiftUI and AppKit paths need different types. `.system` maps to `nil` on both — letting macOS's current appearance take effect.
 
-Because `TouchCodeCore` must remain `AppKit`-free (it is consumed by non-UI targets), the `NSAppearance` projection lives in an **app-module** extension file under `apps/mac/touch-code/App/Theme/`. The `ColorScheme` projection can live either place; colocating both app-side keeps the pair together and `TouchCodeCore` pure.
+Because `CodansCore` must remain `AppKit`-free (it is consumed by non-UI targets), the `NSAppearance` projection lives in an **app-module** extension file under `apps/mac/codans/App/Theme/`. The `ColorScheme` projection can live either place; colocating both app-side keeps the pair together and `CodansCore` pure.
 
 **`AppAppearanceView<Content>` — scene wrapper (new).**
 
@@ -158,7 +158,7 @@ struct AppAppearanceView<Content: View>: View {
 }
 ```
 
-Reads `SettingsStore` reactively via the existing `@Environment` injection (`TouchCodeApp` already installs it on both scenes). Placing `AppAppearanceView` at the root of *every* scene ensures `viewDidMoveToWindow` fires at least once per scene attachment — picking up newly opened windows automatically.
+Reads `SettingsStore` reactively via the existing `@Environment` injection (`CodansApp` already installs it on both scenes). Placing `AppAppearanceView` at the root of *every* scene ensures `viewDidMoveToWindow` fires at least once per scene attachment — picking up newly opened windows automatically.
 
 **`WindowAppearanceSetter` — `NSViewRepresentable` (new).**
 
@@ -249,7 +249,7 @@ struct GhosttyTerminalSettingsDraft {
 }
 ```
 
-**Managed-keys strategy.** The config file is a mix of user-written lines and lines touch-code owns. `GhosttyConfigFile.apply` defines a set of managed keys (v1: just `theme`; extensible to `font-family`, `font-size`, `confirm-close-surface` later). On write:
+**Managed-keys strategy.** The config file is a mix of user-written lines and lines codans owns. `GhosttyConfigFile.apply` defines a set of managed keys (v1: just `theme`; extensible to `font-family`, `font-size`, `confirm-close-surface` later). On write:
 
 1. Read the file as UTF-8 lines.
 2. Scan each line; if its key is in the managed set, drop it; otherwise preserve verbatim (comments, whitespace, unknown keys, other users' directives).
@@ -308,7 +308,7 @@ The live value binds to `GhosttyConfigFile` on `MainActor`. The test value serve
 │  Config File                                                 │
 │    ~/.config/ghostty/config                                  │
 │                                                              │
-│  Footer: "touch-code reads and writes your Ghostty config,   │
+│  Footer: "codans reads and writes your Ghostty config,   │
 │           so changes here stay in sync with Ghostty itself." │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -319,54 +319,54 @@ Plain two `Picker`s, side by side. Pickers show "Select Theme" when the current 
 
 ### Data Storage
 
-**touch-code `settings.json`:** No schema changes. `GeneralSettings.appearance: AppearancePreference` already persists via `SettingsStore`'s debounced save pipeline. Default stays `.system`. Existing `settings.json` files decode unchanged.
+**codans `settings.json`:** No schema changes. `GeneralSettings.appearance: AppearancePreference` already persists via `SettingsStore`'s debounced save pipeline. Default stays `.system`. Existing `settings.json` files decode unchanged.
 
-**Ghostty config file (`~/.config/ghostty/config`):** Resolved using Ghostty's own convention — `$XDG_CONFIG_HOME/ghostty/config` when set, else `$HOME/.config/ghostty/config`. Format is the key-value line format Ghostty already parses; touch-code writes plain lines, never a structured representation. Only the managed keys are rewritten; everything else is preserved byte-for-byte.
+**Ghostty config file (`~/.config/ghostty/config`):** Resolved using Ghostty's own convention — `$XDG_CONFIG_HOME/ghostty/config` when set, else `$HOME/.config/ghostty/config`. Format is the key-value line format Ghostty already parses; codans writes plain lines, never a structured representation. Only the managed keys are rewritten; everything else is preserved byte-for-byte.
 
-Concurrent editing risk (user has Ghostty open in a text editor while touch-code writes) is mitigated by atomic replace: `replaceItem` preserves inode identity on overwrite, so a concurrent read sees either the old or the new file, never a partial state. If the user saves in their editor after our write, their save wins (last-write-wins) — standard filesystem semantics, acceptable for a rarely-edited config.
+Concurrent editing risk (user has Ghostty open in a text editor while codans writes) is mitigated by atomic replace: `replaceItem` preserves inode identity on overwrite, so a concurrent read sees either the old or the new file, never a partial state. If the user saves in their editor after our write, their save wins (last-write-wins) — standard filesystem semantics, acceptable for a rarely-edited config.
 
 ### Component Boundaries
 
 ```
-TouchCodeCore/Settings/
+CodansCore/Settings/
   AppearancePreference.swift           unchanged (Codable enum) — drop "preview only" wording
   GeneralSettings.swift                unchanged
 
-apps/mac/touch-code/App/Theme/         (new files; sibling of ThemeGit.swift)
+apps/mac/codans/App/Theme/         (new files; sibling of ThemeGit.swift)
   AppearancePreference+UI.swift        ColorScheme + NSAppearance projections
   AppAppearanceView.swift              scene wrapper (~30 LOC)
   WindowAppearanceSetter.swift         NSViewRepresentable + AppearanceApplyingView (~40 LOC)
   GhosttyColorSchemeSyncView.swift     ghostty runtime color-scheme sync (~20 LOC)
   AppearanceDiagnostics.swift          structured log helper (~30 LOC)
 
-apps/mac/touch-code/App/
-  TouchCodeApp.swift                   wrap both scene contents in AppAppearanceView { }
+apps/mac/codans/App/
+  CodansApp.swift                   wrap both scene contents in AppAppearanceView { }
   ContentView.swift                    wrap terminal subtree in GhosttyColorSchemeSyncView
 
-apps/mac/touch-code/Runtime/Ghostty/
+apps/mac/codans/Runtime/Ghostty/
   GhosttyRuntime.swift                 add setColorScheme(_:), reloadAppConfig(),
                                        register notification listener in init
   GhosttyConfigFile.swift              new — load/apply managed region of config file
   GhosttyThemeCatalog.swift            new — enumerate + classify bundled themes
 
-apps/mac/touch-code/App/Features/Settings/
+apps/mac/codans/App/Features/Settings/
   SettingsSection.swift                add .terminal case
   SettingsWindowView.swift             sidebar row + switch case for .terminal pane
   Panes/SettingsGeneralView.swift      remove "preview only" caption (one-line copy change)
   Panes/SettingsTerminalView.swift     new pane (~120 LOC)
   SettingsTerminalFeature.swift        new TCA reducer + client (~150 LOC combined)
 
-apps/mac/touch-code/App/Clients/
+apps/mac/codans/App/Clients/
   GhosttyTerminalSettingsClient.swift  new — Dependency wrapper around GhosttyConfigFile
 
-TouchCodeCore/Support/ or similar
+CodansCore/Support/ or similar
   Notification.Name extension for .ghosttyRuntimeReloadRequested (or keep app-side)
 ```
 
 Dependency directions:
 
-- `App/Theme/` depends on `TouchCodeCore` and `AppKit`/`SwiftUI`. Never the reverse.
-- `TouchCodeCore` stays `AppKit`-free.
+- `App/Theme/` depends on `CodansCore` and `AppKit`/`SwiftUI`. Never the reverse.
+- `CodansCore` stays `AppKit`-free.
 - `Runtime/Ghostty/GhosttyConfigFile` has no dependency on the Settings feature — it defines data types that the Settings feature imports. Notification is the only coupling between writer and runtime.
 - `SettingsTerminalFeature` depends on `GhosttyTerminalSettingsClient` (TCA `DependencyKey`), which in turn wraps `GhosttyConfigFile` in its `liveValue`. Test dependencies inject a fake client without touching the filesystem.
 
@@ -384,11 +384,11 @@ Assign `NSApp.appearance` at app launch and on every preference change, skip `.p
 
 **Rejected because:** `@Environment(\.colorScheme)` in SwiftUI is driven by `.preferredColorScheme`, not by `NSApp.effectiveAppearance`. Skipping the SwiftUI modifier leaves any SwiftUI view that reads `colorScheme` — including `GhosttyColorSchemeSyncView` — keyed to the system default rather than the user's preference. The two paths must both be wired or dependent components silently desynchronize.
 
-### Alt 3 — Store terminal theme choices in touch-code's `settings.json`
+### Alt 3 — Store terminal theme choices in codans's `settings.json`
 
 Persist the light/dark theme names in `GeneralSettings` alongside `appearance`. On change, patch the live Ghostty config in memory but leave the user's config file alone.
 
-**Rejected because:** The user's expectation is that a terminal palette choice holds across all Ghostty usage, not just touch-code. Splitting the source of truth (touch-code's JSON for in-app, Ghostty's config for standalone) creates drift the first time the user edits one and not the other. Writing Ghostty's config is how Ghostty itself expects this state to be owned — one file, one truth.
+**Rejected because:** The user's expectation is that a terminal palette choice holds across all Ghostty usage, not just codans. Splitting the source of truth (codans's JSON for in-app, Ghostty's config for standalone) creates drift the first time the user edits one and not the other. Writing Ghostty's config is how Ghostty itself expects this state to be owned — one file, one truth.
 
 ### Alt 4 — Shell out to Ghostty's own CLI / IPC to set themes
 
@@ -400,9 +400,9 @@ If Ghostty exposes a "set theme" command externally (e.g. via `ghostty +theme se
 
 Parse the whole file, emit a canonical re-serialization.
 
-**Rejected because:** Ghostty's config format includes comments, blank lines, and directive ordering that users deliberately maintain (grouping, conditional blocks via `config-file = ...`). Canonical re-serialization destroys intent. The managed-keys strategy — preserve everything except the bounded set touch-code owns — is the minimum-disruption approach.
+**Rejected because:** Ghostty's config format includes comments, blank lines, and directive ordering that users deliberately maintain (grouping, conditional blocks via `config-file = ...`). Canonical re-serialization destroys intent. The managed-keys strategy — preserve everything except the bounded set codans owns — is the minimum-disruption approach.
 
-### Alt 6 — Introduce a touch-code `Theme` struct / design-token layer
+### Alt 6 — Introduce a codans `Theme` struct / design-token layer
 
 Define `Theme` types with `accent`, `surface`, `warning`, etc., injected via `@Environment(\.theme)`; migrate the 54 color sites.
 
@@ -440,7 +440,7 @@ Fields include the current preference, resolved `NSAppearance` name, `NSApp.effe
 - Not meaningfully unit-testable: `WindowAppearanceSetter` side effects and the wrapper views' bodies. Covered by manual visual walk-through: `light` / `dark` / `system` × {main window, Settings window, newly-opened sheets, system Appearance toggle while in `system` mode}.
 - Not unit-testable: live Ghostty runtime re-application. Covered by manual verification with a real terminal open during theme changes.
 
-**Rollback.** Pure-additive change. If `AppAppearanceView` misbehaves, revert the wrapping in `TouchCodeApp.swift` — wrapped scene content continues to work under macOS's default appearance. If the Terminal pane misbehaves, revert the `.terminal` `SettingsSection` case — existing panes are unaffected. `GhosttyRuntime.setColorScheme` and `reloadAppConfig` are additive and only invoked by new wiring.
+**Rollback.** Pure-additive change. If `AppAppearanceView` misbehaves, revert the wrapping in `CodansApp.swift` — wrapped scene content continues to work under macOS's default appearance. If the Terminal pane misbehaves, revert the `.terminal` `SettingsSection` case — existing panes are unaffected. `GhosttyRuntime.setColorScheme` and `reloadAppConfig` are additive and only invoked by new wiring.
 
 The user's Ghostty config file has a failure mode worth calling out: if a bad managed block is written (e.g. unknown theme name), Ghostty refuses to parse it and falls back to defaults. Because we validate by writing to a temp file and invoking Ghostty's parser on it *before* overwriting the real path, this is guarded — on validation failure, the real file is untouched and the user sees an error message in the Settings pane.
 
@@ -483,7 +483,7 @@ A window somehow receives SwiftUI's `.preferredColorScheme` but not `NSApp.appea
 *Mitigation:* Both paths are driven from a single `AppearancePreference` read inside `AppAppearanceView` — drift requires a code bug, not a state split. The diagnostics log records both `NSApp.effectiveAppearance` and the preference on every event, making mismatches visible.
 
 **Risk 7 — Concurrent edits to the Ghostty config file.**
-User has the config file open in a text editor while touch-code writes, or Ghostty itself reloads during our write.
+User has the config file open in a text editor while codans writes, or Ghostty itself reloads during our write.
 
 *Mitigation:* Atomic replace via `FileManager.replaceItem` ensures any reader sees either the old complete file or the new complete file, never a partial state. Last-write-wins semantics if the user saves from their editor after our write — standard filesystem expectations, acceptable for a rarely-edited config.
 

@@ -52,7 +52,7 @@ expands additively (existing reserved-empty Phase 1 entries decode with
 - [x] M0 — libghostty per-surface env capability spike — **supported** via `ghostty_surface_config_s.env_vars` (2026-04-25)
 - [x] M1 — Schema & types: ScriptKind, ScriptTintColor, ScriptDefinition
        expansion, GitProjectSettings +3 lifecycle script fields (2026-04-25,
-       21 tests, full TouchCodeCore suite green)
+       21 tests, full CodansCore suite green)
 - [x] M2 — Mid-layer API: HookConfigClient (+upsert/+delete),
        SettingsWriter (+5 closures); HierarchyClient.runScript +
        HierarchyManager.runScript / openPane env arg deferred to M5/M8 per
@@ -321,55 +321,55 @@ Related documents:
 
 Key source files (read before touching):
 
-- `apps/mac/TouchCodeCore/Settings/ProjectSettings.swift` — per-Project
+- `apps/mac/CodansCore/Settings/ProjectSettings.swift` — per-Project
   fields. `envVars` and `scripts` are reserved-empty and grow real
   bindings in M4 / M5.
-- `apps/mac/TouchCodeCore/Settings/GitProjectSettings.swift` — git-only
+- `apps/mac/CodansCore/Settings/GitProjectSettings.swift` — git-only
   override fields. M1 adds `setupScript` / `archiveScript` / `deleteScript`
   (additive Codable, no schema bump).
-- `apps/mac/TouchCodeCore/Settings/ScriptDefinition.swift` — Phase 1
+- `apps/mac/CodansCore/Settings/ScriptDefinition.swift` — Phase 1
   placeholder (`id` / `name` / `command`). M1 expands to
   `(id, kind, name, command, systemImage?, tintColor?)`.
-- `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift` — 9-case Scope
+- `apps/mac/CodansCore/Hooks/HookSubscription.swift` — 9-case Scope
   enum the Hooks pane edits inline.
-- `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsSection.swift` —
   pane enum. M3 drops `.projectGit` / `.projectGitHub` / `.projectEnv`.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`
   — pane composition. M3 prunes the retired-pane subrows mapping;
   `projectsChanged` already falls back to General when kind hides the
   selection (Phase 1 fix; cite the existing behaviour in M3 commit).
-- `apps/mac/touch-code/App/Features/Settings/Panes/ProjectGeneralSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/ProjectGeneralSettingsView.swift`
   — Phase 1's minimal pane. M4 rewrites this as a 5-Section Form.
-- `apps/mac/touch-code/App/Features/Settings/Panes/{ProjectGitSettingsView,ProjectGitHubSettingsView,ProjectEnvSettingsView}.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/{ProjectGitSettingsView,ProjectGitHubSettingsView,ProjectEnvSettingsView}.swift`
   — three scaffolds deleted in M3 once their content lives in General.
-- `apps/mac/touch-code/App/Features/Settings/Panes/ProjectScriptsSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/ProjectScriptsSettingsView.swift`
   — placeholder. M5 fills.
-- `apps/mac/touch-code/App/Features/Settings/Panes/ProjectHooksSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/ProjectHooksSettingsView.swift`
   — Phase 1 read-only. M6 makes it editable.
-- `apps/mac/touch-code/App/Clients/HookConfigClient.swift` — TCA bridge
+- `apps/mac/codans/App/Clients/HookConfigClient.swift` — TCA bridge
   for `hooks.json`. M2 adds `upsert` / `delete` closures over the existing
   `HookConfigStore.scheduleSave` pipeline.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — manager bridge.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — manager bridge.
   M2 adds `runScript`. M9 wires `createWorktree` / `setWorktreeArchived` /
   `removeWorktree` through `runWorktreeLifecycleScript`.
-- `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift` — defines
+- `apps/mac/codans/App/Features/Editor/EditorFeature.swift` — defines
   `SettingsWriter` today. M2 adds `setProjectDefaultShell` /
   `setProjectGitField` / `setProjectEnvVar` / `setProjectScripts` /
   `setProjectLifecycleScript`.
-- `apps/mac/touch-code/Runtime/TerminalEngine.swift` and
-  `apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift` — spawn path.
+- `apps/mac/codans/Runtime/TerminalEngine.swift` and
+  `apps/mac/codans/Runtime/Ghostty/PaneSurface.swift` — spawn path.
   M8 widens `ensureSurface` and `PaneSurface.init` to carry `env: [String:
   String]`. M0 (the libghostty spike) determines whether per-surface env
   is supported or whether the typed-export fallback is mandatory.
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — orchestrator for
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — orchestrator for
   spawn + lifecycle. M2 widens `createTab`; M8 wires env into spawn paths;
   M9 adds `runWorktreeLifecycleScript(_:for:)` and wraps the three
   lifecycle methods.
-- `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItem.swift`
+- `apps/mac/codans/App/Features/CommandPalette/CommandPaletteItem.swift`
   / `CommandPaletteItems.swift` — palette entries. M10 adds
   `.runProjectScript(ProjectID, WorktreeID, ScriptDefinition.ID)` Kind and
   the build path that iterates the active Project's scripts.
-- `apps/mac/touch-code/App/Features/WorktreeHeader/HeaderOpenSplitButton.swift`
+- `apps/mac/codans/App/Features/WorktreeHeader/HeaderOpenSplitButton.swift`
   — pattern HeaderRunScriptSplitButton mirrors. M7 adds the new view
   next to the existing one in the same toolbar slot.
 - `scripts/check-rename-residue.sh` — CI rename gate. M3 grows the
@@ -441,7 +441,7 @@ round-trips Codable.
 
 Tasks:
 
-1. **`apps/mac/TouchCodeCore/Settings/ScriptKind.swift`** (NEW): define
+1. **`apps/mac/CodansCore/Settings/ScriptKind.swift`** (NEW): define
    `enum ScriptKind: String, Codable, CaseIterable, Sendable { case run,
    test, deploy, lint, format, custom }`. Add static helpers
    `defaultName(for:)`, `defaultSystemImage(for:)`, `defaultTintColor(for:)`
@@ -449,11 +449,11 @@ Tasks:
    `Color` / SF Symbols don't import here, so the helpers return raw
    `String` (SF Symbol name) / `ScriptTintColor` (next task) — view-side
    resolves to `Image` / `Color`.
-2. **`apps/mac/TouchCodeCore/Settings/ScriptTintColor.swift`** (NEW):
+2. **`apps/mac/CodansCore/Settings/ScriptTintColor.swift`** (NEW):
    define `enum ScriptTintColor: String, Codable, Sendable { case green,
    yellow, red, blue, teal, purple, gray }`. The SwiftUI `Color`
    resolution helper lives view-side in M5.
-3. **`apps/mac/TouchCodeCore/Settings/ScriptDefinition.swift`** (EXPAND):
+3. **`apps/mac/CodansCore/Settings/ScriptDefinition.swift`** (EXPAND):
    add `kind: ScriptKind`, `systemImage: String?`, `tintColor:
    ScriptTintColor?` while preserving existing `id` / `name` / `command`.
    Codable: `kind` decodes with default `.run` when absent so any reserved-
@@ -462,18 +462,18 @@ Tasks:
    `resolvedSystemImage` (returns `systemImage` only when `kind == .custom`,
    otherwise `kind.defaultSystemImage`), `resolvedTintColor` (same custom-
    only override semantics).
-4. **`apps/mac/TouchCodeCore/Settings/GitProjectSettings.swift`** (EXPAND):
+4. **`apps/mac/CodansCore/Settings/GitProjectSettings.swift`** (EXPAND):
    add `setupScript: String`, `archiveScript: String`, `deleteScript:
    String`, default empty. Codable: `decodeIfPresent` with default `""`.
    Extend `isEffectivelyEmpty` so an all-fields-empty `git` subtree still
    collapses to nil through the existing `Settings.garbageCollect()` path.
-5. **`apps/mac/TouchCodeCore/Settings/ProjectSettings.swift`** (no field
+5. **`apps/mac/CodansCore/Settings/ProjectSettings.swift`** (no field
    changes, but add `normalizeScriptIDs() mutating` per Risk R5: walks
    `scripts`, replaces any duplicate `id` with a fresh UUID, returns the
    list of replaced IDs for logging). Wire into the `Settings` `decode`
    path so loads always normalize.
 
-Tests in this milestone (TouchCodeCoreTests):
+Tests in this milestone (CodansCoreTests):
 
 - `ScriptDefinitionCodableTests.swift`: round-trips for every `ScriptKind`
   case; predefined kinds ignore `systemImage` / `tintColor` via
@@ -494,17 +494,17 @@ Goal: every UI write site has a closure to call. No view code yet.
 
 Tasks:
 
-1. **`apps/mac/touch-code/App/Clients/HookConfigClient.swift`** (EXPAND):
+1. **`apps/mac/codans/App/Clients/HookConfigClient.swift`** (EXPAND):
    add `var upsert: @MainActor @Sendable (HookSubscription) async throws
    -> Void` and `var delete: @MainActor @Sendable (UUID) async throws ->
    Void`. Live impls call into `HookConfigStore.upsert(_:)` /
    `HookConfigStore.remove(id:)` (add these on the store: `upsert` mutates
    in-place by id-match-or-append and calls `scheduleSave`; `remove` is
    no-op when id is absent). The user-facing `upsert` rejects subscriptions
-   whose `command` starts with the `__touch-code/internal:` prefix and
+   whose `command` starts with the `__codans/internal:` prefix and
    throws a typed `WriteRefused.internalNamespace` so the UI can surface
    the message.
-2. **`apps/mac/touch-code/App/Features/Editor/EditorFeature.swift`**
+2. **`apps/mac/codans/App/Features/Editor/EditorFeature.swift`**
    (`SettingsWriter` extension): add five closures.
    - `setProjectDefaultShell: @Sendable (ProjectID, String?) async ->
      Void` — nil clears the override.
@@ -522,20 +522,20 @@ Tasks:
      `WorktreeLifecycle = .setup | .archive | .delete`.
 
    The `.testValue` / `.previewValue` initializers grow no-op stubs.
-3. **`apps/mac/touch-code/App/Clients/HierarchyClient.swift`** (EXPAND):
+3. **`apps/mac/codans/App/Clients/HierarchyClient.swift`** (EXPAND):
    add `var runScript: @MainActor @Sendable (UUID, ProjectID, WorktreeID)
    async throws -> Void`. Live impl inside `HierarchyManager`: looks up the
    `ScriptDefinition` via `SettingsWriter.readSnapshotSync()`, throws
    `RunScriptError.unknownScript` if missing, otherwise calls
    `createTab(...)` with the resolved metadata.
-4. **`apps/mac/touch-code/Runtime/HierarchyManager.swift`** (EXPAND
+4. **`apps/mac/codans/Runtime/HierarchyManager.swift`** (EXPAND
    `createTab`): widen the signature to accept `name: String?`, `icon:
    String?`, `tint: ScriptTintColor?`, `env: [String: String]`,
    `cwd: URL?`, `command: String?` (all optional / defaulted-empty).
    Existing tab-bar `+` callsite passes nil/empty for all new args (no
    behaviour change for them). The script-spawn callsite from M5 / M7
    carries the resolved metadata.
-5. **`apps/mac/touch-code/Runtime/HierarchyManager.swift`** (NEW
+5. **`apps/mac/codans/Runtime/HierarchyManager.swift`** (NEW
    helper): `nonisolated func resolvedEnv(for projectID: ProjectID,
    in settings: Settings) -> [String: String]` — exact body from the
    design doc Section "Environment: model + injection". Pure function;
@@ -543,11 +543,11 @@ Tasks:
    ("project keys win"). Lives at the manager level so M8 / M9 can both
    call it.
 
-Tests in this milestone (mac/touch-code/Tests):
+Tests in this milestone (mac/codans/Tests):
 
 - `HookConfigClientTests.swift`: `upsert` of a fresh subscription appends;
   upsert of an existing id replaces; `delete` of a present id removes;
-  `delete` of a missing id no-ops; upsert of a `__touch-code/internal:`
+  `delete` of a missing id no-ops; upsert of a `__codans/internal:`
   command throws `WriteRefused.internalNamespace`.
 - `SettingsWriterPhase2Tests.swift`: each of the five new closures on a
   `SettingsStore` test instance writes the expected `Settings` mutation
@@ -567,33 +567,33 @@ does not have to coexist with the dead Git/GitHub/Env panes.
 
 Tasks:
 
-1. **`apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`**
+1. **`apps/mac/codans/App/Features/Settings/SettingsSection.swift`**
    (DROP 3 cases): remove `.projectGit(ProjectID)`, `.projectGitHub(ProjectID)`,
    `.projectEnv(ProjectID)` from the enum. Update `subrows(for:projectID:)`
    to return only `[.projectGeneral, .projectScripts, .projectHooks]`
    regardless of `ProjectKind` (Phase 2 takes the kind difference inside
    General, not at the sidebar). Update `projectID` extractor to drop the
    removed cases.
-2. **`apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift`**
+2. **`apps/mac/codans/App/Features/Settings/SettingsWindowView.swift`**
    detail switch: drop the three `.projectGit` / `.projectGitHub` /
    `.projectEnv` cases. The remaining three Project cases stay.
-3. **DELETE** `apps/mac/touch-code/App/Features/Settings/Panes/ProjectGitSettingsView.swift`,
-   `apps/mac/touch-code/App/Features/Settings/Panes/ProjectGitHubSettingsView.swift`,
-   `apps/mac/touch-code/App/Features/Settings/Panes/ProjectEnvSettingsView.swift`.
+3. **DELETE** `apps/mac/codans/App/Features/Settings/Panes/ProjectGitSettingsView.swift`,
+   `apps/mac/codans/App/Features/Settings/Panes/ProjectGitHubSettingsView.swift`,
+   `apps/mac/codans/App/Features/Settings/Panes/ProjectEnvSettingsView.swift`.
 4. **DELETE** their tests under
-   `apps/mac/touch-code/Tests/ProjectSettingsScaffoldTests.swift` (or
+   `apps/mac/codans/Tests/ProjectSettingsScaffoldTests.swift` (or
    wherever Phase 1 anchored "scaffold" coverage; the file is small).
 5. **`scripts/check-rename-residue.sh`** (DENY-LIST GROW): add
    `ProjectGitSettingsView`, `ProjectGitHubSettingsView`,
    `ProjectEnvSettingsView` to the deny pattern list with a short
    "// Retired in Project Settings Phase 2" comment.
-6. **`apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`**:
+6. **`apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`**:
    verify `projectsChanged` already falls back to `.projectGeneral(pid)`
    when `subrows(for:)` no longer contains the current selection (Phase 1
    fix). Add a regression test for the reverse direction: a Project
    already on `.projectGeneral` keeps that selection across a kind flip
    from `git_repo` to `plain_dir`.
-7. **`apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`**
+7. **`apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`**
    pane composition: drop the `IdentifiedArrayOf` references to
    `.projectGit(...)` / `.projectGitHub(...)` / `.projectEnv(...)` if any
    (likely none — the pane state is keyed by `ProjectID`, not section).
@@ -621,12 +621,12 @@ files, no shared state.
 
 Tasks:
 
-1. **`apps/mac/TouchCodeCore/Settings/ShellRegistry.swift`** (NEW):
+1. **`apps/mac/CodansCore/Settings/ShellRegistry.swift`** (NEW):
    `struct ShellRegistry` with a static `installed: [String]` that probes
    `/etc/shells` for paths whose binaries exist on disk. Mirrors
    `EditorRegistry`. Tests stub via a `ShellRegistry.Provider` protocol so
    we don't read the real filesystem in tests.
-2. **`apps/mac/touch-code/App/Features/Settings/Panes/OptionalOverridePicker.swift`**
+2. **`apps/mac/codans/App/Features/Settings/Panes/OptionalOverridePicker.swift`**
    (NEW): generic SwiftUI view
    `OptionalOverridePicker<Value: Hashable>(title: String, selection:
    Binding<Value?>, inheritedValue: Value?, options: [(value: Value, label:
@@ -634,13 +634,13 @@ Tasks:
    `tag(nil)` row label is `"Use global default — \(inheritedLabel
    (inheritedValue))"`. M4 instantiates it for `defaultEditor`,
    `defaultShell`, `worktreeBaseRef`, `defaultMergeStrategy`, `postMergeAction`.
-3. **`apps/mac/touch-code/App/Features/Settings/Panes/OptionalToggleBinding.swift`**
+3. **`apps/mac/codans/App/Features/Settings/Panes/OptionalToggleBinding.swift`**
    (NEW helper): a tiny adapter so the `copyIgnoredOnWorktreeCreate` /
    `copyUntrackedOnWorktreeCreate` Picker (three options: "Use global
    default — yes" / "Yes" / "No") can express the three states without a
    custom view. Implementation: a Picker over `enum TriState { case
    inherit, yes, no }` with `Binding` adapters in / out of `Bool?`.
-4. **`apps/mac/touch-code/App/Features/Settings/Panes/EnvironmentEditorView.swift`**
+4. **`apps/mac/codans/App/Features/Settings/Panes/EnvironmentEditorView.swift`**
    (NEW): the key/value table. Reads `projects[pid]?.envVars`; renders
    a column-aligned list of `(key, value, ✕ button)` rows sorted alphabetically
    by key on display. "Add variable" appends a blank row whose KEY field
@@ -649,7 +649,7 @@ Tasks:
    (Risk R3). Errors render inline with a red border + accessibility hint.
    Writes route through `SettingsWriter.setProjectEnvVar(pid, key,
    newValue)`; deletes route through `setProjectEnvVar(pid, key, nil)`.
-5. **`apps/mac/touch-code/App/Features/Settings/Panes/ProjectGeneralSettingsView.swift`**
+5. **`apps/mac/codans/App/Features/Settings/Panes/ProjectGeneralSettingsView.swift`**
    (REWRITE): one `Form` with five sibling `Section`s in the order from the
    design doc (Editor, Default Shell, Worktree, GitHub, Environment).
    Worktree and GitHub render only when `projectKind == .gitRepo`.
@@ -668,7 +668,7 @@ Tasks:
    - Environment Section: embed `EnvironmentEditorView`.
    View reads `@Environment(SettingsStore.self)` for live state (Phase 1
    pattern). Bindings write through `SettingsWriter` closures.
-6. **`apps/mac/touch-code/App/Features/Settings/ProjectSettingsFeature.swift`**:
+6. **`apps/mac/codans/App/Features/Settings/ProjectSettingsFeature.swift`**:
    no reducer changes for M4 (writes go through `SettingsWriter` closures,
    not through this feature's actions). Drop any `.projectGit*` /
    `.projectGitHub*` / `.projectEnv*` action cases that Phase 1 reserved
@@ -683,7 +683,7 @@ Tests in this milestone:
 - `ProjectGeneralSettingsViewKindRenderTests.swift`: render the view on a
   `.plainDir` Project and assert the SwiftUI hierarchy has no Worktree /
   GitHub Sections (use `XCTAssertViewContains` shim from
-  `TouchCodeTestSupport`); render on `.gitRepo` and assert all five.
+  `CodansTestSupport`); render on `.gitRepo` and assert all five.
 - `EnvironmentEditorValidationTests.swift`: a non-POSIX KEY shows the
   inline error and does not invoke `setProjectEnvVar`; a value with `\n`
   rejects with the "no newlines in env values" message; duplicate KEY
@@ -701,7 +701,7 @@ only) and a user-defined list with inline edit / drag-to-reorder.
 
 Tasks:
 
-1. **`apps/mac/touch-code/App/Features/Settings/Panes/ScriptDefinitionRow.swift`**
+1. **`apps/mac/codans/App/Features/Settings/Panes/ScriptDefinitionRow.swift`**
    (NEW): SwiftUI view for a single script row. Collapsed form shows kind
    icon (resolved via `script.resolvedSystemImage` + `resolvedTintColor`
    → SwiftUI `Image` / `Color`), name, command preview, and three
@@ -714,7 +714,7 @@ Tasks:
      SF Symbol name) and a `ScriptTintColor` Picker.
    - Save / Cancel buttons (Save calls
      `SettingsWriter.setProjectScripts(pid, updatedArray)`).
-2. **`apps/mac/touch-code/App/Features/Settings/Panes/ProjectScriptsSettingsView.swift`**
+2. **`apps/mac/codans/App/Features/Settings/Panes/ProjectScriptsSettingsView.swift`**
    (REWRITE): `Form` with two Sections.
    - Lifecycle Section (rendered only when `kind == .gitRepo`): three
      labelled TextEditors bound to `git.setupScript` / `git.archiveScript`
@@ -758,7 +758,7 @@ inline-expandable rows that edit every HookSubscription field.
 
 Tasks:
 
-1. **`apps/mac/touch-code/App/Features/Settings/Panes/ScopePickerView.swift`**
+1. **`apps/mac/codans/App/Features/Settings/Panes/ScopePickerView.swift`**
    (NEW): kind-aware scope picker. Top-level Picker chooses one of nine
    `Scope.Kind`s. Below, a conditional value control:
    - `.anyPane` — none.
@@ -772,7 +772,7 @@ Tasks:
      `**/feature/*` / `**/repos/*`.
    Uses an internal `[ScopeKind: String]` buffer so toggling between
    text-valued kinds preserves user input.
-2. **`apps/mac/touch-code/App/Features/Settings/Panes/HookEditorRow.swift`**
+2. **`apps/mac/codans/App/Features/Settings/Panes/HookEditorRow.swift`**
    (NEW): the expandable row from the design doc Section "Hooks: pane
    edit UI". Edit fields: event Picker, ScopePickerView, command
    TextEditor, matchPattern TextField + three flag toggles, mode Picker
@@ -781,7 +781,7 @@ Tasks:
    variant — keep that view's table generic enough for both general
    envVars and per-hook env), `disabled` Toggle. Save validates per
    design doc; failure keeps row expanded with red-flagged fields.
-3. **`apps/mac/touch-code/App/Features/Settings/Panes/ProjectHooksSettingsView.swift`**
+3. **`apps/mac/codans/App/Features/Settings/Panes/ProjectHooksSettingsView.swift`**
    (REWRITE): replace the read-only list with a `ForEach` of
    `HookEditorRow`. Add a "+ Add Hook" button at the top that inserts a
    new row already expanded with the scope pre-selected to
@@ -790,7 +790,7 @@ Tasks:
    `HookConfigClient.delete`. Saving with a non-project scope shows a
    tooltip ("This hook will move to the Global list") on Save and the
    row disappears from this pane on next refresh.
-4. **`apps/mac/touch-code/App/Features/Settings/ProjectSettingsFeature.swift`**:
+4. **`apps/mac/codans/App/Features/Settings/ProjectSettingsFeature.swift`**:
    add reducer actions for hook upsert / delete dispatched from
    `HookEditorRow`. Effects call into `HookConfigClient.upsert` /
    `delete` and surface failure as inline error text on the row.
@@ -823,7 +823,7 @@ Goal: every Worktree header shows a Run split button next to the existing
 
 Tasks:
 
-1. **`apps/mac/touch-code/App/Features/WorktreeHeader/HeaderRunScriptSplitButton.swift`**
+1. **`apps/mac/codans/App/Features/WorktreeHeader/HeaderRunScriptSplitButton.swift`**
    (NEW): SwiftUI view using `Menu(primaryAction:)`. State source:
    `@Environment(SettingsStore.self) settings.projects[currentProjectID]?.scripts`.
    - Primary action: `scripts.first { $0.kind == .run }` ??
@@ -835,7 +835,7 @@ Tasks:
      Scripts…" footer that opens Settings → Scripts.
    - Label / icon / tint of the button itself reflects the primary
      script's resolved values (or "Run" + play.fill + accent if empty).
-2. **`apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderView.swift`**
+2. **`apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderView.swift`**
    (or equivalent host of `HeaderOpenSplitButton`): place
    `HeaderRunScriptSplitButton` immediately after the Open button in
    the toolbar layout. No other layout changes.
@@ -861,7 +861,7 @@ determined by M0's spike result.
 
 Tasks:
 
-1. **`apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift`**: widen
+1. **`apps/mac/codans/Runtime/Ghostty/PaneSurface.swift`**: widen
    `init(...)` to accept `env: [String: String]` (default empty). If
    M0 said per-surface env is supported: pass `env` into the libghostty
    surface config at creation. If not: store on the surface; after the
@@ -869,11 +869,11 @@ Tasks:
    `" export A='1' B='2' …\n"` (single line, leading space for
    `HISTCONTROL=ignorespace`, single-quote escaping, ends with the
    user's intended `initialCommand` if any).
-2. **`apps/mac/touch-code/Runtime/TerminalEngine.swift`**: widen
+2. **`apps/mac/codans/Runtime/TerminalEngine.swift`**: widen
    `ensureSurface(...)` to forward `env: [String: String]`. The
    `bringUp` path performs the M0 capability check once and stores
    `let supportsPerSurfaceEnv: Bool` for `PaneSurface` to read.
-3. **`apps/mac/touch-code/Runtime/HierarchyManager.swift`**:
+3. **`apps/mac/codans/Runtime/HierarchyManager.swift`**:
    `openPane` resolves env via `resolvedEnv(for: projectID, in:
    settings)` (M2 helper) and forwards into `ensureSurface`. The
    `createTab` widening from M2 already carries `env`; the script-spawn
@@ -902,7 +902,7 @@ fail-warn.
 
 Tasks:
 
-1. **`apps/mac/touch-code/Runtime/HierarchyManager.swift`** (NEW
+1. **`apps/mac/codans/Runtime/HierarchyManager.swift`** (NEW
    helper): `func runWorktreeLifecycleScript(_ phase:
    SettingsWriter.WorktreeLifecycle, for worktreeID: WorktreeID) async
    throws -> LifecycleScriptResult`. Reads `git.<phase>Script` from
@@ -912,19 +912,19 @@ Tasks:
    `currentDirectoryURL = worktreePath`. Captures combined stdout+stderr
    into a buffered `String`. Returns `.success(stdout: String)` or
    `.failure(exitCode: Int32, stdout: String)`.
-2. **`apps/mac/touch-code/Runtime/HierarchyManager.swift`**: wrap each
+2. **`apps/mac/codans/Runtime/HierarchyManager.swift`**: wrap each
    of the three lifecycle methods to call
    `runWorktreeLifecycleScript(.setup / .archive / .delete, for:
    worktreeID)`. Setup: a `.failure(...)` aborts catalog row creation
    (worktree directory left on disk; cf design doc Security note). Archive
    / delete: a `.failure(...)` logs a warning and proceeds. Output
    posts to `LifecycleScriptToast` regardless.
-3. **`apps/mac/touch-code/App/Features/Toast/LifecycleScriptToast.swift`**
+3. **`apps/mac/codans/App/Features/Toast/LifecycleScriptToast.swift`**
    (NEW): a transient SwiftUI sheet anchored on the main window. Shows
    phase + worktree name + scrollable stdout. Auto-dismisses 5s after
    success; stays open on failure until the user dismisses; Cancel button
    on the sheet sends SIGTERM to the running process.
-4. **`apps/mac/touch-code/App/Features/Toast/LifecycleScriptToastFeature.swift`**
+4. **`apps/mac/codans/App/Features/Toast/LifecycleScriptToastFeature.swift`**
    (NEW TCA reducer): tracks `(isPresented, phase, worktreeID, output,
    exitState)`. Effects subscribe to a `LifecycleScriptStream`
    `AsyncSequence` that the manager publishes on. RootFeature integrates
@@ -953,12 +953,12 @@ item per `ProjectSettings.scripts` entry. Activating runs through
 
 Tasks:
 
-1. **`apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItem.swift`**:
+1. **`apps/mac/codans/App/Features/CommandPalette/CommandPaletteItem.swift`**:
    add `case runProjectScript(ProjectID, WorktreeID, ScriptDefinition.ID)`
    to `Kind`. Item label = `script.displayName`; subtitle = kind's
    display string ("Test", "Deploy", or "Custom"); icon = resolved system
    image; tint = resolved tint colour.
-2. **`apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItems.swift`**:
+2. **`apps/mac/codans/App/Features/CommandPalette/CommandPaletteItems.swift`**:
    in `build(...)`, when an active Project is in scope, iterate
    `settings.projects[pid]?.scripts ?? []` and emit one
    `runProjectScript` item per entry. Cross-project scripts are not
@@ -984,8 +984,8 @@ naming.
 
 Sweep checklist:
 
-- M1 schema tests in TouchCodeCoreTests (≥ 6).
-- M2 client / writer tests in mac/touch-code/Tests (≥ 8).
+- M1 schema tests in CodansCoreTests (≥ 6).
+- M2 client / writer tests in mac/codans/Tests (≥ 8).
 - M3 sidebar restructure tests (≥ 3).
 - M4 General pane tests (≥ 8).
 - M5 Scripts pane tests (≥ 6).
@@ -1048,7 +1048,7 @@ Run from the repository root unless otherwise specified.
 
 ```bash
 # Always operate from the worktree root
-cd /Users/wanggang/.prowl/repos/touch-code/feature/worktree-settings
+cd /Users/wanggang/.prowl/repos/codans/feature/worktree-settings
 
 # Confirm branch
 git status
@@ -1067,9 +1067,9 @@ make mac-lint
 make mac-test         # full suite
 # Or, per-milestone targeted runs:
 xcodebuild test \
-  -workspace apps/mac/touch-code.xcworkspace \
-  -scheme TouchCodeCore \
-  -only-testing:TouchCodeCoreTests/ScriptDefinitionCodableTests \
+  -workspace apps/mac/codans.xcworkspace \
+  -scheme CodansCore \
+  -only-testing:CodansCoreTests/ScriptDefinitionCodableTests \
   | xcbeautify
 
 # Rename-residue gate
@@ -1186,7 +1186,7 @@ acceptance, codex review findings, and any non-trivial diffs go here.)
 
 End-state types and signatures the implementation must produce.
 
-In `apps/mac/TouchCodeCore/Settings/ScriptKind.swift`:
+In `apps/mac/CodansCore/Settings/ScriptKind.swift`:
 
 ```swift
 public enum ScriptKind: String, Codable, CaseIterable, Sendable {
@@ -1200,7 +1200,7 @@ extension ScriptKind {
 }
 ```
 
-In `apps/mac/TouchCodeCore/Settings/ScriptTintColor.swift`:
+In `apps/mac/CodansCore/Settings/ScriptTintColor.swift`:
 
 ```swift
 public enum ScriptTintColor: String, Codable, Sendable {
@@ -1208,7 +1208,7 @@ public enum ScriptTintColor: String, Codable, Sendable {
 }
 ```
 
-In `apps/mac/TouchCodeCore/Settings/ScriptDefinition.swift`:
+In `apps/mac/CodansCore/Settings/ScriptDefinition.swift`:
 
 ```swift
 public struct ScriptDefinition:
@@ -1231,7 +1231,7 @@ public struct ScriptDefinition:
 }
 ```
 
-In `apps/mac/TouchCodeCore/Settings/GitProjectSettings.swift` (additive):
+In `apps/mac/CodansCore/Settings/GitProjectSettings.swift` (additive):
 
 ```swift
 public struct GitProjectSettings { ...
@@ -1241,7 +1241,7 @@ public struct GitProjectSettings { ...
 }
 ```
 
-In `apps/mac/touch-code/App/Clients/HookConfigClient.swift` (extends
+In `apps/mac/codans/App/Clients/HookConfigClient.swift` (extends
 existing struct):
 
 ```swift
@@ -1259,7 +1259,7 @@ enum HookConfigClient.WriteRefused: Error, Equatable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift`
+In `apps/mac/codans/App/Features/Editor/EditorFeature.swift`
 (`SettingsWriter` extension):
 
 ```swift
@@ -1286,7 +1286,7 @@ nonisolated struct SettingsWriter: Sendable { ...
 }
 ```
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
 ```swift
 nonisolated struct HierarchyClient: Sendable { ...
@@ -1303,7 +1303,7 @@ enum HierarchyClient.RunScriptError: Error, Equatable {
 }
 ```
 
-In `apps/mac/touch-code/Runtime/HierarchyManager.swift`:
+In `apps/mac/codans/Runtime/HierarchyManager.swift`:
 
 ```swift
 extension HierarchyManager {
@@ -1336,7 +1336,7 @@ func createTab(
 ) async throws -> Tab.ID
 ```
 
-In `apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift`:
+In `apps/mac/codans/Runtime/Ghostty/PaneSurface.swift`:
 
 ```swift
 final class PaneSurface { ...
@@ -1347,7 +1347,7 @@ final class PaneSurface { ...
 }
 ```
 
-In `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItem.swift`:
+In `apps/mac/codans/App/Features/CommandPalette/CommandPaletteItem.swift`:
 
 ```swift
 extension CommandPaletteItem.Kind {
@@ -1355,7 +1355,7 @@ extension CommandPaletteItem.Kind {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Settings/Panes/`:
+In `apps/mac/codans/App/Features/Settings/Panes/`:
 
 ```swift
 struct OptionalOverridePicker<Value: Hashable>: View {
@@ -1372,7 +1372,7 @@ struct HookEditorRow: View { ... }
 struct ScopePickerView: View { ... }
 ```
 
-In `apps/mac/touch-code/App/Features/WorktreeHeader/HeaderRunScriptSplitButton.swift`:
+In `apps/mac/codans/App/Features/WorktreeHeader/HeaderRunScriptSplitButton.swift`:
 
 ```swift
 struct HeaderRunScriptSplitButton: View {
@@ -1382,7 +1382,7 @@ struct HeaderRunScriptSplitButton: View {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Toast/LifecycleScriptToast.swift`:
+In `apps/mac/codans/App/Features/Toast/LifecycleScriptToast.swift`:
 
 ```swift
 struct LifecycleScriptToast: View {

@@ -27,14 +27,14 @@ Per [user-test-patterns.md](../user-test-patterns.md), this set probes three sur
   - `agentState.row.<paneID>` — one identifier per popover row
   - `agentState.row.<paneID>.state` — the state icon in that row, with `accessibilityLabel` ∈ {`waitingForInput`, `loading`, `finished`, `idle`}
   - `agentState.row.<paneID>.headline` — the `<Project> / <Worktree>` line
-- **Persisted state** — `~/.config/touch-code/catalog.json` queried with `jq` to verify the `agentKind` / `agentSessionID` fields on a Pane survive a relaunch.
-- **Log stream** — `log stream --predicate 'subsystem == "com.touch-code.agentstate"' …` for identification / state-transition trace lines, used as a ready signal where the UI alone is ambiguous.
+- **Persisted state** — `~/.config/codans/catalog.json` queried with `jq` to verify the `agentKind` / `agentSessionID` fields on a Pane survive a relaunch.
+- **Log stream** — `log stream --predicate 'subsystem == "com.gumpw.codans.agentstate"' …` for identification / state-transition trace lines, used as a ready signal where the UI alone is ambiguous.
 
-A "trigger an OSC 9;4 busy report on pane P" step means: drive `printf '\e]9;4;3\a'` into pane P (via the `tc` CLI's pane-input verb or by typing it into the pane chrome); the matching "clear" step drives `printf '\e]9;4;0\a'`. These exact escape sequences are documented in [memory: OSC 9;4 emitter coverage](../../.claude/projects/-Users-wanggang-dev-00-touch-code/memory/project_osc94_emitters.md) and have a manual test recipe verified by Gump on 2026-05-03.
+A "trigger an OSC 9;4 busy report on pane P" step means: drive `printf '\e]9;4;3\a'` into pane P (via the `codans` CLI's pane-input verb or by typing it into the pane chrome); the matching "clear" step drives `printf '\e]9;4;0\a'`. These exact escape sequences are documented in [memory: OSC 9;4 emitter coverage](../../.claude/projects/-Users-wanggang-dev-00-codans/memory/project_osc94_emitters.md) and have a manual test recipe verified by Gump on 2026-05-03.
 
 A "drive a `waitingForInput`-class OSC 9 event on pane P" step means: send `printf '\e]9;Approve this action\a'` into pane P. The title text `"Approve"` causes `DetectionTranslator.classify` to label the event as `waitingForInput` rather than `taskFinished`.
 
-A "make pane P appear to be running agent A" precondition means: at pane creation time, set `initialCommand` to the bare agent name (`claude`, `codex`, or `pi`) via `tc tab new --command <name>`. The agent need not actually be installed — `AgentBinder` matches on the recorded `initialCommand` string regardless of whether the binary resolves. This keeps cases reproducible on machines without all three agents installed.
+A "make pane P appear to be running agent A" precondition means: at pane creation time, set `initialCommand` to the bare agent name (`claude`, `codex`, or `pi`) via `codans tab new --command <name>`. The agent need not actually be installed — `AgentBinder` matches on the recorded `initialCommand` string regardless of whether the binary resolves. This keeps cases reproducible on machines without all three agents installed.
 
 ## Journeys
 
@@ -53,7 +53,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - No other Worktree contains any pane with `agentKind` set.
 
 **Steps:**
-1. Confirm the current focus is the main window (`tc focus` may be used as a no-op trigger to bring it forward).
+1. Confirm the current focus is the main window (`codans focus` may be used as a no-op trigger to bring it forward).
 2. Inspect the `WorktreeHeader` region for the presence of an element with accessibility identifier `agentState.badge`.
 
 **Assertions:**
@@ -80,9 +80,9 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Assertions:**
 1. (UI) After step 3: `agentState.badge` accessibility label reads exactly `Claude Code is working`.
 2. (UI) The badge's pulse animation is running (the badge has an active `pulseAnimating=true` accessibility trait OR the accessibility identifier `agentState.badge.pulse` is present).
-3. (Log) Within the same window, one line under `subsystem:"com.touch-code.agentstate"` `category:"store"` matches `state-transition.*P1.*idle->loading`.
+3. (Log) Within the same window, one line under `subsystem:"com.gumpw.codans.agentstate"` `category:"store"` matches `state-transition.*P1.*idle->loading`.
 
-**Artifacts on FAIL:** `screenshot.png`, `catalog.json.snapshot.json`, console log filtered to subsystem `com.touch-code.agentstate`.
+**Artifacts on FAIL:** `screenshot.png`, `catalog.json.snapshot.json`, console log filtered to subsystem `com.gumpw.codans.agentstate`.
 
 #### Case `UT-AA-B-003`: Working → busy cleared → headline reads "finished"
 
@@ -349,18 +349,18 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - No bound Panes exist.
 
 **Steps:**
-1. Create a new Pane via `tc tab new --command claude` (the binary need not resolve; binder uses the recorded `initialCommand` string).
+1. Create a new Pane via `codans tab new --command claude` (the binary need not resolve; binder uses the recorded `initialCommand` string).
 2. Wait for ready signal "Pane attached" on the new pane.
-3. Wait until either (a) a row appears in `agentState.view` after a hover, OR (b) `~/.config/touch-code/catalog.json`'s pane entry contains `agentKind=claude-code` — whichever first.
+3. Wait until either (a) a row appears in `agentState.view` after a hover, OR (b) `~/.config/codans/catalog.json`'s pane entry contains `agentKind=claude-code` — whichever first.
 4. Quit the app cleanly.
 5. Relaunch the app.
 6. Wait for ready signal "App launched".
 
 **Assertions:**
-1. (File) After step 3: `jq '.. | objects | select(.id? and .initialCommand?) | select(.agentKind?)' ~/.config/touch-code/catalog.json` returns at least one row whose `agentKind == "claude-code"` and whose pane ID matches the new pane.
+1. (File) After step 3: `jq '.. | objects | select(.id? and .initialCommand?) | select(.agentKind?)' ~/.config/codans/catalog.json` returns at least one row whose `agentKind == "claude-code"` and whose pane ID matches the new pane.
 2. (UI) After step 6: hovering `agentState.badge` opens the popover with at least one row, and that row's content names "Claude Code".
 
-**Artifacts on FAIL:** `catalog.json.snapshot.json` taken before quit and after relaunch; console log filtered to `com.touch-code.agentstate`.
+**Artifacts on FAIL:** `catalog.json.snapshot.json` taken before quit and after relaunch; console log filtered to `com.gumpw.codans.agentstate`.
 
 #### Case `UT-AA-I-002`: Closing the Pane clears the binding
 
@@ -370,12 +370,12 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - End-state of `UT-AA-I-001` after relaunch (one bound Pane visible in popover).
 
 **Steps:**
-1. Close the agent Pane via the Pane context menu's "Close" item (or `tc pane close <id>`).
+1. Close the agent Pane via the Pane context menu's "Close" item (or `codans pane close <id>`).
 2. Wait for ready signal: a coordinator log line confirming pane teardown OR the row disappearing from the popover.
 
 **Assertions:**
 1. (UI) The previously bound row no longer exists in `agentState.view`. If this was the only bound Pane, `agentState.badge` itself is no longer in the accessibility tree.
-2. (File) `jq '.. | objects | select(.id? and .initialCommand?) | .agentKind? // empty' ~/.config/touch-code/catalog.json` returns no rows naming that pane's ID with a non-null `agentKind`.
+2. (File) `jq '.. | objects | select(.id? and .initialCommand?) | .agentKind? // empty' ~/.config/codans/catalog.json` returns no rows naming that pane's ID with a non-null `agentKind`.
 
 **Artifacts on FAIL:** `catalog.json.snapshot.json`, console log.
 
@@ -387,14 +387,14 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 - App started, no bound Panes.
 
 **Steps:**
-1. Create a new Pane via `tc tab new --command "make all"`.
+1. Create a new Pane via `codans tab new --command "make all"`.
 2. Wait for ready signal "Pane attached".
-3. Wait 3 seconds, or until the next state-transition log line from `com.touch-code.agentstate` would have fired (whichever first).
+3. Wait 3 seconds, or until the next state-transition log line from `com.gumpw.codans.agentstate` would have fired (whichever first).
 
 **Assertions:**
 1. (UI) `agentState.badge` is not in the accessibility tree.
 2. (File) The new pane's `catalog.json` entry has no `agentKind` field (or it is null).
-3. (Log) No log line under `com.touch-code.agentstate` `category:"binder"` matches this pane's ID with a non-empty kind.
+3. (Log) No log line under `com.gumpw.codans.agentstate` `category:"binder"` matches this pane's ID with a non-empty kind.
 
 **Artifacts on FAIL:** `catalog.json.snapshot.json`, console log.
 
@@ -405,7 +405,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Preconditions:**
 - App started.
 - One Pane P1 bound to `claude-code`, currently `idle`.
-- Shell integration is **confirmed active** for P1 (verifiable by emitting one OSC 133 D sequence manually and seeing a `subsystem:"com.touch-code.ghostty"` log line acknowledging it; if no such log line appears, the case is reported `inconclusive — shell-integration unavailable` per the spec's OQ-1 and SKIPS the assertions below).
+- Shell integration is **confirmed active** for P1 (verifiable by emitting one OSC 133 D sequence manually and seeing a `subsystem:"com.gumpw.codans.ghostty"` log line acknowledging it; if no such log line appears, the case is reported `inconclusive — shell-integration unavailable` per the spec's OQ-1 and SKIPS the assertions below).
 
 **Steps:**
 1. In P1, drive `printf '\e]133;D;0\a'` (OSC 133 D, indicating prompt returned).
@@ -417,7 +417,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 2. (UI) The popover row for P1 now shows a Codex logo and display name.
 3. (Log) One line matches `binder.*rebind.*P1.*claude-code->codex`.
 
-**Artifacts on FAIL:** `catalog.json.snapshot.json` before and after, console log filtered to both `com.touch-code.agentstate` and `com.touch-code.ghostty`.
+**Artifacts on FAIL:** `catalog.json.snapshot.json` before and after, console log filtered to both `com.gumpw.codans.agentstate` and `com.gumpw.codans.ghostty`.
 
 **Note on conditional skip:** if the precondition's OSC 133 D ack log line does not appear, the validator reports `inconclusive` with reason `shell-integration unavailable per OQ-1`. The case is **not** marked failed in that scenario — this is the spec-acknowledged limitation.
 
@@ -452,7 +452,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Preconditions:**
 - App started.
 - One bound Pane P1=`claude-code` currently in `finished` (after a recent loading→finished transition via UT-AA-B-002/003).
-- `~/.config/touch-code/notifications.json` contains a corresponding `taskFinished` entry for P1 with `readAt: null` (unread).
+- `~/.config/codans/notifications.json` contains a corresponding `taskFinished` entry for P1 with `readAt: null` (unread).
 - Current focus is on a different Pane (not P1).
 
 **Steps:**
@@ -472,7 +472,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 
 **Preconditions:**
 - App started.
-- `~/.config/touch-code/settings.json` has `notifications.inAppEnabled=false`, `notifications.systemEnabled=false`, `notifications.dockBadgeEnabled=false`, `notifications.soundEnabled=false`.
+- `~/.config/codans/settings.json` has `notifications.inAppEnabled=false`, `notifications.systemEnabled=false`, `notifications.dockBadgeEnabled=false`, `notifications.soundEnabled=false`.
 - One bound Pane P1=`claude-code` in `idle`.
 
 **Steps:**
@@ -486,7 +486,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 2. (UI) After step 4: badge headline reads `Claude Code is waiting for input`, pulse running.
 3. (UI) The inbox bell badge has not changed (notifications.json still empty), and Dock badge is unchanged — confirming AgentState wrote nothing through the notifications subsystem.
 
-**Artifacts on FAIL:** `screenshot.png`, `notifications.json.snapshot.json`, console log filtered to both `com.touch-code.agentstate` and `com.touch-code.notifications`.
+**Artifacts on FAIL:** `screenshot.png`, `notifications.json.snapshot.json`, console log filtered to both `com.gumpw.codans.agentstate` and `com.gumpw.codans.notifications`.
 
 ### Journey AA-A: Accessibility surface reads complete state
 

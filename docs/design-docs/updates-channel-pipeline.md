@@ -12,7 +12,7 @@ filters appcast items by channel. The release pipeline needs to actually produce
 on both channels for the in-app picker to do anything.
 
 `SUFeedURL` in `Configurations/mac-Info.plist` points at
-`https://github.com/wanggang316/touch-code/releases/latest/download/appcast.xml`. The
+`https://github.com/wanggang316/codans/releases/latest/download/appcast.xml`. The
 `releases/latest/...` redirect skips prereleases, so it always serves whatever the most
 recent non-prerelease GitHub Release attached as `appcast.xml`.
 
@@ -32,7 +32,7 @@ recent non-prerelease GitHub Release attached as `appcast.xml`.
 - Delta updates (`.delta` patches). Full DMG-per-update is fine for v1; deltas land later.
 - `.app.zip` distribution unit. Sparkle accepts DMG enclosures; we keep the existing
   artifact and avoid double-building.
-- Auto tip on every `main` push (supacode does this; touch-code is single-developer and
+- Auto tip on every `main` push (supacode does this; codans is single-developer and
   too noisy). Tip is `workflow_dispatch` only.
 - Per-architecture appcasts. universal binary today, Sparkle handles arch matching.
 
@@ -146,7 +146,7 @@ Sequence:
 3. Manually run the new `release-tip.yml` via `gh workflow run release-tip.yml`.
 4. Verify the same URL now returns a feed with both a stable and a tip item.
 5. Switch the in-app channel to Tip on a debug client + flush
-   `defaults delete com.gumpw.touch-agent-mac`. Sparkle should offer the tip build.
+   `defaults delete com.gumpw.codans`. Sparkle should offer the tip build.
 
 ## Open questions
 

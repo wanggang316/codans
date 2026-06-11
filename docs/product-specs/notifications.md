@@ -6,14 +6,14 @@
 
 ## Summary
 
-touch-code is a multi-pane workbench for running coding agents and other long-running terminal processes in parallel across many Worktrees. Users routinely leave a Pane unattended — switch to another Worktree, another tab, or another app entirely — while a build, test run, or AI agent works in the background. Notifications exist to **pull the user's attention back to the exact Pane that needs them**, and only that Pane.
+codans is a multi-pane workbench for running coding agents and other long-running terminal processes in parallel across many Worktrees. Users routinely leave a Pane unattended — switch to another Worktree, another tab, or another app entirely — while a build, test run, or AI agent works in the background. Notifications exist to **pull the user's attention back to the exact Pane that needs them**, and only that Pane.
 
 This spec defines the v1 of the notification system: which events qualify as notifications, how the user is alerted, and where unread state surfaces in the UI. It deliberately replaces and shrinks the in-flight C6 design (`docs/design-docs/c6-agent-notifications.md` / `c6-agent-notifications-v2.md`), which over-built around hooks and rule editors before the actual user need was tested.
 
 ## Context
 
 - The hierarchy is `Catalog → Project → Worktree → Tab → Pane`. A Pane is a single Ghostty terminal surface; multiple Panes split-arrange inside a Tab.
-- A reference implementation in [supacode](https://github.com/anysphere/supacode) sits at the simple end of the design space: stdout-driven, no persistence, hover popover only. The C6 worktree (`design+c6-agent-notifications`) sits at the complex end: 24 files, persisted JSON, FSM, rule DSL, permission delegate. v1 of touch-code lands closer to supacode in mechanism, with the addition of persistence and hierarchical roll-up badges.
+- A reference implementation in [supacode](https://github.com/anysphere/supacode) sits at the simple end of the design space: stdout-driven, no persistence, hover popover only. The C6 worktree (`design+c6-agent-notifications`) sits at the complex end: 24 files, persisted JSON, FSM, rule DSL, permission delegate. v1 of codans lands closer to supacode in mechanism, with the addition of persistence and hierarchical roll-up badges.
 
 ## Goals and Non-Goals
 
@@ -187,4 +187,4 @@ The design doc must explicitly justify any retained pieces from the C6 worktree;
 
 - Reference implementation (mechanism baseline): `supacode/Clients/Notifications/` and `supacode/Features/Repositories/Views/*Notification*View*.swift`.
 - Prior design (to be replaced): `docs/design-docs/c6-agent-notifications.md`, `docs/design-docs/c6-agent-notifications-v2.md`.
-- Hierarchy model: `apps/mac/TouchCodeCore/{Catalog,Project,Worktree,Tab,Pane}.swift`.
+- Hierarchy model: `apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane}.swift`.

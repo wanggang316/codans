@@ -12,16 +12,16 @@ Implement light / dark / system appearance picker, persisted to Settings → Gen
 
 This feature spans three integration points:
 
-1. **Settings UI & persistence** — the existing `SettingsStore` infrastructure (touch-code's own `settings.json`) handles appearance preference, and a new `GhosttyConfigFile` reader/writer handles terminal theme selection in `~/.config/ghostty/config`.
+1. **Settings UI & persistence** — the existing `SettingsStore` infrastructure (codans's own `settings.json`) handles appearance preference, and a new `GhosttyConfigFile` reader/writer handles terminal theme selection in `~/.config/ghostty/config`.
 2. **SwiftUI + AppKit rendering** — app chrome is driven by SwiftUI's `.preferredColorScheme` + AppKit's `NSApp.appearance` (dual-path to reach both native SwiftUI views and AppKit-hosted Ghostty surfaces).
 3. **Ghostty runtime** — two entry points: `ghostty_app_set_color_scheme` (instant, in-memory, tells Ghostty which palette to render) and `ghostty_app_update_config` (triggered after config-file edits, re-parses and reloads).
 
 Key files to read before starting:
 - `docs/design-docs/app-appearance.md` — design decisions, alternatives considered, risks, and rationale
-- `apps/mac/touch-code/App/Features/Settings/SettingsGeneralView.swift` — existing appearance picker (inert today)
-- `apps/mac/touch-code/Runtime/Ghostty/GhosttyRuntime.swift` — app-level Ghostty façade (will gain two methods)
-- `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift` — enum of settings sidebar rows (will gain `.terminal` case)
-- `TouchCodeCore/Settings/GeneralSettings.swift` — model for General settings (appearance already present)
+- `apps/mac/codans/App/Features/Settings/SettingsGeneralView.swift` — existing appearance picker (inert today)
+- `apps/mac/codans/Runtime/Ghostty/GhosttyRuntime.swift` — app-level Ghostty façade (will gain two methods)
+- `apps/mac/codans/App/Features/Settings/SettingsSection.swift` — enum of settings sidebar rows (will gain `.terminal` case)
+- `CodansCore/Settings/GeneralSettings.swift` — model for General settings (appearance already present)
 
 ## Interfaces & Dependencies
 
@@ -94,7 +94,7 @@ Key files to read before starting:
    - Simple `os_log` wrapper or `print` to `os_log`.
    - Log on: user mode change, `viewDidMoveToWindow`, per-window application, Ghostty sync.
 
-5. **Wire `AppAppearanceView` into both scenes** (modify `app/TouchCodeApp.swift`)
+5. **Wire `AppAppearanceView` into both scenes** (modify `app/CodansApp.swift`)
    - Wrap `WindowGroup { ... }` content: `AppAppearanceView { ContentView(...) }`.
    - Wrap `Window("Settings", ...) { ... }` content: `AppAppearanceView { SettingsWindowView(...) }`.
 
@@ -262,14 +262,14 @@ Key files to read before starting:
    - Display config file path below (read-only).
    - Show warning / error messages if present.
    - Disable pickers while `isLoading || isApplying`.
-   - Footer: "touch-code reads and writes your Ghostty config, so changes here stay in sync with Ghostty itself."
+   - Footer: "codans reads and writes your Ghostty config, so changes here stay in sync with Ghostty itself."
 
 4. **Wire Terminal pane into `SettingsWindowView`** (modify `app/Features/Settings/SettingsWindowView.swift`)
    - Add sidebar row for `.terminal` (label: "Terminal").
    - Switch in detail view: `case .terminal: SettingsTerminalView(store: ...)`.
    - Inject `GhosttyTerminalSettingsClient.liveValue` into the reducer's dependencies.
 
-5. **Inject `GhosttyTerminalSettingsClient` dependency in `AppState.bringUp()`** (modify `app/TouchCodeApp.swift`)
+5. **Inject `GhosttyTerminalSettingsClient` dependency in `AppState.bringUp()`** (modify `app/CodansApp.swift`)
    - Set `$0.ghosttyTerminalSettingsClient = .appLiveValue` in `SettingsWindowFeature` dependencies.
 
 **Verification:**
@@ -294,12 +294,12 @@ Key files to read before starting:
 
 1. **Write unit tests for `AppearancePreference` projections**
    - Test `ColorScheme?` and `NSAppearance?` mapping for all three cases.
-   - File: `apps/mac/TouchCodeCoreTests/AppearancePreferenceTests.swift`.
+   - File: `apps/mac/CodansCoreTests/AppearancePreferenceTests.swift`.
 
 2. **Write unit tests for `GhosttyConfigFile`**
    - Test `updatedContents(from:settings:)` pure string transformation.
    - Test cases: empty file, unrelated content, existing managed lines, trailing newlines, comments mixed with managed keys.
-   - File: `apps/mac/touch-code/Tests/GhosttyConfigFileTests.swift`.
+   - File: `apps/mac/codans/Tests/GhosttyConfigFileTests.swift`.
 
 3. **Write unit tests for `GhosttyThemeCatalog` classification**
    - Test `background = #RRGGBB` parsing and luminance calculation.

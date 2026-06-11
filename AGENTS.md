@@ -1,4 +1,4 @@
-# touch-code
+# codans
 
 ## Quick Start
 
@@ -9,7 +9,7 @@ make bootstrap                                  # init submodules (ghostty, git-
 
 # Build / run
 make mac-generate                               # tuist install + tuist generate (transitively builds Ghostty xcframework)
-make mac-build                                  # build touch-code.app + tc CLI
+make mac-build                                  # build codans.app + codans CLI
 make mac-run-app                                # build + open the app
 
 # Code hygiene
@@ -23,20 +23,20 @@ Requires Xcode **26.0+** (pinned via `apps/mac/Tuist.swift: compatibleXcodeVersi
 
 ## Architecture Overview
 
-touch-code is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `tc` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI. Architecture is adapted from the user's reference projects **supacode** and **supaterm**.
+codans is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `codans` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI. Architecture is adapted from the user's reference projects **supacode** and **supaterm**.
 
 See [Architecture](docs/architecture.md) for domains, layers, and dependency rules.
 
 ## Repository Structure
 
 ```
-touch-code/
+codans/
 ├── apps/mac/                   # Mac platform: Tuist project, sources, ghostty submodule
-│   ├── touch-code/             # The Mac app (App / Runtime / Hooks / Process / Git / GitHub)
-│   ├── tc/                     # `tc` CLI binary (RPC client to the running app)
-│   ├── tcKit/                  # CLI-side library shared by tc + tests
-│   ├── TouchCodeCore/          # Pure domain models (Project / Worktree / Tab / Pane / Tag)
-│   ├── TouchCodeIPC/           # JSON-RPC wire protocol shared by app + CLI
+│   ├── codans/                 # The Mac app (App / Runtime / Hooks / Process / Git / GitHub)
+│   ├── codans-cli/             # `codans` CLI binary (RPC client to the running app)
+│   ├── CodansKit/              # CLI-side library shared by codans-cli + tests
+│   ├── CodansCore/          # Pure domain models (Project / Worktree / Tab / Pane / Tag)
+│   ├── CodansIPC/           # JSON-RPC wire protocol shared by app + CLI
 │   ├── ThirdParty/ghostty/     # libghostty submodule (built into GhosttyKit.xcframework)
 │   ├── Project.swift           # Tuist project definition
 │   └── Makefile                # Mac-platform build targets
@@ -89,8 +89,8 @@ See [Quick Start](#quick-start). Top-level Makefile delegates every `mac-*` targ
 
 - **Language:** Swift 6 with strict concurrency. Targets are wired via Tuist; do not edit the generated `.xcodeproj`/`.xcworkspace` directly.
 - **Lint / format:** `swiftlint` (config `apps/mac/.swiftlint.yml`, `strict: true`) and `swift-format` (config `apps/mac/.swift-format.json`). Run `make mac-check` before committing.
-- **Architecture:** hybrid TCA + `@Observable`. Domain types live in `TouchCodeCore`; wire protocol in `TouchCodeIPC`; app features under `apps/mac/touch-code/App/Features/<Feature>/`.
+- **Architecture:** hybrid TCA + `@Observable`. Domain types live in `CodansCore`; wire protocol in `CodansIPC`; app features under `apps/mac/codans/App/Features/<Feature>/`.
 - **Module boundaries** (`Runtime`, `Hooks`, `Git`, `GitHub`, `App`) are enforced by folder convention + code review, not Tuist target edges. Do not add cross-module imports that bypass the documented boundary.
-- **Subprocess:** always go through the shared `CommandRunner` in `apps/mac/touch-code/Process/`. Do not spawn `Process` directly inside feature modules.
+- **Subprocess:** always go through the shared `CommandRunner` in `apps/mac/codans/Process/`. Do not spawn `Process` directly inside feature modules.
 - **Naming:** Swift API Design Guidelines. Filenames match the primary type. TCA reducers end with `Feature`, views with `View`.
 - **Comments:** explain *why*, not *what*. Cite design-doc / exec-plan IDs when a non-obvious decision is encoded in code.

@@ -13,11 +13,11 @@
       "milestone": "M1",
       "depends_on": [],
       "fulfills": [],
-      "preconditions": "On feat/agent-state at HEAD 1a9d441 (planning docs committed). make mac-build is green. apps/mac/TouchCodeCore/Pane.swift is the existing Pane definition with id/workingDirectory/initialCommand/labels and a custom Codable that drops initialCommand on decode.",
-      "expected_behavior": "TouchCodeCore now exports AgentKind (claude-code / codex / pi) and AgentKindPatterns.classify(initialCommand:title:notificationTitle:). Pane carries optional agentKind and agentSessionID, with Codable that round-trips a Pane carrying agentKind, and decodes an older fixture (no agentKind key) to nil. No catalog migration runs.",
+      "preconditions": "On feat/agent-state at HEAD 1a9d441 (planning docs committed). make mac-build is green. apps/mac/CodansCore/Pane.swift is the existing Pane definition with id/workingDirectory/initialCommand/labels and a custom Codable that drops initialCommand on decode.",
+      "expected_behavior": "CodansCore now exports AgentKind (claude-code / codex / pi) and AgentKindPatterns.classify(initialCommand:title:notificationTitle:). Pane carries optional agentKind and agentSessionID, with Codable that round-trips a Pane carrying agentKind, and decodes an older fixture (no agentKind key) to nil. No catalog migration runs.",
       "verification_steps": [
         "make mac-build passes.",
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentKindPatternsTests\" passes — at least three hit + three miss cases per AgentKind, plus a roundtrip Pane Codable test.",
+        "make mac-test ARGS=\"-only-testing:codansTests/AgentKindPatternsTests\" passes — at least three hit + three miss cases per AgentKind, plus a roundtrip Pane Codable test.",
         "Manual: load an existing catalog.json fixture (one with no agentKind key) into a unit test, decode + encode, confirm the encoded JSON does not introduce an agentKind key (no spurious migration write)."
       ]
     },
@@ -28,14 +28,14 @@
       "started_at": "2026-05-22T04:30:00Z",
       "completed_at": "2026-05-22T06:30:00Z",
       "commit": "3994012",
-      "verification_posture": "build-only — unit tests committed but exec deferred to touch-codeTests cleanup plan",
+      "verification_posture": "build-only — unit tests committed but exec deferred to codansTests cleanup plan",
       "milestone": "M1",
       "depends_on": ["T1"],
       "fulfills": [],
       "preconditions": "T1 is committed (AgentKind + Pane fields exist). HierarchyClient struct currently exposes setPaneLabel etc.; HierarchyManager exposes labels writer with the standard debounced save pipeline.",
       "expected_behavior": "HierarchyClient gains setPaneAgentKind and setPaneAgentSessionID closures (live / unimplemented / test default all wired). HierarchyManager.setPaneAgentKind mutates Pane.agentKind and schedules a save only when the value actually changes; same shape for sessionID. Repeated writes of the same value are no-ops.",
       "verification_steps": [
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/HierarchyManagerAgentIdentityTests\" passes — covers (a) write reflects in snapshot, (b) repeat write does not schedule save, (c) write nil clears field."
+        "make mac-test ARGS=\"-only-testing:codansTests/HierarchyManagerAgentIdentityTests\" passes — covers (a) write reflects in snapshot, (b) repeat write does not schedule save, (c) write nil clears field."
       ]
     },
     {
@@ -46,15 +46,15 @@
       "completed_at": "2026-05-22T07:30:00Z",
       "commit": "9cfbf95",
       "commits_in_task": ["e149ab6", "9cfbf95"],
-      "verification_posture": "build-only — unit tests committed but exec deferred to touch-codeTests cleanup plan; OSC 133 prompt-end dispatch dormant pending libghostty OQ-1",
+      "verification_posture": "build-only — unit tests committed but exec deferred to codansTests cleanup plan; OSC 133 prompt-end dispatch dormant pending libghostty OQ-1",
       "milestone": "M1",
       "depends_on": ["T1", "T2"],
       "fulfills": [],
       "preconditions": "T1 + T2 committed. RootFeature has the existing engineEventReceived chain that already routes paneInfoChanged / paneExited etc. SurfaceInfo exposes title and lastNotificationTitle; libghostty may or may not deliver paneInfoChanged(.promptEnd) — OQ-1 tracks that.",
       "expected_behavior": "A new @MainActor AgentBinder is wired up at AppState.bringUp. On pane creation it tries to classify from initialCommand; later title changes and OSC 9 banner events get a second pass; promptEnd is the only rebind trigger. paneExited / paneCrashed clear the binding. catalog.json starts carrying agentKind for panes that match the patterns.",
       "verification_steps": [
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentBinderTests\" passes — covers initialCommand match, title-only match, sticky behaviour without prompt-end, rebind on prompt-end, paneExited unbind, no-match silence.",
-        "Manual: make mac-run-app; create a new tab via 'tc tab new --command claude' (or by simulating with printf '\\e]2;Claude Code\\a'); quit; jq '.. | objects | select(.agentKind?) | .agentKind' ~/.config/touch-code/catalog.json returns \"claude-code\"."
+        "make mac-test ARGS=\"-only-testing:codansTests/AgentBinderTests\" passes — covers initialCommand match, title-only match, sticky behaviour without prompt-end, rebind on prompt-end, paneExited unbind, no-match silence.",
+        "Manual: make mac-run-app; create a new tab via 'codans tab new --command claude' (or by simulating with printf '\\e]2;Claude Code\\a'); quit; jq '.. | objects | select(.agentKind?) | .agentKind' ~/.config/codans/catalog.json returns \"claude-code\"."
       ]
     },
     {
@@ -64,14 +64,14 @@
       "started_at": "2026-05-22T07:30:00Z",
       "completed_at": "2026-05-22T08:30:00Z",
       "commit": "6ab2def4",
-      "verification_posture": "build-only — 14 unit tests committed but exec deferred to touch-codeTests cleanup plan; AgentRegistry.swift typechecks against built TouchCodeCore.framework",
+      "verification_posture": "build-only — 14 unit tests committed but exec deferred to codansTests cleanup plan; AgentRegistry.swift typechecks against built CodansCore.framework",
       "milestone": "M2",
       "depends_on": ["T3"],
       "fulfills": [],
-      "preconditions": "M1 committed. PaneKeyboardActivityTracker already exists. DetectionTranslator.classify already exists in TouchCodeCore.",
+      "preconditions": "M1 committed. PaneKeyboardActivityTracker already exists. DetectionTranslator.classify already exists in CodansCore.",
       "expected_behavior": "AgentRegistry exposes entries keyed by PaneID, each AgentEntry carrying kind / sessionID / state / lastTransitionAt. Inputs (runningPanes change, TerminalEvent, keyboard activity, focus, agent-bound/unbound) drive a private scratch (prevPhase / pendingFinished / waitingForInput) that derives the four-state output. Priority is waitingForInput > loading > finished > idle.",
       "verification_steps": [
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentRegistryStateTests\" passes — at least 12 cases covering the transition table in design doc §Runtime State Derivation."
+        "make mac-test ARGS=\"-only-testing:codansTests/AgentRegistryStateTests\" passes — at least 12 cases covering the transition table in design doc §Runtime State Derivation."
       ]
     },
     {
@@ -81,14 +81,14 @@
       "started_at": "2026-05-22T08:30:00Z",
       "completed_at": "2026-05-22T09:00:00Z",
       "commit": "76fea552",
-      "verification_posture": "build-only — 5 integration tests committed but exec deferred to touch-codeTests cleanup plan",
+      "verification_posture": "build-only — 5 integration tests committed but exec deferred to codansTests cleanup plan",
       "milestone": "M2",
       "depends_on": ["T4"],
       "fulfills": [],
       "preconditions": "T4 committed. NotificationDetector + DetectionTranslator already exist and consume TerminalEvent.",
       "expected_behavior": "A new integration test feeds an identical TerminalEvent sequence (OSC 9 → bell → OSC 9;4 busy → paneIdle → paneExited) to NotificationDetector and AgentRegistry and asserts both classify the same events consistently via DetectionTranslator.classify.",
       "verification_steps": [
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/AgentNotificationConsistencyTests\" passes."
+        "make mac-test ARGS=\"-only-testing:codansTests/AgentNotificationConsistencyTests\" passes."
       ]
     },
     {
@@ -106,9 +106,9 @@
       "preconditions": "M2 committed. AgentRegistry exists and is observable.",
       "expected_behavior": "A SwiftUI popover view consumes AgentRegistry, sorts entries by state priority then lastTransitionAt desc, and renders one row per AgentEntry (logo + Project/Worktree path + state icon + relative time). A separate ActiveAgentsBadgeViewModel produces the headline copy in the four shapes (empty / single / multi-same / multi-mixed).",
       "verification_steps": [
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/SortedEntriesProviderTests\" passes.",
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/ActiveAgentsBadgeViewModelTests\" passes — four headline shapes.",
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/ActiveAgentsRowSnapshotTests\" passes — four states × light/dark.",
+        "make mac-test ARGS=\"-only-testing:codansTests/SortedEntriesProviderTests\" passes.",
+        "make mac-test ARGS=\"-only-testing:codansTests/ActiveAgentsBadgeViewModelTests\" passes — four headline shapes.",
+        "make mac-test ARGS=\"-only-testing:codansTests/ActiveAgentsRowSnapshotTests\" passes — four states × light/dark.",
         "Runtime probes UT-AA-P-003 and UT-AA-P-004 from docs/user-tests/active-agents-view.md once the popover is reachable via T6's status-bar entry (or a temporary dev hook); the per-task probe defers to the milestone gate if the entry is not yet wired in T5 alone."
       ]
     },
@@ -133,7 +133,7 @@
       "preconditions": "T5 committed. WorktreeHeaderView currently hosts the inbox bell; the popover view exists and can render. HierarchyClient.focusPane is the existing focus API.",
       "expected_behavior": "The badge view renders the headline from T5's view model, hosts the popover via .popover anchored to itself, and implements the 250ms-open / 150ms-close hover bridge. A new RootFeature action .activeAgents(.rowTapped) selects project → worktree → tab and calls focusPane. Required accessibility identifiers are declared: activeAgents.badge / activeAgents.popover / activeAgents.row.<paneID> / .row.<paneID>.state / .row.<paneID>.headline.",
       "verification_steps": [
-        "make mac-test ARGS=\"-only-testing:touch-codeTests/ActiveAgentsHoverBridgeTests\" passes — 250 / 150 ms timing under TestClock.",
+        "make mac-test ARGS=\"-only-testing:codansTests/ActiveAgentsHoverBridgeTests\" passes — 250 / 150 ms timing under TestClock.",
         "Runtime probe via /hs-user-test against the 18 case IDs in fulfills."
       ]
     },
@@ -177,8 +177,8 @@
     },
     {
       "from_task": "T1",
-      "issue": "Brief specified test file path apps/mac/touch-code/Tests/TouchCodeCoreTests/ which does not exist; correct path is apps/mac/TouchCodeCoreTests/.",
-      "justification": "Brief errata absorbed by implementer who placed the file at the actual path; subsequent briefs in this plan will reference apps/mac/TouchCodeCoreTests/ directly.",
+      "issue": "Brief specified test file path apps/mac/codans/Tests/CodansCoreTests/ which does not exist; correct path is apps/mac/CodansCoreTests/.",
+      "justification": "Brief errata absorbed by implementer who placed the file at the actual path; subsequent briefs in this plan will reference apps/mac/CodansCoreTests/ directly.",
       "dismissed_at": "2026-05-22T02:30:00Z"
     },
     {
@@ -196,31 +196,31 @@
     {
       "from_task": "T2",
       "issue": "RootFeatureTests.swift:391-397 calls SettingsWindowPresenter(open:) constructor that no longer exists (production grew an openAt: parameter) and references .worktreeHeader(.delegate(.showCustomEditorsSettings)) which was removed. Pre-existing API drift surfaced when test target started compiling.",
-      "justification": "Dormant repo breakage; not introduced by ActiveAgents work. Per controller decision 2026-05-22T06:00, T2-T8 switch to build-only verification posture and the touch-codeTests target cleanup becomes a separate plan covering this file plus TabChipSnapshotTests plus a CI test job. Not safe to fix inline because each call site needs to be re-derived from current production signatures.",
+      "justification": "Dormant repo breakage; not introduced by ActiveAgents work. Per controller decision 2026-05-22T06:00, T2-T8 switch to build-only verification posture and the codansTests target cleanup becomes a separate plan covering this file plus TabChipSnapshotTests plus a CI test job. Not safe to fix inline because each call site needs to be re-derived from current production signatures.",
       "dismissed_at": "2026-05-22T06:00:00Z"
     },
     {
       "from_task": "T2",
       "issue": "TabChipSnapshotTests.swift:92 calls TabChip view constructor missing onChangeColorRequested + onCopyID parameters (production view grew callbacks without updating snapshot test). Pre-existing API drift.",
-      "justification": "Same root cause as the RootFeatureTests entry above (3 weeks of production drift while touch-codeTests target was un-runnable). Deferred to the same touch-codeTests-cleanup follow-up plan.",
+      "justification": "Same root cause as the RootFeatureTests entry above (3 weeks of production drift while codansTests target was un-runnable). Deferred to the same codansTests-cleanup follow-up plan.",
       "dismissed_at": "2026-05-22T06:00:00Z"
     },
     {
       "from_task": "T2",
       "issue": "Repo has no CI test workflow; only release.yml + release-tip.yml exist under .github/workflows/. No xcodebuild test runs on PR / push, which is the root cause that allowed three layers of dormant breakages (SWIFT_MODULE_NAME, MasterTerminal actor-isolation, RootFeature+TabChip API drift) to accumulate undetected over ~3 weeks.",
-      "justification": "Adding CI is the structural fix that prevents this class of regression from recurring; out of scope for ActiveAgents but a load-bearing item for the touch-codeTests-cleanup follow-up plan. Recorded here so the audit trail captures the why-it-was-broken alongside the what.",
+      "justification": "Adding CI is the structural fix that prevents this class of regression from recurring; out of scope for ActiveAgents but a load-bearing item for the codansTests-cleanup follow-up plan. Recorded here so the audit trail captures the why-it-was-broken alongside the what.",
       "dismissed_at": "2026-05-22T06:00:00Z"
     },
     {
       "from_task": "T2",
-      "issue": "T2's HierarchyManagerAgentIdentityTests (8 cases) committed at 3994012 but never exercised; static review only. Once touch-codeTests target is restored by the cleanup plan, these tests should be the first thing re-run to validate T2 behaviour retroactively.",
+      "issue": "T2's HierarchyManagerAgentIdentityTests (8 cases) committed at 3994012 but never exercised; static review only. Once codansTests target is restored by the cleanup plan, these tests should be the first thing re-run to validate T2 behaviour retroactively.",
       "justification": "Build-only posture chosen 2026-05-22T06:00 means T2-T8 unit tests are committed-but-unrun until cleanup. The implementer self-reviewed each test line-by-line against the production API and reported it compile-shape correct; the gap is exec validation, not authoring quality.",
       "dismissed_at": "2026-05-22T06:00:00Z"
     },
     {
       "from_task": "T2",
       "issue": "Code-reviewer S1: RecordingCatalogStore.scheduleSave override calls super, which spawns a real 500ms debounced disk write to a per-test tempdir that no assertion reads. Cleaner override would skip super and only count invocations.",
-      "justification": "Single-line test cleanup. Cannot be safely iterated under build-only posture because the test target can not be executed today; touching test code without exec verification risks introducing a silent regression. Bundled into the touch-codeTests cleanup follow-up plan where the test will be re-run and the cleanup applied together.",
+      "justification": "Single-line test cleanup. Cannot be safely iterated under build-only posture because the test target can not be executed today; touching test code without exec verification risks introducing a silent regression. Bundled into the codansTests cleanup follow-up plan where the test will be re-run and the cleanup applied together.",
       "dismissed_at": "2026-05-22T06:30:00Z"
     },
     {
@@ -232,7 +232,7 @@
     {
       "from_task": "T3",
       "issue": "Code-reviewer S2 (T3): Trigger.desktopNotification(title:body:) carries a body payload that the binder never reads (AgentKindPatterns.classify takes only notificationTitle). Body is dead data on the trigger.",
-      "justification": "Dropping the body parameter would require updating AgentBinderTests (which carry .desktopNotification(title:body:) call sites), and build-only posture says do not iterate test code without exec verification. Defer to the touch-codeTests cleanup plan that will re-run all tests; the dead body field costs nothing today and a future body-pattern matcher could reuse it.",
+      "justification": "Dropping the body parameter would require updating AgentBinderTests (which carry .desktopNotification(title:body:) call sites), and build-only posture says do not iterate test code without exec verification. Defer to the codansTests cleanup plan that will re-run all tests; the dead body field costs nothing today and a future body-pattern matcher could reuse it.",
       "dismissed_at": "2026-05-22T07:00:00Z"
     },
     {
@@ -249,8 +249,8 @@
     },
     {
       "from_task": "T4",
-      "issue": "Pre-existing tc CLI target build failure: tc/Commands/AppCommands.swift cannot resolve ArgumentParser module after tuist install + tuist generate. Reproduced on stashed clean HEAD by T2 and T4 implementers; not introduced by ActiveAgents work. Blocks xcodebuild -scheme touch-code build from reaching exit 0 because the app target embeds the tc binary as a post-build phase.",
-      "justification": "Independent of touch-codeTests target breakage; deferred to the same touch-codeTests cleanup follow-up plan (or a sibling tc-build plan if its root cause turns out to be unrelated). Each T2-T8 implementer has verified production source compiles by running xcodebuild -scheme TouchCodeCore build (green) and confirming new files typecheck against the built framework; that is the strongest verification path available today.",
+      "issue": "Pre-existing codans CLI target build failure: codans-cli/Commands/AppCommands.swift cannot resolve ArgumentParser module after tuist install + tuist generate. Reproduced on stashed clean HEAD by T2 and T4 implementers; not introduced by ActiveAgents work. Blocks xcodebuild -scheme codans build from reaching exit 0 because the app target embeds the codans binary as a post-build phase.",
+      "justification": "Independent of codansTests target breakage; deferred to the same codansTests cleanup follow-up plan (or a sibling codans-build plan if its root cause turns out to be unrelated). Each T2-T8 implementer has verified production source compiles by running xcodebuild -scheme CodansCore build (green) and confirming new files typecheck against the built framework; that is the strongest verification path available today.",
       "dismissed_at": "2026-05-22T08:00:00Z"
     },
     {
@@ -262,7 +262,7 @@
     {
       "from_task": "T8",
       "issue": "Code-reviewer T8 suggestions: Test B could add a doc-comment noting that bell verdict is hardcoded in both subsystems (not classifier-mediated); Test D could call out the pendingFinished/paneOutput interaction; temp-file cleanup comment slightly overstates cleanliness; the comment on what is NOT in the events array could move next to its referent. Also FYI: no paneCrashed scenario in the five-test set (paneCrashed would be the highest-value sixth scenario).",
-      "justification": "Five cosmetic items + one FYI about scope; zero correctness impact. Build-only posture prevents safely iterating on test files. paneCrashed scenario could be added in the touch-codeTests cleanup plan when tests can run end-to-end and the symmetry-break can be verified live.",
+      "justification": "Five cosmetic items + one FYI about scope; zero correctness impact. Build-only posture prevents safely iterating on test files. paneCrashed scenario could be added in the codansTests cleanup plan when tests can run end-to-end and the symmetry-break can be verified live.",
       "dismissed_at": "2026-05-22T09:00:00Z"
     },
     {
@@ -274,7 +274,7 @@
     {
       "from_task": "T6",
       "issue": "WorktreeHeaderView.swift is dead code (no render call site). Brief asked to insert the ActiveAgents badge there; implementer correctly placed it in WorktreeDetailView.toolbar where the inbox bell visibly renders. WorktreeHeaderView.swift remains untouched dead code.",
-      "justification": "Cleaning up dead WorktreeHeaderView.swift (either deleting it or rewiring WorktreeDetailView to compose it) is out of ActiveAgents scope. Worth a dedicated cleanup task in the touch-codeTests-cleanup follow-up plan or a sibling 'remove dead UI scaffolding' plan.",
+      "justification": "Cleaning up dead WorktreeHeaderView.swift (either deleting it or rewiring WorktreeDetailView to compose it) is out of ActiveAgents scope. Worth a dedicated cleanup task in the codansTests-cleanup follow-up plan or a sibling 'remove dead UI scaffolding' plan.",
       "dismissed_at": "2026-05-22T11:00:00Z"
     },
     {
@@ -291,19 +291,19 @@
     },
     {
       "from_task": "T7",
-      "issue": "T5 commit ac90d7379 contained .foregroundStyle(.accentColor) which is not a valid ShapeStyle member; T6 commit 5adcb426 added GHOSTTY_PROGRESS_STATE_REMOVE reference to TouchCodeApp.swift without `import GhosttyKit`. Both were masked by Xcode's incremental-build cache during prior task verification and only surfaced when T7's implementer did a clean build. Both fixed inline by T7's commit 51f0ecdd as drive-by build-unblockers.",
-      "justification": "Pre-existing latent bugs from prior tasks; the inline drive-by fixes were necessary because T7's brief required build-green verification. Future tasks should run clean builds (delete DerivedData or use xcodebuild clean) instead of incremental builds to avoid masking compile errors like these. Add to the touch-codeTests cleanup plan as a procedure update.",
+      "issue": "T5 commit ac90d7379 contained .foregroundStyle(.accentColor) which is not a valid ShapeStyle member; T6 commit 5adcb426 added GHOSTTY_PROGRESS_STATE_REMOVE reference to CodansApp.swift without `import GhosttyKit`. Both were masked by Xcode's incremental-build cache during prior task verification and only surfaced when T7's implementer did a clean build. Both fixed inline by T7's commit 51f0ecdd as drive-by build-unblockers.",
+      "justification": "Pre-existing latent bugs from prior tasks; the inline drive-by fixes were necessary because T7's brief required build-green verification. Future tasks should run clean builds (delete DerivedData or use xcodebuild clean) instead of incremental builds to avoid masking compile errors like these. Add to the codansTests cleanup plan as a procedure update.",
       "dismissed_at": "2026-05-22T12:00:00Z"
     },
     {
       "from_task": "T7",
       "issue": "ActiveAgentsBadgeViewModel.init(entries:) takes [AgentEntry] but T6's badge passed registry.entries which is [PaneID: AgentEntry]. T7 worked around by flattening Array(registry.entries.values) at the badge body call site. Long-term cleaner shape: either accept a Sequence on the view model or expose a sorted-array accessor on AgentRegistry.",
-      "justification": "T6's code passed spec-review and code-review without this being caught (possibly because reviewers traced argument types one layer at a time without verifying the concrete passed value). The flatten workaround is correct and clean enough; defer the API refactor to the touch-codeTests cleanup plan when the wider AgentRegistry surface gets revisited.",
+      "justification": "T6's code passed spec-review and code-review without this being caught (possibly because reviewers traced argument types one layer at a time without verifying the concrete passed value). The flatten workaround is correct and clean enough; defer the API refactor to the codansTests cleanup plan when the wider AgentRegistry surface gets revisited.",
       "dismissed_at": "2026-05-22T12:00:00Z"
     },
     {
       "from_task": "integration",
-      "issue": "Final integration code-review §3.2-§3.5: cross-file lastRunning invariant pin (suggestion), focus-pump edge-trigger comment (suggestion), progress-state heuristic duplication between TouchCodeApp.dispatchToAgentRegistry and RootFeature.paneProgressBusyChanged (nit), sessionID always nil in AgentBinder.writeIfChanged (FYI documented).",
+      "issue": "Final integration code-review §3.2-§3.5: cross-file lastRunning invariant pin (suggestion), focus-pump edge-trigger comment (suggestion), progress-state heuristic duplication between CodansApp.dispatchToAgentRegistry and RootFeature.paneProgressBusyChanged (nit), sessionID always nil in AgentBinder.writeIfChanged (FYI documented).",
       "justification": "Four cosmetic / FYI items from the final integration review. Zero behavioural impact. The lastRunning invariant comment + focus-pump comment can be added during the cleanup pass when tests can run end-to-end to verify the comments still describe live behaviour; progress-state heuristic deduplication is a refactor better done when RootFeature's pulse-related surface gets touched next; sessionID end-to-end plumb is its own follow-up.",
       "dismissed_at": "2026-05-22T12:30:00Z"
     }
@@ -322,13 +322,13 @@
     },
     {
       "at": "2026-05-22T05:00:00Z",
-      "question": "touch-codeTests 目标自 feb1801 起编译失败（productName=TouchCode 让 PRODUCT_MODULE_NAME 也变 TouchCode，但 99 个测试仍 @testable import touch_code；CI 不跑 test 所以 3 周未被察觉）。怎么修？",
+      "question": "codansTests 目标自 feb1801 起编译失败（productName=Codans 让 PRODUCT_MODULE_NAME 也变 Codans，但 99 个测试仍 @testable import Codans；CI 不跑 test 所以 3 周未被察觉）。怎么修？",
       "options": [
-        "Project.swift 加一行 SWIFT_MODULE_NAME=touch_code（推荐）",
-        "批量 sed 重命名 99 个 import 为 TouchCode",
+        "Project.swift 加一行 SWIFT_MODULE_NAME=Codans（推荐）",
+        "批量 sed 重命名 99 个 import 为 Codans",
         "T2 先体验性跳过测试验证，后续 task 同样 build-only 推进"
       ],
-      "answer": "Project.swift 加一行 SWIFT_MODULE_NAME=touch_code（推荐）",
+      "answer": "Project.swift 加一行 SWIFT_MODULE_NAME=Codans（推荐）",
       "answered_by": "human"
     },
     {

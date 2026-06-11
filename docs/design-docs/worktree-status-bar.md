@@ -7,7 +7,7 @@
 
 ## 1. Context and Scope
 
-touch-code 主窗口 titlebar 目前的布局（`WorktreeDetailView.swift:161-218`）为：
+codans 主窗口 titlebar 目前的布局（`WorktreeDetailView.swift:161-218`）为：
 
 ```
 [leading: 分支标签]  ……(空)……  [primaryAction: 🔔 ⇪ 📖]  [Settings 齿轮 by ContentView]
@@ -21,7 +21,7 @@ touch-code 主窗口 titlebar 目前的布局（`WorktreeDetailView.swift:161-21
 
 - `RootFeature`（912 行，已聚合 `editor` / `gitHub` / `worktreeHeader` / `sidebar` / `detail` / routers）—— 所有 per-window 全局状态的收口点，也是 `selection` 的来源。
 - `GitHubFeature`（per-Worktree `snapshots: [WorktreeID: PullRequestSnapshot]` + `loading` + `lastError`）—— PR 数据来源。
-- `GitHubSnapshotCache`（写 `~/.config/touch-code/github-snapshots.json`）—— 启动时 `seedFromCache` 喂给 `GitHubFeature`，保证首屏有 PR 数据。
+- `GitHubSnapshotCache`（写 `~/.config/codans/github-snapshots.json`）—— 启动时 `seedFromCache` 喂给 `GitHubFeature`，保证首屏有 PR 数据。
 - `EditorFeature.lastOpenResult: OpenResultMarker?` —— Editor 打开结果的 Observable 标记，已在 reducer 里赋值（`EditorFeature.swift:131/135`）。
 - `MainWindowCommands`（`⌘P` → `commandPaletteToggle`）—— 命令面板唯一的快捷键入口，硬编码为 `.keyboardShortcut("p", modifiers: .command)`。
 - `PullRequestPopover`（360pt 已有组件）—— PR 详情弹窗，本设计只在 PR 形态点击时复用它。
@@ -43,7 +43,7 @@ touch-code 主窗口 titlebar 目前的布局（`WorktreeDetailView.swift:161-21
 - 不做新的 keybinding 配置系统（命令面板快捷键仍硬编码 ⌘P）。
 - 不做持久化 —— toast 与 motivational 纯内存，应用重启全部丢弃。
 - 不做菜单栏 / Dock / 通知中心推送。
-- 不做多 window 的 broadcast（touch-code 是单 `WindowGroup`）。
+- 不做多 window 的 broadcast（codans 是单 `WindowGroup`）。
 - 不重写 `PullRequestPopover`（只复用）。
 
 ## 3. Design
@@ -107,9 +107,9 @@ toast 的生命周期（push / auto-clear / 覆盖）在 reducer 里；PR / moti
 
 ### 3.3 State & API Design
 
-#### `StatusToast` 值类型（TouchCodeCore 模块）
+#### `StatusToast` 值类型（CodansCore 模块）
 
-放在 `TouchCodeCore/StatusBar/StatusToast.swift`。原因：`RootFeature` 和后续 feature（run-script 等）都需要构造 `StatusToast`；放在 core 模块避免交叉依赖。
+放在 `CodansCore/StatusBar/StatusToast.swift`。原因：`RootFeature` 和后续 feature（run-script 等）都需要构造 `StatusToast`；放在 core 模块避免交叉依赖。
 
 ```
 public enum StatusToast: Equatable, Sendable {
@@ -119,7 +119,7 @@ public enum StatusToast: Equatable, Sendable {
 }
 ```
 
-没有 `error` case：致命错误在 touch-code 里走 sheet / banner，不占这块槽。
+没有 `error` case：致命错误在 codans 里走 sheet / banner，不占这块槽。
 
 #### `StatusBarFeature`
 
@@ -232,7 +232,7 @@ private struct StatusMotivationalView: View {
 }
 ```
 
-`CommandPaletteShortcut.displayString` 是**新增的单一常量**（放在 `TouchCodeCore/Shortcuts/CommandPaletteShortcut.swift`）：
+`CommandPaletteShortcut.displayString` 是**新增的单一常量**（放在 `CodansCore/Shortcuts/CommandPaletteShortcut.swift`）：
 
 ```
 public enum CommandPaletteShortcut {
@@ -248,7 +248,7 @@ public enum CommandPaletteShortcut {
 
 ### 3.7 ⌘-hold 切换文案
 
-PR 形态按住 ⌘ 时文字换成 `Open on GitHub ⌘↵`。touch-code 还没有命令键观察器。新增 `StatusBar/CommandKeyObserver.swift`：
+PR 形态按住 ⌘ 时文字换成 `Open on GitHub ⌘↵`。codans 还没有命令键观察器。新增 `StatusBar/CommandKeyObserver.swift`：
 
 ```
 @Observable
@@ -266,7 +266,7 @@ final class CommandKeyObserver: NSObject {
 }
 ```
 
-在 `TouchCodeApp` 启动时实例化一次，通过 `.environment(commandKeyObserver)` 注入；`StatusPullRequestView` 用 `@Environment(CommandKeyObserver.self)` 读。只监听 local events（我们的进程 focus 时），不需要 AppKit 的 Accessibility 权限。
+在 `CodansApp` 启动时实例化一次，通过 `.environment(commandKeyObserver)` 注入；`StatusPullRequestView` 用 `@Environment(CommandKeyObserver.self)` 读。只监听 local events（我们的进程 focus 时），不需要 AppKit 的 Accessibility 权限。
 
 ### 3.8 窄窗口隐藏
 
@@ -352,17 +352,17 @@ private func worktreeToolbarContent(address: Address, info: WorktreeInfo?) -> so
 
 | Module | 新增 / 改动 | 依赖方向 |
 |---|---|---|
-| `TouchCodeCore/StatusBar/StatusToast.swift` | 新增（public value type） | 被 app 层 + 未来 Feature 导入 |
-| `TouchCodeCore/Shortcuts/CommandPaletteShortcut.swift` | 新增（public constant） | 被 `MainWindowCommands` + `StatusBarView` 共用 |
-| `touch-code/App/Features/StatusBar/StatusBarFeature.swift` | 新增 reducer | 仅依赖 `TouchCodeCore` |
-| `touch-code/App/Features/StatusBar/StatusBarView.swift` | 新增 view（顶层） | 读取 scoped store 和注入的 `gitHubStore` |
-| `touch-code/App/Features/StatusBar/Views/{StatusToastView,StatusPullRequestView,StatusMotivationalView,ChecksRollupRing}.swift` | 新增子视图 | 无横向依赖 |
-| `touch-code/App/Features/StatusBar/CommandKeyObserver.swift` | 新增 `@Observable` | 被 `TouchCodeApp` 实例化、`StatusPullRequestView` 读 |
-| `touch-code/App/Features/Root/RootFeature.swift` | 改动：新增 `statusBar` scope + 4-8 条 action pass-through 分支 | 已存在的 `Scope` 模式 |
-| `touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift` | 改动：toolbar content 新增 3 项 (Spacer/Item/Spacer) + 多一个 store 参数 | 视图层 |
-| `touch-code/App/TouchCodeApp.swift` / `ContentView.swift` | 改动：注入 `CommandKeyObserver` environment，向 `WorktreeDetailView` 传 `gitHubStore` | bootstrap |
-| `touch-code/App/Commands/MainWindowCommands.swift` | 改动：改为读 `CommandPaletteShortcut.key/modifiers` | 视图层 |
-| `touch-code/Tests/StatusBarTests/StatusBarFeatureTests.swift` | 新增 | TestStore |
+| `CodansCore/StatusBar/StatusToast.swift` | 新增（public value type） | 被 app 层 + 未来 Feature 导入 |
+| `CodansCore/Shortcuts/CommandPaletteShortcut.swift` | 新增（public constant） | 被 `MainWindowCommands` + `StatusBarView` 共用 |
+| `codans/App/Features/StatusBar/StatusBarFeature.swift` | 新增 reducer | 仅依赖 `CodansCore` |
+| `codans/App/Features/StatusBar/StatusBarView.swift` | 新增 view（顶层） | 读取 scoped store 和注入的 `gitHubStore` |
+| `codans/App/Features/StatusBar/Views/{StatusToastView,StatusPullRequestView,StatusMotivationalView,ChecksRollupRing}.swift` | 新增子视图 | 无横向依赖 |
+| `codans/App/Features/StatusBar/CommandKeyObserver.swift` | 新增 `@Observable` | 被 `CodansApp` 实例化、`StatusPullRequestView` 读 |
+| `codans/App/Features/Root/RootFeature.swift` | 改动：新增 `statusBar` scope + 4-8 条 action pass-through 分支 | 已存在的 `Scope` 模式 |
+| `codans/App/Features/WorktreeDetail/WorktreeDetailView.swift` | 改动：toolbar content 新增 3 项 (Spacer/Item/Spacer) + 多一个 store 参数 | 视图层 |
+| `codans/App/CodansApp.swift` / `ContentView.swift` | 改动：注入 `CommandKeyObserver` environment，向 `WorktreeDetailView` 传 `gitHubStore` | bootstrap |
+| `codans/App/Commands/MainWindowCommands.swift` | 改动：改为读 `CommandPaletteShortcut.key/modifiers` | 视图层 |
+| `codans/Tests/StatusBarTests/StatusBarFeatureTests.swift` | 新增 | TestStore |
 
 **依赖方向**：`Views → Feature → Core`。`Feature` 不 import 任何 View；`Views` 不新增横向跨 feature import（读 `gitHubStore` 通过注入而非 `@Dependency`）。
 
@@ -468,7 +468,7 @@ private func worktreeToolbarContent(address: Address, info: WorktreeInfo?) -> so
 
 ### 5.4 Observability
 
-- `StatusBarFeature` 的 Logger subsystem：`"com.touch-code.statusbar"`，category 按 action 命名（`push` / `cleared`）。
+- `StatusBarFeature` 的 Logger subsystem：`"com.gumpw.codans.statusbar"`，category 按 action 命名（`push` / `cleared`）。
 - 生产中只打 warning toast 的 message 字符串（帮助排查"为什么看到橙色"），不打 success / inProgress（降噪）。
 
 ### 5.5 Migration / Rollback
@@ -502,7 +502,7 @@ toast message 由 app 内部字符串构成，不携带用户密码 / token / �
 | R1 | `ViewThatFits` 在 macOS 26 toolbar 内测量失真 | 中 | 中（中段在某些窗口尺寸闪烁或误隐藏） | 回退到 GeometryReader + 520pt 阈值；AC-VS-2 的验证放在 M6 |
 | R2 | `TimelineView(.everyMinute)` 每分钟触发 SwiftUI diff，偶发情况下 AX tree 抖动 | 低 | 低（VoiceOver 重复朗读） | `accessibilityIdentifier` 稳定节点；如仍有问题改成 5 分钟刻度或纯字符串不带分钟 |
 | R3 | RootFeature 路由分支增多后 `coreReducer` 继续膨胀 | 高 | 中（可维护性） | 把 toast 路由分支抽成 `private var statusToastRouting: some Reducer` 单独 ReducerBuilder 方法（和 `sidebarAndDetailScopes` 同一风格） |
-| R4 | `CommandKeyObserver` 未停止导致 local monitor 泄漏 | 低 | 低（事件开销） | `start()` 在 `TouchCodeApp` onAppear，`stop()` 在 onDisappear；加 weak-self capture；附单元测试 |
+| R4 | `CommandKeyObserver` 未停止导致 local monitor 泄漏 | 低 | 低（事件开销） | `start()` 在 `CodansApp` onAppear，`stop()` 在 onDisappear；加 weak-self capture；附单元测试 |
 | R5 | `success` toast 的 3s 对用户太短 / 太长 | 中 | 低（UX 调整） | 常量放 `StatusBarFeature.Constants`，后续在 Settings 暴露即可 |
 | R6 | `EditorFeature.openFailed(reason:)` 里的 `reason` 字段未脱敏可能带路径 | 中 | 低（隐私） | `shortMessage(_:)` 路由函数只取第一行 + 截断 80 字符 |
 | R7 | PR `url` 为 `file://` 或非 https（数据污染） | 低 | 低 | `⌘+click` 的 URL 构造时 `scheme == "https"` 断言；失败则降级为不响应 |
@@ -515,7 +515,7 @@ toast message 由 app 内部字符串构成，不携带用户密码 / token / �
 | OQ-1 | 命令面板快捷键是否已有解析 API | **已答**：没有 keybinding DB，直接用硬编码 + 新增 `CommandPaletteShortcut` 共享常量（§3.6）。`MainWindowCommands` 同步改造。 |
 | OQ-2 | `checkRollup` 是否已含 `skipped / neutral` | **已答**：`PullRequestBadge.CheckRollup.from` 已产出 `{passing, failing, pending, neutral}` 四分类，neutral 吸收 skipped。色环直接复用；不需要扩 schema。 |
 | OQ-3 | `EditorFeature.lastOpenResult` 能否被订阅 | **已答**：`@ObservableState` + `.openSucceeded/.openFailed` action 已经是 observable、reducer 可 intercept 的事件；RootFeature 直接监听这两个 action 翻译成 toast。不需要改 `EditorFeature`。 |
-| OQ-4 | run-script 生命周期事件 | **延后**：当前 touch-code 没有 `RunScriptFeature`（grep 零命中）。设计保留 inProgress 形态作为扩展点；真正接入时在 RootFeature 加 3 行分支即可。不阻塞本设计。 |
+| OQ-4 | run-script 生命周期事件 | **延后**：当前 codans 没有 `RunScriptFeature`（grep 零命中）。设计保留 inProgress 形态作为扩展点；真正接入时在 RootFeature 加 3 行分支即可。不阻塞本设计。 |
 | OQ-5 | Plain Project 的 motivational 是否定制 | **答**：首版**不定制**。motivational 文案是 `HH:mm – Open Command Palette ⌘P`，对 Plain Project 同样适用（命令面板始终可用）。未来若 Plain Project 有专属 hint，扩展一个 `motivationalHint(for: project)` 纯函数即可。 |
 | OQ-6 | 多 toast 是否需要队列 | **答**：首版**不做队列**（方案 A，§4.6）。后到覆盖先到。Could Have 清单中保留"inProgress 多任务聚合"作为未来增量。 |
 

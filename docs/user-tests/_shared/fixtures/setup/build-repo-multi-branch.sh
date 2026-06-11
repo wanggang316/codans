@@ -38,7 +38,7 @@ export GIT_COMMITTER_EMAIL='test@example.com'
 BASE_EPOCH=1767225600  # 2026-01-01T00:00:00Z, fixed.
 
 # Work in an isolated tmp dir; cleanup on exit.
-WORK_DIR="$(mktemp -d -t touch-code-fixture-multi-branch.XXXXXX)"
+WORK_DIR="$(mktemp -d -t codans-fixture-multi-branch.XXXXXX)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 REPO_DIR="${WORK_DIR}/repo"
