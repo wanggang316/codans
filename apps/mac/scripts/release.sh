@@ -40,7 +40,7 @@ export_dir="${release_dir}/export"
 app_path="${export_dir}/Codans.app"
 
 workspace="${srcroot}/codans.xcworkspace"
-scheme="codans"
+scheme="Codans"
 
 # ----- helpers ------------------------------------------------------------
 
