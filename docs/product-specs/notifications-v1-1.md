@@ -63,7 +63,7 @@ Three classes of evidence forced the v1.1 scope.
 - [ ] **N1.1-S2 — System notifications.** A boolean toggle controlling whether `UNUserNotificationCenter` banners are posted. When `false`, no banner is posted, but the inbox + bell badge + Dock badge continue to update according to N1.1-S1. The toggle write persists regardless of authorization state.
 - [ ] **N1.1-S3 — Sound.** A boolean toggle controlling whether the system default sound accompanies the OS banner. When `systemEnabled == false`, the Sound row is disabled in the UI with a tooltip explaining that sound requires the system banner; the persisted value is preserved across the disabled state. When `systemEnabled == true`, the toggle gates `UNNotificationContent.sound = .default`.
 - [ ] **N1.1-S4 — Dock badge.** A boolean toggle controlling whether `NSApp.dockTile.badgeLabel` reflects the unread count. When `false`, the badge is cleared and stays cleared regardless of inbox state.
-- [ ] **N1.1-S5 — Mute rules summary.** A read-only row on the Notifications pane showing `N rule(s), M pane(s) muted` based on the current `NotificationsSettings.mute` content, plus a "Reveal rules.json in Finder" button that selects `~/.config/touch-code/detection-rules.json` in Finder. When both counts are zero the summary text collapses to `No mute rules`.
+- [ ] **N1.1-S5 — Mute rules summary.** A read-only row on the Notifications pane showing `N rule(s), M pane(s) muted` based on the current `NotificationsSettings.mute` content, plus a "Reveal rules.json in Finder" button that selects `~/.config/codans/detection-rules.json` in Finder. When both counts are zero the summary text collapses to `No mute rules`.
 
 #### Permission alert on system toggle (PM2 follow-up)
 
@@ -140,7 +140,7 @@ The runnable form of these criteria will be expressed as user-test cases in `doc
 - **AC-V11-S5.** Given `dockBadgeEnabled == false` and one unread notification in the inbox, when the Dock badge would normally show `1`, then the badge stays cleared.
 - **AC-V11-S6.** Given `NotificationsSettings.mute.mutedRuleIDs.count == 3` and `mute.mutedPaneIDs.count == 2`, when the Notifications pane renders, then the summary row reads `3 rule(s), 2 pane(s) muted`.
 - **AC-V11-S7.** Given both mute counts are zero, when the Notifications pane renders, then the summary row reads `No mute rules`.
-- **AC-V11-S8.** Given the user clicks "Reveal rules.json in Finder", then Finder activates with `~/.config/touch-code/detection-rules.json` selected. When that file does not exist, it is created from defaults first.
+- **AC-V11-S8.** Given the user clicks "Reveal rules.json in Finder", then Finder activates with `~/.config/codans/detection-rules.json` selected. When that file does not exist, it is created from defaults first.
 
 ### Permission alert
 
@@ -190,7 +190,7 @@ The runnable form of these criteria will be expressed as user-test cases in `doc
 - A "test notification" button in the Settings pane that fires a fake event through the full chokepoint, for verifying settings without driving an actual long command.
 - Per-event-kind sound choice (only the system default sound is wired in v1.1).
 - A snooze-this-pane verb distinct from mute (mute is permanent until toggled off; v1.2 might introduce a time-bounded version).
-- CLI access to the chokepoint (no `tc notifications` subcommand in v1.1).
+- CLI access to the chokepoint (no `codans notifications` subcommand in v1.1).
 
 ---
 
@@ -199,4 +199,4 @@ The runnable form of these criteria will be expressed as user-test cases in `doc
 - v1 product spec: [notifications.md](notifications.md) — defines the underlying event sources, the inbox model, the roll-up indicators, and the navigation flow that v1.1 inherits.
 - Settings v2 base: [exec-plans/settings-base.md](../exec-plans/settings-base.md) — defines `SettingsStore`, `NotificationsSettings`, and the disk-debounced persistence pipeline that v1.1's new fields ride on.
 - Settings pane design (T2): [design-docs/settings-notifications.md](../design-docs/settings-notifications.md) — the prior design pass for the UI; v1.1 supersedes its coordinator-wiring section with the broader chokepoint design in [notifications-v1-1.md](../design-docs/notifications-v1-1.md) (forthcoming).
-- Inbox storage primitive: `apps/mac/TouchCodeCore/Notifications/InboxStorage.swift` — pure dedup/age/cap functions; v1.1's envelope work touches only the file I/O wrapper, not these primitives.
+- Inbox storage primitive: `apps/mac/CodansCore/Notifications/InboxStorage.swift` — pure dedup/age/cap functions; v1.1's envelope work touches only the file I/O wrapper, not these primitives.

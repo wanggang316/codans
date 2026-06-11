@@ -6,7 +6,7 @@
 
 ## Context and Scope
 
-touch-code runs coding agents (Claude Code, Codex CLI, pi, …) as
+codans runs coding agents (Claude Code, Codex CLI, pi, …) as
 first-class inhabitants of Panes. In a typical session a user has
 2–8 Panes distributed across Worktrees; most are driven by an agent;
 the user attends only to whichever one is currently working, has just
@@ -62,11 +62,11 @@ and per-surface info from libghostty. It does **not** depend on
   tools) in v1. The kind registry is a hand-maintained allowlist —
   new agents are a code change, not a config change. Generalising
   this is a future-work concern.
-- A new IPC surface or `tc` command. AgentState is in-app only.
+- A new IPC surface or `codans` command. AgentState is in-app only.
 - Re-implementing the notifications inbox UX. The two systems share
   no UI; muted Panes still appear in AgentState.
 - Cross-window or multi-app behaviour. AgentState is anchored to
-  the touch-code main window's `WorktreeHeader`.
+  the codans main window's `WorktreeHeader`.
 - Status-bar entry as `NSStatusItem` (macOS menu bar / Dynamic-Island
   style). v1 ships an in-app `WorktreeHeader` entry; menu-bar variant
   is future work.
@@ -123,7 +123,7 @@ explicit `Pane.agentKind` / `Pane.agentSessionID` fields instead.
 
 ```
  ┌──────────────────────────────────────────────────────────────────────────┐
- │                            touch-code app                                │
+ │                            codans app                                │
  │                                                                          │
  │  Runtime/C1 ──▶ TerminalEngine ── AsyncStream<TerminalEvent> ─┐          │
  │                                                                │          │
@@ -159,7 +159,7 @@ explicit `Pane.agentKind` / `Pane.agentSessionID` fields instead.
 ### Data Storage
 
 The catalog gains two optional fields on `Pane` (in
-`TouchCodeCore/Pane.swift`). Both are persisted; both default to nil.
+`CodansCore/Pane.swift`). Both are persisted; both default to nil.
 
 ```swift
 public struct Pane: Equatable, Sendable, Identifiable {
@@ -189,7 +189,7 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
 
 **Codable forward compatibility.** Both fields are optional and emitted
 only when non-nil — old `catalog.json` files decode unchanged; downgrade
-to a prior touch-code build silently drops the fields. No migration
+to a prior codans build silently drops the fields. No migration
 script needed.
 
 **No new persisted runtime state.** The `AgentStateStore`'s derived state
@@ -218,7 +218,7 @@ Terminal title, initial command, and desktop-notification text are not
 agent-identity signals. If the foreground job does not match a supported
 agent, the pane is unbound and does not appear in AgentState.
 
-**`AgentBinder`** lives in `apps/mac/touch-code/Runtime/AgentBinder.swift`
+**`AgentBinder`** lives in `apps/mac/codans/Runtime/AgentBinder.swift`
 (Runtime layer, alongside `HierarchyManager`). It consumes foreground job
 snapshots and pane lifecycle (`paneExited`, `paneCrashed`,
 `paneClosedByTab`).
@@ -310,7 +310,7 @@ two subsystems independent.
 `PaneAttentionInterpreter.classifyAgentActivity` is the agent-specific
 heuristic the registry runs over the rendered active region. The
 notifications detector still owns OSC 9 / bell classification for the
-inbox; the two subsystems share `TouchCodeCore` but derive their states
+inbox; the two subsystems share `CodansCore` but derive their states
 from different inputs and stay independent.
 
 ### UI
@@ -364,7 +364,7 @@ Popover contents:
   - Row gains a faint hover background; whole row is the click
     target for Fitts's-law.
 
-**Logo assets** ship in `apps/mac/touch-code/Resources/Assets.xcassets/
+**Logo assets** ship in `apps/mac/codans/Resources/Assets.xcassets/
 AgentLogos/`:
 - `claude-code.imageset` — Anthropic Claude wordmark / leaf glyph.
 - `codex.imageset` — OpenAI Codex spiral.
@@ -379,12 +379,12 @@ without an asset.
 
 | Layer | New module | Responsibilities | Forbidden imports |
 |---|---|---|---|
-| `TouchCodeCore` | `AgentKind`, `AgentKindPatterns`, `Pane.agentKind/agentSessionID` | Value types, pattern table | Nothing |
-| `apps/mac/touch-code/Runtime` | `AgentBinder.swift` | Identify agent kind, write Pane fields via `HierarchyClient` | App features layer |
-| `apps/mac/touch-code/App/Features/AgentState` | `AgentStateStore`, `AgentStateView`, `AgentStateView`, `AgentStateRowView` | Derived state, UI | Runtime internals; no `NotificationStore` |
-| `apps/mac/touch-code/App/Features/WorktreeHeader` | Updated `WorktreeHeaderView` | Hosts `AgentStateView` | — |
+| `CodansCore` | `AgentKind`, `AgentKindPatterns`, `Pane.agentKind/agentSessionID` | Value types, pattern table | Nothing |
+| `apps/mac/codans/Runtime` | `AgentBinder.swift` | Identify agent kind, write Pane fields via `HierarchyClient` | App features layer |
+| `apps/mac/codans/App/Features/AgentState` | `AgentStateStore`, `AgentStateView`, `AgentStateView`, `AgentStateRowView` | Derived state, UI | Runtime internals; no `NotificationStore` |
+| `apps/mac/codans/App/Features/WorktreeHeader` | Updated `WorktreeHeaderView` | Hosts `AgentStateView` | — |
 
-**Dependency direction.** `AgentState → TouchCodeCore`,
+**Dependency direction.** `AgentState → CodansCore`,
 `AgentState → HierarchyClient` (read), `AgentState → catalog
 read-only`, `AgentState → PaneKeyboardActivityTracker` (read).
 AgentState does **not** import `Notifications/*`.
@@ -457,11 +457,11 @@ agents. The product value lives in the curation.
 
 **Testing.**
 - `AgentKindPatterns` is a pure table → exhaustive unit tests in
-  `TouchCodeCoreTests` exercise every pattern against fixture
+  `CodansCoreTests` exercise every pattern against fixture
   foreground jobs.
 - `AgentStateStore` state derivation is a pure function from
   (scratch state, signal) → new state → derived state. Tests live
-  in `touch-codeTests/Features/AgentStateRegistryTests.swift`,
+  in `codansTests/Features/AgentStateRegistryTests.swift`,
   driven by hand-built signal sequences (no live runtime).
 - `AgentBinder` is tested against an in-memory `HierarchyClient`
   spy that records `setPaneAgentKind` calls; tests cover foreground
@@ -475,7 +475,7 @@ hashing + Set lookup. The popover renders a list of at most
 ~20 rows; SwiftUI's `LazyVStack` is overkill at this scale, plain
 `VStack` is fine.
 
-**Observability.** `Logger(subsystem: "com.touch-code.agentstate")`
+**Observability.** `Logger(subsystem: "com.gumpw.codans.agentstate")`
 emits `info` on identification (which signal won), `debug` on each
 state transition, `warning` on unbind-by-rebind (helps diagnose
 runaway re-identification loops). No counters / metrics in v1.
@@ -510,4 +510,4 @@ toggle is easy to add later if user feedback demands it.
 | Logo assets for Claude / Codex / pi carry brand-mark license constraints | Use the agents' public press / brand kits and the brand glyph only (no wordmark). If a logo's terms are ambiguous, ship a generic glyph for that kind in v1 and revisit before any commercial release. |
 | `paneIdle` 30 s threshold marks a still-thinking agent as `finished` when it goes quiet between tool calls | The same trade-off already governs the inbox `taskFinished` event; if it proves wrong in practice, both consumers benefit from raising the threshold once in `DetectionTranslator.idleThreshold`. |
 | Popover hover-bridge feels fragile on slow gestures | 250 ms open / 150 ms close numbers are tunable in one place (`AgentStateView`); revisit after first dogfood pass. Click-toggle is always available as a backup. |
-| `AgentStateStore` and `NotificationStore` diverge on what constitutes "the same event" (e.g., one shows finished, the other doesn't) | Documented as expected behaviour — the two systems answer different questions and share only raw signals. Validation: a small test in `touch-codeTests` asserts both systems classify a canned OSC 9 sequence and an OSC 9;4 transition consistently against `DetectionTranslator.classify`. |
+| `AgentStateStore` and `NotificationStore` diverge on what constitutes "the same event" (e.g., one shows finished, the other doesn't) | Documented as expected behaviour — the two systems answer different questions and share only raw signals. Validation: a small test in `codansTests` asserts both systems classify a canned OSC 9 sequence and an OSC 9;4 transition consistently against `DetectionTranslator.classify`. |

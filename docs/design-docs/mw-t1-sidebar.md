@@ -436,7 +436,7 @@ let panelIndex = hierarchyManager.catalog.panelWorktreeIndex()
 ```
 
 `Catalog.panelWorktreeIndex()` is `nonisolated func` with no access modifier
-→ defaults to `internal`. TouchCodeCore exposes it across the module boundary
+→ defaults to `internal`. CodansCore exposes it across the module boundary
 iff we mark it `public`. T1 bumps it to `public` (trivial change, strictly
 additive) so the sidebar can build the index once per render pass. Worktree
 and Project aggregation helpers on `NotificationInbox` then become one-line
@@ -456,7 +456,7 @@ view can read `inbox.inbox` directly:
 ```
 
 `InboxStore` already conforms to `@Observable` (see `ContentView` wiring of
-other observable stores). `TouchCodeApp.bringUp` injects it alongside
+other observable stores). `CodansApp.bringUp` injects it alongside
 `HierarchyManager` and `SettingsStore`.
 
 Rationale: mirrors how `HierarchyManager` is consumed by `HierarchySidebarView`
@@ -512,8 +512,8 @@ already use.
 | `RootFeature` | Routes sidebar delegate → `EditorFeature` / `FinderClient`; deletes `SidebarMode` plumbing | Reducer state for inbox (gone) |
 | `InboxStore` | Environment injection to sidebar | Sidebar render decisions |
 
-Dependency direction unchanged: app → TouchCodeCore. FinderClient is app-side,
-TouchCodeCore never imports AppKit.
+Dependency direction unchanged: app → CodansCore. FinderClient is app-side,
+CodansCore never imports AppKit.
 
 ## Alternatives Considered
 
@@ -660,7 +660,7 @@ it missing.
 on touch" is documented.
 
 **R2: `panelWorktreeIndex()` visibility bump is a cross-module change.** Other
-callers of TouchCodeCore might start depending on it.
+callers of CodansCore might start depending on it.
 *Mitigation:* doc-comment the method as "prefer the per-scope aggregation
 helpers; use raw index only when you're rendering many rows per frame over the
 same snapshot". We don't forbid broader use — the helper is pure and cheap.

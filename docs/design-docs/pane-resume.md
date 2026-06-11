@@ -6,14 +6,14 @@
 
 ## Context and Scope
 
-[Product Spec: Pane Resume](../product-specs/pane-resume.md) requires that each Pane's terminal content (and optionally the underlying shell process) survives `cmd-Q` of touch-code. Today every Pane is a `ghostty_surface_t` whose `Exec` backend internally `forkpty()`s a shell child; when the app exits, the shell dies with the surface and only the cwd is persisted (commit `fa7eadb6`).
+[Product Spec: Pane Resume](../product-specs/pane-resume.md) requires that each Pane's terminal content (and optionally the underlying shell process) survives `cmd-Q` of codans. Today every Pane is a `ghostty_surface_t` whose `Exec` backend internally `forkpty()`s a shell child; when the app exits, the shell dies with the surface and only the cwd is persisted (commit `fa7eadb6`).
 
 Phase 0 spike findings (already completed in conversation):
 
 - libghostty's `termio.Backend = union(Kind) { exec }` (`ghostty/src/termio/backend.zig:24`) is internally extensible. No public C entry exposes an external-PTY backend, but the Zig union is shaped for one.
 - `libghostty-vt` already ships its own C-ABI build target (`ghostty/build.zig:155-165`), independent of `GhosttyKit.xcframework`.
 - `zmx` (`/Users/wanggang/dev/opensource/zmx`) is exactly the daemon we need: per-session unix socket, fork+setsid daemonization (`zmx/src/main.zig:780`), `ghostty_vt.Terminal` mirror of PTY output, multi-client fan-out, validated two-phase serializer (`zmx/src/util.zig:479`).
-- Existing touch-code persistence is atomic-rename JSON with top-level `version: Int`; `CatalogStore.swift` is the reference pattern.
+- Existing codans persistence is atomic-rename JSON with top-level `version: Int`; `CatalogStore.swift` is the reference pattern.
 - IPC between app and CLI uses length-prefixed JSON envelopes over Unix socket. The daemon protocol is a different transport (binary, length-prefixed `ipc.Tag` envelopes from zmx) and must not be conflated.
 
 This design specifies how to integrate zmx as an out-of-process sidecar, what patches it needs, how libghostty's surface adopts an external PTY backend, and how the catalog / snapshot files glue everything together.
@@ -60,7 +60,7 @@ The key trade-off: we deliberately accept **one round-trip per PTY byte** (PTY �
 ### System Context Diagram
 
 ```
-                         touch-code.app process
+                         codans.app process
    ┌──────────────────────────────────────────────────────────────────┐
    │                                                                  │
    │   Pane view (SwiftUI)                                            │
@@ -81,7 +81,7 @@ The key trade-off: we deliberately accept **one round-trip per PTY byte** (PTY �
    │       │                     │                                    │
    └───────┼─────────────────────┼────────────────────────────────────┘
            │                     │ unix socket (zmx wire format)
-           │                     │ ~/Library/Caches/touch-code/zmx-sessions/<paneID>.sock
+           │                     │ ~/Library/Caches/codans/zmx-sessions/<paneID>.sock
            │                     ▼
            │   ┌──────────────────────────────────────────────────────┐
            │   │  zmx daemon  (one per Pane, daemonized)              │
@@ -94,8 +94,8 @@ The key trade-off: we deliberately accept **one round-trip per PTY byte** (PTY �
            │                     │ owns PTY master, runs setsid'd
            │                     │
            └──────────────── reads sessions.json + snapshots/ on launch
-                              ~/.config/touch-code/sessions.json (v1)
-                              ~/Library/Caches/touch-code/snapshots/<paneID>.snap
+                              ~/.config/codans/sessions.json (v1)
+                              ~/Library/Caches/codans/snapshots/<paneID>.snap
 ```
 
 ### API Design
@@ -154,7 +154,7 @@ zmx serve <session> [--cwd <path>] [--command <prog> [args...]] [--restore-from 
 
 Patch surface: ~80 LoC Zig (subcommand wiring + reuse of `Daemon.ensureSession`).
 
-**4. ZmxClient (Swift, in `touch-code/Runtime/`)**
+**4. ZmxClient (Swift, in `codans/Runtime/`)**
 
 ```swift
 @MainActor
@@ -180,7 +180,7 @@ Actually — simpler design: one unix socket fd. App-side `ZmxClient` demultiple
 
 Two new artifacts under existing roots; both follow the architecture's atomic-rename + versioned JSON pattern (or raw bytes for snapshots).
 
-**`~/.config/touch-code/sessions.json`** (versioned, v1)
+**`~/.config/codans/sessions.json`** (versioned, v1)
 
 ```jsonc
 {
@@ -192,7 +192,7 @@ Two new artifacts under existing roots; both follow the architecture's atomic-re
       "createdAt": "2026-05-24T10:00:00Z",
       "lastAttachedAt": "2026-05-24T11:30:00Z",
       "command": ["/bin/zsh", "-l"],
-      "cwd": "/Users/wanggang/dev/touch-code",
+      "cwd": "/Users/wanggang/dev/codans",
       "zmxVersion": "0.6.0+tc1"
     }
   }
@@ -209,13 +209,13 @@ Read by app:
 - once at launch, to enumerate resumable Panes
 - never re-read after that (in-memory truth)
 
-**`~/Library/Caches/touch-code/snapshots/<paneID>.snap`**
+**`~/Library/Caches/codans/snapshots/<paneID>.snap`**
 
 Raw bytes from `serializeTerminalState`. No header, no framing, no version field — the bytes ARE the VT replay stream. Format version is implicitly tied to the `zmx_version` recorded in `sessions.json`; mismatched versions cause snapshot tier to fall back to cold start (R7 cleanup also handles this).
 
 Written by daemon on `.Snapshot`. Read by daemon (not app) when launched with `--restore-from`. App never parses these bytes; it just confirms file existence.
 
-**`~/Library/Caches/touch-code/zmx-sessions/<paneID>.sock`** (Unix socket)
+**`~/Library/Caches/codans/zmx-sessions/<paneID>.sock`** (Unix socket)
 
 The daemon's listening socket. zmx's `$ZMX_DIR` env var points the daemon at this directory. The dir lives under `Caches/` not `Application Support/` because it's transient runtime state (sockets are unlinked on shutdown, recreated on next launch).
 
@@ -241,21 +241,21 @@ for each entry in sessions.json:
 | Component | Location | Owns | Doesn't own |
 |---|---|---|---|
 | `External` backend | `apps/mac/ThirdParty/ghostty/src/termio/External.zig` (patch) | fd-based read/write loop, external_resize action emission | PTY ioctl, process lifetime, fork |
-| `zmx` binary | `apps/mac/ThirdParty/zmx/` (new submodule) → `TouchCode.app/Contents/Resources/bin/zmx` | PTY ownership, ghostty-vt mirror, serializer, wire protocol, daemonization | catalog format, snapshot file location policy (driven by `$ZMX_DIR`) |
-| `ZmxClient` | `apps/mac/touch-code/Runtime/Ghostty/ZmxClient.swift` (new) | socket fd, message framing, control-fd ↔ socketpair bridge, lifecycle on this Pane's daemon | daemon process management (spawn / kill — that's `PaneSurface`'s job) |
-| `PaneSurface` | `apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift` (modified) | daemon spawn via `CommandRunner`, `ZmxClient` lifecycle, surface config (always external_pty_fd ≥ 0) | wire protocol, serialization |
-| `SessionStore` | `apps/mac/TouchCodeCore/SessionStore.swift` (new) | sessions.json read/write, atomic rename, reaper | runtime state, IPC |
-| `SessionReaper` | `apps/mac/touch-code/Runtime/SessionReaper.swift` (new) | startup sweep of stale sessions and snapshots | normal-flow session lifetime |
-| `Resume` Setting | `apps/mac/touch-code/App/Features/Settings/` (modified) | the on/off toggle, persistence into `settings.json` general section | runtime application of the toggle (`PaneSurface` reads at quit time) |
+| `zmx` binary | `apps/mac/ThirdParty/zmx/` (new submodule) → `Codans.app/Contents/Resources/bin/zmx` | PTY ownership, ghostty-vt mirror, serializer, wire protocol, daemonization | catalog format, snapshot file location policy (driven by `$ZMX_DIR`) |
+| `ZmxClient` | `apps/mac/codans/Runtime/Ghostty/ZmxClient.swift` (new) | socket fd, message framing, control-fd ↔ socketpair bridge, lifecycle on this Pane's daemon | daemon process management (spawn / kill — that's `PaneSurface`'s job) |
+| `PaneSurface` | `apps/mac/codans/Runtime/Ghostty/PaneSurface.swift` (modified) | daemon spawn via `CommandRunner`, `ZmxClient` lifecycle, surface config (always external_pty_fd ≥ 0) | wire protocol, serialization |
+| `SessionStore` | `apps/mac/CodansCore/SessionStore.swift` (new) | sessions.json read/write, atomic rename, reaper | runtime state, IPC |
+| `SessionReaper` | `apps/mac/codans/Runtime/SessionReaper.swift` (new) | startup sweep of stale sessions and snapshots | normal-flow session lifetime |
+| `Resume` Setting | `apps/mac/codans/App/Features/Settings/` (modified) | the on/off toggle, persistence into `settings.json` general section | runtime application of the toggle (`PaneSurface` reads at quit time) |
 
 **Dependency direction additions** (extending architecture.md):
 
 ```
-TouchCodeCore     (existing) + SessionStore
+CodansCore     (existing) + SessionStore
     │
-    └── TouchCodeIPC (existing — unchanged)
+    └── CodansIPC (existing — unchanged)
             │
-            └── touch-code (app)
+            └── codans (app)
                     │
                     └── Runtime
                           ├── Ghostty/ZmxClient   (new)
@@ -263,19 +263,19 @@ TouchCodeCore     (existing) + SessionStore
                           └── SessionReaper       (new)
 ```
 
-zmx binary is a sibling of `tc` under `Contents/Resources/bin/`. Build flow extends the existing `build-ghostty.sh` pattern: a new `apps/mac/scripts/build-zmx.sh` produces a fingerprint-cached `.build/zmx/zmx` binary, embedded via Tuist post-script (mirroring `embed-tc.sh`).
+zmx binary is a sibling of `codans` under `Contents/Resources/bin/`. Build flow extends the existing `build-ghostty.sh` pattern: a new `apps/mac/scripts/build-zmx.sh` produces a fingerprint-cached `.build/zmx/zmx` binary, embedded via Tuist post-script (mirroring `embed-codans.sh`).
 
 **Architectural invariants extended**:
 
 - *PTY ownership lives in the daemon, never in-process.* The Exec backend path becomes dead code at runtime (we always pass `external_pty_fd`); we don't remove it from the patched ghostty to keep upstream merge small.
 - *Snapshot file format is opaque bytes.* App must not parse it. Schema versioning is via `zmxVersion` in sessions.json, not in the snapshot itself.
-- *Daemon and CLI socket are completely separate transports.* One is binary `ipc.Tag` framing for daemon I/O; the other is JSON-RPC for tc ↔ app. Never bridge them.
+- *Daemon and CLI socket are completely separate transports.* One is binary `ipc.Tag` framing for daemon I/O; the other is JSON-RPC for codans ↔ app. Never bridge them.
 
 ## Alternatives Considered
 
 **A. Swift port of zmx daemon (rejected for v1)**
 
-Rewrite the zmx daemon in Swift, link `libghostty-vt.xcframework`, share the JSON-RPC framing already used by tc ↔ app.
+Rewrite the zmx daemon in Swift, link `libghostty-vt.xcframework`, share the JSON-RPC framing already used by codans ↔ app.
 
 Pros:
 - Single transport across the app (JSON-RPC everywhere)
@@ -322,7 +322,7 @@ Cons:
 
 **D. LaunchAgent supervisor for daemons**
 
-Install `~/Library/LaunchAgents/com.touch-code.zmx-<paneID>.plist` per daemon so launchd brings the process back if it crashes and starts it at login.
+Install `~/Library/LaunchAgents/com.gumpw.codans.zmx-<paneID>.plist` per daemon so launchd brings the process back if it crashes and starts it at login.
 
 Pros:
 - Daemons survive `kill -9`
@@ -330,7 +330,7 @@ Pros:
 
 Cons:
 - One plist per Pane → potentially hundreds of LaunchAgent entries, all churn-y
-- Codesigning + first-launch permission popup ("touch-code wants to add LaunchAgent") creates a worse UX than the gain
+- Codesigning + first-launch permission popup ("codans wants to add LaunchAgent") creates a worse UX than the gain
 - Reboot survival isn't actually delivered (shell process dies at logout regardless)
 
 **Decision**: rejected. Spec ruled out reboot survival (Won't Have list); without that gain, LaunchAgents are net-negative complexity.
@@ -358,8 +358,8 @@ Cons:
 - The reaper deletes snapshot files >7 days old, bounding accidental retention.
 
 **Observability**
-- All daemon spawn / attach / detach / snapshot / reap events log to `com.touch-code.runtime` os.Logger category
-- `tc session list` (new RPC) enumerates sessions.json for debugging
+- All daemon spawn / attach / detach / snapshot / reap events log to `com.gumpw.codans.runtime` os.Logger category
+- `codans session list` (new RPC) enumerates sessions.json for debugging
 - zmx daemon writes its own logs to `$ZMX_DIR/logs/<session>.log` (already implemented upstream); accessible via Console.app
 
 **Error handling**
@@ -372,7 +372,7 @@ Cons:
 **Testing strategy**
 - Unit tests: SessionStore round-trip + migration (mirrors `CatalogCodableTests`)
 - Unit tests: ZmxClient message framing against a recorded socket transcript (no daemon needed)
-- Integration test: spawn a real zmx, do `attach → write bytes → snapshot → restart → reattach`, assert byte equality of buffer. Add to `TouchCodeRuntimeTests`.
+- Integration test: spawn a real zmx, do `attach → write bytes → snapshot → restart → reattach`, assert byte equality of buffer. Add to `CodansRuntimeTests`.
 - User tests: AC1–AC8 mapped 1:1 in `docs/user-tests/pane-resume.md` by `/hs-test-spec`.
 
 **Migration / rollback**
@@ -390,13 +390,13 @@ Cons:
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| libghostty External backend has hidden assumptions on PTY-only behavior (termios state polling, ioctl quirks, signal handling) that don't translate to socketpair | Medium | High | Build the External backend on a fork; run touch-code's existing terminal smoke tests + ghostty-vt's own test corpus; iterate before upstream-PRing. Have a clean Exec-backend fallback per-Pane via env var override (`TC_FORCE_EXEC=1`) |
+| libghostty External backend has hidden assumptions on PTY-only behavior (termios state polling, ioctl quirks, signal handling) that don't translate to socketpair | Medium | High | Build the External backend on a fork; run codans's existing terminal smoke tests + ghostty-vt's own test corpus; iterate before upstream-PRing. Have a clean Exec-backend fallback per-Pane via env var override (`TC_FORCE_EXEC=1`) |
 | zmx upstream introduces protocol-breaking changes between releases (README explicitly warns about this) | High | Medium | Pin zmx to a specific submodule commit; treat upgrades as design-doc-bumping events. `zmxVersion` in sessions.json forces reaping on bump. |
 | Daemon fails to detach properly on some macOS versions (signed/notarized binary subtleties with `setsid`) | Low | High | Verify in a smoke test on every macOS minor we support. zmx already daemonizes correctly per code inspection; risk is environmental, not code. |
 | Snapshot file corruption (partial write on power loss) causes daemon to refuse `--restore-from` | Medium | Low | Daemon falls back to cold start on parse failure (graceful). For extra safety, daemon can write `.snap.tmp` + rename atomically — small zmx patch |
-| Per-user disk fills up with stale snapshots if app never relaunches (reaper never runs) | Low | Low | Snapshots are bounded by scrollback cap (10K lines × 30 panes ≈ <100MB total). Reaper runs on every launch. Manual cleanup via `tc session prune` (nice-to-have). |
-| User has system-wide `zmx` installed and `ZMX_DIR` collides | Medium | Medium | Always set `ZMX_DIR=~/Library/Caches/touch-code/zmx-sessions` via env when spawning our zmx binary; user's separate zmx instance keeps its own dir. Document the convention. |
-| Two touch-code instances running simultaneously fight over the same Pane's daemon | Low | High | sessions.json has no app-instance ID, so the second instance would attempt to attach. Daemon rejects second attach (single-client v1). UI shows error → user closes the second instance. Document; revisit if multi-instance becomes a goal. |
+| Per-user disk fills up with stale snapshots if app never relaunches (reaper never runs) | Low | Low | Snapshots are bounded by scrollback cap (10K lines × 30 panes ≈ <100MB total). Reaper runs on every launch. Manual cleanup via `codans session prune` (nice-to-have). |
+| User has system-wide `zmx` installed and `ZMX_DIR` collides | Medium | Medium | Always set `ZMX_DIR=~/Library/Caches/codans/zmx-sessions` via env when spawning our zmx binary; user's separate zmx instance keeps its own dir. Document the convention. |
+| Two codans instances running simultaneously fight over the same Pane's daemon | Low | High | sessions.json has no app-instance ID, so the second instance would attempt to attach. Daemon rejects second attach (single-client v1). UI shows error → user closes the second instance. Document; revisit if multi-instance becomes a goal. |
 | External backend's `external_resize` action is missed by Swift code → daemon's PTY size never matches surface size → garbled rendering | Low | High | Cover with an integration test that drives surface resize and asserts zmx daemon's `ws_col`/`ws_row` (via `.Info` IPC reply). |
 
 ---
@@ -454,7 +454,7 @@ With the coordinator in place, the following lifecycle transitions trigger `sche
 | Daemon spawned + socket reachable | `recordSpawn(session)` |
 | Surface attaches to daemon (cold start or reattach) | `recordAttach(paneID)` — bumps `lastAttachedAt` |
 | Surface detaches (explicit or quit live tier) | `recordDetach(paneID)` — bumps `lastAttachedAt` |
-| `tc pane close` / Pane closed via UI | `recordClose(paneID)` — removes row |
+| `codans pane close` / Pane closed via UI | `recordClose(paneID)` — removes row |
 | Reaper prunes at launch | `applyReaperPrune(deadKeys)` |
 
 The 500 ms debounce window collapses bursts (multi-pane bring-up at launch). `applicationWillTerminate` calls `coordinator.flushPending()` to drain the last write.
@@ -487,7 +487,7 @@ extension SessionReaper {
 
 Invoked from `bootstrapSessionStack` after `sweep()` returns the catalog-driven state map.
 
-Failure-tolerance: directory-list errors (ENOENT on first launch, EACCES under a sandbox bug) are logged at `.warning` and no daemons are killed — false-negatives are acceptable, false-positives (killing a non-touch-code daemon by mistake) are not. The socket directory is `~/Library/Caches/touch-code/zmx-sessions/`, owned exclusively by us; the directory check is therefore unambiguous.
+Failure-tolerance: directory-list errors (ENOENT on first launch, EACCES under a sandbox bug) are logged at `.warning` and no daemons are killed — false-negatives are acceptable, false-positives (killing a non-codans daemon by mistake) are not. The socket directory is `~/Library/Caches/codans/zmx-sessions/`, owned exclusively by us; the directory check is therefore unambiguous.
 
 ### Discoverability — Settings status + Forget-all (R16, AC11)
 

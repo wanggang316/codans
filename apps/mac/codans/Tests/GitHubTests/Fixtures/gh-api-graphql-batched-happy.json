@@ -1,0 +1,53 @@
+{
+  "data": {
+    "repository": {
+      "branch0": {
+        "nodes": [
+          {
+            "number": 39,
+            "title": "feat(github): PR-centric GitHub integration v1",
+            "state": "MERGED",
+            "isDraft": false,
+            "additions": 5759,
+            "deletions": 73,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": null,
+            "url": "https://github.com/wanggang316/codans/pull/39",
+            "updatedAt": "2026-04-23T10:00:00Z",
+            "headRefName": "feature/github01",
+            "baseRefName": "main",
+            "commits": { "totalCount": 12 },
+            "author": { "login": "wanggang316" },
+            "headRepository": { "name": "codans", "owner": { "login": "wanggang316" } },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "name": "build",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "startedAt": "2026-04-23T09:00:00Z",
+                    "completedAt": "2026-04-23T09:02:00Z",
+                    "detailsUrl": "https://github.com/wanggang316/codans/actions/runs/1/job/build"
+                  },
+                  {
+                    "name": "tests",
+                    "status": "COMPLETED",
+                    "conclusion": "FAILURE",
+                    "startedAt": "2026-04-23T09:00:00Z",
+                    "completedAt": "2026-04-23T09:05:30Z",
+                    "detailsUrl": "https://github.com/wanggang316/codans/actions/runs/1/job/tests"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "branch1": {
+        "nodes": []
+      }
+    }
+  }
+}

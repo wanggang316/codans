@@ -6,7 +6,7 @@
 
 ## Summary
 
-Restore each Pane's terminal content (visible buffer, scrollback, cursor, modes) — and optionally the running shell itself — across touch-code app restarts. Today, when the app exits, every Pane's libghostty surface tears down its PTY; the user's running compilations, long-tail commands, and CLI-agent loops die with it, and only the working directory survives. This feature decouples PTY ownership from the rendering surface so that the in-memory terminal state is captured before exit and replayed (or actively re-attached) on next launch.
+Restore each Pane's terminal content (visible buffer, scrollback, cursor, modes) — and optionally the running shell itself — across codans app restarts. Today, when the app exits, every Pane's libghostty surface tears down its PTY; the user's running compilations, long-tail commands, and CLI-agent loops die with it, and only the working directory survives. This feature decouples PTY ownership from the rendering surface so that the in-memory terminal state is captured before exit and replayed (or actively re-attached) on next launch.
 
 Persistence offers two tiers driven by a single user choice at quit time:
 
@@ -17,7 +17,7 @@ Both tiers share the same daemon architecture, serialization format, and on-disk
 
 ## User Stories
 
-- **As a CLI-agent power user**, I want my long-running agent loops (e.g. `claude --resume`, a build watch, `pnpm dev`) to keep running when I `cmd-Q` touch-code, so that I can quit/relaunch without interrupting in-flight work.
+- **As a CLI-agent power user**, I want my long-running agent loops (e.g. `claude --resume`, a build watch, `pnpm dev`) to keep running when I `cmd-Q` codans, so that I can quit/relaunch without interrupting in-flight work.
 - **As a daily developer**, I want the visible terminal content (scrollback, last command output, prompt state) restored exactly as I left it after a quit-and-relaunch, so I don't lose context when the app dies or I restart for an update.
 - **As a power user**, I want a clear signal at quit time of how many Panes have running shells that will continue, with an obvious way to opt out for a specific quit if I want a clean slate.
 - **As a returning user after a long break**, I want stale persistent sessions cleaned up automatically (or surfaced clearly) so that orphan daemons don't accumulate forever.
@@ -33,7 +33,7 @@ Both tiers share the same daemon architecture, serialization format, and on-disk
 - [ ] **R5** — A global Setting "Resume panes on launch" (default: on) controls whether daemons are kept across quit; toggling off makes quit behave as snapshot-tier for all Panes
 - [ ] **R6** — When the app force-quits or is `kill -9`'d by the user, every daemon already running independently continues to run (i.e. the daemon must be detached from the app's process group)
 - [ ] **R7** — Daemons that have not been attached for N days (default 7) are reaped on next app launch, freeing their socket and on-disk state
-- [ ] **R8** — Closing a Pane explicitly (Pane → Close, or `tc pane close`) kills its daemon and removes its catalog entry
+- [ ] **R8** — Closing a Pane explicitly (Pane → Close, or `codans pane close`) kills its daemon and removes its catalog entry
 - [ ] **R9** — A daemon serving an active Pane in v1 accepts exactly one client connection at a time; subsequent attach attempts are rejected (multi-client mirroring deferred to v2)
 
 ### Nice to Have
@@ -49,11 +49,11 @@ Both tiers share the same daemon architecture, serialization format, and on-disk
 - macOS reboot survival — requires a per-user LaunchAgent, and the user's shell process is killed by `launchd` at logout/reboot anyway, so the value is marginal
 - Cross-machine / cross-user resume
 - Per-Project opt-out — the default-on global toggle is sufficient for v1
-- Sharing a session across multiple touch-code app instances on the same machine
+- Sharing a session across multiple codans app instances on the same machine
 
 ## Acceptance Criteria
 
-- **AC1.** Given a Pane running an arbitrary command (e.g. `tail -f`), when the user `cmd-Q`'s touch-code with "Resume panes on launch" enabled and relaunches the app, then the same Pane re-opens with the live tail-output stream continuing where it was, and process inspection (`ps -ef` outside touch-code) shows the original shell PID is still running.
+- **AC1.** Given a Pane running an arbitrary command (e.g. `tail -f`), when the user `cmd-Q`'s codans with "Resume panes on launch" enabled and relaunches the app, then the same Pane re-opens with the live tail-output stream continuing where it was, and process inspection (`ps -ef` outside codans) shows the original shell PID is still running.
 
 - **AC2.** Given the same scenario as AC1 but with "Resume panes on launch" disabled in Settings, when the user quits and relaunches, then the Pane re-opens with the visible buffer and scrollback identical to the pre-quit screen (text, colors, cursor position), but the shell PID has changed (the on-disk snapshot was replayed into a fresh shell).
 
@@ -63,9 +63,9 @@ Both tiers share the same daemon architecture, serialization format, and on-disk
 
 - **AC5.** Given a Pane reattached after relaunch, when the user types and the program echoes / runs commands normally, then there is no perceptible input lag versus a freshly-created Pane (P99 keystroke-to-glyph < 50ms on M-series hardware).
 
-- **AC6.** Given a second instance of touch-code starting up while the first is still running and holding daemons, when it attempts to attach to those sockets, then it sees the daemons as "in use" and either declines to attach or falls back to fresh shells (no double-attach corruption).
+- **AC6.** Given a second instance of codans starting up while the first is still running and holding daemons, when it attempts to attach to those sockets, then it sees the daemons as "in use" and either declines to attach or falls back to fresh shells (no double-attach corruption).
 
-- **AC7.** Given a Pane with `ghostty-vt`-trackable state (custom keyboard mode, alternate screen, scrolling region, OSC 7 pwd, palette modifications) at quit time, when the user relaunches, then all those modes are present in the restored surface (verified via `tc pane read` or visual inspection).
+- **AC7.** Given a Pane with `ghostty-vt`-trackable state (custom keyboard mode, alternate screen, scrolling region, OSC 7 pwd, palette modifications) at quit time, when the user relaunches, then all those modes are present in the restored surface (verified via `codans pane read` or visual inspection).
 
 - **AC8.** Given an app that force-quits or crashes, when the user relaunches, then any Pane whose daemon was running independently is restored as if it had been a normal quit; any Pane whose state was only in-memory (daemon hadn't started yet) opens as fresh.
 
@@ -103,7 +103,7 @@ After M0–M5 landed and the live + snapshot tiers shipped, a deeper review iden
 
 ### Additional Acceptance Criteria
 
-- **AC9.** Given a Pane spawned and attached in the current session, when the app crashes (`kill -9 TouchCode`) and is relaunched, then `sessions.json` already contains the pane's row from before the crash, and the daemon reattaches as if a normal quit had occurred.
+- **AC9.** Given a Pane spawned and attached in the current session, when the app crashes (`kill -9 Codans`) and is relaunched, then `sessions.json` already contains the pane's row from before the crash, and the daemon reattaches as if a normal quit had occurred.
 
 - **AC10.** Given a corrupted or empty `sessions.json` but two surviving `zmx serve` daemons running under the managed socket directory, when the app launches, then both daemons are detected by directory scan and killed (because no catalog row and no hierarchy entry claims them), their sockets are unlinked, and the launch completes with no resume.
 

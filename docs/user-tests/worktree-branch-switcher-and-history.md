@@ -84,7 +84,7 @@ In addition to the project's standard "App launched" signal, cases in this docum
 **Covers AC:** AC-HD-1
 
 **Preconditions:**
-- Catalog seed `_shared/fixtures/catalog/branch-switcher.json` placed at `~/.config/touch-code/catalog.json` (Worktree HEAD = `feat/header-redesign`).
+- Catalog seed `_shared/fixtures/catalog/branch-switcher.json` placed at `~/.config/codans/catalog.json` (Worktree HEAD = `feat/header-redesign`).
 - Multi-branch repo bundle restored to `<tmp>/repo-multi-branch`.
 - App started; "App launched" ready signal observed.
 

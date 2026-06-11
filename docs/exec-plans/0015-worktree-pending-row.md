@@ -55,20 +55,20 @@ PR #48 shipped on 2026-04-26 with M1–M4 + M6. M5 view integration deferred to 
 **Related documents (read before executing):**
 
 - Master design doc: `docs/design-docs/worktree-sidebar-ordering.md` (commit `1f714b3`) — four-segment ordering, `PendingWorktree` shape, `SidebarRow` enum, cancel/finished guard, 8-cap rule, alternatives B1/B2/B3, Risks table.
-- Task spec: `/tmp/touch-code-bootstrap-03.md` — file-by-file change list (this ExecPlan tracks the same surface area).
+- Task spec: `/tmp/codans-bootstrap-03.md` — file-by-file change list (this ExecPlan tracks the same surface area).
 - Worktree-management context (M9 in particular): `docs/exec-plans/0010-worktree-management.md` — explains why `CreateWorktreeFeature` owns the stream today and how the setup-script delegate chain works.
 - Architecture: `docs/architecture.md` — domain layering rules (HierarchySidebar feature lives in App layer; HierarchyManager in Runtime; GitWorktreeClient in Git/).
 
 **Key source files (read or modify):**
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeFeature.swift` — current sheet reducer with stream consumption (lines 192-220), success sidecar (lines 232-274), private `humanReadable` (lines 287-306). All three blocks move out of this file.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeSheet.swift` — current sheet view, progress log block at lines 81-94 (deleted in M4).
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — parent reducer; today's `.createWorktreeSheet` delegate handler at lines 314-328 is rewritten in M2 to also handle `.beginCreate`.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift` — `orderedVisibleWorktrees` at lines 50-56 (replaced via task02's `orderedSidebarRows` in M5); `ForEach` at line 417 switches to heterogeneous rows.
-- `apps/mac/touch-code/App/Features/HierarchySidebar/ArchivedWorktreesFeature.swift` — second copy of `humanReadable` at lines 144-156 (deleted in M1, callers reroute to the shared function).
-- `apps/mac/touch-code/Git/GitWorktreeClient.swift` — `createWorktreeStream` (lines 600-708) and `CreateWorktreeSpec` (lines 24-33). No edits, but the cancel-via-Process-terminate behavior at lines 696-706 is what makes pending Cancel actually kill the child `wt`. `GitWorktreeError` enum (lines 47-56) is the input type to the new `humanReadable` helper.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — `createWorktreeWithGit` (lines 217-221), `selectWorktree`, `createTab`, `openPane`, `runWorktreeLifecycleScript` are called from the new `pendingWorktreeFinished` arm in M2.
-- `apps/mac/touch-code/Tests/CreateWorktreeFeatureTests.swift` — existing TestStore-based tests; assertions on `progressLines` / `isSubmitting` are removed, new `.beginCreate` delegate test is added.
+- `apps/mac/codans/App/Features/HierarchySidebar/CreateWorktreeFeature.swift` — current sheet reducer with stream consumption (lines 192-220), success sidecar (lines 232-274), private `humanReadable` (lines 287-306). All three blocks move out of this file.
+- `apps/mac/codans/App/Features/HierarchySidebar/CreateWorktreeSheet.swift` — current sheet view, progress log block at lines 81-94 (deleted in M4).
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift` — parent reducer; today's `.createWorktreeSheet` delegate handler at lines 314-328 is rewritten in M2 to also handle `.beginCreate`.
+- `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift` — `orderedVisibleWorktrees` at lines 50-56 (replaced via task02's `orderedSidebarRows` in M5); `ForEach` at line 417 switches to heterogeneous rows.
+- `apps/mac/codans/App/Features/HierarchySidebar/ArchivedWorktreesFeature.swift` — second copy of `humanReadable` at lines 144-156 (deleted in M1, callers reroute to the shared function).
+- `apps/mac/codans/Git/GitWorktreeClient.swift` — `createWorktreeStream` (lines 600-708) and `CreateWorktreeSpec` (lines 24-33). No edits, but the cancel-via-Process-terminate behavior at lines 696-706 is what makes pending Cancel actually kill the child `wt`. `GitWorktreeError` enum (lines 47-56) is the input type to the new `humanReadable` helper.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — `createWorktreeWithGit` (lines 217-221), `selectWorktree`, `createTab`, `openPane`, `runWorktreeLifecycleScript` are called from the new `pendingWorktreeFinished` arm in M2.
+- `apps/mac/codans/Tests/CreateWorktreeFeatureTests.swift` — existing TestStore-based tests; assertions on `progressLines` / `isSubmitting` are removed, new `.beginCreate` delegate test is added.
 
 **Term glossary:**
 
@@ -89,15 +89,15 @@ Six narrative milestones. M1 lays foundations; M2-M4 implement the reducer + she
 
 **Goal:** A single `humanReadable(GitWorktreeError) -> String` exists project-wide, and `PendingWorktree.swift` carries the full struct shape. Both are pure, no behavior change to existing flows.
 
-Create `apps/mac/touch-code/Git/GitWorktreeErrorMessage.swift` with one top-level `internal func humanReadable(_ error: GitWorktreeError) -> String` covering all 8 `GitWorktreeError` cases. The exhaustive switch matches the version currently in `CreateWorktreeFeature.swift:287-306` (master doc §Cross-Cutting Concerns describes the merge — pick the more operational text per case, e.g. `executableMissing → "The bundled wt helper is missing. Reinstall touch-code."`). The function is `nonisolated` and pure.
+Create `apps/mac/codans/Git/GitWorktreeErrorMessage.swift` with one top-level `internal func humanReadable(_ error: GitWorktreeError) -> String` covering all 8 `GitWorktreeError` cases. The exhaustive switch matches the version currently in `CreateWorktreeFeature.swift:287-306` (master doc §Cross-Cutting Concerns describes the merge — pick the more operational text per case, e.g. `executableMissing → "The bundled wt helper is missing. Reinstall codans."`). The function is `nonisolated` and pure.
 
 Delete the private `humanReadable` from `CreateWorktreeFeature.swift` (lines 287-306) and from `ArchivedWorktreesFeature.swift` (lines 144-156). Both files now reference the new top-level function unqualified (Swift module-internal lookup).
 
-Replace `apps/mac/touch-code/App/Features/HierarchySidebar/PendingWorktree.swift`. If task02 has merged its stub by the time this milestone runs, replace the file's contents in place. If task02 has not merged, create the file fresh. Either way the final shape is:
+Replace `apps/mac/codans/App/Features/HierarchySidebar/PendingWorktree.swift`. If task02 has merged its stub by the time this milestone runs, replace the file's contents in place. If task02 has not merged, create the file fresh. Either way the final shape is:
 
 ```swift
 import Foundation
-import TouchCodeCore
+import CodansCore
 
 nonisolated struct PendingWorktreeID: Hashable, Sendable {
   let raw: UUID
@@ -300,7 +300,7 @@ Verify build. `CreateWorktreeFeatureTests` will fail loudly on the deleted state
 
 **Goal:** `CreateWorktreeSheet` no longer shows the progress log; cap banner appears when full. `PendingWorktreeRow` exists and renders both states.
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeSheet.swift`:
+In `apps/mac/codans/App/Features/HierarchySidebar/CreateWorktreeSheet.swift`:
 
 - Delete the progress log block (lines 81-94).
 - Above the form (or just below the title), add a banner shown only when `store.currentPendingCountForProject >= 8`:
@@ -318,11 +318,11 @@ In `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeSheet.swift`
 - Update Create button `.disabled(...)` predicate: drop `store.isSubmitting`, add `|| store.currentPendingCountForProject >= 8`.
 - **Button label stays literal `"Create"`.** Do NOT introduce a `"Creating…"` swap or any animated busy-state — the sheet dismisses synchronously on submit (no in-sheet busy interval to communicate). The previous "Creating…" UX is replaced by the spinning pending row in the sidebar.
 
-Create `apps/mac/touch-code/App/Features/HierarchySidebar/PendingWorktreeRow.swift`:
+Create `apps/mac/codans/App/Features/HierarchySidebar/PendingWorktreeRow.swift`:
 
 ```swift
 import SwiftUI
-import TouchCodeCore
+import CodansCore
 
 struct PendingWorktreeRow: View {
   let pending: PendingWorktree
@@ -400,7 +400,7 @@ This milestone depends on task02 (`feat/worktree-sidebar-segments`) being merged
 - **Path A — task02 already merged.** Rebase `feat/worktree-pending-row` onto current `main` (`git fetch origin && git rebase origin/main`), pick up `SidebarRow` + `orderedSidebarRows` + the `ForEach` reshape, and complete this milestone in the same PR.
 - **Path B — task02 still in-flight.** Skip this milestone in the initial PR. The reducer changes from M2-M4 still ship usable behavior (sheet dismiss is now non-blocking; `wt sw` runs to completion in background; on success, real worktree row appears via `createWorktreeWithGit` writing to catalog + the existing `orderedVisibleWorktrees` consumer rendering it; on failure, the pending state is invisible — degraded but not broken). The view wiring lands as a one-commit follow-up PR after task02 merges. Note the deferral in the PR body and on master.
 
-For Path A, edits in `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
+For Path A, edits in `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift`:
 
 - Replace the `ForEach(Self.orderedVisibleWorktrees(in: project))` at line 417 with `ForEach(Self.orderedSidebarRows(project: project, pendings: store.pendingWorktrees.elements))`. Inside the closure, switch on `SidebarRow`:
 
@@ -429,7 +429,7 @@ Acceptance: launch the app, open Create Worktree on a real repo, click Create wi
 
 **Goal:** TestStore-driven coverage for the lifecycle, race, retry, cancel, cap. `CreateWorktreeFeatureTests` updated to current shape.
 
-Create `apps/mac/touch-code/Tests/PendingWorktreeLifecycleTests.swift`. Use a controlled `gitWorktreeClient.createWorktreeStream` test value: an `AsyncThrowingStream` whose continuation is accessible to the test so events / errors / termination can be driven manually. Pattern follows existing `Tests/HierarchySidebarFeatureTests.swift` setup. Stub `hierarchyClient.createWorktreeWithGit` etc. with TestStore-friendly values (a synthesized `WorktreeID`, no-throw default).
+Create `apps/mac/codans/Tests/PendingWorktreeLifecycleTests.swift`. Use a controlled `gitWorktreeClient.createWorktreeStream` test value: an `AsyncThrowingStream` whose continuation is accessible to the test so events / errors / termination can be driven manually. Pattern follows existing `Tests/HierarchySidebarFeatureTests.swift` setup. Stub `hierarchyClient.createWorktreeWithGit` etc. with TestStore-friendly values (a synthesized `WorktreeID`, no-throw default).
 
 Tests to add (one `@Test` each):
 
@@ -442,14 +442,14 @@ Tests to add (one `@Test` each):
 7. `pendingCatalogWriteFailureKeepsRowAsFailed` — stub `createWorktreeWithGit` to throw → drive `pendingWorktreeFinished` → assert row remains with `.failed(.commandFailed(...))`. (Validates D4's catalog-write-as-critical-boundary: failure here keeps the pending row.)
 8. `pendingOpenPaneFailureStillRemovesRow` — stub `createWorktreeWithGit` to succeed (returns a synthesized `WorktreeID`) but stub `openPane` (or `createTab`) to throw → drive `pendingWorktreeFinished` → assert pending row is removed AND no `.failed` pending lingers; setup-script effect still fires. (Validates D4's "post-catalog steps are cosmetic" rule: `try?` swallowing must not roll back the pending removal.)
 
-Update `apps/mac/touch-code/Tests/CreateWorktreeFeatureTests.swift`:
+Update `apps/mac/codans/Tests/CreateWorktreeFeatureTests.swift`:
 
 - Drop assertions on `progressLines` and `isSubmitting` (state fields removed).
 - Update `initialState()` factory to pass `currentPendingCountForProject: 0`.
 - Add `createButtonTappedEmitsBeginCreateDelegate` — set valid form state, send `.createButtonTapped`, expect `.delegate(.beginCreate(let pending))` with `pending.spec.branch == "feature/new-idea"` etc. Use `store.exhaustivity = .off` + `await store.receive(\.delegate.beginCreate)` pattern.
 - Add `createButtonTappedRejectedAtCap` — initial state with `currentPendingCountForProject: 8` → send `.createButtonTapped` → assert `submitError` set, no delegate emitted.
 
-Run `xcodebuild test` (via `make mac-build` + manual test invocation, or `xcrun xcodebuild -scheme touch-code -destination 'platform=macOS' test` if test target is configured).
+Run `xcodebuild test` (via `make mac-build` + manual test invocation, or `xcrun xcodebuild -scheme codans -destination 'platform=macOS' test` if test target is configured).
 
 ### Milestone 7: Ship
 
@@ -457,7 +457,7 @@ Run `make mac-lint` (swiftlint clean), `make mac-build` (debug build green). For
 
 ## Concrete Steps
 
-Run all commands from the worktree root `/Users/wanggang/.worktree/repos/touch-code/feat/worktree-pending-row`.
+Run all commands from the worktree root `/Users/wanggang/.worktree/repos/codans/feat/worktree-pending-row`.
 
 **Setup (once, before M1):**
 
@@ -474,18 +474,18 @@ git log --oneline -3
 make mac-lint            # expect: no output (success), exit 0
 make mac-build           # expect: ** BUILD SUCCEEDED **
 # stage only the touched files (no git add -A):
-git add apps/mac/touch-code/App/Features/HierarchySidebar/<files...>
+git add apps/mac/codans/App/Features/HierarchySidebar/<files...>
 /commit                  # use the slash command per project memory
 ```
 
-(Project memory feedback: "invoke `/commit` after each small feature change in touch-code". Do not run raw `git commit`.)
+(Project memory feedback: "invoke `/commit` after each small feature change in codans". Do not run raw `git commit`.)
 
 **M1-specific verification:**
 
 ```bash
-grep -n "humanReadable" apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeFeature.swift
+grep -n "humanReadable" apps/mac/codans/App/Features/HierarchySidebar/CreateWorktreeFeature.swift
 # expect: no private func humanReadable, but multiple call sites referencing the global function
-grep -rn "private func humanReadable" apps/mac/touch-code
+grep -rn "private func humanReadable" apps/mac/codans
 # expect: no matches (both private copies deleted)
 ```
 
@@ -522,7 +522,7 @@ EOF
 A reviewer should be able to verify this PR with the following observations:
 
 1. **Build + lint:** `make mac-lint && make mac-build` green.
-2. **Test suite:** the existing 855+-test suite still green; the 7 new pending-lifecycle tests pass; the updated `CreateWorktreeFeatureTests` pass. Run via the project's standard test invocation (Xcode scheme `touch-code` test action, or equivalent xcodebuild command).
+2. **Test suite:** the existing 855+-test suite still green; the 7 new pending-lifecycle tests pass; the updated `CreateWorktreeFeatureTests` pass. Run via the project's standard test invocation (Xcode scheme `codans` test action, or equivalent xcodebuild command).
 3. **Behavioral demo (only fully verifiable on Path A):**
    - Open a real git repo Project. Click `+` to open Create Worktree. Toggle "Copy ignored files" on. Type a fresh branch name. Click Create.
    - **Expected:** sheet dismisses immediately. A spinner row appears under the Project with text `Creating…` then progress lines from `wt sw`.
@@ -575,13 +575,13 @@ state.createWorktreeSheet = CreateWorktreeFeature.State(
 
 The following symbols must exist and have the listed shapes at end of this work:
 
-In `apps/mac/touch-code/Git/GitWorktreeErrorMessage.swift`:
+In `apps/mac/codans/Git/GitWorktreeErrorMessage.swift`:
 
 ```swift
 internal func humanReadable(_ error: GitWorktreeError) -> String
 ```
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/PendingWorktree.swift`:
+In `apps/mac/codans/App/Features/HierarchySidebar/PendingWorktree.swift`:
 
 ```swift
 nonisolated struct PendingWorktreeID: Hashable, Sendable {
@@ -607,7 +607,7 @@ struct PendingWorktree: Equatable, Identifiable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`:
+In `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarFeature.swift`:
 
 ```swift
 extension HierarchySidebarFeature.State {
@@ -625,7 +625,7 @@ extension HierarchySidebarFeature.Action {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/CreateWorktreeFeature.swift`:
+In `apps/mac/codans/App/Features/HierarchySidebar/CreateWorktreeFeature.swift`:
 
 ```swift
 extension CreateWorktreeFeature.State {
@@ -641,7 +641,7 @@ extension CreateWorktreeFeature.Action.Delegate {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/PendingWorktreeRow.swift`:
+In `apps/mac/codans/App/Features/HierarchySidebar/PendingWorktreeRow.swift`:
 
 ```swift
 struct PendingWorktreeRow: View {
@@ -654,12 +654,12 @@ struct PendingWorktreeRow: View {
 }
 ```
 
-No new external dependencies (no Swift Package additions, no Tuist target changes). The work is contained to existing modules: `touch-code` (App + Git layers) and the existing `TouchCodeCore` types are referenced but not modified.
+No new external dependencies (no Swift Package additions, no Tuist target changes). The work is contained to existing modules: `codans` (App + Git layers) and the existing `CodansCore` types are referenced but not modified.
 
 `HierarchyClient`'s public surface is unchanged — `createWorktreeWithGit`, `selectWorktree`, `createTab`, `openPane`, `runWorktreeLifecycleScript` are called as today, just from the parent reducer instead of from the sheet child. `GitWorktreeClient.createWorktreeStream` is consumed identically; the `continuation.onTermination`-driven cancellation already in place is what makes Cancel actually kill the `wt` subprocess.
 
 Strict no-go list (per bootstrap spec):
 
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` (task01).
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` (task01).
+- `apps/mac/codans/Runtime/HierarchyManager.swift` (task01).
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` (task01).
 - `SidebarRow.swift` shape (task02). If a need to extend appears, escalate to master with a `QUESTION:` message before touching it.

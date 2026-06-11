@@ -7,14 +7,14 @@
 
 ## Context and Scope
 
-touch-code currently exposes preferences through a single SwiftUI `.sheet`
+codans currently exposes preferences through a single SwiftUI `.sheet`
 (`SettingsSheetFeature`/`SettingsSheetView`) presented by `RootFeature` and
 limited to the Editors pane. Two separate `@MainActor` stores write to the
-same on-disk file `~/.config/touch-code/settings.json`:
+same on-disk file `~/.config/codans/settings.json`:
 
 - `SettingsStore` (app target) owns `Settings` (v1, fields: `version`,
   `defaultEditorID`, `customEditors`) — driven by C7/C8 editor work.
-- `NotificationSettingsStore` (app target) owns `TouchCodeSettings` (also
+- `NotificationSettingsStore` (app target) owns `CodansSettings` (also
   `version: 1`, field: `notifications`) — driven by C6 agent notifications.
 
 Each store decodes the file through `AtomicFileStore`, both reject unknown
@@ -32,13 +32,13 @@ design freezes.
 
 Reference files:
 
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — scene graph, `AppState` bring-up.
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — owns the old sheet.
-- `apps/mac/touch-code/App/Features/Settings/{SettingsSheetFeature,SettingsSheetView,SettingsEditorSection,SettingsStore}.swift`.
-- `apps/mac/touch-code/App/Clients/EditorClient.swift` — reads `settings.defaultEditorID`, `settings.customEditors`, catalog `Project.defaultEditor`.
-- `apps/mac/touch-code/App/Clients/InboxClient.swift` — reads/writes `NotificationSettingsStore`.
-- `apps/mac/touch-code/Notifications/{NotificationSettingsStore,NotificationCoordinator,C6AppBootstrap}.swift`.
-- `apps/mac/TouchCodeCore/Editor/Settings.swift` (v1 `Settings`), `EditorStorageModels.swift` (`CustomEditor`), `Project.swift` (`defaultEditor`, `worktreesDirectory`).
+- `apps/mac/codans/App/CodansApp.swift` — scene graph, `AppState` bring-up.
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — owns the old sheet.
+- `apps/mac/codans/App/Features/Settings/{SettingsSheetFeature,SettingsSheetView,SettingsEditorSection,SettingsStore}.swift`.
+- `apps/mac/codans/App/Clients/EditorClient.swift` — reads `settings.defaultEditorID`, `settings.customEditors`, catalog `Project.defaultEditor`.
+- `apps/mac/codans/App/Clients/InboxClient.swift` — reads/writes `NotificationSettingsStore`.
+- `apps/mac/codans/Notifications/{NotificationSettingsStore,NotificationCoordinator,C6AppBootstrap}.swift`.
+- `apps/mac/CodansCore/Editor/Settings.swift` (v1 `Settings`), `EditorStorageModels.swift` (`CustomEditor`), `Project.swift` (`defaultEditor`, `worktreesDirectory`).
 
 ## Goals and Non-Goals
 
@@ -120,7 +120,7 @@ furthering M13.
 
 ```
                  ┌──────────────────────────────────────┐
-                 │ TouchCodeApp (SwiftUI Scene graph)   │
+                 │ CodansApp (SwiftUI Scene graph)   │
                  │                                      │
 ┌─ Menu Bar ─┐   │  WindowGroup "main"                  │
 │ Settings…  │──▶│    → ContentView                     │
@@ -148,8 +148,8 @@ furthering M13.
                  └──────────────────────────────────────┘
                          │ AtomicFileStore write/read (debounced 500 ms)
                          ▼
-                 ~/.config/touch-code/settings.json  (v2)
-                 ~/.config/touch-code/settings.json.v1-<ts>  (backup, on migration)
+                 ~/.config/codans/settings.json  (v2)
+                 ~/.config/codans/settings.json.v1-<ts>  (backup, on migration)
 ```
 
 Consumers besides the window:
@@ -215,7 +215,7 @@ only by their respective owners):
     v1 `Settings.defaultEditorID`).
   - `customEditors: [CustomEditor]` — migrated from v1 `Settings.customEditors`.
 - `NotificationsSettings` — superset of the existing C6 type:
-  - `mute: MuteSettings` (already in `TouchCodeCore/Notifications/MuteSettings.swift`).
+  - `mute: MuteSettings` (already in `CodansCore/Notifications/MuteSettings.swift`).
   - `authStatus: AuthorizationStatusCache` (existing).
   - `neverPrompt: Bool`, `notNowUntil: Date?` (existing).
   - Plus three UI-owned toggles for M5 (inactive in T1; set by T2):
@@ -407,7 +407,7 @@ hard-coding strings, so localisation / rebranding happens in one place:
 
 ### Data Storage
 
-One file, one schema, `~/.config/touch-code/settings.json`:
+One file, one schema, `~/.config/codans/settings.json`:
 
 ```jsonc
 {
@@ -460,7 +460,7 @@ invariant.
 - `Settings.repositories: [ProjectID: RepositorySettings]` — reserved
   for future per-Repo settings that do *not* belong on the catalog
   (e.g. "last time I opened the Hooks pane" or user-visible
-  overrides that should not round-trip through `tc catalog import`).
+  overrides that should not round-trip through `codans catalog import`).
   Empty `RepositorySettings` in T1; T4+ may add fields without
   breaking compatibility.
 
@@ -473,7 +473,7 @@ invariant.
   We declare this explicitly so a field renamed on the catalog side
   cannot silently break settings decoding. The Swift types
   (`ProjectID`) already derive Codable from the UUID-backed base
-  identifier (`TouchCodeCore/IDs.swift`); the settings Codable
+  identifier (`CodansCore/IDs.swift`); the settings Codable
   reuses that derivation, no bespoke converter.
 - **Lenient decode of unknown keys.** The decoder walks the
   `repositories` dictionary as `[String: RepositorySettings]` first,
@@ -555,7 +555,7 @@ Modules and their directions:
 
 ```
 apps/mac/
-├── TouchCodeCore/                (zero internal deps)
+├── CodansCore/                (zero internal deps)
 │   └── Settings/                 (new subfolder)
 │       ├── Settings.swift        (v2 root)
 │       ├── GeneralSettings.swift
@@ -564,7 +564,7 @@ apps/mac/
 │       └── RepositorySettings.swift
 │   └── Editor/                   (unchanged — EditorID / CustomEditor / CommandTemplate / EditorValidators)
 │
-└── touch-code/App/Features/Settings/
+└── codans/App/Features/Settings/
     ├── SettingsStore.swift              (moved in from Settings/, owns v2)
     ├── SettingsWindowFeature.swift      (new reducer)
     ├── SettingsWindowView.swift         (new NavigationSplitView root)
@@ -580,10 +580,10 @@ apps/mac/
         └── SettingsSidebarView.swift
 ```
 
-- `Settings` v2 Codable lives in `TouchCodeCore/Settings/` so the CLI
-  (`tc`) can decode in future (spec M6 Developer "Copy app version"
+- `Settings` v2 Codable lives in `CodansCore/Settings/` so the CLI
+  (`codans`) can decode in future (spec M6 Developer "Copy app version"
   and beyond). Placement is a mild expansion of the existing
-  `TouchCodeCore/Editor/Settings.swift` convention. Tuist
+  `CodansCore/Editor/Settings.swift` convention. Tuist
   `buildableFolders` recurses, so no `Project.swift` edit is required.
 - `SettingsStore` lives in the app target; it references the core
   model directly.
@@ -592,9 +592,9 @@ apps/mac/
   `SettingsStore`, so lives here).
 
 Dependencies:
-- `TouchCodeCore/Settings` depends on `TouchCodeCore` core types
+- `CodansCore/Settings` depends on `CodansCore` core types
   (`ProjectID`, `EditorID`, `CustomEditor`, `MuteSettings`).
-- App target depends on `TouchCodeCore` — unchanged.
+- App target depends on `CodansCore` — unchanged.
 - `RootFeature` loses its `settingsSheet` state and effects; the
   sheet-based delegate action from `WorktreeHeaderFeature`
   (`showCustomEditorsSettings`) is rerouted to an
@@ -602,12 +602,12 @@ Dependencies:
   `EnvironmentValues.openWindow`. Concrete wiring: a new
   `SettingsWindowPresenter` client (TCA dependency) whose
   `.live` closes over `@Environment(\.openWindow)` obtained inside
-  `TouchCodeApp.body` and injected via `.withDependencies`.
+  `CodansApp.body` and injected via `.withDependencies`.
 
 Legacy code removed:
 - `SettingsSheetFeature`, `SettingsSheetView`, `SettingsEditorSection`
   (logic folded into `SettingsGeneralView`).
-- `NotificationSettingsStore` entirely. `TouchCodeSettings` /
+- `NotificationSettingsStore` entirely. `CodansSettings` /
   `NotificationsSettings` v1 types moved: the v1 `NotificationsSettings`
   shape is kept for the legacy-decode path (LegacyV1Settings) but
   not as the in-memory model.
@@ -625,7 +625,7 @@ Legacy code removed:
   the settings file; `inboxStore.saveNow()` + `notificationBootstrap`
   survive unchanged because they write different files.
 
-`TouchCodeApp.body`:
+`CodansApp.body`:
 
 ```swift
 Window("Settings", id: "settings") {
@@ -674,7 +674,7 @@ map.
 - Verdict: rejected. M13 is a *writer-overlap* invariant, not a
   centralization mandate. Keep per-Project fields on the catalog.
 
-### A2. Per-section files under `~/.config/touch-code/` (e.g. `settings/general.json`)
+### A2. Per-section files under `~/.config/codans/` (e.g. `settings/general.json`)
 
 - Pros: writers do not share a file so the keys-overwrite bug becomes
   structurally impossible.
@@ -711,7 +711,7 @@ without colliding.
 
 ### Security / Privacy
 
-- Settings file remains `0600`-private under `~/.config/touch-code/`
+- Settings file remains `0600`-private under `~/.config/codans/`
   (existing `AtomicFileStore` policy).
 - No new secrets stored. Appearance, editor IDs, per-Project paths are
   all user-visible.
@@ -720,7 +720,7 @@ without colliding.
 
 ### Observability
 
-- Reuse `os.Logger(subsystem: "com.touch-code.persistence", category: "settings")`.
+- Reuse `os.Logger(subsystem: "com.gumpw.codans.persistence", category: "settings")`.
 - Add one additional category `category: "migration"` for v1→v2
   migration traces: whether the load saw v2 / v1 / unknown, which legacy
   keys were carried forward, the backup filename. Enough to debug a

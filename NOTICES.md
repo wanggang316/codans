@@ -5,7 +5,7 @@ along with their licenses.
 
 ## Diff renderer web assets
 
-Path: `apps/mac/touch-code/App/Features/Diff/WebAssets/`
+Path: `apps/mac/codans/App/Features/Diff/WebAssets/`
 
 Files (`index.html`, `renderer.js`, `renderer.css`, `manifest.json`) are
 vendored from YiTong v0.1.0
@@ -16,4 +16,4 @@ vendored from YiTong v0.1.0
 - `kpdecker/jsdiff` (BSD-3-Clause, https://github.com/kpdecker/jsdiff)
 
 Full license text and attribution: see
-`apps/mac/touch-code/App/Features/Diff/WebAssets/LICENSE`.
+`apps/mac/codans/App/Features/Diff/WebAssets/LICENSE`.

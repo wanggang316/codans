@@ -6,7 +6,7 @@
 
 ## 1. Context and Scope
 
-touch-code defines its keyboard shortcuts in three disjoint locations today,
+codans defines its keyboard shortcuts in three disjoint locations today,
 each hardcoded:
 
 - **Window-scope SwiftUI bindings** in
@@ -17,14 +17,14 @@ each hardcoded:
 - **Sidebar row hotkeys** in
   `App/Features/HierarchySidebar/HierarchySidebarView.swift:619` — `⌃⌘1`–`⌃⌘9`
   attached to a zero-frame invisible Button per visible Worktree row.
-- **App-scope binding** in `App/TouchCodeApp.swift:85` — `⌘,` for the
+- **App-scope binding** in `App/CodansApp.swift:85` — `⌘,` for the
   Settings window via `CommandGroup(replacing: .appSettings)`.
 
 Two further consumers display shortcut hints but do not bind keys:
 
 - `Features/CommandPalette/CommandPaletteItems.swift` renders display strings
   (`["⌘", "⇧", "G"]`) on rows via `KeyEquivalentDescriptor`.
-- `TouchCodeCore/Shortcuts/CommandPaletteShortcut.swift` exports `keyChar`
+- `CodansCore/Shortcuts/CommandPaletteShortcut.swift` exports `keyChar`
   and `displayString` constants so `MainWindowCommands` and
   `StatusMotivationalView` agree on the `⌘P` chord.
 
@@ -48,7 +48,7 @@ same path rather than re-introducing per-feature drift.
 - A single registry of every user-bindable in-app shortcut, keyed by a
   stable `CommandID`, with the default chord encoded once.
 - Persistence of user overrides in a dedicated file
-  `~/.config/touch-code/shortcuts.json`, separate from `settings.json`.
+  `~/.config/codans/shortcuts.json`, separate from `settings.json`.
 - A Settings → Shortcuts pane that replaces `ComingSoonPane`: search,
   group by category, record-new-chord, disable, per-row reset, reset-all.
 - Conflict detection across three tiers: macOS system-reserved chords, the
@@ -91,7 +91,7 @@ Three layers, with strict dependency direction:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  TouchCodeCore/Shortcuts/   (no SwiftUI / no AppKit)│
+│  CodansCore/Shortcuts/   (no SwiftUI / no AppKit)│
 │    CommandID enum                                   │
 │    ShortcutBinding                                  │
 │    ShortcutSchema (defaults, version)               │
@@ -102,7 +102,7 @@ Three layers, with strict dependency direction:
 └──────────────────────┬──────────────────────────────┘
                        │ pure data only
 ┌──────────────────────▼──────────────────────────────┐
-│  touch-code/App/Shortcuts/   (SwiftUI + AppKit glue)│
+│  codans/App/Shortcuts/   (SwiftUI + AppKit glue)│
 │    ShortcutsStore (file I/O, debounced)             │
 │    ShortcutDisplay (UCKeyTranslate)                 │
 │    HotkeyRecorderNSView + SwiftUI wrapper           │
@@ -139,7 +139,7 @@ correct behavior for non-US-QWERTY users without per-layout overrides.
 ```
                 ┌──────────────────────────┐
                 │  shortcuts.json (disk)   │
-                │  ~/.config/touch-code/   │
+                │  ~/.config/codans/   │
                 └────────────┬─────────────┘
                              │ AtomicFileStore
                              │ (500 ms debounce)
@@ -174,7 +174,7 @@ correct behavior for non-US-QWERTY users without per-layout overrides.
 
 #### 3.3.1 `CommandID`
 
-A closed enum in `TouchCodeCore/Shortcuts/CommandID.swift`. Conforms to
+A closed enum in `CodansCore/Shortcuts/CommandID.swift`. Conforms to
 `Hashable`, `Sendable`, and a custom `RawRepresentable` over `String` whose
 raw values are stable JSON keys (the persisted file uses these strings
 verbatim).
@@ -222,7 +222,7 @@ public struct ShortcutBinding: Equatable, Hashable, Sendable, Codable {
 
 `ModifierMask` is an `OptionSet<UInt8>` defined alongside, deliberately not
 SwiftUI's `EventModifiers` or AppKit's `NSEvent.ModifierFlags` — those are
-platform types in the upper layer; this struct lives in TouchCodeCore which
+platform types in the upper layer; this struct lives in CodansCore which
 has no SwiftUI/AppKit dependency. Conversions are one-line in
 `ShortcutDisplay`.
 
@@ -439,8 +439,8 @@ failure). Justification for parallel-store rather than fold-into-Settings:
 - A standalone file is the right shape for the deferred export feature:
   the user can already inspect and copy `shortcuts.json` directly.
 
-File path: `~/.config/touch-code/shortcuts.json`. Discovered via the same
-`NSHomeDirectory()` + `.config/touch-code/` convention `Settings.defaultURL()`
+File path: `~/.config/codans/shortcuts.json`. Discovered via the same
+`NSHomeDirectory()` + `.config/codans/` convention `Settings.defaultURL()`
 uses, factored into a shared helper if both stores end up needing it.
 
 Schema versioning: an explicit `version: 1` field at the document root.
@@ -464,7 +464,7 @@ extension EnvironmentValues {
 }
 ```
 
-`TouchCodeApp.swift` injects the store's resolved map at the top of the
+`CodansApp.swift` injects the store's resolved map at the top of the
 view tree:
 
 ```swift
@@ -539,7 +539,7 @@ The `selectWorktreeAt(index:)` helper maps `1...9 → .selectWorktreeAt1 …
 .selectWorktreeAt9`. Indices outside that range (rows 10+) get no hotkey,
 matching today's behavior.
 
-`TouchCodeApp.swift` — the `⌘,` button stays inline (it is `.systemFixed`
+`CodansApp.swift` — the `⌘,` button stays inline (it is `.systemFixed`
 and the chord is `kVK_ANSI_Comma + .command`); the registry contains the
 entry for *display* purposes in the Settings pane, but the actual binding
 is left as the existing literal `.keyboardShortcut(",", modifiers: .command)`
@@ -628,7 +628,7 @@ frame.
 
 ## 4. Component Boundaries
 
-New files in `apps/mac/TouchCodeCore/Shortcuts/`:
+New files in `apps/mac/CodansCore/Shortcuts/`:
 
 - `CommandID.swift` — the closed enum.
 - `ShortcutBinding.swift` — `ShortcutBinding`, `ModifierMask`.
@@ -641,11 +641,11 @@ New files in `apps/mac/TouchCodeCore/Shortcuts/`:
 - `ConflictDetectors/AppKitReservedDetector.swift`
 - `ConflictDetectors/InternalConflictDetector.swift`
 
-Existing `TouchCodeCore/Shortcuts/CommandPaletteShortcut.swift` is
+Existing `CodansCore/Shortcuts/CommandPaletteShortcut.swift` is
 **deleted**; its two consumers (`MainWindowCommands`,
 `StatusMotivationalView`) migrate to the registry.
 
-New files in `apps/mac/touch-code/App/Shortcuts/`:
+New files in `apps/mac/codans/App/Shortcuts/`:
 
 - `ShortcutsStore.swift` — `@MainActor @Observable` owner of
   `shortcuts.json`. Mirrors `SettingsStore` boilerplate (atomic write,
@@ -657,7 +657,7 @@ New files in `apps/mac/touch-code/App/Shortcuts/`:
 - `HotkeyRecorder/HotkeyRecorderNSView.swift`
 - `HotkeyRecorder/HotkeyRecorderView.swift` — SwiftUI wrapper.
 
-New file in `apps/mac/touch-code/App/Features/Settings/Panes/`:
+New file in `apps/mac/codans/App/Features/Settings/Panes/`:
 
 - `ShortcutsSettingsView.swift` — replaces the `ComingSoonPane` mount.
 
@@ -673,7 +673,7 @@ Touched outside these directories:
   `ShortcutSchema.app`.
 - `App/Features/Settings/SettingsWindowView.swift` — line 83 swaps
   `ComingSoonPane` for `ShortcutsSettingsView`.
-- `App/TouchCodeApp.swift` — instantiates `ShortcutsStore`, injects
+- `App/CodansApp.swift` — instantiates `ShortcutsStore`, injects
   `\.resolvedShortcuts` at the top of the view tree.
 - `Features/CommandPalette/CommandPaletteItems.swift` — the
   `KeyEquivalentDescriptor` for each row is built from the resolved map
@@ -681,9 +681,9 @@ Touched outside these directories:
 - `Runtime/Status/StatusMotivationalView.swift` — palette hint reads from
   the resolved map.
 
-Dependency direction: TouchCodeCore stays SwiftUI-free and AppKit-free;
+Dependency direction: CodansCore stays SwiftUI-free and AppKit-free;
 the `App/Shortcuts/` glue layer is the only place that imports SwiftUI,
-AppKit, and `TouchCodeCore`. Nothing in TouchCodeCore reaches up.
+AppKit, and `CodansCore`. Nothing in CodansCore reaches up.
 
 ## 5. Cross-Cutting Concerns
 
@@ -708,7 +708,7 @@ sed-and-substitute step.
 A single signpost stream:
 
 ```swift
-let logger = Logger(subsystem: "com.touch-code.shortcuts", category: "registry")
+let logger = Logger(subsystem: "com.gumpw.codans.shortcuts", category: "registry")
 ```
 
 Events:
@@ -726,7 +726,7 @@ user content).
 
 ### 5.3 Testing Strategy
 
-Unit tests in `TouchCodeCoreTests/Shortcuts/`:
+Unit tests in `CodansCoreTests/Shortcuts/`:
 
 - `ShortcutResolverTests` — empty overrides ⇒ schema; partial overrides ⇒
   merged; disabled override ⇒ resolved with `isEnabled = false` and
@@ -744,7 +744,7 @@ Unit tests in `TouchCodeCoreTests/Shortcuts/`:
   matches the literal previously used at the call site (snapshot check
   pinned during the migration commit).
 
-Unit tests in `apps/mac/touch-code/Tests/Shortcuts/` (App-target tests
+Unit tests in `apps/mac/codans/Tests/Shortcuts/` (App-target tests
 because they depend on AppKit / SwiftUI shims):
 
 - `ShortcutDisplayTests` — fixed-fixture layout (programmatically install

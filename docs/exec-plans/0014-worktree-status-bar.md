@@ -21,7 +21,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 - [x] 写 ExecPlan（本文件）
 - [x] **M1 Skeleton** (2026-04-24)
-  - [x] M1.1 StatusToast 值类型（TouchCodeCore/StatusBar/StatusToast.swift） — commit `7e7610c`
+  - [x] M1.1 StatusToast 值类型（CodansCore/StatusBar/StatusToast.swift） — commit `7e7610c`
   - [x] M1.2 StatusBarFeature reducer + 单测（7/7 绿） — commit `c579d2f`
   - [x] M1.3 StatusBarView 最小实现 + 挂 toolbar
 - [x] **M2 Editor hook** (2026-04-24)
@@ -44,12 +44,12 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Surprises & Discoveries
 
-- **2026-04-24 (M1.2 → M2.1)** The `touch-code` test target shares its app binary as the xctest host. When a test run starts, SwiftUI mounts `TouchCodeApp` + `AppState.bringUp()` in the same process, which touches live clients (GitHubClient, EditorClient, …). Under swift-testing's default parallel execution, that bootstrap races with our TestStores and produces non-deterministic `Test crashed with signal trap` on whichever test happens to be on-CPU. Running individual `StatusBarFeatureTests` cases in isolation passes every time; running the whole suite is flaky (observed 7/7, 6/7, 2/7 in three consecutive attempts). This is pre-existing and orthogonal to 0014 — any new TestStore suite in this target is exposed to the same race. **Workaround**: rely on `-only-testing` at the test-function level for deterministic signal during M1-M7 work; do not treat aggregate flakes as code regressions. A follow-up hardening task (add `LSUIElement` + test-mode guard in `AppState.bringUp()`) is a candidate for a separate plan. M2 forwarding tests that touched `RootFeature` + `StatusBarFeature` in one TestStore were retired in favour of a pure-function `shortToastMessage` test; the `.editor(.openSucceeded/.openFailed)` → `.statusBar(.push(...))` forwarding is verified via app-run smoke (M7 step).
+- **2026-04-24 (M1.2 → M2.1)** The `codans` test target shares its app binary as the xctest host. When a test run starts, SwiftUI mounts `CodansApp` + `AppState.bringUp()` in the same process, which touches live clients (GitHubClient, EditorClient, …). Under swift-testing's default parallel execution, that bootstrap races with our TestStores and produces non-deterministic `Test crashed with signal trap` on whichever test happens to be on-CPU. Running individual `StatusBarFeatureTests` cases in isolation passes every time; running the whole suite is flaky (observed 7/7, 6/7, 2/7 in three consecutive attempts). This is pre-existing and orthogonal to 0014 — any new TestStore suite in this target is exposed to the same race. **Workaround**: rely on `-only-testing` at the test-function level for deterministic signal during M1-M7 work; do not treat aggregate flakes as code regressions. A follow-up hardening task (add `LSUIElement` + test-mode guard in `AppState.bringUp()`) is a candidate for a separate plan. M2 forwarding tests that touched `RootFeature` + `StatusBarFeature` in one TestStore were retired in favour of a pure-function `shortToastMessage` test; the `.editor(.openSucceeded/.openFailed)` → `.statusBar(.push(...))` forwarding is verified via app-run smoke (M7 step).
 
 ## Decision Log
 
 - **2026-04-24** 设计阶段已确认：状态归属 → 新建 `StatusBarFeature`；toast 发射 → RootFeature 路由既有 child actions；PR 数据 → 读 `GitHubFeature.State.snapshots`；快捷键 → 硬编码 + 共享常量；toast 节流 → sequence token + 后到覆盖；窄窗口 → `ViewThatFits` 三档；状态机 → TCA reducer + `TestClock`。详见 design doc §3-4。
-- **2026-04-24 (M4.B)** Reused the existing `CommandKeyObserver` from `App/Features/HierarchySidebar/` rather than adding a second class under `App/Features/StatusBar/`. The existing class already self-installs its NSEvent monitor at `init`, handles teardown via a `nonisolated` `MonitorStorage` helper, and exposes `isCommandHeld: Bool`. Its file location is incidental; wiring it through the scene's `.environment` at `TouchCodeApp` level makes it reachable from StatusPullRequestView without a file move. Diverges from Plan §Interfaces: `isPressed` is named `isCommandHeld` and there is no `start()` / `stop()` pair.
+- **2026-04-24 (M4.B)** Reused the existing `CommandKeyObserver` from `App/Features/HierarchySidebar/` rather than adding a second class under `App/Features/StatusBar/`. The existing class already self-installs its NSEvent monitor at `init`, handles teardown via a `nonisolated` `MonitorStorage` helper, and exposes `isCommandHeld: Bool`. Its file location is incidental; wiring it through the scene's `.environment` at `CodansApp` level makes it reachable from StatusPullRequestView without a file move. Diverges from Plan §Interfaces: `isPressed` is named `isCommandHeld` and there is no `start()` / `stop()` pair.
 - **2026-04-24 (M4.C)** PR form's click action is **opens GitHub URL** (via `.gitHub(.delegate(.openURL))`) rather than the `PullRequestPopover` reuse called out in Plan §Plan of Work > Milestone 4. Hosting the popover on the titlebar anchor would require either (a) sharing `GitHubFeature.State.popoverTarget` with the sidebar badge (produces a single-popover-at-a-time race with ambiguous anchoring) or (b) introducing a new per-status-bar presentation state + extracting a 60-line popover-content builder out of `HierarchySidebarView`. For M4.C the click=URL path delivers the MVP visual surface; the popover integration is tracked as OQ-7 below. Spec AC-PR-3 needs a follow-up amendment.
 
 ## Outcomes & Retrospective
@@ -91,17 +91,17 @@ Next: `/codex:review` over the branch.
 
 **Key source files**（本计划要读 / 改的文件）：
 
-- `apps/mac/touch-code/App/Features/Root/RootFeature.swift` — 912 行总聚合 reducer。新 `StatusBarFeature` scope 与 toast 路由分支都挂在它的 `headerAndEditorScopes` / `coreReducer` 里。
-- `apps/mac/touch-code/App/Features/WorktreeDetail/WorktreeDetailView.swift:161-218` — 现有 titlebar toolbar 内容，本计划在 navigation group 和 primaryAction group 之间插入中段槽。
-- `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift:33-36,131-135` — `OpenResultMarker` 枚举 + `openSucceeded/.openFailed` action，是 M2 的上游信号。
-- `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift` — `snapshots[WorktreeID]` 是 M4 读源，`mergeCompleted/.closeCompleted/.markReadyCompleted/.rerunFailedJobsCompleted` 是 M3 的上游信号。
-- `apps/mac/TouchCodeCore/GitHub/PullRequestSnapshot.swift` — `PullRequestState` / `checkRollup: [CheckResult]` / `state` 字段形状。
-- `apps/mac/touch-code/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift:38` — `PullRequestBadge.CheckRollup.from(checks:)` 既有 rollup 汇总函数，M4.A 复用它，不重写。
-- `apps/mac/touch-code/App/Features/GitHub/Theme/PullRequestStateColors.swift` — `PullRequestStateColor` / `CheckRollupColor` 已有颜色常量，M4 / M4.A 直接读。
-- `apps/mac/touch-code/App/Features/GitHub/Views/PullRequestPopover.swift` — 360pt 已有 popover，M4 只复用不修改。
-- `apps/mac/touch-code/App/Commands/MainWindowCommands.swift:37` — `⌘P` 硬编码处，M5.A 迁移到共享常量。
-- `apps/mac/touch-code/App/TouchCodeApp.swift` — bootstrap；注入 `CommandKeyObserver` environment 和把 `gitHubStore` 透传。
-- `apps/mac/touch-code/App/ContentView.swift` — `WorktreeDetailView` 构造 / store scoping 入口。
+- `apps/mac/codans/App/Features/Root/RootFeature.swift` — 912 行总聚合 reducer。新 `StatusBarFeature` scope 与 toast 路由分支都挂在它的 `headerAndEditorScopes` / `coreReducer` 里。
+- `apps/mac/codans/App/Features/WorktreeDetail/WorktreeDetailView.swift:161-218` — 现有 titlebar toolbar 内容，本计划在 navigation group 和 primaryAction group 之间插入中段槽。
+- `apps/mac/codans/App/Features/Editor/EditorFeature.swift:33-36,131-135` — `OpenResultMarker` 枚举 + `openSucceeded/.openFailed` action，是 M2 的上游信号。
+- `apps/mac/codans/App/Features/GitHub/GitHubFeature.swift` — `snapshots[WorktreeID]` 是 M4 读源，`mergeCompleted/.closeCompleted/.markReadyCompleted/.rerunFailedJobsCompleted` 是 M3 的上游信号。
+- `apps/mac/CodansCore/GitHub/PullRequestSnapshot.swift` — `PullRequestState` / `checkRollup: [CheckResult]` / `state` 字段形状。
+- `apps/mac/codans/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift:38` — `PullRequestBadge.CheckRollup.from(checks:)` 既有 rollup 汇总函数，M4.A 复用它，不重写。
+- `apps/mac/codans/App/Features/GitHub/Theme/PullRequestStateColors.swift` — `PullRequestStateColor` / `CheckRollupColor` 已有颜色常量，M4 / M4.A 直接读。
+- `apps/mac/codans/App/Features/GitHub/Views/PullRequestPopover.swift` — 360pt 已有 popover，M4 只复用不修改。
+- `apps/mac/codans/App/Commands/MainWindowCommands.swift:37` — `⌘P` 硬编码处，M5.A 迁移到共享常量。
+- `apps/mac/codans/App/CodansApp.swift` — bootstrap；注入 `CommandKeyObserver` environment 和把 `gitHubStore` 透传。
+- `apps/mac/codans/App/ContentView.swift` — `WorktreeDetailView` 构造 / store scoping 入口。
 
 **术语定义**：
 
@@ -118,7 +118,7 @@ Next: `/codex:review` over the branch.
 
 **目的**：让 titlebar 多出一个可见的中段槽，reducer 能接收 toast push、3s 后自动清 success / 8s 自动清 warning。其他形态本 milestone 不实现；`toast == nil` 时中段渲染 `EmptyView()`。
 
-- **M1.1**（commit #1） 新建 `apps/mac/TouchCodeCore/StatusBar/StatusToast.swift`：
+- **M1.1**（commit #1） 新建 `apps/mac/CodansCore/StatusBar/StatusToast.swift`：
   ```
   public enum StatusToast: Equatable, Sendable {
     case inProgress(String)
@@ -126,9 +126,9 @@ Next: `/codex:review` over the branch.
     case warning(String)
   }
   ```
-  需要编辑 `apps/mac/TouchCodeCore/Sources/...` 的模块导出（如果 Tuist 用 source glob 可跳过）。commit message: `feat(statusbar): add StatusToast value type`。
+  需要编辑 `apps/mac/CodansCore/Sources/...` 的模块导出（如果 Tuist 用 source glob 可跳过）。commit message: `feat(statusbar): add StatusToast value type`。
   
-- **M1.2**（commit #2） 新建 `apps/mac/touch-code/App/Features/StatusBar/StatusBarFeature.swift` 与 `apps/mac/touch-code/Tests/StatusBarTests/StatusBarFeatureTests.swift`：
+- **M1.2**（commit #2） 新建 `apps/mac/codans/App/Features/StatusBar/StatusBarFeature.swift` 与 `apps/mac/codans/Tests/StatusBarTests/StatusBarFeatureTests.swift`：
   - reducer 维护 `toast: StatusToast?` + `sequence: UInt64`
   - `.push(toast)`：替换 `state.toast`，`sequence &+= 1`，取消旧 timer；success 调度 3s `.cleared(currentSeq)`，warning 调度 8s，inProgress 无 timer
   - `.cleared(seq)`：若 `seq == state.sequence` 才清空，否则吞掉
@@ -139,7 +139,7 @@ Next: `/codex:review` over the branch.
   
 - **M1.3**（commit #3） 挂在 RootFeature 与 View 层：
   - `RootFeature.swift`：`State` 追加 `var statusBar: StatusBarFeature.State = .init()`；`Action` 追加 `case statusBar(StatusBarFeature.Action)`；`headerAndEditorScopes` 追加 `Scope(state: \.statusBar, action: \.statusBar) { StatusBarFeature() }`。
-  - 新建 `apps/mac/touch-code/App/Features/StatusBar/StatusBarView.swift`：顶层 SwiftUI 视图，现阶段 body 为：
+  - 新建 `apps/mac/codans/App/Features/StatusBar/StatusBarView.swift`：顶层 SwiftUI 视图，现阶段 body 为：
     ```
     if let toast = store.toast {
       StatusToastView(toast: toast)
@@ -149,7 +149,7 @@ Next: `/codex:review` over the branch.
       Color.clear.frame(width: 1, height: 1)
     }
     ```
-  - 新建 `apps/mac/touch-code/App/Features/StatusBar/Views/StatusToastView.swift`：根据 case 渲染 spinner / 绿 ✓ / 橙 ▲ + secondary 文本。
+  - 新建 `apps/mac/codans/App/Features/StatusBar/Views/StatusToastView.swift`：根据 case 渲染 spinner / 绿 ✓ / 橙 ▲ + secondary 文本。
   - `WorktreeDetailView.swift:161-218` 的 `worktreeToolbarContent(address:info:)`：在 `branchToolbarItem` 之后、`ToolbarItemGroup(placement: .primaryAction)` 之前插入：
     ```
     ToolbarSpacer(.flexible)
@@ -222,18 +222,18 @@ Next: `/codex:review` over the branch.
 
 本 milestone 三个 subtask 可并行：**M4.A、M4.B、M5.A**（M5.A 虽属 M5 范畴但独立度高，和 M4 一起放到 Agent teams 批次里）。
 
-- **M4.A**（commit #6，**可并行**） 新建 `apps/mac/touch-code/App/Features/StatusBar/Views/ChecksRollupRing.swift`：
+- **M4.A**（commit #6，**可并行**） 新建 `apps/mac/codans/App/Features/StatusBar/Views/ChecksRollupRing.swift`：
   - 输入 `let checks: [CheckResult]`；内部调用既有 `PullRequestBadge.CheckRollup.from(checks: checks)`
   - 渲染 14×14 pt `Canvas` 四色环；段色来自 `CheckRollupColor.{passing,failing,pending,neutral}`
   - `total == 0` → `EmptyView`
   - 单测用例（纯函数 layout）：`{passing:4, failing:0, pending:0, neutral:0}` → 单段绿；`{passing:2, failing:1, pending:1, neutral:0}` → 三段顺时针 180° / 90° / 90°
   - commit: `feat(statusbar): add ChecksRollupRing view`
 
-- **M4.B**（commit #7，**可并行**） 新建 `apps/mac/touch-code/App/Features/StatusBar/CommandKeyObserver.swift`：
+- **M4.B**（commit #7，**可并行**） 新建 `apps/mac/codans/App/Features/StatusBar/CommandKeyObserver.swift`：
   - `@Observable final class CommandKeyObserver: NSObject` + `var isPressed: Bool`
   - `start()` 调 `NSEvent.addLocalMonitorForEvents(matching: .flagsChanged)`，capture weak self；更新 `isPressed = ev.modifierFlags.contains(.command)`
   - `stop()` 调 `NSEvent.removeMonitor`
-  - `TouchCodeApp` 用 `@State private var commandKeyObserver = CommandKeyObserver()`，`WindowGroup.onAppear { commandKeyObserver.start() }.onDisappear { commandKeyObserver.stop() }`，`.environment(commandKeyObserver)` 注入
+  - `CodansApp` 用 `@State private var commandKeyObserver = CommandKeyObserver()`，`WindowGroup.onAppear { commandKeyObserver.start() }.onDisappear { commandKeyObserver.stop() }`，`.environment(commandKeyObserver)` 注入
   - 单测：触发一个合成 `.flagsChanged` event 验证 `isPressed` 翻转
   - commit: `feat(statusbar): add CommandKeyObserver for ⌘-hold detection`
 
@@ -248,7 +248,7 @@ Next: `/codex:review` over the branch.
       return .motivational
     }
     ```
-  - 新建 `apps/mac/touch-code/App/Features/StatusBar/Views/StatusPullRequestView.swift`：
+  - 新建 `apps/mac/codans/App/Features/StatusBar/Views/StatusPullRequestView.swift`：
     - 徽章：`#N` + `PullRequestStateColor.<state>Fill`
     - 点击：`store.send(.gitHub(.presentPopover(worktreeID, worktreePath)))`，popover 内容 = 既有 `PullRequestPopover`（从 sidebar 那边已有的 binding 复用 / 或从 GitHubFeature scope 里读 `store.popoverTarget == worktreeID`）
     - `⌘+click`：`NSWorkspace.shared.open(snapshot.url)` 或者走 `.delegate(.openURL(snapshot.url))`
@@ -265,16 +265,16 @@ Next: `/codex:review` over the branch.
 
 **目的**：无 toast、无 PR 时 titlebar 显示时间 + 时段图标 + `Open Command Palette ⌘P`。
 
-- **M5.A**（commit #9，**可并行**，与 M4.A / M4.B 一同进 agent teams 批次） 新建 `apps/mac/TouchCodeCore/Shortcuts/CommandPaletteShortcut.swift`：
+- **M5.A**（commit #9，**可并行**，与 M4.A / M4.B 一同进 agent teams 批次） 新建 `apps/mac/CodansCore/Shortcuts/CommandPaletteShortcut.swift`：
   ```
   public enum CommandPaletteShortcut {
     public static let keyChar: Character = "p"
     public static let displayString: String = "⌘P"
   }
   ```
-  （SwiftUI 的 `EventModifiers` 依赖 SwiftUI import —— 若 TouchCodeCore 不 link SwiftUI，就只放 keyChar + displayString，modifier 在 app 层硬编码 `.command`。）
+  （SwiftUI 的 `EventModifiers` 依赖 SwiftUI import —— 若 CodansCore 不 link SwiftUI，就只放 keyChar + displayString，modifier 在 app 层硬编码 `.command`。）
   
-  改 `apps/mac/touch-code/App/Commands/MainWindowCommands.swift:37`：
+  改 `apps/mac/codans/App/Commands/MainWindowCommands.swift:37`：
   ```
   .keyboardShortcut(KeyEquivalent(CommandPaletteShortcut.keyChar), modifiers: .command)
   ```
@@ -282,7 +282,7 @@ Next: `/codex:review` over the branch.
   
   commit: `refactor(shortcuts): extract CommandPaletteShortcut shared constant`
 
-- **M5.B**（commit #10） 新建 `apps/mac/touch-code/App/Features/StatusBar/Views/StatusMotivationalView.swift`：
+- **M5.B**（commit #10） 新建 `apps/mac/codans/App/Features/StatusBar/Views/StatusMotivationalView.swift`：
   - `TimelineView(.everyMinute)` 取当前 `Date`，`Calendar.current.component(.hour, ...)`
   - 纯函数 `static func timeStyle(for hour: Int) -> (icon: String, color: Color)`，断言：`6..<12 → sunrise.fill / orange`，`12..<17 → sun.max.fill / yellow`，`17..<21 → sunset.fill / pink`，其他 → `moon.stars.fill / indigo`
   - 文案：`"\(date, format: .dateTime.hour().minute()) – Open Command Palette \(CommandPaletteShortcut.displayString)"`，`.font(.footnote).monospaced().foregroundStyle(.secondary)`
@@ -311,7 +311,7 @@ Next: `/codex:review` over the branch.
 **目的**：可访问性 + 代码卫生。
 
 - **M7.1**（commit #12） `SharedBackgroundHidden` `ViewModifier`：
-  - 新建 `apps/mac/touch-code/App/Features/StatusBar/SharedBackgroundHidden.swift`（或更广的 `Theme/`）
+  - 新建 `apps/mac/codans/App/Features/StatusBar/SharedBackgroundHidden.swift`（或更广的 `Theme/`）
   - 定义：
     ```
     struct SharedBackgroundHidden: ViewModifier {
@@ -335,7 +335,7 @@ Next: `/codex:review` over the branch.
 
 ```bash
 # 在 worktree 根目录
-cd /Users/wanggang/.prowl/repos/touch-code/feature/status-bar
+cd /Users/wanggang/.prowl/repos/codans/feature/status-bar
 
 # 编辑 → 编译
 make mac-build             # 首轮从头编可能 ~2min；增量 ~10s
@@ -344,9 +344,9 @@ make mac-build             # 首轮从头编可能 ~2min；增量 ~10s
 # 跑测试
 # 首轮用 xcodebuild 全量：
 cd apps/mac && xcodebuild test \
-  -workspace touch-code.xcworkspace \
-  -scheme touch-code \
-  -only-testing:touch-codeTests/StatusBarFeatureTests 2>&1 | xcbeautify
+  -workspace codans.xcworkspace \
+  -scheme codans \
+  -only-testing:codansTests/StatusBarFeatureTests 2>&1 | xcbeautify
 # → 期望："Test Suite StatusBarFeatureTests passed"
 
 # 风格检查
@@ -441,7 +441,7 @@ ViewThatFits(in: .horizontal) {
 
 **必须在本计划结束后存在的类型与签名**：
 
-在 `apps/mac/TouchCodeCore/StatusBar/StatusToast.swift`：
+在 `apps/mac/CodansCore/StatusBar/StatusToast.swift`：
 
 ```
 public enum StatusToast: Equatable, Sendable {
@@ -451,7 +451,7 @@ public enum StatusToast: Equatable, Sendable {
 }
 ```
 
-在 `apps/mac/TouchCodeCore/Shortcuts/CommandPaletteShortcut.swift`：
+在 `apps/mac/CodansCore/Shortcuts/CommandPaletteShortcut.swift`：
 
 ```
 public enum CommandPaletteShortcut {
@@ -460,7 +460,7 @@ public enum CommandPaletteShortcut {
 }
 ```
 
-在 `apps/mac/touch-code/App/Features/StatusBar/StatusBarFeature.swift`：
+在 `apps/mac/codans/App/Features/StatusBar/StatusBarFeature.swift`：
 
 ```
 @Reducer

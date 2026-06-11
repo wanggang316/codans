@@ -27,30 +27,30 @@ and list-heavy surfaces (Scripts, Hooks) keep their own pages.
 
 Reference files (read for this design):
 
-- `apps/mac/touch-code/App/Features/Settings/Panes/SettingsGeneralView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/SettingsGeneralView.swift`
   — Form / Section / Picker pattern the new General pane mirrors.
-- `apps/mac/touch-code/App/Features/Settings/Panes/GitHubSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/GitHubSettingsView.swift`
   — global GitHub Section structure that the per-Project GitHub Section reuses.
-- `apps/mac/touch-code/App/Features/Settings/Panes/ProjectGeneralSettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/ProjectGeneralSettingsView.swift`
   — Phase 1 General pane that grows substantially in Phase 2.
-- `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift` — sub-pane
+- `apps/mac/codans/App/Features/Settings/SettingsSection.swift` — sub-pane
   enum that shrinks from 6 to 3 Project cases.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift` —
   pane-state composition; `projectsChanged` re-seeds `kind`, the same hook
   retires the now-unreachable Git/GitHub/Env panes.
-- `apps/mac/touch-code/Hooks/HookConfigStore.swift` — `load` / `save` /
+- `apps/mac/codans/Hooks/HookConfigStore.swift` — `load` / `save` /
   `scheduleSave` / `flush` / `upsertInternal` (the existing internal-namespace
   upsert pattern that user-facing edit reuses).
-- `apps/mac/touch-code/App/Clients/HookConfigClient.swift` — TCA bridge that
+- `apps/mac/codans/App/Clients/HookConfigClient.swift` — TCA bridge that
   Phase 2 widens with `save` / `upsert` / `delete` closures.
-- `apps/mac/touch-code/Runtime/TerminalEngine.swift` and
-  `apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift` — the spawn path
+- `apps/mac/codans/Runtime/TerminalEngine.swift` and
+  `apps/mac/codans/Runtime/Ghostty/PaneSurface.swift` — the spawn path
   envVars need to ride through.
-- `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift` — the 9-case Scope
+- `apps/mac/CodansCore/Hooks/HookSubscription.swift` — the 9-case Scope
   enum the inline editor renders a kind-aware picker for.
-- `apps/mac/TouchCodeCore/Settings/{ProjectSettings,GitProjectSettings,ScriptDefinition}.swift`
+- `apps/mac/CodansCore/Settings/{ProjectSettings,GitProjectSettings,ScriptDefinition}.swift`
   — schema slots that Phase 2 fills (no version bump).
-- `apps/mac/touch-code/App/Features/CommandPalette/CommandPaletteItem.swift`
+- `apps/mac/codans/App/Features/CommandPalette/CommandPaletteItem.swift`
   — palette extension point for surfacing user-defined scripts.
 
 Adjacent work:
@@ -283,7 +283,7 @@ Section "Default Shell"
 [git_repo only:]
 Section "Worktree"
   ┌─ TextField + "Choose…" — projects[pid]?.worktreesDirectory
-  │    nil case shows "Use global default — ~/.touch-code/repos/<name>"
+  │    nil case shows "Use global default — ~/.codans/repos/<name>"
   ├─ TextField "Base ref" — projects[pid]?.git?.worktreeBaseRef
   │    nil case shows placeholder "Use global default — origin/HEAD"
   ├─ Toggle "Copy .gitignore'd files when creating worktree"
@@ -555,7 +555,7 @@ State source: `settingsStore.settings.projects[currentProjectID]?.scripts ?? []`
 
 `ProjectSettings.envVars: [String: String]` lives on disk; the resolved
 env at spawn time merges `ProcessInfo.processInfo.environment` (the
-touch-code app's own env) with `projects[pid].envVars`. Project keys
+codans app's own env) with `projects[pid].envVars`. Project keys
 win on collision. The merge happens in a single helper:
 
 ```swift
@@ -584,7 +584,7 @@ The merged map flows through:
 
 `PaneSurface.init` widens to accept `env: [String: String]`. The
 implementation tries libghostty's per-surface env config first; if the
-ghostty SDK exposed by the touch-code worktree's vendored ghostty does
+ghostty SDK exposed by the codans worktree's vendored ghostty does
 not have such a hook, the fallback is to type `export KEY='VALUE'`
 lines into the PTY before any `initialCommand`. The fallback uses
 single-quote escaping (POSIX-compatible) and prefixes each line with a
@@ -693,7 +693,7 @@ in-memory `HookConfig.subscriptions` array. `upsert` matches
 no-ops when the id is missing — matches "best-effort delete on a stale
 ID" semantics.
 
-The store's `upsertInternal` already reserves the `__touch-code/internal:`
+The store's `upsertInternal` already reserves the `__codans/internal:`
 command namespace for first-party hooks. `upsert` from the user-facing
 Hook editor refuses to write a subscription whose `command` starts with
 that prefix — that's a UI-level guard, not a model-level one (model
@@ -797,7 +797,7 @@ require ad-hoc tab management for one-shot processes. A direct
 
 ```
 apps/mac/
-├── TouchCodeCore/
+├── CodansCore/
 │   ├── Settings/
 │   │   ├── ProjectSettings.swift            (no schema change; new
 │   │   │                                     `envVars` editor binding helpers)
@@ -806,7 +806,7 @@ apps/mac/
 │   │   ├── ScriptDefinition.swift           (expand from placeholder)
 │   │   └── ScriptKind.swift                 (NEW)
 │   └── (no Hooks model changes)
-├── touch-code/
+├── codans/
 │   ├── App/Features/Settings/
 │   │   ├── SettingsSection.swift            (drop 3 cases, drop 3 sub-row helpers)
 │   │   ├── ProjectSettingsFeature.swift     (+ envVars / scripts / hook actions)
@@ -857,7 +857,7 @@ Dependency directions:
   it's already the orchestrator for `createWorktree` / `setWorktreeArchived`
   / `removeWorktree`. The new `runWorktreeLifecycleScript(_:for:)` runs
   inline within those methods.
-- Command Palette extension imports from `TouchCodeCore` for
+- Command Palette extension imports from `CodansCore` for
   `ScriptDefinition`; the `runProjectScript` activation route lives in
   RootFeature alongside other palette routes.
 
@@ -989,7 +989,7 @@ renaming.
   deleted; users who genuinely want two parallel runs (e.g. of `npm
   test` against two branches) can't get them; tab-management is a
   cheap user action (⌘W); we are inventing a special-case for tabs
-  that does not match how any other tab in touch-code behaves.
+  that does not match how any other tab in codans behaves.
 - Verdict: rejected. Every Run opens a fresh tab. Title is the
   initial `script.name` but freely renameable like any other tab; no
   `lockedTitle` field, no per-script tab map, no reconcile path. If
@@ -1050,7 +1050,7 @@ Per pane, target ≥ 6 tests; total Phase 2 net new ≈ 50.
 ### Security / privacy
 
 - No new external input surfaces. Hook commands and Script commands run
-  with the same privileges the touch-code app has. The user authored
+  with the same privileges the codans app has. The user authored
   the strings; we run them. No sandboxing change.
 - Environment values may contain secrets (API tokens, passwords). The
   values land in plaintext `settings.json` (mode 0600 already, same as
@@ -1059,20 +1059,20 @@ Per pane, target ≥ 6 tests; total Phase 2 net new ≈ 50.
   text in settings.json. Do not paste credentials you wouldn't keep in
   a config file."
 - Lifecycle scripts run before the catalog records the worktree. A
-  malicious / broken `setupScript` cannot corrupt touch-code state —
+  malicious / broken `setupScript` cannot corrupt codans state —
   worst case the worktree directory exists on disk but is not in the
   catalog. Recovery: user runs Add Worktree again, picks Existing
   Worktree path.
 
 ### Observability
 
-- Each new write site logs through the existing `com.touch-code.persistence`
-  / `com.touch-code.hooks` Loggers.
+- Each new write site logs through the existing `com.gumpw.codans.persistence`
+  / `com.gumpw.codans.hooks` Loggers.
 - Lifecycle script invocations log a single line at start (event,
   worktreeID, script length) and a single line at end (exit code,
   elapsed). stdout/stderr go to the toast, not the system log
   (privacy: scripts may print user data).
-- Script tab creation logs through `com.touch-code.runtime` /
+- Script tab creation logs through `com.gumpw.codans.runtime` /
   `category: "scripts"` (NEW category).
 
 ### Migration
@@ -1132,7 +1132,7 @@ Per pane, target ≥ 6 tests; total Phase 2 net new ≈ 50.
   row's edit, the in-memory state drifts from disk. Mitigation:
   `HookConfigStore.scheduleSave` is single-writer / `@MainActor`, and
   every `upsert` re-reads the in-memory `HookConfig` before mutation.
-  No real race in single-process touch-code; cross-process editing
+  No real race in single-process codans; cross-process editing
   (user opens hooks.json in vim while Settings is open) is detected
   by the file-watch reload path that exists today.
 - **R5: scripts with overlapping `.id`s after manual user-edits to

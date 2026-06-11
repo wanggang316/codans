@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Same SRCROOT/TARGET_BUILD_DIR guards as embed-git-wt.sh / embed-tc.sh:
+# Same SRCROOT/TARGET_BUILD_DIR guards as embed-git-wt.sh / embed-codans.sh:
 # a stray run outside the Xcode build driver would expand unset paths
 # to "/" and the rm -rf below would clobber it. Hard-fail instead.
 : "${SRCROOT:?SRCROOT must be set (run this from the Xcode build driver)}"

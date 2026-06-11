@@ -6,7 +6,7 @@
 
 ## Context and Scope
 
-侧边栏中每个 Project 节点下渲染若干 Worktree 行。目前（`apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift:45-51`）的排序实现只有 5 行：
+侧边栏中每个 Project 节点下渲染若干 Worktree 行。目前（`apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift:45-51`）的排序实现只有 5 行：
 
 ```swift
 let visible = project.worktrees.filter { !$0.archived }
@@ -214,17 +214,17 @@ schema **不变**。新增的 `reorderWorktrees` 调用走 `HierarchyManager` �
 ### Component Boundaries
 
 ```
-TouchCodeCore/
+CodansCore/
   Worktree.swift                     无变更
 
-touch-code/Runtime/
+codans/Runtime/
   HierarchyManager.swift             新增 reorderWorktrees(_, segment, from, to)
                                      调整 createWorktree 的插入位置（unpinned 顶部）
 
-touch-code/App/Clients/
+codans/App/Clients/
   HierarchyClient.swift              新增 reorderWorktrees 闭包
 
-touch-code/App/Features/HierarchySidebar/
+codans/App/Features/HierarchySidebar/
   HierarchySidebarFeature.swift      新增 pendingWorktrees 字段
                                      新增 begin/progress/finished/failed/retry/
                                      discard/cancel actions
@@ -320,7 +320,7 @@ pending 段是四段中唯一引入新数据源的段，因此连带几项工程
 
 ### 可观测性
 
-`os.Logger` 子系统 `com.touch-code.app`，category `worktree-sidebar-order`：
+`os.Logger` 子系统 `com.gumpw.codans.app`，category `worktree-sidebar-order`：
 - `info`：`reorderWorktrees(segment, from, to)`、`pin/unpin` 的位置变更、`pendingBegin / Finished`。
 - `error`：`pendingFailed`，附 `GitWorktreeError` variant。
 

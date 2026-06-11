@@ -8,7 +8,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After completing this plan, users can configure keybindings in Ghostty's config and those bindings will route to meaningful touch-code actions: new tabs, splits, window operations, terminal commands, and app settings. Currently the action callback is a stub that silently ignores all bindings. Implementing this plan will restore the full keybinding surface, routing all 62 supported ghostty actions into the app's TCA layer for handling.
+After completing this plan, users can configure keybindings in Ghostty's config and those bindings will route to meaningful codans actions: new tabs, splits, window operations, terminal commands, and app settings. Currently the action callback is a stub that silently ignores all bindings. Implementing this plan will restore the full keybinding surface, routing all 62 supported ghostty actions into the app's TCA layer for handling.
 
 The user-visible outcome: `keybind cmd+e = close_tab` in `~/.config/ghostty/config` will work as expected — the key press will close the active tab instead of being silently dropped. The same applies to every keybinding the user configures across the action budget.
 
@@ -30,14 +30,14 @@ The user-visible outcome: `keybind cmd+e = close_tab` in `~/.config/ghostty/conf
 ## Surprises & Discoveries
 
 **M1: Three exhaustive switches needed updating beyond the plan** (2026-04-22). The plan mentioned only `RootFeature` as a downstream consumer, but two more files pattern-matched TerminalEvent exhaustively:
-- `touch-code/Hooks/EventMapper.swift:51` — maps TerminalEvent to HookEnvelope. New events return nil (no hook semantics).
-- `touch-code/Runtime/TerminalEngine.swift:381` — classifies events as lifecycle (unbuffered) vs chatty (buffered). Classified `.panelInfoChanged` as non-lifecycle (per design doc Risks table about chatty TUI); the three intent/config events are lifecycle.
+- `codans/Hooks/EventMapper.swift:51` — maps TerminalEvent to HookEnvelope. New events return nil (no hook semantics).
+- `codans/Runtime/TerminalEngine.swift:381` — classifies events as lifecycle (unbuffered) vs chatty (buffered). Classified `.panelInfoChanged` as non-lifecycle (per design doc Risks table about chatty TUI); the three intent/config events are lifecycle.
 
 Both are small additions. No impact on subsequent milestones.
 
 ## Decision Log
 
-**DEC-1 — New Core types at top level, not `Pane/` subfolder.** Plan proposed `TouchCodeCore/Pane/*.swift`. Existing convention: Pane.swift, Project.swift, Space.swift, etc. all sit at top level of TouchCodeCore/. Placed new files at top level to match, avoiding the need to update Tuist `buildableFolders`.
+**DEC-1 — New Core types at top level, not `Pane/` subfolder.** Plan proposed `CodansCore/Pane/*.swift`. Existing convention: Pane.swift, Project.swift, Space.swift, etc. all sit at top level of CodansCore/. Placed new files at top level to match, avoiding the need to update Tuist `buildableFolders`.
 
 **DEC-2 — Inline `sizeLimit` fields instead of defining a `Size` struct.** Plan referenced `Size` in `PaneInfoDelta.sizeLimit(min:max:)`, but no `Size` type exists in Core. Inlined as `sizeLimit(minWidth:minHeight:maxWidth:maxHeight:)` to avoid adding an unused helper type. Four `UInt32` fields are not meaningfully worse than a `Size` struct.
 
@@ -57,11 +57,11 @@ Both are small additions. No impact on subsequent milestones.
 
 **DEC-M5-A — `HierarchyClient.unzoomTab` added** because the spec referenced `zoomPanel`/`unzoomPanel` that don't exist; `HierarchyManager.focusPanel`/`unfocusPanel` already implement the zoom semantics under older names. Rename opportunity for later.
 
-**DEC-M5-C — Router delegates `.presentTerminalRequested`/`.commandPaletteToggleRequested`** back to RootFeature. touch-code has no command palette feature today; RootFeature consumes both as explicit no-ops so the seam exists without the consumer.
+**DEC-M5-C — Router delegates `.presentTerminalRequested`/`.commandPaletteToggleRequested`** back to RootFeature. codans has no command palette feature today; RootFeature consumes both as explicit no-ops so the seam exists without the consumer.
 
 **DEC-M5-E — `resizePanel` is a ratio delta, not pixels.** libghostty's RESIZE_SPLIT carries pixels; `SplitTree` stores only ratios (clamped [0.1, 0.9]). `amount` is treated as a ratio delta directly. Good enough; the decoder can scale if keybinds feel under/over-responsive.
 
-**DEC-M6-1 — `WindowService.openNewWindow`/`closeWindow` are stubs.** `TouchCodeApp` is single-`WindowGroup` today; SwiftUI's `OpenWindowAction` isn't reachable from a Client, and no per-Pane→NSWindow registry exists. `closeWindow` falls back to `NSApp.keyWindow.performClose(nil)` which ignores the paneID argument but handles the common case (keybind inside the focused window). Full implementation waits on the multi-window design (design doc §Risks).
+**DEC-M6-1 — `WindowService.openNewWindow`/`closeWindow` are stubs.** `CodansApp` is single-`WindowGroup` today; SwiftUI's `OpenWindowAction` isn't reachable from a Client, and no per-Pane→NSWindow registry exists. `closeWindow` falls back to `NSApp.keyWindow.performClose(nil)` which ignores the paneID argument but handles the common case (keybind inside the focused window). Full implementation waits on the multi-window design (design doc §Risks).
 
 **DEC-M6-3 — `openConfig` uses `NSWorkspace.open`, not `EditorClient`.** `EditorClient.open(directory:…)` only accepts directory URLs; no file-level overload. `NSWorkspace.open(URL(fileURLWithPath: "~/.config/ghostty/config"))` respects the user's LaunchServices default for the file type. Switch to `EditorClient` once it gains file opens.
 
@@ -71,11 +71,11 @@ Both are small additions. No impact on subsequent milestones.
 
 **DEC-M4-3 — `toggleBackgroundOpacity` is empty.** Opacity lives in the appearance settings layer (DeveloperSettings / future appearance overrides) that the runtime does not own. The method exists so the decoder compiles and the keybind is observable via its `.debug` log.
 
-**DEC-M7-1 — `TOUCH_CODE_DISABLE_ACTION_ROUTING=1` gate sits in the C callback.** Earlier than the decoder so the escape hatch short-circuits before any main-thread hop. Environmental read on every callback is cheap (`ProcessInfo.environment` is lazily cached by Foundation).
+**DEC-M7-1 — `CODANS_DISABLE_ACTION_ROUTING=1` gate sits in the C callback.** Earlier than the decoder so the escape hatch short-circuits before any main-thread hop. Environmental read on every callback is cheap (`ProcessInfo.environment` is lazily cached by Foundation).
 
 **DEC-M7-2 — Event fan-out routes through the existing `terminalClient.events()` stream, not a new stream.** The engine's single AsyncStream already fans out to every subscriber; adding per-event streams would duplicate the broadcast. The root reducer filters by pattern inline — one switch, two `send` calls — and every other event keeps flowing through the diagnostic `lastEvent` marker.
 
-**DEC-M7b-1 — Six `decode*` enum helpers relaxed from `fileprivate` to `internal static`.** The C→Swift enum mapping tables in `GhosttyActionDecoder` (close tab mode / new split direction / goto split direction / resize split direction / goto tab target / goto window target) are the only slices of the 65-case switch that can be tested without constructing a full `ghostty_action_s` C union. `@testable import touch_code` cannot cross `fileprivate`, so these six helpers are now `static` (module-internal) while `decodeKeyTable`, `keyTriggerFingerprint`, `handleOpenURL`, and the `emit*` dispatch helpers stay `fileprivate`. Visibility-only change; no callers or behavior moved.
+**DEC-M7b-1 — Six `decode*` enum helpers relaxed from `fileprivate` to `internal static`.** The C→Swift enum mapping tables in `GhosttyActionDecoder` (close tab mode / new split direction / goto split direction / resize split direction / goto tab target / goto window target) are the only slices of the 65-case switch that can be tested without constructing a full `ghostty_action_s` C union. `@testable import Codans` cannot cross `fileprivate`, so these six helpers are now `static` (module-internal) while `decodeKeyTable`, `keyTriggerFingerprint`, `handleOpenURL`, and the `emit*` dispatch helpers stay `fileprivate`. Visibility-only change; no callers or behavior moved.
 
 ## Codex Review Resolution (2026-04-22)
 
@@ -95,9 +95,9 @@ Codex flagged six correctness / safety issues after the initial landing. All are
 
 ## Outcomes & Retrospective
 
-**What shipped (2026-04-22).** All 65 libghostty action tags are routed: tab/split intents to `PaneActionRouterFeature` → `HierarchyClient` / `HierarchyManager`, window intents to `WindowActionRouterFeature` → `WindowService` / `AppLifecycleClient` / `UpdatesClient` / `EditorClient`, surface-info deltas to `PaneSurface.info` + the `panelInfoChanged` event stream, effectful actions inline via AppKit, and app-level config changes via `GhosttyRuntime.applyClonedConfig` / `reloadConfig`. The prior hardcoded `action_cb` stub — silently dropping every user keybind — is gone. A launch-arg gate (`TOUCH_CODE_DISABLE_ACTION_ROUTING=1`) provides a hotfix escape hatch.
+**What shipped (2026-04-22).** All 65 libghostty action tags are routed: tab/split intents to `PaneActionRouterFeature` → `HierarchyClient` / `HierarchyManager`, window intents to `WindowActionRouterFeature` → `WindowService` / `AppLifecycleClient` / `UpdatesClient` / `EditorClient`, surface-info deltas to `PaneSurface.info` + the `panelInfoChanged` event stream, effectful actions inline via AppKit, and app-level config changes via `GhosttyRuntime.applyClonedConfig` / `reloadConfig`. The prior hardcoded `action_cb` stub — silently dropping every user keybind — is gone. A launch-arg gate (`CODANS_DISABLE_ACTION_ROUTING=1`) provides a hotfix escape hatch.
 
-**What was bigger than planned.** The plan scoped the decoder at "~250 lines / 62 cases"; reality was 559 lines / 65 cases, driven by 10+ small trade-offs between libghostty's richer C union and touch-code's typed Swift surface (recorded DEC-M2-1 through DEC-M2-10). The downstream blast radius was also understated: 3 pre-existing exhaustive switches on `TerminalEvent` needed updates (`RootFeature.LastEventMarker`, `EventMapper.map`, `TerminalEngine.isLifecycle`).
+**What was bigger than planned.** The plan scoped the decoder at "~250 lines / 62 cases"; reality was 559 lines / 65 cases, driven by 10+ small trade-offs between libghostty's richer C union and codans's typed Swift surface (recorded DEC-M2-1 through DEC-M2-10). The downstream blast radius was also understated: 3 pre-existing exhaustive switches on `TerminalEvent` needed updates (`RootFeature.LastEventMarker`, `EventMapper.map`, `TerminalEngine.isLifecycle`).
 
 **What was smaller than planned.** Parallelizing via sub-agents collapsed M2/M3/M5/M6 from a sequential "~4-day" chain into a single working session. Seven atomic commits (bb7b18e → 4476767) split the work so the history stays bisectable across buckets.
 
@@ -106,7 +106,7 @@ Codex flagged six correctness / safety issues after the initial landing. All are
 - `UpdatesClient.checkNow` is a logger stub until Sparkle wires in.
 - `COPY_TITLE_TO_CLIPBOARD` is a 2-line fill-in deferred (DEC-M2-1) so M2 didn't depend on M3's shape.
 - `toggleBackgroundOpacity` is empty — opacity ownership lives in appearance settings, not this runtime.
-- `.delegate(.presentTerminalRequested)` and `.delegate(.commandPaletteToggleRequested)` are consumed as root-level no-ops; touch-code has no command-palette feature yet.
+- `.delegate(.presentTerminalRequested)` and `.delegate(.commandPaletteToggleRequested)` are consumed as root-level no-ops; codans has no command-palette feature yet.
 - Router-to-catalog resolution in `gotoSplit` collapses 4-way spatial directions to previous/next; a true spatial walk needs per-pane frame geometry the reducer doesn't own (DEC-M5-B).
 - `resizeSplit` treats `amount` as a ratio delta because `SplitTree` stores ratios only, not pixels (DEC-M5-E).
 
@@ -119,13 +119,13 @@ Codex flagged six correctness / safety issues after the initial landing. All are
 **Related documents:**
 - **Design doc:** `docs/design-docs/0008-ghostty-action-routing.md` — comprehensive specification of all 62 actions, 5-bucket classification, decoder architecture, event types, and alternative analysis.
 - **Architecture doc:** `docs/architecture.md` — system domains, dependency rules, state management hybrid (TCA + @Observable), invariant "Runtime is TCA-free".
-- **TerminalEvent:** `apps/mac/TouchCodeCore/TerminalEvent.swift` — source of the existing event enum.
+- **TerminalEvent:** `apps/mac/CodansCore/TerminalEvent.swift` — source of the existing event enum.
 
 **Key source files:**
-- `apps/mac/touch-code/Runtime/Ghostty/GhosttyRuntime.swift` — owns action callback stub at line 148; holds Pane registry and shared weak reference.
-- `apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift` — embeds 16 bytes of PaneID as userdata; needs SurfaceInfo @Observable state added.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — TCA bridge; will gain closures for addressOf, moveTab, equalizeTabSplits, resizePanel.
-- `apps/mac/touch-code/App/Features/RootFeature.swift` — root reducer; will compose the two new routers.
+- `apps/mac/codans/Runtime/Ghostty/GhosttyRuntime.swift` — owns action callback stub at line 148; holds Pane registry and shared weak reference.
+- `apps/mac/codans/Runtime/Ghostty/PaneSurface.swift` — embeds 16 bytes of PaneID as userdata; needs SurfaceInfo @Observable state added.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — TCA bridge; will gain closures for addressOf, moveTab, equalizeTabSplits, resizePanel.
+- `apps/mac/codans/App/Features/RootFeature.swift` — root reducer; will compose the two new routers.
 
 **Orientation:** The work flows upward from Core types to Runtime decoding to TCA feature consumption. The key architectural insight is the layering:
 - **Core (types):** add 4 TerminalEvent cases + 3 public enums for PaneInfoDelta, PaneActionRequest, WindowActionRequest
@@ -142,11 +142,11 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
 **Goal:** Define the public types consumed by Runtime and features. All ghostty action dispatch happens through these types — they are the contract between layers.
 
-**What exists at the end:** Three new public enums in `TouchCodeCore/Pane/` and four new TerminalEvent cases in `TouchCodeCore/TerminalEvent.swift`, providing typed representations of every routable action and info mutation.
+**What exists at the end:** Three new public enums in `CodansCore/Pane/` and four new TerminalEvent cases in `CodansCore/TerminalEvent.swift`, providing typed representations of every routable action and info mutation.
 
 **Work:**
 
-1. **`apps/mac/TouchCodeCore/Pane/PaneInfoDelta.swift` (new file)**
+1. **`apps/mac/CodansCore/Pane/PaneInfoDelta.swift` (new file)**
 
    Create enum with 25 cases, one per info-state mutation the decoder will emit. The design doc defines all cases; copy them verbatim:
 
@@ -184,9 +184,9 @@ Work is organized into seven milestones, each delivering a self-contained capabi
    }
    ```
 
-   Note: `Size` is imported from `TouchCodeCore` (used elsewhere for window sizing). Check that it exists; if not, define as `struct Size: Sendable { let width: UInt32; let height: UInt32 }`.
+   Note: `Size` is imported from `CodansCore` (used elsewhere for window sizing). Check that it exists; if not, define as `struct Size: Sendable { let width: UInt32; let height: UInt32 }`.
 
-2. **`apps/mac/TouchCodeCore/Pane/PaneActionRequest.swift` (new file)**
+2. **`apps/mac/CodansCore/Pane/PaneActionRequest.swift` (new file)**
 
    Create enum with 11 cases for tab/split intents and supporting types. Include typed wrappers around ghostty's C enums:
 
@@ -216,7 +216,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    (The decoder will map ghostty's C enum tags to these cases; this file just defines the typed wrapper enums that the decoder produces and features consume.)
 
-3. **`apps/mac/TouchCodeCore/Pane/WindowActionRequest.swift` (new file)**
+3. **`apps/mac/CodansCore/Pane/WindowActionRequest.swift` (new file)**
 
    Create enum with 11 cases for window/app intents and typed target wrapper:
 
@@ -242,7 +242,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    (Exact cases copied from design doc. The target wrapper will be decoded from ghostty's C union.)
 
-4. **`apps/mac/TouchCodeCore/TerminalEvent.swift` — add 4 cases**
+4. **`apps/mac/CodansCore/TerminalEvent.swift` — add 4 cases**
 
    Add to the `public nonisolated enum TerminalEvent` enum:
 
@@ -263,11 +263,11 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
 **Goal:** Create the single module that translates libghostty's C enums + unions into typed Swift. Everything else in the codebase speaks typed Swift; the decoder is the translation boundary.
 
-**What exists at the end:** A new `GhosttyActionDecoder` type in `apps/mac/touch-code/Runtime/Ghostty/GhosttyActionDecoder.swift` with two static methods: `appAction` and `surfaceAction`. Each handles the full action dispatch for its target type, decoding the C union, resolving the action intent, and returning a Bool (true = consumed, false = fallback to Ghostty default).
+**What exists at the end:** A new `GhosttyActionDecoder` type in `apps/mac/codans/Runtime/Ghostty/GhosttyActionDecoder.swift` with two static methods: `appAction` and `surfaceAction`. Each handles the full action dispatch for its target type, decoding the C union, resolving the action intent, and returning a Bool (true = consumed, false = fallback to Ghostty default).
 
 **Work:**
 
-1. **`apps/mac/touch-code/Runtime/Ghostty/GhosttyActionDecoder.swift` (new file)**
+1. **`apps/mac/codans/Runtime/Ghostty/GhosttyActionDecoder.swift` (new file)**
 
    Create the decoder enum with the skeleton from the design doc. The implementation will contain ~250 lines (62 cases across two methods).
 
@@ -307,7 +307,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
 **Work:**
 
-1. **`apps/mac/touch-code/Runtime/Ghostty/SurfaceInfo.swift` (new file)**
+1. **`apps/mac/codans/Runtime/Ghostty/SurfaceInfo.swift` (new file)**
 
    Create the @Observable class as defined in the design doc. All fields should have sensible defaults (empty strings, 0, false, nil as appropriate). No persistence — this is ephemeral session state.
 
@@ -328,7 +328,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    Add a convenience initializer if needed for clarity. Keep this class minimal — no methods except properties.
 
-2. **`apps/mac/touch-code/Runtime/Ghostty/PaneSurface.swift` — add state + methods**
+2. **`apps/mac/codans/Runtime/Ghostty/PaneSurface.swift` — add state + methods**
 
    a) Add a property:
    ```swift
@@ -359,7 +359,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    The `apply` method is the single place PaneInfoDelta is translated to field mutations. The decoder calls it; features read via `pane.info.title` etc.
 
-3. **Verification:** Build, no errors. Create a simple unit test in `apps/mac/touch-code/Tests/PanelSurfaceTests.swift` that constructs a PaneSurface, applies a few deltas, and asserts the fields changed. (This is a smoke test; the heavy lifting is in the router tests.)
+3. **Verification:** Build, no errors. Create a simple unit test in `apps/mac/codans/Tests/PanelSurfaceTests.swift` that constructs a PaneSurface, applies a few deltas, and asserts the fields changed. (This is a smoke test; the heavy lifting is in the router tests.)
 
 ---
 
@@ -371,7 +371,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
 **Work:**
 
-1. **`apps/mac/touch-code/Runtime/Ghostty/GhosttyRuntime.swift` — replace stub, add methods**
+1. **`apps/mac/codans/Runtime/Ghostty/GhosttyRuntime.swift` — replace stub, add methods**
 
    a) Replace the `actionCallback` stub (line ~148) with the real thunk from the design doc. The thunk checks `Thread.isMainThread`; if true, calls `handleAction` synchronously under `MainActor.assumeIsolated`; if false, dispatches to the main queue async and returns false immediately.
 
@@ -438,11 +438,11 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
 **Goal:** Create a TCA reducer that subscribes to `panelActionRequested` events and dispatches to HierarchyClient.
 
-**What exists at the end:** A new feature `apps/mac/touch-code/App/Features/PaneActionRouter/PaneActionRouterFeature.swift` that maps each PaneActionRequest case to the corresponding HierarchyClient call. The feature is composed into RootFeature and automatically routes all tab/split intents.
+**What exists at the end:** A new feature `apps/mac/codans/App/Features/PaneActionRouter/PaneActionRouterFeature.swift` that maps each PaneActionRequest case to the corresponding HierarchyClient call. The feature is composed into RootFeature and automatically routes all tab/split intents.
 
 **Work:**
 
-1. **Extend HierarchyClient** (`apps/mac/touch-code/App/Clients/HierarchyClient.swift`)
+1. **Extend HierarchyClient** (`apps/mac/codans/App/Clients/HierarchyClient.swift`)
 
    Add three new closures to the HierarchyClient struct. These are needed because the design doc references them:
 
@@ -461,7 +461,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    Add corresponding liveValue closures in the DependencyKey that forward to HierarchyManager.
 
-2. **`apps/mac/touch-code/App/Features/PaneActionRouter/PaneActionRouterFeature.swift` (new file)**
+2. **`apps/mac/codans/App/Features/PaneActionRouter/PaneActionRouterFeature.swift` (new file)**
 
    Create a TCA reducer with:
 
@@ -528,7 +528,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    The feature is lightweight — each case is 3-5 lines. The real logic is in HierarchyManager; the router is just the IPC layer.
 
-3. **Compose into RootFeature** (`apps/mac/touch-code/App/Features/Root/RootFeature.swift`)
+3. **Compose into RootFeature** (`apps/mac/codans/App/Features/Root/RootFeature.swift`)
 
    In RootFeature's body:
 
@@ -570,7 +570,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
 **Work:**
 
-1. **`apps/mac/touch-code/App/Clients/WindowService.swift` (new file)**
+1. **`apps/mac/codans/App/Clients/WindowService.swift` (new file)**
 
    Thin wrapper over NSWindow and NSApp:
 
@@ -607,7 +607,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    The implementation is straightforward; most is fetching the window from the pane and calling NSWindow methods.
 
-2. **`apps/mac/touch-code/App/Clients/AppLifecycleClient.swift` (new or extend if exists)**
+2. **`apps/mac/codans/App/Clients/AppLifecycleClient.swift` (new or extend if exists)**
 
    If not present, create:
 
@@ -629,7 +629,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
    }
    ```
 
-3. **`apps/mac/touch-code/App/Clients/UpdatesClient.swift` (new or extend if exists)**
+3. **`apps/mac/codans/App/Clients/UpdatesClient.swift` (new or extend if exists)**
 
    If Sparkle is already integrated, this may exist. If not:
 
@@ -645,7 +645,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
    (Placeholder; the actual impl depends on how Sparkle is wired in the app.)
 
-4. **`apps/mac/touch-code/App/Features/WindowActionRouter/WindowActionRouterFeature.swift` (new file)**
+4. **`apps/mac/codans/App/Features/WindowActionRouter/WindowActionRouterFeature.swift` (new file)**
 
    Create the TCA reducer:
 
@@ -757,7 +757,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 
 **Goal:** Wire the routers into the app, add comprehensive unit tests, add observability logging, and implement a launch-arg disable gate for safe rollout.
 
-**What exists at the end:** The app builds, all routers are active, action callback handles all 62 actions, unit tests pass, and a `TOUCH_CODE_DISABLE_ACTION_ROUTING=1` launch arg can disable the feature if a regression is found.
+**What exists at the end:** The app builds, all routers are active, action callback handles all 62 actions, unit tests pass, and a `CODANS_DISABLE_ACTION_ROUTING=1` launch arg can disable the feature if a regression is found.
 
 **Work:**
 
@@ -770,7 +770,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
    Import `os.log` and add logging:
 
    ```swift
-   private static let logger = Logger(subsystem: "com.touch-code.runtime", category: "action")
+   private static let logger = Logger(subsystem: "com.gumpw.codans.runtime", category: "action")
 
    // At the start of surfaceAction and appAction:
    logger.debug("action: \(action.tag.rawValue), paneID: \(paneID)")
@@ -782,19 +782,19 @@ Work is organized into seven milestones, each delivering a self-contained capabi
    logger.info("unknown ghostty action tag: \(action.tag.rawValue)")
    ```
 
-   Also maintain a bounded counter in GhosttyRuntime for `tc system.status` to expose (optional for MVP; defer if time is tight).
+   Also maintain a bounded counter in GhosttyRuntime for `codans system.status` to expose (optional for MVP; defer if time is tight).
 
 3. **Launch-arg disable gate**
 
    In GhosttyRuntime, before the action callback is invoked, check:
 
    ```swift
-   if ProcessInfo.processInfo.environment["TOUCH_CODE_DISABLE_ACTION_ROUTING"] == "1" {
+   if ProcessInfo.processInfo.environment["CODANS_DISABLE_ACTION_ROUTING"] == "1" {
      return false
    }
    ```
 
-   This allows hotfix if a regression slips through. Document in release notes: "If action routing causes issues, launch with `TOUCH_CODE_DISABLE_ACTION_ROUTING=1` and report the issue."
+   This allows hotfix if a regression slips through. Document in release notes: "If action routing causes issues, launch with `CODANS_DISABLE_ACTION_ROUTING=1` and report the issue."
 
 4. **Unit tests**
 
@@ -823,7 +823,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
    - [ ] Bind `cmd+q = quit`; press it; confirm quit-confirmation dialog appears (not immediate quit)
    - [ ] Bind `cmd+shift+.` = `toggle_fullscreen`; press it; confirm window toggles fullscreen
    - [ ] Bind `cmd+shift+u = check_for_updates`; press it; confirm updates dialog appears (or "already latest version")
-   - [ ] Run with `TOUCH_CODE_DISABLE_ACTION_ROUTING=1`; bind `cmd+e = close_tab`; press it; confirm it silently no-ops (Ghostty default behavior)
+   - [ ] Run with `CODANS_DISABLE_ACTION_ROUTING=1`; bind `cmd+e = close_tab`; press it; confirm it silently no-ops (Ghostty default behavior)
 
 6. **Metrics and rollout plan**
 
@@ -833,7 +833,7 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 - `cd apps/mac && make mac-build && make mac-test` — all tests pass
 - No new errors or warnings
 - Manual smoke test: ~15 keybinds across all 5 buckets work as expected
-- Disable flag works: `TOUCH_CODE_DISABLE_ACTION_ROUTING=1` silently ignores all bindings
+- Disable flag works: `CODANS_DISABLE_ACTION_ROUTING=1` silently ignores all bindings
 
 ---
 
@@ -842,44 +842,44 @@ Work is organized into seven milestones, each delivering a self-contained capabi
 Run these commands from the root of the repository:
 
 ```bash
-cd /Users/wanggang/.prowl/repos/touch-code/refactor/arch/apps/mac
+cd /Users/wanggang/.prowl/repos/codans/refactor/arch/apps/mac
 
 # Step 1: Create Core types
-touch touch-code/TouchCodeCore/Pane/PaneInfoDelta.swift
-touch touch-code/TouchCodeCore/Pane/PaneActionRequest.swift
-touch touch-code/TouchCodeCore/Pane/WindowActionRequest.swift
+touch codans/CodansCore/Pane/PaneInfoDelta.swift
+touch codans/CodansCore/Pane/PaneActionRequest.swift
+touch codans/CodansCore/Pane/WindowActionRequest.swift
 # Edit TerminalEvent.swift to add 4 cases
 
 # Step 2: Create decoder
-touch touch-code/Runtime/Ghostty/GhosttyActionDecoder.swift
+touch codans/Runtime/Ghostty/GhosttyActionDecoder.swift
 
 # Step 3: Create SurfaceInfo
-touch touch-code/Runtime/Ghostty/SurfaceInfo.swift
+touch codans/Runtime/Ghostty/SurfaceInfo.swift
 # Edit PaneSurface.swift to add state and apply() method
 
 # Step 4: Extend GhosttyRuntime
 # Edit GhosttyRuntime.swift to replace action callback and add methods
 
 # Step 5: Create PaneActionRouterFeature
-mkdir -p touch-code/App/Features/PaneActionRouter
-touch touch-code/App/Features/PaneActionRouter/PaneActionRouterFeature.swift
+mkdir -p codans/App/Features/PaneActionRouter
+touch codans/App/Features/PaneActionRouter/PaneActionRouterFeature.swift
 # Edit HierarchyClient.swift to add 3 new closures
 
 # Step 6: Create WindowActionRouterFeature and clients
-mkdir -p touch-code/App/Features/WindowActionRouter
-touch touch-code/App/Features/WindowActionRouter/WindowActionRouterFeature.swift
-touch touch-code/App/Clients/WindowService.swift
-touch touch-code/App/Clients/AppLifecycleClient.swift
+mkdir -p codans/App/Features/WindowActionRouter
+touch codans/App/Features/WindowActionRouter/WindowActionRouterFeature.swift
+touch codans/App/Clients/WindowService.swift
+touch codans/App/Clients/AppLifecycleClient.swift
 # Edit UpdatesClient.swift or create if missing
 
 # Step 7: Integration and testing
 # Edit RootFeature.swift to compose routers
 # Create test files
-touch touch-code/Tests/GhosttyActionDecoderTests.swift
-touch touch-code/Tests/PaneActionRouterFeatureTests.swift
-touch touch-code/Tests/WindowActionRouterFeatureTests.swift
-touch touch-code/Tests/GhosttyRuntimeActionTests.swift
-touch touch-code/Tests/PanelSurfaceTests.swift
+touch codans/Tests/GhosttyActionDecoderTests.swift
+touch codans/Tests/PaneActionRouterFeatureTests.swift
+touch codans/Tests/WindowActionRouterFeatureTests.swift
+touch codans/Tests/GhosttyRuntimeActionTests.swift
+touch codans/Tests/PanelSurfaceTests.swift
 
 # Build
 make mac-build
@@ -912,7 +912,7 @@ Test Summary: 42 passed, 0 failed.
 
 5. **Tests pass:** Run `make mac-test` and confirm 42+ tests pass, including all new decoder, router, and feature tests.
 
-6. **Disable flag works:** Launch with `TOUCH_CODE_DISABLE_ACTION_ROUTING=1`; keybinds silently no-op (Ghostty's default behavior for unhandled actions).
+6. **Disable flag works:** Launch with `CODANS_DISABLE_ACTION_ROUTING=1`; keybinds silently no-op (Ghostty's default behavior for unhandled actions).
 
 7. **No regressions:** Launch the full app; test existing features (tab bar, split viewport, sidebar, git viewer, settings). Confirm nothing is broken.
 
@@ -920,7 +920,7 @@ Test Summary: 42 passed, 0 failed.
 
 ## Manual Smoke Checklist (M7c)
 
-These cases are not driveable from `tc` because libghostty's action callback only fires under a real keystroke. A tester runs through this list on a dev build before any release that includes routing changes.
+These cases are not driveable from `codans` because libghostty's action callback only fires under a real keystroke. A tester runs through this list on a dev build before any release that includes routing changes.
 
 **Setup:** Add the listed `keybind` lines to `~/.config/ghostty/config`, relaunch the app, then press each bound key in an active terminal pane.
 
@@ -954,7 +954,7 @@ These cases are not driveable from `tc` because libghostty's action callback onl
 ### Bucket 3 — Surface info
 
 - [ ] In a running terminal, change the shell prompt that emits OSC title → Tab bar shows the new title (via `.panelInfoChanged(.title)`)
-- [ ] `cd /tmp` → the Pane's `info.pwd` updates (inspect via debugger or a `tc pane.status` call if wired)
+- [ ] `cd /tmp` → the Pane's `info.pwd` updates (inspect via debugger or a `codans pane.status` call if wired)
 - [ ] Hover over a URL printed in the terminal → `info.mouseOverLink` populates (mouse-over-link handled)
 - [ ] Run a command that prints `\a` (bell) → `info.bellCount` increments; if notifications are enabled, see the notification surface fire
 - [ ] Trigger a readonly state or secure-input mode → info fields flip; log line at `.debug` fires
@@ -974,7 +974,7 @@ These cases are not driveable from `tc` because libghostty's action callback onl
 
 ### Disable gate
 
-- [ ] Launch with env `TOUCH_CODE_DISABLE_ACTION_ROUTING=1` → **every** bound key from the checklist above becomes a silent no-op; no logs, no state changes
+- [ ] Launch with env `CODANS_DISABLE_ACTION_ROUTING=1` → **every** bound key from the checklist above becomes a silent no-op; no logs, no state changes
 
 ### Regression sweep
 
@@ -1044,12 +1044,12 @@ Use this pattern for PaneActionRouterFeature and WindowActionRouterFeature tests
 
 **New public types (Core):**
 
-In `TouchCodeCore/Pane/`:
+In `CodansCore/Pane/`:
 - `enum PaneInfoDelta` (25 cases)
 - `enum PaneActionRequest` (11 cases) + `enum CloseTabMode`, `enum GotoTabTarget`, etc.
 - `enum WindowActionRequest` (11 cases) + `enum GotoWindowTarget`
 
-In `TouchCodeCore/TerminalEvent.swift`:
+In `CodansCore/TerminalEvent.swift`:
 - `case panelInfoChanged(PaneID, PaneInfoDelta)`
 - `case panelActionRequested(PaneID, PaneActionRequest)`
 - `case windowActionRequested(WindowActionRequest)`
@@ -1057,15 +1057,15 @@ In `TouchCodeCore/TerminalEvent.swift`:
 
 **New Runtime types:**
 
-In `touch-code/Runtime/Ghostty/SurfaceInfo.swift`:
+In `codans/Runtime/Ghostty/SurfaceInfo.swift`:
 - `@Observable class SurfaceInfo` (~20 fields, all Sendable)
 
-In `touch-code/Runtime/Ghostty/GhosttyActionDecoder.swift`:
+In `codans/Runtime/Ghostty/GhosttyActionDecoder.swift`:
 - `enum GhosttyActionDecoder`
   - `static func surfaceAction(_ action, paneID, pane, runtime) -> Bool`
   - `static func appAction(_ action, runtime) -> Bool`
 
-In `touch-code/Runtime/Ghostty/GhosttyRuntime.swift`:
+In `codans/Runtime/Ghostty/GhosttyRuntime.swift`:
 - `@MainActor func handleAction(target, action) -> Bool`
 - `@MainActor private func handleSurfaceAction(_ surface, _ action) -> Bool`
 - `@MainActor private func paneID(fromSurface) -> PaneID?`
@@ -1075,53 +1075,53 @@ In `touch-code/Runtime/Ghostty/GhosttyRuntime.swift`:
 - `@MainActor func reloadConfig(soft)`
 - `@MainActor func toggleBackgroundOpacity()`
 
-In `touch-code/Runtime/Ghostty/PaneSurface.swift`:
+In `codans/Runtime/Ghostty/PaneSurface.swift`:
 - `var info: SurfaceInfo`
 - `func apply(_ delta: PaneInfoDelta)`
 - `func markExited(code: Int32)`
 
 **New App types:**
 
-In `touch-code/App/Clients/HierarchyClient.swift`:
+In `codans/App/Clients/HierarchyClient.swift`:
 - `var addressOf: @MainActor @Sendable (PaneID) -> (SpaceID, ProjectID, WorktreeID)?`
 - `var moveTab: @MainActor @Sendable (TabID, ...) throws -> Void`
 - `var equalizeTabSplits: @MainActor @Sendable (TabID, ...) throws -> Void`
 - `var resizePanel: @MainActor @Sendable (PaneID, direction, amount) throws -> Void`
 
-In `touch-code/App/Clients/WindowService.swift`:
+In `codans/App/Clients/WindowService.swift`:
 - `struct WindowService: Sendable`
   - `var openNewWindow: @Sendable (PaneID) throws -> Void`
   - `var closeWindow: @Sendable (PaneID) throws -> Void`
   - `var activateWindow: @Sendable (GotoWindowTarget) -> Void`
   - `var keyWindow: @Sendable () -> NSWindow?`
 
-In `touch-code/App/Clients/AppLifecycleClient.swift`:
+In `codans/App/Clients/AppLifecycleClient.swift`:
 - `struct AppLifecycleClient: Sendable`
   - `var requestQuit: @Sendable () -> Void`
   - `var terminate: @Sendable () -> Void`
 
-In `touch-code/App/Clients/UpdatesClient.swift`:
+In `codans/App/Clients/UpdatesClient.swift`:
 - `var checkNow: @Sendable () -> Void`
 
-In `touch-code/App/Features/PaneActionRouter/PaneActionRouterFeature.swift`:
+In `codans/App/Features/PaneActionRouter/PaneActionRouterFeature.swift`:
 - `@Reducer struct PaneActionRouterFeature`
   - `enum Action` with `.panelActionRequested(PaneID, PaneActionRequest)` case
   - Reducer body dispatches to HierarchyClient
 
-In `touch-code/App/Features/WindowActionRouter/WindowActionRouterFeature.swift`:
+In `codans/App/Features/WindowActionRouter/WindowActionRouterFeature.swift`:
 - `@Reducer struct WindowActionRouterFeature`
   - `enum Action` with `.windowActionRequested(WindowActionRequest)` case
   - Reducer body dispatches to WindowService, AppLifecycleClient, UpdatesClient, EditorClient
 
 **Dependency injection updates:**
 
-In `touch-code/App/Features/Root/RootFeature.swift`:
+In `codans/App/Features/Root/RootFeature.swift`:
 - Compose `PaneActionRouterFeature()` and `WindowActionRouterFeature()` into the body
 - Subscribe to TerminalEvent stream; route `panelActionRequested` and `windowActionRequested` events
 
 **Architectural invariants maintained:**
 - ✅ Runtime is TCA-free (only emits events; no HierarchyClient import)
-- ✅ All cross-process communication through TouchCodeIPC (not violated)
+- ✅ All cross-process communication through CodansIPC (not violated)
 - ✅ Pane state mutation is Runtime-localized (via pane.apply)
 - ✅ No circular dependencies (decoder imports Core, Runtime; routers import Clients)
 - ✅ Events flow one way (Runtime → AsyncStream → TCA)

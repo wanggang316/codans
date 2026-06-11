@@ -1,17 +1,17 @@
 # Homebrew release pipeline
 
-`touch-code` ships to Homebrew through a self-hosted cask in **`wanggang316/homebrew-tap`**. Stable installs run as:
+`codans` ships to Homebrew through a self-hosted cask in **`wanggang316/homebrew-tap`**. Stable installs run as:
 
 ```bash
-brew install --cask wanggang316/tap/touch-code
+brew install --cask wanggang316/tap/codans
 ```
 
 ## Pipeline
 
-1. `release.yml` cuts a notarized `TouchCode-<version>.dmg` + `.sha256` and attaches them to a **draft** GitHub Release. Manual review / publication remains the safety gate.
+1. `release.yml` cuts a notarized `Codans-<version>.dmg` + `.sha256` and attaches them to a **draft** GitHub Release. Manual review / publication remains the safety gate.
 2. When the maintainer flips the release to **published**, `update-cask.yml` fires on the `release: published` event.
-3. The workflow downloads the DMG asset, cross-checks the published `.sha256` against a fresh `shasum -a 256` of the downloaded bytes, then runs `scripts/render-cask.sh` against the in-repo template at `Casks/touch-code.rb`.
-4. The rendered cask is pushed as a single commit to `wanggang316/homebrew-tap` at `Casks/touch-code.rb` over HTTPS using `HOMEBREW_TAP_TOKEN`.
+3. The workflow downloads the DMG asset, cross-checks the published `.sha256` against a fresh `shasum -a 256` of the downloaded bytes, then runs `scripts/render-cask.sh` against the in-repo template at `Casks/codans.rb`.
+4. The rendered cask is pushed as a single commit to `wanggang316/homebrew-tap` at `Casks/codans.rb` over HTTPS using `HOMEBREW_TAP_TOKEN`.
 
 `tip`-channel releases (`release-tip.yml`) are tagged `tip` and marked prerelease — `update-cask.yml` filters both out so Homebrew users stay on the stable channel. Sparkle still handles in-app tip-channel updates for opted-in clients.
 
@@ -30,32 +30,32 @@ These steps are required exactly once per environment; future stable releases ar
 3. **Register the token on this repo:**
 
    ```bash
-   gh secret set HOMEBREW_TAP_TOKEN --repo wanggang316/touch-code --body "$PAT_VALUE"
+   gh secret set HOMEBREW_TAP_TOKEN --repo wanggang316/codans --body "$PAT_VALUE"
    ```
 
    The workflow refuses to run without it (see the `: "${TAP_TOKEN:?…}"` guard).
 
-4. **First-time cask seed.** The very first stable release after enabling this pipeline writes the initial `Casks/touch-code.rb` into the empty tap repo. No manual seeding required.
+4. **First-time cask seed.** The very first stable release after enabling this pipeline writes the initial `Casks/codans.rb` into the empty tap repo. No manual seeding required.
 
 ## Local dry-run
 
 Render the cask against an existing DMG without touching CI or the tap:
 
 ```bash
-DMG=apps/mac/.build/release/TouchCode-0.3.0.dmg
+DMG=apps/mac/.build/release/Codans-0.3.0.dmg
 SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
-./scripts/render-cask.sh 0.3.0 "$SHA" /tmp/touch-code.rb
-brew style /tmp/touch-code.rb            # optional: run Homebrew's rubocop
-brew install --cask /tmp/touch-code.rb   # optional: smoke-test the install
+./scripts/render-cask.sh 0.3.0 "$SHA" /tmp/codans.rb
+brew style /tmp/codans.rb            # optional: run Homebrew's rubocop
+brew install --cask /tmp/codans.rb   # optional: smoke-test the install
 ```
 
 ## Troubleshooting
 
-- **`brew install` fails with `Cask 'touch-code' is unavailable`** — the user forgot to tap. Both `brew install --cask wanggang316/tap/touch-code` and `brew tap wanggang316/tap && brew install --cask touch-code` work; the former is the recommended one-liner.
+- **`brew install` fails with `Cask 'codans' is unavailable`** — the user forgot to tap. Both `brew install --cask wanggang316/tap/codans` and `brew tap wanggang316/tap && brew install --cask codans` work; the former is the recommended one-liner.
 - **Workflow exits "cask already at v… in tap — nothing to push"** — the rendered cask matched the tap copy byte-for-byte. Usually means the workflow was re-run after a successful push; harmless.
 - **`sha256 mismatch`** — the DMG attached to the Release does not match its `.sha256` sidecar. Indicates a corrupted or swapped asset. Re-run `release.yml` against the same tag and re-publish.
 - **Tap push 403** — `HOMEBREW_TAP_TOKEN` expired or lacks `contents:write` on the tap repo. Rotate the PAT and `gh secret set` it again.
 
 ## Future: official `homebrew-cask`
 
-If touch-code grows enough adoption to meet Homebrew's [acceptable casks criteria](https://docs.brew.sh/Acceptable-Casks), we can mirror the same `Casks/touch-code.rb` into a PR against `Homebrew/homebrew-cask`. The cask is already structured to pass `brew style` and `brew audit --new`. Until then, the self-hosted tap is the canonical channel.
+If codans grows enough adoption to meet Homebrew's [acceptable casks criteria](https://docs.brew.sh/Acceptable-Casks), we can mirror the same `Casks/codans.rb` into a PR against `Homebrew/homebrew-cask`. The cask is already structured to pass `brew style` and `brew audit --new`. Until then, the self-hosted tap is the canonical channel.

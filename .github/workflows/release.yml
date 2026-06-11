@@ -1,7 +1,7 @@
 name: release
 
 # Tag-triggered Developer ID release pipeline. Pushing a `v*` tag (e.g.
-# `v0.1.0`) produces a notarized + stapled `TouchCode-<version>.dmg`
+# `v0.1.0`) produces a notarized + stapled `Codans-<version>.dmg`
 # attached to a draft GitHub Release.
 #
 # Required GitHub repository secrets (set via `gh secret set` or web UI):
@@ -200,7 +200,7 @@ jobs:
         run: make mac-archive
 
       - name: Upload dSYMs to Sentry
-        # Registers the release `touch-code@<version>` on Sentry and
+        # Registers the release `codans@<version>` on Sentry and
         # pushes the dSYMs from the .xcarchive so future crashes resolve
         # to readable source lines. The script no-ops cleanly when
         # SENTRY_AUTH_TOKEN is unset, keeping the workflow tolerant of
@@ -221,7 +221,7 @@ jobs:
           AC_API_KEY_P8:    ${{ secrets.AC_API_KEY_P8 }}
         run: |
           ./apps/mac/scripts/release.sh notarize \
-            apps/mac/.build/release/export/TouchCode.app
+            apps/mac/.build/release/export/Codans.app
 
       - name: Build DMG
         run: ./apps/mac/scripts/release.sh dmg
@@ -233,7 +233,7 @@ jobs:
           AC_API_KEY_P8:    ${{ secrets.AC_API_KEY_P8 }}
         run: |
           ./apps/mac/scripts/release.sh notarize \
-            "apps/mac/.build/release/TouchCode-${{ steps.meta.outputs.version }}.dmg"
+            "apps/mac/.build/release/Codans-${{ steps.meta.outputs.version }}.dmg"
 
       # ---- Sparkle appcast.xml (Stage 2 of the in-app updater) ----
       # The notarized DMG is the unit Sparkle's appcast advertises. We
@@ -261,7 +261,7 @@ jobs:
           : "${SPARKLE_PRIVATE_KEY:?secret SPARKLE_PRIVATE_KEY not configured}"
           STAGING="$RUNNER_TEMP/appcast-staging"
           mkdir -p "$STAGING"
-          /bin/cp "apps/mac/.build/release/TouchCode-${{ steps.meta.outputs.version }}.dmg" "$STAGING/"
+          /bin/cp "apps/mac/.build/release/Codans-${{ steps.meta.outputs.version }}.dmg" "$STAGING/"
           # generate_appcast embeds the download-url-prefix in each item's
           # <enclosure url="..."> attribute; point at the GitHub Releases
           # download URL for this exact tag so Sparkle clients fetch the
@@ -338,7 +338,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          DMG="apps/mac/.build/release/TouchCode-${{ steps.meta.outputs.version }}.dmg"
+          DMG="apps/mac/.build/release/Codans-${{ steps.meta.outputs.version }}.dmg"
           APPCAST="apps/mac/.build/release/appcast.xml"
           gh release create "${{ steps.meta.outputs.tag }}" \
             --draft \

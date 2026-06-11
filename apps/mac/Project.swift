@@ -8,7 +8,7 @@ let ghosttyFingerprintInputScript = """
 """
 
 let project = Project(
-  name: "touch-code",
+  name: "codans",
   settings: .settings(
     base: [
       // Debug uses Automatic signing for contributors without a
@@ -30,20 +30,20 @@ let project = Project(
   targets: [
     // Shared domain types. Zero internal deps. Consumed by app + CLI.
     .target(
-      name: "TouchCodeCore",
+      name: "CodansCore",
       destinations: .macOS,
       product: .staticFramework,
-      bundleId: "app.touch-code.core",
+      bundleId: "com.gumpw.codans.core",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .default,
       buildableFolders: [
-        "TouchCodeCore",
-        "TouchCodeCore/Agents",
-        "TouchCodeCore/GitHub",
-        "TouchCodeCore/Notifications",
-        "TouchCodeCore/Shortcuts",
-        "TouchCodeCore/Shortcuts/ConflictDetectors",
-        "TouchCodeCore/StatusBar",
+        "CodansCore",
+        "CodansCore/Agents",
+        "CodansCore/GitHub",
+        "CodansCore/Notifications",
+        "CodansCore/Shortcuts",
+        "CodansCore/Shortcuts/ConflictDetectors",
+        "CodansCore/StatusBar",
       ],
       settings: .settings(
         base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
@@ -51,25 +51,25 @@ let project = Project(
       )
     ),
 
-    // TouchCodeCore unit tests. Links TouchCodeIPC so IPC codable tests can
+    // CodansCore unit tests. Links CodansIPC so IPC codable tests can
     // live here too (DEC-1: avoid proliferating test targets, per 0003 and
-    // 0005 M1 DEC-5 — dedicated TouchCodeIPCTests not justified).
+    // 0005 M1 DEC-5 — dedicated CodansIPCTests not justified).
     .target(
-      name: "TouchCodeCoreTests",
+      name: "CodansCoreTests",
       destinations: .macOS,
       product: .unitTests,
-      bundleId: "app.touch-code.core-tests",
+      bundleId: "com.gumpw.codans.core-tests",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .default,
       buildableFolders: [
-        "TouchCodeCoreTests",
-        "TouchCodeCoreTests/IPC",
-        "TouchCodeCoreTests/GitHubTests",
-        "TouchCodeCoreTests/Shortcuts",
+        "CodansCoreTests",
+        "CodansCoreTests/IPC",
+        "CodansCoreTests/GitHubTests",
+        "CodansCoreTests/Shortcuts",
       ],
       dependencies: [
-        .target(name: "TouchCodeCore"),
-        .target(name: "TouchCodeIPC"),
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
       ],
       settings: .settings(
         base: [
@@ -82,14 +82,14 @@ let project = Project(
 
     // JSON-RPC wire protocol. Consumed by app + CLI.
     .target(
-      name: "TouchCodeIPC",
+      name: "CodansIPC",
       destinations: .macOS,
       product: .staticFramework,
-      bundleId: "app.touch-code.ipc",
+      bundleId: "com.gumpw.codans.ipc",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .default,
-      buildableFolders: ["TouchCodeIPC", "TouchCodeIPC/WireTypes"],
-      dependencies: [.target(name: "TouchCodeCore")],
+      buildableFolders: ["CodansIPC", "CodansIPC/WireTypes"],
+      dependencies: [.target(name: "CodansCore")],
       settings: .settings(
         base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
         defaultSettings: .essential
@@ -111,25 +111,25 @@ let project = Project(
       output: .xcframework(path: ghosttyXCFrameworkPath, linking: .static)
     ),
 
-    // tcKit: shared CLI library — Transport / RPCClient / Renderer /
-    // ExitCode / SocketDiscovery. The tc binary is a thin wrapper;
+    // CodansKit: shared CLI library — Transport / RPCClient / Renderer /
+    // ExitCode / SocketDiscovery. The codans binary is a thin wrapper;
     // parallel plans (C5 for skill command, future CLI extensions) link
-    // into tcKit rather than the tc binary.
+    // into CodansKit rather than the codans binary.
     .target(
-      name: "tcKit",
+      name: "CodansKit",
       destinations: .macOS,
       product: .staticFramework,
-      bundleId: "app.touch-code.cli-kit",
+      bundleId: "com.gumpw.codans.cli-kit",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .default,
       buildableFolders: [
-        "tcKit",
-        "tcKit/Transport",
-        "tcKit/Render",
+        "CodansKit",
+        "CodansKit/Transport",
+        "CodansKit/Render",
       ],
       dependencies: [
-        .target(name: "TouchCodeCore"),
-        .target(name: "TouchCodeIPC"),
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
         .external(name: "ArgumentParser"),
       ],
       settings: .settings(
@@ -138,20 +138,20 @@ let project = Project(
       )
     ),
 
-    // tcKit unit tests. Headless — uses InMemoryTransport, does not
-    // reach into the touch-code app target.
+    // CodansKit unit tests. Headless — uses InMemoryTransport, does not
+    // reach into the Codans app target.
     .target(
-      name: "tcKitTests",
+      name: "CodansKitTests",
       destinations: .macOS,
       product: .unitTests,
-      bundleId: "app.touch-code.cli-kit-tests",
+      bundleId: "com.gumpw.codans.cli-kit-tests",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .default,
-      buildableFolders: ["tcKitTests"],
+      buildableFolders: ["CodansKitTests"],
       dependencies: [
-        .target(name: "tcKit"),
-        .target(name: "TouchCodeCore"),
-        .target(name: "TouchCodeIPC"),
+        .target(name: "CodansKit"),
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
       ],
       settings: .settings(
         base: [
@@ -162,22 +162,24 @@ let project = Project(
       )
     ),
 
-    // tc CLI binary. Thin wrapper around tcKit — Runtime / Hooks / Git
+    // codans CLI binary. Thin wrapper around CodansKit — Runtime / Hooks / Git
     // are intentionally off-limits per architecture dep rules. Isolation
     // default is `nonisolated` to match the ArgumentParser command
-    // conventions (commands run off the main actor).
+    // conventions (commands run off the main actor). Target is named
+    // `codans-cli` to stay distinct from the `Codans` app target; the
+    // emitted binary's PRODUCT_NAME is `codans`.
     .target(
-      name: "tc",
+      name: "codans-cli",
       destinations: .macOS,
       product: .commandLineTool,
-      bundleId: "app.touch-code.cli",
+      bundleId: "com.gumpw.codans.cli",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .default,
-      buildableFolders: ["tc", "tc/Commands"],
+      buildableFolders: ["codans-cli", "codans-cli/Commands"],
       dependencies: [
-        .target(name: "tcKit"),
-        .target(name: "TouchCodeCore"),
-        .target(name: "TouchCodeIPC"),
+        .target(name: "CodansKit"),
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
         .external(name: "ArgumentParser"),
       ],
       settings: .settings(
@@ -186,11 +188,11 @@ let project = Project(
           // can build the CLI. Release archives override signing via
           // xcodebuild command-line build settings (release.sh) which
           // win over anything Tuist injects here. Hardened Runtime is
-          // mandatory for notarization on the embedded tc — set it on
+          // mandatory for notarization on the embedded codans — set it on
           // the target so it's part of the project, not the cmdline.
           "CODE_SIGNING_ALLOWED[config=Debug]": "NO",
           "ENABLE_HARDENED_RUNTIME[config=Release]": "YES",
-          "PRODUCT_NAME": "tc",
+          "PRODUCT_NAME": "codans",
           "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
         ],
         defaultSettings: .essential
@@ -198,30 +200,30 @@ let project = Project(
     ),
 
     // Mac app. Runtime / Hooks / Git are in-app modules (subfolders, not separate targets).
-    // tc is a dependency so app builds produce the CLI binary alongside the .app bundle.
+    // codans-cli is a dependency so app builds produce the CLI binary alongside the .app bundle.
     .target(
-      name: "touch-code",
+      name: "Codans",
       destinations: .macOS,
       product: .app,
-      productName: "TouchCode",
-      bundleId: "com.gumpw.touch-agent-mac",
+      productName: "Codans",
+      bundleId: "com.gumpw.codans",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .file(path: "Configurations/mac-Info.plist"),
       buildableFolders: [
-        "touch-code/App",
-        "touch-code/App/Features/Socket",
-        "touch-code/App/Features/Socket/handlers",
-        "touch-code/App/Features/GitHub",
-        "touch-code/App/Features/GitHub/Theme",
-        "touch-code/App/Features/GitHub/Views",
-        "touch-code/App/Features/MasterTerminal",
-        "touch-code/App/Features/MasterTerminal/Resources",
-        "touch-code/Runtime",
-        "touch-code/Process",
-        "touch-code/Git",
-        "touch-code/GitHub",
+        "codans/App",
+        "codans/App/Features/Socket",
+        "codans/App/Features/Socket/handlers",
+        "codans/App/Features/GitHub",
+        "codans/App/Features/GitHub/Theme",
+        "codans/App/Features/GitHub/Views",
+        "codans/App/Features/MasterTerminal",
+        "codans/App/Features/MasterTerminal/Resources",
+        "codans/Runtime",
+        "codans/Process",
+        "codans/Git",
+        "codans/GitHub",
       ],
-      entitlements: .file(path: "Configurations/touch-code.entitlements"),
+      entitlements: .file(path: "Configurations/codans.entitlements"),
       // git-wt submodule wiring. Pre-script fails the build cleanly when
       // the submodule is not checked out; post-script copies only the `wt`
       // file into Resources/git-wt/wt so Bundle.main.url(forResource:
@@ -243,29 +245,29 @@ let project = Project(
           ],
           basedOnDependencyAnalysis: false
         ),
-        // tc CLI embedding. Copies the tc binary built by its sibling
-        // target into Resources/bin/tc so the app can ship a single
-        // self-contained .app and `tc skill install` / first-launch
+        // codans CLI embedding. Copies the codans binary built by its sibling
+        // target into Resources/bin/codans so the app can ship a single
+        // self-contained .app and `codans skill install` / first-launch
         // installer (c4-cli D3) have a stable inside-bundle path to
-        // symlink from ~/.local/bin/tc.
+        // symlink from ~/.local/bin/codans.
         .post(
-          script: "\"${SRCROOT}/scripts/embed-tc.sh\"",
-          name: "Embed tc",
+          script: "\"${SRCROOT}/scripts/embed-codans.sh\"",
+          name: "Embed codans",
           inputPaths: [
-            "$(CONFIGURATION_BUILD_DIR)/tc",
+            "$(CONFIGURATION_BUILD_DIR)/codans",
           ],
           outputPaths: [
-            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/tc",
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/codans",
           ],
           basedOnDependencyAnalysis: true
         ),
         // zmx pane-resume daemon embedding. The zmx binary is built by
         // the Makefile's build-zmx prerequisite (out-of-band from Tuist,
         // since it's a vendored Zig build) and lives at
-        // .build/zmx/bin/zmx. This script copies it alongside tc under
+        // .build/zmx/bin/zmx. This script copies it alongside codans under
         // Resources/bin so the running app can spawn it from a stable
-        // inside-bundle path. Must run after "Embed tc" because that
-        // script wipes Resources/bin before copying tc.
+        // inside-bundle path. Must run after "Embed codans" because that
+        // script wipes Resources/bin before copying codans.
         .post(
           script: "\"${SRCROOT}/scripts/embed-zmx.sh\"",
           name: "Embed zmx",
@@ -306,10 +308,10 @@ let project = Project(
         ),
       ],
       dependencies: [
-        .target(name: "TouchCodeCore"),
-        .target(name: "TouchCodeIPC"),
-        .target(name: "tc"),
-        .target(name: "tcKit"),
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
+        .target(name: "codans-cli"),
+        .target(name: "CodansKit"),
         .target(name: "GhosttyKit"),
         .external(name: "ComposableArchitecture"),
         .external(name: "Sparkle"),
@@ -325,27 +327,27 @@ let project = Project(
       )
     ),
 
-    // touch-code unit tests (Runtime + App integration tests).
+    // Codans app unit tests (Runtime + App integration tests).
     .target(
-      name: "touch-codeTests",
+      name: "CodansTests",
       destinations: .macOS,
       product: .unitTests,
-      bundleId: "app.touch-code.mac-tests",
+      bundleId: "com.gumpw.codans.mac-tests",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .default,
       buildableFolders: [
-        "touch-code/Tests",
-        "touch-code/Tests/Socket",
-        "touch-code/Tests/Harness",
-        "touch-code/Tests/Integration",
-        "touch-code/Tests/GitHubTests",
-        "touch-code/Tests/StatusBarTests",
-        "touch-code/Tests/Shortcuts",
-        "touch-code/Tests/MasterTerminal",
+        "codans/Tests",
+        "codans/Tests/Socket",
+        "codans/Tests/Harness",
+        "codans/Tests/Integration",
+        "codans/Tests/GitHubTests",
+        "codans/Tests/StatusBarTests",
+        "codans/Tests/Shortcuts",
+        "codans/Tests/MasterTerminal",
       ],
       dependencies: [
-        .target(name: "touch-code"),
-        .target(name: "tcKit"),
+        .target(name: "Codans"),
+        .target(name: "CodansKit"),
         .external(name: "SnapshotTesting"),
       ],
       settings: .settings(

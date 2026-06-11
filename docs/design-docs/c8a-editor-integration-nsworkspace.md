@@ -33,7 +33,7 @@ It additionally **decouples the feature from Worktree**: "Open in X" is fundamen
 - User-defined command templates ("Custom editors"). Adding a new entry is a code change. If this turns out to be wrong, amend later.
 - Install / download / quarantine help. If the entry isn't installed, it doesn't appear. That's the whole UX.
 - Disambiguation between multiple installed versions of the same app (e.g. Xcode stable vs. Xcode-beta). Launch Services' choice wins. Document the limitation.
-- Subsetting the registry based on touch-code's own overlapping capabilities (e.g. "we already have a built-in terminal, skip terminal apps"). Respect user choice — don't prune.
+- Subsetting the registry based on codans's own overlapping capabilities (e.g. "we already have a built-in terminal, skip terminal apps"). Respect user choice — don't prune.
 - Coupling the editor service to Worktree, Project, or Pane types. The service is a pure path-opener; any per-Project semantics live one layer up, in the feature/handler that calls it.
 
 ## Design
@@ -63,13 +63,13 @@ The load-bearing trade-off is **"uniform mechanism" (C8's aesthetic) vs. "mechan
 
 ```
  ┌──────────────────────────────────────────────────────────────────┐
- │  touch-code app                                                  │
+ │  codans app                                                  │
  │                                                                  │
  │  Callers (resolve context → URL)     Settings · Editor pane      │
  │  ┌─────────────────────────┐         ┌──────────────────────┐    │
  │  │ Worktree header button  │         │ Default editor:      │    │
  │  │ Git viewer "Enter"      │◀── same │   🅲 Cursor      ▼   │    │
- │  │ CLI `tc open [<path>]`  │   list  │ (installed only)     │    │
+ │  │ CLI `codans open [<path>]`  │   list  │ (installed only)     │    │
  │  │ Future deeplink handler │         └──────────────────────┘    │
  │  └──────────┬──────────────┘                                     │
  │             │ openInEditor(path: URL,                            │
@@ -203,7 +203,7 @@ Adding a new entry is a two-line code change (registry row + priority insertion)
 **Caller layer** (TCA `EditorFeature` or IPC handler) decides what to pass as `preferred`:
 
 ```
-userExplicitPick   (dropdown click, `tc open --in …`)
+userExplicitPick   (dropdown click, `codans open --in …`)
   → pass as `preferred`, strictly (throw if uninstalled: user asked for a specific thing)
 OR, if no user pick:
 projectOverride    (project.defaultEditor via hierarchy lookup from path)
@@ -230,8 +230,8 @@ The caller owns the `projectOverride` filter-if-installed step; the service owns
 
 - `editor.describe` → `[EditorDescriptor]` — payload shape changes (new fields, `argv` gone), method name/semantics the same. No CLI consumers depend on the old shape today.
 - `editor.open { path: String, preferred?: EditorID }` → `EditorChoice`.
-  - `path` is **mandatory** and must be an absolute directory path. Callers (including the CLI) resolve their own context to a path; `tc open` with no argument uses `$PWD`.
-  - `preferred` is optional; supplied when the user invoked `tc open --in <editor>`.
+  - `path` is **mandatory** and must be an absolute directory path. Callers (including the CLI) resolve their own context to a path; `codans open` with no argument uses `$PWD`.
+  - `preferred` is optional; supplied when the user invoked `codans open --in <editor>`.
   - When `preferred` is absent, the IPC handler does `hierarchyClient.project(containing: path)?.defaultEditor` and, if that ID is installed, passes it as the service `preferred`. This keeps CLI invocations consistent with in-app "click Open" behaviour: both honour the per-Project override silently. The handler is the only place this lookup happens — the service itself never imports `HierarchyClient`.
   - `argv` removed from the response.
 - `editor.setGlobalDefault { editorID? }` → `void`. Sets `settings.general.defaultEditorID`; `null` clears it. (Renamed from `editor.setDefault` for clarity now that per-Project default lives on a different surface.)
@@ -263,12 +263,12 @@ No new files. One field simplifies, one removed, one kept:
 2. If `general.defaultEditorID` is a string that is not in the new builtin registry, set it to `nil` and log at `.info`. Next resolution falls through to the priority auto-pick.
 3. If any `Project.defaultEditor` is a string that is not in the new builtin registry (i.e. it was a custom editor ID from C8), set it to `nil` and log at `.info`.
 
-No schema version bump (touch-code's settings/catalog readers are tolerant of unknown keys). Rollback is safe in both directions.
+No schema version bump (codans's settings/catalog readers are tolerant of unknown keys). Rollback is safe in both directions.
 
 ### Component Boundaries
 
 ```
-apps/mac/touch-code/App/Clients/Editor/
+apps/mac/codans/App/Clients/Editor/
 ├── EditorService.swift          ─ protocol (unchanged signature)
 ├── EditorService+Live.swift     ─ live: uses AppLauncher + NSWorkspace
 ├── EditorService+Test.swift     ─ test double (now trivially smaller)
@@ -345,7 +345,7 @@ Dropdown contents follow `menuOrder`, filtered to installed entries, with thin c
 ⌨   $EDITOR
 ```
 
-Uninstalled entries: **not shown**. No banner, no explanation, no download link. If the user installs Cursor after touch-code is running, opening Settings re-probes on pane appear and the dropdown now includes Cursor. `.editor` is always shown (no bundle to probe) as long as the Pane primitive it depends on is available.
+Uninstalled entries: **not shown**. No banner, no explanation, no download link. If the user installs Cursor after codans is running, opening Settings re-probes on pane appear and the dropdown now includes Cursor. `.editor` is always shown (no bundle to probe) as long as the Pane primitive it depends on is available.
 
 **Per-Project override** lives in the Project Options sheet and uses the same picker shape, with one extra row `↩ Use global default` at the top (equivalent to setting `Project.defaultEditor = nil`). Writes go through `HierarchyClient.setRepositoryDefaultEditor(projectID, editorID)` — unchanged from C8. The value domain is now restricted to installed built-in IDs (the picker only offers installed editors, like the global picker).
 
@@ -391,9 +391,9 @@ Detect via bundle IDs, but still spawn the CLI shim (`code`, `cursor`, ...) once
 
 ### A3. Subset the list to only code editors
 
-Cut terminals and git clients on the grounds that touch-code has built-in Panes (terminal) and C7 Git Viewer (git client), making external equivalents redundant.
+Cut terminals and git clients on the grounds that codans has built-in Panes (terminal) and C7 Git Viewer (git client), making external equivalents redundant.
 
-- **Pros:** shorter dropdown, smaller registry, matches touch-code's "Pane IS the terminal" stance.
+- **Pros:** shorter dropdown, smaller registry, matches codans's "Pane IS the terminal" stance.
 - **Cons:** pre-empts the user's choice. Some users want Warp's AI, Ghostty on a second monitor, or GitHub Desktop's PR UI alongside the built-in features. The cost of keeping them is ~20 rows in a Swift enum; the benefit is "no one ever has to ask where X went".
 - **Verdict:** rejected. Ship all 28.
 
@@ -418,12 +418,12 @@ Start with `defaultEditorID = nil`; first "Open in editor" click opens Settings 
 ### Security
 
 - **Reduced attack surface.** No `Process`, no argv substitution, no env whitelist, no shell concerns. The remaining surface is "LS opens a directory in a bundle identified by string" — a well-trodden macOS path.
-- **Quarantine / Gatekeeper.** LS handles quarantine prompts on behalf of touch-code; if a bundle is quarantined the user sees the OS-standard dialog, not a touch-code error. Acceptable.
-- **Deeplink risk.** If a future `touch-code://` URL requests `editor.open` with a `preferred` ID that is not in the built-in registry, the service rejects it — there is no user-provided template it can weaponise. Strictly safer than C8.
+- **Quarantine / Gatekeeper.** LS handles quarantine prompts on behalf of codans; if a bundle is quarantined the user sees the OS-standard dialog, not a codans error. Acceptable.
+- **Deeplink risk.** If a future `codans://` URL requests `editor.open` with a `preferred` ID that is not in the built-in registry, the service rejects it — there is no user-provided template it can weaponise. Strictly safer than C8.
 
 ### Observability
 
-- `os.Logger` category `com.touch-code.editor`. Log at `.info` on every resolve (editor ID + dir path) and every launch (success/fail). Log at `.error` on migration anomalies (unknown `defaultEditorID`, legacy `customEditors` present).
+- `os.Logger` category `com.gumpw.codans.editor`. Log at `.info` on every resolve (editor ID + dir path) and every launch (success/fail). Log at `.error` on migration anomalies (unknown `defaultEditorID`, legacy `customEditors` present).
 - No signposts for launch wall-clock; LS returns near-instantly and the meaningful latency is in the editor's own cold-start, which we can't measure from here.
 
 ### Accessibility
@@ -457,9 +457,9 @@ Covered under Data Storage above. One-line summary: decode is tolerant, stale ID
 - **R1 — ToDesktop-style bundle ID drift.** Cursor's bundle ID is a ToDesktop hash (`com.todesktop.230313mzl4w4u92`). If a future Cursor release re-publishes under a different ID, detection misses it. **Mitigation:** `alternateBundleIdentifiers: [String]` on every descriptor; probe primary first, fall through alternates. Update the list when the shim moves (code change).
 - **R2 — JetBrains special-case drift.** If JetBrains changes how its apps accept folder-open via `configuration.arguments`, our one branch breaks silently (app launches, folder ignored) for all five JetBrains entries (IntelliJ, WebStorm, PyCharm, RubyMine, RustRover). **Mitigation:** manual smoke test on one JetBrains IDE in every release; if fragile in practice, prefer `ides-openFolder` URL scheme as a per-editor override.
 
-- **R2b — `.editor` depends on a Pane primitive that may not exist yet.** touch-code needs a "create Pane at path with initial stdin input (`$EDITOR\n`)" capability for the `.shellEditor` launch mode. If the Pane feature doesn't already expose this, C8a's `.editor` case can't ship. **Mitigation:** /hs-planner's first task is to verify or build this primitive. If it's not trivial, drop `.editor` from this iteration (one-line registry change) and re-add it when the Pane side is ready — the rest of the 28-entry parity is unaffected.
+- **R2b — `.editor` depends on a Pane primitive that may not exist yet.** codans needs a "create Pane at path with initial stdin input (`$EDITOR\n`)" capability for the `.shellEditor` launch mode. If the Pane feature doesn't already expose this, C8a's `.editor` case can't ship. **Mitigation:** /hs-planner's first task is to verify or build this primitive. If it's not trivial, drop `.editor` from this iteration (one-line registry change) and re-add it when the Pane side is ready — the rest of the 28-entry parity is unaffected.
 - **R3 — Launch Services picks wrong Xcode version.** User has Xcode and Xcode-beta installed; LS picks whichever is "default". **Mitigation:** document as a known limitation; consider a separate `xcodeBeta` descriptor with bundle ID `com.apple.dt.Xcode-beta` (if Apple uses a stable alternate ID) in a follow-up.
-- **R4 — First-install race.** User installs Cursor while touch-code is running; the cached `describe()` still says it's missing. **Mitigation:** `describe()` re-probes when Settings pane becomes visible and when IPC `editor.describe` is called. Sufficient for the use case; avoids polling.
+- **R4 — First-install race.** User installs Cursor while codans is running; the cached `describe()` still says it's missing. **Mitigation:** `describe()` re-probes when Settings pane becomes visible and when IPC `editor.describe` is called. Sufficient for the use case; avoids polling.
 - **R5 — Loss of escape hatch for niche editors.** A user who was using a Custom template for, say, Helix, loses their setup on upgrade. **Mitigation:** add Helix to the built-in registry if requested (2-line change). The current `customEditors` surface has no known users per logs, so the migration-loss blast radius is near zero. If wrong, revert via amendment.
 - **R6 — `NSWorkspace.open` async callback error swallowing.** The callback-based API returns errors via completion handler; miswiring could drop errors silently. **Mitigation:** wrap in `withCheckedThrowingContinuation`; unit test asserts the continuation resumes exactly once in success and failure paths.
 

@@ -39,10 +39,10 @@ v2 closes both classes. This doc enumerates **deltas only**. v1 remains the base
 **Non-Goals**
 
 - Restructuring the FSM. `AgentState` and the v1 transition table stay.
-- Changing the persistence format or storage path. `~/.config/touch-code/inbox.json` keeps its v1 schema; only `AgentNotification` gains an optional field (forward-compatible).
+- Changing the persistence format or storage path. `~/.config/codans/inbox.json` keeps its v1 schema; only `AgentNotification` gains an optional field (forward-compatible).
 - Cross-device sync, push, snooze, rich notifications.
 - Replacing C3's `internalEventStream()` with a separate IPC channel (socket, named pipe, etc.). C3 already provides an in-process event bus that suffices for v2's needs; introducing a parallel transport would duplicate routing and dedup logic.
-- Per-agent hook installer state machine UX. C3 owns hook installation in touch-code; C6 only consumes.
+- Per-agent hook installer state machine UX. C3 owns hook installation in codans; C6 only consumes.
 
 ## Design
 
@@ -50,7 +50,7 @@ The deltas are grouped by concern. Each carries a short rationale, a concrete co
 
 ### D1. Status-bar bell entry (UI surface #4)
 
-**Where it lives.** `apps/mac/touch-code/App/Features/WorktreeHeader/` (alongside the existing status-bar pieces touched by recent commits `98305e8`, `93ace64`, `9447120`, `6911a65`).
+**Where it lives.** `apps/mac/codans/App/Features/WorktreeHeader/` (alongside the existing status-bar pieces touched by recent commits `98305e8`, `93ace64`, `9447120`, `6911a65`).
 
 **What it shows.** A bell icon button bound to the same `unreadPublisher` that drives the dock badge.
 
@@ -64,7 +64,7 @@ The deltas are grouped by concern. Each carries a short rationale, a concrete co
 **Contract.**
 
 ```swift
-// apps/mac/touch-code/App/Features/WorktreeHeader/StatusBarBellView.swift
+// apps/mac/codans/App/Features/WorktreeHeader/StatusBarBellView.swift
 struct StatusBarBellView: View {
     @ObservedObject var viewModel: StatusBarBellViewModel
     var body: some View { /* … */ }
@@ -135,7 +135,7 @@ public struct AgentNotification: Codable, Equatable, Identifiable {
 **Coordinator-level window.**
 
 ```swift
-// apps/mac/touch-code/Notifications/NotificationCoordinator.swift
+// apps/mac/codans/Notifications/NotificationCoordinator.swift
 private struct DedupRecord {
     let key: String         // dedupKey or hash(paneID|title|body)
     let postedAt: Date
@@ -171,7 +171,7 @@ When a Pane closes, `TrackerRegistry.teardown(paneID)` calls `coordinator.clearD
 **Wire-up.**
 
 ```swift
-// apps/mac/touch-code/Notifications/AgentStateTracker.swift
+// apps/mac/codans/Notifications/AgentStateTracker.swift
 private var lastUserInputAt: Date?
 private let userInteractionWindow: TimeInterval = 3.0
 
@@ -186,7 +186,7 @@ private func shouldSuppress(_ transition: AgentStateTransition) -> Bool {
 }
 ```
 
-**Hook into pane input.** `GhosttySurfaceBridge` (or its touch-code equivalent) already routes key input; we add a `paneKeyInput(paneID:)` callback the `TrackerRegistry` forwards to the matching tracker's `recordUserInput`.
+**Hook into pane input.** `GhosttySurfaceBridge` (or its codans equivalent) already routes key input; we add a `paneKeyInput(paneID:)` callback the `TrackerRegistry` forwards to the matching tracker's `recordUserInput`.
 
 **Why selective (only `.completed` / `.idle`).** `.blockedOnInput` is exactly when a typing user has stopped because the agent is asking; suppressing that transition would defeat the purpose. `.running` is not a notification-worthy transition anyway.
 
@@ -214,7 +214,7 @@ The two are intentionally separate: master-off = "I don't want this feature righ
 
 ### D6. `applicationDidBecomeActive` permission refresh
 
-**Where.** `apps/mac/touch-code/App/AppDelegate.swift` (or the SwiftUI `Scene`-level equivalent already in use). Add:
+**Where.** `apps/mac/codans/App/AppDelegate.swift` (or the SwiftUI `Scene`-level equivalent already in use). Add:
 
 ```swift
 NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
@@ -265,8 +265,8 @@ settings.publisher(for: \.inAppEnabled)
 
 ```swift
 switch response.actionIdentifier {
-case "touch-code.focus":   inbox.markRead([id]); deeplink.open("touch-code://pane/\(paneID)/focus")
-case "touch-code.dismiss": inbox.dismiss([id])
+case "codans.focus":   inbox.markRead([id]); deeplink.open("codans://pane/\(paneID)/focus")
+case "codans.dismiss": inbox.dismiss([id])
 case UNNotificationDefaultActionIdentifier: /* tap on body = focus */
 default: break
 }
@@ -324,17 +324,17 @@ Use the same fake clock and in-memory `AtomicFileStore` already used by v1 tests
 **Audit.** v1 marks-read on `InboxSidebarFeature.rowTapped`. Other focus paths:
 
 - Click on OS banner body (default action) — D9 wires this.
-- `tc focus <paneID>` CLI command — currently does **not** mark read.
+- `codans focus <paneID>` CLI command — currently does **not** mark read.
 - Status-bar bell click — D1 opens sidebar but does not mark anything read until the user clicks a row.
 - Click on a worktree in the sidebar list — does not mark read.
 
 **Decision.** "Focus implies acknowledgement of unread for that Pane only." Add `InboxClient.markReadForPane(_:)`. Wire:
 
-- `tc focus` → `markReadForPane(paneID)`.
+- `codans focus` → `markReadForPane(paneID)`.
 - Sidebar worktree row tap → `markReadForWorktree(worktreeID)` (new).
 - Status-bar bell remains read-on-row-click — the bell is a nav affordance, not an acknowledgement.
 
-**Tests.** `InboxClientTests.markReadForPane`, `markReadForWorktree`. CLI smoke test for `tc focus`.
+**Tests.** `InboxClientTests.markReadForPane`, `markReadForWorktree`. CLI smoke test for `codans focus`.
 
 ### D14. Structured metrics
 
@@ -355,14 +355,14 @@ enum NotificationMetric: String {
 }
 ```
 
-**Sink.** Initially write through `os.Logger` with a structured payload (`subsystem: "touch-code.notifications"`, `category: "metrics"`). Expose a `tc notifications stats` CLI subcommand that reads the last hour of logs and prints per-counter totals. No external metrics service in v1.
+**Sink.** Initially write through `os.Logger` with a structured payload (`subsystem: "codans.notifications"`, `category: "metrics"`). Expose a `codans notifications stats` CLI subcommand that reads the last hour of logs and prints per-counter totals. No external metrics service in v1.
 
 **Tests.** `MetricsTests` — assert each counter increments on the relevant code path.
 
 ## Data Model Deltas (consolidated)
 
 ```swift
-// TouchCodeCore/Notifications/AgentNotification.swift
+// CodansCore/Notifications/AgentNotification.swift
 public struct AgentNotification: Codable, Equatable, Identifiable {
     public let id: UUID
     public let paneID: PaneID
@@ -376,7 +376,7 @@ public struct AgentNotification: Codable, Equatable, Identifiable {
     public var dedupKey: String?            // NEW
 }
 
-// TouchCodeCore/Notifications/AgentDetectionRules.swift
+// CodansCore/Notifications/AgentDetectionRules.swift
 public struct AgentDetectionRules: Codable {
     public let version: Int                 // NEW (always 2 going forward)
     public let rules: [AgentDetectionRule]
@@ -387,7 +387,7 @@ public struct AgentDetectionRule: Codable {
     public var surfaceIdle: Bool = false    // NEW
 }
 
-// TouchCodeCore/Notifications/NotificationsSettings.swift
+// CodansCore/Notifications/NotificationsSettings.swift
 public struct NotificationsSettings: Codable {
     public var enabled: Bool                = true   // NEW master
     public var inAppEnabled: Bool           = true
@@ -474,7 +474,7 @@ Total new test files: **9**. Total new test methods: **~32**. All run against th
 - **DEC-V5.** Top-level master `enabled` is distinct from `mute.enabled`; master OFF skips inbox append entirely; mute ON still appends to inbox but silences surfaces.
 - **DEC-V6.** Sound mutex: when system notifications enabled, in-app sound is silenced and the UI reflects that the OS owns audio.
 - **DEC-V7.** Worktree promotion fires only on the 0→N unread transition per worktree.
-- **DEC-V8.** `tc focus` and sidebar worktree-row tap mark read; status-bar bell click does not (it's nav, not acknowledgement).
+- **DEC-V8.** `codans focus` and sidebar worktree-row tap mark read; status-bar bell click does not (it's nav, not acknowledgement).
 - **DEC-V9.** Status-bar bell is the only new entry-point in v2; per-tab unread dots in the tab bar are deferred until usage data shows the status-bar bell alone is insufficient. (User-confirmed 2026-04-25.)
 - **DEC-V10.** `moveNotifiedWorktreeToTop` defaults `true`. Manual ordering is preserved as the fallback when no unread; promotion is reversible by clearing unread. (User-confirmed.)
 - **DEC-V11.** When the master `enabled` toggle is OFF, the status-bar bell renders as a bell-slash icon (not hidden), so the entry-point for re-enabling stays discoverable. Click still opens the inbox sidebar; the sidebar surfaces a banner reminding the user that notifications are globally disabled. (User-confirmed.)

@@ -1,4 +1,4 @@
-# User-Test Patterns — touch-code
+# User-Test Patterns — codans
 
 **Status:** Initial draft, written alongside [user-tests/notifications-v1-1.md](user-tests/notifications-v1-1.md). Expand as more features adopt the user-test pattern.
 
@@ -6,13 +6,13 @@ This document defines the project-wide conventions a user-test case must follow 
 
 ## Surfaces and Tooling
 
-touch-code is a native macOS app shipping three user-facing surfaces:
+codans is a native macOS app shipping three user-facing surfaces:
 
 | Surface | Probe approach | Allowed selectors |
 |---|---|---|
 | **SwiftUI window UI** (main window, Settings window, sheets, alerts, context menus) | Manual visual probe by a human dogfooder; `XCUITest` for automated probes (preferred when the build target supports it) | Accessibility identifiers (`accessibilityIdentifier(_:)`), visible role + label (e.g., `Toggle("Sound", isOn:)` → role=switch, name="Sound"), or unambiguous on-screen text |
-| **`tc` CLI** (JSON-RPC client → app) | Shell invocations with `tc …` and stdout/exit-code assertions | Subcommand name + flags; `--json` output where supported |
-| **Persisted state files** (`~/.config/touch-code/{settings,catalog,notifications,detection-rules}.json`, plus log lines) | `jq` queries against file content; `log stream` / `Console.app` filters against `subsystem:"com.touch-code.*"` | File path + JSON key path; log filter expression |
+| **`codans` CLI** (JSON-RPC client → app) | Shell invocations with `codans …` and stdout/exit-code assertions | Subcommand name + flags; `--json` output where supported |
+| **Persisted state files** (`~/.config/codans/{settings,catalog,notifications,detection-rules}.json`, plus log lines) | `jq` queries against file content; `log stream` / `Console.app` filters against `subsystem:"com.gumpw.codans.*"` | File path + JSON key path; log filter expression |
 
 If a case cannot be expressed in one of these probe languages, the case is mis-scoped — either the assertion is implementation-internal (move to a unit test) or the surface needs a new accessibility identifier (raise it as a precondition / spec-amendment, do not work around with brittle selectors).
 
@@ -32,14 +32,14 @@ Every case that drives the app must wait on a ready signal before executing step
 | App launched | Dock icon visible AND main window's worktree status bar contains the bell button |
 | Settings window open | `Settings → Notifications` section header is visible AND the macOS-permission status row has resolved to one of `Authorized` / `Denied` / `Not yet asked` |
 | Pane attached | Pane chrome shows the prompt cursor OR the spinner "Spinning up shell…" has disappeared |
-| Notification emitted | Either: a Dock badge label change, a log line under `subsystem:"com.touch-code.notifications"` `category:"coordinator"` with a recognised verb (`posted`, `drop`), or a row in `~/.config/touch-code/notifications.json`'s `entries` array (whichever the case names) |
+| Notification emitted | Either: a Dock badge label change, a log line under `subsystem:"com.gumpw.codans.notifications"` `category:"coordinator"` with a recognised verb (`posted`, `drop`), or a row in `~/.config/codans/notifications.json`'s `entries` array (whichever the case names) |
 
 ## Fixture Seeding
 
-Files are placed under the user's `~/.config/touch-code/` before app launch. Each case names the exact files it seeds; the runner is responsible for backing up and restoring the user's real files around the case.
+Files are placed under the user's `~/.config/codans/` before app launch. Each case names the exact files it seeds; the runner is responsible for backing up and restoring the user's real files around the case.
 
 ```
-~/.config/touch-code/
+~/.config/codans/
   settings.json            — owned by SettingsStore; seed-able before launch
   catalog.json             — owned by CatalogStore; seed-able before launch
   notifications.json       — owned by NotificationStore; seed-able before launch
@@ -59,7 +59,7 @@ For cases that genuinely require duration progression (a command running for ≥
 Every case lists what to capture on FAIL. Defaults that apply to every case unless overridden:
 
 - `screenshot.png` — full-window screenshot at first failed assertion.
-- `console.log` — `log stream --predicate 'subsystem == "com.touch-code.notifications"' --last 5m` output around the failure.
+- `console.log` — `log stream --predicate 'subsystem == "com.gumpw.codans.notifications"' --last 5m` output around the failure.
 - For probes that touched a state file: a copy of the file at failure time, named `<file>.snapshot.json`.
 
 ## Personas

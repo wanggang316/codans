@@ -1,0 +1,94 @@
+{
+  "data": {
+    "repository": {
+      "branch0": {
+        "nodes": [
+          {
+            "number": 501,
+            "title": "fork's main targets our main",
+            "state": "OPEN",
+            "isDraft": false,
+            "additions": 10,
+            "deletions": 2,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": null,
+            "url": "https://github.com/someone/codans/pull/501",
+            "updatedAt": "2026-04-20T09:00:00Z",
+            "headRefName": "main",
+            "baseRefName": "main",
+            "commits": { "totalCount": 1 },
+            "author": { "login": "someone" },
+            "headRepository": { "name": "codans", "owner": { "login": "someone" } },
+            "statusCheckRollup": null
+          },
+          {
+            "number": 42,
+            "title": "upstream main PR — this is the right one",
+            "state": "OPEN",
+            "isDraft": false,
+            "additions": 100,
+            "deletions": 5,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": "APPROVED",
+            "url": "https://github.com/wanggang316/codans/pull/42",
+            "updatedAt": "2026-04-22T10:00:00Z",
+            "headRefName": "main",
+            "baseRefName": "release",
+            "commits": { "totalCount": 3 },
+            "author": { "login": "wanggang316" },
+            "headRepository": { "name": "codans", "owner": { "login": "wanggang316" } },
+            "statusCheckRollup": null
+          }
+        ]
+      },
+      "branch1": {
+        "nodes": [
+          {
+            "number": 601,
+            "title": "only a fork PR for this branch — still valid since base != head",
+            "state": "OPEN",
+            "isDraft": false,
+            "additions": 20,
+            "deletions": 0,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": null,
+            "url": "https://github.com/fork/codans/pull/601",
+            "updatedAt": "2026-04-23T08:00:00Z",
+            "headRefName": "fork-feature",
+            "baseRefName": "main",
+            "commits": { "totalCount": 2 },
+            "author": { "login": "fork-contributor" },
+            "headRepository": { "name": "codans", "owner": { "login": "fork-contributor" } },
+            "statusCheckRollup": null
+          }
+        ]
+      },
+      "branch2": {
+        "nodes": [
+          {
+            "number": 701,
+            "title": "fork PR with base == head — should be dropped",
+            "state": "OPEN",
+            "isDraft": false,
+            "additions": 5,
+            "deletions": 0,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": null,
+            "url": "https://github.com/bad/codans/pull/701",
+            "updatedAt": "2026-04-23T09:00:00Z",
+            "headRefName": "shared-name",
+            "baseRefName": "shared-name",
+            "commits": { "totalCount": 1 },
+            "author": { "login": "bad-fork" },
+            "headRepository": { "name": "codans", "owner": { "login": "bad-fork" } },
+            "statusCheckRollup": null
+          }
+        ]
+      }
+    }
+  }
+}

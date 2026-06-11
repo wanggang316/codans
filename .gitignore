@@ -42,8 +42,8 @@ apps/mac/Configurations/Secrets.xcconfig
 
 # Per-machine performance baseline written by 0005 M8 tests (TC_PERF_BASELINE=capture).
 # Each contributor and CI runner captures its own; not shared in the repo.
-apps/mac/touch-code/Tests/Performance/baseline.json
-apps/mac/touch-code/Tests/Performance/baseline.run.txt
+apps/mac/codans/Tests/Performance/baseline.json
+apps/mac/codans/Tests/Performance/baseline.run.txt
 
 apps/mac/.build/release/
 apps/mac/.build/zmx/

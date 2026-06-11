@@ -8,17 +8,17 @@
 
 ## Context and Scope
 
-touch-code is deliberately not an IDE. Every code-reading or code-editing need is a hand-off to an external editor or file manager — VSCode, Cursor, Zed, Xcode, Sublime Text, Finder, and anything the user can describe with a command template. [Product-spec C8](../product-spec.md) pins the surface: a **Worktree-level** directory open, driven by either (a) a dropdown button in the Worktree header or (b) the `tc open [--in <editor>] [<worktree>]` CLI. No file-level or diff-level opens in v1.
+codans is deliberately not an IDE. Every code-reading or code-editing need is a hand-off to an external editor or file manager — VSCode, Cursor, Zed, Xcode, Sublime Text, Finder, and anything the user can describe with a command template. [Product-spec C8](../product-spec.md) pins the surface: a **Worktree-level** directory open, driven by either (a) a dropdown button in the Worktree header or (b) the `codans open [--in <editor>] [<worktree>]` CLI. No file-level or diff-level opens in v1.
 
 [Open Question #7](../product-spec.md#open-questions) (editor discovery & invocation) is resolved by this doc: ship a **built-in allowlist with documented CLI wrappers**, discover installed editors by probing `$PATH`, and allow **user-defined command templates** for everything else.
 
 Repository state at design time:
 
-- `Project.defaultEditor: String?` already exists on the domain type in `apps/mac/TouchCodeCore/Project.swift`. This design fixes its semantics (it stores an `EditorID` string) and adds a settings-level global default.
-- The `touch-code-skill/` is not yet present, and no editor service has been implemented.
+- `Project.defaultEditor: String?` already exists on the domain type in `apps/mac/CodansCore/Project.swift`. This design fixes its semantics (it stores an `EditorID` string) and adds a settings-level global default.
+- The `codans-skill/` is not yet present, and no editor service has been implemented.
 - supacode has a battle-tested editor-open pattern via Launch Services and bundle IDs (`OpenWorktreeAction.swift` + `WorkspaceClient.swift`). We adopt its **shape** (enum of known editors, per-project override) but invert its **mechanism** (CLI wrappers over `Process`, not `NSWorkspace.open`). Rationale in [Alternatives](#alternatives-considered).
 
-This document is the source of truth for C8. It does not specify the `tc` CLI shell (that is C4, sibling design doc), nor the Worktree header UI beyond the minimum C8 contributes. It assumes C2 (hierarchy) provides `Worktree.path`.
+This document is the source of truth for C8. It does not specify the `codans` CLI shell (that is C4, sibling design doc), nor the Worktree header UI beyond the minimum C8 contributes. It assumes C2 (hierarchy) provides `Worktree.path`.
 
 ## Goals and Non-Goals
 
@@ -26,7 +26,7 @@ This document is the source of truth for C8. It does not specify the `tc` CLI sh
 
 - Open **the currently selected Worktree's directory** in one of: VSCode, Cursor, Zed, Xcode, Sublime Text, Finder — via a small, stable built-in allowlist.
 - Allow arbitrary user-defined entries via a command template with a `{dir}` placeholder.
-- Resolve an editor choice from: explicit request (`tc open --in vscode`) → per-Project override (`Project.defaultEditor`) → global default (`Settings.defaultEditorID`) → built-in fallback (Finder).
+- Resolve an editor choice from: explicit request (`codans open --in vscode`) → per-Project override (`Project.defaultEditor`) → global default (`Settings.defaultEditorID`) → built-in fallback (Finder).
 - Discover installed editors at app start by probing `$PATH` for each allowlist binary; expose the result so the Settings UI and the Worktree-header dropdown only show what is actually usable.
 - Fail loudly and clearly on missing editor, non-zero exit, timeout, or bad template.
 - Be fully testable with a mock `Process` dependency — no real editor launches in unit tests.
@@ -37,7 +37,7 @@ This document is the source of truth for C8. It does not specify the `tc` CLI sh
 - **No line-number mapping, no cursor positioning, no symbol navigation.**
 - **No Launch Services / bundle-ID discovery.** One mechanism, not two.
 - **No install help.** If VSCode is installed but `code` is not on `PATH`, we surface that as a discoverable error — we do not open VSCode's "Install 'code' in PATH" dialog on the user's behalf.
-- **No editor spawning from `touch-code/Git/` or `touch-code/Runtime/`.** The editor service has a single call site per layer: the TCA editor-open action and the CLI's IPC handler.
+- **No editor spawning from `codans/Git/` or `codans/Runtime/`.** The editor service has a single call site per layer: the TCA editor-open action and the CLI's IPC handler.
 - **No diff-view hand-off.** Sending a working-tree diff into VSCode's diff view is out of scope; that is what C7's in-app viewer is for.
 - **No project-open behaviour customisation per editor** (e.g. "open in new window vs. add to workspace"). Whatever the editor's default is for "CLI passed a directory" is what we get.
 
@@ -50,7 +50,7 @@ A single service, `EditorService`, exposes two capabilities:
 1. **Describe** — enumerate built-in and user-defined editors, marking each as installed or missing based on a cached `$PATH` probe.
 2. **Open** — given a `URL` (directory) and an optional `EditorID`, resolve the editor choice, substitute `{dir}` into the command template, spawn a `Process`, and surface the outcome.
 
-The service lives in its own in-app module slice under `apps/mac/touch-code/App/Clients/Editor/` (it is TCA-feature-adjacent, not a separate Tuist target). It has no persistent state of its own; reads come from `SettingsStore` (global default + custom templates) and `HierarchyManager` (per-Project override). Writes (changing the default) go through the same stores.
+The service lives in its own in-app module slice under `apps/mac/codans/App/Clients/Editor/` (it is TCA-feature-adjacent, not a separate Tuist target). It has no persistent state of its own; reads come from `SettingsStore` (global default + custom templates) and `HierarchyManager` (per-Project override). Writes (changing the default) go through the same stores.
 
 There are three load-bearing decisions, covered in [Alternatives Considered](#alternatives-considered):
 
@@ -62,7 +62,7 @@ There are three load-bearing decisions, covered in [Alternatives Considered](#al
 
 ```
  ┌─────────────────────────────────────────────────────────────┐
- │  touch-code app                                             │
+ │  codans app                                             │
  │                                                             │
  │  Worktree header (SwiftUI)         Settings view (TCA)      │
  │  ┌──────────────┐                  ┌───────────────────┐    │
@@ -91,9 +91,9 @@ There are three load-bearing decisions, covered in [Alternatives Considered](#al
  │                             │   - Project.defaultEditor │   │
  │                             └───────────────────────────┘   │
  │                                                             │
- │  IPC socket (C4)            Tuist target: tc                │
+ │  IPC socket (C4)            Tuist target: codans                │
  │  ┌───────────┐ method:      ┌───────────────────────────┐   │
- │  │ hierarchy │ editor.open  │  tc open [--in <editor>]  │   │
+ │  │ hierarchy │ editor.open  │  codans open [--in <editor>]  │   │
  │  │ .socket   │◀─────────────│      [<worktree>]         │   │
  │  └───────────┘              └───────────────────────────┘   │
  └─────────────────────────────────────────────────────────────┘
@@ -201,7 +201,7 @@ Validation on save: `id` must not collide with a built-in; `template.binary` mus
 
 #### Resolution order
 
-Resolution has two layers. First, **which Worktree are we opening?** For in-app callers the Worktree comes from the current selection. For the CLI (`tc open`), it comes from an explicit `<worktree>` positional argument, otherwise from the `TOUCH_CODE_PANE_ID` env var injected into every Pane. If neither is set — `tc open` run outside a touch-code Pane with no `<worktree>` — the IPC handler returns `EditorError.unresolvedWorktree` and the CLI prints a clear message telling the user to pass `<worktree>` explicitly. We do **not** fall back to the last-focused Worktree or to any heuristic; an unresolved call is a user error, not a guess.
+Resolution has two layers. First, **which Worktree are we opening?** For in-app callers the Worktree comes from the current selection. For the CLI (`codans open`), it comes from an explicit `<worktree>` positional argument, otherwise from the `CODANS_PANE_ID` env var injected into every Pane. If neither is set — `codans open` run outside a codans Pane with no `<worktree>` — the IPC handler returns `EditorError.unresolvedWorktree` and the CLI prints a clear message telling the user to pass `<worktree>` explicitly. We do **not** fall back to the last-focused Worktree or to any heuristic; an unresolved call is a user error, not a guess.
 
 Second, once the Worktree is pinned, **which editor?**
 
@@ -231,7 +231,7 @@ Reserved methods, payloads pinned by the CLI design doc. Minimum surface:
 - `editor.open { worktreeID?: UUID, preferred?: EditorID }` → `EditorChoice`
 - `editor.setDefault { projectID: UUID, editorID: EditorID? }` → `void` (null → unset; falls back to global)
 
-`tc open [--in <editor>] [<worktree>]` maps to `editor.open`. The CLI resolves `worktreeID` in this order: (1) the explicit `<worktree>` argument if given; (2) the Pane whose UUID is in the invoking shell's `TOUCH_CODE_PANE_ID` env var (the app injects this into every Pane) — the handler then walks up to the Pane's owning Worktree; (3) otherwise, **no fallback** — the handler returns `EditorError.unresolvedWorktree` and the CLI prints `error: no worktree (pass <worktree> or run from inside a touch-code Pane)` to stderr with exit code 2.
+`codans open [--in <editor>] [<worktree>]` maps to `editor.open`. The CLI resolves `worktreeID` in this order: (1) the explicit `<worktree>` argument if given; (2) the Pane whose UUID is in the invoking shell's `CODANS_PANE_ID` env var (the app injects this into every Pane) — the handler then walks up to the Pane's owning Worktree; (3) otherwise, **no fallback** — the handler returns `EditorError.unresolvedWorktree` and the CLI prints `error: no worktree (pass <worktree> or run from inside a codans Pane)` to stderr with exit code 2.
 
 ### Data Storage
 
@@ -250,7 +250,7 @@ No new files. No new schema version bump required for C8 (the `Project.defaultEd
 ### Component Boundaries
 
 ```
-apps/mac/touch-code/App/Clients/Editor/
+apps/mac/codans/App/Clients/Editor/
 ├── EditorService.swift          ─ protocol
 ├── EditorService+Live.swift     ─ live implementation using ProcessSpawner
 ├── EditorService+Test.swift     ─ preview/test double
@@ -260,26 +260,26 @@ apps/mac/touch-code/App/Clients/Editor/
 ├── ProcessSpawner.swift         ─ protocol; live wraps Foundation.Process; test records calls
 └── PathProber.swift             ─ `which`-like PATH scan; pure over a filesystem protocol
 
-apps/mac/touch-code/App/Features/WorktreeHeader/        ← new feature folder; not yet in architecture.md
+apps/mac/codans/App/Features/WorktreeHeader/        ← new feature folder; not yet in architecture.md
 └── WorktreeHeaderOpenButton.swift  ─ SwiftUI dropdown + reducer wiring
 
-apps/mac/touch-code/App/Features/Settings/
+apps/mac/codans/App/Features/Settings/
 └── SettingsEditorSection.swift     ─ UI for global default + custom editors
 
-apps/mac/tc/
-└── OpenCommand.swift               ─ `tc open` subcommand → IPC editor.open
+apps/mac/codans/
+└── OpenCommand.swift               ─ `codans open` subcommand → IPC editor.open
 ```
 
 **Dependency rules:**
 
-- `EditorService` has zero dependencies on `Runtime`, `Hooks`, `Git`, `TouchCodeIPC`. It consumes `ProjectID`, `WorktreeID`, `Project` from `TouchCodeCore` and `URL`/`Process` from Foundation.
-- The CLI target `tc` never imports `EditorService`. It talks to the app via `editor.*` IPC and shows the response.
+- `EditorService` has zero dependencies on `Runtime`, `Hooks`, `Git`, `CodansIPC`. It consumes `ProjectID`, `WorktreeID`, `Project` from `CodansCore` and `URL`/`Process` from Foundation.
+- The CLI target `codans` never imports `EditorService`. It talks to the app via `editor.*` IPC and shows the response.
 - `EditorService` never reads `HierarchyManager` directly; the TCA editor-open action resolves `Project.defaultEditor` at call time and passes it in. This keeps the service a pure function of inputs.
 - `ProcessSpawner` is the single seam for testing. All spawns funnel through it; the live implementation constructs `Process`, the test records `(argv, env, cwd)` and returns a canned exit.
 
 **What each component is NOT responsible for:**
 
-- `EditorService`: not responsible for deciding *when* to open (that's a user action), not responsible for UI, not responsible for resolving the invoking Pane's worktree (that's IPC's job in `tc open`).
+- `EditorService`: not responsible for deciding *when* to open (that's a user action), not responsible for UI, not responsible for resolving the invoking Pane's worktree (that's IPC's job in `codans open`).
 - `EditorRegistry`: not responsible for discovery. It returns the declared templates; `PathProber` decorates them with installation status.
 - `PathProber`: not responsible for caching semantics beyond returning results; the service owns the cache.
 - `ProcessSpawner`: not responsible for any business logic; it spawns and waits, nothing more.
@@ -308,9 +308,9 @@ apps/mac/tc/
 | `.timedOut` | Child still running after 5 s; service sent SIGTERM/SIGKILL | Toast: "<editor> did not respond within 5 seconds. Retry or open in another editor." with a retry action |
 | `.badTemplate(id, reason)` | Custom template invalid (no `{dir}`, empty binary) | Settings inline validation; never reaches runtime |
 | `.notADirectory(path)` | Worktree path resolves to a file or is missing | Toast: "Worktree directory not found on disk" |
-| `.unresolvedWorktree` | `tc open` invoked with no `<worktree>` and no `TOUCH_CODE_PANE_ID` | CLI: stderr `error: no worktree ...`, exit 2. Never raised from in-app callers. |
+| `.unresolvedWorktree` | `codans open` invoked with no `<worktree>` and no `CODANS_PANE_ID` | CLI: stderr `error: no worktree ...`, exit 2. Never raised from in-app callers. |
 
-All errors are also logged at `os.Logger` category `com.touch-code.editor` with the editor ID and the redacted argv (the path is not a secret but is included as-is — this matches `os.Logger`'s standard privacy guarantees for string interpolation).
+All errors are also logged at `os.Logger` category `com.gumpw.codans.editor` with the editor ID and the redacted argv (the path is not a secret but is included as-is — this matches `os.Logger`'s standard privacy guarantees for string interpolation).
 
 ### Testing strategy
 
@@ -361,7 +361,7 @@ Skip the cache; `which` at each spawn.
 Make `EditorID` an enum with cases for each built-in plus `.custom(String)`.
 
 - **Pros:** exhaustive `switch` at call sites; compiler catches missing handling when we add a new built-in.
-- **Cons:** `Project.defaultEditor` is already `String?` in `TouchCodeCore`; changing it to an enum forces `TouchCodeCore` to know about `EditorID`, which is an App-tier concept. Custom editors need associated values anyway, so the enum degenerates to `.builtin(Built)` / `.custom(String)` and the compiler-exhaustiveness benefit shrinks.
+- **Cons:** `Project.defaultEditor` is already `String?` in `CodansCore`; changing it to an enum forces `CodansCore` to know about `EditorID`, which is an App-tier concept. Custom editors need associated values anyway, so the enum degenerates to `.builtin(Built)` / `.custom(String)` and the compiler-exhaustiveness benefit shrinks.
 - **Verdict:** rejected. Strings are the right type for an open allowlist; validation at save time covers the invariant the enum would.
 
 ### A6. Spawn via `osascript` / AppleScript
@@ -374,11 +374,11 @@ Use scripted app activation instead of `Process`.
 
 ### A7. Confirm every open with a deeplink-style modal
 
-Route all opens through `DeeplinkConfirmationFeature` (used by `touch-code://` URL handling).
+Route all opens through `DeeplinkConfirmationFeature` (used by `codans://` URL handling).
 
-- **Pros:** consistent with how the app confirms `tc send` from an untrusted source.
+- **Pros:** consistent with how the app confirms `codans send` from an untrusted source.
 - **Cons:** user-initiated, in-app opens are *not* untrusted. A confirmation modal on every dropdown click is friction with no safety benefit.
-- **Verdict:** rejected for in-app and for CLI-from-inside-a-Pane calls. Apply confirmation only if a future deeplink (`touch-code://worktree/<id>/open-in/vscode`) arrives from outside the app.
+- **Verdict:** rejected for in-app and for CLI-from-inside-a-Pane calls. Apply confirmation only if a future deeplink (`codans://worktree/<id>/open-in/vscode`) arrives from outside the app.
 
 ## Cross-Cutting Concerns
 
@@ -388,11 +388,11 @@ Route all opens through `DeeplinkConfirmationFeature` (used by `touch-code://` U
 - **Path validation.** Before spawning, `URL.isDirectory == true` and `FileManager.default.fileExists(atPath:)` are checked; a negative result returns `.notADirectory` rather than handing a stale path to the editor.
 - **Environment whitelist.** The child receives only `PATH`, `HOME`, `LC_ALL`. This blocks `SHELL`/`EDITOR`/`VISUAL`/`GIT_*`/`JAVA_TOOL_OPTIONS`/etc. from leaking into GUI editors where they might misbehave.
 - **No code execution outside the allowlist / user-saved templates.** A URL-based deeplink cannot name an arbitrary binary; only IDs that resolve to a saved template are invokable. A malicious deeplink can at worst ask for `editor.open` with a legitimate ID the user has already approved by saving.
-- **Quarantine bit.** If a user-saved template points to a quarantined binary (e.g. from a DMG), `Process.run()` surfaces the system's quarantine error as `.spawnFailed` and the UI tells the user to clear quarantine manually. touch-code does not silently clear `com.apple.quarantine`.
+- **Quarantine bit.** If a user-saved template points to a quarantined binary (e.g. from a DMG), `Process.run()` surfaces the system's quarantine error as `.spawnFailed` and the UI tells the user to clear quarantine manually. codans does not silently clear `com.apple.quarantine`.
 
 ### Observability
 
-- `os.Logger` category `com.touch-code.editor`. Every `open` call logs `id`, `binaryPath`, and exit code at `.info`. Template validation failures at `.error`.
+- `os.Logger` category `com.gumpw.codans.editor`. Every `open` call logs `id`, `binaryPath`, and exit code at `.info`. Template validation failures at `.error`.
 - Spawn wall-clock time is recorded as `os.signpost`, category same; available in Instruments.
 - On `.nonZeroExit`, the first line of stderr is logged at `.info` (not `.error`, since it's often user-fixable).
 
@@ -413,17 +413,17 @@ Route all opens through `DeeplinkConfirmationFeature` (used by `touch-code://` U
 - **File-level opens.** Add `open(file:line:)` to the protocol; extend `CommandTemplate` with optional placeholders.
 - **Per-editor "new window" flag.** Add a `CommandTemplate.alwaysNewWindow: Bool` that appends `-n`/`--new-window`/`-a -n Xcode` as appropriate.
 - **Recent-editor memory.** If the user picks a non-default from the dropdown, remember it as the effective default for the current session only. Zero new persistence.
-- **Skill metadata.** The published Agent Skill (C5) can consult `editor.describe` via IPC to suggest `tc open --in ...` to agents, without any runtime coupling to the app.
+- **Skill metadata.** The published Agent Skill (C5) can consult `editor.describe` via IPC to suggest `codans open --in ...` to agents, without any runtime coupling to the app.
 
 ## Risks
 
 - **R1 — VSCode-or-derivative `code` shim collision.** Users with both VSCode Stable and Insiders installed have two `code` binaries (one of which is often `code-insiders`); custom derivatives (VSCodium, Positron) may alias to `code`. Mitigation: the allowlist `vscode` entry opens whichever `code` is found; power users disambiguate via a custom template (`vscode-insiders` → `code-insiders`).
 - **R2 — `cursor` / `zed` CLI instability.** These shims have changed shape in past releases (e.g. Cursor's shim at one point required `cursor --new-window` to avoid reusing a stale window). Mitigation: keep template definitions co-located in one file (`EditorRegistry.swift`) so updating the allowlist is a one-line edit; dogfood each release.
 - **R3 — User confusion between "editor not installed" and "CLI shim not installed".** Mitigation: error copy is explicit — "Visual Studio Code CLI (`code`) not found on PATH" beats "VSCode not installed", and offers the actionable fix.
-- **R4 — Custom template injection.** A user saves a template whose `binary` is `bash` and `args` is `["-c", "rm -rf ~"]`. Mitigation: the `args` validator requires exactly one literal `"{dir}"` token; additionally, a warning banner in Settings flags any template whose binary is a known shell (`bash`/`zsh`/`fish`/`sh`). We do not block — the user is the admin of their own machine — but we surface the risk. This is not a touch-code-specific attack vector (the user could run anything anyway) but we avoid making it trivial.
+- **R4 — Custom template injection.** A user saves a template whose `binary` is `bash` and `args` is `["-c", "rm -rf ~"]`. Mitigation: the `args` validator requires exactly one literal `"{dir}"` token; additionally, a warning banner in Settings flags any template whose binary is a known shell (`bash`/`zsh`/`fish`/`sh`). We do not block — the user is the admin of their own machine — but we surface the risk. This is not a codans-specific attack vector (the user could run anything anyway) but we avoid making it trivial.
 - **R5 — Launch Services disagreement on Xcode.** `open -a Xcode` opens whichever Xcode version Launch Services thinks is preferred; users with multiple Xcode installs may land on the wrong one. Mitigation: document; add a custom-template example for "Open in Xcode 16 Beta" with an absolute `/Applications/Xcode-16-beta.app/Contents/MacOS/Xcode {dir}` template.
 - **R6 — Slow editor CLI cold-start hitting the 5 s timeout.** The six allowlist wrappers typically exit in well under 500 ms even from cold, but a future editor CLI (or a congested machine) could legitimately need longer. A real timeout would surface as a `.timedOut` toast that looks like a failure when the editor is actually about to appear. Mitigation: (a) instrument the exit wall-clock via `os.signpost` and keep the 5 s budget under review during dogfooding; (b) when a user reports this, lift the timeout to 15 s with a confirmed-slow-wrapper flag on the template (not a global bump, so fast-path editors still fail fast on genuine hangs). Do **not** substitute an "assume-detached" heuristic — a user waiting on an editor that never appears is worse than a user seeing a clear timeout error.
-- **R7 — Editor app sandboxing.** Some Mac-App-Store-distributed editors (e.g. TextMate, BBEdit) have CLI shims that rely on XPC connections to their sandboxed container; the connection may be refused when spawned from touch-code's sandbox. Mitigation: not an allowlist concern in v1 (our six built-ins do not use this pattern); users reporting this can fall back to `open -a <AppName> {dir}` via custom template.
+- **R7 — Editor app sandboxing.** Some Mac-App-Store-distributed editors (e.g. TextMate, BBEdit) have CLI shims that rely on XPC connections to their sandboxed container; the connection may be refused when spawned from codans's sandbox. Mitigation: not an allowlist concern in v1 (our six built-ins do not use this pattern); users reporting this can fall back to `open -a <AppName> {dir}` via custom template.
 
 ## Resolved Items (locked at approval)
 

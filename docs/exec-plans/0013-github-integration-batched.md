@@ -8,7 +8,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Purpose
 
-After this plan lands, activating a Project with twenty-plus Worktrees in touch-code paints every PR badge in a single visible frame — the sidebar goes from empty to fully populated (state pill + check-rollup overlay + `+N −M` diff) in roughly one round-trip to GitHub, rather than the staggered two-to-three-second wave the v1 per-Worktree model produces today. Specifically:
+After this plan lands, activating a Project with twenty-plus Worktrees in codans paints every PR badge in a single visible frame — the sidebar goes from empty to fully populated (state pill + check-rollup overlay + `+N −M` diff) in roughly one round-trip to GitHub, rather than the staggered two-to-three-second wave the v1 per-Worktree model produces today. Specifically:
 
 - Every PR-carrying Worktree in the active Project shows its badge within approximately five hundred milliseconds of Project activation, regardless of Worktree count.
 - CI-rollup overlays paint with the badge (same render pass), instead of arriving later when a secondary `gh pr checks` subprocess completes.
@@ -18,7 +18,7 @@ After this plan lands, activating a Project with twenty-plus Worktrees in touch-
 
 What a contributor observes after this plan lands, compared to today:
 
-1. On a cold launch with the touch-code Project active (20+ Worktrees, 13 of which correspond to merged PRs), previously every row paints its purple `git-merge` icon + `#NNN` pill one-by-one over ~3 seconds. After v2: all 13 rows flip in one frame, ~600 ms after launch completes.
+1. On a cold launch with the codans Project active (20+ Worktrees, 13 of which correspond to merged PRs), previously every row paints its purple `git-merge` icon + `#NNN` pill one-by-one over ~3 seconds. After v2: all 13 rows flip in one frame, ~600 ms after launch completes.
 2. Previously, after you merge a PR from the popover, the row's pill stays "open" for ~2 seconds then flips to "merged". After v2: same behavior for that row, plus any dependent Worktrees on the same base branch also get their `mergeStateStatus` refreshed in the same batch.
 3. Previously, a `git checkout other-branch` in a terminal pane inside a Worktree does not update the sidebar's PR badge until focus-gained triggers a reconcile. After v2 (if the `WorktreeBranchWatcher` Phase 7 ships): the badge updates within a second of the checkout.
 
@@ -26,7 +26,7 @@ This plan does not add UI; every visual surface is unchanged. It is an execution
 
 ## Progress
 
-- [x] M1 — `RemoteInfo` + `GitService.remoteInfo(at:)` — 2026-04-23 (14 parser tests + 3 service tests; `RemoteInfo.ParseError` kept local to TouchCodeCore to avoid a cross-module dep — see DEC-2)
+- [x] M1 — `RemoteInfo` + `GitService.remoteInfo(at:)` — 2026-04-23 (14 parser tests + 3 service tests; `RemoteInfo.ParseError` kept local to CodansCore to avoid a cross-module dep — see DEC-2)
 - [x] M2 — Extend `PullRequestSnapshot` (new fields + Codable compat) — 2026-04-23 (4 fields added: `checkRollup`, `mergeStateStatus`, `reviewDecision`, `headRepositoryOwner`; custom `init(from:)`/`encode(to:)` uses `decodeIfPresent` with defaults so pre-v2 snapshots round-trip identically; 4 new Codable tests; v1 `gh pr view` parser intentionally not updated — see DEC-3)
 - [x] M3 — `GitHubClient.batchPullRequests` + `LiveGitHubService` implementation (GraphQL builder, chunking, decoder, fork filter) — 2026-04-23 (GhCommand.apiGraphQL + BatchedPullRequestQuery + JSONOutputParsers.parseBatchedPullRequests + LiveGitHubService.batchPullRequests + 16 unit tests incl. 2 golden-file fixtures)
 - [x] M4 — Reducer migration: dual-path during transition (per-Worktree + per-Project coexist) — 2026-04-23 (state: `snapshotsByProject`/`inFlightFetchProjects`/`queuedRefreshByProject`/`lastErrorByProject`/`projectGitRoots`; actions: `projectActivated`/`projectRefreshRequested`/`projectBatchLoaded`/`worktreeBranchChanged`; projection into per-Worktree `snapshots` for v1-view compat; RootFeature `selectionChanged` dispatches on projectID transitions; 6 new TestStore tests; DEC-4 drops the `githubFetchModel` flag — see below; DEC-5 defers `mergeCompletedSchedulesDelayedProjectRefresh` test)
@@ -96,15 +96,15 @@ Net effect: v1 `parsePullRequest` continues to emit the 12 original fields; deco
 
 ### DEC-2 (2026-04-23, M1): Local `RemoteInfo.ParseError` instead of reusing `GitError`
 
-Plan's Work Items said "Invalid inputs throw a new `GitError.malformedRemoteURL(String)` case added in `apps/mac/touch-code/Git/GitError.swift`" while also placing `RemoteInfo.swift` in `apps/mac/TouchCodeCore/Git/`. Contradiction: `TouchCodeCore` is a standalone Swift module and cannot import from the app module, so the parser cannot throw `GitError` directly.
+Plan's Work Items said "Invalid inputs throw a new `GitError.malformedRemoteURL(String)` case added in `apps/mac/codans/Git/GitError.swift`" while also placing `RemoteInfo.swift` in `apps/mac/CodansCore/Git/`. Contradiction: `CodansCore` is a standalone Swift module and cannot import from the app module, so the parser cannot throw `GitError` directly.
 
-Resolved by giving `RemoteInfo` a nested `ParseError.malformed(String)` enum in `TouchCodeCore`. `LiveGitService.remoteInfo(at:)` (app module) catches `RemoteInfo.ParseError.malformed` and rethrows as `GitError.malformedRemoteURL(_)`. Net effect for callers above the service layer: unchanged — they still see `GitError.malformedRemoteURL`. Net effect for the CLI / other future TouchCodeCore consumers: they can reuse `RemoteInfo.parse` without taking an app-layer dep.
+Resolved by giving `RemoteInfo` a nested `ParseError.malformed(String)` enum in `CodansCore`. `LiveGitService.remoteInfo(at:)` (app module) catches `RemoteInfo.ParseError.malformed` and rethrows as `GitError.malformedRemoteURL(_)`. Net effect for callers above the service layer: unchanged — they still see `GitError.malformedRemoteURL`. Net effect for the CLI / other future CodansCore consumers: they can reuse `RemoteInfo.parse` without taking an app-layer dep.
 
 Two existing `GitError` exhaustive switches in `CommitLogView.swift` and `FileChangeListView.swift` needed a new case handler. Added `"Could not parse the remote URL: \(url)"` — matches the existing error-description sentence style.
 
 ### DEC-1 (2026-04-23): Execute serially, skip Agent Teams parallelization
 
-Plan identifies M1+M2 as potentially parallel (no overlapping file sets: M1 touches `Git/*`, M2 touches `TouchCodeCore/GitHub/*`). Considered dispatching two worktree-isolated agents. Rejected for this execution because each agent would pay a cold-start cost of reading roughly 8–10 files to match existing project conventions (`nonisolated` modifier placement, Swift-Testing framework vs XCTest, golden-file fixture layout, Codable decodeIfPresent patterns, lint rules). At ~30–60 min per milestone, the coordination + review overhead of two parallel agents exceeds the wall-clock savings, and small-step commit cadence from a single executor gives better debugging granularity. Reconsider Agent Teams for M3 if its sub-tasks prove parallelizable in practice (current read: sequential deps make it not a good candidate).
+Plan identifies M1+M2 as potentially parallel (no overlapping file sets: M1 touches `Git/*`, M2 touches `CodansCore/GitHub/*`). Considered dispatching two worktree-isolated agents. Rejected for this execution because each agent would pay a cold-start cost of reading roughly 8–10 files to match existing project conventions (`nonisolated` modifier placement, Swift-Testing framework vs XCTest, golden-file fixture layout, Codable decodeIfPresent patterns, lint rules). At ~30–60 min per milestone, the coordination + review overhead of two parallel agents exceeds the wall-clock savings, and small-step commit cadence from a single executor gives better debugging granularity. Reconsider Agent Teams for M3 if its sub-tasks prove parallelizable in practice (current read: sequential deps make it not a good candidate).
 
 Initial architectural decisions are already captured in the design doc's "Alternatives Considered" and "Open Questions" sections; this log records only choices made *during execution* that deviate from or extend the plan.
 
@@ -142,7 +142,7 @@ Net: +40 new tests. Design-doc estimated +50; the difference is M6 subtractions 
 
 ### Lessons learned
 
-- **Sanity-checking layering claims matters**: the plan put `RemoteInfo` in `TouchCodeCore` while also throwing an app-module `GitError` — a contradiction caught during M1 that required restructuring (DEC-2). Layer-crossing assumptions are cheapest to surface at plan-review time, next cheapest in the first milestone, more expensive later.
+- **Sanity-checking layering claims matters**: the plan put `RemoteInfo` in `CodansCore` while also throwing an app-module `GitError` — a contradiction caught during M1 that required restructuring (DEC-2). Layer-crossing assumptions are cheapest to surface at plan-review time, next cheapest in the first milestone, more expensive later.
 - **Dual-path migration beats feature flags for this repo**: DEC-4's decision to drop the `githubFetchModel` runtime flag in favor of per-commit revertability held up — M4's dual-write kept v1 working as a fallback without needing to carry a flag through five milestones.
 - **"Skip cosmetic updates that M5 will invalidate"**: DEC-3 (skip updating v1 `gh pr view` parser in M2) and DEC-6 (keep `pullRequest(branch:)` in M6) both avoided ~2 hours of fixture regeneration + test churn that M5/follow-up would have obsoleted anyway. Worth doing again when the next M lands.
 - **TestStore `.withDependencies` needs all deps stubbed, not just the ones the action directly touches**: M4 wire-up in `RootFeature.selectionChanged` broke 2 `exhaustivity = .off` tests because my new dispatch kicked an effect that used unstubbed `.date` + `gitService.remoteInfo` + `GitHubClient.batchPullRequests`. Adding those stubs fixed it, but the pattern is worth noting: downstream effects still need deps even when the test ignores downstream actions.
@@ -156,27 +156,27 @@ Net: +40 new tests. Design-doc estimated +50; the difference is M6 subtractions 
 - Design doc (v2, authoritative): [docs/design-docs/github-integration-batched.md](../design-docs/github-integration-batched.md) — the execution model, GraphQL shape, decoder patterns, fork-filter rules, invalidation events, and risks are all specified there. This plan translates that design into ordered, verifiable engineering tasks; it does not restate the design's rationale.
 - Design doc (v1, superseded): [docs/design-docs/github-integration.md](../design-docs/github-integration.md) — retained for historical context only. The v1 fetch path it describes is what this plan replaces.
 - Prior ExecPlan (v1 implementation): [docs/exec-plans/0012-github-integration.md](0012-github-integration.md) — the milestones it enumerates are what this plan's M1–M6 unwind. Read sections M0–M7 there to understand which pieces persist and which get replaced.
-- Architecture map: [docs/architecture.md](../architecture.md), specifically the `touch-code/Process/`, `touch-code/GitHub/`, and `touch-code/App/Features/GitHub/` rows in the codemap table.
+- Architecture map: [docs/architecture.md](../architecture.md), specifically the `codans/Process/`, `codans/GitHub/`, and `codans/App/Features/GitHub/` rows in the codemap table.
 
 **Key source files:**
 
 | Path | Role | What this plan does to it |
 |---|---|---|
-| `apps/mac/touch-code/GitHub/GitHubService.swift` | Protocol defining the data layer surface. | Adds `batchPullRequests(host:owner:repo:branches:)`. Single-branch `pullRequest` retained as a convenience. `checks(number:…)` and `latestWorkflowRun(…)` removed in M6. |
-| `apps/mac/touch-code/GitHub/LiveGitHubService.swift` | Concrete implementation wrapping `gh` via `CommandRunner`. | Gains `batchPullRequests`; internal helpers `buildBatchedQuery`, `chunk`, `TaskGroup`-driven concurrent execution, GraphQL response decoding. |
-| `apps/mac/touch-code/GitHub/GhCommand.swift` | Typed argv builder for `gh` subcommands. | New `apiGraphQL(query:hostname:variables:)` entry returning `(argv, expectedExitCodes)`. |
-| `apps/mac/touch-code/GitHub/JSONOutputParsers.swift` | Stdin → DTO pure functions with golden-file tests. | Gains `parseBatchedPullRequests(_:aliasMap:)`. Adds `DynamicKey` helper + union-type `CheckNode` decoder. Existing parsers (`parsePullRequest`, `parseChecks`, `parseLatestWorkflowRun`, `parseAuthStatus`) stay; the first three are orphaned in M6. |
-| `apps/mac/touch-code/GitHub/GitHubError.swift` | Error taxonomy. | Adds `.graphQLError(String)`, `.ghCLIOutdated(minVersion: String)`, `.remoteInfoUnavailable`, `.oversizeResponse(bytes: Int)`. |
-| `apps/mac/touch-code/App/Clients/GitHubClient.swift` | TCA DependencyKey mirroring the service protocol. | `batchPullRequests` closure added; `checks` and `latestWorkflowRun` closures removed in M6. |
-| `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift` | TCA reducer owning per-Worktree PR snapshot state. | Adds `projectActivated` / `projectRefreshRequested` / `projectBatchLoaded` actions + new state slots `snapshotsByProject`, `inFlightFetchProjects`, `queuedRefreshByProject`, `lastErrorByProject`. Existing per-Worktree state kept during M4; derived from project state. |
-| `apps/mac/touch-code/App/Features/GitHub/Views/PullRequestPopover.swift` | Popover content. | Reads `snapshot.checkRollup` directly (M5). Existing `checks` parameter path removed. |
-| `apps/mac/touch-code/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift` | Sidebar-row badge view. | Removes `.task(id:)` that currently drives per-Worktree `worktreeBecameVisible`; the reducer now kicks off fetches at the Project level (M5). |
-| `apps/mac/touch-code/Git/GitService.swift` + `apps/mac/touch-code/Git/LiveGitService.swift` | Read-only git data-layer protocol + impl. | Gains `remoteInfo(at:)` (M1). |
-| `apps/mac/touch-code/App/Clients/GitServiceClient.swift` | TCA DependencyKey for Git operations. | Gains `remoteInfo` closure (M1). |
-| `apps/mac/TouchCodeCore/GitHub/PullRequestSnapshot.swift` | PR snapshot DTO. | Gains `checkRollup: [CheckResult]`, `mergeStateStatus`, `reviewDecision`, `headRepositoryOwner`. Codable is additive — old `settings.json` files round-trip identically. |
-| `apps/mac/TouchCodeCore/GitHub/MergeStateStatus.swift` (new) + `ReviewDecision.swift` (new) | Pure value-type enums. | New files. |
-| `apps/mac/TouchCodeCore/Git/RemoteInfo.swift` (new) | Host/owner/repo value type. | New file. |
-| `apps/mac/touch-code/Tests/GitHubTests/Fixtures/` | Golden-file GraphQL / gh JSON outputs. | New fixtures for batched GraphQL response, including a fork-PR noise case and an empty-branches case. |
+| `apps/mac/codans/GitHub/GitHubService.swift` | Protocol defining the data layer surface. | Adds `batchPullRequests(host:owner:repo:branches:)`. Single-branch `pullRequest` retained as a convenience. `checks(number:…)` and `latestWorkflowRun(…)` removed in M6. |
+| `apps/mac/codans/GitHub/LiveGitHubService.swift` | Concrete implementation wrapping `gh` via `CommandRunner`. | Gains `batchPullRequests`; internal helpers `buildBatchedQuery`, `chunk`, `TaskGroup`-driven concurrent execution, GraphQL response decoding. |
+| `apps/mac/codans/GitHub/GhCommand.swift` | Typed argv builder for `gh` subcommands. | New `apiGraphQL(query:hostname:variables:)` entry returning `(argv, expectedExitCodes)`. |
+| `apps/mac/codans/GitHub/JSONOutputParsers.swift` | Stdin → DTO pure functions with golden-file tests. | Gains `parseBatchedPullRequests(_:aliasMap:)`. Adds `DynamicKey` helper + union-type `CheckNode` decoder. Existing parsers (`parsePullRequest`, `parseChecks`, `parseLatestWorkflowRun`, `parseAuthStatus`) stay; the first three are orphaned in M6. |
+| `apps/mac/codans/GitHub/GitHubError.swift` | Error taxonomy. | Adds `.graphQLError(String)`, `.ghCLIOutdated(minVersion: String)`, `.remoteInfoUnavailable`, `.oversizeResponse(bytes: Int)`. |
+| `apps/mac/codans/App/Clients/GitHubClient.swift` | TCA DependencyKey mirroring the service protocol. | `batchPullRequests` closure added; `checks` and `latestWorkflowRun` closures removed in M6. |
+| `apps/mac/codans/App/Features/GitHub/GitHubFeature.swift` | TCA reducer owning per-Worktree PR snapshot state. | Adds `projectActivated` / `projectRefreshRequested` / `projectBatchLoaded` actions + new state slots `snapshotsByProject`, `inFlightFetchProjects`, `queuedRefreshByProject`, `lastErrorByProject`. Existing per-Worktree state kept during M4; derived from project state. |
+| `apps/mac/codans/App/Features/GitHub/Views/PullRequestPopover.swift` | Popover content. | Reads `snapshot.checkRollup` directly (M5). Existing `checks` parameter path removed. |
+| `apps/mac/codans/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift` | Sidebar-row badge view. | Removes `.task(id:)` that currently drives per-Worktree `worktreeBecameVisible`; the reducer now kicks off fetches at the Project level (M5). |
+| `apps/mac/codans/Git/GitService.swift` + `apps/mac/codans/Git/LiveGitService.swift` | Read-only git data-layer protocol + impl. | Gains `remoteInfo(at:)` (M1). |
+| `apps/mac/codans/App/Clients/GitServiceClient.swift` | TCA DependencyKey for Git operations. | Gains `remoteInfo` closure (M1). |
+| `apps/mac/CodansCore/GitHub/PullRequestSnapshot.swift` | PR snapshot DTO. | Gains `checkRollup: [CheckResult]`, `mergeStateStatus`, `reviewDecision`, `headRepositoryOwner`. Codable is additive — old `settings.json` files round-trip identically. |
+| `apps/mac/CodansCore/GitHub/MergeStateStatus.swift` (new) + `ReviewDecision.swift` (new) | Pure value-type enums. | New files. |
+| `apps/mac/CodansCore/Git/RemoteInfo.swift` (new) | Host/owner/repo value type. | New file. |
+| `apps/mac/codans/Tests/GitHubTests/Fixtures/` | Golden-file GraphQL / gh JSON outputs. | New fixtures for batched GraphQL response, including a fork-PR noise case and an empty-branches case. |
 
 **Term definitions (non-obvious):**
 
@@ -195,32 +195,32 @@ Seven milestones, roughly in increasing risk and visibility. M1–M3 are strictl
 
 **Goal.** Give the rest of the stack a reliable way to derive `(host, owner, repo)` from a Project's gitRoot, because every batched GraphQL query needs those three fields. No reducer or view touches this yet; it is pre-work for M3.
 
-**What will exist at the end.** A new `RemoteInfo` value type in `TouchCodeCore/Git/`, a new `GitService.remoteInfo(at:)` protocol method with a `LiveGitService` implementation, a new `GitServiceClient.remoteInfo` closure, eight parser-level unit tests covering URL variants (SSH, HTTPS, with/without `.git`, GHES hostname).
+**What will exist at the end.** A new `RemoteInfo` value type in `CodansCore/Git/`, a new `GitService.remoteInfo(at:)` protocol method with a `LiveGitService` implementation, a new `GitServiceClient.remoteInfo` closure, eight parser-level unit tests covering URL variants (SSH, HTTPS, with/without `.git`, GHES hostname).
 
 **Work items.**
 
-In `apps/mac/TouchCodeCore/Git/RemoteInfo.swift` (new file), define `public nonisolated struct RemoteInfo: Equatable, Sendable, Hashable` with `host: String`, `owner: String`, `repo: String` and a `public static func parse(_ urlString: String) throws -> RemoteInfo` method. The parser accepts three URL shapes: SSH-style `git@<host>:<owner>/<repo>.git`, HTTPS `https://<host>/<owner>/<repo>.git`, and explicit `ssh://git@<host>/<owner>/<repo>.git`. The `.git` suffix is optional. Invalid inputs throw a new `GitError.malformedRemoteURL(String)` case added in `apps/mac/touch-code/Git/GitError.swift`.
+In `apps/mac/CodansCore/Git/RemoteInfo.swift` (new file), define `public nonisolated struct RemoteInfo: Equatable, Sendable, Hashable` with `host: String`, `owner: String`, `repo: String` and a `public static func parse(_ urlString: String) throws -> RemoteInfo` method. The parser accepts three URL shapes: SSH-style `git@<host>:<owner>/<repo>.git`, HTTPS `https://<host>/<owner>/<repo>.git`, and explicit `ssh://git@<host>/<owner>/<repo>.git`. The `.git` suffix is optional. Invalid inputs throw a new `GitError.malformedRemoteURL(String)` case added in `apps/mac/codans/Git/GitError.swift`.
 
-In `apps/mac/touch-code/Git/GitService.swift`, add to the protocol:
+In `apps/mac/codans/Git/GitService.swift`, add to the protocol:
 
 ```swift
 func remoteInfo(at path: URL) async throws -> RemoteInfo
 ```
 
-In `apps/mac/touch-code/Git/GitCommand.swift`, add `static func remoteGetUrl(remote: String = "origin") -> [String]` returning `["remote", "get-url", remote]`.
+In `apps/mac/codans/Git/GitCommand.swift`, add `static func remoteGetUrl(remote: String = "origin") -> [String]` returning `["remote", "get-url", remote]`.
 
-In `apps/mac/touch-code/Git/LiveGitService.swift`, implement `remoteInfo(at:)` by running `GitCommand.remoteGetUrl()` with cwd = path, parsing stdout via `RemoteInfo.parse`. Map `GitError.malformedRemoteURL` to `GitHubError.remoteInfoUnavailable` at the *caller* level (the GitHub feature reducer), not here.
+In `apps/mac/codans/Git/LiveGitService.swift`, implement `remoteInfo(at:)` by running `GitCommand.remoteGetUrl()` with cwd = path, parsing stdout via `RemoteInfo.parse`. Map `GitError.malformedRemoteURL` to `GitHubError.remoteInfoUnavailable` at the *caller* level (the GitHub feature reducer), not here.
 
-In `apps/mac/touch-code/App/Clients/GitServiceClient.swift`, add the `remoteInfo: @Sendable (URL) async throws -> RemoteInfo` closure to the struct definition, the `live(service:)` wiring, and the `testValue` stub.
+In `apps/mac/codans/App/Clients/GitServiceClient.swift`, add the `remoteInfo: @Sendable (URL) async throws -> RemoteInfo` closure to the struct definition, the `live(service:)` wiring, and the `testValue` stub.
 
-Add unit tests in `apps/mac/touch-code/Tests/Git/` (or wherever the existing GitService tests live — check `Tests/` layout) covering the eight URL variants plus one malformed-URL case.
+Add unit tests in `apps/mac/codans/Tests/Git/` (or wherever the existing GitService tests live — check `Tests/` layout) covering the eight URL variants plus one malformed-URL case.
 
 **Verification.**
 
 ```
 $ cd apps/mac
-$ xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code \
-    -destination 'platform=macOS' -only-testing:touch-codeTests/RemoteInfoTests
+$ xcodebuild test -workspace codans.xcworkspace -scheme codans \
+    -destination 'platform=macOS' -only-testing:codansTests/RemoteInfoTests
 ```
 
 Expected: all tests pass, including the new eight. No other test should be affected.
@@ -233,15 +233,15 @@ Expected: all tests pass, including the new eight. No other test should be affec
 
 **Work items.**
 
-In `apps/mac/TouchCodeCore/GitHub/MergeStateStatus.swift` (new), define `public nonisolated enum MergeStateStatus: String, Codable, Sendable, Equatable` with cases matching GitHub's GraphQL enum: `clean`, `dirty`, `blocked`, `behind`, `hasHooks`, `unstable`, `unknown`, `draft`. Include a fallback decoder so unknown raw values decode to `.unknown` (GitHub adds enum cases; we must not fail).
+In `apps/mac/CodansCore/GitHub/MergeStateStatus.swift` (new), define `public nonisolated enum MergeStateStatus: String, Codable, Sendable, Equatable` with cases matching GitHub's GraphQL enum: `clean`, `dirty`, `blocked`, `behind`, `hasHooks`, `unstable`, `unknown`, `draft`. Include a fallback decoder so unknown raw values decode to `.unknown` (GitHub adds enum cases; we must not fail).
 
-In `apps/mac/TouchCodeCore/GitHub/ReviewDecision.swift` (new), define `public nonisolated enum ReviewDecision: String, Codable, Sendable, Equatable` with cases: `approved`, `changesRequested`, `reviewRequired`. Fallback decoder: unknown → nil at the consumer level.
+In `apps/mac/CodansCore/GitHub/ReviewDecision.swift` (new), define `public nonisolated enum ReviewDecision: String, Codable, Sendable, Equatable` with cases: `approved`, `changesRequested`, `reviewRequired`. Fallback decoder: unknown → nil at the consumer level.
 
-In `apps/mac/TouchCodeCore/GitHub/PullRequestSnapshot.swift`, add the four fields. Codable `init(from:)` uses `decodeIfPresent` with these defaults: `checkRollup ?? []`, `mergeStateStatus ?? .unknown`, `reviewDecision ?? nil`, `headRepositoryOwner ?? ""`. `encode(to:)` emits them always (we're on the write side; no round-trip compatibility concern). Update the default initialiser parameter list with the same defaults.
+In `apps/mac/CodansCore/GitHub/PullRequestSnapshot.swift`, add the four fields. Codable `init(from:)` uses `decodeIfPresent` with these defaults: `checkRollup ?? []`, `mergeStateStatus ?? .unknown`, `reviewDecision ?? nil`, `headRepositoryOwner ?? ""`. `encode(to:)` emits them always (we're on the write side; no round-trip compatibility concern). Update the default initialiser parameter list with the same defaults.
 
-In `apps/mac/touch-code/GitHub/JSONOutputParsers.swift`, update `parsePullRequest(_:)` to populate the new fields from the existing `gh pr view --json` response — `statusCheckRollup` is already available there if the call includes the field. In `apps/mac/touch-code/GitHub/GhCommand.swift`, extend `pullRequestView(branch:)` 's field list with `statusCheckRollup,mergeStateStatus,reviewDecision`.
+In `apps/mac/codans/GitHub/JSONOutputParsers.swift`, update `parsePullRequest(_:)` to populate the new fields from the existing `gh pr view --json` response — `statusCheckRollup` is already available there if the call includes the field. In `apps/mac/codans/GitHub/GhCommand.swift`, extend `pullRequestView(branch:)` 's field list with `statusCheckRollup,mergeStateStatus,reviewDecision`.
 
-Update existing golden-file fixtures under `apps/mac/touch-code/Tests/GitHubTests/Fixtures/` to include the new fields (regenerate from a real `gh pr view feature/github01 --json <updated field list>` run and check in).
+Update existing golden-file fixtures under `apps/mac/codans/Tests/GitHubTests/Fixtures/` to include the new fields (regenerate from a real `gh pr view feature/github01 --json <updated field list>` run and check in).
 
 Update `JSONOutputParsersTests.swift` and `GitHubFeatureTests.swift` expectations to assert the new fields. `RecordingCommandRunner`-based tests in `LiveGitHubServiceTests.swift` also need updated canned outputs.
 
@@ -249,8 +249,8 @@ Update `JSONOutputParsersTests.swift` and `GitHubFeatureTests.swift` expectation
 
 ```
 $ cd apps/mac
-$ xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code \
-    -destination 'platform=macOS' -only-testing:touch-codeTests/GitHubTests 2>&1 \
+$ xcodebuild test -workspace codans.xcworkspace -scheme codans \
+    -destination 'platform=macOS' -only-testing:codansTests/GitHubTests 2>&1 \
     | grep -E "(passed|failed)"
 ```
 
@@ -264,7 +264,7 @@ Expected: all GitHubTests pass. No regression in the broader suite — `gh pr vi
 
 **Work items.**
 
-In `apps/mac/touch-code/GitHub/GitHubService.swift`, add:
+In `apps/mac/codans/GitHub/GitHubService.swift`, add:
 
 ```swift
 func batchPullRequests(
@@ -275,7 +275,7 @@ func batchPullRequests(
 ) async throws -> [String: PullRequestSnapshot]
 ```
 
-In `apps/mac/touch-code/GitHub/GhCommand.swift`, add:
+In `apps/mac/codans/GitHub/GhCommand.swift`, add:
 
 ```swift
 static func apiGraphQL(
@@ -294,7 +294,7 @@ static func apiGraphQL(
 
 The variables dictionary is sorted to keep argv deterministic for test diffing.
 
-In a new file `apps/mac/touch-code/GitHub/BatchedPullRequestQuery.swift`, write a pure function:
+In a new file `apps/mac/codans/GitHub/BatchedPullRequestQuery.swift`, write a pure function:
 
 ```swift
 enum BatchedPullRequestQuery {
@@ -317,7 +317,7 @@ static func chunk(_ branches: [String]) -> [[String]]
 
 that slices into up to `chunkSize`-length arrays.
 
-In `apps/mac/touch-code/GitHub/JSONOutputParsers.swift`, add:
+In `apps/mac/codans/GitHub/JSONOutputParsers.swift`, add:
 
 ```swift
 static func parseBatchedPullRequests(
@@ -338,9 +338,9 @@ Branches that have an entry in `aliasMap` but no surviving PR after filtering ar
 
 Introduce `CheckNode` union-type decoder (handling `CheckRun | StatusContext` per design doc §Response Decoding), and a conversion `CheckNode → CheckResult` that reuses the existing `CheckResult` enum.
 
-In `apps/mac/touch-code/GitHub/GitHubError.swift`, add four cases: `graphQLError(String)`, `ghCLIOutdated(minVersion: String)`, `remoteInfoUnavailable`, `oversizeResponse(bytes: Int)`, `malformedBranchName(String)`. Update `GitHubError.userFacingMessage` accordingly.
+In `apps/mac/codans/GitHub/GitHubError.swift`, add four cases: `graphQLError(String)`, `ghCLIOutdated(minVersion: String)`, `remoteInfoUnavailable`, `oversizeResponse(bytes: Int)`, `malformedBranchName(String)`. Update `GitHubError.userFacingMessage` accordingly.
 
-In `apps/mac/touch-code/GitHub/LiveGitHubService.swift`, implement `batchPullRequests` as:
+In `apps/mac/codans/GitHub/LiveGitHubService.swift`, implement `batchPullRequests` as:
 
 1. If `branches.isEmpty` return `[:]` without spawning.
 2. Bump `maxOutputBytes` for this call to 8 MiB (was 2 MiB for per-Worktree calls; design doc §Security).
@@ -349,9 +349,9 @@ In `apps/mac/touch-code/GitHub/LiveGitHubService.swift`, implement `batchPullReq
 5. Each child task: builds query for its chunk, runs `gh api graphql`, decodes response, filters forks, returns `[branch: snapshot]`.
 6. Merge child results. On any child failure, cancel siblings and rethrow.
 
-In `apps/mac/touch-code/App/Clients/GitHubClient.swift`, add the `batchPullRequests` closure mirroring the service method signature.
+In `apps/mac/codans/App/Clients/GitHubClient.swift`, add the `batchPullRequests` closure mirroring the service method signature.
 
-**New test file** `apps/mac/touch-code/Tests/GitHubTests/BatchedPullRequestsTests.swift` covering, at minimum:
+**New test file** `apps/mac/codans/Tests/GitHubTests/BatchedPullRequestsTests.swift` covering, at minimum:
 
 1. Single-chunk happy path (2 branches, both with PRs).
 2. Multi-chunk path (60 branches → 3 chunks).
@@ -368,7 +368,7 @@ In `apps/mac/touch-code/App/Clients/GitHubClient.swift`, add the `batchPullReque
 13. Branch with zero PRs (empty `nodes` array) → branch is absent from returned dictionary.
 14. Branch with five PRs → returns most-recent (first after server-side sort).
 
-Two new golden-file JSON fixtures in `apps/mac/touch-code/Tests/GitHubTests/Fixtures/`:
+Two new golden-file JSON fixtures in `apps/mac/codans/Tests/GitHubTests/Fixtures/`:
 
 - `batched-pr-happy.json` — a two-branch response with fully populated PR data.
 - `batched-pr-fork-noise.json` — a response where one branch has upstream + fork noise to exercise filtering rules.
@@ -377,9 +377,9 @@ Two new golden-file JSON fixtures in `apps/mac/touch-code/Tests/GitHubTests/Fixt
 
 ```
 $ cd apps/mac
-$ xcodebuild test -workspace touch-code.xcworkspace -scheme touch-code \
+$ xcodebuild test -workspace codans.xcworkspace -scheme codans \
     -destination 'platform=macOS' \
-    -only-testing:touch-codeTests/BatchedPullRequestsTests 2>&1 \
+    -only-testing:codansTests/BatchedPullRequestsTests 2>&1 \
     | grep -E "Test .* (passed|failed)" | tail -20
 ```
 
@@ -390,9 +390,9 @@ Also, exercise it against real `gh` once, outside CI:
 ```
 $ cd apps/mac
 $ TC_RUN_GITHUB_INTEGRATION_TESTS=1 xcodebuild test \
-    -workspace touch-code.xcworkspace -scheme touch-code \
+    -workspace codans.xcworkspace -scheme codans \
     -destination 'platform=macOS' \
-    -only-testing:touch-codeTests/BatchedPullRequestsIntegrationTests
+    -only-testing:codansTests/BatchedPullRequestsIntegrationTests
 ```
 
 (Test file to be added alongside the unit tests, skipped unless the env var is set.)
@@ -405,7 +405,7 @@ $ TC_RUN_GITHUB_INTEGRATION_TESTS=1 xcodebuild test \
 
 **Work items.**
 
-In `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift`, extend `State`:
+In `apps/mac/codans/App/Features/GitHub/GitHubFeature.swift`, extend `State`:
 
 ```swift
 var snapshotsByProject: [ProjectID: BatchedPullRequests] = [:]
@@ -435,13 +435,13 @@ Implement handlers per the design doc's "Fetch Scheduling in the Reducer" sectio
 
 Add a helper `state.projectionSnapshot(worktreeID:)` that, given a WorktreeID, returns the projected `PullRequestSnapshot?` from `snapshotsByProject`. Use this for write-action delegate payloads (mergeCompleted etc.).
 
-Wire the observation: in `apps/mac/touch-code/App/Features/Root/RootFeature.swift`, subscribe to `HierarchyManager.selectedProjectIDChanges` (add this if not already present) and dispatch `GitHubFeature.Action.projectActivated` with the Project's gitRoot and visible branches.
+Wire the observation: in `apps/mac/codans/App/Features/Root/RootFeature.swift`, subscribe to `HierarchyManager.selectedProjectIDChanges` (add this if not already present) and dispatch `GitHubFeature.Action.projectActivated` with the Project's gitRoot and visible branches.
 
 **During M4 only, the per-Worktree path still works.** The existing `worktreeBecameVisible` handler continues to write into `state.snapshots[worktreeID]`. The new `projectBatchLoaded` handler writes into `state.snapshotsByProject` AND (for M4 compat) projects into `state.snapshots[worktreeID]` for each branch found. Views read from `state.snapshots` unchanged. Both paths coexist; the more recent write wins.
 
 Add a hidden feature flag `SettingsStore.general.githubFetchModel: "legacy" | "batched"` (default `"batched"`) and gate the per-Worktree path behind `"legacy"`. This gives a single-line rollback during M4 – M5.
 
-**New TestStore tests** in `apps/mac/touch-code/Tests/GitHubTests/GitHubFeatureTests.swift`:
+**New TestStore tests** in `apps/mac/codans/Tests/GitHubTests/GitHubFeatureTests.swift`:
 
 1. `projectActivatedWithEmptyBranchesIsNoop`
 2. `projectActivatedFiresSingleBatchFetch`
@@ -455,14 +455,14 @@ Add a hidden feature flag `SettingsStore.general.githubFetchModel: "legacy" | "b
 **Verification.**
 
 ```
-$ xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+$ xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans \
     -destination 'platform=macOS' \
-    -only-testing:touch-codeTests/GitHubFeatureTests
+    -only-testing:codansTests/GitHubFeatureTests
 ```
 
 Expected: 19 existing + 8 new = 27 tests passing.
 
-Manual smoke: `make -C apps/mac run-app`, activate the `touch-code` Project, observe that all PR badges paint in one visible frame (not staggered). Compare to the same operation on main prior to this commit.
+Manual smoke: `make -C apps/mac run-app`, activate the `codans` Project, observe that all PR badges paint in one visible frame (not staggered). Compare to the same operation on main prior to this commit.
 
 ### Milestone 5: View migration — check rollup from snapshot, retire per-row `.task`
 
@@ -472,13 +472,13 @@ Manual smoke: `make -C apps/mac run-app`, activate the `touch-code` Project, obs
 
 **Work items.**
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift`:
+In `apps/mac/codans/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift`:
 
 1. Delete the `.task(id: BadgeTaskIdentity(...))` modifier.
 2. Delete the `BadgeTaskIdentity` private struct (unused after #1).
 3. The `.popover` and `.onHover` modifiers stay — they don't need the `Color.clear.frame(0,0)` workaround anymore, but keeping it is harmless. Leave unchanged for minimal diff.
 
-In `apps/mac/touch-code/App/Features/HierarchySidebar/HierarchySidebarView.swift`, inside `worktreeRow(...)`, replace:
+In `apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift`, inside `worktreeRow(...)`, replace:
 
 ```swift
 let rollup: PullRequestBadge.CheckRollup = {
@@ -498,7 +498,7 @@ let rollup: PullRequestBadge.CheckRollup = {
 }()
 ```
 
-In `apps/mac/touch-code/App/Features/GitHub/Views/PullRequestPopover.swift`, change its `Content.loaded(snapshot, checks:, workflowRun:)` case to `.loaded(snapshot, workflowRun:)` — the `checks` parameter is redundant because `snapshot.checkRollup` carries the same data. Update `HierarchySidebarView.gitHubPopoverContent` call site accordingly.
+In `apps/mac/codans/App/Features/GitHub/Views/PullRequestPopover.swift`, change its `Content.loaded(snapshot, checks:, workflowRun:)` case to `.loaded(snapshot, workflowRun:)` — the `checks` parameter is redundant because `snapshot.checkRollup` carries the same data. Update `HierarchySidebarView.gitHubPopoverContent` call site accordingly.
 
 In `GitHubFeature.swift`, remove the `checksFetchEffect(...)` call from `snapshotLoaded(.success)` — the reducer no longer needs to prefetch checks because the batched path already includes them and the per-Worktree path is gated behind the legacy flag. If legacy mode is on (flag = `"legacy"`), re-add the effect; expressed via an `if` at that call site.
 
@@ -511,14 +511,14 @@ Update the three TestStore tests from commit `9bf5c91` that now need to NOT expe
 **Verification.**
 
 ```
-$ xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+$ xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans \
     -destination 'platform=macOS' \
-    -only-testing:touch-codeTests/GitHubTests
+    -only-testing:codansTests/GitHubTests
 ```
 
 Expected: all GitHub tests pass (count unchanged from M4's 27).
 
-Manual: `make -C apps/mac run-app`, cold-launch with touch-code Project active. Observe check-rollup overlays paint in the same frame as the PR badge, not after. Compare against M4's run.
+Manual: `make -C apps/mac run-app`, cold-launch with codans Project active. Observe check-rollup overlays paint in the same frame as the PR badge, not after. Compare against M4's run.
 
 ### Milestone 6: Delete v1 fetch path
 
@@ -528,17 +528,17 @@ Manual: `make -C apps/mac run-app`, cold-launch with touch-code Project active. 
 
 **Work items.**
 
-In `apps/mac/touch-code/GitHub/GitHubService.swift`, remove:
+In `apps/mac/codans/GitHub/GitHubService.swift`, remove:
 
 - `func pullRequest(branch: String, worktreePath: URL)` — replaced by `batchPullRequests(branches: [branch])`.
 - `func checks(number: Int, worktreePath: URL)` — data is now inside snapshots.
 - `func latestWorkflowRun(branch: String, worktreePath: URL)` — see Open Question 4 in the design doc; if the URL-parse path landed in M3, delete this. Otherwise leave as a single-call method.
 
-Mirror the deletions in `apps/mac/touch-code/GitHub/LiveGitHubService.swift`, `apps/mac/touch-code/GitHub/GhCommand.swift` (`pullRequestView`, `pullRequestChecks`, `runListLatest`), and `apps/mac/touch-code/App/Clients/GitHubClient.swift`.
+Mirror the deletions in `apps/mac/codans/GitHub/LiveGitHubService.swift`, `apps/mac/codans/GitHub/GhCommand.swift` (`pullRequestView`, `pullRequestChecks`, `runListLatest`), and `apps/mac/codans/App/Clients/GitHubClient.swift`.
 
-In `apps/mac/touch-code/GitHub/JSONOutputParsers.swift`, remove `parsePullRequest`, `parseChecks`, `parseLatestWorkflowRun` — all replaced by `parseBatchedPullRequests`. `parseAuthStatus` stays.
+In `apps/mac/codans/GitHub/JSONOutputParsers.swift`, remove `parsePullRequest`, `parseChecks`, `parseLatestWorkflowRun` — all replaced by `parseBatchedPullRequests`. `parseAuthStatus` stays.
 
-In `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift`:
+In `apps/mac/codans/App/Features/GitHub/GitHubFeature.swift`:
 
 - Remove `State.checks: [Int: [CheckResult]]`.
 - Remove `State.latestWorkflowRuns: [Int: WorkflowRun]` if Open Question 4's URL-parse path landed; otherwise keep.
@@ -548,19 +548,19 @@ In `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift`:
 
 Update call sites:
 
-- `apps/mac/touch-code/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift` — already removed `worktreeBecameVisible` in M5; confirm no references remain.
+- `apps/mac/codans/App/Features/HierarchySidebar/WorktreeGitHubBadge.swift` — already removed `worktreeBecameVisible` in M5; confirm no references remain.
 - The error-case badge that calls `.refreshRequested` needs to dispatch `.projectRefreshRequested` instead. Plumb the project context through.
 
 Delete the TestStore tests for removed actions (approximately nine tests). Confirm the remaining tests still describe the system correctly.
 
-Update `docs/architecture.md` codemap's `touch-code/GitHub/` entry to drop mentions of `pr view / pr checks / run list` and add `gh api graphql`.
+Update `docs/architecture.md` codemap's `codans/GitHub/` entry to drop mentions of `pr view / pr checks / run list` and add `gh api graphql`.
 
 **Verification.**
 
 ```
-$ xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+$ xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans \
     -destination 'platform=macOS' \
-    -only-testing:touch-codeTests/GitHubTests
+    -only-testing:codansTests/GitHubTests
 ```
 
 Expected: GitHubTests count drops to 27 – 9 + (any M5/M6-specific tests) ≈ 22 tests passing.
@@ -579,7 +579,7 @@ Manual smoke: same as M5 — app starts, badges paint, merge/close/markReady wor
 
 ## Concrete Steps
 
-All commands assume working directory `/Users/wanggang/dev/00/touch-code` unless noted. The user runs these by hand between milestones; agent only invokes them when explicitly asked.
+All commands assume working directory `/Users/wanggang/dev/00/codans` unless noted. The user runs these by hand between milestones; agent only invokes them when explicitly asked.
 
 **Baseline check before starting M1:**
 
@@ -590,8 +590,8 @@ $ make -C apps/mac build 2>&1 | tail -3
 $ make -C apps/mac lint 2>&1 | tail -3
   # Baseline lint passes (pre-existing violations only, no new ones introduced)
 
-$ xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
-    -destination 'platform=macOS' -only-testing:touch-codeTests/GitHubTests 2>&1 \
+$ xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans \
+    -destination 'platform=macOS' -only-testing:codansTests/GitHubTests 2>&1 \
     | grep "Test run" | tail -1
   Test run with 19 tests in 1 suite passed after [N.NN] seconds.
 ```
@@ -601,9 +601,9 @@ $ xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code 
 ```
 $ make -C apps/mac build                    # expect: ** BUILD SUCCEEDED **
 $ make -C apps/mac lint 2>&1 | grep -E "<changed-files-in-milestone>"    # expect: empty
-$ xcodebuild test -workspace apps/mac/touch-code.xcworkspace -scheme touch-code \
+$ xcodebuild test -workspace apps/mac/codans.xcworkspace -scheme codans \
     -destination 'platform=macOS' \
-    -only-testing:touch-codeTests/<milestone-specific-tests>
+    -only-testing:codansTests/<milestone-specific-tests>
 ```
 
 **Per-milestone commit (following project convention `/commit` cadence):**
@@ -620,7 +620,7 @@ Commit messages follow the `feat / fix / refactor / test / docs / chore` types a
 **Functional acceptance** (runs at M5 complete; M6 is a pure-subtraction follow-up):
 
 1. `make -C apps/mac run-app`. Wait for main window.
-2. Expect: a Project with 20+ Worktrees (use the `touch-code` Project in the author's catalog, which has `feature/github01`, `feature/command-p`, `feature/theme`, etc.) shows every matching PR badge within ~600 ms of the window becoming interactive. Measure with stopwatch; acceptance is "noticeably faster than v1 — one frame vs. 2–3 second wave".
+2. Expect: a Project with 20+ Worktrees (use the `codans` Project in the author's catalog, which has `feature/github01`, `feature/command-p`, `feature/theme`, etc.) shows every matching PR badge within ~600 ms of the window becoming interactive. Measure with stopwatch; acceptance is "noticeably faster than v1 — one frame vs. 2–3 second wave".
 3. For a Worktree on branch `feature/github01`: badge is purple `git-merge` icon, `#39` capsule, `+5759 −73` diff stats. Popover opens on hover. Merge button is disabled (already merged) with tooltip "Pull request is already merged".
 4. Click Merge (on a live open PR, if any exist at test time). Within 2 seconds the badge flips to merged state without a manual refresh.
 5. In a terminal, inside the `feature/github01` Worktree: `git checkout feature/theme` (or any other branch that maps to a different PR). The badge updates within focus-regain (v2.0) or ~1 s (v2.1 with watcher).
@@ -765,7 +765,7 @@ Libraries and services used:
 
 Types that must exist at milestone-specific points:
 
-In `apps/mac/TouchCodeCore/Git/RemoteInfo.swift` (M1):
+In `apps/mac/CodansCore/Git/RemoteInfo.swift` (M1):
 
 ```swift
 public nonisolated struct RemoteInfo: Equatable, Sendable, Hashable {
@@ -777,7 +777,7 @@ public nonisolated struct RemoteInfo: Equatable, Sendable, Hashable {
 }
 ```
 
-In `apps/mac/touch-code/Git/GitService.swift` (M1):
+In `apps/mac/codans/Git/GitService.swift` (M1):
 
 ```swift
 public nonisolated protocol GitService: Sendable {
@@ -786,7 +786,7 @@ public nonisolated protocol GitService: Sendable {
 }
 ```
 
-In `apps/mac/TouchCodeCore/GitHub/MergeStateStatus.swift` (M2):
+In `apps/mac/CodansCore/GitHub/MergeStateStatus.swift` (M2):
 
 ```swift
 public nonisolated enum MergeStateStatus: String, Codable, Sendable, Equatable {
@@ -794,7 +794,7 @@ public nonisolated enum MergeStateStatus: String, Codable, Sendable, Equatable {
 }
 ```
 
-In `apps/mac/TouchCodeCore/GitHub/ReviewDecision.swift` (M2):
+In `apps/mac/CodansCore/GitHub/ReviewDecision.swift` (M2):
 
 ```swift
 public nonisolated enum ReviewDecision: String, Codable, Sendable, Equatable {
@@ -802,7 +802,7 @@ public nonisolated enum ReviewDecision: String, Codable, Sendable, Equatable {
 }
 ```
 
-In `apps/mac/touch-code/GitHub/GitHubService.swift` (M3):
+In `apps/mac/codans/GitHub/GitHubService.swift` (M3):
 
 ```swift
 public nonisolated protocol GitHubService: Sendable {
@@ -816,7 +816,7 @@ public nonisolated protocol GitHubService: Sendable {
 }
 ```
 
-In `apps/mac/touch-code/GitHub/BatchedPullRequestQuery.swift` (M3):
+In `apps/mac/codans/GitHub/BatchedPullRequestQuery.swift` (M3):
 
 ```swift
 enum BatchedPullRequestQuery {
@@ -831,7 +831,7 @@ enum BatchedPullRequestQuery {
 }
 ```
 
-In `apps/mac/touch-code/App/Clients/GitHubClient.swift` (M3, M6):
+In `apps/mac/codans/App/Clients/GitHubClient.swift` (M3, M6):
 
 ```swift
 nonisolated struct GitHubClient: Sendable {
@@ -847,7 +847,7 @@ nonisolated struct GitHubClient: Sendable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/GitHub/GitHubFeature.swift` state (M4):
+In `apps/mac/codans/App/Features/GitHub/GitHubFeature.swift` state (M4):
 
 ```swift
 @ObservableState

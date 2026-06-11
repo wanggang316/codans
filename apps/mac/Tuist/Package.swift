@@ -18,7 +18,7 @@ let packageSettings = PackageSettings(
 #endif
 
 let package = Package(
-  name: "TouchCodeDependencies",
+  name: "CodansDependencies",
   dependencies: [
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     .package(url: "https://github.com/pointfreeco/swift-composable-architecture", exact: "1.23.1"),

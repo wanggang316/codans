@@ -1,0 +1,13 @@
+[
+  {
+    "databaseId": 123456789,
+    "name": "CI",
+    "status": "completed",
+    "conclusion": "success",
+    "headBranch": "feature/github01",
+    "headSha": "aeafe6f0123456789",
+    "number": 42,
+    "updatedAt": "2026-04-23T05:10:00Z",
+    "url": "https://github.com/wanggang316/codans/actions/runs/123456789"
+  }
+]

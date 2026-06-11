@@ -14,14 +14,14 @@ srcroot="$(cd "${script_dir}/.." && pwd)"
 repo_root="$(cd "${srcroot}/../.." && pwd)"
 
 xcconfig="${srcroot}/Configurations/Project.xcconfig"
-cli_source="${srcroot}/tc/TouchCodeCLI.swift"
+cli_source="${srcroot}/codans-cli/CodansCLI.swift"
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*"; }
 
 print_usage() {
   cat <<'EOF'
-sync-product-version.sh — sync tc + skill versions from MARKETING_VERSION.
+sync-product-version.sh — sync codans + skill versions from MARKETING_VERSION.
 
 Usage:
   sync-product-version.sh           update files in place

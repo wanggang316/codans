@@ -100,19 +100,19 @@ Two `DependencyKey`-conforming function structs, paralleling supacode's `Termina
 **TerminalClient** — input, focus, retry, and the engine event stream. Commands are `@MainActor @Sendable`.
 
 - Commands: `sendInput(paneID, text)`, `setFocus(paneID, focused)`, `retryPanel(paneID) -> Bool`, `ensureSurface(paneID, worktreeID)`, `closeSurface(paneID)`.
-- Events: `events() -> AsyncStream<TerminalEvent>` — same `TerminalEvent` type already in `TouchCodeCore`. Root reducer subscribes once via an `Effect.run` on `.onLaunch`.
+- Events: `events() -> AsyncStream<TerminalEvent>` — same `TerminalEvent` type already in `CodansCore`. Root reducer subscribes once via an `Effect.run` on `.onLaunch`.
 
 The split between the two clients mirrors their concerns: `HierarchyClient` is tree topology; `TerminalClient` is per-Pane runtime. Both compose the same `HierarchyManager` + `TerminalEngine` pair on the `liveValue` side — but separation lets features depend on only the half they need and keeps test setups small.
 
 ### Data Storage
 
-No new persistence. `CatalogStore` (shipped) already owns `~/.config/touch-code/catalog.json`. Selection state (`selectedSpaceID`, `selectedProjectID` per Space, `selectedWorktreeID` per Project, `selectedTabID` per Worktree) is already in `Catalog` and persists via `HierarchyManager.scheduleSave`. The TCA shell relies on this — picking a Worktree in the sidebar calls `HierarchyClient.selectWorktree` which mutates the catalog and schedules a debounced save.
+No new persistence. `CatalogStore` (shipped) already owns `~/.config/codans/catalog.json`. Selection state (`selectedSpaceID`, `selectedProjectID` per Space, `selectedWorktreeID` per Project, `selectedTabID` per Worktree) is already in `Catalog` and persists via `HierarchyManager.scheduleSave`. The TCA shell relies on this — picking a Worktree in the sidebar calls `HierarchyClient.selectWorktree` which mutates the catalog and schedules a debounced save.
 
 Transient UI state (sheet presentations, alert presentations, sidebar collapse, search query) lives only in TCA `@ObservableState` and is not persisted in v1. If a future plan wants restoration of e.g. "last sidebar collapse state", it lands in `settings.json` via a separate `SettingsClient`.
 
 ### Component Boundaries
 
-Feature layout under `apps/mac/touch-code/App/Features/`:
+Feature layout under `apps/mac/codans/App/Features/`:
 
 | Feature | Responsibility | Depends on |
 |---|---|---|
@@ -123,7 +123,7 @@ Feature layout under `apps/mac/touch-code/App/Features/`:
 | `SplitViewport/SplitViewportFeature.swift` | Split-tree rendering; split/close/focus/resize | `HierarchyClient`, `TerminalClient` |
 | `Inspector/InspectorFeature.swift` | Reserved slot for C7 / C6; default empty | future |
 
-Client-layer files under `apps/mac/touch-code/App/Clients/`:
+Client-layer files under `apps/mac/codans/App/Clients/`:
 
 | Client | File | `liveValue` wires to |
 |---|---|---|
@@ -140,7 +140,7 @@ SwiftUI views:
 | `TabBarView` | `TabBar/TabBarView.swift` | Horizontal button strip + "new tab" action |
 | `SplitViewportView` | `SplitViewport/SplitViewportView.swift` | Recursive function walking `SplitTree.Node`; leaves become `PaneHostView` |
 
-`MainView` (shipped in M5 with its direct `SingleSurfaceHost`) is replaced: `TouchCodeApp.body` swaps to `ContentView`. `SingleSurfaceHost` goes away once `RootFeature` subscribes the real event stream and drives `TerminalClient.ensureSurface` for the active tab's leaves.
+`MainView` (shipped in M5 with its direct `SingleSurfaceHost`) is replaced: `CodansApp.body` swaps to `ContentView`. `SingleSurfaceHost` goes away once `RootFeature` subscribes the real event stream and drives `TerminalClient.ensureSurface` for the active tab's leaves.
 
 Dependency rule: feature files must not `import` each other across peer directories. Composition happens through `RootFeature`'s scopes. Sub-features communicate via `Effect` and parent-level delegate actions — not by one sub-feature's state referencing another's.
 
@@ -172,9 +172,9 @@ Keep `HierarchySidebar` / `TabBar` / `SplitViewport` as views that send actions 
 
 ## Cross-Cutting Concerns
 
-**Testing strategy.** Every sub-feature ships with a `TestStore`-based test file. Each injects `HierarchyClient.testValue` / `TerminalClient.testValue` with unimplemented closures that the test overrides per-case. Sub-feature tests assert action dispatch, effect cancellation, and state updates. Integration tests stay in `TouchCodeRuntimeTests` covering the composition end-to-end with a fake runtime.
+**Testing strategy.** Every sub-feature ships with a `TestStore`-based test file. Each injects `HierarchyClient.testValue` / `TerminalClient.testValue` with unimplemented closures that the test overrides per-case. Sub-feature tests assert action dispatch, effect cancellation, and state updates. Integration tests stay in `CodansRuntimeTests` covering the composition end-to-end with a fake runtime.
 
-**Observability.** `os.Logger` categories already exist (`com.touch-code.*`); the shell adds `com.touch-code.shell` for reducer-level logging and reuses existing `com.touch-code.persistence` / `.runtime` categories. No new logger surfaces.
+**Observability.** `os.Logger` categories already exist (`com.gumpw.codans.*`); the shell adds `com.gumpw.codans.shell` for reducer-level logging and reuses existing `com.gumpw.codans.persistence` / `.runtime` categories. No new logger surfaces.
 
 **Event stream lifecycle.** `RootFeature.onLaunch` arms an `Effect.run { send in for await event in terminalClient.events() { send(.engineEvent(event)) } }`. The effect is cancellable via a `CancelID.events`. On `onQuit` the effect is cancelled and `TerminalEngine.finishEventStream` is called — shipped M4 behaviour supports idempotent finish.
 
@@ -182,9 +182,9 @@ Keep `HierarchySidebar` / `TabBar` / `SplitViewport` as views that send actions 
 
 **Error handling.** Client commands do not throw at the boundary — they swallow `HierarchyError` and surface a `.hierarchyError(String)` action that the root reducer can translate into an `@Presents alert`. The rationale mirrors supacode: TCA effects are more ergonomic when commands return `Void`, and user-visible errors are a presentation concern anyway.
 
-**Migration path.** `TouchCodeApp.body` flips from `MainView` to `ContentView`; `SingleSurfaceHost` is deleted once `RootFeature` drives the same path through `TerminalClient.ensureSurface`. No user-visible state migration required — the catalog schema is unchanged.
+**Migration path.** `CodansApp.body` flips from `MainView` to `ContentView`; `SingleSurfaceHost` is deleted once `RootFeature` drives the same path through `TerminalClient.ensureSurface`. No user-visible state migration required — the catalog schema is unchanged.
 
-**Rollback plan.** If the TCA shell is unstable, revert `TouchCodeApp.body` to mount `MainView`; all TCA work stays behind its own files and does not mutate the shipped runtime. A single-commit revert is enough.
+**Rollback plan.** If the TCA shell is unstable, revert `CodansApp.body` to mount `MainView`; all TCA work stays behind its own files and does not mutate the shipped runtime. A single-commit revert is enough.
 
 ## Risks
 

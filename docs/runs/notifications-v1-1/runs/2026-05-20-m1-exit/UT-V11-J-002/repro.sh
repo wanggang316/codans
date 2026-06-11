@@ -2,9 +2,9 @@
 # UT-V11-J-002 — controller-driven probe (replayable).
 
 set -eu
-FEATURE_APP=~/Library/Developer/Xcode/DerivedData/touch-code-chgukochxcibwaglczplbvhgcaqu/Build/Products/Debug/TouchCode.app
-FEATURE_TC=$FEATURE_APP/Contents/Resources/bin/tc
-INBOX=~/.config/touch-code/notifications.json
+FEATURE_APP=~/Library/Developer/Xcode/DerivedData/codans-chgukochxcibwaglczplbvhgcaqu/Build/Products/Debug/Codans.app
+FEATURE_TC=$FEATURE_APP/Contents/Resources/bin/codans
+INBOX=~/.config/codans/notifications.json
 
 cp -p "$INBOX" "${INBOX}.user-backup" 2>/dev/null || true
 

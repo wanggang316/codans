@@ -32,7 +32,7 @@ The hierarchy on `main` is `Catalog → Project → Worktree → Tab → Pane`. 
 - No stdout regex scanning. v1 consumes only the structured events libghostty + the runtime already emit. Tools that don't emit OSC 9 / ring the bell / use shell integration are silently uncovered; this is documented, not patched.
 - No hook-based detection (c3-hooks integration). The hook-source path is reserved for v2 and would be additive.
 - No user-editable detection rules, template DSL, severity levels, snooze, sound, pane-internal toast, hover popover, or per-rule mute.
-- No CLI access to the inbox in v1. The data model lives in `TouchCodeCore` so that surfacing it later is a small change, but `tc` does not query it now.
+- No CLI access to the inbox in v1. The data model lives in `CodansCore` so that surfacing it later is a small change, but `codans` does not query it now.
 
 ## Design
 
@@ -100,7 +100,7 @@ The detector runs on the same actor as the runtime event loop; output is fanned 
 
 ### Storage (DQ2)
 
-`NotificationStore` holds the inbox as `[Notification]` in memory and persists to `~/.config/touch-code/notifications.json` using `AtomicFileStore`. The file is **separate** from `catalog.json`: notifications are time-series data, the catalog is structural; mixing them complicates Catalog schema migration.
+`NotificationStore` holds the inbox as `[Notification]` in memory and persists to `~/.config/codans/notifications.json` using `AtomicFileStore`. The file is **separate** from `catalog.json`: notifications are time-series data, the catalog is structural; mixing them complicates Catalog schema migration.
 
 ```swift
 public struct Notification: Codable, Sendable, Identifiable {
@@ -193,7 +193,7 @@ This action is *not* routed through `PaneActionRouter` — that router handles i
 `RollupIndex` is the single source; each surface owns the rendering of its level.
 
 - **L4 Project — unread dot.** `HierarchySidebar` Project row reads `RollupIndex.unreadProjects`. When the project's `ProjectID` is in the set, render a small filled circle (4 px) immediately to the right of the project name. No count.
-- **L3 Worktree — bell glyph.** `WorktreeRowIcon` (`apps/mac/touch-code/App/Features/HierarchySidebar/WorktreeRowIcon.swift`) currently picks between branch / PR-state glyphs. Extend its inputs with `hasUnreadNotification: Bool` (sourced from `RollupIndex.unreadWorktrees`); when true, override the asset to a bell glyph and suppress the role tint. PR check-rollup overlay (the bottom-right circle) keeps working unchanged. When the worktree is read again, the icon falls back to its prior PR / branch state.
+- **L3 Worktree — bell glyph.** `WorktreeRowIcon` (`apps/mac/codans/App/Features/HierarchySidebar/WorktreeRowIcon.swift`) currently picks between branch / PR-state glyphs. Extend its inputs with `hasUnreadNotification: Bool` (sourced from `RollupIndex.unreadWorktrees`); when true, override the asset to a bell glyph and suppress the role tint. PR check-rollup overlay (the bottom-right circle) keeps working unchanged. When the worktree is read again, the icon falls back to its prior PR / branch state.
 - **L2 Tab — unread dot.** `TabBar` row prepends a small filled circle (4 px) before the tab title text when the tab's `TabID` is in `RollupIndex.unreadTabs`. No count, no kind distinction.
 - **L1 Pane — coloured top line.** Pane chrome renders a 2 px line across its top edge:
   - `PaneIndicator.taskFinished` → green (`Color.systemGreen` at slightly desaturated opacity).
@@ -206,7 +206,7 @@ None of L1–L4 are interactive — they are visual-only. The single popover ent
 
 ### Status-Bar Bell + Inbox Popover
 
-The existing `StatusBarFeature` (`apps/mac/touch-code/App/Features/StatusBar/`) currently fills a single center slot of the worktree status bar with one of `{toast, pullRequest, motivational}`. v1 adds a **right-anchored bell slot** that is independent of the center slot and always present:
+The existing `StatusBarFeature` (`apps/mac/codans/App/Features/StatusBar/`) currently fills a single center slot of the worktree status bar with one of `{toast, pullRequest, motivational}`. v1 adds a **right-anchored bell slot** that is independent of the center slot and always present:
 
 ```
 ┌─────────────────────── worktree status bar ───────────────────────┐
@@ -226,11 +226,11 @@ The bell button is the **only** popover entry — Worktree-row bell glyphs and t
 ### Component Boundaries (DQ5)
 
 ```
-TouchCodeCore/Notifications/
+CodansCore/Notifications/
   Notification.swift             // model only — id, kind, source path, ts, read
                                  // (kept in Core in case CLI exposes inbox later)
 
-touch-code/App/Features/Notifications/
+codans/App/Features/Notifications/
   NotificationDetector.swift     // TerminalEvent → Notification
   NotificationStore.swift        // [Notification] + AtomicFileStore + sweep/cap
   RollupIndex.swift              // RollupIndex derivation (Sets + paneIndicator map)
@@ -248,7 +248,7 @@ The L1–L4 indicator surfaces are **edits to existing files**, not new ones:
 
 Each of those reads from `RollupIndex` via a small Equatable view-store slice; no other behaviour changes.
 
-Dependency direction: `TouchCodeCore.Notification ← Detector → Store → RollupIndex → InboxBellFeature, OSNotifier, DockBadger, [sidebar/tabbar/pane edits]`. The store has no knowledge of UI or OS facilities; UI components observe the store.
+Dependency direction: `CodansCore.Notification ← Detector → Store → RollupIndex → InboxBellFeature, OSNotifier, DockBadger, [sidebar/tabbar/pane edits]`. The store has no knowledge of UI or OS facilities; UI components observe the store.
 
 The Settings Notifications panel is a thin section added to the existing `App/Features/Settings/` reducer; it is not a separate file owned by Notifications.
 
@@ -349,10 +349,10 @@ None at design-doc time. The four spec-level OQs were resolved during this desig
 ## References
 
 - Product spec: [docs/product-specs/notifications.md](../product-specs/notifications.md)
-- Hierarchy primitives: `apps/mac/TouchCodeCore/{Catalog,Project,Worktree,Tab,Pane,SplitTree,TerminalEvent,PaneInfoDelta}.swift`
-- Atomic file I/O: `apps/mac/TouchCodeCore/AtomicFileStore.swift`
-- Status bar host: `apps/mac/touch-code/App/Features/StatusBar/`
-- Salvaged from C6: `apps/mac/touch-code/Notifications/OSNotifier.swift` (in worktree branch `worktree-design+c6-agent-notifications`)
+- Hierarchy primitives: `apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane,SplitTree,TerminalEvent,PaneInfoDelta}.swift`
+- Atomic file I/O: `apps/mac/CodansCore/AtomicFileStore.swift`
+- Status bar host: `apps/mac/codans/App/Features/StatusBar/`
+- Salvaged from C6: `apps/mac/codans/Notifications/OSNotifier.swift` (in worktree branch `worktree-design+c6-agent-notifications`)
 - Reference implementation studied: `supacode/Clients/Notifications/`, `supacode/Features/Repositories/Views/*Notification*View*.swift`
 - Deprecated by this doc:
   - [c6-agent-notifications.md](c6-agent-notifications.md)

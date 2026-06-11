@@ -83,7 +83,7 @@ next_patch() {
 # channels (stable + tip).  Returns empty if unreachable.
 max_published_build() {
   curl -fsSL --max-time 10 \
-    "https://github.com/wanggang316/touch-code/releases/latest/download/appcast.xml" 2>/dev/null \
+    "https://github.com/wanggang316/codans/releases/latest/download/appcast.xml" 2>/dev/null \
     | grep -oE '<sparkle:version>[^<]+' \
     | sed 's/<sparkle:version>//' \
     | sort -n \

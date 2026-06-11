@@ -178,52 +178,52 @@ Related documents:
 
 Key source files (ordered by dependency flow):
 
-- `apps/mac/TouchCodeCore/Project.swift` — `Project` struct. Two fields
+- `apps/mac/CodansCore/Project.swift` — `Project` struct. Two fields
   (`defaultEditor`, `worktreesDirectory`) migrate away; `kind` derived
   property added.
-- `apps/mac/TouchCodeCore/ProjectKind.swift` — *new*, owns the
+- `apps/mac/CodansCore/ProjectKind.swift` — *new*, owns the
   `git_repo` / `plain_dir` enum + `Project.kind` extension.
-- `apps/mac/TouchCodeCore/Catalog.swift` — version bump 1→2;
+- `apps/mac/CodansCore/Catalog.swift` — version bump 1→2;
   `garbageCollectEditors` walk retargets to `Settings.projects`.
-- `apps/mac/TouchCodeCore/Settings/Settings.swift` — v3 root; renames
+- `apps/mac/CodansCore/Settings/Settings.swift` — v3 root; renames
   `repositories` → `projects`, decoder accepts v2 and folds into v3.
-- `apps/mac/TouchCodeCore/Settings/RepositorySettings.swift` — deleted
+- `apps/mac/CodansCore/Settings/RepositorySettings.swift` — deleted
   in Step 7 after all call sites moved off it.
-- `apps/mac/TouchCodeCore/Settings/ProjectSettings.swift` — *new*,
+- `apps/mac/CodansCore/Settings/ProjectSettings.swift` — *new*,
   the flat struct holding all per-Project prefs; `git` nested.
-- `apps/mac/TouchCodeCore/Settings/GitProjectSettings.swift` — *new*,
+- `apps/mac/CodansCore/Settings/GitProjectSettings.swift` — *new*,
   the git-kind-only subset.
-- `apps/mac/TouchCodeCore/Settings/SettingsMigration.swift` — adds a
+- `apps/mac/CodansCore/Settings/SettingsMigration.swift` — adds a
   v2→v3 branch that folds catalog overrides via an injected closure.
-- `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift` — adds two
+- `apps/mac/CodansCore/Hooks/HookSubscription.swift` — adds two
   `Scope` cases; Kind decoder becomes fail-soft.
-- `apps/mac/TouchCodeCore/Hooks/HookConfig.swift` — version 1→2.
-- `apps/mac/touch-code/Runtime/HierarchyManager.swift` — loses two
+- `apps/mac/CodansCore/Hooks/HookConfig.swift` — version 1→2.
+- `apps/mac/codans/Runtime/HierarchyManager.swift` — loses two
   mutators; exposes a migration-time override snapshot.
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` —
   `mutateRepository` → `mutateProject`; initialisation grows a
   catalog-overrides fold.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — drops two
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — drops two
   closures, adds `kind(of:)`.
-- `apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
+- `apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
   — renamed to `ProjectSettingsFeature.swift`; writes rewire from
   `HierarchyClient` to `SettingsStore`; classifier uses
   `.projectID` / `.projectPathGlob` directly.
-- `apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`
+- `apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`
   — `repositoryPanes` → `projectPanes`; State carries per-pane `kind`.
-- `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift` —
+- `apps/mac/codans/App/Features/Settings/SettingsSection.swift` —
   two cases renamed; four new cases added.
-- `apps/mac/touch-code/App/Features/Settings/Sidebar/SettingsSidebarView.swift`
+- `apps/mac/codans/App/Features/Settings/Sidebar/SettingsSidebarView.swift`
   — DisclosureGroup rows conditional on `kind`; **no visual indicator**
   distinguishes kinds.
-- `apps/mac/touch-code/App/Features/Settings/Panes/*SettingsView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/*SettingsView.swift`
   — file renames + four new scaffolds.
-- `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift` — the
+- `apps/mac/codans/App/Features/Editor/EditorFeature.swift` — the
   existing `.setProjectOverride` action rewires from HierarchyClient
   to SettingsStore.
-- `apps/mac/touch-code/App/Features/Socket/handlers/HookHandlers.swift`
+- `apps/mac/codans/App/Features/Socket/handlers/HookHandlers.swift`
   — exhaustive `switch` over `HookSubscription.Scope` grows two cases.
-- `apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift`
+- `apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift`
   — the `scopeLabel` helper grows two cases; `HookSource.repository`
   renames to `.project` (tag label stays "Project" user-facing).
 - `scripts/check-rename-residue.sh` — *new*, the CI grep gate.
@@ -272,36 +272,36 @@ types compile alongside (but do not replace) `RepositorySettings`. No
 JSON file changes yet; no UI changes yet. Build stays green.
 
 **Step 1 — `ProjectKind` + `Project.kind` + `HierarchyClient.kind(of:)`.**
-Add `apps/mac/TouchCodeCore/ProjectKind.swift` holding the two-case
+Add `apps/mac/CodansCore/ProjectKind.swift` holding the two-case
 public enum (`.gitRepo`, `.plainDir`, raw values `"git_repo"` and
 `"plain_dir"`). Add an extension on `Project` with
 `public var kind: ProjectKind { gitRoot == nil ? .plainDir : .gitRepo }`.
-Extend `apps/mac/touch-code/App/Clients/HierarchyClient.swift` with a
+Extend `apps/mac/codans/App/Clients/HierarchyClient.swift` with a
 closure `var kind: @MainActor @Sendable (ProjectID) -> ProjectKind?`;
 live wiring scans `hierarchyManager.catalog.spaces` for the Project
 and maps, returning `nil` on absence. Tests under
-`apps/mac/TouchCodeCoreTests/ProjectKindTests.swift` cover the two
-derivation branches; `apps/mac/touch-code/Tests/HierarchyClientTests.swift`
+`apps/mac/CodansCoreTests/ProjectKindTests.swift` cover the two
+derivation branches; `apps/mac/codans/Tests/HierarchyClientTests.swift`
 gains a forwarding test. Commit message: `feat(core): add ProjectKind
 derivation and HierarchyClient.kind(of:)`.
 
 **Step 2 — `ProjectSettings` + `GitProjectSettings` types (additive).**
-Add `apps/mac/TouchCodeCore/Settings/ProjectSettings.swift` with the
+Add `apps/mac/CodansCore/Settings/ProjectSettings.swift` with the
 struct shape from the design doc: top-level `defaultEditor: EditorID?`,
 `worktreesDirectory: String?`, `defaultShell: String?`,
 `envVars: [String: String]`, `scripts: [ScriptDefinition]`
 (placeholder type — see Interfaces), and `git: GitProjectSettings?`.
-Add `apps/mac/TouchCodeCore/Settings/GitProjectSettings.swift` with
+Add `apps/mac/CodansCore/Settings/GitProjectSettings.swift` with
 `worktreeBaseRef: String?`, `copyIgnoredOnWorktreeCreate: Bool?`,
 `copyUntrackedOnWorktreeCreate: Bool?`, `defaultMergeStrategy:
 MergeStrategy?`, `postMergeAction: MergedWorktreeAction?`,
 `githubDisabled: Bool`. Codable omit-when-default on every Optional
 and `githubDisabled: false`. Provide `isEffectivelyEmpty` on both
 (outer also clears `git` to nil when inner is empty). Tests under
-`apps/mac/TouchCodeCoreTests/Settings/ProjectSettingsCodableTests.swift`:
+`apps/mac/CodansCoreTests/Settings/ProjectSettingsCodableTests.swift`:
 round-trip empty struct (`{}`), populated git-only, populated
 top-level-only, mixed. Also add a placeholder `ScriptDefinition`
-struct in `apps/mac/TouchCodeCore/Settings/ScriptDefinition.swift`
+struct in `apps/mac/CodansCore/Settings/ScriptDefinition.swift`
 with minimal fields (`id: UUID`, `name: String`, `command: String`)
 — this reserves the slot; full definition lands in a later wave.
 Commit message: `feat(settings): add ProjectSettings and
@@ -318,7 +318,7 @@ against the old names because those names live in the view tier
 (renames happen in Milestone 4).
 
 **Step 3 — `settings.json` v3 with v2-fold decoder.** Edit
-`apps/mac/TouchCodeCore/Settings/Settings.swift`: bump
+`apps/mac/CodansCore/Settings/Settings.swift`: bump
 `currentVersion` to 3; rename the field and coding key
 `repositories` to `projects`; change the value type to
 `[ProjectID: ProjectSettings]`; keep the string-keyed JSON dict
@@ -339,7 +339,7 @@ worktreesDirectory: String?)?` and folds the returned values into
 `projects[pid]` top-level fields. `SettingsStore.init` gains a
 `catalogOverridesSnapshot` parameter it forwards to migration; the
 parameter is `nil` when called outside `bringUp` (tests). Tests
-under `apps/mac/TouchCodeCoreTests/Settings/SettingsMigrationV2ToV3Tests.swift`:
+under `apps/mac/CodansCoreTests/Settings/SettingsMigrationV2ToV3Tests.swift`:
 fresh v3 file round-trips; v2 file with one `repositories[pid]`
 entry produces v3 with matching `projects[pid].git.*`; v2 file
 plus catalog-overrides closure produces v3 with the two top-level
@@ -349,9 +349,9 @@ not here). Commit message: `feat(settings): migrate settings.json
 to v3 with projects dict`.
 
 **Step 4 — `catalog.json` v2 stripping two Project fields.** Edit
-`apps/mac/TouchCodeCore/Catalog.swift` to bump
+`apps/mac/CodansCore/Catalog.swift` to bump
 `currentVersion` to 2; decoder accepts `version ∈ {1, 2}`. Edit
-`apps/mac/TouchCodeCore/Project.swift`: keep
+`apps/mac/CodansCore/Project.swift`: keep
 `defaultEditor: EditorID?` and `worktreesDirectory: String?` as
 stored fields (so pending in-memory reads from Milestone 3 still
 work), but remove both from `CodingKeys` for encoding — they're
@@ -359,7 +359,7 @@ read on decode (`decodeIfPresent` on v1 input) and never written.
 `Catalog.garbageCollectEditors(knownIDs:)` is retired: its
 responsibility moves to `Settings.garbageCollectEditors`, so delete
 the catalog-side method and its call site in `CatalogStore`. Then
-edit `apps/mac/touch-code/Runtime/HierarchyManager.swift` to add a
+edit `apps/mac/codans/Runtime/HierarchyManager.swift` to add a
 one-shot accessor `func drainLegacyOverrides() -> [ProjectID:
 (defaultEditor: EditorID?, worktreesDirectory: String?)]` that
 snapshots every Project's two fields, then clears them in-memory
@@ -377,7 +377,7 @@ Commit message: `feat(catalog): migrate catalog.json to v2 by
 stripping per-Project preference fields`.
 
 **Step 5 — `hooks.json` v2 with new Scope cases + fail-soft Kind.**
-Edit `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift`: add
+Edit `apps/mac/CodansCore/Hooks/HookSubscription.swift`: add
 `case projectID(ProjectID)` and `case projectPathGlob(String)` to
 `Scope`; add `projectID` and `projectPathGlob` to the private
 `Kind` enum. Replace `Kind`'s synthesised Codable with a manual
@@ -385,18 +385,18 @@ Edit `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift`: add
 outer decoder catches) on an unrecognised raw string, and a manual
 `encode(to:)` (symmetric). The `HookSubscription` decoder wraps
 the Scope decode in a `do/catch`; on sentinel error, it logs a
-warning via the existing `Logger(subsystem: "com.touch-code.hooks",
+warning via the existing `Logger(subsystem: "com.gumpw.codans.hooks",
 category: "config")` and re-throws as a typed
 `DecodingError.valueNotFound` that the outer `[HookSubscription]`
 decode can skip-with-log. `HookConfig.swift` bumps
 `currentVersion` to 2; decoder accepts 1 or 2. Exhaustive switches
 at three consumer sites grow two cases: (a)
-`apps/mac/touch-code/App/Features/Socket/handlers/HookHandlers.swift`
+`apps/mac/codans/App/Features/Socket/handlers/HookHandlers.swift`
 `hook.list` paneID filter — both new cases return `false` (they
 don't match a paneID); (b)
-`apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift`
+`apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift`
 `scopeLabel(_:)` — both new cases return their kind name as a
-label; (c) `apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
+label; (c) `apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
 `isRepositoryScope` — `.projectID` matches `== project.id`;
 `.projectPathGlob` matches by glob against `project.rootPath`.
 Tests: `HookSubscriptionCodableTests.projectIDRoundTrip`,
@@ -425,7 +425,7 @@ bridges; remove `HierarchyManager.setWorktreesDirectory`,
 `setDefaultEditorAnySpace`, and the `findProjectAnySpace` helper
 — they become dead code once `EditorFeature.setProjectOverride`
 and `ProjectSettingsFeature` (next step) route to SettingsStore.
-Edit `apps/mac/touch-code/App/Features/Editor/EditorFeature.swift`
+Edit `apps/mac/codans/App/Features/Editor/EditorFeature.swift`
 `.setProjectOverride(projectID:, spaceID:, editorID:)` to close
 over `SettingsStore` (injected via `@Dependency` — add a
 `SettingsStoreClient` wrapper if direct injection causes MainActor
@@ -451,7 +451,7 @@ of kind). Parallel execution from here on.
 
 **Step 7 — `RepositorySettingsFeature` → `ProjectSettingsFeature`.**
 Rename
-`apps/mac/touch-code/App/Features/Settings/RepositorySettingsFeature.swift`
+`apps/mac/codans/App/Features/Settings/RepositorySettingsFeature.swift`
 to `ProjectSettingsFeature.swift` (git mv). Rename the type; rename
 `HooksLoad` payload `.loaded([HookRow])` stays but the `HookSource`
 enum in `HookMergeView.swift` renames `.repository` to `.project`
@@ -469,25 +469,25 @@ to use `.projectID` / `.projectPathGlob` directly; tighten
 Rename the tests file to `ProjectSettingsFeatureTests.swift` and
 update every `repository`/`Repository` token; the `isRepositoryScope`
 helper renames to `isProjectScope`. Delete
-`apps/mac/TouchCodeCore/Settings/RepositorySettings.swift` — call
+`apps/mac/CodansCore/Settings/RepositorySettings.swift` — call
 sites are gone. Commit message: `refactor(settings): rename
 RepositorySettingsFeature to ProjectSettingsFeature and switch writes
 to SettingsStore`.
 
 **Step 8 — `SettingsWindowFeature` rename + sidebar kind-awareness
 + `SettingsSection` case expansion.** Edit
-`apps/mac/touch-code/App/Features/Settings/SettingsWindowFeature.swift`:
+`apps/mac/codans/App/Features/Settings/SettingsWindowFeature.swift`:
 rename `repositoryPanes` → `projectPanes` (and its action
 `.repositoryPanes` → `.projectPanes`); `.forEach` keypath and
 `ensureRepositoryPane` follow. `ensureProjectPane` takes a
 `HierarchyClient.kind` lookup to seed `State.kind` on insertion.
 Edit
-`apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`:
+`apps/mac/codans/App/Features/Settings/SettingsSection.swift`:
 rename `.repositoryGeneral(ProjectID)` → `.projectGeneral`,
 `.repositoryHooks` → `.projectHooks`; add
 `.projectGit(ProjectID)`, `.projectGitHub(ProjectID)`,
 `.projectScripts(ProjectID)`, `.projectEnv(ProjectID)`. Edit
-`apps/mac/touch-code/App/Features/Settings/Sidebar/SettingsSidebarView.swift`
+`apps/mac/codans/App/Features/Settings/Sidebar/SettingsSidebarView.swift`
 so the DisclosureGroup row-builder consults
 `HierarchyClient.kind(of: pid)` via a view-scoped
 `@Environment(\.hierarchyClient)` or a direct `HierarchyManager`
@@ -510,7 +510,7 @@ switch update.** Rename
 and the `struct RepositoryGeneralSettingsView` → `ProjectGeneralSettingsView`.
 Rename `RepositoryHooksSettingsView.swift` → `ProjectHooksSettingsView.swift`.
 Add four new files under
-`apps/mac/touch-code/App/Features/Settings/Panes/`:
+`apps/mac/codans/App/Features/Settings/Panes/`:
 `ProjectGitSettingsView.swift`, `ProjectGitHubSettingsView.swift`,
 `ProjectScriptsSettingsView.swift`, `ProjectEnvSettingsView.swift`.
 Each has the frozen signature
@@ -520,7 +520,7 @@ some View { Text("Coming in M<N>…") … } }` with the M-number placeholder
 filled from the ui-settings-window.md spec section that owns that pane
 (Git → M17, GitHub → M18, Scripts → M19, Env → M20; these M numbers
 are added to the spec in Step 11). Edit
-`apps/mac/touch-code/App/Features/Settings/SettingsWindowView.swift`
+`apps/mac/codans/App/Features/Settings/SettingsWindowView.swift`
 detail switch: rename the two existing cases and add four new ones,
 each following the existing `store.scope(state:, action:)` fallback-
 to-`EmptyView` pattern. No tests for the scaffold views themselves —
@@ -533,7 +533,7 @@ Repository pane views to Project, add four scaffold panes`.
 `scripts/check-rename-residue.sh` that runs from the repo root and
 greps `apps/mac/` Swift files for `\b[Rr]epository\b`, excluding
 an allowlist (`apps/mac/Makefile` target bodies that speak about
-git repos, `docs/**` entirely, `apps/mac/touch-code/App/Features/GitViewer/**`
+git repos, `docs/**` entirely, `apps/mac/codans/App/Features/GitViewer/**`
 which wraps legitimate Git-repo-the-concept APIs, and comment
 lines explicitly tagged `// renamed from Repository*`). Non-zero
 exit on any hit. Add `apps/mac/Makefile` target `check-rename:` that
@@ -612,7 +612,7 @@ with Steps 10 and 11 in parallel under the same pattern.
 
 ## Concrete Steps
 
-Working directory for all commands: repo root (`/Users/wanggang/.prowl/repos/touch-code/feature/worktree-settings`).
+Working directory for all commands: repo root (`/Users/wanggang/.prowl/repos/codans/feature/worktree-settings`).
 
 ### Generate Tuist project
 
@@ -627,7 +627,7 @@ or removes Swift files (Steps 1, 2, 5, 9, 10). Idempotent.
 
 ```
 cd apps/mac
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug build -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -637,9 +637,9 @@ Expected: `** BUILD SUCCEEDED **`.
 
 ```
 cd apps/mac
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test \
-  -only-testing:touch-codeTests/<TestSuite> \
+  -only-testing:codansTests/<TestSuite> \
   -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -650,11 +650,11 @@ lists the tests that must be green.
 
 ```
 cd apps/mac
-xcodebuild -workspace touch-code.xcworkspace -scheme touch-code \
+xcodebuild -workspace codans.xcworkspace -scheme codans \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme TouchCodeCoreTests \
+xcodebuild -workspace codans.xcworkspace -scheme CodansCoreTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
-xcodebuild -workspace touch-code.xcworkspace -scheme tcTests \
+xcodebuild -workspace codans.xcworkspace -scheme tcTests \
   -configuration Debug test -destination 'platform=macOS' | xcbeautify
 ```
 
@@ -729,7 +729,7 @@ labels after `.task` fires.
 whose `scope.kind` is `"futureKind"`. App launches without error; the
 broken subscription is absent from `hook.list` RPC output; a warning
 line `"Dropping subscription with unknown scope kind: futureKind"`
-appears in `log stream --predicate 'subsystem == "com.touch-code.hooks"'`.
+appears in `log stream --predicate 'subsystem == "com.gumpw.codans.hooks"'`.
 
 **Kind-aware sidebar — git Project.** Open Settings and expand a
 git-backed Project. Observable: six sub-rows (General, Git & Worktree,
@@ -887,7 +887,7 @@ matching lines.
 
 ## Interfaces and Dependencies
 
-In `apps/mac/TouchCodeCore/ProjectKind.swift`:
+In `apps/mac/CodansCore/ProjectKind.swift`:
 
     public nonisolated enum ProjectKind: String, Codable, Hashable, Sendable {
       case gitRepo  = "git_repo"
@@ -898,11 +898,11 @@ In `apps/mac/TouchCodeCore/ProjectKind.swift`:
       public var kind: ProjectKind { gitRoot == nil ? .plainDir : .gitRepo }
     }
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+In `apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
     var kind: @MainActor @Sendable (_ projectID: ProjectID) -> ProjectKind?
 
-In `apps/mac/TouchCodeCore/Settings/ProjectSettings.swift`:
+In `apps/mac/CodansCore/Settings/ProjectSettings.swift`:
 
     public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
       public var defaultEditor: EditorID?
@@ -914,7 +914,7 @@ In `apps/mac/TouchCodeCore/Settings/ProjectSettings.swift`:
       public var isEffectivelyEmpty: Bool { /* … */ }
     }
 
-In `apps/mac/TouchCodeCore/Settings/GitProjectSettings.swift`:
+In `apps/mac/CodansCore/Settings/GitProjectSettings.swift`:
 
     public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
       public var worktreeBaseRef: String?
@@ -926,7 +926,7 @@ In `apps/mac/TouchCodeCore/Settings/GitProjectSettings.swift`:
       public var isEffectivelyEmpty: Bool { /* … */ }
     }
 
-In `apps/mac/TouchCodeCore/Settings/ScriptDefinition.swift` (placeholder):
+In `apps/mac/CodansCore/Settings/ScriptDefinition.swift` (placeholder):
 
     public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identifiable {
       public var id: UUID
@@ -934,13 +934,13 @@ In `apps/mac/TouchCodeCore/Settings/ScriptDefinition.swift` (placeholder):
       public var command: String
     }
 
-In `apps/mac/TouchCodeCore/Settings/Settings.swift`:
+In `apps/mac/CodansCore/Settings/Settings.swift`:
 
     public var version: Int                                   // now 3
     public var projects: [ProjectID: ProjectSettings]         // was `repositories`
     public static let currentVersion = 3
 
-In `apps/mac/TouchCodeCore/Settings/SettingsMigration.swift`:
+In `apps/mac/CodansCore/Settings/SettingsMigration.swift`:
 
     public enum LoadOutcome: Equatable {
       case fresh
@@ -961,17 +961,17 @@ In `apps/mac/TouchCodeCore/Settings/SettingsMigration.swift`:
       )? = { _ in nil }
     ) throws -> LoadOutcome
 
-In `apps/mac/touch-code/Runtime/HierarchyManager.swift`:
+In `apps/mac/codans/Runtime/HierarchyManager.swift`:
 
     func drainLegacyOverrides() -> [ProjectID: (defaultEditor: EditorID?, worktreesDirectory: String?)]
     // removed: setWorktreesDirectory, setDefaultEditorAnySpace, findProjectAnySpace
 
-In `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift`:
+In `apps/mac/codans/App/Features/Settings/SettingsStore.swift`:
 
     func mutateProject(_ pid: ProjectID, _ transform: (inout ProjectSettings) -> Void)
     // removed: mutateRepository
 
-In `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift`:
+In `apps/mac/CodansCore/Hooks/HookSubscription.swift`:
 
     public enum Scope: Equatable, Sendable {
       case anyPane
@@ -987,12 +987,12 @@ In `apps/mac/TouchCodeCore/Hooks/HookSubscription.swift`:
 
     // Scope.Kind decoder becomes manual-and-fail-soft on unknown raw.
 
-In `apps/mac/TouchCodeCore/Hooks/HookConfig.swift`:
+In `apps/mac/CodansCore/Hooks/HookConfig.swift`:
 
     public static let currentVersion = 2
     // decoder accepts version ∈ {1, 2}
 
-In `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`:
+In `apps/mac/codans/App/Features/Settings/SettingsSection.swift`:
 
     public enum SettingsSection: Hashable, Sendable {
       case general, github, notifications, terminal, developer
@@ -1005,7 +1005,7 @@ In `apps/mac/touch-code/App/Features/Settings/SettingsSection.swift`:
       case projectEnv(ProjectID)             // NEW
     }
 
-In `apps/mac/touch-code/App/Features/Settings/ProjectSettingsFeature.swift`:
+In `apps/mac/codans/App/Features/Settings/ProjectSettingsFeature.swift`:
 
     @Reducer
     struct ProjectSettingsFeature {
@@ -1020,12 +1020,12 @@ In `apps/mac/touch-code/App/Features/Settings/ProjectSettingsFeature.swift`:
       // Actions unchanged in shape; effects now close over SettingsStore.
     }
 
-In `apps/mac/touch-code/App/Features/Settings/Panes/HookMergeView.swift`:
+In `apps/mac/codans/App/Features/Settings/Panes/HookMergeView.swift`:
 
     public enum HookSource: Hashable, Sendable { case global, project }
     // `.repository` removed; tag label becomes "Project".
 
 External libraries: no new SPM dependencies. Tuist `buildableFolders`
-already cover the directories that gain new files (`TouchCodeCore/Settings/`,
-`TouchCodeCore/Hooks/`, `touch-code/App/Features/Settings/Panes/`). No
+already cover the directories that gain new files (`CodansCore/Settings/`,
+`CodansCore/Hooks/`, `codans/App/Features/Settings/Panes/`). No
 Tuist edits required.

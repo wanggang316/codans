@@ -82,7 +82,7 @@ Views:
 Old path removal (in this PR — closed loop, no follow-up debt):
 
 - `WorktreeDetailView.worktreeHeader(address:)` is replaced by `WorktreeHeaderView(...)`.
-- `apps/mac/touch-code/App/Features/WorktreeHeader/WorktreeHeaderOpenButton.swift` is **deleted**. Its only call site (`WorktreeDetailView.worktreeHeader`) is rewritten to mount `HeaderOpenSplitButton`, which supersedes it. The resolution chain previously held in `WorktreeHeaderOpenButton.currentDefaultLabel` moves to `EditorFeature.resolveDefault` (see §API Design) and is consumed by both the split button's label and the primary-action dispatch. No tests currently target the old button (grep confirms zero test files reference it); nothing to migrate. `docs/architecture.md` entry for `touch-code/App/Features/WorktreeHeader/` is updated to name the new surface.
+- `apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderOpenButton.swift` is **deleted**. Its only call site (`WorktreeDetailView.worktreeHeader`) is rewritten to mount `HeaderOpenSplitButton`, which supersedes it. The resolution chain previously held in `WorktreeHeaderOpenButton.currentDefaultLabel` moves to `EditorFeature.resolveDefault` (see §API Design) and is consumed by both the split button's label and the primary-action dispatch. No tests currently target the old button (grep confirms zero test files reference it); nothing to migrate. `docs/architecture.md` entry for `codans/App/Features/WorktreeHeader/` is updated to name the new surface.
 - `ContentView` toolbar's inspector toggle (the second `ToolbarItem`) is removed. `RootFeature.State.inspectorVisible` and the `inspectorVisibilityToggled` action are deleted because they would otherwise diverge from `Worktree.gitViewerVisible`. `ContentView`'s `if store.inspectorVisible { GitViewerView(...) }` branch becomes `if resolveGVVisible(selection) { GitViewerView(...) }`, where `resolveGVVisible` is a `ContentView`-scoped helper that reads the selected Worktree's `gitViewerVisible` from `hierarchyManager.catalog`. The 3-column `HStack` shape stays untouched in T2; T3 converts it to an overlay.
 
 ### System Context Diagram
@@ -138,7 +138,7 @@ actions (delegate, consumed by RootFeature)
 
 Dependencies: `InboxClient`, `HierarchyClient`. No `EditorClient` (delegate up).
 
-#### `NotificationInbox` extension (TouchCodeCore)
+#### `NotificationInbox` extension (CodansCore)
 
 Add a pure helper next to the existing `unreadCount(forWorktree:in:)`:
 
@@ -199,7 +199,7 @@ No new persistence. All reads go through the existing `Catalog` + `NotificationI
 ### Component Boundaries
 
 ```
-apps/mac/touch-code/App/Features/WorktreeHeader/
+apps/mac/codans/App/Features/WorktreeHeader/
   WorktreeHeaderFeature.swift     (NEW — reducer + State + Action + delegate)
   WorktreeHeaderView.swift        (NEW — row; mounts inside WorktreeDetailView)
   HeaderBellView.swift            (NEW — bell + badge + popover host)
@@ -261,7 +261,7 @@ Rejected. Spec removes the gear from the chrome, and the picker's "+ Custom edit
   - `gitViewerToggled` drives `setWorktreeGitViewerVisible(_, !current)`.
   - `customEditorsTapped` emits `.delegate(.showCustomEditorsSettings)`.
 - `EditorFeatureTests`: add a case for the new `resolveDefault` static helper (project override / global default / Finder fallback).
-- `NotificationInboxAggregationTests` (TouchCodeCoreTests): add a case for the new `totalUnread(in:)` extension — two unread + one orphan yields 2; dismissed/read entries excluded.
+- `NotificationInboxAggregationTests` (CodansCoreTests): add a case for the new `totalUnread(in:)` extension — two unread + one orphan yields 2; dismissed/read entries excluded.
 - SwiftUI previews in `HeaderBellView.swift`, `HeaderOpenSplitButton.swift`, `HeaderGitViewerToggle.swift` for empty-state / unread-state / installed-vs-missing / visible-vs-hidden.
 - Snapshot tests are out of scope per "snapshot/preview" phrasing in the task brief — the repo already uses SwiftUI previews; we keep that.
 
@@ -305,7 +305,7 @@ Everything else — the Header row, the GV toggle button, the `gitViewerVisible`
 
 ### Error handling
 
-- `notificationTapped` chains three mutations. `selectSpace` is non-throwing; `selectProject` / `selectWorktree` can throw if IDs stale. We catch and swallow (log via `Logger(subsystem: "com.touch-code.header", category: "bell")`) — the popover was rendered from a cached snapshot, so staleness is possible and not user-actionable. Stale row just no-ops.
+- `notificationTapped` chains three mutations. `selectSpace` is non-throwing; `selectProject` / `selectWorktree` can throw if IDs stale. We catch and swallow (log via `Logger(subsystem: "com.gumpw.codans.header", category: "bell")`) — the popover was rendered from a cached snapshot, so staleness is possible and not user-actionable. Stale row just no-ops.
 - `markReadForWorktree` is idempotent (InboxStore checks `readAt == nil`). Safe to call on stale selection.
 - Editor open failures already flow through `EditorFeature.openFailed` → `store.editor.lastOpenResult` → toast. No new path.
 

@@ -10,7 +10,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 After this plan ships, a user can flip any of five Notifications settings (in-app, system, sound, dock badge, command-finished threshold) and observe the next event obey the new value immediately — no relaunch, no edits to JSON files, no surprises. Command-finished events surface only when they cross the configured duration threshold, are not user-cancelled (Ctrl-C), and are not interrupted by recent keyboard activity in the same pane. Non-zero exit produces a visibly distinct banner title. A right-click "Mute notifications" on any pane silences that pane in one click. A worktree that gains its first unread notification moves to the top of its project's worktree list and stays there until the user manually reorders. The inbox file on disk grows a `{ version, entries }` envelope that survives a legacy upgrade in one save round-trip, and an accidental downgrade from a future build is recovered through a quarantine plus a one-shot "Inbox reset" entry in the bell popover.
 
-Concretely, before this plan: toggles in Settings → Notifications persist but do nothing; every `commandFinished` event becomes a notification regardless of duration or intent; muting a pane requires hand-editing `~/.config/touch-code/catalog.json`; the inbox file is a bare JSON array with no migration path. After this plan: all five gates and the four command-finished suppression rules work as specified, the per-pane menu toggles the label live, and the inbox file is version-gated.
+Concretely, before this plan: toggles in Settings → Notifications persist but do nothing; every `commandFinished` event becomes a notification regardless of duration or intent; muting a pane requires hand-editing `~/.config/codans/catalog.json`; the inbox file is a bare JSON array with no migration path. After this plan: all five gates and the four command-finished suppression rules work as specified, the per-pane menu toggles the label live, and the inbox file is version-gated.
 
 ## Progress
 
@@ -69,25 +69,25 @@ Concretely, before this plan: toggles in Settings → Notifications persist but 
 
 **Key existing source files this plan depends on or modifies:**
 
-- `apps/mac/TouchCodeCore/Settings/Settings.swift` — root `Settings` Codable. M1 adds a `notifications: NotificationsSettings` field with `decodeIfPresent` default.
-- `apps/mac/TouchCodeCore/Settings/GeneralSettings.swift`, `DeveloperSettings.swift`, `WorktreeSettings.swift` — sibling sections that establish the file-per-section pattern. M1 mirrors this for `NotificationsSettings.swift`.
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` — `@MainActor @Observable` owner of `~/.config/touch-code/settings.json`. M1 adds a `mutateNotifications(_:)` section mutator alongside the existing `mutateGeneral` / `mutateDeveloper` / `mutateWorktree`.
-- `apps/mac/TouchCodeCore/Notifications/InboxStorage.swift` — pure dedup/age/cap policies for the inbox. Unchanged by this plan; M1 adds a new `InboxFile.swift` sibling that owns file I/O (the envelope) and `NotificationStore.init` switches to it.
-- `apps/mac/touch-code/App/Features/Notifications/NotificationStore.swift` — current owner of `notifications.json`. M1 swaps its `AtomicFileStore.read([InboxEntry].self, …)` call for `InboxFile.load(from:)`, and its scheduled-save body for `InboxFile.save(_, to:)`.
-- `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift` — runtime-event consumer that currently calls `store.append` and `banner.post` directly. M2 changes its `emit` to construct a `NotificationCoordinator.Candidate` and route it; M4 changes the context build to feed `DetectionTranslator`'s new `Context`; M5 reads from `PaneKeyboardActivityTracker` to populate the keystroke timestamps.
-- `apps/mac/TouchCodeCore/Notifications/DetectionTranslator.swift` — pure event-to-Entry table. M4 extends its `translate(_:hasProducedOutput:)` signature to `translate(_:context:)` with a new `Context` value type, and adds the four command-finished suppression branches.
-- `apps/mac/touch-code/App/Features/Notifications/OSNotifier.swift` — protocol + `UserNotificationsOSNotifier`. M2 adds `playSound: Bool` to `post`.
-- `apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift` — current 122-LOC view that only shows authorization status. M3 rewrites the body into five-section form (in-app / system / sound / dock badge / command-finished / mute / permission).
-- `apps/mac/touch-code/App/Features/SplitViewport/LazyPaneHost.swift` — pane chrome host. M7 adds a `.contextMenu` modifier hosting `PaneContextMenu`.
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — catalog mutation surface. M6 adds `reorderWorktrees` and `setPaneLabel`; the existing `setWorktreePinned` is the reference shape for both.
-- `apps/mac/touch-code/Runtime/Ghostty/GhosttySurfaceView.swift` — key-event delivery into libghostty. M5 adds one call into `PaneKeyboardActivityTracker.recordKey`.
-- `apps/mac/TouchCodeCore/Catalog.swift`, `Project.swift`, `Worktree.swift`, `Pane.swift` — domain types. Unchanged by this plan except indirectly through the mutation methods on `HierarchyClient`.
+- `apps/mac/CodansCore/Settings/Settings.swift` — root `Settings` Codable. M1 adds a `notifications: NotificationsSettings` field with `decodeIfPresent` default.
+- `apps/mac/CodansCore/Settings/GeneralSettings.swift`, `DeveloperSettings.swift`, `WorktreeSettings.swift` — sibling sections that establish the file-per-section pattern. M1 mirrors this for `NotificationsSettings.swift`.
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` — `@MainActor @Observable` owner of `~/.config/codans/settings.json`. M1 adds a `mutateNotifications(_:)` section mutator alongside the existing `mutateGeneral` / `mutateDeveloper` / `mutateWorktree`.
+- `apps/mac/CodansCore/Notifications/InboxStorage.swift` — pure dedup/age/cap policies for the inbox. Unchanged by this plan; M1 adds a new `InboxFile.swift` sibling that owns file I/O (the envelope) and `NotificationStore.init` switches to it.
+- `apps/mac/codans/App/Features/Notifications/NotificationStore.swift` — current owner of `notifications.json`. M1 swaps its `AtomicFileStore.read([InboxEntry].self, …)` call for `InboxFile.load(from:)`, and its scheduled-save body for `InboxFile.save(_, to:)`.
+- `apps/mac/codans/App/Features/Notifications/NotificationDetector.swift` — runtime-event consumer that currently calls `store.append` and `banner.post` directly. M2 changes its `emit` to construct a `NotificationCoordinator.Candidate` and route it; M4 changes the context build to feed `DetectionTranslator`'s new `Context`; M5 reads from `PaneKeyboardActivityTracker` to populate the keystroke timestamps.
+- `apps/mac/CodansCore/Notifications/DetectionTranslator.swift` — pure event-to-Entry table. M4 extends its `translate(_:hasProducedOutput:)` signature to `translate(_:context:)` with a new `Context` value type, and adds the four command-finished suppression branches.
+- `apps/mac/codans/App/Features/Notifications/OSNotifier.swift` — protocol + `UserNotificationsOSNotifier`. M2 adds `playSound: Bool` to `post`.
+- `apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift` — current 122-LOC view that only shows authorization status. M3 rewrites the body into five-section form (in-app / system / sound / dock badge / command-finished / mute / permission).
+- `apps/mac/codans/App/Features/SplitViewport/LazyPaneHost.swift` — pane chrome host. M7 adds a `.contextMenu` modifier hosting `PaneContextMenu`.
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — catalog mutation surface. M6 adds `reorderWorktrees` and `setPaneLabel`; the existing `setWorktreePinned` is the reference shape for both.
+- `apps/mac/codans/Runtime/Ghostty/GhosttySurfaceView.swift` — key-event delivery into libghostty. M5 adds one call into `PaneKeyboardActivityTracker.recordKey`.
+- `apps/mac/CodansCore/Catalog.swift`, `Project.swift`, `Worktree.swift`, `Pane.swift` — domain types. Unchanged by this plan except indirectly through the mutation methods on `HierarchyClient`.
 
 **Terminology used in this plan:**
 
 - **Chokepoint** — `NotificationCoordinator`, the single class through which every notification decision flows. The detector hands it `Candidate` values; it returns `Decision` values; downstream side effects only execute from inside it.
 - **Candidate** — a value type pairing an `InboxEntry` with the precomputed `sourceIsFocused: Bool` flag. The detector produces these; the coordinator consumes them.
-- **Drop reason** — a string-coded enum (`InboxDropReason`, lives in `TouchCodeCore`) shared between the pure translator's `Step.drop` and the coordinator's `Decision.dropped` so log lines collate across the two layers.
+- **Drop reason** — a string-coded enum (`InboxDropReason`, lives in `CodansCore`) shared between the pure translator's `Step.drop` and the coordinator's `Decision.dropped` so log lines collate across the two layers.
 - **0 → N edge** — the transition for a worktree's unread count from zero to one. Only this edge fires the worktree-promote behaviour; subsequent unreads on the same worktree do not retrigger.
 - **Envelope shape** — `{ "version": 1, "entries": [InboxEntry…] }` JSON top level. Replaces the v1.0 bare array; loader accepts both for one release cycle.
 - **Quarantine** — renaming a forward-version `notifications.json` to `notifications.json.bak-<ISO date>` and starting the inbox empty. Followed by a one-shot synthetic "Inbox reset" entry so the user notices.
@@ -106,7 +106,7 @@ This milestone introduces the `NotificationsSettings` type as a sixth top-level 
 
 **Task M1.T1 — `NotificationsSettings` schema.**
 
-Add `apps/mac/TouchCodeCore/Settings/NotificationsSettings.swift` (new file, ~80 LOC). Defines:
+Add `apps/mac/CodansCore/Settings/NotificationsSettings.swift` (new file, ~80 LOC). Defines:
 
 ```swift
 public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
@@ -129,30 +129,30 @@ public nonisolated struct MuteSettings: Equatable, Sendable, Codable {
 
 Codable's `init(from:)` uses `decodeIfPresent` for every field and applies the clamp `max(1, min(3600, value))` to `commandFinishedThresholdSec`; an out-of-range loaded value is replaced with the clamped value and a single `os.Logger` warning is emitted under category `settings` (lifted from the existing settings logger). `encode(to:)` writes every field explicitly so the JSON is diffable.
 
-Extend `apps/mac/TouchCodeCore/Settings/Settings.swift`:
+Extend `apps/mac/CodansCore/Settings/Settings.swift`:
 
 - Add `public var notifications: NotificationsSettings` to the struct (with default value `.default`).
 - Add `.notifications` to `CodingKeys`.
 - Add a `notifications` decode line using `decodeIfPresent`.
 - Add a `notifications` encode line.
 
-Extend `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift`:
+Extend `apps/mac/codans/App/Features/Settings/SettingsStore.swift`:
 
 - Add `func mutateNotifications(_ transform: (inout NotificationsSettings) -> Void)` mirroring the existing section mutators.
 
 **Files touched (M1.T1):**
-- `apps/mac/TouchCodeCore/Settings/NotificationsSettings.swift` — new
-- `apps/mac/TouchCodeCore/Settings/Settings.swift` — extend
-- `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift` — extend
+- `apps/mac/CodansCore/Settings/NotificationsSettings.swift` — new
+- `apps/mac/CodansCore/Settings/Settings.swift` — extend
+- `apps/mac/codans/App/Features/Settings/SettingsStore.swift` — extend
 
-**preconditions:** Settings v3 currently has no `notifications` section. `~/.config/touch-code/settings.json` from a v1.0 install must decode after M1.T1 with `settings.notifications == NotificationsSettings.default`.
+**preconditions:** Settings v3 currently has no `notifications` section. `~/.config/codans/settings.json` from a v1.0 install must decode after M1.T1 with `settings.notifications == NotificationsSettings.default`.
 
 **expected_behavior:** A pre-v1.1 `settings.json` decodes cleanly; a v1.1 launch writes the `notifications` section into the next debounced save. No user-visible UI change yet (M3 lands the pane).
 
 **verification_steps:**
-1. Manual: with no prior `settings.json`, launch the app, quit, inspect the file with `jq '.notifications' ~/.config/touch-code/settings.json`. Expect a JSON object whose keys are the eight `NotificationsSettings` fields at their defaults.
+1. Manual: with no prior `settings.json`, launch the app, quit, inspect the file with `jq '.notifications' ~/.config/codans/settings.json`. Expect a JSON object whose keys are the eight `NotificationsSettings` fields at their defaults.
 2. Manual: with an existing v1.0 `settings.json` (no `notifications` key), launch the app, mutate any unrelated setting (e.g., flip Appearance), quit, re-inspect. Expect the `notifications` object to now be present at defaults, and existing keys to be unchanged.
-3. Automated: new `NotificationsSettingsCodableTests` cases under `apps/mac/TouchCodeCoreTests/Settings/` round-trip default and non-default instances; out-of-range threshold is clamped on decode; missing `notifications` block decodes to defaults.
+3. Automated: new `NotificationsSettingsCodableTests` cases under `apps/mac/CodansCoreTests/Settings/` round-trip default and non-default instances; out-of-range threshold is clamped on decode; missing `notifications` block decodes to defaults.
 
 **fulfills:** [] — pure schema introduction; user-observable behaviour requires M2's chokepoint to consume the values.
 
@@ -160,7 +160,7 @@ Extend `apps/mac/touch-code/App/Features/Settings/SettingsStore.swift`:
 
 **Task M1.T2 — `InboxFile` envelope and `NotificationStore` migration.**
 
-Add `apps/mac/TouchCodeCore/Notifications/InboxFile.swift` (new file, ~100 LOC). Defines:
+Add `apps/mac/CodansCore/Notifications/InboxFile.swift` (new file, ~100 LOC). Defines:
 
 ```swift
 public nonisolated enum InboxFile {
@@ -188,7 +188,7 @@ public nonisolated enum InboxFile {
 
 Loader sequence is exactly as specified in the design doc §InboxFile (envelope decode first; on failure try bare array; on both failures return `[]` without rename; on envelope success with `version > currentVersion` rename and return `[]`). The rename uses `FileManager.moveItem(at:to:)`.
 
-Change `apps/mac/touch-code/App/Features/Notifications/NotificationStore.swift`:
+Change `apps/mac/codans/App/Features/Notifications/NotificationStore.swift`:
 
 - In `init`: replace `try AtomicFileStore.read([InboxEntry].self, at: fileURL) ?? []` with `try InboxFile.load(from: fileURL, now: now) ?? []`.
 - In `flush()` and the debounced save Task: replace `try AtomicFileStore.write(entries, to: fileURL)` and `try AtomicFileStore.write(snapshot, to: self.fileURL)` with `try InboxFile.save(entries, to: fileURL)` and `try InboxFile.save(snapshot, to: self.fileURL)` respectively.
@@ -196,18 +196,18 @@ Change `apps/mac/touch-code/App/Features/Notifications/NotificationStore.swift`:
 Expose one new piece of state on the store so M8 can read it without re-walking the file system: `public private(set) var loadedQuarantineBackupURL: URL?` — set during `init` if the loader returned `[]` from the quarantine branch. Default nil.
 
 **Files touched (M1.T2):**
-- `apps/mac/TouchCodeCore/Notifications/InboxFile.swift` — new
-- `apps/mac/touch-code/App/Features/Notifications/NotificationStore.swift` — extend
+- `apps/mac/CodansCore/Notifications/InboxFile.swift` — new
+- `apps/mac/codans/App/Features/Notifications/NotificationStore.swift` — extend
 
 **preconditions:** `NotificationStore.init` currently reads via `AtomicFileStore.read([InboxEntry].self, …)`; this is the only call site touching the file.
 
 **expected_behavior:** New installs write envelope shape on first save. v1.0 inboxes load unchanged at launch and rewrite in envelope on the next mutation. A pre-seeded forward-version file is renamed and the inbox is empty at launch (with `loadedQuarantineBackupURL` populated for M8 to consume).
 
 **verification_steps:**
-1. Manual UT-V11-J-001: with no `notifications.json`, launch, trigger one OSC 9 event on an unfocused pane, wait ≥ 1 s, `jq '.version, (.entries | length)' ~/.config/touch-code/notifications.json` returns `1` and `1`.
+1. Manual UT-V11-J-001: with no `notifications.json`, launch, trigger one OSC 9 event on an unfocused pane, wait ≥ 1 s, `jq '.version, (.entries | length)' ~/.config/codans/notifications.json` returns `1` and `1`.
 2. Manual UT-V11-J-002: seed `notifications.json` with three legacy bare-array entries (two unread, one read), launch, open the bell popover (see 3 rows; badge shows `2`), trigger one new event, wait ≥ 1 s, re-inspect: file is now envelope and `entries | length` is `4`.
-3. Manual UT-V11-J-003 partial (file moves only — the toast comes in M8): seed `notifications.json` with `{ "version": 99, "entries": [...] }`, launch. After launch, `ls -la ~/.config/touch-code/notifications.json*` shows a `.bak-<ISO>` file with the seeded content and either no `notifications.json` yet or an envelope with `entries: []`.
-4. Automated: new `InboxFileTests` under `apps/mac/TouchCodeCoreTests/` cover envelope round-trip; legacy bare array → envelope upgrade; forward-version quarantine path; corrupt file returns empty without rename.
+3. Manual UT-V11-J-003 partial (file moves only — the toast comes in M8): seed `notifications.json` with `{ "version": 99, "entries": [...] }`, launch. After launch, `ls -la ~/.config/codans/notifications.json*` shows a `.bak-<ISO>` file with the seeded content and either no `notifications.json` yet or an envelope with `entries: []`.
+4. Automated: new `InboxFileTests` under `apps/mac/CodansCoreTests/` cover envelope round-trip; legacy bare array → envelope upgrade; forward-version quarantine path; corrupt file returns empty without rename.
 
 **fulfills:** UT-V11-J-001, UT-V11-J-002
 
@@ -228,7 +228,7 @@ This milestone routes every notification-worthy event through the new `Notificat
 
 **Task M2.T1 — `NotificationSettingsReader` protocol and adapter.**
 
-Add `apps/mac/touch-code/App/Features/Notifications/NotificationsSettingsReader.swift` (new file, ~50 LOC). Defines:
+Add `apps/mac/codans/App/Features/Notifications/NotificationsSettingsReader.swift` (new file, ~50 LOC). Defines:
 
 ```swift
 @MainActor
@@ -249,7 +249,7 @@ final class SettingsStoreReaderAdapter: NotificationSettingsReader {
 
 `onChange` returns a token whose `cancel()` removes the handler. Implementation uses `withObservationTracking` to invalidate on next change tick, then re-arms; the standard `@Observable` reactivity pattern.
 
-Add a `FakeNotificationSettingsReader` in `apps/mac/touch-code/Tests/Notifications/Fakes/` (new directory):
+Add a `FakeNotificationSettingsReader` in `apps/mac/codans/Tests/Notifications/Fakes/` (new directory):
 
 ```swift
 @MainActor
@@ -262,8 +262,8 @@ final class FakeNotificationSettingsReader: NotificationSettingsReader {
 ```
 
 **Files touched (M2.T1):**
-- `apps/mac/touch-code/App/Features/Notifications/NotificationsSettingsReader.swift` — new
-- `apps/mac/touch-code/Tests/Notifications/Fakes/FakeNotificationSettingsReader.swift` — new
+- `apps/mac/codans/App/Features/Notifications/NotificationsSettingsReader.swift` — new
+- `apps/mac/codans/Tests/Notifications/Fakes/FakeNotificationSettingsReader.swift` — new
 
 **preconditions:** `SettingsStore` is `@MainActor @Observable`; `OSNotifier` exposes `currentAuthorizationStatus()`.
 
@@ -278,16 +278,16 @@ final class FakeNotificationSettingsReader: NotificationSettingsReader {
 
 **Task M2.T2 — `NotificationCoordinator`, OSNotifier playSound, detector emits Candidate.**
 
-Add `apps/mac/touch-code/App/Features/Notifications/NotificationCoordinator.swift` (new file, ~150 LOC). Class and types per the design doc §NotificationCoordinator — `init`, `handle(_:)`, `recomputeDockBadge()`, `refreshAuthorizationStatus()`, `Candidate`, `Decision`, `DropReason`. The `unreadByWorktree` cache is initialised from `inbox.entries.filter { $0.isUnread }` at construction time. `handle` returns the `Decision` so callers and tests can inspect; production callers do not consume the return.
+Add `apps/mac/codans/App/Features/Notifications/NotificationCoordinator.swift` (new file, ~150 LOC). Class and types per the design doc §NotificationCoordinator — `init`, `handle(_:)`, `recomputeDockBadge()`, `refreshAuthorizationStatus()`, `Candidate`, `Decision`, `DropReason`. The `unreadByWorktree` cache is initialised from `inbox.entries.filter { $0.isUnread }` at construction time. `handle` returns the `Decision` so callers and tests can inspect; production callers do not consume the return.
 
-Routing inside `handle` follows the design doc's decision sequence: focused-source drop first, then `inAppEnabled` (gates inbox + dock recompute), then `systemEnabled` + `authStatus.isAuthorized` (gates OS post), then `moveNotifiedWorktreeToTop` + 0→N edge (gates promote — but the actual reorder call is wired in M6; M2 only updates the cache and computes the `promoted` field of `Decision`, dispatching the catalog call lands in M6.T2). Drop-reason log lines emit at `.debug` under `subsystem: "com.touch-code.notifications"`, `category: "coordinator"`.
+Routing inside `handle` follows the design doc's decision sequence: focused-source drop first, then `inAppEnabled` (gates inbox + dock recompute), then `systemEnabled` + `authStatus.isAuthorized` (gates OS post), then `moveNotifiedWorktreeToTop` + 0→N edge (gates promote — but the actual reorder call is wired in M6; M2 only updates the cache and computes the `promoted` field of `Decision`, dispatching the catalog call lands in M6.T2). Drop-reason log lines emit at `.debug` under `subsystem: "com.gumpw.codans.notifications"`, `category: "coordinator"`.
 
-Extend `apps/mac/touch-code/App/Features/Notifications/OSNotifier.swift`:
+Extend `apps/mac/codans/App/Features/Notifications/OSNotifier.swift`:
 
 - Change protocol method to `func post(_ entry: InboxEntry, playSound: Bool) async`.
 - Change `UserNotificationsOSNotifier.post` to accept `playSound` and set `content.sound = playSound ? .default : nil`.
 
-Add `apps/mac/touch-code/Tests/Notifications/Fakes/MockOSNotifier.swift`:
+Add `apps/mac/codans/Tests/Notifications/Fakes/MockOSNotifier.swift`:
 
 ```swift
 @MainActor
@@ -300,7 +300,7 @@ final class MockOSNotifier: OSNotifier {
 }
 ```
 
-Change `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift`:
+Change `apps/mac/codans/App/Features/Notifications/NotificationDetector.swift`:
 
 - Add a `coordinator: NotificationCoordinator` dependency to `init`.
 - In `emit(_:isTeardown:)`: stop calling `store.append`, `banner.post`, and the focused-pane drop directly. Instead build a `NotificationCoordinator.Candidate(entry: inbox, sourceIsFocused: resolved.source.paneID == globallyFocusedPane())` and pass to `coordinator.handle(_:)`. Keep `onProjectActivity?(resolved.source.projectID)` — the project activity bump is still detector-owned.
@@ -310,11 +310,11 @@ Wire the coordinator into `AppState.bringUp()` (search for the existing `Notific
 Wire `applicationDidBecomeActive` to call `coordinator.refreshAuthorizationStatus()` (likely already a hook point in `AppDelegate` or the SwiftUI `.onChange(of: scenePhase)` site).
 
 **Files touched (M2.T2):**
-- `apps/mac/touch-code/App/Features/Notifications/NotificationCoordinator.swift` — new
-- `apps/mac/touch-code/App/Features/Notifications/OSNotifier.swift` — extend
-- `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift` — change `emit`
-- `apps/mac/touch-code/Tests/Notifications/Fakes/MockOSNotifier.swift` — new
-- `apps/mac/touch-code/App/` (wire-up in `AppState.bringUp` or equivalent) — change
+- `apps/mac/codans/App/Features/Notifications/NotificationCoordinator.swift` — new
+- `apps/mac/codans/App/Features/Notifications/OSNotifier.swift` — extend
+- `apps/mac/codans/App/Features/Notifications/NotificationDetector.swift` — change `emit`
+- `apps/mac/codans/Tests/Notifications/Fakes/MockOSNotifier.swift` — new
+- `apps/mac/codans/App/` (wire-up in `AppState.bringUp` or equivalent) — change
 
 **preconditions:** M1 lands; `NotificationsSettings` exists; detector currently calls `store.append`/`banner.post` directly.
 
@@ -324,7 +324,7 @@ Wire `applicationDidBecomeActive` to call `coordinator.refreshAuthorizationStatu
 1. Manual UT-V11-CP-001 + CP-002: seed `settings.json` with `inAppEnabled: true`. Trigger event A → inbox grows, dock shows 1. Hand-edit `settings.json` to `inAppEnabled: false` (or wait until M3). Trigger event B → no inbox change, no dock change, log line `drop inAppDisabled` visible under `--debug`.
 2. Manual UT-V11-S-001 through UT-V11-S-005: configure `settings.json` per each case's precondition, drive the event, observe the matrix per the user-test assertions.
 3. Manual UT-V11-L-001: with `--debug` off, no drop lines. With `--debug` on, drop lines appear.
-4. Automated: new `NotificationCoordinatorTests` under `apps/mac/touch-code/Tests/Notifications/`. Cases:
+4. Automated: new `NotificationCoordinatorTests` under `apps/mac/codans/Tests/Notifications/`. Cases:
    - `evaluatesLiveSettingsAtDecisionTime` — flip a reader field between candidates, assert decision uses the new value.
    - `inAppOffSkipsInboxButPostsBanner`
    - `systemOffPreservesInbox`
@@ -352,11 +352,11 @@ After M3 the user can flip the four toggles from the Notifications pane, see the
 
 **Task M3.T1 — `NotificationsSettingsView` rewrite.**
 
-Rewrite `apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift` body. Replace the current "About v1" section with four new sections:
+Rewrite `apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift` body. Replace the current "About v1" section with four new sections:
 
 1. **Notifications** — four `Toggle` rows bound to `settings.notifications.{inAppEnabled, systemEnabled, soundEnabled, dockBadgeEnabled}` via `settingsStore.mutateNotifications`. Sound row gets `.disabled(!settings.notifications.systemEnabled)` plus `.help("Sound requires System notifications to be on.")`. System-toggle `onChange` reads `osNotifier`'s cached auth status; when flipping to `true` while `authStatus == .denied`, sets `@State var showPermissionAlert = true`.
 2. **Command-finished notifications** — `Toggle` for `commandFinishedEnabled` and a `TextField(value:, format: .number)` for `commandFinishedThresholdSec`. The text field's `format` modifier with `IntegerFormatStyle` and the binding's setter clamps to `[1, 3600]` before persisting (UI-layer rejection per AC-V11-CF7). Disabled when `commandFinishedEnabled` is off. Caption: "Commands shorter than this are silent. Cancelled commands (Ctrl-C) are always silent. Notifications are also suppressed for 1 second after you type in the pane."
-3. **Mute rules** — read-only summary row + "Reveal rules.json in Finder…" button. Summary string formula: `"\(mute.mutedRuleIDs.count) rule(s), \(mute.mutedPaneIDs.count) pane(s) muted"`, collapsing to `"No mute rules"` when both counts are zero. Reveal button calls a helper `revealRulesFile()` that ensures `~/.config/touch-code/detection-rules.json` exists (creating it with a default empty-rules JSON if absent — borrow the format used by the existing detection-rules consumer or use `{"version": 1, "rules": []}` if no consumer exists yet) and then calls `NSWorkspace.shared.activateFileViewerSelecting([url])`.
+3. **Mute rules** — read-only summary row + "Reveal rules.json in Finder…" button. Summary string formula: `"\(mute.mutedRuleIDs.count) rule(s), \(mute.mutedPaneIDs.count) pane(s) muted"`, collapsing to `"No mute rules"` when both counts are zero. Reveal button calls a helper `revealRulesFile()` that ensures `~/.config/codans/detection-rules.json` exists (creating it with a default empty-rules JSON if absent — borrow the format used by the existing detection-rules consumer or use `{"version": 1, "rules": []}` if no consumer exists yet) and then calls `NSWorkspace.shared.activateFileViewerSelecting([url])`.
 4. **macOS permission** — the existing status row + action row, moved below the new sections.
 
 Add the alert modifier:
@@ -366,7 +366,7 @@ Add the alert modifier:
   Button("Open System Settings…") { openSystemNotificationsPane() }
   Button("Cancel", role: .cancel) { }
 } message: {
-  Text("macOS is currently blocking notifications for touch-code. Open System Settings to allow them.")
+  Text("macOS is currently blocking notifications for codans. Open System Settings to allow them.")
 }
 ```
 
@@ -375,7 +375,7 @@ Add the alert modifier:
 The view's read path stays through `@Environment(SettingsStore.self)` (a binding seam this codebase already uses for Settings panes); add `@Environment(UserNotificationsOSNotifier.self)` (already present in the file for the permission row).
 
 **Files touched (M3.T1):**
-- `apps/mac/touch-code/App/Features/Settings/Panes/NotificationsSettingsView.swift` — rewrite
+- `apps/mac/codans/App/Features/Settings/Panes/NotificationsSettingsView.swift` — rewrite
 
 **preconditions:** M2 lands; `settings.notifications` field exists; coordinator consumes the gates.
 
@@ -408,7 +408,7 @@ This milestone teaches the pure translator three suppression rules (threshold, S
 
 **Task M4.T1 — `DetectionTranslator.Context` and command-finished gates.**
 
-Change `apps/mac/TouchCodeCore/Notifications/DetectionTranslator.swift`:
+Change `apps/mac/CodansCore/Notifications/DetectionTranslator.swift`:
 
 - Introduce a public nested type `DetectionTranslator.Context`:
   ```swift
@@ -423,9 +423,9 @@ Change `apps/mac/TouchCodeCore/Notifications/DetectionTranslator.swift`:
 - Change the public signature `translate(_:hasProducedOutput:)` to `translate(_:context:)`. Move the previous `hasProducedOutput` Set into `Context.hasProducedOutput`.
 - Add `Step.drop: DropReason?` field. `Step` becomes `(entry: Entry?, outputFlag: OutputFlag, drop: DropReason?)`. Existing call sites get `drop: nil` initialiser defaults.
 - Extend `Entry` translation for the `.commandFinished(exitCode, duration)` case per the design doc §DetectionTranslator extension. The four suppression branches return `Step(entry: nil, outputFlag: .unchanged, drop: <reason>)` for the matching case; the success path returns the entry with `title: "Command finished", body: "Completed in <duration>."`; the non-zero path returns `title: "Command failed (exit \(code))", body: "Ran for <duration> before failing."`. Duration formatter: an internal `formatDuration(_:)` helper that renders `Double` seconds as `"5s"` / `"1m 23s"` / `"2h 14m"`.
-- Move `DropReason` enum into `TouchCodeCore` as `InboxDropReason` (new file `apps/mac/TouchCodeCore/Notifications/InboxDropReason.swift`, ~20 LOC) so both the translator's `Step.drop` and the coordinator's `Decision.dropped` reference one type. `NotificationCoordinator.DropReason` becomes a typealias or reuses `InboxDropReason` directly.
+- Move `DropReason` enum into `CodansCore` as `InboxDropReason` (new file `apps/mac/CodansCore/Notifications/InboxDropReason.swift`, ~20 LOC) so both the translator's `Step.drop` and the coordinator's `Decision.dropped` reference one type. `NotificationCoordinator.DropReason` becomes a typealias or reuses `InboxDropReason` directly.
 
-Update `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift`:
+Update `apps/mac/codans/App/Features/Notifications/NotificationDetector.swift`:
 
 - Add a `lastKeystrokes: () -> [PaneID: Date]` closure to `init` (provided by `AppState.bringUp` and backed by `PaneKeyboardActivityTracker.snapshot()` in M5; for now M4 wires it to `{ [:] }`).
 - In `handle(_:)`: construct `Context` from `hasProducedOutput`, the keystrokes closure, `Date()`, and reads of `settingsReader.notifications.commandFinishedEnabled / commandFinishedThresholdSec`. Pass to `DetectionTranslator.translate(event, context:)`.
@@ -434,10 +434,10 @@ Update `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swif
 Update `NotificationCoordinator` to expose `let commandFinishedEnabled, commandFinishedThresholdSec` reads off `settingsReader.notifications` — already covered by M2's reader injection; verify they are surfaced for the detector context build.
 
 **Files touched (M4.T1):**
-- `apps/mac/TouchCodeCore/Notifications/DetectionTranslator.swift` — extend
-- `apps/mac/TouchCodeCore/Notifications/InboxDropReason.swift` — new
-- `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift` — extend (Context build + keystroke closure)
-- `apps/mac/touch-code/App/Features/Notifications/NotificationCoordinator.swift` — minor (use `InboxDropReason`)
+- `apps/mac/CodansCore/Notifications/DetectionTranslator.swift` — extend
+- `apps/mac/CodansCore/Notifications/InboxDropReason.swift` — new
+- `apps/mac/codans/App/Features/Notifications/NotificationDetector.swift` — extend (Context build + keystroke closure)
+- `apps/mac/codans/App/Features/Notifications/NotificationCoordinator.swift` — minor (use `InboxDropReason`)
 
 **preconditions:** M2 lands; settings reader provides `commandFinishedEnabled / commandFinishedThresholdSec`.
 
@@ -471,7 +471,7 @@ After M5, the 1-second keystroke window from the spec actually fires. The detect
 
 **Task M5.T1 — `PaneKeyboardActivityTracker` + wiring.**
 
-Add `apps/mac/touch-code/App/Features/Notifications/PaneKeyboardActivityTracker.swift` (new file, ~40 LOC):
+Add `apps/mac/codans/App/Features/Notifications/PaneKeyboardActivityTracker.swift` (new file, ~40 LOC):
 
 ```swift
 @MainActor
@@ -483,11 +483,11 @@ final class PaneKeyboardActivityTracker {
 }
 ```
 
-Change `apps/mac/touch-code/Runtime/Ghostty/GhosttySurfaceView.swift`:
+Change `apps/mac/codans/Runtime/Ghostty/GhosttySurfaceView.swift`:
 
 - Identify the call site that delivers a user key event into libghostty (search for `sendKey`, `keyDown`, or `NSEvent` handlers inside the `NSViewRepresentable`). Immediately before the libghostty dispatch, call `tracker.recordKey(in: paneID)`. The tracker reference must be reachable from the surface view; inject it via the existing `PaneSurface` chain or through `Environment` if the surface view already takes environment objects (read the file to confirm; the simpler injection wins).
 
-Change `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift`:
+Change `apps/mac/codans/App/Features/Notifications/NotificationDetector.swift`:
 
 - Replace the M4 stub closure `{ [:] }` with `{ [weak tracker] in tracker?.snapshot() ?? [:] }`.
 - In the existing teardown branches (`paneExited` / `paneCrashed` / `paneClosedByTab` — where `paneSourceCache` is cleared today), also call `tracker?.purge(paneID)`.
@@ -495,10 +495,10 @@ Change `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swif
 Wire the tracker in `AppState.bringUp()` between `NotificationStore` and `NotificationCoordinator` — single instance held alongside the other Notifications singletons.
 
 **Files touched (M5.T1):**
-- `apps/mac/touch-code/App/Features/Notifications/PaneKeyboardActivityTracker.swift` — new
-- `apps/mac/touch-code/Runtime/Ghostty/GhosttySurfaceView.swift` — extend (one call site)
-- `apps/mac/touch-code/App/Features/Notifications/NotificationDetector.swift` — extend (closure swap + purge calls)
-- `apps/mac/touch-code/App/` (`AppState.bringUp`) — extend (one wire)
+- `apps/mac/codans/App/Features/Notifications/PaneKeyboardActivityTracker.swift` — new
+- `apps/mac/codans/Runtime/Ghostty/GhosttySurfaceView.swift` — extend (one call site)
+- `apps/mac/codans/App/Features/Notifications/NotificationDetector.swift` — extend (closure swap + purge calls)
+- `apps/mac/codans/App/` (`AppState.bringUp`) — extend (one wire)
 
 **preconditions:** M4 lands; `DetectionTranslator.Context.lastUserKeystrokeAt` is consulted; detector's keystroke closure is currently `{ [:] }`.
 
@@ -529,7 +529,7 @@ After M6, the first unread notification for a worktree promotes it to the top of
 
 **Task M6.T1 — `HierarchyClient.reorderWorktrees` and `setPaneLabel` mutations.**
 
-Extend `apps/mac/touch-code/App/Clients/HierarchyClient.swift`:
+Extend `apps/mac/codans/App/Clients/HierarchyClient.swift`:
 
 ```swift
 var reorderWorktrees: @MainActor @Sendable (
@@ -550,17 +550,17 @@ enum WorktreeReorderMode: Sendable {
 }
 ```
 
-Implement both in `apps/mac/touch-code/App/Clients/HierarchyManager.swift` (or wherever the live impl lives — search for `setWorktreePinned` for the precedent shape):
+Implement both in `apps/mac/codans/App/Clients/HierarchyManager.swift` (or wherever the live impl lives — search for `setWorktreePinned` for the precedent shape):
 
 - `reorderWorktrees(projectID, worktreeID, .moveToFrontWithinUnpinned)`: locate the project; split worktrees into pinned + unpinned; if target is pinned, no-op and return; otherwise remove the target from `unpinned`, insert at index 0; rejoin `pinned + unpinned`; call `catalogStore.scheduleSave`.
 - `setPaneLabel(paneID, label, present)`: walk the catalog to the pane; mutate `pane.labels.insert(label)` or `pane.labels.remove(label)`; call `catalogStore.scheduleSave` (the existing 500 ms debounce per CatalogStore.scheduleSave).
 
-Tests under `apps/mac/touch-code/Tests/Clients/HierarchyClientTests.swift` (or a new `HierarchyManagerWorktreeTests.swift` sibling): pinned exclusion, no-op when target is already at position 0, correct rejoin order, persistence after debounce.
+Tests under `apps/mac/codans/Tests/Clients/HierarchyClientTests.swift` (or a new `HierarchyManagerWorktreeTests.swift` sibling): pinned exclusion, no-op when target is already at position 0, correct rejoin order, persistence after debounce.
 
 **Files touched (M6.T1):**
-- `apps/mac/touch-code/App/Clients/HierarchyClient.swift` — extend
-- `apps/mac/touch-code/App/Clients/HierarchyManager.swift` — extend (or wherever live impl is)
-- `apps/mac/touch-code/Tests/Clients/HierarchyClientTests.swift` — extend
+- `apps/mac/codans/App/Clients/HierarchyClient.swift` — extend
+- `apps/mac/codans/App/Clients/HierarchyManager.swift` — extend (or wherever live impl is)
+- `apps/mac/codans/Tests/Clients/HierarchyClientTests.swift` — extend
 
 **preconditions:** `HierarchyClient` has `reorderProjects` / `setWorktreePinned` precedents.
 
@@ -583,7 +583,7 @@ Extend `NotificationCoordinator`:
 - Pass the catalog dependency in via the existing M2 `init` (which already takes `catalog: HierarchyClient`).
 
 **Files touched (M6.T2):**
-- `apps/mac/touch-code/App/Features/Notifications/NotificationCoordinator.swift` — extend
+- `apps/mac/codans/App/Features/Notifications/NotificationCoordinator.swift` — extend
 
 **preconditions:** M6.T1 lands; `reorderWorktrees` is callable. M2's cache stub exists.
 
@@ -614,7 +614,7 @@ After M7, right-clicking any pane reveals a context menu whose first item is "Mu
 
 **Task M7.T1 — `PaneContextMenu` + `LazyPaneHost` wiring.**
 
-Add `apps/mac/touch-code/App/Features/SplitViewport/PaneContextMenu.swift` (new file, ~40 LOC):
+Add `apps/mac/codans/App/Features/SplitViewport/PaneContextMenu.swift` (new file, ~40 LOC):
 
 ```swift
 struct PaneContextMenu: View {
@@ -640,16 +640,16 @@ struct PaneContextMenu: View {
 }
 ```
 
-The `Catalog.pane(_:)` helper does not exist today as written; if absent, add it as a small lookup extension in `TouchCodeCore/Catalog+Lookup.swift` (new file or sibling) — a single `func pane(_ id: PaneID) -> Pane?` that walks projects → worktrees → tabs → panes. If the project already has such a helper (search before adding), reuse it.
+The `Catalog.pane(_:)` helper does not exist today as written; if absent, add it as a small lookup extension in `CodansCore/Catalog+Lookup.swift` (new file or sibling) — a single `func pane(_ id: PaneID) -> Pane?` that walks projects → worktrees → tabs → panes. If the project already has such a helper (search before adding), reuse it.
 
-Extend `apps/mac/touch-code/App/Features/SplitViewport/LazyPaneHost.swift`:
+Extend `apps/mac/codans/App/Features/SplitViewport/LazyPaneHost.swift`:
 
 - Wrap the existing `content` view in a `.contextMenu { PaneContextMenu(paneID: store.paneID) }` modifier. Place it on the `PaneHostView` branch of the `switch store.phase`, not on the loading / failed placeholders (the menu only makes sense once the pane is ready).
 
 **Files touched (M7.T1):**
-- `apps/mac/touch-code/App/Features/SplitViewport/PaneContextMenu.swift` — new
-- `apps/mac/touch-code/App/Features/SplitViewport/LazyPaneHost.swift` — extend
-- `apps/mac/TouchCodeCore/Catalog+Lookup.swift` — new (only if no existing helper)
+- `apps/mac/codans/App/Features/SplitViewport/PaneContextMenu.swift` — new
+- `apps/mac/codans/App/Features/SplitViewport/LazyPaneHost.swift` — extend
+- `apps/mac/CodansCore/Catalog+Lookup.swift` — new (only if no existing helper)
 
 **preconditions:** M6.T1 lands; `setPaneLabel` is callable.
 
@@ -679,10 +679,10 @@ After M8, an accidental downgrade (a forward-version `notifications.json` from a
 
 **Task M8.T1 — Inbox-reset quarantine toast.**
 
-Extend `apps/mac/touch-code/App/Features/Notifications/NotificationCoordinator.swift`:
+Extend `apps/mac/codans/App/Features/Notifications/NotificationCoordinator.swift`:
 
 - Add a method `func emitQuarantineNotice(backupURL: URL) async` that constructs an `InboxEntry` with kind `.taskFinished`, title `"Inbox reset"`, body `"Your inbox was reset because notifications.json had an unsupported version. Backup saved as \(backupURL.lastPathComponent)."`, source `InboxEntry.SourcePath` whose IDs are all zero-UUIDs (so navigation falls back to the deepest existing ancestor — practically the inbox itself).
-- Idempotency: write a `quarantine-shown.json` marker under `~/.config/touch-code/state/` (or whatever state-cache directory the project uses — search for `state/` or `cache/`; if none exists, the marker can live alongside the inbox file as `notifications.json.quarantine-shown`) containing `{ "backupBasename": "<file>" }`. On `emitQuarantineNotice`, read the marker first; if its `backupBasename` matches the current `backupURL.lastPathComponent`, return without emitting. Otherwise write the marker and emit.
+- Idempotency: write a `quarantine-shown.json` marker under `~/.config/codans/state/` (or whatever state-cache directory the project uses — search for `state/` or `cache/`; if none exists, the marker can live alongside the inbox file as `notifications.json.quarantine-shown`) containing `{ "backupBasename": "<file>" }`. On `emitQuarantineNotice`, read the marker first; if its `backupBasename` matches the current `backupURL.lastPathComponent`, return without emitting. Otherwise write the marker and emit.
 - The synthetic entry is routed through `coordinator.handle(Candidate(entry: synthetic, sourceIsFocused: false))` so the standard gates apply — `inAppEnabled` off would silence the recovery toast too, which is acceptable (the user explicitly silenced in-app surfaces; the backup file is still present on disk for them to inspect).
 
 Wire `AppState.bringUp()`:
@@ -690,8 +690,8 @@ Wire `AppState.bringUp()`:
 - After constructing `NotificationStore`, read its `loadedQuarantineBackupURL` (added in M1.T2). If non-nil, schedule `coordinator.emitQuarantineNotice(backupURL:)` on the next runloop tick (after detector and coordinator are fully constructed).
 
 **Files touched (M8.T1):**
-- `apps/mac/touch-code/App/Features/Notifications/NotificationCoordinator.swift` — extend
-- `apps/mac/touch-code/App/` (`AppState.bringUp`) — extend (call site)
+- `apps/mac/codans/App/Features/Notifications/NotificationCoordinator.swift` — extend
+- `apps/mac/codans/App/` (`AppState.bringUp`) — extend (call site)
 
 **preconditions:** M1.T2 lands `loadedQuarantineBackupURL`; M2.T2 lands the coordinator.
 
@@ -776,19 +776,19 @@ Expected on success: `mac-build` ends with a build-succeeded line; `mac-lint` ex
 
 ```bash
 xcodebuild test \
-  -workspace apps/mac/touch-code.xcworkspace \
-  -scheme touch-code \
+  -workspace apps/mac/codans.xcworkspace \
+  -scheme codans \
   -destination 'platform=macOS' \
-  -only-testing:TouchCodeCoreTests 2>&1 | xcbeautify
+  -only-testing:CodansCoreTests 2>&1 | xcbeautify
 
 xcodebuild test \
-  -workspace apps/mac/touch-code.xcworkspace \
-  -scheme touch-code \
+  -workspace apps/mac/codans.xcworkspace \
+  -scheme codans \
   -destination 'platform=macOS' \
-  -only-testing:touch-codeTests/Notifications 2>&1 | xcbeautify
+  -only-testing:codansTests/Notifications 2>&1 | xcbeautify
 ```
 
-The second invocation requires that the `touch-codeTests` target build successfully on the working branch (it was broken on `main` per the v1 ExecPlan §Surprises S1). If the target is still broken when M2.T2 lands, surface that as a Surprise & Discovery and route the fix through `/hs-followup-scope` — the project has the option of fixing the target as part of this plan's scope or opening a separate task.
+The second invocation requires that the `codansTests` target build successfully on the working branch (it was broken on `main` per the v1 ExecPlan §Surprises S1). If the target is still broken when M2.T2 lands, surface that as a Surprise & Discovery and route the fix through `/hs-followup-scope` — the project has the option of fixing the target as part of this plan's scope or opening a separate task.
 
 **Manual smoke commands (per-milestone, ad-hoc):**
 
@@ -800,16 +800,16 @@ printf '\033]9;hello\007'
 sleep 30 && echo done
 
 # Inspect the inbox file:
-jq '{version, count: (.entries | length)}' ~/.config/touch-code/notifications.json
+jq '{version, count: (.entries | length)}' ~/.config/codans/notifications.json
 
 # Inspect the settings file:
-jq '.notifications' ~/.config/touch-code/settings.json
+jq '.notifications' ~/.config/codans/settings.json
 
 # Watch coordinator drops:
-log stream --predicate 'subsystem == "com.touch-code.notifications" && category == "coordinator"' --debug
+log stream --predicate 'subsystem == "com.gumpw.codans.notifications" && category == "coordinator"' --debug
 
 # Seed a forward-version inbox file (M8 manual smoke):
-printf '{"version":99,"entries":[]}' > ~/.config/touch-code/notifications.json
+printf '{"version":99,"entries":[]}' > ~/.config/codans/notifications.json
 ```
 
 **Per-milestone commit:**
@@ -849,7 +849,7 @@ Every milestone is repeatable:
 - **`SettingsStore`** debounces 500 ms trailing; calling `flush()` is safe at any moment.
 - **Catalog reorder** mutates an existing field (`Project.worktrees` order); reverting is one more `reorderWorktrees` call to a different target, or a manual sidebar drag.
 - **Quarantine** is a rename, not a delete; the user can restore by renaming `notifications.json.bak-<ISO>` back to `notifications.json` while the app is quit.
-- **The quarantine-shown marker** is a small JSON file under `~/.config/touch-code/state/`; deleting it forces the next launch to re-emit the toast (useful during dogfooding).
+- **The quarantine-shown marker** is a small JSON file under `~/.config/codans/state/`; deleting it forces the next launch to re-emit the toast (useful during dogfooding).
 
 The one explicitly destructive operation is editing `settings.json` while the app is running — `SettingsStore` will overwrite the file on its next debounced save. Restore from `settings.json.v3-<ts>` backups if present, or accept the loss.
 
@@ -860,9 +860,9 @@ This plan inherits the prototype-grade evidence that the v1 ExecPlan landed (52 
 Sample expected log output (during M2 dogfood with `inAppEnabled: false`):
 
 ```
-com.touch-code.notifications coordinator drop inAppDisabled — entry NotificationID(...) source PaneID(...)
-com.touch-code.notifications coordinator drop systemDisabled — entry NotificationID(...) source PaneID(...)
-com.touch-code.notifications coordinator posted — entry NotificationID(...) inApp=true os=true sound=true badge=1 promoted=false
+com.gumpw.codans.notifications coordinator drop inAppDisabled — entry NotificationID(...) source PaneID(...)
+com.gumpw.codans.notifications coordinator drop systemDisabled — entry NotificationID(...) source PaneID(...)
+com.gumpw.codans.notifications coordinator posted — entry NotificationID(...) inApp=true os=true sound=true badge=1 promoted=false
 ```
 
 Sample expected `notifications.json` after the first envelope write (M1.T2 acceptance):
@@ -917,7 +917,7 @@ Sample expected `settings.json` after M1 (showing the new section at defaults):
 
 The end-state types and signatures, prescriptive. Every signature below must exist at the conclusion of the named milestone.
 
-In `apps/mac/TouchCodeCore/Settings/NotificationsSettings.swift` (M1):
+In `apps/mac/CodansCore/Settings/NotificationsSettings.swift` (M1):
 
 ```swift
 public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
@@ -938,7 +938,7 @@ public nonisolated struct MuteSettings: Equatable, Sendable, Codable {
 }
 ```
 
-In `apps/mac/TouchCodeCore/Notifications/InboxFile.swift` (M1):
+In `apps/mac/CodansCore/Notifications/InboxFile.swift` (M1):
 
 ```swift
 public nonisolated enum InboxFile {
@@ -953,7 +953,7 @@ public nonisolated enum InboxFile {
 }
 ```
 
-In `apps/mac/TouchCodeCore/Notifications/InboxDropReason.swift` (M4):
+In `apps/mac/CodansCore/Notifications/InboxDropReason.swift` (M4):
 
 ```swift
 public nonisolated enum InboxDropReason: String, Sendable, Codable, Equatable {
@@ -969,7 +969,7 @@ public nonisolated enum InboxDropReason: String, Sendable, Codable, Equatable {
 }
 ```
 
-In `apps/mac/TouchCodeCore/Notifications/DetectionTranslator.swift` (M4 extension):
+In `apps/mac/CodansCore/Notifications/DetectionTranslator.swift` (M4 extension):
 
 ```swift
 extension DetectionTranslator {
@@ -991,7 +991,7 @@ public struct Step: Equatable, Sendable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Notifications/OSNotifier.swift` (M2 change):
+In `apps/mac/codans/App/Features/Notifications/OSNotifier.swift` (M2 change):
 
 ```swift
 @MainActor
@@ -1002,7 +1002,7 @@ public protocol OSNotifier: AnyObject {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Notifications/NotificationsSettingsReader.swift` (M2):
+In `apps/mac/codans/App/Features/Notifications/NotificationsSettingsReader.swift` (M2):
 
 ```swift
 @MainActor
@@ -1013,7 +1013,7 @@ protocol NotificationSettingsReader: AnyObject {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Notifications/NotificationCoordinator.swift` (M2):
+In `apps/mac/codans/App/Features/Notifications/NotificationCoordinator.swift` (M2):
 
 ```swift
 @MainActor
@@ -1046,7 +1046,7 @@ final class NotificationCoordinator {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/Notifications/PaneKeyboardActivityTracker.swift` (M5):
+In `apps/mac/codans/App/Features/Notifications/PaneKeyboardActivityTracker.swift` (M5):
 
 ```swift
 @MainActor
@@ -1057,7 +1057,7 @@ final class PaneKeyboardActivityTracker {
 }
 ```
 
-In `apps/mac/touch-code/App/Clients/HierarchyClient.swift` (M6 extension):
+In `apps/mac/codans/App/Clients/HierarchyClient.swift` (M6 extension):
 
 ```swift
 struct HierarchyClient { /* existing closures */
@@ -1070,7 +1070,7 @@ enum WorktreeReorderMode: Sendable {
 }
 ```
 
-In `apps/mac/touch-code/App/Features/SplitViewport/PaneContextMenu.swift` (M7):
+In `apps/mac/codans/App/Features/SplitViewport/PaneContextMenu.swift` (M7):
 
 ```swift
 struct PaneContextMenu: View {
@@ -1079,19 +1079,19 @@ struct PaneContextMenu: View {
 }
 ```
 
-Dependencies: no new external libraries. The plan uses `UserNotifications`, `AppKit`, `Foundation`, `Observation`, and the existing in-repo `TouchCodeCore` / `TouchCodeIPC`. SwiftUI for the pane and the menu. `XCTest` for the new test suites.
+Dependencies: no new external libraries. The plan uses `UserNotifications`, `AppKit`, `Foundation`, `Observation`, and the existing in-repo `CodansCore` / `CodansIPC`. SwiftUI for the pane and the menu. `XCTest` for the new test suites.
 
 ## Testing growth per milestone
 
 | Milestone | New test files | New test methods (rough) | Target |
 |---|---|---|---|
-| M1 | `NotificationsSettingsCodableTests.swift`, `InboxFileTests.swift` | ~12 | `TouchCodeCoreTests` |
-| M2 | `SettingsStoreReaderAdapterTests.swift`, `NotificationCoordinatorTests.swift`, `MockOSNotifier`, `FakeNotificationSettingsReader` | ~10 | `touch-codeTests/Notifications` (gated on the target's build success) |
-| M3 | `NotificationsSettingsViewTests.swift` (snapshot or ViewInspector for the disabled-Sound state and the alert presented-state) | ~4 | `touch-codeTests` |
-| M4 | extend `DetectionTranslatorTests.swift` for the new `Context` and Step.drop matrix; one round-trip test for `InboxDropReason` | ~12 | `TouchCodeCoreTests` |
-| M5 | extend `DetectionTranslatorTests.swift` for keystroke edges (999/1000/1001 ms); one smoke test for `PaneKeyboardActivityTracker` | ~4 | `TouchCodeCoreTests` + a small app-target tracker test |
+| M1 | `NotificationsSettingsCodableTests.swift`, `InboxFileTests.swift` | ~12 | `CodansCoreTests` |
+| M2 | `SettingsStoreReaderAdapterTests.swift`, `NotificationCoordinatorTests.swift`, `MockOSNotifier`, `FakeNotificationSettingsReader` | ~10 | `codansTests/Notifications` (gated on the target's build success) |
+| M3 | `NotificationsSettingsViewTests.swift` (snapshot or ViewInspector for the disabled-Sound state and the alert presented-state) | ~4 | `codansTests` |
+| M4 | extend `DetectionTranslatorTests.swift` for the new `Context` and Step.drop matrix; one round-trip test for `InboxDropReason` | ~12 | `CodansCoreTests` |
+| M5 | extend `DetectionTranslatorTests.swift` for keystroke edges (999/1000/1001 ms); one smoke test for `PaneKeyboardActivityTracker` | ~4 | `CodansCoreTests` + a small app-target tracker test |
 | M6 | extend `HierarchyClientTests.swift` for reorder + setPaneLabel; extend `NotificationCoordinatorTests.swift` for unreadByWorktree edge + pinned exclusion | ~8 | mixed |
-| M7 | `PaneContextMenuTests.swift` | ~3 | `touch-codeTests` |
-| M8 | extend `NotificationCoordinatorTests.swift` for quarantine notice idempotency | ~3 | `touch-codeTests` |
+| M7 | `PaneContextMenuTests.swift` | ~3 | `codansTests` |
+| M8 | extend `NotificationCoordinatorTests.swift` for quarantine notice idempotency | ~3 | `codansTests` |
 
-Cumulative target: ~56 new unit-test methods on top of the v1 baseline of 52 in `TouchCodeCoreTests`. The exact target counts are estimates — the plan does not block on hitting a number; it blocks on the user-test validator returning PASS for every case ID at the M8 final gate.
+Cumulative target: ~56 new unit-test methods on top of the v1 baseline of 52 in `CodansCoreTests`. The exact target counts are estimates — the plan does not block on hitting a number; it blocks on the user-test validator returning PASS for every case ID at the M8 final gate.

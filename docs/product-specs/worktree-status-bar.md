@@ -230,7 +230,7 @@ GWT 格式，每条对应一个可测行为。
 
 ## Open Questions
 
-- [ ] **OQ-1**：命令面板在 touch-code 里是否已有 `AppShortcuts` 等价机制？若无，motivational hint 的快捷键部分是 (a) 硬编码文案 (b) 隐藏 hint 只显示时间 (c) 推迟到命令面板落地后再开 motivational 态？
+- [ ] **OQ-1**：命令面板在 codans 里是否已有 `AppShortcuts` 等价机制？若无，motivational hint 的快捷键部分是 (a) 硬编码文案 (b) 隐藏 hint 只显示时间 (c) 推迟到命令面板落地后再开 motivational 态？
 - [ ] **OQ-2**：PR checks rollup 在 `GitHubFeature` 当前数据结构里是否已包含 `skipped` / `neutral` 状态？圆环配色需要据此确认。
 - [ ] **OQ-3**：`EditorFeature.lastOpenResult` 现在如何驱动 UI？本 spec 假设它能被 status bar 订阅产生 success/warning toast —— 如果它目前只用一次性 sheet，需要一个 Observable 通道。
 - [ ] **OQ-4**：run-script / custom-command 的执行状态目前是否暴露为可订阅的 flow？若尚未，本 spec 的 inProgress 态需要它先具备生命周期事件。
