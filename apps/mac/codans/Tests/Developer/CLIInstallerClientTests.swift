@@ -44,9 +44,7 @@ struct CLIInstallerClientTests {
       let legacyDir = root.appending(component: ".local/bin", directoryHint: .isDirectory)
       return CLIInstallerClient.Paths(
         tcSymlink: installDir.appending(component: "codans", directoryHint: .notDirectory),
-        tcodeSymlink: installDir.appending(component: "tcode", directoryHint: .notDirectory),
         legacyLocalBinTc: legacyDir.appending(component: "codans", directoryHint: .notDirectory),
-        legacyLocalBinTcode: legacyDir.appending(component: "tcode", directoryHint: .notDirectory),
         bundledTcBinary: bundledTc
       )
     }
@@ -80,38 +78,24 @@ struct CLIInstallerClientTests {
   }
 
   @Test
-  func probe_onlyTcPresent_returnsNotInstalled() throws {
-    // Partial state: codans is our symlink, tcode absent. Probe collapses to
-    // .notInstalled so a subsequent install() completes the pair.
+  func probe_ourSymlink_returnsInstalled() throws {
     let home = try TempHome()
     let paths = home.paths()
     try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: home.bundledTc)
-    let (client, _) = makeClient(paths: paths)
-
-    #expect(client.probe() == .notInstalled)
-  }
-
-  @Test
-  func probe_bothOurs_returnsInstalled() throws {
-    let home = try TempHome()
-    let paths = home.paths()
-    try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: home.bundledTc)
-    try FileManager.default.createSymbolicLink(at: paths.tcodeSymlink, withDestinationURL: home.bundledTc)
     let (client, _) = makeClient(paths: paths)
 
     assertInstalled(client.probe())
   }
 
   @Test
-  func probe_tcOursButTcodeForeign_returnsCollision() throws {
+  func probe_foreignFile_returnsCollision() throws {
     let home = try TempHome()
     let paths = home.paths()
-    try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: home.bundledTc)
-    try Data("#!/bin/sh\necho foreign\n".utf8).write(to: paths.tcodeSymlink)
+    try Data("#!/bin/sh\necho foreign\n".utf8).write(to: paths.tcSymlink)
     let (client, _) = makeClient(paths: paths)
 
     if case .collision(let owner) = client.probe() {
-      #expect(owner == paths.tcodeSymlink)
+      #expect(owner == paths.tcSymlink)
     } else {
       Issue.record("Expected .collision, got \(client.probe())")
     }
@@ -136,7 +120,6 @@ struct CLIInstallerClientTests {
     #expect(script.contains("set -e"))
     #expect(script.contains("mkdir -p /usr/local/bin"))
     #expect(script.contains("ln -s '\(home.bundledTc.path)' '\(paths.tcSymlink.path)'"))
-    #expect(script.contains("ln -s '\(home.bundledTc.path)' '\(paths.tcodeSymlink.path)'"))
     #expect(shell.calls.first?.prompt.contains("administrator access") == true)
   }
 
@@ -145,7 +128,6 @@ struct CLIInstallerClientTests {
     let home = try TempHome()
     let paths = home.paths()
     try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: home.bundledTc)
-    try FileManager.default.createSymbolicLink(at: paths.tcodeSymlink, withDestinationURL: home.bundledTc)
     let (client, shell) = makeClient(paths: paths)
 
     let result = client.install()
@@ -230,7 +212,6 @@ struct CLIInstallerClientTests {
     let home = try TempHome()
     let paths = home.paths()
     try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: home.bundledTc)
-    try FileManager.default.createSymbolicLink(at: paths.tcodeSymlink, withDestinationURL: home.bundledTc)
     let (client, shell) = makeClient(paths: paths)
 
     let result = client.uninstall()
@@ -240,7 +221,6 @@ struct CLIInstallerClientTests {
     let script = shell.calls.first?.command ?? ""
     #expect(script.contains("set -e"))
     #expect(script.contains("rm '\(paths.tcSymlink.path)'"))
-    #expect(script.contains("rm '\(paths.tcodeSymlink.path)'"))
   }
 
   @Test
@@ -271,57 +251,33 @@ struct CLIInstallerClientTests {
     #expect(shell.calls.isEmpty)
   }
 
-  @Test
-  func uninstall_whenTcodeIsForeign_refusesAndKeepsTc() throws {
-    let home = try TempHome()
-    let paths = home.paths()
-    try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: home.bundledTc)
-    try Data("#!/bin/sh\necho foreign\n".utf8).write(to: paths.tcodeSymlink)
-    let (client, shell) = makeClient(paths: paths)
-
-    let result = client.uninstall()
-
-    if case .success(.collision(let owner)) = result {
-      #expect(owner == paths.tcodeSymlink)
-    } else {
-      Issue.record("Expected collision on tcode, got \(result)")
-    }
-    #expect(shell.calls.isEmpty)
-    // codans symlink still in place — uninstall did not touch it.
-    #expect(FileManager.default.fileExists(atPath: paths.tcSymlink.path))
-  }
-
   // MARK: - Script composers (pure-function unit tests)
 
   @Test
-  func composeInstallScript_freshMachine_includesMkdirAndBothLnLines() {
+  func composeInstallScript_freshMachine_includesMkdirAndLnLine() {
     let bundled = URL(fileURLWithPath: "/Applications/Codans.app/Contents/Resources/bin/codans")
     let codans = URL(fileURLWithPath: "/usr/local/bin/codans")
-    let tcode = URL(fileURLWithPath: "/usr/local/bin/tcode")
 
-    let script = CLIInstallerClient.composeInstallScript(bundled: bundled, absentPaths: [codans, tcode])
+    let script = CLIInstallerClient.composeInstallScript(bundled: bundled, absentPaths: [codans])
 
     #expect(
       script == """
         set -e
         mkdir -p /usr/local/bin
         ln -s '/Applications/Codans.app/Contents/Resources/bin/codans' '/usr/local/bin/codans'
-        ln -s '/Applications/Codans.app/Contents/Resources/bin/codans' '/usr/local/bin/tcode'
         """)
   }
 
   @Test
-  func composeInstallScript_withLegacyCleanup_appendsGuardedRmLines() {
+  func composeInstallScript_withLegacyCleanup_appendsGuardedRmLine() {
     let bundled = URL(fileURLWithPath: "/Applications/Codans.app/Contents/Resources/bin/codans")
     let codans = URL(fileURLWithPath: "/usr/local/bin/codans")
-    let tcode = URL(fileURLWithPath: "/usr/local/bin/tcode")
     let legacyTc = URL(fileURLWithPath: "/Users/test/.local/bin/codans")
-    let legacyTcode = URL(fileURLWithPath: "/Users/test/.local/bin/tcode")
 
     let script = CLIInstallerClient.composeInstallScript(
       bundled: bundled,
-      absentPaths: [codans, tcode],
-      legacyToCleanup: [legacyTc, legacyTcode]
+      absentPaths: [codans],
+      legacyToCleanup: [legacyTc]
     )
 
     #expect(
@@ -329,9 +285,7 @@ struct CLIInstallerClientTests {
         set -e
         mkdir -p /usr/local/bin
         ln -s '/Applications/Codans.app/Contents/Resources/bin/codans' '/usr/local/bin/codans'
-        ln -s '/Applications/Codans.app/Contents/Resources/bin/codans' '/usr/local/bin/tcode'
         [ -L '/Users/test/.local/bin/codans' ] && [ "$(readlink '/Users/test/.local/bin/codans')" = '/Applications/Codans.app/Contents/Resources/bin/codans' ] && rm '/Users/test/.local/bin/codans' || true
-        [ -L '/Users/test/.local/bin/tcode' ] && [ "$(readlink '/Users/test/.local/bin/tcode')" = '/Applications/Codans.app/Contents/Resources/bin/codans' ] && rm '/Users/test/.local/bin/tcode' || true
         """)
   }
 
@@ -339,11 +293,10 @@ struct CLIInstallerClientTests {
   func install_includesLegacyCleanupWhenLegacyPathsAreOurs() throws {
     let home = try TempHome()
     let paths = home.paths()
-    // Pre-create legacy symlinks pointing at our bundle.
+    // Pre-create the legacy symlink pointing at our bundle.
     let legacyDir = paths.legacyLocalBinTc.deletingLastPathComponent()
     try FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
     try FileManager.default.createSymbolicLink(at: paths.legacyLocalBinTc, withDestinationURL: home.bundledTc)
-    try FileManager.default.createSymbolicLink(at: paths.legacyLocalBinTcode, withDestinationURL: home.bundledTc)
     let (client, shell) = makeClient(paths: paths)
 
     _ = client.install()
@@ -353,9 +306,7 @@ struct CLIInstallerClientTests {
       set -e
       mkdir -p /usr/local/bin
       ln -s '\(bundled)' '\(paths.tcSymlink.path)'
-      ln -s '\(bundled)' '\(paths.tcodeSymlink.path)'
       [ -L '\(paths.legacyLocalBinTc.path)' ] && [ "$(readlink '\(paths.legacyLocalBinTc.path)')" = '\(bundled)' ] && rm '\(paths.legacyLocalBinTc.path)' || true
-      [ -L '\(paths.legacyLocalBinTcode.path)' ] && [ "$(readlink '\(paths.legacyLocalBinTcode.path)')" = '\(bundled)' ] && rm '\(paths.legacyLocalBinTcode.path)' || true
       """
     #expect(shell.calls.first?.command == expected)
   }
@@ -408,17 +359,15 @@ struct CLIInstallerClientTests {
   }
 
   @Test
-  func composeUninstallScript_bothOurs_emitsRmLines() {
+  func composeUninstallScript_ourSymlink_emitsRmLine() {
     let codans = URL(fileURLWithPath: "/usr/local/bin/codans")
-    let tcode = URL(fileURLWithPath: "/usr/local/bin/tcode")
 
-    let script = CLIInstallerClient.composeUninstallScript(paths: [codans, tcode])
+    let script = CLIInstallerClient.composeUninstallScript(paths: [codans])
 
     #expect(
       script == """
         set -e
         rm '/usr/local/bin/codans'
-        rm '/usr/local/bin/tcode'
         """)
   }
 }

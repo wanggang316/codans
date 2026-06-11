@@ -3,31 +3,26 @@ import CodansCore
 import os.log
 
 /// Idempotent installer for the codans CLI. Release builds symlink `codans`
-/// and `tcode` from `/usr/local/bin/` to the bundled binary inside
-/// `codans.app`; Debug builds use `codans-dev` and `tcode-dev` so local
-/// development never takes over the production command. The
-/// privileged write is a single `do shell script` invocation with admin
-/// privileges that runs `mkdir -p` + `ln -s` + (M4) legacy cleanup in one
-/// transaction. `probe()` is unprivileged and safe to call on view-appear;
-/// `install()` / `uninstall()` show the system auth dialog exactly once
-/// per call (or zero times when no work remains — both already-our or both
-/// already-absent paths).
+/// from `/usr/local/bin/` to the bundled binary inside `codans.app`; Debug
+/// builds use `codans-dev` so local development never takes over the
+/// production command. The privileged write is a single `do shell script`
+/// invocation with admin privileges that runs `mkdir -p` + `ln -s` + legacy
+/// cleanup in one transaction. `probe()` is unprivileged and safe to call on
+/// view-appear; `install()` / `uninstall()` show the system auth dialog
+/// exactly once per call (or zero times when no work remains — the
+/// destination is already ours or already absent).
 ///
-/// `codans` and `tcode` are an atomic install pair. A foreign file at either
-/// destination short-circuits the operation with `.collision(owner:)` and
-/// no privileged dialog is shown.
+/// A foreign file at the destination short-circuits the operation with
+/// `.collision(owner:)` and no privileged dialog is shown.
 @MainActor
 final class CLIInstallerClient {
   /// URLs that parameterise the installer. Tests override everything; production
   /// uses the defaults pointing at `/usr/local/bin`.
   struct Paths: Equatable {
     var tcSymlink: URL
-    var tcodeSymlink: URL
-    /// Legacy `~/.local/bin/{codans,tcode}` paths from prior versions. The
-    /// privileged install script in M4 will `rm` these only when they resolve
-    /// to our bundled binary.
+    /// Legacy `~/.local/bin/codans` path from a prior version. The privileged
+    /// install script `rm`s it only when it resolves to our bundled binary.
     var legacyLocalBinTc: URL
-    var legacyLocalBinTcode: URL
     /// Bundled `codans` binary to symlink to. Resolved via `CLIBundleLocator`.
     /// `nil` when no bundled binary can be located — install surfaces this
     /// as `.bundleMissing`.
@@ -39,16 +34,12 @@ final class CLIInstallerClient {
       let legacyLocalBin = home.appendingPathComponent(".local/bin", isDirectory: true)
       #if DEBUG
         let tcName = "codans-dev"
-        let tcodeName = "tcode-dev"
       #else
         let tcName = "codans"
-        let tcodeName = "tcode"
       #endif
       return Paths(
         tcSymlink: usrLocalBin.appendingPathComponent(tcName, isDirectory: false),
-        tcodeSymlink: usrLocalBin.appendingPathComponent(tcodeName, isDirectory: false),
         legacyLocalBinTc: legacyLocalBin.appendingPathComponent(tcName, isDirectory: false),
-        legacyLocalBinTcode: legacyLocalBin.appendingPathComponent(tcodeName, isDirectory: false),
         bundledTcBinary: try? CLIBundleLocator.locateBinary()
       )
     }
@@ -56,15 +47,15 @@ final class CLIInstallerClient {
     var primaryCommandName: String { tcSymlink.lastPathComponent }
   }
 
-  /// Current state of the `codans` / `tcode` symlink pair under
-  /// `/usr/local/bin/`. Never persisted; the pane re-`probe()`s on appear.
+  /// Current state of the `codans` symlink under `/usr/local/bin/`. Never
+  /// persisted; the pane re-`probe()`s on appear.
   enum InstallStatus: Equatable {
     case unknown
     case notInstalled
-    /// Both symlinks present and resolve to our bundled binary.
+    /// The symlink is present and resolves to our bundled binary.
     case installed(at: URL, pointsToBundle: Bool)
-    /// A file exists at `tcSymlink` or `tcodeSymlink` that is not our
-    /// symlink. We never overwrite it.
+    /// A file exists at `tcSymlink` that is not our symlink. We never
+    /// overwrite it.
     case collision(owner: URL)
     case failed(CLIInstallError, lastAttempt: Date?)
   }
@@ -100,31 +91,27 @@ final class CLIInstallerClient {
   /// through `InstallStatus.failed` so the view renders them without special
   /// casing.
   ///
-  /// `codans` and `tcode` are treated as an **atomic install pair**. The returned
-  /// status collapses the two-dimensional truth table into:
-  /// - any destination foreign → `.collision(owner:)` (the first foreign URL)
-  /// - both destinations `.ourSymlink` → `.installed(...)`
-  /// - every other mix (both absent / one ours + one absent) → `.notInstalled`
-  ///   (running `install()` from there completes the pair idempotently).
+  /// - foreign destination → `.collision(owner:)`
+  /// - our symlink → `.installed(...)`
+  /// - absent → `.notInstalled`
   func probe() -> InstallStatus {
-    let pair = inspectPair()
-    if let collision = pair.firstForeign {
-      return .collision(owner: collision)
-    }
-    if pair.bothOurs {
+    switch inspect(paths.tcSymlink) {
+    case .foreign:
+      return .collision(owner: paths.tcSymlink)
+    case .ourSymlink:
       return .installed(at: paths.tcSymlink, pointsToBundle: true)
+    case .absent:
+      return .notInstalled
     }
-    return .notInstalled
   }
 
   // MARK: - Install
 
-  /// Symlinks `codans` and `tcode` under `/usr/local/bin/` to the bundled binary
-  /// via a single privileged `do shell script` call. Atomic on the install
-  /// pair: a foreign file at either destination aborts before the auth dialog
-  /// opens, with **zero mutations**.
+  /// Symlinks `codans` under `/usr/local/bin/` to the bundled binary via a
+  /// single privileged `do shell script` call. A foreign file at the
+  /// destination aborts before the auth dialog opens, with **zero mutations**.
   ///
-  /// Skips the auth dialog entirely when both symlinks already resolve to our
+  /// Skips the auth dialog entirely when the symlink already resolves to our
   /// bundled binary (idempotent re-install).
   func install() -> Result<InstallStatus, CLIInstallError> {
     guard let bundled = paths.bundledTcBinary else {
@@ -134,19 +121,19 @@ final class CLIInstallerClient {
       return .failure(.bundleMissing(bundled))
     }
 
-    let pair = inspectPair()
-    if let foreign = pair.firstForeign {
-      return .failure(.destinationExistsNotOurs(foreign))
-    }
-    if pair.bothOurs {
+    switch inspect(paths.tcSymlink) {
+    case .foreign:
+      return .failure(.destinationExistsNotOurs(paths.tcSymlink))
+    case .ourSymlink:
       return .success(.installed(at: paths.tcSymlink, pointsToBundle: true))
+    case .absent:
+      break
     }
 
-    let absentPaths = pair.all.compactMap { $0.1 == .absent ? $0.0 : nil }
     let legacyToCleanup = ourLegacyPaths()
     let script = Self.composeInstallScript(
       bundled: bundled,
-      absentPaths: absentPaths,
+      absentPaths: [paths.tcSymlink],
       legacyToCleanup: legacyToCleanup
     )
     do {
@@ -167,23 +154,23 @@ final class CLIInstallerClient {
 
   // MARK: - Uninstall
 
-  /// Removes the `codans` and `tcode` symlinks iff both destinations are ours or
-  /// absent. A foreign file at either destination returns
-  /// `.success(.collision(owner:))` without showing the auth dialog.
+  /// Removes the `codans` symlink iff the destination is ours or absent. A
+  /// foreign file at the destination returns `.success(.collision(owner:))`
+  /// without showing the auth dialog.
   ///
   /// Returns `.success(.notInstalled)` without showing the auth dialog when
   /// nothing belongs to us (idempotent re-uninstall).
   func uninstall() -> Result<InstallStatus, CLIInstallError> {
-    let pair = inspectPair()
-    if let foreign = pair.firstForeign {
-      return .success(.collision(owner: foreign))
-    }
-    let oursToRemove = pair.all.compactMap { $0.1 == .ourSymlink ? $0.0 : nil }
-    if oursToRemove.isEmpty {
+    switch inspect(paths.tcSymlink) {
+    case .foreign:
+      return .success(.collision(owner: paths.tcSymlink))
+    case .absent:
       return .success(.notInstalled)
+    case .ourSymlink:
+      break
     }
 
-    let script = Self.composeUninstallScript(paths: oursToRemove)
+    let script = Self.composeUninstallScript(paths: [paths.tcSymlink])
     do {
       try privilegedShell.run(
         script,
@@ -205,8 +192,8 @@ final class CLIInstallerClient {
   /// Composes the `do shell script` body for an install. Includes `mkdir -p`
   /// for `/usr/local/bin` (idempotent; admin priv covers the create on bare
   /// macOS), one `ln -s` per absent destination, and one `rm` per legacy
-  /// `~/.local/bin/{codans,tcode}` that the unprivileged probe verified is our
-  /// own symlink. Foreign legacy entries are not touched.
+  /// `~/.local/bin/codans` that the unprivileged probe verified is our own
+  /// symlink. Foreign legacy entries are not touched.
   static func composeInstallScript(
     bundled: URL,
     absentPaths: [URL],
@@ -257,35 +244,11 @@ final class CLIInstallerClient {
     case foreign
   }
 
-  /// Classification of the two-destination install pair. Order is always
-  /// [tcSymlink, tcodeSymlink] so callers can produce deterministic error
-  /// messages.
-  private struct PairInspection {
-    let all: [(URL, LinkState)]
-
-    /// First foreign URL, if any — traversal order matches `all`.
-    var firstForeign: URL? {
-      all.first(where: { $0.1 == .foreign })?.0
-    }
-
-    /// True iff both destinations are our symlinks.
-    var bothOurs: Bool {
-      all.allSatisfy { $0.1 == .ourSymlink }
-    }
-  }
-
-  private func inspectPair() -> PairInspection {
-    PairInspection(all: [
-      (paths.tcSymlink, inspect(paths.tcSymlink)),
-      (paths.tcodeSymlink, inspect(paths.tcodeSymlink)),
-    ])
-  }
-
-  /// Returns the legacy `~/.local/bin/{codans,tcode}` paths that resolve to our
-  /// bundled binary. Foreign or absent entries are excluded — only entries we
-  /// know we created in a prior version qualify for cleanup.
+  /// Returns the legacy `~/.local/bin/codans` path if it resolves to our
+  /// bundled binary. Foreign or absent entries are excluded — only an entry we
+  /// know we created in a prior version qualifies for cleanup.
   private func ourLegacyPaths() -> [URL] {
-    [paths.legacyLocalBinTc, paths.legacyLocalBinTcode].filter { inspect($0) == .ourSymlink }
+    [paths.legacyLocalBinTc].filter { inspect($0) == .ourSymlink }
   }
 
   /// Classifies the destination path without mutating the filesystem. A path is

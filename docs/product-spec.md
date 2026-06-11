@@ -137,7 +137,7 @@ C5 Published Agent Skill   (standalone package; consumed by coding agents, not b
 
 ## Open Questions
 
-1. **CLI binary name** — *Resolved by exec-plan 0003 (C4 D1, D2):* `codans` with install-time collision check (per architecture §Open-Q #3 — manual `codans install-cli`); fallback `tcode` symlink when `codans` is taken. See [C4 design doc §D1](design-docs/c4-cli.md).
+1. **CLI binary name** — *Resolved by exec-plan 0003 (C4 D1, D2):* `codans` with install-time collision check (per architecture §Open-Q #3 — manual `codans install-cli`). See [C4 design doc §D1](design-docs/c4-cli.md).
 2. **Agent Skill repo location** — Keep the skill in a `codans-skill/` subdirectory of this repo (co-versioned with the CLI) vs. a separate companion repo (`codans-skills`, publishable independently). **Blocks:** release process and skill installation UX. *Leaning: subdirectory of this repo in v1 to guarantee version alignment with `codans`; optionally publish a mirror repo later for people who want `npx skills add` without the app.*
 3. **Non-git Projects** — Do we allow a "Project" that isn't a git repo (e.g. a scratch folder)? If yes, what happens to Worktree-related UI? **Blocks:** Project model definition. *Leaning: allow, but Worktree features become inert.*
 4. **Hook execution model** — *Resolved by exec-plan 0003 (C3 D1):* out-of-process only in v1. Each hook subscription runs a `/bin/sh -c <command>` with `CODANS_HOOK_ENVELOPE` holding the JSON envelope. In-process JS scripting deferred indefinitely (not compatible with the language-agnostic contract we want for `codans`-shell composition). See [C3 design doc §D1](design-docs/c3-lifecycle-hooks.md).

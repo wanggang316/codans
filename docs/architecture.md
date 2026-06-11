@@ -248,7 +248,7 @@ Readers abort or migrate on version mismatch: `settings.json` accepts v1/v2/v3 (
 
 2. **Multi-window semantics.** *Resolved by docs/design-docs/project-tags.md (M3):* the app is single main window. The prior `WindowGroup` allowed multiple instances but was never wired into application state. M3 collapses the scene to `Window(id: "main")`, suppresses the default ⌘N "New Window" command, and gates ⌘Q with a confirmation alert when running terminal sessions exist. Settings is a separate `Window(id: "settings")`, unchanged. If multi-window demand emerges later it would re-introduce a `windows: [CatalogWindow]` array on `Catalog`.
 
-3. **CLI binary distribution.** *Resolved by exec-plan 0003 (C4 D2):* manual `codans install-cli` — the app copies the bundled `codans` binary into `~/.local/bin/codans` (creating the directory + offering a shell-rc PATH update if needed), collision-checks against an existing `codans` on `$PATH`, and falls back to a `tcode` symlink when `codans` is taken. See [C4 design doc §D2](design-docs/c4-cli.md). *No system-path writes.*
+3. **CLI binary distribution.** *Resolved by exec-plan 0003 (C4 D2):* manual `codans install-cli` — the app copies the bundled `codans` binary into `~/.local/bin/codans` (creating the directory + offering a shell-rc PATH update if needed), collision-checks against an existing `codans` on `$PATH`, and aborts without writing when one is found. See [C4 design doc §D2](design-docs/c4-cli.md). *No system-path writes.*
 
 4. **Hook handler execution policy.** Serial per event vs. concurrent with a cap. **Blocks:** `codans/Hooks (in-app module)` scheduler. *Leaning:* concurrent with a global cap (default 8); single-handler-at-a-time flag per hook subscription as opt-in.
 
