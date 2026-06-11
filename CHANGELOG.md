@@ -12,8 +12,6 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Renamed the product from "touch-code" to "Codans."** The app is now `Codans.app` with bundle id `com.gumpw.codans`, the CLI binary and command are `codans` (was `tc`), and the Homebrew cask is `codans`. On-disk state moves to `~/.config/codans`, `~/Library/Caches/codans`, `~/.codans/repos`, and the control socket to `/tmp/codans-<uid>.sock`. No migration is performed — existing `touch-code` state, worktrees, and installed CLI are left in place and must be removed or re-created manually.
-
 ### Deprecated
 
 ### Removed
@@ -21,6 +19,12 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 ### Security
+
+## [0.4.6] - 2026-06-11
+
+### Changed
+
+- **Renamed the product from "touch-code" to "Codans."** The app is now `Codans.app` with bundle id `com.gumpw.codans`, the CLI binary and command are `codans` (was `tc`), and the Homebrew cask is `codans`. On-disk state moves to `~/.config/codans`, `~/Library/Caches/codans`, `~/.codans/repos`, and the control socket to `/tmp/codans-<uid>.sock`. No migration is performed — existing `touch-code` state, worktrees, and installed CLI are left in place and must be removed or re-created manually.
 
 ## [0.4.5] - 2026-06-10
 
