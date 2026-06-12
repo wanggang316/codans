@@ -1,0 +1,67 @@
+{
+  "brand": "Codans",
+  "nav": {
+    "changelog": "Changelog",
+    "download": "Download",
+    "github": "GitHub"
+  },
+  "hero": {
+    "tagline": "Parallel development for the agent era.",
+    "subtitle": "One Mac-native window. Many worktrees. Every agent.",
+    "primary_cta": "Download for macOS",
+    "secondary_cta": "View on GitHub",
+    "brew_install": "brew install --cask wanggang316/tap/codans"
+  },
+  "features": {
+    "heading": "What is Codans?",
+    "intro": "Codans is a terminal development environment built for parallel development with coding agents. It orchestrates all of your projects, worktrees, and coding agents into a single window.",
+    "items": [
+      {
+        "title": "Native",
+        "body": "Built on Ghostty and native to macOS — every Ghostty and macOS capability comes for free."
+      },
+      {
+        "title": "Agent-first",
+        "body": "See the live running state of every agent in real time."
+      },
+      {
+        "title": "Parallel",
+        "body": "Project tree + git worktrees + tabs + split panes let you manage every line of work in one window. No more Cmd-Tab."
+      },
+      {
+        "title": "Custom commands",
+        "body": "Bind project-specific commands and shortcuts; one chord runs the right thing."
+      },
+      {
+        "title": "GitHub",
+        "body": "Deep GitHub integration — manage the whole pull-request lifecycle in-app."
+      },
+      {
+        "title": "Git Viewer",
+        "body": "A built-in diff and history panel. Review changes any time, without leaving the terminal."
+      },
+      {
+        "title": "Keyboard-driven",
+        "body": "A deep set of customizable shortcuts to keep you fast."
+      },
+      {
+        "title": "IDE integration",
+        "body": "VS Code, Cursor, Zed, and Xcode are auto-detected. One shortcut opens any worktree."
+      }
+    ]
+  },
+  "cta": {
+    "title": "Get Codans.",
+    "sub": "Drag into /Applications. The codans CLI installs itself on first launch.",
+    "primary": "Download .dmg",
+    "secondary": "Read the source"
+  },
+  "footer": {
+    "tagline": "Built for the agent era.",
+    "releases": "Releases",
+    "issues": "Issues",
+    "repo": "Repository",
+    "license": "MIT",
+    "version": "v0.4.6"
+  }
+}
