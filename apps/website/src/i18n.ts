@@ -7,7 +7,7 @@ import zhLanding from "./locales/zh/landing.json";
 export const SUPPORTED_LANGS = ["en", "zh"] as const;
 export type Lang = (typeof SUPPORTED_LANGS)[number];
 
-const STORAGE_KEY = "tc-lang";
+const STORAGE_KEY = "codans-lang";
 
 /**
  * Default language is English regardless of browser locale (product

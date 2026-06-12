@@ -1,5 +1,5 @@
 {
-  "brand": "TouchCode",
+  "brand": "Codans",
   "nav": {
     "changelog": "Changelog",
     "download": "Download",
@@ -10,11 +10,11 @@
     "subtitle": "One Mac-native window. Many worktrees. Every agent.",
     "primary_cta": "Download for macOS",
     "secondary_cta": "View on GitHub",
-    "brew_install": "brew install --cask wanggang316/tap/touch-code"
+    "brew_install": "brew install --cask wanggang316/tap/codans"
   },
   "features": {
-    "heading": "What is TouchCode?",
-    "intro": "TouchCode is a terminal development environment built for parallel development with coding agents. It orchestrates all of your projects, worktrees, and coding agents into a single window.",
+    "heading": "What is Codans?",
+    "intro": "Codans is a terminal development environment built for parallel development with coding agents. It orchestrates all of your projects, worktrees, and coding agents into a single window.",
     "items": [
       {
         "title": "Native",
@@ -51,8 +51,8 @@
     ]
   },
   "cta": {
-    "title": "Get TouchCode.",
-    "sub": "Drag into /Applications. The tc shim installs itself on first launch.",
+    "title": "Get Codans.",
+    "sub": "Drag into /Applications. The codans CLI installs itself on first launch.",
     "primary": "Download .dmg",
     "secondary": "Read the source"
   },
@@ -62,6 +62,6 @@
     "issues": "Issues",
     "repo": "Repository",
     "license": "MIT",
-    "version": "v0.3.0"
+    "version": "v0.4.6"
   }
 }

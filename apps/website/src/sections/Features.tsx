@@ -7,7 +7,7 @@ interface FeatureItem {
 }
 
 /**
- * The "什么是 TouchCode？" intro region below the hero — opencode.ai-style:
+ * The "什么是 Codans？" intro region below the hero — opencode.ai-style:
  * text only, single column, no illustrations. A heading + intro paragraph,
  * then the feature list in the exact order authored in landing.json
  * (`features.items` is an ordered array — order on the page === order in

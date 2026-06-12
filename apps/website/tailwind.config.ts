@@ -20,22 +20,22 @@ export default {
           DEFAULT: "#1F1F22",
           strong: "#2A2A2F",
         },
-        // The single accent — GitHub Primer functional green. Calmer and
-        // less neon than WeChat green on a near-black surface, which is the
-        // whole point: it reads as a developer-tool accent, not an AI glow.
-        // `acc-500` (#238636) is GitHub's dark-mode primary-button green;
-        // `acc-300` (#3FB950) is its success-text green for inline marks.
+        // The single accent — GitHub Primer functional blue, matching the
+        // Codans app icon's blue block mark. Calm on a near-black surface:
+        // it reads as a developer-tool accent, not an AI glow.
+        // `acc-500` (#1F6FEB) is GitHub's dark-mode primary-button blue;
+        // `acc-300` (#58A6FF) is its accent-text blue for inline marks.
         acc: {
-          50: "#DAFBE1",
-          100: "#ACEEBB",
-          200: "#6FDD8B",
-          300: "#3FB950",
-          400: "#2EA043",
-          500: "#238636",
-          600: "#1A7F37",
-          700: "#116329",
-          800: "#044F1E",
-          900: "#003D16",
+          50: "#CAE8FF",
+          100: "#A5D6FF",
+          200: "#79C0FF",
+          300: "#58A6FF",
+          400: "#388BFD",
+          500: "#1F6FEB",
+          600: "#1158C7",
+          700: "#0D419D",
+          800: "#0C2D6B",
+          900: "#051D4D",
         },
       },
       fontFamily: {
@@ -62,8 +62,8 @@ export default {
         "display-2": ["clamp(2rem, 4vw, 3.25rem)", { lineHeight: "1.06", letterSpacing: "-0.03em" }],
       },
       boxShadow: {
-        glow: "0 8px 30px -10px rgba(35, 134, 54, 0.45)",
-        "glow-soft": "0 0 60px -22px rgba(35, 134, 54, 0.16)",
+        glow: "0 8px 30px -10px rgba(31, 111, 235, 0.45)",
+        "glow-soft": "0 0 60px -22px rgba(31, 111, 235, 0.16)",
         window: "0 40px 90px -30px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset",
       },
       backgroundImage: {

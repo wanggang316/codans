@@ -4,10 +4,10 @@ import { motion } from "framer-motion";
 import { LINKS } from "@/lib/links";
 
 /**
- * v2 Hero. The centerpiece is the real touch-code app screenshot shipped
+ * v2 Hero. The centerpiece is the real Codans app screenshot shipped
  * as /hero-app.png. Background is intentionally flat (no mouse-tracked
  * spotlight, no coloured radial wash) — just a faint dot grid — so the
- * accent green reads as a deliberate mark rather than ambient AI haze.
+ * accent blue reads as a deliberate mark rather than ambient AI haze.
  */
 export default function Hero() {
   const { t } = useTranslation();
@@ -59,25 +59,43 @@ export default function Hero() {
 // ─── reveal helper (real spaces between words, clip-masked rise-in) ───────
 
 function RevealLine({ text }: { text: string }) {
-  const words = text.split(" ");
+  // Honour explicit "\n" breaks authored in the locale copy — e.g. the
+  // Chinese tagline breaks at the comma so "Agent 时代" never splits
+  // mid-phrase. Word indices run across lines so the stagger is continuous.
+  const lines = text.split("\n").map((line) => line.split(" "));
+  const offsets: number[] = [];
+  let total = 0;
+  for (const words of lines) {
+    offsets.push(total);
+    total += words.length;
+  }
   return (
     <span className="inline-block">
-      {words.map((w, i) => (
-        <Fragment key={i}>
-          <span className="inline-flex overflow-hidden align-bottom">
-            <motion.span
-              initial={{ y: "110%" }}
-              animate={{ y: "0%" }}
-              transition={{ duration: 0.7, delay: 0.15 + i * 0.05, ease: [0.22, 1, 0.36, 1] }}
-              className="inline-block"
-            >
-              {w}
-            </motion.span>
-          </span>
-          {/* Real, non-clipped space between words — a trailing space
-              inside the inline-block above gets collapsed by the browser,
-              which is what glued the words together. */}
-          {i < words.length - 1 ? " " : ""}
+      {lines.map((words, li) => (
+        <Fragment key={li}>
+          {li > 0 && <br />}
+          {words.map((w, i) => (
+            <Fragment key={i}>
+              <span className="inline-flex overflow-hidden align-bottom">
+                <motion.span
+                  initial={{ y: "110%" }}
+                  animate={{ y: "0%" }}
+                  transition={{
+                    duration: 0.7,
+                    delay: 0.15 + (offsets[li] + i) * 0.05,
+                    ease: [0.22, 1, 0.36, 1],
+                  }}
+                  className="inline-block"
+                >
+                  {w}
+                </motion.span>
+              </span>
+              {/* Real, non-clipped space between words — a trailing space
+                  inside the inline-block above gets collapsed by the browser,
+                  which is what glued the words together. */}
+              {i < words.length - 1 ? " " : ""}
+            </Fragment>
+          ))}
         </Fragment>
       ))}
     </span>
@@ -184,7 +202,7 @@ function ScreenshotShowcase() {
           shape) rather than a rectangular box-shadow. */}
       <img
         src="/hero-app.png"
-        alt="TouchCode window: sidebar with multiple projects and worktrees, terminal panes, and the command palette open"
+        alt="Codans window: sidebar with multiple projects and worktrees, terminal panes, and the command palette open"
         width={2400}
         height={1474}
         className="block h-auto w-full [filter:drop-shadow(0_40px_80px_rgba(0,0,0,0.55))]"

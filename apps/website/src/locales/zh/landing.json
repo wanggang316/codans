@@ -1,20 +1,20 @@
 {
-  "brand": "TouchCode",
+  "brand": "Codans",
   "nav": {
     "changelog": "更新日志",
     "download": "下载",
     "github": "GitHub"
   },
   "hero": {
-    "tagline": "为 Agent 时代而生的并行开发。",
+    "tagline": "为 Agent 时代而生的\n并行开发工具",
     "subtitle": "一个 macOS 原生窗口，编排所有 worktree 与 Agent。",
     "primary_cta": "下载 macOS 版",
     "secondary_cta": "在 GitHub 查看",
-    "brew_install": "brew install --cask wanggang316/tap/touch-code"
+    "brew_install": "brew install --cask wanggang316/tap/codans"
   },
   "features": {
-    "heading": "什么是 TouchCode？",
-    "intro": "TouchCode 是一款为 Coding Agent 而生的并行开发而生的终端开发环境，把你所有的项目、worktree 和 Coding Agent 优雅的编排进同一个窗口。",
+    "heading": "什么是 Codans？",
+    "intro": "Codans 是一款为 Coding Agent 并行开发而生的终端开发环境，把你所有的项目、worktree 和 Coding Agent 优雅地编排进同一个窗口。",
     "items": [
       {
         "title": "原生",
@@ -51,8 +51,8 @@
     ]
   },
   "cta": {
-    "title": "开始使用 TouchCode。",
-    "sub": "拖入 /Applications 即可。首次启动自动安装 tc 命令。",
+    "title": "开始使用 Codans。",
+    "sub": "拖入 /Applications 即可。首次启动自动安装 codans 命令。",
     "primary": "下载 .dmg",
     "secondary": "阅读源码"
   },
@@ -62,6 +62,6 @@
     "issues": "问题反馈",
     "repo": "代码仓库",
     "license": "MIT",
-    "version": "v0.3.0"
+    "version": "v0.4.6"
   }
 }

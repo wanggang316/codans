@@ -9,7 +9,7 @@ export default function Logo({ size = 28, className = "" }: Props) {
       src="/logo.png"
       width={size}
       height={size}
-      alt="TouchCode"
+      alt="Codans"
       className={`select-none rounded-[6px] ${className}`}
       draggable={false}
     />
