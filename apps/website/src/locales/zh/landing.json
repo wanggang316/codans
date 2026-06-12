@@ -57,11 +57,8 @@
     "secondary": "阅读源码"
   },
   "footer": {
-    "tagline": "为 Agent 时代而生。",
     "releases": "发布版本",
     "issues": "问题反馈",
-    "repo": "代码仓库",
-    "license": "MIT",
-    "version": "v0.4.6"
+    "repo": "代码仓库"
   }
 }

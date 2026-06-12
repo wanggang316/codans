@@ -11,7 +11,17 @@ export default function Footer() {
           <Logo size={28} />
           <div>
             <div className="font-mono text-sm text-ink">{t("brand")}</div>
-            <div className="text-xs text-ink-muted">{t("footer.tagline")}</div>
+            <div className="text-xs text-ink-muted">
+              © 2026{" "}
+              <a
+                className="hover:text-ink"
+                href="https://github.com/wanggang316"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Gump
+              </a>
+            </div>
           </div>
         </div>
         <ul className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-ink-muted">
@@ -30,8 +40,6 @@ export default function Footer() {
               {t("footer.repo")}
             </a>
           </li>
-          <li className="font-mono text-ink-dim">{t("footer.license")}</li>
-          <li className="font-mono text-ink-dim">{t("footer.version")}</li>
         </ul>
       </div>
     </footer>
