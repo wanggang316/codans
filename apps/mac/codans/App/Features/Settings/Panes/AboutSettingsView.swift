@@ -23,9 +23,10 @@ struct AboutSettingsView: View {
           .font(.caption)
           .foregroundStyle(.tertiary)
       }
-      Text("Codans.app")
-        .font(.caption)
-        .foregroundStyle(.tertiary)
+      if let websiteURL = URL(string: "https://codans.dev") {
+        Link("codans.dev", destination: websiteURL)
+          .font(.caption)
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(24)
