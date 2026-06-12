@@ -57,11 +57,8 @@
     "secondary": "Read the source"
   },
   "footer": {
-    "tagline": "Built for the agent era.",
     "releases": "Releases",
     "issues": "Issues",
-    "repo": "Repository",
-    "license": "MIT",
-    "version": "v0.4.6"
+    "repo": "Repository"
   }
 }
