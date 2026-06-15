@@ -97,6 +97,19 @@ struct ZmxIPCTests {
   }
 
   @Test
+  func snapshotTagEncodesWithTagByte14() {
+    // An empty `.snapshot` frame is header-only: 8 bytes laid out as
+    // `[tag(1)=14][len_LE(4)=0][padding(3)=0]`. The next feature relies on
+    // this wire image to ask a daemon to write its snapshot.
+    let encoded = ZmxFraming.encode(ZmxFrame(tag: .snapshot))
+    let bytes = Array(encoded)
+    #expect(bytes.count == ZmxFraming.headerSize)
+    #expect(bytes[0] == 14)  // ZmxTag.snapshot
+    #expect(Array(bytes[1..<5]) == [0, 0, 0, 0])  // little-endian u32 length = 0
+    #expect(Array(bytes[5..<8]) == [0, 0, 0])  // 3 zero padding bytes
+  }
+
+  @Test
   func infoPayloadDecodesFromFrozenWireShape() throws {
     // Build a 552-byte Info image: pid at offset 8, cwd_len at 14,
     // cwd at 272. Everything else zero.
