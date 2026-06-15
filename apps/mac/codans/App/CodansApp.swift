@@ -189,6 +189,20 @@ struct CodansApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   weak var appState: AppState?
 
+  /// SNAP-009 re-entrancy guard. A first `applicationShouldTerminate` that
+  /// chooses a disposition returns `.terminateLater` and spawns the (async)
+  /// snapshot/detach work in a detached `@MainActor` Task. AppKit keeps the
+  /// process alive pending the `reply`, but a fresh user-initiated quit
+  /// (rapid double ⌘Q) — or AppKit re-issuing terminate — can re-enter this
+  /// callback before that reply lands. Without a cross-call latch the second
+  /// entry would spawn a SECOND `detachAllForQuit`: a duplicate snapshot loop
+  /// and a duplicate `sessions.json` persist racing the first. The flag is set
+  /// the instant the first disposition is dispatched and is never cleared
+  /// (the only transition out of "disposition in progress" is process exit),
+  /// so every subsequent terminate request is a clean no-op that simply
+  /// re-returns `.terminateLater` and waits on the original reply.
+  private var dispositionInProgress = false
+
   override init() {
     super.init()
     // Wire up macOS notification banner click delegation. Without this, the
@@ -231,6 +245,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     _ sender: NSApplication
   ) -> NSApplication.TerminateReply {
     MainActor.assumeIsolated {
+      // SNAP-009: a disposition (snapshot/detach) is already in flight from a
+      // prior terminate. Do NOT re-run it — that would double-dispatch the
+      // snapshot loop and the `sessions.json` persist. Re-return `.terminateLater`
+      // so AppKit keeps waiting on the original `reply`; no dialog, no second pass.
+      guard !dispositionInProgress else { return .terminateLater }
       guard let appState else { return .terminateNow }
       let lifecycle = appState.sessionLifecycle
       let activePanes = lifecycle?.liveZmxClientCount ?? 0
@@ -250,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // no-op when there are no live clients, so skipping it for activePanes == 0
         // is purely an optimisation; the explicit guard keeps the no-panes path cheap.
         guard activePanes > 0, let lifecycle else { return .terminateNow }
-        return Self.runDetachThenTerminate(lifecycle, action: action, sender: sender)
+        return runDetachThenTerminate(lifecycle, action: action, sender: sender)
       }
 
       let choice = QuitConfirmationDialog.present(
@@ -260,10 +279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       switch choice {
       case .keepRunning:
         guard let lifecycle else { return .terminateNow }
-        return Self.runDetachThenTerminate(lifecycle, action: .keepRunning, sender: sender)
+        return runDetachThenTerminate(lifecycle, action: .keepRunning, sender: sender)
       case .snapshot:
         guard let lifecycle else { return .terminateNow }
-        return Self.runDetachThenTerminate(lifecycle, action: .snapshot, sender: sender)
+        return runDetachThenTerminate(lifecycle, action: .snapshot, sender: sender)
       case .cancel:
         return .terminateCancel
       }
@@ -280,12 +299,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   /// timeout, and an outer ceiling races the disposition work against a sleep —
   /// whichever finishes first replies. `reply` is sent exactly once (the
   /// `replied` guard) so a late completion after the ceiling cannot double-reply.
+  ///
+  /// Instance method (not `static`) so it owns the single write of the
+  /// `dispositionInProgress` latch: the flag is set here, synchronously, before
+  /// `.terminateLater` is returned, so a re-entrant `applicationShouldTerminate`
+  /// (rapid double ⌘Q) sees it and short-circuits without a second disposition.
   @MainActor
-  private static func runDetachThenTerminate(
+  private func runDetachThenTerminate(
     _ lifecycle: SessionLifecycle,
     action: QuitAction,
     sender: NSApplication
   ) -> NSApplication.TerminateReply {
+    // SNAP-009: latch before dispatching so any re-entrant terminate is a no-op.
+    dispositionInProgress = true
     // Hard ceiling on the total quit wait. `detachAllForQuit` is already
     // bounded by the per-pane timeout × concurrency-window factor; this is a
     // belt-and-suspenders cap so an unforeseen wedge inside the disposition
