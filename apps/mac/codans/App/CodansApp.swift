@@ -1100,15 +1100,23 @@ final class AppState {
       // Pass the current hierarchy's pane ids so the reaper can kill any
       // alive daemon whose paneID no longer maps to a surface — without
       // this, an out-of-sync sessions.json vs hierarchy.json would leak
-      // daemons until the 7-day stale window catches them. The returned
-      // reattach states are no longer consumed: bringup re-attaches every
-      // pane via `zmx attach`, so there is no per-pane reattach queue to seed.
-      _ = try reaper.sweep(livePaneIDs: livePaneIDs)
+      // daemons until the 7-day stale window catches them.
+      //
+      // The sweep's `.snapshot(url)` states name panes whose daemon is
+      // gone but a quit-time `<paneID>.snap` survives on disk. Thread
+      // those into the engine BEFORE bring-up so the next `ensureSurface`
+      // for each paneID spawns `zmx attach … --restore-from <url>` exactly
+      // once. `.alive`/`.dead` states are not restores and are ignored
+      // here — restore is driven purely by snapshot presence, never by the
+      // current on-quit resume setting (VAL-RESTORE-015).
+      let states = try reaper.sweep(livePaneIDs: livePaneIDs)
+      engine.pendingRestores = Self.derivePendingRestores(from: states)
     } catch {
       // A corrupt catalog or transient I/O error must not block app
       // launch — the worst outcome is a fresh shell per pane, which is
-      // codans's pre-M2 behaviour. Log via os.Logger so a chronic
-      // failure surfaces in Console.
+      // codans's pre-M2 behaviour. Leave `pendingRestores` empty so every
+      // pane cold-starts (degrade-to-cold-start). Log via os.Logger so a
+      // chronic failure surfaces in Console.
       Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session.reaper")
         .error("SessionReaper.sweep failed: \(String(describing: error), privacy: .public)")
     }
@@ -1346,6 +1354,22 @@ final class AppState {
       }
     }
     return ids
+  }
+
+  /// Reduce a launch-time sweep's per-pane state map to the restore queue
+  /// the engine consumes during bring-up. Only `.snapshot(url)` states
+  /// represent a pane to restore (a `<paneID>.snap` survives on disk with
+  /// no live daemon); `.alive`/`.dead` states are not restores and are
+  /// dropped. `internal` (not `private`) so `@testable` tests can exercise
+  /// the derivation directly. See `bootstrapSessionStack`.
+  static func derivePendingRestores(
+    from states: [PaneID: SessionState]
+  ) -> [PaneID: URL] {
+    states.reduce(into: [PaneID: URL]()) { result, entry in
+      if case .snapshot(let url) = entry.value {
+        result[entry.key] = url
+      }
+    }
   }
 
   /// `(worktreeID → path)` for every non-archived Worktree across all
