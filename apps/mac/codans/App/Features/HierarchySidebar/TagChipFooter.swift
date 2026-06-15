@@ -40,8 +40,6 @@ struct TagFilterPopoverFooter: View {
   /// the only ambient signal the footer carries.
   var agentStatePanelOpen: Bool = false
 
-  @State private var isSortPopoverPresented = false
-
   var body: some View {
     HStack(spacing: 0) {
       // Tag-filter button is intentionally hidden — TagFilterList and the
@@ -50,40 +48,46 @@ struct TagFilterPopoverFooter: View {
       // surfaces sort + refresh.
       HStack(spacing: 6) {
         if let sortMode, let onSortModeChanged, let onManualSortRequested {
-          Button {
-            isSortPopoverPresented.toggle()
+          // Native `Menu` + inline `Picker` instead of a hand-rolled
+          // popover: the system renders the selection checkmark, hover
+          // highlight, and keyboard navigation, matching Finder's
+          // "Sort By" menu. The sort glyph stays visually neutral
+          // regardless of the active mode — unlike the tag filter,
+          // "sort order" is a navigation aid rather than a constraint
+          // hiding rows, so there is nothing to draw the eye to.
+          let sortSelection = Binding<ProjectSortMode>(
+            get: { sortMode },
+            set: { picked in
+              // "Manual Order…" opens the reorder sheet rather than
+              // flipping the mode directly; the catalog only switches
+              // to `.manual` once the user confirms that sheet.
+              if picked == .manual {
+                onManualSortRequested()
+              } else {
+                onSortModeChanged(picked)
+              }
+            }
+          )
+          Menu {
+            Picker("Sort By", selection: sortSelection) {
+              Text("By Date Added").tag(ProjectSortMode.joinOrder)
+              Text("Recently Active").tag(ProjectSortMode.activeFirst)
+              Text("Manual Order…").tag(ProjectSortMode.manual)
+            }
+            .pickerStyle(.inline)
           } label: {
-            // The sort glyph stays visually neutral regardless of the
-            // active mode — unlike the tag filter, "sort order" is a
-            // navigation aid rather than a constraint hiding rows, so
-            // there is nothing to draw the eye to once the user has
-            // made their choice.
             Image(systemName: "arrow.up.arrow.down")
               .font(.system(size: 11, weight: .regular))
               .foregroundStyle(.secondary)
               .frame(width: 18, height: 18)
               .contentShape(Rectangle())
+              .accessibilityHidden(true)
           }
-          .buttonStyle(.plain)
+          .menuStyle(.borderlessButton)
+          .menuIndicator(.hidden)
+          .fixedSize()
           .help(sortHelpText(for: sortMode))
           .accessibilityLabel("Sort projects")
-          .popover(isPresented: $isSortPopoverPresented, arrowEdge: .bottom) {
-            ProjectSortList(
-              mode: sortMode,
-              onSelect: { picked in
-                // Dismiss the popover first so the user sees the
-                // re-sorted list as soon as the callback runs —
-                // leaving it open swallows the visual feedback they
-                // expect.
-                isSortPopoverPresented = false
-                if picked == .manual {
-                  onManualSortRequested()
-                } else {
-                  onSortModeChanged(picked)
-                }
-              }
-            )
-          }
         }
       }
       Spacer()
@@ -132,60 +136,6 @@ struct TagFilterPopoverFooter: View {
     case .joinOrder: return "Sort projects"
     case .activeFirst: return "Sorted by recent activity — click to change"
     case .manual: return "Sorted manually — click to change"
-    }
-  }
-}
-
-/// Three-row vertical list shown inside the sort popover. Visually
-/// mirrors `TagFilterList` so the two bottom-bar popovers share the
-/// same row chrome.
-private struct ProjectSortList: View {
-  let mode: ProjectSortMode
-  let onSelect: (ProjectSortMode) -> Void
-
-  @State private var hoveredMode: ProjectSortMode?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      row(.joinOrder, label: "By Date Added")
-      Divider().padding(.vertical, 2)
-      row(.activeFirst, label: "Recently Active")
-      Divider().padding(.vertical, 2)
-      row(.manual, label: "Manual Order…")
-    }
-    .padding(6)
-    .frame(minWidth: 200)
-  }
-
-  @ViewBuilder
-  private func row(_ value: ProjectSortMode, label: String) -> some View {
-    let isSelected = value == mode
-    let isHovered = hoveredMode == value
-    Button {
-      onSelect(value)
-    } label: {
-      HStack(spacing: 8) {
-        Color.clear.frame(width: 10, height: 10)
-        Text(label)
-          .font(.callout)
-          .foregroundStyle(isSelected ? Color.white : .primary)
-          .lineLimit(1)
-        Spacer(minLength: 8)
-        if isSelected {
-          Image(systemName: "checkmark")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.white)
-            .accessibilityHidden(true)
-        }
-      }
-      .padding(.horizontal, 8)
-      .padding(.vertical, 5)
-      .background(rowBackground(isSelected: isSelected, isHovered: isHovered))
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .onHover { hovering in
-      hoveredMode = hovering ? value : (hoveredMode == value ? nil : hoveredMode)
     }
   }
 }
