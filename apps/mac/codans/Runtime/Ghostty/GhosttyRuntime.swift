@@ -59,6 +59,11 @@ final class GhosttyRuntime {
   private var config: ghostty_config_t?
   let dispatcher = CallbackDispatcher()
   private var appFocusObservers: [NSObjectProtocol] = []
+  /// Retained `NSWorkspace`-center observers (screen + system wake). Held
+  /// separately from `appFocusObservers` because they live on
+  /// `NSWorkspace.shared.notificationCenter`, not the default center, and so
+  /// must be removed from that same center in deinit.
+  private var workspaceWakeObservers: [NSObjectProtocol] = []
 
   /// Back-reference to the engine whose event stream surfaces action decoder
   /// emits (`paneInfoChanged`, `paneActionRequested`, etc.). Weak to
@@ -168,6 +173,34 @@ final class GhosttyRuntime {
         self?.reloadAppConfig()
       }
     }
+
+    // Display sleep→wake and reconfiguration leave AppKit without a guaranteed
+    // layout pass, so a surface can keep a grid sized to a collapsed drawable —
+    // the terminal renders narrow after the screen turns back on. Re-sync every
+    // live surface's geometry on the wake / reconfiguration signals.
+    // `didChangeScreenParameters` lives on the default center; the screen /
+    // system wake notifications live on the NSWorkspace center.
+    appFocusObservers.append(
+      center.addObserver(
+        forName: NSApplication.didChangeScreenParametersNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated { self?.resyncAllSurfaceGeometry() }
+      }
+    )
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+    for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
+      workspaceWakeObservers.append(
+        workspaceCenter.addObserver(
+          forName: name,
+          object: nil,
+          queue: .main
+        ) { [weak self] _ in
+          MainActor.assumeIsolated { self?.resyncAllSurfaceGeometry() }
+        }
+      )
+    }
   }
 
   isolated deinit {
@@ -179,6 +212,12 @@ final class GhosttyRuntime {
       center.removeObserver(observer)
     }
     appFocusObservers.removeAll()
+
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+    for observer in workspaceWakeObservers {
+      workspaceCenter.removeObserver(observer)
+    }
+    workspaceWakeObservers.removeAll()
 
     for (_, pane) in surfacesByPaneID {
       pane.close()
@@ -235,6 +274,18 @@ final class GhosttyRuntime {
   func defocusAllSurfaces(except target: PaneID?) {
     for (pid, pane) in surfacesByPaneID where pid != target {
       pane.setFocus(false)
+    }
+  }
+
+  /// Re-sync every live surface's geometry and force a redraw. Invoked when the
+  /// screens wake, the system wakes, or the display configuration changes —
+  /// transitions after which AppKit may skip the layout pass that normally
+  /// keeps libghostty's grid in step with the view, leaving the terminal
+  /// rendered into a narrow column. Idempotent: a surface already at the right
+  /// size re-pushes the same value and libghostty dedupes it.
+  func resyncAllSurfaceGeometry() {
+    for pane in surfacesByPaneID.values {
+      pane.resyncGeometryAndRedraw()
     }
   }
 

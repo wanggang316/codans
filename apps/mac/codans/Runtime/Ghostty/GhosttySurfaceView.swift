@@ -103,6 +103,10 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// Outstanding next-tick focus reclaim. `nonisolated(unsafe)` so the
   /// nonisolated deinit can cancel it; only touched on the main actor.
   nonisolated(unsafe) private var pendingFocusClaim: Task<Void, Never>?
+  /// Outstanding deferred geometry resync raised by a display sleep→wake or
+  /// reconfiguration. `nonisolated(unsafe)` so the nonisolated deinit can
+  /// cancel it; only touched on the main actor.
+  nonisolated(unsafe) private var pendingGeometryResync: Task<Void, Never>?
 
   init(paneID: PaneID) {
     self.paneID = paneID
@@ -130,7 +134,10 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   // PaneSurface (2bbee60) and SurfaceInfo. AppKit handles the actual
   // teardown via NSView's dealloc; observers we add are removed when
   // the view leaves its window.
-  deinit { pendingFocusClaim?.cancel() }
+  deinit {
+    pendingFocusClaim?.cancel()
+    pendingGeometryResync?.cancel()
+  }
 
   // MARK: - Drag & drop
 
@@ -378,9 +385,15 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
 
   override func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
-    guard let surface else { return }
-    let scale = backingScaleFactor()
-    ghostty_surface_set_content_scale(surface, scale, scale)
+    // Re-push content scale AND device-pixel size together. Pushing only the
+    // content scale here left libghostty holding a stale size paired with a
+    // new scale whenever the backing scale changed without a bounds change —
+    // e.g. the window landing on a different-DPI display as the screen sleeps
+    // and wakes. ghostty derives grid columns from size ÷ scale, so a higher
+    // scale against the old size collapses the grid to a fraction of its
+    // width (the "terminal renders narrow after the screen turns back on"
+    // bug). pushGeometry guards a nil surface internally.
+    pushGeometry()
   }
 
   override func resize(withOldSuperviewSize oldSize: NSSize) {
@@ -402,6 +415,28 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     let px = convertToBacking(bounds.size)
     if px.width > 0, px.height > 0 {
       ghostty_surface_set_size(surface, UInt32(px.width), UInt32(px.height))
+    }
+  }
+
+  /// Recover rendering after the surface was hidden and shown again (display
+  /// sleep→wake, returning from another Space, un-minimise) or after a display
+  /// reconfiguration. AppKit does not reliably issue a layout/resize pass on
+  /// these transitions, so libghostty can be left with a grid sized to a
+  /// collapsed drawable — the terminal renders into a narrow column with the
+  /// rest of the pane blank. Re-push the current geometry (when it differs
+  /// from ghostty's stale size this triggers SIGWINCH + reflow; when it
+  /// matches, libghostty dedupes it) and force a redraw. A second push next
+  /// main-actor turn lands the final geometry if the wake notification fired
+  /// while the window's backing scale was still transitioning.
+  func resyncGeometryAndRedraw() {
+    guard let surface else { return }
+    pushGeometry()
+    ghostty_surface_refresh(surface)
+    pendingGeometryResync?.cancel()
+    pendingGeometryResync = Task { @MainActor [weak self] in
+      guard let self, !Task.isCancelled, let surface = self.surface else { return }
+      self.pushGeometry()
+      ghostty_surface_refresh(surface)
     }
   }
 
@@ -458,6 +493,10 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     if lastOcclusion == visible { return }
     lastOcclusion = visible
     ghostty_surface_set_occlusion(surface, visible)
+    // Becoming visible again (screen woke, Space returned, un-minimised) is
+    // the moment a grid left narrow by a collapsed drawable must be re-synced:
+    // AppKit won't issue a layout pass if the point bounds never changed.
+    if visible { resyncGeometryAndRedraw() }
   }
 
   // MARK: - Keyboard
