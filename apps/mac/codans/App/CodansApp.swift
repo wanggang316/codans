@@ -220,9 +220,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   /// the no-dialog branch applies (and which button is default-focused when the dialog
   /// IS shown).
   ///
-  /// Returns `.terminateNow` for keepRunning / snapshot so the subsequent
-  /// `willTerminate` hook still fires and the remaining persisted-state flushes run.
-  /// `.cancel` aborts the quit entirely.
+  /// Returns `.terminateLater` for keepRunning / snapshot: the daemon-disposition
+  /// work (`detachAllForQuit`) is now `async` — the `.snapshot` action awaits each
+  /// pane's daemon writing its `.snap` and closing — so we defer the actual
+  /// termination until that work finishes (or its bounded ceiling elapses) and
+  /// then `reply(toApplicationShouldTerminate: true)`. The subsequent `willTerminate`
+  /// hook still fires afterwards so the remaining persisted-state flushes run.
+  /// `.cancel` aborts the quit entirely and is unaffected by the snapshot path.
   nonisolated func applicationShouldTerminate(
     _ sender: NSApplication
   ) -> NSApplication.TerminateReply {
@@ -245,10 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // No dialog — apply the configured action directly. `detachAllForQuit` is a
         // no-op when there are no live clients, so skipping it for activePanes == 0
         // is purely an optimisation; the explicit guard keeps the no-panes path cheap.
-        if activePanes > 0 {
-          lifecycle?.detachAllForQuit(action: action)
-        }
-        return .terminateNow
+        guard activePanes > 0, let lifecycle else { return .terminateNow }
+        return Self.runDetachThenTerminate(lifecycle, action: action, sender: sender)
       }
 
       let choice = QuitConfirmationDialog.present(
@@ -257,15 +259,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       )
       switch choice {
       case .keepRunning:
-        lifecycle?.detachAllForQuit(action: .keepRunning)
-        return .terminateNow
+        guard let lifecycle else { return .terminateNow }
+        return Self.runDetachThenTerminate(lifecycle, action: .keepRunning, sender: sender)
       case .snapshot:
-        lifecycle?.detachAllForQuit(action: .snapshot)
-        return .terminateNow
+        guard let lifecycle else { return .terminateNow }
+        return Self.runDetachThenTerminate(lifecycle, action: .snapshot, sender: sender)
       case .cancel:
         return .terminateCancel
       }
     }
+  }
+
+  /// Drive the now-`async` `detachAllForQuit` from the synchronous
+  /// `applicationShouldTerminate` callback: spawn a `@MainActor` task that runs
+  /// the disposition work, then `reply(toApplicationShouldTerminate: true)`, and
+  /// return `.terminateLater` so AppKit keeps the process alive until that reply.
+  ///
+  /// The wait is bounded two ways so quit can never hang on a wedged daemon:
+  /// `detachAllForQuit(.snapshot)` itself is bounded by the per-pane snapshot
+  /// timeout, and an outer ceiling races the disposition work against a sleep —
+  /// whichever finishes first replies. `reply` is sent exactly once (the
+  /// `replied` guard) so a late completion after the ceiling cannot double-reply.
+  @MainActor
+  private static func runDetachThenTerminate(
+    _ lifecycle: SessionLifecycle,
+    action: QuitAction,
+    sender: NSApplication
+  ) -> NSApplication.TerminateReply {
+    // Hard ceiling on the total quit wait. `detachAllForQuit` is already
+    // bounded by the per-pane timeout × concurrency-window factor; this is a
+    // belt-and-suspenders cap so an unforeseen wedge inside the disposition
+    // work can never keep the app from exiting.
+    let ceiling: Duration = .seconds(20)
+    Task { @MainActor in
+      var replied = false
+      func replyOnce() {
+        guard !replied else { return }
+        replied = true
+        sender.reply(toApplicationShouldTerminate: true)
+      }
+      // Run the disposition work as a child task so the watchdog below can
+      // cancel it once the ceiling fires; both children stay on the main actor
+      // so the shared `replied` flag needs no extra synchronisation.
+      let work = Task { @MainActor in
+        await lifecycle.detachAllForQuit(action: action)
+      }
+      let watchdog = Task { @MainActor in
+        try? await Task.sleep(for: ceiling)
+        // Ceiling hit before the disposition work finished: stop waiting and
+        // let the app exit. `Task.sleep` throws `CancellationError` if the
+        // work finished first, in which case this branch is skipped.
+        guard !Task.isCancelled else { return }
+        work.cancel()
+        replyOnce()
+      }
+      // Await the disposition work; whichever lands first (it or the ceiling)
+      // calls `replyOnce`, then we cancel the watchdog so it does not linger.
+      await work.value
+      watchdog.cancel()
+      replyOnce()
+    }
+    return .terminateLater
   }
 
   /// Handles a banner click. Parses the deeplink the OSNotifier embedded
