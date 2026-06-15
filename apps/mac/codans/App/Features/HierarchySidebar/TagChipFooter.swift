@@ -26,11 +26,12 @@ struct TagFilterPopoverFooter: View {
   /// Right-side refresh glyph. Optional so previews / tests without a
   /// reconciler wired can drop it.
   var onRefreshTapped: (() -> Void)?
-  /// Project-sort popover wiring. When nil, the sort button is hidden —
-  /// preserves the existing footer shape in previews / tests that don't
-  /// thread sort state through.
-  var sortMode: ProjectSortMode?
-  var onSortModeChanged: ((ProjectSortMode) -> Void)?
+  /// Sort button wiring. When nil, the button is hidden — preserves the
+  /// existing footer shape in previews / tests that don't thread it
+  /// through. There is only one ordering the UI exposes (manual), so the
+  /// button drops straight into the inline reorder session; the computed
+  /// `joinOrder` / `activeFirst` modes stay in the model but are no
+  /// longer surfaced.
   var onManualSortRequested: (() -> Void)?
   /// Sidebar-relocated AgentState toggle. nil = hide the button
   /// entirely (used in previews / contexts without a registry wired).
@@ -47,35 +48,11 @@ struct TagFilterPopoverFooter: View {
       // without rewiring the call site, but the footer currently only
       // surfaces sort + refresh.
       HStack(spacing: 6) {
-        if let sortMode, let onSortModeChanged, let onManualSortRequested {
-          // Native `Menu` + inline `Picker` instead of a hand-rolled
-          // popover: the system renders the selection checkmark, hover
-          // highlight, and keyboard navigation, matching Finder's
-          // "Sort By" menu. The sort glyph stays visually neutral
-          // regardless of the active mode — unlike the tag filter,
-          // "sort order" is a navigation aid rather than a constraint
-          // hiding rows, so there is nothing to draw the eye to.
-          let sortSelection = Binding<ProjectSortMode>(
-            get: { sortMode },
-            set: { picked in
-              // "Manual Order…" opens the reorder sheet rather than
-              // flipping the mode directly; the catalog only switches
-              // to `.manual` once the user confirms that sheet.
-              if picked == .manual {
-                onManualSortRequested()
-              } else {
-                onSortModeChanged(picked)
-              }
-            }
-          )
-          Menu {
-            Picker("Sort By", selection: sortSelection) {
-              Text("By Date Added").tag(ProjectSortMode.joinOrder)
-              Text("Recently Active").tag(ProjectSortMode.activeFirst)
-              Text("Manual Order…").tag(ProjectSortMode.manual)
-            }
-            .pickerStyle(.inline)
-          } label: {
+        if let onManualSortRequested {
+          // Single-action sort: with the computed orders removed from the
+          // UI, the glyph drops straight into the inline reorder session
+          // instead of opening a menu.
+          Button(action: onManualSortRequested) {
             Image(systemName: "arrow.up.arrow.down")
               .font(.system(size: 11, weight: .regular))
               .foregroundStyle(.secondary)
@@ -83,11 +60,9 @@ struct TagFilterPopoverFooter: View {
               .contentShape(Rectangle())
               .accessibilityHidden(true)
           }
-          .menuStyle(.borderlessButton)
-          .menuIndicator(.hidden)
-          .fixedSize()
-          .help(sortHelpText(for: sortMode))
-          .accessibilityLabel("Sort projects")
+          .buttonStyle(.plain)
+          .help("Reorder projects")
+          .accessibilityLabel("Reorder projects")
         }
       }
       Spacer()
@@ -129,14 +104,6 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-  }
-
-  private func sortHelpText(for mode: ProjectSortMode) -> String {
-    switch mode {
-    case .joinOrder: return "Sort projects"
-    case .activeFirst: return "Sorted by recent activity — click to change"
-    case .manual: return "Sorted manually — click to change"
-    }
   }
 }
 

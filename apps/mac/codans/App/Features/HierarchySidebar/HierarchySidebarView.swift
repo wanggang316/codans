@@ -283,8 +283,6 @@ struct HierarchySidebarView: View {
         onUntaggedTapped: { store.send(.untaggedChipTapped) },
         onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
         onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-        sortMode: catalog.projectSortMode,
-        onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
         onManualSortRequested: { store.send(.beginProjectReorder) },
         onAgentStateTapped: agentStateStore == nil
           ? nil
@@ -626,9 +624,6 @@ struct HierarchySidebarView: View {
   /// the user how to act and carries the only way out of the session.
   private var reorderBanner: some View {
     HStack(spacing: 8) {
-      Image(systemName: "line.3.horizontal")
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
       Text("Drag to reorder projects")
         .font(.callout)
         .foregroundStyle(.secondary)
