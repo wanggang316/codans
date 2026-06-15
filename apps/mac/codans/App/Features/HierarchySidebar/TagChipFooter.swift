@@ -29,10 +29,13 @@ struct TagFilterPopoverFooter: View {
   /// Sort button wiring. When nil, the button is hidden — preserves the
   /// existing footer shape in previews / tests that don't thread it
   /// through. There is only one ordering the UI exposes (manual), so the
-  /// button drops straight into the inline reorder session; the computed
+  /// button toggles the inline reorder session directly; the computed
   /// `joinOrder` / `activeFirst` modes stay in the model but are no
   /// longer surfaced.
-  var onManualSortRequested: (() -> Void)?
+  var onReorderToggle: (() -> Void)?
+  /// Whether the inline reorder session is active. Tints the glyph and
+  /// flips its help / label so re-tapping reads as "exit".
+  var isReordering: Bool = false
   /// Sidebar-relocated AgentState toggle. nil = hide the button
   /// entirely (used in previews / contexts without a registry wired).
   var onAgentStateTapped: (() -> Void)?
@@ -48,21 +51,22 @@ struct TagFilterPopoverFooter: View {
       // without rewiring the call site, but the footer currently only
       // surfaces sort + refresh.
       HStack(spacing: 6) {
-        if let onManualSortRequested {
+        if let onReorderToggle {
           // Single-action sort: with the computed orders removed from the
-          // UI, the glyph drops straight into the inline reorder session
-          // instead of opening a menu.
-          Button(action: onManualSortRequested) {
+          // UI, the glyph toggles the inline reorder session — enter when
+          // idle, exit when already reordering. The accent tint marks the
+          // active state so the second tap reads as "exit".
+          Button(action: onReorderToggle) {
             Image(systemName: "arrow.up.arrow.down")
               .font(.system(size: 11, weight: .regular))
-              .foregroundStyle(.secondary)
+              .foregroundStyle(isReordering ? Color.accentColor : .secondary)
               .frame(width: 18, height: 18)
               .contentShape(Rectangle())
               .accessibilityHidden(true)
           }
           .buttonStyle(.plain)
-          .help("Reorder projects")
-          .accessibilityLabel("Reorder projects")
+          .help(isReordering ? "Done reordering" : "Reorder projects")
+          .accessibilityLabel(isReordering ? "Done reordering" : "Reorder projects")
         }
       }
       Spacer()

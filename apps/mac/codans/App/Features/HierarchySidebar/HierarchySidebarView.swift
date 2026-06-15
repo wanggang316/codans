@@ -283,7 +283,10 @@ struct HierarchySidebarView: View {
         onUntaggedTapped: { store.send(.untaggedChipTapped) },
         onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
         onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-        onManualSortRequested: { store.send(.beginProjectReorder) },
+        onReorderToggle: {
+          store.send(store.isReorderingProjects ? .endProjectReorder : .beginProjectReorder)
+        },
+        isReordering: isReordering,
         onAgentStateTapped: agentStateStore == nil
           ? nil
           : {
