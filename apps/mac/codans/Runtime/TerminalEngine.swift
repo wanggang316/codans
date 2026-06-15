@@ -1,5 +1,6 @@
 import Foundation
 import CodansCore
+import os.log
 
 /// Public-facing façade that composes `CatalogStore`, `HierarchyManager`, and
 /// `GhosttyRuntime` behind a fan-out event stream. Feature code (TCA clients,
@@ -62,6 +63,17 @@ final class TerminalEngine {
   /// a crash between launches no longer leaves recently-created panes
   /// invisible to the next launch's reaper.
   var sessionCoordinator: SessionCoordinator?
+
+  /// Snapshot-restore paths keyed by Pane, populated by `CodansApp` before
+  /// bring-up and consumed exactly once in `ensureSurface`. When a pane has an
+  /// entry, its first `attach` is built with `--restore-from <path>`; the entry
+  /// is removed on consumption so a later bring-up of the same pane in the same
+  /// session (close + reopen) gets a clean cold command with no stale restore.
+  var pendingRestores: [PaneID: URL] = [:]
+
+  private static let logger = Logger(
+    subsystem: "com.gumpw.codans.runtime", category: "runtime.session.lifecycle"
+  )
 
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
@@ -151,11 +163,25 @@ final class TerminalEngine {
     // `ZMX_DIR` is pinned, and its directory pre-created (zmx's own mkdir is
     // non-recursive), so the daemon socket lands where `ZmxControlClient`
     // looks for it.
+    // Consume any pending snapshot-restore path exactly once and bake it into
+    // the command below. `command` is built a single time and reused for BOTH
+    // the initial PaneSurface attempt and the HAN-82 ticked retry, so the path
+    // is consumed once and the retry still restores. A later ensureSurface for
+    // the same pane (close + reopen) finds the map already cleared, so it gets a
+    // clean cold command with no stale re-restore. Do NOT move this consume into
+    // the attempt/retry block or that consume-once invariant breaks.
+    let restorePath = consumeRestorePath(for: pane.id)
+    if restorePath != nil {
+      Self.logger.info(
+        "zmx.restore applied pane=\(pane.id.raw.uuidString, privacy: .public)"
+      )
+    }
     let session = ZmxAttachCommand.session(for: pane.id)
     let command = ZmxAttachCommand.build(
       zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
       session: session,
-      userCommand: nil
+      userCommand: nil,
+      restoreFrom: restorePath
     )
     let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
     try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
@@ -356,6 +382,16 @@ final class TerminalEngine {
 
   private func tabIDForPane(_ paneID: PaneID) -> TabID? {
     findPane(paneID)?.tabID
+  }
+
+  /// Remove and return the pending snapshot-restore path for a pane, if any.
+  /// Consume-once: the entry is dropped on read, so a second call for the same
+  /// pane (e.g. a close + reopen in the same session) returns `nil` and yields a
+  /// cold command with no stale re-restore. Extracted as its own method so the
+  /// consume-once mechanism is unit-testable without driving the libghostty
+  /// surface path.
+  func consumeRestorePath(for paneID: PaneID) -> String? {
+    pendingRestores.removeValue(forKey: paneID)?.path
   }
 
   /// Process-group leader PID of the pane's current foreground job, or
