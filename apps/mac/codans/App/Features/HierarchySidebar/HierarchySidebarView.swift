@@ -199,12 +199,12 @@ struct HierarchySidebarView: View {
     // tags; `.all` is the no-op default.
     let visibleProjects = catalog.sorted(filteredProjects(catalog: catalog))
     let untaggedExists = catalog.projects.contains { $0.tagIDs.isEmpty }
-    // Display-name index used by the manual-sort sheet; built from the
-    // authoritative array (not `visibleProjects`) so a hidden / filtered
-    // project still resolves to its real name in the dialog.
-    let projectNames: [ProjectID: String] = Dictionary(
-      uniqueKeysWithValues: catalog.projects.map { ($0.id, $0.name) }
-    )
+
+    let isReordering = store.isReorderingProjects
+    // The reorder session always shows the full, unfiltered Project set:
+    // a filtered subset would desync `ForEach.onMove`'s indices from the
+    // `catalog.projects` array that `reorderProjects` mutates.
+    let displayedProjects = isReordering ? catalog.sorted(catalog.projects) : visibleProjects
 
     // Sidebar body: the upper ZStack is the only area the
     // AgentState panel may draw into. Clipping this region is
@@ -215,9 +215,13 @@ struct HierarchySidebarView: View {
     // transition is cut at the footer's top edge and reads as sliding
     // up from beneath the fixed footer.
     VStack(spacing: 0) {
+      if isReordering {
+        reorderBanner
+      }
       ZStack(alignment: .bottom) {
         treeBody(
-          projects: visibleProjects,
+          projects: displayedProjects,
+          isReordering: isReordering,
           bottomInsetHeight: agentStatePanelOpen ? clampedAgentStatePanelHeight : 0
         )
           .background(
@@ -281,7 +285,7 @@ struct HierarchySidebarView: View {
         onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
         sortMode: catalog.projectSortMode,
         onSortModeChanged: { store.send(.projectSortModeChanged($0)) },
-        onManualSortRequested: { store.send(.manualSortSheetRequested) },
+        onManualSortRequested: { store.send(.beginProjectReorder) },
         onAgentStateTapped: agentStateStore == nil
           ? nil
           : {
@@ -312,18 +316,6 @@ struct HierarchySidebarView: View {
       withAnimation(.easeOut(duration: 0.18)) {
         agentStatePanelOpen = true
       }
-    }
-    .sheet(
-      isPresented: Binding(
-        get: { store.manualSortSheet != nil },
-        set: { isPresented in
-          if !isPresented {
-            store.send(.manualSortCancelled)
-          }
-        }
-      )
-    ) {
-      ManualProjectSortSheetView(projectNames: projectNames, store: store)
     }
     .toolbar { sidebarToolbarContent }
     .sheet(
@@ -475,7 +467,7 @@ struct HierarchySidebarView: View {
   // MARK: - Tree
 
   @ViewBuilder
-  private func treeBody(projects: [Project], bottomInsetHeight: Double) -> some View {
+  private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double) -> some View {
     if projects.isEmpty {
       emptyState
     } else {
@@ -503,8 +495,21 @@ struct HierarchySidebarView: View {
       // posture is fine for source-list-style sidebars.
       ScrollViewReader { proxy in
         List(selection: nativeSelectionBinding) {
-          ForEach(projects) { project in
-            projectSection(project, hotkeyIndex: hotkeyIndex)
+          if isReordering {
+            // Reorder session: one draggable header-only row per Project
+            // (worktrees hidden). A single row per ForEach element is what
+            // makes `.onMove` valid here — it forwards to `reorderProjects`,
+            // which moves `catalog.projects` and restamps `manualOrder`.
+            ForEach(projects) { project in
+              reorderProjectRow(project)
+            }
+            .onMove { source, destination in
+              store.send(.reorderProjects(from: source, to: destination))
+            }
+          } else {
+            ForEach(projects) { project in
+              projectSection(project, hotkeyIndex: hotkeyIndex)
+            }
           }
         }
         .listStyle(.sidebar)
@@ -613,6 +618,52 @@ struct HierarchySidebarView: View {
       return ShortcutDisplay.chord(for: fallback)
     }
     return nil
+  }
+
+  // MARK: - Project reorder session
+
+  /// Inline edit-mode banner shown above the list while reordering. Tells
+  /// the user how to act and carries the only way out of the session.
+  private var reorderBanner: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "line.3.horizontal")
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      Text("Drag to reorder projects")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+      Spacer(minLength: 8)
+      Button("Done") { store.send(.endProjectReorder) }
+        .keyboardShortcut(.defaultAction)
+        .controlSize(.small)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+    .background(.bar)
+    .overlay(alignment: .bottom) { Divider() }
+  }
+
+  /// Header-only Project row rendered during the reorder session: a
+  /// leading drag handle plus the Project name. No disclosure chevron,
+  /// hover chrome, or selection — the row exists only to be dragged.
+  private func reorderProjectRow(_ project: Project) -> some View {
+    HStack(spacing: 8) {
+      Image(systemName: "line.3.horizontal")
+        .font(.system(size: 12, weight: .regular))
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      Text(project.name)
+        .font(.body)
+        .lineLimit(1)
+        .truncationMode(.middle)
+      Spacer(minLength: 0)
+    }
+    .padding(.vertical, 2)
+    .contentShape(Rectangle())
+    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
+    .accessibilityLabel(project.name)
   }
 
   // MARK: - Project section
