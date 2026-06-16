@@ -443,10 +443,26 @@ private enum ScriptTargetLabel {
 /// installed symbol and a shortcut to launch the SF Symbols app. Colour reuses
 /// the Project colour-swatch design (`ColorChip`).
 private struct ScriptIconPopover: View {
+  /// Which sub-panel the popover shows. SF Symbols (curated grid + colour) vs.
+  /// Upload (user image). Mutually exclusive at render time, so they live in
+  /// separate tabs rather than one stacked column.
+  private enum IconTab: Hashable { case symbol, upload }
+
   let script: ScriptDefinition
   let onUpdate: (ScriptDefinition) -> Void
 
+  /// Defaults to Upload when the command already carries a custom icon so the
+  /// user lands on the tab that owns the current icon. Persists across the
+  /// re-renders that `onUpdate` triggers (SwiftUI keeps `@State` by identity),
+  /// so picking an icon never bounces the user back to the other tab.
+  @State private var tab: IconTab
   @State private var showImporter = false
+
+  init(script: ScriptDefinition, onUpdate: @escaping (ScriptDefinition) -> Void) {
+    self.script = script
+    self.onUpdate = onUpdate
+    _tab = State(initialValue: script.customIconPath == nil ? .symbol : .upload)
+  }
 
   private static let presets: [String] = [
     "terminal", "terminal.fill", "play.fill", "stop.fill",
@@ -511,14 +527,42 @@ private struct ScriptIconPopover: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("Icon & Color")
+      Text("Icon")
         .font(.headline)
-      Text("Pick a symbol and colour, type any SF Symbol name your system has, or upload your own image.")
+
+      Picker("Icon source", selection: $tab) {
+        Text("SF Symbols").tag(IconTab.symbol)
+        Text("Upload").tag(IconTab.upload)
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+
+      switch tab {
+      case .symbol: symbolTab
+      case .upload: uploadTab
+      }
+    }
+    .padding(12)
+    .frame(width: 360)
+    .fileImporter(
+      isPresented: $showImporter,
+      allowedContentTypes: [.image],
+      allowsMultipleSelection: false
+    ) { result in
+      if case .success(let urls) = result, let url = urls.first {
+        applyCustomIcon(from: url)
+      }
+    }
+  }
+
+  /// SF Symbols tab: free-text symbol field + curated grid + colour swatches.
+  @ViewBuilder
+  private var symbolTab: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Pick a symbol and colour, or type any SF Symbol name your system has.")
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
-
-      customIconRow
 
       HStack(spacing: 8) {
         TextField("SF Symbol name", text: symbolBinding)
@@ -552,34 +596,50 @@ private struct ScriptIconPopover: View {
 
       ScriptTintSwatchRow(selection: tintBinding)
     }
-    .padding(12)
-    .frame(width: 360)
-    .fileImporter(
-      isPresented: $showImporter,
-      allowedContentTypes: [.image],
-      allowsMultipleSelection: false
-    ) { result in
-      if case .success(let urls) = result, let url = urls.first {
-        applyCustomIcon(from: url)
-      }
-    }
   }
 
-  /// Upload affordance + live preview. When a custom icon is set it previews at
-  /// the left with a "Remove" button; the upload button reads "Replace…".
+  /// Upload tab: large preview of the current icon plus Upload / Replace /
+  /// Remove. The empty state shows a placeholder glyph and a single Upload
+  /// button. `minHeight` keeps the popover from shrinking jarringly relative
+  /// to the taller SF Symbols tab.
   @ViewBuilder
-  private var customIconRow: some View {
-    HStack(spacing: 8) {
-      ScriptIconView(script: script, size: 22)
-        .frame(width: 22, height: 22)
-      Button(script.customIconPath == nil ? "Upload Custom Icon…" : "Replace…") {
-        showImporter = true
-      }
-      if script.customIconPath != nil {
-        Button("Remove", role: .destructive, action: clearCustomIcon)
+  private var uploadTab: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Upload an image (PNG, JPEG, …) to use as this command's icon.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      HStack(spacing: 12) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 8)
+            .fill(Color(nsColor: .controlBackgroundColor))
+          RoundedRectangle(cornerRadius: 8)
+            .strokeBorder(Color(nsColor: .separatorColor))
+          if script.customIconPath != nil {
+            ScriptIconView(script: script, size: 44)
+          } else {
+            Image(systemName: "photo")
+              .font(.title)
+              .foregroundStyle(.secondary)
+              .accessibilityHidden(true)
+          }
+        }
+        .frame(width: 72, height: 72)
+
+        VStack(alignment: .leading, spacing: 6) {
+          Button(script.customIconPath == nil ? "Upload Icon…" : "Replace…") {
+            showImporter = true
+          }
+          if script.customIconPath != nil {
+            Button("Remove", role: .destructive, action: clearCustomIcon)
+          }
+        }
+        Spacer(minLength: 0)
       }
       Spacer(minLength: 0)
     }
+    .frame(minHeight: 150, alignment: .top)
   }
 
   /// A preset is "active" only when it's the current SF Symbol *and* no custom
