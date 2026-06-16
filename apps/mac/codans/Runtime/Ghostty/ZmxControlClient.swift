@@ -26,6 +26,18 @@ nonisolated enum ZmxControlClient {
     case closedWithoutReply
   }
 
+  /// Outcome of a best-effort `.snapshot` request. The daemon answers a
+  /// snapshot by writing its `<paneID>.snap` and then closing the socket,
+  /// so socket EOF before the deadline is the acknowledgement.
+  enum SnapshotResult: Equatable, Sendable {
+    /// Daemon closed the socket (EOF) before the deadline — snapshot done.
+    case acknowledged
+    /// Deadline elapsed before EOF; the snapshot may or may not have landed.
+    case timedOut
+    /// No control socket (daemon already gone) — nothing was sent.
+    case noSocket
+  }
+
   /// Filesystem path of the daemon control socket for a Pane. Must match
   /// the `ZMX_DIR` pin in `PaneDaemonBringup.canonicalSocketDirectory()`
   /// and the session name in `ZmxAttachCommand.session(for:)` — the daemon
@@ -109,6 +121,74 @@ nonisolated enum ZmxControlClient {
       guard let fd = try? openConnection(socketPath: path) else { return }
       defer { Darwin.close(fd) }
       try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .kill)))
+    }
+  }
+
+  /// Best-effort `.snapshot`: ask a pane's daemon to write its
+  /// `<paneID>.snap` now, then wait (bounded) for the daemon to close the
+  /// socket — its EOF is the acknowledgement that the snapshot landed.
+  ///
+  /// Mirrors `kill(for:)`'s transport (same `openConnection`/`sendAll`) and
+  /// `SessionReaper.sendOneShotKill`'s EOF-wait (`poll` on `POLLIN`, a
+  /// zero-length read = EOF = ack). The blocking connect/send/poll runs on a
+  /// background queue and is bridged back through a continuation, so callers
+  /// (e.g. `quit-snapshot-wiring`'s per-pane task group) never block the main
+  /// actor. A request-time log line is emitted before the EOF-wait so every
+  /// pane asked to snapshot is recorded regardless of outcome.
+  ///
+  /// A missing control socket (daemon already gone) is a silent no-op that
+  /// returns `.noSocket` — it never throws.
+  static func snapshot(
+    for paneID: PaneID, timeout: Duration = .seconds(2)
+  ) async -> SnapshotResult {
+    let path = socketPath(for: paneID)
+    let deadlineMs = max(Int(timeout.components.seconds * 1000), 1)
+    logger.info("zmx.snapshot send pane=\(paneID.raw.uuidString, privacy: .public)")
+    return await withCheckedContinuation { (cont: CheckedContinuation<SnapshotResult, Never>) in
+      DispatchQueue.global(qos: .userInitiated).async {
+        cont.resume(returning: runSnapshot(socketPath: path, deadlineMs: deadlineMs))
+      }
+    }
+  }
+
+  /// Blocking body of `snapshot(for:)`. Opens the socket, sends a framed
+  /// `.snapshot`, then polls for EOF up to `deadlineMs`. Runs off the main
+  /// actor (background queue). Connect/send failures and a missing socket
+  /// collapse to `.noSocket`; the daemon's EOF is `.acknowledged`; a hit
+  /// deadline is `.timedOut`.
+  private static func runSnapshot(socketPath: String, deadlineMs: Int) -> SnapshotResult {
+    guard let fd = try? openConnection(socketPath: socketPath) else { return .noSocket }
+    defer { Darwin.close(fd) }
+    guard (try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .snapshot)))) != nil else {
+      return .noSocket
+    }
+
+    // Wait for the daemon to close the socket (POLLIN + zero-length read =
+    // EOF = ack) or for the deadline to elapse. We never read a reply —
+    // `.snapshot` is acknowledged by the daemon's socket close, mirroring
+    // `SessionReaper.sendOneShotKill`'s one-way EOF wait.
+    let start = DispatchTime.now().uptimeNanoseconds
+    while true {
+      let elapsedMs = Int((DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+      let remaining = deadlineMs - elapsedMs
+      if remaining <= 0 { return .timedOut }
+      var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+      let pr = withUnsafeMutablePointer(to: &pfd) { Darwin.poll($0, 1, Int32(remaining)) }
+      if pr < 0 {
+        if errno == EINTR { continue }
+        return .timedOut
+      }
+      if pr == 0 { return .timedOut }
+      var byte: UInt8 = 0
+      let n = Darwin.read(fd, &byte, 1)
+      if n < 0 {
+        if errno == EINTR { continue }
+        return .timedOut
+      }
+      // EOF: daemon finished the snapshot and closed the socket.
+      if n == 0 { return .acknowledged }
+      // Any unsolicited bytes the daemon emits before closing are ignored —
+      // keep waiting for the close.
     }
   }
 

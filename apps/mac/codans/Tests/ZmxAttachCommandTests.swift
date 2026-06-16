@@ -42,4 +42,39 @@ struct ZmxAttachCommandTests {
     let cmd = ZmxAttachCommand.build(zmxPath: "/Users/a b/zmx", session: "s", userCommand: nil)
     #expect(cmd == "'/Users/a b/zmx' attach 's'")
   }
+
+  @Test
+  func nilRestoreFromIsByteIdenticalToBareAttach() {
+    let cmd = ZmxAttachCommand.build(
+      zmxPath: "/Apps/zmx", session: "abc", userCommand: nil, restoreFrom: nil)
+    #expect(cmd == "'/Apps/zmx' attach 'abc'")
+  }
+
+  @Test
+  func blankRestoreFromIsIgnored() {
+    let cmd = ZmxAttachCommand.build(
+      zmxPath: "/Apps/zmx", session: "abc", userCommand: nil, restoreFrom: "   ")
+    #expect(cmd == "'/Apps/zmx' attach 'abc'")
+  }
+
+  @Test
+  func restoreFromEmitsFlagAfterSession() {
+    let cmd = ZmxAttachCommand.build(
+      zmxPath: "/Apps/zmx", session: "abc", userCommand: nil, restoreFrom: "/p")
+    #expect(cmd == "'/Apps/zmx' attach 'abc' --restore-from '/p'")
+  }
+
+  @Test
+  func restoreFromPrecedesUserCommandWrapper() {
+    let cmd = ZmxAttachCommand.build(
+      zmxPath: "/Apps/zmx", session: "abc", userCommand: "cmd", restoreFrom: "/p")
+    #expect(cmd == "'/Apps/zmx' attach 'abc' --restore-from '/p' /bin/sh -c 'cmd'")
+  }
+
+  @Test
+  func restoreFromPathWithSpaceAndQuoteSurvivesQuoting() {
+    let cmd = ZmxAttachCommand.build(
+      zmxPath: "/Apps/zmx", session: "abc", userCommand: "cmd", restoreFrom: "/a b/it's.snap")
+    #expect(cmd == #"'/Apps/zmx' attach 'abc' --restore-from '/a b/it'\''s.snap' /bin/sh -c 'cmd'"#)
+  }
 }

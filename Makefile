@@ -18,7 +18,7 @@ help:
 	@echo "  mac-format        - swift-format in-place"
 	@echo "  mac-lint          - swiftlint"
 	@echo "  mac-check         - format + lint"
-	@echo "  mac-test          - (placeholder)"
+	@echo "  mac-test          - Run Swift unit tests (xcodebuild test, non-zero on failure)"
 	@echo "  mac-clean         - Remove workspace + project + Package.resolved"
 	@echo ""
 	@echo "website ($(WEB_DIR)):"
