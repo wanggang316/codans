@@ -6,6 +6,7 @@ import CodansCore
 /// sidebar's "Projects" DisclosureGroup.
 public enum SettingsSection: Hashable, Sendable {
   case general
+  case globalCommands
   case github
   case worktree
   case terminal
@@ -26,7 +27,8 @@ public enum SettingsSection: Hashable, Sendable {
 
   /// Canonical iteration order for global sidebar rows.
   public static let globals: [SettingsSection] = [
-    .general, .github, .worktree, .terminal, .notifications, .developer, .shortcuts, .updates, .about,
+    .general, .globalCommands, .github, .worktree, .terminal, .notifications, .developer, .shortcuts,
+    .updates, .about,
   ]
 
   /// Display name for global sidebar rows. Project-scoped cases return `nil` because
@@ -35,6 +37,7 @@ public enum SettingsSection: Hashable, Sendable {
   public var globalTitle: String? {
     switch self {
     case .general: return "General"
+    case .globalCommands: return "Global Commands"
     case .github: return "GitHub"
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"

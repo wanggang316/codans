@@ -1212,11 +1212,32 @@ struct RootFeature {
             }
           }
 
+        case .runGlobalScriptRequested(let scriptID):
+          // Same selection-resolution + staleness rationale as
+          // `runScriptRequested`, routed through the global run path which
+          // resolves the script from `general.globalScripts`.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
+          let client = hierarchyClient
+          return .run { send in
+            do {
+              try await client.runGlobalScript(scriptID, projectID, worktreeID)
+            } catch let error as RunScriptError {
+              await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
+            } catch {
+              await send(.statusBar(.push(.warning("Run script failed: \(error.localizedDescription)"))))
+            }
+          }
+
         case .stopScriptRequested(let scriptID):
           // Same selection-resolution + staleness rationale as
           // `runScriptRequested`. `stopScript` is a synchronous, best-effort
           // MainActor call (sends Ctrl-C to the tracked run pane), so it runs
           // inline like the pane-busy writers rather than through `.run`.
+          // Serves both project and global commands (the run pane is keyed by
+          // worktree+scriptID).
           guard
             let projectID = state.selection.projectID,
             let worktreeID = state.selection.worktreeID
@@ -1229,6 +1250,14 @@ struct RootFeature {
           return .run { _ in
             await MainActor.run {
               presenter.openAt(.projectScripts(projectID))
+            }
+          }
+
+        case .manageGlobalScriptsRequested:
+          let presenter = settingsWindowPresenter
+          return .run { _ in
+            await MainActor.run {
+              presenter.openAt(.globalCommands)
             }
           }
         }
@@ -1978,6 +2007,21 @@ struct RootFeature {
       return .run { send in
         do {
           try await client.runScript(scriptID, projectID, worktreeID)
+        } catch let error as RunScriptError {
+          await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
+        } catch {
+          await send(.statusBar(.push(.warning("Run script failed: \(error.localizedDescription)"))))
+        }
+      }
+
+    // Global commands — palette item carries the (projectID, worktreeID,
+    // scriptID) triple; fan out into the same global run-script effect the
+    // WorktreeHeader split-button uses, so failure handling stays in one place.
+    case .runGlobalScript(let projectID, let worktreeID, let scriptID):
+      let client = hierarchyClient
+      return .run { send in
+        do {
+          try await client.runGlobalScript(scriptID, projectID, worktreeID)
         } catch let error as RunScriptError {
           await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
         } catch {

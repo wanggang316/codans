@@ -411,6 +411,18 @@ nonisolated struct HierarchyClient: Sendable {
       _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
     ) async throws -> Void
 
+  /// Runs a user-defined `ScriptDefinition` from `Settings.general.globalScripts`
+  /// (the project-agnostic global command list) in the given Worktree. Resolution
+  /// reads the global list instead of a Project's scripts; everything downstream
+  /// (tab/pane spawn, run-pane reuse, Run/Stop tracking, onFinished policy) is
+  /// shared with `runScript`. `projectID` + `worktreeID` only name where to spawn —
+  /// the selected Worktree's context. Throws `RunScriptError.unknownScript` when the
+  /// id is absent from `globalScripts`; `.missingWorktree` when the worktree is gone.
+  var runGlobalScript:
+    @MainActor @Sendable (
+      _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
+    ) async throws -> Void
+
   /// Interrupts a running script by sending Ctrl-C (`\u{3}`) to the pane the
   /// script last spawned in `worktreeID`. The pane is left open so the next
   /// run reuses it. Best-effort: a no-op when no run pane is tracked (or it
@@ -807,6 +819,16 @@ extension HierarchyClient {
           terminalClient: terminalClient
         )
       },
+      runGlobalScript: { [weak settings] scriptID, projectID, worktreeID in
+        try await runGlobalScript(
+          scriptID: scriptID,
+          projectID: projectID,
+          worktreeID: worktreeID,
+          manager: manager,
+          settings: settings,
+          terminalClient: terminalClient
+        )
+      },
       stopScript: { scriptID, _, worktreeID in
         stopScript(
           scriptID: scriptID,
@@ -903,6 +925,60 @@ extension HierarchyClient {
     else {
       throw RunScriptError.unknownScript(scriptID)
     }
+    try await runResolvedScript(
+      script: script,
+      projectID: projectID,
+      worktreeID: worktreeID,
+      manager: manager,
+      snapshot: snapshot,
+      terminalClient: terminalClient
+    )
+  }
+
+  /// Global-command sibling of `runScript`: resolves the `ScriptDefinition`
+  /// from `Settings.general.globalScripts` rather than a Project's scripts,
+  /// then hands off to the shared `runResolvedScript` pipeline. `projectID` /
+  /// `worktreeID` name the spawn target (the selected Worktree).
+  @MainActor
+  private static func runGlobalScript(
+    scriptID: UUID,
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    manager: HierarchyManager,
+    settings: SettingsStore?,
+    terminalClient: TerminalClient?
+  ) async throws {
+    let snapshot = settings?.settings ?? .default
+    guard let script = snapshot.general.globalScripts.first(where: { $0.id == scriptID })
+    else {
+      throw RunScriptError.unknownScript(scriptID)
+    }
+    try await runResolvedScript(
+      script: script,
+      projectID: projectID,
+      worktreeID: worktreeID,
+      manager: manager,
+      snapshot: snapshot,
+      terminalClient: terminalClient
+    )
+  }
+
+  /// Shared execution pipeline for a fully-resolved `ScriptDefinition`,
+  /// regardless of whether it came from a Project's `scripts` or the global
+  /// `general.globalScripts` list. Resolves the worktree cwd + env, honours
+  /// the run-pane reuse / Run-Stop tracking / onFinished policy, and spawns
+  /// the tab/pane. Run-pane tracking keys on (worktreeID, scriptID); global
+  /// and project scripts never collide because each carries a distinct UUID.
+  @MainActor
+  private static func runResolvedScript(
+    script: ScriptDefinition,
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    manager: HierarchyManager,
+    snapshot: Settings,
+    terminalClient: TerminalClient?
+  ) async throws {
+    let scriptID = script.id
     var foundWorktreePath: String?
     outer: for project in manager.catalog.projects where project.id == projectID {
       for worktree in project.worktrees where worktree.id == worktreeID {
@@ -1569,6 +1645,7 @@ extension HierarchyClient: DependencyKey {
     movePane: { _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeArchivedWithLifecycle: { _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
@@ -1671,6 +1748,7 @@ extension HierarchyClient: DependencyKey {
     movePane: unimplemented("HierarchyClient.movePane"),
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
+    runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
     stopScript: unimplemented("HierarchyClient.stopScript"),
     setWorktreeArchivedWithLifecycle: unimplemented(
       "HierarchyClient.setWorktreeArchivedWithLifecycle"

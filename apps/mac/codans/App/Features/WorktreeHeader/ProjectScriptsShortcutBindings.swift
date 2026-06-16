@@ -27,10 +27,16 @@ struct ProjectScriptsShortcutBindings: View {
 
   var body: some View {
     let scripts = settingsStore.settings.projects[projectID]?.scripts ?? []
+    let globalScripts = settingsStore.settings.general.globalScripts
     ForEach(scripts) { script in
       shadow(for: script)
     }
-    stopChord(scripts: scripts)
+    ForEach(globalScripts) { script in
+      shadow(for: script, isGlobal: true)
+    }
+    // Either list can hold the script currently running in this worktree; the
+    // ⌘. stop chord targets whichever it is.
+    stopChord(scripts: scripts + globalScripts)
   }
 
   /// ⌘. interrupts the run-script currently executing in this worktree — the
@@ -54,13 +60,19 @@ struct ProjectScriptsShortcutBindings: View {
     }
   }
 
+  /// `isGlobal` routes the chord through the global run path; project scripts
+  /// use the project run path. Both stop via the shared ⌘. chord above.
   @ViewBuilder
-  private func shadow(for script: ScriptDefinition) -> some View {
+  private func shadow(for script: ScriptDefinition, isGlobal: Bool = false) -> some View {
     if let chord = script.keyboardShortcut, chord.isEnabled, chord.keyCode != 0,
       let key = ShortcutDisplay.keyEquivalent(for: chord.keyCode)
     {
       Button {
-        store.send(.runScriptTapped(scriptID: script.id))
+        if isGlobal {
+          store.send(.runGlobalScriptTapped(scriptID: script.id))
+        } else {
+          store.send(.runScriptTapped(scriptID: script.id))
+        }
       } label: {
         EmptyView()
       }

@@ -38,6 +38,11 @@ enum CommandPaletteItems {
         items.append(
           contentsOf: projectScriptItems(projectID: projectID, worktreeID: worktreeID)
         )
+        // Global commands (`general.globalScripts`) run in the selected
+        // Worktree, so they're gated on the same selection as project scripts.
+        items.append(
+          contentsOf: globalScriptItems(projectID: projectID, worktreeID: worktreeID)
+        )
       }
     }
     if let focusedPaneID {
@@ -216,6 +221,31 @@ enum CommandPaletteItems {
         subtitle: script.kind.defaultName,
         icon: script.resolvedSystemImage,
         kind: .runProjectScript(projectID, worktreeID, script.id)
+      )
+    }
+  }
+
+  /// Global-command items, one per `GeneralSettings.globalScripts` entry. Pulls
+  /// the list through `SettingsWriter` so the palette mirrors live
+  /// `settings.json` state. Carries the selection's `(projectID, worktreeID)`
+  /// as the spawn target. Subtitle is fixed to "Global Command" so these are
+  /// distinguishable from a same-named project command in the result list.
+  /// The `id` is keyed only by the script's stable UUID (no project prefix)
+  /// because a global command is the same entry regardless of which Worktree
+  /// is selected.
+  private static func globalScriptItems(
+    projectID: ProjectID,
+    worktreeID: WorktreeID
+  ) -> [CommandPaletteItem] {
+    @Dependency(SettingsWriter.self) var settingsWriter
+    let scripts = settingsWriter.readSnapshotSync().general.globalScripts
+    return scripts.map { script in
+      CommandPaletteItem(
+        id: "global.script.\(script.id.uuidString)",
+        title: script.displayName,
+        subtitle: "Global Command",
+        icon: script.resolvedSystemImage,
+        kind: .runGlobalScript(projectID, worktreeID, script.id)
       )
     }
   }

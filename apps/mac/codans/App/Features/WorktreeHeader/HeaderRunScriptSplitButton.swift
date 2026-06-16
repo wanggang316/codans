@@ -47,6 +47,10 @@ struct HeaderRunScriptSplitButton: View {
     //    underlying NSMenu, which otherwise caches its items across
     //    open / close cycles).
     let scripts = settingsStore.settings.projects[projectID]?.scripts ?? []
+    // Global commands (`general.globalScripts`) surface in the same dropdown
+    // under their own section, below the Project commands. Read here in body
+    // for the same Observation + `.id(_:)` reasons as the project list.
+    let globalScripts = settingsStore.settings.general.globalScripts
     // Primary is whichever script the user has placed at index 0
     // in the Settings → Project Scripts list. Drag-to-reorder is
     // the only knob the user has — preferring `.run` kind over
@@ -82,12 +86,12 @@ struct HeaderRunScriptSplitButton: View {
     // view when a run pane starts/stops. Folded into the Menu `.id` below so
     // the cached NSMenu's items flip Run⇄Stop instead of staying stale.
     let runningSignature =
-      scripts
+      (scripts + globalScripts)
       .map { hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id) ? "1" : "0" }
       .joined()
 
     Menu {
-      caretMenu(scripts: scripts)
+      caretMenu(scripts: scripts, globalScripts: globalScripts)
     } label: {
       // Manual HStack — `Label(_:systemImage:)` collapses to a
       // single-colour template via the toolbar's default LabelStyle,
@@ -129,25 +133,51 @@ struct HeaderRunScriptSplitButton: View {
     .help(primaryHelp)
     // Force Menu rebuild when scripts mutate. The signature folds id +
     // displayName + icon + tint + ORDER so add / edit / delete /
-    // reorder all invalidate. Without this, NSMenu caches its items
-    // across open cycles and Settings-side edits don't reflect here.
-    .id(Self.identitySignature(of: scripts) + "#" + runningSignature)
+    // reorder all invalidate, across BOTH the project and global lists.
+    // Without this, NSMenu caches its items across open cycles and
+    // Settings-side edits don't reflect here.
+    .id(
+      Self.identitySignature(of: scripts) + "##"
+        + Self.identitySignature(of: globalScripts) + "#" + runningSignature)
   }
 
   // MARK: - Caret menu
 
+  /// Menu order, top to bottom: Project Commands section, Global Commands
+  /// section, divider, then the two "Manage …" footers. A section is omitted
+  /// when its list is empty so an empty group header never shows; the Manage
+  /// footers always render so the user can reach either pane from here.
   @ViewBuilder
-  private func caretMenu(scripts: [ScriptDefinition]) -> some View {
-    ForEach(scripts) { script in
-      menuButton(for: script)
-    }
+  private func caretMenu(
+    scripts: [ScriptDefinition],
+    globalScripts: [ScriptDefinition]
+  ) -> some View {
     if !scripts.isEmpty {
+      Section("Project Commands") {
+        ForEach(scripts) { script in
+          menuButton(for: script)
+        }
+      }
+    }
+    if !globalScripts.isEmpty {
+      Section("Global Commands") {
+        ForEach(globalScripts) { script in
+          menuButton(for: script, isGlobal: true)
+        }
+      }
+    }
+    if !scripts.isEmpty || !globalScripts.isEmpty {
       Divider()
     }
     Button {
       store.send(.manageScriptsTapped(projectID: projectID))
     } label: {
-      Label("Manage Scripts…", systemImage: "gearshape")
+      Label("Manage Project Commands…", systemImage: "gearshape")
+    }
+    Button {
+      store.send(.manageGlobalScriptsTapped)
+    } label: {
+      Label("Manage Global Commands…", systemImage: "globe")
     }
   }
 
@@ -159,14 +189,21 @@ struct HeaderRunScriptSplitButton: View {
   /// stored `ShortcutBinding` to SwiftUI's KeyEquivalent +
   /// EventModifiers goes through `ShortcutDisplay`, the same helper
   /// the system Shortcuts pane uses.
+  ///
+  /// `isGlobal` switches the run dispatch between the project run path
+  /// (`runScriptTapped`) and the global run path (`runGlobalScriptTapped`).
+  /// Stop is shared (`stopScriptTapped`) because the run pane is keyed by
+  /// (worktree, scriptID), unique across both lists.
   @ViewBuilder
-  private func menuButton(for script: ScriptDefinition) -> some View {
+  private func menuButton(for script: ScriptDefinition, isGlobal: Bool = false) -> some View {
     // Mirror the primary half: a running script's menu row becomes a red
     // "Stop …" that interrupts it; the chord (below) toggles the same way.
     let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
     let button = Button {
       if isRunning {
         store.send(.stopScriptTapped(scriptID: script.id))
+      } else if isGlobal {
+        store.send(.runGlobalScriptTapped(scriptID: script.id))
       } else {
         store.send(.runScriptTapped(scriptID: script.id))
       }
