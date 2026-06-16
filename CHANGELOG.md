@@ -20,6 +20,36 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.7] - 2026-06-17
+
+### Added
+
+- **Migrate your old touch-code state to Codans.** A new
+  `scripts/migrate-touch-code-to-codans.py` brings your touch-code config and
+  worktrees over to Codans, repairing the git-worktree metadata that a manual
+  move would break. Dry-run by default; pass `--apply` to make changes, and
+  quit the app first.
+
+### Changed
+
+- **Reordering projects in the sidebar is now a direct drag.** Tapping the sort
+  glyph drops the sidebar straight into a reorder session with drag handles — no
+  separate menu or sheet — and tapping it again finishes.
+- **The About pane links to codans.dev.** The website line in Settings → About
+  is now a clickable link.
+
+### Fixed
+
+- **"Snapshot and exit" on quit now actually preserves your panes.** Choosing
+  Settings → General → On quit → "Snapshot and exit" used to bring panes back
+  empty; it now restores each pane's last screen, scrollback, and working
+  directory into a fresh shell on relaunch. (Use "Keep session running" to keep
+  the programs themselves running.)
+- **Panes no longer get stuck at the wrong size after the display sleeps.**
+  Waking the display, or uncovering a window that was behind another, no longer
+  leaves a pane rendering at a stale width — the terminal resyncs its size and
+  repaints.
+
 ## [0.4.6] - 2026-06-11
 
 ### Changed
