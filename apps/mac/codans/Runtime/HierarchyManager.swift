@@ -65,10 +65,32 @@ final class HierarchyManager {
   /// insert/remove; the dirty predicates OR the two together.
   private var commandBusyPanes: Set<PaneID> = []
 
-  init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
+  /// Upper bound on how long a foreground command keeps a pane in
+  /// `commandBusyPanes`. A command that actually finishes flips the poller's
+  /// `setPaneCommandBusy(_:false)` and clears the flag at once; this timeout
+  /// is the backstop for programs that legitimately hold the foreground
+  /// indefinitely — pagers (`git branch` → `less`), dev servers
+  /// (`npm run dev`), REPLs, full-screen TUIs (`vim` / `top`). Past this
+  /// window a still-foreground command is a steady interactive state, not a
+  /// "loading" worth spinning over, so it ages out. Injected so tests can
+  /// drive expiry without wall-clock waits.
+  @ObservationIgnored private let commandBusyMaxDuration: Duration
+
+  /// Per-pane expiry tasks backing `commandBusyMaxDuration`. `@ObservationIgnored`
+  /// so scheduling / cancelling a timer never invalidates SwiftUI views — only
+  /// the `commandBusyPanes` mutation a fired timer performs does.
+  @ObservationIgnored private var commandBusyTimers: [PaneID: Task<Void, Never>] = [:]
+
+  init(
+    catalog: Catalog,
+    store: CatalogStore,
+    runtime: HierarchyRuntime,
+    commandBusyMaxDuration: Duration = .seconds(5)
+  ) {
     self.catalog = catalog
     self.store = store
     self.runtime = runtime
+    self.commandBusyMaxDuration = commandBusyMaxDuration
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
     let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
@@ -998,7 +1020,7 @@ final class HierarchyManager {
       for pane in worktree.tabs.flatMap({ $0.panes }) {
         runtime.closeSurface(for: pane.id)
         runningPanes.remove(pane.id)
-        commandBusyPanes.remove(pane.id)
+        clearCommandBusy(pane.id)
       }
       if let idx = catalog.projects[projectIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
         catalog.projects[projectIndex].worktrees[idx].archived = true
@@ -1053,7 +1075,7 @@ final class HierarchyManager {
       for pane in worktree.tabs.flatMap({ $0.panes }) {
         runtime.closeSurface(for: pane.id)
         runningPanes.remove(pane.id)
-        commandBusyPanes.remove(pane.id)
+        clearCommandBusy(pane.id)
       }
       for tab in worktree.tabs {
         lastFocusedPaneByTab.removeValue(forKey: tab.id)
@@ -1138,7 +1160,7 @@ final class HierarchyManager {
     for pane in tab.panes {
       runtime.closeSurface(for: pane.id)
       runningPanes.remove(pane.id)
-      commandBusyPanes.remove(pane.id)
+      clearCommandBusy(pane.id)
     }
     lastFocusedPaneByTab.removeValue(forKey: id)
 
@@ -1529,8 +1551,37 @@ final class HierarchyManager {
   /// Sets whether `paneID`'s foreground process group is a running command.
   /// Idempotent. Fed by the foreground-job poller via the root reducer; the
   /// dirty predicates OR this with the OSC-driven `runningPanes`.
+  ///
+  /// A fresh busy report arms a `commandBusyMaxDuration` expiry timer so a
+  /// program that holds the foreground forever (pager / dev server / TUI)
+  /// stops pinning the spinner. Re-reports for an already-busy pane keep the
+  /// original deadline — the poller re-emits on every job change, and a
+  /// long-lived command must age out rather than have its timer reset.
   func setPaneCommandBusy(_ paneID: PaneID, _ busy: Bool) {
-    if busy { commandBusyPanes.insert(paneID) } else { commandBusyPanes.remove(paneID) }
+    guard busy else {
+      clearCommandBusy(paneID)
+      return
+    }
+    guard !commandBusyPanes.contains(paneID) else { return }
+    commandBusyPanes.insert(paneID)
+    let duration = commandBusyMaxDuration
+    commandBusyTimers[paneID]?.cancel()
+    commandBusyTimers[paneID] = Task { [weak self] in
+      try? await Task.sleep(for: duration)
+      guard !Task.isCancelled else { return }
+      self?.clearCommandBusy(paneID)
+    }
+  }
+
+  /// The single clear path for `commandBusyPanes`: drops the flag and tears
+  /// down the pane's expiry timer so a timer never outlives the membership it
+  /// guards. Used by the poller's "command finished" report, the expiry timer
+  /// itself (cancelling an already-finished task is a no-op), and pane
+  /// teardown. Idempotent.
+  private func clearCommandBusy(_ paneID: PaneID) {
+    commandBusyPanes.remove(paneID)
+    commandBusyTimers[paneID]?.cancel()
+    commandBusyTimers[paneID] = nil
   }
 
   /// True when any pane inside `tabID` is currently marked running.
@@ -1786,7 +1837,7 @@ final class HierarchyManager {
 
     runtime.closeSurface(for: paneID)
     runningPanes.remove(paneID)
-    commandBusyPanes.remove(paneID)
+    clearCommandBusy(paneID)
     if lastFocusedPaneByTab[tabID] == paneID {
       lastFocusedPaneByTab.removeValue(forKey: tabID)
     }

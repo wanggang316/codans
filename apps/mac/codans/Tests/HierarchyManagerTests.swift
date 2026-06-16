@@ -745,4 +745,84 @@ struct HierarchyManagerTests {
     try manager.closePane(tabAPane2, in: tabA, in: wt, in: pr)
     #expect(!manager.tabIsDirty(tabA))
   }
+
+  @Test
+  func commandBusyExpiresAfterMaxDuration() async throws {
+    let timeout: Duration = .milliseconds(50)
+    let (m, wt, tabID, paneID) = try await makeManagerWithPane(
+      commandBusyMaxDuration: timeout
+    )
+
+    m.setPaneCommandBusy(paneID, true)
+    #expect(m.tabIsDirty(tabID))
+    #expect(m.worktreeIsDirty(wt))
+
+    // A foreground command that never finishes (dev server, pager, TUI) must
+    // stop pinning the spinner once it ages past the timeout. Wait well past
+    // it so the assertion does not race a late-firing timer.
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(!m.tabIsDirty(tabID))
+    #expect(!m.worktreeIsDirty(wt))
+  }
+
+  @Test
+  func commandBusyRepeatReportsStillExpire() async throws {
+    let timeout: Duration = .milliseconds(50)
+    let (m, _, tabID, paneID) = try await makeManagerWithPane(
+      commandBusyMaxDuration: timeout
+    )
+
+    // The poller re-emits busy=true on every job change; repeated reports for
+    // an already-busy pane must neither stack timers nor block expiry.
+    m.setPaneCommandBusy(paneID, true)
+    m.setPaneCommandBusy(paneID, true)
+    #expect(m.tabIsDirty(tabID))
+
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(!m.tabIsDirty(tabID))
+  }
+
+  @Test
+  func commandBusyClearedBeforeTimeoutStaysClear() async throws {
+    let timeout: Duration = .milliseconds(50)
+    let (m, _, tabID, paneID) = try await makeManagerWithPane(
+      commandBusyMaxDuration: timeout
+    )
+
+    // A command that finishes normally clears at once; the cancelled timer
+    // must not fire later and resurrect the dirty flag.
+    m.setPaneCommandBusy(paneID, true)
+    m.setPaneCommandBusy(paneID, false)
+    #expect(!m.tabIsDirty(tabID))
+
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(!m.tabIsDirty(tabID))
+  }
+
+  /// Builds an isolated manager with a custom command-busy timeout plus a
+  /// single project → worktree → tab → pane. Expiry tests need a short
+  /// timeout; the shared `manager` keeps the 5s default so the other tests
+  /// never wait on a real timer.
+  private func makeManagerWithPane(
+    commandBusyMaxDuration: Duration
+  ) async throws -> (HierarchyManager, WorktreeID, TabID, PaneID) {
+    let tempURL = FileManager.default.temporaryDirectory
+      .appending(component: UUID().uuidString + ".json")
+    let m = HierarchyManager(
+      catalog: .default,
+      store: CatalogStore(fileURL: tempURL),
+      runtime: FakeHierarchyRuntime(),
+      commandBusyMaxDuration: commandBusyMaxDuration
+    )
+    let projectID = m.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
+    let worktreeID = try m.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main"
+    )
+    let tabID = try m.createTab(in: worktreeID, in: projectID, name: nil)
+    let paneID = try await m.openPane(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/tmp", initialCommand: nil
+    )
+    return (m, worktreeID, tabID, paneID)
+  }
 }
