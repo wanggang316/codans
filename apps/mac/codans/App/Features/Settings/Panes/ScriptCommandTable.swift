@@ -590,7 +590,11 @@ private struct ScriptIconPopover: View {
         }
         .padding(12)
       }
-      .frame(maxHeight: 124)
+      // Fixed (not max) height: under the tab layout's intrinsic sizing a
+      // `maxHeight` ScrollView collapses to a single visible row. A fixed
+      // height reserves the full grid (all preset rows) like the pre-tab
+      // popover did.
+      .frame(height: 124)
 
       Divider()
 
