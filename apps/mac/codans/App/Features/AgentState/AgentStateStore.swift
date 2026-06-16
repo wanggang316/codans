@@ -1,7 +1,7 @@
+import CodansCore
 import Foundation
 import OSLog
 import Observation
-import CodansCore
 
 private let storeLogger = Logger(
   subsystem: "com.gumpw.codans.agentstate", category: "store"
@@ -80,14 +80,26 @@ final class AgentStateStore {
     var userInputSeen: Bool
     var lastViewportText: String?
     var lastWorkingAt: Date?
+    /// True only for a pane seeded from the persisted quit snapshot that
+    /// has not yet received a live viewport classification. While set,
+    /// `refresh` holds the restored display state instead of deriving a
+    /// synthetic `.idle` from the (still-absent) viewport text — otherwise
+    /// the `onAgentBound` rebind at launch would collapse a resumed
+    /// working/blocked badge. Cleared the instant a real viewport lands
+    /// (`applyViewportText`).
+    var awaitingFirstClassification: Bool
 
-    static func fresh(userInputSeen: Bool = false) -> Self {
+    static func fresh(
+      userInputSeen: Bool = false,
+      awaitingFirstClassification: Bool = false
+    ) -> Self {
       Self(
         rawState: .idle,
         seen: true,
         userInputSeen: userInputSeen,
         lastViewportText: nil,
-        lastWorkingAt: nil
+        lastWorkingAt: nil,
+        awaitingFirstClassification: awaitingFirstClassification
       )
     }
   }
@@ -222,10 +234,11 @@ final class AgentStateStore {
   ///
   /// If a viewport snapshot already classifies as `.working` or `.blocked`
   /// for the bound kind, treat it as user-input observed. This catches
-  /// the "agent was already running when the binding formed" case (app
-  /// restart with a restored pane, or a fresh pane that an external trigger
-  /// spawned with an immediately-running agent) so the badge surfaces the
-  /// classifier output instead of staying `.idle` until the user types.
+  /// the "agent was already running when the binding formed" case (a fresh
+  /// pane that an external trigger spawned with an immediately-running
+  /// agent) so the badge surfaces the classifier output instead of staying
+  /// `.idle` until the user types. The app-restart case is handled
+  /// separately by the persisted seed (see `seedRestored`), preserved below.
   func onAgentBound(
     _ paneID: PaneID,
     kind: AgentKind,
@@ -245,11 +258,17 @@ final class AgentStateStore {
     } else {
       scratch[paneID] = .fresh(userInputSeen: effectiveUserInputSeen)
     }
+    // Preserve a state seeded from the persisted quit snapshot
+    // (`seedRestored`). The binder re-identifies the restored agent and
+    // calls this on launch; hardcoding `.idle` here dropped the resumed
+    // working/blocked badge before any live viewport arrived. Fresh
+    // bindings have no prior entry and correctly start `.idle`.
+    let seeded = entries[paneID]
     entries[paneID] = AgentEntry(
       kind: kind,
       sessionID: sessionID,
-      state: .idle,
-      lastTransitionAt: now()
+      state: seeded?.state ?? .idle,
+      lastTransitionAt: seeded?.lastTransitionAt ?? now()
     )
     refresh(paneID)
   }
@@ -280,7 +299,10 @@ final class AgentStateStore {
         state: record.state,
         lastTransitionAt: now()
       )
-      scratch[record.paneID] = .fresh(userInputSeen: true)
+      scratch[record.paneID] = .fresh(
+        userInputSeen: true,
+        awaitingFirstClassification: true
+      )
     }
   }
 
@@ -319,6 +341,9 @@ final class AgentStateStore {
   private func applyViewportText(_ text: String, paneID: PaneID) {
     var s = scratch[paneID] ?? .fresh()
     s.lastViewportText = text
+    // A real viewport classification now governs; release the restored
+    // seed so normal derivation takes over (see `seedRestored`).
+    s.awaitingFirstClassification = false
     scratch[paneID] = s
     refresh(paneID)
   }
@@ -386,6 +411,13 @@ final class AgentStateStore {
     }
     s.rawState = newRaw
     scratch[paneID] = s
+
+    // A pane seeded from the quit snapshot holds its restored display
+    // state until the first live viewport classification — deriving from
+    // absent viewport text would collapse a resumed working/blocked badge
+    // to idle. `applyViewportText` clears the flag the moment real output
+    // lands, handing control back to normal derivation.
+    if s.awaitingFirstClassification { return }
 
     guard var entry = entries[paneID] else { return }
     let newState = displayState(for: s)
