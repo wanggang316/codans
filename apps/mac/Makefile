@@ -20,7 +20,7 @@ help:
 	@echo "  format           - swift-format in-place"
 	@echo "  lint             - swiftlint"
 	@echo "  check            - format + lint"
-	@echo "  test             - (placeholder)"
+	@echo "  test             - Run Swift unit-test schemes (Codans/CodansCore/CodansKit)"
 	@echo "  clean            - Remove workspace + project + Package.resolved"
 
 bootstrap:
@@ -87,8 +87,19 @@ check-rename:
 
 check: format lint check-rename
 
-test:
-	@echo "no tests yet"
+# Run the Swift unit-test schemes. The `Codans` scheme hosts CodansTests
+# (app/runtime tests); CodansCore / CodansKit host the framework tests.
+# Each xcodebuild test is piped through xcbeautify for readable output;
+# `set -o pipefail` is required so a pipe does NOT mask xcodebuild's exit
+# code (a naive `... | xcbeautify` always reports success). The loop aborts
+# via `|| exit $$?` on the first scheme that fails so the target exits non-zero.
+test: generate
+	@set -o pipefail; \
+	for scheme in Codans CodansCore CodansKit; do \
+	  echo "==> testing $$scheme"; \
+	  xcodebuild test -workspace codans.xcworkspace -scheme "$$scheme" -configuration Debug \
+	    | mise exec -- xcbeautify || exit $$?; \
+	done
 
 clean:
 	rm -rf .build codans.xcworkspace codans.xcodeproj Tuist/Package.resolved

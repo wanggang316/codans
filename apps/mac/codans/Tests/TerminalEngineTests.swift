@@ -332,6 +332,43 @@ struct TerminalEngineTests {
     }
   }
 
+  // MARK: - Pending restore consume-once
+
+  @Test
+  func consumeRestorePathReturnsSeededPathThenNil() {
+    let (engine, _, _, _) = makeEngine()
+    let paneID = PaneID()
+    let url = URL(fileURLWithPath: "/tmp/snapshot-\(UUID().uuidString).bin")
+    engine.pendingRestores[paneID] = url
+
+    // First read returns the path and clears the entry.
+    #expect(engine.consumeRestorePath(for: paneID) == url.path)
+    // Second read for the same pane sees an empty map → nil (consume-once).
+    #expect(engine.consumeRestorePath(for: paneID) == nil)
+  }
+
+  @Test
+  func consumeRestorePathLeavesOtherPanesUnaffected() {
+    let (engine, _, _, _) = makeEngine()
+    let paneA = PaneID()
+    let paneB = PaneID()
+    let urlA = URL(fileURLWithPath: "/tmp/a.bin")
+    let urlB = URL(fileURLWithPath: "/tmp/b.bin")
+    engine.pendingRestores[paneA] = urlA
+    engine.pendingRestores[paneB] = urlB
+
+    // Consuming one pane's restore must not disturb the other's entry.
+    #expect(engine.consumeRestorePath(for: paneA) == urlA.path)
+    #expect(engine.consumeRestorePath(for: paneB) == urlB.path)
+    #expect(engine.consumeRestorePath(for: paneA) == nil)
+  }
+
+  @Test
+  func consumeRestorePathReturnsNilForAbsentPane() {
+    let (engine, _, _, _) = makeEngine()
+    #expect(engine.consumeRestorePath(for: PaneID()) == nil)
+  }
+
   // MARK: - Subscribe-after-finish
 
   @Test

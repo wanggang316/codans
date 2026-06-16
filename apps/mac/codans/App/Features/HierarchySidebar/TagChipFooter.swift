@@ -26,12 +26,16 @@ struct TagFilterPopoverFooter: View {
   /// Right-side refresh glyph. Optional so previews / tests without a
   /// reconciler wired can drop it.
   var onRefreshTapped: (() -> Void)?
-  /// Project-sort popover wiring. When nil, the sort button is hidden —
-  /// preserves the existing footer shape in previews / tests that don't
-  /// thread sort state through.
-  var sortMode: ProjectSortMode?
-  var onSortModeChanged: ((ProjectSortMode) -> Void)?
-  var onManualSortRequested: (() -> Void)?
+  /// Sort button wiring. When nil, the button is hidden — preserves the
+  /// existing footer shape in previews / tests that don't thread it
+  /// through. There is only one ordering the UI exposes (manual), so the
+  /// button toggles the inline reorder session directly; the computed
+  /// `joinOrder` / `activeFirst` modes stay in the model but are no
+  /// longer surfaced.
+  var onReorderToggle: (() -> Void)?
+  /// Whether the inline reorder session is active. Tints the glyph and
+  /// flips its help / label so re-tapping reads as "exit".
+  var isReordering: Bool = false
   /// Sidebar-relocated AgentState toggle. nil = hide the button
   /// entirely (used in previews / contexts without a registry wired).
   var onAgentStateTapped: (() -> Void)?
@@ -40,8 +44,6 @@ struct TagFilterPopoverFooter: View {
   /// the only ambient signal the footer carries.
   var agentStatePanelOpen: Bool = false
 
-  @State private var isSortPopoverPresented = false
-
   var body: some View {
     HStack(spacing: 0) {
       // Tag-filter button is intentionally hidden — TagFilterList and the
@@ -49,41 +51,22 @@ struct TagFilterPopoverFooter: View {
       // without rewiring the call site, but the footer currently only
       // surfaces sort + refresh.
       HStack(spacing: 6) {
-        if let sortMode, let onSortModeChanged, let onManualSortRequested {
-          Button {
-            isSortPopoverPresented.toggle()
-          } label: {
-            // The sort glyph stays visually neutral regardless of the
-            // active mode — unlike the tag filter, "sort order" is a
-            // navigation aid rather than a constraint hiding rows, so
-            // there is nothing to draw the eye to once the user has
-            // made their choice.
+        if let onReorderToggle {
+          // Single-action sort: with the computed orders removed from the
+          // UI, the glyph toggles the inline reorder session — enter when
+          // idle, exit when already reordering. The accent tint marks the
+          // active state so the second tap reads as "exit".
+          Button(action: onReorderToggle) {
             Image(systemName: "arrow.up.arrow.down")
               .font(.system(size: 11, weight: .regular))
-              .foregroundStyle(.secondary)
+              .foregroundStyle(isReordering ? Color.accentColor : .secondary)
               .frame(width: 18, height: 18)
               .contentShape(Rectangle())
+              .accessibilityHidden(true)
           }
           .buttonStyle(.plain)
-          .help(sortHelpText(for: sortMode))
-          .accessibilityLabel("Sort projects")
-          .popover(isPresented: $isSortPopoverPresented, arrowEdge: .bottom) {
-            ProjectSortList(
-              mode: sortMode,
-              onSelect: { picked in
-                // Dismiss the popover first so the user sees the
-                // re-sorted list as soon as the callback runs —
-                // leaving it open swallows the visual feedback they
-                // expect.
-                isSortPopoverPresented = false
-                if picked == .manual {
-                  onManualSortRequested()
-                } else {
-                  onSortModeChanged(picked)
-                }
-              }
-            )
-          }
+          .help(isReordering ? "Done reordering" : "Reorder projects")
+          .accessibilityLabel(isReordering ? "Done reordering" : "Reorder projects")
         }
       }
       Spacer()
@@ -125,68 +108,6 @@ struct TagFilterPopoverFooter: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-  }
-
-  private func sortHelpText(for mode: ProjectSortMode) -> String {
-    switch mode {
-    case .joinOrder: return "Sort projects"
-    case .activeFirst: return "Sorted by recent activity — click to change"
-    case .manual: return "Sorted manually — click to change"
-    }
-  }
-}
-
-/// Three-row vertical list shown inside the sort popover. Visually
-/// mirrors `TagFilterList` so the two bottom-bar popovers share the
-/// same row chrome.
-private struct ProjectSortList: View {
-  let mode: ProjectSortMode
-  let onSelect: (ProjectSortMode) -> Void
-
-  @State private var hoveredMode: ProjectSortMode?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      row(.joinOrder, label: "By Date Added")
-      Divider().padding(.vertical, 2)
-      row(.activeFirst, label: "Recently Active")
-      Divider().padding(.vertical, 2)
-      row(.manual, label: "Manual Order…")
-    }
-    .padding(6)
-    .frame(minWidth: 200)
-  }
-
-  @ViewBuilder
-  private func row(_ value: ProjectSortMode, label: String) -> some View {
-    let isSelected = value == mode
-    let isHovered = hoveredMode == value
-    Button {
-      onSelect(value)
-    } label: {
-      HStack(spacing: 8) {
-        Color.clear.frame(width: 10, height: 10)
-        Text(label)
-          .font(.callout)
-          .foregroundStyle(isSelected ? Color.white : .primary)
-          .lineLimit(1)
-        Spacer(minLength: 8)
-        if isSelected {
-          Image(systemName: "checkmark")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.white)
-            .accessibilityHidden(true)
-        }
-      }
-      .padding(.horizontal, 8)
-      .padding(.vertical, 5)
-      .background(rowBackground(isSelected: isSelected, isHovered: isHovered))
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .onHover { hovering in
-      hoveredMode = hovering ? value : (hoveredMode == value ? nil : hoveredMode)
-    }
   }
 }
 

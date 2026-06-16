@@ -353,6 +353,21 @@ let project = Project(
       settings: .settings(
         base: [
           "CODE_SIGNING_ALLOWED": "NO",
+          // `@testable import Codans` failed to build this app-hosted test
+          // bundle ("Unable to find module dependency: 'Codans'" / "no such
+          // module 'Codans'"). Root cause: a `.framework` product self-
+          // advertises its Swift module inside `X.framework/Modules/`, which
+          // the loader finds via the framework search path (this is why the
+          // framework-hosted CodansCoreTests works). An `.app` product does
+          // NOT export a loader-discoverable module into the products dir, so
+          // the test target — which links the app only as a TEST_HOST — has
+          // no import search path that reaches the app's emitted swiftmodule.
+          // The app already emits a testable `Codans.swiftmodule` into its own
+          // intermediate build dir; add that dir to the test target's Swift
+          // import search so the testable import resolves. Verified via
+          // -Rmodule-loading: with this path the loader loads module 'Codans';
+          // without it, it never even attempts to.
+          "SWIFT_INCLUDE_PATHS": "$(PROJECT_TEMP_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)/Codans.build/Objects-normal/$(NATIVE_ARCH)",
           "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
         ],
         defaultSettings: .essential

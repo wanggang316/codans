@@ -24,11 +24,26 @@ nonisolated enum ZmxAttachCommand {
     paneID.raw.uuidString
   }
 
-  /// Compose `<zmx> attach <session> [/bin/sh -c <userCommand>]`.
+  /// Compose `<zmx> attach <session> [--restore-from <path>] [/bin/sh -c <userCommand>]`.
   /// `userCommand` is the Pane's `initialCommand` (e.g. a worktree setup
   /// script); when nil/empty the attached session runs the login shell.
-  static func build(zmxPath: String, session: String, userCommand: String?) -> String {
-    let attach = "\(shellQuote(zmxPath)) attach \(shellQuote(session))"
+  /// `restoreFrom`, when a non-empty path, instructs zmx to seed a freshly
+  /// created session from that snapshot; the flag goes right after the
+  /// session and before any `/bin/sh -c <userCommand>` so it binds to the
+  /// `attach` itself rather than the wrapped user command. Defaults to nil so
+  /// the existing call sites compile unchanged until a later feature wires it.
+  static func build(
+    zmxPath: String,
+    session: String,
+    userCommand: String?,
+    restoreFrom: String? = nil
+  ) -> String {
+    var attach = "\(shellQuote(zmxPath)) attach \(shellQuote(session))"
+    if let snapshot = restoreFrom?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !snapshot.isEmpty
+    {
+      attach += " --restore-from \(shellQuote(snapshot))"
+    }
     guard let trimmed = userCommand?.trimmingCharacters(in: .whitespacesAndNewlines),
       !trimmed.isEmpty
     else {

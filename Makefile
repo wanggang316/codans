@@ -1,6 +1,7 @@
-.PHONY: help bootstrap mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-clean
+.PHONY: help bootstrap mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-clean web-install web-dev web-build web-preview web-typecheck
 
 MAC_APP_DIR := apps/mac
+WEB_DIR     := apps/website
 
 help:
 	@echo "codans top-level Makefile (delegates to $(MAC_APP_DIR)/Makefile):"
@@ -17,8 +18,15 @@ help:
 	@echo "  mac-format        - swift-format in-place"
 	@echo "  mac-lint          - swiftlint"
 	@echo "  mac-check         - format + lint"
-	@echo "  mac-test          - (placeholder)"
+	@echo "  mac-test          - Run Swift unit tests (xcodebuild test, non-zero on failure)"
 	@echo "  mac-clean         - Remove workspace + project + Package.resolved"
+	@echo ""
+	@echo "website ($(WEB_DIR)):"
+	@echo "  web-install       - pnpm install"
+	@echo "  web-dev           - pnpm dev   (Vite at http://localhost:5173)"
+	@echo "  web-build         - pnpm build (production output in $(WEB_DIR)/dist)"
+	@echo "  web-preview       - pnpm preview"
+	@echo "  web-typecheck     - tsc -b --noEmit"
 
 bootstrap:
 	git submodule update --init --recursive
@@ -29,3 +37,18 @@ mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-c
 
 mac-bump-version:
 	$(MAKE) -C $(MAC_APP_DIR) bump-version VERSION=$(VERSION)
+
+web-install:
+	cd $(WEB_DIR) && pnpm install
+
+web-dev:
+	cd $(WEB_DIR) && pnpm dev
+
+web-build:
+	cd $(WEB_DIR) && pnpm build
+
+web-preview:
+	cd $(WEB_DIR) && pnpm preview
+
+web-typecheck:
+	cd $(WEB_DIR) && pnpm typecheck

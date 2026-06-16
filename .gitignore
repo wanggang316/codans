@@ -55,3 +55,7 @@ apps/mac/.build/zmx/
 .claude/*
 !.claude/skills/
 .worktrees/
+
+# harness-stack FDD per-plan runtime state (plans, contracts, validation, handoffs).
+# Work-in-progress orchestration state, not a committed artifact — kept local by design.
+.harness-runtime/

@@ -165,6 +165,46 @@ Writers always go through atomic-rename JSON persistence:
 
 Readers abort or migrate on version mismatch: `settings.json` accepts v1/v2/v3 (migrating v1/v2 to v3 in place with a backup); `catalog.json` accepts v1/v2; `hooks.json` accepts v1/v2. Unknown `version` values route the file aside as `*.broken-<ts>` and start from defaults.
 
+### Session lifecycle: quit snapshot + launch restore
+
+The "Snapshot and exit" quit action (`QuitAction.snapshot`) and its launch-time
+restore are one end-to-end path built on the unified `zmx attach` invocation —
+cold start, live re-attach, and snapshot restore are all the *same* spawn, with
+`--restore-from` an optional flag, never a second spawn path.
+
+- **Producer (quit).** `SessionLifecycle.detachAllForQuit(action:)` is `async`.
+  On `.snapshot` it calls `ZmxControlClient.snapshot(for:)` per live surface with
+  bounded concurrency (sliding window of 8) and a per-pane timeout (`.seconds(2)`);
+  the daemon answers by writing `<paneID>.snap` and closing its control socket
+  (socket EOF = acknowledgement). A pane that times out falls back to
+  `ZmxControlClient.kill(for:)` so a wedged daemon can never strand quit. The
+  snapshotted set and the kill-fallback set are provably disjoint (fallback is
+  signalled by a *log line*, not by `.snap` absence — a clean empty-buffer pane
+  also writes no file). `applicationShouldTerminate` drives this via a
+  `.terminateLater` reply bounded by an outer 20 s watchdog, and a one-way
+  `dispositionInProgress` latch makes a re-entrant terminate (rapid double ⌘Q)
+  a clean no-op. `.keepRunning` leaves daemons alive untouched.
+- **Consumer (launch).** `CodansApp.bootstrapSessionStack` keeps the
+  `SessionReaper.sweep()` result and reduces its `.snapshot(url)` states (only
+  those — `.alive`/`.dead` are ignored) into `TerminalEngine.pendingRestores`
+  via `AppState.derivePendingRestores`, *before* bring-up. `ensureSurface`
+  consumes each pane's path exactly once (`removeValue`, stable across the
+  HAN-82 surface-init retry) and passes it to `ZmxAttachCommand.build(restoreFrom:)`.
+  Restore is keyed on snapshot *file presence*, never on the current
+  `quitAction` setting.
+- **cwd by inheritance (no `--cwd`).** The restored shell's working directory is
+  the daemon's cwd, which libghostty sets on the forked child from
+  `pane.workingDirectory` — so each pane restores in its own directory with no
+  `--cwd` flag (empirically confirmed by `ThirdParty/zmx/test/restore.bats`).
+- **Files.** `.snap` files live at `${ZMX_DIR}/snapshots/<paneID-UUID>.snap`
+  (`ZMX_DIR` is pinned by the app so producer, consumer, and reaper agree on the
+  path); the reaper deletes a snap once its paneID is `.alive` again and ages
+  out snaps older than 7 days. `.snap` files are plaintext, user-readable only.
+- **Observability.** `os.Logger` under `com.gumpw.codans.runtime`:
+  `zmx.snapshot send pane=<uuid>` (category `runtime.zmx.control`, per pane at
+  request time), `zmx.snapshot kill-fallback pane=<uuid>` and
+  `zmx.restore applied pane=<uuid>` (category `runtime.session.lifecycle`).
+
 ### Logging
 
 - `os.Logger` with subsystem `com.gumpw.codans.*`

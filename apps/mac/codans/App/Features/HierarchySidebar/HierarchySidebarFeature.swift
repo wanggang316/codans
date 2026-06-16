@@ -84,18 +84,14 @@ struct HierarchySidebarFeature {
     /// disk before the crash. See `docs/design-docs/worktree-sidebar-ordering.md`
     /// §pending 段.
     var pendingWorktrees: IdentifiedArrayOf<PendingWorktree> = []
-    /// Manual-project-order sheet state. Non-nil = visible. Carries the
-    /// in-progress ordered ProjectID list so the user can cancel without
-    /// affecting the catalog — only "完成" writes back through
-    /// `applyManualProjectOrder`.
-    var manualSortSheet: ManualProjectSortSheet?
-  }
-
-  /// Modal state for the "手动排序" sheet. The list is initialised from
-  /// `catalog.projects.map(\.id)` — i.e. the last-known manual order, or
-  /// the current insertion order if the user has never reordered.
-  struct ManualProjectSortSheet: Equatable {
-    var orderedIDs: [ProjectID]
+    /// Transient "reorder projects inline" editing session. When `true`,
+    /// the sidebar collapses every Project to a header-only row, prefixes
+    /// each with a drag handle, and enables `ForEach.onMove` so Projects
+    /// can be dragged directly in the list. Session-scoped — never
+    /// persisted; the resulting order is saved live through
+    /// `reorderProjects`. Entered from the footer sort menu's
+    /// "Manual Order…" item, dismissed by the inline "Done" control.
+    var isReorderingProjects: Bool = false
   }
 
   /// Payload for the first-archive explainer dialog. Carries the
@@ -230,18 +226,15 @@ struct HierarchySidebarFeature {
     /// User picked a non-manual sort from the sort popover. Persists and
     /// keeps `catalog.projects` (the manual order) untouched.
     case projectSortModeChanged(ProjectSortMode)
-    /// User picked "手动排序" — open the reorder sheet seeded with the
-    /// current manual order.
-    case manualSortSheetRequested
-    /// Dismissed via Cancel / outside-tap. Drops the in-progress order.
-    case manualSortCancelled
-    /// User dragged a row inside the sheet (`onMove` forwarder). Updates
-    /// the sheet's draft list only; commit happens on Done.
-    case manualSortRowsMoved(from: IndexSet, to: Int)
-    /// "完成". Writes the draft order back via
-    /// `applyManualProjectOrder` and switches `projectSortMode` to
-    /// `.manual` (the manager does this in one step).
-    case manualSortConfirmed
+    /// User picked "Manual Order…" — enter the inline reorder session.
+    /// Seeds `manualOrder` from the currently displayed order (so the
+    /// list doesn't reshuffle), flips `projectSortMode` to `.manual`,
+    /// and sets `isReorderingProjects`.
+    case beginProjectReorder
+    /// User tapped the inline "Done" control — leaves the reorder
+    /// session. The order is already persisted, so this only clears the
+    /// transient UI flag.
+    case endProjectReorder
 
     // M4: Tag chip footer at the sidebar's safe-area bottom.
     /// Toggle membership of `id` in `Catalog.activeTagFilter`. If filter is
@@ -475,30 +468,22 @@ struct HierarchySidebarFeature {
 
     case .projectSortModeChanged(let mode):
       hierarchyClient.setProjectSortMode(mode)
+      // Switching to a computed order leaves no manual session to edit.
+      if mode != .manual { state.isReorderingProjects = false }
       return .none
 
-    case .manualSortSheetRequested:
-      // Seed from `catalog.projects` (the manual order). When the user has
-      // never reordered, this equals insertion order.
-      let snapshot = hierarchyClient.snapshot()
-      state.manualSortSheet = ManualProjectSortSheet(
-        orderedIDs: snapshot.projects.map(\.id)
-      )
+    case .beginProjectReorder:
+      // Seed `manualOrder` from the order the user currently sees (the
+      // full, unfiltered list under the active mode) and flip to
+      // `.manual` in one step, so entering the session doesn't reshuffle
+      // rows. The inline `.onMove` then maps 1:1 onto `catalog.projects`.
+      let catalog = hierarchyClient.snapshot()
+      hierarchyClient.applyManualProjectOrder(catalog.sorted(catalog.projects).map(\.id))
+      state.isReorderingProjects = true
       return .none
 
-    case .manualSortCancelled:
-      state.manualSortSheet = nil
-      return .none
-
-    case .manualSortRowsMoved(let source, let destination):
-      guard state.manualSortSheet != nil else { return .none }
-      state.manualSortSheet?.orderedIDs.move(fromOffsets: source, toOffset: destination)
-      return .none
-
-    case .manualSortConfirmed:
-      guard let sheet = state.manualSortSheet else { return .none }
-      hierarchyClient.applyManualProjectOrder(sheet.orderedIDs)
-      state.manualSortSheet = nil
+    case .endProjectReorder:
+      state.isReorderingProjects = false
       return .none
 
     case .projectAddWorktreeTapped(let projectID):

@@ -298,6 +298,15 @@ final class PaneSurface {
     return daemonShellPID > 0 ? daemonShellPID : nil
   }
 
+  /// Forward a post-wake / post-reconfiguration geometry resync to the host
+  /// view, which owns the bounds→device-pixel conversion. Called by
+  /// `GhosttyRuntime.resyncAllSurfaceGeometry()` on screen/system wake and
+  /// display-parameter changes. No-op after `close()`.
+  func resyncGeometryAndRedraw() {
+    guard surface != nil else { return }
+    view.resyncGeometryAndRedraw()
+  }
+
   /// Apply a color scheme to this surface and request a redraw. No-op after `close()`.
   /// Called by `GhosttyRuntime.setColorScheme(_:)` when the app's resolved
   /// color scheme changes (either user picker toggle or OS-level appearance flip).
