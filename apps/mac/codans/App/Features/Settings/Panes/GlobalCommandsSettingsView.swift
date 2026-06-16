@@ -49,7 +49,8 @@ struct GlobalCommandsSettingsView: View {
         onMove: moveScript,
         validateChord: { binding, excluding in
           chordValidator(binding, excludingScriptID: excluding)
-        }
+        },
+        allowsKindPresets: false
       )
     }
     .padding(20)

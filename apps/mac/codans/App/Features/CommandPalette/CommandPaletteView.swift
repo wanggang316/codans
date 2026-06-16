@@ -143,10 +143,19 @@ struct CommandPaletteView: View {
 
   private func row(_ item: CommandPaletteItem, selected: Bool) -> some View {
     HStack(spacing: 10) {
-      Image(systemName: item.icon)
-        .frame(width: 20)
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
+      if let path = item.customIconPath, let image = CommandIconStore.image(for: path) {
+        Image(nsImage: image)
+          .resizable()
+          .interpolation(.high)
+          .scaledToFit()
+          .frame(width: 20, height: 20)
+          .accessibilityHidden(true)
+      } else {
+        Image(systemName: item.icon)
+          .frame(width: 20)
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
+      }
       VStack(alignment: .leading, spacing: 2) {
         Text(item.title).font(.system(size: 13))
         if let subtitle = item.subtitle {

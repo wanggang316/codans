@@ -101,14 +101,7 @@ struct HeaderRunScriptSplitButton: View {
       // against SwiftUI fallbacks that would otherwise re-monochrome
       // the glyph at render time.
       HStack(spacing: 6) {
-        Image(systemName: primaryIcon)
-          .symbolRenderingMode(.palette)
-          .foregroundStyle(primaryTint)
-          // play.fill (triangle) and stop.fill (square) have different glyph
-          // widths, so a bare swap made the button reflow on every toggle.
-          // A fixed square footprint keeps the icon column constant and the
-          // `.replace` transition cross-fades the swap instead of popping.
-          .contentTransition(.symbolEffect(.replace))
+        primaryGlyph(primary: primary, isRunning: isRunning, symbol: primaryIcon, tint: primaryTint)
           .frame(width: 16, height: 16)
           .accessibilityHidden(true)
           // Chord rides right after the icon (left of the chevron), matching
@@ -141,6 +134,35 @@ struct HeaderRunScriptSplitButton: View {
         + Self.identitySignature(of: globalScripts) + "#" + runningSignature)
   }
 
+  /// Primary-half glyph: the command's custom uploaded icon when set (and the
+  /// button is idle), otherwise the tinted SF Symbol with the Run⇄Stop
+  /// cross-fade. While running, always show the `stop.fill` symbol so the
+  /// custom art never masks the interrupt affordance.
+  @ViewBuilder
+  private func primaryGlyph(
+    primary: ScriptDefinition?, isRunning: Bool, symbol: String, tint: Color
+  ) -> some View {
+    if !isRunning, let path = primary?.customIconPath,
+      let image = CommandIconStore.image(for: path)
+    {
+      Image(nsImage: image)
+        .resizable()
+        .interpolation(.high)
+        .scaledToFit()
+        .accessibilityHidden(true)
+    } else {
+      Image(systemName: symbol)
+        .symbolRenderingMode(.palette)
+        .foregroundStyle(tint)
+        // play.fill (triangle) and stop.fill (square) have different glyph
+        // widths, so a bare swap made the button reflow on every toggle.
+        // A fixed square footprint keeps the icon column constant and the
+        // `.replace` transition cross-fades the swap instead of popping.
+        .contentTransition(.symbolEffect(.replace))
+        .accessibilityHidden(true)
+    }
+  }
+
   // MARK: - Caret menu
 
   /// Menu order, top to bottom: Project Commands section, Global Commands
@@ -153,14 +175,14 @@ struct HeaderRunScriptSplitButton: View {
     globalScripts: [ScriptDefinition]
   ) -> some View {
     if !scripts.isEmpty {
-      Section("Project Commands") {
+      Section("Project") {
         ForEach(scripts) { script in
           menuButton(for: script)
         }
       }
     }
     if !globalScripts.isEmpty {
-      Section("Global Commands") {
+      Section("Global") {
         ForEach(globalScripts) { script in
           menuButton(for: script, isGlobal: true)
         }
@@ -169,15 +191,11 @@ struct HeaderRunScriptSplitButton: View {
     if !scripts.isEmpty || !globalScripts.isEmpty {
       Divider()
     }
-    Button {
+    Button("Manage Project Commands…") {
       store.send(.manageScriptsTapped(projectID: projectID))
-    } label: {
-      Label("Manage Project Commands…", systemImage: "gearshape")
     }
-    Button {
+    Button("Manage Global Commands…") {
       store.send(.manageGlobalScriptsTapped)
-    } label: {
-      Label("Manage Global Commands…", systemImage: "globe")
     }
   }
 
@@ -214,10 +232,7 @@ struct HeaderRunScriptSplitButton: View {
       Label {
         Text(isRunning ? "Stop \(script.displayName)" : script.displayName)
       } icon: {
-        ScriptTintColorPalette.menuIcon(
-          systemName: isRunning ? "stop.fill" : script.resolvedSystemImage,
-          tint: isRunning ? .red : script.resolvedTintColor
-        )
+        menuIcon(for: script, isRunning: isRunning)
       }
     }
     if let chord = script.keyboardShortcut, chord.isEnabled, chord.keyCode != 0,
@@ -226,6 +241,23 @@ struct HeaderRunScriptSplitButton: View {
       button.keyboardShortcut(key, modifiers: ShortcutDisplay.eventModifiers(for: chord.modifiers))
     } else {
       button
+    }
+  }
+
+  /// Menu-row icon: the command's custom uploaded icon (redrawn as a non-template
+  /// `NSImage` so it survives into the native menu) when set and idle, otherwise
+  /// the tinted SF Symbol — red `stop.fill` while running.
+  @ViewBuilder
+  private func menuIcon(for script: ScriptDefinition, isRunning: Bool) -> some View {
+    if !isRunning, let path = script.customIconPath,
+      let image = CommandIconStore.menuImage(for: path)
+    {
+      image
+    } else {
+      ScriptTintColorPalette.menuIcon(
+        systemName: isRunning ? "stop.fill" : script.resolvedSystemImage,
+        tint: isRunning ? .red : script.resolvedTintColor
+      )
     }
   }
 
@@ -241,7 +273,7 @@ struct HeaderRunScriptSplitButton: View {
         let chord =
           script.keyboardShortcut.map { ShortcutDisplay.chord(for: $0) } ?? ""
         return
-          "\(script.id)|\(script.displayName)|\(script.resolvedSystemImage)|\(script.resolvedTintColor.rawValue)|\(chord)"
+          "\(script.id)|\(script.displayName)|\(script.resolvedSystemImage)|\(script.customIconPath ?? "")|\(script.resolvedTintColor.rawValue)|\(chord)"
       }
       .joined(separator: "·")
   }

@@ -18,6 +18,10 @@ struct CommandPaletteItem: Equatable, Identifiable {
   /// burying it in the lower subtitle band. `nil` matches the title only.
   let searchText: String?
   let icon: String
+  /// Filename of a user-uploaded custom command icon (see `CommandIconStore`).
+  /// When set, the row renders this image instead of the SF Symbol named by
+  /// `icon`. `nil` for every non-command row.
+  let customIconPath: String?
   /// Hardcoded display hint, used as a fallback when `commandID` is unset or the env-injected
   /// resolved-shortcut map has no binding for that ID. Registry-tracked actions should pass
   /// `commandID` instead so users see their custom rebinds in the palette.
@@ -39,6 +43,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     subtitle: String? = nil,
     searchText: String? = nil,
     icon: String,
+    customIconPath: String? = nil,
     shortcut: KeyEquivalentDescriptor? = nil,
     commandID: CommandID? = nil,
     priorityTier: Int = 100,
@@ -50,6 +55,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     self.subtitle = subtitle
     self.searchText = searchText
     self.icon = icon
+    self.customIconPath = customIconPath
     self.shortcut = shortcut
     self.commandID = commandID
     self.priorityTier = priorityTier

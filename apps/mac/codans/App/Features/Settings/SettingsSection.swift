@@ -27,7 +27,7 @@ public enum SettingsSection: Hashable, Sendable {
 
   /// Canonical iteration order for global sidebar rows.
   public static let globals: [SettingsSection] = [
-    .general, .globalCommands, .github, .worktree, .terminal, .notifications, .developer, .shortcuts,
+    .general, .github, .worktree, .terminal, .notifications, .developer, .globalCommands, .shortcuts,
     .updates, .about,
   ]
 

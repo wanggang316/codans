@@ -26,6 +26,12 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
   public var name: String
   public var command: String
   public var systemImage: String?
+  /// Filename of a user-uploaded custom icon stored under the app's managed
+  /// `command-icons/` directory (see the app-layer `CommandIconStore`). When
+  /// set, it takes precedence over `systemImage` / the kind default at render
+  /// time. `nil` means "use an SF Symbol". Stored as a bare filename (not an
+  /// absolute path) so `settings.json` stays portable and home-relative.
+  public var customIconPath: String?
   public var tintColor: ScriptTintColor?
   public var target: ScriptTarget
   public var direction: ScriptSplitDirection
@@ -48,6 +54,7 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
     name: String = "",
     command: String = "",
     systemImage: String? = nil,
+    customIconPath: String? = nil,
     tintColor: ScriptTintColor? = nil,
     target: ScriptTarget = .newTab,
     direction: ScriptSplitDirection = .right,
@@ -60,6 +67,7 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
     self.name = name
     self.command = command
     self.systemImage = systemImage
+    self.customIconPath = customIconPath
     self.tintColor = tintColor
     self.target = target
     self.direction = direction
@@ -120,7 +128,7 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, kind, name, command, systemImage, tintColor
+    case id, kind, name, command, systemImage, customIconPath, tintColor
     case target, direction, onFinished, focus
     case keyboardShortcut
   }
@@ -132,6 +140,7 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
     self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
     self.command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
     self.systemImage = try c.decodeIfPresent(String.self, forKey: .systemImage)
+    self.customIconPath = try c.decodeIfPresent(String.self, forKey: .customIconPath)
     self.tintColor = try c.decodeIfPresent(ScriptTintColor.self, forKey: .tintColor)
     self.target = try c.decodeIfPresent(ScriptTarget.self, forKey: .target) ?? .newTab
     self.direction = try c.decodeIfPresent(ScriptSplitDirection.self, forKey: .direction) ?? .right
@@ -157,6 +166,7 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
       try c.encode(command, forKey: .command)
     }
     try c.encodeIfPresent(systemImage, forKey: .systemImage)
+    try c.encodeIfPresent(customIconPath, forKey: .customIconPath)
     try c.encodeIfPresent(tintColor, forKey: .tintColor)
     if target != .newTab {
       try c.encode(target, forKey: .target)

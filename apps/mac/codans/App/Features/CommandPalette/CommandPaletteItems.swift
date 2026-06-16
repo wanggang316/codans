@@ -220,6 +220,7 @@ enum CommandPaletteItems {
         title: script.displayName,
         subtitle: script.kind.defaultName,
         icon: script.resolvedSystemImage,
+        customIconPath: script.customIconPath,
         kind: .runProjectScript(projectID, worktreeID, script.id)
       )
     }
@@ -245,6 +246,7 @@ enum CommandPaletteItems {
         title: script.displayName,
         subtitle: "Global Command",
         icon: script.resolvedSystemImage,
+        customIconPath: script.customIconPath,
         kind: .runGlobalScript(projectID, worktreeID, script.id)
       )
     }

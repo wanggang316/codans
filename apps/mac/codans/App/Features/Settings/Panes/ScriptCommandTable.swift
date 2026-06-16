@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import CodansCore
 
 /// Inline, spreadsheet-style editor for a Project's custom commands.
@@ -32,6 +33,11 @@ struct ScriptCommandTable: View {
   let onMove: (_ id: UUID, _ offset: Int) -> Void
   /// Chord conflict check, excluding the row being edited.
   let validateChord: (ShortcutBinding, _ excluding: UUID) -> HotkeyRecorderPopover.ValidationResult
+  /// When `true` (Project pane) the `+` button offers preset kinds (Run, Test,
+  /// …) and the built-in Run is protected from deletion. When `false` (Global
+  /// pane) there are no kind presets — `+` adds a single plain Custom command
+  /// and every row is freely removable.
+  var allowsKindPresets: Bool = true
 
   private let iconColumnWidth: CGFloat = 48
   private let nameColumnWidth: CGFloat = 130
@@ -105,9 +111,10 @@ struct ScriptCommandTable: View {
     // the row it would delete is the Run.
     let deletionTargetID = selectedID ?? scripts.last?.id
     let deletionTargetIsRun =
-      deletionTargetID.flatMap { id in scripts.first(where: { $0.id == id }) }?.kind == .run
+      allowsKindPresets
+      && deletionTargetID.flatMap { id in scripts.first(where: { $0.id == id }) }?.kind == .run
     return HStack(spacing: 2) {
-      addMenu
+      addControl
 
       barButton(
         "minus",
@@ -158,6 +165,20 @@ struct ScriptCommandTable: View {
     .buttonStyle(.borderless)
     .disabled(disabled)
     .help(label)
+  }
+
+  /// `+` control. With kind presets (Project pane) it's a menu of preset kinds;
+  /// without them (Global pane) it's a plain button that appends one Custom
+  /// command — global commands have no Run/Test/… taxonomy.
+  @ViewBuilder
+  private var addControl: some View {
+    if allowsKindPresets {
+      addMenu
+    } else {
+      barButton("plus", label: "Add command", disabled: false) {
+        onAdd(.custom)
+      }
+    }
   }
 
   /// `+` menu: offers each preset kind plus Custom. Predefined kinds already
@@ -263,10 +284,7 @@ private struct ScriptCommandRow: View {
       commandPopover = false
       iconPopover.toggle()
     } label: {
-      Image(systemName: script.resolvedSystemImage)
-        .foregroundStyle(ScriptTintColorPalette.color(for: script.resolvedTintColor))
-        .frame(width: 16, alignment: .center)
-        .accessibilityHidden(true)
+      ScriptIconView(script: script, size: 16)
     }
     .popover(isPresented: $iconPopover, arrowEdge: .bottom) {
       ScriptIconPopover(script: script, onUpdate: onUpdate)
@@ -428,6 +446,8 @@ private struct ScriptIconPopover: View {
   let script: ScriptDefinition
   let onUpdate: (ScriptDefinition) -> Void
 
+  @State private var showImporter = false
+
   private static let presets: [String] = [
     "terminal", "terminal.fill", "play.fill", "stop.fill",
     "hammer.fill", "shippingbox.fill", "doc.text.fill", "sparkles",
@@ -442,13 +462,40 @@ private struct ScriptIconPopover: View {
   private var symbolBinding: Binding<String> {
     Binding(
       get: { script.systemImage ?? script.resolvedSystemImage },
-      set: {
-        var updated = script
-        let trimmed = $0.trimmingCharacters(in: .whitespaces)
-        updated.systemImage = trimmed.isEmpty ? nil : trimmed
-        onUpdate(updated)
-      }
+      set: { applySymbol($0) }
     )
+  }
+
+  /// Set an SF Symbol override and drop any custom icon — the two are mutually
+  /// exclusive (custom wins at render time, so picking a symbol must clear it).
+  /// The replaced custom file is removed from the managed store.
+  private func applySymbol(_ name: String) {
+    var updated = script
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    updated.systemImage = trimmed.isEmpty ? nil : trimmed
+    if let stale = script.customIconPath {
+      updated.customIconPath = nil
+      CommandIconStore.remove(filename: stale)
+    }
+    onUpdate(updated)
+  }
+
+  /// Copy the picked image into the managed store and point the command at it.
+  private func applyCustomIcon(from url: URL) {
+    guard let filename = try? CommandIconStore.importImage(from: url) else { return }
+    var updated = script
+    if let stale = script.customIconPath { CommandIconStore.remove(filename: stale) }
+    updated.customIconPath = filename
+    onUpdate(updated)
+  }
+
+  /// Revert to the SF Symbol, deleting the managed custom file.
+  private func clearCustomIcon() {
+    guard let stale = script.customIconPath else { return }
+    var updated = script
+    updated.customIconPath = nil
+    onUpdate(updated)
+    CommandIconStore.remove(filename: stale)
   }
 
   private var tintBinding: Binding<ScriptTintColor> {
@@ -466,10 +513,12 @@ private struct ScriptIconPopover: View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Icon & Color")
         .font(.headline)
-      Text("Pick a symbol and colour, or type any SF Symbol name your system has.")
+      Text("Pick a symbol and colour, type any SF Symbol name your system has, or upload your own image.")
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
+
+      customIconRow
 
       HStack(spacing: 8) {
         TextField("SF Symbol name", text: symbolBinding)
@@ -484,10 +533,10 @@ private struct ScriptIconPopover: View {
         ) {
           ForEach(Self.presets, id: \.self) { name in
             Button {
-              symbolBinding.wrappedValue = name
+              applySymbol(name)
             } label: {
               Image(systemName: name)
-                .foregroundStyle(name == symbolBinding.wrappedValue ? ScriptTintColorPalette.color(for: script.resolvedTintColor) : .primary)
+                .foregroundStyle(isActiveSymbol(name) ? ScriptTintColorPalette.color(for: script.resolvedTintColor) : .primary)
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
             }
@@ -505,6 +554,38 @@ private struct ScriptIconPopover: View {
     }
     .padding(12)
     .frame(width: 360)
+    .fileImporter(
+      isPresented: $showImporter,
+      allowedContentTypes: [.image],
+      allowsMultipleSelection: false
+    ) { result in
+      if case .success(let urls) = result, let url = urls.first {
+        applyCustomIcon(from: url)
+      }
+    }
+  }
+
+  /// Upload affordance + live preview. When a custom icon is set it previews at
+  /// the left with a "Remove" button; the upload button reads "Replace…".
+  @ViewBuilder
+  private var customIconRow: some View {
+    HStack(spacing: 8) {
+      ScriptIconView(script: script, size: 22)
+        .frame(width: 22, height: 22)
+      Button(script.customIconPath == nil ? "Upload Custom Icon…" : "Replace…") {
+        showImporter = true
+      }
+      if script.customIconPath != nil {
+        Button("Remove", role: .destructive, action: clearCustomIcon)
+      }
+      Spacer(minLength: 0)
+    }
+  }
+
+  /// A preset is "active" only when it's the current SF Symbol *and* no custom
+  /// icon is overriding it — a custom icon means no symbol is selected.
+  private func isActiveSymbol(_ name: String) -> Bool {
+    script.customIconPath == nil && name == symbolBinding.wrappedValue
   }
 
   /// Launch the SF Symbols app, falling back to the web reference.
