@@ -174,6 +174,37 @@ struct AgentKindPatternsTests {
     )
   }
 
+  // MARK: - launchesAgent (static command-string gate)
+
+  @Test
+  func launchesAgent_matchesKnownAgentAsFirstToken() {
+    #expect(AgentKindPatterns.launchesAgent(commandLine: "pi") == .pi)
+    #expect(AgentKindPatterns.launchesAgent(commandLine: "claude") == .claudeCode)
+    #expect(AgentKindPatterns.launchesAgent(commandLine: "codex") == .codex)
+  }
+
+  @Test
+  func launchesAgent_ignoresArgumentsAndLeadingPath() {
+    #expect(AgentKindPatterns.launchesAgent(commandLine: "pi --resume") == .pi)
+    #expect(
+      AgentKindPatterns.launchesAgent(commandLine: "/opt/homebrew/bin/claude chat") == .claudeCode
+    )
+  }
+
+  @Test
+  func launchesAgent_readsOnlyTheFirstLineOfAMultiLineCommand() {
+    #expect(AgentKindPatterns.launchesAgent(commandLine: "pi\n你好") == .pi)
+    #expect(AgentKindPatterns.launchesAgent(commandLine: "codex\nreview this\nthen ship") == .codex)
+  }
+
+  @Test
+  func launchesAgent_returnsNilForPlainShellOrUnknownLaunchers() {
+    // First token only — a `pi` buried in arguments must not trigger a split.
+    for command in ["npm test", "cd app && npm run dev", "echo pi", "git status", "", "   "] {
+      #expect(AgentKindPatterns.launchesAgent(commandLine: command) == nil)
+    }
+  }
+
   // MARK: - Pane Codable round-trip
 
   @Test

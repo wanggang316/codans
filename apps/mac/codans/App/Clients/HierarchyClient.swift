@@ -917,6 +917,20 @@ extension HierarchyClient {
 
     let onFinishedNeeded = script.resolvedOnFinished != .none
 
+    // "Launch agent + prefilled prompt": when the first line invokes a known
+    // agent and there is no close-on-finish teardown, split the launch line
+    // off from the follow-up input. The launch line starts the agent the
+    // normal way; the follow-ups are deferred until the agent is actually
+    // ready to read stdin (see `scheduleDeferredInput`). Sending them up front
+    // races the agent's startup: the prompt lands in the input box but its
+    // submit Enter is swallowed, and early lines echo out of order before the
+    // shell prompt appears. Plain shell multi-commands and one-shot
+    // (close-on-finish) scripts keep the original single send.
+    let (launchCommand, deferredInput): (String, [String]) =
+      !onFinishedNeeded && AgentKindPatterns.launchesAgent(commandLine: script.command) != nil
+      ? splitLaunchAndFollowups(script.command)
+      : (script.command, [])
+
     // Reuse path: if the dedicated run pane from a previous run is still
     // alive, re-run into it instead of spawning a new tab/pane — this is
     // what keeps repeated runs on the same pane. Gated on
@@ -931,7 +945,18 @@ extension HierarchyClient {
         try? manager.selectTab(tab, in: wt, in: proj)
         manager.focusSurfaceView(for: existing)
       }
-      terminalClient.sendInput(existing, script.command + "\n")
+      // Subscribe before the launch write so the agent's foreground-job
+      // change is not missed by the deferred-input waiter.
+      let deferredStream = deferredInput.isEmpty ? nil : terminalClient.events()
+      terminalClient.sendInput(existing, launchCommand + "\n")
+      if let deferredStream {
+        scheduleDeferredInput(
+          paneID: existing,
+          followups: deferredInput,
+          terminalClient: terminalClient,
+          eventStream: deferredStream
+        )
+      }
       return
     }
 
@@ -944,6 +969,8 @@ extension HierarchyClient {
 
     let spawnedPaneID = try await dispatchScript(
       script: script,
+      launchCommand: launchCommand,
+      followups: deferredInput,
       worktreeID: worktreeID,
       projectID: projectID,
       cwd: cwd,
@@ -1020,6 +1047,8 @@ extension HierarchyClient {
   @MainActor
   private static func dispatchScript(
     script: ScriptDefinition,
+    launchCommand: String,
+    followups: [String],
     worktreeID: WorktreeID,
     projectID: ProjectID,
     cwd: String,
@@ -1034,10 +1063,29 @@ extension HierarchyClient {
     // exits as soon as the script's last statement completes — same trick the
     // archive/delete lifecycle uses in `openNewTabAndAwaitExit`. Without it,
     // "Close tab when finished" silently never triggers (HAN-36).
+    //
+    // `launchCommand` is the launch line only when the script split off
+    // deferred input (agent + prompt); otherwise it equals the full command.
     let spawnCommand = wrapForOnFinished(
-      command: script.command,
+      command: launchCommand,
       policy: script.resolvedOnFinished
     )
+
+    // Subscribe before the spawn so the agent's foreground-job change is not
+    // missed by the deferred-input waiter. nil when there is nothing deferred.
+    let deferredStream = followups.isEmpty ? nil : terminalClient?.events()
+
+    // Wires deferred follow-up input to whichever pane this dispatch writes
+    // into. No-op when `followups` is empty or the terminal client is absent.
+    func armDeferredInput(into paneID: PaneID) {
+      guard let deferredStream, let terminalClient else { return }
+      scheduleDeferredInput(
+        paneID: paneID,
+        followups: followups,
+        terminalClient: terminalClient,
+        eventStream: deferredStream
+      )
+    }
 
     func openInNewTab() async throws -> PaneID {
       let tabID = try manager.createTab(
@@ -1064,7 +1112,9 @@ extension HierarchyClient {
 
     switch script.target {
     case .newTab:
-      return try await openInNewTab()
+      let paneID = try await openInNewTab()
+      armDeferredInput(into: paneID)
+      return paneID
 
     case .focused:
       // sendInput needs the focused pane and the terminal runtime; absent
@@ -1072,17 +1122,20 @@ extension HierarchyClient {
       if let terminalClient,
         let anchor = focusedAnchor(worktreeID: worktreeID, in: manager)
       {
-        terminalClient.sendInput(anchor.paneID, script.command + "\n")
+        terminalClient.sendInput(anchor.paneID, launchCommand + "\n")
+        armDeferredInput(into: anchor.paneID)
         return nil
       }
       runScriptLogger.info(
         "target=.focused fell back to .newTab — \(terminalClient == nil ? "no TerminalClient" : "no focused pane in worktree", privacy: .public)"
       )
-      return try await openInNewTab()
+      let paneID = try await openInNewTab()
+      armDeferredInput(into: paneID)
+      return paneID
 
     case .split:
       if let anchor = focusedAnchor(worktreeID: worktreeID, in: manager) {
-        return try await manager.splitPane(
+        let paneID = try await manager.splitPane(
           anchor.paneID,
           direction: mapSplitDirection(script.direction),
           in: anchor.tabID, in: worktreeID, in: projectID,
@@ -1090,11 +1143,15 @@ extension HierarchyClient {
           initialCommand: spawnCommand,
           env: env
         )
+        armDeferredInput(into: paneID)
+        return paneID
       }
       runScriptLogger.info(
         "target=.split fell back to .newTab — no focused pane in worktree"
       )
-      return try await openInNewTab()
+      let paneID = try await openInNewTab()
+      armDeferredInput(into: paneID)
+      return paneID
     }
   }
 
@@ -1109,6 +1166,130 @@ extension HierarchyClient {
     guard policy != .none else { return command }
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? "exit" : "\(trimmed); exit"
+  }
+
+  // MARK: - Deferred agent input
+
+  /// Splits a multi-line "launch agent + prompt" command into the launch line
+  /// (sent as the pane's initial command) and the follow-up lines fed to the
+  /// agent once it is ready to read stdin. Blank lines are dropped so a
+  /// trailing newline in the editor never turns into a stray submit. Returns
+  /// no follow-ups for single-line commands, so callers keep the original
+  /// one-shot send path.
+  nonisolated private static func splitLaunchAndFollowups(
+    _ command: String
+  ) -> (launch: String, followups: [String]) {
+    let lines =
+      command
+      .split(separator: "\n", omittingEmptySubsequences: false)
+      .map(String.init)
+    guard lines.count > 1 else { return (command, []) }
+    let followups = lines.dropFirst().filter {
+      !$0.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+    return (lines.first ?? command, followups)
+  }
+
+  /// Outcome of waiting for the launched agent to become ready for input.
+  private enum DeferredReadiness: Sendable {
+    /// The launch line's agent is now the pane's foreground process.
+    case agentUp
+    /// The pane exited / crashed before the agent came up — drop the input.
+    case aborted
+    /// Neither happened within the budget — send anyway as a fallback.
+    case timedOut
+  }
+
+  /// Defers follow-up script lines until the agent launched by the script's
+  /// first line is up, then submits each line as a separate input. Fixes the
+  /// race where a multi-line "launch agent + prompt" command is blasted into a
+  /// freshly forked shell before the agent can read stdin: the prompt landed
+  /// in the input box but its submit Enter was swallowed during startup, and
+  /// early lines echoed out of order ahead of the shell prompt.
+  ///
+  /// Readiness uses the signals the runtime actually emits — `.paneIdle` is
+  /// never emitted in production, so output-silence is not available. We wait
+  /// for `.foregroundJobChanged` to classify the foreground as a known agent,
+  /// then settle briefly before sending (there is no precise "ready for input"
+  /// signal, so the settle is tuned, not exact). A `.paneExited` /
+  /// `.paneCrashed` abandons the queue; an overall timeout sends anyway.
+  @MainActor
+  private static func scheduleDeferredInput(
+    paneID: PaneID,
+    followups: [String],
+    terminalClient: TerminalClient,
+    eventStream: AsyncStream<TerminalEvent>
+  ) {
+    guard !followups.isEmpty else { return }
+    Task.detached(priority: .userInitiated) {
+      await deliverDeferredInput(
+        paneID: paneID,
+        followups: followups,
+        terminalClient: terminalClient,
+        eventStream: eventStream
+      )
+    }
+  }
+
+  private static func deliverDeferredInput(
+    paneID: PaneID,
+    followups: [String],
+    terminalClient: TerminalClient,
+    eventStream: AsyncStream<TerminalEvent>
+  ) async {
+    // Budget: how long to wait for the agent's foreground job to appear before
+    // giving up and sending anyway; how long to let its TUI draw after it does.
+    let readyTimeout: Duration = .seconds(8)
+    let settleAfterReady: Duration = .seconds(2)
+    let betweenLines: Duration = .milliseconds(120)
+
+    // Race the agent-up signal against the timeout. The event task owns the
+    // iterator for its whole lifetime (no cross-task iterator sharing); the
+    // group only races their return values.
+    let readiness = await withTaskGroup(of: DeferredReadiness.self) {
+      group -> DeferredReadiness in
+      group.addTask {
+        for await event in eventStream {
+          switch event {
+          case .foregroundJobChanged(let pid, let job) where pid == paneID:
+            if AgentKindPatterns.classify(foregroundJob: job) != nil {
+              return .agentUp
+            }
+          case .paneExited(let pid, _, _) where pid == paneID,
+            .paneCrashed(let pid, _) where pid == paneID:
+            return .aborted
+          default:
+            continue
+          }
+        }
+        return .aborted
+      }
+      group.addTask {
+        try? await Task.sleep(for: readyTimeout)
+        return .timedOut
+      }
+      let first = await group.next() ?? .timedOut
+      group.cancelAll()
+      return first
+    }
+
+    switch readiness {
+    case .aborted:
+      return
+    case .agentUp:
+      // Agent process is live but may still be drawing its banner / checking
+      // for updates. Give it a beat to reach its input line before submitting.
+      try? await Task.sleep(for: settleAfterReady)
+    case .timedOut:
+      // Never saw an agent foreground (unknown startup shape). Send anyway —
+      // better than silently dropping the input.
+      break
+    }
+
+    for line in followups {
+      await MainActor.run { terminalClient.sendInput(paneID, line + "\n") }
+      try? await Task.sleep(for: betweenLines)
+    }
   }
 
   /// Picks the worktree's selected (or first) tab and returns its

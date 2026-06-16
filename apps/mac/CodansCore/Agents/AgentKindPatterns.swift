@@ -37,6 +37,36 @@ public nonisolated enum AgentKindPatterns {
     bestForegroundJobMatch(job)?.kind
   }
 
+  /// Lightweight check for whether the FIRST token of a command line invokes
+  /// a known agent binary (e.g. `pi`, `claude`, `codex`). Unlike `classify`,
+  /// which inspects the live foreground process group, this reads the static
+  /// command string — the script runner uses it to recognise a multi-line
+  /// command that means "launch this agent, then feed it the remaining lines
+  /// as input". Returns nil for unknown launchers (plain shell commands), so
+  /// callers safely fall back to their original single-send behaviour.
+  public static func launchesAgent(commandLine: String) -> AgentKind? {
+    let firstLine =
+      commandLine
+      .split(separator: "\n", omittingEmptySubsequences: false)
+      .first
+      .map(String.init) ?? commandLine
+    guard
+      let token =
+        firstLine
+        .split(whereSeparator: { $0 == " " || $0 == "\t" })
+        .first
+    else { return nil }
+    let basename = normalizeExecutableName((String(token) as NSString).lastPathComponent)
+    guard !basename.isEmpty else { return nil }
+    for kind in AgentKind.allCases {
+      guard let patterns = processName[kind] else { continue }
+      if patterns.contains(where: { $0.lowercased() == basename }) {
+        return kind
+      }
+    }
+    return nil
+  }
+
   private static func bestForegroundJobMatch(
     _ job: ForegroundJob
   ) -> (kind: AgentKind, score: Int)? {
