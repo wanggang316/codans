@@ -62,11 +62,12 @@ public nonisolated struct PersistedAgentRecord: Codable, Equatable, Sendable {
   public let paneID: PaneID
   public let kindRaw: String
   public let stateRaw: String
-  /// Process group leader of the agent at capture time. Liveness is
-  /// checked at restore via `kill(pid, 0)`: ESRCH → drop the record;
-  /// success → seed the registry. `0` means "PID unknown at capture",
-  /// which fails the liveness check and is therefore equivalent to a
-  /// dead record — the safe default.
+  /// Process group leader of the agent at capture time, for diagnostics.
+  /// NOT used for restore liveness: on the External backend the agent runs
+  /// inside the daemon's PTY and no foreground PID is readable, so this is
+  /// frequently `0`. Restore liveness is instead a direct daemon-socket
+  /// probe per pane (see `AppState.seedRestoredAgents` /
+  /// `SessionReaper.isDaemonAlive`).
   public let pid: Int32
   public let capturedAt: Date
 
