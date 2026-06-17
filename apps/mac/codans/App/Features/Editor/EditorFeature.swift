@@ -321,6 +321,11 @@ nonisolated struct SettingsWriter: Sendable {
   /// upsert closures and matches `ForEach.onMove`'s array-back semantics.
   var setProjectScripts: @Sendable (_ projectID: ProjectID, _ scripts: [ScriptDefinition]) async -> Void
 
+  /// Global scripts replace — `GeneralSettings.globalScripts`. Same
+  /// full-array semantics as `setProjectScripts`; the Global Commands pane
+  /// writes the whole list back after every edit / reorder / delete.
+  var setGlobalScripts: @Sendable (_ scripts: [ScriptDefinition]) async -> Void
+
   /// Per-Project worktree-lifecycle script. Empty string clears.
   var setProjectLifecycleScript:
     @Sendable (_ projectID: ProjectID, _ phase: WorktreeLifecycle, _ command: String) async -> Void
@@ -390,6 +395,11 @@ extension SettingsWriter {
           store?.mutateProject(pid) { $0.scripts = scripts }
         }
       },
+      setGlobalScripts: { [weak store] scripts in
+        await MainActor.run {
+          store?.mutateGeneral { $0.globalScripts = scripts }
+        }
+      },
       setProjectLifecycleScript: { [weak store] pid, phase, command in
         await MainActor.run {
           store?.mutateProject(pid) { project in
@@ -432,6 +442,7 @@ extension SettingsWriter: DependencyKey {
     setProjectGitField: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectEnvVar: { _, _, _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectScripts: { _, _ in fatalError("SettingsWriter.liveValue not configured") },
+    setGlobalScripts: { _ in fatalError("SettingsWriter.liveValue not configured") },
     setProjectLifecycleScript: { _, _, _ in fatalError("SettingsWriter.liveValue not configured") }
   )
 
@@ -444,6 +455,7 @@ extension SettingsWriter: DependencyKey {
     setProjectGitField: unimplemented("SettingsWriter.setProjectGitField"),
     setProjectEnvVar: unimplemented("SettingsWriter.setProjectEnvVar"),
     setProjectScripts: unimplemented("SettingsWriter.setProjectScripts"),
+    setGlobalScripts: unimplemented("SettingsWriter.setGlobalScripts"),
     setProjectLifecycleScript: unimplemented("SettingsWriter.setProjectLifecycleScript")
   )
 }

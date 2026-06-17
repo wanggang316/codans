@@ -142,6 +142,7 @@ struct SettingsSidebarView: View {
   private func icon(for section: SettingsSection) -> String {
     switch section {
     case .general: return "gearshape"
+    case .globalCommands: return "terminal"
     case .github: return "arrow.triangle.pull"
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"

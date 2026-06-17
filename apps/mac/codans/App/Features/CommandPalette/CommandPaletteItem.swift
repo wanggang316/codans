@@ -81,6 +81,12 @@ struct CommandPaletteItem: Equatable, Identifiable {
     // selection between palette open and activation.
     case runProjectScript(ProjectID, WorktreeID, ScriptDefinition.ID)
 
+    // Global Commands — one Kind per `GeneralSettings.globalScripts` entry.
+    // Like `runProjectScript`, carries the selection's `(projectID,
+    // worktreeID)` so the global command runs in the exact Worktree that
+    // built the item even if the selection changes before activation.
+    case runGlobalScript(ProjectID, WorktreeID, ScriptDefinition.ID)
+
     // Pane / Window (thin wrappers over the existing request enums)
     case paneAction(PaneActionRequest)
     case windowAction(WindowActionRequest)

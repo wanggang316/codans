@@ -16,17 +16,20 @@ struct SettingsWindowFeature {
     var selection: SettingsSection?
     var general: EditorFeature.State = .init()
     var terminal: SettingsTerminalFeature.State = .init()
+    var globalCommands: GlobalCommandsFeature.State = .init()
     var projectPanes: IdentifiedArrayOf<ProjectSettingsFeature.State> = []
 
     init(
       selection: SettingsSection? = nil,
       general: EditorFeature.State = .init(),
       terminal: SettingsTerminalFeature.State = .init(),
+      globalCommands: GlobalCommandsFeature.State = .init(),
       projectPanes: IdentifiedArrayOf<ProjectSettingsFeature.State> = []
     ) {
       self.selection = selection
       self.general = general
       self.terminal = terminal
+      self.globalCommands = globalCommands
       self.projectPanes = projectPanes
     }
 
@@ -40,6 +43,7 @@ struct SettingsWindowFeature {
     case selectionChanged(SettingsSection?)
     case general(EditorFeature.Action)
     case terminal(SettingsTerminalFeature.Action)
+    case globalCommands(GlobalCommandsFeature.Action)
     case projectPanes(IdentifiedActionOf<ProjectSettingsFeature>)
     /// Fired by `SettingsWindowView`'s `.onDisappear`. Clears sidebar selection on close.
     case windowClosed
@@ -58,6 +62,9 @@ struct SettingsWindowFeature {
     Scope(state: \.terminal, action: \.terminal) {
       SettingsTerminalFeature()
     }
+    Scope(state: \.globalCommands, action: \.globalCommands) {
+      GlobalCommandsFeature()
+    }
     Reduce { state, action in
       switch action {
       case .selectionChanged(let next):
@@ -73,6 +80,8 @@ struct SettingsWindowFeature {
       case .general:
         return .none
       case .terminal:
+        return .none
+      case .globalCommands:
         return .none
       case .projectPanes:
         return .none

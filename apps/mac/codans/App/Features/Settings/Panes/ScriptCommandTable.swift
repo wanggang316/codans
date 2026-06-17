@@ -32,6 +32,11 @@ struct ScriptCommandTable: View {
   let onMove: (_ id: UUID, _ offset: Int) -> Void
   /// Chord conflict check, excluding the row being edited.
   let validateChord: (ShortcutBinding, _ excluding: UUID) -> HotkeyRecorderPopover.ValidationResult
+  /// When `true` (Project pane) the `+` button offers preset kinds (Run, Test,
+  /// …) and the built-in Run is protected from deletion. When `false` (Global
+  /// pane) there are no kind presets — `+` adds a single plain Custom command
+  /// and every row is freely removable.
+  var allowsKindPresets: Bool = true
 
   private let iconColumnWidth: CGFloat = 48
   private let nameColumnWidth: CGFloat = 130
@@ -105,9 +110,10 @@ struct ScriptCommandTable: View {
     // the row it would delete is the Run.
     let deletionTargetID = selectedID ?? scripts.last?.id
     let deletionTargetIsRun =
-      deletionTargetID.flatMap { id in scripts.first(where: { $0.id == id }) }?.kind == .run
+      allowsKindPresets
+      && deletionTargetID.flatMap { id in scripts.first(where: { $0.id == id }) }?.kind == .run
     return HStack(spacing: 2) {
-      addMenu
+      addControl
 
       barButton(
         "minus",
@@ -158,6 +164,20 @@ struct ScriptCommandTable: View {
     .buttonStyle(.borderless)
     .disabled(disabled)
     .help(label)
+  }
+
+  /// `+` control. With kind presets (Project pane) it's a menu of preset kinds;
+  /// without them (Global pane) it's a plain button that appends one Custom
+  /// command — global commands have no Run/Test/… taxonomy.
+  @ViewBuilder
+  private var addControl: some View {
+    if allowsKindPresets {
+      addMenu
+    } else {
+      barButton("plus", label: "Add command", disabled: false) {
+        onAdd(.custom)
+      }
+    }
   }
 
   /// `+` menu: offers each preset kind plus Custom. Predefined kinds already
