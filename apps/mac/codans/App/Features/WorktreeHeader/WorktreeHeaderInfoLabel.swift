@@ -65,6 +65,13 @@ struct WorktreeHeaderInfoLabel: View {
 
   private var isMainCheckout: Bool { worktree.path == project.rootPath }
 
+  /// Project name tint in the caption row. Uses the project's configured
+  /// color when set; otherwise keeps the caption `.secondary` hue so a
+  /// No-Color project reads exactly as before.
+  private var projectNameColor: Color {
+    project.color?.swiftUIColor ?? .secondary
+  }
+
   // MARK: - Row 1: branch (click target)
 
   private var branchRowButton: some View {
@@ -141,8 +148,10 @@ struct WorktreeHeaderInfoLabel: View {
       if !folderRestatesBranch {
         Text(worktree.name)
         Text("· \(project.name)")
+          .foregroundStyle(projectNameColor)
       } else {
         Text(project.name)
+          .foregroundStyle(projectNameColor)
       }
     }
     .font(.caption)

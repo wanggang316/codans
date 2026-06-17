@@ -21,7 +21,7 @@ import CodansCore
 /// showing an empty frame.
 struct AgentStateView: View {
   let entries: [PaneID: AgentStateStore.AgentEntry]
-  let resolveSourcePath: (PaneID) -> (project: String, worktree: String)?
+  let resolveSourcePath: (PaneID) -> (project: String, worktree: String, projectColor: ProjectColor?)?
   let onTapRow: (PaneID) -> Void
 
   var body: some View {
@@ -74,6 +74,7 @@ struct AgentStateView: View {
           entry: item.entry,
           projectName: names?.project ?? "—",
           worktreeName: names?.worktree ?? "—",
+          projectColor: names?.projectColor,
           onTap: { onTapRow(item.paneID) }
         )
       }

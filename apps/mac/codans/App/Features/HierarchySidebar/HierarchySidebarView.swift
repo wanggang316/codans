@@ -1442,6 +1442,12 @@ private struct ProjectHeaderRow: View {
   @State private var isPlusHovering = false
   @State private var isMenuHovering = false
 
+  /// Project name tint. Uses the project's configured color when set;
+  /// otherwise keeps the prior hover-driven primary/secondary behavior.
+  private var projectNameColor: Color {
+    project.color?.swiftUIColor ?? (isHovering ? .primary : .secondary)
+  }
+
   var body: some View {
     let hasUnread =
       rollup?.current.unreadProjects.contains(project.id) == true
@@ -1469,7 +1475,7 @@ private struct ProjectHeaderRow: View {
       }
       Text(project.name)
         .font(.subheadline)
-        .foregroundStyle(isHovering ? .primary : .secondary)
+        .foregroundStyle(projectNameColor)
         .lineLimit(1)
       Spacer(minLength: 4)
       // Keep the hover chrome from collapsing row width when hidden —
@@ -1747,19 +1753,22 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
 }
 
 /// Walks the catalog for a paneID and returns the (projectName,
-/// worktreeName) pair the AgentState row needs for its breadcrumb.
+/// worktreeName, projectColor) tuple the AgentState row needs for its
+/// breadcrumb. `projectColor` mirrors the project's configured color so the
+/// row's project name renders in the same hue as the sidebar header and
+/// worktree-header label (`nil` = No Color → caption secondary).
 /// Returns nil when the pane has been torn down between event delivery
 /// and the next popover render — the row renders an em-dash fallback.
 private func resolveAgentStateSourcePath(
   paneID: PaneID,
   catalog: Catalog
-) -> (project: String, worktree: String)? {
+) -> (project: String, worktree: String, projectColor: ProjectColor?)? {
   for project in catalog.projects {
     for worktree in project.worktrees
     where worktree.tabs.contains(where: { tab in
       tab.panes.contains(where: { $0.id == paneID })
     }) {
-      return (project.name, worktree.name)
+      return (project.name, worktree.name, project.color)
     }
   }
   return nil

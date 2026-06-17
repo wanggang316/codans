@@ -24,6 +24,11 @@ struct AgentStateRowView: View {
   let entry: AgentStateStore.AgentEntry
   let projectName: String
   let worktreeName: String
+  /// The source project's configured color. When set, the project line
+  /// renders in this hue so the row matches the sidebar header and
+  /// worktree-header label; `nil` (No Color) keeps the caption secondary.
+  /// Defaults to `nil` so legacy call sites and tests render unchanged.
+  var projectColor: ProjectColor?
   /// True when this row's pane is the main window's currently-focused
   /// pane. Renders a native-style selected-row tint so the user can
   /// match the row they're hovering to "the pane I'm looking at".
@@ -102,7 +107,7 @@ struct AgentStateRowView: View {
           .accessibilityIdentifier("agentState.row.\(paneID).headline")
         Text(projectName)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(projectNameStyle)
           .lineLimit(1)
           .truncationMode(.middle)
       }
@@ -125,11 +130,18 @@ struct AgentStateRowView: View {
           .accessibilityIdentifier("agentState.row.\(paneID).headline")
         Text(projectName)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(projectNameStyle)
           .lineLimit(1)
           .truncationMode(.middle)
       }
     }
+  }
+
+  /// Foreground color for the project line. Uses the project's configured
+  /// color when set; falls back to the caption `.secondary` hue for No-Color
+  /// projects so the row reads unchanged from before this affordance.
+  private var projectNameStyle: Color {
+    projectColor?.swiftUIColor ?? .secondary
   }
 
   /// Row background. Three tiers:
