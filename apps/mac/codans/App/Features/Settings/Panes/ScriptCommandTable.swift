@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 import CodansCore
 
 /// Inline, spreadsheet-style editor for a Project's custom commands.
@@ -284,7 +283,10 @@ private struct ScriptCommandRow: View {
       commandPopover = false
       iconPopover.toggle()
     } label: {
-      ScriptIconView(script: script, size: 16)
+      Image(systemName: script.resolvedSystemImage)
+        .foregroundStyle(ScriptTintColorPalette.color(for: script.resolvedTintColor))
+        .frame(width: 16, alignment: .center)
+        .accessibilityHidden(true)
     }
     .popover(isPresented: $iconPopover, arrowEdge: .bottom) {
       ScriptIconPopover(script: script, onUpdate: onUpdate)
@@ -443,26 +445,8 @@ private enum ScriptTargetLabel {
 /// installed symbol and a shortcut to launch the SF Symbols app. Colour reuses
 /// the Project colour-swatch design (`ColorChip`).
 private struct ScriptIconPopover: View {
-  /// Which sub-panel the popover shows. SF Symbols (curated grid + colour) vs.
-  /// Upload (user image). Mutually exclusive at render time, so they live in
-  /// separate tabs rather than one stacked column.
-  private enum IconTab: Hashable { case symbol, upload }
-
   let script: ScriptDefinition
   let onUpdate: (ScriptDefinition) -> Void
-
-  /// Defaults to Upload when the command already carries a custom icon so the
-  /// user lands on the tab that owns the current icon. Persists across the
-  /// re-renders that `onUpdate` triggers (SwiftUI keeps `@State` by identity),
-  /// so picking an icon never bounces the user back to the other tab.
-  @State private var tab: IconTab
-  @State private var showImporter = false
-
-  init(script: ScriptDefinition, onUpdate: @escaping (ScriptDefinition) -> Void) {
-    self.script = script
-    self.onUpdate = onUpdate
-    _tab = State(initialValue: script.customIconPath == nil ? .symbol : .upload)
-  }
 
   private static let presets: [String] = [
     "terminal", "terminal.fill", "play.fill", "stop.fill",
@@ -478,40 +462,13 @@ private struct ScriptIconPopover: View {
   private var symbolBinding: Binding<String> {
     Binding(
       get: { script.systemImage ?? script.resolvedSystemImage },
-      set: { applySymbol($0) }
+      set: {
+        var updated = script
+        let trimmed = $0.trimmingCharacters(in: .whitespaces)
+        updated.systemImage = trimmed.isEmpty ? nil : trimmed
+        onUpdate(updated)
+      }
     )
-  }
-
-  /// Set an SF Symbol override and drop any custom icon — the two are mutually
-  /// exclusive (custom wins at render time, so picking a symbol must clear it).
-  /// The replaced custom file is removed from the managed store.
-  private func applySymbol(_ name: String) {
-    var updated = script
-    let trimmed = name.trimmingCharacters(in: .whitespaces)
-    updated.systemImage = trimmed.isEmpty ? nil : trimmed
-    if let stale = script.customIconPath {
-      updated.customIconPath = nil
-      CommandIconStore.remove(filename: stale)
-    }
-    onUpdate(updated)
-  }
-
-  /// Copy the picked image into the managed store and point the command at it.
-  private func applyCustomIcon(from url: URL) {
-    guard let filename = try? CommandIconStore.importImage(from: url) else { return }
-    var updated = script
-    if let stale = script.customIconPath { CommandIconStore.remove(filename: stale) }
-    updated.customIconPath = filename
-    onUpdate(updated)
-  }
-
-  /// Revert to the SF Symbol, deleting the managed custom file.
-  private func clearCustomIcon() {
-    guard let stale = script.customIconPath else { return }
-    var updated = script
-    updated.customIconPath = nil
-    onUpdate(updated)
-    CommandIconStore.remove(filename: stale)
   }
 
   private var tintBinding: Binding<ScriptTintColor> {
@@ -527,38 +484,8 @@ private struct ScriptIconPopover: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("Icon")
+      Text("Icon & Color")
         .font(.headline)
-
-      Picker("Icon source", selection: $tab) {
-        Text("SF Symbols").tag(IconTab.symbol)
-        Text("Upload").tag(IconTab.upload)
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-
-      switch tab {
-      case .symbol: symbolTab
-      case .upload: uploadTab
-      }
-    }
-    .padding(12)
-    .frame(width: 360)
-    .fileImporter(
-      isPresented: $showImporter,
-      allowedContentTypes: [.image],
-      allowsMultipleSelection: false
-    ) { result in
-      if case .success(let urls) = result, let url = urls.first {
-        applyCustomIcon(from: url)
-      }
-    }
-  }
-
-  /// SF Symbols tab: free-text symbol field + curated grid + colour swatches.
-  @ViewBuilder
-  private var symbolTab: some View {
-    VStack(alignment: .leading, spacing: 10) {
       Text("Pick a symbol and colour, or type any SF Symbol name your system has.")
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -577,10 +504,10 @@ private struct ScriptIconPopover: View {
         ) {
           ForEach(Self.presets, id: \.self) { name in
             Button {
-              applySymbol(name)
+              symbolBinding.wrappedValue = name
             } label: {
               Image(systemName: name)
-                .foregroundStyle(isActiveSymbol(name) ? ScriptTintColorPalette.color(for: script.resolvedTintColor) : .primary)
+                .foregroundStyle(name == symbolBinding.wrappedValue ? ScriptTintColorPalette.color(for: script.resolvedTintColor) : .primary)
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
             }
@@ -590,66 +517,14 @@ private struct ScriptIconPopover: View {
         }
         .padding(12)
       }
-      // Fixed (not max) height: under the tab layout's intrinsic sizing a
-      // `maxHeight` ScrollView collapses to a single visible row. A fixed
-      // height reserves the full grid (all preset rows) like the pre-tab
-      // popover did.
-      .frame(height: 124)
+      .frame(maxHeight: 124)
 
       Divider()
 
       ScriptTintSwatchRow(selection: tintBinding)
     }
-  }
-
-  /// Upload tab: large preview of the current icon plus Upload / Replace /
-  /// Remove. The empty state shows a placeholder glyph and a single Upload
-  /// button. `minHeight` keeps the popover from shrinking jarringly relative
-  /// to the taller SF Symbols tab.
-  @ViewBuilder
-  private var uploadTab: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Upload an image (PNG, JPEG, …) to use as this command's icon.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-
-      HStack(spacing: 12) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 8)
-            .fill(Color(nsColor: .controlBackgroundColor))
-          RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(Color(nsColor: .separatorColor))
-          if script.customIconPath != nil {
-            ScriptIconView(script: script, size: 44)
-          } else {
-            Image(systemName: "photo")
-              .font(.title)
-              .foregroundStyle(.secondary)
-              .accessibilityHidden(true)
-          }
-        }
-        .frame(width: 72, height: 72)
-
-        VStack(alignment: .leading, spacing: 6) {
-          Button(script.customIconPath == nil ? "Upload Icon…" : "Replace…") {
-            showImporter = true
-          }
-          if script.customIconPath != nil {
-            Button("Remove", role: .destructive, action: clearCustomIcon)
-          }
-        }
-        Spacer(minLength: 0)
-      }
-      Spacer(minLength: 0)
-    }
-    .frame(minHeight: 150, alignment: .top)
-  }
-
-  /// A preset is "active" only when it's the current SF Symbol *and* no custom
-  /// icon is overriding it — a custom icon means no symbol is selected.
-  private func isActiveSymbol(_ name: String) -> Bool {
-    script.customIconPath == nil && name == symbolBinding.wrappedValue
+    .padding(12)
+    .frame(width: 360)
   }
 
   /// Launch the SF Symbols app, falling back to the web reference.
