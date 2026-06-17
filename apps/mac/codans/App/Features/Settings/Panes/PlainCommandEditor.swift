@@ -14,6 +14,15 @@ import SwiftUI
 struct PlainCommandEditor: NSViewRepresentable {
   @Binding var text: String
 
+  /// Whether the text view should grab first responder as soon as it attaches
+  /// to its window. Needed inside a `.popover` (the click that opens the
+  /// popover never reaches the field, so it would otherwise be unfocusable),
+  /// but wrong for inline use: when several editors render at once they would
+  /// race for first responder and the last one created wins — e.g. the three
+  /// lifecycle editors in Project → General all stealing focus to the last
+  /// (Delete) script on open. Defaults to off; only the popover opts in.
+  var autoFocusOnAppear: Bool = false
+
   func makeCoordinator() -> Coordinator {
     Coordinator(text: $text)
   }
@@ -49,7 +58,11 @@ struct PlainCommandEditor: NSViewRepresentable {
     // as unfocusable. Promote it to first responder once it has attached to the
     // popover window — same "wait for window, then focus" shape the pane-focus
     // paths use. Retries because the window is nil for the first run-loop ticks.
-    context.coordinator.focusWhenAttached(textView)
+    // Opt-in only: inline editors leave focus to the user's click so they don't
+    // hijack the caret on appear (see `autoFocusOnAppear`).
+    if autoFocusOnAppear {
+      context.coordinator.focusWhenAttached(textView)
+    }
     return scrollView
   }
 
