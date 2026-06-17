@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -53,6 +53,53 @@ struct AgentStateStoreTests {
     let f = Fixture()
     f.viewport("• Working (10s)")
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+  }
+
+  @Test
+  func seededWorkingSurvivesLaunchRebind() {
+    // M6.T6.5 resume: an agent persisted as `.working` at quit must keep
+    // that badge after launch. The binder re-identifies the restored agent
+    // and fires `onAgentBound`; it must not collapse the seeded state to
+    // `.idle` before any live viewport classification arrives.
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+  }
+
+  @Test
+  func seededBlockedSurvivesLaunchRebind() {
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .blocked)])
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
+    #expect(f.registry.entries[f.paneID]?.state == .blocked)
+  }
+
+  @Test
+  func seededStateYieldsToLiveViewport() {
+    // The seed is only a bridge until live signals return. Once a real
+    // viewport classification lands it governs — here the restored agent
+    // has finished, so its idle prompt drives the badge back to idle.
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
+
+    f.viewport("codex> ")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+  }
+
+  @Test
+  func seededWorkingConfirmedByLiveViewport() {
+    // A genuinely still-working restored agent keeps `.working` once its
+    // live working cue re-renders.
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
+
+    f.viewport("• Working (10s)")
     #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 

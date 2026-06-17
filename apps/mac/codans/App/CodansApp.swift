@@ -1506,10 +1506,11 @@ final class AppState {
       }
     )
     self.agentStateStore = registry
-    // Pre-seed the registry from the last quit's agent snapshot (M6.T6.5).
-    // Each persisted record carries the foreground PGID at capture time;
-    // `kill(pid, 0)` filters out agents whose processes exited between
-    // launches so we never restore a phantom "waiting for input" badge.
+    // Pre-seed the registry from the last quit's agent snapshot (M6.T6.5)
+    // so a resumed working/blocked agent surfaces immediately instead of
+    // waiting for the first live viewport. Each restored record is gated on
+    // a direct daemon-socket probe so we never restore a phantom badge for
+    // an agent whose daemon died between launches.
     Self.seedRestoredAgents(coordinator: self.sessionCoordinator, registry: registry)
     // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
     // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
@@ -1578,12 +1579,15 @@ final class AppState {
   /// Liveness is keyed on the pane's zmx daemon, not the agent process.
   /// On the External-backend branch the agent runs inside the daemon's PTY
   /// (it is a child of the daemon's shell), and `PaneSurface` cannot read a
-  /// foreground PID, so the captured `record.pid` is always `0`. The reaper's
-  /// launch sweep has already probed every recorded socket and left only the
-  /// surviving daemons in `coordinator.catalog.sessions`; a pane present there
-  /// has a reachable daemon, so the agent it hosted is alive too. Agents whose
-  /// daemon did not survive are dropped. Unknown enum raws (a future build's
-  /// `kindRaw` / `stateRaw`) are likewise dropped instead of failing the launch.
+  /// foreground PID, so the captured `record.pid` is always `0` — a PID
+  /// liveness check is useless here. The keepRunning quit path also persists
+  /// `sessions: [:]` (resume reattaches from the Pane list, not the socket
+  /// catalog), so `coordinator.catalog.sessions` is empty at this point and
+  /// cannot be used to tell which daemons survived. We instead probe each
+  /// restored pane's control socket directly via `SessionReaper.isDaemonAlive`
+  /// — a reachable socket means the daemon, and the agent inside its PTY, is
+  /// still alive. Agents whose daemon did not survive are dropped, as are
+  /// unknown enum raws (a future build's `kindRaw` / `stateRaw`).
   @MainActor
   private static func seedRestoredAgents(
     coordinator: SessionCoordinator?,
@@ -1592,20 +1596,32 @@ final class AppState {
     guard let coordinator else { return }
     let restored = coordinator.restoredAgents
     guard !restored.isEmpty else { return }
-    // Sessions that survived the reaper sweep — their daemons answered
-    // `connect(2)`, so the agents running inside their PTYs are still alive.
-    let aliveSessions = coordinator.catalog.sessions
+    let seeds = selectAgentSeeds(
+      restored: restored,
+      isDaemonAlive: { SessionReaper.isDaemonAlive(paneID: $0) }
+    )
+    registry.seedRestored(seeds)
+  }
+
+  /// Pure seed-selection policy extracted from `seedRestoredAgents` so the
+  /// liveness + enum-decoding gates are unit-testable without a live socket.
+  /// Keeps a restored record only when its daemon answers `isDaemonAlive`
+  /// and both enum raws still decode in this build.
+  static func selectAgentSeeds(
+    restored: [PaneID: PersistedAgentRecord],
+    isDaemonAlive: (PaneID) -> Bool
+  ) -> [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] {
     var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
     seeds.reserveCapacity(restored.count)
     for (paneID, record) in restored {
-      guard aliveSessions[paneID.raw.uuidString] != nil else { continue }
+      guard isDaemonAlive(paneID) else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
         let state = AgentStateStore.AgentRuntimeState(rawValue: record.stateRaw)
       else { continue }
       seeds.append((paneID: paneID, kind: kind, state: state))
     }
-    registry.seedRestored(seeds)
+    return seeds
   }
 
   /// Active-agents T6: long-running focus observer for `AgentStateStore`.
