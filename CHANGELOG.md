@@ -20,6 +20,20 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.8] - 2026-06-18
+
+### Added
+
+- **Global commands.** Define project-agnostic commands in Settings → Global
+  Commands and run them from any worktree — they appear in the worktree-header
+  Command menu and the Command Palette right alongside your per-project commands.
+
+### Fixed
+
+- **Agents come back with the right status.** An agent that was working or
+  blocked when you quit no longer reappears as idle — after relaunch the Agents
+  view restores its real state.
+
 ## [0.4.7] - 2026-06-17
 
 ### Added
