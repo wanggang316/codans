@@ -602,7 +602,7 @@ private struct ScriptCommandPopover: View {
         .help("Direction to split the focused pane.")
       }
 
-      PlainCommandEditor(text: commandBinding)
+      PlainCommandEditor(text: commandBinding, autoFocusOnAppear: true)
         .frame(height: 140)
         .overlay(
           RoundedRectangle(cornerRadius: 6)
