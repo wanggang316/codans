@@ -304,6 +304,20 @@ public final class SessionReaper {
     }
   }
 
+  /// Catalog-independent liveness probe for a single pane's daemon.
+  ///
+  /// `sweep` keys liveness off `catalog.sessions`, but the keepRunning quit
+  /// path persists `sessions: [:]` (the daemons survive and reattach is
+  /// driven by the hierarchy Pane list, not the socket catalog). So at the
+  /// next launch `catalog.sessions` is empty and cannot tell which restored
+  /// agents still have a live daemon. The agent-seed path probes the
+  /// canonical control socket directly instead — the same `connect(2)` test
+  /// `sweep` applies to catalog rows, just addressed by `PaneID` rather than
+  /// a catalog row.
+  static func isDaemonAlive(paneID: PaneID) -> Bool {
+    probe(socketPath: ZmxControlClient.socketPath(for: paneID))
+  }
+
   /// Synchronous `connect(2)` probe against a Unix domain socket. Uses
   /// `O_NONBLOCK` + `poll(2)` for a bounded wait so a half-open socket
   /// (daemon hung, kernel still routing) cannot stall launch indefinitely.

@@ -46,6 +46,11 @@ struct CreateWorktreeFeature {
     // Options loaded asynchronously on presentation.
     var baseRefOptions: [String] = []
     var localBranchNamesLower: Set<String> = []
+    /// Lowercased branches currently checked out by a LIVE worktree.
+    /// A name in this set is a hard conflict (git won't check the same
+    /// branch out twice). A name in `localBranchNamesLower` but NOT here
+    /// is a "dangling" branch — re-creating reuses it instead of failing.
+    var liveWorktreeBranchesLower: Set<String> = []
     var automaticBaseRef: String?
     var loadingOptions: Bool = true
 
@@ -61,6 +66,9 @@ struct CreateWorktreeFeature {
     // Transient derived state.
     var validationError: String?
     var submitError: String?
+    /// Non-error hint shown when the typed name matches a dangling local
+    /// branch that will be reused (its commits kept, base ref ignored).
+    var reuseNotice: String?
   }
 
   enum Action: Equatable {
@@ -68,6 +76,7 @@ struct CreateWorktreeFeature {
     case optionsLoaded(
       baseRefs: [String],
       localBranchNamesLower: Set<String>,
+      liveWorktreeBranchesLower: Set<String>,
       automaticBaseRef: String?
     )
     case branchDraftChanged(String)
@@ -104,22 +113,30 @@ struct CreateWorktreeFeature {
           async let refs = (try? client.branchRefs(repoRoot)) ?? []
           async let locals =
             (try? client.localBranchNames(repoRoot)) ?? []
+          async let live = (try? client.lsWorktrees(repoRoot)) ?? []
           async let auto = (try? client.defaultRemoteBranchRef(repoRoot)) ?? nil
           let loadedRefs = await refs
           let loadedLocals = await locals
+          let loadedLive = Set(
+            await live
+              .map { $0.branch.trimmingCharacters(in: .whitespaces).lowercased() }
+              .filter { !$0.isEmpty }
+          )
           let loadedAuto = await auto
           await send(
             .optionsLoaded(
               baseRefs: loadedRefs,
               localBranchNamesLower: loadedLocals,
+              liveWorktreeBranchesLower: loadedLive,
               automaticBaseRef: loadedAuto
             ))
         }
 
-      case .optionsLoaded(let baseRefs, let locals, let auto):
+      case .optionsLoaded(let baseRefs, let locals, let live, let auto):
         state.loadingOptions = false
         state.baseRefOptions = baseRefs
         state.localBranchNamesLower = locals
+        state.liveWorktreeBranchesLower = live
         state.automaticBaseRef = auto
         // Preserve a user-set value if they already picked one while
         // options were loading. Otherwise prefer the per-Project override
@@ -136,18 +153,33 @@ struct CreateWorktreeFeature {
 
       case .branchDraftChanged(let draft):
         state.branchNameDraft = draft
-        // Live-validate synchronously against the local-branch set we
-        // already fetched. The `git check-ref-format` path is also
-        // exercised on Create — no need to shell out on every keystroke.
+        // Live-validate synchronously against the branch sets we already
+        // fetched. The `git check-ref-format` path is also exercised on
+        // Create — no need to shell out on every keystroke.
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
         if trimmed.isEmpty {
           state.validationError = nil
+          state.reuseNotice = nil
         } else if trimmed.contains(where: \.isWhitespace) {
           state.validationError = "Branch names can't contain spaces."
-        } else if state.localBranchNamesLower.contains(trimmed.lowercased()) {
-          state.validationError = "Branch \"\(trimmed)\" already exists."
+          state.reuseNotice = nil
+        } else if state.liveWorktreeBranchesLower.contains(lower) {
+          // Checked out by a live worktree — git refuses a second
+          // checkout, and it isn't a dangling ref we can reuse.
+          state.validationError =
+            "Branch \"\(trimmed)\" is already checked out in another worktree."
+          state.reuseNotice = nil
+        } else if state.localBranchNamesLower.contains(lower) {
+          // Dangling branch: it exists but no worktree is on it (e.g. a
+          // prior remove couldn't drop the ref). Re-creating reuses it
+          // instead of failing — surface a hint, not an error.
+          state.validationError = nil
+          state.reuseNotice =
+            "Will reuse existing branch \"\(trimmed)\" — its commits are kept and the base ref is ignored."
         } else {
           state.validationError = nil
+          state.reuseNotice = nil
         }
         return .none
 
@@ -186,6 +218,18 @@ struct CreateWorktreeFeature {
           state.validationError = "Branch name produces an empty directory name."
           return .none
         }
+        // Re-decide reuse against the SANITIZED branch name (what git-wt
+        // actually creates), not the raw draft — sanitization can shift
+        // the name (trailing dashes, doubled slashes). A branch checked
+        // out by a live worktree is a hard conflict; a dangling branch
+        // (exists, no worktree) is reused via `--path`.
+        let branchLower = directoryName.lowercased()
+        if state.liveWorktreeBranchesLower.contains(branchLower) {
+          state.validationError =
+            "Branch \"\(directoryName)\" is already checked out in another worktree."
+          return .none
+        }
+        let reuseExistingBranch = state.localBranchNamesLower.contains(branchLower)
         // Branch names like `feature/abc` map to nested folders
         // (`feature/abc`); `appending(path:)` honours the embedded
         // separator, whereas `appending(component:)` would percent-encode
@@ -213,7 +257,8 @@ struct CreateWorktreeFeature {
           baseRef: baseRef,
           fetchOrigin: state.fetchOrigin,
           copyIgnored: state.copyIgnored,
-          copyUntracked: state.copyUntracked
+          copyUntracked: state.copyUntracked,
+          reuseExistingBranch: reuseExistingBranch
         )
         let pending = PendingWorktree(
           id: PendingWorktreeID(),

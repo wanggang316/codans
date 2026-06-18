@@ -109,6 +109,10 @@ struct SettingsWindowView: View {
         sessionCoordinator: sessionCoordinator,
         onForgetAllSessions: onForgetAllSessions
       )
+    case .globalCommands:
+      GlobalCommandsSettingsView(
+        store: store.scope(state: \.globalCommands, action: \.globalCommands)
+      )
     case .github:
       GitHubSettingsView(settingsStore: settingsStore)
     case .worktree:

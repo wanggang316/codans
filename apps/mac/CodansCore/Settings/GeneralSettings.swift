@@ -102,6 +102,14 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// re-enable starts a fresh anonymous id.
   public var crashReportsEnabled: Bool
 
+  /// User-defined commands that are available across every Project — the
+  /// global counterpart to `ProjectSettings.scripts`. Surfaced in the
+  /// worktree-header Command menu, the Command Palette, and the
+  /// Settings → Global Commands pane. Each entry runs in the currently
+  /// selected worktree's context. Empty by default; omitted from the
+  /// serialized `general` object when empty so existing files stay clean.
+  public var globalScripts: [ScriptDefinition]
+
   public init(
     appearance: AppearancePreference = .system,
     defaultEditorID: EditorID? = nil,
@@ -117,7 +125,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     agentsViewAutoOpen: Bool = true,
     agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
     agentsViewAutoSort: Bool = true,
-    crashReportsEnabled: Bool = true
+    crashReportsEnabled: Bool = true,
+    globalScripts: [ScriptDefinition] = []
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
@@ -134,6 +143,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.agentsViewDisplayMode = agentsViewDisplayMode
     self.agentsViewAutoSort = agentsViewAutoSort
     self.crashReportsEnabled = crashReportsEnabled
+    self.globalScripts = globalScripts
   }
 
   public static let `default` = GeneralSettings()
@@ -147,6 +157,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case agentsViewDisplayMode
     case agentsViewAutoSort
     case crashReportsEnabled
+    case globalScripts
     /// Retired in favour of `quitConfirmation` + `quitAction`. Still decoded by
     /// `init(from:)` so legacy settings files migrate transparently on first launch.
     case quitStrategy
@@ -232,6 +243,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     // with fresh installs; the user can opt out from Settings → General.
     self.crashReportsEnabled =
       try container.decodeIfPresent(Bool.self, forKey: .crashReportsEnabled) ?? true
+    // Older settings files predate this field. Absent → empty list; the
+    // worktree-header Command menu and palette simply show no global
+    // commands until the user adds one in Settings → Global Commands.
+    self.globalScripts =
+      try container.decodeIfPresent([ScriptDefinition].self, forKey: .globalScripts) ?? []
   }
 
   /// Explicit encoder so the retired `resumePanesOnLaunch` / `quitStrategy` CodingKeys
@@ -256,5 +272,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encode(agentsViewAutoOpen, forKey: .agentsViewAutoOpen)
     try container.encode(agentsViewDisplayMode, forKey: .agentsViewDisplayMode)
     try container.encode(crashReportsEnabled, forKey: .crashReportsEnabled)
+    // Omit-when-empty: keep `general` free of an empty `globalScripts: []`
+    // array on installs that never define a global command.
+    if !globalScripts.isEmpty {
+      try container.encode(globalScripts, forKey: .globalScripts)
+    }
   }
 }
