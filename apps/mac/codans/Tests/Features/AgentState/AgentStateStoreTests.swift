@@ -116,6 +116,35 @@ struct AgentStateStoreTests {
   }
 
   @Test
+  func claudePaneIdleFlushesHeldWorkingToFinished() {
+    // Regression (fix/agents-view-done-wrong): Claude's `claudeWorkingHold`
+    // debounces the finishing `working`→`idle` transition. The trailing edge
+    // only flips on a follow-up derivation, but once the rendered region
+    // settles no further `paneViewportChanged` fires — so the held `working`
+    // was getting pinned forever. The engine's quiet `.paneIdle` nudge now
+    // supplies that post-hold derivation; here it must flip a backgrounded,
+    // finished Claude agent to `.finished`.
+    let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
+    let paneID = PaneID()
+    let registry = AgentStateStore(focusedPane: { nil }, now: { clock.value })
+
+    registry.onAgentBound(paneID, kind: .claudeCode, sessionID: nil)
+    registry.onPaneKeyboardActivity(paneID)
+    registry.onTerminalEvent(.paneViewportChanged(paneID, text: "✢ Editing…"))
+    #expect(registry.entries[paneID]?.state == .working)
+
+    // Agent finishes: idle prompt renders, but the hold pins working.
+    clock.setValue(Date(timeIntervalSince1970: 1_000.3))
+    registry.onTerminalEvent(.paneViewportChanged(paneID, text: "❯ "))
+    #expect(registry.entries[paneID]?.state == .working)
+
+    // Screen settled; the quiet nudge arrives past the hold window → finished.
+    clock.setValue(Date(timeIntervalSince1970: 1_002))
+    registry.onTerminalEvent(.paneIdle(paneID, duration: 1.7))
+    #expect(registry.entries[paneID]?.state == .finished)
+  }
+
+  @Test
   func focusedCompletionStaysIdle() {
     let f = Fixture()
     f.focused.setValue(f.paneID)
