@@ -20,6 +20,29 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.9] - 2026-06-18
+
+### Changed
+
+- **Project names now wear their project color.** The color set in Settings →
+  General → Color tints the project name in the sidebar, the Agents view, and
+  the worktree header — not just the project dot. Projects with No Color keep
+  the default styling.
+
+### Fixed
+
+- **Agent status no longer gets stuck on "working."** After a coding agent
+  (like Claude Code) finishes, the Agents view badge reliably settles to
+  "finished" instead of staying lit as "working."
+- **Recreating a worktree you deleted earlier works again.** Making a new
+  worktree with the same name as one you'd removed no longer fails with "Branch
+  already exists" — it reuses the leftover branch and keeps its commits. When a
+  branch can't be removed because another worktree still has it checked out, you
+  now get a notice instead of a silent skip.
+- **Opening Settings → Project → General no longer drops your cursor into the
+  Delete Script box.** The caret stays put; the command-editor popover still
+  focuses its field as before.
+
 ## [0.4.8] - 2026-06-18
 
 ### Added
