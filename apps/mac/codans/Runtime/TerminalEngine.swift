@@ -84,6 +84,10 @@ final class TerminalEngine {
   private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
   private var foregroundJobMisses: [PaneID: UInt8] = [:]
   private var viewportSnapshots: [PaneID: String] = [:]
+  /// When each pane's active-region snapshot last changed. Drives the
+  /// bounded `.paneIdle` settle nudges emitted while an agent pane is quiet
+  /// (see `viewportPollOutcome`).
+  private var viewportChangedAt: [PaneID: Date] = [:]
   /// Process-group → resolved foreground job cache. The poll loop hits
   /// every PGID at ≤300 ms when an agent is bound; the underlying
   /// `proc_listpids` + `proc_pidinfo` + `KERN_PROCARGS2` triad costs a
@@ -377,6 +381,7 @@ final class TerminalEngine {
     foregroundJobSnapshots.removeValue(forKey: paneID)
     foregroundJobMisses.removeValue(forKey: paneID)
     viewportSnapshots.removeValue(forKey: paneID)
+    viewportChangedAt.removeValue(forKey: paneID)
     stopForegroundJobPollingIfIdle()
   }
 
@@ -697,7 +702,7 @@ final class TerminalEngine {
         emit(.foregroundJobChanged(paneID, next))
       }
       if let surface = ghosttyRuntime.surface(for: paneID) {
-        emitViewportIfNeeded(paneID: paneID, surface: surface, foregroundJob: next)
+        emitViewportIfNeeded(paneID: paneID, surface: surface, foregroundJob: next, now: now)
       }
     }
   }
@@ -726,7 +731,8 @@ final class TerminalEngine {
   private func emitViewportIfNeeded(
     paneID: PaneID,
     surface: PaneSurface,
-    foregroundJob: ForegroundJob
+    foregroundJob: ForegroundJob,
+    now: Date
   ) {
     let hasAgentSignal =
       hierarchy.catalog.pane(paneID)?.agentKind != nil
@@ -735,9 +741,61 @@ final class TerminalEngine {
     // scrollback that happens to still be visible must not pin the agent on a
     // stale prompt/spinner.
     guard hasAgentSignal, let text = surface.readText(.active) else { return }
-    guard viewportSnapshots[paneID] != text else { return }
-    viewportSnapshots[paneID] = text
-    emit(.paneViewportChanged(paneID, text: text))
+    switch Self.viewportPollOutcome(
+      text: text,
+      previous: viewportSnapshots[paneID],
+      changedAt: viewportChangedAt[paneID],
+      now: now
+    ) {
+    case .changed:
+      viewportSnapshots[paneID] = text
+      viewportChangedAt[paneID] = now
+      emit(.paneViewportChanged(paneID, text: text))
+    case .idleNudge(let duration):
+      emit(.paneIdle(paneID, duration: duration))
+    case .quiet:
+      break
+    }
+  }
+
+  /// How long after an agent pane's active region goes quiet we keep
+  /// nudging the agent-state machine with `.paneIdle`. Sized to comfortably
+  /// outlast `PaneAttentionInterpreter.claudeWorkingHold` so the held
+  /// `working` state always gets at least one post-hold derivation, then
+  /// bounded so a long-idle agent pane stops ticking.
+  static let idleNudgeWindow: TimeInterval = PaneAttentionInterpreter.claudeWorkingHold * 2
+
+  enum ViewportPollOutcome: Equatable {
+    case changed
+    case idleNudge(duration: TimeInterval)
+    case quiet
+  }
+
+  /// Pure decision for what an agent pane's foreground-job poll should emit,
+  /// given the freshly read active-region `text`, the `previous` snapshot,
+  /// when that snapshot was first observed (`changedAt`), and `now`.
+  ///
+  /// - Changed text → `.changed`: the live cue moved, emit `paneViewportChanged`.
+  /// - Unchanged within `idleNudgeWindow` → `.idleNudge`: the screen has
+  ///   settled but the agent-state machine debounces a finishing agent's
+  ///   `working`→`idle` transition (`claudeWorkingHold`). That trailing edge
+  ///   only flips on a *follow-up* derivation; once the rendered region stops
+  ///   changing no further `paneViewportChanged` fires, so the held `working`
+  ///   would never settle to `finished`. These bounded `.paneIdle` ticks
+  ///   supply that follow-up. (Notification consumers ignore sub-30 s idle,
+  ///   so this stays badge-only.)
+  /// - Unchanged beyond the window → `.quiet`: stop, the badge has settled.
+  static func viewportPollOutcome(
+    text: String,
+    previous: String?,
+    changedAt: Date?,
+    now: Date
+  ) -> ViewportPollOutcome {
+    guard previous == text else { return .changed }
+    guard let changedAt else { return .quiet }
+    let quiet = now.timeIntervalSince(changedAt)
+    guard quiet > 0, quiet <= idleNudgeWindow else { return .quiet }
+    return .idleNudge(duration: quiet)
   }
 }
 

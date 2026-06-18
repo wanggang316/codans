@@ -380,4 +380,49 @@ struct TerminalEngineTests {
     for await _ in stream { count += 1 }
     #expect(count == 0)
   }
+
+  // MARK: - Viewport poll outcome (agent idle nudges)
+
+  @Test
+  func viewportPollEmitsChangedThenBoundedIdleNudges() {
+    let t0 = Date(timeIntervalSince1970: 1_000)
+    func outcome(_ text: String, _ previous: String?, quiet: TimeInterval) -> TerminalEngine.ViewportPollOutcome {
+      TerminalEngine.viewportPollOutcome(
+        text: text, previous: previous, changedAt: t0, now: t0.addingTimeInterval(quiet)
+      )
+    }
+
+    // First snapshot for a pane (no baseline) → changed.
+    #expect(
+      TerminalEngine.viewportPollOutcome(text: "spinner", previous: nil, changedAt: nil, now: t0)
+        == .changed
+    )
+    // Live cue moved → changed.
+    #expect(outcome("b", "a", quiet: 0.3) == .changed)
+
+    // Quiet within the settle window → idle nudge carrying the quiet duration.
+    if case .idleNudge(let duration) = outcome("a", "a", quiet: 0.3) {
+      #expect(abs(duration - 0.3) < 0.001)
+    } else {
+      Issue.record("expected an idle nudge within the settle window")
+    }
+
+    // Quiet past the hold but still within the window → must keep nudging:
+    // this is the tick that settles the badge.
+    let pastHold = PaneAttentionInterpreter.claudeWorkingHold + 0.3
+    if case .idleNudge = outcome("a", "a", quiet: pastHold) {
+    } else {
+      Issue.record("expected a nudge to fire after the hold expires")
+    }
+
+    // Quiet beyond the window → silent (no forever-ticking for an idle pane).
+    #expect(outcome("a", "a", quiet: TerminalEngine.idleNudgeWindow + 0.5) == .quiet)
+  }
+
+  @Test
+  func idleNudgeWindowOutlastsClaudeWorkingHold() {
+    // The nudges only fix the badge if at least one fires *after* the hold
+    // expires, so the window must strictly exceed the hold.
+    #expect(TerminalEngine.idleNudgeWindow > PaneAttentionInterpreter.claudeWorkingHold)
+  }
 }
