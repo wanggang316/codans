@@ -17,6 +17,17 @@ nonisolated struct GitWtEntry: Decodable, Equatable, Sendable {
   }
 }
 
+/// Outcome of the best-effort local-branch deletion run during worktree
+/// removal. `kept` means git refused (branch checked out by the main
+/// checkout or another worktree) — removal still succeeds, the branch is
+/// intentionally left intact, and `reason` carries git's message so the
+/// caller can surface why the branch survived.
+nonisolated enum BranchDeleteOutcome: Equatable, Sendable {
+  case deleted
+  case absent
+  case kept(reason: String)
+}
+
 /// Input spec for `createWorktreeStream`. The caller pre-sanitizes `name`
 /// to the on-disk directory name (via `GitWorktreeClient.sanitizeBranchName`
 /// or an equivalent), which may differ from `branch` when the branch name
@@ -29,6 +40,16 @@ nonisolated struct CreateWorktreeSpec: Equatable, Sendable {
   var fetchOrigin: Bool
   var copyIgnored: Bool
   var copyUntracked: Bool
+  /// True when a local branch named `name` already exists but no live
+  /// worktree is checked out on it — a "dangling" branch left behind
+  /// when a prior remove's `git branch -D` was skipped (empty catalog
+  /// branch) or refused (branch checked out elsewhere). `wt sw` only
+  /// attaches an existing branch when an explicit `--path` is supplied
+  /// (otherwise it dies with "branch exists without worktree"), so
+  /// `makeCreateArguments` passes one. The branch's existing commits are
+  /// preserved and the selected base ref is ignored. Fixes the "can't
+  /// re-create a removed worktree under the same name" trap.
+  var reuseExistingBranch: Bool = false
 }
 
 /// Stream events emitted while `wt sw` runs. Consumers render
@@ -88,11 +109,13 @@ nonisolated struct GitWorktreeClient: Sendable {
   /// used to clean up the local branch left behind by `git worktree
   /// remove`, which intentionally keeps the ref so the user can recover
   /// it. Codans's UX is "delete the worktree means delete its
-  /// branch too" (matches `wt rm`), so we drop it here. Errors are
-  /// swallowed: git refuses if the branch is checked out elsewhere
-  /// (main / shared branch) or never existed, neither of which should
-  /// surface as a remove-worktree failure.
-  var deleteBranchIfExists: @Sendable (_ repoRoot: URL, _ branch: String) async -> Void
+  /// branch too" (matches `wt rm`), so we drop it here. Never throws:
+  /// git refuses if the branch is checked out elsewhere (main / shared
+  /// branch), which must NOT fail the remove — that refusal is reported
+  /// as `.kept` so the caller can surface why the branch lingered (and
+  /// the next same-name create will reuse it via `reuseExistingBranch`).
+  var deleteBranchIfExists:
+    @Sendable (_ repoRoot: URL, _ branch: String) async -> BranchDeleteOutcome
   /// Best-effort `git push <remote> --delete <branch>` — deletes the remote
   /// tracking branch when the user opted into "Delete remote branch with
   /// worktree". The remote is resolved from the branch's configured upstream
@@ -169,6 +192,16 @@ nonisolated extension GitWorktreeClient {
     if !spec.baseRef.isEmpty {
       arguments.append("--from")
       arguments.append(spec.baseRef)
+    }
+    if spec.reuseExistingBranch {
+      // Attach the pre-existing branch instead of creating it (`-b`).
+      // The path mirrors git-wt's own default layout (`<base-dir>/<name>`)
+      // so the resulting worktree lands exactly where a fresh create
+      // would. git-wt ignores `--from` on this path.
+      arguments.append("--path")
+      arguments.append(
+        spec.baseDirectory.appending(path: spec.name).path(percentEncoded: false)
+      )
     }
     if spec.copyIgnored || spec.copyUntracked {
       arguments.append("--verbose")
@@ -808,11 +841,11 @@ nonisolated extension GitWorktreeClient {
 
       deleteBranchIfExists: { repoRoot, branch in
         // Best-effort: git refuses if the branch is checked out by
-        // another worktree (e.g. it's the project's main branch) or
-        // simply doesn't exist. Either case shouldn't fail the remove
-        // flow — the worktree has already been pulled out of the user's
-        // hierarchy by the caller.
-        _ = await GitWorktreeShell.run(
+        // another worktree (e.g. it's the project's main branch) — that
+        // refusal is exactly when we must NOT delete it, so we report
+        // `.kept` instead of failing the remove flow. A genuinely-absent
+        // branch is `.absent`. Neither aborts the caller.
+        let outcome = await GitWorktreeShell.run(
           executable: GitWorktreeShell.gitURL,
           arguments: [
             "-C", repoRoot.path(percentEncoded: false),
@@ -820,6 +853,21 @@ nonisolated extension GitWorktreeClient {
           ],
           cwd: repoRoot
         )
+        guard case .exited(let code, _, let stderr, _) = outcome else {
+          return .kept(reason: "git branch -D did not complete")
+        }
+        if code == 0 { return .deleted }
+        let message = GitWorktreeShell.decodeUTF8(stderr)
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = message.lowercased()
+        // git's "not found" phrasings vary by version/locale; treat any
+        // of them as already-gone rather than a kept branch.
+        if lower.contains("not found") || lower.contains("no branch named")
+          || lower.contains("couldn't look up")
+        {
+          return .absent
+        }
+        return .kept(reason: message.isEmpty ? "git refused to delete the branch" : message)
       },
 
       deleteRemoteBranchIfExists: { repoRoot, branch in
@@ -1063,7 +1111,7 @@ extension GitWorktreeClient: DependencyKey {
       AsyncThrowingStream { $0.finish() }
     },
     removeWorktree: unimplemented("GitWorktreeClient.removeWorktree"),
-    deleteBranchIfExists: { _, _ in },
+    deleteBranchIfExists: { _, _ in .absent },
     deleteRemoteBranchIfExists: { _, _ in },
     pruneWorktrees: unimplemented("GitWorktreeClient.pruneWorktrees", placeholder: 0),
     fetchRemote: unimplemented("GitWorktreeClient.fetchRemote"),

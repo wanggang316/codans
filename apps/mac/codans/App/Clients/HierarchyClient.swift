@@ -22,6 +22,14 @@ private let runScriptLogger = Logger(
   category: "runScript"
 )
 
+/// Diagnostics for worktree removal — in particular, why a tracked
+/// branch was kept (checked out elsewhere) instead of deleted. Filter
+/// with `log stream --predicate 'category == "worktreeRemove"'`.
+private let worktreeRemoveLogger = Logger(
+  subsystem: "com.gumpw.codans.hierarchy",
+  category: "worktreeRemove"
+)
+
 /// TCA dependency-injection bridge over `HierarchyManager`. Features depend
 /// on this struct's closures, not on the manager directly; the `liveValue`
 /// binds each closure to a concrete `HierarchyManager` instance at app
@@ -450,10 +458,15 @@ nonisolated struct HierarchyClient: Sendable {
   /// (relocate-then-prune via `removeWorktreeWithGit`) waits for the
   /// pane's child to exit. Removal of an already-archived worktree
   /// goes through `removeWorktreeWithGit` directly and skips this hook.
+  ///
+  /// Returns a non-fatal warning to surface as a toast when removal
+  /// succeeded but the worktree's branch was intentionally kept (it's
+  /// checked out by the main checkout or another worktree); `nil` on a
+  /// clean removal.
   var removeWorktreeWithLifecycle:
     @MainActor @Sendable (
       _ worktreeID: WorktreeID, _ inProject: ProjectID
-    ) async throws -> Void
+    ) async throws -> String?
 
   // MARK: - Worktree sidebar ordering (worktree-sidebar-ordering.md task01)
 
@@ -864,7 +877,7 @@ extension HierarchyClient {
             settings: snapshot
           )
         }
-        try await removeWorktreeWithGit(
+        return try await removeWorktreeWithGit(
           worktreeID: worktreeID, projectID: projectID,
           manager: manager, gitWorktreeClient: gitWorktreeClient,
           deleteRemoteBranch: snapshot.worktree.deleteRemoteBranchWithWorktree
@@ -1476,6 +1489,7 @@ extension HierarchyClient {
   /// holding the cwd as a live file descriptor must be closed
   /// beforehand), then runs git, then drops the catalog row.
   /// Re-throws `GitWorktreeError` for the caller to surface.
+  @discardableResult
   @MainActor
   private static func removeWorktreeWithGit(
     worktreeID: WorktreeID,
@@ -1483,7 +1497,7 @@ extension HierarchyClient {
     manager: HierarchyManager,
     gitWorktreeClient: GitWorktreeClient,
     deleteRemoteBranch: Bool
-  ) async throws {
+  ) async throws -> String? {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
       let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
       let gitRoot = project.gitRoot
@@ -1492,6 +1506,18 @@ extension HierarchyClient {
     }
     manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
     let gitRootURL = URL(fileURLWithPath: gitRoot)
+    // Resolve the branch authoritatively from git BEFORE removal —
+    // `worktree.branch` can be empty/stale (reconciled rows, legacy
+    // catalog entries), and a missed branch deletion is exactly what
+    // leaves a dangling ref that blocks same-name re-creation. Match by
+    // canonical path; fall back to the catalog value.
+    let liveBranch = (try? await gitWorktreeClient.lsWorktrees(gitRootURL))?
+      .first { HierarchyManager.canonicalPath($0.path) == HierarchyManager.canonicalPath(worktree.path) }?
+      .branch
+    let branchToDelete = [liveBranch, worktree.branch]
+      .compactMap { $0 }
+      .first { !$0.isEmpty }
+
     try await gitWorktreeClient.removeWorktree(
       gitRootURL,
       URL(fileURLWithPath: worktree.path)
@@ -1499,10 +1525,10 @@ extension HierarchyClient {
     // Drop the branch the worktree was tracking. `git worktree remove`
     // intentionally leaves the ref behind, so re-creating a worktree
     // with the same name afterwards trips Codans's "branch already
-    // exists" guard. Best-effort: git refuses if the branch is checked
-    // out elsewhere (main / shared) — which is exactly when we DON'T
-    // want to delete it — so swallowing the error is the safe default.
-    if let branch = worktree.branch, !branch.isEmpty {
+    // exists" guard. git refuses if the branch is checked out elsewhere
+    // (main / shared) — which is exactly when we DON'T want to delete it.
+    var keptWarning: String?
+    if let branch = branchToDelete {
       // Delete the remote tracking branch first, while the local branch
       // (and its upstream config) still exists so the remote can be
       // resolved. Gated on the user's "Delete remote branch with worktree"
@@ -1510,9 +1536,20 @@ extension HierarchyClient {
       if deleteRemoteBranch {
         await gitWorktreeClient.deleteRemoteBranchIfExists(gitRootURL, branch)
       }
-      await gitWorktreeClient.deleteBranchIfExists(gitRootURL, branch)
+      switch await gitWorktreeClient.deleteBranchIfExists(gitRootURL, branch) {
+      case .deleted, .absent:
+        break
+      case .kept(let reason):
+        worktreeRemoveLogger.notice(
+          "kept branch after worktree remove: branch=\(branch, privacy: .public) reason=\(reason, privacy: .public)"
+        )
+        keptWarning =
+          "Worktree removed. Branch \"\(branch)\" was kept because it's checked out elsewhere; "
+          + "re-creating a worktree with the same name will reuse it."
+      }
     }
     try manager.removeWorktree(worktreeID, from: projectID)
+    return keptWarning
   }
 
   /// AsyncStream backed by Swift Observation — samples `manager.catalog`'s
@@ -1754,7 +1791,7 @@ extension HierarchyClient: DependencyKey {
       "HierarchyClient.setWorktreeArchivedWithLifecycle"
     ),
     removeWorktreeWithLifecycle: unimplemented(
-      "HierarchyClient.removeWorktreeWithLifecycle"
+      "HierarchyClient.removeWorktreeWithLifecycle", placeholder: nil
     ),
     promoteWorktree: unimplemented("HierarchyClient.promoteWorktree"),
     setPaneLabel: unimplemented("HierarchyClient.setPaneLabel"),

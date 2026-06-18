@@ -920,7 +920,12 @@ struct HierarchySidebarFeature {
     .run { send in
       await send(.lifecycleStarted(worktreeID: wid))
       do {
-        try await client.removeWorktreeWithLifecycle(wid, pid)
+        // A non-nil return means removal succeeded but the branch was
+        // intentionally kept (checked out elsewhere) — surface it as a
+        // non-fatal note via the same toast channel.
+        if let warning = try await client.removeWorktreeWithLifecycle(wid, pid) {
+          await send(.lifecycleFailed(message: warning))
+        }
       } catch {
         await send(.lifecycleFailed(message: "Delete failed: \(error.localizedDescription)"))
       }

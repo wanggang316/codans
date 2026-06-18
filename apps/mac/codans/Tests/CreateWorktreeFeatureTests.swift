@@ -15,13 +15,18 @@ struct CreateWorktreeFeatureTests {
   private func initialState(
     currentPendingCountForProject: Int = 0
   ) -> CreateWorktreeFeature.State {
-    CreateWorktreeFeature.State(
+    var state = CreateWorktreeFeature.State(
       projectID: ProjectID(),
       repoRoot: URL(fileURLWithPath: "/tmp/repo"),
       worktreesDirectory: URL(fileURLWithPath: "/tmp/repo/.worktrees"),
       currentPendingCountForProject: currentPendingCountForProject,
       localBranchNamesLower: ["main", "feature/existing"]
     )
+    // "main" is checked out by the main worktree (live conflict);
+    // "feature/existing" exists as a ref but has no worktree (dangling →
+    // reusable on re-create).
+    state.liveWorktreeBranchesLower = ["main"]
+    return state
   }
 
   @Test
@@ -49,14 +54,30 @@ struct CreateWorktreeFeatureTests {
   }
 
   @Test
-  func branchDraftCollidingWithExistingLocalIsRejected() async {
+  func branchDraftCollidingWithLiveWorktreeIsRejected() async {
     let store = TestStore(initialState: initialState()) {
       CreateWorktreeFeature()
     }
     store.exhaustivity = .off
     await store.send(.branchDraftChanged("main")) {
       $0.branchNameDraft = "main"
-      $0.validationError = "Branch \"main\" already exists."
+      $0.validationError = "Branch \"main\" is already checked out in another worktree."
+      $0.reuseNotice = nil
+    }
+  }
+
+  @Test
+  func branchDraftMatchingDanglingBranchShowsReuseNotice() async {
+    let store = TestStore(initialState: initialState()) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // Exists as a ref, no live worktree → reuse instead of reject.
+    await store.send(.branchDraftChanged("feature/existing")) {
+      $0.branchNameDraft = "feature/existing"
+      $0.validationError = nil
+      $0.reuseNotice =
+        "Will reuse existing branch \"feature/existing\" — its commits are kept and the base ref is ignored."
     }
   }
 
@@ -69,6 +90,7 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("feature/new-idea")) {
       $0.branchNameDraft = "feature/new-idea"
       $0.validationError = nil
+      $0.reuseNotice = nil
     }
   }
 

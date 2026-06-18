@@ -34,6 +34,10 @@ struct CreateWorktreeSheet: View {
           Text(error)
             .font(.caption)
             .foregroundStyle(.red)
+        } else if let notice = store.reuseNotice {
+          Text(notice)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
       }
 
