@@ -123,6 +123,19 @@ final class TerminalEngine {
     ghosttyRuntime?.terminalEngine = self
   }
 
+  // Explicit (nonisolated) deinit so the compiler emits the standard
+  // nonisolated tail rather than the synthesized isolated deinit Swift 6
+  // generates for `@MainActor` classes. The isolated path hops via
+  // `swift_task_deinitOnExecutorMainActorBackDeploy`, which double-frees a
+  // TaskLocal scope when released inside a cascading teardown — the libmalloc
+  // abort fixed for PaneSurface (2bbee60), SurfaceInfo, and
+  // AgentStateOrderCoordinator. Cancelling the foreground-job poller here is
+  // also correct hygiene; `Task.cancel()` is nonisolated and `Task?` is
+  // Sendable, so it is sound from a nonisolated deinit.
+  deinit {
+    foregroundJobPollTask?.cancel()
+  }
+
   // MARK: - Pane surface lifecycle
 
   enum SurfaceError: Error, Sendable {
