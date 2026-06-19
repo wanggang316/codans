@@ -1,4 +1,4 @@
-.PHONY: help bootstrap build-ghostty build-zmx generate build run-app format lint check check-rename test clean build-cli archive release bump-version regen-completions
+.PHONY: help bootstrap build-ghostty build-zmx generate build run-app format lint check check-rename check-deinit test clean build-cli archive release bump-version regen-completions
 
 # Use full Xcode.app when xcode-select points at Command Line Tools only.
 # See DEC-10 in docs/exec-plans/0001-bootstrap-monorepo.md.
@@ -19,7 +19,8 @@ help:
 	@echo "  regen-completions - Regenerate codans-cli/Resources/completions/{codans.zsh,codans.bash,codans.fish} from the built CLI"
 	@echo "  format           - swift-format in-place"
 	@echo "  lint             - swiftlint"
-	@echo "  check            - format + lint"
+	@echo "  check            - format + lint + rename/deinit guards"
+	@echo "  check-deinit     - Guard against Swift 6 isolated-deinit landmines"
 	@echo "  test             - Run Swift unit-test schemes (Codans/CodansCore/CodansKit)"
 	@echo "  clean            - Remove workspace + project + Package.resolved"
 
@@ -85,7 +86,12 @@ lint:
 check-rename:
 	../../scripts/check-rename-residue.sh apps/mac
 
-check: format lint check-rename
+# Guard against Swift 6 synthesized isolated-deinit crashes in the
+# MainActor-default app target (see scripts/check-isolated-deinit.py).
+check-deinit:
+	../../scripts/check-isolated-deinit.py codans
+
+check: format lint check-rename check-deinit
 
 # Run the Swift unit-test schemes. The `Codans` scheme hosts CodansTests
 # (app/runtime tests); CodansCore / CodansKit host the framework tests.
