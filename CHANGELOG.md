@@ -20,6 +20,19 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.10] - 2026-06-19
+
+### Fixed
+
+- **Finished agents no longer flip back to "working."** When a coding agent
+  like Claude Code wraps up, its end-of-run summary line no longer tricks the
+  Agents view into relighting the "working" badge — a done agent stays done.
+- **Phantom agents clear from the Agents view.** When an agent exits and leaves
+  a plain shell (or an open editor like vim) behind, the Agents view no longer
+  keeps showing a ghost entry for the agent that's already gone.
+- **Fixed an occasional crash when switching tabs or worktrees.** Tapping a tab
+  chip to move between tabs or worktrees no longer sometimes brings the app down.
+
 ## [0.4.9] - 2026-06-18
 
 ### Changed
