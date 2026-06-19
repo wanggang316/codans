@@ -425,4 +425,34 @@ struct TerminalEngineTests {
     // expires, so the window must strictly exceed the hold.
     #expect(TerminalEngine.idleNudgeWindow > PaneAttentionInterpreter.claudeWorkingHold)
   }
+
+  // MARK: - Foreground-job re-delivery (ghost-binding release)
+
+  @Test
+  func foregroundJobRedeliversToRetireStaleBinding() {
+    // A genuine change always emits, regardless of binding/agent state.
+    #expect(
+      TerminalEngine.shouldRedeliverForegroundJob(
+        changed: true, paneIsBound: false, foregroundIsStaleNonAgent: false))
+    #expect(
+      TerminalEngine.shouldRedeliverForegroundJob(
+        changed: true, paneIsBound: true, foregroundIsStaleNonAgent: true))
+
+    // The ghost case: a bound pane whose foreground has settled on a
+    // non-agent program keeps re-delivering the *unchanged* job so the
+    // binder's release hysteresis can retire the stale binding.
+    #expect(
+      TerminalEngine.shouldRedeliverForegroundJob(
+        changed: false, paneIsBound: true, foregroundIsStaleNonAgent: true))
+
+    // Healthy agent pane (foreground still an agent) → no churn.
+    #expect(
+      !TerminalEngine.shouldRedeliverForegroundJob(
+        changed: false, paneIsBound: true, foregroundIsStaleNonAgent: false))
+
+    // Unbound pane with a steady non-agent foreground → nothing to retire.
+    #expect(
+      !TerminalEngine.shouldRedeliverForegroundJob(
+        changed: false, paneIsBound: false, foregroundIsStaleNonAgent: true))
+  }
 }

@@ -697,8 +697,27 @@ final class TerminalEngine {
       } else {
         foregroundJobMisses[paneID] = 0
       }
-      if foregroundJobSnapshots[paneID] != next {
+      let changed = foregroundJobSnapshots[paneID] != next
+      if changed {
         foregroundJobSnapshots[paneID] = next
+      }
+      // Deliver `next` to the binder on a genuine change, and *also* keep
+      // re-delivering an unchanged job while a bound pane's foreground has
+      // settled on a non-agent program. A TUI agent holds the terminal
+      // foreground for its whole lifetime, so a steady non-agent foreground
+      // means the agent exited — but with change-only emission no further
+      // event would ever fire to retire the now-stale binding, stranding a
+      // ghost agent in the view. The re-delivery lets the binder's release
+      // hysteresis run to completion; it is self-limiting because the pane
+      // stops being bound once released. See `shouldRedeliverForegroundJob`.
+      let paneIsBound = hierarchy.catalog.pane(paneID)?.agentKind != nil
+      let foregroundIsStaleNonAgent =
+        !next.isEmpty && AgentKindPatterns.classify(foregroundJob: next) == nil
+      if Self.shouldRedeliverForegroundJob(
+        changed: changed,
+        paneIsBound: paneIsBound,
+        foregroundIsStaleNonAgent: foregroundIsStaleNonAgent
+      ) {
         emit(.foregroundJobChanged(paneID, next))
       }
       if let surface = ghosttyRuntime.surface(for: paneID) {
@@ -796,6 +815,25 @@ final class TerminalEngine {
     let quiet = now.timeIntervalSince(changedAt)
     guard quiet > 0, quiet <= idleNudgeWindow else { return .quiet }
     return .idleNudge(duration: quiet)
+  }
+
+  /// Whether `pollForegroundJobs` should deliver the freshly read foreground
+  /// job to the binder this tick.
+  ///
+  /// A genuine change always emits. Additionally, while a *bound* pane's
+  /// foreground has settled on a non-agent program, the unchanged job is
+  /// re-delivered so the binder's release hysteresis can retire the stale
+  /// binding: a TUI agent owns the terminal foreground for its whole lifetime,
+  /// so a steady non-agent foreground means the agent exited — yet with
+  /// change-only emission no further event fires to signal it, leaving a ghost
+  /// agent bound forever. Bounded by the binder's own miss threshold and
+  /// self-limiting (the pane stops being bound once the release lands).
+  static func shouldRedeliverForegroundJob(
+    changed: Bool,
+    paneIsBound: Bool,
+    foregroundIsStaleNonAgent: Bool
+  ) -> Bool {
+    changed || (paneIsBound && foregroundIsStaleNonAgent)
   }
 }
 
