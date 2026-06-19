@@ -542,6 +542,36 @@ struct PaneAttentionInterpreterTests {
     #expect(held == .working)
   }
 
+  @Test
+  func claudeRecapLineAfterCompletionStaysIdle() {
+    // Regression (fix/agents-view-done-wrong): Claude's post-completion
+    // recap line `※ recap: …` matched the spinner-activity heuristic (`※`
+    // was in the spinner set, and a width-truncated recap ends in `…`),
+    // flipping a *finished* agent back to `working` (the observed
+    // done→working flicker). A done screen — completion summary, a
+    // truncated recap, and an empty `❯` prompt — must classify as idle.
+    let screen = """
+          ✻ Crunched for 34m 0s
+
+        ※ recap: Goal: fix the width bug. The serializer change is committed and tests pass. Next: push the submodule then the main repo, and optionally rebuild …
+
+        ────────────────────────────────────────
+        ❯
+        ────────────────────────────────────────
+          [Opus 4.8 (1M context)] ██░░░░░░░░ 22% | resume-width
+        """
+    #expect(activity(.claudeCode, screen) == .idle)
+  }
+
+  @Test
+  func claudeLiveSpinnerStillClassifiesWorking() {
+    // Guard the other side of the recap fix: the sparkle/asterisk spinner
+    // frames are still working cues, so removing `※` must not regress live
+    // spinner detection.
+    #expect(activity(.claudeCode, "✻ Searching…") == .working)
+    #expect(activity(.claudeCode, "✶ Thinking…") == .working)
+  }
+
   private func activity(
     _ kind: AgentKind,
     _ viewportText: String

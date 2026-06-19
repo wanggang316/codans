@@ -440,10 +440,18 @@ extension PaneAttentionInterpreter {
   }
 
   private static func hasSpinnerActivity(_ content: String) -> Bool {
+    // `※` is deliberately absent: Claude Code prefixes its post-completion
+    // recap line with it (`※ recap: …`), and a recap truncated to the
+    // terminal width ends in `…` — which would otherwise satisfy the
+    // spinner-line shape below and pin a *finished* agent on `working`
+    // (observed as a done→working flip while the recap re-rendered). The
+    // live working spinner uses the sparkle/asterisk frames kept here; the
+    // `✻ Crunched for …s` completion summary carries no `…`, so it is
+    // already excluded by the `…` requirement.
     let spinnerScalars: Set<UnicodeScalar> = [
       "·", "✱", "✲", "✳", "✴", "✵", "✶", "✷", "✸", "✹", "✺", "✻", "✼", "✽", "✾",
       "✿", "❀", "❁", "❂", "❃", "❇", "❈", "❉", "❊", "❋", "✢", "✣", "✤", "✥",
-      "✦", "✧", "✨", "⊛", "⊕", "⊙", "◉", "◎", "◍", "⁂", "⁕", "※", "⍟", "☼",
+      "✦", "✧", "✨", "⊛", "⊕", "⊙", "◉", "◎", "◍", "⁂", "⁕", "⍟", "☼",
       "★", "☆",
     ]
     return content.split(separator: "\n").contains { line in
