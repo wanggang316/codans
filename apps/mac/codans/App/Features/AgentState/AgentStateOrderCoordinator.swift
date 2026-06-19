@@ -51,6 +51,21 @@ final class AgentStateOrderCoordinator {
     self.debounce = debounce
   }
 
+  // Explicit (nonisolated) deinit so the compiler emits the standard
+  // nonisolated tail rather than the implicitly-synthesized isolated deinit
+  // Swift 6 generates for `@MainActor` classes. `AgentStateSidebarPanel`
+  // releases this coordinator while reacting to a `HierarchyManager.catalog`
+  // mutation (e.g. `selectTab` / `selectWorktree` from a tab-chip tap),
+  // i.e. inside a SwiftUI transaction flush. An isolated deinit would hop via
+  // `swift_task_deinitOnExecutorMainActorBackDeploy` and, in that cascading
+  // teardown, double-free a TaskLocal `StopLookupScope` slab — the same
+  // libmalloc abort fixed for PaneSurface (2bbee60), SurfaceInfo, and the
+  // GhosttySurfaceView CachedValue. `Task.cancel()` is nonisolated and
+  // `Task?` is Sendable, so the cancel is sound from a nonisolated deinit.
+  deinit {
+    pendingResort?.cancel()
+  }
+
   /// Reconcile the display order against a fresh entries snapshot.
   /// `autoSort` mirrors `Settings → General → Agents View → Auto-sort`.
   func reconcile(
