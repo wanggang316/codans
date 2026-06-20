@@ -18,7 +18,7 @@
     "items": [
       {
         "title": "原生",
-        "body": "基于 Ghostty 构建，macOS 原生，天生具备 Ghostty 和 macOS 的所有特性"
+        "body": "基于 Ghostty 构建，macOS 原生"
       },
       {
         "title": "Agent First",
@@ -35,10 +35,6 @@
       {
         "title": "Github",
         "body": "深度集成 Github，在应用内管理 PR 整个生命周期"
-      },
-      {
-        "title": "Git Viewer",
-        "body": "集成 diff / 历史面板，随时查看变更，无需离开终端"
       },
       {
         "title": "快捷键",

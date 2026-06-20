@@ -18,7 +18,7 @@
     "items": [
       {
         "title": "Native",
-        "body": "Built on Ghostty and native to macOS — every Ghostty and macOS capability comes for free."
+        "body": "Built on Ghostty and native to macOS."
       },
       {
         "title": "Agent-first",
@@ -35,10 +35,6 @@
       {
         "title": "GitHub",
         "body": "Deep GitHub integration — manage the whole pull-request lifecycle in-app."
-      },
-      {
-        "title": "Git Viewer",
-        "body": "A built-in diff and history panel. Review changes any time, without leaving the terminal."
       },
       {
         "title": "Keyboard-driven",
