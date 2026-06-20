@@ -43,6 +43,17 @@ struct AppBootstrapView: View {
         .shimmer(isActive: true)
     }
     .multilineTextAlignment(.center)
+    // Pin the spinner+caption to their intrinsic height before the
+    // window-filling frame centers them. The indeterminate macOS
+    // `ProgressView` (an `NSProgressIndicator`) greedily expands along the
+    // free axis inside a flexible-frame `VStack`: at window sizes larger than
+    // the content it eats the vertical slack and self-centers in the window
+    // while the caption lays out separately, so the two visibly drift apart
+    // (caption floats up-and-left of a dead-centred spinner). Fixing only the
+    // vertical axis collapses the stack to its content height — keeping the
+    // pair a single centred unit — while leaving the width flexible so the
+    // rotating one-liners stay horizontally centred without re-fitting jitter.
+    .fixedSize(horizontal: false, vertical: true)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: .windowBackgroundColor))
     .task {
