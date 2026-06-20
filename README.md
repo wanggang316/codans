@@ -17,18 +17,17 @@
 
 ---
 
-Codans is a terminal development environment built for parallel development with coding agents. It orchestrates all of your projects, worktrees, and coding agents into a single four-level hierarchy — Project → Worktree → Tab → Pane — inside one window. Built on Ghostty and native to macOS, it ships with the `codans` companion CLI and a published Agent Skill, all from a Tuist-managed monorepo.
+Codans is a terminal development environment built for parallel development with coding agents. It orchestrates all of your projects, worktrees, and coding agents into a single window.
 
 ## Highlights
 
 | | |
 |---|---|
-| **Native** | Built on Ghostty and native to macOS — every Ghostty and macOS capability comes for free. |
+| **Native** | Built on Ghostty and native to macOS. |
 | **Agent-first** | See the live running state of every agent in real time. |
 | **Parallel** | Project tree + git worktrees + tabs + split panes manage every line of work in one window. No more Cmd-Tab. |
 | **Custom commands** | Bind project-specific commands and shortcuts; one chord runs the right thing. |
 | **GitHub** | Deep GitHub integration — manage the whole pull-request lifecycle in-app. |
-| **Git Viewer** | A built-in diff and history panel. Review changes any time, without leaving the terminal. |
 | **Keyboard-driven** | A deep set of customizable shortcuts to keep you fast. |
 | **IDE integration** | VS Code, Cursor, Zed, and Xcode are auto-detected. One shortcut opens any worktree. |
 
@@ -81,11 +80,9 @@ The top-level `Makefile` delegates every `mac-*` target to `apps/mac/Makefile`.
 
 All project knowledge lives in [`docs/`](docs/):
 
-- [Golden Rules](docs/golden-rules.md) — non-negotiable principles
 - [Architecture](docs/architecture.md) — domains, layers, dependency rules
 - [Product specs](docs/product-specs/) — what the product is
 - [Design docs](docs/design-docs/) — feature and system designs
 - [Execution plans](docs/exec-plans/) — versioned plans with progress
-- [Homebrew release pipeline](docs/homebrew.md) — cask, tap, and the auto-publish workflow
 
 Agent-facing entry point: [`AGENTS.md`](AGENTS.md) (also exposed as `CLAUDE.md`).
