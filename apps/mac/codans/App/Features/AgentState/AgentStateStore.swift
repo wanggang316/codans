@@ -34,9 +34,11 @@ private let storeLogger = Logger(
 /// Lifecycle teardown (`paneExited` / `paneCrashed` / `paneClosedByTab`)
 /// drops both the entry and its scratch — the row disappears from the
 /// view when the user closes the pane. `onAgentUnbound` does the same
-/// explicitly for the user-driven unbind path. The store is
-/// silently inert for unbound panes: events arrive, scratch stays
-/// uninitialized, and `entries` never grows.
+/// explicitly for the user-driven unbind path. `reconcileMembership`
+/// is the catalog backstop for a pane that leaves the hierarchy without
+/// delivering one of those events. The store is silently inert for
+/// unbound panes: events arrive, scratch stays uninitialized, and
+/// `entries` never grows.
 @MainActor
 @Observable
 final class AgentStateStore {
@@ -279,6 +281,34 @@ final class AgentStateStore {
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
     scratch.removeValue(forKey: paneID)
+  }
+
+  /// Catalog-membership backstop. Drops every entry (and its scratch)
+  /// whose pane is no longer present in the live catalog.
+  ///
+  /// Bound entries are normally retired by the per-pane teardown events
+  /// (`paneExited` / `paneCrashed` / `paneClosedByTab`) or `onAgentUnbound`,
+  /// but a pane can leave the hierarchy without one reaching the store — a
+  /// worktree / project removal, or a launch seed for a pane the catalog no
+  /// longer hosts. Such an entry can never resolve to a project/worktree, so
+  /// `AgentStateView` renders it as an em-dash "ghost" row; left alone it is
+  /// re-persisted into the quit snapshot and liveness-seeded again next
+  /// launch. Reconciling against the live catalog on every structural
+  /// mutation breaks that loop. Driven by the app's event drain on
+  /// `hierarchyMutated` (see `AppState.dispatchToAgentStateStore`).
+  ///
+  /// Takes a flat `Set<PaneID>` rather than a `Catalog` so the store stays
+  /// free of hierarchy imports — the catalog walk lives in the wiring layer.
+  func reconcileMembership(livePaneIDs: Set<PaneID>) {
+    let stale = entries.keys.filter { !livePaneIDs.contains($0) }
+    guard !stale.isEmpty else { return }
+    for paneID in stale {
+      storeLogger.info(
+        "reconcile-drop pane=\(paneID.raw.uuidString, privacy: .public) — absent from catalog"
+      )
+      entries.removeValue(forKey: paneID)
+      scratch.removeValue(forKey: paneID)
+    }
   }
 
   /// Pre-seed the registry from a persisted catalog at launch. Each

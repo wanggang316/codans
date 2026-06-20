@@ -189,4 +189,21 @@ extension Catalog {
     }
     return []
   }
+
+  /// Every `PaneID` currently in the catalog, flat across all projects,
+  /// worktrees, and tabs. Linear in the total pane count. Used by the
+  /// AgentState registry's membership reconcile to detect bound entries
+  /// whose pane has left the hierarchy (see
+  /// `AgentStateStore.reconcileMembership`).
+  public func allPaneIDs() -> Set<PaneID> {
+    var ids: Set<PaneID> = []
+    for project in projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs {
+          for pane in tab.panes { ids.insert(pane.id) }
+        }
+      }
+    }
+    return ids
+  }
 }

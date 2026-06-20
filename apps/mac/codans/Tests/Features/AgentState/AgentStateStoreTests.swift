@@ -322,6 +322,61 @@ struct AgentStateStoreTests {
     #expect(registry.entries[paneID]?.lastTransitionAt == Date(timeIntervalSince1970: 2_000))
   }
 
+  @Test
+  func reconcileDropsEntryAbsentFromCatalog() {
+    // The production ghost: a bound pane that left the hierarchy without a
+    // teardown event reaching the store. Its entry can never resolve to a
+    // project/worktree (renders an em-dash row), so the membership reconcile
+    // must drop it.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.entries[f.paneID] != nil)
+
+    f.registry.reconcileMembership(livePaneIDs: [])
+    #expect(f.registry.entries[f.paneID] == nil)
+  }
+
+  @Test
+  func reconcileKeepsEntryStillInCatalog() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+
+    f.registry.reconcileMembership(livePaneIDs: [f.paneID])
+    #expect(f.registry.entries[f.paneID] != nil)
+  }
+
+  @Test
+  func reconcileDropsOnlyAbsentEntries() {
+    // A reconcile triggered by one pane's removal must leave the bindings of
+    // panes that are still in the catalog untouched.
+    let f = Fixture()
+    let live = PaneID()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.registry.onAgentBound(live, kind: .codex, sessionID: nil)
+
+    f.registry.reconcileMembership(livePaneIDs: [live])
+    #expect(f.registry.entries[f.paneID] == nil)
+    #expect(f.registry.entries[live] != nil)
+  }
+
+  @Test
+  func reconcileDropsSeededGhostAndItsScratch() {
+    // A launch seed for a pane the catalog no longer hosts (daemon socket
+    // briefly alive, hierarchy already pruned) — the exact case behind the
+    // two em-dash rows in production. The reconcile drops the seeded entry;
+    // a late viewport for the dropped pane must not resurrect a row, proving
+    // the scratch was dropped alongside the entry.
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+
+    f.registry.reconcileMembership(livePaneIDs: [])
+    #expect(f.registry.entries[f.paneID] == nil)
+
+    f.viewport("• Working (10s)")
+    #expect(f.registry.entries[f.paneID] == nil)
+  }
+
   @MainActor
   final class Fixture {
     let paneID = PaneID()
