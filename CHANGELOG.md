@@ -20,6 +20,23 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.11] - 2026-06-21
+
+### Fixed
+
+- **Dragging a tab to reorder no longer glitches into the titlebar.** The
+  lifted copy that follows your cursor during a reorder now stays pinned to
+  the tab row instead of floating up into the window titlebar or painting a
+  tall white column above the tabs — it tracks the cursor as a single,
+  cleanly-clipped tab chip.
+- **Stale agent rows clear from the Agents view.** Agent entries left behind
+  after their pane is gone — the ones that showed up as blank "— —"
+  placeholders — now disappear on their own instead of lingering across
+  launches.
+- **Loading screens keep the spinner and its caption together.** On launch
+  and while a worktree is still loading, the spinner and its text no longer
+  drift apart at larger window sizes; they stay centred as one unit.
+
 ## [0.4.10] - 2026-06-19
 
 ### Fixed
