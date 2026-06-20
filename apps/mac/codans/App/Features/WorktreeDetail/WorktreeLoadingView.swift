@@ -78,6 +78,13 @@ struct WorktreeLoadingView: View {
       }
     }
     .multilineTextAlignment(.center)
+    // Collapse the stack to its intrinsic height before the window-filling
+    // frame centers it. The indeterminate macOS `ProgressView` in
+    // `headerGlyph` (an `NSProgressIndicator`) otherwise greedily expands
+    // along the free vertical axis and self-centers in the detail pane,
+    // drifting away from the name/command/tail labels below it at larger pane
+    // sizes. Width stays flexible so the command + tail keep truncating.
+    .fixedSize(horizontal: false, vertical: true)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: .windowBackgroundColor))
   }
