@@ -1548,7 +1548,11 @@ final class AppState {
       for await event in detectorEvents {
         await detector.handle(event)
         Self.dispatchToAgentBinder(event: event, binder: binder)
-        Self.dispatchToAgentStateStore(event: event, registry: registry)
+        Self.dispatchToAgentStateStore(
+          event: event,
+          registry: registry,
+          catalog: { manager.catalog }
+        )
       }
     }
     // Wire 4: focus tracker. Same re-arming observation pump pattern as
@@ -1565,12 +1569,24 @@ final class AppState {
   }
 
   /// Drain-loop branch that feeds terminal events into `AgentStateStore`.
+  ///
+  /// On structural mutations it also reconciles the registry against live
+  /// catalog membership: a worktree / project teardown can remove a pane
+  /// without delivering a per-pane teardown event to the store, leaving a
+  /// bound entry that resolves to nothing and renders an em-dash ghost row
+  /// (and is re-persisted / re-seeded across launches). `selection` and
+  /// `tags` scopes never change pane membership, so they skip the catalog
+  /// walk to keep the hot selection path cheap.
   @MainActor
   private static func dispatchToAgentStateStore(
     event: TerminalEvent,
-    registry: AgentStateStore
+    registry: AgentStateStore,
+    catalog: @MainActor () -> Catalog
   ) {
     registry.onTerminalEvent(event)
+    if case .hierarchyMutated(let scope) = event, scope != .selection, scope != .tags {
+      registry.reconcileMembership(livePaneIDs: catalog().allPaneIDs())
+    }
   }
 
   /// Filter the previous quit's agent snapshot through a liveness check
