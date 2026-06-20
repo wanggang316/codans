@@ -171,19 +171,18 @@ struct TabBarRowView: View {
         // over — the chip's own idle fill is `.clear`, which would let
         // their titles bleed through and overlap.
         .background(TabBarColors.draggingBackground)
+        // Hard-clip the lifted copy to its own chip frame. On macOS 26 the
+        // copy's opaque background otherwise paints a tall white column up to
+        // the titlebar during a drag (a SwiftUI host/overlay regression — the
+        // drag code itself is unchanged from when this shipped clean). Clipping
+        // bounds the copy to `chipHeight` regardless of why it overflows; the
+        // shadow is applied after, so it still feathers outside the clip.
+        .frame(width: frame.width, height: TabBarMetrics.chipHeight)
+        .clipped()
         .scaleEffect(1.03)
         .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
         .allowsHitTesting(false)
-        // Center on the dragged chip's *measured* row-space rect, not a
-        // hardcoded `chipHeight / 2`. The row's coordinate space (`rowSpace`)
-        // is taller than one chip — the bar nests in a `GeometryReader` +
-        // horizontal `ScrollView` (`TabBarOverflowScroll`) under a
-        // bottom-aligned `barHeight` frame — so assuming the chips sit at
-        // y = 16 floats the lifted copy a full row too high, up into the
-        // titlebar. `frame` is this chip's real rect reported via
-        // `ChipFrameKey` in the same space the overlay resolves against, so
-        // `frame.midY` pins the copy to the actual row regardless of insets.
-        .position(x: dragCursorX, y: frame.midY)
+        .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
         .zIndex(10)
     }
   }
