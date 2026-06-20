@@ -174,7 +174,16 @@ struct TabBarRowView: View {
         .scaleEffect(1.03)
         .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
         .allowsHitTesting(false)
-        .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
+        // Center on the dragged chip's *measured* row-space rect, not a
+        // hardcoded `chipHeight / 2`. The row's coordinate space (`rowSpace`)
+        // is taller than one chip — the bar nests in a `GeometryReader` +
+        // horizontal `ScrollView` (`TabBarOverflowScroll`) under a
+        // bottom-aligned `barHeight` frame — so assuming the chips sit at
+        // y = 16 floats the lifted copy a full row too high, up into the
+        // titlebar. `frame` is this chip's real rect reported via
+        // `ChipFrameKey` in the same space the overlay resolves against, so
+        // `frame.midY` pins the copy to the actual row regardless of insets.
+        .position(x: dragCursorX, y: frame.midY)
         .zIndex(10)
     }
   }
