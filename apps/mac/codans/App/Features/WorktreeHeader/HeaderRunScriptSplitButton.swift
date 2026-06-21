@@ -177,25 +177,26 @@ struct HeaderRunScriptSplitButton: View {
     }
   }
 
-  /// One menu item. When the script carries a valid keyboard chord,
-  /// `.keyboardShortcut(_:modifiers:)` registers it globally for the
-  /// owning window — pressing the chord fires the same dispatch path
-  /// as a manual menu pick, and macOS renders the chord in the menu
-  /// item's trailing column automatically. Conversion from the
-  /// stored `ShortcutBinding` to SwiftUI's KeyEquivalent +
-  /// EventModifiers goes through `ShortcutDisplay`, the same helper
-  /// the system Shortcuts pane uses.
+  /// One menu item. Deliberately does **not** attach the script's chord via
+  /// `.keyboardShortcut(_:modifiers:)`: a keyEquivalent makes AppKit reserve a
+  /// trailing accelerator column across *every* row, so the chord-less footers
+  /// ("Manage … Commands…") render with a wide empty right gutter and the whole
+  /// dropdown balloons far past its longest label. Dropping the in-menu chord
+  /// collapses that column so the menu hugs "Manage Project Commands…" — the
+  /// widest item. The chord still fires: `ProjectScriptsShortcutBindings` mounts
+  /// the real responder-chain binding outside the toolbar (the in-menu binding
+  /// was never the live dispatch path — it only lit up after the menu had been
+  /// opened and dropped on the next `.id(_:)` rebuild).
   ///
   /// `isGlobal` switches the run dispatch between the project run path
   /// (`runScriptTapped`) and the global run path (`runGlobalScriptTapped`).
   /// Stop is shared (`stopScriptTapped`) because the run pane is keyed by
   /// (worktree, scriptID), unique across both lists.
-  @ViewBuilder
   private func menuButton(for script: ScriptDefinition, isGlobal: Bool = false) -> some View {
     // Mirror the primary half: a running script's menu row becomes a red
-    // "Stop …" that interrupts it; the chord (below) toggles the same way.
+    // "Stop …" that interrupts it.
     let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
-    let button = Button {
+    return Button {
       if isRunning {
         store.send(.stopScriptTapped(scriptID: script.id))
       } else if isGlobal {
@@ -216,28 +217,18 @@ struct HeaderRunScriptSplitButton: View {
         )
       }
     }
-    if let chord = script.keyboardShortcut, chord.isEnabled, chord.keyCode != 0,
-      let key = ShortcutDisplay.keyEquivalent(for: chord.keyCode)
-    {
-      button.keyboardShortcut(key, modifiers: ShortcutDisplay.eventModifiers(for: chord.modifiers))
-    } else {
-      button
-    }
   }
 
-  /// Stable identity for `.id(_:)`. Folds every field that affects
-  /// the Menu's rendered output — name + icon + tint + chord + the
-  /// array's order. id alone wouldn't change on edit; including the
-  /// rendered fields means a same-id, different-content edit still
-  /// rebuilds (otherwise a chord change would never bind via the
-  /// system menu).
+  /// Stable identity for `.id(_:)`. Folds every field that affects the Menu's
+  /// rendered output — name + icon + tint + the array's order. id alone
+  /// wouldn't change on a same-id edit; including the rendered fields means an
+  /// edit to any of them still rebuilds the cached NSMenu. The chord is
+  /// intentionally absent: it no longer renders in the menu (see `menuButton`),
+  /// so a chord-only change has nothing to invalidate here.
   private static func identitySignature(of scripts: [ScriptDefinition]) -> String {
     scripts
       .map { script -> String in
-        let chord =
-          script.keyboardShortcut.map { ShortcutDisplay.chord(for: $0) } ?? ""
-        return
-          "\(script.id)|\(script.displayName)|\(script.resolvedSystemImage)|\(script.resolvedTintColor.rawValue)|\(chord)"
+        "\(script.id)|\(script.displayName)|\(script.resolvedSystemImage)|\(script.resolvedTintColor.rawValue)"
       }
       .joined(separator: "·")
   }
