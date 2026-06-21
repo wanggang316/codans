@@ -472,12 +472,12 @@ struct HierarchySidebarView: View {
     Button {
       store.send(.toolbarAddProjectTapped)
     } label: {
-      Label("Open Local Folder…", systemImage: "folder")
+      Label("Open Project…", systemImage: "folder")
     }
     Button {
       store.send(.cloneRepoTapped)
     } label: {
-      Label("Clone Repository…", systemImage: "arrow.down.circle")
+      Label("Clone Repository…", systemImage: "square.and.arrow.down.on.square")
     }
   }
 
