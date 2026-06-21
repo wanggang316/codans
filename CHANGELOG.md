@@ -20,6 +20,39 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.12] - 2026-06-22
+
+### Added
+
+- **Terminal cursor and font settings.** Settings → Terminal now lets you pick
+  the cursor shape, font family, and font size alongside the theme. Changes
+  write to your ghostty config and take effect in running terminals without a
+  restart.
+- **Clone a repo straight from Add Project.** The sidebar's "+" now offers both
+  "Open Project" (pick any local folder) and "Clone Repository" — paste a Git
+  URL, choose a destination, and Codans clones it and adds it as a project in
+  one step.
+
+### Changed
+
+- **The project Environment Variables editor is cleaner.** The add/edit sheet is
+  rebuilt as a compact native card, editable rows gain a copy-name button, and
+  built-in variables now show their resolved value (e.g. CODANS_ROOT_PATH shows
+  the project root).
+- **Built-in pane variables are renamed from `TOUCHCODE_` to `CODANS_`.**
+  `TOUCHCODE_WORKTREE_PATH` and `TOUCHCODE_ROOT_PATH` are now
+  `CODANS_WORKTREE_PATH` and `CODANS_ROOT_PATH` — update any pane scripts that
+  reference the old names.
+
+### Fixed
+
+- **Panes that run a command and exit now close themselves.** A "Close when
+  finished" command — or simply typing `exit` — no longer leaves the tab parked
+  on a blank screen with a cursor until you press Return; the pane tears down and
+  its close policy fires as intended.
+- **The worktree command dropdown no longer has a wide empty gutter.** The Run /
+  command menu now hugs its widest label instead of stretching past its content.
+
 ## [0.4.11] - 2026-06-21
 
 ### Fixed
