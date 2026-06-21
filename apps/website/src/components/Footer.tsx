@@ -19,6 +19,11 @@ export default function Footer() {
         </div>
         <ul className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-ink-muted">
           <li>
+            <a className="hover:text-ink" href={LINKS.changelog}>
+              {t("nav.changelog")}
+            </a>
+          </li>
+          <li>
             <a className="hover:text-ink" href={LINKS.releases} target="_blank" rel="noreferrer">
               {t("footer.releases")}
             </a>

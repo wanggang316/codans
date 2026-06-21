@@ -56,5 +56,18 @@
     "releases": "Releases",
     "issues": "Issues",
     "repo": "Repository"
+  },
+  "changelog": {
+    "title": "Changelog",
+    "subtitle": "Every release of Codans, newest first.",
+    "latest": "Latest",
+    "kinds": {
+      "Added": "Added",
+      "Changed": "Changed",
+      "Deprecated": "Deprecated",
+      "Removed": "Removed",
+      "Fixed": "Fixed",
+      "Security": "Security"
+    }
   }
 }

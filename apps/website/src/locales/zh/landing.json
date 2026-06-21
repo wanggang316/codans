@@ -56,5 +56,18 @@
     "releases": "发布版本",
     "issues": "问题反馈",
     "repo": "代码仓库"
+  },
+  "changelog": {
+    "title": "更新日志",
+    "subtitle": "Codans 的每一个版本，最新在前。",
+    "latest": "最新",
+    "kinds": {
+      "Added": "新增",
+      "Changed": "变更",
+      "Deprecated": "弃用",
+      "Removed": "移除",
+      "Fixed": "修复",
+      "Security": "安全"
+    }
   }
 }
