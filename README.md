@@ -86,3 +86,7 @@ All project knowledge lives in [`docs/`](docs/):
 - [Execution plans](docs/exec-plans/) — versioned plans with progress
 
 Agent-facing entry point: [`AGENTS.md`](AGENTS.md) (also exposed as `CLAUDE.md`).
+
+## License
+
+Codans is open source under the [MIT License](LICENSE).
