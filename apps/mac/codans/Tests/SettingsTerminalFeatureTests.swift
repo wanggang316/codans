@@ -23,7 +23,8 @@ struct SettingsTerminalFeatureTests {
       fontSize: fontSize,
       availableLightThemes: ["Light A", "Light B"],
       availableDarkThemes: ["Dark A", "Dark B"],
-      availableFontFamilies: ["Menlo", "Fira Code"],
+      availableFontFamilies: ["Helvetica", "Menlo", "Fira Code"],
+      monospacedFontFamilies: ["Menlo", "Fira Code"],
       themePreviews: [:],
       warningMessage: warning
     )

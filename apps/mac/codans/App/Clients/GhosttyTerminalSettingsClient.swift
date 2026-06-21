@@ -43,6 +43,7 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         availableLightThemes: [],
         availableDarkThemes: [],
         availableFontFamilies: [],
+        monospacedFontFamilies: [],
         themePreviews: [:],
         warningMessage: nil
       )
@@ -58,6 +59,7 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         availableLightThemes: [],
         availableDarkThemes: [],
         availableFontFamilies: [],
+        monospacedFontFamilies: [],
         themePreviews: [:],
         warningMessage: nil
       )

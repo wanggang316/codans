@@ -83,9 +83,12 @@ nonisolated struct GhosttyTerminalSettings: Equatable, Sendable {
   /// `lightTheme` / `darkTheme` — see callers that prepend missing entries.
   let availableLightThemes: [String]
   let availableDarkThemes: [String]
-  /// Monospaced font families available on the system. Not necessarily
-  /// containing `fontFamily` — see callers that prepend a missing entry.
+  /// All font families available on the system. Not necessarily containing
+  /// `fontFamily` — see callers that prepend a missing entry.
   let availableFontFamilies: [String]
+  /// Subset of `availableFontFamilies` that is monospaced; the picker badges
+  /// these so the terminal-appropriate fonts stand out in the full list.
+  let monospacedFontFamilies: Set<String>
   /// Parsed color directives keyed by theme name. Used by the Settings →
   /// Terminal picker to render swatches + a hover preview without re-touching
   /// disk. Missing entries (or empty previews) render as neutral chrome.
@@ -129,7 +132,7 @@ struct GhosttyConfigFile {
   let fileManager: FileManager
   let notificationCenter: NotificationCenter
   let catalogProvider: @MainActor () -> GhosttyThemeCatalog
-  let fontFamilyProvider: @MainActor () -> [String]
+  let fontFamilyProvider: @MainActor () -> GhosttyFontFamilies
 
   // MARK: Constants
 
@@ -153,7 +156,7 @@ struct GhosttyConfigFile {
     fileManager: FileManager = .default,
     notificationCenter: NotificationCenter = .default,
     catalogProvider: (@MainActor () -> GhosttyThemeCatalog)? = nil,
-    fontFamilyProvider: (@MainActor () -> [String])? = nil
+    fontFamilyProvider: (@MainActor () -> GhosttyFontFamilies)? = nil
   ) {
     self.homeDirectoryURL = homeDirectoryURL
     self.environment = environment
@@ -177,7 +180,7 @@ struct GhosttyConfigFile {
     }
     // Font enumeration is system-wide (Core Text), so the default provider
     // takes no inputs; tests inject a fixed list.
-    self.fontFamilyProvider = fontFamilyProvider ?? { GhosttyFontCatalog.monospacedFamilies() }
+    self.fontFamilyProvider = fontFamilyProvider ?? { GhosttyFontCatalog.families() }
   }
 
   // MARK: - Path resolution
@@ -227,6 +230,7 @@ struct GhosttyConfigFile {
     }
 
     let parsed = Self.parseThemeDirective(from: contents)
+    let fonts = fontFamilyProvider()
     return GhosttyTerminalSettings(
       configPath: configURL.path,
       lightTheme: parsed.light,
@@ -236,7 +240,8 @@ struct GhosttyConfigFile {
       fontSize: Self.parseFontSize(from: contents),
       availableLightThemes: catalog.light,
       availableDarkThemes: catalog.dark,
-      availableFontFamilies: fontFamilyProvider(),
+      availableFontFamilies: fonts.all,
+      monospacedFontFamilies: fonts.monospaced,
       themePreviews: catalog.previews,
       warningMessage: parsed.warning
     )

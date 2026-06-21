@@ -97,7 +97,8 @@ struct SettingsTerminalView: View {
       Picker("Font", selection: familyBinding) {
         Text("Default").tag(String?.none)
         ForEach(families, id: \.self) { family in
-          Text(family).tag(String?.some(family))
+          fontFamilyLabel(family, isMonospaced: snapshot.monospacedFontFamilies.contains(family))
+            .tag(String?.some(family))
         }
       }
       .disabled(controlsDisabled)
@@ -118,6 +119,19 @@ struct SettingsTerminalView: View {
   private func sizeLabel(_ size: Double) -> String {
     let number = size == size.rounded() ? String(Int(size)) : String(size)
     return "\(number) pt"
+  }
+
+  /// Picker row for a font family. Monospaced families get a leading `</>`
+  /// code glyph so the terminal-appropriate fonts stand out in the full list.
+  /// `Label` carries the family name as its title, so the symbol stays
+  /// accessible without a separate accessibility label.
+  @ViewBuilder
+  private func fontFamilyLabel(_ family: String, isMonospaced: Bool) -> some View {
+    if isMonospaced {
+      Label(family, systemImage: "chevron.left.forwardslash.chevron.right")
+    } else {
+      Text(family)
+    }
   }
 
   /// Prepend `current` to `list` when it's a value missing from the catalog, so
