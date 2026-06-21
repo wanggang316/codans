@@ -422,6 +422,44 @@ struct HierarchySidebarView: View {
     } message: {
       Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
     }
+    // Batch "Archive All Merged Worktrees" confirmation (Project ⋯ menu).
+    .confirmationDialog(
+      archiveAllMergedTitle,
+      isPresented: Binding(
+        get: { store.pendingArchiveAllMerged != nil },
+        set: { if !$0 { store.send(.projectArchiveAllMergedCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Archive") {
+        store.send(.projectArchiveAllMergedConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.projectArchiveAllMergedCancelled)
+      }
+    } message: {
+      Text("Files and branches are kept. Find them later under “Archived Worktrees” in the Project menu.")
+    }
+    // Batch "Remove All Merged Worktrees" confirmation (Project ⋯ menu).
+    .confirmationDialog(
+      removeAllMergedTitle,
+      isPresented: Binding(
+        get: { store.pendingRemoveAllMerged != nil },
+        set: { if !$0 { store.send(.projectRemoveAllMergedCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove Worktrees", role: .destructive) {
+        store.send(.projectRemoveAllMergedConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.projectRemoveAllMergedCancelled)
+      }
+    } message: {
+      Text(
+        "Closes all panes and deletes each Worktree directory, including any uncommitted changes. This cannot be undone."
+      )
+    }
     // Prune toast.
     .alert(
       "Prune complete",
@@ -744,7 +782,8 @@ struct HierarchySidebarView: View {
           ProjectHeaderRow(
             project: project,
             isExpanded: isExpanded,
-            store: store
+            store: store,
+            gitHubStore: gitHubStore
           )
         }
         .buttonStyle(.plain)
@@ -1269,6 +1308,20 @@ struct HierarchySidebarView: View {
     return "Remove Project?"
   }
 
+  private var archiveAllMergedTitle: String {
+    let count = store.pendingArchiveAllMerged?.worktreeIDs.count ?? 0
+    return count == 1
+      ? "Archive 1 merged Worktree?"
+      : "Archive \(count) merged Worktrees?"
+  }
+
+  private var removeAllMergedTitle: String {
+    let count = store.pendingRemoveAllMerged?.worktreeIDs.count ?? 0
+    return count == 1
+      ? "Remove 1 merged Worktree?"
+      : "Remove \(count) merged Worktrees?"
+  }
+
   // MARK: - Diff stats chip
 
   /// Compact `+N −M` chip rendered to the right of the row content. Counts
@@ -1474,12 +1527,30 @@ private struct ProjectHeaderRow: View {
   /// expanded). The parent Button still owns the tap, so this is display-only.
   var isExpanded: Bool = false
   @Bindable var store: StoreOf<HierarchySidebarFeature>
+  /// Read-only access to per-Worktree PR snapshots so the ⋯ menu can resolve
+  /// the project's merged Worktrees for the "… All Merged Worktrees" items.
+  /// Nil in previews — the items then render disabled.
+  var gitHubStore: StoreOf<GitHubFeature>?
   @Environment(RollupIndexProvider.self) private var rollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @State private var isHovering = false
   @State private var isPlusHovering = false
   @State private var isMenuHovering = false
+
+  /// Non-archived, non-main Worktrees in this project whose GitHub PR is
+  /// merged. Drives the Project ⋯ menu's "Archive / Remove All Merged
+  /// Worktrees" items (count + enablement). Empty when the GitHub store is
+  /// absent or nothing is merged. "Merged" is the PR's GitHub state, matching
+  /// `scripts/clean-merged-branches.sh` — squash-merge friendly, unlike
+  /// `git branch --merged`.
+  private var mergedWorktreeIDs: [WorktreeID] {
+    guard let gitHubStore else { return [] }
+    return project.worktrees
+      .filter { !$0.archived && $0.path != project.rootPath }
+      .filter { gitHubStore.snapshots[$0.id]?.state == .merged }
+      .map(\.id)
+  }
 
   /// Project name tint. Uses the project's configured color when set;
   /// otherwise keeps the prior hover-driven primary/secondary behavior.
@@ -1556,6 +1627,37 @@ private struct ProjectHeaderRow: View {
           } label: {
             Label("Prune Stale Worktrees", systemImage: "wand.and.sparkles")
           }
+          let mergedIDs = mergedWorktreeIDs
+          Button {
+            store.send(
+              .projectArchiveAllMergedTapped(
+                projectID: project.id, worktreeIDs: mergedIDs
+              )
+            )
+          } label: {
+            Label(
+              mergedIDs.isEmpty
+                ? "Archive All Merged Worktrees"
+                : "Archive All Merged Worktrees (\(mergedIDs.count))",
+              systemImage: "archivebox"
+            )
+          }
+          .disabled(mergedIDs.isEmpty)
+          Button(role: .destructive) {
+            store.send(
+              .projectRemoveAllMergedTapped(
+                projectID: project.id, worktreeIDs: mergedIDs
+              )
+            )
+          } label: {
+            Label(
+              mergedIDs.isEmpty
+                ? "Remove All Merged Worktrees"
+                : "Remove All Merged Worktrees (\(mergedIDs.count))",
+              systemImage: "trash"
+            )
+          }
+          .disabled(mergedIDs.isEmpty)
           Divider()
           // M5 (project-tags): inline color palette + "Tags…" entry.
           // ControlGroup(.palette) gives the native NSMenu color row;
