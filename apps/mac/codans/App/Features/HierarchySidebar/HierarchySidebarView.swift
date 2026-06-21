@@ -1,8 +1,8 @@
 import AppKit
+import CodansCore
 import ComposableArchitecture
 import OSLog
 import SwiftUI
-import CodansCore
 
 private let autoOpenLogger = Logger(
   subsystem: "com.gumpw.codans.agentstate", category: "autoOpen"
@@ -224,17 +224,17 @@ struct HierarchySidebarView: View {
           isReordering: isReordering,
           bottomInsetHeight: agentStatePanelOpen ? clampedAgentStatePanelHeight : 0
         )
-          .background(
-            GeometryReader { proxy in
-              Color.clear.preference(
-                key: SidebarHeightPreferenceKey.self,
-                value: proxy.size.height
-              )
-            }
-          )
-          .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
-            sidebarHeightObservation = newHeight
+        .background(
+          GeometryReader { proxy in
+            Color.clear.preference(
+              key: SidebarHeightPreferenceKey.self,
+              value: proxy.size.height
+            )
           }
+        )
+        .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
+          sidebarHeightObservation = newHeight
+        }
 
         if agentStatePanelOpen, let registry = agentStateStore {
           AgentStateSidebarPanel(
@@ -336,6 +336,24 @@ struct HierarchySidebarView: View {
         CreateWorktreeSheet(store: childStore)
       }
     }
+    .sheet(
+      isPresented: Binding(
+        get: { store.cloneRepoSheet != nil },
+        set: { isPresented in
+          if !isPresented {
+            store.send(.cloneRepoSheet(.cancelButtonTapped))
+          }
+        }
+      )
+    ) {
+      if let childStore = store.scope(
+        state: \.cloneRepoSheet,
+        action: \.cloneRepoSheet
+      ) {
+        CloneRepoSheet(store: childStore)
+          .interactiveDismissDisabled(store.cloneRepoSheet?.isCloning ?? false)
+      }
+    }
     .confirmationDialog(
       worktreeRemovalTitle,
       isPresented: Binding(
@@ -435,13 +453,31 @@ struct HierarchySidebarView: View {
   @ToolbarContentBuilder
   private var sidebarToolbarContent: some ToolbarContent {
     ToolbarItem(placement: .primaryAction) {
-      Button {
-        store.send(.toolbarAddProjectTapped)
+      Menu {
+        addProjectMenuItems
       } label: {
         Label("Add Project", systemImage: "plus")
           .commandKeyHint(.addProject)
       }
+      .menuIndicator(.hidden)
       .helpWithShortcut("Add Project", .addProject)
+    }
+  }
+
+  /// Shared Add Project menu: open an existing local folder (the current
+  /// flow, also bound to the `.addProject` shortcut) or clone a remote
+  /// repository into a new local path.
+  @ViewBuilder
+  private var addProjectMenuItems: some View {
+    Button {
+      store.send(.toolbarAddProjectTapped)
+    } label: {
+      Label("Open Local Folder…", systemImage: "folder")
+    }
+    Button {
+      store.send(.cloneRepoTapped)
+    } label: {
+      Label("Clone Repository…", systemImage: "arrow.down.circle")
     }
   }
 
@@ -582,13 +618,16 @@ struct HierarchySidebarView: View {
         .font(.callout)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
-      Button {
-        store.send(.toolbarAddProjectTapped)
+      Menu {
+        addProjectMenuItems
       } label: {
         Label("Open Project", systemImage: "plus")
           .commandKeyHint(.addProject)
       }
+      .menuStyle(.button)
+      .menuIndicator(.hidden)
       .buttonStyle(.borderedProminent)
+      .fixedSize()
       Spacer()
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
