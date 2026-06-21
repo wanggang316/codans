@@ -27,6 +27,9 @@ struct SettingsTerminalFeature {
     case loadResult(Result<GhosttyTerminalSettings, ApplyError>)
     case lightThemeSelected(String?)
     case darkThemeSelected(String?)
+    case cursorStyleSelected(GhosttyCursorStyle?)
+    case fontFamilySelected(String?)
+    case fontSizeSelected(Double?)
     case applyResult(Result<GhosttyTerminalSettings, ApplyError>)
   }
 
@@ -75,15 +78,28 @@ struct SettingsTerminalFeature {
         return .none
 
       case .lightThemeSelected(let name):
-        return applyDraft(state: &state, lightTheme: name, darkTheme: state.snapshot?.darkTheme)
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, lightTheme: name))
 
       case .darkThemeSelected(let name):
-        return applyDraft(state: &state, lightTheme: state.snapshot?.lightTheme, darkTheme: name)
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, darkTheme: name))
 
-      case .applyResult(.success(let snapshot)):
+      case .cursorStyleSelected(let style):
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, cursorStyle: style))
+
+      case .fontFamilySelected(let name):
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, fontFamily: name))
+
+      case .fontSizeSelected(let size):
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, fontSize: size))
+
+      case .applyResult(.success(let applied)):
         state.isApplying = false
-        state.snapshot = snapshot
-        state.warningMessage = snapshot.warningMessage
+        // An apply only changes directive values; the theme / font catalogs are
+        // unchanged. Carry the already-loaded catalog forward so the theme rows
+        // don't visibly reload, and so a fast pick needn't re-enumerate disk +
+        // system fonts. Fall back to the applied snapshot if we somehow had none.
+        state.snapshot = state.snapshot.map { $0.merging(directivesFrom: applied) } ?? applied
+        state.warningMessage = applied.warningMessage
         state.errorMessage = nil
         return .none
 
@@ -95,16 +111,37 @@ struct SettingsTerminalFeature {
     }
   }
 
-  /// Shared tail for `lightThemeSelected` / `darkThemeSelected`. Cancels any in-flight
-  /// apply before queueing a fresh one so the user's latest pick is the one that lands.
+  /// Build a draft mirroring the current snapshot, overriding exactly the
+  /// fields the caller passes. Each parameter is a *double* optional: omitting
+  /// it (`.none`) inherits the snapshot's value; passing `field: x` (where `x`
+  /// is itself optional) sets it — including `field: nil`, which clears the
+  /// directive. This lets a single picker change one directive while carrying
+  /// the rest of the managed block forward unchanged.
+  private func draft(
+    from snapshot: GhosttyTerminalSettings?,
+    lightTheme: String?? = nil,
+    darkTheme: String?? = nil,
+    cursorStyle: GhosttyCursorStyle?? = nil,
+    fontFamily: String?? = nil,
+    fontSize: Double?? = nil
+  ) -> GhosttyTerminalSettingsDraft {
+    GhosttyTerminalSettingsDraft(
+      lightTheme: lightTheme ?? snapshot?.lightTheme,
+      darkTheme: darkTheme ?? snapshot?.darkTheme,
+      cursorStyle: cursorStyle ?? snapshot?.cursorStyle,
+      fontFamily: fontFamily ?? snapshot?.fontFamily,
+      fontSize: fontSize ?? snapshot?.fontSize
+    )
+  }
+
+  /// Cancels any in-flight apply before queueing a fresh one so the user's
+  /// latest pick is the one that lands.
   private func applyDraft(
     state: inout State,
-    lightTheme: String?,
-    darkTheme: String?
+    draft: GhosttyTerminalSettingsDraft
   ) -> Effect<Action> {
     state.isApplying = true
     state.errorMessage = nil
-    let draft = GhosttyTerminalSettingsDraft(lightTheme: lightTheme, darkTheme: darkTheme)
     return .run { send in
       do {
         let snapshot = try await client.apply(draft)

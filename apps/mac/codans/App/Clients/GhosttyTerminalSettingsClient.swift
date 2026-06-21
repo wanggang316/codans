@@ -37,8 +37,13 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         configPath: "/tmp/codans-tests/ghostty/config",
         lightTheme: nil,
         darkTheme: nil,
+        cursorStyle: nil,
+        fontFamily: nil,
+        fontSize: nil,
         availableLightThemes: [],
         availableDarkThemes: [],
+        availableFontFamilies: [],
+        monospacedFontFamilies: [],
         themePreviews: [:],
         warningMessage: nil
       )
@@ -48,8 +53,13 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         configPath: "/tmp/codans-tests/ghostty/config",
         lightTheme: draft.lightTheme,
         darkTheme: draft.darkTheme,
+        cursorStyle: draft.cursorStyle,
+        fontFamily: draft.fontFamily,
+        fontSize: draft.fontSize,
         availableLightThemes: [],
         availableDarkThemes: [],
+        availableFontFamilies: [],
+        monospacedFontFamilies: [],
         themePreviews: [:],
         warningMessage: nil
       )
@@ -84,7 +94,17 @@ extension GhosttyTerminalSettingsClient {
         try await MainActor.run { try GhosttyConfigFile().load() }
       },
       apply: { draft in
-        try await MainActor.run { try GhosttyConfigFile().apply(draft) }
+        // Apply writes the file and reparses directives; the theme / font
+        // catalogs don't change as a result, and the reducer carries the
+        // already-loaded catalog forward. Inject empty providers so we don't
+        // re-read ~200 theme files and re-enumerate every system font on each
+        // pick — that main-thread work is what made the rows visibly reload.
+        try await MainActor.run {
+          try GhosttyConfigFile(
+            catalogProvider: { .empty },
+            fontFamilyProvider: { .empty }
+          ).apply(draft)
+        }
       }
     )
   }
