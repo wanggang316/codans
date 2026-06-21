@@ -4,4 +4,8 @@
     <loc>https://codans.dev/</loc>
     <changefreq>weekly</changefreq>
   </url>
+  <url>
+    <loc>https://codans.dev/changelog</loc>
+    <changefreq>weekly</changefreq>
+  </url>
 </urlset>

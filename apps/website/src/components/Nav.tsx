@@ -32,7 +32,9 @@ export default function Nav() {
           <span className="font-mono text-[15px]">{t("brand")}</span>
         </a>
         <nav className="flex items-center gap-1 text-[13px]">
-          <NavLink href={LINKS.changelog}>{t("nav.changelog")}</NavLink>
+          <NavLink href={LINKS.changelog} internal>
+            {t("nav.changelog")}
+          </NavLink>
           <NavLink href={LINKS.releases}>{t("nav.download")}</NavLink>
           <NavLink href={LINKS.repo} accent>
             {t("nav.github")}
@@ -91,16 +93,18 @@ function NavLink({
   href,
   children,
   accent,
+  internal,
 }: {
   href: string;
   children: React.ReactNode;
   accent?: boolean;
+  /** Same-site route — render a plain link, not a new-tab external one. */
+  internal?: boolean;
 }) {
   return (
     <a
       href={href}
-      target="_blank"
-      rel="noreferrer"
+      {...(internal ? {} : { target: "_blank", rel: "noreferrer" })}
       className={`group relative rounded-md px-3 py-1.5 transition-colors ${
         accent
           ? "text-acc-300 hover:text-acc-200"
