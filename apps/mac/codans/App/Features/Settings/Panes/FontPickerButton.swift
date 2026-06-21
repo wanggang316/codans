@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Font-family picker mirroring `ThemePickerButton`: a popup-styled trigger that
@@ -278,45 +279,80 @@ private struct FontPreviewCard: View {
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
-  /// Mock terminal mirroring `ThemePreviewCard`'s sample lines, but rendered in
-  /// the previewed font so you can judge it against real terminal output. Colors
-  /// are a fixed neutral dark scheme since a font carries none of its own.
+  private let previewSize: CGFloat = 12
+
+  /// Mock terminal mirroring `ThemePreviewCard`'s sample lines, rendered the way
+  /// a terminal actually lays text out: one glyph per fixed-width cell. This is
+  /// what makes the preview match the real output — a proportional layout (plain
+  /// `Text`) would look nothing like the monospaced grid Ghostty renders,
+  /// especially for non-monospaced fonts. Colors are a fixed neutral dark scheme
+  /// since a font carries none of its own.
   private var terminalSample: some View {
     let fg = Color(white: 0.92)
     let cursor = fg.opacity(0.8)
     let green = Color(red: 0.40, green: 0.78, blue: 0.42)
     let red = Color(red: 0.91, green: 0.45, blue: 0.45)
+    let cellWidth = Self.cellWidth(family: fontName, size: previewSize)
 
     return VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 4) {
-        Text("$")
-          .foregroundStyle(fg.opacity(0.7))
-        Text("git status")
-          .foregroundStyle(fg)
-        RoundedRectangle(cornerRadius: 1)
-          .fill(cursor)
-          .frame(width: 6, height: 12)
-      }
-      Text("On branch main")
-        .foregroundStyle(fg.opacity(0.85))
-      Text("error: 1 file modified")
-        .foregroundStyle(red)
-      Text("✓ ready to commit")
-        .foregroundStyle(green)
+      gridLine([("$ ", fg.opacity(0.7)), ("git status", fg)], cellWidth: cellWidth, cursor: cursor)
+      gridLine([("On branch main", fg.opacity(0.85))], cellWidth: cellWidth)
+      gridLine([("error: 1 file modified", red)], cellWidth: cellWidth)
+      gridLine([("✓ ready to commit", green)], cellWidth: cellWidth)
     }
-    .font(previewFont(12))
+    .font(previewFont(previewSize))
     .lineLimit(1)
-    .minimumScaleFactor(0.7)
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(white: 0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    .background(Color(white: 0.13))
+    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     .overlay(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
         .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
     )
   }
 
+  /// One terminal line as a fixed-width cell grid. `runs` are (text, color)
+  /// segments; an optional trailing cursor block follows.
+  private func gridLine(
+    _ runs: [(String, Color)], cellWidth: CGFloat, cursor: Color? = nil
+  ) -> some View {
+    let cells = runs.flatMap { run in run.0.map { (character: $0, color: run.1) } }
+    return HStack(spacing: 0) {
+      ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+        Text(String(cell.character))
+          .foregroundStyle(cell.color)
+          .frame(width: cellWidth, alignment: .center)
+      }
+      if let cursor {
+        RoundedRectangle(cornerRadius: 1)
+          .fill(cursor)
+          .frame(width: cellWidth * 0.85, height: previewSize * 1.2)
+      }
+    }
+  }
+
   private func previewFont(_ size: CGFloat) -> Font {
-    fontName.map { .custom($0, size: size) } ?? .system(size: size)
+    // Default falls back to the system monospaced font — Ghostty's own default
+    // is monospaced, so this previews closer to reality than the proportional
+    // system font.
+    fontName.map { .custom($0, size: size) } ?? .system(size: size, design: .monospaced)
+  }
+
+  /// The monospace cell width a terminal uses for `family`: the advance of "0".
+  /// Exact for monospaced fonts; for proportional fonts it reproduces the same
+  /// stretched grid Ghostty falls back to, so the preview tracks reality.
+  private static func cellWidth(family: String?, size: CGFloat) -> CGFloat {
+    let font: NSFont
+    if let family {
+      let descriptor = NSFontDescriptor(fontAttributes: [.family: family])
+      font =
+        NSFont(descriptor: descriptor, size: size)
+        ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    } else {
+      font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+    let measured = ("0" as NSString).size(withAttributes: [.font: font]).width
+    return max(measured, size * 0.3)
   }
 }
