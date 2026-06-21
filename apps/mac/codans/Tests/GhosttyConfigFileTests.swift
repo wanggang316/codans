@@ -11,8 +11,12 @@ import Testing
 struct GhosttyConfigFileTests {
   // MARK: - Helpers
 
-  private func draft(light: String? = nil, dark: String? = nil) -> GhosttyTerminalSettingsDraft {
-    GhosttyTerminalSettingsDraft(lightTheme: light, darkTheme: dark)
+  private func draft(
+    light: String? = nil,
+    dark: String? = nil,
+    cursorStyle: GhosttyCursorStyle? = nil
+  ) -> GhosttyTerminalSettingsDraft {
+    GhosttyTerminalSettingsDraft(lightTheme: light, darkTheme: dark, cursorStyle: cursorStyle)
   }
 
   // MARK: - Empty file
@@ -231,6 +235,63 @@ struct GhosttyConfigFileTests {
         # theme = light:X,dark:Y
         font-family = Menlo
         theme = light:A,dark:B
+        """
+    )
+  }
+
+  // MARK: - Cursor style
+
+  @Test
+  func cursorStyleOnlyEmitsSingleDirective() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(cursorStyle: .bar))
+    #expect(out == "cursor-style = bar\n")
+  }
+
+  @Test
+  func themeAndCursorStyleEmitInStableOrder() {
+    let out = GhosttyConfigFile.updatedContents(
+      from: "",
+      draft: draft(light: "Alpha", dark: "Beta", cursorStyle: .underline)
+    )
+    #expect(out == "theme = light:Alpha,dark:Beta\ncursor-style = underline\n")
+  }
+
+  @Test
+  func hollowBlockUsesUnderscoreToken() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(cursorStyle: .blockHollow))
+    #expect(out == "cursor-style = block_hollow\n")
+  }
+
+  @Test
+  func existingCursorStyleIsReplacedInPlace() {
+    let input = """
+      font-family = Menlo
+      cursor-style = block
+      font-size = 13
+      """
+    let out = GhosttyConfigFile.updatedContents(from: input, draft: draft(cursorStyle: .bar))
+    #expect(
+      out == """
+        font-family = Menlo
+        cursor-style = bar
+        font-size = 13
+        """
+    )
+  }
+
+  @Test
+  func nilCursorStyleStripsManagedDirectiveLeavingTheme() {
+    let input = """
+      cursor-style = bar
+      theme = light:X,dark:Y
+      font-size = 13
+      """
+    // Draft keeps the theme but drops cursor-style: the directive is removed.
+    let out = GhosttyConfigFile.updatedContents(from: input, draft: draft(light: "X", dark: "Y"))
+    #expect(
+      out == """
+        theme = light:X,dark:Y
+        font-size = 13
         """
     )
   }

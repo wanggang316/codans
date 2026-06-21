@@ -18,6 +18,7 @@ struct SettingsTerminalView: View {
     Form {
       if let snapshot = store.snapshot {
         themePickersSection(snapshot: snapshot)
+        cursorStyleSection(snapshot: snapshot)
         configFileSection(path: snapshot.configPath)
       } else if store.isLoading {
         Section {
@@ -69,6 +70,32 @@ struct SettingsTerminalView: View {
         "Codans reads and writes your Ghostty config, so changes here stay in sync "
           + "with Ghostty itself."
       )
+    }
+  }
+
+  // MARK: - Cursor style
+
+  private func cursorStyleSection(snapshot: GhosttyTerminalSettings) -> some View {
+    // Bind directly to the snapshot's cursor style; on change we dispatch the
+    // pick, which rewrites the managed config block and reloads the snapshot.
+    // `nil` is the "Default" tag — Codans stops managing `cursor-style` and
+    // Ghostty's own default (block) applies.
+    let selection = Binding<GhosttyCursorStyle?>(
+      get: { snapshot.cursorStyle },
+      set: { store.send(.cursorStyleSelected($0)) }
+    )
+    return Section {
+      Picker("Cursor Style", selection: selection) {
+        Text("Default").tag(GhosttyCursorStyle?.none)
+        ForEach(GhosttyCursorStyle.allCases, id: \.self) { style in
+          Text(style.displayName).tag(GhosttyCursorStyle?.some(style))
+        }
+      }
+      .disabled(controlsDisabled)
+    } header: {
+      Text("Cursor")
+    } footer: {
+      Text("\"Default\" leaves the cursor shape to your Ghostty config.")
     }
   }
 

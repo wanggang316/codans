@@ -9,12 +9,14 @@ struct SettingsTerminalFeatureTests {
   private func makeSnapshot(
     light: String? = "Light A",
     dark: String? = "Dark A",
+    cursorStyle: GhosttyCursorStyle? = nil,
     warning: String? = nil
   ) -> GhosttyTerminalSettings {
     GhosttyTerminalSettings(
       configPath: "/tmp/ghostty/config",
       lightTheme: light,
       darkTheme: dark,
+      cursorStyle: cursorStyle,
       availableLightThemes: ["Light A", "Light B"],
       availableDarkThemes: ["Dark A", "Dark B"],
       themePreviews: [:],
@@ -80,6 +82,33 @@ struct SettingsTerminalFeatureTests {
       )
     }
     await store.send(.lightThemeSelected("Light B")) { $0.isApplying = true }
+    await store.receive(\.applyResult.success) {
+      $0.isApplying = false
+      $0.snapshot = applied
+    }
+  }
+
+  @Test
+  func cursorStylePickCarriesThemesAndApplies() async {
+    let initial = makeSnapshot(light: "Light A", dark: "Dark A", cursorStyle: nil)
+    let applied = makeSnapshot(light: "Light A", dark: "Dark A", cursorStyle: .bar)
+    let store = TestStore(
+      initialState: makeState(snapshot: initial)
+    ) {
+      SettingsTerminalFeature()
+    } withDependencies: {
+      $0[GhosttyTerminalSettingsClient.self] = GhosttyTerminalSettingsClient(
+        load: { initial },
+        apply: { draft in
+          // The pick must carry the current themes forward, not drop them.
+          #expect(draft.lightTheme == "Light A")
+          #expect(draft.darkTheme == "Dark A")
+          #expect(draft.cursorStyle == .bar)
+          return applied
+        }
+      )
+    }
+    await store.send(.cursorStyleSelected(.bar)) { $0.isApplying = true }
     await store.receive(\.applyResult.success) {
       $0.isApplying = false
       $0.snapshot = applied

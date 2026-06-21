@@ -27,6 +27,7 @@ struct SettingsTerminalFeature {
     case loadResult(Result<GhosttyTerminalSettings, ApplyError>)
     case lightThemeSelected(String?)
     case darkThemeSelected(String?)
+    case cursorStyleSelected(GhosttyCursorStyle?)
     case applyResult(Result<GhosttyTerminalSettings, ApplyError>)
   }
 
@@ -75,10 +76,28 @@ struct SettingsTerminalFeature {
         return .none
 
       case .lightThemeSelected(let name):
-        return applyDraft(state: &state, lightTheme: name, darkTheme: state.snapshot?.darkTheme)
+        return applyDraft(
+          state: &state,
+          lightTheme: name,
+          darkTheme: state.snapshot?.darkTheme,
+          cursorStyle: state.snapshot?.cursorStyle
+        )
 
       case .darkThemeSelected(let name):
-        return applyDraft(state: &state, lightTheme: state.snapshot?.lightTheme, darkTheme: name)
+        return applyDraft(
+          state: &state,
+          lightTheme: state.snapshot?.lightTheme,
+          darkTheme: name,
+          cursorStyle: state.snapshot?.cursorStyle
+        )
+
+      case .cursorStyleSelected(let style):
+        return applyDraft(
+          state: &state,
+          lightTheme: state.snapshot?.lightTheme,
+          darkTheme: state.snapshot?.darkTheme,
+          cursorStyle: style
+        )
 
       case .applyResult(.success(let snapshot)):
         state.isApplying = false
@@ -100,11 +119,16 @@ struct SettingsTerminalFeature {
   private func applyDraft(
     state: inout State,
     lightTheme: String?,
-    darkTheme: String?
+    darkTheme: String?,
+    cursorStyle: GhosttyCursorStyle?
   ) -> Effect<Action> {
     state.isApplying = true
     state.errorMessage = nil
-    let draft = GhosttyTerminalSettingsDraft(lightTheme: lightTheme, darkTheme: darkTheme)
+    let draft = GhosttyTerminalSettingsDraft(
+      lightTheme: lightTheme,
+      darkTheme: darkTheme,
+      cursorStyle: cursorStyle
+    )
     return .run { send in
       do {
         let snapshot = try await client.apply(draft)

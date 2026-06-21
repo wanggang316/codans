@@ -35,6 +35,27 @@ nonisolated enum GhosttyConfigFileError: LocalizedError {
 
 // MARK: - Values
 
+/// Terminal cursor shape, mapping 1:1 onto Ghostty's `cursor-style` config
+/// tokens. `rawValue` IS the config token, so the managed block emits it
+/// verbatim and `load` parses it straight back. Cases mirror
+/// `terminal.CursorStyle` in libghostty (default there is `.block`).
+nonisolated enum GhosttyCursorStyle: String, CaseIterable, Hashable, Sendable {
+  case block
+  case bar
+  case underline
+  case blockHollow = "block_hollow"
+
+  /// Human-facing label for the Settings picker.
+  var displayName: String {
+    switch self {
+    case .block: return "Block"
+    case .bar: return "Bar"
+    case .underline: return "Underline"
+    case .blockHollow: return "Hollow Block"
+    }
+  }
+}
+
 /// Snapshot of the user's current Ghostty terminal-appearance state, as
 /// observable by the Settings pane. Carries both the user-selected themes
 /// (nil ⇒ no managed directive in file) and the enumerated catalog so the
@@ -47,6 +68,11 @@ nonisolated struct GhosttyTerminalSettings: Equatable, Sendable {
   /// managed directive exists or the directive was malformed.
   let lightTheme: String?
   let darkTheme: String?
+  /// Cursor shape from the managed `cursor-style = <token>` directive. `nil`
+  /// when no managed directive exists or the on-disk value isn't a token we
+  /// recognise — the pane then renders the "Default" option (Ghostty's own
+  /// default applies).
+  let cursorStyle: GhosttyCursorStyle?
   /// Enumerated catalog of themes on disk. Not necessarily containing
   /// `lightTheme` / `darkTheme` — see callers that prepend missing entries.
   let availableLightThemes: [String]
@@ -60,14 +86,16 @@ nonisolated struct GhosttyTerminalSettings: Equatable, Sendable {
   let warningMessage: String?
 }
 
-/// User-intent payload for `apply`. Nil fields mean "don't emit a managed
-/// theme directive" — on commit the managed block is removed entirely when
-/// both are nil. Mirror behaviour (both nil → no directive; one nil → both
-/// set to the non-nil value) is applied inside `apply` so the pane can
-/// defer the decision.
+/// User-intent payload for `apply`. Each field is the desired state of one
+/// managed directive; `nil` means "don't emit that directive" (the key is
+/// stripped on commit). The draft is the *complete* desired state of all
+/// managed keys, so callers must carry forward the values they aren't
+/// changing. Theme mirror behaviour (both nil → no directive; one nil → both
+/// set to the non-nil value) is applied inside `apply`.
 nonisolated struct GhosttyTerminalSettingsDraft: Equatable, Sendable {
   let lightTheme: String?
   let darkTheme: String?
+  let cursorStyle: GhosttyCursorStyle?
 }
 
 // MARK: - Reader / Writer
@@ -95,8 +123,8 @@ struct GhosttyConfigFile {
 
   /// Set of directive keys this type owns. Any occurrence of these in the
   /// config file is deleted and re-emitted as a single canonical block on
-  /// `apply`. v1: just `theme`; future iterations add font-family, font-size.
-  private static let managedKeys: Set<String> = ["theme"]
+  /// `apply`. Future iterations add font-family, font-size.
+  private static let managedKeys: Set<String> = ["theme", "cursor-style"]
 
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.mac",
@@ -185,6 +213,7 @@ struct GhosttyConfigFile {
       configPath: configURL.path,
       lightTheme: parsed.light,
       darkTheme: parsed.dark,
+      cursorStyle: Self.parseCursorStyle(from: contents),
       availableLightThemes: catalog.light,
       availableDarkThemes: catalog.dark,
       themePreviews: catalog.previews,
@@ -356,21 +385,34 @@ struct GhosttyConfigFile {
     return key.lowercased()
   }
 
-  /// Build the canonical managed block for `draft`. Currently emits at most
-  /// one line: `theme = light:<X>,dark:<Y>`. Mirror semantics when only one
-  /// theme is set.
+  /// Build the canonical managed block for `draft` — one line per managed
+  /// directive the draft asks for, in a stable order (theme, then
+  /// cursor-style). A `nil` field contributes no line; an all-nil draft
+  /// yields an empty block (the managed region is removed entirely).
   private static func canonicalManagedBlock(
     for draft: GhosttyTerminalSettingsDraft
   ) -> [String] {
-    let light = draft.lightTheme
-    let dark = draft.darkTheme
-    // Resolve mirror semantics: if one side is set and the other is nil,
-    // use the set side for both. Both nil → no block.
+    var lines: [String] = []
+    if let themeLine = canonicalThemeLine(for: draft) {
+      lines.append(themeLine)
+    }
+    if let cursor = draft.cursorStyle {
+      lines.append("cursor-style = \(cursor.rawValue)")
+    }
+    return lines
+  }
+
+  /// Resolve the `theme = light:<X>,dark:<Y>` line for `draft`, or `nil` when
+  /// neither theme is set. Mirror semantics: if one side is set and the other
+  /// is nil, the set side is used for both.
+  private static func canonicalThemeLine(
+    for draft: GhosttyTerminalSettingsDraft
+  ) -> String? {
     let resolvedLight: String?
     let resolvedDark: String?
-    switch (light, dark) {
+    switch (draft.lightTheme, draft.darkTheme) {
     case (nil, nil):
-      return []
+      return nil
     case (let l?, nil):
       resolvedLight = l
       resolvedDark = l
@@ -381,8 +423,8 @@ struct GhosttyConfigFile {
       resolvedLight = l
       resolvedDark = d
     }
-    guard let l = resolvedLight, let d = resolvedDark else { return [] }
-    return ["theme = light:\(l),dark:\(d)"]
+    guard let l = resolvedLight, let d = resolvedDark else { return nil }
+    return "theme = light:\(l),dark:\(d)"
   }
 
   /// Parse the `theme = …` directive out of existing config contents, if any.
@@ -425,6 +467,21 @@ struct GhosttyConfigFile {
       )
     }
     return (nil, nil, nil)
+  }
+
+  /// Parse the `cursor-style = <token>` directive out of existing config
+  /// contents. Returns the matching `GhosttyCursorStyle`, or `nil` when the
+  /// directive is absent or its value isn't a token we recognise. First
+  /// occurrence wins, mirroring `parseThemeDirective`.
+  private static func parseCursorStyle(from contents: String) -> GhosttyCursorStyle? {
+    for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
+      let line = String(rawLine)
+      guard directiveKey(in: line) == "cursor-style" else { continue }
+      guard let eq = line.firstIndex(of: "=") else { continue }
+      let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+      return GhosttyCursorStyle(rawValue: value.lowercased())
+    }
+    return nil
   }
 
   // MARK: - libghostty validation
