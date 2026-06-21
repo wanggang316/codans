@@ -2273,7 +2273,7 @@ final class HierarchyManager {
   ]
 
   /// Merges the per-worktree built-in variables codans provides for
-  /// every pane (`TOUCHCODE_WORKTREE_PATH`, `TOUCHCODE_ROOT_PATH`) into
+  /// every pane (`CODANS_WORKTREE_PATH`, `CODANS_ROOT_PATH`) into
   /// `env`. Injected here at spawn time — not in `resolvedEnv`, which is
   /// project-scoped and has no worktree — and written *after* the caller's
   /// env so a user-defined `envVars` entry of the same name can't shadow
