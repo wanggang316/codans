@@ -73,10 +73,19 @@ nonisolated struct GhosttyTerminalSettings: Equatable, Sendable {
   /// recognise — the pane then renders the "Default" option (Ghostty's own
   /// default applies).
   let cursorStyle: GhosttyCursorStyle?
+  /// Font family from the managed `font-family = <name>` directive. `nil` when
+  /// no managed directive exists — Ghostty's default font applies.
+  let fontFamily: String?
+  /// Point size from the managed `font-size = <n>` directive. `nil` when no
+  /// managed directive exists or the on-disk value didn't parse as a number.
+  let fontSize: Double?
   /// Enumerated catalog of themes on disk. Not necessarily containing
   /// `lightTheme` / `darkTheme` — see callers that prepend missing entries.
   let availableLightThemes: [String]
   let availableDarkThemes: [String]
+  /// Monospaced font families available on the system. Not necessarily
+  /// containing `fontFamily` — see callers that prepend a missing entry.
+  let availableFontFamilies: [String]
   /// Parsed color directives keyed by theme name. Used by the Settings →
   /// Terminal picker to render swatches + a hover preview without re-touching
   /// disk. Missing entries (or empty previews) render as neutral chrome.
@@ -96,6 +105,8 @@ nonisolated struct GhosttyTerminalSettingsDraft: Equatable, Sendable {
   let lightTheme: String?
   let darkTheme: String?
   let cursorStyle: GhosttyCursorStyle?
+  let fontFamily: String?
+  let fontSize: Double?
 }
 
 // MARK: - Reader / Writer
@@ -118,13 +129,16 @@ struct GhosttyConfigFile {
   let fileManager: FileManager
   let notificationCenter: NotificationCenter
   let catalogProvider: @MainActor () -> GhosttyThemeCatalog
+  let fontFamilyProvider: @MainActor () -> [String]
 
   // MARK: Constants
 
   /// Set of directive keys this type owns. Any occurrence of these in the
   /// config file is deleted and re-emitted as a single canonical block on
-  /// `apply`. Future iterations add font-family, font-size.
-  private static let managedKeys: Set<String> = ["theme", "cursor-style"]
+  /// `apply`.
+  private static let managedKeys: Set<String> = [
+    "theme", "cursor-style", "font-family", "font-size",
+  ]
 
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.mac",
@@ -138,7 +152,8 @@ struct GhosttyConfigFile {
     environment: [String: String] = ProcessInfo.processInfo.environment,
     fileManager: FileManager = .default,
     notificationCenter: NotificationCenter = .default,
-    catalogProvider: (@MainActor () -> GhosttyThemeCatalog)? = nil
+    catalogProvider: (@MainActor () -> GhosttyThemeCatalog)? = nil,
+    fontFamilyProvider: (@MainActor () -> [String])? = nil
   ) {
     self.homeDirectoryURL = homeDirectoryURL
     self.environment = environment
@@ -160,6 +175,9 @@ struct GhosttyConfigFile {
         )
       }
     }
+    // Font enumeration is system-wide (Core Text), so the default provider
+    // takes no inputs; tests inject a fixed list.
+    self.fontFamilyProvider = fontFamilyProvider ?? { GhosttyFontCatalog.monospacedFamilies() }
   }
 
   // MARK: - Path resolution
@@ -214,8 +232,11 @@ struct GhosttyConfigFile {
       lightTheme: parsed.light,
       darkTheme: parsed.dark,
       cursorStyle: Self.parseCursorStyle(from: contents),
+      fontFamily: Self.parseStringDirective("font-family", from: contents),
+      fontSize: Self.parseFontSize(from: contents),
       availableLightThemes: catalog.light,
       availableDarkThemes: catalog.dark,
+      availableFontFamilies: fontFamilyProvider(),
       themePreviews: catalog.previews,
       warningMessage: parsed.warning
     )
@@ -386,9 +407,9 @@ struct GhosttyConfigFile {
   }
 
   /// Build the canonical managed block for `draft` — one line per managed
-  /// directive the draft asks for, in a stable order (theme, then
-  /// cursor-style). A `nil` field contributes no line; an all-nil draft
-  /// yields an empty block (the managed region is removed entirely).
+  /// directive the draft asks for, in a stable order (theme, font-family,
+  /// font-size, cursor-style). A `nil` field contributes no line; an all-nil
+  /// draft yields an empty block (the managed region is removed entirely).
   private static func canonicalManagedBlock(
     for draft: GhosttyTerminalSettingsDraft
   ) -> [String] {
@@ -396,10 +417,22 @@ struct GhosttyConfigFile {
     if let themeLine = canonicalThemeLine(for: draft) {
       lines.append(themeLine)
     }
+    if let family = draft.fontFamily, !family.isEmpty {
+      lines.append("font-family = \(family)")
+    }
+    if let size = draft.fontSize {
+      lines.append("font-size = \(formatFontSize(size))")
+    }
     if let cursor = draft.cursorStyle {
       lines.append("cursor-style = \(cursor.rawValue)")
     }
     return lines
+  }
+
+  /// Format a point size for the config: whole numbers emit without a decimal
+  /// (`13`), fractional sizes keep their value (`13.5`).
+  private static func formatFontSize(_ size: Double) -> String {
+    size == size.rounded() ? String(Int(size)) : String(size)
   }
 
   /// Resolve the `theme = light:<X>,dark:<Y>` line for `draft`, or `nil` when
@@ -482,6 +515,27 @@ struct GhosttyConfigFile {
       return GhosttyCursorStyle(rawValue: value.lowercased())
     }
     return nil
+  }
+
+  /// Return the trimmed value of the first `key = <value>` directive, or `nil`
+  /// when absent or empty. Used for free-form string directives like
+  /// `font-family` where any non-empty value is accepted verbatim.
+  private static func parseStringDirective(_ key: String, from contents: String) -> String? {
+    for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
+      let line = String(rawLine)
+      guard directiveKey(in: line) == key else { continue }
+      guard let eq = line.firstIndex(of: "=") else { continue }
+      let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+      return value.isEmpty ? nil : value
+    }
+    return nil
+  }
+
+  /// Parse the `font-size = <n>` directive as a point size. Returns `nil` when
+  /// absent or non-numeric. First occurrence wins.
+  private static func parseFontSize(from contents: String) -> Double? {
+    guard let raw = parseStringDirective("font-size", from: contents) else { return nil }
+    return Double(raw)
   }
 
   // MARK: - libghostty validation

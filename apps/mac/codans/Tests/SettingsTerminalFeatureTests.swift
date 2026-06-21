@@ -10,6 +10,8 @@ struct SettingsTerminalFeatureTests {
     light: String? = "Light A",
     dark: String? = "Dark A",
     cursorStyle: GhosttyCursorStyle? = nil,
+    fontFamily: String? = nil,
+    fontSize: Double? = nil,
     warning: String? = nil
   ) -> GhosttyTerminalSettings {
     GhosttyTerminalSettings(
@@ -17,8 +19,11 @@ struct SettingsTerminalFeatureTests {
       lightTheme: light,
       darkTheme: dark,
       cursorStyle: cursorStyle,
+      fontFamily: fontFamily,
+      fontSize: fontSize,
       availableLightThemes: ["Light A", "Light B"],
       availableDarkThemes: ["Dark A", "Dark B"],
+      availableFontFamilies: ["Menlo", "Fira Code"],
       themePreviews: [:],
       warningMessage: warning
     )
@@ -109,6 +114,65 @@ struct SettingsTerminalFeatureTests {
       )
     }
     await store.send(.cursorStyleSelected(.bar)) { $0.isApplying = true }
+    await store.receive(\.applyResult.success) {
+      $0.isApplying = false
+      $0.snapshot = applied
+    }
+  }
+
+  @Test
+  func fontFamilyPickCarriesOtherDirectivesForward() async {
+    let initial = makeSnapshot(
+      light: "Light A", dark: "Dark A", cursorStyle: .bar, fontFamily: nil, fontSize: 14
+    )
+    let applied = makeSnapshot(
+      light: "Light A", dark: "Dark A", cursorStyle: .bar, fontFamily: "Fira Code", fontSize: 14
+    )
+    let store = TestStore(
+      initialState: makeState(snapshot: initial)
+    ) {
+      SettingsTerminalFeature()
+    } withDependencies: {
+      $0[GhosttyTerminalSettingsClient.self] = GhosttyTerminalSettingsClient(
+        load: { initial },
+        apply: { draft in
+          #expect(draft.fontFamily == "Fira Code")
+          // Every other managed directive must ride along unchanged.
+          #expect(draft.fontSize == 14)
+          #expect(draft.cursorStyle == .bar)
+          #expect(draft.lightTheme == "Light A")
+          return applied
+        }
+      )
+    }
+    await store.send(.fontFamilySelected("Fira Code")) { $0.isApplying = true }
+    await store.receive(\.applyResult.success) {
+      $0.isApplying = false
+      $0.snapshot = applied
+    }
+  }
+
+  @Test
+  func fontSizeSelectingDefaultClearsItButKeepsTheRest() async {
+    // Selecting nil ("Default") must clear font-size — distinct from inheriting
+    // the current value — while carrying the other directives forward.
+    let initial = makeSnapshot(light: "Light A", dark: "Dark A", fontSize: 16)
+    let applied = makeSnapshot(light: "Light A", dark: "Dark A", fontSize: nil)
+    let store = TestStore(
+      initialState: makeState(snapshot: initial)
+    ) {
+      SettingsTerminalFeature()
+    } withDependencies: {
+      $0[GhosttyTerminalSettingsClient.self] = GhosttyTerminalSettingsClient(
+        load: { initial },
+        apply: { draft in
+          #expect(draft.fontSize == nil)
+          #expect(draft.lightTheme == "Light A")
+          return applied
+        }
+      )
+    }
+    await store.send(.fontSizeSelected(nil)) { $0.isApplying = true }
     await store.receive(\.applyResult.success) {
       $0.isApplying = false
       $0.snapshot = applied

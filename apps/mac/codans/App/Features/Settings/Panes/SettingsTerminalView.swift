@@ -18,6 +18,7 @@ struct SettingsTerminalView: View {
     Form {
       if let snapshot = store.snapshot {
         themePickersSection(snapshot: snapshot)
+        fontSection(snapshot: snapshot)
         cursorStyleSection(snapshot: snapshot)
         configFileSection(path: snapshot.configPath)
       } else if store.isLoading {
@@ -71,6 +72,60 @@ struct SettingsTerminalView: View {
           + "with Ghostty itself."
       )
     }
+  }
+
+  // MARK: - Font
+
+  /// Common terminal point sizes offered in the size picker; the user's current
+  /// size is prepended when it falls outside this set.
+  private static let fontSizeChoices: [Double] = [
+    9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 24,
+  ]
+
+  private func fontSection(snapshot: GhosttyTerminalSettings) -> some View {
+    let familyBinding = Binding<String?>(
+      get: { snapshot.fontFamily },
+      set: { store.send(.fontFamilySelected($0)) }
+    )
+    let sizeBinding = Binding<Double?>(
+      get: { snapshot.fontSize },
+      set: { store.send(.fontSizeSelected($0)) }
+    )
+    let families = prepending(snapshot.fontFamily, to: snapshot.availableFontFamilies)
+    let sizes = prepending(snapshot.fontSize, to: Self.fontSizeChoices)
+    return Section {
+      Picker("Font", selection: familyBinding) {
+        Text("Default").tag(String?.none)
+        ForEach(families, id: \.self) { family in
+          Text(family).tag(String?.some(family))
+        }
+      }
+      .disabled(controlsDisabled)
+      Picker("Size", selection: sizeBinding) {
+        Text("Default").tag(Double?.none)
+        ForEach(sizes, id: \.self) { size in
+          Text(sizeLabel(size)).tag(Double?.some(size))
+        }
+      }
+      .disabled(controlsDisabled)
+    } header: {
+      Text("Font")
+    } footer: {
+      Text("\"Default\" leaves the font to your Ghostty config.")
+    }
+  }
+
+  private func sizeLabel(_ size: Double) -> String {
+    let number = size == size.rounded() ? String(Int(size)) : String(size)
+    return "\(number) pt"
+  }
+
+  /// Prepend `current` to `list` when it's a value missing from the catalog, so
+  /// the picker shows the on-disk selection verbatim instead of collapsing to
+  /// "Default".
+  private func prepending<T: Equatable>(_ current: T?, to list: [T]) -> [T] {
+    guard let current, !list.contains(current) else { return list }
+    return [current] + list
   }
 
   // MARK: - Cursor style

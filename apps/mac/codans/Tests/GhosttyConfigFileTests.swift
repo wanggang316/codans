@@ -14,9 +14,17 @@ struct GhosttyConfigFileTests {
   private func draft(
     light: String? = nil,
     dark: String? = nil,
-    cursorStyle: GhosttyCursorStyle? = nil
+    cursorStyle: GhosttyCursorStyle? = nil,
+    fontFamily: String? = nil,
+    fontSize: Double? = nil
   ) -> GhosttyTerminalSettingsDraft {
-    GhosttyTerminalSettingsDraft(lightTheme: light, darkTheme: dark, cursorStyle: cursorStyle)
+    GhosttyTerminalSettingsDraft(
+      lightTheme: light,
+      darkTheme: dark,
+      cursorStyle: cursorStyle,
+      fontFamily: fontFamily,
+      fontSize: fontSize
+    )
   }
 
   // MARK: - Empty file
@@ -40,7 +48,7 @@ struct GhosttyConfigFileTests {
 
   @Test
   func nonManagedContentGetsBlockAppended() {
-    let input = "font-family = Menlo\nfont-size = 13\n"
+    let input = "window-padding-x = 4\nscrollback-limit = 10000\n"
     let out = GhosttyConfigFile.updatedContents(
       from: input,
       draft: draft(light: "Alpha", dark: "Beta")
@@ -48,7 +56,7 @@ struct GhosttyConfigFileTests {
     // Managed block lands at end-of-file because no managed key was present.
     // Trailing newline of the input is preserved; non-managed lines stay
     // in their original positions.
-    #expect(out == "font-family = Menlo\nfont-size = 13\ntheme = light:Alpha,dark:Beta\n")
+    #expect(out == "window-padding-x = 4\nscrollback-limit = 10000\ntheme = light:Alpha,dark:Beta\n")
   }
 
   // MARK: - Replace in place
@@ -56,9 +64,9 @@ struct GhosttyConfigFileTests {
   @Test
   func existingThemeIsReplacedAtSamePosition() {
     let input = """
-      font-family = Menlo
+      window-padding-x = 4
       theme = light:Old,dark:Old
-      font-size = 13
+      scrollback-limit = 10000
       """
     let out = GhosttyConfigFile.updatedContents(
       from: input,
@@ -68,9 +76,9 @@ struct GhosttyConfigFileTests {
     // same index so non-managed siblings keep their relative position.
     #expect(
       out == """
-        font-family = Menlo
+        window-padding-x = 4
         theme = light:New,dark:Newer
-        font-size = 13
+        scrollback-limit = 10000
         """
     )
   }
@@ -81,9 +89,9 @@ struct GhosttyConfigFileTests {
   func multipleInterleavedManagedLinesCollapseToSingleCanonicalBlock() {
     let input = """
       theme = light:A,dark:A
-      font-family = Menlo
+      window-padding-x = 4
       theme = light:B,dark:B
-      font-size = 13
+      scrollback-limit = 10000
       theme = light:C,dark:C
       """
     let out = GhosttyConfigFile.updatedContents(
@@ -95,8 +103,8 @@ struct GhosttyConfigFileTests {
     #expect(
       out == """
         theme = light:Final,dark:Final
-        font-family = Menlo
-        font-size = 13
+        window-padding-x = 4
+        scrollback-limit = 10000
         """
     )
   }
@@ -107,13 +115,13 @@ struct GhosttyConfigFileTests {
   func commentsAndBlankLinesArePreservedAroundReplacement() {
     let input = """
       # top comment
-      font-family = Menlo
+      window-padding-x = 4
 
       # before theme
       theme = light:Old,dark:Old
       # after theme
 
-      font-size = 13
+      scrollback-limit = 10000
       """
     let out = GhosttyConfigFile.updatedContents(
       from: input,
@@ -122,13 +130,13 @@ struct GhosttyConfigFileTests {
     #expect(
       out == """
         # top comment
-        font-family = Menlo
+        window-padding-x = 4
 
         # before theme
         theme = light:New,dark:New2
         # after theme
 
-        font-size = 13
+        scrollback-limit = 10000
         """
     )
   }
@@ -137,7 +145,7 @@ struct GhosttyConfigFileTests {
 
   @Test
   func trailingNewlineIsPreserved() {
-    let input = "font-family = Menlo\n"
+    let input = "window-padding-x = 4\n"
     let out = GhosttyConfigFile.updatedContents(
       from: input,
       draft: draft(light: "A", dark: "B")
@@ -147,12 +155,12 @@ struct GhosttyConfigFileTests {
 
   @Test
   func absentTrailingNewlineStaysAbsentForExistingFile() {
-    let input = "font-family = Menlo"
+    let input = "window-padding-x = 4"
     let out = GhosttyConfigFile.updatedContents(
       from: input,
       draft: draft(light: "A", dark: "B")
     )
-    #expect(out == "font-family = Menlo\ntheme = light:A,dark:B")
+    #expect(out == "window-padding-x = 4\ntheme = light:A,dark:B")
   }
 
   // MARK: - Draft both nil removes block
@@ -160,15 +168,15 @@ struct GhosttyConfigFileTests {
   @Test
   func draftBothNilRemovesManagedBlockLeavingRest() {
     let input = """
-      font-family = Menlo
+      window-padding-x = 4
       theme = light:X,dark:Y
-      font-size = 13
+      scrollback-limit = 10000
       """
     let out = GhosttyConfigFile.updatedContents(from: input, draft: draft())
     #expect(
       out == """
-        font-family = Menlo
-        font-size = 13
+        window-padding-x = 4
+        scrollback-limit = 10000
         """
     )
   }
@@ -176,8 +184,8 @@ struct GhosttyConfigFileTests {
   @Test
   func draftBothNilOnFileWithNoManagedKeysIsIdentity() {
     let input = """
-      font-family = Menlo
-      font-size = 13
+      window-padding-x = 4
+      scrollback-limit = 10000
       """
     let out = GhosttyConfigFile.updatedContents(from: input, draft: draft())
     #expect(out == input)
@@ -221,7 +229,7 @@ struct GhosttyConfigFileTests {
   func commentedThemeLineIsNotReplaced() {
     let input = """
       # theme = light:X,dark:Y
-      font-family = Menlo
+      window-padding-x = 4
       """
     let out = GhosttyConfigFile.updatedContents(
       from: input,
@@ -233,7 +241,7 @@ struct GhosttyConfigFileTests {
     #expect(
       out == """
         # theme = light:X,dark:Y
-        font-family = Menlo
+        window-padding-x = 4
         theme = light:A,dark:B
         """
     )
@@ -265,16 +273,16 @@ struct GhosttyConfigFileTests {
   @Test
   func existingCursorStyleIsReplacedInPlace() {
     let input = """
-      font-family = Menlo
+      window-padding-x = 4
       cursor-style = block
-      font-size = 13
+      scrollback-limit = 10000
       """
     let out = GhosttyConfigFile.updatedContents(from: input, draft: draft(cursorStyle: .bar))
     #expect(
       out == """
-        font-family = Menlo
+        window-padding-x = 4
         cursor-style = bar
-        font-size = 13
+        scrollback-limit = 10000
         """
     )
   }
@@ -284,14 +292,81 @@ struct GhosttyConfigFileTests {
     let input = """
       cursor-style = bar
       theme = light:X,dark:Y
-      font-size = 13
+      scrollback-limit = 10000
       """
     // Draft keeps the theme but drops cursor-style: the directive is removed.
     let out = GhosttyConfigFile.updatedContents(from: input, draft: draft(light: "X", dark: "Y"))
     #expect(
       out == """
         theme = light:X,dark:Y
-        font-size = 13
+        scrollback-limit = 10000
+        """
+    )
+  }
+
+  // MARK: - Font
+
+  @Test
+  func fontFamilyEmitsDirectiveVerbatim() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(fontFamily: "JetBrains Mono"))
+    #expect(out == "font-family = JetBrains Mono\n")
+  }
+
+  @Test
+  func emptyFontFamilyEmitsNoDirective() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(fontFamily: ""))
+    #expect(out == "")
+  }
+
+  @Test
+  func wholeFontSizeEmitsWithoutDecimal() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(fontSize: 14))
+    #expect(out == "font-size = 14\n")
+  }
+
+  @Test
+  func fractionalFontSizeKeepsDecimal() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(fontSize: 13.5))
+    #expect(out == "font-size = 13.5\n")
+  }
+
+  @Test
+  func allManagedDirectivesEmitInStableOrder() {
+    let out = GhosttyConfigFile.updatedContents(
+      from: "",
+      draft: draft(
+        light: "L", dark: "D", cursorStyle: .bar, fontFamily: "Fira Code", fontSize: 12
+      )
+    )
+    #expect(
+      out == """
+        theme = light:L,dark:D
+        font-family = Fira Code
+        font-size = 12
+        cursor-style = bar
+
+        """
+    )
+  }
+
+  @Test
+  func existingFontDirectivesReplacedInPlace() {
+    let input = """
+      window-padding-x = 4
+      font-family = Menlo
+      font-size = 13
+      scrollback-limit = 10000
+      """
+    let out = GhosttyConfigFile.updatedContents(
+      from: input,
+      draft: draft(fontFamily: "Fira Code", fontSize: 15)
+    )
+    #expect(
+      out == """
+        window-padding-x = 4
+        font-family = Fira Code
+        font-size = 15
+        scrollback-limit = 10000
         """
     )
   }

@@ -38,8 +38,11 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         lightTheme: nil,
         darkTheme: nil,
         cursorStyle: nil,
+        fontFamily: nil,
+        fontSize: nil,
         availableLightThemes: [],
         availableDarkThemes: [],
+        availableFontFamilies: [],
         themePreviews: [:],
         warningMessage: nil
       )
@@ -50,8 +53,11 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         lightTheme: draft.lightTheme,
         darkTheme: draft.darkTheme,
         cursorStyle: draft.cursorStyle,
+        fontFamily: draft.fontFamily,
+        fontSize: draft.fontSize,
         availableLightThemes: [],
         availableDarkThemes: [],
+        availableFontFamilies: [],
         themePreviews: [:],
         warningMessage: nil
       )

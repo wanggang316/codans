@@ -28,6 +28,8 @@ struct SettingsTerminalFeature {
     case lightThemeSelected(String?)
     case darkThemeSelected(String?)
     case cursorStyleSelected(GhosttyCursorStyle?)
+    case fontFamilySelected(String?)
+    case fontSizeSelected(Double?)
     case applyResult(Result<GhosttyTerminalSettings, ApplyError>)
   }
 
@@ -76,28 +78,19 @@ struct SettingsTerminalFeature {
         return .none
 
       case .lightThemeSelected(let name):
-        return applyDraft(
-          state: &state,
-          lightTheme: name,
-          darkTheme: state.snapshot?.darkTheme,
-          cursorStyle: state.snapshot?.cursorStyle
-        )
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, lightTheme: name))
 
       case .darkThemeSelected(let name):
-        return applyDraft(
-          state: &state,
-          lightTheme: state.snapshot?.lightTheme,
-          darkTheme: name,
-          cursorStyle: state.snapshot?.cursorStyle
-        )
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, darkTheme: name))
 
       case .cursorStyleSelected(let style):
-        return applyDraft(
-          state: &state,
-          lightTheme: state.snapshot?.lightTheme,
-          darkTheme: state.snapshot?.darkTheme,
-          cursorStyle: style
-        )
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, cursorStyle: style))
+
+      case .fontFamilySelected(let name):
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, fontFamily: name))
+
+      case .fontSizeSelected(let size):
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, fontSize: size))
 
       case .applyResult(.success(let snapshot)):
         state.isApplying = false
@@ -114,21 +107,37 @@ struct SettingsTerminalFeature {
     }
   }
 
-  /// Shared tail for `lightThemeSelected` / `darkThemeSelected`. Cancels any in-flight
-  /// apply before queueing a fresh one so the user's latest pick is the one that lands.
+  /// Build a draft mirroring the current snapshot, overriding exactly the
+  /// fields the caller passes. Each parameter is a *double* optional: omitting
+  /// it (`.none`) inherits the snapshot's value; passing `field: x` (where `x`
+  /// is itself optional) sets it — including `field: nil`, which clears the
+  /// directive. This lets a single picker change one directive while carrying
+  /// the rest of the managed block forward unchanged.
+  private func draft(
+    from snapshot: GhosttyTerminalSettings?,
+    lightTheme: String?? = nil,
+    darkTheme: String?? = nil,
+    cursorStyle: GhosttyCursorStyle?? = nil,
+    fontFamily: String?? = nil,
+    fontSize: Double?? = nil
+  ) -> GhosttyTerminalSettingsDraft {
+    GhosttyTerminalSettingsDraft(
+      lightTheme: lightTheme ?? snapshot?.lightTheme,
+      darkTheme: darkTheme ?? snapshot?.darkTheme,
+      cursorStyle: cursorStyle ?? snapshot?.cursorStyle,
+      fontFamily: fontFamily ?? snapshot?.fontFamily,
+      fontSize: fontSize ?? snapshot?.fontSize
+    )
+  }
+
+  /// Cancels any in-flight apply before queueing a fresh one so the user's
+  /// latest pick is the one that lands.
   private func applyDraft(
     state: inout State,
-    lightTheme: String?,
-    darkTheme: String?,
-    cursorStyle: GhosttyCursorStyle?
+    draft: GhosttyTerminalSettingsDraft
   ) -> Effect<Action> {
     state.isApplying = true
     state.errorMessage = nil
-    let draft = GhosttyTerminalSettingsDraft(
-      lightTheme: lightTheme,
-      darkTheme: darkTheme,
-      cursorStyle: cursorStyle
-    )
     return .run { send in
       do {
         let snapshot = try await client.apply(draft)
