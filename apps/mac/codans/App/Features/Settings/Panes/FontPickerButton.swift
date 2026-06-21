@@ -49,15 +49,11 @@ struct FontPickerButton: View {
   }
 
   /// Mirrors `ThemePickerButton`'s trigger: a faint hover highlight and a
-  /// chevron badge. Shows a tiny "Ag" rendered in the selected font as a live
-  /// cue, then the family name.
+  /// chevron badge, showing the selected family name.
   @ViewBuilder
   private var triggerLabel: some View {
     HStack(alignment: .center, spacing: 6) {
       if let selection {
-        Text("Ag")
-          .font(.custom(selection, size: 13))
-          .foregroundStyle(.secondary)
         Text(selection)
           .foregroundStyle(.primary)
           .lineLimit(1)
@@ -186,18 +182,16 @@ private struct FontListRow: View {
 
   var body: some View {
     HStack(spacing: 8) {
+      // Fixed-width leading slot keeps family names aligned whether or not the
+      // row carries a monospace badge.
+      monospaceBadge
+        .frame(width: 14, alignment: .center)
       Text(displayName)
         .font(rowFont)
         .lineLimit(1)
         .truncationMode(.tail)
         .foregroundStyle(.primary)
       Spacer(minLength: 4)
-      if isMonospaced {
-        Image(systemName: "chevron.left.forwardslash.chevron.right")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .accessibilityLabel("Monospaced")
-      }
       if isSelected {
         Image(systemName: "checkmark")
           .font(.system(size: 10, weight: .bold))
@@ -208,6 +202,18 @@ private struct FontListRow: View {
     .padding(.horizontal, 10)
     .padding(.vertical, 5)
     .background(rowBackground)
+  }
+
+  @ViewBuilder
+  private var monospaceBadge: some View {
+    if isMonospaced {
+      Image(systemName: "chevron.left.forwardslash.chevron.right")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel("Monospaced")
+    } else {
+      Color.clear
+    }
   }
 
   private var displayName: String {
@@ -249,10 +255,7 @@ private struct FontPreviewCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
-      Text("Ag")
-        .font(previewFont(40))
-        .frame(maxWidth: .infinity, alignment: .leading)
-      sampleLines
+      terminalSample
       Spacer(minLength: 0)
     }
     .padding(12)
@@ -275,19 +278,42 @@ private struct FontPreviewCard: View {
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
-  private var sampleLines: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text("ABCDEFGHIJKLM")
-      Text("abcdefghijklm")
-      Text("0123456789")
-      Text("(){}[]<> = => != ::")
-      Text("The quick brown fox")
+  /// Mock terminal mirroring `ThemePreviewCard`'s sample lines, but rendered in
+  /// the previewed font so you can judge it against real terminal output. Colors
+  /// are a fixed neutral dark scheme since a font carries none of its own.
+  private var terminalSample: some View {
+    let fg = Color(white: 0.92)
+    let cursor = fg.opacity(0.8)
+    let green = Color(red: 0.40, green: 0.78, blue: 0.42)
+    let red = Color(red: 0.91, green: 0.45, blue: 0.45)
+
+    return VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 4) {
+        Text("$")
+          .foregroundStyle(fg.opacity(0.7))
+        Text("git status")
+          .foregroundStyle(fg)
+        RoundedRectangle(cornerRadius: 1)
+          .fill(cursor)
+          .frame(width: 6, height: 12)
+      }
+      Text("On branch main")
+        .foregroundStyle(fg.opacity(0.85))
+      Text("error: 1 file modified")
+        .foregroundStyle(red)
+      Text("✓ ready to commit")
+        .foregroundStyle(green)
     }
-    .font(previewFont(13))
+    .font(previewFont(12))
     .lineLimit(1)
     .minimumScaleFactor(0.7)
-    .foregroundStyle(.primary)
+    .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(white: 0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+    )
   }
 
   private func previewFont(_ size: CGFloat) -> Font {
