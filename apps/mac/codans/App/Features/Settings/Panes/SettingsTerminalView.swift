@@ -109,7 +109,7 @@ struct SettingsTerminalView: View {
     } header: {
       Text("Font")
     } footer: {
-      Text("For the cleanest terminal rendering, choose a monospaced font — marked with the </> badge.")
+      Text("Recommended: a monospaced font — marked with the </> badge — for the cleanest terminal rendering.")
     }
   }
 

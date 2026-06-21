@@ -255,7 +255,10 @@ private struct FontPreviewCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
-      terminalSample
+      Text("Ag")
+        .font(previewFont(40))
+        .frame(maxWidth: .infinity, alignment: .leading)
+      sampleLines
       Spacer(minLength: 0)
     }
     .padding(12)
@@ -278,42 +281,21 @@ private struct FontPreviewCard: View {
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
-  /// Mock terminal mirroring `ThemePreviewCard`'s sample lines, rendered in the
-  /// previewed font so you can judge it against real terminal output. Colors are
-  /// a fixed neutral dark scheme since a font carries none of its own.
-  private var terminalSample: some View {
-    let fg = Color(white: 0.92)
-    let cursor = fg.opacity(0.8)
-    let green = Color(red: 0.40, green: 0.78, blue: 0.42)
-    let red = Color(red: 0.91, green: 0.45, blue: 0.45)
-
-    return VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 4) {
-        Text("$")
-          .foregroundStyle(fg.opacity(0.7))
-        Text("git status")
-          .foregroundStyle(fg)
-        RoundedRectangle(cornerRadius: 1)
-          .fill(cursor)
-          .frame(width: 6, height: 12)
-      }
-      Text("On branch main")
-        .foregroundStyle(fg.opacity(0.85))
-      Text("error: 1 file modified")
-        .foregroundStyle(red)
-      Text("✓ ready to commit")
-        .foregroundStyle(green)
+  /// Sample text rendered in the previewed font: alphabet, digits, and code
+  /// symbols so glyph shapes and spacing are easy to judge at a glance.
+  private var sampleLines: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text("ABCDEFGHIJKLM")
+      Text("abcdefghijklm")
+      Text("0123456789")
+      Text("(){}[]<> = => != ::")
+      Text("The quick brown fox")
     }
-    .font(previewFont(12))
+    .font(previewFont(13))
     .lineLimit(1)
     .minimumScaleFactor(0.7)
-    .padding(10)
+    .foregroundStyle(.primary)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(white: 0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 6, style: .continuous)
-        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-    )
   }
 
   private func previewFont(_ size: CGFloat) -> Font {
