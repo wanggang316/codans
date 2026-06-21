@@ -57,6 +57,22 @@ actor GitWorktreeCLI {
     }
   }
 
+  /// Clones `remoteURL` into `destinationPath`. The destination's parent
+  /// directory is created if missing (git itself won't make intermediate
+  /// parents) and used as the working directory; git creates the final
+  /// leaf. Throws `GitCLIError.exitCode` carrying git's stderr on failure
+  /// (bad URL, auth, existing non-empty dir) so callers can surface the
+  /// reason verbatim.
+  func clone(remoteURL: String, destinationPath: String) throws {
+    let destination = URL(fileURLWithPath: destinationPath)
+    let parent = destination.deletingLastPathComponent()
+    try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+    _ = try run(
+      arguments: ["clone", remoteURL, destinationPath],
+      cwd: parent.path
+    )
+  }
+
   // MARK: - Private
 
   private func run(arguments: [String], cwd: String) throws -> String {

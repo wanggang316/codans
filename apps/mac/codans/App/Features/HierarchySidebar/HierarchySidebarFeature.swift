@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 // MARK: - Transient sheet / dialog payloads
 
@@ -54,6 +54,10 @@ struct HierarchySidebarFeature {
 
     var addWorktreeSheet: AddWorktreeSheet?
     var createWorktreeSheet: CreateWorktreeFeature.State?
+    /// "Clone Repository" sheet reached from the Add Project menu. Drives
+    /// a `git clone` and, on success, routes the destination back through
+    /// the same registration path as a picked local folder.
+    var cloneRepoSheet: CloneRepoFeature.State?
     var archivedWorktreesSheet: ArchivedWorktreesFeature.State?
     var pendingWorktreeRemoval: PendingWorktreeRemoval?
     var pendingProjectRemoval: PendingProjectRemoval?
@@ -119,6 +123,8 @@ struct HierarchySidebarFeature {
     case toolbarAddProjectTapped
     case addProjectFolderPicked(URL?)
     case addProjectGitRootResolved(canonicalPath: String, gitRoot: String?)
+    /// Add Project menu → "Clone Repository…". Opens the clone sheet.
+    case cloneRepoTapped
 
     // Reorder Projects (ForEach.onMove forwarder).
     case reorderProjects(from: IndexSet, to: Int)
@@ -258,6 +264,8 @@ struct HierarchySidebarFeature {
     /// Child-feature actions for the Create Worktree sheet. Parent
     /// dismisses on either delegate case (dismiss or submitted).
     case createWorktreeSheet(CreateWorktreeFeature.Action)
+    /// Child-feature actions for the Clone Repository sheet.
+    case cloneRepoSheet(CloneRepoFeature.Action)
 
     // Delegate up to RootFeature for effects that cross feature boundaries.
     case delegate(Delegate)
@@ -325,6 +333,17 @@ struct HierarchySidebarFeature {
         // Other child actions are handled by the ifLet-scoped
         // reducer; no-op at the parent level.
         return .none
+      case .cloneRepoSheet(.delegate(.dismissed)):
+        state.cloneRepoSheet = nil
+        return .none
+      case .cloneRepoSheet(.delegate(.cloned(let localPath))):
+        // Clone landed on disk; dismiss the sheet and reuse the picked-folder
+        // path so registration (dedup guard → gitRoot discovery → catalog
+        // add → reconcile) stays in one place.
+        state.cloneRepoSheet = nil
+        return .send(.addProjectFolderPicked(URL(fileURLWithPath: localPath)))
+      case .cloneRepoSheet:
+        return .none
       case .archivedWorktreesSheet(.delegate(.dismissed)):
         state.archivedWorktreesSheet = nil
         return .none
@@ -336,6 +355,9 @@ struct HierarchySidebarFeature {
     }
     .ifLet(\.createWorktreeSheet, action: \.createWorktreeSheet) {
       CreateWorktreeFeature()
+    }
+    .ifLet(\.cloneRepoSheet, action: \.cloneRepoSheet) {
+      CloneRepoFeature()
     }
     .ifLet(\.archivedWorktreesSheet, action: \.archivedWorktreesSheet) {
       ArchivedWorktreesFeature()
@@ -399,6 +421,10 @@ struct HierarchySidebarFeature {
       // addProject is non-throwing and returns a non-optional ProjectID.
       let projectID = hierarchyClient.addProject(name, canonical, gitRoot)
       return .send(.delegate(.reconcileProjectRequested(projectID)))
+
+    case .cloneRepoTapped:
+      state.cloneRepoSheet = CloneRepoFeature.State()
+      return .none
 
     // MARK: Tag filter chip footer (M4)
 
@@ -831,6 +857,10 @@ struct HierarchySidebarFeature {
       return .none
 
     case .createWorktreeSheet:
+      // Routed through the top-level Reducer; unreachable here.
+      return .none
+
+    case .cloneRepoSheet:
       // Routed through the top-level Reducer; unreachable here.
       return .none
     }
