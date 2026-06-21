@@ -108,6 +108,8 @@ struct SettingsTerminalView: View {
       .disabled(controlsDisabled)
     } header: {
       Text("Font")
+    } footer: {
+      Text("For the cleanest terminal rendering, choose a monospaced font — marked with the </> badge.")
     }
   }
 
