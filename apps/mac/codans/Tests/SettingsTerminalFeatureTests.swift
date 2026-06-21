@@ -181,6 +181,45 @@ struct SettingsTerminalFeatureTests {
   }
 
   @Test
+  func applyPreservesLoadedCatalog() async {
+    // The live apply path returns a snapshot with an empty catalog (it skips the
+    // expensive theme/font enumeration). The reducer must carry the catalog
+    // loaded on appear forward so the theme/font rows don't reload.
+    let initial = makeSnapshot(light: "Light A", dark: "Dark A")
+    let appliedWithEmptyCatalog = GhosttyTerminalSettings(
+      configPath: "/tmp/ghostty/config",
+      lightTheme: "Light B",
+      darkTheme: "Dark A",
+      cursorStyle: nil,
+      fontFamily: nil,
+      fontSize: nil,
+      availableLightThemes: [],
+      availableDarkThemes: [],
+      availableFontFamilies: [],
+      monospacedFontFamilies: [],
+      themePreviews: [:],
+      warningMessage: nil
+    )
+    let store = TestStore(
+      initialState: makeState(snapshot: initial)
+    ) {
+      SettingsTerminalFeature()
+    } withDependencies: {
+      $0[GhosttyTerminalSettingsClient.self] = GhosttyTerminalSettingsClient(
+        load: { initial },
+        apply: { _ in appliedWithEmptyCatalog }
+      )
+    }
+    await store.send(.lightThemeSelected("Light B")) { $0.isApplying = true }
+    // Catalog (theme + font lists) is the one from `initial`, not the empty one
+    // the apply returned — only the directive (light theme) changed.
+    await store.receive(\.applyResult.success) {
+      $0.isApplying = false
+      $0.snapshot = makeSnapshot(light: "Light B", dark: "Dark A")
+    }
+  }
+
+  @Test
   func applyFailureSurfacesErrorMessage() async {
     let initial = makeSnapshot()
     struct Boom: LocalizedError { var errorDescription: String? { "Ghostty rejected config" } }

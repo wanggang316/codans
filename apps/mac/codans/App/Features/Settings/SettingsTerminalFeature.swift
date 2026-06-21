@@ -92,10 +92,14 @@ struct SettingsTerminalFeature {
       case .fontSizeSelected(let size):
         return applyDraft(state: &state, draft: draft(from: state.snapshot, fontSize: size))
 
-      case .applyResult(.success(let snapshot)):
+      case .applyResult(.success(let applied)):
         state.isApplying = false
-        state.snapshot = snapshot
-        state.warningMessage = snapshot.warningMessage
+        // An apply only changes directive values; the theme / font catalogs are
+        // unchanged. Carry the already-loaded catalog forward so the theme rows
+        // don't visibly reload, and so a fast pick needn't re-enumerate disk +
+        // system fonts. Fall back to the applied snapshot if we somehow had none.
+        state.snapshot = state.snapshot.map { $0.merging(directivesFrom: applied) } ?? applied
+        state.warningMessage = applied.warningMessage
         state.errorMessage = nil
         return .none
 

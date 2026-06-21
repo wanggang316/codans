@@ -1,5 +1,7 @@
+import AppKit
 import ComposableArchitecture
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Detail pane for Settings → Terminal. Presents two side-by-side theme pickers
 /// (Light / Dark) backed by the Ghostty theme catalog; writes flow through
@@ -10,8 +12,12 @@ import SwiftUI
 struct SettingsTerminalView: View {
   @Bindable var store: StoreOf<SettingsTerminalFeature>
 
+  // Deliberately excludes `isApplying`: an apply is a fast, cancellable write,
+  // and disabling controls mid-apply makes the theme rows dim then restore —
+  // the "flicker" seen when switching font/cursor. Rapid re-picks are already
+  // coalesced by the reducer's cancel-in-flight.
   private var controlsDisabled: Bool {
-    store.isLoading || store.isApplying || store.snapshot == nil
+    store.isLoading || store.snapshot == nil
   }
 
   var body: some View {
@@ -66,11 +72,6 @@ struct SettingsTerminalView: View {
       )
     } header: {
       Text("Theme")
-    } footer: {
-      Text(
-        "Codans reads and writes your Ghostty config, so changes here stay in sync "
-          + "with Ghostty itself."
-      )
     }
   }
 
@@ -94,7 +95,7 @@ struct SettingsTerminalView: View {
     let families = prepending(snapshot.fontFamily, to: snapshot.availableFontFamilies)
     let sizes = prepending(snapshot.fontSize, to: Self.fontSizeChoices)
     return Section {
-      Picker("Font", selection: familyBinding) {
+      Picker("Font Family", selection: familyBinding) {
         Text("Default").tag(String?.none)
         ForEach(families, id: \.self) { family in
           fontFamilyLabel(family, isMonospaced: snapshot.monospacedFontFamilies.contains(family))
@@ -102,7 +103,7 @@ struct SettingsTerminalView: View {
         }
       }
       .disabled(controlsDisabled)
-      Picker("Size", selection: sizeBinding) {
+      Picker("Font Size", selection: sizeBinding) {
         Text("Default").tag(Double?.none)
         ForEach(sizes, id: \.self) { size in
           Text(sizeLabel(size)).tag(Double?.some(size))
@@ -111,8 +112,6 @@ struct SettingsTerminalView: View {
       .disabled(controlsDisabled)
     } header: {
       Text("Font")
-    } footer: {
-      Text("\"Default\" leaves the font to your Ghostty config.")
     }
   }
 
@@ -121,17 +120,26 @@ struct SettingsTerminalView: View {
     return "\(number) pt"
   }
 
-  /// Picker row for a font family. Monospaced families get a leading `</>`
-  /// code glyph so the terminal-appropriate fonts stand out in the full list.
-  /// `Label` carries the family name as its title, so the symbol stays
-  /// accessible without a separate accessibility label.
+  /// Picker row for a font family. Monospaced families get a small trailing
+  /// `</>` code glyph so the terminal-appropriate fonts stand out in the full
+  /// list, while the family name itself stays the primary, accessible label.
   @ViewBuilder
   private func fontFamilyLabel(_ family: String, isMonospaced: Bool) -> some View {
     if isMonospaced {
-      Label(family, systemImage: "chevron.left.forwardslash.chevron.right")
+      Text("\(family)  ") + monospaceBadge
     } else {
       Text(family)
     }
+  }
+
+  /// Trailing decorative badge marking a monospaced family. Composed as `Text`
+  /// so it can sit inline after the name; the name carries the accessible
+  /// label, so the glyph itself needs none.
+  private var monospaceBadge: Text {
+    // swiftlint:disable:next accessibility_label_for_image
+    Text(Image(systemName: "chevron.left.forwardslash.chevron.right"))
+      .font(.caption2)
+      .foregroundColor(.secondary)
   }
 
   /// Prepend `current` to `list` when it's a value missing from the catalog, so
@@ -163,20 +171,50 @@ struct SettingsTerminalView: View {
       .disabled(controlsDisabled)
     } header: {
       Text("Cursor")
-    } footer: {
-      Text("\"Default\" leaves the cursor shape to your Ghostty config.")
     }
   }
 
   // MARK: - Config file path
 
   private func configFileSection(path: String) -> some View {
-    Section("Config File") {
-      Text(path)
-        .font(.callout.monospaced())
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    Section {
+      HStack(spacing: 8) {
+        Text(path)
+          .font(.callout.monospaced())
+          .foregroundStyle(.secondary)
+          .textSelection(.enabled)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Button("Open") { openConfigFile(path) }
+      }
+    } header: {
+      Text("Config File")
+    } footer: {
+      Text(
+        "Codans reads and writes your Ghostty config, so changes here stay in sync "
+          + "with Ghostty itself."
+      )
+    }
+  }
+
+  /// Open the config file in the user's default plain-text editor. The file has
+  /// no extension, so we route through the plain-text handler rather than
+  /// `open(_:)` (which can fail to find an association for an extensionless
+  /// file). When the file doesn't exist yet — nothing has been saved — reveal
+  /// the directory instead.
+  private func openConfigFile(_ path: String) {
+    let url = URL(fileURLWithPath: path)
+    guard FileManager.default.fileExists(atPath: path) else {
+      NSWorkspace.shared.open(url.deletingLastPathComponent())
+      return
+    }
+    if let editor = NSWorkspace.shared.urlForApplication(toOpen: UTType.plainText) {
+      NSWorkspace.shared.open(
+        [url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration()
+      )
+    } else {
+      NSWorkspace.shared.open(url)
     }
   }
 

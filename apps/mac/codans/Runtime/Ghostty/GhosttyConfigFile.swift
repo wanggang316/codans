@@ -98,6 +98,29 @@ nonisolated struct GhosttyTerminalSettings: Equatable, Sendable {
   let warningMessage: String?
 }
 
+extension GhosttyTerminalSettings {
+  /// Return a copy that keeps this snapshot's catalog (theme + font lists and
+  /// previews) but takes every directive value, the config path, and the
+  /// warning from `other`. Used after an apply so the catalog-backed rows
+  /// don't re-render for a change that only touched directive values.
+  func merging(directivesFrom other: GhosttyTerminalSettings) -> GhosttyTerminalSettings {
+    GhosttyTerminalSettings(
+      configPath: other.configPath,
+      lightTheme: other.lightTheme,
+      darkTheme: other.darkTheme,
+      cursorStyle: other.cursorStyle,
+      fontFamily: other.fontFamily,
+      fontSize: other.fontSize,
+      availableLightThemes: availableLightThemes,
+      availableDarkThemes: availableDarkThemes,
+      availableFontFamilies: availableFontFamilies,
+      monospacedFontFamilies: monospacedFontFamilies,
+      themePreviews: themePreviews,
+      warningMessage: other.warningMessage
+    )
+  }
+}
+
 /// User-intent payload for `apply`. Each field is the desired state of one
 /// managed directive; `nil` means "don't emit that directive" (the key is
 /// stripped on commit). The draft is the *complete* desired state of all
