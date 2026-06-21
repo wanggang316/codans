@@ -84,10 +84,6 @@ struct SettingsTerminalView: View {
   ]
 
   private func fontSection(snapshot: GhosttyTerminalSettings) -> some View {
-    let familyBinding = Binding<String?>(
-      get: { snapshot.fontFamily },
-      set: { store.send(.fontFamilySelected($0)) }
-    )
     let sizeBinding = Binding<Double?>(
       get: { snapshot.fontSize },
       set: { store.send(.fontSizeSelected($0)) }
@@ -95,14 +91,14 @@ struct SettingsTerminalView: View {
     let families = prepending(snapshot.fontFamily, to: snapshot.availableFontFamilies)
     let sizes = prepending(snapshot.fontSize, to: Self.fontSizeChoices)
     return Section {
-      Picker("Font Family", selection: familyBinding) {
-        Text("Default").tag(String?.none)
-        ForEach(families, id: \.self) { family in
-          fontFamilyLabel(family, isMonospaced: snapshot.monospacedFontFamilies.contains(family))
-            .tag(String?.some(family))
-        }
-      }
-      .disabled(controlsDisabled)
+      FontPickerButton(
+        title: "Font Family",
+        families: families,
+        monospaced: snapshot.monospacedFontFamilies,
+        selection: snapshot.fontFamily,
+        isDisabled: controlsDisabled,
+        onPick: { store.send(.fontFamilySelected($0)) }
+      )
       Picker("Font Size", selection: sizeBinding) {
         Text("Default").tag(Double?.none)
         ForEach(sizes, id: \.self) { size in
@@ -118,28 +114,6 @@ struct SettingsTerminalView: View {
   private func sizeLabel(_ size: Double) -> String {
     let number = size == size.rounded() ? String(Int(size)) : String(size)
     return "\(number) pt"
-  }
-
-  /// Picker row for a font family. Monospaced families get a small trailing
-  /// `</>` code glyph so the terminal-appropriate fonts stand out in the full
-  /// list, while the family name itself stays the primary, accessible label.
-  @ViewBuilder
-  private func fontFamilyLabel(_ family: String, isMonospaced: Bool) -> some View {
-    if isMonospaced {
-      Text("\(family)  ") + monospaceBadge
-    } else {
-      Text(family)
-    }
-  }
-
-  /// Trailing decorative badge marking a monospaced family. Composed as `Text`
-  /// so it can sit inline after the name; the name carries the accessible
-  /// label, so the glyph itself needs none.
-  private var monospaceBadge: Text {
-    // swiftlint:disable:next accessibility_label_for_image
-    Text(Image(systemName: "chevron.left.forwardslash.chevron.right"))
-      .font(.caption2)
-      .foregroundColor(.secondary)
   }
 
   /// Prepend `current` to `list` when it's a value missing from the catalog, so
@@ -186,7 +160,14 @@ struct SettingsTerminalView: View {
           .lineLimit(1)
           .truncationMode(.middle)
           .frame(maxWidth: .infinity, alignment: .leading)
-        Button("Open") { openConfigFile(path) }
+        Button {
+          openConfigFile(path)
+        } label: {
+          Label("Open in text editor", systemImage: "square.and.pencil")
+            .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.borderless)
+        .help("Open in default text editor")
       }
     } header: {
       Text("Config File")
