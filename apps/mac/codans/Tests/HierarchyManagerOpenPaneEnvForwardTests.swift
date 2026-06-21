@@ -7,7 +7,7 @@ import CodansCore
 /// Forwarding contract: the `env` argument passed to
 /// `HierarchyManager.openPane` and `splitPane` reaches the runtime's
 /// `ensureSurface` call, augmented with the per-worktree built-in path
-/// variables (`TOUCHCODE_WORKTREE_PATH` / `TOUCHCODE_ROOT_PATH`) that
+/// variables (`CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`) that
 /// codans injects for every pane. FakeHierarchyRuntime records the env
 /// on every call so we can assert the exact map made it across.
 ///
