@@ -30,17 +30,17 @@ If it's not in the repo, it doesn't exist to the agent. Slack discussions, verba
 
 **Enforcement:** Cross-link review, repository structure checks.
 
-## 5. Every complex change gets an execution plan
+## 5. Plan complex work before building — but a plan is not a Library doc
 
-For non-trivial work, create an exec plan in `docs/exec-plans/` before starting. Plans track progress, surprises, and decisions. They are living documents checked into the repo.
+For non-trivial work, capture a plan before starting (the sequence, the surprises, the decisions). Planning and progress are **working state**: they live in gitignored runtime state (`.harness-runtime/`), never committed under `docs/`. `docs/` is a curated Library of durable knowledge — when a plan settles a durable decision, fold *that decision* into the relevant design-doc or `architecture.md`, not a progress log.
 
-**Enforcement:** Process convention, plan template structure validation.
+**Enforcement:** Process convention; the `docs/README` current-state + liveness conventions; the `doc-sync` sweep.
 
 ## 6. Fix the environment, not the prompt
 
 When an agent fails, treat it as an environment bug. The fix is always one of: missing tool, missing documentation, missing guardrail, or missing feedback loop. Fix it structurally so it never recurs.
 
-**Enforcement:** Culture, retrospectives in exec plan outcomes.
+**Enforcement:** Culture, retrospectives.
 
 ## 7. Enforce architecture mechanically
 

@@ -19,7 +19,7 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 | `CodansCore` | static framework | `apps/mac/CodansCore/` | Pure domain types: Project/Worktree/Tab/Pane models, `Tag`/`TagFilter`, `SplitTree`, stable UUID identifiers. Zero internal deps. Consumed by app + CLI. |
 | `CodansIPC` | static framework | `apps/mac/CodansIPC/` | JSON-RPC wire protocol: Request/Response envelopes, Method constants, payload types, socket discovery. Shared between app and CLI. |
 | `codans-cli` | command-line tool | `apps/mac/codans-cli/` | CLI binary (`PRODUCT_NAME=codans`). Depends on `CodansCore`, `CodansIPC`, `ArgumentParser`. Runtime / Hooks / Git are intentionally off-limits — CLI is a thin RPC client. |
-| `codans` | macOS app | `apps/mac/codans/{App,Runtime,Hooks,Git}/` | The Mac app. Buildable subfolders compile as one target. Depends on `CodansCore`, `CodansIPC`, `codans`; the `codans` binary is embedded inside the app bundle at `Codans.app/Contents/Resources/bin/codans` via the `Embed codans` post-script (`apps/mac/scripts/embed-codans.sh`), giving the CLI installer a stable symlink target. The `.app` filename is `Codans.app` (no space) to keep packaging tools happy; user-facing identity is "Codans" via `CFBundleDisplayName` + `CFBundleName`. |
+| `codans` | macOS app | `apps/mac/codans/{App,Runtime,Process,Git,GitHub}/` | The Mac app. Buildable subfolders compile as one target. (`Hooks/` is a planned subfolder, not yet created.) Depends on `CodansCore`, `CodansIPC`, `codans`; the `codans` binary is embedded inside the app bundle at `Codans.app/Contents/Resources/bin/codans` via the `Embed codans` post-script (`apps/mac/scripts/embed-codans.sh`), giving the CLI installer a stable symlink target. The `.app` filename is `Codans.app` (no space) to keep packaging tools happy; user-facing identity is "Codans" via `CFBundleDisplayName` + `CFBundleName`. |
 
 ### In-app modules (subfolders of the `codans` target, not separate Tuist targets)
 
@@ -27,15 +27,15 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 |---|---|
 | `codans/App/` | `@main CodansApp.swift`, root SwiftUI scene, TCA store construction |
 | `codans/Runtime/` | libghostty integration: GhosttyKit Swift bindings, Pane lifecycle, Surface rendering adapter, `@Observable` runtime state |
-| `codans/Hooks/` | Lifecycle event taxonomy (Pane created / ready / output match / idle / exit; Tab activated; Worktree activated), hook registration, out-of-process shell handler dispatch |
+| `codans/Hooks/` *(planned, not yet implemented)* | **Design intent, no code yet** — the `Hooks/` subfolder does not exist and `CodansIPC/Method.swift` has no `hook.*` methods. The intended subsystem: lifecycle event taxonomy (Pane created / ready / output match / idle / exit; Tab activated; Worktree activated), hook registration, out-of-process shell handler dispatch. See [Lifecycle hooks](design-docs/lifecycle-hooks.md). |
 | `codans/Process/` | Shared subprocess primitive — `CommandRunner` protocol + `FoundationCommandRunner` / `RecordingCommandRunner`. Extracted from `Git/` during the GitHub integration (0012 DEC-5) so `Git/` and `GitHub/` can depend on a common runner without taking a sibling-module import. Timeout + SIGTERM→SIGKILL ladder + pipe-drain backpressure live here; translation from `CommandOutcome` to a domain error type is each caller's responsibility. |
 | `codans/Git/` | Read-only git data access: diff parsing, log enumeration, commit detail extraction. No write operations. |
 | `codans/GitHub/` | gh-delegated GitHub integration data layer (0012). `GitHubService` protocol + `LiveGitHubService` wrapping `gh` via `CommandRunner`, `GhCommand` argv builder, `GhExecutableResolver` actor, `JSONOutputParsers` translating gh stdout → `CodansCore` DTOs, `GitHubError` taxonomy. Zero HTTP in-app; auth/tokens live entirely in gh's own config store. App-layer TCA bits live in `App/Clients/GitHubClient.swift` + `App/Features/GitHub/`. |
-| `codans/App/Features/GitHub/` | 0012 GitHub integration TCA feature. `GitHubFeature` owns per-Worktree PR snapshots + 30 s availability cache + popover presentation bit; `GitHubRootBindings` stacks under the Scope to fan delegate actions out to `NSWorkspace.open` / `SettingsWindowPresenter`. Views: `PullRequestBadge` (sidebar-row capsule), `PullRequestPopover` with split-button merge + checks list, `CheckRow`, `MergeSplitButton`, colour tokens in `Theme/`. |
+| `codans/App/Features/GitHub/` | 0012/0013 GitHub integration TCA feature. `GitHubFeature` owns the fetch lifecycle as a **repository-batched** model: one `gh api graphql` per Project (per-branch GraphQL aliases, chunked ≤25 branches × 3 concurrent) returns every Worktree's PR data in a single round-trip, keyed by `ProjectID` with **no TTL** — invalidation is event-driven (Worktree added/removed, branch change, post-write mutation, Project activated, manual refresh). The 30 s freshness window applies only to the `gh` *availability* probe (`availabilityFreshness`), not to PR data. `GitHubRootBindings` stacks under the Scope to fan delegate actions out to `NSWorkspace.open` / `SettingsWindowPresenter`. Data layer in `codans/GitHub/` (`BatchedPullRequestQuery`, `LiveGitHubService`). Views: `PullRequestBadge` (sidebar-row capsule), `PullRequestPopover` with split-button merge + checks list, `CheckRow`, `MergeSplitButton`, colour tokens in `Theme/`. See [GitHub integration](design-docs/github-integration.md). |
 | `codans/App/Clients/Editor/` | `EditorService` / `EditorRegistry` / `PathProber` / `ProcessSpawner` — C8 external-editor handoff. `LiveEditorService` merges built-in allowlist (VSCode / Cursor / Zed / Xcode / Sublime / Finder) with user-defined templates from `SettingsStore`, probes `$PATH` for installation status, and spawns with a 5 s budget + SIGTERM→SIGKILL ladder. |
-| `codans/App/Features/GitViewer/` | C7 read-only git viewer: `GitViewerFeature` TCA reducer + SwiftUI column hierarchy (`GitViewerView` / `CommitLogView` / `FileChangeListView` / `UnifiedDiffView`) + 50k-line `LargeDiffPlaceholderView` with POSIX-quoted "Copy command" button. |
-| `codans/App/Features/WorktreeHeader/` | T2 Header row above the terminal Tab bar. `WorktreeHeaderFeature` owns bell + split-button + GV-toggle state; subscribes to `InboxClient.observe()` for the badge. Views: `WorktreeHeaderView` (row container) + `HeaderBellView` / `HeaderBellPopover` (notifications) + `HeaderOpenSplitButton` (primary open + editor picker + "Set default for this Project" sub-menu + "+ Custom editors…" deeplink) + `HeaderGitViewerToggle` (flips `Worktree.gitViewerVisible`). Editor opens flow as `.delegate(.openEditor…)` actions consumed by `RootFeature`. |
-| `codans/App/Features/Socket/` | `EditorHandlers` — server-side RPC handlers for `editor.describe` / `editor.open` / `editor.setDefault`. Bridges `EditorClient` + `HierarchyClient` to wire types in `CodansIPC/Editor/`. MethodRouter registration lands at the 0003 merge per plan 0005 DEC-21. |
+| `codans/App/Clients/Editor/` (git viewing) | There is no in-app git viewer. "Toggle Git Viewer" (⌘ chord / menu / palette → `RootFeature.diffInspectorToggledForCurrentWorktree`) resolves `general.defaultGitViewerID` (an `EditorID?` into the registry's git-client category) and opens the current Worktree in an external client (Fork / Sourcetree / GitHub Desktop / …) through the same `EditorService` open path as the default editor; `nil` or an uninstalled target is a no-op. See [Editor integration § Git Viewer](design-docs/editor-integration.md). |
+| `codans/App/Features/WorktreeHeader/` | T2 Header row above the terminal Tab bar. `WorktreeHeaderFeature` owns the split-button state. Views: `WorktreeHeaderView` (row container, left = read-only branch label gated by `supportsWorktrees`) + `WorktreeHeaderInfoLabel` + `AppIconImage` + `HeaderOpenSplitButton` (primary open + editor picker + "Set default for this Project" sub-menu + "+ Custom editors…" deeplink) + `HeaderRunScriptSplitButton`. There is no header Git-Viewer chip — Git viewing lives behind the ⌘⌥G chord / menu and routes through `general.defaultGitViewerID`. Editor opens flow as `.delegate(.openEditor…)` actions consumed by `RootFeature`. |
+| `codans/App/Features/Socket/` | Socket server + `MethodRouter` + per-namespace handlers (`SystemHandlers`, `HierarchyHandlers`, `TerminalHandlers`, `EditorHandlers`). `EditorHandlers` serves `editor.describe` / `editor.open` / `editor.setGlobalDefault` / `editor.setProjectDefault`, bridging `EditorClient` + `HierarchyClient` to the `CodansIPC/Editor/` wire types. |
 
 Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by **folder convention + code review**, not by Tuist target edges. This matches supacode/supaterm's idiom. Promote a subfolder to its own target only when it gains a test bundle, becomes consumed by another app (e.g. iOS), or needs to restrict its public API surface.
 
@@ -44,7 +44,7 @@ Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by *
 | Path | Purpose |
 |---|---|
 | `apps/mac/` | The mac platform: Tuist project, sources, ghostty submodule, per-app Makefile |
-| `docs/` | Project documentation (this file, product-spec, design-docs, exec-plans, references) |
+| `docs/` | Project documentation: this file, `product-spec.md`, `golden-rules.md`, plus `design-docs/`, `product-specs/`, `references/`, `generated/`, `user-tests/` |
 | `mise.toml` | Pinned versions for `tuist`, `zig`, `swiftlint`, `xcbeautify` — shared across any future apps |
 | `Makefile` | Top-level delegator: `make mac-build` → `$(MAKE) -C apps/mac build` |
 
@@ -75,8 +75,9 @@ CodansCore                               (leaf — zero internal deps)
             ├── codans                          (CodansCore, CodansIPC — nothing else)
             └── codans (app)            (CodansCore, CodansIPC, codans, external deps)
                     │
-                    └── in-app modules:     codans/{App,Runtime,Hooks,Git}
-                        (not separate targets; folder-level boundary only)
+                    └── in-app modules:     codans/{App,Runtime,Process,Git,GitHub}
+                        (not separate targets; folder-level boundary only.
+                         Hooks/ is planned, not yet created.)
 
 codans-skill/                           (orthogonal — no Swift dependency;
                                              consumed by coding agents, not by the app)
@@ -101,13 +102,15 @@ Rules not visible in code. Violating any of these will not fail tests immediatel
 
 - **Pane state mutability is localized to `Runtime`.** Pane scrollback, cursor, and selection are mutable only inside `codans/Runtime (in-app module)`. Other layers read via `@Observable` bindings or event streams; they must not call mutators directly.
 - **All cross-process communication goes through `CodansIPC`.** No other channel between `apps/cli` and `apps/mac`. No HTTP, no TCP, no file-based queues, no shared memory.
-- **Hooks are out-of-process only in v1.** Hook handlers execute as shell commands fork-exec'd by the app, receiving JSON on stdin and returning JSON on stdout. In-process handlers (embedded JS, WASM) are explicitly deferred.
+- **Hooks are out-of-process only in v1.** *(Design intent — the Hooks subsystem is not yet implemented; see [Lifecycle hooks](design-docs/lifecycle-hooks.md).)* When built, hook handlers execute as shell commands fork-exec'd by the app, receiving JSON on stdin and returning JSON on stdout. In-process handlers (embedded JS, WASM) are explicitly deferred.
 - **State management is hybrid by design, with a clear boundary.** High-frequency terminal state uses `@Observable`; app flow state uses TCA. Mixing the two patterns within a single feature is a red flag. See [State Management](#state-management-hybrid-tca--observable).
 - **Persistence is atomic-rename JSON with a top-level `version: Int`.** All files under `~/.config/codans/` include a schema version. Readers that encounter an unknown version abort rather than silently upgrade. Writers write to a temp file and rename over the original.
 - **`codans` is stateless.** The CLI has no persistent state of its own. All truth lives in the running app; `codans` is a thin RPC client. Adding file reads/writes in `apps/cli` requires a design doc.
 - **Identifiers are UUIDs.** Every Project, Worktree, Tab, Pane, Tag has a stable UUID. Index-based addressing (`codans pane focus 1/2/3`) is convenience sugar resolved to a UUID before any state mutation. Internal code must use UUIDs.
 - **Agent Skill is consumed, never loaded.** The app must not parse, index, or invoke `SKILL.md`. The only skill-related runtime code is the `codans skill install` helper, which copies files to the agent's skill directory.
 - **`codans/Runtime (in-app module)` is TCA-free.** Runtime exposes `@Observable` classes and AsyncStream events. TCA bridging lives in `apps/mac` (the `*Client` types). This keeps Runtime independently testable and portable.
+- **`SplitTree<PaneID>` stores only Pane IDs, never surface objects.** Per-Tab split layout (`CodansCore.SplitTree<PaneID>`, see `CodansCore/Tab.swift`) is a recursive value type keyed on `PaneID`; view composition resolves each leaf ID to its Pane and live `ghostty_surface_t` at render time. This is what makes split state Codable/persistable (a live surface pointer cannot survive restart) and makes every split operation (grow/shrink, focus nav, swap) a pure value-type transform that is unit-testable without any libghostty bring-up. Invariant: the set of leaf IDs in a Tab's `splitTree` equals the set of `panes[*].id` on that Tab.
+- **Per-Pane crash isolation, escalating to the Tab.** When a Pane's libghostty surface faults, `HierarchyManager` keeps the Pane entry (so `SplitTree` stays stable) and flips its state to an error placeholder with a Retry action; Retry re-creates a fresh surface at the same path. A per-Pane counter that resets after 30 s without a crash escalates **3 crashes within 30 s** to tearing down the owning Tab with a user-visible toast. A single Pane fault never takes down its siblings.
 
 ## Cross-Cutting Concerns
 
@@ -115,7 +118,7 @@ Rules not visible in code. Violating any of these will not fail tests immediatel
 
 **TCA (The Composable Architecture)** is used for:
 - App shell (root reducer, launch flow)
-- Feature flows: Settings, CommandPalette, GitViewer, HierarchyCatalog, Updates
+- Feature flows: Settings, CommandPalette, GitHub, HierarchySidebar, WorktreeHeader, Updates
 - Socket server lifecycle
 - Deeplink dispatch
 
@@ -133,20 +136,19 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
 ### IPC
 
 - **Transport:** Unix domain socket, one per running app instance. Release builds default to `/tmp/codans-$UID.sock`; Debug builds default to `/tmp/codans-dev-$UID.sock`; both are overridable via `CODANS_SOCKET_PATH`
-- **Wire protocol:** length-prefixed JSON envelopes. Framing: `\n`-terminated length header followed by the JSON body. Envelope shapes defined in `CodansIPC/Protocol.swift`:
-  - Request: `{"id": "uuid", "method": "terminal.open_panel", "params": {...}}`
+- **Wire protocol:** length-prefixed JSON envelopes. Framing is a `UInt32` **big-endian** length prefix followed by exactly N bytes of UTF-8 JSON — **no trailing newline**. Each frame is capped at **16 MiB**; an oversized length prefix raises `IPCError.invalidFrame` and the connection is closed (0003 DEC-3). Envelope shapes defined in `CodansIPC/Protocol.swift`:
+  - Request: `{"id": "uuid", "method": "terminal.sendInput", "params": {...}}`
   - Success: `{"id": "uuid", "result": {...}}`
   - Error: `{"id": "uuid", "error": {"code": Int, "message": "…"}}`
-- **Methods:** namespaced (`terminal.*`, `hierarchy.*`, `git.*`, `skill.*`, `system.*`)
+- **Methods:** namespaced — `system.*`, `editor.*`, `hierarchy.*`, `pane.*`, `terminal.*` (enumerated in `CodansIPC/Method.swift`). `git.*` and `skill.*` are reserved namespaces with no live methods yet.
 - **Discovery in `apps/cli`:** env var `CODANS_SOCKET_PATH` → build-channel default path probe → (optional) launch app and wait up to 10s
 - **Context pane id:** the app sets `CODANS_PANE_ID` in each Pane's environment so `codans` commands run inside a Pane can default to that Pane's UUID without an explicit flag (mirrors `SUPATERM_PANE_ID`)
 
 ### URL scheme
 
 - Scheme: `codans://`
-- Examples: `codans://worktree/<id>/focus`, `codans://pane/<id>/send?text=...`
-- Parsed by `apps/mac/Features/Deeplink/DeeplinkParser.swift`; maps onto the same IPC methods used by `codans`
-- Routed through `DeeplinkConfirmationFeature` for user approval on sensitive actions (send, exec)
+- Shipping surface: `codans://focus?project=…&worktree=…&tab=…&pane=…`, parsed by `CodansApp.parseDeeplink` (`apps/mac/codans/App/CodansApp.swift`) off `onOpenURL` and resolved to a hierarchy selection. There is no standalone `DeeplinkParser`/`DeeplinkRouter` type.
+- *Design intent (not yet built):* richer verbs (`…/send`, `…/exec`) and a `DeeplinkConfirmationFeature` approval gate for sensitive actions. Only `focus` exists today, and `focus` requires no confirmation.
 
 ### Persistence
 
@@ -154,16 +156,17 @@ Files under `~/.config/codans/` (JSON, UTF-8, pretty-printed with sorted keys fo
 
 | File | Version | Contents |
 |---|---|---|
-| `catalog.json` | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`. v3 was the rm-space refactor: prior v2 `Catalog.spaces` and `CatalogWindow` are dropped, each Space migrated to a Tag with the same name. Per-Project `defaultEditor` and `worktreesDirectory` moved to `settings.json` in v2 (one-shot read of v1 values through `HierarchyManager.drainLegacyOverrides`). |
-| `settings.json` | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). v3 renamed `repositories` → `projects` and widened the value type to `ProjectSettings` with an optional `git: GitProjectSettings?` subtree for `git_repo`-kind overrides. |
-| `hooks.json` | v2 | User-configured hook subscriptions (event → shell command + options). v2 added `.projectID` / `.projectPathGlob` scope cases and made Scope decoding fail-soft on unknown kinds. |
+| `catalog.json` (`CodansCore/Catalog.swift`) | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. v3 is the rm-space shape (no `spaces` / `CatalogWindow`). Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
+| `settings.json` (`CodansCore/Settings/`) | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). v3 renamed `repositories` → `projects` and widened the value type to `ProjectSettings` with an optional `git: GitProjectSettings?` subtree for `git_repo`-kind overrides. |
+| `sessions.json` (`CodansCore/Session.swift`) | v1 | Live zmx daemon registry — per-Pane session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
+| `notifications.json`, `shortcuts.json` | — | Inbox entries and keybinding overrides (`AppDirectories.configDirectory`). Persisted JSON keys are API: e.g. `CommandID.toggleDiffInspector` keeps the raw value `"toggleGitViewer"` so renaming the Swift identifier never orphans a user's keybinding. |
 
-Writers always go through atomic-rename JSON persistence:
+Writers always go through atomic-rename JSON persistence (`CodansCore/AtomicFileStore.swift`):
 1. Encode to temp file in the same directory
 2. `fsync` temp file
 3. `rename(2)` over original
 
-Readers abort or migrate on version mismatch: `settings.json` accepts v1/v2/v3 (migrating v1/v2 to v3 in place with a backup); `catalog.json` accepts v1/v2; `hooks.json` accepts v1/v2. Unknown `version` values route the file aside as `*.broken-<ts>` and start from defaults.
+Version handling differs by file. `catalog.json` is **strict**: its decoder requires `version == Catalog.currentVersion` (currently 3) and throws `DecodingIssue.unsupportedVersion` on anything else — there is no in-place catalog migration. `settings.json` **migrates** v1/v2 → v3 in place with a backup. `sessions.json` accepts any `version <= currentVersion` and ignores newer files. In every case an unreadable / unsupported file is routed aside as `*.broken-<ts>` (or backed up) and the reader starts from defaults. (The planned Hooks subsystem will add `hooks.json`; it does not exist yet — see [Lifecycle hooks](design-docs/lifecycle-hooks.md).)
 
 ### Session lifecycle: quit snapshot + launch restore
 
@@ -224,6 +227,16 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 - `scripts/build-ghostty.sh` runs Zig to build `GhosttyKit.xcframework` from the submodule; uses fingerprint-based caching (git HEAD + local diff + mise.toml hash)
 - Top-level `Makefile` orchestrates: `make bootstrap` (submodules + mise), `make build-ghostty`, `make generate` (Tuist), `make build`, `make test`
 
+### Build & concurrency invariants
+
+Hard-won constraints that are invisible in the code but break the build or crash the runtime if violated:
+
+- **GhosttyKit linking.** Xcode 26 ships without the Metal toolchain — a one-time `xcodebuild -downloadComponent MetalToolchain` is required. The app target must link `-lc++ -framework Carbon -framework Metal -framework MetalKit -framework CoreText -framework QuartzCore` because `ghostty-internal.a` pulls in the spirv_cross/glslang C++ runtime and Carbon HIToolbox.
+- **`ghostty_init(argc, argv)` first.** It must be the first libghostty call of the process — `ghostty_config_new` null-derefs otherwise. Enforced via a `GhosttyRuntime` static global-init on first access.
+- **Swift 6 + `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor` (workspace-wide).** Three recurring gotchas: use `@Dependency(Type.self)`, never the keypath form (`WritableKeyPath` is not `Sendable`); `AnyView`-erase recursive SwiftUI views or the type-checker hangs (>5 min); fully-qualify `CodansCore.Tab` because `SwiftUI.Tab` shadows it.
+- **Swift Testing landmine.** `String.split(whereSeparator:)` + `String.Index` slicing crashes inside a `@Test` (Signal 5, `dispatch_assert_queue_fail`); use `components(separatedBy:)` + UTF-8-view slicing instead.
+- **`xcodebuild` invocation.** Target `codans.xcworkspace`, not `-project` (SwiftPM deps resolve at the workspace level). The host-app test scheme SIGSEGVs on ghostty config load, so pure-domain tests run host-free via `-only-testing:CodansCoreTests`. `xcodebuild test ENV=value` sets *build* settings, not test-runtime env (Xcode 15+) — gate integration/perf tests with `.enabled(if:)` reading `ProcessInfo` (a thrown skip counts as a failure).
+
 ## Technology Choices
 
 | Technology | Scope | Purpose | Rationale |
@@ -233,7 +246,7 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 | SPM (via Tuist `Package.swift`) | workspace | External dependencies | Standard tool for fetching third-party libraries (TCA, ArgumentParser, Sparkle); integrated into Tuist |
 | mise | workspace | Tool version pinning | Committed `mise.toml` pins `tuist`, `zig`, `swiftlint`, `xcbeautify`; guarantees reproducible first-clone builds |
 | libghostty (via `ThirdParty/ghostty` submodule → Zig → `GhosttyKit.xcframework`) | `codans/Runtime (in-app module)` | Terminal emulator | Best macOS-native terminal renderer with a stable C API; building from submodule (not prebuilt XCFramework) matches supacode/supaterm and lets us patch Ghostty if needed |
-| The Composable Architecture | `apps/mac` | App/UI state | Testable unidirectional flows for features (Settings, CommandPalette, GitViewer); proven in both reference projects |
+| The Composable Architecture | `apps/mac` | App/UI state | Testable unidirectional flows for features (Settings, CommandPalette, GitHub); proven in both reference projects |
 | Swift Observation (`@Observable`) | `codans/Runtime (in-app module)`, parts of `apps/mac` | Runtime state | Hybrid complement to TCA for high-frequency terminal state; native Swift 6 feature; proven in supacode |
 | ArgumentParser | `apps/cli` | CLI parsing | Apple's official CLI framework; same as both reference projects |
 | Sparkle | `apps/mac` | Auto-update | De facto standard for macOS app updates; same as supacode |
@@ -244,12 +257,12 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 | Surface | File | Responsibility |
 |---|---|---|
 | App launch | `apps/mac/codans/App/CodansApp.swift` | `@main`, root TCA store construction, window lifecycle |
-| CLI launch | `apps/mac/codans/main.swift` | `ArgumentParser` root; dispatches to subcommand |
-| Socket server | `apps/mac/codans/App/Features/Socket/SocketServer.swift` | Accepts Unix socket connections, routes JSON-RPC to IPC methods |
-| libghostty bootstrap | `apps/mac/codans/Runtime/GhosttyRuntime.swift` | Initializes `ghostty_app_t`, registers callbacks |
-| Hook dispatcher | `apps/mac/codans/Hooks/HookDispatcher.swift` | Fan-out of lifecycle events to configured handlers |
-| Deeplink handler | `apps/mac/codans/App/Features/Deeplink/DeeplinkRouter.swift` | Receives `codans://` URLs, converts to IPC-equivalent actions |
-| Persistence boundary | `apps/mac/CodansCore/Persistence.swift` | Atomic-rename JSON read/write with version checks |
+| CLI launch | `apps/mac/codans-cli/CodansCLI.swift` | `ArgumentParser` root; dispatches to subcommand |
+| Socket server | `apps/mac/codans/App/Features/Socket/SocketServer.swift` | Accepts Unix socket connections; `MethodRouter` routes JSON-RPC to per-namespace handlers |
+| libghostty bootstrap | `apps/mac/codans/Runtime/Ghostty/GhosttyRuntime.swift` | Initializes `ghostty_app_t`, registers callbacks (`ghostty_init(argc,argv)` must be the first libghostty call — see Build & concurrency invariants) |
+| Hook dispatcher | *(planned)* | Fan-out of lifecycle events to configured handlers — not yet implemented (see [Lifecycle hooks](design-docs/lifecycle-hooks.md)) |
+| Deeplink handler | `apps/mac/codans/App/CodansApp.swift` (`parseDeeplink`) | Receives `codans://` URLs via `onOpenURL`; current shipping surface is `codans://focus?project=…&worktree=…&tab=…&pane=…` |
+| Persistence boundary | `apps/mac/CodansCore/AtomicFileStore.swift` | Atomic-rename JSON read/write with version checks |
 
 ## References
 
@@ -284,16 +297,16 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 
 ## Open Architectural Questions
 
-1. **Internal Tuist target granularity in `apps/mac`.** Split each Feature into its own framework target (supacode pattern — slower clean build, better cache) vs. single app target with folder-level organization. **Blocks:** initial Tuist configuration. *Leaning:* separate framework targets for heavy features (Terminal, Hierarchy, GitViewer); single target for the rest.
+1. **Internal Tuist target granularity in `apps/mac`.** *Resolved as shipped:* the app is a single Tuist target with folder-level module organization (`App` / `Runtime` / `Process` / `Git` / `GitHub`); in-app boundaries are folder convention + code review, not target edges. Promote a subfolder to its own framework target only when it gains a test bundle, is consumed by another app, or needs to restrict its public API.
 
 2. **Multi-window semantics.** *Resolved by docs/design-docs/project-tags.md (M3):* the app is single main window. The prior `WindowGroup` allowed multiple instances but was never wired into application state. M3 collapses the scene to `Window(id: "main")`, suppresses the default ⌘N "New Window" command, and gates ⌘Q with a confirmation alert when running terminal sessions exist. Settings is a separate `Window(id: "settings")`, unchanged. If multi-window demand emerges later it would re-introduce a `windows: [CatalogWindow]` array on `Catalog`.
 
 3. **CLI binary distribution.** *Resolved (C4 §D2):* from Settings → Developer, one macOS administrator-authorization dialog symlinks the bundle-embedded signed binary (`Contents/Resources/bin/codans`) into `/usr/local/bin/codans` (Debug: `/usr/local/bin/codans-dev`). `/usr/local/bin` is on the default macOS `PATH`, so the CLI works in every shell, GUI launcher, and cron context without rc-file edits; an unprivileged probe classifies the destination as absent / our-symlink / foreign and aborts on a foreign file before opening the dialog. See [CLI design doc §D2 and §CLI 安装](design-docs/cli.md#cli-安装).
 
-4. **Hook handler execution policy.** Serial per event vs. concurrent with a cap. **Blocks:** `codans/Hooks (in-app module)` scheduler. *Leaning:* concurrent with a global cap (default 8); single-handler-at-a-time flag per hook subscription as opt-in.
+4. **Hook handler execution policy.** Serial per event vs. concurrent with a cap. **Pending** the unbuilt Hooks subsystem (see [Lifecycle hooks](design-docs/lifecycle-hooks.md)). *Leaning:* concurrent with a global cap (default 8); single-handler-at-a-time flag per hook subscription as opt-in.
 
 5. **IPC backpressure.** *Resolved (C4 §D9):* per-connection bounded queue, **64 in-flight**, 2-second overflow wait before the server returns `IPCError.overloaded` (CLI exit 5). Global queue rejected — slow clients would starve healthy ones. See [CLI design doc §D9](design-docs/cli.md#decisions).
 
-6. **Runtime crash recovery.** A single Pane's libghostty surface crashes — should Runtime restart just the Pane, surface the crash to the user, or tear down the whole Tab? *Leaning:* per-Pane restart with a user-visible placeholder showing the error; 3 crashes in 30s escalates to Tab tear-down.
+6. **Runtime crash recovery.** *Resolved:* per-Pane restart with a user-visible error placeholder + Retry; 3 crashes in 30 s escalates to Tab tear-down. Folded into "Architectural Invariants" (per-Pane crash isolation).
 
-7. **Worktree storage layout defaults.** Where do new worktrees live? Per product-spec Q6. **Blocks:** `apps/mac/Features/Hierarchy` Worktree creator. *Leaning:* sibling `<repo>-worktrees/<branch>/` by default, per-Project override.
+7. **Worktree storage layout defaults.** *Resolved:* sibling `<repo>-worktrees/<branch>/` by default, per-Project override via `worktreesDirectory`. See [Worktree](design-docs/worktree.md).

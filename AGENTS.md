@@ -67,7 +67,6 @@ See [Golden Rules](docs/golden-rules.md) for the complete list with rationale an
 | [docs/architecture.md](docs/architecture.md) | System architecture, domains, layers |
 | [docs/golden-rules.md](docs/golden-rules.md) | Enforced principles and conventions |
 | [docs/design-docs/](docs/design-docs/) | Design documents |
-| [docs/exec-plans/](docs/exec-plans/) | Execution plans for complex work |
 | [docs/product-specs/](docs/product-specs/) | Product specifications |
 | [docs/references/](docs/references/) | External docs, API references |
 | [docs/generated/](docs/generated/) | Auto-generated artifacts |
@@ -93,4 +92,4 @@ See [Quick Start](#quick-start). Top-level Makefile delegates every `mac-*` targ
 - **Module boundaries** (`Runtime`, `Hooks`, `Git`, `GitHub`, `App`) are enforced by folder convention + code review, not Tuist target edges. Do not add cross-module imports that bypass the documented boundary.
 - **Subprocess:** always go through the shared `CommandRunner` in `apps/mac/codans/Process/`. Do not spawn `Process` directly inside feature modules.
 - **Naming:** Swift API Design Guidelines. Filenames match the primary type. TCA reducers end with `Feature`, views with `View`.
-- **Comments:** explain *why*, not *what*. Cite design-doc / exec-plan IDs when a non-obvious decision is encoded in code.
+- **Comments:** explain *why*, not *what*. Cite design-doc IDs when a non-obvious decision is encoded in code.
