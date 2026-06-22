@@ -7,8 +7,8 @@ import CodansCore
 /// piling everything into File:
 ///
 /// - **Codans** (app menu): Check for Updates…, next to About / Settings.
-/// - **File**: project / worktree creation (Add Project…, Clone Repository…,
-///   New Worktree…).
+/// - **File**: project / worktree creation (Open Project…, Clone Repository…,
+///   New Worktree…) — mirroring the sidebar's "Add Project" menu.
 /// - **View**: sidebar chrome (Toggle Sidebar, Reveal in Sidebar) plus the
 ///   **Command Palette**.
 /// - **Window**: the auto-populated window list ("Codans" / "Settings" window
@@ -87,15 +87,17 @@ struct MainWindowCommands: Commands {
     }
 
     // MARK: File — create
+    // The sidebar's "Add Project" is itself a two-item menu; surface both items
+    // flat here. "Open Project…" is the folder picker (bound to `.addProject`);
+    // "Clone Repository…" opens the clone sheet.
     CommandGroup(after: .newItem) {
-      Button("Add Project…") {
+      Button("Open Project…") {
         store()?.send(.sidebar(.toolbarAddProjectTapped))
       }
       .appKeyboardShortcut(.addProject, in: shortcuts)
       .disabled(store() == nil)
 
-      // Opens the same clone sheet as the sidebar's Add Project ▾ menu. No
-      // registry chord — clone is an infrequent setup action.
+      // No registry chord — clone is an infrequent setup action.
       Button("Clone Repository…") {
         store()?.send(.sidebar(.cloneRepoTapped))
       }
