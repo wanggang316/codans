@@ -1,12 +1,11 @@
 # Crash reporting
 
+**状态：** 已上线（可见）
+
 Codans uses Sentry to capture uncaught crashes (Mach exceptions, POSIX
 signals, `NSException`) and Swift errors on release builds, with the
 stack trace symbolicated against the dSYMs produced by the same archive.
 The SDK never runs in DEBUG builds and can be turned off per-install.
-
-See [ExecPlan 0017](../exec-plans/0017-crash-reporting.md) for the
-design rationale and the alternatives that were considered.
 
 ## Privacy stance
 
@@ -143,3 +142,14 @@ single-place edit.)
 | DSN plumbing | `Configurations/Secrets.xcconfig` → `mac-Info.plist` `SentryDSN` |
 | Release symbol upload | `apps/mac/scripts/release.sh` `upload-symbols` |
 | SDK pin | `apps/mac/Tuist/Package.swift` (`getsentry/sentry-cocoa`) |
+
+## 技术决策
+
+- **Telemetry types are explicitly `nonisolated`.** The workspace sets
+  `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor`, but Sentry invokes
+  `beforeSend` off the main actor, so the event filter (`SystemHangFilter`)
+  must be `@Sendable` / `nonisolated`; the telemetry unit tests likewise
+  run nonisolated. This constraint applies to **every** off-main-actor SDK
+  callback in the app target — annotate the closure and its captured types
+  `nonisolated` rather than letting the workspace default pin them to
+  `MainActor`.
