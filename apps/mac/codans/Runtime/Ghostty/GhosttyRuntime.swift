@@ -406,17 +406,20 @@ final class GhosttyRuntime {
     color: NSColor,
     opacity: Double
   ) {
+    // Note: the titlebar's transparency is owned by SwiftUI
+    // (`.windowToolbarStyle(.unified)` + `.toolbarBackground(.hidden)` on the
+    // worktree detail), which already lets the glass extend under the unified
+    // toolbar. We deliberately do NOT touch `titlebarAppearsTransparent` here —
+    // forcing it fights SwiftUI's toolbar management and de-fuses the header.
     let isFullScreen = window.styleMask.contains(.fullScreen)
     if opacity < 1, !isFullScreen {
       window.isOpaque = false
-      window.titlebarAppearsTransparent = true
       window.backgroundColor = color.withAlphaComponent(opacity)
       if let app {
         ghostty_set_window_background_blur(app, Unmanaged.passUnretained(window).toOpaque())
       }
     } else {
       window.isOpaque = true
-      window.titlebarAppearsTransparent = false
       window.backgroundColor = color
     }
   }
@@ -493,12 +496,6 @@ final class GhosttyRuntime {
       if SettingsWindowTagger.matches(window) {
         window.isOpaque = true
         window.backgroundColor = .windowBackgroundColor
-        // Restore the system titlebar: if this window was painted before the
-        // Settings tag landed (tagging races the appearance broadcasters), it
-        // may carry a transparent titlebar from `applyTerminalWindowBackground`
-        // — which kills the standard Settings scroll-edge material. Reset every
-        // pass so it self-heals.
-        window.titlebarAppearsTransparent = false
         continue
       }
       applyTerminalWindowBackground(window, color: color, opacity: opacity)
