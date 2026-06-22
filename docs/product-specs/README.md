@@ -8,13 +8,11 @@ Use [_template.md](_template.md) as a starting point.
 
 ## Index
 
-<!-- Format: [Title](filename.md) — one-line summary. Alphabetical by filename. -->
+<!-- One entry per doc, alphabetical: [Title](file) — one-line summary. Each doc carries a `**状态：**` field. -->
 
-- [AgentState View](active-agents-view.md) — WorktreeHeader 常驻状态条徽章 + 悬停浮窗，一句话汇总所有 CLI Agent 当前运行态（等输入/在跑/完成/闲置），点击行级联聚焦对应 Pane
-- [Notifications v1.1 — Settings, Coordinator, Command-Finished Threshold](notifications-v1-1.md) — Adds a single policy chokepoint wiring the four notification toggles, per-pane mute, command-finished duration threshold, and auto-promote-noisy-worktree for agent users
-- [Notifications](notifications.md) — v1 notification system that pulls attention back to the exact Pane needing input or finishing a long task, via in-app inbox, hierarchical roll-up badges, macOS banner, and Dock badge
-- [Pane Resume](pane-resume.md) — Restores each Pane's terminal content (and optionally the live shell) across app restarts via an out-of-process sidecar daemon, with live-tier and snapshot-tier persistence
-- [Project Management](project-management.md) — Full Project (git repo / scratch folder) lifecycle in codans — add, health, rename, per-project prefs, reorder, remove — as data-only bookkeeping that never touches files on disk
-- [Main-Window UI](ui-main-window.md) — Two-column main window: a Sidebar listing Projects/Worktrees with a bottom Tag filter, and a Detail header above the terminal carrying a read-only branch label and an "Open in…" split button (bell lives in the status bar; Git diff in the Diff inspector)
-- [Settings Window](ui-settings-window.md) — 独立的设置窗口（全局分段 + 按 Project 覆盖，子行按 ProjectKind 动态裁剪），基础版承载已落地能力的可用 UI 并为未落地能力预留占位分段
-- [Worktree Management](worktree-management.md) — 面向用户的 Worktree 全生命周期（create with base ref/copy flags、discover、switch、archive、remove、prune via git-wt），外加四段侧边栏排序、titlebar 状态栏（PR/toast/motivational）与 header 分支切换器（应用内 `git switch`；Diff Viewer History tab 列为 Future）
+- [AgentState View](active-agents-view.md) — 一句话看清每个 agent 此刻在做什么（11 种 kind、前台进程组识别），区别于通知的「刚发生了什么」
+- [Notifications](notifications.md) — 把注意力拉回需要输入/长任务完成的 Pane：四通道（inbox/横幅/Dock/上卷徽标）+ 五项设置 + 命令完成阈值 + worktree 提升
+- [Project Management](project-management.md) — Project 全生命周期（add / health / rename / per-project prefs / reorder / remove）：纯数据记账，绝不动磁盘文件
+- [Main-Window UI](ui-main-window.md) — 两栏主窗口：Sidebar（扁平 Project/Worktree + 底部排序/刷新 footer）+ Detail（终端之上 branch 标签 + "Open in …" split button）
+- [Settings Window](ui-settings-window.md) — 独立 Settings 窗口：全局分段 + 按 Project 覆盖，子行按 ProjectKind 动态裁剪
+- [Worktree Management](worktree-management.md) — 面向用户的 Worktree 全生命周期（create/discover/switch/archive/remove/prune via `git-wt`）+ 侧边栏分段排序 + 状态栏 + 分支切换器
