@@ -3,9 +3,11 @@ import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import Logo from "./Logo";
 import { LINKS } from "@/lib/links";
+import { useLatestDmgUrl } from "@/lib/useLatestDmg";
 
 export default function Nav() {
   const { t } = useTranslation();
+  const dmgUrl = useLatestDmgUrl();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -55,7 +57,9 @@ export default function Nav() {
             <NavLink href={LINKS.changelog} internal>
               {t("nav.changelog")}
             </NavLink>
-            <NavLink href={LINKS.releases}>{t("nav.download")}</NavLink>
+            <NavLink href={dmgUrl} download>
+              {t("nav.download")}
+            </NavLink>
             <NavLink href={LINKS.repo}>{t("nav.github")}</NavLink>
           </nav>
           <LangToggle />
@@ -75,7 +79,7 @@ export default function Nav() {
             <MobileLink href={LINKS.changelog} internal onNavigate={() => setOpen(false)}>
               {t("nav.changelog")}
             </MobileLink>
-            <MobileLink href={LINKS.releases} onNavigate={() => setOpen(false)}>
+            <MobileLink href={dmgUrl} download onNavigate={() => setOpen(false)}>
               {t("nav.download")}
             </MobileLink>
             <MobileLink href={LINKS.repo} onNavigate={() => setOpen(false)}>
@@ -160,16 +164,21 @@ function NavLink({
   href,
   children,
   internal,
+  download,
 }: {
   href: string;
   children: React.ReactNode;
   /** Same-site route — render a plain link, not a new-tab external one. */
   internal?: boolean;
+  /** Direct file download — stay on the page, don't open a new tab. */
+  download?: boolean;
 }) {
+  const newTab = !internal && !download;
   return (
     <a
       href={href}
-      {...(internal ? {} : { target: "_blank", rel: "noreferrer" })}
+      {...(newTab ? { target: "_blank", rel: "noreferrer" } : {})}
+      {...(download ? { download: "" } : {})}
       className="group relative rounded-md px-3 py-1.5 text-ink/80 transition-colors hover:text-ink"
     >
       <span className="relative z-10">{children}</span>
@@ -183,17 +192,22 @@ function MobileLink({
   href,
   children,
   internal,
+  download,
   onNavigate,
 }: {
   href: string;
   children: React.ReactNode;
   internal?: boolean;
+  /** Direct file download — stay on the page, don't open a new tab. */
+  download?: boolean;
   onNavigate: () => void;
 }) {
+  const newTab = !internal && !download;
   return (
     <a
       href={href}
-      {...(internal ? {} : { target: "_blank", rel: "noreferrer" })}
+      {...(newTab ? { target: "_blank", rel: "noreferrer" } : {})}
+      {...(download ? { download: "" } : {})}
       onClick={onNavigate}
       className="rounded-md px-3 py-2.5 text-ink/85 transition-colors hover:bg-ink/[0.04] hover:text-ink"
     >
