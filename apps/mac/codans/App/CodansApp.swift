@@ -129,7 +129,9 @@ struct CodansApp: App {
       MainWindowCommands(
         store: { appState.store },
         shortcuts: appState.shortcutsStore.resolved,
-        sidebarFocus: sidebarFocusObserver
+        sidebarFocus: sidebarFocusObserver,
+        settingsStore: appState.settingsStore,
+        hierarchyManager: appState.hierarchyManager
       )
       CommandGroup(replacing: .appSettings) {
         // Chord routes through the registry so a user override in Settings → Shortcuts
