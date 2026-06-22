@@ -59,6 +59,12 @@ codans 刻意不是 IDE。任何读码或改码的需求都是一次向外部编
 
 5. **Path 进，别无他物。** 服务 API 是 `(directory: URL, preferred: EditorID?)`。调用方在派发前把自身上下文化成 `URL`——没有域类型穿过服务边界。Per-Project 默认编辑器 override 作为特性**保留**，但在服务**外**解析：调用方（TCA `EditorFeature` reducer 或 IPC handler）查出所属 `Project`、读其 override、过滤到已安装、把结果作为 `preferred` 传给服务。服务只见 `EditorID?`，从不见 `ProjectID`。
 
+### Git Viewer（在外部 git 客户端打开）
+
+「在 Git Viewer 中查看当前 Worktree」走的是同一条交接路径，**不是一个内置查看器——应用内的 Git Viewer overlay 已从代码移除**。「Toggle Git Viewer」命令（⌘ chord / 菜单 / 命令面板，对应 `RootFeature.diffInspectorToggledForCurrentWorktree`）读全局 `general.defaultGitViewerID`（一个指向注册表 **git-client 类目**的 `EditorID?`），命中已安装项就派发 `.editor(.openRequested(editorID:, worktreePath:, projectID:))`，把当前 Worktree 在那个外部客户端（Fork、Sourcetree、GitHub Desktop、…）里打开。`nil`（Default Git Viewer = None）或解析不到已安装项时为 no-op。
+
+它与默认编辑器是**两个独立的全局默认**（`defaultEditorID` 与 `defaultGitViewerID`），各有 Settings → General 下拉，但共用同一注册表、同一 `AppLauncher`、同一 open 路径——git 查看只是「在外部工具里打开 Worktree 目录」的又一个目标，而非独立机制。
+
 ### System Context Diagram
 
 ```

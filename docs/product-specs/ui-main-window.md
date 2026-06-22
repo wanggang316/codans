@@ -36,7 +36,7 @@ codans 的主窗口是一个两栏布局：左侧 **Sidebar** 列出全部 Proje
 
 Legend: `●` active Worktree, `○` inactive Worktree, `[+]` hover-only add, `[⋯]` options menu，`⇅` 排序（reorder）、`⟳` 刷新——侧栏底部 footer 当前露出的两个动作。Tag 过滤入口已实现但当前隐藏（见下文）。
 
-注：通知铃铛**不在** Header 上。未读通知通过状态栏铃铛 + popover 呈现（见 [notifications.md](notifications.md)）；Git 相关入口也不挂 Header——⌘⌥G / 命令面板 "Toggle Git Viewer" / 菜单启动用户选定的**外部 git 客户端**（Settings → General → Default Git Viewer），应用内的 **Diff inspector 尚未实现**（前瞻设计见 [diff-inspector.md](../design-docs/diff-inspector.md)）。
+注：通知铃铛**不在** Header 上。未读通知通过状态栏铃铛 + popover 呈现（见 [notifications.md](notifications.md)）；Git 相关入口也不挂 Header——⌘⌥G / 命令面板 "Toggle Git Viewer" / 菜单启动用户选定的**外部 git 客户端**（Settings → General → Default Git Viewer）。应用内已无内置 Git Viewer / diff 查看器（旧 overlay 已移除），机制见 [editor-integration.md](../design-docs/editor-integration.md)。
 
 ## User Stories
 
@@ -94,7 +94,7 @@ Legend: `●` active Worktree, `○` inactive Worktree, `[+]` hover-only add, `[
 Header 只承载两样：左侧只读分支标签，右侧 "Open in …" split button。它**不**承载通知铃铛，也**不**承载任何 Git Viewer / Diff 切换按钮——这两类能力都不在 Header 上：
 
 - **通知**：状态栏铃铛是唯一的 inbox popover 入口；未读以按层级上卷的徽标呈现（见下文 Display 与 [notifications.md](notifications.md)）。
-- **Git diff**：⌘⌥G、命令面板 "Toggle Git Viewer"、或菜单启动用户在 Settings → General → Default Git Viewer 选定的**外部 git 客户端**（选 None 或解析不出即 no-op）。应用内的 **Diff inspector**（右缘改动文件列表 + 全区 diff drawer）**尚未实现**——为前瞻设计，见 [diff-inspector.md](../design-docs/diff-inspector.md)。
+- **Git diff**：⌘⌥G、命令面板 "Toggle Git Viewer"、或菜单启动用户在 Settings → General → Default Git Viewer 选定的**外部 git 客户端**（选 None 或解析不出即 no-op；机制见 [editor-integration.md](../design-docs/editor-integration.md) 的「Git Viewer」一节）。应用内已无内置 diff 查看器——旧 `GitViewer` overlay 已移除。
 
 "Open in …" picker（split button 的 caret）：
 
@@ -131,7 +131,7 @@ Header 只承载两样：左侧只读分支标签，右侧 "Open in …" split b
 - [x] Header 左侧显示活跃 Worktree 的只读分支标签（git-branch icon + 分支名）。
 - [x] Header 右侧显示一个 "Open in …" split button。
 - [x] "Open in …" 主动作在默认编辑器打开当前 Worktree（无默认则 Finder）。caret 打开 picker。
-- [x] picker 列出六个内建编辑器（VS Code、Cursor、Zed、Xcode、Sublime、Finder）外加任何用户自定义编辑器。未安装者禁用并附解释 tooltip；Finder 始终可用。
+- [x] picker 列出已安装的内建条目（编辑器 / 终端 / git 客户端 / Finder——见 [editor-integration.md](../design-docs/editor-integration.md) 的内建注册表）；未安装者不出现，无用户自定义编辑器。Finder 始终可用。
 - [x] Header 之下的终端 Tab 条与分屏 Pane 行为照旧；无回归。
 - [x] 选中一个无活跃 Tab 的 Worktree 时显示 empty 占位 + "New Tab" 按钮。
 
@@ -150,7 +150,7 @@ Header 只承载两样：左侧只读分支标签，右侧 "Open in …" split b
 ### Won't Have
 
 - 从 Header 编辑分支（rename / checkout / switch）。分支标签只读。（分支切换器是独立能力，见 [worktree-management.md](worktree-management.md)。）
-- 常驻第三列的 inspector。Diff inspector（落地后）以右缘 + drawer 呈现，不是常驻列。
+- 常驻第三列的 inspector。应用内不提供内置 diff inspector；Git 查看交给外部 git 客户端。
 - "Add Project" / "Add Worktree" 背后的完整 sheet/flow——入口在 UI 中可见，sheet 本体超出本规格范围。
 - 主窗口 chrome 上的 gear / settings 按钮。Settings 经既有路径（⌘,）触达。
 - 任何应用内分支列表或 checkout picker。
@@ -166,14 +166,14 @@ Header 只承载两样：左侧只读分支标签，右侧 "Open in …" split b
 - 给定选中一个 Worktree，当 Detail 区渲染，则 Header 行可见，显示 git-branch icon + 当前分支名（只读标签）。
 - 给定用户装了 VS Code 但没装 Cursor，当打开 "Open in …" picker，则 VS Code 可用、Cursor 禁用并附解释 tooltip；Finder 始终可用，点击后在活跃 Worktree 路径打开 Finder。
 - 给定有未读通知，当某 Worktree 持有未读，则其侧栏行显示尾部未读点，父 Project section 聚合为单个点；铃铛与 inbox 在状态栏而非 Header。
-- 给定已在 Settings → General → Default Git Viewer 选定一个已安装的外部 git 客户端，当用户按 ⌘⌥G（或命令面板 "Toggle Git Viewer"），则在当前 Worktree 路径启动该客户端；选 None 或解析不出时为 no-op。（应用内 Diff inspector 尚未实现——其右缘 inspector + drawer 与 per-Worktree 持久化 `Worktree.diffInspectorVisible` 见 [diff-inspector.md](../design-docs/diff-inspector.md)。）
+- 给定已在 Settings → General → Default Git Viewer 选定一个已安装的外部 git 客户端，当用户按 ⌘⌥G（或命令面板 "Toggle Git Viewer"），则在当前 Worktree 路径启动该客户端；选 None 或解析不出时为 no-op。（应用内无内置 diff 查看器；Git 查看走外部客户端。）
 
 ## 设计沿革（History）
 
 本节仅记录改变了当前形态的承重转变，正文已按现状陈述：
 
 - **Space → Tag**（[project-tags.md](../design-docs/project-tags.md)）：层级为 4 级（无 Space 容器）；横切分类改由 `Tag` 承载；侧栏底部不再有 Space switcher；⌘1–⌘9 / ⌘K 的 Space 跳转解绑；per-Space "上次活跃 Worktree" 记忆移除（per-Project `selectedWorktreeID` 已覆盖）。
-- **Git Viewer overlay 移除**（[diff-inspector.md](../design-docs/diff-inspector.md)）：旧的右缘 `GitViewer` overlay 与 Header 上的切换按钮一并移除。应用内的 Diff inspector（右缘 inspector + drawer）仍是**前瞻设计、尚未实现**；当前 ⌘⌥G / 命令面板 / 菜单启动外部 git 客户端。设计落地后会引入 `Worktree.diffInspectorVisible`（由 `gitViewerVisible` 重命名而来）。
+- **Git Viewer overlay 移除**：旧的右缘 `GitViewer` overlay 与 Header 上的切换按钮一并移除；应用内不再有内置 diff 查看器。当前 ⌘⌥G / 命令面板 / 菜单启动外部 git 客户端（机制见 [editor-integration.md](../design-docs/editor-integration.md)）。
 - **通知铃铛不在 Header**（[notifications.md](notifications.md)）：未读以按层级上卷的徽标呈现，唯一 popover 入口是状态栏铃铛。
 
 ## References
@@ -181,5 +181,5 @@ Header 只承载两样：左侧只读分支标签，右侧 "Open in …" split b
 - 设计：[main-window.md](../design-docs/main-window.md)
 - Tag / 单窗口：[project-tags.md](../design-docs/project-tags.md)
 - 通知：[notifications.md](notifications.md)
-- Diff inspector（已设计未实现）：[diff-inspector.md](../design-docs/diff-inspector.md)
+- Git Viewer（外部 git 客户端）：[editor-integration.md](../design-docs/editor-integration.md)
 - 层级模型：`apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane}.swift`
