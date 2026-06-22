@@ -119,6 +119,10 @@ final class AppearanceApplyingView: NSView {
         // standard macOS Settings tone. See `SettingsWindowTagger`.
         window.appearance = appearance
         window.backgroundColor = .windowBackgroundColor
+        // Self-heal a transparent titlebar applied before the Settings tag
+        // landed, so the standard scroll-edge material returns. See
+        // `applyTerminalWindowBackground`.
+        window.titlebarAppearsTransparent = false
       } else {
         window.appearance = inferredChromeAppearance ?? appearance
         // Route through the runtime so the window picks up `background-opacity`

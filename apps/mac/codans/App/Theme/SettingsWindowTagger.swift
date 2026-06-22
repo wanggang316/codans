@@ -34,6 +34,11 @@ struct SettingsWindowTag: NSViewRepresentable {
       super.viewDidMoveToWindow()
       if let window {
         SettingsWindowTagger.register(window)
+        // Guarantee the standard macOS Settings titlebar (with its scroll-edge
+        // material). The appearance broadcasters force `titlebarAppearsTransparent`
+        // on the frosted-glass terminal windows and may have touched this window
+        // before the tag above landed; restore it the moment we identify it.
+        window.titlebarAppearsTransparent = false
         // Opt this specific window out of macOS scene restoration — Settings is
         // a transient utility surface, so the next launch should not reopen it
         // just because the user quit with it open. `Window(id:)` participates
