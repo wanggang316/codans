@@ -142,10 +142,12 @@ function BrewLine({ command }: { command: string }) {
       type="button"
       onClick={onCopy}
       title="Click to copy"
-      className="group inline-flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 font-mono text-[12.5px] text-ink-muted transition-colors hover:bg-white/[0.04] hover:text-ink"
+      className="group inline-flex max-w-full cursor-pointer items-start gap-1.5 rounded-md px-2.5 py-1.5 text-left font-mono text-[12.5px] leading-relaxed text-ink-muted transition-colors hover:bg-white/[0.04] hover:text-ink"
     >
-      <span className="text-acc-300">$</span>
-      <span>{copied ? "Copied to clipboard" : command}</span>
+      <span className="break-words">
+        <span className="mr-1.5 text-acc-300">$</span>
+        {copied ? "Copied to clipboard" : command}
+      </span>
       <CopyGlyph copied={copied} />
     </button>
   );

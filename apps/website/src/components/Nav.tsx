@@ -56,9 +56,7 @@ export default function Nav() {
               {t("nav.changelog")}
             </NavLink>
             <NavLink href={LINKS.releases}>{t("nav.download")}</NavLink>
-            <NavLink href={LINKS.repo} accent>
-              {t("nav.github")}
-            </NavLink>
+            <NavLink href={LINKS.repo}>{t("nav.github")}</NavLink>
           </nav>
           <LangToggle />
           <MenuToggle open={open} onClick={() => setOpen((v) => !v)} />
@@ -80,7 +78,7 @@ export default function Nav() {
             <MobileLink href={LINKS.releases} onNavigate={() => setOpen(false)}>
               {t("nav.download")}
             </MobileLink>
-            <MobileLink href={LINKS.repo} accent onNavigate={() => setOpen(false)}>
+            <MobileLink href={LINKS.repo} onNavigate={() => setOpen(false)}>
               {t("nav.github")}
             </MobileLink>
           </div>
@@ -120,57 +118,51 @@ function MenuToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
 }
 
 /**
- * EN / 中文 segmented toggle. Drives `i18n.changeLanguage`; the choice is
- * persisted to localStorage by the listener in i18n.ts. Default is English.
+ * Single-button language switch. The label is the language it will switch
+ * *to* (中文 while in English, EN while in Chinese) so it reads as an action.
+ * Drives `i18n.changeLanguage`; the choice is persisted to localStorage by
+ * the listener in i18n.ts. Default is English.
  */
 function LangToggle() {
   const { i18n } = useTranslation();
-  const current = i18n.language?.startsWith("zh") ? "zh" : "en";
-  return (
-    <div className="ml-1.5 flex items-center overflow-hidden rounded-full border border-line bg-bg-elev/60 text-[12px]">
-      <LangButton active={current === "en"} onClick={() => i18n.changeLanguage("en")}>
-        EN
-      </LangButton>
-      <span className="h-3.5 w-px bg-line" />
-      <LangButton active={current === "zh"} onClick={() => i18n.changeLanguage("zh")}>
-        中文
-      </LangButton>
-    </div>
-  );
-}
-
-function LangButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
+  const next = i18n.language?.startsWith("zh") ? "en" : "zh";
   return (
     <button
       type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`px-2.5 py-1 transition-colors ${
-        active ? "text-ink" : "text-ink-dim hover:text-ink-muted"
-      }`}
+      onClick={() => i18n.changeLanguage(next)}
+      aria-label={next === "zh" ? "切换到中文" : "Switch to English"}
+      className="ml-1.5 inline-flex items-center gap-1.5 rounded-full border border-line bg-bg-elev/60 px-2.5 py-1 text-[12px] text-ink-muted transition-colors hover:text-ink"
     >
-      {children}
+      <GlobeGlyph />
+      <span>{next === "zh" ? "中文" : "EN"}</span>
     </button>
+  );
+}
+
+function GlobeGlyph() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.6 2.7 2.6 15.3 0 18M12 3c-2.6 2.7-2.6 15.3 0 18" strokeLinecap="round" />
+    </svg>
   );
 }
 
 function NavLink({
   href,
   children,
-  accent,
   internal,
 }: {
   href: string;
   children: React.ReactNode;
-  accent?: boolean;
   /** Same-site route — render a plain link, not a new-tab external one. */
   internal?: boolean;
 }) {
@@ -178,11 +170,7 @@ function NavLink({
     <a
       href={href}
       {...(internal ? {} : { target: "_blank", rel: "noreferrer" })}
-      className={`group relative rounded-md px-3 py-1.5 transition-colors ${
-        accent
-          ? "text-acc-300 hover:text-acc-200"
-          : "text-ink/80 hover:text-ink"
-      }`}
+      className="group relative rounded-md px-3 py-1.5 text-ink/80 transition-colors hover:text-ink"
     >
       <span className="relative z-10">{children}</span>
       <span className="absolute inset-0 -z-0 rounded-md bg-ink/0 transition-colors group-hover:bg-ink/[0.04]" />
@@ -194,13 +182,11 @@ function NavLink({
 function MobileLink({
   href,
   children,
-  accent,
   internal,
   onNavigate,
 }: {
   href: string;
   children: React.ReactNode;
-  accent?: boolean;
   internal?: boolean;
   onNavigate: () => void;
 }) {
@@ -209,11 +195,7 @@ function MobileLink({
       href={href}
       {...(internal ? {} : { target: "_blank", rel: "noreferrer" })}
       onClick={onNavigate}
-      className={`rounded-md px-3 py-2.5 transition-colors ${
-        accent
-          ? "text-acc-300 hover:bg-ink/[0.04]"
-          : "text-ink/85 hover:bg-ink/[0.04] hover:text-ink"
-      }`}
+      className="rounded-md px-3 py-2.5 text-ink/85 transition-colors hover:bg-ink/[0.04] hover:text-ink"
     >
       {children}
     </a>
