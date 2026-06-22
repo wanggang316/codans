@@ -1,9 +1,9 @@
 import AppKit
+import CodansCore
 import Foundation
 import GhosttyKit
 import OSLog
 import SwiftUI
-import CodansCore
 
 private let chromeTintLogger = Logger(
   subsystem: "com.gumpw.codans.runtime", category: "chrome-tint-debug"
@@ -189,6 +189,21 @@ final class GhosttyRuntime {
         MainActor.assumeIsolated { self?.resyncAllSurfaceGeometry() }
       }
     )
+
+    // The frosted-glass background is host-applied (libghostty never touches
+    // the embedder's NSWindow), and the full-screen branch in
+    // `applyTerminalWindowBackground` needs a re-apply on the transition:
+    // a window entering full-screen must drop back to opaque or the blur
+    // reveals black behind it, and exiting must restore the glass. Re-stain
+    // every window on the toggle.
+    for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+      appFocusObservers.append(
+        center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+          MainActor.assumeIsolated { self?.applyBackgroundColorToWindows() }
+        }
+      )
+    }
+
     let workspaceCenter = NSWorkspace.shared.notificationCenter
     for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
       workspaceWakeObservers.append(
@@ -348,6 +363,65 @@ final class GhosttyRuntime {
     return NSColor(ghostty: color)
   }
 
+  /// User's `background-opacity` from the active Ghostty config, clamped to
+  /// `[0, 1]`. Returns `1` (fully opaque) when the key is unset or no config
+  /// has loaded yet. Drives the translucent frosted-glass terminal
+  /// background: `applyTerminalWindowBackground` paints the window tint at
+  /// this alpha and only makes the window non-opaque + blurred when it's
+  /// below 1.
+  func backgroundOpacity() -> Double {
+    guard let config else { return 1 }
+    var value: Double = 1
+    let key = "background-opacity"
+    let keyLen = UInt(key.lengthOfBytes(using: .utf8))
+    _ = ghostty_config_get(config, &value, key, keyLen)
+    return min(max(value, 0), 1)
+  }
+
+  /// Paint one non-Settings window's background to the terminal theme tone,
+  /// honoring `background-opacity` for the translucent frosted-glass look.
+  ///
+  /// In an embedder libghostty never touches the host `NSWindow`, so the glass
+  /// effect is the host's job: when opacity < 1 (and the window isn't
+  /// full-screen) we make the window non-opaque, paint the theme tint at that
+  /// alpha, and ask libghostty to apply the macOS window-background blur — its
+  /// radius / glass style come from the `background-blur` config key (e.g.
+  /// `macos-glass-regular`). The terminal surface itself renders transparent
+  /// (for `macos-glass-*` the renderer forces surface alpha to 0), so this
+  /// window tint is the only visible layer and the blur shows through it.
+  /// Full-screen restores an opaque background so the blur doesn't reveal
+  /// black behind the window.
+  ///
+  /// Callers own skipping the Settings window and any `window.appearance`
+  /// updates; this method only owns background + opacity + blur. The
+  /// `color` / `opacity` arguments let the batch path (`applyBackgroundColor`
+  /// `ToWindows`) resolve them once instead of per window.
+  func applyTerminalWindowBackground(
+    _ window: NSWindow,
+    color: NSColor,
+    opacity: Double
+  ) {
+    let isFullScreen = window.styleMask.contains(.fullScreen)
+    if opacity < 1, !isFullScreen {
+      window.isOpaque = false
+      window.titlebarAppearsTransparent = true
+      window.backgroundColor = color.withAlphaComponent(opacity)
+      if let app {
+        ghostty_set_window_background_blur(app, Unmanaged.passUnretained(window).toOpaque())
+      }
+    } else {
+      window.isOpaque = true
+      window.titlebarAppearsTransparent = false
+      window.backgroundColor = color
+    }
+  }
+
+  /// Convenience overload that resolves the current theme color + opacity.
+  /// Used by single-window call sites (e.g. `WindowAppearanceSetter`).
+  func applyTerminalWindowBackground(_ window: NSWindow) {
+    applyTerminalWindowBackground(window, color: backgroundColor(), opacity: backgroundOpacity())
+  }
+
   /// Mirror of ghostty's `Ghostty.Config.unfocusedSplitOpacity`. Reads the
   /// `unfocused-split-opacity` config key (default 0.85 — surface visibility,
   /// not overlay opacity) and returns the inverted overlay opacity used to
@@ -404,16 +478,19 @@ final class GhosttyRuntime {
   /// flips cascade through NSApp.effectiveAppearance untouched.
   private func applyBackgroundColorToWindows() {
     let color = backgroundColor()
+    let opacity = backgroundOpacity()
     let inferred = color.perceivedAppearance
     for window in NSApp.windows {
-      // Settings window opts out of the Ghostty terminal-background stain;
-      // restore the stock `.windowBackgroundColor` so the pane keeps the
-      // standard macOS Settings tone across scheme flips.
+      // Settings window opts out of the Ghostty terminal-background stain (and
+      // the frosted-glass translucency); restore the stock opaque
+      // `.windowBackgroundColor` so the pane keeps the standard macOS Settings
+      // tone across scheme flips.
       if SettingsWindowTagger.matches(window) {
+        window.isOpaque = true
         window.backgroundColor = .windowBackgroundColor
         continue
       }
-      window.backgroundColor = color
+      applyTerminalWindowBackground(window, color: color, opacity: opacity)
       if window.appearance != nil, let inferred {
         window.appearance = inferred
       }
