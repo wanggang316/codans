@@ -6,13 +6,17 @@ import CodansCore
 /// Main-window menu commands, organised into standard macOS menus instead of
 /// piling everything into File:
 ///
-/// - **Codans** (app menu): **Command Palette** + Check for Updates…, next to
-///   About / Settings.
-/// - **File**: project / worktree creation (Add Project…, New Worktree…).
-/// - **View**: sidebar chrome (Toggle Sidebar, Reveal in Sidebar).
+/// - **Codans** (app menu): Check for Updates…, next to About / Settings.
+/// - **File**: project / worktree creation (Add Project…, Clone Repository…,
+///   New Worktree…).
+/// - **View**: sidebar chrome (Toggle Sidebar, Reveal in Sidebar) plus the
+///   **Command Palette**.
 /// - **Window**: the auto-populated window list ("Codans" / "Settings" window
 ///   entries) is dropped — codans is a single-main-window host, so switching
-///   between window-title entries is noise.
+///   between window-title entries is noise. Those entries are AppKit-owned
+///   (`addWindowsItem`), which `CommandGroup(replacing: .windowList)` does not
+///   suppress, so each scene excludes its own window at the AppKit level (see
+///   `ExcludeFromWindowsMenu` wired in `CodansApp.body`).
 /// - **Worktree**: worktree navigation + actions, the Git Viewer toggle, and
 ///   the user-defined Project + Global **commands** (merged in at the bottom).
 /// - **Tab**: tab lifecycle (New Tab / Close Tab) plus pane split / focus /
@@ -73,17 +77,8 @@ struct MainWindowCommands: Commands {
   let hierarchyManager: HierarchyManager
 
   var body: some Commands {
-    // MARK: Codans (app menu) — Command Palette + updates
-    // Both sit right after "About Codans" (the `.appInfo` group). The Command
-    // Palette used to live in File as "Quick Action…"; the app menu is the more
-    // conventional home for an app-wide launcher.
+    // MARK: Codans (app menu) — Check for Updates
     CommandGroup(after: .appInfo) {
-      Button("Command Palette") {
-        store()?.send(.commandPaletteToggle(nil))
-      }
-      .appKeyboardShortcut(.commandPaletteToggle, in: shortcuts)
-      .disabled(store() == nil)
-
       Button("Check for Updates…") {
         store()?.send(.checkForUpdatesRequested)
       }
@@ -99,6 +94,13 @@ struct MainWindowCommands: Commands {
       .appKeyboardShortcut(.addProject, in: shortcuts)
       .disabled(store() == nil)
 
+      // Opens the same clone sheet as the sidebar's Add Project ▾ menu. No
+      // registry chord — clone is an infrequent setup action.
+      Button("Clone Repository…") {
+        store()?.send(.sidebar(.cloneRepoTapped))
+      }
+      .disabled(store() == nil)
+
       Button("New Worktree…") {
         store()?.send(.newWorktreeForCurrentProjectRequested)
       }
@@ -106,7 +108,7 @@ struct MainWindowCommands: Commands {
       .disabled(!hasCurrentProject)
     }
 
-    // MARK: View — show / hide chrome
+    // MARK: View — show / hide chrome + Command Palette
     CommandGroup(after: .sidebar) {
       Button("Toggle Sidebar") {
         guard let s = store() else { return }
@@ -122,13 +124,15 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.revealCurrentWorktreeInSidebar, in: shortcuts)
       .disabled(!hasActiveWorktree)
-    }
 
-    // MARK: Window — drop the auto window list
-    // AppKit/SwiftUI otherwise append a "Codans" + "Settings" window-title list
-    // to the Window menu. With a single main window there's nothing useful to
-    // switch to, so replace the group with nothing to remove those entries.
-    CommandGroup(replacing: .windowList) {}
+      Divider()
+
+      Button("Command Palette") {
+        store()?.send(.commandPaletteToggle(nil))
+      }
+      .appKeyboardShortcut(.commandPaletteToggle, in: shortcuts)
+      .disabled(store() == nil)
+    }
 
     // MARK: Worktree — navigation + actions + Git Viewer + user commands
     CommandMenu("Worktree") {
