@@ -1,7 +1,9 @@
 # Product Spec: Worktree Management
 
-**Status:** Shipped（生命周期 / 侧边栏排序 / 状态栏 / 分支切换器均已上线）；Diff Viewer History tab 为 Future（见 §History tab）。
+**状态：** 已上线（可见）
 **Author:** Gump (with Claude)
+
+> 生命周期 / 侧边栏排序 / 状态栏 / 分支切换器均已上线。唯一例外是 **Diff Viewer History tab**，状态为 `已设计未实现`（见 §History tab）。
 
 ## Summary
 
@@ -59,7 +61,7 @@ Worktree 操作通过打包的 [`git-wt`](https://github.com/khoi/git-wt) helper
 
 ### Must Have — 切换 Worktree
 
-- [ ] **一键激活**：点 Worktree 行即选中、恢复其 Tabs/Panes、更新 header 分支标签与 git-viewer 态。
+- [ ] **一键激活**：点 Worktree 行即选中、恢复其 Tabs/Panes、更新 header 分支标签。
 - [ ] **切换即时**：无进度 UI（目标 Worktree 状态已在内存）。
 
 ### Must Have — Archive（软隐藏，可逆）
@@ -122,18 +124,18 @@ Worktree 操作通过打包的 [`git-wt`](https://github.com/khoi/git-wt) helper
 
 ### Nice to Have / Future
 
-- [ ] **Diff Viewer History tab**（见 §History tab，未上线）。
+- [ ] **Diff Viewer History tab**（`已设计未实现`，见 §History tab）。
 - [ ] **Rename branch** in-place（`git branch -m` 包装，实时校验）。
 - [ ] **Line-change badge**——每行 `+123 -45` 指示。
 - [ ] **Branch-name autocomplete**（Create sheet）。
 - [ ] inProgress 多任务并发聚合态（`N tasks running`，点击弹列表）；success toast 的 undo；motivational 自定义右半句。
 - [ ] PR merge 时自动提示归档（依赖 GitHub 集成）。
 
-## History tab（Future — 未上线）
+## History tab（`已设计未实现`）
 
 产品愿景里 Git Diff Viewer 右侧拆 Changes / History 双 tab：History 列当前分支 commit 历史（分页），点 commit 在左侧渲染整 commit unified diff，左侧标题显示 `<short-sha> · <subject>`；branch popover 底部"View all"跳到 History tab。
 
-**当前状态：未实现。** 代码里没有 `DiffFeature` / Changes-History tab 结构；Diff 能力仅在 service 层（`commitDiff` 等）。落地前置依赖是先有 `DiffFeature`。在它存在前，popover 不提供"View all"入口或将其降级。本能力的设计意图见 [worktree 设计文档 §Diff Viewer History tab](../design-docs/worktree.md)。
+**当前状态：`已设计未实现`。** 代码里没有 `DiffFeature` / Changes-History tab 结构。**应用内不存在任何 diff / git 历史查看器**——内置 diff overlay 不存在，`toggleDiffInspector` 命令仅把当前 worktree 路径交给用户配置的外部 git viewer（未配置时为 no-op）；Diff 能力止于 service 层（`commitDiff` 等）。落地前置依赖是先有 `DiffFeature`。在它存在前，popover 不提供"View all"入口或将其降级。本能力的设计意图见 [worktree 设计文档 §Diff Viewer History tab](../design-docs/worktree.md)。
 
 ## Acceptance Criteria
 
@@ -205,7 +207,7 @@ Worktree 操作通过打包的 [`git-wt`](https://github.com/khoi/git-wt) helper
 
 ### Out of Scope（承重边界）
 
-- **无分支的 detached-commit worktree**——v1 总是创建命名分支。
+- **无分支的 detached-commit worktree**——创建时总是带命名分支。
 - **应用内 commit / rebase / merge / pull / push / cherry-pick / revert / stash / discard UI**——terminal-first，用 `git`/`lazygit`。脏树切换失败时原样冒泡 git stderr，不裁剪、不翻译、不自动 stash。
 - **创建/删除/重命名分支**（仅 switch）；popover 内的 PR / 远程比较视图。
 - **多 worktree 批量操作**（如"归档所有已合并 worktree"）；冲突解决 UI。
@@ -220,7 +222,7 @@ Worktree 操作通过打包的 [`git-wt`](https://github.com/khoi/git-wt) helper
 ### Future Consideration
 
 - Diff Viewer History tab（依赖先有 `DiffFeature`）；inline rebase/merge helpers；branch rename in-place。
-- Archive hook / script 经 C3（v1 的生命周期脚本是内联同步执行，与异步 C3 hook 不同）。
+- Archive hook / script 经 C3（现行生命周期脚本是内联同步执行，与异步 C3 hook 不同）。
 - PR merge 时自动提示归档（依赖 GitHub 集成）。
 
 ## References

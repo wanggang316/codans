@@ -1,15 +1,13 @@
 # 设计文档：GitHub Integration
 
-**状态：** 已上线（repository-batched 取数模型）
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
 
 GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题、draft、加减行、mergeable、review、CI rollup）呈现为一枚徽标 + popover，并提供 merge / close / mark-ready / rerun-failed-jobs 写操作。用户可见面（侧栏 capsule、popover、命令面板入口、Settings）与取数无关，下文只记录取数与写入模型的耐久决策。
 
-**当前模型**——repository-batched GraphQL 取数。最早的 v1 是 per-Worktree 模型：每个侧栏行在出现时触发一次 `gh pr view <branch>`，快照加载后再触发一次 `gh pr checks <number>`。一个开着 20+ Worktree 的 Project 冷刷新会背靠背 fork 约 40 个 `gh` 子进程，每个付 ~80–150 ms 冷启动 + ~300–500 ms 网络往返；徽标错位逐个刷出，CI overlay 一个个闪入。更糟的是，逐行的 `.task(id:)` 依赖 SwiftUI 视图生命周期——当行初始分支解析为不挂载的 `EmptyView()` 时，无缓存行的取数根本不发生。v1 已被本设计完全取代（迁移已完成，v1 代码与 `state.checks[prNumber]` 映射已删除）。下文保留的是为何这样取数的*理由*。
-
-成本从 **O(Worktrees)** 降到 **O(Repositories)**（用户开着的仓库数，实践中 ≤ 1）：一次 `gh api graphql` 用 per-branch GraphQL alias 覆盖一个 Project 内的全部分支，PR 元数据 + CI rollup 在**一次网络往返**里取回。
+取数模型是 **repository-batched GraphQL**：成本随 **O(Repositories)**（用户开着的仓库数，实践中 ≤ 1）而非 **O(Worktrees)** 缩放。一次 `gh api graphql` 用 per-branch GraphQL alias 覆盖一个 Project 内的全部分支，PR 元数据 + CI rollup 在**一次网络往返**里取回。取数生命周期由 reducer 拥有的 Project 级 effect 驱动，经显式失效事件触发，不依赖 SwiftUI 视图生命周期。
 
 ## 目标与非目标
 
@@ -17,8 +15,8 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
 
 - 每个刷新周期的子进程成本从 O(Worktrees) 降到 O(Repositories)，典型 10–40× 减少。
 - PR 元数据 + 聚合 check 结果在每仓库**一次网络往返**取回，使 CI 健康度随 PR 快照一同绘制，而非随后到达。
-- 用 reducer 拥有的 Project 级 effect 取代逐行 `.task(id:)`，由显式失效事件驱动（Worktree 出现、分支变更、写后变更、手动刷新）。
-- 保留所有 v1 非功能保证：**零应用内 HTTP、零 Keychain、零 token material 进入 codans、零来自 SwiftUI 视图体的隐藏网络工作**。
+- 取数由 reducer 拥有的 Project 级 effect 发起，经显式失效事件驱动（Worktree 出现、分支变更、写后变更、手动刷新），而非逐行 `.task(id:)`。
+- 非功能保证：**零应用内 HTTP、零 Keychain、零 token material 进入 codans、零来自 SwiftUI 视图体的隐藏网络工作**。
 
 **非目标**
 
@@ -39,9 +37,9 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
 
 3. **reducer 逐 Worktree 分发。** 成功后经本地 catalog 把 `branch → WorktreeID` 映射，写入 `state.snapshotsByProject[P]`，视图照旧从中读取。
 
-4. **失效事件驱动，无 TTL。** v1 用 30 秒新鲜窗口；现已弃用。缓存「活到某个已知失效事件发生为止」——这些事件不多，且每个都比对每个 Worktree 盲目 30 秒重探更便宜也更正确。
+4. **失效事件驱动，无 TTL。** 缓存「活到某个已知失效事件发生为止」——这些事件不多，且每个都比对每个 Worktree 盲目按固定窗口重探更便宜也更正确。
 
-5. **check rollup 随快照一起取。** v1 把 `pullRequest(branch:)` + `checks(number:)` 分开取；现已合并——GraphQL query 把 `statusCheckRollup.contexts` 与其余字段一并取回，消费者直接读 `snapshot.checkRollup`，独立的 `state.checks[prNumber]` 映射消失。
+5. **check rollup 随快照一起取。** GraphQL query 把 `statusCheckRollup.contexts` 与其余字段一并取回，消费者直接读 `snapshot.checkRollup`，无独立的 `checks(number:)` 调用、无独立的 `state.checks[prNumber]` 映射。
 
 6. **gh 子进程路径不变。** Resolver、env allowlist、超时（20 s）、argv 安全模型全部沿用；仅 output cap 为批量 query 提高到 8 MiB（见 Risks）。
 
@@ -331,7 +329,7 @@ struct CheckNode: Decodable, Equatable, Hashable {
 
 ### 数据模型
 
-- **`PullRequestSnapshot` 带 `checkRollup`。** 独立 `checks(number:)` 调用消失，其输出成为快照上的字段。快照还带 `mergeStateStatus`（区分 `.clean` / `.dirty` / `.blocked` / `.behind` / `.draft` / `.hasHooks` / `.unknown`，比 v1 的 `MergeableState` 更细，让 popover 的 merge 按钮能精确解释为何被禁用）、`reviewDecision`、`headRepositoryOwner`（供写时 fork 过滤）。
+- **`PullRequestSnapshot` 带 `checkRollup`。** check 结果是快照上的字段，随 PR 元数据在同一 query 取回。快照还带 `mergeStateStatus`（区分 `.clean` / `.dirty` / `.blocked` / `.behind` / `.draft` / `.hasHooks` / `.unknown`，比裸 `MergeableState` 更细，让 popover 的 merge 按钮能精确解释为何被禁用）、`reviewDecision`、`headRepositoryOwner`（供写时 fork 过滤）。
 
 ```swift
 public struct PullRequestSnapshot: Equatable, Sendable, Codable {
@@ -369,7 +367,7 @@ public struct BatchedPullRequests: Equatable, Sendable {
 
 ### 缓存与失效
 
-无 TTL；事件驱动。**缓存键 = `ProjectID`**：一个 Project 的快照共享一条 GraphQL query、共享生命周期；逐 Worktree 失效坍缩为「刷新该 Project」，不再细分。
+无 TTL；事件驱动。**缓存键 = `ProjectID`**：一个 Project 的快照共享一条 GraphQL query、共享生命周期；失效粒度是「刷新该 Project」，不细分到单个 Worktree。
 
 **失效事件枚举：**
 
@@ -471,17 +469,17 @@ public struct RemoteInfo: Equatable, Sendable {
 
 - **env allowlist** 转发 `PATH`、`HOME`、`GH_CONFIG_DIR`、`XDG_CONFIG_HOME`（重定位的 auth store）+ 强制 `LC_ALL`，**剥除 `GH_TOKEN` / `GITHUB_TOKEN`**——codans 不携带、不转发任何 token material。
 - 子进程 argv 是 `(executable, [args])`，无 shell 解释。GraphQL query 作为单个 `-f query=<body>` 传（gh 处理 HTTP POST body）；body 内的用户派生分支名在插值前已 GraphQL-字符串转义，转义失败的分支名被丢弃并记日志。
-- 超时 20 s；**output cap 8 MiB**（从 v1 的 2 MiB 提高——25 分支 × 5 PR × 完整 check rollup 在病态大仓可达 ~4–6 MB；超限抛 `.oversizeResponse`）。
+- 超时 20 s；**output cap 8 MiB**（25 分支 × 5 PR × 完整 check rollup 在病态大仓可达 ~4–6 MB；超限抛 `.oversizeResponse`）。
 - 最低 `gh` 版本 **2.20+**（稳定 GraphQL + `--hostname` 行为）；可用性探针解析 `gh --version`，过旧则显示 `brew upgrade gh` 横幅。
 
 ### UI 层
 
-零视觉变化。视图层适配点（机械替换）：
+视图层接线：
 
-- `WorktreeRowIcon` 的 `rollup` 来源从 `store.checks[snapshot.number]` 改为 `PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)`。
-- `PullRequestPopover` 读 `snapshot.checkRollup` + 新增 `snapshot.mergeStateStatus` / `snapshot.reviewDecision`，更精确解释 merge-disabled 原因。
-- `WorktreeGitHubBadge` 读 `store.snapshots[worktreeID]`——外部不变，reducer 从 `state.snapshotsByProject[P]` 派生该字典。
-- 侧栏行原先驱动 `worktreeBecameVisible` 的逐行 `.task` 已**移除**；reducer 经 Project 级事件负责发起取数。
+- `WorktreeRowIcon` 的 `rollup` 来源是 `PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)`。
+- `PullRequestPopover` 读 `snapshot.checkRollup` + `snapshot.mergeStateStatus` / `snapshot.reviewDecision`，精确解释 merge-disabled 原因。
+- `WorktreeGitHubBadge` 读 `store.snapshots[worktreeID]`，该字典由 reducer 从 `state.snapshotsByProject[P]` 派生。
+- 侧栏行不持有发起取数的逐行 `.task`；取数由 reducer 经 Project 级事件发起。
 
 ### PR ↔ Worktree 配对
 
@@ -491,11 +489,11 @@ public struct RemoteInfo: Equatable, Sendable {
 
 ## 备选方案
 
-- **A — 保留 v1 per-Worktree，加 3 路 in-flight cap + `statusCheckRollup` 合并。** 否决：成本在 fork 数而非总工作量。合并 pr view + pr checks 把子进程从 2N 降到 N 是不错的增量，但仍 O(N)——20 个 Worktree 仍要 20 × 150 ms 冷启动只为 fork 完；也没解决 `.task`-on-`EmptyView` 的脆弱。仅当 v2 受阻才发。
+- **A — per-Worktree 取数（每行 `gh pr view <branch>` + `gh pr checks <number>`），加 3 路 in-flight cap + `statusCheckRollup` 合并。** 否决：成本随 Worktree 数而非仓库数缩放。合并 pr view + pr checks 把子进程从 2N 降到 N 是增量优化，但仍 O(N)——20 个 Worktree 仍要 20 × 150 ms 冷启动；且逐行 `.task(id:)` 依赖 SwiftUI 视图生命周期，当行解析为不挂载的 `EmptyView()` 时无缓存行的取数根本不发生。repository-batched 模型把成本降到 O(Repositories) 并把取数从视图生命周期解耦，故采纳。
 - **B — 用 `gh pr list --json ... --state all`。** 否决：`gh pr list --json statusCheckRollup` 受支持，但 gh 内部对每个 PR 另发一次 GraphQL，实为 N 次往返、只是被隐藏，总墙钟与 N-分支最坏情形相同。「直接用 gh pr list」的简洁是个泄漏抽象。
 - **C — `URLSession` 直连 GraphQL + Keychain 存 OAuth。** 否决：`gh api graphql` 每 chunk 加 ~100–150 ms 子进程成本，3 并发 chunk 约 200 ms/刷新；付 ~1500 行工程账（OAuth device flow、token 存储/刷新、rate-limit 退避、错误分类、Enterprise host 切换、re-auth 面）去省 ~200 ms 是错的权衡，且重复 `gh` 已正确做的事。仅当 codans 需要实时 PR 更新 / review 线程 / 跨仓聚合时再考虑。
 - **D — 周期后台轮询取代事件驱动。** 否决：事件驱动严格更优——交互时同等新鲜、空闲时零成本。罕见的「GitHub 状态自行变了」由手动刷新 + merge 侧延迟刷新覆盖。**注**：一个 scoped、focus-gated、自适应的轮询被采纳（见上「关于轮询的取舍」），它绕开了 D 的三条反对（后台、全 Project、AFK 时仍跑），因为 AFK 用户的 app 不是前台。
-- **E — 落盘最后快照以启动即显。** v2.0 否决：当前「启动后 ~500 ms 空侧栏再填充」可接受。落盘会带来 stale 数据、「显示 X 又变 Y」类 bug、翻倍文件 IO 面。待用户反馈再议。
+- **E — 落盘最后快照以启动即显。** 否决：当前「启动后 ~500 ms 空侧栏再填充」可接受。落盘会带来 stale 数据、「显示 X 又变 Y」类 bug、翻倍文件 IO 面。待用户反馈再议。
 
 ## 风险
 

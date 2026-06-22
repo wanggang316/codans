@@ -1,6 +1,6 @@
 # 设计文档：AgentState View
 
-**状态：** 已上线
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -18,13 +18,13 @@ codans 把编码 agent（Claude Code、Codex CLI、pi、…）当作 Pane 的一
 - 侧栏底部的 AgentState 面板列出所有 worktree 中每个 agent-bearing Pane：agent logo、project + worktree 标签、派生运行态（`working` 带动画指示），以及最近一次状态变化时间。
 - 面板顶部有一句话标题（"Agents View"）；超过 4 条时附带 `(N)` 计数 chip。
 - 点击行聚焦那个 Pane，按需切换 project / worktree / tab。
-- 识别覆盖 `AgentKind` 注册表中的**全部 agent**（v1 shipped 11 个：Claude Code、Codex、pi、opencode、Gemini、Cursor Agent、Cline、GitHub Copilot、Kimi、Droid、Amp）。注册表是手维护的 allowlist——新增 agent 是一次代码改动（扩 `AgentKind` + `AgentKindPatterns`），不是配置改动。其余 Pane 不出现在 AgentState 中。
+- 识别覆盖 `AgentKind` 注册表中的**全部 agent**（当前 11 个：Claude Code、Codex、pi、opencode、Gemini、Cursor Agent、Cline、GitHub Copilot、Kimi、Droid、Amp）。注册表是手维护的 allowlist——新增 agent 是一次代码改动（扩 `AgentKind` + `AgentKindPatterns`），不是配置改动。其余 Pane 不出现在 AgentState 中。
 - `AgentStateStore` 拥有每个 Pane 的运行态状态机，由前台进程组快照、`TerminalEvent` 流（视口文本 / idle / teardown）和 `PaneKeyboardActivityTracker` 驱动。纯运行时态——不持久化。
 - `Pane` 上两个可选字段（`agentKind`、`agentSessionID`）持久化 Pane 绑定到*哪个* agent。Pane 身份判定跨重启存活；运行态不存活。
 
 **非目标**
 
-- 带丰富跃迁历史的通用 agent FSM——那是 C6 v1 的 `AgentStateTracker`，因比 inbox 所需的机器多得多而被放弃。沿用同一教训：AgentState 只存渲染面板所需的最小派生态，仅此而已。
+- 带丰富跃迁历史的通用 agent FSM。AgentState 只存渲染面板所需的最小派生态，仅此而已（根因见「技术决策」）。
 - 识别 allowlist 之外的任意 agent（aider、自研内部 CLI、未来工具）。泛化此能力是 future-work。
 - 新 IPC 面或 `codans` 命令。AgentState 仅在 app 内。
 - 重新实现通知 inbox 的 UX。两套系统不共享 UI；被 mute 的 Pane 仍出现在 AgentState 中。
@@ -55,7 +55,7 @@ codans 把编码 agent（Claude Code、Codex CLI、pi、…）当作 Pane 的一
 
 **为什么是这个形状。** 两个设计张力驱动这次拆分。
 
-第一是**identification vs. state**：「这个 Pane 到底是不是 agent」是一个缓变、可持久、需要跨重启存活的事实（这样用户带 logo 的行不会在重启后全部消失）。「这个 agent 现在在干什么」是快变、可丢弃的派生。把两者混在一起，正是被废弃的 C6 v1 设计长出重量级 FSM 的原因；拆开后每层都能很小。
+第一是**identification vs. state**：「这个 Pane 到底是不是 agent」是一个缓变、可持久、需要跨重启存活的事实（这样用户带 logo 的行不会在重启后全部消失）。「这个 agent 现在在干什么」是快变、可丢弃的派生。两者拆开后每层都能很小（不拆开的代价见「技术决策」）。
 
 第二是**与 notifications 独立**。通知检测器与 AgentState 共享三条输入流，但回答不同问题。强迫一方消费另一方的输出（例如「AgentState 读 InboxStore 来定 `finished` 态」）会把 mute 策略、去重窗口和规则语法耦合进一个本不该关心它们的层。两者都订阅原始信号；输出永不交叉。
 
@@ -200,7 +200,7 @@ derive(pane) =
 
 排序由 `SortedEntriesProvider` 给出：先按状态优先级桶（triage 顺序），桶内按 `lastTransitionAt` 降序；`AgentStateOrderCoordinator` 对状态驱动的重排做防抖，使列表不随 agent 状态翻动而闪烁（reduce-motion 用户拿到无动画的重排）。
 
-> **附注：** 另有一个 `AgentStateView`（width 320 的 popover 变体，标题 "Active Agents (N)"）保留在 feature 目录中，但当前 shipped 宿主是侧栏面板，不是 popover。
+> **附注：** 另有一个 `AgentStateView`（width 320 的 popover 变体，标题 "Active Agents (N)"）保留在 feature 目录中，但当前装配的宿主是侧栏面板，不是 popover。
 
 **Logo 资源** 放在 `apps/mac/codans/Resources/Assets.xcassets/AgentLogos/`，每个已识别 kind 一个 imageset（light/dark 双变体）。来源是各 agent 官方 press / brand kit；license 风险记在 Risks。回落 SF Symbol 覆盖任何尚无资源的 kind。
 
@@ -224,10 +224,20 @@ var setPaneAgentSessionID: @MainActor @Sendable (PaneID, String?) -> Void
 
 `AgentStateStore` 经 `reconcileMembership(livePaneIDs:)` 兜底——对每次结构性 catalog 变更（`hierarchyMutated`）丢弃已不在 catalog 中的 entry，斩断「ghost 行被再持久化进 quit snapshot、下次启动又被 seed」的回路。它收一个扁平 `Set<PaneID>` 而非 `Catalog`，使 store 不沾 hierarchy import（catalog 遍历留在 wiring 层）。
 
+## 技术决策
+
+**为何不持久化跃迁、不建通用 agent FSM。** AgentState 只在内存里保留每个 Pane 的最近一个派生态，跃迁历史不落盘。理由：
+
+- AgentState 恰好只需「现在是哪个态」来渲染一份永远反映当下的列表，而非一份跃迁日志。带丰富跃迁历史的 per-Pane FSM 会为这个目标翻倍其表面积，且需要持久化与迁移。
+- identification（缓变、可持久）与 runtime state（快变、可丢弃）一旦混在同一台状态机里，那台机器就会被迫同时承担「跨重启存活」与「每信号高频更新」两套相互冲突的要求，从而膨胀。拆成 `AgentBinder`（写持久 Pane 字段）+ `AgentStateStore`（纯内存派生）后，每层都很小，且派生层在纯 Swift 里零 I/O 可测。
+- 跃迁历史确有价值，但那是通知 inbox 的领域（它消费 OSC 9 / bell delta 并持久化）。让 AgentState 也存一份会与 inbox 的职责重叠。
+
+**为何与 notifications 共享原始信号但输出永不交叉。** 通知检测器与 AgentState 订阅同三条输入流（前台进程组快照、`TerminalEvent`、视口文本），但回答不同问题——「刚发生了什么」vs「现在正在发生什么」。强迫一方消费另一方的输出（如「AgentState 读 `InboxStore` 来定 `finished` 态」）会把 mute 策略、去重窗口与规则语法耦合进一个本不该关心它们的层。因此两者各自从原始信号派生，`AgentStateStore` 不 import `NotificationStore`。
+
 ## 备选方案（Alternatives）
 
 - **A — 复用 `Pane.labels` 的 `agent:<kind>` 字符串键。** 否决（Gump 明确提出的理由）：字符串键在字段层不被类型检查、鼓励读写双方漂移，并把两个无关子系统（通知 mute 与 agent 识别）混进一个无类型袋。两个可选字段的迁移成本很小；长期清晰度收益很大。
-- **B — 复活 C6 v1 的 per-Pane `AgentStateTracker` FSM 并持久化跃迁。** 否决：AgentState 恰好只需最近一个态，而非跃迁日志；加回持久化会让一个「永远反映当下的列表」翻倍其表面积。上面基于标志的派生在纯 Swift 里零 I/O 可测。
+- **B — per-Pane `AgentStateTracker` FSM 并持久化跃迁。** 否决：AgentState 恰好只需最近一个态，而非跃迁日志；持久化跃迁会让一个「永远反映当下的列表」翻倍其表面积。上面基于标志的派生在纯 Swift 里零 I/O 可测。
 - **C — 把 `finished` 耦合到 `InboxEntry.readAt`。** 否决：(i) 它会从一个 UI feature 强行引一条依赖边进通知存储层，正是「双消费者—单信号源」拆分要避免的耦合；(ii) mute / 去重策略随之漏进 AgentState 语义；(iii) 本地标志配以相同的清除触发（focus、keystroke、新 output）产出相同的可观察行为，却无耦合。
 - **D — macOS `NSStatusItem`（菜单栏）取代 app 内面板。** v1 否决（Gump 拍板）：deferring `NSStatusItem` 把工作留在既有 SwiftUI 宿主内。`AgentStateStore` 与视图的拆分刻意 UI-agnostic，故菜单栏变体是未来的一次替换、而非重写。
 - **E — 实时前台 job 轮询。** 采纳。运行时通过嵌入式终端 API 读 PTY 前台进程组，每周期为所有 Pane 采一次进程表快照。这避开了 title 启发式，同时仍覆盖从已开 shell 启动的 agent 与经运行时 wrapper 启动的 agent。

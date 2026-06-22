@@ -1,8 +1,9 @@
 # 设计文档：Lifecycle Hooks
 
-**状态：已设计，代码尚未实现。** 本文是初始设计；截至目前无 `apps/mac/codans/Hooks/` 目录，`CodansIPC/Method.swift` 无任何 `hook.*` 方法，`CodansCore` 无 `HookEvent` 等类型。读者**不应**认为此能力已上线——下文记录的是已论证的耐久契约，待实现时遵循。
-
+**状态：** 已设计未实现
 **作者：** Gump（与 Claude）
+
+> **设计意图，尚未实现（读前须知）。** 本文是初始设计；截至目前无 `apps/mac/codans/Hooks/` 目录，`CodansIPC/Method.swift` 无任何 `hook.*` 方法，`CodansCore` 无 `HookEvent` 等类型。读者**不应**认为此能力已上线——下文记录的是已论证的耐久契约（API 形状、wire schema、决策），待实现时遵循，不代表现状能力。
 
 ## 背景与范围
 

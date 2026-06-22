@@ -1,6 +1,6 @@
 # Product Spec: Settings Window
 
-**Status:** Implemented
+**状态：** 已上线（可见）
 **Author:** Gump (with Claude)
 
 ## Summary
@@ -12,9 +12,10 @@ codans 提供一个独立的「设置」窗口，承载全局偏好与按 Projec
 
 每个 Project 的子行按 `ProjectKind`（`git_repo` / `dir`）裁剪，但 **kind 本身从不
 在 UI 暴露**——没有图标、徽章或标签区分两者，唯一信号是可见子行（及详情区内
-Section）的集合本身。已落地能力（外部编辑器、代理通知、CLI、per-Project 覆盖、
-脚本）对应的分段给出可用 UI；尚未落地的能力（Shortcuts 自定义、Updates 更新
-通道、Appearance 主题引擎）以占位分段出现，保证导航形状与未来扩展槽位到位。
+Section）的集合本身。全部全局分段（General / Notifications / Developer / Shortcuts /
+Updates / About，以及 GitHub / Worktrees / Terminal / Global Commands 等）与
+Project 分段均已上线，给出可用 UI——外部编辑器、Appearance 主题、代理通知、CLI、
+快捷键自定义、Updates 更新通道、per-Project 覆盖与脚本都在对应分段内可交互。
 
 技术设计见 [Settings 设计文档](../design-docs/settings.md)。
 
@@ -58,8 +59,8 @@ Section）的集合本身。已落地能力（外部编辑器、代理通知、C
 - 作为打开了多个 Project 的用户，我希望侧栏下方出现 Projects 子树，展开每个
   Project 都能看到属于它的设置分段，这样我可以只给某一个项目设置不同的默认编辑器、
   worktree 目录或脚本。
-- 作为已经在使用外部编辑器配置的用户，我希望原有的默认编辑器、内置编辑器列表、
-  自定义编辑器配置在新窗口中以相同的交互存在，已有配置不丢失。
+- 作为已经在使用外部编辑器配置的用户，我希望原有的默认编辑器选择在新窗口中以
+  相同的下拉交互存在（按优先级列出已装编辑器），升级后已有配置不丢失。
 - 作为依赖代理通知的用户，我希望在通知分段里能一眼看到系统通知权限的状态，当权限
   被拒时能用一个入口跳到系统设置。
 - 作为 `codans` CLI 的用户，我希望在设置窗口里能一键安装 / 卸载 `codans`，不必到
@@ -78,27 +79,30 @@ Section）的集合本身。已落地能力（外部编辑器、代理通知、C
   非模态窗口惯例）。macOS 应用菜单出现 Settings… 项，对应 ⌘,。
 - **M2 — 双列布局。** 左侧侧栏 + 右侧详情，两列默认都可见；窗口最小 750 × 500，
   侧栏最小宽度 220pt。
-- **M3 — 全局分段。** 侧栏顶部固定列出全局分段，顺序稳定：General、Notifications、
-  Developer、Shortcuts、Updates、About（及已落地的其它全局分段）。
+- **M3 — 全局分段。** 侧栏顶部固定列出全局分段，顺序稳定：General、GitHub、
+  Worktrees、Terminal、Notifications、Developer、Global Commands、Shortcuts、
+  Updates、About。
 - **M16 — 选中状态。** 关闭窗口会清空当前选中分段，但不清掉各分段里已填写/已编辑
   的数据。再次打开默认回到 General；各分段内容（未提交的对话框草稿除外）与上次
   一致。
 
 ### General 分段
 
-- **M4** 承载：(1) **Appearance**（System / Light / Dark）——选择会持久化但不实际
-  改变主窗口外观（主题引擎尚未实装），控件保持可交互，标题旁以 "Preview" /
-  caption 提示未生效；(2) **Default editor**——下拉：Finder + 所有已装编辑器，
-  全局默认，可被 Project 级覆盖；(3) **Built-in editors**——只读，每行显示已装/未装
-  状态、显示名、命令路径，含 "Refresh detection"；(4) **Custom editors**——可
-  新增/删除，新增弹窗采集 ID/显示名/可执行文件/参数模板，实时校验。
+- **M4** 承载：(1) **Appearance**（System / Light / Dark）——选择持久化并实际驱动
+  全 app 外观，经 `AppAppearanceView` 同时作用于 SwiftUI 的 `.preferredColorScheme`
+  与 AppKit 的 `NSApp.appearance`（覆盖 Ghostty 终端宿主）；footer 提供跳往 Terminal
+  分段的链接，在那里设好 light/dark 终端主题后即随此选择同步切换；(2) **Default
+  editor**——下拉，按优先级列出所有已装编辑器（含 Finder），全局默认，可被 Project
+  级覆盖。打开分段时刷新检测缓存，运行期间新装的编辑器在下次打开设置时出现。
 
 ### Notifications 分段
 
-- **M5 — 五个控件。** (1) **In-app notifications**——总开关；(2) **System
+- **M5 — 四个控件。** (1) **In-app notifications**——总开关；(2) **System
   notifications**——开关，打开时若系统权限被拒，弹对话框含 "Open System
-  Settings" 直达；(3) **Sound**——开关；(4) **Dock badge**——开关；(5) **Mute
-  rules**——只读静音规则计数摘要 + "Reveal rules.json in Finder"。
+  Settings" 直达；(3) **Sound**——开关；(4) **Dock badge**——开关。静音规则
+  （`NotificationsSettings.mute`）持久存于 `settings.json`，但其专用规则编辑
+  Section 在规则编辑器落地前暂不在分段内呈现（当前 per-pane 静音直接走
+  `Pane.labels`）。
 - 四个开关正交（in-app 与 system 独立，可实现「仅后台」）。System 关时 Sound 行
   禁用但持久值保留。被拒状态下开启 System 会弹信息性 alert 含深链，而开关保持
   开启（捕获意图，不代表 OS 拦截状态）。各开关的精确门控语义见
@@ -114,10 +118,13 @@ Section）的集合本身。已落地能力（外部编辑器、代理通知、C
 
 ### Shortcuts / Updates / About
 
-- **M7** Shortcuts 与 Updates 进入后显示统一占位面板 "Coming in a later
-  release."；选中仍高亮，不产生空态闪烁。
-- **M8** About 显示 App 名称、版本号（短版本 + Build 号）、版权声明、官网占位
-  链接。本版本不含 "Check for updates"（归 Updates，未交付）。
+- **M7 — Shortcuts。** 按类别分组列出 `ShortcutSchema.app` 的每条快捷键，支持录制
+  新组合键、禁用某条、单行重置与全部恢复默认；录制时的冲突反馈内联呈现，级联重置前
+  弹确认对话框。布局遵循 macOS 系统设置惯例（带分组标题的层级 `Table`）。
+- **M8 — Updates。** 承载 Sparkle 更新通道与节奏：通道选择（stable / tip）、后台
+  检查开关与节奏、是否自动下载安装，以及一个 "Check for Updates…" 按钮立即探测。
+  每次改动写入 `settings.json` 并即时回放给运行中的 Sparkle 实例，启动时同样应用一次。
+- **M8b — About。** 显示 App 名称、版本号（短版本 + Build 号）、版权声明、官网链接。
 
 ### Projects 子树与 Project 分段
 
@@ -186,9 +193,8 @@ Section）的集合本身。已落地能力（外部编辑器、代理通知、C
 
 - 升级前历史配置里 `defaultEditorID` 为某具体编辑器 → 首次打开新版本设置窗口，
   General 的 Default editor 下拉展示该编辑器为选中项。
-- 升级前已有若干自定义编辑器 → 打开设置，Custom editors 列表完整展示所有历史条目。
-- 在 Custom editors 新增一个合法模板，关闭窗口再打开 → 新增条目仍在。
-- Appearance 设为 Dark，关闭再打开 → 仍显示 Dark（即便主窗口并未实际变暗）。
+- Appearance 设为 Dark → 主窗口（含 Ghostty 终端宿主）即时切换为深色；关闭再打开
+  设置仍显示 Dark。
 
 ### Notifications 分段
 
@@ -229,20 +235,21 @@ Section）的集合本身。已落地能力（外部编辑器、代理通知、C
   并重启 app → 两处改动均保留。
 - 手动编辑磁盘上的 `settings.json` 后重启 app，只要格式合法 → 设置窗口完整反映
   磁盘上的值。
-- 历史版本已有默认编辑器 + 自定义编辑器 + 通知偏好 + per-Project 覆盖，升级到
-  本版本并打开设置 → 全部可见且可编辑，历史已写盘的任意条目不在升级中丢失。
+- 历史版本已有默认编辑器 + 通知偏好 + per-Project 覆盖，升级到本版本并打开设置 →
+  全部可见且可编辑，历史已写盘的任意条目不在升级中丢失。
 
-### 占位分段
+### Shortcuts / Updates 分段
 
-- 点击 Shortcuts 或 Updates → 详情区显示统一的 "Coming in a later release."；
-  侧栏选中高亮正常；切回 General 正常恢复。
+- 点击 Shortcuts → 详情区按类别列出全部快捷键；录制一个与现有项冲突的组合键 →
+  内联冲突反馈出现；点击全部恢复默认 → 弹确认对话框。
+- 点击 Updates → 详情区出现通道选择、后台检查/自动下载开关与 "Check for Updates…"
+  按钮；切换通道 → 写入 `settings.json` 且立即触发一次后台检查。
 
 ## Out of Scope
 
-- Shortcuts 自定义（快捷键录制、冲突检测、覆盖存储）——占位分段。
-- Appearance 主题引擎（光/暗/跟随系统的全 app 渲染）——控件可交互但不生效。
-- Updates 更新通道（自动检查、通道切换、自动下载）——占位分段。
-- 仓库 avatar 获取、贡献者信息展示；分析 / 崩溃上报开关。
+- 静音规则的窗口内可视化编辑器（`NotificationsSettings.mute` 已持久化，但规则编辑
+  Section 尚未呈现）。
+- 仓库 avatar 获取、贡献者信息展示。
 - Skill 安装器 UI（codans Agent Skill 的安装由 CLI 驱动，不进入设置窗口）。
 - 侧栏顶部搜索框；设置的 JSON 导入/导出。
 - 按 Project hook 的在窗口内可视化新建/编辑（仅 "Reveal in Finder" 逃生入口）。

@@ -1,23 +1,23 @@
 # Design Doc: Main Window
 
-**Status:** Shipped
+**状态：** 已上线（可见）
 **Author:** Gump (with Claude)
 
 ## Context and Scope
 
-主窗口是两栏布局：左 **Sidebar**（扁平 Project 树 + 底部 Tag filter），右 **Detail**（终端之上一行 **Header**，其下 **Tab 条** + 分屏 **Pane**）。能力与验收见 [Main-Window UI 产品规格](../product-specs/ui-main-window.md)。
+主窗口是两栏布局：左 **Sidebar**（扁平 Project 树 + 底部 footer），右 **Detail**（终端之上一行 **Header**，其下 **Tab 条** + 分屏 **Pane**）。能力与验收见 [Main-Window UI 产品规格](../product-specs/ui-main-window.md)。
 
 层级为 `Catalog → Project → Worktree → Tab → Pane`（四级）。本文记录三个主窗口子系统——Sidebar、Header、Tab 条——各自的**耐久不变量与边界**，即"为什么这样拆、什么绝不能反过来做"。具体 SwiftUI 布局、像素值、reducer 全量 action 表不在此固化（实现可演进）。
 
-本窗口最初以四子任务的"主窗口重构"立项；其后被两次产品演进覆盖，下文已按现状陈述（见末尾 §设计沿革）。相邻子系统的现状权威文档：
+相邻子系统的权威文档：
 
 - 通知 / 未读上卷 / 状态栏铃铛：[notifications.md](notifications.md)。
-- Space→Tag / 单窗口 / 侧栏 Tag filter：[project-tags.md](project-tags.md)。
-- Diff inspector（取代 Git Viewer）：[diff-inspector.md](diff-inspector.md)。
+- Tag 模型 / 单窗口 / Tag 过滤：[project-tags.md](project-tags.md)。
+- Diff inspector（已设计未实现）：[diff-inspector.md](diff-inspector.md)。
 
 ## Sidebar
 
-`HierarchySidebarView` 渲染当前 Catalog 的**扁平 Project 列表**（无 Space 层），每个 Project 是一个 section，其下列出 Worktree；底部钉一条 Tag filter chip 条。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter chip、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
+`HierarchySidebarView` 渲染当前 Catalog 的**扁平 Project 列表**，每个 Project 是一个 section，其下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），当前露出排序（reorder）与刷新两个动作。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
 
 ### 不变量
 
@@ -32,15 +32,15 @@
 
 - **依赖方向：app → CodansCore，单向。** `FinderClient` 是 app 侧；`CodansCore` 永不 import AppKit。
 
-### Tag filter
+### Tag filter（已实现，当前隐藏）
 
-底部 Tag filter chip 条原地占据早先 spaceFooter 的槽位（`.safeAreaInset(edge: .bottom)`），渲染每个 `Tag` 一个 chip + 隐含 `[All]` / `[Untagged]`，点击切换 `Catalog.activeTagFilter`（多选 OR；`[Untagged]` 互斥，仅在存在无标签 Project 时出现）。Tag 模型（`Tag` / `TagID` / `TagFilter` / `Project.tagIDs` / `Catalog.tags` / `Catalog.activeTagFilter`）、CRUD、迁移与 CLI 全在 [project-tags.md](project-tags.md)，本文不复述。
+侧栏底部 footer 钉在 `.safeAreaInset(edge: .bottom)`。Tag 过滤入口（`TagFilterPopoverFooter` 的过滤按钮 + popover 内的 `TagFilterList`）已实现并保留接线：popover 列每个 `Tag` 一行 + 隐含 `[All]` / `[Untagged]`，点击切换 `Catalog.activeTagFilter`（多选 OR；`[Untagged]` 互斥，仅在存在无标签 Project 时出现）。但该过滤按钮**当前刻意隐藏**（`TagChipFooter.swift:49`）——footer 当前只露排序与刷新，过滤可在不重接调用点的前提下重新挂出。Tag 模型（`Tag` / `TagID` / `TagFilter` / `Project.tagIDs` / `Catalog.tags` / `Catalog.activeTagFilter`）、CRUD、迁移与 CLI 全在 [project-tags.md](project-tags.md)，本文不复述。
 
 ## Header
 
 Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只读 `⎇ branch` 标签、右侧 "Open in …" split button。它由一个 TCA feature（自 `RootFeature` scope）拥有，挂在 `WorktreeDetailView` 内 Header 原位，不改外层 split-view 结构。
 
-> **Header 现状刻意收窄。** 立项时 Header 还规划了通知铃铛 + popover 和 Git Viewer 切换按钮，二者随产品演进迁出：通知未读改由状态栏铃铛 popover 承载（[notifications.md](notifications.md)：状态栏铃铛是**唯一** popover 入口），Git diff 改由 ⌘⇧G / 命令面板 / 菜单触发的 Diff inspector 承载（[diff-inspector.md](diff-inspector.md)）。下文只保留仍然成立的不变量。
+> **Header 刻意收窄。** Header 不含通知铃铛，也不含任何 Git Viewer / Diff 切换按钮。通知未读由状态栏铃铛 popover 承载（[notifications.md](notifications.md)：状态栏铃铛是**唯一** popover 入口）。Git 相关入口不挂 Header：⌘⌥G / 菜单 / 命令面板 "Toggle Git Viewer" 启动用户在 Settings → General → Default Git Viewer 选定的**外部 git 客户端**（解析 `general.defaultGitViewerID`；选 None 或解析不出即 no-op）。应用内的 **Diff inspector 尚未实现**（[diff-inspector.md](diff-inspector.md) 为前瞻设计，落地的只有 `CommandID.toggleDiffInspector` 标识符）。下文只保留仍然成立的不变量。
 
 ### 不变量
 
@@ -61,9 +61,11 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 - **未读计数与（曾经的 Header）popover 行共用同一个 `PaneID → WorktreeID` 索引。** 凡是把未读按 Worktree 聚合的读取，都必须经同一个 `panelWorktreeIndex()` 派生的 `PaneID → WorktreeID` 索引：徽标计数与逐 Worktree 的行计数因此用同一套 orphan 排除策略——pane 已不在 catalog 的条目对二者都不计——所以徽标永不超过实际渲染的行数。这条不变量现由通知子系统持有：`NotificationInbox.totalUnread(in:)` / `notifications(forWorktree:in:)` 是同源实现（[notifications.md](notifications.md) §上卷/`RollupIndex`）。
   > 该索引最初服务于 Header 上的 bell badge + 分组 popover。bell 已迁到状态栏（[notifications.md](notifications.md)）；"计数与行共用一个索引、orphan 对二者一致排除"的约束随之迁移，但**约束本身未变**——任何重新引入逐 Worktree 未读聚合的表面都必须复用这个单一索引，而非自建第二份。
 
-### Diff inspector 切换（已被取代）
+### Git diff 入口（无应用内查看器）
 
-立项时 Header 的 Git Viewer 切换写 `Worktree.gitViewerVisible`，并经 `HierarchyClient.setWorktreeGitViewerVisible` + `ContentView` 的 `resolveGVVisible` / `RootFeature.inspectorVisible` 这套。**这半已整体被 Diff inspector 取代**：触发入口改为 ⌘⇧G / 命令面板 "Toggle Git Viewer" / 菜单，`Worktree.gitViewerVisible` 直接重命名为 `Worktree.diffInspectorVisible`（无别名解码），呈现从右缘 overlay 改为右缘 changed-files inspector + 全区 diff drawer。现状与不变量见 [diff-inspector.md](diff-inspector.md)；主窗口侧不再持有任何 Git-Viewer-toggle 状态。
+主窗口侧**不**持有任何 Git-Viewer-toggle 状态，Header 上也无对应按钮。旧的右缘 `GitViewer` overlay 已移除（其 `Worktree.gitViewerVisible` 字段、`HierarchyClient.setWorktreeGitViewerVisible`、`ContentView.resolveGVVisible` 等都已不复存在）。当前唯一的 Git diff 入口是 ⌘⌥G / 菜单 / 命令面板 "Toggle Git Viewer"，它解析 `general.defaultGitViewerID` 并启动一个**外部 git 客户端**（选 None 或解析不出即 no-op；`RootFeature.diffInspectorToggledForCurrentWorktree`）。
+
+应用内的 **Diff inspector（右缘 changed-files inspector + 全区 diff drawer）尚未实现**——[diff-inspector.md](diff-inspector.md) 是前瞻设计，截至本次修订 `apps/mac/codans/App/Features/Diff/` 不存在，落地的只有 `CommandID.toggleDiffInspector` 标识符及其钉死的 JSON raw value。该设计落地后会引入 `Worktree.diffInspectorVisible`（由 `gitViewerVisible` 重命名而来）。
 
 ## Tab Bar
 
@@ -99,8 +101,8 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 | 组件 | 拥有 | 不拥有 |
 |---|---|---|
 | `HierarchySidebarFeature` | 展开集合、filter/popover/sheet 瞬态状态、上下文菜单派发、选择/filter 编排、delegate 上抛 | 编辑器打开副作用（delegate 给 EditorFeature）、Finder 揭示（经 FinderClient）、catalog 变更（经 HierarchyClient） |
-| `HierarchySidebarView` | 视觉树、hover chrome、行点、Tag filter footer | 选择逻辑、catalog 状态（直读 `hierarchyManager.catalog`）、inbox 状态（直读 `inboxStore`） |
-| Header feature | 分支标签 + Open-in split button 的 UI 状态、editor-open delegate 上抛 | 默认编辑器解析（`EditorFeature.resolveDefault` 单一来源）、通知（状态栏）、Git diff（Diff inspector） |
+| `HierarchySidebarView` | 视觉树、hover chrome、行点、底部 footer（排序/刷新；Tag 过滤已实现但当前隐藏） | 选择逻辑、catalog 状态（直读 `hierarchyManager.catalog`）、inbox 状态（直读 `inboxStore`） |
+| Header feature | 分支标签 + Open-in split button 的 UI 状态、editor-open delegate 上抛 | 默认编辑器解析（`EditorFeature.resolveDefault` 单一来源）、通知（状态栏）、Git diff（⌘⌥G 走外部客户端；应用内 Diff inspector 待实现） |
 | `TabBarFeature` | 把每个 tab 操作一行转发经 client；无状态 reducer | catalog 状态、运行态/焦点 map（在 HierarchyManager 上） |
 | `HierarchyManager` | catalog 变更、`paneRunning` / `lastFocusedPaneByTab` runtime-only map、Tag CRUD | 各 feature 的 UI 状态 |
 | `FinderClient` | `reveal(path:)` 经 NSWorkspace | 编辑器打开（不同 client） |
@@ -109,18 +111,18 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 
 ## 设计沿革（History）
 
-本窗口最初以四子任务推进：T0（数据模型/聚合契约）、T1（Sidebar + Space switcher）、T2（Header 行）、T3（Git Viewer overlay + 快捷键）。其后两次产品演进改写了现状，本文已按现状陈述并清除了被取代/删除的内容：
+本节仅记录改变了当前形态的承重转变，正文已按现状陈述、不再复述被取代或删除的中间态：
 
-- **Space → Tag / 单窗口**（[project-tags.md](project-tags.md)，Approved）：`Space` / `SpaceID` / `CatalogWindow` 从域模型整体移除，层级 5→4 级。**已删除字段**：`Space.lastActiveWorktreeID`、`Space.selectedProjectID`、`CatalogWindow.selectedSpaceID`——切勿当现状。侧栏底部从 Space switcher 改为 Tag filter；⌘1–⌘9 / ⌘K 解绑。
-- **Git Viewer → Diff inspector**（[diff-inspector.md](diff-inspector.md)）：Header 的 Git Viewer 切换按钮移除；`Worktree.gitViewerVisible` 重命名为 `Worktree.diffInspectorVisible`；呈现改为右缘 inspector + 全区 drawer，触发改为 ⌘⇧G / 命令面板 / 菜单。
-- **通知铃铛迁出 Header**（[notifications.md](notifications.md)）：未读以按层级上卷的徽标呈现，唯一 popover 入口是状态栏铃铛。
+- **Space → Tag / 单窗口**（[project-tags.md](project-tags.md)，Approved）：`Space` / `SpaceID` / `CatalogWindow` 从域模型整体移除，层级 5→4 级。**已删除字段**：`Space.lastActiveWorktreeID`、`Space.selectedProjectID`、`CatalogWindow.selectedSpaceID`——切勿当现状。横切分类改由 `Tag` 承载；侧栏底部不再有 Space switcher（Tag 过滤已实现但当前隐藏，见上文 §Tag filter）；⌘1–⌘9 / ⌘K 解绑。
+- **Git Viewer overlay 移除**（[diff-inspector.md](diff-inspector.md)）：旧的右缘 `GitViewer` overlay 连同 Header 上的切换按钮一并移除；应用内的 Diff inspector 仍是**前瞻设计、尚未实现**（落地的只有 `CommandID.toggleDiffInspector`）。当前 ⌘⌥G / 命令面板 / 菜单的 "Toggle Git Viewer" 启动外部 git 客户端。
+- **通知铃铛不在 Header**（[notifications.md](notifications.md)）：未读以按层级上卷的徽标呈现，唯一 popover 入口是状态栏铃铛。
 
 ## References
 
 - 产品规格：[ui-main-window.md](../product-specs/ui-main-window.md)
 - Tag / 单窗口：[project-tags.md](project-tags.md)
 - 通知 / 上卷 / 状态栏铃铛：[notifications.md](notifications.md)
-- Diff inspector：[diff-inspector.md](diff-inspector.md)
+- Diff inspector（已设计未实现）：[diff-inspector.md](diff-inspector.md)
 - 键盘快捷键统管：[keyboard-shortcuts.md](keyboard-shortcuts.md)
 - 层级 / catalog：`apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane,SplitTree}.swift`
 - 层级变更面：`apps/mac/codans/App/Clients/HierarchyClient.swift`

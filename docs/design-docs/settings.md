@@ -1,6 +1,6 @@
 # Design Doc: Settings — Window, Persistence, and Per-Project Preferences
 
-**Status:** Implemented
+**状态：** 已上线（可见）
 **Author:** Gump (with Claude)
 
 ## Context and Scope
@@ -44,19 +44,18 @@ files** is the load-bearing decision — see "The single-writer invariant".
   override field is `Optional` so a future worktree tier is purely additive.
 - A per-repo checked-in config file (team-shared config overlaid on global).
   All Project settings live in the user-global `settings.json`.
-- Appearance theme engine, Shortcuts capture, Updates channel — placeholder
-  panes only.
 - A general settings import/export UI; sidebar search.
 
 ## The single-writer invariant
 
-Settings began as **two** `@MainActor` stores writing the same
-`settings.json`: an editor store owning `{version, defaultEditorID,
-customEditors}` and a notifications store owning `{version, notifications}`.
-Both decoded through `AtomicFileStore`, both rewrote the file in full from a
-narrow schema, and the last writer silently wiped the other's keys. Collapsing
-onto a single `SettingsStore` that owns the whole `Settings` tree is what fixes
-that class of bug.
+A single `SettingsStore` owns the whole `Settings` tree and is the only writer
+of `settings.json`. This guards against the failure mode that motivated the
+design: **two** `@MainActor` stores writing the same file — an editor store
+owning `{version, defaultEditorID, customEditors}` and a notifications store
+owning `{version, notifications}` — both decoding through `AtomicFileStore`,
+both rewriting the file in full from a narrow schema, so the last writer
+silently wipes the other's keys. One store owning the whole tree closes that
+class of bug.
 
 The invariant generalizes: **"different writers must not clobber one file" is a
 writer-overlap rule, not a centralization mandate.** The correct split is
@@ -120,14 +119,15 @@ so reducers need only a `ProjectID`, not a full `Project` snapshot.
 public nonisolated struct Settings {            // currentVersion = 3
   var version: Int
   var general: GeneralSettings
-  var notifications: NotificationsSettings
   var developer: DeveloperSettings
-  var projects: [ProjectID: ProjectSettings]    // v2 key was `repositories`
+  var worktree: WorktreeSettings
+  var projects: [ProjectID: ProjectSettings]
+  var notifications: NotificationsSettings
 }
 
 public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
-  var defaultEditor: EditorID?         // moved off Project.catalog in v2→v3
-  var worktreesDirectory: String?      // moved off Project; no-op on `dir`
+  var defaultEditor: EditorID?         // nil = inherit the global default editor
+  var worktreesDirectory: String?      // no-op on `dir`
   var envVars: [String: String]
   var scripts: [ScriptDefinition]
   var git: GitProjectSettings?         // nil for `dir`, or when no git overrides
@@ -161,16 +161,18 @@ Durable schema decisions:
   a no-op for `dir`; carrying it universally keeps the data model uniform and a
   later `git init` upgrade picks it up at no cost.
 
-### Reading per-Project fields after migration
+**Resolving per-Project fields (post-migration invariant).** The `catalog.json`
+encoder **does not write** `Project.defaultEditor` / `worktreesDirectory` (both
+are permanently `nil` in the snapshot). Every reader MUST resolve those two
+fields via `SettingsStore` / `settings.projects[pid]`, **never** off the
+`Project` struct — which silently yields `nil`, read by callers as "use global
+default". This is the most common drift trap in this subsystem.
 
-After the v2→v3 fold, the v2 `catalog.json` encoder **stops writing**
-`Project.defaultEditor` / `worktreesDirectory` (permanently `nil` in the
-snapshot). Every reader MUST resolve those two fields via
-`SettingsStore` / `settings.projects[pid]`, **never** off the `Project` struct —
-which now silently yields `nil`, read by callers as "use global default". This
-is the most common drift trap in this subsystem.
+## 技术决策 — schema 迁移记录
 
-## Migration (v1/v2 → v3)
+The schema is **v3** today (`Settings.currentVersion = 3`). The records below
+pin the load-bearing *why* behind how the loader still ingests every historical
+shape; they are not part of the steady-state read/write path.
 
 The migration entry point in code is **`SettingsMigration.load`** with
 `typealias SettingsMigration.CatalogOverrides`
@@ -179,22 +181,28 @@ The migration entry point in code is **`SettingsMigration.load`** with
 name **`HierarchyManager.drainLegacyOverrides`** — same mechanism, two names;
 the code-side authority is `SettingsMigration`.
 
-- `SettingsMigration.load` accepts `version` in `{1, 2, 3}`. v3 is a no-op
-  (idempotent; no disk write). v1/v2 migrate in place; the original file is
-  renamed aside (`settings.json.v1-<ts>` / backup) **before** the first v3
-  write, so a botched migration is always recoverable. The decoder itself stays
-  pure (v3-only); the legacy-shape handling and the catalog fold live in
-  `SettingsMigration.load`.
-- **v1 (two disjoint writers).** A permissive legacy decode reads optional
-  `defaultEditorID`, `customEditors`, `notifications`; missing fields map to
-  defaults, not failures. The v1 `mute.badgeEnabled` maps to the new
-  `dockBadgeEnabled`; the legacy field is deliberately **left on disk** for any
-  third-party reader, but the notification coordinator stops consulting it.
+- **Three accepted shapes; v3 is the fast path.** `SettingsMigration.load`
+  decodes v3 directly (`Settings.init(from:)` is strict v3-only; a no-op,
+  idempotent, no disk write) and catches `unsupportedVersion(2)` /
+  `unsupportedVersion(1)` to run the legacy folds out-of-band. v1 lifts
+  **straight to v3** (it skips v2 entirely — a v1 file never had a `repositories`
+  dict). The original file is renamed aside (`settings.json.v1-<ts>` /
+  `settings.json.v2-<ts>`) **before** the v3 write lands, so a botched migration
+  is always recoverable. The decoder itself stays pure (v3-only); the
+  legacy-shape handling and the catalog fold live in `SettingsMigration.load`.
+- **v1 carries forward only `defaultEditorID`.** The permissive `LegacyV1Settings`
+  decode reads `version` and `defaultEditorID`; missing fields map to defaults,
+  not failures. The retired C8 `customEditors` array is ignored on migration
+  (C8a). v1 had no notifications section, so nothing maps into
+  `NotificationsSettings` from the v1 path.
 - **v2 → v3 fold.** Map each `repositories[pid]` value into a `ProjectSettings`
   whose `git` holds the three GitHub fields; then fold the per-Project
   `defaultEditor` / `worktreesDirectory` read from `catalog.json` into the same
   `projects[pid]`. This requires catalog access at settings-load time and so
-  runs after `HierarchyManager` has loaded.
+  runs after `HierarchyManager` has loaded. Vocabulary unification rides on the
+  same fold: the v2 `repositories` key (value `RepositorySettings`) becomes
+  `projects` (value `ProjectSettings`), retiring the `Repository*` naming that
+  had leaked into JSON keys, test names, and the sidebar.
 - **Migration crash window (ordering invariant).** Draining the catalog only
   *schedules* a debounced save, while the settings v2→v3 commit is synchronous.
   A crash between them would drop overrides permanently — `settings.json` is
@@ -203,18 +211,19 @@ the code-side authority is `SettingsMigration`.
   overrides are non-empty: then a crash before the settings write re-runs the
   fold next boot against an already-clean catalog (the two fields read `nil`),
   producing no duplicates.
-- **Per-file, not atomic.** Each file's decoder accepts two versions and
-  upgrades on its next save; a single file's migration failing can't corrupt the
-  others. Unknown `version` routes the file aside as `*.broken-<ts>` and starts
+- **Per-file, not atomic.** Each persisted file migrates independently on its
+  own load path, so one file's migration failing can't corrupt the others. An
+  unrecognised `version` routes the file aside as `*.broken-<ts>` and starts
   from defaults (the architecture-wide escape hatch).
 
 ## Notification gating (`NotificationsSettings`)
 
-`NotificationsSettings` is the sixth section. Its four UI toggles are
-**orthogonal booleans, not a single `level` enum** — users need crossings the
-enum can't express (in-app off + system on = "background only"), and sound /
-Dock badge are independent dimensions on top. The durable gating contract,
-which the notification coordinator (the single policy chokepoint) enforces:
+`NotificationsSettings` is the `notifications` section of `settings.json`. Its
+four delivery toggles are **orthogonal booleans, not a single `level` enum** —
+users need crossings the enum can't express (in-app off + system on =
+"background only"), and sound / Dock badge are independent dimensions on top.
+The durable gating contract, which the notification coordinator (the single
+policy chokepoint) enforces:
 
 - **`inAppEnabled`** gates `inbox.append` (the bell unread list, and the Dock
   badge that derives from the inbox's unread count) but is **decoupled from the
@@ -225,9 +234,9 @@ which the notification coordinator (the single policy chokepoint) enforces:
 - **`soundEnabled`** is passed **per call** as `OSNotifier.post(playSound:)`,
   not stashed as adapter state — a stateful `playSound` property would race when
   a batch of posts straddles a settings flip.
-- **`dockBadgeEnabled`** drives the Dock badge — explicitly **not** the legacy
-  `mute.badgeEnabled`, which the migration mapped from but the coordinator no
-  longer reads.
+- **`dockBadgeEnabled`** drives the Dock badge. `recomputeDockBadge` clears the
+  badge unless **both** `inAppEnabled` and `dockBadgeEnabled` are on, so the
+  badge is a strict subset of the inbox surface.
 
 The inbox **is** the only in-app surface; there is no separate transient toast,
 so gating it satisfies the "no in-app banner" requirement without building one.

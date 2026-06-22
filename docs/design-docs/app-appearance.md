@@ -1,6 +1,6 @@
 # 设计文档：App Appearance & Terminal Theme
 
-**状态：** 已上线
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -60,10 +60,10 @@ codans 的 Settings → General → Appearance picker（`system` / `light` / `da
 
 ### App 外观的决议：单写者 `NSApp.appearance`
 
-> **机制更正（核心）。** 早先的设计走"双路径"：SwiftUI 侧 `.preferredColorScheme` + AppKit 侧 `NSApp.appearance` 各写一遍。实测两者**会打架**——同一窗口既被 SwiftUI 的 `.preferredColorScheme` 又被 `NSApp.appearance` 写入时会相互覆盖、产生抖动。已上线方案因此**移除了 `.preferredColorScheme`**，改为：
+App 外观只有**一个写者**：`NSApp.appearance`（+ 逐窗口 `NSApp.windows[n].appearance`），它是 AppKit 与 SwiftUI 共同的外观真相源。**不**额外用 SwiftUI 的 `.preferredColorScheme`——单写者与 `.preferredColorScheme` 双写同一窗口会相互覆盖、产生抖动（详见 Alt 2）。
 
-- **单写者**：只有 `NSApp.appearance`（+ 逐窗口 `NSApp.windows[n].appearance`）写外观。它是 AppKit 与 SwiftUI 共同的外观真相源。
-- **SwiftUI 派生**：SwiftUI 的 `@Environment(\.colorScheme)` 从**宿主窗口的 `effectiveAppearance`** 派生而来——无需 `.preferredColorScheme` 去强推。窗口外观一旦由单写者设定，嵌在其中的 SwiftUI 子树读到的 `colorScheme` 即随之解析。
+- **单写者**：`NSApp.appearance`（+ 逐窗口）是唯一施加外观处。
+- **SwiftUI 派生**：SwiftUI 的 `@Environment(\.colorScheme)` 从**宿主窗口的 `effectiveAppearance`** 派生而来。窗口外观一旦由单写者设定，嵌在其中的 SwiftUI 子树读到的 `colorScheme` 即随之解析，无需 `.preferredColorScheme` 强推。
 
 这样既覆盖了不参与 SwiftUI 色彩环境的 Metal-backed AppKit 宿主（Ghostty 终端视图），又让 SwiftUI 系统语义色与 materials 通过宿主窗口正确重渲染——且只有一个写者，杜绝双路径互覆盖。
 
@@ -112,10 +112,10 @@ codans 的 Settings → General → Appearance picker（`system` / `light` / `da
 ### API 设计
 
 **`AppearancePreference` — 两个投影。**
-`var colorScheme: ColorScheme?`（`.system → nil`）与 `var appearance: NSAppearance?`（`.system → nil`、`.light → .aqua`、`.dark → .darkAqua`）。因 `CodansCore` 必须 `AppKit`-free（被非 UI target 消费），`NSAppearance` 投影放在 `apps/mac/codans/App/Theme/` 下的 app 模块扩展里；`ColorScheme` 投影与之并置，保持 Core 纯净。`colorScheme` 投影现主要供需要读色彩方案的下游（如 `GhosttyColorSchemeSyncView`）解析使用，**不再**经 `.preferredColorScheme` 回推给 SwiftUI。
+`var colorScheme: ColorScheme?`（`.system → nil`）与 `var appearance: NSAppearance?`（`.system → nil`、`.light → .aqua`、`.dark → .darkAqua`）。因 `CodansCore` 必须 `AppKit`-free（被非 UI target 消费），`NSAppearance` 投影放在 `apps/mac/codans/App/Theme/` 下的 app 模块扩展里；`ColorScheme` 投影与之并置，保持 Core 纯净。`colorScheme` 投影供需要读色彩方案的下游（如 `GhosttyColorSchemeSyncView`）解析使用，**不**经 `.preferredColorScheme` 回推给 SwiftUI。
 
 **`AppAppearanceView<Content>` — scene wrapper。**
-包住每个 scene 的内容，经既有 `@Environment` 注入响应式读 `SettingsStore`。它**只**经 AppKit 路径施加外观——在 `.background { }` 里挂一个 `WindowAppearanceSetter`，由后者写 `NSApp.appearance`。**不再** `.preferredColorScheme`（已移除，避免与 `NSApp.appearance` 打架）。放在*每个* scene 根，确保 `viewDidMoveToWindow` 每次 scene 挂载至少触发一次，自动接住新开窗口。
+包住每个 scene 的内容，经既有 `@Environment` 注入响应式读 `SettingsStore`。它**只**经 AppKit 路径施加外观——在 `.background { }` 里挂一个 `WindowAppearanceSetter`，由后者写 `NSApp.appearance`；**不**用 `.preferredColorScheme`（避免与 `NSApp.appearance` 打架）。放在*每个* scene 根，确保 `viewDidMoveToWindow` 每次 scene 挂载至少触发一次，自动接住新开窗口。
 
 **`WindowAppearanceSetter` — `NSViewRepresentable`（单写者本体）。**
 薄 `NSView` 包装。`viewDidMoveToWindow`（与 `preference` 的 `didSet`）触发 `applyAppearance()`：
@@ -147,7 +147,7 @@ private func applyAppearance() {
 
 ### Managed-keys 策略
 
-config 文件是用户写的行与 codans 拥有的行的混合。`apply` 定义一组 **managed keys**——已从 v1 的仅 `theme` **扩展到** `cursor-style` / `font-family` / `font-size`（这些与 `theme` 共用同一套 managed-keys 机制；进一步扩展是自然延伸）。写盘时：
+config 文件是用户写的行与 codans 拥有的行的混合。`apply` 定义一组 **managed keys**——`theme` / `cursor-style` / `font-family` / `font-size`，共用同一套 managed-keys 机制（进一步扩展是自然延伸）。写盘时：
 
 1. 以 UTF-8 按行读取。
 2. 逐行扫描：键在 managed 集内则丢弃，否则**逐字节原样保留**（注释、空白、未知键、其他用户指令）。
@@ -165,13 +165,13 @@ managed 块无论 draft 顺序如何，**总以同一顺序与格式**输出，�
 
 `SettingsSection` 增 `.terminal` case。新 reducer `SettingsTerminalFeature`（state：`snapshot` / `isLoading` / `isApplying` / `errorMessage` / `warningMessage`；actions：`onAppear` 异步加载、`lightThemeSelected` / `darkThemeSelected`、`applyResult`；reducer 节流 apply——快速重选取代在飞调用）依赖 `GhosttyTerminalSettingsClient`（TCA `DependencyKey`，`liveValue` 在 `MainActor` 绑 `GhosttyConfigFile`，test value 内存 fixture）。UI 为并排两个 `Picker`（nil 时显 "Select Theme"，`isApplying || isLoading` 时禁用），warning / error 渲染于控件上方。
 
-**不变：** `SettingsStore`、`AppearancePreference.CodingKeys`、`GeneralSettings`、`SettingsGeneralView` 的 `Picker` 绑定；仅 caption copy 去掉 "preview only"。
+**不变：** `SettingsStore`、`AppearancePreference.CodingKeys`、`GeneralSettings`、`SettingsGeneralView` 的 `Picker` 绑定。General pane 的 caption 不宣称 "preview only"——Appearance 选择真正驱动 chrome。
 
 ### 组件边界
 
 ```
 CodansCore/Settings/
-  AppearancePreference.swift           Codable 枚举 — 去 "preview only" 措辞
+  AppearancePreference.swift           Codable 枚举
   GeneralSettings.swift                不变
 
 apps/mac/codans/App/Theme/         (新文件; ThemeGit.swift 的兄弟)
@@ -193,7 +193,7 @@ apps/mac/codans/Runtime/Ghostty/
 apps/mac/codans/App/Features/Settings/
   SettingsSection.swift                +.terminal
   SettingsWindowView.swift             侧栏行 + .terminal pane 分支
-  Panes/SettingsGeneralView.swift      去 "preview only" caption
+  Panes/SettingsGeneralView.swift      Appearance picker（caption 不含 "preview only"）
   Panes/SettingsTerminalView.swift     新 pane
   SettingsTerminalFeature.swift        新 TCA reducer + client
 
@@ -217,7 +217,7 @@ apps/mac/codans/App/Clients/
 
 ### Alt 2 — 双路径（`.preferredColorScheme` + `NSApp.appearance` 都写）
 SwiftUI 侧 `.preferredColorScheme` 与 AppKit 侧 `NSApp.appearance` 各写一遍，期望两路覆盖各自的表面。
-**否决（曾上线、已移除 SwiftUI 那半）：** 同一窗口同时被两个写者写外观会相互覆盖、产生抖动。已上线方案改为**单写者 `NSApp.appearance`**，SwiftUI 从宿主窗口的 `effectiveAppearance` 派生 `colorScheme`——既覆盖 AppKit 宿主，又让 SwiftUI 正确重渲染，且无双写互覆盖。这正是本设计采用的方案，故 Alt 1/Alt 2 都被否决：前者够不到 AppKit，后者两写打架。
+**否决：** 同一窗口同时被两个写者写外观会相互覆盖、产生抖动。采用的方案是**单写者 `NSApp.appearance`**，SwiftUI 从宿主窗口的 `effectiveAppearance` 派生 `colorScheme`——既覆盖 AppKit 宿主，又让 SwiftUI 正确重渲染，且无双写互覆盖。Alt 1 够不到 AppKit、Alt 2 两写打架，故均否决。
 
 ### Alt 3 — 把终端主题选择存进 codans 的 `settings.json`
 **否决：** 用户期望终端 palette 横跨所有 Ghostty 使用、而不止 codans。拆分事实来源（codans JSON 管 app 内、Ghostty config 管独立运行）会在用户改了其一未改其二时立刻漂移。写 Ghostty config 正是 Ghostty 自身期望此状态被拥有的方式——一份文件、一个真相。
@@ -260,7 +260,7 @@ SwiftUI 侧 `.preferredColorScheme` 与 AppKit 侧 `NSApp.appearance` 各写一�
 
 **Risk 5 — 改 preference 后新开的窗口漏掉 AppKit 外观。** `applyAppearance` 在触发时遍历 `NSApp.windows`，接住既有窗口但会漏掉之后新开的（若 setter 只在主 scene）。*缓解：* 把 `AppAppearanceView` 放在*每个* scene 根，各 scene representable 的 `viewDidMoveToWindow` 在新窗口诞生时接住；之后新增而未包裹的 scene 类型，退化模式是"跟随上次设定的 `NSApp.appearance`"，可接受。
 
-**Risk 6 — 单写者未覆盖某个窗口。** 某窗口未被 `NSApp.appearance` 单写者触达（如在外观设定前创建、且未走 `viewDidMoveToWindow` 路径），渲染出陈旧外观。*缓解：* 单写者本就遍历 `NSApp.windows` 逐窗重赋并 `invalidateShadow()`；`AppAppearanceView` 置于每个 scene 根使每次挂载都重跑一遍；diagnostics 日志每事件记录 `NSApp.effectiveAppearance` 与 preference，使任何漏窗可见。**注意**：因已移除 `.preferredColorScheme`、改为单写者，早先"AppKit 与 SwiftUI 两路径漂移"的失败模式不复存在——SwiftUI 从窗口外观派生，没有第二个写者可与之分叉。
+**Risk 6 — 单写者未覆盖某个窗口。** 某窗口未被 `NSApp.appearance` 单写者触达（如在外观设定前创建、且未走 `viewDidMoveToWindow` 路径），渲染出陈旧外观。*缓解：* 单写者本就遍历 `NSApp.windows` 逐窗重赋并 `invalidateShadow()`；`AppAppearanceView` 置于每个 scene 根使每次挂载都重跑一遍；diagnostics 日志每事件记录 `NSApp.effectiveAppearance` 与 preference，使任何漏窗可见。**注意**：单写者模型下不存在"AppKit 与 SwiftUI 两路径漂移"的失败模式——SwiftUI 从窗口外观派生，没有第二个写者可与之分叉。
 
 **Risk 7 — Ghostty config 文件并发编辑。** *缓解：* `FileManager.replaceItem` 原子替换确保任何读者见到完整旧文件或完整新文件，绝无半态；last-write-wins。
 

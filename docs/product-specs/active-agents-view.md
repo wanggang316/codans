@@ -1,6 +1,6 @@
 # 产品规格：AgentState View
 
-**状态：** 已上线
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 **Related:** [docs/design-docs/active-agents-view.md](../design-docs/active-agents-view.md)
 
@@ -10,7 +10,7 @@ codans 用户通常同时驱动多个 CLI 编程 Agent，每个 Agent 占用一�
 
 AgentState 是侧栏底部的一处常驻面板（`AgentStateSidebarPanel`，标题 "Agents View"），列出当前被识别为运行已知 Agent 的每个 Pane，含品牌 logo、所属 Project / Worktree 路径、四态运行态（`working` / `blocked` / `finished` / `idle`），点击行即把所在 Project → Worktree → Tab 级联激活并把 Pane 拉到 first responder。它不是通知系统——通知讲的是「刚刚发生了什么」，AgentState 讲的是「现在正在发生什么」。
 
-识别覆盖 `AgentKind` 注册表中的**全部 Agent**：v1 shipped 11 类——Claude Code、Codex、pi、opencode、Gemini、Cursor Agent、Cline、GitHub Copilot、Kimi、Droid、Amp。新增一类是一次代码改动（扩 `AgentKind` + `AgentKindPatterns`），不是配置改动。
+识别覆盖 `AgentKind` 注册表中的**全部 Agent**，当前为 11 类——Claude Code、Codex、pi、opencode、Gemini、Cursor Agent、Cline、GitHub Copilot、Kimi、Droid、Amp。新增一类是一次代码改动（扩 `AgentKind` + `AgentKindPatterns`），不是配置改动。
 
 ## Context
 
@@ -64,7 +64,7 @@ AgentState 是侧栏底部的一处常驻面板（`AgentStateSidebarPanel`，标
 
 #### Agent 识别与持久化
 
-- [ ] **AA-I1.** v1 识别 `AgentKind` 注册表中的 11 类 Agent（Claude Code、Codex、pi、opencode、Gemini、Cursor Agent、Cline、GitHub Copilot、Kimi、Droid、Amp）；其他 Pane 不进入 AgentState。
+- [ ] **AA-I1.** 识别 `AgentKind` 注册表中当前的 11 类 Agent（Claude Code、Codex、pi、opencode、Gemini、Cursor Agent、Cline、GitHub Copilot、Kimi、Droid、Amp）；其他 Pane 不进入 AgentState。
 - [ ] **AA-I2.** 识别成功后，Pane 的 Agent 类型在 catalog 中持久化（`Pane.agentKind`）；codans 重启后无需重新识别即可立即在面板中显示对应 logo。
 - [ ] **AA-I3.** Pane 关闭（用户主动 close、子进程退出、崩溃）后，该 Pane 的 Agent 绑定自动清除，对应行从面板消失。
 - [ ] **AA-I4.** 同一 Pane 内用户从一个 Agent 退到 shell 顶层 prompt 后再启动另一个 Agent，应当能被重新识别——重绑由前台进程组变化驱动，不依赖 OSC 133；一个仍在跑的 Agent 始终是其 Pane 的前台进程，故退出与重启会被自然观察到。
@@ -124,11 +124,9 @@ AgentState 是侧栏底部的一处常驻面板（`AgentStateSidebarPanel`，标
 
 技术实现已在 [docs/design-docs/active-agents-view.md](../design-docs/active-agents-view.md) 中固化（含三层组件、前台进程组识别、状态机派生表、与通知系统的解耦边界、6 个 alternatives 的拒绝理由）。
 
-## Open Questions
+## 技术决策
 
-设计与实现期间已解决（留作记录）：
-
-- **识别信号：** 早期设计假定靠 terminal title / initialCommand / OSC 9 banner 等软信号识别；shipped 实现改为**只看前台进程组**（`ForegroundJob` 携带真实 pid / pgid / argv0 / commandLine），title 等一概忽略。AC9 / AC11 / AC15 据此可观察。
-- **重绑触发：** 早期假定靠 OSC 133 prompt-return 重评（无 shell-integration 时可能永不触发）；shipped 实现由前台进程组变化驱动 + `releaseMissThreshold` 迟滞，不再依赖 OSC 133。
-- **状态动词集：** 统一以代码枚举 `AgentRuntimeState` 为准（`idle` / `working` / `blocked` / `finished`），UI 文案与 VoiceOver 朗读同源；早期产品稿用的 `waitingForInput` / `loading` 已收敛为 `blocked` / `working`。
+- **识别信号——只看前台进程组。** 识别**只**依据 Pane 的前台进程组（`ForegroundJob` 携带真实 pid / pgid / argv0 / commandLine），terminal title / initialCommand / OSC 9 banner 等软信号一概忽略。AC9 / AC11 / AC15 据此可观察。理由：软信号易被伪造或漂移，而前台进程组是 PTY 层的事实，能同时覆盖「从已开 shell 启动」与「经运行时 wrapper 启动」的 agent。
+- **重绑触发——由前台进程组变化驱动，不依赖 OSC 133。** 一个仍在跑的 agent 始终是其 Pane 的前台进程，故「退到 shell、再启动另一个 agent」由前台组变化 + `releaseMissThreshold` 迟滞自然观察到。不绑定 OSC 133 prompt-return，因为无 shell-integration 时它可能永不触发。
+- **状态动词集——以代码枚举 `AgentRuntimeState` 为准。** 四态 `idle` / `working` / `blocked` / `finished`，UI 文案与 VoiceOver 朗读同源。`blocked` 涵盖「等待用户输入 / 被批准提示阻塞」，`working` 涵盖「在执行」。
 - **Agent logo 使用条款：** 若某家 brand mark 受限，相应行回落到通用 SF Symbol。

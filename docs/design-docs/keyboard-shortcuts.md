@@ -1,13 +1,13 @@
 # 设计文档：Keyboard Shortcuts（统一管理）
 
-**状态：** 已上线
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
 
-codans 的应用内快捷键曾散落在三处、各自硬编码：window-scope 的 SwiftUI 绑定（`MainWindowCommands`：`⌘P` Quick Action、`⌘E` Open in Editor、`⌘⇧G` Toggle Git Viewer、`⌘F` Filter Tags、`⌘T` New Tab、`⌘W` Close Tab、Prev/Next Tab、Switch-to-Tab N 等）、侧栏行热键（`HierarchySidebarView` 给每个可见 Worktree 行挂零帧隐形 Button 的 `⌃⌘1`–`⌃⌘9`）、app-scope 的 `⌘,`（Settings 窗口）。另有两个消费者只**显示**和弦提示而不绑定键：Command Palette 的行内提示，与状态栏的激励视图。
+codans 的应用内快捷键由一个单一 registry 统一管理。它取代的旧形态是三处各自硬编码的绑定：window-scope 的 SwiftUI 绑定（`MainWindowCommands`：`⌘P` Quick Action、`⌘E` Open in Editor、Toggle Git Viewer、`⌘T` New Tab、`⌘W` Close Tab、Prev/Next Tab、Switch-to-Tab N 等）、侧栏行热键（`HierarchySidebarView` 给每个可见 Worktree 行挂零帧隐形 Button 的 `⌃⌘1`–`⌃⌘9`）、app-scope 的 `⌘,`（Settings 窗口）。另有两个消费者只**显示**和弦提示而不绑定键：Command Palette 的行内提示，与状态栏的激励视图。（"Filter Tags" 此前亦在此列；其侧栏 Tag 过滤 UI 当前隐藏，故和弦不再作为现状暴露。）
 
-本设计用一个**单一 registry** 取代逐调用点硬编码：以稳定 `CommandID` 为键、默认和弦只编码一次；一个持久化的覆盖存储；一个让用户改键 / 禁用 / 重置任意已注册命令的 Settings 面板。它刻意覆盖全部应用内快捷键，使未来新增都走同一条路径，而非再引入逐 feature 的漂移。
+本设计以一个**单一 registry** 统管全部应用内快捷键：以稳定 `CommandID` 为键、默认和弦只编码一次；一个持久化的覆盖存储；一个让用户改键 / 禁用 / 重置任意已注册命令的 Settings 面板。它刻意覆盖全部应用内快捷键，使未来新增都走同一条路径，而非再引入逐 feature 的漂移。
 
 ## 目标与非目标
 

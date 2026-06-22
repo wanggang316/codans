@@ -1,11 +1,13 @@
 # Product Spec: Project Management
 
-**Status:** Shipped
+**Status:** Shipped (visible)
 **Author:** Gump (with Claude)
 
 ## Summary
 
 A **Project** is a single git repository — or in a minority case, a scratch folder — that the user has registered with codans. Projects live at the top of the hierarchy (`Catalog → Project → Worktree → Tab → Pane`) and own Worktrees, or a single synthetic "main" Worktree when the Project is not git-backed. Projects are organized by **Tags** (zero-or-more user labels per Project), not by a containing Space — the sidebar is a flat Project list, optionally filtered by an active Tag set. This spec covers the full Project management lifecycle: adding an existing local repository, viewing its health, renaming, configuring per-Project preferences (default editor, worktree storage path), reordering, and removing it from codans.
+
+> Liveness note (2026-06): the Tag data model (tagging Projects, the persisted filter, multi-select OR semantics) is **implemented but the Tag-filter UI is currently hidden** — the sidebar footer surfaces only sort + refresh (`TagFilterPopoverFooter`, `TagChipFooter.swift:49`). Tag-related requirements below describe shipped-but-unsurfaced behavior, not what a user can reach today. The data-only / on-disk guarantees are unaffected and remain current.
 
 The load-bearing guarantee: a Project registration is **pure bookkeeping** — codans **never moves, copies, or deletes files on disk** as part of Project management. That invariant runs through add, remove, and rename alike.
 
@@ -36,7 +38,7 @@ The load-bearing guarantee: a Project registration is **pure bookkeeping** — c
   - `failed(reason)` — path missing, not a git repo anymore, or scan error. Reasons shown as a human-readable message in a failure row with "Retry" / "Remove" actions.
 - [ ] **Reconcile on app launch and on window focus.** For every registered Project, re-check existence and refresh the Worktree list. New worktrees added outside codans appear; removed worktrees are pruned from the sidebar (with the same "Project last-active Worktree" safety behavior the model already handles).
 - [ ] **Rename Project** inline from the sidebar row context menu. Same validation as add-time.
-- [ ] **Tag Projects.** A Project carries zero or more Tags (name + color from a fixed palette). The sidebar can filter to an active Tag set (multi-select OR); the filter is persisted in the Catalog. Tags replace the former Space container — there is no per-Space scoping or "move between Spaces" operation.
+- [ ] **Tag Projects.** A Project carries zero or more Tags (name + color from a fixed palette). The sidebar can filter to an active Tag set (multi-select OR); the filter is persisted in the Catalog. Tags are the sole organizing axis — there is no per-Space scoping or "move between Spaces" operation. *(Implemented but currently hidden: the Tag-filter affordance in the sidebar footer is suppressed — see the liveness note in Summary. The filtering, persistence, and OR semantics exist in the model and can be re-mounted without rewiring.)*
 - [ ] **Reorder Projects** by drag. Order is persisted and honored across launches.
 - [ ] **Per-Project default editor.** A per-Project override for the Worktree-header "Open in ▾" default; falls back to the global default editor when unset. Specified by C8 editor integration; this spec references the existing contract.
 - [ ] **Per-Project worktree storage path.** Editable in a "Project options" surface. Default value is `~/.codans/repos/<project-name>/`. Users can override per Project (e.g. point at a sibling of the repo). Empty / invalid paths are rejected inline. See [Worktree Management spec](worktree-management.md) for how this path is consumed.

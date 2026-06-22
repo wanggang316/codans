@@ -1,6 +1,6 @@
 # Design Doc: Update channel — release & signing pipeline
 
-**Status:** Shipped
+**状态：** 已上线（可见）
 **Author:** Gump
 
 ## Context and Scope
@@ -149,13 +149,13 @@ OTHER_CODE_SIGN_FLAGS=--timestamp
 ARCHS=arm64
 ```
 
-This **obsoletes the reverted `Release.xcconfig` + `#include?` +
-`defaultSettings: .essential(excluding:)` approaches** — they lost to Xcode's resolution
+Command-line settings are used **instead of an `Release.xcconfig` + `#include?` +
+`defaultSettings: .essential(excluding:)` layering**, which loses to Xcode's resolution
 order. Resolve the identity's SHA-1 via `security find-identity`.
 
 **Do NOT `xcodebuild -exportArchive` for Developer-ID.** Its `IDEDistributionMethodManager`
 needs a GUI-logged-in Apple ID, which is impossible headless in CI. Instead, **copy the
-signed `.app` straight out of the `.xcarchive`**. The `ExportOptions.plist` was deleted.
+signed `.app` straight out of the `.xcarchive`** — there is no `ExportOptions.plist`.
 
 ### Notarization
 
@@ -192,7 +192,7 @@ None. `ChannelUpdaterDelegate.allowedChannels(for:)` already returns `[]` for st
 
 ## Operational Notes
 
-Resolved during bringup (kept as a record):
+Behavior for the operational edge cases:
 
 - **Releasing a stable while a tip is pending** — both workflows share
   `concurrency: release` to serialise. If stable lands during a tip workflow's merge step,

@@ -1,10 +1,9 @@
 # Project Tags + Single-Window — Removing Space and Multi-Window
 
-**Status:** Approved
-**Author:** Gump (with Claude)
-**Date:** 2026-04-27
-**Branch:** `refactor/rm-space`
-**Supersedes:** [mw-t4-space-management.md](mw-t4-space-management.md) (Space CRUD surface — to be removed)
+**状态：** 单窗口强制为「已上线（可见）」；Tag 过滤为「已实现但当前隐藏」。
+**作者：** Gump（与 Claude）
+
+> Liveness：单窗口（⌘W 隐藏、⌘Q 确认门、`applicationShouldTerminateAfterLastWindowClosed = false`）当前生效且可见。Tag 数据模型与 catalog 迁移在代码中已实现，但 **Tag 过滤 UI 当前刻意隐藏**——侧栏 footer 只露 sort/refresh（`TagChipFooter.swift:49`），`TagFilterList` 与回调休眠在码以便日后重新挂载。本文档其余部分描述 Tag 的完整设计意图，按「已实现但隐藏」理解。
 
 ## 1. Context and Scope
 

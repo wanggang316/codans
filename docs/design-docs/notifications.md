@@ -1,6 +1,6 @@
 # 设计文档：Notifications
 
-**状态：** 已上线（v1 + v1.1 加固）
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -8,8 +8,6 @@
 通知子系统的职责，是在某个 Pane 需要用户时——编码 agent 卡在等待输入、或长任务结束——把用户的注意力拉回到**那个确切的 Pane**，且只拉回那一个。能力与验收标准见 [Notifications 产品规格](../product-specs/notifications.md)。
 
 层级为 `Catalog → Project → Worktree → Tab → Pane`；一个 Pane 是一个 Ghostty surface，多个 Pane 通过 `SplitTree<PaneID>` 在一个 Tab 内分屏排布。
-
-本设计取代了更早、过度构建的「C6」方案（FSM tracker、用户可编辑的规则 DSL、stdout 扫描器，约 2900 行），那套方案从未进入 `main`。下文的决策记录保留了否决它的*理由*；C6 设计文档本身已删除（可从 git 历史找回）。
 
 ## 目标与非目标
 
@@ -67,6 +65,16 @@
 ```
 
 外部触点：`UNUserNotificationCenter`、`NSApp.dockTile`、`AtomicFileStore`。唯一的非 `TerminalEvent` 输入是击键旁路（`PaneKeyboardActivityTracker`）。
+
+## 技术决策
+
+**为何不用 FSM tracker / 用户可编辑的规则 DSL / stdout 扫描器。** 检测刻意建为运行时事件流下游的一个纯翻译器，而非独立的检测引擎。理由：
+
+- **运行时已经暴露了所需的结构化事件**（OSC 9、bell、OSC 133、子进程退出、idle、crash），因此再叠一台带 per-Pane FSM、用户可编辑规则 DSL 与 stdout 正则扫描器的检测机，是为 inbox 实际所需多得多的机器——表面积与维护成本都不成比例。
+- **stdout 正则扫描会漂移**：模式如 `"(y/n)"` 会误命中聊天记录；而一旦对外发布一套正则，就会顺势招来规则编辑器（这正是整套方案里最大的单块）。记录「请在你的工具里发 OSC 9」比永久维护这套正则更便宜。
+- **检测与策略必须分离。** 把「把事件翻译成候选」和「决定要不要呈现它」混在一起，正是「设置一加入、检测器就长成一坨内联 `if`」的根源。于是三层拆开：纯翻译器 `DetectionTranslator`、编排器 `NotificationDetector`、唯一策略闸 `NotificationCoordinator`。
+
+代价是覆盖缺口：既不发 OSC 9、也不响铃、也不发 OSC 133 的工具不被覆盖——这是被记录的限制（见「非目标」与「风险」），若实践证明需要，stdout 扫描器可作为增量回归来源补回。
 
 ## 检测（`DetectionTranslator`，纯函数）
 
@@ -166,7 +174,7 @@ codans/App/Clients/HierarchyClient.swift   // + reorderWorktrees, setPaneLabel
 
 ## 备选方案（Alternatives）
 
-- **A1 — stdout 正则扫描器。** 否决：模式会漂移（"(y/n)" 会命中聊天记录），而一旦发一套正则就会招来规则编辑器（C6 中最大的单块）。记录「请在你的工具里发 OSC 9」比永久维护这套正则更便宜；若真有用户撞上缺口，扫描器可作为增量回归。
+- **A1 — stdout 正则扫描器。** 否决：模式会漂移（"(y/n)" 会命中聊天记录），而一旦发一套正则就会招来规则编辑器。记录「请在你的工具里发 OSC 9」比永久维护这套正则更便宜；若真有用户撞上缺口，扫描器可作为增量回归。（根因见「技术决策」。）
 - **A2 — 侧栏 inbox 路由。** 否决（已与用户确认）：通知本质是瞬态的（读 → 点进 → 忘掉），常驻路由把它们过度提升。铃铛 + popover 才贴合实际流程。
 - **A3 — 基于 hook 的检测。** v1 否决：当前只有 Claude Code 写 c3 hooks；运行时的结构化事件覆盖任何遵守 OSC 9/133 的工具——严格更广。日后可增量加入。
 - **A4 — 把闸塞进检测器。** 否决：检测器已经是编排；把策略塞进去会模糊「纯翻译器 / 编排 / 策略」的拆分，并拉长测试矩阵。

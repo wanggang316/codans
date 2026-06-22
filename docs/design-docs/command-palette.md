@@ -1,11 +1,13 @@
 # 设计文档：Command Palette（Quick Action）
 
-**状态：** 已上线
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
 
 Command Palette 是一个键盘优先的浮层：以 `⌘P` 从主窗口任意位置唤起一个搜索框，枚举每一个可执行命令，让用户按名称模糊搜索并执行。它是**可发现性与速度的乘数，而非新能力层**——面板暴露的每条命令在别处都已有专属入口（菜单栏绑定、侧栏/头部按钮、Ghostty 键绑定）。随着动作面增长（Worktree、Pane、Editor、Git viewer、脚本），"用户得知道某动作住在哪个菜单/右键/popover"的成本呈二次增长；面板把这条成本压平。
+
+> liveness（2026-06）：内建的 Git/diff viewer overlay **已移除**——应用内不再有可用的 diff 查看器。"Toggle Git Viewer"（`toggleDiffInspector`）命令本身仍在线，但语义已改为**在用户于 Settings → General → Default Git Viewer 配置的外部 git 客户端里打开当前 Worktree**；当该项为 None 或所选客户端未安装时为 no-op（见 [组件边界](#组件边界) 与 [keyboard-shortcuts.md](keyboard-shortcuts.md)）。Tag 过滤相关命令当前无对应——侧栏 Tag 过滤 UI 处于隐藏状态。
 
 唤起有两条对等入口：window-scope 的 `⌘P` 和 Ghostty 的 `toggle_command_palette` 动作（经 `PaneActionRequest.toggleCommandPalette` → `PaneActionRouterFeature` 抵达 `RootFeature`）。二者落到同一开关。
 
@@ -55,7 +57,7 @@ Command Palette 是一个键盘优先的浮层：以 `⌘P` 从主窗口任意�
    existing features execute the work (no new business logic added)
 ```
 
-面板视图挂在 `ContentView` 里，作为主 `NavigationSplitView` 之上的条件 overlay，与 Git Viewer overlay 共用同一个 `ZStack`。
+面板视图挂在 `ContentView` 里，作为主 `NavigationSplitView` 之上的条件 overlay。（原与 Git Viewer overlay 共用同一 `ZStack`；内建 Git Viewer overlay 移除后，面板是该 `ZStack` 里的主 overlay。）
 
 ## 数据模型
 
@@ -64,6 +66,8 @@ Command Palette 是一个键盘优先的浮层：以 `⌘P` 从主窗口任意�
 `CommandPaletteItem` 携带 `id`（跨重启稳定，recency 键）、`title`、可选 `subtitle`、可选 `searchText`（被模糊评分以 title 级优先级匹配但**不在行内显示**——让一项能凭可见标题里没有的词上浮，例如 "Switch to Worktree: <name>" 把 Project 名放进 `searchText`，使 Project 名查询命中它而非沉到 subtitle 带）、`icon`、可选 `shortcut`（展示用提示）、可选 `commandID`（接入快捷键 registry，使行内和弦显示随用户改键流动）、`priorityTier`，以及 `hiddenWhenQueryEmpty`。
 
 `Kind` 枚举覆盖各域命令：App（`openSettings` / `checkForUpdates` / `quit`）、Worktree（`selectWorktree(ProjectID, WorktreeID)` / `closeCurrentWorktree` / `refreshCurrentWorktree` / `toggleDiffInspector`）、Editor（`openCurrentWorktreeInDefaultEditor` / `openCurrentWorktreeIn(EditorID)` / `revealCurrentWorktreeInFinder`）、Project / Global 脚本（`runProjectScript` / `runGlobalScript`，各携 `(ProjectID, WorktreeID, ScriptDefinition.ID)`），以及 Pane / Window 的薄包装 `paneAction(PaneActionRequest)` / `windowAction(WindowActionRequest)`。
+
+> `toggleDiffInspector`（面板项 "Toggle Git Viewer"）当前路由到 `RootFeature.diffInspectorToggledForCurrentWorktree`，把当前 Worktree 在 `Settings → General → Default Git Viewer` 配置的**外部 git 客户端**里打开——内建 diff overlay 已移除（`RootFeature.swift:1454`）。命令名沿用历史的 "diff inspector / Git viewer" 字样，但应用内**无任何内建 diff 查看器**；Default Git Viewer = None 或客户端缺失时该项为 no-op。
 
 **`runProjectScript` / `runGlobalScript` 携 `(projectID, worktreeID)` 是设计决定，不是冗余。** 命令在构建项时捕获当时的选择，使路由跑在*构建该项时的那个确切选择*上，即便用户在打开与激活之间切换了选择。
 
@@ -122,7 +126,7 @@ apps/mac/codans/App/Features/CommandPalette/
 `CommandPaletteItems.build(...)` 每次打开调用一次（非每次击键），在三个语境带内产出项：
 
 1. **始终：** app 级命令。
-2. **选中 Worktree 时：** Git viewer toggle、editor-open（每个已装 `EditorDescriptor` 一条）、refresh、delete、reveal in Finder，以及该 Project 的 `ProjectSettings.scripts` 与 `GeneralSettings.globalScripts`（脚本经 `SettingsWriter` 读实时快照，切到别的 Project 即重建并暴露那个 Project 的脚本）。
+2. **选中 Worktree 时：** Git viewer toggle（"Toggle Git Viewer"——现打开外部客户端，见上文 `Kind` 段标注）、editor-open（每个已装 `EditorDescriptor` 一条）、refresh、delete、reveal in Finder，以及该 Project 的 `ProjectSettings.scripts` 与 `GeneralSettings.globalScripts`（脚本经 `SettingsWriter` 读实时快照，切到别的 Project 即重建并暴露那个 Project 的脚本）。Tag 过滤命令未进面板——侧栏 Tag 过滤 UI 当前隐藏。
 3. **聚焦 Pane 时：** 需要源 pane 的 `PaneActionRequest` / `WindowActionRequest`。若无聚焦 pane，这些项被略去而非以合成 paneID 发出。
 
 **精确聚焦的区分是耐久不变量。** 依赖"哪个 split 聚焦"的 pane 动作（split / focus 导航 / zoom）**仅当 pane 经 Ghostty 键绑定管线带入（精确聚焦）时才发出**；菜单触发的打开会略去它们，使用户绝不会看到一个"Focus Pane Left"从错误的 pane 静默导航。Tab 域动作（New Tab / Close Tab / Equalize）与 Window 域动作只需当前 tab 里任一 leaf 即可解析（同 tab 每个 leaf 映射到同一 NSWindow），故 fallback 解析的 paneID 足矣，无论聚焦是否精确都安全。

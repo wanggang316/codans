@@ -1,7 +1,9 @@
 # 设计文档：CLI（`codans`）
 
-**状态：** 已上线（核心动词集），含 CLI 安装一节
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
+
+> **现状 vs 未接线（读前须知）。** 核心动词集已上线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群、`pane send` / `broadcast`。**已定义但未接线**（源码中存在，但未挂进 `CodansCLI.subcommands` 或对应 `*Command.subcommands`，故 `codans <cmd>` 报 unknown subcommand）：各级 `list` 子命令、顶层 `open`、`help-json`。**完全未实现**：`skill.*` 与 `hook.*` 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`）。下文逐处标注，勿把未接线 / 未实现当现状能力。
 
 ## 背景与范围
 
@@ -120,7 +122,7 @@
 | `codans project add PATH` | `hierarchy.addProject` | `HierarchyManager.addProject` | `PATH`，`[--name NAME]` |
 | `codans project rm ID` | `hierarchy.removeProject` | `HierarchyManager.removeProject` | `ID`（别名/名字/`current`） |
 
-> `ProjectList`（`codans project list`，走 `hierarchy.listProjects`）在源码中存在，但**未挂进** `ProjectCommand.subcommands`，因此当前不可经 `codans project list` 调用——用 `codans tree` 看 Project。Worktree / Tab / Pane 的 `list` 子命令同理（见各节脚注）。
+> `ProjectList`（`codans project list`，走 `hierarchy.listProjects`）在源码中存在，但**未挂进** `ProjectCommand.subcommands`，因此当前不可经 `codans project list` 调用——用 `codans tree` 看 Project。其底层 `hierarchy.listProjects` 方法本身已在 `MethodRouter` 接线（`codans tree` 正用它），故未接线的只是 CLI 子命令，非服务端方法。Worktree / Tab / Pane 的 `list` 子命令同理（`hierarchy.listWorktrees` / `listTabs` / `listPanes` 均已路由，仅各 `*Command.subcommands` 未挂；见各节脚注）。
 
 #### `codans worktree …`
 
@@ -193,7 +195,7 @@
 |---|---|---|---|
 | `codans open [<path>] [--in EDITOR]` | `editor.open` | `EditorService` | `[<path>]`（默认 `$PWD`，相对路径相对 `$PWD` 解析），`[--in EDITOR]` |
 
-> `OpenCommand` 在源码中存在（`apps/mac/codans-cli/Commands/OpenCommand.swift`），但当前**未挂进** `CodansCLI.subcommands`，故 `codans open` 与 `list` 命令同属"已实现但未接线"状态。其契约仍是耐久的，故在此记录。
+> `OpenCommand` 在源码中存在（`apps/mac/codans-cli/Commands/OpenCommand.swift`），但当前**未挂进** `CodansCLI.subcommands`，故 `codans open` 与 `list` 命令同属"已实现但未接线"状态。服务端 `editor.open` 方法本身已在 `MethodRouter.routeEditor` 接线，未接线的只是 CLI 子命令。其契约仍是耐久的，故在此记录。
 
 `EDITOR` 是编辑器 id（`cursor`/`zed`/`vscode`/`xcode`/`finder`/`ghostty`/…）。`path` 在 C8a Phase 4c 后是单一位置参数（早先的 `<worktree>` / `--path` 二分已合并）。编辑器优先级在服务端 `EditorService` 处理：(1) 显式 `--in`（strict，未安装即报错）→ (2) `Settings.projects[pid].defaultEditor`（路径落在已注册 Project 内时，lenient）→ (3) 全局 `Settings.defaultEditorID`（lenient）→ (4) 内建注册表优先级遍历 → (5) Finder 回退（永远可用）。
 

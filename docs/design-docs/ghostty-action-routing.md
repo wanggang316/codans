@@ -1,15 +1,13 @@
 # 设计文档：Ghostty Action Routing
 
-**状态：** 已上线
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
 
-libghostty 把每一个用户可配置的 keybinding 暴露成一个 **action**：用户按下绑定键时，libghostty 不自己应用该绑定，而是回调 runtime-config 的 `action_cb(app, target, action)`。宿主决定是否消费每个 action（返回 `true`），还是让 Ghostty 回退到它的默认行为（几乎总是 no-op——libghostty 自身没有 UI）。
+libghostty 把每一个用户可配置的 keybinding 暴露成一个 **action**：用户按下绑定键时，libghostty 不自己应用该绑定，而是回调 runtime-config 的 `action_cb(app, target, action)`。宿主决定是否消费每个 action（返回 `true`），还是让 Ghostty 回退到它的默认行为（几乎总是 no-op——libghostty 自身没有 UI）。`action_cb` 是这条链路的唯一缝：宿主在此不消费的 action 即静默 no-op——用户配的 `keybind` 不生效、surface 发出的信息型 action（title / pwd / bell / mouse shape / search 状态）被丢弃、app 级配置热重载被忽略。终端的*渲染*与*键盘*路径不经 `action_cb`，故能独立绘制与接受输入；但任何需要宿主*响应* ghostty 事件去**做**的事都经此回调。
 
-这套路由替代了早先那个永远返回 `false` 的 `action_cb` 桩：在桩状态下，用户在 Ghostty 里配的**每一个** `keybind` 都静默 no-op，每一个 surface 发出的信息型 action（title / pwd / bell / mouse shape / search 状态）都被丢弃，每一次 app 级配置热重载都被忽略。终端能绘制、能接受输入，是因为*渲染*与*键盘*路径绕过了 `action_cb`——但任何需要宿主*响应* ghostty 事件去**做**的事都不会发生。
-
-本设计路由 codans 有明确映射的**全部** ghostty action，而非增量子集。理由：解码器在各桶之间形状一致，多覆盖一批 action 的边际成本只是一个 `case` + 一个 `SurfaceInfo` 字段；而每一个未路由的 action 对用户都是一次静默失败，"半覆盖的 keybinding 系统"换来的分诊成本远超推迟的收益。
+`action_cb` 路由 codans 有明确映射的**全部** ghostty action，而非增量子集。理由：解码器在各桶之间形状一致，多覆盖一批 action 的边际成本只是一个 `case` + 一个 `SurfaceInfo` 字段；而每一个未路由的 action 对用户都是一次静默失败，"半覆盖的 keybinding 系统"换来的分诊成本远超推迟的收益。
 
 ### 我们在其上构建的既有状态
 
@@ -36,7 +34,7 @@ action 集合按宿主侧分发语义分成四类（外加一个 app 级 config 
 
 **非目标**
 
-- **用户可配置的 codans action 绑定表。** 首版硬编码 1:1 的 ghostty-action → codans-operation 映射；可编辑的绑定表是另一份设计。
+- **用户可配置的 codans action 绑定表。** ghostty-action → codans-operation 是硬编码的 1:1 映射；可编辑的绑定表是另一份设计。
 - **Clipboard 读 / 写 / 确认回调**（`read_clipboard_cb` 等）。另文处理。本文的 `COPY_TITLE_TO_CLIPBOARD` 直接用 `NSPasteboard`，不走这些回调。
 - **Search overlay UI、secure-input 视觉指示、scroll bar 渲染、progress bar overlay。** 这些归后续 UI feature。本设计只把状态*存*在 `SurfaceInfo` 上并发 `panelInfoChanged`，供未来 overlay 消费。
 - **多窗口模型重设计。** window intent 桶映射到*当前* NSWindow（按架构计划 1:1 对应一个 Space）；本文只交付 intent，接收方决定策略。
@@ -154,7 +152,7 @@ libghostty 的 `ghostty_surface_config_s.env_vars` 缓冲**假定不被 `ghostty
 
 **可观测性。** `os.Logger` category `com.gumpw.codans.runtime.action`；每个解码后的 action 以 `.debug` 记 `(paneID, tag)`，未支持分支以 `.info` 记 tag int。`codans system.status` 增 `ghostty.actions` 段：本 session 逐 tag 计数，使"agent 问为什么 keybind 不工作"一条命令可诊断。`GhosttyRuntime` 暴露有界（256 项，LRU 逐出）的 `unhandledActionCounts` 供 status 命令读取。
 
-**Rollout / 逃生舱。** 启动参数 / 环境变量 **`CODANS_DISABLE_ACTION_ROUTING=1`** 在 C 回调里（任何主线程跳转之前）短路全部 keybind 路由，作为已上线的回归逃生舱。分桶落地顺序 Info → Effect → Tab/Split intent → Window intent → Config，每桶一个 commit，使 bisect 能把责任收敛到单桶。
+**逃生舱。** 启动参数 / 环境变量 **`CODANS_DISABLE_ACTION_ROUTING=1`** 在 C 回调里（任何主线程跳转之前）短路全部 keybind 路由，是出现回归时的逃生舱。分桶（Info / Effect / Tab-Split intent / Window intent / Config）是代码与 commit 的组织边界，使 bisect 能把责任收敛到单桶。
 
 **错误处理。** `ghostty_surface_userdata` 为 nil 或 PaneID 不在注册表 → 返回 `false`、不发事件（拆除竞态期的预期情况）；畸形 payload（如越界 `GOTO_TAB`，见上文 clamp 规则）→ `.info` 日志；router 侧失败（如 worktree 中途归档导致 `splitPanel` 抛错）→ 经既有错误面弹 toast，绝不崩溃、绝不重试；`CONFIG_CHANGE` 克隆失败（`ghostty_config_clone` 返回 nil）→ `.error` 日志 + 返回 `false`，Runtime 保留旧 config。
 

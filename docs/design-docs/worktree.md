@@ -1,7 +1,9 @@
 # 设计文档：Worktree
 
-**状态：** 已上线（生命周期 / 侧边栏排序 / 状态栏 / 分支切换器均在 `main`）；Diff Viewer History tab 尚未实现（见 §Diff Viewer History tab）。
+**状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
+
+> 生命周期 / 侧边栏排序 / 状态栏 / 分支切换器均已上线。唯一例外是 §分支切换器与历史 末尾的 **Diff Viewer History tab**，状态为 `已设计未实现`（代码无 `DiffFeature`，详见该节）。
 
 ## 背景与范围
 
@@ -12,7 +14,7 @@
 1. **生命周期**——创建（流式 file-copy）、发现 CLI 创建的 worktree、archive/unarchive 软隐藏、安全/强制删除、prune、删除前终端安全检查。
 2. **侧边栏排序**——每个 Project 下 worktree 行的四段排序模型。
 3. **状态栏**——titlebar 中段按优先级切换形态的状态槽。
-4. **分支切换器与历史**——header 分支区升级为可点击 popover（应用内 `git switch`），以及（未来）Diff Viewer 的 History tab。
+4. **分支切换器与历史**——header 分支区是可点击 popover（应用内 `git switch`）。本子系统还记录 Diff Viewer History tab 的设计意图，但该部分 `已设计未实现`（见对应小节）。
 
 四块在代码里落在不同 feature 目录，但都围绕 `Worktree`/`Project` 模型与 `HierarchyManager`/`HierarchyClient` 这条单一写入面展开，故合并为一份设计。
 
@@ -22,7 +24,7 @@
 - **`HierarchyManager` 是 `@MainActor @Observable` 运行时态**，不持有 TCA / 表现层瞬时状态，也不 spawn 进程；git 工作一律经 `GitWorktreeClient` / `GitService`（nonisolated async），成功后才回到 manager 改 catalog。
 - **标识符一律 UUID**；`WorktreeID` 在 `HierarchyManager.createWorktree` 写入 catalog 那一刻才生成（不预分配）。
 - **持久化是带 version 的原子 rename JSON**；给 `Worktree` 加字段走 `decodeIfPresent` + 条件编码模式，已有 `archived` / `archivedAt` / `isPinned` 先例，且不升 schema 版本。
-- **单窗口语义**：`Space` 容器已被移除（见 project-tags 设计），所有 Worktree 操作在单 `WindowGroup` 内，无 `SpaceID` 参数、无跨窗口同步。
+- **单窗口语义**：所有 Worktree 操作在单 `WindowGroup` 内，无 `SpaceID` 参数、无跨窗口同步（无 `Space` 容器层；分组语义由 Project 标签承担，见 project-tags 设计）。
 
 ## 目标与非目标
 
@@ -68,7 +70,7 @@
 - **listing/discovery**：`lsWorktrees(repoRoot) -> [GitWtEntry]`。
 - **分支/ref 查询**：`localBranchNames`、`branchRefs`、`defaultRemoteBranchRef`、`isValidBranchName`。
 - **创建（流式）**：`createWorktreeStream(CreateWorktreeSpec) -> AsyncThrowingStream<CreateWorktreeEvent, Error>`。仅创建有值得渲染的进度（copy-ignored 大仓可跑 >30s），其余操作有界且短，用一次性 async throws。
-- **删除/prune**：`removeWorktree(repoRoot, path)`、`pruneWorktrees(repoRoot) -> Int`。**注意：删除无 `force` 参数**——安全/强制的区分不再是 `git-wt` flag，而由调用层先跑 `changedFiles` 预检、再决定是否走删除（详见下文删除流程）。
+- **删除/prune**：`removeWorktree(repoRoot, path)`、`pruneWorktrees(repoRoot) -> Int`。**注意：删除无 `force` 参数**——安全/强制的区分不是 `git-wt` flag，而由调用层先跑 `changedFiles` 预检、再决定是否走删除（详见下文删除流程）。
 - **fetch**：`fetchRemote(repoRoot, remote)`。
 - **诊断**：`changedFiles(worktreeRoot) -> [String]`，喂给安全删除的错误展示。
 
@@ -91,7 +93,7 @@ git 工作不藏在 `HierarchyClient` 背后——后者的契约是"同步、ma
 
 `Worktree` 的存活字段：`archived: Bool`、`archivedAt: Date?`、`isPinned: Bool`。**无 `sortIndex`、无 `createdAt`**（段内顺序完全由 catalog 数组下标承担）。
 
-Codable 模式（与既有 `gitViewerVisible` 同形）：`decodeIfPresent ?? false` 保读兼容；`archived == false` 时省略编码，使未归档 worktree 的 on-disk catalog round-trip 完全不变。**不单设 `archivedWorktrees` 数组**——并行数组会复制整个 `Worktree`、fork 唯一性/选中不变量、多出一处跨集合同步；in-place flag 配合 `project.worktrees.filter { !$0.archived }` 一行解决。不升 schema 版本（`CatalogStore` 的保存管线容忍字段新增）。
+Codable 模式（与 `isPinned` 同形）：`decodeIfPresent ?? false` 保读兼容；`archived == false` 时省略编码，使未归档 worktree 的 on-disk catalog round-trip 完全不变。**不单设 `archivedWorktrees` 数组**——并行数组会复制整个 `Worktree`、fork 唯一性/选中不变量、多出一处跨集合同步；in-place flag 配合 `project.worktrees.filter { !$0.archived }` 一行解决。不升 schema 版本（`CatalogStore` 的保存管线容忍字段新增）。
 
 ### 发现 / reconcile 契约
 
@@ -107,7 +109,7 @@ Codable 模式（与既有 `gitViewerVisible` 同形）：`decodeIfPresent ?? fa
 
 ### 删除流程与终端安全
 
-安全 vs 强制不再是 `git-wt` flag，而是调用层的两步：
+安全 vs 强制不是 `git-wt` flag，而是调用层的两步：
 
 1. **安全删除**：先 `changedFiles(worktreeRoot)`。非空 → 抛/呈现 `uncommittedChanges(files:)`，渲染"3 files have uncommitted changes in `<path>`: a.swift, b.swift, …"，给主按钮"Force Remove" + 次按钮"Cancel"。
 2. **强制删除**：独立确认，显式声明"未提交改动将被丢弃""不可撤销"，然后跳过预检直接删。
@@ -191,7 +193,7 @@ main → pinned → pending → unpinned
 
 ### pending 段连带的工程影响
 
-pending 是四段中唯一引入新数据源的段，连带几项改动（为让 pending 存在的副产品）：`CreateWorktreeFeature` 责任收窄为表单 + 同步预检，提交时把 `CreateWorktreeSpec` 包成 `PendingWorktree` 经 `.delegate(.beginCreate(pending))` 上抛、sheet 立即 dismiss；流式 effect 上移到 parent（`HierarchySidebarFeature` 持 cancellable，键 `enum CancelID { case pending(PendingWorktreeID) }`）；**catalog 写入仍在 stream 完成时**（`pendingWorktreeFinished` 那一步同步调 `createWorktreeWithGit` 并同步移除 pending 项，保 catalog ↔ on-disk 一致）；`GitWorktreeError → 人类可读字符串`集中到一处（合并原先 `CreateWorktreeFeature` 与 `ArchivedWorktreesFeature` 各自的私有副本）；生命周期 setup 脚本调度从 sheet 移到 parent 的 finished 步。
+pending 是四段中唯一引入新数据源的段，连带几项改动（为让 pending 存在的副产品）：`CreateWorktreeFeature` 责任收窄为表单 + 同步预检，提交时把 `CreateWorktreeSpec` 包成 `PendingWorktree` 经 `.delegate(.beginCreate(pending))` 上抛、sheet 立即 dismiss；流式 effect 上移到 parent（`HierarchySidebarFeature` 持 cancellable，键 `enum CancelID { case pending(PendingWorktreeID) }`）；**catalog 写入仍在 stream 完成时**（`pendingWorktreeFinished` 那一步同步调 `createWorktreeWithGit` 并同步移除 pending 项，保 catalog ↔ on-disk 一致）；`GitWorktreeError → 人类可读字符串`集中到一处（而非散落在 `CreateWorktreeFeature` 与 `ArchivedWorktreesFeature` 各自的私有实现）；生命周期 setup 脚本调度落在 parent 的 finished 步、而非 sheet。
 
 ---
 
@@ -263,9 +265,9 @@ toast == nil && 有活跃 PR     →  PR 形态 (P2)
 
 ### 概览
 
-header 分支区从只读副标题升级为可点击入口；分支切换在应用内完成。**新开 `BranchSwitcherFeature` 而非塞进 `WorktreeHeaderFeature`**：后者已持 editor / run-script delegate（多 action + delegate case），再加 4–6 个切换 action + popover 生命周期 + 缓存失效 + HEAD-change 联动会突破可读性阈值；独立 feature 的 TestStore 也更清晰。Header feature 仅作为 view 上的兄弟出现在同一 `ToolbarItem`，挂载点把 `StoreOf<BranchSwitcherFeature>` 传给 `WorktreeHeaderInfoLabel`。
+header 分支区是可点击入口，分支切换在应用内完成。**分支切换逻辑落在独立的 `BranchSwitcherFeature`，不混入 `WorktreeHeaderFeature`**：后者已持 editor / run-script delegate（多 action + delegate case），再叠加 4–6 个切换 action + popover 生命周期 + 缓存失效 + HEAD-change 联动会突破可读性阈值；独立 feature 的 TestStore 也更清晰。Header feature 仅作为 view 上的兄弟出现在同一 `ToolbarItem`，挂载点把 `StoreOf<BranchSwitcherFeature>` 传给 `WorktreeHeaderInfoLabel`。
 
-> **Diff Viewer History tab 尚未实现。** 产品规格的"Diff Viewer 右侧拆 Changes/History 双 tab"半边目前**未上线**：代码里没有 `DiffFeature` / `DiffTab` / `DiffHistoryListView` / `historyState`，Diff 能力仅在 service 层（`GitServiceClient.commitDiff` 等已存在）。本节末尾的 §Diff Viewer History tab 记录其设计意图，但状态为 planned；popover 底部"View all"入口的落点依赖它，故 popover 当前可不提供该按钮或将其降级。
+> **状态：`已设计未实现`。** 产品规格的"Diff Viewer 右侧拆 Changes/History 双 tab"这半边没有对应代码：没有 `DiffFeature` / `DiffTab` / `DiffHistoryListView` / `historyState`。**当前无任何应用内 diff / 历史查看器**——内置 diff overlay 不存在，`toggleDiffInspector` 命令仅把当前 worktree 路径交给用户配置的外部 git viewer（`general.defaultGitViewerID`；未配置时为 no-op）。Diff 能力止于 service 层（`GitServiceClient.commitDiff` 等）。本节末尾的 §Diff Viewer History tab 记录其设计意图；popover 底部"View all"入口的落点依赖它，故 popover 当前不提供该按钮或将其降级。
 
 ### Service 层契约
 
@@ -295,13 +297,13 @@ header 分支区从只读副标题升级为可点击入口；分支切换在应�
 
 行 1 = `WorktreeRowIcon` + 分支名（`.headline`）+ 尾随 chevron-down（`isSwitching` 时换 `ProgressView().controlSize(.mini)`）；行 2 = `worktree.name · project.name`（`.caption .secondary`）。`branchTitle`：`worktree.branch == nil` → `"(detached)"`（未来 `Worktree.headSha` 可用后点亮 `"(detached @ <short-sha>)"`）；否则 `worktree.branch ?? worktree.name`（worktree.name fallback 覆盖刚 clone 无 HEAD 的情形）。整行 `.contentShape(.rect)` + hover 高亮，点击 toggle `popoverTapped`，`.popover(arrowEdge: .bottom)` 挂 `BranchSwitcherView`。Project 名沿 `Worktree → Project` 反查，`WorktreeHeaderInfoLabel` 已接收 `project: Project` 直接读 `project.name`。
 
-### Diff Viewer History tab（planned，未上线）
+### Diff Viewer History tab（`已设计未实现`）
 
-> 此小节为设计意图记录；当前无对应代码。
+> 此小节为设计意图记录；当前无对应代码，且其前置依赖（Diff Viewer 本身）也不存在。
 
-意图是 Diff Viewer 右侧拆 Changes/History segmented control：Changes 保持现状（未提交改动），History 列当前分支 commit 历史（分页，首页 50、滚动到底加载下页），点 commit 在左侧渲染该 commit 整体 unified diff，左侧标题在 History 模式显示 `<short-sha> · <subject>` 而非文件路径。`commitDiff` 复用既有 `GitServiceClient.commitDiff` + 既有 16 MiB / `maxFileBytes` / `maxFileLines` caps（超限走"too large"占位）。设计倾向把 History 做成 `DiffFeature` 的内嵌 `HistoryState` 而非 child reducer（两 tab 共用同一左侧 drawer，child 会需要 scope plumbing 或父级 active-selection reducer，得不偿失），HEAD 变化或 `worktreeSelected` 时重置 History 状态。popover 的 Recent Commits（≤10 条）与 History 首页（50 条）用**独立缓存**而非同源——sort/limit 形不同，共享会让冷启动时 popover 为更大的那个等待，且 HEAD 变化的失效顺序耦合。
+意图是 Diff Viewer 右侧拆 Changes/History segmented control：Changes 呈现未提交改动，History 列当前分支 commit 历史（分页，首页 50、滚动到底加载下页），点 commit 在左侧渲染该 commit 整体 unified diff，左侧标题在 History 模式显示 `<short-sha> · <subject>` 而非文件路径。`commitDiff` 复用既有 `GitServiceClient.commitDiff` + 既有 16 MiB / `maxFileBytes` / `maxFileLines` caps（超限走"too large"占位）。设计倾向把 History 做成 `DiffFeature` 的内嵌 `HistoryState` 而非 child reducer（两 tab 共用同一左侧 drawer，child 会需要 scope plumbing 或父级 active-selection reducer，得不偿失），HEAD 变化或 `worktreeSelected` 时重置 History 状态。popover 的 Recent Commits（≤10 条）与 History 首页（50 条）用**独立缓存**而非同源——sort/limit 形不同，共享会让冷启动时 popover 为更大的那个等待，且 HEAD 变化的失效顺序耦合。
 
-落地前置依赖：`DiffFeature` 本身（当前不存在）。一旦它存在，本节升格为已上线，popover 的"View all"入口接通"打开 Diff Viewer → selected tab = History"。
+落地前置依赖：`DiffFeature` 本身（当前不存在）。它落地后，本节状态转为已上线，popover 的"View all"入口接通"打开 Diff Viewer → selected tab = History"。
 
 ---
 
@@ -372,7 +374,7 @@ apps/mac/scripts/{verify,embed}-git-wt.sh
 - **状态栏挂 `WorktreeHeaderFeature` / `RootFeature` 顶层。** 均否决：Header mixing toast 让两件事 action enum 混杂、bell 测试被迫断言无 toast；RootFeature 顶层加字段使 toast 的 timer effect 更难测、牵动大量类型推断。独立 `StatusBarFeature` 迁移点单一。
 - **PR 数据读 `GitHubSnapshotCache` 文件流。** 否决：缓存只反映上次成功批量 fetch，落后于会话内乐观刷新，会让 titlebar 滞后于 sidebar。直接读 feature state 同源。
 - **分支 popover 状态塞 `WorktreeHeaderFeature`；`git branch -a`；两遍 `for-each-ref`。** 均否决，见 §分支切换器 各节。
-- **History 做成 child `DiffHistoryFeature`。** 否决（planned 段）：两 tab 共用左侧 drawer，child 需 scope plumbing 或父级 active-selection reducer，内嵌 `HistoryState` 更省。
+- **History 做成 child `DiffHistoryFeature`。** 否决（属 `已设计未实现` 部分）：两 tab 共用左侧 drawer，child 需 scope plumbing 或父级 active-selection reducer，内嵌 `HistoryState` 更省。
 
 ## 风险
 
@@ -388,7 +390,7 @@ apps/mac/scripts/{verify,embed}-git-wt.sh
 | pending 行堆叠失控。 | 每 project 软上限 8 条；第 9 次提交 sheet banner 拒绝。 |
 | `for-each-ref` 格式漂移 / `--track` 歧义。 | 钉文档化 `%(…)` token；caller 传全限定 `origin/x`，UI 永不传歧义输入。 |
 | `WorktreeHeadWatcher` 200ms debounce 让 spinner 多停 ~200ms。 | 可接受；更快 reset 需双重事实来源。 |
-| 大 merge commit diff 撞 16 MiB cap（History，planned）。 | 复用既有 working-tree diff 的"too large"占位，UX 一致。 |
+| 大 merge commit diff 撞 16 MiB cap（History，`已设计未实现`）。 | 复用既有 working-tree diff 的"too large"占位，UX 一致。 |
 | `ViewThatFits` 在 toolbar 内测量失真。 | 回退 GeometryReader + 520pt 阈值。 |
 | `EditorFeature.openFailed(reason:)` 未脱敏可能带路径。 | toast 路由的 `shortMessage` 只取第一行 + 截断 80 字符。 |
 | `CommandKeyObserver` 未停止泄漏 monitor。 | `start()`/`stop()` 绑 `CodansApp` onAppear/onDisappear，weak-self capture。 |

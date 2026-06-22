@@ -1,19 +1,26 @@
 # 设计文档：Diff Inspector
 
-**状态：** 前瞻设计（forward-looking）——契约已定，实现尚未落地。截至本次修订，`apps/mac/codans/App/Features/Diff/` 尚不存在；先行落地的只有 `CommandID.toggleDiffInspector` 标识符及其钉死的 JSON raw value（见下方"重命名"）。本设计描述目标形态与承重不变量。
+**状态：** 已设计未实现
+
+> **当前应用内没有可用的 diff / 历史查看器。** 旧的 `GitViewer` feature 已从代码移除（`RootFeatureTests` 等处注释为证：「the GitViewer feature no longer exists」），新的 Diff inspector 尚未构建——`apps/mac/codans/App/Features/Diff/` 目录不存在。本设计仅在代码里落地了一个 `CommandID.toggleDiffInspector` 标识符及其钉死的 JSON raw value `toggleGitViewer`（见"重命名"），feature 本体（reducer、视图、vendored web 资产、bridge）全部未建。
+>
+> 该命令 id 当前被复用作另一用途：`⌘⌥G` chord / 菜单 / Command Palette 经 `RootFeature.diffInspectorToggledForCurrentWorktree` 读 `general.defaultGitViewerID`，把当前 Worktree 在**外部 git 客户端**里打开（经 Editor Integration 注册表中的 git-client 条目）；未配置默认 git 客户端时为 no-op。这与下文设计的「应用内 inspector + drawer」**不是同一回事**。
+>
+> 下文是这个尚未落地的设计的目标形态与承重不变量，全程以「未实现的设计」语气阅读。
+
 **作者：** Gump
 
 ## 背景
 
-旧的 `GitViewer` 在 360 pt 右缘 overlay 里展示 working / staged / log 三个 scope tab。本设计用一个更窄的两件套替换它：一个 280 pt 右缘 **Diff inspector** 列出当前 Worktree 的变更文件，外加一个按需 **drawer** 用单文件 diff 铺满整个终端区域。
+本设计提出一个应用内 diff 查看器，形态是更窄的两件套：一个 280 pt 右缘 **Diff inspector** 列出当前 Worktree 的变更文件，外加一个按需 **drawer** 用单文件 diff 铺满整个终端区域。（被移除的旧 `GitViewer` 曾在 360 pt 右缘 overlay 里展示 working / staged / log 三个 scope tab；本设计是它的预期替代，但替代尚未建成。）
 
 Diff 渲染复用 YiTong 的 WKWebView bundle（Apache-2.0，**vendored**——不作为 Swift package 导入），它包裹了 `@pierre/diffs`（Apache-2.0）+ Shiki + `kpdecker/jsdiff`（BSD-3-Clause）。
 
 ## 目标
 
-本变更后用户可观测的行为：
+设计落地后用户应可观测的行为（当前均未实现）：
 
-- ⌘⇧G / Header GV 按钮 / Command Palette "Toggle Git Viewer" 显示 per-Worktree 的 Diff inspector。可见性 per-Worktree 持久化。
+- ⌘⇧G / Header GV 按钮 / Command Palette "Toggle Git Viewer" 显示 per-Worktree 的 Diff inspector。可见性 per-Worktree 持久化。（注：命令 id `toggleDiffInspector` 当前实绑 ⌘⌥G，且行为是打开外部 git 客户端——见顶部状态注记。本设计目标 chord 为 ⌘⇧G。）
 - Inspector 列出所有工作树变更，带状态 + `+adds / −dels`。
 - 点击文件行 → drawer 从右滑入并铺满终端区域。
 - Drawer header 带 unified ↔ split 选择器；选择经 `@AppStorage("diffStyle")` 持久化。
@@ -26,7 +33,7 @@ Diff 渲染复用 YiTong 的 WKWebView bundle（Apache-2.0，**vendored**——�
 
 - Commit log / history 视图（推迟）。
 - 从 inspector 暂存 / 取消暂存（只读）。
-- Schema 向后兼容。`Worktree.gitViewerVisible` **直接**改名为 `Worktree.diffInspectorVisible`，不做 alias 解码。
+- Schema 向后兼容。落地时 `Worktree.gitViewerVisible` 将**直接**改名为 `Worktree.diffInspectorVisible`，不做 alias 解码。
 - 从 npm 打包 `@pierre/diffs`；我们 vendor 预打包好的 JS，无 Node 工具链。
 - 跨平台对等。仅 macOS。
 
@@ -272,7 +279,9 @@ Diff/
 
 用户可见字符串（"Git Viewer"、菜单项标签）v1 不变。
 
-> 落地状态注记：上表里**仅** `CommandID.toggleDiffInspector`（标识符 + 钉死的 raw value `toggleGitViewer`）已在代码中落地（`CommandPaletteItem`/`RootFeature`/`MainWindowCommands` 等引用它）。其余重命名连同整个 `Diff/` 模块尚未落地。
+> 落地状态注记：上表里只有命令 id 这一条线已在代码中落地——`CommandID.toggleDiffInspector`（标识符 + 钉死的 raw value `toggleGitViewer`）、`CommandPaletteItem.Kind.toggleDiffInspector`、以及 `RootFeature.Action.diffInspectorToggledForCurrentWorktree`（由 `CommandPaletteItem`/`RootFeature`/`MainWindowCommands`/`ShortcutSchema` 引用）。如顶部状态注记所述，这条线当前驱动的是「打开外部 git 客户端」，而非本设计的应用内 inspector。
+>
+> 其余全部尚未落地：`Worktree.diffInspectorVisible`、`HierarchyClient.setWorktreeDiffInspectorVisible`、`RootFeature.diffInspectorVisible(in:)`、`WorktreeHeaderFeature.Action.diffInspectorToggleTapped`、`.delegate(.diffInspectorToggleRequested)`、`HeaderDiffInspectorToggle` view、`RootFeature.State.diff` / `Action.diff(...)`——这些都依附于尚不存在的 `Diff/` 模块与 inspector 可见性状态，连同整个 `Diff/` 模块一并未建。
 
 ## 备选方案（Alternatives）
 
