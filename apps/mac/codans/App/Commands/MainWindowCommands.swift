@@ -4,10 +4,19 @@ import SwiftUI
 import CodansCore
 
 /// Main-window menu commands, organised into standard macOS menus instead of
-/// piling everything into File: File (create/close), View (show/hide chrome),
-/// and three app-specific menus — **Commands** (user-defined Project + Global
-/// commands), **Worktree** (worktree navigation + actions), and **Tabs**
-/// (tab / pane management).
+/// piling everything into File:
+///
+/// - **Codans** (app menu): **Command Palette** + Check for Updates…, next to
+///   About / Settings.
+/// - **File**: project / worktree creation (Add Project…, New Worktree…).
+/// - **View**: sidebar chrome (Toggle Sidebar, Reveal in Sidebar).
+/// - **Window**: the auto-populated window list ("Codans" / "Settings" window
+///   entries) is dropped — codans is a single-main-window host, so switching
+///   between window-title entries is noise.
+/// - **Worktree**: worktree navigation + actions, the Git Viewer toggle, and
+///   the user-defined Project + Global **commands** (merged in at the bottom).
+/// - **Tab**: tab lifecycle (New Tab / Close Tab) plus pane split / focus /
+///   rename / switch.
 ///
 /// Every built-in chord is sourced from the shortcut registry
 /// (`ShortcutSchema.app` ⊕ `ShortcutsStore.overrides`) via the
@@ -53,26 +62,37 @@ struct MainWindowCommands: Commands {
   /// menu items are disabled and the chord falls through to the terminal (where
   /// `⌘⌫` is the standard "delete to start of line" binding).
   let sidebarFocus: SidebarFocusObserver
-  /// Source for the user-defined command rows in the **Commands** menu. Read in
-  /// the menu body so an add / edit / delete / reorder in Settings reflects
-  /// without restart (`@Observable`; `Commands` participates in observation).
+  /// Source for the user-defined command rows merged into the **Worktree** menu.
+  /// Read in the menu body so an add / edit / delete / reorder in Settings
+  /// reflects without restart (`@Observable`; `Commands` participates in
+  /// observation).
   let settingsStore: SettingsStore
-  /// Live run/stop state for the Commands menu — a running command's row becomes
+  /// Live run/stop state for the command rows — a running command's row becomes
   /// "Stop …" and gates the ⌘. stop item so it doesn't swallow the terminal's
   /// ⌘. while idle. `@Observable`, same source as the tab busy spinner.
   let hierarchyManager: HierarchyManager
 
   var body: some Commands {
-    // MARK: File — create / close
-    CommandGroup(after: .newItem) {
-      Button("Quick Action…") {
+    // MARK: Codans (app menu) — Command Palette + updates
+    // Both sit right after "About Codans" (the `.appInfo` group). The Command
+    // Palette used to live in File as "Quick Action…"; the app menu is the more
+    // conventional home for an app-wide launcher.
+    CommandGroup(after: .appInfo) {
+      Button("Command Palette") {
         store()?.send(.commandPaletteToggle(nil))
       }
       .appKeyboardShortcut(.commandPaletteToggle, in: shortcuts)
       .disabled(store() == nil)
 
-      Divider()
+      Button("Check for Updates…") {
+        store()?.send(.checkForUpdatesRequested)
+      }
+      .appKeyboardShortcut(.checkForUpdates, in: shortcuts)
+      .disabled(store() == nil)
+    }
 
+    // MARK: File — create
+    CommandGroup(after: .newItem) {
       Button("Add Project…") {
         store()?.send(.sidebar(.toolbarAddProjectTapped))
       }
@@ -84,30 +104,6 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.newWorktree, in: shortcuts)
       .disabled(!hasCurrentProject)
-
-      Divider()
-
-      Button("New Tab") {
-        store()?.send(.newTabForCurrentWorktree)
-      }
-      .appKeyboardShortcut(.newTab, in: shortcuts)
-      .disabled(!hasActiveWorktree)
-
-      Button("Close Tab") {
-        // ⌘W is a global menu chord; SwiftUI Commands aren't scene-scoped, so the
-        // same accelerator fires regardless of which window is key. Route on the
-        // current key window: Settings (or any future SwiftUI utility window
-        // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
-        // window forwards to TabFeature. Without this dispatch the chord pressed
-        // inside Settings would close the foreground worktree's tab.
-        if let key = NSApp.keyWindow, SettingsWindowTagger.matches(key) {
-          key.performClose(nil)
-        } else {
-          store()?.send(.closeActiveTabForCurrentWorktree)
-        }
-      }
-      .appKeyboardShortcut(.closeTab, in: shortcuts)
-      .disabled(store() == nil)
     }
 
     // MARK: View — show / hide chrome
@@ -126,31 +122,15 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.revealCurrentWorktreeInSidebar, in: shortcuts)
       .disabled(!hasActiveWorktree)
-
-      Divider()
-
-      Button("Toggle Git Viewer") {
-        store()?.send(.diffInspectorToggledForCurrentWorktree)
-      }
-      .appKeyboardShortcut(.toggleDiffInspector, in: shortcuts)
-      .disabled(!hasActiveWorktree)
     }
 
-    // Check for Updates… lives next to the app menu's About / Settings group.
-    CommandGroup(after: .appInfo) {
-      Button("Check for Updates…") {
-        store()?.send(.checkForUpdatesRequested)
-      }
-      .appKeyboardShortcut(.checkForUpdates, in: shortcuts)
-      .disabled(store() == nil)
-    }
+    // MARK: Window — drop the auto window list
+    // AppKit/SwiftUI otherwise append a "Codans" + "Settings" window-title list
+    // to the Window menu. With a single main window there's nothing useful to
+    // switch to, so replace the group with nothing to remove those entries.
+    CommandGroup(replacing: .windowList) {}
 
-    // MARK: Commands — user-defined Project + Global commands
-    CommandMenu("Commands") {
-      commandsMenuContent()
-    }
-
-    // MARK: Worktree — navigation + actions
+    // MARK: Worktree — navigation + actions + Git Viewer + user commands
     CommandMenu("Worktree") {
       Button("Open in Editor") {
         store()?.send(.openDefaultForCurrentWorktreeRequested)
@@ -171,6 +151,14 @@ struct MainWindowCommands: Commands {
       .disabled(!hasActiveWorktree)
 
       Divider()
+
+      // Git Viewer moved here from View — it operates on the current Worktree's
+      // diff and reads naturally alongside the GitHub items.
+      Button("Toggle Git Viewer") {
+        store()?.send(.diffInspectorToggledForCurrentWorktree)
+      }
+      .appKeyboardShortcut(.toggleDiffInspector, in: shortcuts)
+      .disabled(!hasActiveWorktree)
 
       Button("Open PR on GitHub") {
         store()?.send(.openCurrentPRRequested)
@@ -234,10 +222,40 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.showArchivedWorktrees, in: shortcuts)
       .disabled(!hasCurrentProject)
+
+      Divider()
+
+      // User-defined Project + Global commands, merged in from the former
+      // standalone "Commands" menu.
+      commandsMenuContent()
     }
 
-    // MARK: Tabs — tab / pane management
-    CommandMenu("Tabs") {
+    // MARK: Tab — tab / pane management
+    CommandMenu("Tab") {
+      Button("New Tab") {
+        store()?.send(.newTabForCurrentWorktree)
+      }
+      .appKeyboardShortcut(.newTab, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
+      Button("Close Tab") {
+        // ⌘W is a global menu chord; SwiftUI Commands aren't scene-scoped, so the
+        // same accelerator fires regardless of which window is key. Route on the
+        // current key window: Settings (or any future SwiftUI utility window
+        // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
+        // window forwards to TabFeature. Without this dispatch the chord pressed
+        // inside Settings would close the foreground worktree's tab.
+        if let key = NSApp.keyWindow, SettingsWindowTagger.matches(key) {
+          key.performClose(nil)
+        } else {
+          store()?.send(.closeActiveTabForCurrentWorktree)
+        }
+      }
+      .appKeyboardShortcut(.closeTab, in: shortcuts)
+      .disabled(store() == nil)
+
+      Divider()
+
       Button("Split Right") {
         store()?.send(.splitCurrentPaneRequested(direction: .right))
       }
@@ -320,11 +338,12 @@ struct MainWindowCommands: Commands {
 
   // MARK: - Commands menu content
 
-  /// Builds the **Commands** menu: every Project command for the current
-  /// Worktree's Project, then every Global command, then a fixed ⌘. stop item
-  /// and the two "Manage …" footers. A running command's row flips to "Stop …".
-  /// Plain function (not `@ViewBuilder`) so the `let` bindings that gather the
-  /// command lists are legal; the returned `Group` body is the view tree.
+  /// Builds the user-defined command rows merged into the **Worktree** menu:
+  /// every Project command for the current Worktree's Project, then every Global
+  /// command, then a fixed ⌘. stop item and the two "Manage …" footers. A
+  /// running command's row flips to "Stop …". Plain function (not
+  /// `@ViewBuilder`) so the `let` bindings that gather the command lists are
+  /// legal; the returned `Group` body is the view tree.
   private func commandsMenuContent() -> some View {
     let projectID = store()?.state.selection.projectID
     let worktreeID = store()?.state.selection.worktreeID
