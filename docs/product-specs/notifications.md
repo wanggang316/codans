@@ -1,190 +1,117 @@
-# Product Spec: Notifications
+# 产品规格：Notifications
 
-**Status:** Shipped (v1 + v1.1)
-**Author:** Gump (with Claude)
+**状态：** 已上线（v1 + v1.1）
+**作者：** Gump（与 Claude）
 
-## Summary
+## 摘要
 
-codans runs coding agents and long-running terminal processes in parallel across
-many Worktrees. Users routinely leave a Pane unattended while a build, test run,
-or agent works in the background. Notifications **pull the user's attention back
-to the exact Pane that needs them** — and only that Pane.
+codans 让用户在许多 Worktree 间并行运行编码 agent 和长任务。用户经常在某个 Pane 后台跑着 build、测试或 agent 时离开它。通知的职责是**把用户的注意力拉回到那个确切需要他的 Pane**——且只拉回那一个。
 
-This spec defines which events qualify, how the user is alerted, where unread
-state surfaces, and the user-controlled policy (settings, mute, thresholds,
-worktree promotion). It deliberately stays small: no stdout scanner, no rule
-editor, no hooks — those were the over-build of an earlier design that was
-dropped before it shipped.
+本规格定义：哪些事件构成通知、如何提醒用户、未读状态在 UI 何处呈现，以及用户可控的策略（设置、静音、阈值、worktree 提升）。它刻意保持精简：无 stdout 扫描器、无规则编辑器、无 hook——那些是一套在上线前就被放弃的过度设计。
 
-## Context
+## 背景
 
-- Hierarchy: `Catalog → Project → Worktree → Tab → Pane`. A Pane is one Ghostty
-  surface; multiple Panes split-arrange inside a Tab.
-- Mechanism baseline borrowed from supacode (stdout-driven, hover popover); codans
-  adds persistence, hierarchical roll-up, a policy chokepoint, and settings.
+- 层级：`Catalog → Project → Worktree → Tab → Pane`。一个 Pane 是一个 Ghostty surface，多个 Pane 在一个 Tab 内分屏。
+- 机制基线借鉴 supacode（stdout 驱动、hover popover）；codans 增加了持久化、按层级上卷、策略闸与设置。
 
-## Goals and Non-Goals
+## 目标与非目标
 
-**Goals**
+**目标**
 
-- Surface two event classes: a Pane is **waiting for input**, or a Pane
-  **finished a long task / exited unexpectedly**.
-- Alert through four channels: in-app unread indicators, in-app inbox popover,
-  macOS banner, Dock badge — each independently controllable.
-- Roll unread counts up the hierarchy to the highest ancestor the user can't see.
-- Survive restarts. Let the user tune noise (command-finished threshold, per-pane
-  mute) and triage faster (promote a notified worktree).
+- 呈现两类事件：某 Pane 正**等待输入**，或某 Pane **完成长任务 / 意外退出**。
+- 经四条通道提醒：应用内未读指示、应用内 inbox popover、macOS 横幅、Dock 徽标——每条都可独立控制。
+- 把未读计数沿层级上卷到用户看不到的最高祖先。
+- 跨重启存活。让用户调节噪音（命令完成阈值、逐 pane 静音）并更快分诊（提升被通知的 worktree）。
 
-**Non-Goals**
+**非目标**
 
-- Stdout regex scanning / user-editable detection rules / template DSL.
-- Hook-based detection (deferred until c3-hooks proves a need).
-- In-app toast/inline banner; hover-popover entry point.
-- Snooze / re-mark-as-unread; severity beyond "needs response" vs "informational".
-- Cross-window aggregation; CLI access to the inbox.
-- Per-event custom sound; configurable keystroke-suppression window; auto-demote.
+- stdout 正则扫描 / 用户可编辑的检测规则 / 模板 DSL。
+- 基于 hook 的检测（待 c3-hooks 证明需求后再说）。
+- 应用内 toast/内联横幅；hover-popover 入口。
+- snooze / 重新标为未读；超出「需响应」vs「信息性」的严重级别。
+- 跨窗口聚合；inbox 的 CLI 访问。
+- 逐事件自定义音效；可配置的击键抑制窗口；自动降回。
 
-## User Stories
+## 用户故事
 
-- Running an agent, I'm alerted when it stops to ask a permission question.
-- Running a long build in another Worktree, I'm alerted when it finishes.
-- App in background → a macOS banner; app foreground on another Pane → a quiet
-  count, not a banner (I'm already at the keyboard).
-- App closed overnight → yesterday's unread are still there.
-- A collapsed Project shows "something inside needs attention"; I drill in.
-- Clicking a notification focuses the exact source Pane, across Worktrees.
-- A noisy Pane → one-click "Mute notifications" on its context menu.
-- Fast commands (< 10 s) and commands I cancelled (Ctrl-C) produce no banner.
-- A noisy worktree at the bottom of a long list jumps to the top on first unread.
+- 跑着 agent 时，它停下来问权限，我被提醒。
+- 在另一个 Worktree 跑长 build，它结束时我被提醒。
+- 应用在后台 → macOS 横幅；应用在前台但在别的 Pane → 安静的计数而非横幅（我已经在键盘前）。
+- 应用关了一整夜 → 昨天的未读还在。
+- 折叠的 Project 显示「里面有东西需要注意」，我钻进去。
+- 点击通知精确聚焦到来源 Pane，跨 Worktree 也行。
+- 嘈杂的 Pane → 它的右键菜单上一键「Mute notifications」。
+- 快命令（< 10 秒）和我 Ctrl-C 取消的命令不产生横幅。
+- 长列表底部的嘈杂 worktree 在首次未读时跳到顶部。
 
-## Requirements
+## 需求
 
-### Detection
+### 检测
 
-- **N1 — Waiting for input.** Detected from the structured events the runtime
-  emits — OSC 9 desktop notifications, the terminal bell — **not** by scanning
-  stdout. Tools emitting neither are uncovered (documented limitation).
-- **N2 — Long task finished.** The foreground process exits, the pane goes idle
-  (`≥ 30 s`, had recent output, no prompt detected), or a shell-integration
-  `commandFinished` (OSC 133) fires subject to the thresholds below.
-- **N3 — Non-zero exit folds into N2**; the body/title reflect the status.
-- **N4 — Per-Pane mute.** All Panes monitored by default; a per-Pane mute
-  (`notifications:muted` label) suppresses N1/N2 for that Pane only.
-- **N5 — Dedup window.** Same `(Pane, kind)` within 30 s updates the existing
-  entry instead of adding one; unread count unchanged.
+- **N1 — 等待输入。** 从运行时发出的结构化事件检测——OSC 9 桌面通知、终端 bell——**不**靠扫描 stdout。两者都不发的工具不被覆盖（记录在案的限制）。
+- **N2 — 长任务结束。** 前台进程退出、pane 进入 idle（`≥ 30 秒`、近期有输出、未检测到提示符），或 shell-integration 的 `commandFinished`（OSC 133，受下方阈值约束）。
+- **N3 — 非零退出并入 N2**；body/标题反映状态。
+- **N4 — 逐 Pane 静音。** 默认监控所有 Pane；逐 Pane 静音（`notifications:muted` 标签）只抑制该 Pane 的 N1/N2。
+- **N5 — 去重窗口。** 30 秒内同 `(Pane, kind)` 更新既有条目而非新增；未读计数不变。
 
-### Channels (each independently gated by Settings)
+### 通道（每条由 Settings 独立把关）
 
-- **C1 — Unread indicators.** Boolean per hierarchy level + a numeric count on the
-  status-bar bell (see Display).
-- **C2 — Inbox popover.** A status-bar bell opens a newest-first popover with
-  read/unread and the source `(project, worktree, tab, pane)`. No sidebar route.
-- **C3 — macOS banner.** Posted only when the app is not frontmost **or** the
-  source Pane is not the focused Pane. Gated by `systemEnabled` + authorization.
-- **C5 — Dock badge.** Mirrors the global unread count; clears at 0. Gated by
-  `dockBadgeEnabled`.
+- **C1 — 未读指示。** 每个层级一个布尔 + 状态栏铃铛上的数值计数（见 Display）。
+- **C2 — inbox popover。** 状态栏铃铛打开最新在前的 popover，含读/未读与来源 `(project, worktree, tab, pane)`。无侧栏路由。
+- **C3 — macOS 横幅。** 仅当应用非最前 **或** 来源 Pane 非聚焦 Pane 时投递。受 `systemEnabled` + 授权把关。
+- **C5 — Dock 徽标。** 镜像全局未读计数，0 时清除。受 `dockBadgeEnabled` 把关。
 
-### Display — hierarchical roll-up
+### Display — 按层级上卷
 
-- **L1–L4.** Unread rolls `Pane → Tab → Worktree → Project`, shown **only at the
-  deepest still-hidden ancestor**: L1 Pane = 2–4 px top line (green = finished,
-  amber = waiting; amber wins if both); L2 Tab = dot before title; L3 Worktree =
-  bell glyph replaces the row icon; L4 Project = dot after the name. L2–L4 are
-  kind-agnostic booleans.
-- **L5 — Status-bar bell.** The only popover entry; numeric count (`99+` past 100);
-  hidden at 0.
+- **L1–L4。** 未读沿 `Pane → Tab → Worktree → Project` 上卷，**只在最深的仍隐藏的祖先处显示**：L1 Pane = 2–4 px 顶线（绿 = 完成，琥珀 = 等待；二者皆有则琥珀胜）；L2 Tab = 标题前的点；L3 Worktree = 铃铛字形替换行图标；L4 Project = 名字后的点。L2–L4 是 kind 无关的布尔。
+- **L5 — 状态栏铃铛。** 唯一的 popover 入口；数值计数（过 100 显示 `99+`）；为 0 时隐藏。
 
-### Read / navigate / persist
+### 读 / 导航 / 持久化
 
-- **R1** focusing a Pane marks its unread read · **R2** clicking a row marks that
-  row · **R3** "Mark all as read" · **R4** no snooze/re-unread.
-- **G1** inbox-row click focuses the exact source · **G2** banner click activates +
-  same focus · **G3** dead target → fall back to the deepest existing ancestor;
-  the row stays, visibly flagged.
-- **P1** survive restart · **P2** cap 500 (evict oldest read, then oldest unread)
-  · **P3** age out > 7 days on launch · **P4** dead-target rows retained until
-  P2/P3.
+- **R1** 聚焦某 Pane 标记其未读为已读 · **R2** 点击某行标记该行 · **R3**「全部标为已读」· **R4** 无 snooze/重标未读。
+- **G1** inbox 行点击精确聚焦来源 · **G2** 横幅点击激活 + 同样聚焦 · **G3** 死目标 → 回退到最深的仍存在祖先；行保留并可见地标记。
+- **P1** 跨重启存活 · **P2** 上限 500（逐出最旧已读，再逐出最旧未读）· **P3** 启动时老化 > 7 天 · **P4** 死目标行保留至 P2/P3。
 
-### Permission
+### 授权
 
-- **PM1** on-demand prompt on first banner (not at launch) · **PM2** Settings shows
-  status + Request / Open-System-Settings recovery.
+- **PM1** 首次横幅时按需弹窗（非启动时）· **PM2** Settings 显示状态 + Request / 打开系统设置 的恢复路径。
 
-### Settings — five controls (v1.1)
+### 设置 — 五个控件（v1.1）
 
-- **S1 In-app**, **S2 System**, **S3 Sound**, **S4 Dock badge** — four orthogonal
-  toggles (in-app and system are independent, enabling "background-only").
-  Sound is disabled-but-preserved when System is off. **S5** a read-only mute
-  summary + Reveal-rules.json-in-Finder.
-- **P-alert.** Flipping System on while denied shows an informational alert with an
-  Open-System-Settings deep-link; the toggle stays on (captures intent).
+- **S1 In-app**、**S2 System**、**S3 Sound**、**S4 Dock badge**——四个正交开关（in-app 与 system 独立，可实现「仅后台」）。System 关时 Sound 被禁用但持久值保留。**S5** 只读的静音摘要 + Reveal-rules.json-in-Finder。
+- **P-alert。** 在被拒状态下开启 System 会弹信息性 alert，含「打开系统设置」深链；开关保持开启（捕获意图）。
 
-### Command-finished thresholds (v1.1)
+### 命令完成阈值（v1.1）
 
-- **CF1** `commandFinishedEnabled` (default on) · **CF2** `commandFinishedThresholdSec`
-  (default 10, `[1,3600]`) suppresses shorter commands · **CF3** exit 130/143
-  (user cancel) always suppressed · **CF4** suppressed if a keystroke landed in
-  the pane within 1 s (fixed) · **CF5** non-zero exit gets a glance-distinct title.
+- **CF1** `commandFinishedEnabled`（默认开）· **CF2** `commandFinishedThresholdSec`（默认 10，`[1,3600]`）抑制更短的命令 · **CF3** exit 130/143（用户取消）永远抑制 · **CF4** 事件前 1 秒（固定）pane 有击键则抑制 · **CF5** 非零退出给出一眼可辨的标题。
 
-### Worktree promote (v1.1)
+### Worktree 提升（v1.1）
 
-- **WT1** `moveNotifiedWorktreeToTop` (default on): first unread (`0 → N`) moves
-  the worktree to the top of its Project's **unpinned** list, persisted · **WT2**
-  fires only on the `0 → N` edge · **WT3** per-Project, never cross-project · **WT4**
-  off → no reorder · **WT5** pinned worktrees are never auto-promoted; no
-  auto-demote.
+- **WT1** `moveNotifiedWorktreeToTop`（默认开）：首次未读（`0 → N`）把 worktree 移到其 Project **未固定**列表的顶部，并持久化 · **WT2** 仅在 `0 → N` 边沿触发 · **WT3** 限于 Project 内，绝不跨 Project · **WT4** 关 → 不重排 · **WT5** 固定 worktree 永不自动提升；无自动降回。
 
-### Inbox JSON envelope (v1.1)
+### Inbox JSON 信封（v1.1）
 
-- **J1** `{ version: 1, entries: [...] }` on write · **J2** legacy bare-array reads
-  transparently, rewritten on next flush · **J3** a greater-version file loads
-  empty and is renamed `notifications.json.bak-<ISO>` once (downgrade-safe).
+- **J1** 写入时为 `{ version: 1, entries: [...] }` · **J2** 遗留裸数组透明读取，下次刷盘时改写 · **J3** 更高版本文件加载为空并一次性重命名为 `notifications.json.bak-<ISO>`（降级安全）。
 
-## Acceptance Criteria
+## 验收标准
 
-(Behavioral assertions; the runnable form lives in
-`docs/user-tests/notifications-v1-1.md`.)
+（行为断言；可运行形式见 `docs/user-tests/notifications-v1-1.md`。）
 
-**Detection** — D1 `read -p` prompt → N1 within 1 s · D2 `make build` exit → N2
-with status · D3 output then 30 s idle → exactly one N2 · D4 muted pane → nothing
-· D5 second trigger within 30 s → no second row.
-**Channels** — C1 frontmost+focused → no banner, indicators only · C2 background
-→ banner · C3 frontmost on a different Pane → banner · C4 Dock badge tracks count,
-clears at 0.
-**Roll-up** — L1 collapsed Project shows the dot, no descendant indicator · L2
-expanded Project, worktree holds it → bell glyph · L3 active worktree, inactive
-tab → tab dot · L4 active tab, unfocused pane → coloured line · L5 focus clears ·
-L6 `99+` cap, no numeric per-level · L7 N1+N2 on one pane → amber.
-**Navigation** — G1 full path focus · G2 banner parity · G3 deleted pane → land on
-worktree, row stays flagged.
-**Persistence** — P1 5 unread survive relaunch · P2 cap evicts oldest read then
-unread, stays 500 · P3 8-day-old entry gone before render.
-**Permission** — PM1 first banner prompts, in-app updates regardless · PM2 denied
-shows Open-System-Settings · PM3 dismissed → Request re-prompts.
+**检测** — D1 `read -p` 提示符 → 1 秒内 N1 · D2 `make build` 退出 → 带状态的 N2 · D3 输出后 idle 30 秒 → 恰好一条 N2 · D4 已静音 pane → 无 · D5 30 秒内第二次触发 → 不新增。
+**通道** — C1 最前+聚焦 → 无横幅，仅指示 · C2 后台 → 横幅 · C3 最前但在别的 Pane → 横幅 · C4 Dock 徽标跟随计数，0 时清除。
+**上卷** — L1 折叠 Project 显示点、无后代指示 · L2 Project 展开、worktree 持有 → 铃铛字形 · L3 活跃 worktree、非活跃 tab → tab 点 · L4 活跃 tab、未聚焦 pane → 彩色线 · L5 聚焦即清 · L6 `99+` 上限、各级无数字 · L7 一个 pane 上 N1+N2 → 琥珀。
+**导航** — G1 全路径聚焦 · G2 横幅同样 · G3 已删 pane → 落到 worktree，行保留并标记。
+**持久化** — P1 5 条未读跨重启存活 · P2 容量逐出最旧已读再未读、保持 500 · P3 8 天前条目在渲染前消失。
+**授权** — PM1 首条横幅弹窗、应用内照常更新 · PM2 被拒显示「打开系统设置」· PM3 已忽略 → Request 再次弹窗。
 
-**v1.1 (`AC-V11-*`)** — **CP1–CP3** every notification flows one chokepoint reading
-live settings; drops don't resurface on a later toggle-on. **S1–S8** the four
-toggles take effect (in-app off → banner still posts, no inbox/Dock; system off →
-inbox/Dock update, no banner; sound off → `content.sound == nil`; sound row
-disabled when system off; dock-badge off stays cleared; mute summary text;
-Reveal creates the file if absent). **P1–P2** denied + system-on → alert + deep-link.
-**M1–M4** context-menu mute toggles the label / checkmark; muted pane drops before
-the chokepoint; existing rows preserved. **CF1–CF7** enable/threshold/cancel/
-keystroke/non-zero-title/UI-validation. **WT1–WT5** promote on the 0→N edge,
-persisted; no retrigger; no demote; pinned exempt; off → no reorder. **J1–J3**
-envelope write / legacy read / forward-version quarantine.
+**v1.1（`AC-V11-*`）** — **CP1–CP3** 每条通知流经单一闸读取实时设置；丢弃的不会在之后开启时重现。**S1–S8** 四开关生效（in-app 关 → 仍发横幅、无 inbox/Dock；system 关 → inbox/Dock 更新、无横幅；sound 关 → `content.sound == nil`；system 关时 Sound 行禁用；dock-badge 关保持清除；mute 摘要文案；Reveal 在文件不存在时创建）。**P1–P2** 被拒 + 开 system → alert + 深链。**M1–M4** 上下文菜单静音切换标签/勾选；被静音 pane 在闸前丢弃；既有行保留。**CF1–CF7** 开关/阈值/取消/击键/非零标题/UI 校验。**WT1–WT5** 在 0→N 边沿提升并持久化；不重触发；不降回；固定豁免；关 → 不重排。**J1–J3** 信封写入 / 遗留读取 / 前向版本隔离。
 
-## Open Questions
+## 遗留问题（Open Questions）
 
-Resolved during design (kept for the record): prompt-pattern set → moot (no
-scanner; structured events only); inbox position → status-bar bell, no sidebar
-route; split-visible focus → only the focused Pane clears unread; idle timer →
-relies on the runtime's input-aware `paneIdle`; non-zero title → numeric exit in
-the body, compact title; keystroke window → "any key into the pane"; promote
-rollback on toggle-off → no (the manual order at that point is authority).
+设计期间已解决（留作记录）：提示符模式集 → 已无意义（无扫描器，只用结构化事件）；inbox 位置 → 状态栏铃铛，无侧栏路由；分屏可见时的聚焦 → 仅聚焦的 Pane 清未读；idle timer → 依赖运行时输入感知的 `paneIdle`；非零标题 → body 含数字退出码、标题保持紧凑；击键窗口 →「任何进入 pane 的键」；toggle 关时是否回滚提升 → 否（彼时的手动顺序即权威）。
 
-## References
+## 参考
 
-- Design: [notifications.md](../design-docs/notifications.md)
-- Hierarchy model: `apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane}.swift`
-- Inbox storage primitive: `apps/mac/CodansCore/Notifications/InboxStorage.swift`
+- 设计：[notifications.md](../design-docs/notifications.md)
+- 层级模型：`apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane}.swift`
+- inbox 存储原语：`apps/mac/CodansCore/Notifications/InboxStorage.swift`
