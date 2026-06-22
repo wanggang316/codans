@@ -134,6 +134,13 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.commandPaletteToggle, in: shortcuts)
       .disabled(store() == nil)
+
+      // Trailing separator isolates Command Palette into its own section so the
+      // system-inserted "Enter Full Screen" (which carries a leading icon) lands
+      // in a separate section. macOS reserves an icon column per section, so
+      // without this Command Palette would share Enter Full Screen's section and
+      // get indented to clear that column — misaligning it from the items above.
+      Divider()
     }
 
     // MARK: Worktree — navigation + actions + Git Viewer + user commands
