@@ -57,6 +57,13 @@ final class GhosttyRuntime {
 
   private(set) var app: ghostty_app_t?
   private var config: ghostty_config_t?
+  /// User's intended `background-opacity`, snapshotted by `GhosttyConfigLoader`
+  /// before the surface-transparency override clobbers it. The window layer
+  /// paints its frosted-glass tint at this value; the live `config` itself
+  /// carries `background-opacity = 0` (surface forced transparent) whenever
+  /// this is below 1, so we can't read it back from `config`. Refreshed on
+  /// every hard reload.
+  private var userBackgroundOpacity: Double = 1
   let dispatcher = CallbackDispatcher()
   private var appFocusObservers: [NSObjectProtocol] = []
   /// Retained `NSWorkspace`-center observers (screen + system wake). Held
@@ -97,10 +104,11 @@ final class GhosttyRuntime {
   init() throws {
     _ = GhosttyBootstrap.initialize
 
-    guard let config = GhosttyConfigLoader.makeFreshConfig() else {
+    guard let loaded = GhosttyConfigLoader.makeFreshConfig() else {
       throw GhosttyError.configInitFailed
     }
-    self.config = config
+    self.config = loaded.config
+    self.userBackgroundOpacity = loaded.userBackgroundOpacity
 
     dispatcher.runtime = self
     // libghostty signals "I have work pending; please call ghostty_app_tick
@@ -363,19 +371,16 @@ final class GhosttyRuntime {
     return NSColor(ghostty: color)
   }
 
-  /// User's `background-opacity` from the active Ghostty config, clamped to
-  /// `[0, 1]`. Returns `1` (fully opaque) when the key is unset or no config
-  /// has loaded yet. Drives the translucent frosted-glass terminal
-  /// background: `applyTerminalWindowBackground` paints the window tint at
-  /// this alpha and only makes the window non-opaque + blurred when it's
-  /// below 1.
+  /// User's intended `background-opacity`, clamped to `[0, 1]`. Returns `1`
+  /// (fully opaque) until the first config load. This is the *snapshot* taken
+  /// before the surface-transparency override, not a live read of `config` —
+  /// when below 1 the live config carries `background-opacity = 0` (surface
+  /// forced transparent) so reading it back would always yield 0. Drives the
+  /// frosted-glass terminal background: `applyTerminalWindowBackground` paints
+  /// the window tint at this alpha and makes the window non-opaque + blurred
+  /// only when it's below 1.
   func backgroundOpacity() -> Double {
-    guard let config else { return 1 }
-    var value: Double = 1
-    let key = "background-opacity"
-    let keyLen = UInt(key.lengthOfBytes(using: .utf8))
-    _ = ghostty_config_get(config, &value, key, keyLen)
-    return min(max(value, 0), 1)
+    userBackgroundOpacity
   }
 
   /// Paint one non-Settings window's background to the terminal theme tone,
@@ -811,9 +816,14 @@ final class GhosttyRuntime {
     }
     let pushed: ghostty_config_t?
     if soft, let current = config {
+      // Soft reload (color-scheme flip): keep the existing surface override and
+      // the last snapshotted opacity — only the conditional state changed.
       pushed = ghostty_config_clone(current)
+    } else if let fresh = GhosttyConfigLoader.makeFreshConfig() {
+      pushed = fresh.config
+      userBackgroundOpacity = fresh.userBackgroundOpacity
     } else {
-      pushed = GhosttyConfigLoader.makeFreshConfig()
+      pushed = nil
     }
     guard let handle = pushed else {
       chromeTintLogger.log("reloadConfig: no pushed config, bailing")
