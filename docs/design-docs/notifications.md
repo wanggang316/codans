@@ -1,360 +1,332 @@
 # Design Doc: Notifications
 
-**Status:** Approved
+**Status:** Shipped (v1 + v1.1 hardening)
 **Author:** Gump (with Claude)
-**Date:** 2026-04-30
 
 ## Context and Scope
 
-This design implements the [Notifications product spec](../product-specs/notifications.md) — a system that pulls the user's attention back to a specific Pane when a coding agent or long-running command needs them. It supersedes the prior C6 design line:
+The notification subsystem pulls the user's attention back to the exact Pane
+that needs them — a coding agent blocked on input, or a long task that finished
+— and only that Pane. See the [Notifications product spec](../product-specs/notifications.md)
+for capabilities and acceptance criteria.
 
-- `docs/design-docs/c6-agent-notifications.md`
-- `docs/design-docs/c6-agent-notifications-v2.md`
-- `docs/design-docs/c6-m5-inbox-sidebar.md`
-- `docs/exec-plans/0006-agent-notifications.md`
+The hierarchy is `Catalog → Project → Worktree → Tab → Pane`; a Pane is one
+Ghostty surface, multiple Panes split-arrange inside a Tab via `SplitTree<PaneID>`.
 
-…all of which assumed a "Panel" abstraction that was never adopted on `main`, an FSM tracker, a user-editable rule DSL, and an ~24-file / ~2900-line implementation. The audit in this thread concluded the C6 design was overbuilt for the actual user need; this doc replaces it with a smaller design grounded in primitives the runtime already exposes.
-
-The hierarchy on `main` is `Catalog → Project → Worktree → Tab → Pane`. A Pane is a single Ghostty surface; multiple Panes split-arrange inside a Tab via a recursive `SplitTree<PaneID>`.
+This design replaced an earlier, over-built "C6" line (an FSM tracker, a
+user-editable rule DSL, a stdout scanner, ~2900 LOC) that was never adopted on
+`main`. The decision record below keeps the *why* of that rejection; the C6
+design docs themselves were deleted (recoverable from git history).
 
 ## Goals and Non-Goals
 
 **Goals**
 
-- Translate two classes of in-Pane events (waiting-for-input, task-finished) into notifications without writing a stdout scanner from scratch.
-- Persist the inbox across app restarts using the existing `AtomicFileStore` pattern.
-- Expose unread state through hierarchical roll-up badges that show only at the deepest hidden ancestor, plus a single bell entry in the worktree status bar with a popover inbox.
-- Deliver macOS banners only when the originating Pane is not the user's current focus.
-- Land in ≤ 7 files / ≈ 600 LOC, including tests.
+- Translate the structured events the runtime already emits (OSC 9 desktop
+  notification, terminal bell, OSC 133 command-finished, child-exit, idle,
+  crash) into notifications — **without** a stdout scanner.
+- Persist the inbox across restarts via the existing `AtomicFileStore`.
+- Surface unread state as hierarchical roll-up badges (shown only at the deepest
+  hidden ancestor) plus one status-bar bell with a popover inbox.
+- Route every emitted notification through **one policy chokepoint** that honours
+  the user's settings and macOS authorization before any side effect.
+- Deliver macOS banners only when the source Pane is not the user's focus.
 
 **Non-Goals**
 
-- No stdout regex scanning. v1 consumes only the structured events libghostty + the runtime already emit. Tools that don't emit OSC 9 / ring the bell / use shell integration are silently uncovered; this is documented, not patched.
-- No hook-based detection (c3-hooks integration). The hook-source path is reserved for v2 and would be additive.
-- No user-editable detection rules, template DSL, severity levels, snooze, sound, pane-internal toast, hover popover, or per-rule mute.
-- No CLI access to the inbox in v1. The data model lives in `CodansCore` so that surfacing it later is a small change, but `codans` does not query it now.
+- No stdout regex scanning (see Alternatives A1). Tools that emit neither OSC 9
+  nor the bell nor OSC 133 are silently uncovered — documented, not patched.
+- No hook-based detection (c3-hooks). Reserved for a future additive source.
+- No user-editable detection rules / template DSL / severity levels / snooze /
+  in-app toast surface / per-event sound choice.
+- No CLI access to the inbox. The model lives in `CodansCore` so surfacing it
+  later is small, but `codans` does not query it.
 
-## Design
+## Design Overview
 
-### Overview
+The driving insight, in two halves:
 
-The single design insight that drives everything: **the runtime already exposes the structured events we need**. `TerminalEvent` and `PaneInfoDelta` already surface OSC 9 desktop notifications, terminal bell, OSC 133 command-finished, child-exit, idle, and crash. v1 of the notification system is therefore a small **translator + store + UI** sitting downstream of the existing event stream — not a new detection engine.
-
-The user-facing surface is one bell button in the existing worktree status bar (with a numeric unread badge) and four hierarchical roll-up badges in the sidebar / tab bar / pane chrome that show only at the deepest still-hidden ancestor. Clicking the bell opens a popover; clicking a row in the popover (or a macOS banner) drives a new `RootFeature.focusHierarchyPath` action that walks the path expanding ancestors, switching worktrees, activating tabs, and focusing panes as needed.
-
-The chosen trade-off compared with both reference points:
-
-- vs. **supacode** (~900 LOC): we add persistence + per-level roll-up badges + on-demand permission. We keep the bell-popover entry and the structural simplicity.
-- vs. **C6 worktree** (~2900 LOC): we drop the stdout scanner, FSM tracker, rule DSL, template renderer, registry, settings store, broken-file backup, and most of the bridging adapters. We keep the salvaged `OSNotifier` only.
-
-### System Context Diagram
+1. **The runtime already exposes the structured events we need** — so detection
+   is a small *translator* downstream of the existing event stream, not a new
+   detection engine.
+2. **Detection and policy must stay separate.** Mixing "translate event into a
+   candidate" with "decide whether to surface it" is what made the first detector
+   grow into a thicket of inline `if`s the moment settings appeared. So:
+   - `DetectionTranslator` — **pure**; `(event, context) → Step`. Grows knobs as
+     inputs, never as state.
+   - `NotificationDetector` — orchestration: catalog walk, muted-label drop,
+     `hasProducedOutput`, keystroke context; emits a `Candidate`.
+   - `NotificationCoordinator` — the **policy chokepoint**: reads live settings +
+     auth status, dispatches to the side-effect sinks. The only place gates live.
 
 ```
-                                                    ┌────────────────────────────┐
-                                                    │  UNUserNotificationCenter  │
-                                                    └──────────▲─────────────────┘
-                                                               │ banner / permission
-                                                               │
-┌──────────────┐   TerminalEvent /   ┌────────────────────┐    │
-│   Runtime    │   PaneInfoDelta     │     Notification   │    │     ┌─────────────────┐
-│  (Ghostty +  │────────────────────▶│       Detector     │────┼────▶│   OSNotifier    │
-│ TerminalEng) │                     └─────────┬──────────┘    │     └─────────────────┘
-└──────────────┘                               │ append        │
-                                               ▼               │     ┌─────────────────┐
-                                     ┌────────────────────┐    └────▶│    DockBadger   │
-                                     │ NotificationStore  │          └─────────────────┘
-                                     │   (in-mem + JSON)  │
-                                     └─────────┬──────────┘
-                                               │ unread set deltas
-                                               ▼
-┌─────────────────────┐  Catalog focus + ┌────────────────────┐
-│   RootFeature /     │─────────────────▶│    RollupIndex     │
-│  HierarchySidebar   │  expanded state  │  [ScopePath: Int]  │
-└──────────▲──────────┘                  └─────────┬──────────┘
-           │                                        │ keypath read
-           │ focusHierarchyPath(P,W,T,Pn)           ▼
-           │                            ┌────────────────────┐
-           └────────────────────────────│  Status-Bar Bell + │
-                                        │   Inbox Popover    │
-                                        └────────────────────┘
+                                    ┌──────────────────────────┐
+                                    │ SettingsStore (v3)       │
+                                    │ .notifications: 7 fields │
+                                    └─────────┬────────────────┘
+                                              │ NotificationSettingsReader
+                                              ▼
+   ┌──────────────┐  TerminalEvent   ┌────────────────────────┐
+   │ TerminalEng. │─────────────────▶│ NotificationDetector   │
+   └──────────────┘                  │  • catalog walk        │
+   ┌──────────────┐  key input       │  • muted-label drop    │
+   │ GhosttyView  │─────────────────▶│  • DetectionTranslator │
+   └──────────────┘                  └────────┬───────────────┘
+                                              │ Candidate (or drop)
+                                              ▼
+                       ┌──────────────────────────────────────┐
+                       │  NotificationCoordinator (chokepoint) │
+                       │  • read settings + authStatus         │
+                       │  • dispatch sinks  • unreadByWorktree  │
+                       └──┬─────────┬─────────┬─────────┬──────┘
+                          ▼         ▼         ▼         ▼
+                    ┌────────┐ ┌────────┐ ┌──────┐ ┌──────────────────┐
+                    │ Store  │ │OSNotif.│ │ Dock │ │HierarchyClient   │
+                    │.append │ │.post(  │ │Badger│ │.reorderWorktrees │
+                    │        │ │playSnd)│ │      │ │                  │
+                    └────────┘ └────────┘ └──────┘ └──────────────────┘
 ```
 
-### Detection (DQ1)
+External touchpoints: `UNUserNotificationCenter`, `NSApp.dockTile`,
+`AtomicFileStore`. The only non-`TerminalEvent` input is the keystroke
+side-channel (`PaneKeyboardActivityTracker`).
 
-`NotificationDetector` subscribes to the runtime's `TerminalEvent` stream and translates structured events into notifications. The translation table:
+## Detection (`DetectionTranslator`, pure)
+
+`translate(_ event: TerminalEvent, context: Context) -> Step` is pure; `Context`
+carries `hasProducedOutput`, `lastUserKeystrokeAt: [PaneID: Date]`, an injected
+`now`, and the command-finished settings. Translation table:
 
 | Source event | Becomes | Kind |
 |---|---|---|
-| `PaneInfoDelta.desktopNotification(title, body)` | one notification with that title/body | `.waitingForInput` if title/body matches a small heuristic ("permission", "approval", "input", "?"); else `.taskFinished` |
-| `PaneInfoDelta.bellRang` | "Pane rang the bell" | `.waitingForInput` |
-| `PaneInfoDelta.commandFinished(exitCode, duration)` | "command finished in Ns" or "exited with status N" | `.taskFinished` (only emitted when shell-integration is active) |
-| `TerminalEvent.paneExited(code, signal)` | "pane exited" with status / signal | `.taskFinished` |
-| `TerminalEvent.paneCrashed(reason)` | "pane crashed: $reason" | `.taskFinished` (was T3 in the spec; merged here) |
-| `TerminalEvent.paneIdle(duration)` | "task idle for $duration" | `.taskFinished` (only when `duration ≥ 30s` AND the pane has produced output recently AND no shell prompt detected) |
+| `desktopNotification(title, body)` (OSC 9) | that title/body | `.waitingForInput` if it matches a small heuristic ("permission"/"approval"/"input"/"?"), else `.taskFinished` |
+| `bellRang` | "Pane rang the bell" | `.waitingForInput` |
+| `commandFinished(exitCode, duration)` (OSC 133) | see suppression rules below | `.taskFinished` |
+| `paneExited(code, signal)` | "pane exited" + status | `.taskFinished` |
+| `paneCrashed(reason)` | "pane crashed: …" | `.taskFinished` |
+| `paneIdle(duration)` | "task idle for …" | `.taskFinished` — only when `duration ≥ 30s` AND the pane produced output recently AND no shell prompt detected |
 
-Notifications are dropped silently when the source Pane has notifications disabled (`Pane.labels` contains `"notifications:muted"`).
+**Command-finished suppression** — all decisions live in the pure layer, keyed
+only on the injected context (the keystroke timestamp is the one external input):
 
-**Dedup window** (N5): the store keeps a small `(paneID, kind) → lastTimestamp` map. An incoming notification within 30 s of the previous one for the same `(paneID, kind)` updates the existing row's body and timestamp instead of appending. Unread count is unchanged.
+1. `commandFinishedEnabled == false` → drop (`commandFinishedDisabled`).
+2. exit `130` (SIGINT) / `143` (SIGTERM) → drop (`commandCancelled`) — the user
+   cancelled; they know it ended.
+3. `duration < commandFinishedThresholdSec` → drop (`commandFinishedShort`).
+4. a keystroke landed in the source pane within the **1 s** before the event →
+   drop (`userTypingRecently`) — the user is plainly attending the pane.
+5. otherwise emit, with a **glance-distinct title for non-zero exit** ("Command
+   failed (exit N)" vs "Command finished").
 
-The detector runs on the same actor as the runtime event loop; output is fanned to the store via a `MainActor` hop.
+`Step` carries an optional `drop: DropReason?` so a suppression is logged on the
+same path as the coordinator's later drops. `DropReason` lives in `CodansCore`
+so the pure translator and the app-layer coordinator share one string-coded enum.
 
-### Storage (DQ2)
+**Keystroke side-channel.** `PaneKeyboardActivityTracker` (`@MainActor`, owns
+`[PaneID: Date]`) records on every `GhosttySurfaceView.sendKey`, purged on pane
+teardown. Why not a `TerminalEvent.paneUserInput` case: keystroke cadence is
+human-scale (~10 Hz) and only the detector cares — a new event case would add
+noise to every `TerminalEvent` consumer (`RootFeature`, tests, analytics). Why
+not `Pane.labels` / a `@Observable` field: labels are persisted (a catalog save
+per keystroke) and an `@Observable` field would force a SwiftUI re-render per
+keystroke, which `GhosttySurfaceView` deliberately avoids.
 
-`NotificationStore` holds the inbox as `[Notification]` in memory and persists to `~/.config/codans/notifications.json` using `AtomicFileStore`. The file is **separate** from `catalog.json`: notifications are time-series data, the catalog is structural; mixing them complicates Catalog schema migration.
+## Policy chokepoint (`NotificationCoordinator`)
 
-```swift
-public struct Notification: Codable, Sendable, Identifiable {
-  public let id: NotificationID
-  public let kind: Kind                    // .waitingForInput | .taskFinished
-  public let title: String
-  public let body: String
-  public let createdAt: Date
-  public var readAt: Date?                 // nil while unread
-  public let source: SourcePath            // (P, W, T, Pn) at creation time
+A `@MainActor final class` (not a reducer — it holds no UI state; not
+`@Observable` — nothing binds to it), constructed once at bringup. It consumes a
+`Candidate { entry: InboxEntry, sourceIsFocused: Bool }` and returns a `Decision`
+(`.posted(…)` / `.dropped(reason:)`) so tests assert behaviour without inspecting
+collaborators. Gate order:
 
-  public enum Kind: String, Codable, Sendable { case waitingForInput, taskFinished }
-  public struct SourcePath: Codable, Sendable, Equatable {
-    public let projectID: ProjectID
-    public let worktreeID: WorktreeID
-    public let tabID: TabID
-    public let paneID: PaneID
-  }
-}
+1. `sourceIsFocused` → drop. (The in-pane output is itself the alert.)
+2. `inAppEnabled` → append to inbox + recompute Dock badge (the Dock gate is
+   inside). **In-app and system are independent switches**: "background-only"
+   mode is in-app off + system on.
+3. `systemEnabled && authStatus == .authorized` → `OSNotifier.post(entry, playSound: soundEnabled)`.
+4. `moveNotifiedWorktreeToTop` AND the worktree's unread just went `0 → N` →
+   `reorderWorktrees`.
+
+The coordinator owns an `unreadByWorktree: [WorktreeID: Int]` cache (rebuilt from
+the inbox at init, updated incrementally) so the `0 → N` edge is detected without
+re-scanning the inbox. Driving promote from this cache — not by observing the
+store — avoids re-promoting on every `markRead`/dedup-collapse.
+
+`NotificationSettingsReader` is the seam onto `SettingsStore` + cached auth
+status; a fake drives tests. Auth status is re-read on `applicationDidBecomeActive`
+so a System-Settings change lands without restart.
+
+**`OSNotifier.post(_ entry:, playSound:)`** takes sound per call — a stateful
+`playSound` property would be racy when a batch of posts straddles a settings
+flip. The adapter is otherwise ignorant of `SettingsStore`.
+
+## Settings (`NotificationsSettings`)
+
+A sixth top-level section on `Settings` (v3), additive — **no version bump**, all
+fields optional via `decodeIfPresent` (a pre-v1.1 `settings.json` decodes to
+defaults). Fields, all defaulting on/sensible: `inAppEnabled`, `systemEnabled`,
+`soundEnabled`, `dockBadgeEnabled`, `moveNotifiedWorktreeToTop`,
+`commandFinishedEnabled`, `commandFinishedThresholdSec` (default 10, clamped
+`[1,3600]` on decode and at the UI layer), and a count-only `mute` sub-struct.
+
+**Why four orthogonal booleans, not one `level` enum** (A5): users want the
+cross-products an enum can't express (in-app off + system on = "background-only").
+Sound and Dock badge are further independent axes.
+
+The Settings → Notifications pane is **direct-view + `SettingsStore`** (no
+reducer), matching `SettingsGeneralView`. Behaviours that are durable contracts
+(not the exact SwiftUI layout): the Sound row is `.disabled` when `systemEnabled`
+is off but its persisted value is **preserved** (flipping system back on restores
+intent); flipping System on while `authStatus == .denied` shows an informational
+alert with an "Open System Settings" deep-link (`?id=<bundle-id>` with a
+top-level-pane fallback) and the toggle stays `true` (it captures intent, not the
+OS block); the mute row is a summary + Reveal-in-Finder only (no rules editor).
+
+## Storage (`NotificationStore` + `InboxFile`)
+
+The inbox is `[InboxEntry]` in memory, persisted to
+`~/.config/codans/notifications.json`. The record type is **`InboxEntry`**, not
+`Notification` — the latter clashes with `Foundation.Notification` at any call
+site importing both Foundation and CodansCore. Pure inbox mutation
+(dedup/age/cap) lives in `CodansCore.InboxStorage` (a `nonisolated` enum) so it
+is testable independent of the `@MainActor` store. `InboxEntry.source` stores raw
+IDs (`projectID/worktreeID/tabID/paneID`), not weak refs — the catalog mutates
+independently; navigation re-resolves on click.
+
+Sweeps run on load before the inbox is exposed, and the cap is enforced on every
+append: **age** (drop > 7 days), **cap** (> 500 → evict oldest read first, then
+oldest unread). **Dedup window**: an incoming `(paneID, kind)` within 30 s of the
+previous updates the existing row's body/timestamp instead of appending. Saves
+are debounced 250 ms off the MainActor.
+
+**Versioned envelope (`InboxFile`).** The file is `{ version: 1, entries: [...] }`.
+The loader: missing → `nil`; decode `Envelope` → if `version > current`, rename to
+`notifications.json.bak-<ISO>` and return `[]`, else return entries; on envelope
+failure, try the **legacy bare array** (one release of back-compat); on both
+failures, return `[]` without renaming (may be a partial write the next save
+overwrites). Why a version key, not a filename bump (A7): renaming orphans every
+existing user's inbox; the key is one decode-try with zero file ops on the happy
+path. Why not fold into the settings version: the inbox is its own file with its
+own write cadence — coupling would force a settings-save per inbox-save.
+
+## Roll-up (`RollupIndex`)
+
+Computed in a TCA reducer derivation (catalog is tens of nodes; O(N) recompute on
+each input delta is fine), rebuilt when either input changes: the unread set, and
+focus state (`focusedPaneID`, active tab/worktree, expanded sets). Per-level
+indicators are **boolean** except the status-bar bell, which carries the numeric
+global unread count (mirrored by the Dock badge).
+
+**Invariant — each unread contributes to exactly one level: the deepest hidden
+ancestor.** L4 Project (collapsed) · L3 Worktree (project expanded, worktree not
+active) · L2 Tab (worktree active, tab not) · L1 Pane (tab active, pane not
+focused). At L1, an unread `.waitingForInput` (amber) overrides `.taskFinished`
+(green). `globalUnreadCount` is the un-rolled-up total ("every unread, regardless
+of whether you can see its source"). The badge count must be a **computed read of
+the live catalog**, not a cached field — a cache goes stale on catalog-only
+mutations (e.g. removing a non-selected worktree that orphans an unread) because
+no selection signal fires to invalidate it.
+
+Each surface (sidebar Project dot, Worktree bell glyph, Tab dot, Pane top line)
+reads `RollupIndex` via a small Equatable slice; L1–L4 are visual-only. The
+status-bar bell is the **only** popover entry (A5: per-level scoped popovers
+rejected — position in the hierarchy already answers "where", and a scoped
+popover on a rolled-up level would show entries whose real source is several
+levels deeper).
+
+## Navigation
+
+`RootFeature.focusHierarchyPath(SourcePath, fallback:)` walks Project → Worktree
+→ Tab → Pane, setting selection at each level. **Dead-target fallback** (G3): if a
+level no longer exists, land on the deepest still-existing ancestor; the inbox row
+remains, flagged with a faded/struck-through source label. This is `RootFeature`'s
+responsibility (it owns selection), not `PaneActionRouter`'s (intra-pane/-tab).
+
+## Worktree promote
+
+`HierarchyClient.reorderWorktrees(projectID, worktreeID, .moveToFrontWithinUnpinned)`
+moves a worktree to the front of the **unpinned** segment on its first unread
+(`0 → N` edge). **Pinned worktrees never auto-reorder** — pinned is a stronger
+explicit signal than "got a notification". No auto-demote when unread returns to
+0 (the promotion was a discrete past event; the user's current order is
+authority). The mutation belongs to catalog ownership (one linear writer surface,
+matching `setWorktreePinned`/`reorderProjects`); the coordinator only decides
+*when*. Orthogonal to `bumpProjectActivity` (project-level sort) — the coordinator
+does **not** duplicate that call; the detector keeps it.
+
+## Per-pane mute
+
+Mute is the string label `"notifications:muted"` in `Pane.labels` (Codable /
+persisted — no new field). A pane right-click "Mute notifications" item toggles it
+via `HierarchyClient.setPaneLabel` (debounced through `CatalogStore.scheduleSave`,
+in-memory mutation immediate so a re-opened menu reads current state). The menu
+reads via `hierarchy.snapshot()`, not view state, so it reflects the label each
+time it opens. The detector drops muted-pane events before the chokepoint.
+
+## Permission
+
+`OSNotifier` requests authorization on the **first** banner-worthy notification
+(not at launch). Denial silences only banners — in-app badges, inbox, and Dock
+badge work unconditionally. Settings exposes Request / Open-System-Settings
+recovery; status is re-read on `applicationDidBecomeActive`.
+
+## Component Boundaries
+
 ```
-
-Persistence is debounced (250 ms after the last mutation) and runs off the MainActor. On launch, the store loads the file, then synchronously runs two sweeps before exposing the inbox:
-
-- **Age sweep (P3):** drop anything older than 7 days.
-- **Cap sweep (P2):** if `> 500` entries remain, evict oldest read first, then oldest unread, until size = 500.
-
-The 500-entry cap is also enforced on every append.
-
-`SourcePath` deliberately stores raw IDs, not weak references. The catalog can mutate independently; on click, navigation re-resolves the IDs against the current catalog (G3: dead-target fallback to the deepest still-existing ancestor).
-
-### Roll-up (DQ3)
-
-Roll-up is computed in a TCA reducer derivation, not a separate background process. A small struct `RollupIndex` is rebuilt whenever either input changes:
-
-- **Input A:** the set of unread notifications (each carries a `SourcePath` and a `Kind`).
-- **Input B:** focus state from `RootFeature` — `(focusedPaneID, activeTabID, activeWorktreeID, expandedProjectIDs, expandedWorktreeIDs)`.
-
-Per-level indicators are **boolean**, not numeric, except for one place: the status-bar bell carries a numeric global unread count. The Dock badge mirrors that same count. Per-hierarchy-level shape:
-
-```swift
-struct RollupIndex {
-  var unreadProjects: Set<ProjectID>          // L4 dot
-  var unreadWorktrees: Set<WorktreeID>        // L3 bell glyph
-  var unreadTabs: Set<TabID>                  // L2 dot
-  var paneIndicator: [PaneID: PaneIndicator]  // L1 line colour
-  var globalUnreadCount: Int                  // status-bar bell + Dock badge
-}
-
-enum PaneIndicator { case taskFinished, waitingForInput }   // green / amber
-```
-
-Visibility rules — each unread notification contributes to **exactly one level**, the deepest hidden ancestor:
-
-- L4 Project: project is collapsed in the sidebar.
-- L3 Worktree: project is expanded but the worktree is not active (or its row is collapsed in a sidebar that supports collapse).
-- L2 Tab: worktree is active but the tab is not active.
-- L1 Pane: tab is active but the pane is not focused.
-
-For L1, when the same Pane has both unread N1 and unread N2, `PaneIndicator.waitingForInput` wins (amber overrides green) — N1 is the higher-priority signal.
-
-`globalUnreadCount` is the un-rolled-up total (every unread contributes), so the status-bar bell shows "every unread, regardless of whether you can see its source."
-
-Catalog size on the user side is small (tens of nodes), so an O(N) recompute on every input delta is fine. No incremental tree maintenance.
-
-### Navigation (DQ4)
-
-A new action on `RootFeature`:
-
-```swift
-case focusHierarchyPath(SourcePath, fallback: NavigationFallback)
-```
-
-Handler walks the path:
-
-1. If the Project no longer exists → fall back per `NavigationFallback`.
-2. Switch `Catalog.selectedProjectID` and expand the project row.
-3. If the Worktree no longer exists → fall back to project root.
-4. Set `Project.selectedWorktreeID` to switch to that Worktree's tabs/panes.
-5. If the Tab no longer exists → land on the Worktree (no further descent).
-6. Set `Worktree.selectedTabID`.
-7. If the Pane no longer exists → land on the Tab (no further descent).
-8. Set focused Pane via the existing `hierarchyClient` API.
-
-`NavigationFallback` is a single enum value picked by the caller (`.deepestExisting` for inbox-row clicks, identical for banner clicks). G3's "subtle 'source no longer exists' indicator" is rendered in the inbox popover as a faded row with a strikethrough source label; the row stays.
-
-This action is *not* routed through `PaneActionRouter` — that router handles intra-pane / intra-tab intents. Cross-worktree navigation is `RootFeature`'s natural responsibility (it already owns selection state).
-
-### Per-Level Indicator Surfaces
-
-`RollupIndex` is the single source; each surface owns the rendering of its level.
-
-- **L4 Project — unread dot.** `HierarchySidebar` Project row reads `RollupIndex.unreadProjects`. When the project's `ProjectID` is in the set, render a small filled circle (4 px) immediately to the right of the project name. No count.
-- **L3 Worktree — bell glyph.** `WorktreeRowIcon` (`apps/mac/codans/App/Features/HierarchySidebar/WorktreeRowIcon.swift`) currently picks between branch / PR-state glyphs. Extend its inputs with `hasUnreadNotification: Bool` (sourced from `RollupIndex.unreadWorktrees`); when true, override the asset to a bell glyph and suppress the role tint. PR check-rollup overlay (the bottom-right circle) keeps working unchanged. When the worktree is read again, the icon falls back to its prior PR / branch state.
-- **L2 Tab — unread dot.** `TabBar` row prepends a small filled circle (4 px) before the tab title text when the tab's `TabID` is in `RollupIndex.unreadTabs`. No count, no kind distinction.
-- **L1 Pane — coloured top line.** Pane chrome renders a 2 px line across its top edge:
-  - `PaneIndicator.taskFinished` → green (`Color.systemGreen` at slightly desaturated opacity).
-  - `PaneIndicator.waitingForInput` → amber (`Color.systemOrange` at the same opacity).
-  - Absent from `paneIndicator` map → no line.
-
-  Line height is 2 px on Retina, scaled to the nearest pixel boundary. The line sits above any per-pane title chrome and below the surface content, so it never overlaps Ghostty's draw region.
-
-None of L1–L4 are interactive — they are visual-only. The single popover entry is the status-bar bell (next).
-
-### Status-Bar Bell + Inbox Popover
-
-The existing `StatusBarFeature` (`apps/mac/codans/App/Features/StatusBar/`) currently fills a single center slot of the worktree status bar with one of `{toast, pullRequest, motivational}`. v1 adds a **right-anchored bell slot** that is independent of the center slot and always present:
-
-```
-┌─────────────────────── worktree status bar ───────────────────────┐
-│  [left chrome]    [   center-slot form   ]              [🔔 3]    │
-└───────────────────────────────────────────────────────────────────┘
-```
-
-`InboxBellFeature` owns:
-
-- The bell button (icon + numeric badge showing `RollupIndex.globalUnreadCount`, capped to `99+`; hidden when 0).
-- The popover content: a vertical list of `Notification` rows newest-first, with two filter chips (All / Unread). Each row shows kind icon, title, body, "Project › Worktree › Tab" trail, relative time. Clicking dispatches `focusHierarchyPath`.
-- A "Mark all read" action in the popover header.
-- A "Settings…" link that opens the Settings Notifications panel.
-
-The bell button is the **only** popover entry — Worktree-row bell glyphs and the Tab / Project / Pane indicators are visual-only and do not open scoped popovers. (Considered and rejected; see Alternatives A5.)
-
-### Component Boundaries (DQ5)
-
-```
-CodansCore/Notifications/
-  Notification.swift             // model only — id, kind, source path, ts, read
-                                 // (kept in Core in case CLI exposes inbox later)
-
+CodansCore/
+  Notifications/{InboxEntry, InboxStorage, DetectionTranslator(+Context),
+                 InboxFile, RollupIndex, DropReason}.swift
+  Settings/NotificationsSettings.swift
 codans/App/Features/Notifications/
-  NotificationDetector.swift     // TerminalEvent → Notification
-  NotificationStore.swift        // [Notification] + AtomicFileStore + sweep/cap
-  RollupIndex.swift              // RollupIndex derivation (Sets + paneIndicator map)
-  OSNotifier.swift               // UNUserNotificationCenter wrapper (salvaged from C6)
-  DockBadger.swift               // dockTile.badgeLabel mirror, ~30 LOC
-  InboxBellFeature.swift         // bell button + popover content + filter chips
+  NotificationDetector, NotificationCoordinator, NotificationSettingsReader,
+  NotificationStore, OSNotifier, DockBadger, PaneKeyboardActivityTracker
+codans/App/Features/Settings/Panes/NotificationsSettingsView.swift
+codans/App/Clients/HierarchyClient.swift   // + reorderWorktrees, setPaneLabel
 ```
 
-The L1–L4 indicator surfaces are **edits to existing files**, not new ones:
-
-- `App/Features/HierarchySidebar/SidebarRow.swift` — Project unread dot.
-- `App/Features/HierarchySidebar/WorktreeRowIcon.swift` — bell glyph override.
-- `App/Features/TabBar/*` — Tab unread dot prefix.
-- pane chrome view (the small wrapper around `GhosttySurfaceView`) — top indicator line.
-
-Each of those reads from `RollupIndex` via a small Equatable view-store slice; no other behaviour changes.
-
-Dependency direction: `CodansCore.Notification ← Detector → Store → RollupIndex → InboxBellFeature, OSNotifier, DockBadger, [sidebar/tabbar/pane edits]`. The store has no knowledge of UI or OS facilities; UI components observe the store.
-
-The Settings Notifications panel is a thin section added to the existing `App/Features/Settings/` reducer; it is not a separate file owned by Notifications.
+Dependency direction: `InboxEntry ← DetectionTranslator/Detector → Coordinator →
+{Store, OSNotifier, DockBadger, HierarchyClient}`; surfaces observe `RollupIndex`.
+The store is UI- and OS-ignorant by design; `Notifications/` imports no UI types
+beyond the settings pane and the pane context menu.
 
 ## Alternatives Considered
 
-### A1 — stdout regex scanner
-
-Add a per-Pane regex scanner over `paneOutput` to detect prompt-style waits on shells without OSC 9 / bell.
-
-**Why rejected:** Patterns drift. A regex for "(y/n)" matches code review explanations and chat transcripts. Once we ship one regex set, users want to edit it; the rule editor was the largest single piece of complexity in the C6 worktree (`AgentDetectionRules` + `RuleStore` + `TemplateField` + `TemplateRenderer` + `DetectionRouter`, ~700 LOC). Documenting the gap ("emit OSC 9 from your tooling") is cheaper than maintaining the regex set forever. v2 can reintroduce a scanner as an optional module if real users hit the gap.
-
-### A2 — Sidebar inbox route (separate page)
-
-Inbox lives in a top-level sidebar entry that takes over the main viewport when selected (this was the C6.M5 design).
-
-**Why rejected:** Confirmed with the user. The sidebar is already busy (project list, worktree groups, tag chips). Notifications are by nature transient — we read them, click through, forget. A persistent route promotes them to first-class navigation, which they don't deserve. A bell + popover matches the actual flow ("oh, notification → read → jump → done").
-
-### A3 — Hook-based detection via c3-hooks
-
-Treat the c3 lifecycle hook stream as the authoritative T1/T2 source.
-
-**Why rejected:** c3-hooks landed but only Claude Code currently writes them; relying on hooks excludes every other agent and every plain shell command. The runtime's structured events cover the same ground for any tool that respects OSC 9 / OSC 133 — strictly broader coverage. We can additively consume hooks in v2 if there are hook-only signals not reachable via OSC, but v1 doesn't depend on c3.
-
-### A4 — Reuse C6 worktree as-is
-
-Land the C6 design with cosmetic edits.
-
-**Why rejected:** The audit (this conversation, prior turns) found the C6 codebase to be ~3× the LOC needed for the v1 user surface, with most abstractions (`TrackerRegistry`, `TemplateRenderer`, `AgentStateTransition`, `BrokenFileBackup`, the `Bridging/` layer, `NotificationPermissionDelegate`, the rule-editor surface) carrying no v1 user value. Selectively extracting from it is more work than rewriting; ~80 % of its tests are coupled to the discarded abstractions.
-
-The one C6 artifact we keep: `OSNotifier.swift`, a thin `UNUserNotificationCenter` wrapper.
-
-### A5 — Per-level scoped popovers (supacode-style)
-
-Each L1–L4 indicator is also a click target that opens a popover scoped to that level (clicking the worktree bell shows only that worktree's notifications, etc.).
-
-**Why rejected:** Confirmed with the user. The status-bar bell already shows the global unread count; per-level indicators answer the question "where is the unread thing" by virtue of their position in the hierarchy, which is enough for v1. Scoped popovers would require each level to own popover anchor + presentation state + scope filter wiring (~150 LOC across four sites). The `RollupIndex` rule that "each unread contributes to exactly one level" already makes a scoped popover feel disorienting (clicking the project dot would show notifications that are nominally rolled up to that level, but their *actual* sources are several levels deeper). Single popover, hierarchy as the navigation device, is simpler and not less expressive.
-
-## Cross-Cutting Concerns
-
-### Permission
-
-`OSNotifier` requests authorization on the **first** notification routed through C3 (PM1), not at app launch. If the prompt was dismissed (`notDetermined`) the user can re-trigger from Settings → Notifications. If denied (`denied`), Settings shows a deep-link to System Settings (PM2). All other channels (in-app badges, inbox, dock badge) work unconditionally — denial does not silence them.
-
-The authorization status is re-read on `applicationDidBecomeActive` so a user who flips the switch in System Settings sees the change without restart.
-
-### Performance
-
-- **Roll-up recompute:** O(N) over unread set on every change, with N typically ≤ 50. Cheap.
-- **Event volume:** the runtime already coalesces `paneOutput` and rate-limits emit-back-pressure; the detector only consumes structured events, which fire at human cadence (≤ a few per minute per Pane).
-- **Persistence:** debounced 250 ms; full inbox snapshot is JSON-encoded and atomically renamed. At 500 entries × ~250 B = ~125 KB, this is sub-millisecond on SSD.
-- **Idle timer (OQ4):** the runtime's `paneIdle` is already user-input-aware (resets on PTY input). We rely on that — no separate idle timer in the notification system.
-
-### Observability
-
-- All produced notifications pass through `NotificationStore.append` — a single seam for logging.
-- A debug developer view in `Tests/Developer/` lists raw `TerminalEvent → Notification` translations for ad-hoc inspection. Not a user-facing surface.
-
-### Migration
-
-The C6 worktree (`design+c6-agent-notifications`) is **abandoned**, not merged. After this design is approved:
-
-1. The exec plan (next phase) will scope file-level removal of the C6-only files in that worktree, but since C6 was never on `main`, this is a no-op for `main`.
-2. The C6 worktree branch can be deleted after the design is approved.
-3. The three C6 design docs remain in `docs/design-docs/` as historical context; their `Status` should flip to `Deprecated` with a one-line pointer to this doc.
-
-### Testing
-
-- **Detector:** unit tests over a stub `TerminalEvent` stream; assert translation table (every row in the table maps as documented).
-- **Store:** unit tests over append, dedup window, age sweep, cap sweep, persistence round-trip.
-- **Roll-up:** unit tests with a fixture catalog and a fixture unread set; assert exactly one level emits each count, parameterized on focus state.
-- **Navigation:** integration test driving `focusHierarchyPath` against a populated catalog, asserting selection state lands correctly and that fallback works for missing nodes.
-- **End-to-end:** one happy-path test — fake an OSC 9 → see banner request → see badge → click → focus.
-
-C6's 149 tests are not migrated; total target is ≤ 25 tests.
+- **A1 — stdout regex scanner.** Rejected: patterns drift ("(y/n)" matches chat
+  transcripts), and shipping one regex set invites a rule editor (the single
+  largest piece of C6). Documenting "emit OSC 9 from your tooling" is cheaper
+  than maintaining the set forever; a scanner can return additively if real users
+  hit the gap.
+- **A2 — sidebar inbox route.** Rejected (confirmed with user): notifications are
+  transient (read → click → forget); a persistent route over-promotes them. Bell
+  + popover matches the flow.
+- **A3 — hook-based detection.** Rejected for v1: only Claude Code writes c3
+  hooks today; the runtime's structured events cover any tool respecting OSC
+  9/133 — strictly broader. Additive later.
+- **A4 — coordinator gating inside the detector.** Rejected: the detector is
+  already orchestration; cramming policy in blurs the pure-translator /
+  orchestration / policy split and lengthens the test matrix.
+- **A5 — per-level scoped popovers; one toggle-enum.** Both rejected (see Roll-up
+  and Settings above).
+- **A6 — drive promote from the store.** Rejected: the store would need to import
+  `HierarchyClient` + a settings reader — backward deps; it is the leaf type.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| **OSC 9 adoption gap.** Tools that don't emit OSC 9 / ring the bell silently fail to trigger T1. | Documented as a known limitation in the spec and in user-facing docs. v2 introduces an opt-in scanner if real users hit this. The bell + child-exit + idle paths still cover most "long task done" cases. |
-| **Idle timer mis-fires** on long-lived shells where the user is intentionally just reading output. | Runtime's `paneIdle` already resets on user input. We additionally gate on "Pane produced output in the last 60 s" so a stale REPL prompt doesn't keep firing T2. |
-| **OSC 133 not enabled in user's shell.** `commandFinished` only fires with shell integration; plain shells never emit it. | This is acceptable — `paneExited` covers the foreground-process-exit case for any shell. Shell integration is opt-in and additive. |
-| **Catalog mutation between notification creation and click** (e.g., user deletes the Worktree). | Persistence stores raw IDs; navigation re-resolves on click and falls back to the deepest existing ancestor (G3). The inbox row remains and is visually flagged. |
-| **Permission denial blocks all banners.** | In-app badges + dock badge + inbox popover continue to work unconditionally. The Settings panel exposes a recovery path (PM2). |
-| **Bell button consumes status bar real estate** in narrow windows. | Right-anchored slot stays; the center `ViewThatFits` slot shrinks first. If the window is too narrow to fit even the bell, it collapses the badge to a single dot. |
-
-## Open Questions
-
-None at design-doc time. The four spec-level OQs were resolved during this design pass:
-
-- OQ1 (prompt patterns) → moot: no scanner; input set is the structured event list above.
-- OQ2 (sidebar inbox position) → bell in the worktree status bar (right slot), no sidebar route.
-- OQ3 (split-visible Pane R1 scope) → only the focused Pane clears unread on focus.
-- OQ4 (idle timer pause on user input) → relies on runtime's existing input-aware `paneIdle`.
-
----
+| OSC 9 adoption gap — tools that don't emit it never trigger "waiting". | Documented limitation; bell + child-exit + idle still cover most "done" cases. |
+| OSC 133 absent in the user's shell — no `commandFinished`. | `paneExited` covers foreground-process exit for any shell. |
+| Catalog mutates between create and click. | Raw-ID storage + dead-target fallback (G3); the row stays, flagged. |
+| Permission denial. | In-app + Dock + inbox work unconditionally; Settings has the recovery path. |
+| 1 s keystroke window vs IME batching. | Tracker records every `sendKey` incl. composition; if a real IME case bites, lift the constant to a setting. |
+| `reorderWorktrees` racing a manual drag. | Both `@MainActor`; last write wins — auto-promote losing to an in-progress drag is correct. |
+| Forward-version inbox quarantined on downgrade. | Quarantine is a rename, not delete; restorable; one-shot "Inbox reset" entry surfaces it. |
 
 ## References
 
-- Product spec: [docs/product-specs/notifications.md](../product-specs/notifications.md)
-- Hierarchy primitives: `apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane,SplitTree,TerminalEvent,PaneInfoDelta}.swift`
-- Atomic file I/O: `apps/mac/CodansCore/AtomicFileStore.swift`
-- Status bar host: `apps/mac/codans/App/Features/StatusBar/`
-- Salvaged from C6: `apps/mac/codans/Notifications/OSNotifier.swift` (in worktree branch `worktree-design+c6-agent-notifications`)
-- Reference implementation studied: `supacode/Clients/Notifications/`, `supacode/Features/Repositories/Views/*Notification*View*.swift`
-- Deprecated by this doc:
-  - [c6-agent-notifications.md](c6-agent-notifications.md)
-  - [c6-agent-notifications-v2.md](c6-agent-notifications-v2.md)
-  - [c6-m5-inbox-sidebar.md](c6-m5-inbox-sidebar.md)
+- Product spec: [notifications.md](../product-specs/notifications.md)
+- Hierarchy / events: `apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane,SplitTree,TerminalEvent,PaneInfoDelta}.swift`
+- Inbox primitives: `apps/mac/CodansCore/Notifications/`
+- Settings v3 schema: `apps/mac/CodansCore/Settings/Settings.swift`
+- Hierarchy mutation surface: `apps/mac/codans/App/Clients/HierarchyClient.swift`
+- Status-bar host: `apps/mac/codans/App/Features/StatusBar/`
