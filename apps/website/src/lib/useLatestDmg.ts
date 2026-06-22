@@ -2,34 +2,48 @@ import { useEffect, useState } from "react";
 import { LINKS } from "./links";
 
 /**
- * Resolves the direct-download URL of the latest macOS .dmg.
- *
  * The static value ({@link LINKS.latestDmgDirect}) is a release-independent URL
  * that GitHub redirects to the newest release's stable-named asset. Until a
- * release publishes that stable name, this hook fills the gap at runtime: it
- * asks the GitHub API for the latest release and picks its `.dmg` asset, so the
- * download points at the current build without pinning a version in the page.
- * On any failure it keeps the static URL, which becomes valid once the
- * stable-named asset ships.
+ * release publishes that stable name, we resolve the current release's `.dmg`
+ * from the GitHub API at runtime so the download works today and tracks every
+ * release afterwards.
+ *
+ * The lookup is memoised at module scope so the several components that link to
+ * the download (header, hero, CTA) share a single request per page load rather
+ * than each firing their own. On failure the cache is cleared so a later mount
+ * can retry, and callers fall back to the static URL meanwhile.
  */
-export function useLatestDmgUrl(): string {
-  const [url, setUrl] = useState<string>(LINKS.latestDmgDirect);
+let pending: Promise<string> | null = null;
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("https://api.github.com/repos/wanggang316/codans/releases/latest", {
+function resolveLatestDmgUrl(): Promise<string> {
+  if (!pending) {
+    pending = fetch("https://api.github.com/repos/wanggang316/codans/releases/latest", {
       headers: { Accept: "application/vnd.github+json" },
-      signal: controller.signal,
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: { assets?: { name: string; browser_download_url: string }[] }) => {
         const dmg = data.assets?.find((a) => a.name.toLowerCase().endsWith(".dmg"));
-        if (dmg) setUrl(dmg.browser_download_url);
+        return dmg ? dmg.browser_download_url : LINKS.latestDmgDirect;
       })
       .catch(() => {
-        /* Keep the static fallback. */
+        pending = null;
+        return LINKS.latestDmgDirect;
       });
-    return () => controller.abort();
+  }
+  return pending;
+}
+
+export function useLatestDmgUrl(): string {
+  const [url, setUrl] = useState<string>(LINKS.latestDmgDirect);
+
+  useEffect(() => {
+    let active = true;
+    resolveLatestDmgUrl().then((resolved) => {
+      if (active) setUrl(resolved);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   return url;

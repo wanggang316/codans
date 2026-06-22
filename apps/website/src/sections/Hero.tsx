@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import { LINKS } from "@/lib/links";
+import { useLatestDmgUrl } from "@/lib/useLatestDmg";
 
 /**
  * v2 Hero. The centerpiece is the real Codans app screenshot shipped
@@ -11,6 +11,7 @@ import { LINKS } from "@/lib/links";
  */
 export default function Hero() {
   const { t } = useTranslation();
+  const dmgUrl = useLatestDmgUrl();
 
   return (
     <section className="relative overflow-hidden pt-28 pb-20 sm:pt-32">
@@ -45,7 +46,7 @@ export default function Hero() {
           transition={{ duration: 0.7, delay: 0.5 }}
           className="mt-9 flex flex-col items-center gap-4"
         >
-          <PrimaryCta href={LINKS.latestDmg} label={t("hero.primary_cta")} />
+          <PrimaryCta href={dmgUrl} label={t("hero.primary_cta")} />
           <BrewLine command={t("hero.brew_install")} />
         </motion.div>
 
@@ -108,8 +109,7 @@ function PrimaryCta({ href, label }: { href: string; label: string }) {
   return (
     <motion.a
       href={href}
-      target="_blank"
-      rel="noreferrer"
+      download=""
       whileHover={{ y: -1 }}
       whileTap={{ scale: 0.98 }}
       className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-acc-500 px-5 text-[14px] font-medium text-white shadow-glow transition-colors hover:bg-acc-400"
