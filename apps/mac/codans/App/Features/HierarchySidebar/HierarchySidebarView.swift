@@ -1610,6 +1610,9 @@ private struct ProjectHeaderRow: View {
           } label: {
             Label("Project Settings…", systemImage: "slider.horizontal.3")
           }
+          Divider()
+          // Worktree operations group: archived list, prune, and the
+          // merged-batch actions — kept together between dividers.
           let archivedCount = project.worktrees.filter { $0.archived }.count
           Button {
             store.send(.projectShowArchivedTapped(projectID: project.id))
@@ -1637,8 +1640,8 @@ private struct ProjectHeaderRow: View {
           } label: {
             Label(
               mergedIDs.isEmpty
-                ? "Archive All Merged Worktrees"
-                : "Archive All Merged Worktrees (\(mergedIDs.count))",
+                ? "Archive All Merged"
+                : "Archive All Merged (\(mergedIDs.count))",
               systemImage: "archivebox"
             )
           }
@@ -1652,19 +1655,18 @@ private struct ProjectHeaderRow: View {
           } label: {
             Label(
               mergedIDs.isEmpty
-                ? "Remove All Merged Worktrees"
-                : "Remove All Merged Worktrees (\(mergedIDs.count))",
+                ? "Remove All Merged"
+                : "Remove All Merged (\(mergedIDs.count))",
               systemImage: "trash"
             )
           }
           .disabled(mergedIDs.isEmpty)
           Divider()
-          // M5 (project-tags): inline color palette + "Tags…" entry.
-          // ControlGroup(.palette) gives the native NSMenu color row;
-          // "Tags…" opens the global TagManager via the sidebar's
-          // `.openTagManager` delegate.
-          ProjectTagsMenu(project: project, store: store)
-          Divider()
+          // Tags entry intentionally hidden for now. `ProjectTagsMenu` and
+          // its tag-assignment logic (M5: inline color palette + "Tags…"
+          // → global TagManager via `.openTagManager`) are retained — only
+          // the menu entry is suppressed. Re-add the line below to restore.
+          // ProjectTagsMenu(project: project, store: store)
           Button(role: .destructive) {
             store.send(
               .projectRemoveTapped(projectID: project.id, name: project.name)
