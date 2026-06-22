@@ -56,6 +56,26 @@ nonisolated enum GhosttyCursorStyle: String, CaseIterable, Hashable, Sendable {
   }
 }
 
+/// macOS window-background blur style, mapping 1:1 onto Ghostty's
+/// `background-blur` config tokens for the frosted-glass terminal background.
+/// `rawValue` IS the config token, so the managed block emits it verbatim and
+/// `load` parses it straight back. Only the macOS "glass" styles are surfaced
+/// — they pair with `background-opacity < 1` to produce the translucent,
+/// blurred backdrop; Ghostty's numeric-radius / `true` forms are intentionally
+/// not modeled here. Absence of the directive (the "Off" option) means no blur.
+nonisolated enum GhosttyBackgroundBlur: String, CaseIterable, Hashable, Sendable {
+  case regularGlass = "macos-glass-regular"
+  case clearGlass = "macos-glass-clear"
+
+  /// Human-facing label for the Settings picker.
+  var displayName: String {
+    switch self {
+    case .regularGlass: return "Regular Glass"
+    case .clearGlass: return "Clear Glass"
+    }
+  }
+}
+
 /// Snapshot of the user's current Ghostty terminal-appearance state, as
 /// observable by the Settings pane. Carries both the user-selected themes
 /// (nil ⇒ no managed directive in file) and the enumerated catalog so the
@@ -79,6 +99,15 @@ nonisolated struct GhosttyTerminalSettings: Equatable, Sendable {
   /// Point size from the managed `font-size = <n>` directive. `nil` when no
   /// managed directive exists or the on-disk value didn't parse as a number.
   let fontSize: Double?
+  /// Window background opacity from the managed `background-opacity = <n>`
+  /// directive, clamped to `[0, 1]`. `nil` when no managed directive exists —
+  /// Ghostty's default (fully opaque) applies. Values below 1 drive the
+  /// translucent frosted-glass terminal background.
+  let backgroundOpacity: Double?
+  /// Window blur style from the managed `background-blur = <token>` directive.
+  /// `nil` when no managed directive exists or the on-disk value isn't a glass
+  /// token we recognise — the pane then renders the "Off" option.
+  let backgroundBlur: GhosttyBackgroundBlur?
   /// Enumerated catalog of themes on disk. Not necessarily containing
   /// `lightTheme` / `darkTheme` — see callers that prepend missing entries.
   let availableLightThemes: [String]
@@ -111,6 +140,8 @@ extension GhosttyTerminalSettings {
       cursorStyle: other.cursorStyle,
       fontFamily: other.fontFamily,
       fontSize: other.fontSize,
+      backgroundOpacity: other.backgroundOpacity,
+      backgroundBlur: other.backgroundBlur,
       availableLightThemes: availableLightThemes,
       availableDarkThemes: availableDarkThemes,
       availableFontFamilies: availableFontFamilies,
@@ -133,6 +164,8 @@ nonisolated struct GhosttyTerminalSettingsDraft: Equatable, Sendable {
   let cursorStyle: GhosttyCursorStyle?
   let fontFamily: String?
   let fontSize: Double?
+  let backgroundOpacity: Double?
+  let backgroundBlur: GhosttyBackgroundBlur?
 }
 
 // MARK: - Reader / Writer
@@ -164,6 +197,7 @@ struct GhosttyConfigFile {
   /// `apply`.
   private static let managedKeys: Set<String> = [
     "theme", "cursor-style", "font-family", "font-size",
+    "background-opacity", "background-blur",
   ]
 
   private static let logger = Logger(
@@ -261,6 +295,8 @@ struct GhosttyConfigFile {
       cursorStyle: Self.parseCursorStyle(from: contents),
       fontFamily: Self.parseStringDirective("font-family", from: contents),
       fontSize: Self.parseFontSize(from: contents),
+      backgroundOpacity: Self.parseBackgroundOpacity(from: contents),
+      backgroundBlur: Self.parseBackgroundBlur(from: contents),
       availableLightThemes: catalog.light,
       availableDarkThemes: catalog.dark,
       availableFontFamilies: fonts.all,
@@ -454,6 +490,12 @@ struct GhosttyConfigFile {
     if let cursor = draft.cursorStyle {
       lines.append("cursor-style = \(cursor.rawValue)")
     }
+    if let opacity = draft.backgroundOpacity {
+      lines.append("background-opacity = \(formatOpacity(opacity))")
+    }
+    if let blur = draft.backgroundBlur {
+      lines.append("background-blur = \(blur.rawValue)")
+    }
     return lines
   }
 
@@ -461,6 +503,14 @@ struct GhosttyConfigFile {
   /// (`13`), fractional sizes keep their value (`13.5`).
   private static func formatFontSize(_ size: Double) -> String {
     size == size.rounded() ? String(Int(size)) : String(size)
+  }
+
+  /// Format a background opacity for the config: whole numbers emit without a
+  /// decimal (`1`), fractional values keep their value (`0.9`). Values come
+  /// from the discrete Settings picker, so the `String(Double)` round-trip is
+  /// exact for the offered choices.
+  private static func formatOpacity(_ value: Double) -> String {
+    value == value.rounded() ? String(Int(value)) : String(value)
   }
 
   /// Resolve the `theme = light:<X>,dark:<Y>` line for `draft`, or `nil` when
@@ -564,6 +614,24 @@ struct GhosttyConfigFile {
   private static func parseFontSize(from contents: String) -> Double? {
     guard let raw = parseStringDirective("font-size", from: contents) else { return nil }
     return Double(raw)
+  }
+
+  /// Parse the `background-opacity = <n>` directive, clamped to `[0, 1]`.
+  /// Returns `nil` when absent or non-numeric. First occurrence wins.
+  private static func parseBackgroundOpacity(from contents: String) -> Double? {
+    guard let raw = parseStringDirective("background-opacity", from: contents) else { return nil }
+    guard let value = Double(raw) else { return nil }
+    return min(max(value, 0), 1)
+  }
+
+  /// Parse the `background-blur = <token>` directive into a recognised glass
+  /// style. Returns `nil` when absent or when the value is a form we don't
+  /// model in the picker (numeric radius, `true`/`false`) — the pane then
+  /// renders "Off" and the directive is stripped on the next save, mirroring
+  /// `parseCursorStyle`. First occurrence wins.
+  private static func parseBackgroundBlur(from contents: String) -> GhosttyBackgroundBlur? {
+    guard let raw = parseStringDirective("background-blur", from: contents) else { return nil }
+    return GhosttyBackgroundBlur(rawValue: raw.lowercased())
   }
 
   // MARK: - libghostty validation

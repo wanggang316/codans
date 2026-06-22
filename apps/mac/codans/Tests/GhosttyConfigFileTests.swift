@@ -16,14 +16,18 @@ struct GhosttyConfigFileTests {
     dark: String? = nil,
     cursorStyle: GhosttyCursorStyle? = nil,
     fontFamily: String? = nil,
-    fontSize: Double? = nil
+    fontSize: Double? = nil,
+    backgroundOpacity: Double? = nil,
+    backgroundBlur: GhosttyBackgroundBlur? = nil
   ) -> GhosttyTerminalSettingsDraft {
     GhosttyTerminalSettingsDraft(
       lightTheme: light,
       darkTheme: dark,
       cursorStyle: cursorStyle,
       fontFamily: fontFamily,
-      fontSize: fontSize
+      fontSize: fontSize,
+      backgroundOpacity: backgroundOpacity,
+      backgroundBlur: backgroundBlur
     )
   }
 
@@ -366,6 +370,94 @@ struct GhosttyConfigFileTests {
         window-padding-x = 4
         font-family = Fira Code
         font-size = 15
+        scrollback-limit = 10000
+        """
+    )
+  }
+
+  // MARK: - Background opacity & blur
+
+  @Test
+  func backgroundOpacityEmitsFractionalValue() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(backgroundOpacity: 0.9))
+    #expect(out == "background-opacity = 0.9\n")
+  }
+
+  @Test
+  func wholeBackgroundOpacityEmitsWithoutDecimal() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(backgroundOpacity: 1))
+    #expect(out == "background-opacity = 1\n")
+  }
+
+  @Test
+  func regularGlassBlurEmitsToken() {
+    let out = GhosttyConfigFile.updatedContents(
+      from: "", draft: draft(backgroundBlur: .regularGlass))
+    #expect(out == "background-blur = macos-glass-regular\n")
+  }
+
+  @Test
+  func clearGlassBlurEmitsToken() {
+    let out = GhosttyConfigFile.updatedContents(from: "", draft: draft(backgroundBlur: .clearGlass))
+    #expect(out == "background-blur = macos-glass-clear\n")
+  }
+
+  @Test
+  func backgroundDirectivesEmitAfterCursorInStableOrder() {
+    let out = GhosttyConfigFile.updatedContents(
+      from: "",
+      draft: draft(
+        light: "L", dark: "D", cursorStyle: .bar, fontFamily: "Fira Code", fontSize: 12,
+        backgroundOpacity: 0.85, backgroundBlur: .regularGlass
+      )
+    )
+    #expect(
+      out == """
+        theme = light:L,dark:D
+        font-family = Fira Code
+        font-size = 12
+        cursor-style = bar
+        background-opacity = 0.85
+        background-blur = macos-glass-regular
+
+        """
+    )
+  }
+
+  @Test
+  func existingBackgroundDirectivesReplacedInPlace() {
+    let input = """
+      window-padding-x = 4
+      background-opacity = 0.5
+      background-blur = macos-glass-clear
+      scrollback-limit = 10000
+      """
+    let out = GhosttyConfigFile.updatedContents(
+      from: input,
+      draft: draft(backgroundOpacity: 0.9, backgroundBlur: .regularGlass)
+    )
+    #expect(
+      out == """
+        window-padding-x = 4
+        background-opacity = 0.9
+        background-blur = macos-glass-regular
+        scrollback-limit = 10000
+        """
+    )
+  }
+
+  @Test
+  func nilBackgroundStripsDirectivesLeavingTheme() {
+    let input = """
+      background-opacity = 0.9
+      theme = light:X,dark:Y
+      background-blur = macos-glass-regular
+      scrollback-limit = 10000
+      """
+    let out = GhosttyConfigFile.updatedContents(from: input, draft: draft(light: "X", dark: "Y"))
+    #expect(
+      out == """
+        theme = light:X,dark:Y
         scrollback-limit = 10000
         """
     )
