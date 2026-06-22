@@ -3,43 +3,67 @@ import ComposableArchitecture
 import SwiftUI
 import CodansCore
 
-/// Main-window menu commands. Every chord is sourced from the shortcut registry
-/// (`ShortcutSchema.app` ⊕ `ShortcutsStore.overrides`) by way of the `appKeyboardShortcut`
-/// modifier — defaults match what was previously hardcoded inline, but a user can rebind
-/// any of them via Settings → Shortcuts and the menu rebinds without restart.
+/// Main-window menu commands, organised into standard macOS menus instead of
+/// piling everything into File: File (create/close), View (show/hide chrome),
+/// and three app-specific menus — **Commands** (user-defined Project + Global
+/// commands), **Worktree** (worktree navigation + actions), and **Tabs**
+/// (tab / pane management).
 ///
-/// `store` is a closure rather than the resolved `Store` because this `Commands` struct is
-/// instantiated once at scene build, before `AppState.bringUp()` has produced the live
-/// store. Reading the store lazily on each button press lets the parent render
-/// `MainWindowCommands` unconditionally — see the matching note in `CodansApp.body`.
+/// Every built-in chord is sourced from the shortcut registry
+/// (`ShortcutSchema.app` ⊕ `ShortcutsStore.overrides`) via the
+/// `appKeyboardShortcut` modifier — defaults match what was previously
+/// hardcoded inline, and a user can rebind any of them via Settings →
+/// Shortcuts with the menu rebinding without restart. User-defined command
+/// chords come straight off each `ScriptDefinition.keyboardShortcut`.
+///
+/// Registering command chords here (menu-bar keyEquivalents) is load-bearing,
+/// not cosmetic: during normal use a Ghostty terminal pane holds
+/// first-responder and swallows key events before any in-view
+/// `.keyboardShortcut` can match them. AppKit checks menu-bar keyEquivalents
+/// *ahead* of responder-chain dispatch, so the menu bar is the only place a
+/// command chord fires while the terminal is focused.
+///
+/// `store` is a closure rather than the resolved `Store` because this `Commands`
+/// struct is instantiated once at scene build, before `AppState.bringUp()` has
+/// produced the live store. Reading the store lazily on each button press lets
+/// the parent render `MainWindowCommands` unconditionally — see the matching
+/// note in `CodansApp.body`.
 ///
 /// Collision notes for the registry-default chords below:
 ///
-/// - `Open PR on GitHub` lives on `⌘⌃G` rather than `⌘⇧G` so it doesn't shadow AppKit's
-///   default "Find Previous" chord in editable-text contexts (Settings panes, palette
-///   query, hotkey recorder, etc.).
-/// - `Open Project on GitHub` (HAN-58) takes `⌘⇧G`. This intentionally shadows AppKit's
-///   "Find Previous" — codans's text-input surfaces (palette query, rename sheet,
-///   hotkey recorder) don't expose Find Next/Previous, so the cost is nil and the chord
-///   pairs naturally with `⌘G` ("Toggle Git Viewer") + `⌘⌃G` ("Open PR on GitHub").
-/// - The app delegate guards `⌘Q` quit with a confirmation when running terminal sessions
-///   exist. The chord itself is the standard AppKit one and is not registered with the
-///   shortcut registry — quitting is a system-level action, not a rebindable in-app command.
+/// - `Open PR on GitHub` lives on `⌘⌃G` rather than `⌘⇧G` so it doesn't shadow
+///   AppKit's default "Find Previous" chord in editable-text contexts (Settings
+///   panes, palette query, hotkey recorder, etc.).
+/// - `Open Project on GitHub` (HAN-58) takes `⌘⇧G`. This intentionally shadows
+///   AppKit's "Find Previous": codans's text-input surfaces don't expose Find
+///   Next/Previous, so the cost is nil and the chord pairs naturally with `⌘G`
+///   ("Toggle Git Viewer") + `⌘⌃G` ("Open PR on GitHub").
+/// - The app delegate guards `⌘Q` quit with a confirmation when running terminal
+///   sessions exist. The chord itself is the standard AppKit one and is not
+///   registered with the shortcut registry — quitting is a system-level action.
 struct MainWindowCommands: Commands {
   let store: () -> StoreOf<RootFeature>?
-  /// Snapshot of the live `ShortcutsStore.resolved` map. Re-injected from `CodansApp.body`
-  /// on every render; SwiftUI's `Commands` participates in observation, so an override
-  /// rebinds the menu items without a manual refresh path.
+  /// Snapshot of the live `ShortcutsStore.resolved` map. Re-injected from
+  /// `CodansApp.body` on every render; SwiftUI's `Commands` participates in
+  /// observation, so an override rebinds the menu items without a manual refresh.
   let shortcuts: ResolvedShortcutMap
-  /// First-responder tracker for sidebar focus. Drives `.disabled` on the destructive
-  /// worktree chords (`⌘⌫` Archive / `⌘⇧⌫` Delete) so they only fire while the sidebar
-  /// holds focus — when a Ghostty terminal pane is focused the menu items are disabled
-  /// and the chord falls through to the terminal (where `⌘⌫` is the standard
-  /// "delete to start of line" binding). Without this gate the chord would archive the
-  /// active worktree any time the user pressed it inside the terminal.
+  /// First-responder tracker for sidebar focus. Drives `.disabled` on the
+  /// destructive worktree chords (`⌘⌫` Archive / `⌘⇧⌫` Delete) so they only fire
+  /// while the sidebar holds focus — when a Ghostty terminal pane is focused the
+  /// menu items are disabled and the chord falls through to the terminal (where
+  /// `⌘⌫` is the standard "delete to start of line" binding).
   let sidebarFocus: SidebarFocusObserver
+  /// Source for the user-defined command rows in the **Commands** menu. Read in
+  /// the menu body so an add / edit / delete / reorder in Settings reflects
+  /// without restart (`@Observable`; `Commands` participates in observation).
+  let settingsStore: SettingsStore
+  /// Live run/stop state for the Commands menu — a running command's row becomes
+  /// "Stop …" and gates the ⌘. stop item so it doesn't swallow the terminal's
+  /// ⌘. while idle. `@Observable`, same source as the tab busy spinner.
+  let hierarchyManager: HierarchyManager
 
   var body: some Commands {
+    // MARK: File — create / close
     CommandGroup(after: .newItem) {
       Button("Quick Action…") {
         store()?.send(.commandPaletteToggle(nil))
@@ -48,18 +72,6 @@ struct MainWindowCommands: Commands {
       .disabled(store() == nil)
 
       Divider()
-
-      Button("Open in Editor") {
-        store()?.send(.openDefaultForCurrentWorktreeRequested)
-      }
-      .appKeyboardShortcut(.openInEditor, in: shortcuts)
-      .disabled(!hasActiveWorktree)
-
-      Button("Toggle Git Viewer") {
-        store()?.send(.diffInspectorToggledForCurrentWorktree)
-      }
-      .appKeyboardShortcut(.toggleDiffInspector, in: shortcuts)
-      .disabled(!hasActiveWorktree)
 
       Button("Add Project…") {
         store()?.send(.sidebar(.toolbarAddProjectTapped))
@@ -72,6 +84,93 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.newWorktree, in: shortcuts)
       .disabled(!hasCurrentProject)
+
+      Divider()
+
+      Button("New Tab") {
+        store()?.send(.newTabForCurrentWorktree)
+      }
+      .appKeyboardShortcut(.newTab, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
+      Button("Close Tab") {
+        // ⌘W is a global menu chord; SwiftUI Commands aren't scene-scoped, so the
+        // same accelerator fires regardless of which window is key. Route on the
+        // current key window: Settings (or any future SwiftUI utility window
+        // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
+        // window forwards to TabFeature. Without this dispatch the chord pressed
+        // inside Settings would close the foreground worktree's tab.
+        if let key = NSApp.keyWindow, SettingsWindowTagger.matches(key) {
+          key.performClose(nil)
+        } else {
+          store()?.send(.closeActiveTabForCurrentWorktree)
+        }
+      }
+      .appKeyboardShortcut(.closeTab, in: shortcuts)
+      .disabled(store() == nil)
+    }
+
+    // MARK: View — show / hide chrome
+    CommandGroup(after: .sidebar) {
+      Button("Toggle Sidebar") {
+        guard let s = store() else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+          _ = s.send(.toggleSidebarRequested)
+        }
+      }
+      .appKeyboardShortcut(.toggleSidebar, in: shortcuts)
+      .disabled(store() == nil)
+
+      Button("Reveal in Sidebar") {
+        store()?.send(.revealCurrentWorktreeInSidebarRequested)
+      }
+      .appKeyboardShortcut(.revealCurrentWorktreeInSidebar, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
+      Divider()
+
+      Button("Toggle Git Viewer") {
+        store()?.send(.diffInspectorToggledForCurrentWorktree)
+      }
+      .appKeyboardShortcut(.toggleDiffInspector, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+    }
+
+    // Check for Updates… lives next to the app menu's About / Settings group.
+    CommandGroup(after: .appInfo) {
+      Button("Check for Updates…") {
+        store()?.send(.checkForUpdatesRequested)
+      }
+      .appKeyboardShortcut(.checkForUpdates, in: shortcuts)
+      .disabled(store() == nil)
+    }
+
+    // MARK: Commands — user-defined Project + Global commands
+    CommandMenu("Commands") {
+      commandsMenuContent()
+    }
+
+    // MARK: Worktree — navigation + actions
+    CommandMenu("Worktree") {
+      Button("Open in Editor") {
+        store()?.send(.openDefaultForCurrentWorktreeRequested)
+      }
+      .appKeyboardShortcut(.openInEditor, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
+      Button("Reveal in Finder") {
+        store()?.send(.revealCurrentWorktreeInFinderRequested)
+      }
+      .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
+      Button("Copy Worktree Path") {
+        store()?.send(.copyCurrentWorktreePathRequested)
+      }
+      .appKeyboardShortcut(.copyCurrentWorktreePath, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
+      Divider()
 
       Button("Open PR on GitHub") {
         store()?.send(.openCurrentPRRequested)
@@ -87,23 +186,37 @@ struct MainWindowCommands: Commands {
 
       Divider()
 
-      Button("Reveal in Finder") {
-        store()?.send(.revealCurrentWorktreeInFinderRequested)
+      Button("Select Previous Worktree") {
+        store()?.send(.selectAdjacentWorktreeRequested(.previous))
       }
-      .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: shortcuts)
-      .disabled(!hasActiveWorktree)
+      .appKeyboardShortcut(.selectPreviousWorktree, in: shortcuts)
+      .disabled(store() == nil)
 
-      Button("Copy Worktree Path") {
-        store()?.send(.copyCurrentWorktreePathRequested)
+      Button("Select Next Worktree") {
+        store()?.send(.selectAdjacentWorktreeRequested(.next))
       }
-      .appKeyboardShortcut(.copyCurrentWorktreePath, in: shortcuts)
-      .disabled(!hasActiveWorktree)
+      .appKeyboardShortcut(.selectNextWorktree, in: shortcuts)
+      .disabled(store() == nil)
 
-      // Archive / Delete are gated on `sidebarFocus.isSidebarFocused` so the chord
-      // (`⌘⌫` / `⌘⇧⌫`) only fires while the sidebar holds first-responder. When a
-      // Ghostty pane is focused the menu item is disabled, the menu's chord matcher
-      // skips it, and the keystroke reaches the terminal — preserving the standard
-      // `⌘⌫` "delete to start of line" binding inside running shells / editors.
+      Button("Back") {
+        store()?.send(.worktreeHistoryBackRequested)
+      }
+      .appKeyboardShortcut(.worktreeHistoryBack, in: shortcuts)
+      .disabled(!hasHistoryBack)
+
+      Button("Forward") {
+        store()?.send(.worktreeHistoryForwardRequested)
+      }
+      .appKeyboardShortcut(.worktreeHistoryForward, in: shortcuts)
+      .disabled(!hasHistoryForward)
+
+      Divider()
+
+      // Archive / Delete are gated on `sidebarFocus.isSidebarFocused` so the
+      // chord (`⌘⌫` / `⌘⇧⌫`) only fires while the sidebar holds first-responder.
+      // When a Ghostty pane is focused the menu item is disabled, the menu's
+      // chord matcher skips it, and the keystroke reaches the terminal —
+      // preserving the standard `⌘⌫` "delete to start of line" binding.
       Button("Archive Worktree") {
         store()?.send(.archiveCurrentWorktreeRequested)
       }
@@ -121,75 +234,10 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.showArchivedWorktrees, in: shortcuts)
       .disabled(!hasCurrentProject)
-
-      Divider()
-
-      Button("Toggle Sidebar") {
-        guard let s = store() else { return }
-        withAnimation(.easeOut(duration: 0.2)) {
-          _ = s.send(.toggleSidebarRequested)
-        }
-      }
-      .appKeyboardShortcut(.toggleSidebar, in: shortcuts)
-      .disabled(store() == nil)
-
-      Button("Reveal in Sidebar") {
-        store()?.send(.revealCurrentWorktreeInSidebarRequested)
-      }
-      .appKeyboardShortcut(.revealCurrentWorktreeInSidebar, in: shortcuts)
-      .disabled(!hasActiveWorktree)
-
-      Button("Select Previous Worktree") {
-        store()?.send(.selectAdjacentWorktreeRequested(.previous))
-      }
-      .appKeyboardShortcut(.selectPreviousWorktree, in: shortcuts)
-      .disabled(store() == nil)
-
-      Button("Select Next Worktree") {
-        store()?.send(.selectAdjacentWorktreeRequested(.next))
-      }
-      .appKeyboardShortcut(.selectNextWorktree, in: shortcuts)
-      .disabled(store() == nil)
-
-      Divider()
-
-      Button("Back") {
-        store()?.send(.worktreeHistoryBackRequested)
-      }
-      .appKeyboardShortcut(.worktreeHistoryBack, in: shortcuts)
-      .disabled(!hasHistoryBack)
-
-      Button("Forward") {
-        store()?.send(.worktreeHistoryForwardRequested)
-      }
-      .appKeyboardShortcut(.worktreeHistoryForward, in: shortcuts)
-      .disabled(!hasHistoryForward)
     }
 
-    // Check for Updates… lives next to the app menu's About / Settings group. Channel
-    // selection and the unread-notifications shortcut both live in the Settings pane and
-    // command palette respectively — they were removed from the menu bar to keep this
-    // group narrowly scoped to the manual update probe.
-    CommandGroup(after: .appInfo) {
-      Button("Check for Updates…") {
-        store()?.send(.checkForUpdatesRequested)
-      }
-      .appKeyboardShortcut(.checkForUpdates, in: shortcuts)
-      .disabled(store() == nil)
-    }
-
-    // Tab-bar uplift (M2-T2.9). Lands in its own CommandGroup — placed
-    // after the existing block so it reads as a second top-level group in
-    // the menu bar rather than inflating the first group's fan-out. Tabs
-    // take `⌥⌘1..⌥⌘9` (the prior `⌘1..⌘9` Space-switching bindings were
-    // removed in M2).
-    CommandGroup(after: .newItem) {
-      Button("New Tab") {
-        store()?.send(.newTabForCurrentWorktree)
-      }
-      .appKeyboardShortcut(.newTab, in: shortcuts)
-      .disabled(!hasActiveWorktree)
-
+    // MARK: Tabs — tab / pane management
+    CommandMenu("Tabs") {
       Button("Split Right") {
         store()?.send(.splitCurrentPaneRequested(direction: .right))
       }
@@ -228,6 +276,8 @@ struct MainWindowCommands: Commands {
       .appKeyboardShortcut(.focusSplitDown, in: shortcuts)
       .disabled(!hasActiveWorktree)
 
+      Divider()
+
       Button("Rename Tab…") {
         store()?.send(.renameActiveTabForCurrentWorktreeRequested)
       }
@@ -239,22 +289,6 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.changeActiveTabColor, in: shortcuts)
       .disabled(!hasActiveWorktree)
-
-      Button("Close Tab") {
-        // ⌘W is global menu chord; SwiftUI Commands aren't scene-scoped, so the
-        // same accelerator fires regardless of which window is key. Route on the
-        // current key window: Settings (or any future SwiftUI utility window
-        // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
-        // window forwards to TabFeature. Without this dispatch the chord pressed
-        // inside Settings would close the foreground worktree's tab.
-        if let key = NSApp.keyWindow, SettingsWindowTagger.matches(key) {
-          key.performClose(nil)
-        } else {
-          store()?.send(.closeActiveTabForCurrentWorktree)
-        }
-      }
-      .appKeyboardShortcut(.closeTab, in: shortcuts)
-      .disabled(store() == nil)
 
       Divider()
 
@@ -284,14 +318,102 @@ struct MainWindowCommands: Commands {
     }
   }
 
+  // MARK: - Commands menu content
+
+  /// Builds the **Commands** menu: every Project command for the current
+  /// Worktree's Project, then every Global command, then a fixed ⌘. stop item
+  /// and the two "Manage …" footers. A running command's row flips to "Stop …".
+  /// Plain function (not `@ViewBuilder`) so the `let` bindings that gather the
+  /// command lists are legal; the returned `Group` body is the view tree.
+  private func commandsMenuContent() -> some View {
+    let projectID = store()?.state.selection.projectID
+    let worktreeID = store()?.state.selection.worktreeID
+    let projectScripts = projectID.flatMap { settingsStore.settings.projects[$0]?.scripts } ?? []
+    let globalScripts = settingsStore.settings.general.globalScripts
+    let allScripts = projectScripts + globalScripts
+    // Either list can hold the command currently running in this worktree; ⌘.
+    // targets whichever it is.
+    let runningScriptID = worktreeID.flatMap { wid in
+      allScripts.first { hierarchyManager.isScriptRunning(worktreeID: wid, scriptID: $0.id) }?.id
+    }
+
+    return Group {
+      ForEach(projectScripts) { script in
+        scriptButton(for: script, isGlobal: false, worktreeID: worktreeID)
+      }
+      if !projectScripts.isEmpty, !globalScripts.isEmpty {
+        Divider()
+      }
+      ForEach(globalScripts) { script in
+        scriptButton(for: script, isGlobal: true, worktreeID: worktreeID)
+      }
+
+      if !allScripts.isEmpty {
+        Divider()
+      }
+
+      // ⌘. interrupts whatever command is currently running in this worktree —
+      // the standard macOS "cancel" chord. Disabled while idle so it doesn't
+      // swallow ⌘. that should reach a focused terminal pane.
+      Button("Stop Command") {
+        if let runningScriptID {
+          store()?.send(.stopScriptForCurrentWorktree(scriptID: runningScriptID))
+        }
+      }
+      .keyboardShortcut(".", modifiers: .command)
+      .disabled(runningScriptID == nil)
+
+      Divider()
+
+      Button("Manage Project Commands…") {
+        if let projectID = store()?.state.selection.projectID {
+          store()?.send(.worktreeHeader(.delegate(.manageScriptsRequested(projectID: projectID))))
+        }
+      }
+      .disabled(!hasCurrentProject)
+
+      Button("Manage Global Commands…") {
+        store()?.send(.worktreeHeader(.delegate(.manageGlobalScriptsRequested)))
+      }
+    }
+  }
+
+  /// One command row. `isGlobal` routes the run dispatch through the global run
+  /// path; project commands use the project run path. A running command flips to
+  /// "Stop …" and toggles via the shared stop path. The chord comes straight off
+  /// `ScriptDefinition.keyboardShortcut` (registered as a menu-bar keyEquivalent
+  /// so it fires while the terminal is focused).
+  @ViewBuilder
+  private func scriptButton(
+    for script: ScriptDefinition, isGlobal: Bool, worktreeID: WorktreeID?
+  ) -> some View {
+    let isRunning =
+      worktreeID.map {
+        hierarchyManager.isScriptRunning(worktreeID: $0, scriptID: script.id)
+      } ?? false
+    Button(isRunning ? "Stop \(script.displayName)" : "Run \(script.displayName)") {
+      if isRunning {
+        store()?.send(.stopScriptForCurrentWorktree(scriptID: script.id))
+      } else if isGlobal {
+        store()?.send(.runGlobalScriptForCurrentWorktree(scriptID: script.id))
+      } else {
+        store()?.send(.runScriptForCurrentWorktree(scriptID: script.id))
+      }
+    }
+    .modifier(ScriptChordModifier(binding: script.keyboardShortcut))
+    .disabled(!hasActiveWorktree)
+  }
+
+  // MARK: - Enablement
+
   private var hasActiveWorktree: Bool {
     store()?.state.selection.worktreeID != nil
   }
 
-  /// `true` when the current Worktree has a PR snapshot in the GitHub feature's cache.
-  /// Drives the `.disabled` state of the "Open PR on GitHub" menu item — a Worktree
-  /// without a fetched PR (non-GitHub repo, fresh branch with no PR yet, GitHub auth
-  /// not configured) silently exposes a useless chord otherwise.
+  /// `true` when the current Worktree has a PR snapshot in the GitHub feature's
+  /// cache. Drives `.disabled` of "Open PR on GitHub" — a Worktree without a
+  /// fetched PR (non-GitHub repo, fresh branch, auth not configured) silently
+  /// exposes a useless chord otherwise.
   private var hasPRForCurrentWorktree: Bool {
     guard
       let worktreeID = store()?.state.selection.worktreeID,
@@ -300,8 +422,8 @@ struct MainWindowCommands: Commands {
     return true
   }
 
-  /// Drive `.disabled` on Back/Forward menu items so the chord is a hard
-  /// no-op when there's no entry to navigate to (also dims the menu item).
+  /// Drive `.disabled` on Back/Forward so the chord is a hard no-op (and dims
+  /// the menu item) when there's no entry to navigate to.
   private var hasHistoryBack: Bool {
     !(store()?.state.navigationHistoryBack.isEmpty ?? true)
   }
@@ -310,13 +432,29 @@ struct MainWindowCommands: Commands {
     !(store()?.state.navigationHistoryForward.isEmpty ?? true)
   }
 
-  /// `true` when there is a selected Project. Drives `.disabled` for "New Worktree…".
-  /// Doesn't gate on `gitRoot` (non-git Project ⇒ chord silently no-ops in the reducer)
-  /// because exposing that gating in the Commands struct would require a
-  /// `HierarchyManager` snapshot read — which inside SwiftUI `Commands` resolves against
-  /// `liveValue` and crashes (PR-#13 trap). Reducer's guard is sufficient.
+  /// `true` when there is a selected Project. Drives `.disabled` for
+  /// "New Worktree…" / "Manage Project Commands…". Doesn't gate on `gitRoot`
+  /// (non-git Project ⇒ chord silently no-ops in the reducer) because reading a
+  /// `HierarchyManager` snapshot inside SwiftUI `Commands` resolves against
+  /// `liveValue` and crashes (PR-#13 trap). The reducer's guard is sufficient.
   private var hasCurrentProject: Bool {
     store()?.state.selection.projectID != nil
   }
+}
 
+/// Conditionally applies a `ScriptDefinition`'s chord to a command's menu item.
+/// Short-circuits — returns the content unchanged — when the binding is absent,
+/// disabled, has a zero keyCode, or has no matching `KeyEquivalent`.
+private struct ScriptChordModifier: ViewModifier {
+  let binding: ShortcutBinding?
+
+  func body(content: Content) -> some View {
+    if let binding, binding.isEnabled, binding.keyCode != 0,
+      let key = ShortcutDisplay.keyEquivalent(for: binding.keyCode)
+    {
+      content.keyboardShortcut(key, modifiers: ShortcutDisplay.eventModifiers(for: binding.modifiers))
+    } else {
+      content
+    }
+  }
 }

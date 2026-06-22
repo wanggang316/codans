@@ -270,6 +270,21 @@ struct RootFeature {
     /// Silent no-op when no tab is active.
     case renameActiveTabForCurrentWorktreeRequested
     case changeActiveTabColorForCurrentWorktreeRequested
+    /// Run a Project command in the current Worktree — the menu-bar Commands
+    /// menu entry point. Carries only `scriptID`; the target Project + Worktree
+    /// are resolved at handle-time by forwarding to the WorktreeHeader delegate
+    /// path, which already owns that selection-resolution (so a chord pressed
+    /// while a terminal pane holds first-responder still targets the live
+    /// worktree). Command chords must live on the menu bar: a terminal pane is
+    /// first-responder during normal use and swallows key events before any
+    /// in-view `.keyboardShortcut` can see them, whereas menu-bar keyEquivalents
+    /// are matched by AppKit ahead of responder-chain dispatch.
+    case runScriptForCurrentWorktree(scriptID: UUID)
+    /// Run a global command in the current Worktree (menu-bar Commands menu).
+    case runGlobalScriptForCurrentWorktree(scriptID: UUID)
+    /// Stop a running command (project or global) in the current Worktree —
+    /// menu-bar Commands menu / ⌘. chord.
+    case stopScriptForCurrentWorktree(scriptID: UUID)
     /// Resolves the current Worktree's path and asks the Finder client
     /// to reveal it. Mirrors the palette's `revealCurrentWorktreeInFinder`
     /// kind so the menu binding and the palette item land on the same
@@ -1657,6 +1672,20 @@ struct RootFeature {
           await send(
             .editor(.openSucceeded(editorID: EditorRegistry.shellEditorID, displayName: "$EDITOR")))
         }
+
+      // Menu-bar Commands-menu entry points for user-defined commands. They
+      // forward to the WorktreeHeader delegate handlers, which own the
+      // selection-resolution + run/stop effects — a single dispatch path shared
+      // with the toolbar split-button. Registering the chords as menu-bar
+      // keyEquivalents is what makes them fire while a terminal pane is focused.
+      case .runScriptForCurrentWorktree(let scriptID):
+        return .send(.worktreeHeader(.delegate(.runScriptRequested(scriptID: scriptID))))
+
+      case .runGlobalScriptForCurrentWorktree(let scriptID):
+        return .send(.worktreeHeader(.delegate(.runGlobalScriptRequested(scriptID: scriptID))))
+
+      case .stopScriptForCurrentWorktree(let scriptID):
+        return .send(.worktreeHeader(.delegate(.stopScriptRequested(scriptID: scriptID))))
 
       case .newTabForCurrentWorktree:
         guard
