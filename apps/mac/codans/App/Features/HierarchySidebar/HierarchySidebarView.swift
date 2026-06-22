@@ -98,6 +98,16 @@ struct HierarchySidebarView: View {
   @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
+  /// App-wide "is a newer version available?" mirror, injected by
+  /// `ContentView`. Drives the persistent update reminder in the sidebar
+  /// toolbar. Survives "Skip This Version" because it is derived from
+  /// appcast-vs-current version comparison rather than Sparkle's skip state.
+  @Environment(UpdatesModel.self) private var updatesModel
+  /// Sparkle seam. The reminder button triggers a manual check, which
+  /// re-surfaces the update modal even for a version the user previously
+  /// skipped ("...unless they initiate an update check themselves").
+  @Dependency(UpdatesClient.self) private var updatesClient
+
   /// Bridges TCA-owned `currentSelection.worktreeID` ↔ SwiftUI's native
   /// `List(selection:)`. Native binding is what gets us Finder-/Mail-style
   /// selection chrome for free: emphasized blue + white text when the
@@ -490,6 +500,26 @@ struct HierarchySidebarView: View {
 
   @ToolbarContentBuilder
   private var sidebarToolbarContent: some ToolbarContent {
+    // Persistent update reminder, left of "Add Project". Visible whenever the
+    // appcast advertises a newer build for the active channel — and kept
+    // visible after "Skip This Version" — so the user always knows an update
+    // is waiting. Clicking runs a manual check, which re-opens Sparkle's
+    // update flow even for a previously skipped version.
+    if let available = updatesModel.available {
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          updatesClient.checkNow()
+        } label: {
+          // Plain blue download glyph at the toolbar's uniform size, with the
+          // standard toolbar-button hover (same as `+` / toggle). The blue tint
+          // is what sets the update reminder apart from the neutral glyphs.
+          Label("Update \(available.displayVersion)", systemImage: "arrow.down.circle.fill")
+        }
+        .labelStyle(.iconOnly)
+        .foregroundStyle(.blue)
+        .help("Update \(available.displayVersion)")
+      }
+    }
     ToolbarItem(placement: .primaryAction) {
       Menu {
         addProjectMenuItems
