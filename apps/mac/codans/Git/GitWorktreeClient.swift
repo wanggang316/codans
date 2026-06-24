@@ -50,13 +50,36 @@ nonisolated struct CreateWorktreeSpec: Equatable, Sendable {
   /// preserved and the selected base ref is ignored. Fixes the "can't
   /// re-create a removed worktree under the same name" trap.
   var reuseExistingBranch: Bool = false
+  /// Project setup script run as a tracked phase inside
+  /// `createWorktreeStream` once the worktree exists (e.g. `npm
+  /// install`). Sourced from `settings.projects[pid].git.createScript`.
+  /// Runs in the newly-created worktree's directory, not `repoRoot`.
+  /// Empty / whitespace-only / nil skips the setup phase entirely —
+  /// the stream goes straight from `git worktree add` to `.finished`.
+  /// A non-zero exit is best-effort: it never throws or rolls back the
+  /// created worktree.
+  var setupCommand: String?
+}
+
+/// Phases a `createWorktreeStream` run moves through. `creatingWorktree`
+/// covers the `wt sw` (`git worktree add`) leg; `runningSetupScript`
+/// covers the optional project setup command that runs afterward in the
+/// new worktree's directory. Consumers track which phase a pending
+/// creation is in to label progress.
+nonisolated enum CreationPhase: Equatable, Sendable {
+  case creatingWorktree
+  case runningSetupScript
 }
 
 /// Stream events emitted while `wt sw` runs. Consumers render
-/// `.progressLine` verbatim in the Create sheet's log area; `.finished`
-/// signals completion and carries the newly-created worktree path.
+/// `.progressLine` verbatim in the Create sheet's log area;
+/// `.setupPhaseBegan` signals the run has finished `git worktree add`
+/// and is now executing the project setup script in the new worktree;
+/// `.finished` signals completion and carries the newly-created
+/// worktree path.
 nonisolated enum CreateWorktreeEvent: Equatable, Sendable {
   case progressLine(String)
+  case setupPhaseBegan(worktreePath: URL)
   case finished(worktreePath: URL)
 }
 
@@ -114,8 +137,7 @@ nonisolated struct GitWorktreeClient: Sendable {
   /// branch), which must NOT fail the remove — that refusal is reported
   /// as `.kept` so the caller can surface why the branch lingered (and
   /// the next same-name create will reuse it via `reuseExistingBranch`).
-  var deleteBranchIfExists:
-    @Sendable (_ repoRoot: URL, _ branch: String) async -> BranchDeleteOutcome
+  var deleteBranchIfExists: @Sendable (_ repoRoot: URL, _ branch: String) async -> BranchDeleteOutcome
   /// Best-effort `git push <remote> --delete <branch>` — deletes the remote
   /// tracking branch when the user opted into "Delete remote branch with
   /// worktree". The remote is resolved from the branch's configured upstream
@@ -769,6 +791,40 @@ nonisolated extension GitWorktreeClient {
                   ))
                 return
               }
+
+              // Optional setup-script phase. Runs as a tracked phase
+              // INSIDE the stream (rather than later as the first pane's
+              // initial command) so a cancelled creation also kills the
+              // setup child — it reuses the SAME `processBox` +
+              // `continuation.onTermination` wiring the `wt sw`
+              // invocation uses. The command runs in the freshly-created
+              // worktree (`worktreeURL`), not `spec.repoRoot`.
+              let setup = spec.setupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
+              if let setup, !setup.isEmpty {
+                continuation.yield(.setupPhaseBegan(worktreePath: worktreeURL))
+                let setupOutcome = await GitWorktreeShell.runStream(
+                  executable: URL(fileURLWithPath: "/bin/bash"),
+                  arguments: ["-lc", setup],
+                  cwd: worktreeURL,
+                  onSpawn: { process in
+                    processBox.set(process)
+                    onCreateWorktreeSpawn?(process)
+                  },
+                  onStdout: { line in continuation.yield(.progressLine(line)) },
+                  onStderr: { line in continuation.yield(.progressLine(line)) }
+                )
+                // Best-effort: a spawn failure or non-zero exit from the
+                // setup script must NOT throw or roll back the worktree.
+                // We note it as a final progress line and still finish.
+                if let reason = setupOutcome.spawnFailedReason {
+                  continuation.yield(
+                    .progressLine("setup script failed to start: \(reason)"))
+                } else if setupOutcome.exitCode != 0 {
+                  continuation.yield(
+                    .progressLine("setup script exited with code \(setupOutcome.exitCode)"))
+                }
+              }
+
               continuation.yield(.finished(worktreePath: worktreeURL))
               continuation.finish()
             } catch {

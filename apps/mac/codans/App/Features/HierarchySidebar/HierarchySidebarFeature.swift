@@ -879,6 +879,12 @@ struct HierarchySidebarFeature {
           switch event {
           case .progressLine(let line):
             await send(.pendingWorktreeProgress(id, line))
+          case .setupPhaseBegan:
+            // Placeholder: full phase tracking lands in a later feature
+            // (pending-phase-lifecycle). The setup script's own output
+            // still streams in via subsequent `.progressLine` events, so
+            // ignoring the phase marker keeps current behavior unchanged.
+            break
           case .finished(let url):
             await send(.pendingWorktreeFinished(id, url))
             return
