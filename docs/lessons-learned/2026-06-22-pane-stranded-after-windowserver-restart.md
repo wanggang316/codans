@@ -1,4 +1,4 @@
-# Postmortem: panes stuck on `/login` after a WindowServer restart
+# Lessons Learned: panes stuck on `/login` after a WindowServer restart
 
 **Status:** Resolved
 **Date:** 2026-06-22
