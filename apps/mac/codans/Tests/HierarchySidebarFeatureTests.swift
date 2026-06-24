@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -144,5 +144,122 @@ struct HierarchySidebarFeatureTests {
         copyUntracked: true
       )
     }
+  }
+
+  // MARK: - Pending phase lifecycle (pending-phase-lifecycle)
+
+  /// Builds a `.running` pending row whose spec carries no setup command —
+  /// `beginPendingWorktreeCreation` stashes the project's createScript into
+  /// the spec before streaming.
+  private static func makePending(projectID: ProjectID) -> PendingWorktree {
+    PendingWorktree(
+      id: PendingWorktreeID(),
+      projectID: projectID,
+      spec: CreateWorktreeSpec(
+        repoRoot: URL(fileURLWithPath: "/repo"),
+        baseDirectory: URL(fileURLWithPath: "/repo/.worktrees"),
+        name: "feat-x",
+        baseRef: "origin/main",
+        fetchOrigin: false,
+        copyIgnored: false,
+        copyUntracked: false
+      ),
+      displayName: "feat/x",
+      status: .running,
+      lastProgressLine: nil,
+      startedAt: Date(timeIntervalSince1970: 0)
+    )
+  }
+
+  /// beginPendingWorktreeCreation reads the project's createScript and
+  /// stashes it into the pending's spec `setupCommand` so the stream runs
+  /// it in-phase; the stream's `.setupPhaseBegan` flips the row to
+  /// `.runningSetupScript` + records the materialized path; `.progressLine`
+  /// keeps updating `lastProgressLine` across both phases.
+  @Test
+  func beginStashesSetupCommandAndStreamsBothPhases() async {
+    let projectID = ProjectID()
+    let pending = Self.makePending(projectID: projectID)
+    let id = pending.id
+    let materialized = URL(fileURLWithPath: "/repo/.worktrees/feat-x")
+
+    let settings: Settings = {
+      var settings = Settings()
+      settings.projects[projectID] = ProjectSettings(
+        git: GitProjectSettings(createScript: ScriptDefinition(command: "npm install"))
+      )
+      return settings
+    }()
+    // Records the spec the stream was invoked with so we can assert the
+    // setup command was stashed before streaming began.
+    let invokedSetup = LockIsolated<String?>(nil)
+
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0.gitWorktreeClient.createWorktreeStream = { spec in
+        invokedSetup.setValue(spec.setupCommand)
+        return AsyncThrowingStream { continuation in
+          continuation.yield(.progressLine("Cloning…"))
+          continuation.yield(.setupPhaseBegan(worktreePath: materialized))
+          continuation.yield(.progressLine("added 42 packages"))
+          continuation.finish()
+        }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.beginPendingWorktreeCreation(pending)) {
+      // The row is appended with the createScript stashed into its spec.
+      var stashed = pending
+      stashed.spec.setupCommand = "npm install"
+      $0.pendingWorktrees.append(stashed)
+    }
+    #expect(invokedSetup.value == "npm install")
+
+    await store.receive(.pendingWorktreeProgress(id, "Cloning…")) {
+      $0.pendingWorktrees[id: id]?.lastProgressLine = "Cloning…"
+      $0.pendingWorktrees[id: id]?.progressLines = ["Cloning…"]
+    }
+    await store.receive(.pendingWorktreeSetupPhaseBegan(id, materialized)) {
+      $0.pendingWorktrees[id: id]?.phase = .runningSetupScript
+      $0.pendingWorktrees[id: id]?.materializedPath = materialized
+    }
+    await store.receive(.pendingWorktreeProgress(id, "added 42 packages")) {
+      // Second line keeps streaming through the setup phase.
+      $0.pendingWorktrees[id: id]?.lastProgressLine = "added 42 packages"
+      $0.pendingWorktrees[id: id]?.progressLines = ["Cloning…", "added 42 packages"]
+    }
+
+    await store.skipReceivedActions()
+  }
+
+  /// An empty / unset createScript leaves `setupCommand` nil — the stream
+  /// never emits `.setupPhaseBegan`, so the row stays in `.creatingWorktree`.
+  @Test
+  func emptySetupCommandKeepsPhaseCreating() async {
+    let projectID = ProjectID()
+    let pending = Self.makePending(projectID: projectID)
+    let id = pending.id
+    let invokedSetup = LockIsolated<String?>("sentinel")
+
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      // No project entry → no createScript → nil setupCommand.
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      $0.gitWorktreeClient.createWorktreeStream = { spec in
+        invokedSetup.setValue(spec.setupCommand)
+        return AsyncThrowingStream { $0.finish() }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.beginPendingWorktreeCreation(pending))
+    #expect(invokedSetup.value == nil)
+    #expect(store.state.pendingWorktrees[id: id]?.phase == .creatingWorktree)
+
+    await store.skipReceivedActions()
   }
 }

@@ -222,6 +222,10 @@ struct HierarchySidebarFeature {
     // Pending-worktree lifecycle. See worktree-sidebar-ordering.md §pending 段.
     case beginPendingWorktreeCreation(PendingWorktree)
     case pendingWorktreeProgress(PendingWorktreeID, String)
+    /// Stream crossed from `git worktree add` into the setup-script leg.
+    /// Flips the pending row's `phase` to `.runningSetupScript` and records
+    /// the now-materialized worktree path.
+    case pendingWorktreeSetupPhaseBegan(PendingWorktreeID, URL)
     case pendingWorktreeFinished(PendingWorktreeID, URL)
     case pendingWorktreeFailed(PendingWorktreeID, GitWorktreeError)
     case pendingWorktreeRetryTapped(PendingWorktreeID)
@@ -745,6 +749,16 @@ struct HierarchySidebarFeature {
       // entry points (IPC, command palette, tests).
       let count = state.pendingWorktrees.filter { $0.projectID == pending.projectID }.count
       guard count < 8 else { return .none }
+      // Stash the project's setup script into the spec so the stream runs it
+      // as a tracked in-stream phase (`.setupPhaseBegan` → setup output →
+      // `.finished`). Empty / whitespace / nil skips the phase entirely
+      // (handled inside `createWorktreeStream`). Previously this script ran
+      // later as the first pane's initialCommand; it now runs in-stream.
+      var pending = pending
+      pending.spec.setupCommand =
+        settingsWriter
+        .readSnapshotSync()
+        .projects[pending.projectID]?.git?.createScript?.command
       state.pendingWorktrees.append(pending)
       return runPendingStream(pending)
 
@@ -761,6 +775,16 @@ struct HierarchySidebarFeature {
       if let count = state.pendingWorktrees[id: id]?.progressLines.count, count > window {
         state.pendingWorktrees[id: id]?.progressLines.removeFirst(count - window)
       }
+      return .none
+
+    case .pendingWorktreeSetupPhaseBegan(let id, let path):
+      // Race guard: cancel may have removed the row before this phase
+      // marker drained from the stream. The setup script's own output keeps
+      // arriving as `.progressLine` events, so the second line keeps
+      // streaming through this phase too.
+      guard state.pendingWorktrees[id: id] != nil else { return .none }
+      state.pendingWorktrees[id: id]?.phase = .runningSetupScript
+      state.pendingWorktrees[id: id]?.materializedPath = path
       return .none
 
     case .pendingWorktreeFinished(let id, let path):
@@ -794,13 +818,11 @@ struct HierarchySidebarFeature {
       state.pendingWorktrees.remove(id: id)
       hierarchyClient.selectProject(pid)
       try? hierarchyClient.selectWorktree(worktreeID, pid)
-      // Create script materializes as the auto-opened pane's
-      // initialCommand — user sees realtime output in that pane. Empty
-      // / unset script = a plain interactive shell.
-      let createCommand =
-        settingsWriter
-        .readSnapshotSync()
-        .projects[pid]?.git?.createScript?.command
+      // The create script no longer rides along as the first pane's
+      // initialCommand — it now runs as a tracked in-stream phase during
+      // creation (see `beginPendingWorktreeCreation` / `setupPhaseBegan`).
+      // The first pane opens as a plain interactive shell (nil command).
+      //
       // Seed the first pane in two phases. The catalog row (`createPaneRow`)
       // is inserted SYNCHRONOUSLY here so it is observable before the
       // `.selectionChanged` that `selectWorktree` above just triggered is
@@ -808,10 +830,10 @@ struct HierarchySidebarFeature {
       // the still-empty tab and races in a second, redundant pane — and the
       // two concurrent `zmx serve` spawns collide, the loser surfacing
       // `zmxServeFailed`. The async zmx-daemon + surface bringup follows in
-      // the effect. The create script rides along as the pane's initialCommand.
+      // the effect.
       if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil),
         let paneID = try? hierarchyClient.createPaneRow(
-          tabID, worktreeID, pid, pathString, createCommand
+          tabID, worktreeID, pid, pathString, nil
         )
       {
         return .run { [client = hierarchyClient] _ in
@@ -879,12 +901,12 @@ struct HierarchySidebarFeature {
           switch event {
           case .progressLine(let line):
             await send(.pendingWorktreeProgress(id, line))
-          case .setupPhaseBegan:
-            // Placeholder: full phase tracking lands in a later feature
-            // (pending-phase-lifecycle). The setup script's own output
-            // still streams in via subsequent `.progressLine` events, so
-            // ignoring the phase marker keeps current behavior unchanged.
-            break
+          case .setupPhaseBegan(let path):
+            // Worktree now exists on disk; the run has entered the setup
+            // leg. Flip the row's phase + stash the path. The setup
+            // script's own output continues to arrive as `.progressLine`
+            // events, so the row's second line keeps streaming.
+            await send(.pendingWorktreeSetupPhaseBegan(id, path))
           case .finished(let url):
             await send(.pendingWorktreeFinished(id, url))
             return

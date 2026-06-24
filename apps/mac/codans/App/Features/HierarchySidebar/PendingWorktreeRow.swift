@@ -26,6 +26,11 @@ struct PendingWorktreeRow: View {
       Spacer()
     }
     .contentShape(Rectangle())
+    // Keep the child Text nodes (display name + streaming second line)
+    // readable to accessibility while still attaching the stable stage
+    // value below — `.contain` merges children under this element.
+    .accessibilityElement(children: .contain)
+    .accessibilityValue(stageAccessibilityValue)
     .contextMenu {
       switch pending.status {
       case .running:
@@ -33,6 +38,25 @@ struct PendingWorktreeRow: View {
       case .failed:
         Button("Retry", action: onRetry)
         Button("Discard", role: .destructive, action: onDiscard)
+      }
+    }
+  }
+
+  /// Stable, machine-readable stage signal for the row, exposed as its
+  /// accessibility value. The vocabulary is a fixed contract that later
+  /// validation keys on — DO NOT rename these strings:
+  ///   - `creating`    — running, still in the `git worktree add` leg
+  ///   - `setupScript` — running, executing the project setup script
+  ///   - `failed`      — creation failed (Retry / Discard offered)
+  /// See `pending-phase-lifecycle`.
+  private var stageAccessibilityValue: String {
+    switch pending.status {
+    case .failed:
+      return "failed"
+    case .running:
+      switch pending.phase {
+      case .creatingWorktree: return "creating"
+      case .runningSetupScript: return "setupScript"
       }
     }
   }
