@@ -57,17 +57,14 @@ codans/
 4. **Every complex change gets an execution plan** — plan before building
 5. **Fix the environment, not the prompt** — when agents struggle, add missing tools/docs/guardrails
 
-See [Golden Rules](docs/golden-rules.md) for the complete list with rationale and enforcement.
-
 ## Documentation
 
 
 | Directory | Purpose |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | System architecture, domains, layers |
-| [docs/golden-rules.md](docs/golden-rules.md) | Enforced principles and conventions |
+| [docs/product-spec.md](docs/product-spec.md) | What the product is, for whom, and its boundaries |
 | [docs/design-docs/](docs/design-docs/) | Design documents |
-| [docs/product-specs/](docs/product-specs/) | Product specifications |
 | [docs/references/](docs/references/) | External docs, API references |
 | [docs/generated/](docs/generated/) | Auto-generated artifacts |
 

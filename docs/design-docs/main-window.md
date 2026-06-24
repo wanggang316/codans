@@ -5,7 +5,7 @@
 
 ## Context and Scope
 
-主窗口是两栏布局：左 **Sidebar**（扁平 Project 树 + 底部 footer），右 **Detail**（终端之上一行 **Header**，其下 **Tab 条** + 分屏 **Pane**）。能力与验收见 [Main-Window UI 产品规格](../product-specs/ui-main-window.md)。
+主窗口是两栏布局：左 **Sidebar**（扁平 Project 树 + 底部 footer），右 **Detail**（终端之上一行 **Header**，其下 **Tab 条** + 分屏 **Pane**）。
 
 层级为 `Catalog → Project → Worktree → Tab → Pane`（四级）。本文记录三个主窗口子系统——Sidebar、Header、Tab 条——各自的**耐久不变量与边界**，即"为什么这样拆、什么绝不能反过来做"。具体 SwiftUI 布局、像素值、reducer 全量 action 表不在此固化（实现可演进）。
 
@@ -119,7 +119,6 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 
 ## References
 
-- 产品规格：[ui-main-window.md](../product-specs/ui-main-window.md)
 - Tag / 单窗口：[project-tags.md](project-tags.md)
 - 通知 / 上卷 / 状态栏铃铛：[notifications.md](notifications.md)
 - Git Viewer（外部 git 客户端）：[editor-integration.md](editor-integration.md)

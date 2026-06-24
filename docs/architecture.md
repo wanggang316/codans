@@ -44,7 +44,7 @@ Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by *
 | Path | Purpose |
 |---|---|
 | `apps/mac/` | The mac platform: Tuist project, sources, ghostty submodule, per-app Makefile |
-| `docs/` | Project documentation: this file, `product-spec.md`, `golden-rules.md`, plus `design-docs/`, `product-specs/`, `references/`, `generated/`, `user-tests/` |
+| `docs/` | Project documentation: this file, `product-spec.md`, plus `design-docs/`, `references/`, `generated/`, `user-tests/` |
 | `mise.toml` | Pinned versions for `tuist`, `zig`, `swiftlint`, `xcbeautify` — shared across any future apps |
 | `Makefile` | Top-level delegator: `make mac-build` → `$(MAKE) -C apps/mac build` |
 

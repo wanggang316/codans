@@ -8,7 +8,7 @@ description: User-test set for the Worktree Branch Switcher & Diff History featu
 **Status:** Draft
 **Author:** Gump (with Claude)
 **Date:** 2026-05-24
-**Spec:** [docs/product-specs/worktree-management.md](../product-specs/worktree-management.md)
+**Spec:** [worktree.md](../design-docs/worktree.md)
 **Design:** [docs/design-docs/worktree.md](../design-docs/worktree.md)
 
 ## Personas Used

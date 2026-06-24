@@ -8,7 +8,7 @@ description: User-test set for the v1.1 Notifications work — policy chokepoint
 **Status:** Draft
 **Author:** Gump (with Claude)
 **Date:** 2026-05-20
-**Spec:** [docs/product-specs/notifications.md](../product-specs/notifications.md)
+**Spec:** [notifications.md](../design-docs/notifications.md)
 **Design:** [docs/design-docs/notifications.md](../design-docs/notifications.md)
 
 ## Personas Used

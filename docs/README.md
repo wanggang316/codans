@@ -8,8 +8,6 @@ This directory is the **system of record** for all project knowledge. If it's no
 |---|---|
 | [architecture.md](architecture.md) | System architecture, domains, layers, invariants |
 | [product-spec.md](product-spec.md) | What the product is, for whom, and its boundaries |
-| [golden-rules.md](golden-rules.md) | Enforced principles and conventions |
-| [product-specs/](product-specs/) | Per-feature product specifications and requirements |
 | [design-docs/](design-docs/) | Per-subsystem design: invariants and the *why* behind decisions |
 | [references/](references/) | External references, API docs, integration notes |
 | [generated/](generated/) | Auto-generated artifacts — do not edit manually |

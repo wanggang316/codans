@@ -8,7 +8,7 @@ description: User-test set for Pane Resume. Authored by /hs-test-spec. Read `doc
 **Status:** Approved
 **Author:** Gump
 **Date:** 2026-05-24
-**Spec:** docs/product-specs/pane-resume.md (设计文档已下线)
+**Spec:** （产品规格与设计文档均已下线）
 **Design:** docs/design-docs/pane-resume.md (设计文档已下线)
 
 ## Personas Used

@@ -8,7 +8,7 @@ description: User-test set for the AgentState view — in-app status-bar badge +
 **Status:** Draft
 **Author:** Gump (with Claude)
 **Date:** 2026-05-22
-**Spec:** [docs/product-specs/active-agents-view.md](../product-specs/active-agents-view.md)
+**Spec:** [active-agents-view.md](../design-docs/active-agents-view.md)
 **Design:** [docs/design-docs/active-agents-view.md](../design-docs/active-agents-view.md)
 
 ## Personas Used

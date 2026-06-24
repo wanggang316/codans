@@ -5,7 +5,7 @@
 
 ## 背景与范围
 
-通知子系统的职责，是在某个 Pane 需要用户时——编码 agent 卡在等待输入、或长任务结束——把用户的注意力拉回到**那个确切的 Pane**，且只拉回那一个。能力与验收标准见 [Notifications 产品规格](../product-specs/notifications.md)。
+通知子系统的职责，是在某个 Pane 需要用户时——编码 agent 卡在等待输入、或长任务结束——把用户的注意力拉回到**那个确切的 Pane**，且只拉回那一个。
 
 层级为 `Catalog → Project → Worktree → Tab → Pane`；一个 Pane 是一个 Ghostty surface，多个 Pane 通过 `SplitTree<PaneID>` 在一个 Tab 内分屏排布。
 
@@ -195,7 +195,6 @@ codans/App/Clients/HierarchyClient.swift   // + reorderWorktrees, setPaneLabel
 
 ## 参考
 
-- 产品规格：[notifications.md](../product-specs/notifications.md)
 - 层级 / 事件：`apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane,SplitTree,TerminalEvent,PaneInfoDelta}.swift`
 - inbox 原语：`apps/mac/CodansCore/Notifications/`
 - Settings v3 schema：`apps/mac/CodansCore/Settings/Settings.swift`

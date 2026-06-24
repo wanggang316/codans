@@ -5,7 +5,7 @@
 
 ## 背景与范围
 
-codans 把编码 agent（Claude Code、Codex CLI、pi、…）当作 Pane 的一等住户来运行。典型会话里用户有 2–8 个 Pane 散布在各 Worktree，多数由 agent 驱动；用户只关注此刻正在工作、刚完成、或正等他输入的那一个。在 AgentState 之前，跨 Pane 表达这一信号的途径只有：(a) 每个 Pane 的 OSC 9;4「busy」顶条；(b) 由同一来源聚合的侧栏 / tab-chip busy 字形；(c) 记录历史 `taskFinished` / `waitingForInput` 事件的 inbox。三者都答不出用户真正会问的那句话——「**现在有哪些 agent 活着、各自在干什么**」。能力与验收标准见 [AgentState 产品规格](../product-specs/active-agents-view.md)。
+codans 把编码 agent（Claude Code、Codex CLI、pi、…）当作 Pane 的一等住户来运行。典型会话里用户有 2–8 个 Pane 散布在各 Worktree，多数由 agent 驱动；用户只关注此刻正在工作、刚完成、或正等他输入的那一个。在 AgentState 之前，跨 Pane 表达这一信号的途径只有：(a) 每个 Pane 的 OSC 9;4「busy」顶条；(b) 由同一来源聚合的侧栏 / tab-chip busy 字形；(c) 记录历史 `taskFinished` / `waitingForInput` 事件的 inbox。三者都答不出用户真正会问的那句话——「**现在有哪些 agent 活着、各自在干什么**」。
 
 本设计实现 **AgentState**——一个挂在侧栏底部的常驻面板（`AgentStateSidebarPanel`，标题 "Agents View"），列出当前被识别为运行已知 agent 的每个 Pane 及其派生运行态。这个面板是用户跨所有 worktree 分诊 agent 的唯一去处。
 
@@ -276,7 +276,6 @@ var setPaneAgentSessionID: @MainActor @Sendable (PaneID, String?) -> Void
 
 ## 参考
 
-- 产品规格：[active-agents-view.md](../product-specs/active-agents-view.md)
 - AgentKind / 识别：`apps/mac/CodansCore/Agents/{AgentKind,AgentKindPatterns,ForegroundJob,ForegroundJobClassifier}.swift`
 - 渲染区分类器：`apps/mac/CodansCore/Notifications/PaneAttentionInterpreter+Agents.swift`
 - 绑定：`apps/mac/codans/Runtime/AgentBinder.swift`

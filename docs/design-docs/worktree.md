@@ -7,7 +7,7 @@
 
 ## 背景与范围
 
-一个 **Worktree** 是某 Project 的一个 `git worktree`——磁盘上一个具体的分支 checkout，自带目录与 Tab/Pane 布局。codans 的核心工作流就是多个 feature 并行、一个 feature 一个 Worktree、各有自己的终端与 agent。能力与验收标准见 [worktree-management 产品规格](../product-specs/worktree-management.md)。
+一个 **Worktree** 是某 Project 的一个 `git worktree`——磁盘上一个具体的分支 checkout，自带目录与 Tab/Pane 布局。codans 的核心工作流就是多个 feature 并行、一个 feature 一个 Worktree、各有自己的终端与 agent。
 
 本设计覆盖 Worktree 的四个相邻子系统，它们共享同一套不变量（catalog ↔ on-disk 一致、UUID 标识、带 version 的原子 rename 持久化）：
 
@@ -397,7 +397,6 @@ apps/mac/scripts/{verify,embed}-git-wt.sh
 
 ## 参考
 
-- 产品规格：[worktree-management.md](../product-specs/worktree-management.md)
 - 模型：`apps/mac/CodansCore/{Worktree,Project}.swift`、`CodansCore/Git/GitModels.swift`、`CodansCore/StatusBar/StatusToast.swift`、`CodansCore/Shortcuts/CommandPaletteShortcut.swift`
 - git 面：`apps/mac/codans/Git/{GitWorktreeClient,GitService,GitCommand,GitOutputParser}.swift`
 - 运行时：`apps/mac/codans/Runtime/{HierarchyManager,WorktreeHeadWatcher}.swift`

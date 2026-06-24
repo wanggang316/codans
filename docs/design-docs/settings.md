@@ -12,8 +12,7 @@ Settings is one durable subsystem with two faces:
 - a single on-disk document `~/.config/codans/settings.json` owned by one
   writer, `SettingsStore`.
 
-User-facing behavior and acceptance criteria live in
-[ui-settings-window.md](../product-specs/ui-settings-window.md). This doc records
+This doc records
 the durable invariants and the non-obvious *why* behind the persistence model,
 the v3 per-Project schema, and the notification-gating semantics — not the
 SwiftUI layout, which is free to change.
@@ -306,7 +305,6 @@ path, env = the resolved Project env), not through a terminal surface.
 
 ## References
 
-- Product spec: [ui-settings-window.md](../product-specs/ui-settings-window.md)
 - Notification pipeline (gated by these settings): [notifications.md](./notifications.md)
 - Schema authority: `apps/mac/CodansCore/Settings/{Settings,ProjectSettings,GitProjectSettings,NotificationsSettings,SettingsMigration}.swift`, `apps/mac/CodansCore/ProjectKind.swift`
 - Single writer + atomic store: `apps/mac/codans/App/Features/Settings/SettingsStore.swift`
