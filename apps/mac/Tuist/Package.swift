@@ -13,7 +13,21 @@ let packageSettings = PackageSettings(
     // Sentry must be a dynamic framework so its crash handler can be
     // installed before main() and its dSYM is uploaded for symbolication.
     "Sentry": .framework,
-  ]
+  ],
+  // Xcode 26's Explicitly Built Modules runs a Clang dependency scanner
+  // that fails on the macro-support frameworks SwiftPM generates: e.g.
+  // CasePathsMacrosSupport.framework's modulemap references a
+  // CasePathsMacrosSupport-Swift.h that isn't produced for a pure-Swift
+  // module, so the scan aborts the Release archive ("could not build
+  // module 'CasePathsMacrosSupport'"). Disable explicit modules for the
+  // generated SwiftPM targets — command-line build settings on xcodebuild
+  // don't reach package targets, so the override has to live here.
+  baseSettings: .settings(
+    base: [
+      "SWIFT_ENABLE_EXPLICIT_MODULES": "NO",
+      "CLANG_ENABLE_EXPLICIT_MODULES": "NO",
+    ]
+  )
 )
 #endif
 
