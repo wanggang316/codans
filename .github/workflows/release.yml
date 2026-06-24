@@ -194,6 +194,16 @@ jobs:
           printf 'SENTRY_DSN_REST = %s\n' "$SENTRY_DSN_REST" \
             > apps/mac/Configurations/Secrets.xcconfig
 
+      - name: Disable SwiftPM prebuilt swift-syntax (broken under xcodebuild archive)
+        # The macos-26 runner image (>= 20260623) flipped Xcode's
+        # IDEPackageEnablePrebuilts default on. The prebuilt swift-syntax
+        # ships a CasePathsMacrosSupport.framework whose modulemap references a
+        # -Swift.h header the Release archive's Clang dep-scanner can't find
+        # ("could not build module 'CasePathsMacrosSupport'"). Force macros to
+        # build from source. Must run BEFORE `make mac-archive`: SPM resolves
+        # during the `tuist generate` prerequisite, not in release.sh.
+        run: defaults write com.apple.dt.Xcode IDEPackageEnablePrebuilts -bool NO
+
       - name: Archive (xcodebuild archive + extract signed app)
         env:
           APPLE_TEAM_ID: ${{ secrets.DEVELOPMENT_TEAM }}
