@@ -36,6 +36,10 @@ struct ContentView: View {
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
 
+  /// Live Sparkle seam (the global value, shared with the Updates pane) so an
+  /// in-process settings change can re-sync the running `SPUUpdater`.
+  @Dependency(UpdatesClient.self) private var updatesClient
+
   /// Bridges `RootFeature.State.sidebarVisible` (a Bool) to
   /// `NavigationSplitViewVisibility` so the chord, the system disclosure
   /// chevron, and the bound state stay in lockstep.
@@ -152,6 +156,27 @@ struct ContentView: View {
     // descriptors + globalDefault.
     .onChange(of: settingsStore.settings.general.defaultEditorID) { _, _ in
       store.send(.editor(.onAppear))
+    }
+    // Re-sync the live SPUUpdater whenever the Updates prefs change in-process,
+    // not only through the Updates-pane picker bindings. Any other write path
+    // (or a future settings entry point) would otherwise update settings.json
+    // but leave the running updater on its launch-time cadence — the "set 3h,
+    // app still polls daily" drift. `triggerBackgroundCheck: false` so a
+    // settings edit never itself hits the network; the picker opts into an
+    // immediate probe on its own.
+    .onChange(of: settingsStore.settings.general) { old, new in
+      guard old.updateChannel != new.updateChannel
+        || old.updateCheckInterval != new.updateCheckInterval
+        || old.updatesAutomaticallyCheckForUpdates != new.updatesAutomaticallyCheckForUpdates
+        || old.updatesAutomaticallyDownloadUpdates != new.updatesAutomaticallyDownloadUpdates
+      else { return }
+      updatesClient.applyPreferences(
+        new.updateChannel,
+        new.updateCheckInterval,
+        new.updatesAutomaticallyCheckForUpdates,
+        new.updatesAutomaticallyDownloadUpdates,
+        false
+      )
     }
     .onDisappear {
       store.send(.onQuit)
