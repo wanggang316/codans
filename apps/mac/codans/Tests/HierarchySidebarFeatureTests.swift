@@ -291,16 +291,14 @@ struct HierarchySidebarFeatureTests {
         created.withValue { $0.append((pid, display, branch, path)) }
         return newWorktreeID
       }
-      $0.hierarchyClient.selectProject = { _ in }
-      $0.hierarchyClient.selectWorktree = { _, _ in }
-      // Pane seeding is a cosmetic tail; throw so the `try?` createTab
-      // short-circuits and no follow-up surface-bringup effect runs.
-      $0.hierarchyClient.createTab = { _, _, _ in throw CancellationError() }
     }
     store.exhaustivity = .off
 
     await store.send(.pendingWorktreeCancelTapped(id))
-    // Cancel reuses the existing finish path to materialize.
+    // Cancel reuses the existing finish path to materialize. Finish now
+    // delegates the switch decision up (`.worktreeMaterialized`) rather than
+    // selecting / seeding inline; with exhaustivity off we don't assert that
+    // tail here — see `finishedEmitsWorktreeMaterializedDelegate...`.
     await store.receive(.pendingWorktreeFinished(id, materialized)) {
       $0.pendingWorktrees.remove(id: id)
     }
@@ -360,5 +358,80 @@ struct HierarchySidebarFeatureTests {
 
     // No state mutation, no effects — the guard short-circuits.
     await store.send(.pendingWorktreeCancelTapped(id))
+  }
+
+  /// completion-switch-gate: `pendingWorktreeFinished` writes the catalog,
+  /// removes the pending row, and now DELEGATES the switch decision up
+  /// instead of selecting / seeding panes itself. Pins the new contract:
+  /// exactly one `.delegate(.worktreeMaterialized(...))` carrying the new
+  /// WorktreeID + the pending's IDs, and no inline selectProject /
+  /// selectWorktree call.
+  @Test
+  func finishedEmitsWorktreeMaterializedDelegateAndDoesNotSelect() async {
+    let projectID = ProjectID()
+    let pending = Self.makePending(projectID: projectID)
+    let id = pending.id
+    let materialized = URL(fileURLWithPath: "/repo/.worktrees/feat-x")
+    let newWorktreeID = WorktreeID()
+
+    var initial = HierarchySidebarFeature.State()
+    initial.pendingWorktrees.append(pending)
+
+    let selectProjectCalls = LockIsolated(0)
+    let selectWorktreeCalls = LockIsolated(0)
+
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.createWorktreeWithGit = { _, _, _, _ in newWorktreeID }
+      $0.hierarchyClient.selectProject = { _ in
+        selectProjectCalls.withValue { $0 += 1 }
+      }
+      $0.hierarchyClient.selectWorktree = { _, _ in
+        selectWorktreeCalls.withValue { $0 += 1 }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.pendingWorktreeFinished(id, materialized)) {
+      $0.pendingWorktrees.remove(id: id)
+    }
+    await store.receive(
+      .delegate(
+        .worktreeMaterialized(
+          worktreeID: newWorktreeID, projectID: projectID, pendingID: id)))
+    await store.finish()
+
+    #expect(selectProjectCalls.value == 0)
+    #expect(selectWorktreeCalls.value == 0)
+  }
+
+  /// VAL-SWITCH-008 (sidebar leg): a FAILED creation routes through
+  /// `pendingWorktreeFailed`, which never materializes and never emits the
+  /// switch delegate — so failure can never switch the user away.
+  @Test
+  func failedDoesNotEmitWorktreeMaterializedDelegate() async {
+    let projectID = ProjectID()
+    let pending = Self.makePending(projectID: projectID)
+    let id = pending.id
+
+    var initial = HierarchySidebarFeature.State()
+    initial.pendingWorktrees.append(pending)
+
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .pendingWorktreeFailed(id, .commandFailed(command: "git", stderr: "boom"))
+    ) {
+      $0.pendingWorktrees[id: id]?.status = .failed(
+        .commandFailed(command: "git", stderr: "boom"))
+    }
+    // No delegate, no further effects: `store.finish()` would trip if a
+    // `.worktreeMaterialized` (or any other) effect were still in flight.
+    await store.finish()
+    #expect(store.state.pendingWorktrees[id: id]?.status != .running)
   }
 }

@@ -295,6 +295,15 @@ struct HierarchySidebarFeature {
       /// Sidebar bottom-bar refresh button. RootFeature routes this to
       /// `ProjectReconciler.reconcileAll(force: true)`.
       case refreshAllProjectsRequested
+      /// A pending creation finished and its catalog row now exists. The
+      /// sidebar has already written the catalog and removed the pending
+      /// row; it delegates the post-completion "switch to the new worktree"
+      /// decision UP to `RootFeature`, which gates it on the auto-switch
+      /// setting and on whether the user is still viewing this pending
+      /// creation (`activePendingWorktreeID`, which only RootFeature owns).
+      /// The sidebar no longer selects or seeds panes itself.
+      case worktreeMaterialized(
+        worktreeID: WorktreeID, projectID: ProjectID, pendingID: PendingWorktreeID)
     }
   }
 
@@ -816,31 +825,16 @@ struct HierarchySidebarFeature {
       // row for the same logical creation). The post-catalog steps below
       // are cosmetic side-effects and must not roll back this removal.
       state.pendingWorktrees.remove(id: id)
-      hierarchyClient.selectProject(pid)
-      try? hierarchyClient.selectWorktree(worktreeID, pid)
-      // The create script no longer rides along as the first pane's
-      // initialCommand — it now runs as a tracked in-stream phase during
-      // creation (see `beginPendingWorktreeCreation` / `setupPhaseBegan`).
-      // The first pane opens as a plain interactive shell (nil command).
-      //
-      // Seed the first pane in two phases. The catalog row (`createPaneRow`)
-      // is inserted SYNCHRONOUSLY here so it is observable before the
-      // `.selectionChanged` that `selectWorktree` above just triggered is
-      // processed. Otherwise `RootFeature.autoSeedTabAndPaneIfNeeded` reads
-      // the still-empty tab and races in a second, redundant pane — and the
-      // two concurrent `zmx serve` spawns collide, the loser surfacing
-      // `zmxServeFailed`. The async zmx-daemon + surface bringup follows in
-      // the effect.
-      if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil),
-        let paneID = try? hierarchyClient.createPaneRow(
-          tabID, worktreeID, pid, pathString, nil
-        )
-      {
-        return .run { [client = hierarchyClient] _ in
-          try? await client.ensurePaneSurface(paneID, tabID, worktreeID, pid)
-        }
-      }
-      return .none
+      // The post-completion "switch to the new worktree" decision is owned
+      // by `RootFeature`: it gates on the auto-switch setting and on
+      // `activePendingWorktreeID` (still-viewing), neither of which this
+      // reducer can read. Delegate up; the sidebar no longer selects the
+      // worktree or seeds its first tab/pane. When RootFeature decides to
+      // switch, the resulting `.selectionChanged` runs
+      // `autoSeedTabAndPaneIfNeeded`, which seeds the first pane.
+      return .send(
+        .delegate(
+          .worktreeMaterialized(worktreeID: worktreeID, projectID: pid, pendingID: id)))
 
     case .pendingWorktreeFailed(let id, let err):
       // Race guard symmetric with progress / finished arms: a Cancel

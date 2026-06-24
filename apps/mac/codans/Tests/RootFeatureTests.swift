@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -1030,6 +1030,199 @@ struct RootFeatureTests {
     #expect(store.state.revealSelectionTrigger != before)
     #expect(store.state.sidebarVisible)
     #expect(expandCalls.value.contains { $0.0 == project.id && $0.1 == true })
+  }
+
+  // MARK: - Post-completion switch gate (worktreeMaterialized)
+
+  /// Recorder for the gate's selection side-effects. Captures the project
+  /// and worktree the reducer asks `HierarchyClient` to select, so each
+  /// truth-table cell can assert "did / did not switch".
+  private struct SelectRecorder: Sendable {
+    let project = LockIsolated<ProjectID?>(nil)
+    let worktree = LockIsolated<WorktreeID?>(nil)
+    var didSelect: Bool { project.value != nil || worktree.value != nil }
+  }
+
+  /// Builds a gate TestStore with `selectProject`/`selectWorktree` wired
+  /// into `recorder`. `autoSwitch` sets the LIVE settings snapshot read at
+  /// completion; `activePendingWorktreeID` is the still-viewing signal.
+  /// `selectionChanges` finishes immediately so the post-select stream does
+  /// not feed back a `.selectionChanged` (the gate's switch decision is what
+  /// these tests assert, not the downstream auto-seed).
+  @MainActor
+  private func makeGateStore(
+    autoSwitch: Bool,
+    activePendingWorktreeID: PendingWorktreeID?,
+    recorder: SelectRecorder
+  ) -> TestStore<RootFeature.State, RootFeature.Action> {
+    var initial = RootFeature.State()
+    initial.activePendingWorktreeID = activePendingWorktreeID
+    let settings = Settings(worktree: WorktreeSettings(autoSwitchToNewWorktree: autoSwitch))
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0.hierarchyClient.selectProject = { pid in
+        recorder.project.withValue { $0 = pid }
+      }
+      $0.hierarchyClient.selectWorktree = { wt, _ in
+        recorder.worktree.withValue { $0 = wt }
+      }
+    }
+    store.exhaustivity = .off
+    return store
+  }
+
+  @Test
+  func gateOnWatchingSwitches() async {
+    // VAL-SWITCH-001: auto-switch ON + still viewing this pending → switch.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: pendingID, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == worktreeID)
+  }
+
+  @Test
+  func gateOnAwaySwitches() async {
+    // VAL-SWITCH-002: auto-switch ON + user navigated away (active id is a
+    // different pending) → still switch, because the setting forces it.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(
+      autoSwitch: true, activePendingWorktreeID: PendingWorktreeID(), recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == worktreeID)
+  }
+
+  @Test
+  func gateOffAwayStays() async {
+    // VAL-SWITCH-003: auto-switch OFF + away (active id is a *different*
+    // pending) → do not switch. Selection is untouched, and the dangling
+    // active id (a different pending) is left as-is.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let otherPending = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(
+      autoSwitch: false, activePendingWorktreeID: otherPending, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(!rec.didSelect)
+    #expect(store.state.activePendingWorktreeID == otherPending)
+  }
+
+  @Test
+  func gateOffWatchingSwitches() async {
+    // VAL-SWITCH-004: auto-switch OFF but the user is STILL viewing this
+    // pending creation → switch (still-viewing wins independently of the
+    // setting).
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: pendingID, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == worktreeID)
+  }
+
+  @Test
+  func gateOffEmptySelectionStillCountsAsWatching() async {
+    // VAL-SWITCH-005: OFF + the user cleared their selection (empty) or
+    // opened an aux window — neither clears `activePendingWorktreeID`, so it
+    // still equals this pending and the gate switches. We model "empty /
+    // aux-window" as: the active id was never cleared and still matches.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: pendingID, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(rec.didSelect)
+  }
+
+  @Test
+  func gateReadsLiveSettingAtCompletion() async {
+    // VAL-SWITCH-006: a mid-flight toggle decides the outcome — the gate
+    // reads the LIVE snapshot at completion, not a value captured at
+    // kickoff. Here the snapshot reads OFF and the user is away, so the
+    // late-flipped-OFF value makes the gate stay even though kickoff may
+    // have happened while ON.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(
+      autoSwitch: false, activePendingWorktreeID: PendingWorktreeID(), recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(!rec.didSelect)
+  }
+
+  @Test
+  func gateCrossProjectSelectsNewProjectAndWorktree() async {
+    // VAL-SWITCH-007: when the new worktree belongs to a different project
+    // than the current selection, the gate selects BOTH the project and the
+    // worktree so the user lands correctly cross-project.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: pendingID, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == worktreeID)
   }
 
   @Test

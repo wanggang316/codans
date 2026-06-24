@@ -1,8 +1,8 @@
 import AppKit
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import GhosttyKit
-import CodansCore
 
 /// Root reducer for the TCA shell. Composes sub-features for the sidebar,
 /// the worktree detail column, and top-level presentations. Also owns the
@@ -492,13 +492,15 @@ struct RootFeature {
                 // A non-shell, non-agent command lights the tab-chip /
                 // sidebar spinner even when the program never emits OSC 9;4.
                 // Agents are excluded here; their activity is render-derived.
-                await send(.paneCommandBusyChanged(
-                  paneID, ForegroundJobClassifier.indicatesRunningCommand(job)))
+                await send(
+                  .paneCommandBusyChanged(
+                    paneID, ForegroundJobClassifier.indicatesRunningCommand(job)))
                 // Same source, narrower predicate: track `git` / `gh` commands
                 // so a finishing `gh pr create` / `git push` triggers an
                 // immediate PR + diff refresh (0018 M4 follow-up).
-                await send(.paneGitCommandActivity(
-                  paneID, running: ForegroundJobClassifier.indicatesGitCommand(job)))
+                await send(
+                  .paneGitCommandActivity(
+                    paneID, running: ForegroundJobClassifier.indicatesGitCommand(job)))
               case .paneInfoChanged(let paneID, .pwd(let pwd)):
                 // libghostty OSC 7 → persist the live cwd so a restart
                 // restores the pane at the directory the user last `cd`'d
@@ -1091,6 +1093,45 @@ struct RootFeature {
       // `pendingWorktrees` (cancel / discard).
       case .sidebar(.beginPendingWorktreeCreation(let pending)):
         state.activePendingWorktreeID = pending.id
+        return .none
+
+      // Post-completion switch gate. The sidebar has already written the
+      // catalog and removed the pending row; it delegates the "switch to
+      // the new worktree" decision here because the still-viewing signal
+      // (`activePendingWorktreeID`) lives only on this reducer.
+      //
+      // Switch when EITHER the auto-switch setting is on, OR the user is
+      // still viewing this pending creation. The setting is read LIVE at
+      // completion time so a mid-flight toggle decides the outcome.
+      // "Still viewing" falls out of `activePendingWorktreeID == pendingID`:
+      // the clear logic in `.selectionChanged` only fires when a REAL
+      // worktree lands, so empty selection or an open aux window (Settings)
+      // keep the id set → switch; selecting another real worktree or
+      // another pending changes/clears it → stay.
+      //
+      // A FAILED creation never reaches here (it routes through
+      // `pendingWorktreeFailed`), so failure never switches.
+      case .sidebar(.delegate(.worktreeMaterialized(let worktreeID, let projectID, let pendingID))):
+        let autoSwitch =
+          settingsWriter.readSnapshotSync().worktree.autoSwitchToNewWorktree
+        let stillViewing = (state.activePendingWorktreeID == pendingID)
+        let shouldSelect = autoSwitch || stillViewing
+        guard shouldSelect else {
+          // No switch: leave the current selection untouched. The pending
+          // this id pointed at is gone, so defensively clear the dangling
+          // overlay marker (the New-badge write for this branch is a later
+          // feature — not here).
+          if state.activePendingWorktreeID == pendingID {
+            state.activePendingWorktreeID = nil
+          }
+          return .none
+        }
+        // Select the project too for cross-project correctness, then the
+        // worktree. `selectWorktree` emits a `.selectionChanged` that runs
+        // `autoSeedTabAndPaneIfNeeded` (seeds the first tab/pane) and clears
+        // `activePendingWorktreeID`.
+        hierarchyClient.selectProject(projectID)
+        try? hierarchyClient.selectWorktree(worktreeID, projectID)
         return .none
 
       case .sidebar:
