@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Horizontal tab bar for the active Worktree. Reads `Worktree.tabs` from
 /// the environment `HierarchyManager`; dispatches create / select / close
@@ -154,14 +154,17 @@ struct TabBarView: View {
     TabBarRowView(
       tabs: worktree.tabs,
       activeTabID: activeTabID,
-      // Read through the @Observable HierarchyManager so any flip of the
-      // terminal signal (OSC 9;4 progress ∪ running foreground command)
-      // triggers a chip re-render. OR in the render-derived agent `.working`
-      // state for this tab; reading `agentStateStore.entries` here registers
-      // the @Observable dependency that re-renders the chip on a state flip.
-      isDirty: { tabID in
-        hierarchyManager.tabIsDirty(tabID)
-          || Self.tabHasWorkingAgent(tabID, in: worktree, store: agentStateStore)
+      // Two busy signals, kept apart so the chip can treat them differently.
+      // Terminal (OSC 9;4 progress ∪ running foreground command): reading the
+      // @Observable HierarchyManager re-renders the chip on a flip. Agent (the
+      // render-derived `.working` state): reading `agentStateStore.entries`
+      // registers the @Observable dependency that re-renders on a flip. A
+      // working agent animates its own spinner into the tab title, so the chip
+      // suppresses its spinner there (see `ResolvingTabChipView`) while the
+      // terminal signal always shows it.
+      isTerminalBusy: { tabID in hierarchyManager.tabIsDirty(tabID) },
+      isAgentWorking: { tabID in
+        Self.tabHasWorkingAgent(tabID, in: worktree, store: agentStateStore)
       },
       onSelect: { tabID in
         store.send(
