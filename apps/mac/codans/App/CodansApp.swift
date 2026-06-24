@@ -105,6 +105,8 @@ struct CodansApp: App {
             }
         }
       }
+      // Drop this window's "Codans" entry from the Window menu's auto list.
+      .background(ExcludeFromWindowsMenu())
     }
     .windowStyle(.titleBar)
     // Unified toolbar style lets the NavigationSplitView sidebar column's
@@ -128,7 +130,9 @@ struct CodansApp: App {
       MainWindowCommands(
         store: { appState.store },
         shortcuts: appState.shortcutsStore.resolved,
-        sidebarFocus: sidebarFocusObserver
+        sidebarFocus: sidebarFocusObserver,
+        settingsStore: appState.settingsStore,
+        hierarchyManager: appState.hierarchyManager
       )
       CommandGroup(replacing: .appSettings) {
         // Chord routes through the registry so a user override in Settings → Shortcuts
@@ -166,6 +170,8 @@ struct CodansApp: App {
         }
       }
       .background(SettingsWindowTag())
+      // Drop this window's "Settings" entry from the Window menu's auto list.
+      .background(ExcludeFromWindowsMenu())
     }
     .defaultSize(width: 750, height: 500)
     .windowResizability(.contentMinSize)

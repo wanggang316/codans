@@ -125,20 +125,6 @@ struct WorktreeDetailView: View {
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      // Mount project-script shortcut bindings as a 0-sized background of
-      // the detail body. The toolbar's run-script Menu can only register
-      // its in-menu `.keyboardShortcut` after the dropdown has been opened
-      // (Menu content is lazy) — and even then SwiftUI drops the binding
-      // on the next `.id(_:)`-driven rebuild. Mounting hidden Buttons on
-      // the regular view tree keeps every chord live the whole time the
-      // worktree is on screen.
-      .background(alignment: .topLeading) {
-        ProjectScriptsShortcutBindings(
-          store: headerStore,
-          projectID: address.project,
-          worktreeID: address.worktree
-        )
-      }
       // On macOS 15+ remove the title slot entirely so default-placement
       // toolbar items can flow leading-to-trailing with `ToolbarSpacer`
       // controlling the layout.

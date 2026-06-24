@@ -98,6 +98,16 @@ struct HierarchySidebarView: View {
   @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
+  /// App-wide "is a newer version available?" mirror, injected by
+  /// `ContentView`. Drives the persistent update reminder in the sidebar
+  /// toolbar. Survives "Skip This Version" because it is derived from
+  /// appcast-vs-current version comparison rather than Sparkle's skip state.
+  @Environment(UpdatesModel.self) private var updatesModel
+  /// Sparkle seam. The reminder button triggers a manual check, which
+  /// re-surfaces the update modal even for a version the user previously
+  /// skipped ("...unless they initiate an update check themselves").
+  @Dependency(UpdatesClient.self) private var updatesClient
+
   /// Bridges TCA-owned `currentSelection.worktreeID` ↔ SwiftUI's native
   /// `List(selection:)`. Native binding is what gets us Finder-/Mail-style
   /// selection chrome for free: emphasized blue + white text when the
@@ -152,10 +162,10 @@ struct HierarchySidebarView: View {
   @State private var sidebarIndentReady = false
 
   /// Heterogeneous sidebar rows in render order: main → pinned → pending →
-  /// unpinned. `pendings` is filtered to the given project (caller passes
-  /// the full sidebar-wide list). Used by ordering tests + the hotkey
-  /// enumeration shim; the production view splits the segments across
-  /// separate ForEach blocks so each can own its own .onMove.
+  /// unpinned. `pendings` is filtered to the given project (caller passes the
+  /// full sidebar-wide list). Used by ordering tests + the hotkey enumeration
+  /// shim; the production view splits the segments across separate ForEach
+  /// blocks so each can own its own .onMove.
   static func orderedSidebarRows(
     project: Project,
     pendings: [PendingWorktree]
@@ -175,7 +185,7 @@ struct HierarchySidebarView: View {
   /// which only assigns slots to real worktrees. Derived from
   /// `orderedSidebarRows` so the segment ordering stays in one place; the
   /// `pendings: []` argument is correct for hotkey purposes — pending rows
-  /// never claim a `⌃N` slot.
+  /// never claim a `⌃N` slot per design doc §pending 段 用户操作.
   static func orderedVisibleWorktrees(in project: Project) -> [Worktree] {
     orderedSidebarRows(project: project, pendings: []).compactMap { row in
       if case .worktree(let w) = row { return w } else { return nil }
@@ -420,6 +430,44 @@ struct HierarchySidebarView: View {
     } message: {
       Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
     }
+    // Batch "Archive All Merged Worktrees" confirmation (Project ⋯ menu).
+    .confirmationDialog(
+      archiveAllMergedTitle,
+      isPresented: Binding(
+        get: { store.pendingArchiveAllMerged != nil },
+        set: { if !$0 { store.send(.projectArchiveAllMergedCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Archive") {
+        store.send(.projectArchiveAllMergedConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.projectArchiveAllMergedCancelled)
+      }
+    } message: {
+      Text("Files and branches are kept. Find them later under “Archived Worktrees” in the Project menu.")
+    }
+    // Batch "Remove All Merged Worktrees" confirmation (Project ⋯ menu).
+    .confirmationDialog(
+      removeAllMergedTitle,
+      isPresented: Binding(
+        get: { store.pendingRemoveAllMerged != nil },
+        set: { if !$0 { store.send(.projectRemoveAllMergedCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove Worktrees", role: .destructive) {
+        store.send(.projectRemoveAllMergedConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.projectRemoveAllMergedCancelled)
+      }
+    } message: {
+      Text(
+        "Closes all panes and deletes each Worktree directory, including any uncommitted changes. This cannot be undone."
+      )
+    }
     // Prune toast.
     .alert(
       "Prune complete",
@@ -450,6 +498,26 @@ struct HierarchySidebarView: View {
 
   @ToolbarContentBuilder
   private var sidebarToolbarContent: some ToolbarContent {
+    // Persistent update reminder, left of "Add Project". Visible whenever the
+    // appcast advertises a newer build for the active channel — and kept
+    // visible after "Skip This Version" — so the user always knows an update
+    // is waiting. Clicking runs a manual check, which re-opens Sparkle's
+    // update flow even for a previously skipped version.
+    if let available = updatesModel.available {
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          updatesClient.checkNow()
+        } label: {
+          // Plain blue download glyph at the toolbar's uniform size, with the
+          // standard toolbar-button hover (same as `+` / toggle). The blue tint
+          // is what sets the update reminder apart from the neutral glyphs.
+          Label("Update \(available.displayVersion)", systemImage: "arrow.down.circle.fill")
+        }
+        .labelStyle(.iconOnly)
+        .foregroundStyle(.blue)
+        .help("Update \(available.displayVersion)")
+      }
+    }
     ToolbarItem(placement: .primaryAction) {
       Menu {
         addProjectMenuItems
@@ -600,11 +668,11 @@ struct HierarchySidebarView: View {
     }
   }
 
-  /// Empty-state copy reflects the actual affordances the user has — the
-  /// `.addProject` chord (resolved live against `resolvedShortcuts` so a
-  /// rebind keeps the hint accurate) and the toolbar `+` button. Button
-  /// label uses "Open Project" to match the user-facing verb the picker
-  /// presents.
+  /// empty-state copy is English and reflects the actual
+  /// affordances the user has — the `.addProject` chord (resolved live
+  /// against `resolvedShortcuts` so a rebind keeps the hint accurate)
+  /// and the toolbar `+` button. Button label uses "Open Project" to
+  /// match the user-facing verb the picker presents.
   private var emptyState: some View {
     VStack(spacing: 10) {
       Spacer()
@@ -742,7 +810,8 @@ struct HierarchySidebarView: View {
           ProjectHeaderRow(
             project: project,
             isExpanded: isExpanded,
-            store: store
+            store: store,
+            gitHubStore: gitHubStore
           )
         }
         .buttonStyle(.plain)
@@ -751,9 +820,9 @@ struct HierarchySidebarView: View {
         .listRowSeparator(.hidden)
         if isExpanded {
           // Render the four segments individually so pinned and unpinned
-          // each own their own ForEach + .onMove. Pending rows render in
-          // source order between pinned and unpinned; main and pending
-          // segments do not admit reorder.
+          // each own their own ForEach + .onMove (per design doc §渲染合并
+          // / 拖拽). Pending rows render in source order between pinned
+          // and unpinned; main and pending segments do not admit reorder.
           let visible = project.worktrees.filter { !$0.archived }
           let mainRows = visible.filter { $0.path == project.rootPath }
           let pinnedRows = visible.filter { $0.isPinned && $0.path != project.rootPath }
@@ -794,7 +863,7 @@ struct HierarchySidebarView: View {
 
   // MARK: - Pending row
 
-  /// Wires `PendingWorktreeRow` into the segment ForEach with
+  /// Wires task03's `PendingWorktreeRow` into the segment ForEach with
   /// Cancel / Retry / Discard handlers dispatched to the lifecycle reducer.
   @ViewBuilder
   private func pendingRow(_ pending: PendingWorktree) -> some View {
@@ -822,11 +891,11 @@ struct HierarchySidebarView: View {
     let isSelected = currentSelection.worktreeID == worktree.id
     let snapshot = gitHubStore?.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
-      // Rollup data travels with the snapshot (filled by the batched
-      // `gh api graphql` path in `parseBatchedPullRequests`); the per-PR
-      // `state.checks[prNumber]` map is no longer populated on the fetch
-      // side. Reading `snapshot.checkRollup` keeps the overlay working
-      // without spawning an extra gh subprocess.
+      // rollup data travels with the snapshot now (filled by the batched
+      // `gh api graphql` path in `parseBatchedPullRequests`). The v1 per-PR
+      // `state.checks[prNumber]` map is no longer populated on the fetch side —
+      // reading `snapshot.checkRollup` keeps the overlay working without the
+      // extra gh subprocess v1 used to spawn.
       guard let snapshot else { return .noChecks }
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
     }()
@@ -1014,7 +1083,7 @@ struct HierarchySidebarView: View {
   }
 
   // Main-checkout guard: the row whose path is the Project's rootPath is the main checkout
-  // and cannot be archived or removed from the app. Extracted so the row
+  // and cannot be archived or removed from the app (spec W-Q3 guard). Extracted so the row
   // body stays under swiftlint's function_body_length limit.
   @ViewBuilder
   private func worktreeContextMenu(
@@ -1055,8 +1124,8 @@ struct HierarchySidebarView: View {
       }
     }
 
-    // Group 3 — Worktree lifecycle. Hidden for the main checkout: cannot
-    // pin / archive / remove the project's root worktree.
+    // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
+    // guard: cannot pin / archive / remove the project's root worktree).
     if !isMainCheckout {
       Divider()
       Button {
@@ -1267,6 +1336,20 @@ struct HierarchySidebarView: View {
     return "Remove Project?"
   }
 
+  private var archiveAllMergedTitle: String {
+    let count = store.pendingArchiveAllMerged?.worktreeIDs.count ?? 0
+    return count == 1
+      ? "Archive 1 merged Worktree?"
+      : "Archive \(count) merged Worktrees?"
+  }
+
+  private var removeAllMergedTitle: String {
+    let count = store.pendingRemoveAllMerged?.worktreeIDs.count ?? 0
+    return count == 1
+      ? "Remove 1 merged Worktree?"
+      : "Remove \(count) merged Worktrees?"
+  }
+
   // MARK: - Diff stats chip
 
   /// Compact `+N −M` chip rendered to the right of the row content. Counts
@@ -1334,10 +1417,10 @@ struct HierarchySidebarView: View {
     let content: PullRequestPopover.Content = {
       if let error { return .error(error) }
       if let snapshot {
-        // Checks travel inside the snapshot (see the comment on
+        // checks now travel inside the snapshot (see the comment on
         // `snapshot.checkRollup`). `latestWorkflowRuns` remains a separately-fetched
         // lazy load on popover-open — the batched query does not include workflow-run
-        // IDs yet.
+        // IDs yet (Open Question 4 in the design doc).
         let run = store.latestWorkflowRuns[snapshot.number]
         return .loaded(snapshot, checks: snapshot.checkRollup, workflowRun: run)
       }
@@ -1472,12 +1555,30 @@ private struct ProjectHeaderRow: View {
   /// expanded). The parent Button still owns the tap, so this is display-only.
   var isExpanded: Bool = false
   @Bindable var store: StoreOf<HierarchySidebarFeature>
+  /// Read-only access to per-Worktree PR snapshots so the ⋯ menu can resolve
+  /// the project's merged Worktrees for the "… All Merged Worktrees" items.
+  /// Nil in previews — the items then render disabled.
+  var gitHubStore: StoreOf<GitHubFeature>?
   @Environment(RollupIndexProvider.self) private var rollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @State private var isHovering = false
   @State private var isPlusHovering = false
   @State private var isMenuHovering = false
+
+  /// Non-archived, non-main Worktrees in this project whose GitHub PR is
+  /// merged. Drives the Project ⋯ menu's "Archive / Remove All Merged
+  /// Worktrees" items (count + enablement). Empty when the GitHub store is
+  /// absent or nothing is merged. "Merged" is the PR's GitHub state, matching
+  /// `scripts/clean-merged-branches.sh` — squash-merge friendly, unlike
+  /// `git branch --merged`.
+  private var mergedWorktreeIDs: [WorktreeID] {
+    guard let gitHubStore else { return [] }
+    return project.worktrees
+      .filter { !$0.archived && $0.path != project.rootPath }
+      .filter { gitHubStore.snapshots[$0.id]?.state == .merged }
+      .map(\.id)
+  }
 
   /// Project name tint. Uses the project's configured color when set;
   /// otherwise keeps the prior hover-driven primary/secondary behavior.
@@ -1490,7 +1591,7 @@ private struct ProjectHeaderRow: View {
       rollup?.current.unreadProjects.contains(project.id) == true
       && settingsStore.settings.notifications.projectBellEnabled
     HStack(spacing: 6) {
-      // Unread indicator. When the project is in `unreadProjects`
+      // L4 unread indicator. When the project is in `unreadProjects`
       // (rollup rule = project collapsed + unread inside), the leading
       // disclosure chevron swaps for a red bell glyph — same pattern as
       // the worktree row icon. Click target / disclosure semantics are
@@ -1518,7 +1619,7 @@ private struct ProjectHeaderRow: View {
       // Keep the hover chrome from collapsing row width when hidden —
       // use opacity, not conditional rendering.
       HStack(spacing: 2) {
-        // Non-git Projects: suppress the Add Worktree affordance.
+        // Non-git Projects (P-Q4 = a): suppress the Add Worktree affordance.
         // Worktrees are a git-only concept; a scratch folder renders with a
         // single synthetic Worktree and nothing to add.
         if project.supportsWorktrees {
@@ -1537,6 +1638,9 @@ private struct ProjectHeaderRow: View {
           } label: {
             Label("Project Settings…", systemImage: "slider.horizontal.3")
           }
+          Divider()
+          // Worktree operations group: archived list, prune, and the
+          // merged-batch actions — kept together between dividers.
           let archivedCount = project.worktrees.filter { $0.archived }.count
           Button {
             store.send(.projectShowArchivedTapped(projectID: project.id))
@@ -1554,13 +1658,43 @@ private struct ProjectHeaderRow: View {
           } label: {
             Label("Prune Stale Worktrees", systemImage: "wand.and.sparkles")
           }
+          let mergedIDs = mergedWorktreeIDs
+          Button {
+            store.send(
+              .projectArchiveAllMergedTapped(
+                projectID: project.id, worktreeIDs: mergedIDs
+              )
+            )
+          } label: {
+            Label(
+              mergedIDs.isEmpty
+                ? "Archive All Merged"
+                : "Archive All Merged (\(mergedIDs.count))",
+              systemImage: "archivebox"
+            )
+          }
+          .disabled(mergedIDs.isEmpty)
+          Button(role: .destructive) {
+            store.send(
+              .projectRemoveAllMergedTapped(
+                projectID: project.id, worktreeIDs: mergedIDs
+              )
+            )
+          } label: {
+            Label(
+              mergedIDs.isEmpty
+                ? "Remove All Merged"
+                : "Remove All Merged (\(mergedIDs.count))",
+              systemImage: "trash"
+            )
+          }
+          .disabled(mergedIDs.isEmpty)
           Divider()
-          // Inline color palette + "Tags…" entry.
-          // ControlGroup(.palette) gives the native NSMenu color row;
-          // "Tags…" opens the global TagManager via the sidebar's
-          // `.openTagManager` delegate.
-          ProjectTagsMenu(project: project, store: store)
-          Divider()
+          // Tags entry intentionally hidden for now. `ProjectTagsMenu` and
+          // its tag-assignment logic (inline color palette + "Tags…"
+          // → global TagManager via `.openTagManager`) are retained — only
+          // the menu entry is suppressed. Re-add the line below to restore.
+          // ProjectTagsMenu(project: project, store: store)
           Button(role: .destructive) {
             store.send(
               .projectRemoveTapped(projectID: project.id, name: project.name)

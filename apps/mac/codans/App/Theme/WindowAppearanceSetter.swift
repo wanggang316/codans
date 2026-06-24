@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// AppKit half of the dual-path appearance wiring. SwiftUI's `.preferredColorScheme`
 /// doesn't reach AppKit-hosted surfaces (Metal-backed Ghostty views); this representable
@@ -121,7 +121,15 @@ final class AppearanceApplyingView: NSView {
         window.backgroundColor = .windowBackgroundColor
       } else {
         window.appearance = inferredChromeAppearance ?? appearance
-        window.backgroundColor = ghosttyBackground
+        // Route through the runtime so the window picks up `background-opacity`
+        // / `background-blur` (frosted glass) consistently with the
+        // color-scheme path. Fall back to a plain opaque stain when the runtime
+        // isn't up yet (tests / pre-bringUp), matching the prior behavior.
+        if let runtime = GhosttyRuntime.shared {
+          runtime.applyTerminalWindowBackground(window)
+        } else {
+          window.backgroundColor = ghosttyBackground
+        }
       }
       window.contentView?.needsLayout = true
       window.contentView?.needsDisplay = true

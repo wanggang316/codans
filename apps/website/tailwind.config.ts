@@ -73,10 +73,15 @@ export default {
       keyframes: {
         blink: { "0%,49%": { opacity: "1" }, "50%,100%": { opacity: "0" } },
         breathe: { "0%,100%": { opacity: "0.55" }, "50%": { opacity: "1" } },
+        "menu-in": {
+          from: { opacity: "0", transform: "translateY(-6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         blink: "blink 1.1s steps(1) infinite",
         breathe: "breathe 3.2s ease-in-out infinite",
+        "menu-in": "menu-in 0.2s ease-out",
       },
     },
   },

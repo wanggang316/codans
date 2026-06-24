@@ -122,6 +122,7 @@ struct ContentView: View {
     }
     .environment(hierarchyManager)
     .environment(settingsStore)
+    .environment(UpdatesEnvironment.model)
     .environment(worktreeStatusMonitor)
     .environment(worktreeLocalDiffMonitor)
     .environment(notificationRollup)

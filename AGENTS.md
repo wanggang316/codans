@@ -65,6 +65,7 @@ codans/
 | [docs/architecture.md](docs/architecture.md) | System architecture, domains, layers |
 | [docs/product-spec.md](docs/product-spec.md) | What the product is, for whom, and its boundaries |
 | [docs/design-docs/](docs/design-docs/) | Design documents |
+| [docs/lessons-learned/](docs/lessons-learned/) | Root-cause write-ups of hard bugs — pitfalls, fixes, recurrence checks |
 | [docs/references/](docs/references/) | External docs, API references |
 | [docs/generated/](docs/generated/) | Auto-generated artifacts |
 

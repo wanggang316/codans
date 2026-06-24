@@ -26,6 +26,7 @@ struct SettingsTerminalView: View {
         themePickersSection(snapshot: snapshot)
         fontSection(snapshot: snapshot)
         cursorStyleSection(snapshot: snapshot)
+        backgroundSection(snapshot: snapshot)
         configFileSection(path: snapshot.configPath)
       } else if store.isLoading {
         Section {
@@ -148,6 +149,55 @@ struct SettingsTerminalView: View {
     } header: {
       Text("Cursor")
     }
+  }
+
+  // MARK: - Background
+
+  /// Discrete translucency choices for the opacity picker. `nil` ("Default")
+  /// stops managing `background-opacity` so Ghostty's opaque default applies;
+  /// the listed values drive the translucent frosted-glass backdrop. The
+  /// user's current value is prepended when it falls outside this set.
+  private static let backgroundOpacityChoices: [Double] = [
+    0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.6, 0.5,
+  ]
+
+  private func backgroundSection(snapshot: GhosttyTerminalSettings) -> some View {
+    let opacityBinding = Binding<Double?>(
+      get: { snapshot.backgroundOpacity },
+      set: { store.send(.backgroundOpacitySelected($0)) }
+    )
+    let blurBinding = Binding<GhosttyBackgroundBlur?>(
+      get: { snapshot.backgroundBlur },
+      set: { store.send(.backgroundBlurSelected($0)) }
+    )
+    let opacities = prepending(snapshot.backgroundOpacity, to: Self.backgroundOpacityChoices)
+    return Section {
+      Picker("Opacity", selection: opacityBinding) {
+        Text("Default").tag(Double?.none)
+        ForEach(opacities, id: \.self) { value in
+          Text(opacityLabel(value)).tag(Double?.some(value))
+        }
+      }
+      .disabled(controlsDisabled)
+      Picker("Background Blur", selection: blurBinding) {
+        Text("Off").tag(GhosttyBackgroundBlur?.none)
+        ForEach(GhosttyBackgroundBlur.allCases, id: \.self) { style in
+          Text(style.displayName).tag(GhosttyBackgroundBlur?.some(style))
+        }
+      }
+      .disabled(controlsDisabled)
+    } header: {
+      Text("Background")
+    } footer: {
+      Text(
+        "Lower the opacity and pick a glass blur for a frosted-glass terminal. "
+          + "Blur needs opacity below 100% to show, and the glass styles require macOS 26 or later."
+      )
+    }
+  }
+
+  private func opacityLabel(_ value: Double) -> String {
+    "\(Int((value * 100).rounded()))%"
   }
 
   // MARK: - Config file path

@@ -40,6 +40,16 @@ struct RootFeatureCommandPaletteRoutingTests {
   }
 
   @Test
+  func activateShowUnreadNotificationsRoutesToRoot() async {
+    let store = Self.stubbedStore()
+    await store.send(.commandPaletteToggle(nil))
+    await store.send(
+      .commandPalette(.presented(.delegate(.activate(.showUnreadNotifications))))
+    )
+    await store.receive(\.showUnreadRequested)
+  }
+
+  @Test
   func activateWindowActionRoutesToWindowRouter() async {
     let store = Self.stubbedStore()
     await store.send(.commandPaletteToggle(nil))

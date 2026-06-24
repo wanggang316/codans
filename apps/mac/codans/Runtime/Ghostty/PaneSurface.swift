@@ -329,7 +329,10 @@ final class PaneSurface {
     if soft, let current = appConfig {
       pushed = ghostty_config_clone(current)
     } else {
-      pushed = GhosttyConfigLoader.makeFreshConfig()
+      // Per-surface hard reload: the surface honors the same transparency
+      // override as the app config; the opacity snapshot is the runtime's
+      // concern, not the surface's, so only the config handle is needed.
+      pushed = GhosttyConfigLoader.makeFreshConfig()?.config
     }
     guard let handle = pushed else { return }
     ghostty_surface_update_config(surface, handle)

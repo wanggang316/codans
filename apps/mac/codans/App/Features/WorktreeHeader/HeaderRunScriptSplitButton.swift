@@ -177,16 +177,16 @@ struct HeaderRunScriptSplitButton: View {
     }
   }
 
-  /// One menu item. Deliberately does **not** attach the script's chord via
-  /// `.keyboardShortcut(_:modifiers:)`: a keyEquivalent makes AppKit reserve a
-  /// trailing accelerator column across *every* row, so the chord-less footers
-  /// ("Manage … Commands…") render with a wide empty right gutter and the whole
-  /// dropdown balloons far past its longest label. Dropping the in-menu chord
-  /// collapses that column so the menu hugs "Manage Project Commands…" — the
-  /// widest item. The chord still fires: `ProjectScriptsShortcutBindings` mounts
-  /// the real responder-chain binding outside the toolbar (the in-menu binding
-  /// was never the live dispatch path — it only lit up after the menu had been
-  /// opened and dropped on the next `.id(_:)` rebuild).
+  /// One menu item. The chord is rendered as part of the item's *title text*
+  /// (see `menuItemTitle`), not via `.keyboardShortcut(_:modifiers:)`: a real
+  /// keyEquivalent makes AppKit reserve a trailing accelerator column across
+  /// *every* row, so the chord-less footers ("Manage … Commands…") get a wide
+  /// empty right gutter and the dropdown balloons past its longest label.
+  /// Folding the chord into the title shows it without that column, so the menu
+  /// still hugs "Manage Project Commands…". Live chord *dispatch* is owned by
+  /// the menu-bar Commands menu (`MainWindowCommands`), which registers each
+  /// command's chord as a keyEquivalent — the only path that fires while a
+  /// terminal pane holds first-responder. This dropdown is display + click only.
   ///
   /// `isGlobal` switches the run dispatch between the project run path
   /// (`runScriptTapped`) and the global run path (`runGlobalScriptTapped`).
@@ -209,7 +209,7 @@ struct HeaderRunScriptSplitButton: View {
       // tint must be baked into a non-template image (see `menuIcon`) — a
       // plain `Label(_:systemImage:)` would drop the script's colour.
       Label {
-        Text(isRunning ? "Stop \(script.displayName)" : script.displayName)
+        Text(Self.menuItemTitle(for: script, isRunning: isRunning))
       } icon: {
         ScriptTintColorPalette.menuIcon(
           systemName: isRunning ? "stop.fill" : script.resolvedSystemImage,
@@ -219,16 +219,30 @@ struct HeaderRunScriptSplitButton: View {
     }
   }
 
+  /// Title text for a command row — the display name plus, when the command
+  /// carries an enabled chord, the chord glyphs appended after a gap. Rendering
+  /// the chord in the title (rather than as a keyEquivalent) keeps it visible
+  /// without making AppKit reserve a trailing accelerator column that would
+  /// balloon the menu (see `menuButton`).
+  private static func menuItemTitle(for script: ScriptDefinition, isRunning: Bool) -> String {
+    let base = isRunning ? "Stop \(script.displayName)" : script.displayName
+    guard let binding = script.keyboardShortcut, binding.isEnabled, binding.keyCode != 0 else {
+      return base
+    }
+    return "\(base)   \(ShortcutDisplay.chord(for: binding))"
+  }
+
   /// Stable identity for `.id(_:)`. Folds every field that affects the Menu's
-  /// rendered output — name + icon + tint + the array's order. id alone
-  /// wouldn't change on a same-id edit; including the rendered fields means an
-  /// edit to any of them still rebuilds the cached NSMenu. The chord is
-  /// intentionally absent: it no longer renders in the menu (see `menuButton`),
-  /// so a chord-only change has nothing to invalidate here.
+  /// rendered output — name + icon + tint + chord + the array's order. id alone
+  /// wouldn't change on a same-id edit; including the rendered fields (the chord
+  /// now shows in each row's title) means an edit to any of them still rebuilds
+  /// the cached NSMenu.
   private static func identitySignature(of scripts: [ScriptDefinition]) -> String {
     scripts
       .map { script -> String in
-        "\(script.id)|\(script.displayName)|\(script.resolvedSystemImage)|\(script.resolvedTintColor.rawValue)"
+        let chord = script.keyboardShortcut.map { ShortcutDisplay.chord(for: $0) } ?? ""
+        return
+          "\(script.id)|\(script.displayName)|\(script.resolvedSystemImage)|\(script.resolvedTintColor.rawValue)|\(chord)"
       }
       .joined(separator: "·")
   }

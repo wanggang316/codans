@@ -20,6 +20,41 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.13] - 2026-06-22
+
+### Added
+
+- **Frosted-glass terminal background.** Settings → Terminal gains a Background
+  section — pick a background opacity (down to 50%) and a glass blur style
+  (Regular or Clear) to render a translucent, blurred terminal over whatever is
+  behind the window.
+- **An update reminder in the sidebar.** A blue update button now appears in the
+  sidebar toolbar whenever a newer build is available — and stays put even after
+  you choose "Skip This Version" in the updater. Click it to check now and
+  reopen the update flow.
+- **Archive or remove every merged worktree at once.** The Project ⋯ menu adds
+  "Archive All Merged" and "Remove All Merged", applying the usual archive or
+  delete to every worktree whose pull request has been merged — shown with a
+  count and gated behind a confirmation step.
+
+### Changed
+
+- **The menu bar is reorganized.** The Command Palette (formerly "Quick
+  Action…") moves to the Codans app menu; the Commands menu and Toggle Git
+  Viewer fold into the Worktree menu; New Tab and Close Tab move into the Tab
+  menu; and the File menu's items are now labeled "Open Project" and "Clone
+  Repository". All keyboard shortcuts are unchanged.
+
+### Fixed
+
+- **Panes no longer get stranded after sleep, logout, or a display change.**
+  Following one of these, a pane's terminal could quietly lose access to your
+  login keychain — coding agents would suddenly prompt you to sign in again, and
+  ssh / gh would stop working. Panes now keep their session identity across
+  reconnects, so a stranded terminal is recycled cleanly instead.
+- **Dragging a tab no longer risks a crash.** A rare crash while dragging a tab
+  over the reorder highlight is fixed.
+
 ## [0.4.12] - 2026-06-22
 
 ### Added

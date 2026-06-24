@@ -14,7 +14,7 @@ export default function Footer() {
             target="_blank"
             rel="noreferrer"
           >
-            Gump
+            Gump Wang
           </a>
         </div>
         <ul className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-ink-muted">

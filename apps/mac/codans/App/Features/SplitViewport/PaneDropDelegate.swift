@@ -73,6 +73,17 @@ final class PaneDropHighlight {
   /// just-dropped pane and the highlight sticks (confirmed via os_log).
   private var isArmed = false
 
+  // Explicit (nonisolated) deinit: opts out of the synthesized isolated deinit
+  // Swift 6 emits for `@MainActor` classes. SplitViewportView releases this
+  // object during a `HierarchyManager.catalog` mutation (a tab drag/select
+  // tears the split subtree down) inside a SwiftUI transaction flush; an
+  // isolated deinit would hop via swift_task_deinitOnExecutorMainActorBackDeploy
+  // and double-free a TaskLocal `StopLookupScope` in that cascade (libmalloc
+  // abort) — the same footgun fixed for AgentStateOrderCoordinator. Every
+  // stored property here is a value type, so the body is empty: the nonisolated
+  // tail is the entire point.
+  deinit {}
+
   /// Drag start, from the dragged pane's handle. Arms updates and wipes any
   /// stale highlight so a previous cancelled drag can never linger.
   func begin() {

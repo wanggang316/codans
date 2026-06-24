@@ -30,6 +30,8 @@ struct SettingsTerminalFeature {
     case cursorStyleSelected(GhosttyCursorStyle?)
     case fontFamilySelected(String?)
     case fontSizeSelected(Double?)
+    case backgroundOpacitySelected(Double?)
+    case backgroundBlurSelected(GhosttyBackgroundBlur?)
     case applyResult(Result<GhosttyTerminalSettings, ApplyError>)
   }
 
@@ -92,6 +94,13 @@ struct SettingsTerminalFeature {
       case .fontSizeSelected(let size):
         return applyDraft(state: &state, draft: draft(from: state.snapshot, fontSize: size))
 
+      case .backgroundOpacitySelected(let opacity):
+        return applyDraft(
+          state: &state, draft: draft(from: state.snapshot, backgroundOpacity: opacity))
+
+      case .backgroundBlurSelected(let blur):
+        return applyDraft(state: &state, draft: draft(from: state.snapshot, backgroundBlur: blur))
+
       case .applyResult(.success(let applied)):
         state.isApplying = false
         // An apply only changes directive values; the theme / font catalogs are
@@ -123,14 +132,18 @@ struct SettingsTerminalFeature {
     darkTheme: String?? = nil,
     cursorStyle: GhosttyCursorStyle?? = nil,
     fontFamily: String?? = nil,
-    fontSize: Double?? = nil
+    fontSize: Double?? = nil,
+    backgroundOpacity: Double?? = nil,
+    backgroundBlur: GhosttyBackgroundBlur?? = nil
   ) -> GhosttyTerminalSettingsDraft {
     GhosttyTerminalSettingsDraft(
       lightTheme: lightTheme ?? snapshot?.lightTheme,
       darkTheme: darkTheme ?? snapshot?.darkTheme,
       cursorStyle: cursorStyle ?? snapshot?.cursorStyle,
       fontFamily: fontFamily ?? snapshot?.fontFamily,
-      fontSize: fontSize ?? snapshot?.fontSize
+      fontSize: fontSize ?? snapshot?.fontSize,
+      backgroundOpacity: backgroundOpacity ?? snapshot?.backgroundOpacity,
+      backgroundBlur: backgroundBlur ?? snapshot?.backgroundBlur
     )
   }
 
