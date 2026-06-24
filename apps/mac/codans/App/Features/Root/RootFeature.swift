@@ -1960,11 +1960,12 @@ struct RootFeature {
     state.revealSelectionTrigger = UUID()
   }
 
-  // swiftlint:disable cyclomatic_complexity
+  // swiftlint:disable cyclomatic_complexity function_body_length
   /// Dispatches a Command Palette activation into the feature action
   /// that already implements the command. Every case forwards into a
   /// pre-existing action or client — the palette invents no new
-  /// behavior.
+  /// behavior. A flat dispatch table by design, so both the branch-count
+  /// and body-length rules are waived rather than fragmenting the switch.
   private func route(
     _ kind: CommandPaletteItem.Kind,
     state: inout State,
@@ -1979,6 +1980,16 @@ struct RootFeature {
       return .send(.checkForUpdatesRequested)
     case .quit:
       return .send(.windowActionRouter(.requested(.quit)))
+    case .openProject:
+      return .send(.sidebar(.toolbarAddProjectTapped))
+    case .cloneRepository:
+      return .send(.sidebar(.cloneRepoTapped))
+    case .showUnreadNotifications:
+      return .send(.showUnreadRequested)
+    case .toggleSidebar:
+      return .send(.toggleSidebarRequested)
+    case .openGhosttyConfig:
+      return .send(.windowActionRouter(.requested(.openConfig)))
 
     // Worktree
     case .selectWorktree(let projectID, let worktreeID):
@@ -2003,6 +2014,69 @@ struct RootFeature {
       }
     case .toggleDiffInspector:
       return .send(.diffInspectorToggledForCurrentWorktree)
+    case .newWorktree:
+      return .send(.newWorktreeForCurrentProjectRequested)
+    case .copyCurrentWorktreePath:
+      return .send(.copyCurrentWorktreePathRequested)
+    case .revealCurrentWorktreeInSidebar:
+      return .send(.revealCurrentWorktreeInSidebarRequested)
+    case .archiveCurrentWorktree:
+      return .send(.archiveCurrentWorktreeRequested)
+    case .toggleCurrentWorktreePinned:
+      // Resolve the current pin state from the catalog so the sidebar's
+      // toggle flips the right way (the palette item carries no payload).
+      guard
+        let projectID = state.selection.projectID,
+        let worktreeID = state.selection.worktreeID,
+        let worktree = hierarchyClient.snapshot()
+          .projects.first(where: { $0.id == projectID })?
+          .worktrees.first(where: { $0.id == worktreeID })
+      else { return .none }
+      return .send(
+        .sidebar(.worktreePinToggleTapped(worktreeID: worktreeID, current: worktree.isPinned))
+      )
+    case .openCurrentPR:
+      return .send(.openCurrentPRRequested)
+    case .openCurrentProjectOnGitHub:
+      return .send(.openCurrentProjectOnGitHubRequested)
+    case .showArchivedWorktrees:
+      return .send(.showArchivedWorktreesForCurrentProjectRequested)
+
+    // Project — current-selection maintenance / batch actions
+    case .openProjectSettings:
+      guard let projectID = state.selection.projectID else { return .none }
+      return .send(.sidebar(.projectSettingsTapped(projectID: projectID)))
+    case .pruneStaleWorktrees:
+      guard let projectID = state.selection.projectID else { return .none }
+      return .send(.sidebar(.projectPruneTapped(projectID: projectID)))
+    case .archiveAllMergedWorktrees:
+      guard let projectID = state.selection.projectID else { return .none }
+      let ids = Self.mergedWorktreeIDs(
+        projectID: projectID, catalog: hierarchyClient.snapshot(), gitHub: state.gitHub
+      )
+      return .send(
+        .sidebar(.projectArchiveAllMergedTapped(projectID: projectID, worktreeIDs: ids))
+      )
+    case .removeAllMergedWorktrees:
+      guard let projectID = state.selection.projectID else { return .none }
+      let ids = Self.mergedWorktreeIDs(
+        projectID: projectID, catalog: hierarchyClient.snapshot(), gitHub: state.gitHub
+      )
+      return .send(
+        .sidebar(.projectRemoveAllMergedTapped(projectID: projectID, worktreeIDs: ids))
+      )
+    case .removeCurrentProject:
+      guard
+        let projectID = state.selection.projectID,
+        let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })
+      else { return .none }
+      return .send(.sidebar(.projectRemoveTapped(projectID: projectID, name: project.name)))
+
+    // Tab — operate on the current Worktree's active tab
+    case .renameCurrentTab:
+      return .send(.renameActiveTabForCurrentWorktreeRequested)
+    case .changeCurrentTabColor:
+      return .send(.changeActiveTabColorForCurrentWorktreeRequested)
 
     // Editor
     case .openCurrentWorktreeInDefaultEditor:
@@ -2072,7 +2146,25 @@ struct RootFeature {
       return .send(.windowActionRouter(.requested(req)))
     }
   }
-  // swiftlint:enable cyclomatic_complexity
+  // swiftlint:enable cyclomatic_complexity function_body_length
+
+  /// Worktrees in `projectID` whose PR has merged — the rule the sidebar's
+  /// Project "⋯" menu uses to drive "Archive / Remove All Merged Worktrees".
+  /// Excludes the main checkout and already-archived worktrees. Mirrors
+  /// `HierarchySidebarView.mergedWorktreeIDs` so the palette's batch commands
+  /// target an identical set; an empty result makes the downstream sidebar
+  /// action a safe no-op (it guards on `!targets.isEmpty`).
+  private static func mergedWorktreeIDs(
+    projectID: ProjectID,
+    catalog: Catalog,
+    gitHub: GitHubFeature.State
+  ) -> [WorktreeID] {
+    guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
+    return project.worktrees
+      .filter { !$0.archived && $0.path != project.rootPath }
+      .filter { gitHub.snapshots[$0.id]?.state == .merged }
+      .map(\.id)
+  }
 
   /// Per-Project editor override, if any. Used to resolve the Header's
   /// default-editor dispatch through `EditorFeature.resolveDefault` without
