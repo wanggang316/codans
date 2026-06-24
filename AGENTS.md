@@ -68,6 +68,7 @@ See [Golden Rules](docs/golden-rules.md) for the complete list with rationale an
 | [docs/golden-rules.md](docs/golden-rules.md) | Enforced principles and conventions |
 | [docs/design-docs/](docs/design-docs/) | Design documents |
 | [docs/exec-plans/](docs/exec-plans/) | Execution plans for complex work |
+| [docs/lessons-learned/](docs/lessons-learned/) | Root-cause write-ups of hard bugs — pitfalls, fixes, recurrence checks |
 | [docs/product-specs/](docs/product-specs/) | Product specifications |
 | [docs/references/](docs/references/) | External docs, API references |
 | [docs/generated/](docs/generated/) | Auto-generated artifacts |
