@@ -7,7 +7,7 @@ import CodansCore
 
 @testable import Codans
 
-/// Visual regression coverage for the Tab-bar chip visuals landed in M1-T1.3.
+/// Visual regression coverage for the Tab-bar chip visuals.
 /// Five cases exercise the chip background's state combinations plus one
 /// row-level case proves the divider is suppressed adjacent to the active
 /// chip.
@@ -15,8 +15,8 @@ import CodansCore
 /// The TabChipView itself owns hover/press as `@State`, which a plain render
 /// cannot flip. These tests therefore snapshot `TabChipBackground` directly
 /// for the state matrix; label + close-button visuals are covered by the
-/// active-chip + row composites. M3 adds a dirty-state case once the writer
-/// path lands.
+/// active-chip + row composites. A dirty-state case will be added once the
+/// writer path lands.
 ///
 /// Gated behind `TC_RUN_SNAPSHOT_TESTS=1` + `recordMode=false` — matches
 /// `GitViewerSnapshotTests`'s convention. Running this suite without

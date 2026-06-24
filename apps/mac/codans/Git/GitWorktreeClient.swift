@@ -136,8 +136,8 @@ nonisolated struct GitWorktreeClient: Sendable {
 nonisolated extension GitWorktreeClient {
   /// Derives a filesystem-safe relative directory path from a branch name.
   /// Preserves `/` as a path separator so a branch like `feature/abc`
-  /// becomes nested directories `feature/abc` rather than `feature-abc`
-  /// (HAN-57). Strips characters that break on macOS filesystems (`\0`,
+  /// becomes nested directories `feature/abc` rather than `feature-abc`.
+  /// Strips characters that break on macOS filesystems (`\0`,
   /// `:`, `\`); collapses repeated `/` and repeated `-` within each
   /// segment; trims leading/trailing dashes per segment; drops empty
   /// segments produced by leading, trailing, or repeated slashes.
@@ -218,7 +218,7 @@ nonisolated extension GitWorktreeClient {
   /// All patterns are case-insensitive — git's message casing can vary
   /// with locale + version, and the `stderr.lowercased()` branches
   /// below matched case-insensitively long before the two regex
-  /// branches did (issue #24 (b)). Inline `(?i)` keeps the original
+  /// branches did. Inline `(?i)` keeps the original
   /// casing of the captured branch name so UI surfaces show what the
   /// user typed instead of a forced-lower version.
   static func mapGitStderr(command: String, stderr: String) -> GitWorktreeError {
@@ -270,7 +270,7 @@ nonisolated extension GitWorktreeClient {
   /// Paths are compared via `URL.standardizedFileURL.path` so a
   /// trailing slash or `.` component difference between `wt sw`'s
   /// echo and `wt ls`'s canonicalized JSON doesn't produce a false
-  /// mismatch. Issue #24 (c).
+  /// mismatch.
   static func pickNewWorktreePath(
     preEntries: [GitWtEntry],
     postEntries: [GitWtEntry],
@@ -289,9 +289,9 @@ nonisolated extension GitWorktreeClient {
     // user-space symlink edit) because the pre/post strings would
     // resolve differently even though `wt` emitted the identical
     // raw form. The two canonical layers are intentional:
-    // `HierarchyManager.canonicalPath` reconciles T-WORKTREE's wt
-    // output against T-PROJECT's resolved rootPath; this helper
-    // reconciles wt-against-itself. Issue #24 (c) follow-up F1.
+    // `HierarchyManager.canonicalPath` reconciles `wt` output against
+    // a Project's resolved rootPath; this helper reconciles
+    // wt-against-itself.
     func canonical(_ path: String) -> String {
       URL(fileURLWithPath: path).standardizedFileURL.path
     }
@@ -349,7 +349,6 @@ nonisolated extension GitWorktreeClient {
 /// is not isolated to any particular actor) can terminate it without
 /// racing the Task body that assigned it. `@unchecked Sendable`
 /// because the NSLock discipline is what actually enforces safety.
-/// Issue #24 (a).
 nonisolated final class CreateWorktreeProcessBox: @unchecked Sendable {
   private let lock = NSLock()
   private var process: Process?
@@ -423,7 +422,7 @@ nonisolated enum GitWorktreeShell {
   /// The optional `onSpawn` callback fires immediately before
   /// `process.run()` so the caller can capture the `Process` reference
   /// for external cancellation (see `createWorktreeStream`'s
-  /// `continuation.onTermination` wiring — issue #24 (a)). Default
+  /// `continuation.onTermination` wiring). Default
   /// is a no-op so existing callers stay source-compatible.
   static func runStream(
     executable: URL,
@@ -555,7 +554,7 @@ nonisolated extension GitWorktreeClient {
   // Process immediately before `process.run()`. Production code
   // leaves it nil; integration tests pass a closure that captures a
   // weak reference to the Process so they can assert
-  // `!process.isRunning` after cancelling the stream (issue #24 (a)).
+  // `!process.isRunning` after cancelling the stream.
   //
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   static func makeLive(
@@ -685,7 +684,7 @@ nonisolated extension GitWorktreeClient {
           // thread / isolation context) can safely read the Process
           // reference and terminate the child. Without this, a
           // cancelled consumer leaks the `wt` child until it finishes
-          // on its own — see issue #24 (a).
+          // on its own.
           let processBox = CreateWorktreeProcessBox()
 
           let task = Task {
@@ -714,7 +713,7 @@ nonisolated extension GitWorktreeClient {
               // Snapshot the live worktree set BEFORE spawning `wt sw`.
               // After exit we diff against this to identify the new
               // entry — more robust than treating wt's last-non-empty
-              // stdout line as the path (issue #24 (c)). Best-effort:
+              // stdout line as the path. Best-effort:
               // if wt ls fails for any reason, we fall through with an
               // empty snapshot and the diff will surface every
               // post-create entry; the fallbackStdoutLast path then
@@ -782,7 +781,6 @@ nonisolated extension GitWorktreeClient {
             // the final `continuation.finish(...)`). Cancelling the
             // Task first would still leave the wt child alive until
             // it finished, defeating the point of this handler.
-            // Issue #24 (a).
             processBox.terminateIfRunning()
             task.cancel()
           }
@@ -960,7 +958,7 @@ nonisolated extension GitWorktreeClient {
 
   /// Best-effort `wt ls --json` → `[GitWtEntry]`. Returns `[]` on any
   /// failure — used by `createWorktreeStream` for the diff-based
-  /// path-picking (issue #24 (c)) and by `pruneWorktrees` for its
+  /// path-picking and by `pruneWorktrees` for its
   /// before/after count. Both callers tolerate empty on error.
   fileprivate static func liveLsEntries(wt: URL, repoRoot: URL) async -> [GitWtEntry] {
     let outcome = await GitWorktreeShell.run(

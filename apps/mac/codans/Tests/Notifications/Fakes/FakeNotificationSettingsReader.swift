@@ -4,8 +4,8 @@ import CodansCore
 
 @testable import Codans
 
-/// In-memory `NotificationSettingsReader` for unit tests. Will be consumed
-/// by M2.T2's `NotificationCoordinator` test suite to drive coordinator
+/// In-memory `NotificationSettingsReader` for unit tests. Consumed
+/// by the `NotificationCoordinator` test suite to drive coordinator
 /// behaviour deterministically without touching SettingsStore or OSNotifier.
 @MainActor
 final class FakeNotificationSettingsReader: NotificationSettingsReader {

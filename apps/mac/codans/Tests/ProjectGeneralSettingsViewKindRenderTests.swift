@@ -8,7 +8,7 @@ import CodansCore
 /// `ProjectGeneralSettingsView.visibleSections(for:)` function — that's
 /// the testable surface for the kind-conditional render rule. SwiftUI's
 /// view tree itself is not introspected here (snapshot tests are out of
-/// scope per the M4 brief); the visibility set is the observable contract.
+/// scope); the visibility set is the observable contract.
 struct ProjectGeneralSettingsViewKindRenderTests {
   @Test
   func dirHidesGitOnlySections() {

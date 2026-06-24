@@ -3,12 +3,12 @@ import CodansCore
 import CodansIPC
 import os
 
-/// Typed JSON-RPC client. One instance per `codans` invocation (C4 D10).
+/// Typed JSON-RPC client. One instance per `codans` invocation.
 ///
 /// On `call(_:params:timeout:)` the client opens a fresh transport, sends
-/// `system.hello` pipelined with the real request (DEC-4), reads the
-/// hello response (discarded unless it carries an error), then returns
-/// the typed `Result`.
+/// `system.hello` pipelined with the real request, reads the hello
+/// response (discarded unless it carries an error), then returns the
+/// typed `Result`.
 public actor RPCClient {
   public struct Versions: Sendable {
     public let clientVersion: String
@@ -45,15 +45,14 @@ public actor RPCClient {
   }
 
   // swiftlint:disable async_without_await
-  // Follow-up: revisit after a CodansKit concurrency audit — the `async`
-  // keyword has no `await` body today, but removing it breaks callers.
-  // Out of scope for T0, suppressing the lint to unblock.
+  // The `async` keyword has no `await` body today, but removing it breaks
+  // callers; suppress the lint until a CodansKit concurrency audit revisits it.
   /// Explicit teardown. Call after the last `call(...)` to close the
   /// transport deterministically. Idempotent.
   ///
   /// Prefer this over relying on `deinit` — the actor's deinit races
   /// against the inbound-pump's detached Task and can leak the socket
-  /// fd if the pump has not yet observed peer EOF (M4 review item #2).
+  /// fd if the pump has not yet observed peer EOF.
   public func shutdown() async {
     guard !didShutdown else { return }
     didShutdown = true
@@ -72,11 +71,11 @@ public actor RPCClient {
 
   /// Unary call. Returns the decoded `Result` or throws an `RPCError`.
   ///
-  /// On the wire: pipelines `system.hello` + the real request (DEC-4),
-  /// then reads back two responses IN ORDER. Each response's `id` is
-  /// matched against the corresponding outbound request's id — a
-  /// server that reorders or replaces frames surfaces as
-  /// `.misorderedResponse`, never as an infinite hang (M4 review #4).
+  /// On the wire: pipelines `system.hello` + the real request, then reads
+  /// back two responses IN ORDER. Each response's `id` is matched against
+  /// the corresponding outbound request's id — a server that reorders or
+  /// replaces frames surfaces as `.misorderedResponse`, never as an
+  /// infinite hang.
   public func call<Params: Encodable, ResultType: Decodable>(
     _ method: IPC.Method,
     params: Params,
@@ -162,7 +161,7 @@ public actor RPCClient {
             // Surface per-frame decode failures as stream errors instead
             // of silently dropping them — a shaped-wrong frame is a server
             // bug the caller should see, not a missing line in the tail
-            // output (M5 review #1).
+            // output.
             do {
               let decoded = try frame.decoded(as: Element.self)
               continuation.yield(decoded)
@@ -220,9 +219,9 @@ public actor RPCClient {
 
   // MARK: - Internals
 
-  /// Pipeline `system.hello` + the real request in one write. Saves a
-  /// round trip — DEC-4. The caller passes the pre-generated `helloID`
-  /// so it can match the id on the inbound response side.
+  /// Pipeline `system.hello` + the real request in one write, saving a
+  /// round trip. The caller passes the pre-generated `helloID` so it can
+  /// match the id on the inbound response side.
   private func pipelinedSend(helloID: String, request: IPC.Request) async throws {
     let hello = IPC.Request(
       id: helloID,
@@ -268,7 +267,7 @@ public actor RPCClient {
 actor InboundPump {
   /// Wrapped waiter — continuation paired with a unique id so a late-
   /// firing timeout task from a prior `next(timeout:)` call cannot race
-  /// a waiter registered for a *subsequent* call (M4 review item #1).
+  /// a waiter registered for a *subsequent* call.
   private struct Waiter {
     let id: UUID
     let continuation: CheckedContinuation<Data?, Never>

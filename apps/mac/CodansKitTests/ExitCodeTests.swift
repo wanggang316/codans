@@ -21,7 +21,7 @@ struct CLIExitCodeTests {
 
   @Test
   func rawValuesMatchC4DesignDoc() {
-    // DEC-8: agents branch on exit codes — must not change within a major.
+    // Agents branch on exit codes — must not change within a major.
     #expect(CLIExitCode.ok.rawValue == 0)
     #expect(CLIExitCode.userError.rawValue == 1)
     #expect(CLIExitCode.notFound.rawValue == 2)

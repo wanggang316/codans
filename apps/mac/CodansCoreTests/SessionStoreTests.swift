@@ -39,7 +39,7 @@ struct SessionStoreTests {
 
     try storeA.saveNow(catalog)
     // Release storeA's flock before opening storeB — `SessionStore.init`
-    // takes `LOCK_EX|LOCK_NB` (M5.T5.2) so a second concurrent owner
+    // takes `LOCK_EX|LOCK_NB` so a second concurrent owner
     // would throw `.alreadyHeld`. The "two stores against the same file"
     // shape models a relaunch, where the previous owner is already gone.
     storeA.release()
@@ -72,7 +72,7 @@ struct SessionStoreTests {
     #expect(FileManager.default.fileExists(atPath: ctx.fileURL.path) == false)
   }
 
-  /// Guards the M6.T6.2 race fix: an explicit `saveNow(B)` after an
+  /// Guards the race fix: an explicit `saveNow(B)` after an
   /// earlier `scheduleSave(A)` must cancel the pending debounced task
   /// so that, when the 500 ms timer would have fired, it does NOT
   /// resurrect catalog A and overwrite catalog B.

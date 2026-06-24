@@ -5,7 +5,7 @@ import CodansCore
 /// `CommandRunner` seam (live implementation wraps `Foundation.Process`), applies
 /// `GitProcessEnv` stripping, and enforces the 16 MiB output cap + 10 s wall-clock timeout.
 ///
-/// Correctness notes (fixes from 0005 M2 review):
+/// Correctness notes:
 /// - `gitExecutable` defaults to `/usr/bin/git` directly, not `/usr/bin/env`. This keeps the
 ///   env-whitelist guarantee (`PATH` exposure is then irrelevant to which git runs).
 /// - `.notARepo` is detected via `rev-parse --is-inside-work-tree` at the edge, not by

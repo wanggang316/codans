@@ -30,7 +30,7 @@ enum CommandPaletteItems {
     if let worktree = resolveWorktree(selection: selection, catalog: catalog) {
       items.append(contentsOf: worktreeItems(worktreeName: worktree.name))
       items.append(contentsOf: editorItems(worktreeName: worktree.name, descriptors: editorDescriptors))
-      // M10: surface user-defined `ProjectSettings.scripts` for the active
+      // Surface user-defined `ProjectSettings.scripts` for the active
       // Project. Reads through the SettingsWriter dependency so the palette
       // tracks the live `settings.json` snapshot — switching to a different
       // Project rebuilds and surfaces that Project's scripts instead.

@@ -17,7 +17,7 @@ public nonisolated struct Tag: Equatable, Codable, Sendable, Identifiable {
 }
 
 /// Fixed palette matching the macOS Finder tag colors. We do not expose
-/// arbitrary hex on purpose — see `docs/design-docs/project-tags.md` §4.3.
+/// arbitrary hex on purpose.
 public nonisolated enum TagColor: String, Codable, CaseIterable, Sendable {
   case red, orange, yellow, green, blue, purple, grey
 }

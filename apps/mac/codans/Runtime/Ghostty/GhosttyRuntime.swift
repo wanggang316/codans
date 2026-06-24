@@ -803,10 +803,9 @@ enum GhosttyError: Error, Equatable, Sendable, CustomStringConvertible {
   case configInitFailed
   case appInitFailed(reason: String)
   /// `retryable == true` means the caller can re-attempt after a short
-  /// backoff (HAN-82: `ghostty_surface_new` is observed to fail
-  /// transiently — the original throw site bubbled up an opaque
-  /// `surfaceInitFailed` so external scripts had no way to decide
-  /// retry vs. fail-hard).
+  /// backoff: `ghostty_surface_new` is observed to fail transiently, so
+  /// the reason + flag let callers decide retry vs. fail-hard instead of
+  /// seeing an opaque `surfaceInitFailed`.
   case surfaceInitFailed(reason: String, retryable: Bool)
 
   var description: String {

@@ -151,9 +151,8 @@ extension GitWorktreeCLI: DependencyKey {
   /// binary with no per-instance state (the actor just serializes subprocess
   /// invocations). Used today by `HierarchySidebarFeature`'s Add Project
   /// flow for add-time gitRoot classification — reconcile-time worktree
-  /// enumeration is owned by
-  /// T-WORKTREE's `HierarchyClient.reconcileDiscoveredWorktrees` and does
-  /// not go through this dependency.
+  /// enumeration is owned by `HierarchyClient.reconcileDiscoveredWorktrees`
+  /// and does not go through this dependency.
   static let liveValue = GitWorktreeCLI()
 
   /// Tests that touch `discoverGitRoot` typically do so against a real

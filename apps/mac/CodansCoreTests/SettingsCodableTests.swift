@@ -197,7 +197,7 @@ struct SettingsCodableTests {
 
   /// Verifies `projects` serialises as a JSON object keyed by UUID string, not as the
   /// array-of-pairs layout JSONEncoder falls back to for non-String-keyed dictionaries. This
-  /// is the on-disk invariant design §Data Storage relies on for hand-editability.
+  /// is the on-disk invariant the app relies on for hand-editability.
   @Test
   func projectsSerialiseAsUUIDKeyedObject() throws {
     let id = ProjectID()

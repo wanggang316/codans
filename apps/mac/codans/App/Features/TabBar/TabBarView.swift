@@ -6,10 +6,10 @@ import CodansCore
 /// the environment `HierarchyManager`; dispatches create / select / close
 /// / rename / reorder / bulk-close actions through `TabBarFeature`.
 ///
-/// Post M2-T2.7 the chip row lives inside `TabBarOverflowScroll`, which
-/// owns horizontal scrolling, edge-gradient shadows, and auto-scroll-to-
-/// selected; the trailing accessory cluster is pinned outside the scroll
-/// region so `+` is always visible regardless of chip count.
+/// The chip row lives inside `TabBarOverflowScroll`, which owns horizontal
+/// scrolling, edge-gradient shadows, and auto-scroll-to-selected; the
+/// trailing accessory cluster is pinned outside the scroll region so `+`
+/// is always visible regardless of chip count.
 struct TabBarView: View {
   let store: StoreOf<TabBarFeature>
   /// Resolved address of the active worktree whose tabs we render. If any

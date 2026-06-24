@@ -16,20 +16,18 @@ enum HierarchyError: Error, Equatable, Sendable {
 }
 
 /// Identifies a reorderable sidebar section under a Project. The full sidebar
-/// taxonomy has four sections (main / pinned / pending / unpinned, see
-/// `docs/design-docs/worktree-sidebar-ordering.md`); only `pinned` and
-/// `unpinned` admit user-initiated reordering, so this enum names just those.
+/// taxonomy has four sections (main / pinned / pending / unpinned); only
+/// `pinned` and `unpinned` admit user-initiated reordering, so this enum names
+/// just those.
 enum WorktreeSegment: Sendable, Equatable {
   case pinned
   case unpinned
 }
 
 /// Catalog-driven worktree repositioning mode for
-/// `HierarchyClient.promoteWorktree`. The notifications-v1-1 worktree-promote
-/// behaviour ships the only case in v1.1; the enum exists so additional
-/// modes (e.g. `.toIndex(Int)` for an explicit reorder UI) can land without
-/// reshaping the call surface. See
-/// `docs/design-docs/notifications-v1-1.md` §"Worktree promote".
+/// `HierarchyClient.promoteWorktree`. Ships a single case today; the enum
+/// exists so additional modes (e.g. `.toIndex(Int)` for an explicit reorder
+/// UI) can land without reshaping the call surface.
 enum WorktreePromotionMode: Sendable, Equatable {
   /// Move the worktree to index 0 of its Project's unpinned section. Pinned
   /// targets are a silent no-op (pinned ordering is the user's explicit
@@ -155,8 +153,7 @@ final class HierarchyManager {
   /// `catalog.tags`, and persists. Names are trimmed and rejected if empty
   /// (returns a fresh TagID without appending — symmetric with the way
   /// `addProject` would silently no-op on an empty name). Names are not
-  /// enforced unique — see `docs/design-docs/project-tags.md` §3.2 for
-  /// rationale (mirrors Finder).
+  /// enforced unique (mirrors Finder).
   @discardableResult
   func createTag(name: String, color: TagColor) -> TagID {
     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -477,7 +474,7 @@ final class HierarchyManager {
     // is easy to forget; doing it here means the API is self-correcting.
     let canonicalizedPath = Self.canonicalPath(path)
 
-    // Uniqueness guard (HAN-82): without this, dispatcher retries on
+    // Uniqueness guard: without this, dispatcher retries on
     // tab/pane failure register a fresh row pointing at the same
     // (canonical path, name) every time, polluting `codans tree` with
     // orphan UUIDs. Compare canonical-form so symlinked paths
@@ -663,8 +660,7 @@ final class HierarchyManager {
   /// the end of the pinned segment (last visible pinned); Unpin moves it to
   /// the top of the unpinned segment (first visible unpinned). Silent no-op
   /// for unchanged values (no flag flip, no move, no save) and for unknown
-  /// ids. Persists via the standard debounced save pipeline. See
-  /// `docs/design-docs/worktree-sidebar-ordering.md` §pinned 段 / §unpinned 段.
+  /// ids. Persists via the standard debounced save pipeline.
   func setWorktreePinned(worktreeID: WorktreeID, isPinned: Bool) {
     for projectIndex in catalog.projects.indices {
       let project = catalog.projects[projectIndex]
@@ -697,10 +693,9 @@ final class HierarchyManager {
   ///
   /// Validation is all-or-nothing: if any `from` offset or `to` falls outside
   /// the current segment range, or `from` is empty, the call is a silent
-  /// no-op (no save). This matches the staleness guard described in
-  /// `docs/design-docs/worktree-sidebar-ordering.md` §Risks — a snapshot
-  /// taken before a worktree was removed produces out-of-range offsets, and
-  /// dropping the whole reorder is preferable to a partial application.
+  /// no-op (no save). A snapshot taken before a worktree was removed
+  /// produces out-of-range offsets, and dropping the whole reorder is
+  /// preferable to a partial application.
   /// Missing project throws `.notFound`.
   func reorderWorktrees(
     in projectID: ProjectID,
@@ -848,15 +843,15 @@ final class HierarchyManager {
     }
   }
 
-  // MARK: - Pane agent identity (active-agents-view T2)
+  // MARK: - Pane agent identity
 
   /// Writes `Pane.agentKind` (the classified CLI agent currently driving
   /// the pane). `nil` clears the field. Silent no-op on unknown `paneID`.
   /// Idempotent — a repeat call with the same value is a true no-op
   /// (no `scheduleSave`, no debounce churn). The single canonical writer
-  /// for `agentKind`; the upcoming `AgentBinder` (active-agents-view T3)
-  /// routes its classification output through here so all persistence
-  /// flows through the standard `store.scheduleSave(catalog)` pipeline.
+  /// for `agentKind`; the `AgentBinder` routes its classification output
+  /// through here so all persistence flows through the standard
+  /// `store.scheduleSave(catalog)` pipeline.
   func setPaneAgentKind(_ paneID: PaneID, kind: AgentKind?) {
     for projectIndex in catalog.projects.indices {
       for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
@@ -909,7 +904,7 @@ final class HierarchyManager {
   /// against existing rows — both sides go through
   /// `URL(fileURLWithPath:).resolvingSymlinksInPath().standardizedFileURL.path`
   /// so `/var/...` vs. `/private/var/...` don't cause duplicate rows
-  /// against T-PROJECT's `Project.rootPath` which is stored in the
+  /// against the `Project.rootPath`, which is stored in the
   /// symlink-resolved form. Never removes or mutates existing rows —
   /// stale rows are surfaced in the view layer and only deleted by the
   /// user-initiated Prune action. Idempotent across repeated calls
@@ -944,7 +939,7 @@ final class HierarchyManager {
         //    seeded a row with `branch == nil` and `name == lastPathComponent`;
         //    once the directory becomes a git repo, adopt the real branch
         //    so the sidebar reads "main" instead of the folder name.
-        // 2. In-place branch change (HAN-62) — user ran `git checkout` /
+        // 2. In-place branch change — user ran `git checkout` /
         //    `git switch` inside the worktree pane. The row's `branch`
         //    must follow HEAD so the sidebar subtitle, WorktreeHeader
         //    label, and GitHubFeature's PR fetch all see the new value.
@@ -1029,8 +1024,8 @@ final class HierarchyManager {
   /// duplicate on every reconcile.
   ///
   /// **Regression guard**: do NOT add a second equivalent helper on
-  /// this type. Prior to PR #31 review, two static methods
-  /// (`canonical` + `canonicalPath`) coexisted with identical bodies;
+  /// this type. Two static methods (`canonical` + `canonicalPath`) once
+  /// coexisted with identical bodies;
   /// any drift (e.g. one side adding trimming) would silently break
   /// the symmetry the PR body guarantees. Route all call-sites
   /// through this function.
@@ -1485,7 +1480,7 @@ final class HierarchyManager {
     }
     let newID = tabs[newIndex].id
     // Route through `selectTab` rather than writing `selectedTabID`
-    // directly so the M3 focus-restoration block fires for the keyboard
+    // directly so the focus-restoration block fires for the keyboard
     // shortcut path. Otherwise `⌘⇧[` / `⌘⇧]` would persist the new
     // selection without ever asking AppKit to focus the remembered pane.
     try selectTab(newID, in: worktreeID, in: projectID)
@@ -1515,8 +1510,8 @@ final class HierarchyManager {
     runtime.currentWorkingDirectory(for: paneID)
   }
 
-  /// Marks `paneID` as running a tracked command. No caller wired today
-  /// — lands with C3 hooks. Idempotent.
+  /// Marks `paneID` as running a tracked command. No caller wired today.
+  /// Idempotent.
   func markPaneRunning(_ paneID: PaneID) {
     runningPanes.insert(paneID)
   }
@@ -1537,9 +1532,9 @@ final class HierarchyManager {
   /// Reads a runtime set, never touches the catalog.
   func tabIsDirty(_ tabID: TabID) -> Bool {
     // Fast-path: no pane is running anywhere in the app, so the catalog
-    // walk is pointless. Until the C3 hooks plan starts populating
-    // `runningPanes`, this short-circuit means the chip's per-render
-    // call is a single set-emptiness check rather than a hierarchy walk.
+    // walk is pointless. Until something starts populating `runningPanes`,
+    // this short-circuit means the chip's per-render call is a single
+    // set-emptiness check rather than a hierarchy walk.
     guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
     // Walk the catalog once to locate the tab; absent tabs read as idle.
     for project in catalog.projects {
@@ -1988,7 +1983,7 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  // MARK: - Pane address resolution (0008 M5)
+  // MARK: - Pane address resolution
 
   /// Resolves a `PaneID` to the full hierarchy address that owns it. Used by
   /// `PaneActionRouterFeature` to service pane-scoped intents (closeTab,
@@ -2006,7 +2001,7 @@ final class HierarchyManager {
     return nil
   }
 
-  // MARK: - Tab reordering (0008 M5)
+  // MARK: - Tab reordering
 
   /// Moves a Tab inside its Worktree by `offset` positions. Positive shifts
   /// right, negative shifts left; the final index is clamped to the Worktree's
@@ -2050,7 +2045,7 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  // MARK: - Split equalization (0008 M5)
+  // MARK: - Split equalization
 
   /// Sets every split node's `ratio` inside the Tab's `SplitTree` to 0.5 so
   /// sibling panes render at equal sizes. Leaf-only trees are a silent
@@ -2104,7 +2099,7 @@ final class HierarchyManager {
     }
   }
 
-  // MARK: - Pane resize (0008 M5)
+  // MARK: - Pane resize
 
   /// Adjusts the ratio of the closest ancestor split whose orientation
   /// matches `direction`. The ghostty RESIZE_SPLIT action carries a pixel
@@ -2178,7 +2173,7 @@ final class HierarchyManager {
     return nil
   }
 
-  // MARK: - Worktree / Tab activation (M6)
+  // MARK: - Worktree / Tab activation
 
   func activateWorktree(_ id: WorktreeID) throws {
     for (pi, project) in catalog.projects.enumerated()
@@ -2202,7 +2197,7 @@ final class HierarchyManager {
     throw HierarchyError.notFound("Tab \(id)")
   }
 
-  // MARK: - Pane labels (canonical writer for C3 / C4)
+  // MARK: - Pane labels
 
   /// Update a Pane's `labels` set. **Single canonical writer** — every
   /// user-facing write path (the CLI's `codans pane label`, the hook action
@@ -2238,13 +2233,13 @@ final class HierarchyManager {
     throw HierarchyError.notFound("Pane \(paneID)")
   }
 
-  // MARK: - Phase 2: env resolution
+  // MARK: - Env resolution
 
   /// Resolves the merged environment for a Project's spawned subprocesses.
   /// Combines `ProcessInfo.processInfo.environment` with
   /// `Settings.projects[pid].envVars`; project-defined keys win on collision.
-  /// Pure / nonisolated so M8 (PaneSurface env injection) and M9 (lifecycle
-  /// script execution) can call it from off the main actor when convenient.
+  /// Pure / nonisolated so callers (PaneSurface env injection, lifecycle
+  /// script execution) can reach it from off the main actor when convenient.
   nonisolated static func resolvedEnv(
     for projectID: ProjectID,
     in settings: Settings

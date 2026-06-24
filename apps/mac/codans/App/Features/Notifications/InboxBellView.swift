@@ -211,11 +211,11 @@ private struct InboxPopoverContent: View {
     return unreadOnly ? entries.filter(\.isUnread) : entries
   }
 
-  /// Header dropped its "Notifications" title (HAN-56) — the bell anchor
-  /// already names the popover and the redundant headline ate vertical
-  /// space without earning it. The All/Unread picker is centred via a
-  /// ZStack so its horizontal anchor stays fixed regardless of the Mark
-  /// all read button's width / disabled state; the button rides on a
+  /// Header has no "Notifications" title — the bell anchor already names
+  /// the popover and the redundant headline ate vertical space without
+  /// earning it. The All/Unread picker is centred via a ZStack so its
+  /// horizontal anchor stays fixed regardless of the Mark all read
+  /// button's width / disabled state; the button rides on a
   /// trailing-aligned overlay HStack so it doesn't displace the picker.
   private var header: some View {
     ZStack {
@@ -278,12 +278,12 @@ private struct InboxRowView: View {
 
   var body: some View {
     Button(action: onTap) {
-      // HAN-78: row 1 is `<title> - <body>` (uniform font + colour so
-      // the line reads as one continuous sentence); row 2 is the
-      // source breadcrumb + age. The dot indicator stays on row 1 so
-      // it sits next to the content line; row 2 carries a matching
-      // leading indent (`dotColumnWidth + dotSpacing`) so the two
-      // rows' text columns line up.
+      // Row 1 is `<title> - <body>` (uniform font + colour so the line
+      // reads as one continuous sentence); row 2 is the source breadcrumb
+      // + age. The dot indicator stays on row 1 so it sits next to the
+      // content line; row 2 carries a matching leading indent
+      // (`dotColumnWidth + dotSpacing`) so the two rows' text columns
+      // line up.
       VStack(alignment: .leading, spacing: 2) {
         HStack(alignment: .center, spacing: Self.dotSpacing) {
           // Filled circle on unread (yellow for taskFinished, orange
@@ -300,8 +300,7 @@ private struct InboxRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
           // Hover-only nav cue: dimmed-zero by default, fades in and
           // slides 3 pt right while the cursor is over the row.
-          // Suppressed on read rows since they're not navigable
-          // (HAN-56).
+          // Suppressed on read rows since they're not navigable.
           if entry.isUnread {
             Image(systemName: "arrow.right")
               .font(.footnote)
@@ -336,9 +335,9 @@ private struct InboxRowView: View {
     }
     .buttonStyle(.plain)
     .onHover { isHovering = $0 }
-    // Read rows are non-navigable (HAN-56). Block hit-testing entirely
-    // so the row neither fires onTap nor lights up the hover background
-    // — the inbox keeps them around as visual history, not as buttons.
+    // Read rows are non-navigable. Block hit-testing entirely so the row
+    // neither fires onTap nor lights up the hover background — the inbox
+    // keeps them around as visual history, not as buttons.
     .allowsHitTesting(entry.isUnread)
   }
 
@@ -359,10 +358,10 @@ private struct InboxRowView: View {
   }
 
   /// Breadcrumb for the entry's source path: `<project>·<worktree>`,
-  /// matching the OS banner footer format (HAN-78). Resolved live from
+  /// matching the OS banner footer format. Resolved live from
   /// `HierarchyManager.catalog` so a project / worktree rename reflects
   /// in the popover without a save or reload cycle. Returns nil when the
-  /// project has been deleted (G3 dead-target case) so the row simply
+  /// project has been deleted (dead-target case) so the row simply
   /// omits the breadcrumb.
   private var breadcrumb: String? {
     guard let mgr = hierarchyManager,

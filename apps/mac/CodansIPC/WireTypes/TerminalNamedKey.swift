@@ -5,11 +5,10 @@ extension IPC {
   /// (Esc, arrows, function keys, common Ctrl combos) that `terminal.sendInput`
   /// cannot deliver because libghostty's text-input path drops control bytes.
   ///
-  /// The set covers the keys called out in HAN-46. Each value maps on the
-  /// app side to a `ghostty_input_key_s` event with the corresponding Mac
-  /// virtual keycode + modifiers, so terminal applications observe the
-  /// same byte sequences a physical keypress would emit (CSI for arrows,
-  /// 0x1B for escape, 0x09 for tab, etc.).
+  /// Each value maps on the app side to a `ghostty_input_key_s` event with
+  /// the corresponding Mac virtual keycode + modifiers, so terminal
+  /// applications observe the same byte sequences a physical keypress would
+  /// emit (CSI for arrows, 0x1B for escape, 0x09 for tab, etc.).
   public enum TerminalNamedKey: String, Codable, Sendable, CaseIterable {
     case escape
     case up

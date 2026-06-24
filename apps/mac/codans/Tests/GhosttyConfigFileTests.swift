@@ -6,7 +6,7 @@ import Testing
 /// Unit tests for `GhosttyConfigFile.updatedContents` — the pure transform
 /// that rewrites the managed block. The live reader/writer paths (`load` /
 /// `apply`) touch the real filesystem and libghostty; they're exercised in
-/// M5's manual + integration pass, not here.
+/// the manual + integration pass, not here.
 @MainActor
 struct GhosttyConfigFileTests {
   // MARK: - Helpers

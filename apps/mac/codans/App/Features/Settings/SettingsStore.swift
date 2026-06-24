@@ -116,11 +116,11 @@ final class SettingsStore {
       scheduleSave()
     }
 
-    // C8a Phase 5 M1 — reset any stored `general.defaultEditorID` that is not in the
-    // current built-in registry. Stale IDs come from the retired C8 `customEditors`
-    // feature; the resolver would silently fall back, but leaving the dead value on disk
-    // misreports the user's actual preference. Run after the switch so every decode
-    // branch (including `.default`) is covered; idempotent.
+    // Reset any stored `general.defaultEditorID` that is not in the current built-in
+    // registry. Stale IDs come from the retired `customEditors` feature; the resolver
+    // would silently fall back, but leaving the dead value on disk misreports the user's
+    // actual preference. Run after the switch so every decode branch (including
+    // `.default`) is covered; idempotent.
     let didNormalize = settings.garbageCollectEditors(knownIDs: knownEditorIDs)
     if didNormalize {
       logger.info("Reset stale general.defaultEditorID not in built-in registry")
@@ -251,9 +251,9 @@ final class SettingsStore {
     scheduleSave()
   }
 
-  // C8a Phase 3 retired the custom-editor surface. `addCustomEditor` / `updateCustomEditor`
-  // / `removeCustomEditor` are gone; the `customEditors` field was removed from
-  // `GeneralSettings`. Phase 4a's Settings pane uses the built-in registry exclusively.
+  // The custom-editor surface is retired. `addCustomEditor` / `updateCustomEditor` /
+  // `removeCustomEditor` are gone and the `customEditors` field was removed from
+  // `GeneralSettings`; the Settings pane uses the built-in registry exclusively.
 
   /// Hard-overwrite the entire settings document. Only used by tests and recovery paths.
   func replaceAll(_ new: Settings) {
@@ -269,7 +269,7 @@ final class SettingsStore {
       return
     }
     // Cancel any pending debounced save BEFORE writing so the in-flight task can't clobber
-    // us with a stale snapshot after this call returns. Matches PR #22 review N6.
+    // us with a stale snapshot after this call returns.
     pendingSaveTask?.cancel()
     pendingSaveTask = nil
     settings.garbageCollect()

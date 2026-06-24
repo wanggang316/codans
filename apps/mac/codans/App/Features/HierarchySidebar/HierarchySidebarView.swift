@@ -152,12 +152,10 @@ struct HierarchySidebarView: View {
   @State private var sidebarIndentReady = false
 
   /// Heterogeneous sidebar rows in render order: main → pinned → pending →
-  /// unpinned. Per-segment rules and rationale live in
-  /// docs/design-docs/worktree-sidebar-ordering.md §渲染合并. `pendings`
-  /// is filtered to the given project (caller passes the full sidebar-wide
-  /// list). Used by ordering tests + the hotkey enumeration shim; the
-  /// production view splits the segments across separate ForEach blocks
-  /// so each can own its own .onMove.
+  /// unpinned. `pendings` is filtered to the given project (caller passes
+  /// the full sidebar-wide list). Used by ordering tests + the hotkey
+  /// enumeration shim; the production view splits the segments across
+  /// separate ForEach blocks so each can own its own .onMove.
   static func orderedSidebarRows(
     project: Project,
     pendings: [PendingWorktree]
@@ -177,7 +175,7 @@ struct HierarchySidebarView: View {
   /// which only assigns slots to real worktrees. Derived from
   /// `orderedSidebarRows` so the segment ordering stays in one place; the
   /// `pendings: []` argument is correct for hotkey purposes — pending rows
-  /// never claim a `⌃N` slot per design doc §pending 段 用户操作.
+  /// never claim a `⌃N` slot.
   static func orderedVisibleWorktrees(in project: Project) -> [Worktree] {
     orderedSidebarRows(project: project, pendings: []).compactMap { row in
       if case .worktree(let w) = row { return w } else { return nil }
@@ -194,7 +192,7 @@ struct HierarchySidebarView: View {
     // transition (the rising edge into "any agent is loading").
     let _ = anyAgentNeedsAttention
 
-    // Filter the project list by the catalog's active tag filter (M4).
+    // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
     let visibleProjects = catalog.sorted(filteredProjects(catalog: catalog))
@@ -481,7 +479,7 @@ struct HierarchySidebarView: View {
     }
   }
 
-  // MARK: - Tag filter (M4)
+  // MARK: - Tag filter
 
   /// Apply `Catalog.activeTagFilter` to `catalog.projects`. Linear scan;
   /// project counts are small enough (<200) that a per-render filter is
@@ -602,11 +600,11 @@ struct HierarchySidebarView: View {
     }
   }
 
-  /// HAN-65: empty-state copy is English and reflects the actual
-  /// affordances the user has — the `.addProject` chord (resolved live
-  /// against `resolvedShortcuts` so a rebind keeps the hint accurate)
-  /// and the toolbar `+` button. Button label uses "Open Project" to
-  /// match the user-facing verb the picker presents.
+  /// Empty-state copy reflects the actual affordances the user has — the
+  /// `.addProject` chord (resolved live against `resolvedShortcuts` so a
+  /// rebind keeps the hint accurate) and the toolbar `+` button. Button
+  /// label uses "Open Project" to match the user-facing verb the picker
+  /// presents.
   private var emptyState: some View {
     VStack(spacing: 10) {
       Spacer()
@@ -753,9 +751,9 @@ struct HierarchySidebarView: View {
         .listRowSeparator(.hidden)
         if isExpanded {
           // Render the four segments individually so pinned and unpinned
-          // each own their own ForEach + .onMove (per design doc §渲染合并
-          // / 拖拽). Pending rows render in source order between pinned
-          // and unpinned; main and pending segments do not admit reorder.
+          // each own their own ForEach + .onMove. Pending rows render in
+          // source order between pinned and unpinned; main and pending
+          // segments do not admit reorder.
           let visible = project.worktrees.filter { !$0.archived }
           let mainRows = visible.filter { $0.path == project.rootPath }
           let pinnedRows = visible.filter { $0.isPinned && $0.path != project.rootPath }
@@ -796,7 +794,7 @@ struct HierarchySidebarView: View {
 
   // MARK: - Pending row
 
-  /// Wires task03's `PendingWorktreeRow` into the segment ForEach with
+  /// Wires `PendingWorktreeRow` into the segment ForEach with
   /// Cancel / Retry / Discard handlers dispatched to the lifecycle reducer.
   @ViewBuilder
   private func pendingRow(_ pending: PendingWorktree) -> some View {
@@ -824,11 +822,11 @@ struct HierarchySidebarView: View {
     let isSelected = currentSelection.worktreeID == worktree.id
     let snapshot = gitHubStore?.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
-      // 0013 M5: rollup data travels with the snapshot now (filled by the batched
-      // `gh api graphql` path in `parseBatchedPullRequests`). The v1 per-PR
-      // `state.checks[prNumber]` map is no longer populated on the fetch side —
-      // reading `snapshot.checkRollup` keeps the overlay working without the
-      // extra gh subprocess v1 used to spawn.
+      // Rollup data travels with the snapshot (filled by the batched
+      // `gh api graphql` path in `parseBatchedPullRequests`); the per-PR
+      // `state.checks[prNumber]` map is no longer populated on the fetch
+      // side. Reading `snapshot.checkRollup` keeps the overlay working
+      // without spawning an extra gh subprocess.
       guard let snapshot else { return .noChecks }
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
     }()
@@ -1016,7 +1014,7 @@ struct HierarchySidebarView: View {
   }
 
   // Main-checkout guard: the row whose path is the Project's rootPath is the main checkout
-  // and cannot be archived or removed from the app (spec W-Q3 guard). Extracted so the row
+  // and cannot be archived or removed from the app. Extracted so the row
   // body stays under swiftlint's function_body_length limit.
   @ViewBuilder
   private func worktreeContextMenu(
@@ -1057,8 +1055,8 @@ struct HierarchySidebarView: View {
       }
     }
 
-    // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
-    // guard: cannot pin / archive / remove the project's root worktree).
+    // Group 3 — Worktree lifecycle. Hidden for the main checkout: cannot
+    // pin / archive / remove the project's root worktree.
     if !isMainCheckout {
       Divider()
       Button {
@@ -1336,10 +1334,10 @@ struct HierarchySidebarView: View {
     let content: PullRequestPopover.Content = {
       if let error { return .error(error) }
       if let snapshot {
-        // 0013 M5: checks now travel inside the snapshot (see the comment on
+        // Checks travel inside the snapshot (see the comment on
         // `snapshot.checkRollup`). `latestWorkflowRuns` remains a separately-fetched
         // lazy load on popover-open — the batched query does not include workflow-run
-        // IDs yet (Open Question 4 in the design doc).
+        // IDs yet.
         let run = store.latestWorkflowRuns[snapshot.number]
         return .loaded(snapshot, checks: snapshot.checkRollup, workflowRun: run)
       }
@@ -1492,7 +1490,7 @@ private struct ProjectHeaderRow: View {
       rollup?.current.unreadProjects.contains(project.id) == true
       && settingsStore.settings.notifications.projectBellEnabled
     HStack(spacing: 6) {
-      // L4 unread indicator. When the project is in `unreadProjects`
+      // Unread indicator. When the project is in `unreadProjects`
       // (rollup rule = project collapsed + unread inside), the leading
       // disclosure chevron swaps for a red bell glyph — same pattern as
       // the worktree row icon. Click target / disclosure semantics are
@@ -1520,7 +1518,7 @@ private struct ProjectHeaderRow: View {
       // Keep the hover chrome from collapsing row width when hidden —
       // use opacity, not conditional rendering.
       HStack(spacing: 2) {
-        // Non-git Projects (P-Q4 = a): suppress the Add Worktree affordance.
+        // Non-git Projects: suppress the Add Worktree affordance.
         // Worktrees are a git-only concept; a scratch folder renders with a
         // single synthetic Worktree and nothing to add.
         if project.supportsWorktrees {
@@ -1557,7 +1555,7 @@ private struct ProjectHeaderRow: View {
             Label("Prune Stale Worktrees", systemImage: "wand.and.sparkles")
           }
           Divider()
-          // M5 (project-tags): inline color palette + "Tags…" entry.
+          // Inline color palette + "Tags…" entry.
           // ControlGroup(.palette) gives the native NSMenu color row;
           // "Tags…" opens the global TagManager via the sidebar's
           // `.openTagManager` delegate.

@@ -170,7 +170,7 @@ nonisolated enum JSONOutputParsers {
   ///
   /// - `aliasMap`: `[alias: originalBranch]` built by `BatchedPullRequestQuery.buildQuery`.
   /// - `remoteOwner`: `login` of the repository at the project's `origin`. Used by the
-  ///   fork-PR filter (see design-docs/github-integration-batched.md §Fork PR Filtering).
+  ///   fork-PR filter.
   ///
   /// Throws `.graphQLError` when the response carries a top-level `"errors": [...]`.
   /// Throws `.other` on decode failure.

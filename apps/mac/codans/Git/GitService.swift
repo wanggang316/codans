@@ -59,7 +59,7 @@ public nonisolated protocol GitService: Sendable {
   /// `git switch <name>` for `.local`, `git switch --track <origin/x>` for
   /// `.remoteTracking`. Dirty-tree / conflict failures surface as
   /// `GitError.exec(code, stderr)` with stderr preserved verbatim — the caller
-  /// (BranchSwitcherFeature, T6) extracts the first line for the inline error
+  /// (`BranchSwitcherFeature`) extracts the first line for the inline error
   /// banner. No pre-check; rely on git's native enforcement.
   func switchBranch(to target: BranchSwitchTarget, at path: URL) async throws
 

@@ -3,9 +3,8 @@ import Foundation
 
 /// Resolve the codans Unix socket path. Env override wins; default is
 /// build-channel aware. Debug builds use `/tmp/codans-dev-<uid>.sock`;
-/// Release builds use `/tmp/codans-<uid>.sock`. Mirrors the app-side
-/// `SocketPaths` helper — kept in lockstep via the shared convention
-/// documented in plan 0003 DEC-3 and the M3.0.1 hardening commit.
+/// Release builds use `/tmp/codans-<uid>.sock`. Must stay in lockstep
+/// with the app-side `SocketPaths` helper.
 public enum SocketDiscovery {
   public static func productionSocketPath(uid: uid_t = getuid()) -> String {
     "/tmp/codans-\(uid).sock"

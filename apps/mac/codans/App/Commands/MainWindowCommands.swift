@@ -18,7 +18,7 @@ import CodansCore
 /// - `Open PR on GitHub` lives on `⌘⌃G` rather than `⌘⇧G` so it doesn't shadow AppKit's
 ///   default "Find Previous" chord in editable-text contexts (Settings panes, palette
 ///   query, hotkey recorder, etc.).
-/// - `Open Project on GitHub` (HAN-58) takes `⌘⇧G`. This intentionally shadows AppKit's
+/// - `Open Project on GitHub` takes `⌘⇧G`. This intentionally shadows AppKit's
 ///   "Find Previous" — codans's text-input surfaces (palette query, rename sheet,
 ///   hotkey recorder) don't expose Find Next/Previous, so the cost is nil and the chord
 ///   pairs naturally with `⌘G` ("Toggle Git Viewer") + `⌘⌃G` ("Open PR on GitHub").
@@ -178,11 +178,9 @@ struct MainWindowCommands: Commands {
       .disabled(store() == nil)
     }
 
-    // Tab-bar uplift (M2-T2.9). Lands in its own CommandGroup — placed
-    // after the existing block so it reads as a second top-level group in
-    // the menu bar rather than inflating the first group's fan-out. Tabs
-    // take `⌥⌘1..⌥⌘9` (the prior `⌘1..⌘9` Space-switching bindings were
-    // removed in M2).
+    // Lands in its own CommandGroup — placed after the existing block so it
+    // reads as a second top-level group in the menu bar rather than inflating
+    // the first group's fan-out. Tabs take `⌥⌘1..⌥⌘9`.
     CommandGroup(after: .newItem) {
       Button("New Tab") {
         store()?.send(.newTabForCurrentWorktree)
@@ -314,7 +312,7 @@ struct MainWindowCommands: Commands {
   /// Doesn't gate on `gitRoot` (non-git Project ⇒ chord silently no-ops in the reducer)
   /// because exposing that gating in the Commands struct would require a
   /// `HierarchyManager` snapshot read — which inside SwiftUI `Commands` resolves against
-  /// `liveValue` and crashes (PR-#13 trap). Reducer's guard is sufficient.
+  /// `liveValue` and crashes. Reducer's guard is sufficient.
   private var hasCurrentProject: Bool {
     store()?.state.selection.projectID != nil
   }

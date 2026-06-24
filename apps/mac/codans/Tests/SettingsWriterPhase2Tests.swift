@@ -4,7 +4,7 @@ import CodansCore
 
 @testable import Codans
 
-/// Coverage for the `SettingsWriter` closures introduced in Phase 2.
+/// Coverage for the `SettingsWriter` closures.
 /// Each test uses a real `SettingsStore` backed by a temp file so we exercise
 /// the `mutateProject` path and verify persistence end-to-end.
 @MainActor

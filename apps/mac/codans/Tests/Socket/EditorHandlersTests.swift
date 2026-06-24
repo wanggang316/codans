@@ -6,7 +6,7 @@ import CodansIPC
 
 @testable import Codans
 
-/// C8a Phase 6 — `EditorHandlers` IPC coverage. Pins the wire-level contract for the four
+/// `EditorHandlers` IPC coverage. Pins the wire-level contract for the four
 /// `editor.*` methods against stub `EditorClient` + `HierarchyClient` + live `SettingsStore`:
 ///
 /// - `describe`: clears the service cache, then returns the DTO-mapped descriptor list.

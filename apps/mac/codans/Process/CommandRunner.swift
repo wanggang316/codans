@@ -60,7 +60,7 @@ private actor SubprocessGate {
   }
 }
 
-/// Live implementation. Correctness-critical points (see 0005 M2 review feedback):
+/// Live implementation. Correctness-critical points:
 ///
 /// - `terminationHandler` is installed **synchronously** before `process.run()`, so an exit
 ///   that lands between `run()` returning and our await arriving still resumes our

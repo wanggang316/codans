@@ -3,11 +3,9 @@ import os.log
 
 /// Entry point for loading `settings.json`: tries v2 first, falls back to v1 with a
 /// permissive legacy decode, backs aside anything that can neither be parsed nor recognised.
-/// `SettingsStore` delegates its initial load through `SettingsMigration.load` in Step 4.
+/// `SettingsStore` delegates its initial load through `SettingsMigration.load`.
 ///
-/// The migration algorithm is documented in docs/design-docs/settings-base.md §Data Storage.
-///
-/// ## Atomicity invariant (PR #22 review B1/B2)
+/// ## Atomicity invariant
 ///
 /// Data safety on the migration path is critical: a crash or partial failure must never
 /// destroy the user's historical settings without producing a recoverable backup. The legacy
@@ -159,7 +157,7 @@ public nonisolated enum SettingsMigration {
   public static func migrate(_ legacy: LegacyV1Settings) -> Settings {
     var general = GeneralSettings.default
     general.defaultEditorID = legacy.defaultEditorID
-    // C8a: legacy `customEditors` array is ignored on migration — see GeneralSettings doc.
+    // Legacy `customEditors` array is ignored on migration — see GeneralSettings.
 
     return Settings(
       version: Settings.currentVersion,

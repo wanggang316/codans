@@ -4,8 +4,7 @@ import CodansCore
 
 @testable import Codans
 
-/// Plumbing-only tests for `SettingsStoreReaderAdapter` (M2.T1). The
-/// coordinator that consumes this surface lands in M2.T2; here we only
+/// Plumbing-only tests for `SettingsStoreReaderAdapter`. Here we only
 /// verify the read-through, observation fan-out, cancellation, and the
 /// async `refresh()` cache.
 @MainActor

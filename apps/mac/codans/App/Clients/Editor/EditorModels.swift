@@ -6,7 +6,7 @@ import CodansCore
 /// result (nil for `.shellEditor` and for not-installed entries).
 ///
 /// `describe()` returns only installed entries; absence of a descriptor IS the "not installed"
-/// signal — there is no `InstallationStatus` enum in C8a.
+/// signal — there is no `InstallationStatus` enum.
 public nonisolated struct EditorDescriptor: Equatable, Hashable, Sendable, Identifiable, Codable {
   /// How the service launches a directory in this editor. Each branch corresponds to one
   /// mechanism in `EditorService.open`.
@@ -32,8 +32,8 @@ public nonisolated struct EditorDescriptor: Equatable, Hashable, Sendable, Ident
   /// Registry rows always start with `appURL = nil`; the service populates this at `describe`
   /// time against the live `AppLauncher`.
   public let appURL: URL?
-  /// Fallback bundle identifiers probed when the primary misses. Covers R1 (ToDesktop-style
-  /// bundle ID drift, e.g. future Cursor re-publishes). Empty by default.
+  /// Fallback bundle identifiers probed when the primary misses. Covers ToDesktop-style
+  /// bundle ID drift (e.g. future Cursor re-publishes). Empty by default.
   public let alternateBundleIdentifiers: [String]
 
   public init(
@@ -53,8 +53,7 @@ public nonisolated struct EditorDescriptor: Equatable, Hashable, Sendable, Ident
   }
 }
 
-/// Resolved editor returned from `EditorService.open` on success. `argv` is gone in C8a —
-/// NSWorkspace launches have no argv to expose and no consumer needed it.
+/// Resolved editor returned from `EditorService.open` on success.
 public nonisolated struct EditorChoice: Equatable, Hashable, Sendable, Codable {
   public let id: EditorID
   public let displayName: String

@@ -27,15 +27,15 @@ public protocol OSNotifier: AnyObject {
   func requestAuthorization() async -> AuthorizationStatus
   /// Posts a system banner for `entry`. `playSound` mirrors
   /// `NotificationsSettings.soundEnabled` at the moment the coordinator
-  /// (M2.T2) decided to surface this entry; the live SettingsStore value
-  /// is intentionally read once at the call site rather than re-read here
+  /// decided to surface this entry; the live SettingsStore value is
+  /// intentionally read once at the call site rather than re-read here
   /// so a same-tick toggle flip cannot race the banner build.
   ///
-  /// `sourceLabel` is the optional `<project> · <worktree>` breadcrumb
-  /// (HAN-78) the detector pre-resolved against the live catalog. When
-  /// non-nil it is appended to the banner body on its own line; nil
-  /// renders the body unchanged. The inbox row is unaffected — only the
-  /// OS-banner surface composes the breadcrumb here.
+  /// `sourceLabel` is the optional `<project> · <worktree>` breadcrumb the
+  /// detector pre-resolved against the live catalog. When non-nil it is
+  /// appended to the banner body on its own line; nil renders the body
+  /// unchanged. The inbox row is unaffected — only the OS-banner surface
+  /// composes the breadcrumb here.
   func post(_ entry: InboxEntry, playSound: Bool, sourceLabel: String?) async
 }
 
@@ -78,10 +78,10 @@ public final class UserNotificationsOSNotifier: OSNotifier {
 
     let content = UNMutableNotificationContent()
     content.title = entry.title
-    // HAN-78: append `<project> · <worktree>` on its own line after the
-    // body so the banner shows where the event came from without
-    // crowding the title. Empty body + non-nil label still renders the
-    // label as the only body line (no stray leading newline).
+    // Append `<project> · <worktree>` on its own line after the body so
+    // the banner shows where the event came from without crowding the
+    // title. Empty body + non-nil label still renders the label as the
+    // only body line (no stray leading newline).
     if let sourceLabel, !sourceLabel.isEmpty {
       content.body = entry.body.isEmpty ? sourceLabel : "\(entry.body)\n\(sourceLabel)"
     } else {

@@ -28,9 +28,9 @@ public enum QuitAction: String, Codable, CaseIterable, Equatable, Sendable {
 }
 
 /// `general` sub-tree of `settings.json` (v2). Carries the appearance placeholder, the
-/// global default `EditorID`, and global defaults for the GitHub integration. C8a retired
-/// the `customEditors` array that C8 shipped; legacy files that still carry it decode
-/// cleanly (the field is simply ignored) and are re-serialised without it on the next save.
+/// global default `EditorID`, and global defaults for the GitHub integration. The retired
+/// `customEditors` array decodes cleanly from legacy files (the field is simply ignored)
+/// and is re-serialised without it on the next save.
 public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   public var appearance: AppearancePreference
   /// Global default editor. `nil` means "no global default set" — resolution falls back to

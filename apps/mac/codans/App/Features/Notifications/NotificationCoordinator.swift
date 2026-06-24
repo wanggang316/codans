@@ -2,7 +2,7 @@ import Foundation
 import CodansCore
 import os.log
 
-/// Central chokepoint for v1.1 notifications. Every `Candidate` the detector
+/// Central chokepoint for notifications. Every `Candidate` the detector
 /// produces flows through `handle(_:)`, which gates against the four
 /// settings.json toggles (`inAppEnabled`, `systemEnabled`, `soundEnabled`,
 /// `dockBadgeEnabled`), routes the live banner through `OSNotifier`, and
@@ -13,10 +13,6 @@ import os.log
 /// tests to assert outcomes without scraping mock collaborators, and the
 /// settings + authorization snapshot is read at decision time rather than
 /// captured at construction so a same-tick toggle flip is honoured.
-///
-/// M4.T1 will lift the `DropReason` enum into `CodansCore.InboxDropReason`
-/// (shared with `PaneAttentionInterpreter.Step.drop`); the case names are pinned
-/// so the lift is mechanical.
 @MainActor
 final class NotificationCoordinator {
   private let inbox: NotificationStore
@@ -31,14 +27,14 @@ final class NotificationCoordinator {
 
   /// Unread count per worktree, maintained alongside `inbox` mutations.
   /// Surfaced for tests; the live "promote notified worktree to top"
-  /// behaviour (M6.T2) reads the per-call `before` delta directly off
+  /// behaviour reads the per-call `before` delta directly off
   /// `inbox.entries` rather than this cache so a same-tick mutation
   /// outside the coordinator cannot desync the gate.
   internal private(set) var unreadByWorktree: [WorktreeID: Int] = [:]
 
   /// Test seam: drop reasons logged on the most recent `handle(_:)` call.
   /// Reset at the top of every `handle` invocation. Production reads only
-  /// the `Decision` return value; this exists so test L-001 can assert the
+  /// the `Decision` return value; this exists so a test can assert the
   /// log-emitting code path was exercised without intercepting `os.Logger`.
   internal private(set) var lastDropReasons: [DropReason] = []
 
@@ -57,7 +53,7 @@ final class NotificationCoordinator {
 
     // Bootstrap the unread-per-worktree cache from any inbox entries that
     // were rehydrated from disk. Without this, a process restart with
-    // persisted unread entries would leave the cache at zero and the M6.T2
+    // persisted unread entries would leave the cache at zero and the
     // promotion logic would never fire until a brand-new notification
     // landed on that worktree.
     for entry in inbox.entries where entry.isUnread {
@@ -86,7 +82,7 @@ final class NotificationCoordinator {
     // per-worktree unread count did NOT actually grow on this call, so
     // we read the canonical count from `inbox.entries` before and after
     // the append and report the actual delta. The cache mirrors the
-    // post-append truth so the M6.T2 promote logic below sees a faithful
+    // post-append truth so the promote logic below sees a faithful
     // 0→N edge rather than an inflated synthetic one.
     //
     // `before` is hoisted out of the `if settings.inAppEnabled` block so
@@ -149,13 +145,9 @@ final class NotificationCoordinator {
     // catalog (HierarchyManager.promoteWorktree silently no-ops on pinned
     // targets — coordinator policy stays simple). Subsequent unreads on
     // the same worktree do NOT retrigger because `before > 0`. The
-    // promote is one-shot: marking all read flips `before` back to 0 so
-    // the next unread on that worktree re-promotes (AC-V11-WT-003: the
-    // position is not restored when unread drops to zero, but a fresh
-    // 0→N edge does re-promote).
-    //
-    // Covers AC-V11-WT-001..006; AC-V11-D-001 (debounced disk write via
-    // setPaneLabel) is a separate code path owned by HierarchyManager.
+    // promote is one-shot: the position is not restored when unread drops
+    // to zero, but marking all read flips `before` back to 0 so the next
+    // unread on that worktree re-promotes.
     let didPromote: Bool
     if didAppend && settings.moveNotifiedWorktreeToTop && before == 0 {
       catalog.promoteWorktree(
@@ -299,9 +291,9 @@ final class NotificationCoordinator {
     /// True iff the source pane equals the user's globally-focused pane.
     let sourceIsFocused: Bool
     /// `<project> · <worktree>` resolved by the detector against the live
-    /// catalog (HAN-78). Appended on its own line after the OS banner
-    /// body; inbox surfaces don't read this field. Nil when the source
-    /// cache fallback path was taken (live catalog lost both names).
+    /// catalog. Appended on its own line after the OS banner body; inbox
+    /// surfaces don't read this field. Nil when the source cache fallback
+    /// path was taken (live catalog lost both names).
     let bannerSourceLabel: String?
 
     init(entry: InboxEntry, sourceIsFocused: Bool, bannerSourceLabel: String? = nil) {
@@ -327,13 +319,9 @@ final class NotificationCoordinator {
     case dropped(reason: DropReason)
   }
 
-  /// Local to M2.T2. M4.T1 will lift this into
-  /// `CodansCore.InboxDropReason` (shared with
-  /// `PaneAttentionInterpreter.Step.drop`). Case names are pinned so the lift is
-  /// mechanical. `paneMuted`, `commandFinishedDisabled`,
-  /// `commandFinishedShort`, `commandCancelled`, `userTypingRecently` are
-  /// reserved for the interpreter log line — the coordinator itself does not
-  /// emit them today.
+  /// `paneMuted`, `commandFinishedDisabled`, `commandFinishedShort`,
+  /// `commandCancelled`, `userTypingRecently` are reserved for the
+  /// interpreter log line — the coordinator itself does not emit them today.
   enum DropReason: String, Equatable, Sendable {
     case sourceIsFocused
     case inAppDisabled

@@ -3,14 +3,14 @@ import Testing
 
 @testable import Codans
 
-/// Covers the four behaviours of `GhExecutableResolver` documented in exec-plan 0012 M0:
+/// Covers the four behaviours of `GhExecutableResolver`:
 ///   - missing binary returns nil
 ///   - present binary is cached across calls
 ///   - concurrent callers share a single resolution (single-flight)
 ///   - explicit invalidation forces re-probe
 ///
 /// Tests inject a counting prober closure rather than hitting the filesystem. The
-/// live-FS path is exercised indirectly by the M2 integration tests against real `gh`.
+/// live-FS path is exercised indirectly by the integration tests against real `gh`.
 struct GhExecutableResolverTests {
   /// Counts how many times the prober was invoked so tests can assert caching / single-flight.
   actor ProbeCounter {

@@ -32,7 +32,7 @@ struct InMemoryIPCServerTests {
 
     try server.send(IPC.Request(id: "bad-1", method: .systemPing))
     let response = try await server.awaitResponse()
-    // M3.1 fix: non-hello first frame is a handshake-ordering violation,
+    // A non-hello first frame is a handshake-ordering violation,
     // surfaced as `.invalidParams` on the `method` path — not
     // `.versionMismatch`, which is reserved for actual version clashes
     // that happen on a well-formed `system.hello`.
@@ -46,7 +46,7 @@ struct InMemoryIPCServerTests {
   @Test
   func inflightCapRejectsPostHelloWithOverloaded() async throws {
     // Server with cap=0 forces every post-hello frame into the
-    // `.overloaded` branch — proves the wire contract for DEC-9
+    // `.overloaded` branch — proves the wire contract for
     // backpressure even while actor-serialized handling keeps real
     // inflight at ≤ 1 in production.
     let systemHandlers = SystemHandlers(

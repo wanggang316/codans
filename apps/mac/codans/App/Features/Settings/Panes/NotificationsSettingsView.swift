@@ -3,8 +3,8 @@ import SwiftUI
 import CodansCore
 @preconcurrency import UserNotifications
 
-/// Settings → Notifications pane (v1.1). Surfaces every user-visible knob
-/// consumed by `NotificationCoordinator` plus the v1.0 macOS authorization
+/// Settings → Notifications pane. Surfaces every user-visible knob
+/// consumed by `NotificationCoordinator` plus the macOS authorization
 /// recovery surface:
 ///
 /// 1. Three sections by surface (`In-app`, `System`, `Command Finished`).
@@ -34,10 +34,10 @@ import CodansCore
 ///    `NotificationsSettings.thresholdRange` so hand-typed extremes never
 ///    reach the persisted JSON.
 ///
-/// Permission alert (D1 in the v1.1 design doc): flipping System notifications
-/// on while macOS authorization is `.denied` shows an alert that deep-links
-/// into System Settings. The toggle's persisted value is preserved regardless
-/// of the user's alert choice — we only inform; we don't roll back state.
+/// Permission alert: flipping System notifications on while macOS
+/// authorization is `.denied` shows an alert that deep-links into System
+/// Settings. The toggle's persisted value is preserved regardless of the
+/// user's alert choice — we only inform; we don't roll back state.
 ///
 /// Authorization is re-read on every appear and on `applicationDidBecomeActive`
 /// so a flip in System Settings takes effect without a relaunch.
@@ -139,11 +139,11 @@ struct NotificationsSettingsView: View {
       get: { settingsStore.settings.notifications.systemEnabled },
       set: { newValue in
         settingsStore.mutateNotifications { $0.systemEnabled = newValue }
-        // D1 — when the user enables System notifications while macOS has
-        // already denied authorization, the toggle alone has no runtime
-        // effect. Surface the alert so they know to flip the OS-level switch
-        // too. The persisted value is intentionally NOT rolled back; the
-        // setting reflects user intent, the alert reflects current reality.
+        // When the user enables System notifications while macOS has already
+        // denied authorization, the toggle alone has no runtime effect.
+        // Surface the alert so they know to flip the OS-level switch too. The
+        // persisted value is intentionally NOT rolled back; the setting
+        // reflects user intent, the alert reflects current reality.
         guard newValue, let notifier = osNotifier else { return }
         Task {
           let current = await notifier.currentAuthorizationStatus()

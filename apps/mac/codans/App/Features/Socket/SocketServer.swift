@@ -12,8 +12,7 @@ import os
 /// The accept path uses `DispatchSource.makeReadSource(fileDescriptor:)`
 /// over an `O_NONBLOCK` listen socket — so `stop()` can cancel the source
 /// and the server tears down without leaving a thread parked in a blocking
-/// `accept(2)`. Exec-plan 0003 review (M3.1) replaced the earlier
-/// Task.detached while-accept loop.
+/// `accept(2)`.
 @MainActor
 public final class SocketServer {
   public let path: String
@@ -164,11 +163,11 @@ public final class SocketServer {
       _ = fcntl(clientFD, F_SETFL, flags & ~O_NONBLOCK)
     }
 
-    // M3.1 defense-in-depth: verify the kernel-reported peer UID
-    // matches ours before any framing / handshake work runs. The
-    // socket file mode (0600 + owner UID) already blocks cross-UID
-    // connects at the filesystem level; this closes the TOCTOU tail
-    // and covers filesystems that ignore mode bits.
+    // Defense-in-depth: verify the kernel-reported peer UID matches ours
+    // before any framing / handshake work runs. The socket file mode
+    // (0600 + owner UID) already blocks cross-UID connects at the
+    // filesystem level; this closes the TOCTOU tail and covers
+    // filesystems that ignore mode bits.
     switch SocketPeerAuth.authorize(fd: clientFD) {
     case .success:
       break

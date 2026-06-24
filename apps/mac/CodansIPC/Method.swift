@@ -2,11 +2,10 @@ import Foundation
 
 extension IPC {
   /// Every RPC method. Raw values are the on-wire method strings — lowercase
-  /// dotted identifiers per the C4 design doc. Both client and server switch
-  /// on this enum, never on the raw string.
+  /// dotted identifiers. Both client and server switch on this enum, never on
+  /// the raw string.
   ///
-  /// `skill.*` methods are intentionally absent (exec-plan 0003 DEC-5 defers
-  /// the entire skill surface to exec-plan 0004).
+  /// `skill.*` methods are intentionally absent — the skill surface is deferred.
   public enum Method: String, Codable, Hashable, Sendable, CaseIterable {
     // system
     case systemHello = "system.hello"
@@ -16,9 +15,8 @@ extension IPC {
     case systemQuit = "system.quit"
 
     // editor — `editor.*` IPC surface. Handlers live in `EditorHandlers`;
-    // `MethodRouter` dispatches each case post-M6b. C8a Phase 4c renamed
-    // `editor.setDefault` → `editor.setGlobalDefault` and added
-    // `editor.setProjectDefault` as a distinct verb for per-Project overrides.
+    // `MethodRouter` dispatches each case. `setGlobalDefault` and
+    // `setProjectDefault` are distinct verbs (global vs per-Project override).
     case editorDescribe = "editor.describe"
     case editorOpen = "editor.open"
     case editorSetGlobalDefault = "editor.setGlobalDefault"

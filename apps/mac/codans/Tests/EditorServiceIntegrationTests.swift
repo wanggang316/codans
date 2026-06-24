@@ -5,7 +5,7 @@ import CodansCore
 
 @testable import Codans
 
-/// C8a Phase 6.5 — integration smoke test. Hits the real `NSWorkspace` via `LiveAppLauncher`
+/// Integration smoke test. Hits the real `NSWorkspace` via `LiveAppLauncher`
 /// to verify that a freshly-built `LiveEditorService` can open a temp directory in Finder end
 /// to end. Gated behind `TC_RUN_EDITOR_INTEGRATION_TESTS=1` so CI and the default local
 /// `make mac-test` run stay hermetic; enable locally when sanity-checking the NSWorkspace seam.

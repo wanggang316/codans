@@ -1,6 +1,6 @@
 import Foundation
 
-/// Internal-conflict tier of the multi-tier conflict detector (design doc §3.4).
+/// Internal-conflict tier of the multi-tier conflict detector.
 ///
 /// Reports a collision when a candidate `(keyCode, modifiers)` chord is already in use by a
 /// *different* `.configurable` command that is currently enabled and bound. `.systemFixed` and

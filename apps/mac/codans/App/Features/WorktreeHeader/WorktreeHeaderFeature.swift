@@ -32,16 +32,15 @@ struct WorktreeHeaderFeature {
     case pickEditorFromMenuTapped(EditorID)
     case customEditorsTapped
     case setProjectDefaultEditorTapped(projectID: ProjectID, editorID: EditorID?)
-    /// Run script split-button — primary or menu activation. Phase 2.
+    /// Run script split-button — primary or menu activation.
     ///
     /// Carries only `scriptID`; `RootFeature` resolves the target Project +
     /// Worktree from `state.selection` at handle-time. Mirrors the
     /// `pickEditorFromMenuTapped` pattern: SwiftUI bridges Menu content to
     /// NSMenuItem actions whose closure captures don't always refresh on
     /// view rebuild, and the `.keyboardShortcut` chord routes through that
-    /// same path — so a worktree switch could previously fire the script
-    /// against a stale worktreeID. Inline `primaryAction` callers were
-    /// unaffected, but the menu / chord paths were.
+    /// same path — resolving at handle-time keeps a worktree switch from
+    /// firing the script against a stale worktreeID.
     case runScriptTapped(scriptID: UUID)
     /// Run half for a global command (`general.globalScripts`). Carries only
     /// `scriptID`; RootFeature resolves the target Project + Worktree from

@@ -6,7 +6,7 @@ import CodansCore
 
 @testable import Codans
 
-/// M10 coverage: `CommandPaletteItems.build` surfaces one `runProjectScript`
+/// `CommandPaletteItems.build` surfaces one `runProjectScript`
 /// item per active-Project script, the items track active-selection
 /// switches, and `RootFeature` routes activation into
 /// `HierarchyClient.runScript`.

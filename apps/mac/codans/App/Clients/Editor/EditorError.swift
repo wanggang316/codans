@@ -1,10 +1,9 @@
 import Foundation
 import CodansCore
 
-/// Errors surfaced by `EditorService`. C8a simplifies the set to three cases — the NSWorkspace
-/// launch path has no exit code, no timeout, and no child-process spawn failure mode. Each
-/// case maps to a UI toast (see design doc §Error handling) and to an `EditorIPCError` at the
-/// IPC boundary.
+/// Errors surfaced by `EditorService`. Three cases only — the NSWorkspace launch path has no
+/// exit code, no timeout, and no child-process spawn failure mode. Each case maps to a UI toast
+/// and to an `EditorIPCError` at the IPC boundary.
 public nonisolated enum EditorError: LocalizedError, Equatable, Sendable {
   /// An explicit preferred editor was not resolvable via Launch Services. Raised only for
   /// strict (user-explicit) preferred requests; silent defaults fall through instead.

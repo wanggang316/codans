@@ -6,8 +6,7 @@ import CodansCore
 /// bodies based on the data it was given.
 ///
 /// The popover is a pure consumer of state: all actions are callbacks bubbled up to the
-/// parent feature. That keeps the view testable in previews without a TCA store and
-/// matches the C8 editor-picker pattern.
+/// parent feature. That keeps the view testable in previews without a TCA store.
 struct PullRequestPopover: View {
   enum Content: Equatable {
     case loaded(PullRequestSnapshot, checks: [CheckResult], workflowRun: WorkflowRun?)
@@ -37,7 +36,7 @@ struct PullRequestPopover: View {
       // `controlSize` into the popover than List-row hosts (sidebar),
       // so the same popover otherwise rendered at two different sizes
       // depending on which surface opened it. Pinning `.regular` here
-      // normalises both surfaces (HAN-60).
+      // normalises both surfaces.
       .controlSize(.regular)
   }
 

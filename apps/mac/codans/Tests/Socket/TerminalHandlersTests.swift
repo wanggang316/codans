@@ -5,8 +5,8 @@ import Testing
 @testable import CodansCore
 @testable import CodansIPC
 
-/// M6's terminal.sendInput / broadcastInput are intentionally backed by
-/// an injectable `TerminalHandlers.InputSink` protocol — the M6
+/// terminal.sendInput / broadcastInput are intentionally backed by
+/// an injectable `TerminalHandlers.InputSink` protocol — the
 /// bootstrap passes `nil`, so both RPCs must surface `.unsupported`
 /// cleanly (exit code 4 for the CLI). These tests pin that contract + a
 /// minimum-viable fake-sink path proving the routing wires up.
@@ -31,7 +31,7 @@ struct TerminalHandlersTests {
     )
     let response = try await server.awaitResponse()
     if case .unsupported = response.error {
-      // expected — M6 bootstrap intentionally ships without a live
+      // expected — the bootstrap intentionally ships without a live
       // GhosttyRuntime.
     } else {
       Issue.record("expected .unsupported, got \(String(describing: response.error))")

@@ -4,8 +4,8 @@ import Foundation
 /// enum) so the `codans` CLI and the app can compare wire methods without coupling to a Swift enum's
 /// rawValue indirection.
 ///
-/// C8a Phase 4c renamed `editor.setDefault` → `editor.setGlobalDefault` (per-project override
-/// moves to a separate verb for clarity). `editor.setProjectDefault` is new in C8a.
+/// Global and per-Project editor defaults are distinct verbs (`setGlobalDefault` vs
+/// `setProjectDefault`) for clarity.
 public nonisolated enum EditorIPCMethod {
   public static let describe = "editor.describe"
   public static let open = "editor.open"

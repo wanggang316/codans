@@ -4,7 +4,7 @@ import CodansCore
 
 @testable import Codans
 
-/// C8a Phase 6.1 — registry sanity coverage. Pins the shape of the 34-entry static registry:
+/// Registry sanity coverage. Pins the shape of the 34-entry static registry:
 /// size, ID uniqueness, bundle-ID invariants, and priority-list consistency. Catches both
 /// accidental duplication (e.g. adding a new editor without pruning the old) and stale
 /// references (priority lists citing IDs that no longer exist in the registry).

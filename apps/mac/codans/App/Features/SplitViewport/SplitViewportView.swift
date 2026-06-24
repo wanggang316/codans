@@ -10,7 +10,7 @@ import CodansCore
 /// reducer via `.panesInActiveTabChanged(_:)`.
 ///
 /// Empty-Tab UX: centered "No panes" placeholder with a "New Pane" button.
-/// The Tab is never auto-closed by this view (M4 contract from exec plan).
+/// The Tab is never auto-closed by this view.
 struct SplitViewportView: View {
   @Bindable var store: StoreOf<SplitViewportFeature>
   let projectID: ProjectID

@@ -4,9 +4,7 @@ import Foundation
 /// needs. Injectable so tests can substitute an in-memory fake.
 ///
 /// Scoped to the CLI installer domain today; promote out of `CLIInstaller/` if a
-/// second feature adopts it. Previously lived in the (now-deleted) Skill subsystem
-/// as `SkillFileSystem` — renamed and relocated when PR #15 decoupled Skill from
-/// the engineering tree so nothing in the code path keeps a "skill" prefix.
+/// second feature adopts it.
 public protocol CLIFilesystem: Sendable {
   func fileExists(atPath path: String) -> Bool
   func isDirectory(atPath path: String) -> Bool

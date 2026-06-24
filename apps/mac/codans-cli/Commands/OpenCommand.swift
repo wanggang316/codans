@@ -7,10 +7,9 @@ import CodansKit
 /// `codans open [--in <editor>] [<path>]` — launch an external editor (or terminal / git client /
 /// Finder / `$EDITOR`) against a directory by calling the app-side `editor.open` RPC.
 ///
-/// C8a Phase 4c reshaped the wire: `path` is mandatory and the `<worktree>` / `--path`
-/// distinction collapsed into a single positional path argument (defaults to `$PWD`). The
-/// per-Project override lookup happens server-side in `EditorHandlers.open` — the CLI just
-/// sends the canonical path + optional explicit `--in` editor.
+/// `path` is a single positional argument (defaults to `$PWD`). The per-Project override
+/// lookup happens server-side in `EditorHandlers.open` — the CLI just sends the canonical
+/// path + optional explicit `--in` editor.
 ///
 /// Editor precedence (handled server-side by EditorService):
 ///  1. `--in` explicit flag on this command (strict: throws if uninstalled).

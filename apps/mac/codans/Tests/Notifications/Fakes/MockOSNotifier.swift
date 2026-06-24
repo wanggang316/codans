@@ -8,8 +8,8 @@ import CodansCore
 // The conforming members below are `async` because the production
 // `OSNotifier` protocol requires it; the mock has no real async work to do.
 
-/// Test double for `OSNotifier`. M2.T2 added the `playSound:` parameter to
-/// `post`; the recorded tuples preserve both the entry and the flag so
+/// Test double for `OSNotifier`. The `post` method takes a `playSound:`
+/// parameter; the recorded tuples preserve both the entry and the flag so
 /// `NotificationCoordinatorTests` can assert on either dimension.
 @MainActor
 final class MockOSNotifier: OSNotifier {

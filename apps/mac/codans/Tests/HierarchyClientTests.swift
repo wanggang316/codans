@@ -129,7 +129,7 @@ struct HierarchyClientTests {
     #expect(pinned == [p2, p1])
   }
 
-  // MARK: - promoteWorktree (M6.T1)
+  // MARK: - promoteWorktree
 
   /// Three unpinned worktrees A/B/C → promoting B lands it at the front of
   /// the unpinned segment. Covers the v1.1 notifications-promote primitive
@@ -226,7 +226,7 @@ struct HierarchyClientTests {
     // No expectation needed beyond "did not crash".
   }
 
-  // MARK: - setPaneLabel (M6.T1)
+  // MARK: - setPaneLabel
 
   /// Helper: opens a pane in a fresh tab on a fresh worktree and returns the
   /// (projectID, paneID) pair used by the label tests below.
