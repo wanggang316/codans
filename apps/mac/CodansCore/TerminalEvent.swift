@@ -26,7 +26,7 @@ public nonisolated enum TerminalEvent: Sendable {
   case paneReady(PaneID)
   /// Coalesced bytes batch. Note: `data` may split a UTF-8 codepoint at the
   /// 16 KB buffer boundary — consumers that decode text (scrollback viewer,
-  /// C3 hook matchers) must buffer across batches per pane.
+  /// hook matchers) must buffer across batches per pane.
   case paneOutput(PaneID, Data)
   case paneViewportChanged(PaneID, text: String)
   case paneIdle(PaneID, duration: TimeInterval)

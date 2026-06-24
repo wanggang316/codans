@@ -3,8 +3,7 @@ import Foundation
 
 /// Numeric design tokens for the Tab bar. Kept as an enum (no instances) so
 /// the values live in one grep-able place; any layout tweak is a one-file
-/// diff. Values tracked to the tab-bar design doc (`docs/design-docs/tab-bar.md`
-/// §Visual Spec).
+/// diff.
 enum TabBarMetrics {
   /// Height of the full Tab bar row.
   static let barHeight: CGFloat = 32
@@ -43,7 +42,7 @@ enum TabBarMetrics {
   static let dividerHeight: CGFloat = barHeight
 
   /// Delay before the trailing split buttons show their pane-tree preview
-  /// popover, matching the design doc interaction table.
+  /// popover.
   static let hoverPreviewDelay: Duration = .milliseconds(350)
 
   /// Drag-reorder kicks in only after the pointer moves this far — keeps

@@ -17,21 +17,20 @@ struct ContentView: View {
   /// Per-Worktree uncommitted-edits diff cache. Drives the `+N −M` chip on
   /// every worktree row, not just rows with a matched PR.
   let worktreeLocalDiffMonitor: WorktreeLocalDiffMonitor
-  /// v1 notifications roll-up. Threaded via `.environment` so sidebar
+  /// Notifications roll-up. Threaded via `.environment` so sidebar
   /// rows / tab bar / pane chrome can read per-level unread indicators
   /// without each site owning its own derivation.
   let notificationRollup: RollupIndexProvider?
-  /// v1 inbox owner. Threaded so the InboxBellView's popover can read
+  /// Inbox owner. Threaded so the InboxBellView's popover can read
   /// `entries`, mark rows read, and trigger a "Mark all read".
   let notificationStore: NotificationStore?
-  /// v1 banner adapter. Threaded so the Settings → Notifications pane
+  /// Banner adapter. Threaded so the Settings → Notifications pane
   /// reuses the long-lived instance instead of spawning a fresh one
   /// (each spawn re-runs `setNotificationCategories` on the shared
   /// UN center).
   let osNotifier: UserNotificationsOSNotifier?
-  /// T6 (active-agents): registry that backs the worktree-toolbar
-  /// badge + popover. Optional because `AppState.bringUp` constructs
-  /// it lazily; nil renders no badge.
+  /// Registry that backs the worktree-toolbar badge + popover. Optional
+  /// because `AppState.bringUp` constructs it lazily; nil renders no badge.
   let agentStateStore: AgentStateStore?
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.

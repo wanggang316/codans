@@ -41,7 +41,7 @@ struct SettingsMigrationTests {
     #expect(settings.projects.isEmpty)
     #expect(backupURL.lastPathComponent.hasPrefix("settings.json.v1-"))
     #expect(FileManager.default.fileExists(atPath: backupURL.path))
-    // Post PR #22 review B2: migration now commits the v2 tree atomically, so the canonical
+    // Migration now commits the v2 tree atomically, so the canonical
     // URL must already hold the migrated content when `.migratedFromV1` returns.
     #expect(FileManager.default.fileExists(atPath: harness.fileURL.path))
     let readBack = try #require(try AtomicFileStore.read(Settings.self, at: harness.fileURL))

@@ -107,9 +107,8 @@ public final class MethodRouter {
     }
   }
 
-  /// Tag-scoped mutations introduced in M6 alongside the `codans tag` /
-  /// `codans project tag` CLI surface. Lives in its own sub-router so the
-  /// switch in `routeHierarchyMutations` doesn't grow unbounded.
+  /// Tag-scoped mutations. Lives in its own sub-router so the switch in
+  /// `routeHierarchyMutations` doesn't grow unbounded.
   private func routeHierarchyTags(
     _ request: IPC.Request,
     handlers h: HierarchyHandlers
@@ -129,11 +128,6 @@ public final class MethodRouter {
   /// can invoke them directly with `EditorOpenRequest` etc.; the router
   /// decodes `request.params`, invokes the matching method, and re-encodes
   /// the typed response.
-  ///
-  /// C8a Phase 4c: `editor.setDefault` is split into `editor.setGlobalDefault`
-  /// (writes `settings.general.defaultEditorID`) and `editor.setProjectDefault`
-  /// (writes `Project.defaultEditor`); `editor.open` carries a mandatory `path`
-  /// and no longer a `worktreeID`.
   private func routeEditor(_ request: IPC.Request) async -> RouterOutcome? {
     guard let h = editorHandlers else { return nil }
     switch request.method {
@@ -228,10 +222,8 @@ public final class MethodRouter {
     case .systemStatus: return await systemHandlers.status(request.params)
     case .systemQuit: return await systemHandlers.quit(request.params)
     // Non-system methods fall through to the next sub-router. A future
-    // `system.*` case landing in this router silently reaches
-    // `notWired(.unsupported)` without this branch; reviewer flagged
-    // (M3.0.1 nit #1) as acceptable for now — a proper fix would split
-    // `IPC.Method` into per-namespace sub-enums, tracked for M3.1.
+    // `system.*` case landing in this router would silently reach
+    // `notWired(.unsupported)` without this branch.
     default: return nil
     }
   }

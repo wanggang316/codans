@@ -70,8 +70,7 @@ struct CodansApp: App {
     // `WindowGroup`) ensures re-activating the dock icon brings the
     // existing window forward instead of spawning a duplicate, and the
     // system menu does not synthesize a "New Window" item that would let
-    // users create extras out-of-band. See docs/design-docs/project-tags.md
-    // §3.8 for the close-vs-quit semantics.
+    // users create extras out-of-band.
     Window("Codans", id: CodansApp.mainWindowID) {
       AppAppearanceView(settingsStore: appState.settingsStore) {
         if let store = appState.store, appState.terminalEngine != nil {
@@ -195,7 +194,7 @@ struct CodansApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   weak var appState: AppState?
 
-  /// SNAP-009 re-entrancy guard. A first `applicationShouldTerminate` that
+  /// Re-entrancy guard. A first `applicationShouldTerminate` that
   /// chooses a disposition returns `.terminateLater` and spawns the (async)
   /// snapshot/detach work in a detached `@MainActor` Task. AppKit keeps the
   /// process alive pending the `reply`, but a fresh user-initiated quit
@@ -251,7 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     _ sender: NSApplication
   ) -> NSApplication.TerminateReply {
     MainActor.assumeIsolated {
-      // SNAP-009: a disposition (snapshot/detach) is already in flight from a
+      // A disposition (snapshot/detach) is already in flight from a
       // prior terminate. Do NOT re-run it — that would double-dispatch the
       // snapshot loop and the `sessions.json` persist. Re-return `.terminateLater`
       // so AppKit keeps waiting on the original `reply`; no dialog, no second pass.
@@ -316,7 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     action: QuitAction,
     sender: NSApplication
   ) -> NSApplication.TerminateReply {
-    // SNAP-009: latch before dispatching so any re-entrant terminate is a no-op.
+    // Latch before dispatching so any re-entrant terminate is a no-op.
     dispositionInProgress = true
     // Hard ceiling on the total quit wait. `detachAllForQuit` is already
     // bounded by the per-pane timeout × concurrency-window factor; this is a
@@ -438,7 +437,7 @@ final class AppState {
   let hierarchyManager: HierarchyManager
   let settingsStore: SettingsStore
   let shortcutsStore: ShortcutsStore
-  /// v1 notifications inbox owner; survives the full app lifetime so the
+  /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.config/codans/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
   let notificationStore: NotificationStore
@@ -452,50 +451,48 @@ final class AppState {
   /// Mirrors `notificationStore.unreadCount` onto the macOS Dock tile badge
   /// via `withObservationTracking` re-registration.
   @ObservationIgnored private var dockBadgerTask: Task<Void, Never>?
-  /// R1: re-marks unread entries as read whenever the user focuses the
+  /// Re-marks unread entries as read whenever the user focuses the
   /// pane they belong to. Observes catalog focus state via Observation
   /// re-registration; held so shutdown can cancel cleanly.
   @ObservationIgnored private var focusReadMarkerTask: Task<Void, Never>?
   /// Marks orphaned unread entries (whose source pane no longer exists in
   /// the catalog) as read. Observes the catalog's pane membership via the
-  /// same re-registration pattern as the R1 marker; held so shutdown can
-  /// cancel cleanly. Runs an initial sweep on first iteration to clean up
+  /// same re-registration pattern as the focus-read marker; held so shutdown
+  /// can cancel cleanly. Runs an initial sweep on first iteration to clean up
   /// entries inherited from prior launches.
   @ObservationIgnored private var orphanSweepTask: Task<Void, Never>?
-  /// Live banner adapter; held so M5's Settings panel can call
+  /// Live banner adapter; held so the Settings panel can call
   /// `requestAuthorization()` from the recovery button. Single instance
   /// per process — Settings panel reads via `@Environment` rather than
   /// spawning its own (each `init` re-runs setNotificationCategories
   /// on the shared center).
   @ObservationIgnored private(set) var osNotifier: UserNotificationsOSNotifier?
-  /// M2.T2 single chokepoint: gates every detector candidate against the
-  /// v1.1 settings toggles and drives the inbox + banner + dock badge in
+  /// Single chokepoint: gates every detector candidate against the
+  /// settings toggles and drives the inbox + banner + dock badge in
   /// lockstep. Held so the lifetime tracks the app and so the dock-badge
   /// mirror task can call `recomputeDockBadge` on `unreadCount` changes
   /// that originate from non-coordinator paths (markRead, sweepOrphan...).
   @ObservationIgnored private(set) var notificationCoordinator: NotificationCoordinator?
-  /// Active-agents T3: classifies the agent driving each pane and persists
-  /// the verdict via `HierarchyClient.setPaneAgentKind`. Constructed in
+  /// Classifies the agent driving each pane and persists the verdict via
+  /// `HierarchyClient.setPaneAgentKind`. Constructed in
   /// `startNotificationObservers` (it shares the engine-event drain with
   /// `NotificationDetector`) and dispatched from the same `for await event`
   /// loop. Long-lived for the app lifetime.
   @ObservationIgnored private(set) var agentBinder: AgentBinder?
-  /// Active-agents T6: derived UI-side state machine for the badge +
-  /// popover. Subscribes to four event sources (terminal events,
-  /// keystrokes, focus, agent bind/unbind) wired in
-  /// `startNotificationObservers`. Held long-lived so SwiftUI consumers
-  /// outlive any scene reattach.
+  /// Derived UI-side state machine for the badge + popover. Subscribes to
+  /// four event sources (terminal events, keystrokes, focus, agent
+  /// bind/unbind) wired in `startNotificationObservers`. Held long-lived
+  /// so SwiftUI consumers outlive any scene reattach.
   @ObservationIgnored private(set) var agentStateStore: AgentStateStore?
   /// Long-running focus observer for AgentStateStore. Re-arms on every
   /// catalog mutation that could change the globally-focused pane and
   /// forwards new ids to `registry.onPaneFocused`. Same re-arming
   /// pattern as `observeFocusedPaneForRead`.
   @ObservationIgnored private var agentStateFocusTask: Task<Void, Never>?
-  /// M5.T1 keystroke side channel: per-pane "last user keystroke at"
-  /// timestamps fed into the translator's `userTypingRecently` window.
-  /// Strong reference here keeps the tracker alive; the
-  /// `PaneKeyboardActivityTracker.shared` weak handle exposes it to the
-  /// AppKit `GhosttySurfaceView` keystroke site.
+  /// Keystroke side channel: per-pane "last user keystroke at" timestamps
+  /// fed into the translator's `userTypingRecently` window. Strong reference
+  /// here keeps the tracker alive; the `PaneKeyboardActivityTracker.shared`
+  /// weak handle exposes it to the AppKit `GhosttySurfaceView` keystroke site.
   @ObservationIgnored private(set) var keystrokeTracker: PaneKeyboardActivityTracker?
   /// Backing reader behind `NotificationCoordinator`. Held so we can fire
   /// `refreshAuthorizationStatus` from the `applicationDidBecomeActive`
@@ -515,7 +512,7 @@ final class AppState {
   private(set) var store: StoreOf<RootFeature>?
   /// Long-lived store for the Settings window scene. Built during `bringUp()` so the
   /// store — and its in-memory editor-pane state — survives open/close cycles of the
-  /// window (spec M16).
+  /// window.
   private(set) var settingsWindowStore: StoreOf<SettingsWindowFeature>?
   /// Shared dependency container for the Developer pane. Built at the tail
   /// of `bringUp()`; nil until then, which is why the Settings scene body
@@ -551,11 +548,11 @@ final class AppState {
   /// invalidate the cache.
   let worktreeLocalDiffMonitor: WorktreeLocalDiffMonitor
 
-  /// HAN-62: watches `.git/HEAD` for every catalog Worktree so terminal-
-  /// driven `git checkout` inside a pane propagates to the catalog row's
-  /// `branch` (and downstream PR badges) without waiting for the next
-  /// app-focus event. Created here so its lifetime tracks the app and
-  /// the catalog-sync task lives inside `bringUp`.
+  /// Watches `.git/HEAD` for every catalog Worktree so terminal-driven
+  /// `git checkout` inside a pane propagates to the catalog row's `branch`
+  /// (and downstream PR badges) without waiting for the next app-focus
+  /// event. Created here so its lifetime tracks the app and the
+  /// catalog-sync task lives inside `bringUp`.
   let worktreeHeadWatcher: WorktreeHeadWatcher
   private var worktreeHeadWatcherSyncTask: Task<Void, Never>?
 
@@ -620,7 +617,7 @@ final class AppState {
     hierarchyRuntime.attach(engine: engine)
     bootstrapSessionStack(ghostty: ghostty, engine: engine)
 
-    // SettingsStore loads itself (with v1→v2 migration) during `init(fileURL:)`.
+    // SettingsStore loads itself (and migrates legacy formats) during `init(fileURL:)`.
     let manager = hierarchyManager
     let settings = settingsStore
 
@@ -636,8 +633,8 @@ final class AppState {
     self.editorClient = editor
     self.hierarchyClient = hierarchy
 
-    // Notification observers + coordinator depend on `hierarchy` (the M2.T2
-    // coordinator captures `HierarchyClient` so M6.T2 can call
+    // Notification observers + coordinator depend on `hierarchy` (the
+    // coordinator captures `HierarchyClient` so it can call
     // `reorderWorktrees`). Construct them AFTER `hierarchy` is built but
     // BEFORE the RootStore wire-up so the detector task is already
     // draining engine events by the time the reducer is alive.
@@ -725,7 +722,7 @@ final class AppState {
     } withDependencies: {
       $0.hierarchyClient = hierarchy
       $0.terminalClient = .live(engine: engine)
-      // 0005 M6b critical wire: without these overrides, `EditorClient.liveValue` and
+      // Without these overrides, `EditorClient.liveValue` and
       // `SettingsWriter.liveValue` fatalError on any descendants call. Both factories close
       // over `settings` (global default + custom templates); `editorClient` additionally
       // closes over `manager` (per-Project override).
@@ -733,9 +730,9 @@ final class AppState {
       $0.settingsWriter = .live(settings)
       $0.settingsWindowPresenter = presenter
       // Project Management: reconciler captures the live HierarchyClient so
-      // `.reconcileDiscoveredWorktrees` (consumed from T-WORKTREE) flows
-      // through the real manager binding. Default `now` is `Date.init`; tests
-      // override with a scripted closure.
+      // `.reconcileDiscoveredWorktrees` flows through the real manager
+      // binding. Default `now` is `Date.init`; tests override with a
+      // scripted closure.
       $0.projectReconciler = ProjectReconciler(client: hierarchy)
       $0.worktreeHeadWatcher = self.worktreeHeadWatcher
       $0.worktreeWorkingTreeWatcher = self.worktreeWorkingTreeWatcher
@@ -786,12 +783,12 @@ final class AppState {
     }
 
     // Master Terminal hotkey: ⌥⌘` toggles the slide-in panel. Hard-coded
-    // for v1; promotion to ShortcutsStore deferred until that store grows
-    // a "global hotkey" scope. See ExecPlan Decision Log D3.
+    // for now; promotion to ShortcutsStore is deferred until that store
+    // grows a "global hotkey" scope.
     //
     // Skipped if GhosttyRuntime failed to initialise — without it the panel
     // would slide in empty, with no path to recover. The same guard already
-    // gates the rest of the terminal stack at line 306.
+    // gates the rest of the terminal stack.
     if let ghostty {
       let controller = MasterTerminalController(runtime: ghostty)
       self.masterTerminalController = controller
@@ -810,7 +807,7 @@ final class AppState {
     let osNotifier = UserNotificationsOSNotifier()
     self.osNotifier = osNotifier
 
-    // M2.T2 chokepoint: the coordinator gates every candidate against the
+    // Chokepoint: the coordinator gates every candidate against the
     // four `settings.notifications` toggles and drives the inbox + dock
     // badge + system banner in lockstep. The detector hands it a
     // pre-classified `Candidate` (sourceIsFocused already resolved).
@@ -828,7 +825,7 @@ final class AppState {
     self.notificationSettingsReader = settingsReader
     self.notificationCoordinator = coordinator
 
-    // M5.T1 keystroke side channel: AppKit-side key events are recorded
+    // Keystroke side channel: AppKit-side key events are recorded
     // through `PaneKeyboardActivityTracker.shared` from `GhosttySurfaceView`;
     // the detector snapshots the map into each translator Context. Published
     // to the shared static handle here so newly constructed surfaces find
@@ -848,10 +845,10 @@ final class AppState {
         manager?.bumpProjectActivity(projectID)
       }
     )
-    // Active-agents T3 + T6: build the binder and registry, install the
-    // five-wire fan-out (terminal events / running set / keystrokes /
-    // focus / agent bind), and start the long-running drain. Extracted
-    // into a helper so this function stays under the lint body length.
+    // Build the binder and registry, install the five-wire fan-out
+    // (terminal events / running set / keystrokes / focus / agent bind),
+    // and start the long-running drain. Extracted into a helper so this
+    // function stays under the lint body length.
     startAgentStateObservers(
       manager: manager,
       engine: engine,
@@ -882,7 +879,7 @@ final class AppState {
     Task { @MainActor [weak coordinator] in
       await coordinator?.refreshAuthorizationStatus()
     }
-    // M8.T1: if the inbox file was quarantined on load (a forward-version
+    // If the inbox file was quarantined on load (a forward-version
     // `notifications.json` was renamed aside on boot), fire a one-shot
     // synthetic "Inbox reset" notification. The coordinator persists an
     // idempotency marker so the same quarantine event does not re-surface
@@ -1114,32 +1111,32 @@ final class AppState {
       // for each paneID spawns `zmx attach … --restore-from <url>` exactly
       // once. `.alive`/`.dead` states are not restores and are ignored
       // here — restore is driven purely by snapshot presence, never by the
-      // current on-quit resume setting (VAL-RESTORE-015).
+      // current on-quit resume setting.
       let states = try reaper.sweep(livePaneIDs: livePaneIDs)
       engine.pendingRestores = Self.derivePendingRestores(from: states)
     } catch {
       // A corrupt catalog or transient I/O error must not block app
-      // launch — the worst outcome is a fresh shell per pane, which is
-      // codans's pre-M2 behaviour. Leave `pendingRestores` empty so every
-      // pane cold-starts (degrade-to-cold-start). Log via os.Logger so a
-      // chronic failure surfaces in Console.
+      // launch — the worst outcome is a fresh shell per pane. Leave
+      // `pendingRestores` empty so every pane cold-starts
+      // (degrade-to-cold-start). Log via os.Logger so a chronic failure
+      // surfaces in Console.
       Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session.reaper")
         .error("SessionReaper.sweep failed: \(String(describing: error), privacy: .public)")
     }
     // Defense-in-depth: catch daemons whose socket files outlive both
     // the catalog and the hierarchy (e.g. crash mid-spawn before the row
-    // was persisted, or daemons left by a pre-M6 build whose catalog row
+    // was persisted, or daemons left by an older build whose catalog row
     // was wiped). Runs after `sweep` so the catalog is already pruned to
     // the surviving set — anything still on disk after this point is a
     // true filesystem orphan.
     reaper.sweepFilesystemOrphans(livePaneIDs: livePaneIDs)
   }
 
-  /// User-initiated "Forget all sessions" from Settings → General. Per
-  /// the spec (R16 / AC11), the action must terminate every recorded
-  /// daemon, unlink each socket, AND empty the catalog — otherwise the
-  /// next `detachAllForQuit` rebuilds the catalog from the still-alive
-  /// daemons (`collectLiveClients`) and effectively undoes the "forget".
+  /// User-initiated "Forget all sessions" from Settings → General. The
+  /// action must terminate every recorded daemon, unlink each socket, AND
+  /// empty the catalog — otherwise the next `detachAllForQuit` rebuilds the
+  /// catalog from the still-alive daemons (`collectLiveClients`) and
+  /// effectively undoes the "forget".
   ///
   /// Order: kill + unlink first, then clear the catalog. If the kill
   /// step fails per-daemon (already-dead socket, etc.) the launch-time
@@ -1177,7 +1174,7 @@ final class AppState {
     focusReadMarkerTask?.cancel()
     orphanSweepTask?.cancel()
     agentStateFocusTask?.cancel()
-    // Drop the M2.T2 observation tokens explicitly so a `didBecomeActive`
+    // Drop the observation tokens explicitly so a `didBecomeActive`
     // arriving mid-shutdown cannot wake the coordinator on a half-torn-down
     // settings reader.
     notificationSettingsObserverToken?.cancel()
@@ -1228,7 +1225,7 @@ final class AppState {
     )
   }
 
-  /// Long-running R1 marker: every time the user focuses a different
+  /// Long-running read marker: every time the user focuses a different
   /// pane, mark its unread entries read. Drives off the same Observation
   /// re-arming pattern as the Dock badge mirror — each loop iteration
   /// reads the current focused pane id and re-arms a tracker that fires
@@ -1282,7 +1279,7 @@ final class AppState {
 
   /// Returns the single globally-focused pane id, computed the same way
   /// `NotificationDetector.globallyFocusedPane` does. Kept here so both
-  /// the detector (drop-on-focus) and the R1 marker agree on the rule.
+  /// the detector (drop-on-focus) and the read marker agree on the rule.
   /// Note: app frontmost is intentionally NOT gated here — focusing a
   /// pane in the app is the user's deliberate action regardless of
   /// frontmost state, and we want a worktree-switch to clear unreads on
@@ -1395,11 +1392,11 @@ final class AppState {
   }
 
   /// Starts the long-running mirror task that keeps the `WorktreeHeadWatcher`'s
-  /// worktree set in sync with the catalog (HAN-62). Sample BEFORE arming
-  /// the next `withObservationTracking` so any mutation between sync and
-  /// re-arm is caught on the pre-arm pass — same race-closing pattern the
-  /// selection stream in `HierarchyClient.makeSelectionStream` uses.
-  /// Factored out of `bringUp` to keep that method under the lint limit.
+  /// worktree set in sync with the catalog. Sample BEFORE arming the next
+  /// `withObservationTracking` so any mutation between sync and re-arm is
+  /// caught on the pre-arm pass — same race-closing pattern the selection
+  /// stream in `HierarchyClient.makeSelectionStream` uses. Factored out of
+  /// `bringUp` to keep that method under the lint limit.
   private func startHeadWatcherSync() {
     worktreeHeadWatcherSyncTask?.cancel()
     let manager = hierarchyManager
@@ -1451,7 +1448,7 @@ final class AppState {
   }
 
   /// Long-running mirror: routes every `store.unreadCount` change through
-  /// `coordinator.recomputeDockBadge()` so the badge honours the v1.1
+  /// `coordinator.recomputeDockBadge()` so the badge honours the
   /// `inAppEnabled` + `dockBadgeEnabled` gates regardless of which path
   /// mutated the inbox (detector dispatch, `markRead`, `markAllRead`,
   /// `sweepOrphanUnreads`). Each loop iteration recomputes before re-arming
@@ -1483,11 +1480,10 @@ final class AppState {
     }
   }
 
-  /// Active-agents T3 + T6: build the binder + registry, install the
-  /// five fan-out wires, kick the drain. Extracted from
-  /// `startNotificationObservers` so that function stays under the lint
-  /// body-length budget. `@discardableResult` so the call site doesn't
-  /// have to acknowledge the binder.
+  /// Build the binder + registry, install the five fan-out wires, kick the
+  /// drain. Extracted from `startNotificationObservers` so that function
+  /// stays under the lint body-length budget. `@discardableResult` so the
+  /// call site doesn't have to acknowledge the binder.
   @discardableResult
   private func startAgentStateObservers(
     manager: HierarchyManager,
@@ -1496,7 +1492,7 @@ final class AppState {
     detector: NotificationDetector,
     keystrokeTracker: PaneKeyboardActivityTracker
   ) -> AgentBinder {
-    // T6: AgentStateStore is the @Observable state machine the badge +
+    // AgentStateStore is the @Observable state machine the badge +
     // popover bind to. Four wires feed it:
     //   1. terminal events  → onTerminalEvent (drain loop below)
     //   2. keystrokes       → onPaneKeyboardActivity (tracker.onActivity)
@@ -1512,8 +1508,8 @@ final class AppState {
       }
     )
     self.agentStateStore = registry
-    // Pre-seed the registry from the last quit's agent snapshot (M6.T6.5)
-    // so a resumed working/blocked agent surfaces immediately instead of
+    // Pre-seed the registry from the last quit's agent snapshot so a
+    // resumed working/blocked agent surfaces immediately instead of
     // waiting for the first live viewport. Each restored record is gated on
     // a direct daemon-socket probe so we never restore a phantom badge for
     // an agent whose daemon died between launches.
@@ -1646,8 +1642,8 @@ final class AppState {
     return seeds
   }
 
-  /// Active-agents T6: long-running focus observer for `AgentStateStore`.
-  /// Same re-arming `withObservationTracking` pump as
+  /// Long-running focus observer for `AgentStateStore`. Same re-arming
+  /// `withObservationTracking` pump as
   /// `observeFocusedPaneForRead`: read the globally-focused pane (via
   /// `currentlyFocusedPane`), forward to `registry.onPaneFocused`
   /// whenever the id changes, then re-arm against the catalog fields
@@ -1696,9 +1692,9 @@ final class AppState {
     }
   }
 
-  /// Active-agents T3: route the engine event stream through `AgentBinder`.
-  /// Lives next to `NotificationDetector.handle` (same drain loop, same
-  /// MainActor context) so the binder sees foreground jobs and lifecycle teardown without
+  /// Route the engine event stream through `AgentBinder`. Lives next to
+  /// `NotificationDetector.handle` (same drain loop, same MainActor context)
+  /// so the binder sees foreground jobs and lifecycle teardown without
   /// opening a second long-lived Task on the events stream.
   @MainActor
   private static func dispatchToAgentBinder(

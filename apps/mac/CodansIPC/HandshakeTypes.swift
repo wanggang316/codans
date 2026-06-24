@@ -1,7 +1,7 @@
 import Foundation
 
 /// `system.hello` request payload. Pipelined as the first frame of every
-/// connection by `codans` (exec-plan 0003 DEC-4).
+/// connection by `codans`.
 public struct HelloRequest: Codable, Equatable, Sendable {
   public let clientVersion: String
   public let clientBinary: String

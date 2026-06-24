@@ -39,7 +39,7 @@ enum CommandPaletteItems {
       // Tab commands act on the current Worktree's active tab, so they're
       // gated on the Worktree selection rather than on precise pane focus.
       items.append(contentsOf: tabCommandItems(worktreeName: worktree.name))
-      // M10: surface user-defined `ProjectSettings.scripts` for the active
+      // Surface user-defined `ProjectSettings.scripts` for the active
       // Project. Reads through the SettingsWriter dependency so the palette
       // tracks the live `settings.json` snapshot — switching to a different
       // Project rebuilds and surfaces that Project's scripts instead.

@@ -12,8 +12,8 @@ import CodansCore
 ///
 /// Why two files — they fire on disjoint operations:
 /// - **`HEAD`** content flips only on a *branch switch* (`git checkout` /
-///   `git switch`). Closes the canonical HAN-62 gap: a terminal-driven
-///   checkout inside a pane doesn't fire NSApplication's `didBecomeActive`.
+///   `git switch`). A terminal-driven checkout inside a pane doesn't fire
+///   NSApplication's `didBecomeActive`, so the FS watch is what catches it.
 /// - **`logs/HEAD`** (the reflog) appends a line on *every* HEAD movement —
 ///   `commit` / `reset` / `merge` / `rebase` / `pull` — none of which
 ///   rewrite `HEAD`. Without it a `git commit` leaves the diff-stat chip

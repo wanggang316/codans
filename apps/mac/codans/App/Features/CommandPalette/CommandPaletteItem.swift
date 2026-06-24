@@ -104,11 +104,10 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case openCurrentWorktreeIn(EditorID)
     case revealCurrentWorktreeInFinder
 
-    // Project Scripts (Phase 2 / M10) — one Kind per
-    // `ProjectSettings.scripts` entry under the active Project. Carries the
-    // selection's `(projectID, worktreeID)` so the route runs against the
-    // exact selection that built the item, even if the user changes
-    // selection between palette open and activation.
+    // Project Scripts — one Kind per `ProjectSettings.scripts` entry under
+    // the active Project. Carries the selection's `(projectID, worktreeID)`
+    // so the route runs against the exact selection that built the item,
+    // even if the user changes selection between palette open and activation.
     case runProjectScript(ProjectID, WorktreeID, ScriptDefinition.ID)
 
     // Global Commands — one Kind per `GeneralSettings.globalScripts` entry.

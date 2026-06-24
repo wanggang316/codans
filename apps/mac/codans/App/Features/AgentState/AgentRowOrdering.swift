@@ -18,9 +18,9 @@ import CodansCore
 ///    (`finished → idle`, `working → idle`, `blocked → idle`) is NOT
 ///    significant: the row keeps its place so a completed agent quietly
 ///    fading to idle doesn't yank the list around (the dominant flicker the
-///    Agents View suffered — see `docs/product-specs/active-agents-view.md`).
-///    Rises into an active/finished state, and lateral moves between them,
-///    ARE significant and bubble the row to its triage position.
+///    Agents View suffered). Rises into an active/finished state, and
+///    lateral moves between them, ARE significant and bubble the row to its
+///    triage position.
 ///
 /// Pure logic, zero SwiftUI. `reconcileMembership` is `@MainActor` only
 /// because `AgentEntry` is MainActor-isolated by the target's default actor

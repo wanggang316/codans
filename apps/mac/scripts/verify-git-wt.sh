@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pre-empt the same M3 class of bug as embed-git-wt.sh — even though
-# we don't `rm -rf` here, a confusing "missing `/ThirdParty/git-wt/wt`"
-# error on an unset SRCROOT is worth trading for an explicit
-# "SRCROOT must be set" abort.
+# Guard SRCROOT like embed-git-wt.sh — even though we don't `rm -rf`
+# here, a confusing "missing `/ThirdParty/git-wt/wt`" error on an unset
+# SRCROOT is worth trading for an explicit "SRCROOT must be set" abort.
 : "${SRCROOT:?SRCROOT must be set (run this from the Xcode build driver)}"
 
 wt_script="${SRCROOT}/ThirdParty/git-wt/wt"

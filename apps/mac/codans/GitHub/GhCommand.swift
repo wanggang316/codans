@@ -12,9 +12,8 @@ import CodansCore
 /// else triggers `LiveGitHubService`'s stderr-sniffing error-translation branch.
 ///
 /// Tests lock every argv list — these are the exact strings sent to a long-lived external
-/// tool, and a silent drift (flag position, missing `--json` field) can mask real bugs.
-/// Precedent: exec-plan 0005 DEC-19 — a `-w` placement test that didn't reach argv masked
-/// a flag-vs-pathspec bug.
+/// tool, and a silent drift (flag position, missing `--json` field) can mask real bugs
+/// (e.g. a misplaced flag that becomes a pathspec).
 nonisolated enum GhCommand {
   /// `gh auth status --json hosts`. Exit 0 → logged in (parse hosts); exit 1 → not logged in.
   static func authStatus() -> (arguments: [String], expectedExitCodes: Set<Int32>) {
@@ -53,16 +52,15 @@ nonisolated enum GhCommand {
   }
 
   /// `gh run rerun <runID> --failed`. One-shot: re-runs every failed job in the run.
-  /// Per exec-plan 0012 DEC-3 there is no per-job selection in v1.
+  /// There is no per-job selection in v1.
   static func runRerunFailed(runID: Int64) -> (arguments: [String], expectedExitCodes: Set<Int32>) {
     (["run", "rerun", String(runID), "--failed"], [0])
   }
 
   /// `gh api graphql --hostname <host> -f query=<body> -f <var1>=<val1> ...`. Used by the
-  /// v2 batched PR fetcher (0013 M3) to run one custom GraphQL query for many branches at
-  /// once. The `variables` dictionary is sorted before serialisation so argv diffs stay
-  /// deterministic in tests — a mis-ordered flag list can silently mask field-omission
-  /// bugs the way 0005 DEC-19's `-w` placement did.
+  /// v2 batched PR fetcher to run one custom GraphQL query for many branches at once. The
+  /// `variables` dictionary is sorted before serialisation so argv diffs stay deterministic
+  /// in tests — a mis-ordered flag list can silently mask field-omission bugs.
   ///
   /// Exit 0 → GraphQL response (may still carry `"errors": [...]` inside stdout; the
   /// caller inspects the payload). Exit 1 → gh-level failure (network, auth, etc.),

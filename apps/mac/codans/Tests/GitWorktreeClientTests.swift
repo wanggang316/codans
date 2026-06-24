@@ -4,7 +4,7 @@ import Testing
 @testable import Codans
 
 /// Pure-helper coverage for `GitWorktreeClient`. The closures themselves
-/// are exercised by the M13 integration test against a real git repo;
+/// are exercised by the integration test against a real git repo;
 /// here we lock the argument-builder matrix, JSON decode, sanitizer,
 /// and stderr mapping so regressions surface without spawning processes.
 struct GitWorktreeClientTests {
@@ -12,7 +12,7 @@ struct GitWorktreeClientTests {
 
   @Test
   func sanitizePreservesSlashAsPathSeparator() {
-    // HAN-57: `feature/abc` maps to nested folders `feature/abc`, not
+    // `feature/abc` maps to nested folders `feature/abc`, not
     // a flattened `feature-abc`. The full branch path is the relative
     // directory path under the project's worktree base.
     #expect(GitWorktreeClient.sanitizeBranchName("feature/login") == "feature/login")
@@ -195,7 +195,7 @@ struct GitWorktreeClientTests {
   func stderrMapsBranchExistsUppercase() {
     // Locales or future git releases may emit uppercased stderr. The
     // pattern is case-insensitive; captured branch-name keeps its
-    // original casing for faithful UI display (issue #24 (b)).
+    // original casing for faithful UI display.
     let err = GitWorktreeClient.mapGitStderr(
       command: "git worktree add -b X /tmp/X",
       stderr: "FATAL: A BRANCH NAMED 'X' ALREADY EXISTS"
@@ -310,7 +310,7 @@ struct GitWorktreeClientTests {
     #expect(GitWorktreeClient.parsePorcelainPaths(output) == ["path/to/a.swift", "path/to/b.swift"])
   }
 
-  // MARK: - pickNewWorktreePath (issue #24 (c))
+  // MARK: - pickNewWorktreePath
 
   private func entry(path: String, branch: String = "x") -> GitWtEntry {
     GitWtEntry(branch: branch, path: path, head: "abc123", isBare: false)

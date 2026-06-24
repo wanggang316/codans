@@ -46,8 +46,7 @@ struct PendingMergedBatch: Equatable {
 /// sheet payloads, confirmation dialogs) and the project-selection
 /// choreography. Structural catalog data is NOT in state —
 /// `HierarchySidebarView` reads `HierarchyManager.catalog` from the
-/// SwiftUI environment directly, matching the state-ownership trade-off
-/// recorded in the T0 design doc.
+/// SwiftUI environment directly.
 ///
 /// Side effects for Reveal-in-Finder and Open-in-default-editor route
 /// through `.delegate` actions so `RootFeature` composes them with the
@@ -102,8 +101,7 @@ struct HierarchySidebarFeature {
     /// renders inside its Project's section between pinned and unpinned
     /// segments. Not persisted; an app restart clears the set, and the
     /// existing reconcile path picks up any worktree that did make it to
-    /// disk before the crash. See `docs/design-docs/worktree-sidebar-ordering.md`
-    /// §pending 段.
+    /// disk before the crash.
     var pendingWorktrees: IdentifiedArrayOf<PendingWorktree> = []
     /// Transient "reorder projects inline" editing session. When `true`,
     /// the sidebar collapses every Project to a header-only row, prefixes
@@ -246,7 +244,7 @@ struct HierarchySidebarFeature {
       editorID: EditorID
     )
 
-    // Pending-worktree lifecycle. See worktree-sidebar-ordering.md §pending 段.
+    // Pending-worktree lifecycle.
     case beginPendingWorktreeCreation(PendingWorktree)
     case pendingWorktreeProgress(PendingWorktreeID, String)
     case pendingWorktreeFinished(PendingWorktreeID, URL)
@@ -269,7 +267,7 @@ struct HierarchySidebarFeature {
     /// transient UI flag.
     case endProjectReorder
 
-    // M4: Tag chip footer at the sidebar's safe-area bottom.
+    // Tag chip footer at the sidebar's safe-area bottom.
     /// Toggle membership of `id` in `Catalog.activeTagFilter`. If filter is
     /// `.all` or `.untagged` it becomes `.tags([id])`. Within `.tags(set)`,
     /// `id` toggles in/out; an empty result resets to `.all`.
@@ -281,9 +279,9 @@ struct HierarchySidebarFeature {
     /// Bound to ⌘F via `MainWindowCommands`. Routed up so the chip footer
     /// view can take focus.
     case tagFilterFocusRequested
-    /// M5 (project-tags): toggle membership of `tagID` in the Project's
-    /// `tagIDs`. Resolves the current set from the catalog snapshot so
-    /// the View binding can be a plain Toggle without holding state.
+    /// Toggle membership of `tagID` in the Project's `tagIDs`. Resolves the
+    /// current set from the catalog snapshot so the View binding can be a
+    /// plain Toggle without holding state.
     case toggleTagOnProject(ProjectID, TagID)
 
     // Sheet stubs
@@ -311,7 +309,7 @@ struct HierarchySidebarFeature {
       /// registered. `RootFeature` selects the Project so the user lands
       /// on the existing row.
       case revealExistingProject(ProjectID)
-      /// M5 (project-tags): opens the Tag CRUD sheet at root level.
+      /// Opens the Tag CRUD sheet at root level.
       /// Emitted from the project header's "Tags" submenu ("Edit Tags…")
       /// and from the chip footer's trailing "+" button.
       case openTagManager
@@ -453,7 +451,7 @@ struct HierarchySidebarFeature {
       state.cloneRepoSheet = CloneRepoFeature.State()
       return .none
 
-    // MARK: Tag filter chip footer (M4)
+    // MARK: Tag filter chip footer
 
     case .tagChipTapped(let tagID):
       let current = hierarchyClient.snapshot().activeTagFilter
@@ -558,7 +556,7 @@ struct HierarchySidebarFeature {
         projectOverride: projectSettings?.worktreesDirectory
       )
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count
-      // HAN-83: seed the sheet toggles from the effective settings so the
+      // Seed the sheet toggles from the effective settings so the
       // checkboxes match what the user pinned in Project Settings → Worktree
       // (with the global Worktree pane as the fallback). Each per-project
       // override is `nil` = inherit; if both are unset the value falls back
@@ -819,10 +817,10 @@ struct HierarchySidebarFeature {
     // MARK: Pending worktree lifecycle
 
     case .beginPendingWorktreeCreation(let pending):
-      // Hard cap (master doc Risks): silently reject when this project
-      // already has 8 pending creations. The sheet UI also enforces this
-      // via banner + disabled Create; reducer guard covers non-sheet
-      // entry points (IPC, command palette, tests).
+      // Hard cap: silently reject when this project already has 8 pending
+      // creations. The sheet UI also enforces this via banner + disabled
+      // Create; reducer guard covers non-sheet entry points (IPC, command
+      // palette, tests).
       let count = state.pendingWorktrees.filter { $0.projectID == pending.projectID }.count
       guard count < 8 else { return .none }
       state.pendingWorktrees.append(pending)

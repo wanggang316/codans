@@ -47,7 +47,7 @@ import CodansCore
 /// - `Open PR on GitHub` lives on `⌘⌃G` rather than `⌘⇧G` so it doesn't shadow
 ///   AppKit's default "Find Previous" chord in editable-text contexts (Settings
 ///   panes, palette query, hotkey recorder, etc.).
-/// - `Open Project on GitHub` (HAN-58) takes `⌘⇧G`. This intentionally shadows
+/// - `Open Project on GitHub` takes `⌘⇧G`. This intentionally shadows
 ///   AppKit's "Find Previous": codans's text-input surfaces don't expose Find
 ///   Next/Previous, so the cost is nil and the chord pairs naturally with `⌘G`
 ///   ("Toggle Git Viewer") + `⌘⌃G` ("Open PR on GitHub").
@@ -468,7 +468,7 @@ struct MainWindowCommands: Commands {
   /// "New Worktree…" / "Manage Project Commands…". Doesn't gate on `gitRoot`
   /// (non-git Project ⇒ chord silently no-ops in the reducer) because reading a
   /// `HierarchyManager` snapshot inside SwiftUI `Commands` resolves against
-  /// `liveValue` and crashes (PR-#13 trap). The reducer's guard is sufficient.
+  /// `liveValue` and crashes. The reducer's guard is sufficient.
   private var hasCurrentProject: Bool {
     store()?.state.selection.projectID != nil
   }

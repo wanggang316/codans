@@ -6,7 +6,7 @@ import CodansCore
 /// maps. The General pane wraps this in a grouped `Section` so each row
 /// renders with native Form chrome (inset card, hairline separators) and
 /// each commit routes through `SettingsWriter.setProjectEnvVar(pid, key,
-/// value)`; M6's per-hook env editor reuses the same component with a
+/// value)`; the per-hook env editor reuses the same component with a
 /// hooks-aware writer.
 ///
 /// Layout mirrors the System-Settings idiom: every row is a
@@ -19,7 +19,7 @@ import CodansCore
 ///
 /// Add and Edit both push a modal sheet (`EnvVarEditorSheet`) rather than
 /// editing inline, matching the Scripts pane's editor. The sheet enforces
-/// the validation rules (Risk R3 from the design doc):
+/// the validation rules:
 ///   - KEY must match POSIX env-var: `^[A-Za-z_][A-Za-z0-9_]*$`.
 ///   - KEY must not collide with a reserved built-in or an existing key.
 ///   - VALUE must not contain `\n` or `\r` — the on-disk JSON is shell-

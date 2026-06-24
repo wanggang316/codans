@@ -4,10 +4,10 @@ import CodansCore
 
 @testable import Codans
 
-/// Behavioural tests for `NotificationCoordinator` (M2.T2). Each test
-/// declares the AC ID it covers; the runtime probe at the milestone gate
-/// is the authoritative check, but these tests pin the production code
-/// path so a future refactor cannot silently regress the chokepoint.
+/// Behavioural tests for `NotificationCoordinator`. The runtime probe at
+/// the milestone gate is the authoritative check, but these tests pin the
+/// production code path so a future refactor cannot silently regress the
+/// chokepoint.
 @MainActor
 struct NotificationCoordinatorTests {
   // MARK: - Test fixtures
@@ -70,7 +70,7 @@ struct NotificationCoordinatorTests {
   }
 
   /// Records every `promoteWorktree` invocation so tests can assert on
-  /// call count and arguments. M6.T2 promote behaviour matrix.
+  /// call count and arguments.
   @MainActor
   private final class PromoteRecorder {
     private(set) var calls: [(ProjectID, WorktreeID, WorktreePromotionMode)] = []
@@ -170,7 +170,7 @@ struct NotificationCoordinatorTests {
   /// within the 30 s dedup window, preserving the prior `readAt`), the
   /// coordinator must report `inAppAppended == false` for the merged
   /// candidate and must not double-count the worktree in
-  /// `unreadByWorktree`. Without this guard, M6.T2's promote logic would
+  /// `unreadByWorktree`. Without this guard, the promote logic would
   /// see a synthetic 0→N edge for chatty panes whose dedup was designed
   /// to suppress exactly that.
   @Test
@@ -338,13 +338,13 @@ struct NotificationCoordinatorTests {
     #expect(coordinator.lastDropReasons.contains(.systemDisabled))
   }
 
-  // MARK: - M6.T2: worktree promote on 0→N unread edge
+  // MARK: - worktree promote on 0→N unread edge
 
-  /// AC-V11-WT-001 / UT-V11-WT-001: the first unread for a worktree
-  /// invokes `catalog.promoteWorktree(projectID, worktreeID,
+  /// The first unread for a worktree invokes
+  /// `catalog.promoteWorktree(projectID, worktreeID,
   /// .moveToFrontWithinUnpinned)` and the decision reports
   /// `promoted: true`. The coordinator does not inspect pinned-ness —
-  /// the catalog enforces that (M6.T1).
+  /// the catalog enforces that.
   @Test
   func firstUnreadForUnpinnedWorktreePromotes() async throws {
     let (inbox, url) = makeInbox()
@@ -500,10 +500,9 @@ struct NotificationCoordinatorTests {
     #expect(recorder.calls.isEmpty)
   }
 
-  /// AC-V11-WT-006 / UT-V11-WT-006 (coordinator-side half): the
-  /// coordinator does not inspect pinned-ness. It issues
-  /// `promoteWorktree` for every 0→N edge that passes the toggle gate;
-  /// the catalog (`HierarchyManager.promoteWorktree`, M6.T1) silently
+  /// Coordinator-side half: the coordinator does not inspect pinned-ness.
+  /// It issues `promoteWorktree` for every 0→N edge that passes the toggle
+  /// gate; the catalog (`HierarchyManager.promoteWorktree`) silently
   /// no-ops on pinned targets. This test pins the policy split.
   @Test
   func promoteCallFiresRegardlessOfPinnedStatus() async throws {
@@ -528,7 +527,7 @@ struct NotificationCoordinatorTests {
     #expect(recorder.calls.count == 1)
   }
 
-  // MARK: - M8.T1: inbox-reset quarantine toast
+  // MARK: - inbox-reset quarantine toast
 
   /// Synthesize an arbitrary backup URL with a controlled basename so the
   /// test can assert idempotency-marker content without depending on
@@ -644,10 +643,9 @@ struct NotificationCoordinatorTests {
     #expect(markerContent == "notifications.json.bak-gated")
   }
 
-  /// AC-V11-WT-005 / UT-V11-WT-005: a deduped candidate (same
-  /// `(paneID, kind)` within 30 s) does NOT trigger promote because
-  /// `didAppend == false`. Confirms the M2.T2 round-2 dedup→delta
-  /// composition holds end-to-end through the promote branch.
+  /// A deduped candidate (same `(paneID, kind)` within 30 s) does NOT
+  /// trigger promote because `didAppend == false`. Confirms the round-2
+  /// dedup→delta composition holds end-to-end through the promote branch.
   @Test
   func dedupedDuplicateDoesNotPromote() async throws {
     let (inbox, url) = makeInbox()

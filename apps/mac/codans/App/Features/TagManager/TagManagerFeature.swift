@@ -18,8 +18,7 @@ struct PendingTagRemoval: Equatable {
   var affectedProjectCount: Int
 }
 
-/// TCA reducer for the Tag CRUD sheet. Replaces the deleted
-/// `SpaceManagerFeature` (see `docs/exec-plans/project-tags.md` §M5).
+/// TCA reducer for the Tag CRUD sheet.
 ///
 /// State is intentionally tiny — every authoritative tag value lives in
 /// `HierarchyManager.catalog`; this reducer only owns the two transient
@@ -97,8 +96,8 @@ struct TagManagerFeature {
       case .removeTapped(let tagID, let name):
         // Snapshot the project count at tap time so the dialog text is
         // stable even if a parallel writer mutates `catalog.projects`
-        // before the user confirms. Per OQ-3 there is no last-tag
-        // protection — Untagged is a valid catalog state.
+        // before the user confirms. There is no last-tag protection —
+        // Untagged is a valid catalog state.
         let catalog = hierarchyClient.snapshot()
         let count = catalog.projects.filter { $0.tagIDs.contains(tagID) }.count
         state.pendingRemoval = PendingTagRemoval(

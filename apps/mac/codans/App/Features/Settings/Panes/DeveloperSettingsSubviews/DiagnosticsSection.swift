@@ -1,9 +1,9 @@
 import SwiftUI
 import CodansCore
 
-/// M6.3 — Diagnostics. Three buttons that escape users out to disk or the
-/// clipboard. All behaviour lives behind `DeveloperPaneDependencies` closures
-/// so this view remains previewable without AppKit singletons.
+/// Diagnostics buttons that escape users out to disk or the clipboard. All
+/// behaviour lives behind `DeveloperPaneDependencies` closures so this view
+/// remains previewable without AppKit singletons.
 struct DiagnosticsSection: View {
   @Environment(DeveloperPaneDependencies.self) private var deps
   @State private var copyFeedback: String?

@@ -60,7 +60,7 @@ struct HierarchySidebarFeatureTests {
     )
   }
 
-  /// HAN-83: opening the Create-Worktree sheet must seed `copyIgnored`,
+  /// Opening the Create-Worktree sheet must seed `copyIgnored`,
   /// `copyUntracked`, `fetchOrigin`, and `baseRefOverride` from the effective
   /// settings (per-project Git overrides chained to the global Worktree
   /// pane). The bug was that the sheet always started at false / nil even

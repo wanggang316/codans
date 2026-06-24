@@ -1,7 +1,7 @@
 import Foundation
 import CodansCore
 
-/// The C8a 34-entry built-in registry. Every row is a template: `appURL` is always nil and
+/// The built-in editor registry. Every row is a template: `appURL` is always nil and
 /// `alternateBundleIdentifiers` is always empty — the service layer resolves a live `appURL`
 /// against an `AppLauncher` at `describe()` time.
 ///

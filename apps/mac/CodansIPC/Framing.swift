@@ -5,8 +5,8 @@ import Foundation
 /// Layout: 4-byte big-endian `UInt32` length prefix, followed by exactly
 /// `length` bytes of UTF-8 JSON. No trailing newline. The 32-bit prefix
 /// admits frames up to ~4 GiB, but the server enforces a hard 16 MiB cap
-/// per frame (exec-plan 0003 DEC-3): oversize frames throw
-/// `Framing.FramingError.frameTooLarge` and the connection is closed.
+/// per frame: oversize frames throw `Framing.FramingError.frameTooLarge`
+/// and the connection is closed.
 public enum Framing {
   /// Hard per-frame cap. Frames larger than this are rejected.
   public static let maxFrameBytes: UInt32 = 16 * 1024 * 1024

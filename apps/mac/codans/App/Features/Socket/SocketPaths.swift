@@ -4,7 +4,7 @@ import Foundation
 /// Shared path convention for the codans Unix domain socket.
 ///
 /// Centralises the default-path-vs-env-override precedence so both the
-/// app-side `SocketServer` and the CLI-side `SocketDiscovery` (M4) agree on
+/// app-side `SocketServer` and the CLI-side `SocketDiscovery` agree on
 /// exactly one place. No inline `getuid()` calls elsewhere.
 public nonisolated enum SocketPaths {
   /// `/tmp/codans-<uid>.sock` — the production default.

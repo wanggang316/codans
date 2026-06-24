@@ -8,7 +8,7 @@ import os
 /// system-wide regardless of which app is frontmost, (b) it consumes the
 /// event so the chord doesn't leak to whichever app currently holds focus,
 /// and (c) it does not require Accessibility permission. The chord is
-/// hard-coded to ⌥⌘\` for v1 (see ExecPlan Decision Log D3).
+/// hard-coded to ⌥⌘\` for v1.
 @MainActor
 final class MasterTerminalHotkey {
   // `nonisolated(unsafe)` because deinit on a @MainActor class is nonisolated

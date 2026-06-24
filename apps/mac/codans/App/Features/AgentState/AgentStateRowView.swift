@@ -73,11 +73,10 @@ struct AgentStateRowView: View {
     .onHover { isHovering = $0 }
     // `.contain` keeps the `.headline` text and `.state` icon
     // individually addressable by their sub-element identifiers (the
-    // user-test contract surface — see `docs/user-tests/active-agents-view.md`).
-    // `.accessibilityLabel` on a `.contain` container is a no-op, so
-    // the row's full-sentence VoiceOver label is installed via
-    // `.accessibilityRepresentation { Button(label, action:) }` — a
-    // proxy element that carries the label without collapsing the
+    // user-test contract surface). `.accessibilityLabel` on a `.contain`
+    // container is a no-op, so the row's full-sentence VoiceOver label is
+    // installed via `.accessibilityRepresentation { Button(label, action:) }`
+    // — a proxy element that carries the label without collapsing the
     // children-contain semantics needed for sub-element probing.
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("agentState.row.\(paneID)")
@@ -170,8 +169,7 @@ struct AgentStateRowView: View {
   /// Trailing status column — state icon + short verb, in a single
   /// HStack that the outer row's `alignment: .center` keeps vertically
   /// centered against the two-line identity column. The state icon's
-  /// `accessibilityLabel` is the raw enum value per the user-test
-  /// contract (`docs/user-tests/active-agents-view.md` §Test Surface).
+  /// `accessibilityLabel` is the raw enum value per the user-test contract.
   private var statusColumn: some View {
     stateIcon
       .font(.caption2)

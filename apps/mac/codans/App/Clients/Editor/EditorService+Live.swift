@@ -6,7 +6,7 @@ import CodansCore
 ///
 /// State: the `describe()` result is memoised for the service's lifetime. Settings panes
 /// (and the IPC `editor.describe` handler) call `clearCache()` on appear so newly-installed
-/// editors surface without an app restart (R4 in the design doc).
+/// editors surface without an app restart.
 ///
 /// Threading: an `actor` gives us a cheap mutex around the cache without hand-rolling a
 /// lock. The `Sendable` closures for reading settings let the live factory close over
@@ -33,12 +33,10 @@ final actor LiveEditorService: EditorService {
     for template in EditorRegistry.registry {
       switch template.launchMode {
       case .shellEditor:
-        // Always-installed pseudo-editor (no bundle to probe). Opening $EDITOR through this
-        // service still throws `.launchFailed` because the service signature does not carry
-        // a Pane/Tab context — callers that want $EDITOR to actually launch must route
-        // through `hierarchyClient.openPane(... initialCommand: "$EDITOR")` (see the
-        // `.shellEditor` branch of `open(directory:preferred:)` below). Surfacing the row
-        // anyway lets the Settings + Worktree-header pickers list it.
+        // Always-installed pseudo-editor (no bundle to probe). Surfacing the row lets the
+        // Settings + Worktree-header pickers list it; actually opening $EDITOR throws here
+        // and must route through `hierarchyClient.openPane(... initialCommand: "$EDITOR")`
+        // (see the `.shellEditor` branch of `open(directory:preferred:)` below).
         resolved.append(
           EditorDescriptor(
             id: template.id,
@@ -138,24 +136,17 @@ final actor LiveEditorService: EditorService {
       try await launcher.openApplication(at: appURL, configuration: config)
 
     case .shellEditor:
-      // C8a Phase 4d: `TerminalEngine.ensureSurface` now forwards `pane.initialCommand` to
-      // the freshly spawned shell, so the primitive IS in place. What's missing is a way for
-      // this service to address a Pane: `.shellEditor` needs a `(spaceID, projectID,
-      // worktreeID, tabID)` tuple to hand `HierarchyManager.openPane`, and the service's
+      // The Pane primitive exists (`TerminalEngine.ensureSurface` forwards
+      // `pane.initialCommand`), but this service can't address a Pane: `.shellEditor` needs a
+      // `(projectID, worktreeID, tabID)` tuple to hand `HierarchyManager.openPane`, and the
       // `(directory: URL, preferred: EditorID?)` signature intentionally excludes domain
-      // types (design doc §"Path-in, nothing else"). Short of widening the service signature
-      // or smuggling a Pane spawner in via closure, `.shellEditor` can't complete from here.
-      //
-      // Ship: fail gracefully with a descriptive error so the registry entry keeps its shape
-      // in `describe()` but attempting to open through it surfaces the unresolved design
-      // question instead of silently no-op'ing. Callers that want `.shellEditor` to work end
-      // to end should route through the Pane/Tab-aware code path (e.g. the worktree header
-      // "Open in ▾" + a future `codans open --in editor` wired to `hierarchy.openPane`).
+      // types. So fail with a descriptive error rather than silently no-op'ing — the registry
+      // entry keeps its shape in `describe()`, and callers that want `.shellEditor` end to end
+      // route through the Pane/Tab-aware path (e.g. the worktree header "Open in ▾").
       throw EditorError.launchFailed(
         reason:
           "$EDITOR requires a Tab context that EditorService does not have. "
-          + "Open a Pane via the Worktree header or `hierarchy.openPane` with initialCommand=\"$EDITOR\". "
-          + "See docs/exec-plans/c8a-implementation.md (Phase 4d)."
+          + "Open a Pane via the Worktree header or `hierarchy.openPane` with initialCommand=\"$EDITOR\"."
       )
     }
 
@@ -165,8 +156,7 @@ final actor LiveEditorService: EditorService {
   // MARK: - Helpers
 
   /// Probes the launcher for the template's primary bundle ID, falling through to
-  /// `alternateBundleIdentifiers` (R1 in the design doc). Returns nil if no bundle is
-  /// registered for any of them.
+  /// `alternateBundleIdentifiers`. Returns nil if no bundle is registered for any of them.
   private func resolveAppURL(for template: EditorDescriptor) async -> URL? {
     if let url = await launcher.urlForApplication(bundleIdentifier: template.bundleIdentifier) {
       return url

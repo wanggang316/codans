@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 struct SessionCatalogCodableTests {
-  /// Guards the M6.T6.5 forward-compatibility hook: a v1 catalog written
+  /// Guards the forward-compatibility hook: a v1 catalog written
   /// before the `agents` field existed must still decode without error,
   /// defaulting to an empty agents map. The custom `init(from:)` uses
   /// `decodeIfPresent`; if a future contributor swaps it back to plain

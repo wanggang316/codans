@@ -11,12 +11,9 @@ import os.log
 /// State is empty by design: the router is a fan-out table, not a state
 /// machine. Every error path (missing pane address, stale catalog, invalid
 /// resize direction) is swallowed and logged; a race with teardown must
-/// never crash the runtime callback thread. Composing the feature into
-/// `RootFeature` lands in the 0008 integration task and is intentionally
-/// out of scope here — this milestone only wires the type contract and the
-/// dispatch table.
+/// never crash the runtime callback thread.
 ///
-/// Two simplifications, recorded for the Decision Log:
+/// Two simplifications worth noting:
 /// - `PaneActionRequest.gotoSplit` currently collapses spatial directions
 ///   (up/down/left/right) onto the tree's previous/next neighbor order
 ///   (`SplitTree.focusTarget`). A real spatial walk needs frame geometry
@@ -299,9 +296,8 @@ struct PaneActionRouterFeature {
   // MARK: - Split helpers
 
   /// Maps ghostty's four-way `NewSplitDirection` onto the SplitTree's
-  /// `NewDirection`. Both enums are 1:1 after DEC-M2-2 was reverted in
-  /// the P1 rework — libghostty tells us exactly which side the user
-  /// asked for and we honor it.
+  /// `NewDirection`. The two enums are 1:1 — libghostty tells us exactly
+  /// which side the user asked for and we honor it.
   private static func splitDirection(
     for direction: NewSplitDirection
   ) -> SplitTree<PaneID>.NewDirection {

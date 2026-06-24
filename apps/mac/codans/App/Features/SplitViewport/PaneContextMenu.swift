@@ -4,9 +4,7 @@ import CodansCore
 
 /// Pure model for the pane right-click context menu. Side effects (reading
 /// labels, flipping mute, closing the pane) go through closures so the
-/// menu's logic stays testable without spinning up a SwiftUI view tree
-/// (notifications-v1-1 M7.T1 AC-V11-M-001 / M-002 cover the toggle
-/// behaviour).
+/// menu's logic stays testable without spinning up a SwiftUI view tree.
 struct PaneContextMenuModel {
   let paneID: PaneID
   let snapshot: () -> Catalog
@@ -31,8 +29,8 @@ struct PaneContextMenuModel {
 }
 
 /// Right-click menu for a pane. Hosts the "Mute notifications" toggle
-/// (notifications-v1-1) and a "Close" item that tears the pane down;
-/// future menu items can be added here without churning `LazyPaneHost`.
+/// and a "Close" item that tears the pane down; future menu items can be
+/// added here without churning `LazyPaneHost`.
 ///
 /// The menu reads `HierarchyClient.snapshot()` lazily inside
 /// `PaneContextMenuModel.isMuted` on every render so the checkmark

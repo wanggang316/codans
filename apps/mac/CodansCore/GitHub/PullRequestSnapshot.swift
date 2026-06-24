@@ -2,18 +2,16 @@ import Foundation
 
 /// A compact view of one GitHub pull request tied to a Worktree. Decoded from
 /// `gh pr view --json ...` output (v1 path) or from a batched `gh api graphql` response
-/// (v2 path — see docs/design-docs/github-integration-batched.md) by the app-tier parsers.
-/// The DTO itself uses GitHub's string enum values verbatim so the wire JSON decodes
-/// directly.
+/// (v2 path) by the app-tier parsers. The DTO itself uses GitHub's string enum values
+/// verbatim so the wire JSON decodes directly.
 ///
 /// Lives in `CodansCore` rather than the app-tier `codans/GitHub/` so a future
-/// `codans` IPC surface (`github.*` methods, deferred to v2) can ship the same value type
-/// without a refactor. See `docs/exec-plans/0012-github-integration.md` DEC-7.
+/// `codans` IPC surface (`github.*` methods) can ship the same value type without a refactor.
 ///
-/// **v2 additions (0013 M2).** Four fields let the batched fetch path deliver everything
-/// the sidebar badge + popover + merge affordances need in a single GraphQL roundtrip,
-/// eliminating the separate `gh pr checks` subprocess. Each is `decodeIfPresent`-tolerant
-/// so v1 decoders that do not populate them continue to round-trip unchanged:
+/// Four fields let the batched fetch path deliver everything the sidebar badge + popover +
+/// merge affordances need in a single GraphQL roundtrip, eliminating the separate
+/// `gh pr checks` subprocess. Each is `decodeIfPresent`-tolerant so v1 decoders that do not
+/// populate them continue to round-trip unchanged:
 ///
 ///   - `checkRollup` — aggregated check list, replacing the separate `state.checks[prNumber]`
 ///     cache. Empty when no checks exist.

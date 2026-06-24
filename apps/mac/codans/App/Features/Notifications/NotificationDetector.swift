@@ -159,11 +159,11 @@ public final class NotificationDetector {
     // definition the user isn't looking at it.
     let sourceIsFocused = resolved.source.paneID == globallyFocusedPane()
 
-    // HAN-78: title stays clean; the source breadcrumb
-    // (`<project> · <worktree>`) is attached as `bannerSourceLabel` and
-    // appended to the OS banner body by `UserNotificationsOSNotifier`.
-    // The inbox popover already shows the same breadcrumb on the right
-    // of each row, so we deliberately keep `entry.body` untouched.
+    // Title stays clean; the source breadcrumb (`<project> · <worktree>`)
+    // is attached as `bannerSourceLabel` and appended to the OS banner
+    // body by `UserNotificationsOSNotifier`. The inbox popover already
+    // shows the same breadcrumb on the right of each row, so we
+    // deliberately keep `entry.body` untouched.
     let entry = InboxEntry(
       kind: cue.kind,
       title: cue.title,
@@ -254,10 +254,9 @@ public final class NotificationDetector {
   }
 
   /// Banner source label: `【<project>·<worktree>】` (project first, the
-  /// stable axis; worktree second, the volatile one). Full-width brackets
-  /// and a no-space `·` mirror the spec Gump gave for HAN-78. Returns nil
-  /// when both labels are missing so the OS banner falls back to a
-  /// body-only rendering rather than a dangling pair of empty brackets.
+  /// stable axis; worktree second, the volatile one). Returns nil when
+  /// both labels are missing so the OS banner falls back to a body-only
+  /// rendering rather than a dangling pair of empty brackets.
   private func sourceLabel(projectLabel: String?, worktreeLabel: String?) -> String? {
     let parts = [projectLabel, worktreeLabel].compactMap { $0 }
     guard !parts.isEmpty else { return nil }

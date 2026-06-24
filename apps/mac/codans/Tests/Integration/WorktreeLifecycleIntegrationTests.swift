@@ -90,7 +90,7 @@ struct WorktreeLifecycleIntegrationTests {
     #expect(entries.allSatisfy { !$0.isBare })
     #expect(entries.contains(where: { $0.branch == "feature-a" }))
 
-    // Issue #24 (c): the returned path must be a real entry in
+    // The returned path must be a real entry in
     // `wt ls --json`, not something parsed from stray stdout. The
     // diff-based picker guarantees this invariant; a regression
     // would trigger this #expect.
@@ -144,7 +144,7 @@ struct WorktreeLifecycleIntegrationTests {
     #expect(!after.contains { URL(fileURLWithPath: $0.path).standardizedFileURL == worktreePath })
   }
 
-  /// Exercises issue #24 (a) — cancelling a `createWorktreeStream`
+  /// Exercises cancelling a `createWorktreeStream`
   /// consumer must terminate the spawned `wt` child. The invariant we
   /// test is the direct one master called out: "cancel 后 Process 不
   /// 再活着". We capture a weak reference to the `wt` Process via the
@@ -225,7 +225,7 @@ struct WorktreeLifecycleIntegrationTests {
     _ = try? await consumer.value
   }
 
-  /// HAN-57: branches with a `/` create nested directories so the
+  /// Branches with a `/` create nested directories so the
   /// folder layout mirrors the branch hierarchy (e.g. `feature/abc`
   /// becomes `<base>/feature/abc`, not `<base>/feature-abc`). Exercises
   /// the full create → list → remove path against a real `wt` so the

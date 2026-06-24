@@ -1,10 +1,9 @@
 import Foundation
 import CodansCore
 
-// C8a Phase 4c wire types. Matches the NSWorkspace-backed descriptor shape from
-// `docs/design-docs/c8a-editor-integration-nsworkspace.md`: bundle identifier, launch mode,
-// resolved app URL. No `argv`, no `CommandTemplate`, no `InstallationStatusDTO` — a missing
-// entry IS the "not installed" signal.
+// NSWorkspace-backed descriptor wire shape: bundle identifier, launch mode, resolved app URL.
+// No `argv`, no `CommandTemplate`, no `InstallationStatusDTO` — a missing entry IS the
+// "not installed" signal.
 
 /// Wire payload for a single entry in the `editor.describe` response. Mirrors the app-tier
 /// `EditorDescriptor` with `Codable` fields only; kept parallel (rather than re-exported)
@@ -43,8 +42,8 @@ public nonisolated struct EditorDescriptorDTO: Equatable, Hashable, Codable, Sen
   }
 }
 
-/// Wire payload for the `editor.open` response choice. `argv` is gone in C8a — NSWorkspace
-/// launches have no argv to expose.
+/// Wire payload for the `editor.open` response choice. No `argv` — NSWorkspace launches
+/// have no argv to expose.
 public nonisolated struct EditorChoiceDTO: Equatable, Hashable, Codable, Sendable {
   public var id: EditorID
   public var displayName: String

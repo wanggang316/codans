@@ -230,8 +230,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// readers (translators, screen readers, "look up selected text" tools)
   /// know to query `accessibilitySelectedText` on us. Without this the
   /// view advertises itself as a generic non-text NSView and AX clients
-  /// skip the selected-text path entirely — the symptom reported in
-  /// HAN-75.
+  /// skip the selected-text path entirely.
   override func isAccessibilityElement() -> Bool {
     surface != nil
   }
@@ -252,8 +251,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   override func accessibilitySelectedTextRange() -> NSRange {
     // Must reflect a real (non-zero) range when there is a selection —
     // assistive tech treats an empty range as "no selection" and skips
-    // the follow-up `accessibilitySelectedText` query entirely (the
-    // observable failure in HAN-75 before the fix).
+    // the follow-up `accessibilitySelectedText` query entirely.
     selectedRange()
   }
 
@@ -1012,10 +1010,9 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
 ///   2. on a match it calls `writeSelection(to:types:)` to harvest the
 ///      data into a pasteboard.
 /// Without these hooks the selection in a pane is invisible to that whole
-/// class of tools — the HAN-75 symptom. Only the read-out side is wired
-/// here (`returnType == nil`); inbound services (sending text back into
-/// the pane) are out of scope for HAN-75 and intentionally fall through
-/// to `super`.
+/// class of tools. Only the read-out side is wired here
+/// (`returnType == nil`); inbound services (sending text back into the
+/// pane) are intentionally out of scope and fall through to `super`.
 extension GhosttySurfaceView: NSServicesMenuRequestor {
   override func validRequestor(
     forSendType sendType: NSPasteboard.PasteboardType?,

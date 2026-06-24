@@ -17,8 +17,8 @@ import CodansCore
 /// `spring(response: 0.3, dampingFraction: 0.85)` (macOS Safari-style) —
 /// the dragged chip leaves a transparent gap in the row while a lifted
 /// copy follows the cursor in an overlay. The final permutation is
-/// dispatched once via `onReorder` on drop (the catalog mutation stays a
-/// single absolute-order commit, matching the exec-plan's D3).
+/// dispatched once via `onReorder` on drop — the catalog mutation stays a
+/// single absolute-order commit.
 struct TabBarRowView: View {
   let tabs: [CodansCore.Tab]
   let activeTabID: TabID?

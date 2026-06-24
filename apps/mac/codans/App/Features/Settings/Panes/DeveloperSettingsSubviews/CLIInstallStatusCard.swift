@@ -1,7 +1,7 @@
 import SwiftUI
 import CodansCore
 
-/// M6.1 — `codans` CLI install status card. Hosts its own state because the view
+/// `codans` CLI install status card. Hosts its own state because the view
 /// owns transient install/uninstall progress; persisted bookkeeping
 /// (`lastInstallAttemptAt`) flows through `SettingsStore.mutateDeveloper` on
 /// every attempt.

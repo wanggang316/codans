@@ -41,9 +41,8 @@ nonisolated enum GitCommand {
   /// followed by `--` to close the SHA/path ambiguity per git's documented argv grammar.
   ///
   /// Correctness note: every flag (`-w`, `-M`, `-C`, `-U3`, `--cached`) must precede the
-  /// `--` separator. Tokens after `--` are interpreted as pathspec — a bug in the first
-  /// M4a cut of this file placed `-w` after `--` for `.commit`, silently creating a path
-  /// filter named `-w` instead of enabling ignore-whitespace. See 0005 DEC-19.
+  /// `--` separator. Tokens after `--` are interpreted as pathspec, so a misplaced `-w`
+  /// silently becomes a path filter named `-w` instead of enabling ignore-whitespace.
   static func diff(kind: DiffKind, ignoreWhitespace: Bool = false) -> [String] {
     var args: [String] = ["-c", "core.quotePath=false"]
     let whitespaceFlags: [String] = ignoreWhitespace ? ["-w"] : []
@@ -80,7 +79,7 @@ nonisolated enum GitCommand {
   }
 
   /// `git rev-parse --show-toplevel`. Reserved for a future worktree-root discovery helper;
-  /// not called from M2's service paths but documented as available.
+  /// not called from any service path today but documented as available.
   static func revParseShowToplevel() -> [String] {
     ["rev-parse", "--show-toplevel"]
   }

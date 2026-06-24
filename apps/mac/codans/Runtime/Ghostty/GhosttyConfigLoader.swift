@@ -14,7 +14,7 @@ import os.log
 /// any directive in `overridesBody` clobbers the corresponding entry in
 /// the user's `~/.config/ghostty/config`.
 ///
-/// HAN-63: the only override today removes Ghostty's default
+/// The only override today removes Ghostty's default
 /// `super+enter → toggle_fullscreen` keybind so `⌘⏎` falls through to the
 /// inner program. Add new lines to `overridesBody` as more codans
 /// overrides land.
@@ -91,7 +91,7 @@ enum GhosttyConfigLoader {
   /// binding.
   private static let overridesBody: String = """
     # codans overrides — managed automatically; do not edit.
-    # Removes the default ⌘⏎ fullscreen keybind (HAN-63).
+    # Removes the default ⌘⏎ fullscreen keybind.
     keybind = super+enter=unbind
 
     """

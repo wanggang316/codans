@@ -4,7 +4,6 @@ import SwiftUI
 /// latest progress line while running; a red dot + truncated error
 /// caption after failure. Right-click exposes Cancel (running) or
 /// Retry / Discard (failed). Not selectable; not eligible for ⌃⌘N.
-/// See `docs/design-docs/worktree-sidebar-ordering.md` §pending 段.
 struct PendingWorktreeRow: View {
   let pending: PendingWorktree
   let onCancel: () -> Void

@@ -59,3 +59,6 @@ apps/mac/.build/zmx/
 # harness-stack FDD per-plan runtime state (plans, contracts, validation, handoffs).
 # Work-in-progress orchestration state, not a committed artifact — kept local by design.
 .harness-runtime/
+# Earlier runs leaked FDD validation/run artifacts (features.json, validation-state.json,
+# evidence/repro/snapshot files) into docs/runs/. They belong in .harness-runtime/, not docs/.
+docs/runs/

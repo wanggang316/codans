@@ -6,10 +6,10 @@ import os
 /// One accepted connection's request/response loop. Shared by the real
 /// `SocketServer` (on accept) and the test `InMemoryIPCServer` harness.
 ///
-/// Wire protocol (exec-plan 0003 DEC-3): length-prefixed JSON envelopes,
-/// UInt32 big-endian prefix + body, 16 MiB per-frame cap. First frame
-/// must be `system.hello`; subsequent frames are unary OR one streaming
-/// call before connection close (C4 §D10).
+/// Wire protocol: length-prefixed JSON envelopes, UInt32 big-endian
+/// prefix + body, 16 MiB per-frame cap. First frame must be
+/// `system.hello`; subsequent frames are unary OR one streaming call
+/// before connection close.
 public actor SocketConnection {
   public let id: UUID
   public let inflightLimit: Int
@@ -24,8 +24,7 @@ public actor SocketConnection {
   /// Frames that have been decoded but not yet fully responded to.
   /// Incremented at decode time, decremented when the response
   /// (unary or streaming-terminator) has been flushed to the write
-  /// closure. Caps per-connection state growth — DEC-9 in
-  /// exec-plan 0003 fixes this at 64.
+  /// closure. Caps per-connection state growth at `inflightLimit`.
   private var inflight = 0
 
   public init(
@@ -61,10 +60,10 @@ public actor SocketConnection {
           await handleFrame(frame)
         }
       } catch {
-        // DEC-3: oversize / malformed frames close the connection after
-        // a single well-formed `.invalidFrame` response. Swallowing the
-        // error and continuing to append to the buffer would desync the
-        // byte stream and hang the peer.
+        // Oversize / malformed frames close the connection after a single
+        // well-formed `.invalidFrame` response. Swallowing the error and
+        // continuing to append to the buffer would desync the byte stream
+        // and hang the peer.
         await sendError(id: "<malformed>", .invalidFrame(reason: "\(error)"))
         return
       }
@@ -97,13 +96,10 @@ public actor SocketConnection {
         return
       }
     } else if inflight >= inflightLimit {
-      // Per-connection backpressure cap (DEC-9). Actor-serialized
-      // handling keeps the real inflight count at ≤ 1 today, so this
-      // branch is reached only when a future concurrent-dispatch
-      // refactor (tracked as M3.1.1) lets multiple handlers run in
-      // parallel. Leave the cap wired now so the wire contract is
-      // locked: overflow returns `.overloaded` (CLIExitCode 5) and
-      // the connection stays open for later requests.
+      // Per-connection backpressure cap: overflow returns `.overloaded` and
+      // keeps the connection open for later requests. Actor-serialized
+      // handling keeps the real inflight count at ≤ 1 today, so this branch
+      // only matters once handlers run in parallel.
       await sendError(id: request.id, .overloaded)
       return
     }

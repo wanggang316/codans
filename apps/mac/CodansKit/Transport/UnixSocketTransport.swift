@@ -4,8 +4,7 @@ import CodansIPC
 import os
 
 /// Production `Transport` over a Unix domain socket. Opens a fresh
-/// connection per `codans` invocation (C4 D10); writes are length-prefix
-/// framed per DEC-3.
+/// connection per `codans` invocation; writes are length-prefix framed.
 public final class UnixSocketTransport: Transport, @unchecked Sendable {
   public enum ConnectError: Error, Equatable, Sendable {
     case socketCreateFailed(errno: Int32)
@@ -26,43 +25,33 @@ public final class UnixSocketTransport: Transport, @unchecked Sendable {
   private let state = OSAllocatedUnfairLock(initialState: State())
 
   public init(path: String) throws {
-    // Defer the actual socket(2)+connect(2) to the first send.
-    //
-    // Why lazy: on macOS 26.x, any scheduler gap (Task.yield, await,
-    // even an actor hop) between connect(2) and the first send(2) on a
-    // Unix-domain SOCK_STREAM client puts the kernel-side connection
-    // into a state where send(2) returns EPIPE and the server's serve
-    // loop sees an immediate EOF — no bytes ever transit. RPCClient
-    // unavoidably introduces such a gap (the actor's `call` jumps
-    // through `await pipelinedSend` before reaching `transport.send`),
-    // so connecting eagerly here would race the OS quirk on every
-    // invocation.
-    //
-    // The fix is to keep connect+first send in one synchronous block
-    // (see `connectAndSendFirstFrame` / `send`). This init only stashes
-    // the path and wires up the inbound AsyncStream so callers can hold
-    // the transport before the network leg actually opens.
+    // Defer socket(2)+connect(2) to the first send. On macOS 26.x, any
+    // scheduler gap (Task.yield, await, even an actor hop) between
+    // connect(2) and the first send(2) on a Unix-domain SOCK_STREAM
+    // client wedges the kernel-side connection: send(2) returns EPIPE and
+    // the server's serve loop sees an immediate EOF, so no bytes transit.
+    // RPCClient unavoidably introduces such a gap (`call` awaits
+    // `pipelinedSend` before `transport.send`), so connecting eagerly here
+    // would race the quirk on every invocation. The fix keeps connect +
+    // first send in one synchronous block (see `send`); this init only
+    // stashes the path and wires up the inbound AsyncStream.
     self.path = path
     var continuation: AsyncStream<Data>.Continuation!
     self.inbound = AsyncStream<Data> { cont in continuation = cont }
     self.continuation = continuation
   }
 
-  // Follow-up: revisit after a CodansKit concurrency audit — the `async` keyword
-  // has no `await` body today, but removing it breaks callers. Out of scope
-  // for T0, suppressing the lint below to unblock.
+  // The `async` keyword has no `await` body today, but removing it breaks
+  // callers; suppress the lint until a CodansKit concurrency audit revisits it.
   // swiftlint:disable:next async_without_await
   public func send(_ frame: Data) async throws {
     // Darwin.send(2) — not write(2). On macOS 26.x, write(2) on a Unix
     // domain socket whose accept-side handler has not yet called read(2)
-    // can return EPIPE before any bytes hit the wire; send(2) on the
-    // same fd works identically to BSD sockets. Using send(2) keeps the
-    // SIGPIPE-suppression contract too (SO_NOSIGPIPE applies to both).
-    //
-    // Lazy connect happens INSIDE this method (and inside `stateLock`)
-    // so connect(2) and the first send(2) execute in a single block
-    // with no scheduler hop between them — the macOS 26.x EPIPE quirk
-    // only fires when the kernel sees an idle gap there.
+    // can return EPIPE before any bytes hit the wire; send(2) on the same
+    // fd works identically to BSD sockets and honours SO_NOSIGPIPE. Lazy
+    // connect runs inside this method (under the lock) so connect(2) and
+    // the first send(2) share one block with no scheduler hop — the gap
+    // that triggers the EPIPE quirk.
     let needsReader = try state.withLock { (s: inout State) -> Bool in
       try Self.ensureConnectedLocked(state: &s, path: path)
       var remaining = frame

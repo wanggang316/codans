@@ -38,9 +38,8 @@ DENYLIST=(
   '\brepositoryGeneral\b'
   '\brepositoryHooks\b'
   '\bmutateRepository\b'
-  # Phase 2 retired the per-Project sub-pane scaffolds; re-introduction must
-  # not regress through a stray rebase. The General pane absorbs their content
-  # via Section-level conditional rendering.
+  # Retired per-Project sub-pane scaffolds; the General pane now absorbs their
+  # content via Section-level conditional rendering. Must not reappear.
   '\bProjectGitSettingsView\b'
   '\bProjectGitHubSettingsView\b'
   '\bProjectEnvSettingsView\b'
@@ -65,8 +64,8 @@ if [[ -n "$HITS" ]]; then
   echo "check-rename-residue: retired Project-Settings identifier(s) found:" >&2
   echo "$HITS" >&2
   echo >&2
-  echo "These identifiers were renamed by docs/exec-plans/project-settings.md." >&2
-  echo "Rename to the Project* equivalent; only LegacyV2RepositorySettings is allowed" >&2
+  echo "Rename retired RepositorySettings identifiers to the Project* equivalent." >&2
+  echo "Only LegacyV2RepositorySettings is allowed" >&2
   echo "to carry the RepositorySettings word, and only inside SettingsMigration." >&2
   exit 1
 fi

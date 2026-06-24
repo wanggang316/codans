@@ -5,8 +5,8 @@ import CodansCore
 
 @testable import Codans
 
-/// C8a Phase 6 — `EditorFeature` coverage. The C8 custom-editor surface
-/// (add/update/remove) retired in Phase 3; this suite exercises the narrowed NSWorkspace-
+/// `EditorFeature` coverage. The custom-editor surface
+/// (add/update/remove) was retired; this suite exercises the narrowed NSWorkspace-
 /// backed shape: descriptor fetch on appear, global-default write-through, error-string
 /// mapping, and the `resolveDefault` cascade (project override → global → Finder).
 @MainActor

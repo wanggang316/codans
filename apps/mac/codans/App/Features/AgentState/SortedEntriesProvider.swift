@@ -3,8 +3,7 @@ import CodansCore
 
 /// Pure helper that orders `AgentStateStore.entries` for the agent-state view.
 ///
-/// Sort order per spec AC-P4 (see `docs/product-specs/active-agents-view.md`
-/// and `docs/user-tests/active-agents-view.md` UT-AA-P-003):
+/// Sort order:
 ///
 /// 1. Primary: state priority `blocked > finished > working > idle`.
 ///    Note this is the *triage* order surfaced to users — the view answers
@@ -24,8 +23,6 @@ import CodansCore
 /// itself is `nonisolated`; the `sorted` static is `@MainActor` only
 /// because `AgentStateStore.AgentEntry` is MainActor-isolated by the
 /// target's default actor (the registry it lives on is `@MainActor`).
-/// Tests run under `@MainActor` to satisfy this — see
-/// `SortedEntriesProviderTests`.
 nonisolated enum SortedEntriesProvider {
   @MainActor
   static func sorted(

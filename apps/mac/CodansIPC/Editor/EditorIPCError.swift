@@ -7,9 +7,10 @@ import Foundation
 /// `{ code, message }` JSON-RPC error envelope with numeric codes from this table.
 ///
 /// Numeric codes are stable wire contract; do NOT renumber. Gaps left for future additions.
-/// C8a Phase 4c retired `unresolvedWorktree` / `nonZeroExit` / `timedOut` / `spawnFailed` /
-/// `badTemplate` — the NSWorkspace launch path has no exit code, no timeout, no child process,
-/// no custom template, and no Worktree resolution step (callers pass a path directly).
+/// The retired `unresolvedWorktree` / `nonZeroExit` / `timedOut` / `spawnFailed` /
+/// `badTemplate` codes have no analogue on the NSWorkspace launch path — it has no exit code,
+/// no timeout, no child process, no custom template, and no Worktree resolution step (callers
+/// pass a path directly).
 public nonisolated enum EditorIPCError: Int, Error, Equatable, Sendable {
   /// The explicit preferred editor is not installed per Launch Services. Raised only when a
   /// user-explicit `preferred` was supplied; silent defaults fall through instead.

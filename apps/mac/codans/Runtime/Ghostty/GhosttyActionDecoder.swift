@@ -19,13 +19,10 @@ import os.log
 ///     performs the routing side effects (emit events, write
 ///     `PaneSurface.info`, trigger AppKit calls).
 ///
-/// Rationale (plan 0008 DEC-M7d-1): the earlier design queued the raw
-/// `ghostty_action_s` struct and decoded it on main after the callback
-/// returned; the C union's borrowed pointers became dangling, and the
-/// callback reported `false` even though we still applied the action
-/// asynchronously. Pre-decoding fixes both: the async apply reads only
-/// Swift-owned data, and the callback can return the correct
-/// consumed-ness because decode decides it synchronously.
+/// Two-pass so the async main-thread apply never reads the C union's
+/// borrowed pointers (they dangle once `action_cb` returns), and so the
+/// callback can report correct consumed-ness — decode decides it
+/// synchronously.
 enum GhosttyActionDecoder {
 
   nonisolated static let logger = Logger(
@@ -635,7 +632,7 @@ extension GhosttyActionDecoder {
 
   // Note: these six decoders are `internal static` so
   // `@testable import Codans` can reach them from
-  // `GhosttyActionDecoderTests`. See plan 0008 DEC-M7b-1.
+  // `GhosttyActionDecoderTests`.
   nonisolated static func decodeCloseTabMode(
     _ mode: ghostty_action_close_tab_mode_e
   ) -> CloseTabMode? {

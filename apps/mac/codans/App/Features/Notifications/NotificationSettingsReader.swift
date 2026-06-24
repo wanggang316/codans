@@ -3,8 +3,8 @@ import Foundation
 import Observation
 import CodansCore
 
-/// Read-only surface that the future `NotificationCoordinator` (M2.T2) binds
-/// against: the current `NotificationsSettings` snapshot plus the cached
+/// Read-only surface that `NotificationCoordinator` binds against: the
+/// current `NotificationsSettings` snapshot plus the cached
 /// `AuthorizationStatus`, together with a single `onChange` fan-out that
 /// fires whenever either input shifts.
 ///
@@ -25,8 +25,8 @@ protocol NotificationSettingsReader: AnyObject {
 /// every call (the store is `@Observable`, so a `withObservationTracking`
 /// re-arm gives us change notifications); `authStatus` is cached because
 /// `OSNotifier.currentAuthorizationStatus()` is `async` and the coordinator
-/// needs sync reads on its hot path. The bringup site (M2.T2) is expected
-/// to invoke `refresh()` at app start and on `applicationDidBecomeActive`.
+/// needs sync reads on its hot path. The bringup site invokes `refresh()`
+/// at app start and on `applicationDidBecomeActive`.
 @MainActor
 final class SettingsStoreReaderAdapter: NotificationSettingsReader {
   private let settingsStore: SettingsStore
@@ -39,7 +39,7 @@ final class SettingsStoreReaderAdapter: NotificationSettingsReader {
     self.osNotifier = osNotifier
     // `init` does NOT await `osNotifier.currentAuthorizationStatus()` — the
     // call is async and we cannot block synchronous construction. The
-    // cached value starts at `.notDetermined`; M2.T2's bringup site fires
+    // cached value starts at `.notDetermined`; the bringup site fires
     // `refresh()` at app start and on `applicationDidBecomeActive`.
     subscribeNext()
   }
@@ -60,8 +60,8 @@ final class SettingsStoreReaderAdapter: NotificationSettingsReader {
 
   /// Re-reads `await osNotifier.currentAuthorizationStatus()` and updates
   /// the cached value, firing any registered `onChange` handlers if the
-  /// value changed. M2.T2's bringup site wires this to fire on
-  /// `applicationDidBecomeActive` and at app start.
+  /// value changed. Wired to fire on `applicationDidBecomeActive` and at
+  /// app start.
   func refresh() async {
     let next = await osNotifier.currentAuthorizationStatus()
     guard next != authStatus else { return }
@@ -73,19 +73,14 @@ final class SettingsStoreReaderAdapter: NotificationSettingsReader {
 
   /// Arms a `withObservationTracking` registration that fires once when any
   /// observed property of `settingsStore.settings.notifications` mutates,
-  /// then re-arms itself on the MainActor. Matches the re-arming pattern
-  /// used by `RollupIndexProvider` / `HierarchyClient`. The closure is
-  /// `[weak self]` because the adapter is `@MainActor final class` and
-  /// must not retain itself through the Observation token.
+  /// then re-arms itself on the MainActor. The closure is `[weak self]`
+  /// because the adapter is `@MainActor final class` and must not retain
+  /// itself through the Observation token.
   private func subscribeNext() {
-    // Order is fire-then-rearm rather than `RollupIndexProvider`'s
-    // rearm-first pattern. This adapter only fans out — it does not derive
-    // any cached state from `notifications` — so a mutation landing in the
-    // fire-to-rearm gap means at most one missed `onChange` tick;
+    // Fire-then-rearm: this adapter only fans out — it derives no cached
+    // state from `notifications` — so a mutation landing in the
+    // fire-to-rearm gap means at most one missed `onChange` tick, and
     // handlers re-reading `notifications` still see the settled value.
-    // The derived-state correctness argument that motivates rearm-first
-    // in `RollupIndexProvider` (its `recompute` must observe the final
-    // settled snapshot) does not apply here.
     withObservationTracking {
       _ = settingsStore.settings.notifications
     } onChange: { [weak self] in

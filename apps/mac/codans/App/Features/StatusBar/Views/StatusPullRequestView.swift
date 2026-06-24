@@ -11,10 +11,10 @@ import CodansCore
 ///   * ⌘-hold → summary text swaps to `Open on GitHub <chord>`, hinting the
 ///     keyboard binding registered for `.openCurrentPR` (registry default
 ///     ⌘⇧G; respects user override).
-///   * hover dwell (150 ms) → shows the rich `WorktreePullRequestPopover`
-///     (HAN-60), same view the sidebar badge uses. Independent of the
-///     sidebar's `GitHubFeature.popoverTarget` so the two surfaces don't
-///     mount a popover at each other's anchor.
+///   * hover dwell (150 ms) → shows the rich `WorktreePullRequestPopover`,
+///     same view the sidebar badge uses. Independent of the sidebar's
+///     `GitHubFeature.popoverTarget` so the two surfaces don't mount a
+///     popover at each other's anchor.
 struct StatusPullRequestView: View {
   let snapshot: PullRequestSnapshot
   let store: StoreOf<GitHubFeature>

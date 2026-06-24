@@ -128,7 +128,7 @@ struct PaneAttentionInterpreterTests {
     #expect(step.cue?.title.contains("exit 137") == true)
   }
 
-  // MARK: - commandFinished suppression rules (M4.T1)
+  // MARK: - commandFinished suppression rules
 
   @Test
   func commandFinishedDisabled_suppressesEvenLongSuccess() {
@@ -291,7 +291,7 @@ struct PaneAttentionInterpreterTests {
   @Test
   func outOfRangeThresholdInContextDoesNotCrash() {
     // The interpreter deliberately does not re-clamp; the input-validation
-    // contract lives in `NotificationsSettings` decode (and the M3.T1 UI).
+    // contract lives in `NotificationsSettings` decode (and the UI).
     // A zero threshold means every long-enough duration fires.
     let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],

@@ -43,8 +43,7 @@ public struct ShortcutResetPlan: Equatable, Sendable {
 /// also cannot be the *driver* of a cascade — even when `.systemFixed` and a configurable row
 /// share a chord, the configurable row's override is the user's deliberate choice and is
 /// preserved unless the user resets *that* row directly. The cascade fires only on collisions
-/// the user could resolve themselves, mirroring the `InternalConflictDetector` policy
-/// (§3.4 of the design doc).
+/// the user could resolve themselves, mirroring the `InternalConflictDetector` policy.
 public enum ShortcutResetPlanner {
   public static func plan(
     resetting target: CommandID,

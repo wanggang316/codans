@@ -69,7 +69,7 @@ public nonisolated struct Settings: Equatable, Sendable {
   /// Resets any stored editor ID that is not in the caller-provided built-in registry to
   /// `nil` on both `general.defaultEditorID` and `projects[pid].defaultEditor`. Run once at
   /// load so the in-memory `Settings` tree only references editors that the app currently
-  /// knows about — stale IDs from the retired C8 `customEditors` feature would otherwise
+  /// knows about — stale IDs from the retired `customEditors` feature would otherwise
   /// linger in `settings.json` forever (the resolver is lenient and would silently fall
   /// back, but the stored value stays dead).
   ///

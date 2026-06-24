@@ -5,8 +5,8 @@ import CodansCore
 
 @testable import Codans
 
-/// C8a Phase 6.2 — resolution cascade coverage. Exercises `LiveEditorService.resolve(preferred:)`
-/// across the four tiers described in the design doc:
+/// Resolution cascade coverage. Exercises `LiveEditorService.resolve(preferred:)`
+/// across the four tiers:
 ///   1. Strict preferred (installed vs. not-installed).
 ///   2. Lenient global default (installed → use; not installed → fall through).
 ///   3. Priority auto-pick (first installed wins).

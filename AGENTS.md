@@ -57,19 +57,15 @@ codans/
 4. **Every complex change gets an execution plan** — plan before building
 5. **Fix the environment, not the prompt** — when agents struggle, add missing tools/docs/guardrails
 
-See [Golden Rules](docs/golden-rules.md) for the complete list with rationale and enforcement.
-
 ## Documentation
 
 
 | Directory | Purpose |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | System architecture, domains, layers |
-| [docs/golden-rules.md](docs/golden-rules.md) | Enforced principles and conventions |
+| [docs/product-spec.md](docs/product-spec.md) | What the product is, for whom, and its boundaries |
 | [docs/design-docs/](docs/design-docs/) | Design documents |
-| [docs/exec-plans/](docs/exec-plans/) | Execution plans for complex work |
 | [docs/lessons-learned/](docs/lessons-learned/) | Root-cause write-ups of hard bugs — pitfalls, fixes, recurrence checks |
-| [docs/product-specs/](docs/product-specs/) | Product specifications |
 | [docs/references/](docs/references/) | External docs, API references |
 | [docs/generated/](docs/generated/) | Auto-generated artifacts |
 
@@ -94,4 +90,4 @@ See [Quick Start](#quick-start). Top-level Makefile delegates every `mac-*` targ
 - **Module boundaries** (`Runtime`, `Hooks`, `Git`, `GitHub`, `App`) are enforced by folder convention + code review, not Tuist target edges. Do not add cross-module imports that bypass the documented boundary.
 - **Subprocess:** always go through the shared `CommandRunner` in `apps/mac/codans/Process/`. Do not spawn `Process` directly inside feature modules.
 - **Naming:** Swift API Design Guidelines. Filenames match the primary type. TCA reducers end with `Feature`, views with `View`.
-- **Comments:** explain *why*, not *what*. Cite design-doc / exec-plan IDs when a non-obvious decision is encoded in code.
+- **Comments:** explain *why*, not *what*. Cite design-doc IDs when a non-obvious decision is encoded in code.

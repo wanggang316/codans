@@ -163,10 +163,8 @@ struct WorktreeHeaderInfoLabel: View {
 
   // MARK: - Branch title
 
-  /// Source of truth is the model field. OQ-D1 leaves the `git rev-parse`
-  /// short-sha display for detached HEAD as a follow-up; until then we
-  /// render explicit text so the user-test `UT-BSH-HD-003` has a stable
-  /// string to assert against.
+  /// Source of truth is the model field. Detached HEAD renders explicit
+  /// text rather than a `git rev-parse` short sha.
   private var branchTitle: String {
     worktree.branch ?? "(detached)"
   }

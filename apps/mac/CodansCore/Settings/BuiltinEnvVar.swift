@@ -10,7 +10,7 @@ import Foundation
 /// These share the `CODANS_` prefix with the internal IPC/runtime
 /// variables (e.g. `CODANS_WORKTREE_ID`, `CODANS_SOCKET_PATH`) but are
 /// part of the user-facing scripting contract documented in the
-/// Environment pane (see `docs/design-docs/c4-cli.md`).
+/// Environment pane.
 public enum BuiltinEnvVar: String, Sendable, CaseIterable {
   /// Absolute path of the worktree the pane belongs to.
   case worktreePath = "CODANS_WORKTREE_PATH"

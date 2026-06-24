@@ -6,18 +6,9 @@ import CodansIPC
 /// Server-side handler for the `editor.*` IPC surface. Bridges the transport-layer wire types
 /// to the app-tier `EditorClient` + `HierarchyClient` + `SettingsStore`.
 ///
-/// C8a Phase 4c implements four methods:
-///
-/// - `editor.describe` — returns the installed-only descriptor list (`EditorClient.describe`).
-/// - `editor.open` — canonicalizes the caller's path, applies the per-Project override if the
-///   caller did not supply `preferred`, and delegates to `EditorClient.open`.
-/// - `editor.setGlobalDefault` — writes `settings.general.defaultEditorID` via `SettingsStore`.
-/// - `editor.setProjectDefault` — writes `Settings.projects[pid].defaultEditor` via
-///   `SettingsStore.mutateProject`.
-///
-/// The handler is the only place the IPC layer touches `HierarchyClient` + `SettingsStore`; the
-/// `EditorService` itself never sees a `ProjectID` (design doc §"Resolution chain — split across
-/// two layers").
+/// This handler is the only place the IPC layer touches `HierarchyClient` + `SettingsStore`; the
+/// `EditorService` itself never sees a `ProjectID` — the resolution chain is split across the two
+/// layers.
 @MainActor
 final class EditorHandlers {
   private let editor: EditorClient
@@ -33,7 +24,7 @@ final class EditorHandlers {
   // MARK: - describe
 
   func describe() async -> EditorDescribeResponse {
-    // Refresh the service cache on every IPC call (R4): a user who installed Cursor while the
+    // Refresh the service cache on every IPC call: a user who installed Cursor while the
     // app was running sees it in their next `codans open` without restarting.
     await editor.clearCache()
     let descriptors = await editor.describe()
@@ -59,7 +50,7 @@ final class EditorHandlers {
 
     // Per-Project override (lenient): only applied when the caller did not supply `preferred`.
     // If the override is uninstalled, silently fall through to the service's global-default
-    // cascade — design doc §Resolution chain, "lenient" tier.
+    // cascade.
     var preferred = request.preferred
     if preferred == nil {
       preferred = await projectOverride(for: canonical)
@@ -89,9 +80,9 @@ final class EditorHandlers {
     _ request: EditorSetProjectDefaultRequest
   ) throws -> EditorSetProjectDefaultResponse {
     let projectID = ProjectID(raw: request.projectID)
-    // v3 moved per-Project overrides to settings.json. SettingsStore.mutateProject
-    // would silently create an entry for a bogus projectID, so validate against the
-    // catalog snapshot before writing — preserves the `unknownProject` IPC error.
+    // SettingsStore.mutateProject would silently create an entry for a bogus
+    // projectID, so validate against the catalog snapshot before writing —
+    // preserves the `unknownProject` IPC error.
     guard hierarchy.kind(projectID) != nil else {
       throw EditorIPCError.unknownProject
     }
@@ -116,8 +107,8 @@ final class EditorHandlers {
     guard let projectID = hierarchy.projectContaining(canonicalPath) else {
       return nil
     }
-    // v3 reads per-Project editor override from settings.json.projects[pid].defaultEditor
-    // (migrated off catalog in Step 3-4). The lookup is a plain dict read on SettingsStore.
+    // Per-Project editor override is a plain dict read on
+    // settings.json.projects[pid].defaultEditor.
     guard let projectDefault = settings.settings.projects[projectID]?.defaultEditor else {
       return nil
     }

@@ -33,7 +33,7 @@ struct ScriptDefinitionCodableTests {
 
   @Test
   func legacyPayloadWithoutKindDecodesAsRun() throws {
-    // Phase 1 reserved-empty payloads: `{ "id": "<uuid>", "name": "x", "command": "y" }`.
+    // Legacy payloads: `{ "id": "<uuid>", "name": "x", "command": "y" }`.
     // Decoder defaults `kind` to `.run` so existing settings.json files round-trip.
     let id = UUID()
     let payload = Data(#"""

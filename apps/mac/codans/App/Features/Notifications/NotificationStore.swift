@@ -24,8 +24,8 @@ public final class NotificationStore {
   /// Non-nil when the inbox file on disk announced a `version` greater
   /// than this build understands and was renamed aside at launch. Set in
   /// `init` from `InboxFile.LoadResult`; never mutated thereafter. The
-  /// UI (M8.T1 "Inbox reset" toast) reads this once and surfaces the
-  /// backup basename to the user.
+  /// "Inbox reset" toast reads this once and surfaces the backup basename
+  /// to the user.
   public private(set) var loadedQuarantineBackupURL: URL?
 
   @ObservationIgnored private let fileURL: URL

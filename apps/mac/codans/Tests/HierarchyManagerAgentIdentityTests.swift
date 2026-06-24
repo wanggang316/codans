@@ -6,7 +6,7 @@ import Testing
 
 /// Coverage for `HierarchyManager.setPaneAgentKind` /
 /// `setPaneAgentSessionID` — the catalog-write seam consumed by the
-/// upcoming `AgentBinder` (`docs/exec-plans/active-agents-view.md` T3).
+/// upcoming `AgentBinder`.
 /// The contract:
 ///
 ///   1. A write reflects in the in-memory catalog snapshot immediately.

@@ -28,13 +28,14 @@ public nonisolated protocol EditorService: Sendable {
 
   /// Opens `directory` in the resolved editor. Branches on `descriptor.launchMode`:
   /// `.directory` and `.applicationWithArguments` go through `AppLauncher.open`; the
-  /// `.shellEditor` path delegates to the Pane primitive (Phase 4d).
+  /// `.shellEditor` path cannot complete here (it needs a Pane context the service signature
+  /// excludes) and always throws `.launchFailed`.
   ///
   /// Throws:
   ///   - `.notADirectory` if `directory` does not exist or is not a directory.
   ///   - `.notInstalled` if `preferred` is set but not installed.
-  ///   - `.launchFailed` if `NSWorkspace.open` reports an error (or for the `.shellEditor`
-  ///     branch until Phase 4d wires the Pane primitive).
+  ///   - `.launchFailed` if `NSWorkspace.open` reports an error, or for the `.shellEditor`
+  ///     branch.
   @discardableResult
   func open(directory: URL, preferred: EditorID?) async throws -> EditorChoice
 }

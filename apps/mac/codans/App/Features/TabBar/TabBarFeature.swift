@@ -41,7 +41,6 @@ struct TabBarFeature {
     case tabButtonTapped(TabID, inWorktree: WorktreeID, inProject: ProjectID)
     case closeButtonTapped(TabID, inWorktree: WorktreeID, inProject: ProjectID)
 
-    // Tab-bar uplift (M2-T2.2)
     /// Open the rename sheet for `tabID`. Sources: chip context-menu Rename
     /// (any tab) and `RootFeature.renameActiveTabForCurrentWorktreeRequested`
     /// (active tab via ⌘⇧R menu chord).

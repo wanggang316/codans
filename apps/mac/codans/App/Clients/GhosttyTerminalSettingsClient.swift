@@ -19,7 +19,7 @@ nonisolated struct GhosttyTerminalSettingsClient: Sendable {
 
 extension GhosttyTerminalSettingsClient: DependencyKey {
   /// Unwired live value — throws `.configDirectoryUnavailable("unwired")`
-  /// until `AppState.bringUp()` (M4) replaces it with `.appLive()`. We use a
+  /// until `AppState.bringUp()` replaces it with `.appLive()`. We use a
   /// throw rather than a `fatalError` here because the Settings pane renders
   /// errors inline, and an unwired dependency should surface as "Ghostty
   /// config directory is unavailable: unwired" rather than crash the app.

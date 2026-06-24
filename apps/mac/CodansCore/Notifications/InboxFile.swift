@@ -14,7 +14,7 @@ import os.log
 /// understands, e.g. user downgraded after a v1.2 build wrote v2) are
 /// quarantined to a deterministic sibling path and the inbox starts empty
 /// for that launch. The quarantine path is surfaced through `LoadResult`
-/// so the M8 "Inbox reset" toast can name the backup file.
+/// so the "Inbox reset" toast can name the backup file.
 public nonisolated enum InboxFile {
   /// Current envelope version this build writes and the maximum it can read.
   public static let currentVersion: Int = 1

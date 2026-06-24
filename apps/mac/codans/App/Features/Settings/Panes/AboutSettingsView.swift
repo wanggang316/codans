@@ -3,9 +3,9 @@ import SwiftUI
 
 /// About detail pane. Reads every display string from `Bundle.main`'s Info.plist so there
 /// is a single source of truth and so localisation / rebranding flows through the usual
-/// build-setting machinery (design D2). Missing keys — including `NSHumanReadableCopyright`
-/// — omit the corresponding line instead of substituting a constant, so absence is obvious
-/// in Xcode when setting up a new build config.
+/// build-setting machinery. Missing keys — including `NSHumanReadableCopyright` — omit the
+/// corresponding line instead of substituting a constant, so absence is obvious in Xcode
+/// when setting up a new build config.
 struct AboutSettingsView: View {
   var body: some View {
     VStack(alignment: .center, spacing: 12) {

@@ -8,7 +8,7 @@ import os.log
 /// and per-Worktree last-error for the inline banner.
 ///
 /// State is **memory-only** — nothing is persisted. On relaunch, everything reloads from
-/// `gh` on first-view. See exec-plan 0012 M3.
+/// `gh` on first-view.
 ///
 /// Mutations flow through explicit Requested → Completed action pairs (merge /
 /// close / markReady / rerunFailedJobs). The Completed branch schedules a delayed
@@ -24,9 +24,8 @@ struct GitHubFeature {
     var snapshotLoadedAt: [WorktreeID: Date] = [:]
 
     /// Latest workflow run keyed by PR number. Seeds the "Rerun failed jobs" action.
-    /// Open Question 4 in the design doc tracks whether this separate fetch can be
-    /// collapsed into the batched query (extract runID from `detailsUrl`); for now it
-    /// remains a popover-time single-call lookup.
+    /// Remains a popover-time single-call lookup — the batched query does not yet
+    /// carry workflow-run IDs.
     var latestWorkflowRuns: [Int: WorkflowRun] = [:]
 
     var loading: Set<WorktreeID> = []
@@ -46,7 +45,7 @@ struct GitHubFeature {
     /// Per-Worktree last-seen error, cleared on successful refresh.
     var lastError: [WorktreeID: GitHubError] = [:]
 
-    // MARK: - v2 project-batched fetch (0013 M4)
+    // MARK: - v2 project-batched fetch
 
     /// Cached batched result per Project. Keyed by ProjectID because the batched
     /// GraphQL query targets a single repository. The whole map is rebuilt lazily on
@@ -68,16 +67,15 @@ struct GitHubFeature {
 
     /// Last-known gitRoot per Project. Stashed so the queued-refresh drain + the
     /// delayed post-mutation refresh can re-issue a fetch without the caller re-passing
-    /// the gitRoot. Cleared when the Project is removed from the catalog (not modelled
-    /// yet — see Risk R4 in the design doc).
+    /// the gitRoot. Not yet cleared when the Project is removed from the catalog.
     var projectGitRoots: [ProjectID: URL] = [:]
 
-    // MARK: - active-Project liveness poll (0018)
+    // MARK: - active-Project liveness poll
 
     /// Project the foreground liveness poll currently refreshes; `nil` ⇒ paused (app not
     /// active, or no active Project). Set by `pollTargetChanged`; the loop re-issues a
     /// forced `projectRefreshRequested` for this Project on an adaptive cadence while the
-    /// app is foreground. See exec-plan 0018.
+    /// app is foreground.
     var pollTarget: ProjectID?
 
     /// Last-known branch pairs per Project, so a poll tick — or a post-mutation /
@@ -87,7 +85,7 @@ struct GitHubFeature {
     var projectWorktreePairs: [ProjectID: [Action.WorktreeBranchPair]] = [:]
 
     /// Worktree → owning Project. Lets `postMutationRefresh` + the badge/popover retry
-    /// resolve a project-level batched fetch from a `WorktreeID` alone (0018 M3).
+    /// resolve a project-level batched fetch from a `WorktreeID` alone.
     var projectByWorktree: [WorktreeID: ProjectID] = [:]
 
     /// PR-number ↔ Worktree map derived from `snapshots`. Keeps lookup O(1) for action
@@ -130,7 +128,7 @@ struct GitHubFeature {
     case rerunFailedJobsRequested(WorktreeID, runID: Int64, worktreePath: URL)
     case rerunFailedJobsCompleted(WorktreeID, TaskResult<VoidSuccess>)
 
-    // MARK: - v2 project-batched fetch (0013 M4)
+    // MARK: - v2 project-batched fetch
 
     /// Project gained focus or was freshly activated. If no cached snapshot exists (or
     /// the cached branch set does not match the current Worktree list), dispatch a full
@@ -160,9 +158,7 @@ struct GitHubFeature {
     )
 
     /// Emitted by the sidebar when a terminal-initiated `git checkout` changes a
-    /// Worktree's branch. Invalidates the Project's cache and kicks a refresh. The
-    /// `WorktreeBranchWatcher` responsible for dispatching this lives in M7 and may
-    /// ship empty-handed in v2.0.
+    /// Worktree's branch. Invalidates the Project's cache and kicks a refresh.
     case worktreeBranchChanged(
       WorktreeID,
       newBranch: String,
@@ -171,7 +167,7 @@ struct GitHubFeature {
       worktreeBranches: [WorktreeBranchPair]
     )
 
-    // MARK: - active-Project liveness poll (0018)
+    // MARK: - active-Project liveness poll
 
     /// Retarget or pause the foreground liveness poll. A non-nil ProjectID arms the loop
     /// for that Project; `nil` pauses it (app resigned active, or no active Project).
@@ -189,8 +185,8 @@ struct GitHubFeature {
 
     /// Project-level refresh keyed by a single Worktree. Resolves the owning Project from
     /// `projectByWorktree` and runs the batched fetch. Backs the badge / popover
-    /// error-state retry (0018 M3) so a retry repaints the whole repo with full check
-    /// rollups instead of the empty-checks v1 single-branch result.
+    /// error-state retry so a retry repaints the whole repo with full check rollups
+    /// instead of the empty-checks v1 single-branch result.
     case worktreeRefreshRequested(WorktreeID)
 
     case delegate(Delegate)
@@ -234,15 +230,15 @@ struct GitHubFeature {
     /// One-cancellation-slot for all mutations on a Worktree so a second click while an
     /// operation is in flight cancels the prior run rather than racing it.
     case mutation(WorktreeID)
-    /// Per-Project batched fetch (0013 M4). Re-dispatching `projectRefreshRequested`
+    /// Per-Project batched fetch. Re-dispatching `projectRefreshRequested`
     /// for an in-flight Project cancels the prior fetch and replaces it.
     case projectFetch(ProjectID)
-    /// Delayed post-mutation refresh (0013 M4 — merge / close / markReady / rerun all
-    /// schedule this 2 s after a successful write).
+    /// Delayed post-mutation refresh — merge / close / markReady / rerun all
+    /// schedule this 2 s after a successful write.
     case delayedProjectRefresh(ProjectID)
     /// `gh` availability recovery heartbeat — retries every 15 s after an outage.
     case availabilityRecovery
-    /// Single re-arm slot for the active-Project liveness poll (0018). Retargeting or
+    /// Single re-arm slot for the active-Project liveness poll. Retargeting or
     /// pausing cancels the prior loop so at most one timer is ever live.
     case poll
   }
@@ -251,7 +247,7 @@ struct GitHubFeature {
   /// dispatches within the window skip the probe.
   static let availabilityFreshness: TimeInterval = 30
 
-  // MARK: - active-Project liveness poll cadence (0018 M2)
+  // MARK: - active-Project liveness poll cadence
 
   /// Fast cadence — used while the target Project has at least one open PR with CI in
   /// flight or an unsettled merge state. Keeps the check overlay near-live.
@@ -269,7 +265,7 @@ struct GitHubFeature {
   @Dependency(GitHubSnapshotCacheClient.self) var gitHubSnapshotCache
   @Dependency(\.date.now) var now
   /// Drives the liveness-poll re-arm timer + the post-mutation refresh delay. TestStore
-  /// overrides this with a controllable clock (0018).
+  /// overrides this with a controllable clock.
   @Dependency(\.continuousClock) var clock
 
   /// Back-compat alias so existing `gitHubClient` usages compile unchanged. The
@@ -338,10 +334,9 @@ struct GitHubFeature {
       case .presentPopover(let worktreeID, let worktreePath):
         state.popoverTarget = worktreeID
         state.worktreePaths[worktreeID] = worktreePath
-        // Checks travel on the snapshot now (0013 M5) — the only thing popover-open
-        // still needs to fetch is the latest workflow run, which seeds the "Rerun
-        // failed jobs" button with a runID. Dropping it is tracked as Open Question
-        // 4 in the design doc (parse runID from `checkRollup[].detailsURL`).
+        // Checks travel on the snapshot now — the only thing popover-open
+        // still needs to fetch is the latest workflow run, which seeds the
+        // "Rerun failed jobs" button with a runID.
         guard let snapshot = state.snapshots[worktreeID] else { return .none }
         return workflowRunFetchEffect(
           prNumber: snapshot.number, branch: snapshot.headRefName, worktreePath: worktreePath
@@ -453,7 +448,7 @@ struct GitHubFeature {
         state.mutating.remove(worktreeID)
         return postMutationRefresh(worktreeID: worktreeID, state: &state)
 
-      // MARK: - v2 project-batched fetch (0013 M4)
+      // MARK: - v2 project-batched fetch
 
       case .projectActivated(let projectID, let gitRoot, let pairs):
         Self.logger.info(
@@ -488,9 +483,8 @@ struct GitHubFeature {
           cache.save(snapshotOnDisk)
         }
         // Project into per-Worktree `snapshots` so v1 view code keeps rendering
-        // consistent data while M5 migrates views to read from `snapshotsByProject`.
-        // Branches absent from `batched.byBranch` are dropped from `snapshots` so a
-        // PR that was closed between fetches doesn't linger as stale.
+        // consistent data. Branches absent from `batched.byBranch` are dropped from
+        // `snapshots` so a PR that was closed between fetches doesn't linger as stale.
         for pair in pairs {
           if let snap = batched.byBranch[pair.branch] {
             state.snapshots[pair.worktreeID] = snap
@@ -526,7 +520,7 @@ struct GitHubFeature {
           projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
         )
 
-      // MARK: - active-Project liveness poll (0018)
+      // MARK: - active-Project liveness poll
 
       case .pollTargetChanged(let projectID, let gitRoot, let pairs):
         state.pollTarget = projectID
@@ -588,7 +582,7 @@ struct GitHubFeature {
     // Stash the pairs + worktree→project reverse map alongside the gitRoot so the poll
     // tick + post-mutation / retry refreshes can re-issue a fetch from a ProjectID or
     // WorktreeID alone. Written before the in-flight short-circuit so the maps stay
-    // current even when this call collapses into the queued-refresh slot (0018).
+    // current even when this call collapses into the queued-refresh slot.
     state.projectWorktreePairs[projectID] = pairs
     for pair in pairs { state.projectByWorktree[pair.worktreeID] = projectID }
     if state.inFlightFetchProjects.contains(projectID) {
@@ -635,7 +629,7 @@ struct GitHubFeature {
     .cancellable(id: CancelID.projectFetch(projectID), cancelInFlight: true)
   }
 
-  /// Adaptive poll cadence for the active-Project liveness loop (0018 M2). Fast while any
+  /// Adaptive poll cadence for the active-Project liveness loop. Fast while any
   /// open PR has CI in flight or an unsettled merge state; slow otherwise. `nil` (no
   /// cached batch yet) is treated as settled — the first real fetch reclassifies it.
   static func pollCadence(for batched: BatchedPullRequests?) -> Duration {
@@ -649,7 +643,7 @@ struct GitHubFeature {
   }
 
   /// Single-slot re-arm timer for the liveness poll. `cancelInFlight: true` guarantees at
-  /// most one live timer per app; a retarget / pause cancels the prior loop (0018 M1).
+  /// most one live timer per app; a retarget / pause cancels the prior loop.
   private func schedulePollTick(
     _ projectID: ProjectID, after cadence: Duration
   ) -> Effect<Action> {
@@ -713,7 +707,7 @@ struct GitHubFeature {
   /// rollup — not the empty-checks single-branch v1 result. Resolves the Project from
   /// `projectByWorktree`; if the Worktree has not been part of a batched fetch yet,
   /// returns `.none` (the next `projectActivated` / poll tick will cover it). Delayed 2 s
-  /// so GitHub has settled the write before we read it back (0018 M3, closes 0013 DEC-6).
+  /// so GitHub has settled the write before we read it back.
   private func postMutationRefresh(
     worktreeID: WorktreeID, state: inout State
   ) -> Effect<Action> {

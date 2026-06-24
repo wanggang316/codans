@@ -5,7 +5,7 @@ import CodansCore
 @testable import Codans
 
 /// Coverage for `HierarchyManager`'s tag CRUD + cascade rules + filter
-/// normalization. The design doc (§3.5, §5.3) treats `removeTag` as the
+/// normalization. The design treats `removeTag` as the
 /// trickiest piece because it cascades through three independent buckets
 /// (the tag list, every project's `tagIDs`, and `activeTagFilter`); this
 /// suite locks each bucket separately so a future refactor can't silently

@@ -4,7 +4,7 @@ import CodansCore
 
 @testable import Codans
 
-/// Behavioural tests for `PaneContextMenuModel` (M7.T1). The SwiftUI view
+/// Behavioural tests for `PaneContextMenuModel`. The SwiftUI view
 /// itself is a thin wrapper that forwards to this model; testing the
 /// model directly avoids spinning up a view tree while still pinning the
 /// AC contracts on the production code path the menu drives.

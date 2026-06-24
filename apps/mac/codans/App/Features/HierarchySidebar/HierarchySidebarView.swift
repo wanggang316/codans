@@ -162,12 +162,10 @@ struct HierarchySidebarView: View {
   @State private var sidebarIndentReady = false
 
   /// Heterogeneous sidebar rows in render order: main → pinned → pending →
-  /// unpinned. Per-segment rules and rationale live in
-  /// docs/design-docs/worktree-sidebar-ordering.md §渲染合并. `pendings`
-  /// is filtered to the given project (caller passes the full sidebar-wide
-  /// list). Used by ordering tests + the hotkey enumeration shim; the
-  /// production view splits the segments across separate ForEach blocks
-  /// so each can own its own .onMove.
+  /// unpinned. `pendings` is filtered to the given project (caller passes the
+  /// full sidebar-wide list). Used by ordering tests + the hotkey enumeration
+  /// shim; the production view splits the segments across separate ForEach
+  /// blocks so each can own its own .onMove.
   static func orderedSidebarRows(
     project: Project,
     pendings: [PendingWorktree]
@@ -204,7 +202,7 @@ struct HierarchySidebarView: View {
     // transition (the rising edge into "any agent is loading").
     let _ = anyAgentNeedsAttention
 
-    // Filter the project list by the catalog's active tag filter (M4).
+    // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
     let visibleProjects = catalog.sorted(filteredProjects(catalog: catalog))
@@ -549,7 +547,7 @@ struct HierarchySidebarView: View {
     }
   }
 
-  // MARK: - Tag filter (M4)
+  // MARK: - Tag filter
 
   /// Apply `Catalog.activeTagFilter` to `catalog.projects`. Linear scan;
   /// project counts are small enough (<200) that a per-render filter is
@@ -670,7 +668,7 @@ struct HierarchySidebarView: View {
     }
   }
 
-  /// HAN-65: empty-state copy is English and reflects the actual
+  /// empty-state copy is English and reflects the actual
   /// affordances the user has — the `.addProject` chord (resolved live
   /// against `resolvedShortcuts` so a rebind keeps the hint accurate)
   /// and the toolbar `+` button. Button label uses "Open Project" to
@@ -893,7 +891,7 @@ struct HierarchySidebarView: View {
     let isSelected = currentSelection.worktreeID == worktree.id
     let snapshot = gitHubStore?.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
-      // 0013 M5: rollup data travels with the snapshot now (filled by the batched
+      // rollup data travels with the snapshot now (filled by the batched
       // `gh api graphql` path in `parseBatchedPullRequests`). The v1 per-PR
       // `state.checks[prNumber]` map is no longer populated on the fetch side —
       // reading `snapshot.checkRollup` keeps the overlay working without the
@@ -1419,7 +1417,7 @@ struct HierarchySidebarView: View {
     let content: PullRequestPopover.Content = {
       if let error { return .error(error) }
       if let snapshot {
-        // 0013 M5: checks now travel inside the snapshot (see the comment on
+        // checks now travel inside the snapshot (see the comment on
         // `snapshot.checkRollup`). `latestWorkflowRuns` remains a separately-fetched
         // lazy load on popover-open — the batched query does not include workflow-run
         // IDs yet (Open Question 4 in the design doc).
@@ -1693,7 +1691,7 @@ private struct ProjectHeaderRow: View {
           .disabled(mergedIDs.isEmpty)
           Divider()
           // Tags entry intentionally hidden for now. `ProjectTagsMenu` and
-          // its tag-assignment logic (M5: inline color palette + "Tags…"
+          // its tag-assignment logic (inline color palette + "Tags…"
           // → global TagManager via `.openTagManager`) are retained — only
           // the menu entry is suppressed. Re-add the line below to restore.
           // ProjectTagsMenu(project: project, store: store)

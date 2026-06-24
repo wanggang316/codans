@@ -38,11 +38,6 @@ private let worktreeRemoveLogger = Logger(
 /// Narrow by design: every command is a one-line forward into the manager,
 /// and `snapshot` plus `selectionChanges` provide the read paths TCA
 /// features need without exposing the `@Observable` manager surface.
-///
-/// **M2 surface inversion**: per `docs/exec-plans/project-tags.md` §M2.4 the
-/// append-only convention is waived for this milestone. Space-named closures
-/// are removed and Tag-shaped closures replace them. Append-only resumes in
-/// M5+.
 nonisolated struct HierarchyClient: Sendable {
   // MARK: - Tag mutations
 
@@ -113,7 +108,7 @@ nonisolated struct HierarchyClient: Sendable {
       _ id: TabID?, _ inWorktree: WorktreeID, _ inProject: ProjectID
     ) throws -> Void
 
-  // MARK: - Tab mutations (tab-bar uplift)
+  // MARK: - Tab mutations
 
   var renameTab:
     @MainActor @Sendable (
@@ -163,12 +158,10 @@ nonisolated struct HierarchyClient: Sendable {
       _ inWorktree: WorktreeID, _ inProject: ProjectID
     ) throws -> TabID?
 
-  // MARK: - Runtime state (tab-bar uplift, M3)
+  // MARK: - Runtime state
 
-  /// Read path for the chip's dirty (running-command) spinner. Always
-  /// returns `false` until a writer — likely a C3 hook — starts calling
-  /// `markPaneRunning` / `markPaneIdle`. The reader is exposed now so
-  /// `TabChipLabel` can bind to it without another feature sweep.
+  /// Read path for the chip's dirty (running-command) spinner. Bound by
+  /// `TabChipLabel`; reflects `markPaneRunning` / `markPaneIdle`.
   var tabIsDirty: @MainActor @Sendable (_ tabID: TabID) -> Bool
   /// Worktree-scoped variant of `tabIsDirty`. Sidebar rows surface a busy
   /// glyph when any pane in any tab of the worktree is marked running.
@@ -176,11 +169,9 @@ nonisolated struct HierarchyClient: Sendable {
   /// Returns the Pane the user most recently focused in `tabID`, or nil.
   /// Mirrors `HierarchyManager.lastFocusedPane(in:)`.
   var lastFocusedPane: @MainActor @Sendable (_ tabID: TabID) -> PaneID?
-  /// Dormant writer — calls `HierarchyManager.markPaneRunning`. No caller
-  /// today; lands a real writer with the C3 hooks plan.
+  /// Forwards to `HierarchyManager.markPaneRunning`.
   var markPaneRunning: @MainActor @Sendable (_ paneID: PaneID) -> Void
-  /// Dormant writer — calls `HierarchyManager.markPaneIdle`. No caller
-  /// today; lands a real writer with the C3 hooks plan.
+  /// Forwards to `HierarchyManager.markPaneIdle`.
   var markPaneIdle: @MainActor @Sendable (_ paneID: PaneID) -> Void
   /// Writer for the foreground-command busy flag, calling
   /// `HierarchyManager.setPaneCommandBusy`. The root reducer invokes it when
@@ -240,22 +231,20 @@ nonisolated struct HierarchyClient: Sendable {
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
     ) throws -> Void
 
-  // Per-Project editor / worktrees-directory writers were retired in v3: the values
-  // live on `Settings.projects[pid]` and every consumer routes through
-  // `SettingsStore.mutateProject` (`SettingsWriter.setProjectDefaultEditor` /
-  // `SettingsWriter.setProjectWorktreesDirectory`). HierarchyClient is read-only for
-  // per-Project preferences (see `snapshot` / `kind`).
+  // HierarchyClient is read-only for per-Project preferences (see `snapshot` / `kind`):
+  // per-Project editor / worktrees-directory values live on `Settings.projects[pid]` and
+  // every consumer routes through `SettingsStore.mutateProject`
+  // (`SettingsWriter.setProjectDefaultEditor` / `SettingsWriter.setProjectWorktreesDirectory`).
 
   var snapshot: @MainActor @Sendable () -> Catalog
 
   /// Emits whenever the selection chain `(projectID, worktreeID)` changes
   /// in the catalog. Deduped against the previous snapshot. Consumers
-  /// (C6 inbox, C7 git-viewer, M4 detail-column swap) subscribe without
-  /// needing a reference to the `@Observable` `HierarchyManager`. The stream
-  /// finishes only when the engine shuts down.
+  /// subscribe without needing a reference to the `@Observable`
+  /// `HierarchyManager`. The stream finishes only when the engine shuts down.
   var selectionChanges: @MainActor @Sendable () -> AsyncStream<HierarchySelection>
 
-  // MARK: - Worktree Management additions (feat/worktree-mgmt)
+  // MARK: - Worktree Management additions
 
   /// Flips `Worktree.archived` for the given Worktree.
   var setWorktreeArchived:
@@ -281,7 +270,7 @@ nonisolated struct HierarchyClient: Sendable {
   /// Reads the Project's git root, calls `GitWorktreeClient.lsWorktrees`
   /// off the main actor, and merges on-disk worktrees into the catalog.
   /// Append-only — never removes catalog rows. Swallows errors. Consumed
-  /// by `ProjectReconciler` on feat/project-mgmt.
+  /// by `ProjectReconciler`.
   var reconcileDiscoveredWorktrees:
     @MainActor @Sendable (
       _ projectID: ProjectID
@@ -309,7 +298,7 @@ nonisolated struct HierarchyClient: Sendable {
   /// Forwards `HierarchyManager.runningPaneCount`.
   var runningPaneCount: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Int
 
-  // MARK: - Project Management (pm) — added on feat/project-mgmt.
+  // MARK: - Project Management
 
   /// Transient Project health signal. Written by `ProjectReconciler` only.
   var setProjectLoadState:
@@ -352,7 +341,7 @@ nonisolated struct HierarchyClient: Sendable {
   /// `gitRoot` set at project-discovery time.
   var kind: @MainActor @Sendable (_ projectID: ProjectID) -> ProjectKind?
 
-  // MARK: - Pane Action Routing (0008 M5)
+  // MARK: - Pane Action Routing
 
   /// Resolves a `PaneID` to the hierarchy address needed to service
   /// pane-scoped intents (target resolution for `closeTab`, `moveTab`,
@@ -405,12 +394,12 @@ nonisolated struct HierarchyClient: Sendable {
       _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
     ) throws -> Void
 
-  // MARK: - Project Settings Phase 2
+  // MARK: - Project Settings
 
   /// Runs a user-defined `ScriptDefinition` from `Settings.projects[pid].scripts`.
   /// Looks up the script + worktree, opens a fresh tab whose name is the
   /// script's `displayName`, and types the script's `command` into the new
-  /// pane's PTY. Project envVars get injected through the M8 spawn-path env
+  /// pane's PTY. Project envVars get injected through the spawn-path env
   /// hook. Throws `RunScriptError.unknownScript` when the id is not in the
   /// project's scripts (deleted between user click and effect dispatch);
   /// throws `RunScriptError.missingWorktree` when the worktree disappears.
@@ -468,10 +457,9 @@ nonisolated struct HierarchyClient: Sendable {
       _ worktreeID: WorktreeID, _ inProject: ProjectID
     ) async throws -> String?
 
-  // MARK: - Worktree sidebar ordering (worktree-sidebar-ordering.md task01)
+  // MARK: - Worktree sidebar ordering
 
-  /// Moves a single worktree according to `mode` (notifications-v1-1
-  /// worktree-promote primitive). Silent no-op on unknown ids and on pinned
+  /// Moves a single worktree according to `mode`. Silent no-op on unknown ids and on pinned
   /// targets — pinned ordering is treated as the user's explicit preference
   /// and is never auto-mutated. Persists via the standard debounced save
   /// pipeline. Consumed by `NotificationCoordinator` on the 0→N unread edge
@@ -488,7 +476,7 @@ nonisolated struct HierarchyClient: Sendable {
   /// `paneID`. In-memory state changes immediately so the next read sees the
   /// new label; only the disk write is debounced via the standard catalog
   /// save pipeline. Consumed by the pane right-click "Mute notifications"
-  /// menu in notifications-v1-1 (`notifications:muted` label).
+  /// menu (`notifications:muted` label).
   var setPaneLabel:
     @MainActor @Sendable (
       _ paneID: PaneID,
@@ -500,8 +488,7 @@ nonisolated struct HierarchyClient: Sendable {
   /// pane, e.g. `.claudeCode` / `.codex` / `.pi`). `nil` clears the field.
   /// Idempotent: a repeat call with the same value is a true no-op
   /// (no persistence churn). Silent no-op on unknown `paneID`. Consumed
-  /// by `AgentBinder` (`docs/exec-plans/active-agents-view.md` T3) that
-  /// derives the kind from foreground job snapshots.
+  /// by `AgentBinder`, which derives the kind from foreground job snapshots.
   var setPaneAgentKind: @MainActor @Sendable (_ paneID: PaneID, _ kind: AgentKind?) -> Void
 
   /// Writes `Pane.agentSessionID` (agent-supplied session identifier;
@@ -557,7 +544,7 @@ nonisolated struct PaneAddress: Sendable, Equatable {
 /// level" — e.g. a Project may be implied by the worktree without an explicit
 /// project-level selection store.
 ///
-/// `projectID` resolves from `Catalog.selectedProjectID` (the v3 top-level
+/// `projectID` resolves from `Catalog.selectedProjectID` (the top-level
 /// authoritative field, set by `HierarchyManager.selectProject`); when that
 /// is nil it falls back to the first Project carrying a non-nil
 /// `selectedWorktreeID` (the initial-load path before the user's first
@@ -671,12 +658,12 @@ extension HierarchyClient {
         else {
           throw HierarchyError.notFound("Worktree path missing: \(cwd)")
         }
-        // M8: resolve project envVars from the SettingsStore so every
+        // Resolve project envVars from the SettingsStore so every
         // user-flow openPane (TabBar new-tab, SplitViewport new-tab,
         // CreateWorktree, IPC openPane) inherits Project-defined env. When
         // the live wiring omits a SettingsStore (legacy callers, headless
         // tests) the env defaults to empty and the pane spawns with the
-        // raw process env — same behaviour as before M8.
+        // raw process env.
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
           ?? [:]
@@ -705,7 +692,7 @@ extension HierarchyClient {
         )
       },
       ensurePaneSurface: { [weak settings] paneID, tabID, worktreeID, projectID in
-        // Mirror openPane's M8 env resolution — this is the surface-bringup
+        // Mirror openPane's env resolution — this is the surface-bringup
         // half, so Project-defined envVars must still reach the spawned shell.
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
@@ -1122,7 +1109,7 @@ extension HierarchyClient {
     // onFinished policy (closeTab / closePane), append `; exit` so the shell
     // exits as soon as the script's last statement completes — same trick the
     // archive/delete lifecycle uses in `openNewTabAndAwaitExit`. Without it,
-    // "Close tab when finished" silently never triggers (HAN-36).
+    // "Close tab when finished" silently never triggers.
     let spawnCommand = wrapForOnFinished(
       command: script.command,
       policy: script.resolvedOnFinished
@@ -1376,11 +1363,10 @@ extension HierarchyClient {
   /// and hands the result to `manager.reconcileDiscoveredWorktrees`.
   /// Each entry's `path` is passed through `HierarchyManager.canonicalPath`
   /// so `wt ls`'s `/var/...` output matches the symlink-resolved form
-  /// T-PROJECT stores for `Project.rootPath` — without this normalization
-  /// the main checkout would duplicate on every reconcile under `/tmp`
-  /// and `/var`. Swallows and logs `GitWorktreeError` — this path is
-  /// idempotent and must never crash a reconcile (see design doc
-  /// §Discovery / Reconcile).
+  /// stored for `Project.rootPath` — without this normalization the main
+  /// checkout would duplicate on every reconcile under `/tmp` and `/var`.
+  /// Swallows and logs `GitWorktreeError` — this path is idempotent and
+  /// must never crash a reconcile.
   @MainActor
   private static func reconcile(
     projectID: ProjectID,
@@ -1433,12 +1419,10 @@ extension HierarchyClient {
       )
     } catch {
       // Log under com.gumpw.codans.hierarchy/reconcile and swallow —
-      // never throw, never crash a reconcile (see design doc
-      // §Discovery / Reconcile). `projectID` is printed as .public
-      // because it's a UUID opaque to users; the error description
-      // is `.private(mask: .hash)` because `GitWorktreeError
-      // .commandFailed` carries raw git stderr which can embed
-      // local absolute paths. Issue #24 (d) + PR #31 review F2.
+      // never throw, never crash a reconcile. `projectID` is printed as
+      // .public because it's a UUID opaque to users; the error description
+      // is `.private(mask: .hash)` because `GitWorktreeError.commandFailed`
+      // carries raw git stderr which can embed local absolute paths.
       reconcileLogger.error(
         "reconcileDiscoveredWorktrees failed: project=\(projectID.raw.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
       )

@@ -6,7 +6,7 @@ import CodansCore
 
 /// Locks the exact argv each `GhCommand.<method>` produces. These strings cross a process
 /// boundary to `gh`, so drift (a missing `--json` field, a reordered flag) is the kind of
-/// bug that only surfaces in production. Precedent: exec-plan 0005 DEC-19 — a plumb-through
+/// bug that only surfaces in production. Precedent: a plumb-through
 /// test that did not reach argv masked a flag-vs-pathspec bug.
 struct GhCommandTests {
   @Test

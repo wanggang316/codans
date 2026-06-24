@@ -1,6 +1,6 @@
 import Foundation
 
-/// Aggregate result of one project-level batched PR fetch (0013 M3). Returned by
+/// Aggregate result of one project-level batched PR fetch. Returned by
 /// `GitHubService.batchPullRequests(host:owner:repo:branches:)` after one or more
 /// `gh api graphql` subprocesses + response decoding.
 ///
