@@ -139,16 +139,6 @@ cmd_archive() {
   # CODE_SIGN_IDENTITY = "-" defaults Tuist may have baked into target
   # buildSettings, and any xcconfig fight that came with #include?
   # gymnastics.
-  #
-  # Explicitly Built Modules (default-on since Xcode 26) trips on the
-  # prebuilt swift-syntax path the CI runner pulls: its Clang dependency
-  # scanner fails on CasePathsMacrosSupport.framework's module.modulemap
-  # ("header 'CasePathsMacrosSupport-Swift.h' not found"), aborting the
-  # archive. The same source tree archived fine before the runner image
-  # started serving prebuilt swift-syntax. Disabling explicit modules
-  # reverts to implicit module builds and clears the scanner. Build
-  # settings on the command line are highest precedence, so this also
-  # covers release.yml + release-tip.yml without touching either workflow.
   xcodebuild archive \
     -workspace "${workspace}" \
     -scheme "${scheme}" \
@@ -158,8 +148,6 @@ cmd_archive() {
     SKIP_INSTALL=NO \
     ARCHS=arm64 \
     ONLY_ACTIVE_ARCH=NO \
-    SWIFT_ENABLE_EXPLICIT_MODULES=NO \
-    CLANG_ENABLE_EXPLICIT_MODULES=NO \
     CODE_SIGN_STYLE=Manual \
     DEVELOPMENT_TEAM="${team_id}" \
     CODE_SIGN_IDENTITY="${identity_sha}" \

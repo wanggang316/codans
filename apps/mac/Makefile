@@ -32,7 +32,15 @@ build-zmx:
 	./scripts/build-zmx.sh
 
 generate: bootstrap
-	mise exec -- tuist install
+	# --disable-experimental-prebuilts: tuist install shells out to
+	# `swift package resolve`, whose prebuilt swift-syntax is default-on in
+	# the Xcode 26 toolchain. The prebuilt MacroSupport breaks the Release
+	# archive's module scan (CasePathsMacrosSupport.framework's modulemap
+	# references a -Swift.h that isn't there -> "could not build module").
+	# Building swift-syntax from source — as before the CI runner image
+	# started serving the prebuilt — sidesteps it. tuist forwards the flag
+	# through to swift package.
+	mise exec -- tuist install --disable-experimental-prebuilts
 	mise exec -- tuist generate --no-open
 
 build: generate build-zmx
