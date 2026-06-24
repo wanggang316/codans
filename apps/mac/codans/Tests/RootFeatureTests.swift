@@ -1226,6 +1226,116 @@ struct RootFeatureTests {
   }
 
   @Test
+  func gateSwitchSeedsFirstPaneViaLiveSelectionChain() async {
+    // The other gate tests stub `selectionChanges` to finish immediately, so
+    // they prove the SWITCH decision but never exercise the selection→seed
+    // seam that actually lands a first pane. Here we let the post-switch
+    // `.selectionChanged` actually run the live chain: gate switches →
+    // `selectionChanged` is received → `autoSeedTabAndPaneIfNeeded` sees the
+    // new worktree's EMPTY tabs → `createTab` then `openPane` fire. Covers the
+    // switch→pane seam behind VAL-SWITCH-001..007.
+    //
+    // In the live app, the gate's `selectWorktree(...)` emits the
+    // `.selectionChanged` through `hierarchyClient.selectionChanges`. We model
+    // that emission by sending `.selectionChanged` directly after the gate —
+    // the same technique `selectionChangedMirrorsActiveTabFromSnapshot` uses —
+    // so the seed chain runs without `.onLaunch`'s unrelated effect fan-out.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let newTabID = TabID()
+
+    // Catalog whose new worktree has NO tabs — the precondition that makes
+    // the seed chain reach `createTab` + `openPane`.
+    let worktree = Worktree(
+      id: worktreeID, name: "feat", path: "/repo/feat", branch: "feat",
+      tabs: [], selectedTabID: nil
+    )
+    let project = Project(
+      id: projectID, name: "p", rootPath: "/repo", gitRoot: "/repo",
+      worktrees: [worktree], selectedWorktreeID: worktreeID
+    )
+    let catalog = Catalog(projects: [project])
+
+    let settings = Settings(worktree: WorktreeSettings(autoSwitchToNewWorktree: true))
+
+    let selectRecorder = SelectRecorder()
+    let createTabCalls = LockIsolated<Int>(0)
+    struct OpenPaneCall: Sendable, Equatable {
+      let tabID: TabID
+      let worktreeID: WorktreeID
+      let projectID: ProjectID
+      let cwd: String
+    }
+    let openPaneCalls = LockIsolated<[OpenPaneCall]>([])
+
+    var initial = RootFeature.State()
+    initial.activePendingWorktreeID = pendingID
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      // Gate side-effects — record that the switch actually happened.
+      $0.hierarchyClient.selectProject = { pid in
+        selectRecorder.project.withValue { $0 = pid }
+      }
+      $0.hierarchyClient.selectWorktree = { wt, _ in
+        selectRecorder.worktree.withValue { $0 = wt }
+      }
+      // The seed chain we are pinning.
+      $0.hierarchyClient.createTab = { _, _, _ in
+        createTabCalls.withValue { $0 += 1 }
+        return newTabID
+      }
+      $0.hierarchyClient.openPane = { tab, wt, pr, cwd, _ in
+        openPaneCalls.withValue {
+          $0.append(OpenPaneCall(tabID: tab, worktreeID: wt, projectID: pr, cwd: cwd))
+        }
+        return PaneID()
+      }
+      // `.selectionChanged` with a real project transition fans into
+      // `.gitHub(.projectActivated)`, which touches `.date` + remoteInfo +
+      // batchPullRequests; stub each so the chain completes (mirrors
+      // `selectionChangedMirrorsActiveTabFromSnapshot`).
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
+      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.editorClient = EditorClient.testValue
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    // Gate: autoSwitch ON → switch. Records the select; in the live app this
+    // select is what emits the `.selectionChanged` below.
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    #expect(selectRecorder.project.value == projectID, "gate must select the project")
+    #expect(selectRecorder.worktree.value == worktreeID, "gate must select the worktree")
+
+    // The post-switch selection lands and the seed chain runs. `.openPane` is
+    // fired from a `Task { @MainActor }` inside the reducer, so let the store
+    // settle before asserting the recorded calls.
+    await store.send(.selectionChanged(HierarchySelection(projectID: projectID, worktreeID: worktreeID)))
+    await store.finish()
+
+    #expect(createTabCalls.value == 1, "the switch must seed a first tab")
+    #expect(openPaneCalls.value.count == 1, "the switch must seed a first pane")
+    let call = openPaneCalls.value.first
+    #expect(call?.tabID == newTabID)
+    #expect(call?.worktreeID == worktreeID)
+    #expect(call?.projectID == projectID)
+    #expect(call?.cwd == "/repo/feat")
+  }
+
+  @Test
   func focusHierarchyPathRevealsWorktreeInSidebar() async {
     // Notification deep-links — system notifications and the status-bar inbox
     // bell — funnel through `focusHierarchyPath`. Jumping to the pane must

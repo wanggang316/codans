@@ -573,10 +573,14 @@ nonisolated extension GitWorktreeClient {
   // `CodansApp.bringUp()` at startup.
   //
   // `onCreateWorktreeSpawn` is an optional testing seam — the live
-  // `createWorktreeStream` path calls it with the spawned `wt`
-  // Process immediately before `process.run()`. Production code
-  // leaves it nil; integration tests pass a closure that captures a
-  // weak reference to the Process so they can assert
+  // `createWorktreeStream` path calls it immediately before
+  // `process.run()`. It can fire up to TWICE per creation: first with
+  // the `git worktree add` (`wt`) child, then — when the spec carries a
+  // non-empty `setupCommand` — again with the setup `bash` child.
+  // Consumers that capture "the spawned process" must therefore expect
+  // the LATEST spawn to win (a later `set(_:)` overwrites the earlier
+  // one). Production code leaves it nil; integration tests pass a closure
+  // that captures a weak reference to the Process so they can assert
   // `!process.isRunning` after cancelling the stream (issue #24 (a)).
   //
   // swiftlint:disable:next cyclomatic_complexity function_body_length

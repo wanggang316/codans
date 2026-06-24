@@ -263,6 +263,50 @@ struct HierarchySidebarFeatureTests {
     await store.skipReceivedActions()
   }
 
+  /// Reducer boundary: a whitespace-only `createScript.command` is stashed
+  /// VERBATIM into the pending's `spec.setupCommand` — the reducer does NOT
+  /// trim or null it. The trim/skip itself lives in the git layer (see the
+  /// `empty-command-skips-setup` integration test), so the reducer must
+  /// faithfully forward whatever the project's createScript holds.
+  @Test
+  func beginStashesWhitespaceOnlySetupCommandVerbatim() async {
+    let projectID = ProjectID()
+    let pending = Self.makePending(projectID: projectID)
+    let whitespaceCommand = "   "
+
+    let settings: Settings = {
+      var settings = Settings()
+      settings.projects[projectID] = ProjectSettings(
+        git: GitProjectSettings(createScript: ScriptDefinition(command: whitespaceCommand))
+      )
+      return settings
+    }()
+    // Records the spec the stream was invoked with so we can assert the
+    // whitespace-only command was stashed unchanged before streaming began.
+    let invokedSetup = LockIsolated<String?>(nil)
+
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0.gitWorktreeClient.createWorktreeStream = { spec in
+        invokedSetup.setValue(spec.setupCommand)
+        return AsyncThrowingStream { $0.finish() }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.beginPendingWorktreeCreation(pending)) {
+      // The reducer forwards the exact whitespace string — no trim, no nil.
+      var stashed = pending
+      stashed.spec.setupCommand = whitespaceCommand
+      $0.pendingWorktrees.append(stashed)
+    }
+    #expect(invokedSetup.value == whitespaceCommand)
+
+    await store.skipReceivedActions()
+  }
+
   // MARK: - Pending cancel + failure (pending-cancel-and-failure)
 
   /// VAL-LIFECYCLE-006: Cancel while the setup script is running must NOT

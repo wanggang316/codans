@@ -1117,13 +1117,11 @@ struct RootFeature {
         let stillViewing = (state.activePendingWorktreeID == pendingID)
         let shouldSelect = autoSwitch || stillViewing
         guard shouldSelect else {
-          // No switch: leave the current selection untouched. The pending
-          // this id pointed at is gone, so defensively clear the dangling
-          // overlay marker (the New-badge write for this branch is a later
-          // feature — not here).
-          if state.activePendingWorktreeID == pendingID {
-            state.activePendingWorktreeID = nil
-          }
+          // No switch: leave the current selection untouched. Reaching this
+          // else requires `stillViewing == false`, i.e.
+          // `activePendingWorktreeID != pendingID`, so the id (if set) points
+          // at a DIFFERENT pending the user navigated to mid-flight. Leave it
+          // — that pending's own completion clears it. No-op here on purpose.
           return .none
         }
         // Select the project too for cross-project correctness, then the
