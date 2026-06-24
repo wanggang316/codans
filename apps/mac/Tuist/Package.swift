@@ -14,16 +14,26 @@ let packageSettings = PackageSettings(
     // installed before main() and its dSYM is uploaded for symbolication.
     "Sentry": .framework,
   ],
-  // Xcode 26's Explicitly Built Modules runs a Clang dependency scanner
-  // that fails on the macro-support frameworks SwiftPM generates: e.g.
-  // CasePathsMacrosSupport.framework's modulemap references a
-  // CasePathsMacrosSupport-Swift.h that isn't produced for a pure-Swift
-  // module, so the scan aborts the Release archive ("could not build
-  // module 'CasePathsMacrosSupport'"). Disable explicit modules for the
-  // generated SwiftPM targets — command-line build settings on xcodebuild
-  // don't reach package targets, so the override has to live here.
+  // Two settings, both targeting the same Xcode 26 failure on the
+  // macro-support frameworks SwiftPM generates (e.g. CasePathsMacrosSupport,
+  // imported by swift-navigation's SwiftNavigationMacros). They are
+  // pure-Swift modules with no ObjC interface, yet Xcode builds them as
+  // frameworks whose generated module.modulemap declares
+  //   header "<Name>-Swift.h"
+  // — a Swift→ObjC header that is never produced. On the CI runner the
+  // Release archive aborts with "header 'CasePathsMacrosSupport-Swift.h'
+  // not found" / "could not build module"; the same source archives fine
+  // locally on the identical Xcode 26.0.1 toolchain, so it is environment
+  // -timing-sensitive. Command-line build settings on xcodebuild don't
+  // reach SwiftPM package targets, so the overrides live here.
+  //
+  // - SWIFT_INSTALL_OBJC_HEADER=NO: stop emitting/declaring the bogus
+  //   -Swift.h so the framework modulemap no longer requires it.
+  // - *_ENABLE_EXPLICIT_MODULES=NO: drop the Xcode 26 dependency scanner
+  //   that turned the same missing header into 24 scan failures.
   baseSettings: .settings(
     base: [
+      "SWIFT_INSTALL_OBJC_HEADER": "NO",
       "SWIFT_ENABLE_EXPLICIT_MODULES": "NO",
       "CLANG_ENABLE_EXPLICIT_MODULES": "NO",
     ]
