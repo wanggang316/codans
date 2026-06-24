@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Horizontal row of tab chips. Kept thin so feature dispatch stays out of
 /// the chip views — select / close / rename / reorder callbacks come from
@@ -22,12 +22,18 @@ import CodansCore
 struct TabBarRowView: View {
   let tabs: [CodansCore.Tab]
   let activeTabID: TabID?
-  /// Per-tab dirty lookup. Typically backed by
-  /// `HierarchyManager.tabIsDirty(_:)` so SwiftUI observation re-renders
-  /// the row when a pane's running state flips. Default is a no-op
-  /// returning `false` for callers / previews that do not need dirty
-  /// coverage.
-  var isDirty: (TabID) -> Bool = { _ in false }
+  /// Per-tab terminal-busy lookup — typically `HierarchyManager.tabIsDirty(_:)`
+  /// (OSC 9;4 ∪ foreground command). Drives the chip spinner unconditionally:
+  /// a plain command never animates the title itself, so the spinner is the
+  /// only running indicator. Default no-op for callers / previews that do not
+  /// need dirty coverage.
+  var isTerminalBusy: (TabID) -> Bool = { _ in false }
+  /// Per-tab agent-working lookup — true when a bound agent in the tab is
+  /// `.working`. Kept apart from the terminal signal because coding agents
+  /// (e.g. Claude) animate their own spinner into the live OSC title;
+  /// `ResolvingTabChipView` suppresses the chip spinner while that title is the
+  /// one on screen so the two indicators don't stack. Default no-op.
+  var isAgentWorking: (TabID) -> Bool = { _ in false }
   let onSelect: (TabID) -> Void
   let onClose: (TabID) -> Void
   let onMiddleClick: (TabID) -> Void
@@ -123,7 +129,8 @@ struct TabBarRowView: View {
     ResolvingTabChipView(
       tab: tab,
       isActive: activeTabID == tab.id,
-      isDirty: isDirty(tab.id),
+      terminalBusy: isTerminalBusy(tab.id),
+      agentWorking: isAgentWorking(tab.id),
       isOnlyTab: count <= 1,
       isLastTab: index == count - 1,
       chordHint: chordHint(for: index + 1),
@@ -302,7 +309,13 @@ struct TabBarRowView: View {
 private struct ResolvingTabChipView: View {
   let tab: CodansCore.Tab
   let isActive: Bool
-  let isDirty: Bool
+  /// Terminal-busy signal (OSC 9;4 ∪ foreground command). Always drives the
+  /// spinner — a plain command does not self-indicate inside the title.
+  let terminalBusy: Bool
+  /// A bound agent in this tab is `.working`. Drives the spinner only when the
+  /// chip is NOT showing the live OSC title, because a working coding agent
+  /// animates its own spinner into that title (see `showsSpinner(live:)`).
+  let agentWorking: Bool
   let isOnlyTab: Bool
   let isLastTab: Bool
   /// Forwarded to `TabChipView.chordHint`. Resolved at the row level so this view stays
@@ -332,7 +345,7 @@ private struct ResolvingTabChipView: View {
     TabChipView(
       title: resolvedTitle(live: live),
       isActive: isActive,
-      isDirty: isDirty,
+      isDirty: showsSpinner(live: live),
       isOnlyTab: isOnlyTab,
       isLastTab: isLastTab,
       hasUnreadNotification: notificationRollup?.current.unreadTabs.contains(tab.id) == true
@@ -359,6 +372,21 @@ private struct ResolvingTabChipView: View {
       guard let newLive, newLive != tab.cachedDisplayTitle else { return }
       onCacheLiveTitle(newLive)
     }
+  }
+
+  /// Whether to render the chip's running spinner. Terminal commands always
+  /// get it — they never animate the title themselves. A working agent gets it
+  /// only when the chip is showing something OTHER than the live OSC title,
+  /// because a working coding agent (e.g. Claude) already animates its own
+  /// spinner into that live title; stacking codans' spinner on top would
+  /// double the indicator and shove the title into truncation. A manually
+  /// renamed tab (`tab.name`) shows a static name with no live animation, so it
+  /// keeps the spinner.
+  private func showsSpinner(live: String?) -> Bool {
+    if terminalBusy { return true }
+    guard agentWorking else { return false }
+    let showingLiveTitle = (tab.name?.isEmpty ?? true) && live != nil
+    return !showingLiveTitle
   }
 
   /// Title sourced strictly from the live focused-pane `SurfaceInfo`.
