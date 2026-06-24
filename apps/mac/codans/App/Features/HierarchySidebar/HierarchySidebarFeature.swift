@@ -869,6 +869,26 @@ struct HierarchySidebarFeature {
       return .none
 
     case .pendingWorktreeCancelTapped(let id):
+      // Race guard: a Cancel that lands after `pendingWorktreeFinished`
+      // already removed the row (and wrote the catalog) is a harmless
+      // no-op — never both a pending row and a catalog row for the same
+      // logical creation.
+      guard let pending = state.pendingWorktrees[id: id] else { return .none }
+      // Cancel during the setup phase: `git worktree add` already
+      // SUCCEEDED (we hold the materialized path), so discarding now would
+      // orphan an on-disk worktree dir that never reaches the catalog.
+      // Kill the running setup script via the stream's cancel token, then
+      // materialize from the stashed path through the SAME finish path
+      // (`pendingWorktreeFinished` writes the catalog + removes the row).
+      if pending.phase == .runningSetupScript, let path = pending.materializedPath {
+        return .merge(
+          .cancel(id: CancelID.pending(id)),
+          .send(.pendingWorktreeFinished(id, path))
+        )
+      }
+      // Cancel during git-add (not yet materialized): discard cleanly —
+      // remove the row and cancel the stream, whose `onTermination`
+      // terminates the spawned git child. Nothing reaches the catalog.
       state.pendingWorktrees.remove(id: id)
       return .cancel(id: CancelID.pending(id))
 

@@ -262,4 +262,103 @@ struct HierarchySidebarFeatureTests {
 
     await store.skipReceivedActions()
   }
+
+  // MARK: - Pending cancel + failure (pending-cancel-and-failure)
+
+  /// VAL-LIFECYCLE-006: Cancel while the setup script is running must NOT
+  /// orphan the already-materialized worktree. The handler cancels the
+  /// running script (stream effect) AND reuses the finish path so the
+  /// worktree is written to the catalog and the pending row is removed.
+  @Test
+  func cancelDuringSetupPhaseMaterializesViaFinish() async {
+    let projectID = ProjectID()
+    var pending = Self.makePending(projectID: projectID)
+    pending.phase = .runningSetupScript
+    let materialized = URL(fileURLWithPath: "/repo/.worktrees/feat-x")
+    pending.materializedPath = materialized
+    let id = pending.id
+    let newWorktreeID = WorktreeID()
+
+    var initial = HierarchySidebarFeature.State()
+    initial.pendingWorktrees.append(pending)
+
+    let created = LockIsolated<[(ProjectID, String, String, String)]>([])
+
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.createWorktreeWithGit = { pid, display, branch, path in
+        created.withValue { $0.append((pid, display, branch, path)) }
+        return newWorktreeID
+      }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+      // Pane seeding is a cosmetic tail; throw so the `try?` createTab
+      // short-circuits and no follow-up surface-bringup effect runs.
+      $0.hierarchyClient.createTab = { _, _, _ in throw CancellationError() }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.pendingWorktreeCancelTapped(id))
+    // Cancel reuses the existing finish path to materialize.
+    await store.receive(.pendingWorktreeFinished(id, materialized)) {
+      $0.pendingWorktrees.remove(id: id)
+    }
+
+    // Worktree reached the catalog (no orphan dir), pending row gone.
+    #expect(created.value.count == 1)
+    #expect(created.value[0].3 == materialized.path)
+    #expect(store.state.pendingWorktrees[id: id] == nil)
+  }
+
+  /// VAL-LIFECYCLE-005: Cancel during the git-add phase (not yet
+  /// materialized) discards the pending row and cancels the stream effect
+  /// (whose `onTermination` terminates the spawned git child). Nothing is
+  /// written to the catalog.
+  @Test
+  func cancelDuringCreatingPhaseDiscardsCleanly() async {
+    let projectID = ProjectID()
+    let pending = Self.makePending(projectID: projectID)  // phase == .creatingWorktree
+    let id = pending.id
+
+    var initial = HierarchySidebarFeature.State()
+    initial.pendingWorktrees.append(pending)
+
+    let createdCount = LockIsolated(0)
+
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.createWorktreeWithGit = { _, _, _, _ in
+        createdCount.withValue { $0 += 1 }
+        return WorktreeID()
+      }
+    }
+
+    await store.send(.pendingWorktreeCancelTapped(id)) {
+      $0.pendingWorktrees.remove(id: id)
+    }
+
+    // No finish action, no catalog write.
+    #expect(createdCount.value == 0)
+    #expect(store.state.pendingWorktrees[id: id] == nil)
+  }
+
+  /// Cancel arriving after `pendingWorktreeFinished` already removed the
+  /// row is a harmless no-op — guards against a late cancel racing
+  /// completion into double-acting (a pending row AND a catalog row).
+  @Test
+  func cancelAfterFinishedIsNoOp() async {
+    let projectID = ProjectID()
+    let pending = Self.makePending(projectID: projectID)
+    let id = pending.id
+
+    // Empty pending set models the post-finish state (row already removed).
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    }
+
+    // No state mutation, no effects — the guard short-circuits.
+    await store.send(.pendingWorktreeCancelTapped(id))
+  }
 }
