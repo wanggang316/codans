@@ -393,6 +393,12 @@ struct RootFeature {
     /// command finishes in a pane, per owning Project, so a burst of VCS
     /// commands coalesces into one fetch.
     case gitCommandRefresh(ProjectID)
+    /// Low-frequency wall-clock pulse that drives the archived-worktree
+    /// auto-delete sweep (Settings → Worktrees → Cleanup) independent of
+    /// window focus. The launch / `didBecomeActive` pulses never fire while
+    /// the app sits frontmost for hours, so without this a long-lived window
+    /// would never age out archived worktrees past their retention period.
+    case periodicCleanup
   }
 
   @Dependency(TerminalClient.self) private var terminalClient
@@ -580,6 +586,21 @@ struct RootFeature {
             }
           }
           .cancellable(id: CancelID.projectReconcileFocus, cancelInFlight: true),
+
+          // Wall-clock cleanup pulse. The archived-worktree auto-delete sweep
+          // piggybacks on `reconcileAll`, but the launch / focus pulses above
+          // never fire while the app stays frontmost for hours — a long-lived
+          // window would otherwise never age out archived worktrees. A low-
+          // frequency timer guarantees the sweep runs independent of focus.
+          // Non-force so it coalesces with the in-actor 10s debounce; the
+          // first tick lands one interval after launch (which already swept).
+          .run { [projectReconciler] _ in
+            while !Task.isCancelled {
+              try await Task.sleep(for: .seconds(60 * 60))
+              await projectReconciler.reconcileAll()
+            }
+          }
+          .cancellable(id: CancelID.periodicCleanup, cancelInFlight: true),
 
           // Pause the liveness poll the instant the app resigns active, so a
           // backgrounded / idle app fires zero `gh api graphql` subprocesses.
