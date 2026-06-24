@@ -1,5 +1,5 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// Worktree settings pane — global defaults for worktree creation, copying, and
 /// cleanup. These apply across all projects unless overridden per-project.
@@ -49,6 +49,11 @@ struct SettingsWorktreeView: View {
         Toggle(
           "Fetch remote before creating worktree",
           isOn: fetchRemoteBinding
+        )
+
+        Toggle(
+          "Switch to the new worktree when it's ready",
+          isOn: autoSwitchToNewWorktreeBinding
         )
       }
 
@@ -117,6 +122,15 @@ struct SettingsWorktreeView: View {
       get: { settingsStore.settings.worktree.fetchRemoteOnCreate },
       set: { newValue in
         settingsStore.mutateWorktree { $0.fetchRemoteOnCreate = newValue }
+      }
+    )
+  }
+
+  private var autoSwitchToNewWorktreeBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.worktree.autoSwitchToNewWorktree },
+      set: { newValue in
+        settingsStore.mutateWorktree { $0.autoSwitchToNewWorktree = newValue }
       }
     )
   }
