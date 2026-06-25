@@ -1508,4 +1508,101 @@ struct RootFeatureTests {
     #expect(store.state.sidebarVisible)
     #expect(expandCalls.value.contains { $0.0 == project.id && $0.1 == true })
   }
+
+  // MARK: - badge-clear-and-persist (M3): clear on first selection
+
+  @Test
+  func selectionChangedClearsIsNewOnBadgedWorktree() async {
+    // badge-clear-and-persist M3: when selectionChanged lands on a worktree
+    // with isNew == true, the reducer must call setWorktreeIsNew(worktreeID, false)
+    // exactly once to retire the badge. All selection entry points (sidebar
+    // click, keyboard nav, Back/Forward, deep-link) funnel here.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let tabID = TabID()
+
+    let tab = Tab(id: tabID, name: "t", splitTree: SplitTree(), panes: [])
+    let worktree = Worktree(
+      id: worktreeID, name: "w", path: "/w", branch: "main",
+      tabs: [tab], selectedTabID: tabID, isNew: true
+    )
+    let project = Project(
+      id: projectID, name: "p", rootPath: "/", gitRoot: "/",
+      worktrees: [worktree], selectedWorktreeID: worktreeID
+    )
+    let catalog = Catalog(projects: [project])
+    let isNewCalls = LockIsolated<[(WorktreeID, Bool)]>([])
+
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
+        isNewCalls.withValue { $0.append((wt, isNew)) }
+      }
+      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
+      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.editorClient = EditorClient.testValue
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .selectionChanged(HierarchySelection(projectID: projectID, worktreeID: worktreeID)))
+    await store.finish()
+
+    #expect(isNewCalls.value.count == 1, "must clear the badge exactly once")
+    #expect(isNewCalls.value.first?.0 == worktreeID, "must target the selected worktree")
+    #expect(isNewCalls.value.first?.1 == false, "must clear to false")
+  }
+
+  @Test
+  func selectionChangedDoesNotClearIsNewOnUnbadgedWorktree() async {
+    // badge-clear-and-persist M3: when selectionChanged lands on a worktree
+    // with isNew == false, the reducer must NOT call setWorktreeIsNew at all —
+    // ordinary selections must never issue a redundant write.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let tabID = TabID()
+
+    let tab = Tab(id: tabID, name: "t", splitTree: SplitTree(), panes: [])
+    let worktree = Worktree(
+      id: worktreeID, name: "w", path: "/w", branch: "main",
+      tabs: [tab], selectedTabID: tabID, isNew: false
+    )
+    let project = Project(
+      id: projectID, name: "p", rootPath: "/", gitRoot: "/",
+      worktrees: [worktree], selectedWorktreeID: worktreeID
+    )
+    let catalog = Catalog(projects: [project])
+    let isNewCalls = LockIsolated<[(WorktreeID, Bool)]>([])
+
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
+        isNewCalls.withValue { $0.append((wt, isNew)) }
+      }
+      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
+      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.editorClient = EditorClient.testValue
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .selectionChanged(HierarchySelection(projectID: projectID, worktreeID: worktreeID)))
+    await store.finish()
+
+    #expect(isNewCalls.value.isEmpty, "must not call setWorktreeIsNew for an unbadged worktree")
+  }
 }

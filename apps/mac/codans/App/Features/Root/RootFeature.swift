@@ -677,8 +677,22 @@ struct RootFeature {
         // surface. The success path of `pendingWorktreeFinished` calls
         // `selectWorktree(realID)` after the catalog write, which is
         // the moment we want the overlay to retire.
-        if selection.worktreeID != nil {
+        //
+        // badge-clear-and-persist M3: if the landing worktree carries the
+        // "New" marker, retire it now. All selection entry points funnel
+        // through this single site (sidebar click, keyboard nav, Back/Forward,
+        // notification deep-link), so one guard here covers them all. Gate on
+        // `isNew == true` so ordinary selections never issue a redundant write.
+        if let worktreeID = selection.worktreeID {
           state.activePendingWorktreeID = nil
+          let snapshot = hierarchyClient.snapshot()
+          let isBadged =
+            snapshot.projects
+            .first(where: { $0.id == selection.projectID })?
+            .worktrees.first(where: { $0.id == worktreeID })?.isNew == true
+          if isBadged {
+            hierarchyClient.setWorktreeIsNew(worktreeID, false)
+          }
         }
         // Auto-seed a Tab + Pane when the selected Worktree has none so
         // switching to a brand-new Worktree immediately shows a live
