@@ -45,10 +45,18 @@ struct PendingWorktreeRow: View {
     }
     .contentShape(Rectangle())
     // Keep the child Text nodes (display name + streaming second line)
-    // readable to accessibility while still attaching the stable stage
-    // value below — `.contain` merges children under this element.
+    // readable to accessibility while exposing the stable stage value at
+    // the container level. `.accessibilityValue` on a `.contain` container
+    // is a no-op — the value is silently dropped — so the stage value is
+    // installed via `.accessibilityRepresentation` instead: a proxy element
+    // that carries the value without collapsing the children-contain
+    // semantics. The name's `in-progress`/`settled` value on the Text leaf
+    // is unaffected — leaf-level values reach the accessibility tree.
     .accessibilityElement(children: .contain)
-    .accessibilityValue(stageAccessibilityValue)
+    .accessibilityRepresentation {
+      Text(pending.displayName)
+        .accessibilityValue(stageAccessibilityValue)
+    }
     .contextMenu {
       switch pending.status {
       case .running:

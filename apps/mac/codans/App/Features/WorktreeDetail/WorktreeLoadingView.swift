@@ -306,7 +306,7 @@ struct WorktreeLoadingView: View {
   private func subtitleText() -> String {
     switch info.kind {
     case .creating(let progress):
-      let tail = progress.statusLines.suffix(PendingProgressWindow.size)
+      let tail = progress.statusLines.suffix(PendingWorktree.progressLineWindow)
       if !tail.isEmpty { return tail.joined(separator: "\n") }
       return defaultSubtitle()
     case .removing:
@@ -324,12 +324,6 @@ struct WorktreeLoadingView: View {
     return "\(info.actionLabel) \(noun)…"
   }
 
-  /// Compile-time mirror of `PendingWorktree.progressLineWindow`. Kept
-  /// local so the view file doesn't pull in `CodansCore`-flavored
-  /// dependencies just for one Int.
-  private enum PendingProgressWindow {
-    static let size = 5
-  }
 }
 
 #Preview("Streaming output") {
