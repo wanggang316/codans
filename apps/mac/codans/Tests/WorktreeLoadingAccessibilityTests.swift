@@ -35,6 +35,27 @@ struct WorktreeLoadingAccessibilityTests {
   func streamingOutputIDIsStableContractKey() {
     #expect(WorktreeLoadingView.AccessibilityID.streamingOutput == "streaming-output")
   }
+
+  /// VAL-DETAIL-004: the failed state exposes a distinct, stable id so a
+  /// probe (and VoiceOver) can tell a FAILED creation apart from a still-
+  /// loading one. The id vocabulary is the fixed contract — the spoken
+  /// label + error value wiring is dogfood-tier and exercised live.
+  @Test
+  func loadingFailureIDIsStableContractKey() {
+    #expect(WorktreeLoadingView.AccessibilityID.loadingFailure == "loading-failure")
+  }
+
+  /// The loading container and the failure root are MUTUALLY EXCLUSIVE
+  /// keys: on failure the view drops the `loading-view container` id and
+  /// adopts `loading-failure`, so a probe never sees both at once and the
+  /// settled error never reads as "still loading" (VAL-DETAIL-004).
+  @Test
+  func containerAndFailureIDsAreDistinct() {
+    #expect(
+      WorktreeLoadingView.AccessibilityID.container
+        != WorktreeLoadingView.AccessibilityID.loadingFailure
+    )
+  }
 }
 
 /// Pins the pure phase → operation-label mapping the detail loading view's

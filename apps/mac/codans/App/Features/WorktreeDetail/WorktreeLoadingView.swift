@@ -120,11 +120,20 @@ struct WorktreeLoadingView: View {
   ///     validation can probe that the streaming surface stays visible +
   ///     updating without depending on whether git has emitted a line yet
   ///     (VAL-DETAIL-002).
+  ///   - `loading-failure` — the FAILED-state root, present only when a
+  ///     creation has failed (`.failed` kind). It carries a readable
+  ///     "Worktree creation failed" label + the error message as its value
+  ///     so a VoiceOver user (and a probe) perceives the failure rather
+  ///     than the silent warning glyph. Mutually exclusive with
+  ///     `container`: the failed root drops the loading/skeleton id so the
+  ///     state reads as a settled error, not "still loading"
+  ///     (VAL-DETAIL-004).
   enum AccessibilityID {
     static let container = "loading-view container"
     static let skeletonLeft = "skeleton-left"
     static let skeletonMiddle = "skeleton-middle"
     static let streamingOutput = "streaming-output"
+    static let loadingFailure = "loading-failure"
   }
 
   var body: some View {
@@ -176,7 +185,38 @@ struct WorktreeLoadingView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: .windowBackgroundColor))
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier(AccessibilityID.container)
+    // Tag the root by state, NOT unconditionally: while creating/removing
+    // it is the `loading-view container` (skeleton + streaming surface);
+    // on failure it becomes the `loading-failure` root with a readable
+    // label/value so the settled error is announced to assistive tech and
+    // probeable — and the loading/skeleton id is ABSENT, so a probe reads
+    // "failed, not loading" rather than seeing both ids at once
+    // (VAL-DETAIL-004). The warning glyph in `skeletonHeader` stays
+    // `accessibilityHidden` (decorative); this root carries the meaning.
+    .modifier(LoadingStateAccessibility(info: info))
+  }
+
+  /// State-keyed accessibility identity for the loading view's root.
+  /// Creating/removing → the loading container id; failed → the
+  /// `loading-failure` id plus a spoken "Worktree creation failed" label
+  /// and the error message as the value. Split into a modifier so the
+  /// `body` stays a single declarative chain and the contract is colocated
+  /// with the ids it applies (VAL-DETAIL-004).
+  private struct LoadingStateAccessibility: ViewModifier {
+    let info: WorktreeLoadingInfo
+
+    func body(content: Content) -> some View {
+      switch info.kind {
+      case .failed(let message):
+        content
+          .accessibilityIdentifier(AccessibilityID.loadingFailure)
+          .accessibilityLabel("Worktree creation failed")
+          .accessibilityValue(message)
+      case .creating, .removing:
+        content
+          .accessibilityIdentifier(AccessibilityID.container)
+      }
+    }
   }
 
   /// Header region for the loading state. While creating/removing it renders
@@ -208,6 +248,11 @@ struct WorktreeLoadingView: View {
       }
       .fixedSize()
     case .failed:
+      // Decorative warning glyph. It stays `accessibilityHidden` on
+      // purpose: the failure is announced by the view root's
+      // `loading-failure` element (label + error value) so VoiceOver reads
+      // one clear "Worktree creation failed" message instead of an
+      // unlabeled triangle glyph plus the raw static text (VAL-DETAIL-004).
       Image(systemName: "exclamationmark.triangle.fill")
         .font(.largeTitle)
         .symbolRenderingMode(.multicolor)

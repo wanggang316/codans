@@ -1225,6 +1225,101 @@ struct RootFeatureTests {
     #expect(rec.worktree.value == worktreeID)
   }
 
+  // MARK: - Loading-view selection scoping (VAL-DETAIL-005 / VAL-DETAIL-006)
+
+  /// VAL-DETAIL-005: selecting a REAL worktree mid-creation clears
+  /// `activePendingWorktreeID`, so `ContentView.resolveActivePendingWorktree`
+  /// returns nil and the detail pane renders THAT worktree's header — never
+  /// the loading view hijacked onto an unrelated worktree. This is the
+  /// regression that would make the whole app appear "stuck on Creating…",
+  /// so it gets a dedicated reducer test over the clear logic the live
+  /// resolver depends on.
+  @Test
+  func selectingRealWorktreeClearsActivePendingOverlay() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let tabID = TabID()
+    let tab = Tab(id: tabID, name: "t", splitTree: SplitTree(), panes: [])
+    let worktree = Worktree(
+      id: worktreeID, name: "w", path: "/w", branch: "main",
+      tabs: [tab], selectedTabID: tabID
+    )
+    let project = Project(
+      id: projectID, name: "p", rootPath: "/", gitRoot: "/",
+      worktrees: [worktree], selectedWorktreeID: worktreeID
+    )
+    let catalog = Catalog(projects: [project])
+
+    var initial = RootFeature.State()
+    initial.activePendingWorktreeID = PendingWorktreeID()
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.gitService = GitServiceClient.testValue
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
+      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.editorClient = EditorClient.testValue
+      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .selectionChanged(HierarchySelection(projectID: projectID, worktreeID: worktreeID))
+    )
+    #expect(
+      store.state.activePendingWorktreeID == nil,
+      "landing on a real worktree must retire the loading overlay"
+    )
+  }
+
+  /// VAL-DETAIL-006: navigating to a NON-worktree selection (a project-only
+  /// row, or empty selection) does NOT clear `activePendingWorktreeID`.
+  /// Combined with the resolver reading the live `pendingWorktrees` row, this
+  /// is what restores the loading view (streaming continuing) when the user
+  /// returns to the in-progress context — the pending row is not selectable,
+  /// so only a real-worktree landing is allowed to retire the overlay.
+  @Test
+  func selectingNonWorktreeKeepsActivePendingOverlay() async {
+    let projectID = ProjectID()
+    let pendingID = PendingWorktreeID()
+
+    var initial = RootFeature.State()
+    initial.activePendingWorktreeID = pendingID
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.gitService = GitServiceClient.testValue
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
+      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.editorClient = EditorClient.testValue
+    }
+    store.exhaustivity = .off
+
+    // Project-only selection (worktreeID == nil): the overlay must survive.
+    await store.send(.selectionChanged(HierarchySelection(projectID: projectID, worktreeID: nil)))
+    #expect(
+      store.state.activePendingWorktreeID == pendingID,
+      "a project-only selection must not retire the loading overlay"
+    )
+
+    // Empty selection (e.g. an aux window took focus): still survives.
+    await store.send(.selectionChanged(HierarchySelection(projectID: nil, worktreeID: nil)))
+    #expect(
+      store.state.activePendingWorktreeID == pendingID,
+      "an empty selection must not retire the loading overlay"
+    )
+  }
+
   @Test
   func gateSwitchSeedsFirstPaneViaLiveSelectionChain() async {
     // The other gate tests stub `selectionChanges` to finish immediately, so
