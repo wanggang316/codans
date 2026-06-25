@@ -20,6 +20,24 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.15] - 2026-06-25
+
+### Added
+
+- **Project commands in the `codans` CLI.** A new `codans project commands`
+  group lists, adds, edits, and removes a project's saved commands straight
+  from the terminal.
+
+### Fixed
+
+- **Runaway memory growth.** A leak in the terminal's text-reading path could
+  push the app's memory into the gigabytes over a long session with many
+  panes — now fixed.
+- Coding-agent panes again recognize Claude Code when it runs through its
+  `claude.exe` launcher, so the agent reappears in the agents view.
+- The tab spinner no longer flickers back on each time a coding agent runs a
+  tool.
+
 ## [0.4.14] - 2026-06-25
 
 ### Added
