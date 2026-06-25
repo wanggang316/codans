@@ -122,7 +122,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
-  func archiveTearsDownSurfaces() async throws {
+  func archiveSuspendsPanesKeepsThemAndAnnounces() async throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
@@ -140,7 +140,19 @@ struct HierarchyManagerWorktreeMgmtTests {
     fakeRuntime.livePaneIDs.insert(paneID)
 
     try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
-    #expect(fakeRuntime.closeSurfaceCalls == [paneID])
+
+    // Archive routes through suspendSurface (kills the daemon, emits no
+    // .paneExited) — NOT closeSurface, whose .paneExited would route through
+    // paneLifecycleExited → closePane and delete the Pane.
+    #expect(fakeRuntime.suspendSurfaceCalls == [paneID])
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+    // Soft-hide keeps the Pane in the catalog for restore.
+    let worktree = manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }
+    #expect(worktree?.archived == true)
+    #expect(worktree?.tabs.flatMap { $0.panes }.map(\.id) == [paneID])
+    // One structural-mutation announce so the AgentState reconcile runs
+    // against visiblePaneIDs() and retires the hidden worktree's rows.
+    #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
   }
 
   @Test

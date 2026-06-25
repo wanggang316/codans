@@ -35,6 +35,30 @@ struct CatalogResolutionTests {
   }
 
   @Test
+  func visiblePaneIDsExcludesArchivedWorktrees() {
+    let visiblePane = Pane(workingDirectory: "/v")
+    let archivedPane = Pane(workingDirectory: "/a")
+    let visible = Worktree(
+      name: "visible", path: "/repo",
+      tabs: [Tab(splitTree: SplitTree(leaf: visiblePane.id), panes: [visiblePane])]
+    )
+    let archived = Worktree(
+      name: "archived", path: "/repo/arch",
+      tabs: [Tab(splitTree: SplitTree(leaf: archivedPane.id), panes: [archivedPane])],
+      archived: true
+    )
+    let catalog = Catalog(projects: [
+      Project(name: "repo", rootPath: "/repo", gitRoot: "/repo", worktrees: [visible, archived]),
+    ])
+
+    // allPaneIDs() sees both; visiblePaneIDs() drops the archived worktree's
+    // pane — archive kills its daemon, so its agent row must retire even
+    // though the Pane stays in the catalog for restore.
+    #expect(catalog.allPaneIDs() == [visiblePane.id, archivedPane.id])
+    #expect(catalog.visiblePaneIDs() == [visiblePane.id])
+  }
+
+  @Test
   func paneIDsInWorktreeReturnsAllLeaves() throws {
     let paneA = Pane(workingDirectory: "/a")
     let paneB = Pane(workingDirectory: "/b")

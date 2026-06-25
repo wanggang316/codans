@@ -564,10 +564,14 @@ final class HierarchyManager {
   /// Sets the archived flag on a Worktree (spec W-Q1, soft-hide). The
   /// main checkout (path == project.rootPath) cannot be archived and
   /// throws `.invariantViolation`. Archiving `true` iterates the
-  /// Worktree's Panes and calls `runtime.closeSurface(for:)` each so
-  /// terminal surfaces are torn down; the on-disk directory and git
-  /// refs are NOT touched. Idempotent: unchanged value is a silent
-  /// no-op (no save scheduled). Silent no-op when the id is unknown.
+  /// Worktree's Panes and calls `runtime.suspendSurface(for:)` each so the
+  /// pane daemons are killed (even backgrounded ones with no live surface)
+  /// and surfaces torn down — without deleting the Panes, which soft-hide
+  /// keeps in the catalog for restore; the on-disk directory and git refs
+  /// are NOT touched. It then fires `announceHierarchyMutated()` so the
+  /// AgentState reconcile retires the hidden worktree's agent rows.
+  /// Idempotent: unchanged value is a silent no-op (no save scheduled).
+  /// Silent no-op when the id is unknown.
   func setWorktreeArchived(worktreeID: WorktreeID, archived: Bool) throws {
     for projectIndex in catalog.projects.indices {
       let project = catalog.projects[projectIndex]
@@ -580,7 +584,11 @@ final class HierarchyManager {
       guard worktree.archived != archived else { return }
       if archived {
         for pane in worktree.tabs.flatMap({ $0.panes }) {
-          runtime.closeSurface(for: pane.id)
+          // `suspendSurface`, not `closeSurface`: kill each pane's daemon
+          // even when it has no live surface (lazy surfaces left a
+          // backgrounded archived pane's daemon running for days), and emit
+          // no `.paneExited` so soft-hide keeps the Pane in the catalog.
+          runtime.suspendSurface(for: pane.id)
         }
       }
       catalog.projects[projectIndex].worktrees[worktreeIndex].archived = archived
@@ -602,6 +610,12 @@ final class HierarchyManager {
           }?.id
       }
       store.scheduleSave(catalog)
+      // Archive emits no per-pane `.paneExited` (see `suspendSurface`), so
+      // nudge a structural-mutation event to re-run the AgentState reconcile
+      // against `visiblePaneIDs()` — that is what retires the now-hidden
+      // worktree's agent rows. Unarchive needs no nudge: its panes had no
+      // running daemon to surface a row for.
+      if archived { runtime.announceHierarchyMutated() }
       return
     }
   }

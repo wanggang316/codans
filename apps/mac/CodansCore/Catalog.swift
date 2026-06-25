@@ -206,4 +206,22 @@ extension Catalog {
     }
     return ids
   }
+
+  /// Every `PaneID` in a non-archived (visible) worktree, flat across all
+  /// projects. Differs from `allPaneIDs()` only by skipping archived
+  /// worktrees. The AgentState registry's membership reconcile uses this so
+  /// a soft-hidden worktree's panes count as "gone": archive kills their
+  /// daemons, so their agent rows must retire — even though the Pane stays
+  /// in the catalog for restore (see `AgentStateStore.reconcileMembership`).
+  public func visiblePaneIDs() -> Set<PaneID> {
+    var ids: Set<PaneID> = []
+    for project in projects {
+      for worktree in project.worktrees where !worktree.archived {
+        for tab in worktree.tabs {
+          for pane in tab.panes { ids.insert(pane.id) }
+        }
+      }
+    }
+    return ids
+  }
 }
