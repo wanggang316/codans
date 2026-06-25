@@ -1102,14 +1102,18 @@ struct RootFeature {
       //
       // OFF means never auto-focus the new worktree — even when the user
       // was still viewing the loading view. The setting is authoritative.
+      // OFF mints the "New" marker here (whether the user stayed on the
+      // loading view or navigated away); ON and failure never do.
       //
       // A FAILED creation never reaches here (it routes through
-      // `pendingWorktreeFailed`), so failure never switches.
+      // `pendingWorktreeFailed`), so failure never switches and never
+      // mints a marker.
       case .sidebar(.delegate(.worktreeMaterialized(let worktreeID, let projectID, _))):
         let autoSwitch =
           settingsWriter.readSnapshotSync().worktree.autoSwitchToNewWorktree
         let shouldSelect = autoSwitch
         guard shouldSelect else {
+          hierarchyClient.setWorktreeIsNew(worktreeID, true)
           return .none
         }
         // Select the project too for cross-project correctness, then the

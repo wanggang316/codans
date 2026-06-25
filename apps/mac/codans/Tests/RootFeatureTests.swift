@@ -1034,22 +1034,25 @@ struct RootFeatureTests {
 
   // MARK: - Post-completion switch gate (worktreeMaterialized)
 
-  /// Recorder for the gate's selection side-effects. Captures the project
-  /// and worktree the reducer asks `HierarchyClient` to select, so each
-  /// truth-table cell can assert "did / did not switch".
+  /// Recorder for the gate's selection and badge side-effects. Captures the
+  /// project and worktree the reducer asks `HierarchyClient` to select, plus
+  /// any `setWorktreeIsNew` calls, so each truth-table cell can assert
+  /// "did / did not switch" and "did / did not mint the New marker".
   private struct SelectRecorder: Sendable {
     let project = LockIsolated<ProjectID?>(nil)
     let worktree = LockIsolated<WorktreeID?>(nil)
+    /// (worktreeID, isNew) pairs recorded from `setWorktreeIsNew` calls.
+    let isNewCalls = LockIsolated<[(WorktreeID, Bool)]>([])
     var didSelect: Bool { project.value != nil || worktree.value != nil }
   }
 
-  /// Builds a gate TestStore with `selectProject`/`selectWorktree` wired
-  /// into `recorder`. `autoSwitch` sets the LIVE settings snapshot read at
-  /// completion; `activePendingWorktreeID` seeds the state field (used by
-  /// the loading-view resolver, independent of the switch gate).
-  /// `selectionChanges` finishes immediately so the post-select stream does
-  /// not feed back a `.selectionChanged` (the gate's switch decision is what
-  /// these tests assert, not the downstream auto-seed).
+  /// Builds a gate TestStore with `selectProject`/`selectWorktree` and
+  /// `setWorktreeIsNew` wired into `recorder`. `autoSwitch` sets the LIVE
+  /// settings snapshot read at completion; `activePendingWorktreeID` seeds
+  /// the state field (used by the loading-view resolver, independent of the
+  /// switch gate). `selectionChanges` finishes immediately so the post-select
+  /// stream does not feed back a `.selectionChanged` (the gate's switch
+  /// decision is what these tests assert, not the downstream auto-seed).
   @MainActor
   private func makeGateStore(
     autoSwitch: Bool,
@@ -1071,6 +1074,9 @@ struct RootFeatureTests {
       }
       $0.hierarchyClient.selectWorktree = { wt, _ in
         recorder.worktree.withValue { $0 = wt }
+      }
+      $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
+        recorder.isNewCalls.withValue { $0.append((wt, isNew)) }
       }
     }
     store.exhaustivity = .off
@@ -1201,6 +1207,58 @@ struct RootFeatureTests {
     await store.finish()
     #expect(rec.project.value == projectID)
     #expect(rec.worktree.value == worktreeID)
+  }
+
+  // MARK: - badge-set-on-complete (M3): isNew marker
+
+  @Test
+  func gateOffMintsIsNewMarkerOnMaterializedWorktree() async {
+    // badge-set-on-complete M3: auto-switch OFF → reducer calls
+    // `setWorktreeIsNew(worktreeID, true)` on the just-materialized worktree.
+    // The user stays put (unfocused new worktree) and a badge must land.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: pendingID, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+
+    // No selection was made.
+    #expect(!rec.didSelect)
+    // Exactly one isNew call, targeting the materialized worktree with true.
+    #expect(rec.isNewCalls.value.count == 1)
+    #expect(rec.isNewCalls.value.first?.0 == worktreeID)
+    #expect(rec.isNewCalls.value.first?.1 == true)
+  }
+
+  @Test
+  func gateOnDoesNotMintIsNewMarkerOnMaterializedWorktree() async {
+    // badge-set-on-complete M3: auto-switch ON → reducer switches focus but
+    // must NOT call `setWorktreeIsNew`. The focused worktree is already visible.
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: pendingID, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+
+    // The switch happened.
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == worktreeID)
+    // No badge was minted.
+    #expect(rec.isNewCalls.value.isEmpty)
   }
 
   // MARK: - Loading-view selection scoping (VAL-DETAIL-005 / VAL-DETAIL-006)
