@@ -81,11 +81,13 @@ struct WorktreeLoadingInfo: Equatable {
 }
 
 /// Detail-pane loading view for a worktree whose `wt sw` is still
-/// streaming. While creating, a **skeleton header** (placeholder blocks
-/// standing in for the real toolbar's branch-identity + status regions,
-/// which aren't known yet) sits above the worktree name, optional command
-/// chip, and a 5-line streaming tail. The failure path swaps the skeleton
-/// for a warning glyph.
+/// streaming. While creating or removing, a **skeleton header bar**
+/// (placeholder blocks standing in for the real toolbar's branch-identity
+/// + status regions, which aren't known yet) is pinned to the top edge of
+/// the view — matching where the real toolbar will sit on completion. The
+/// worktree name, optional command chip, and 5-line streaming tail fill the
+/// content area below it. The failure path swaps the skeleton for a
+/// centered warning glyph + message; no skeleton blocks appear there.
 ///
 /// This view is the detail body *only* while `activePendingWorktree != nil`
 /// (resolved in `WorktreeDetailView.detailBody`). On completion the pending
@@ -137,9 +139,59 @@ struct WorktreeLoadingView: View {
   }
 
   var body: some View {
+    if case .failed(let message) = info.kind {
+      failedView(message: message)
+    } else {
+      creatingView
+    }
+  }
+
+  /// Layout for the `.creating` and `.removing` states.
+  ///
+  /// `skeleton-left` (spinner + branch-identity block) and `skeleton-middle`
+  /// (status block) are placed in a top header bar pinned to the leading edge
+  /// of the view — matching the position of the real toolbar that replaces
+  /// them on completion. A trailing `Spacer()` keeps the blocks left-aligned
+  /// across the full pane width.
+  ///
+  /// The content body (name / command chip / streaming tail) fills the
+  /// remaining vertical space below the header bar. No skeleton blocks appear
+  /// in the content body. `.fixedSize(vertical: true)` on the header bar pins
+  /// it to its intrinsic height so the `NSProgressIndicator` inside
+  /// `skeleton-left` cannot expand along the outer `VStack`'s free axis.
+  private var creatingView: some View {
     let subtitle = subtitleText()
-    VStack(spacing: 12) {
-      skeletonHeader
+    return VStack(spacing: 0) {
+      // Top header bar — skeleton-left and skeleton-middle, leading-aligned.
+      HStack(spacing: 12) {
+        // Left identity placeholder: small inline spinner (live "work is
+        // happening" cue) followed by a branch-label-width block.
+        // Tagged `skeleton-left`.
+        HStack(spacing: 8) {
+          ProgressView().controlSize(.small)
+          skeletonBlock(width: 120, height: 14)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier(AccessibilityID.skeletonLeft)
+
+        // Middle status placeholder, sized like the header's status capsule.
+        // Tagged `skeleton-middle`.
+        skeletonBlock(width: 84, height: 18)
+          .accessibilityElement(children: .ignore)
+          .accessibilityIdentifier(AccessibilityID.skeletonMiddle)
+
+        Spacer()
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      // Pin the header bar to its intrinsic height so the indeterminate
+      // NSProgressIndicator in skeleton-left cannot expand along the free
+      // vertical axis of the outer VStack.
+      .fixedSize(horizontal: false, vertical: true)
+
+      // Content body: worktree name, current-phase operation chip (only
+      // present during `.creating`), and the 5-line streaming tail.
+      // Fills the remaining vertical space. No skeleton blocks here.
       VStack(spacing: 4) {
         Text(info.name)
           .font(.title3)
@@ -173,90 +225,64 @@ struct WorktreeLoadingView: View {
           .animation(.easeInOut, value: subtitle)
           .accessibilityIdentifier(AccessibilityID.streamingOutput)
       }
+      .multilineTextAlignment(.center)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    .multilineTextAlignment(.center)
-    // Collapse the stack to its intrinsic height before the window-filling
-    // frame centers it. The indeterminate macOS `ProgressView` in
-    // `skeletonHeader` (an `NSProgressIndicator`) otherwise greedily expands
-    // along the free vertical axis and self-centers in the detail pane,
-    // drifting away from the name/command/tail labels below it at larger pane
-    // sizes. Width stays flexible so the command + tail keep truncating.
-    .fixedSize(horizontal: false, vertical: true)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: .windowBackgroundColor))
+    // Tag the root while creating/removing so validation can probe
+    // `loading-view container` to confirm the loading state is in-tree.
+    // On completion this whole view is replaced by the real header +
+    // terminal and this id disappears (VAL-DETAIL-001).
     .accessibilityElement(children: .contain)
-    // Tag the root by state, NOT unconditionally: while creating/removing
-    // it is the `loading-view container` (skeleton + streaming surface);
-    // on failure it becomes the `loading-failure` root with a readable
-    // label/value so the settled error is announced to assistive tech and
-    // probeable — and the loading/skeleton id is ABSENT, so a probe reads
-    // "failed, not loading" rather than seeing both ids at once
-    // (VAL-DETAIL-004). The warning glyph in `skeletonHeader` stays
-    // `accessibilityHidden` (decorative); this root carries the meaning.
-    .modifier(LoadingStateAccessibility(info: info))
+    .accessibilityIdentifier(AccessibilityID.container)
   }
 
-  /// State-keyed accessibility identity for the loading view's root.
-  /// Creating/removing → the loading container id; failed → the
-  /// `loading-failure` id plus a spoken "Worktree creation failed" label
-  /// and the error message as the value. Split into a modifier so the
-  /// `body` stays a single declarative chain and the contract is colocated
-  /// with the ids it applies (VAL-DETAIL-004).
-  private struct LoadingStateAccessibility: ViewModifier {
-    let info: WorktreeLoadingInfo
-
-    func body(content: Content) -> some View {
-      switch info.kind {
-      case .failed(let message):
-        content
-          .accessibilityIdentifier(AccessibilityID.loadingFailure)
-          .accessibilityLabel("Worktree creation failed")
-          .accessibilityValue(message)
-      case .creating, .removing:
-        content
-          .accessibilityIdentifier(AccessibilityID.container)
-      }
-    }
-  }
-
-  /// Header region for the loading state. While creating/removing it renders
-  /// the real detail header's geometry as skeleton placeholder blocks —
-  /// `skeleton-left` (branch/icon identity) and `skeleton-middle` (status) —
-  /// so the layout reads as the header that is *about* to appear, without
-  /// surfacing any real branch name or status (neither is known yet). On
-  /// failure it falls back to the warning glyph the previous design used.
-  @ViewBuilder
-  private var skeletonHeader: some View {
-    switch info.kind {
-    case .creating, .removing:
-      HStack(spacing: 12) {
-        // Left identity placeholder: a small inline spinner (the live "work
-        // is happening" cue, folded in from the old large glyph) followed by
-        // a branch-label-width block. Tagged `skeleton-left`.
-        HStack(spacing: 8) {
-          ProgressView().controlSize(.small)
-          skeletonBlock(width: 120, height: 14)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityIdentifier(AccessibilityID.skeletonLeft)
-
-        // Middle status placeholder, sized like the header's status capsule.
-        // Tagged `skeleton-middle`.
-        skeletonBlock(width: 84, height: 18)
-          .accessibilityElement(children: .ignore)
-          .accessibilityIdentifier(AccessibilityID.skeletonMiddle)
-      }
-      .fixedSize()
-    case .failed:
-      // Decorative warning glyph. It stays `accessibilityHidden` on
-      // purpose: the failure is announced by the view root's
-      // `loading-failure` element (label + error value) so VoiceOver reads
-      // one clear "Worktree creation failed" message instead of an
-      // unlabeled triangle glyph plus the raw static text (VAL-DETAIL-004).
+  /// Layout for the `.failed` state: centered warning glyph + message,
+  /// no skeleton header bar. The failure is a settled error, not a
+  /// transient loading state, so it stays vertically centered in the pane.
+  ///
+  /// `.accessibilityLabel`/`.accessibilityValue` on a `.contain` container
+  /// is a no-op — VoiceOver never reads them. The failure announcement is
+  /// installed via `.accessibilityRepresentation` instead (the same pattern
+  /// established in `AgentStateRowView` for its spoken row label), so the
+  /// "Worktree creation failed" label and error `message` actually reach the
+  /// accessibility tree (VAL-DETAIL-004).
+  private func failedView(message: String) -> some View {
+    VStack(spacing: 12) {
+      // Decorative warning glyph. `accessibilityHidden` because the failure
+      // is announced by the root's `accessibilityRepresentation`; the glyph
+      // itself carries no additional meaning beyond the visual triangle shape.
       Image(systemName: "exclamationmark.triangle.fill")
         .font(.largeTitle)
         .symbolRenderingMode(.multicolor)
         .accessibilityHidden(true)
+      VStack(spacing: 4) {
+        Text(info.name)
+          .font(.title3)
+        Text(message)
+          .font(.subheadline)
+          .monospaced()
+          .foregroundStyle(.tertiary)
+          .lineLimit(5, reservesSpace: true)
+          .truncationMode(.head)
+          .contentTransition(.opacity)
+          .animation(.easeInOut, value: message)
+          .accessibilityIdentifier(AccessibilityID.streamingOutput)
+      }
+    }
+    .multilineTextAlignment(.center)
+    .fixedSize(horizontal: false, vertical: true)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(nsColor: .windowBackgroundColor))
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier(AccessibilityID.loadingFailure)
+    // Proxy element carrying the spoken label + error value so VoiceOver
+    // reads "Worktree creation failed" + the message. Direct
+    // `.accessibilityLabel`/`.accessibilityValue` on a `.contain` container
+    // are no-ops, so the representation is the only path to the a11y tree.
+    .accessibilityRepresentation {
+      Text("Worktree creation failed")
+        .accessibilityValue(message)
     }
   }
 
