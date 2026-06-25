@@ -123,6 +123,42 @@ struct HierarchyManagerReorderTests {
     #expect(after == snapshot)
   }
 
+  // MARK: - setWorktreeIsNew
+
+  /// Pins reposition the row into the pinned segment; `isNew` is a badge-only
+  /// flag and must NOT reorder rows. This test pins the deliberate divergence
+  /// from `setWorktreePinned`, which DOES call `move(fromOffsets:toOffset:)`.
+  @Test
+  func setWorktreeIsNewFlipsWithoutReordering() throws {
+    let pid = try makeProject()
+    let w1 = try manager.createWorktree(in: pid, name: "w1", path: "/repo/w1", branch: "w1")
+    let w2 = try manager.createWorktree(in: pid, name: "w2", path: "/repo/w2", branch: "w2")
+    // New unpinned rows land at unpinned-segment top, so the known order is
+    // [main, w2, w1]. Capture it explicitly so both IDs are referenced and the
+    // post-call assertion proves order is fully preserved.
+    let mainID = worktrees(in: pid)[0].id
+    let knownOrder = [mainID, w2, w1]
+    manager.setWorktreeIsNew(worktreeID: w2, isNew: true)
+    #expect(worktrees(in: pid).map { $0.id } == knownOrder)
+    #expect(worktrees(in: pid).first { $0.id == w2 }?.isNew == true)
+  }
+
+  /// Calling `setWorktreeIsNew` with the value already in place must be a
+  /// silent no-op: the catalog stays byte-identical (no mutation, no
+  /// redundant save). A genuine value change must still take effect.
+  @Test
+  func setWorktreeIsNewSameValueIsNoOp() throws {
+    let pid = try makeProject()
+    let w1 = try manager.createWorktree(in: pid, name: "w1", path: "/repo/w1", branch: "w1")
+    // isNew defaults to false; repeating false is a no-op — catalog must not change.
+    let snapshot = manager.catalog
+    manager.setWorktreeIsNew(worktreeID: w1, isNew: false)
+    #expect(manager.catalog == snapshot)
+    // A genuine value change does take effect.
+    manager.setWorktreeIsNew(worktreeID: w1, isNew: true)
+    #expect(worktrees(in: pid).first { $0.id == w1 }?.isNew == true)
+  }
+
   // MARK: - reorderWorktrees
 
   @Test
