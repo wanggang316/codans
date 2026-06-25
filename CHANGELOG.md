@@ -20,6 +20,28 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.14] - 2026-06-25
+
+### Added
+
+- **More commands in the Command Palette.** Open Project, Clone Repository,
+  and a curated set of worktree, project, tab, and pane actions are now all
+  reachable from the palette. Typing a level name — worktree, tab, pane, or
+  project — surfaces that whole group of commands.
+
+### Changed
+
+- The Command Palette drops two rows that did nothing ("New Window" and
+  "Show Tab Overview").
+
+### Fixed
+
+- Archived worktrees now age out past their retention period even while a
+  window stays frontmost, and changes to update-check preferences take effect
+  immediately instead of only after the next launch.
+- A tab no longer shows a duplicate spinner — and a clipped title — while a
+  coding agent animates its own progress indicator in the live tab title.
+
 ## [0.4.13] - 2026-06-22
 
 ### Added
