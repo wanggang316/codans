@@ -27,6 +27,9 @@ extension IPC {
     // catalog-backed `hierarchy.*` surface. Handlers live in
     // `ProjectHandlers`. `listScripts` reads `ProjectSettings.scripts`.
     case projectListScripts = "project.listScripts"
+    case projectAddScript = "project.addScript"
+    case projectUpdateScript = "project.updateScript"
+    case projectRemoveScript = "project.removeScript"
 
     // hierarchy — reads
     case hierarchyListProjects = "hierarchy.listProjects"

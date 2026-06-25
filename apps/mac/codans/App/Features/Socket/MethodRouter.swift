@@ -184,18 +184,37 @@ public final class MethodRouter {
     guard let h = projectHandlers else { return nil }
     switch request.method {
     case .projectListScripts:
-      do {
-        let params = try request.params.decoded(as: ProjectHandlers.ListScriptsRequest.self)
-        let response = try h.listScripts(params)
-        return Self.encodeUnary(response)
-      } catch let error as IPCError {
-        return .failed(error)
-      } catch let error as DecodingError {
-        return .failed(.invalidParams(message: String(describing: error), path: nil))
-      } catch {
-        return .failed(.internal(String(describing: error)))
+      return Self.projectOutcome {
+        try h.listScripts(request.params.decoded(as: ProjectHandlers.ListScriptsRequest.self))
+      }
+    case .projectAddScript:
+      return Self.projectOutcome {
+        try h.addScript(request.params.decoded(as: ProjectHandlers.AddScriptRequest.self))
+      }
+    case .projectUpdateScript:
+      return Self.projectOutcome {
+        try h.updateScript(request.params.decoded(as: ProjectHandlers.UpdateScriptRequest.self))
+      }
+    case .projectRemoveScript:
+      return Self.projectOutcome {
+        try h.removeScript(request.params.decoded(as: ProjectHandlers.RemoveScriptRequest.self))
       }
     default: return nil
+    }
+  }
+
+  /// Shared adapter for the `project.*` methods: encode the typed response,
+  /// passing a handler `IPCError` straight through, mapping a `DecodingError`
+  /// to `invalidParams`, and any other throw to a programmer-error `internal`.
+  private static func projectOutcome(_ body: () throws -> some Encodable) -> RouterOutcome {
+    do {
+      return encodeUnary(try body())
+    } catch let error as IPCError {
+      return .failed(error)
+    } catch let error as DecodingError {
+      return .failed(.invalidParams(message: String(describing: error), path: nil))
+    } catch {
+      return .failed(.internal(String(describing: error)))
     }
   }
 
