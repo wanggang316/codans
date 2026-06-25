@@ -81,3 +81,15 @@ personas:
       the branch's commit history.
     defaults:
       authStatus: authorized
+
+  - id: cli_automation_scripter
+    role: Developer scripting per-project command setup from the terminal
+    description: >
+      Drives `codans project commands …` non-interactively (setup
+      scripts, CI, coding agents) to provision and tweak a project's
+      Commands without ever opening Settings. Pipes `--json` into jq,
+      branches on exit codes, and expects byte-stable settings.json so
+      committed fixtures and re-runs stay identical. Usually runs against
+      an already-running app on the dev socket.
+    defaults:
+      authStatus: authorized

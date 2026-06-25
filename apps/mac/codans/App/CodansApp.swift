@@ -1005,11 +1005,16 @@ final class AppState {
       hierarchy: hierarchyClient,
       settings: settingsStore
     )
+    let projectHandlers = ProjectHandlers(
+      settings: settingsStore,
+      hierarchy: hierarchyClient
+    )
     let router = MethodRouter(
       systemHandlers: systemHandlers,
       hierarchyHandlers: hierarchyHandlers,
       terminalHandlers: terminalHandlers,
-      editorHandlers: editorHandlers
+      editorHandlers: editorHandlers,
+      projectHandlers: projectHandlers
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)

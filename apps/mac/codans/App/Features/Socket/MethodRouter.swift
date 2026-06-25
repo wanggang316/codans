@@ -21,18 +21,21 @@ public final class MethodRouter {
   private let hierarchyHandlers: HierarchyHandlers?
   private let terminalHandlers: TerminalHandlers?
   private let editorHandlers: EditorHandlers?
+  private let projectHandlers: ProjectHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
     systemHandlers: SystemHandlers,
     hierarchyHandlers: HierarchyHandlers? = nil,
     terminalHandlers: TerminalHandlers? = nil,
-    editorHandlers: EditorHandlers? = nil
+    editorHandlers: EditorHandlers? = nil,
+    projectHandlers: ProjectHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
     self.terminalHandlers = terminalHandlers
     self.editorHandlers = editorHandlers
+    self.projectHandlers = projectHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -45,6 +48,7 @@ public final class MethodRouter {
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
+    if let outcome = await routeProject(request) { return outcome }
     return notWired(request.method)
   }
 
@@ -169,6 +173,48 @@ public final class MethodRouter {
         return .failed(.internal(String(describing: error)))
       }
     default: return nil
+    }
+  }
+
+  /// `project.*` adapter. `ProjectHandlers` throws `IPCError` directly (it is
+  /// the only wire-error type these methods produce), so the catch chain is
+  /// flatter than `routeEditor`'s — no app-tier error translation, just a
+  /// `DecodingError` → `invalidParams` rescue and a programmer-error backstop.
+  private func routeProject(_ request: IPC.Request) async -> RouterOutcome? {
+    guard let h = projectHandlers else { return nil }
+    switch request.method {
+    case .projectListScripts:
+      return Self.projectOutcome {
+        try h.listScripts(request.params.decoded(as: ProjectHandlers.ListScriptsRequest.self))
+      }
+    case .projectAddScript:
+      return Self.projectOutcome {
+        try h.addScript(request.params.decoded(as: ProjectHandlers.AddScriptRequest.self))
+      }
+    case .projectUpdateScript:
+      return Self.projectOutcome {
+        try h.updateScript(request.params.decoded(as: ProjectHandlers.UpdateScriptRequest.self))
+      }
+    case .projectRemoveScript:
+      return Self.projectOutcome {
+        try h.removeScript(request.params.decoded(as: ProjectHandlers.RemoveScriptRequest.self))
+      }
+    default: return nil
+    }
+  }
+
+  /// Shared adapter for the `project.*` methods: encode the typed response,
+  /// passing a handler `IPCError` straight through, mapping a `DecodingError`
+  /// to `invalidParams`, and any other throw to a programmer-error `internal`.
+  private static func projectOutcome(_ body: () throws -> some Encodable) -> RouterOutcome {
+    do {
+      return encodeUnary(try body())
+    } catch let error as IPCError {
+      return .failed(error)
+    } catch let error as DecodingError {
+      return .failed(.invalidParams(message: String(describing: error), path: nil))
+    } catch {
+      return .failed(.internal(String(describing: error)))
     }
   }
 
