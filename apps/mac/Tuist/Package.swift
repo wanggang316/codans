@@ -14,30 +14,13 @@ let packageSettings = PackageSettings(
     // installed before main() and its dSYM is uploaded for symbolication.
     "Sentry": .framework,
   ],
-  // Two settings, both targeting the same Xcode 26 failure on the
-  // macro-support frameworks SwiftPM generates (e.g. CasePathsMacrosSupport,
-  // imported by swift-navigation's SwiftNavigationMacros). They are
-  // pure-Swift modules with no ObjC interface, yet Xcode builds them as
-  // frameworks whose generated module.modulemap declares
-  //   header "<Name>-Swift.h"
-  // — a Swift→ObjC header that is never produced. On the CI runner the
-  // Release archive aborts with "header 'CasePathsMacrosSupport-Swift.h'
-  // not found" / "could not build module"; the same source archives fine
-  // locally on the identical Xcode 26.0.1 toolchain, so it is environment
-  // -timing-sensitive. Command-line build settings on xcodebuild don't
-  // reach SwiftPM package targets, so the overrides live here.
-  //
-  // - SWIFT_INSTALL_OBJC_HEADER=NO: stop emitting/declaring the bogus
-  //   -Swift.h so the framework modulemap no longer requires it.
-  // - *_ENABLE_EXPLICIT_MODULES=NO: drop the Xcode 26 dependency scanner
-  //   that turned the same missing header into 24 scan failures.
-  baseSettings: .settings(
-    base: [
-      "SWIFT_INSTALL_OBJC_HEADER": "NO",
-      "SWIFT_ENABLE_EXPLICIT_MODULES": "NO",
-      "CLANG_ENABLE_EXPLICIT_MODULES": "NO",
-    ]
-  )
+  // Tuist's default SwiftPM product type is `.staticFramework`: a static
+  // archive wrapped in `Foo.framework`. Xcode 26's CI runner image started
+  // scanning those framework modulemaps for pure-Swift macro support modules
+  // such as CasePathsMacrosSupport, whose modulemap declares a generated
+  // `Foo-Swift.h` that is never produced. Emit package libraries as plain
+  // static libraries instead so those framework modulemaps do not exist.
+  baseProductType: .staticLibrary
 )
 #endif
 
