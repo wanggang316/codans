@@ -218,6 +218,15 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 - Domain errors stay inside their package; converted to `IPCError` only at the IPC boundary
 - Panics (Swift fatalError) are reserved for invariant violations, never for user input
 
+### Accessibility (probeable contracts)
+
+User-observable accessibility values are a stable probe contract — validation keys on them, and renaming a vocabulary string breaks a unit test. Two SwiftUI traps to avoid (both bit the worktree-creation in-progress UI):
+
+- `.accessibilityValue(_:)` / `.accessibilityLabel(_:)` applied to a view that is also `.accessibilityElement(children: .contain)` is a **no-op** — the container exposes its children, not its own value. Put the value on a **leaf child** (e.g. the row's name `Text` carries the in-progress/settled value; the status `Text` carries the stage value) so it provably reaches the accessibility tree.
+- `.accessibilityRepresentation { … }` replaces the modified subtree's accessibility entirely (per Apple's docs), so it can shadow contained leaves. Use it only where the element has no children to probe (e.g. a settled failure announced as one element), not to bolt a value onto a `.contain` row whose leaves must stay individually probeable.
+
+`AgentStateRowView` and `PendingWorktreeRow` are the worked examples; decorative spinners/glyphs/shimmer stay `.accessibilityHidden(true)` since the value/label carries the meaning.
+
 ### Build toolchain
 
 - `mise.toml` pins `tuist`, `zig`, `swiftlint`, `xcbeautify`
