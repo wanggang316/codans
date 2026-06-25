@@ -53,4 +53,28 @@ struct PendingWorktree: Equatable, Identifiable {
     case running
     case failed(GitWorktreeError)
   }
+
+  /// `true` while the creation is still streaming (either leg). The row's
+  /// decorative shimmer and spinner key on this; it settles to `false` on
+  /// failure (and the row leaves the pending list entirely on success).
+  var isRunning: Bool {
+    if case .running = status { return true }
+    return false
+  }
+
+  /// Stable, machine-readable signal for whether the worktree NAME is still
+  /// in-flight, exposed as the name's accessibility value so the lifecycle
+  /// state is probeable without reading the (decorative) shimmer animation.
+  /// The vocabulary is a fixed contract that later validation keys on —
+  /// DO NOT rename these strings:
+  ///   - `in-progress` — creation is still streaming (running, either leg)
+  ///   - `settled`     — creation has stopped progressing (failed; success
+  ///                     removes the row from the pending list, so the only
+  ///                     settled state a row reports is `.failed`)
+  /// Complements the per-leg stage value on the row (`creating` /
+  /// `setupScript` / `failed`); see `PendingWorktreeRow.stageAccessibilityValue`
+  /// and `pending-phase-lifecycle`.
+  var nameProgressAccessibilityValue: String {
+    isRunning ? "in-progress" : "settled"
+  }
 }
