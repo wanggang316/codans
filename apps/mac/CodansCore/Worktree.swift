@@ -28,6 +28,11 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
   /// the encode path omits the key when `false` so existing catalogs round-trip
   /// identically.
   public var isPinned: Bool
+  /// A fresh, never-opened Worktree created with auto-switch OFF. Cleared the
+  /// first time the user selects the Worktree. Defaults to `false`; pre-existing
+  /// catalogs decode to `false` via `decodeIfPresent`, and the encode path omits
+  /// the key when `false` so existing catalogs round-trip identically.
+  public var isNew: Bool
 
   public init(
     id: WorktreeID = WorktreeID(),
@@ -38,7 +43,8 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     selectedTabID: TabID? = nil,
     archived: Bool = false,
     archivedAt: Date? = nil,
-    isPinned: Bool = false
+    isPinned: Bool = false,
+    isNew: Bool = false
   ) {
     self.id = id
     self.name = name
@@ -49,12 +55,13 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     self.archived = archived
     self.archivedAt = archivedAt
     self.isPinned = isPinned
+    self.isNew = isNew
   }
 }
 
 extension Worktree: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, path, branch, tabs, selectedTabID, archived, archivedAt, isPinned
+    case id, name, path, branch, tabs, selectedTabID, archived, archivedAt, isPinned, isNew
   }
 
   public init(from decoder: Decoder) throws {
@@ -68,6 +75,7 @@ extension Worktree: Codable {
     self.archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
     self.archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
     self.isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+    self.isNew = try container.decodeIfPresent(Bool.self, forKey: .isNew) ?? false
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -88,6 +96,9 @@ extension Worktree: Codable {
     try container.encodeIfPresent(archivedAt, forKey: .archivedAt)
     if isPinned {
       try container.encode(true, forKey: .isPinned)
+    }
+    if isNew {
+      try container.encode(true, forKey: .isNew)
     }
   }
 }

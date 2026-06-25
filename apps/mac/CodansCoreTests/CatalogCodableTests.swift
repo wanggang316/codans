@@ -124,6 +124,41 @@ struct CatalogCodableTests {
     #expect(decoded == catalog)
   }
 
+  // MARK: - isNew round-trips
+
+  @Test
+  func isNewTrueRoundTrips() throws {
+    // Encode a worktree with isNew == true; decode must preserve the flag.
+    let worktree = Worktree(name: "w", path: "/w", isNew: true)
+    let data = try JSONEncoder().encode(worktree)
+    let decoded = try JSONDecoder().decode(Worktree.self, from: data)
+    #expect(decoded.isNew == true)
+    #expect(decoded == worktree)
+  }
+
+  @Test
+  func isNewFalseOmitsKeyFromJSON() throws {
+    // Encode a worktree with isNew == false; the JSON must not contain the key
+    // so pre-existing catalogs round-trip identically.
+    let worktree = Worktree(name: "w", path: "/w", isNew: false)
+    let data = try JSONEncoder().encode(worktree)
+    let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(dict["isNew"] == nil)
+  }
+
+  @Test
+  func isNewAbsentInJSONDecodesToFalse() throws {
+    // Simulate a pre-isNew catalog entry: strip the key from the encoded dict,
+    // then verify decoding falls back to false (backward-compat).
+    let worktree = Worktree(name: "w", path: "/w", isNew: true)
+    let encoded = try JSONEncoder().encode(worktree)
+    var dict = try #require(try JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    dict.removeValue(forKey: "isNew")
+    let stripped = try JSONSerialization.data(withJSONObject: dict)
+    let decoded = try JSONDecoder().decode(Worktree.self, from: stripped)
+    #expect(decoded.isNew == false)
+  }
+
   // MARK: - Tab invariants
 
   @Test

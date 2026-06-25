@@ -690,6 +690,20 @@ final class HierarchyManager {
     }
   }
 
+  /// Flips `Worktree.isNew` for the given Worktree. Silent no-op for unknown
+  /// ids and unchanged values. Persists via the standard debounced save pipeline.
+  func setWorktreeIsNew(worktreeID: WorktreeID, isNew: Bool) {
+    for projectIndex in catalog.projects.indices {
+      let project = catalog.projects[projectIndex]
+      guard let worktreeIndex = project.worktrees.firstIndex(where: { $0.id == worktreeID })
+      else { continue }
+      guard project.worktrees[worktreeIndex].isNew != isNew else { return }
+      catalog.projects[projectIndex].worktrees[worktreeIndex].isNew = isNew
+      store.scheduleSave(catalog)
+      return
+    }
+  }
+
   /// Reorder rows within a single sidebar segment under one Project. SwiftUI
   /// `.onMove` reports segment-relative `IndexSet` and target offset; this
   /// method translates those into a catalog-array mutation that preserves the

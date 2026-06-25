@@ -270,6 +270,13 @@ nonisolated struct HierarchyClient: Sendable {
       _ worktreeID: WorktreeID, _ isPinned: Bool
     ) -> Void
 
+  /// Flips `Worktree.isNew` for the given Worktree. Silent for unknown ids / unchanged
+  /// values. Persists via the standard debounced save pipeline.
+  var setWorktreeIsNew:
+    @MainActor @Sendable (
+      _ worktreeID: WorktreeID, _ isNew: Bool
+    ) -> Void
+
   /// Flips `Project.isExpanded` (sidebar disclosure state). Silent no-op for
   /// unknown ids and unchanged values. Persists through the standard debounced
   /// save pipeline so the open / closed choice survives restart.
@@ -736,6 +743,9 @@ extension HierarchyClient {
       },
       setWorktreePinned: { worktreeID, isPinned in
         manager.setWorktreePinned(worktreeID: worktreeID, isPinned: isPinned)
+      },
+      setWorktreeIsNew: { worktreeID, isNew in
+        manager.setWorktreeIsNew(worktreeID: worktreeID, isNew: isNew)
       },
       setProjectExpanded: { projectID, isExpanded in
         manager.setProjectExpanded(projectID: projectID, isExpanded: isExpanded)
@@ -1662,6 +1672,7 @@ extension HierarchyClient: DependencyKey {
     selectionChanges: { AsyncStream { $0.finish() } },
     setWorktreeArchived: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreePinned: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setWorktreeIsNew: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectExpanded: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     reconcileDiscoveredWorktrees: { _ in fatalError("HierarchyClient.liveValue not configured") },
     createWorktreeWithGit: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1763,6 +1774,7 @@ extension HierarchyClient: DependencyKey {
     ),
     setWorktreeArchived: unimplemented("HierarchyClient.setWorktreeArchived"),
     setWorktreePinned: unimplemented("HierarchyClient.setWorktreePinned"),
+    setWorktreeIsNew: unimplemented("HierarchyClient.setWorktreeIsNew"),
     setProjectExpanded: unimplemented("HierarchyClient.setProjectExpanded"),
     reconcileDiscoveredWorktrees: unimplemented("HierarchyClient.reconcileDiscoveredWorktrees"),
     createWorktreeWithGit: unimplemented(
