@@ -21,7 +21,10 @@ build/
 *.xcworkspace/
 **/Tuist/Dependencies/
 **/Tuist/.build/
-**/Tuist/Package.resolved
+# Package.resolved is tracked (committed) to pin the dependency graph —
+# leaving it untracked let CI float transitive deps and pull a newer
+# swift-case-paths whose new CasePathsMacrosSupport module fails to build
+# under the CI Xcode toolchain. See apps/mac/Tuist/Package.resolved.
 
 # Carthage
 Carthage/Build/

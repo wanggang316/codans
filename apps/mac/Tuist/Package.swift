@@ -13,14 +13,7 @@ let packageSettings = PackageSettings(
     // Sentry must be a dynamic framework so its crash handler can be
     // installed before main() and its dSYM is uploaded for symbolication.
     "Sentry": .framework,
-  ],
-  // Tuist's default SwiftPM product type is `.staticFramework`: a static
-  // archive wrapped in `Foo.framework`. Xcode 26's CI runner image started
-  // scanning those framework modulemaps for pure-Swift macro support modules
-  // such as CasePathsMacrosSupport, whose modulemap declares a generated
-  // `Foo-Swift.h` that is never produced. Emit package libraries as plain
-  // static libraries instead so those framework modulemaps do not exist.
-  baseProductType: .staticLibrary
+  ]
 )
 #endif
 
