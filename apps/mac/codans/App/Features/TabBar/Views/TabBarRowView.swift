@@ -309,8 +309,11 @@ struct TabBarRowView: View {
 private struct ResolvingTabChipView: View {
   let tab: CodansCore.Tab
   let isActive: Bool
-  /// Terminal-busy signal (OSC 9;4 ∪ foreground command). Always drives the
-  /// spinner — a plain command does not self-indicate inside the title.
+  /// Terminal-busy signal (OSC 9;4 ∪ foreground command). Drives the spinner
+  /// for a plain command (which does not self-indicate inside the title), but
+  /// is suppressed while the chip shows a working agent's live OSC title —
+  /// there the agent's own OSC 9;4 is what set this flag (see
+  /// `showsSpinner(live:)`).
   let terminalBusy: Bool
   /// A bound agent in this tab is `.working`. Drives the spinner only when the
   /// chip is NOT showing the live OSC title, because a working coding agent
@@ -374,19 +377,22 @@ private struct ResolvingTabChipView: View {
     }
   }
 
-  /// Whether to render the chip's running spinner. Terminal commands always
-  /// get it — they never animate the title themselves. A working agent gets it
-  /// only when the chip is showing something OTHER than the live OSC title,
-  /// because a working coding agent (e.g. Claude) already animates its own
-  /// spinner into that live title; stacking codans' spinner on top would
-  /// double the indicator and shove the title into truncation. A manually
-  /// renamed tab (`tab.name`) shows a static name with no live animation, so it
-  /// keeps the spinner.
+  /// Whether to render the chip's running spinner. A working coding agent
+  /// (e.g. Claude) both animates its own spinner into the live OSC title AND
+  /// emits OSC 9;4 while running tool calls — and that OSC 9;4 also lights
+  /// `terminalBusy`. So when the chip is showing the agent's live title, the
+  /// activity is already covered twice over (the title animation plus the
+  /// pane's own progress bar); suppress our spinner there *regardless of*
+  /// `terminalBusy`, or it blinks on with every tool call and stacks on top of
+  /// the title, shoving it into truncation. Otherwise any busy signal drives
+  /// the spinner: a plain command (no self-indication), or a working agent on a
+  /// manually renamed tab (`tab.name` — a static name with no live animation to
+  /// carry the agent's own spinner).
   private func showsSpinner(live: String?) -> Bool {
-    if terminalBusy { return true }
-    guard agentWorking else { return false }
-    let showingLiveTitle = (tab.name?.isEmpty ?? true) && live != nil
-    return !showingLiveTitle
+    let showingAgentLiveTitle =
+      agentWorking && (tab.name?.isEmpty ?? true) && live != nil
+    if showingAgentLiveTitle { return false }
+    return terminalBusy || agentWorking
   }
 
   /// Title sourced strictly from the live focused-pane `SurfaceInfo`.
