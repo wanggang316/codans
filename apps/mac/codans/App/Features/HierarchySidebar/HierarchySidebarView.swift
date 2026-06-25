@@ -852,6 +852,7 @@ struct HierarchySidebarView: View {
         hotkeyNumber: hotkeyNumber,
         isSelected: isSelected
       )
+      newBadgePill(for: worktree)
       diffStatsChip(for: worktree, in: project, snapshot: snapshot)
       gitHubBadge(for: worktree, in: project)
       // Trailing chord hint, after both the row content and the optional PR pill so it
@@ -1267,6 +1268,32 @@ struct HierarchySidebarView: View {
       return "Remove Project “\(name)”?"
     }
     return "Remove Project?"
+  }
+
+  // MARK: - New badge pill
+
+  /// "New" pill — shown while `worktree.isNew == true` (cleared on first open by
+  /// `RootFeature`). Mirrors the PR-number-pill stroke style (same corner radius, line
+  /// weight, and padding) so the two read as one component family, but uses accent blue
+  /// to signal "just created" rather than a PR lifecycle state. Placed as the first
+  /// trailing accessory so the row reads: name · New · diff · PR.
+  @ViewBuilder
+  fileprivate func newBadgePill(for worktree: Worktree) -> some View {
+    if worktree.isNew {
+      Text("New")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+        .background(
+          RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .stroke(Color.accentColor.opacity(0.75), lineWidth: 0.75)
+        )
+        // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
+        // not trailing, so the pill's right edge stays flush when no other accessories follow.
+        .padding(.leading, 6)
+        .accessibilityLabel("New")
+    }
   }
 
   // MARK: - Diff stats chip
