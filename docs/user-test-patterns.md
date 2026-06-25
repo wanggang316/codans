@@ -71,3 +71,13 @@ Personas are reusable across features. The shared registry is `docs/user-tests/_
 - Visual regression / snapshot diffing of arbitrary view layouts. Cases assert observable state, not pixel fidelity.
 - Performance budgets. Cases that need a perf SLO (latency under N ms, FPS above N) cite the existing perf-budget gate instead and explicitly mark the AC as "not user-observable".
 - Cross-version migration tests beyond what a fixture seed expresses. Migration coverage lives in the relevant module's unit suite.
+
+## Knowledge Persistence
+
+Operational facts discovered during validation runs (append fact, not test assertions):
+
+- **No interactive-GUI automation surface exists in the agent environment** (no computer-use / screenshot / XCUITest scheme). SwiftUI-window assertions (rendered a11y values, on-screen placement, live row updates, context-menu contents) are therefore **deferred to a human dogfooder** in automated validation — record them `blocked` with the underlying logic verified by the reducer/integration/Codable suites, never a faked PASS.
+- **`wt` and `/bin/bash` are bundled in the Codans test host**, so `WorktreeLifecycleIntegrationTests` run for real (real `git worktree add` + setup-script subprocess; ~0.5–1.4 s each) — the strongest black-box evidence tier for worktree-lifecycle assertions.
+- **Swift Testing prints a spurious `Executed 0 tests` line** under `xcodebuild test`; the authoritative count is the `Test run with N tests passed` line. Do not read "Executed 0 tests" as a skipped suite.
+- **Do not drive the live `codans` CLI / installed `Codans.app` for validation**: the running instance is typically built from a different worktree and owns the `~/.config/codans/{settings,catalog}.json` socket; driving it mutates the user's real state with no reset boundary. The CLI is a thin RPC client to the socket-owning app, so it cannot probe an arbitrary build in isolation.
+- **Build is heavy + stale-Tuist-path hazard**: a stale `apps/mac/Tuist/.build` pointing at an old worktree path breaks `xcodebuild`; fix with `rm -rf apps/mac/Tuist/.build && make mac-generate` then rebuild.
