@@ -45,17 +45,48 @@ struct WorktreeLoadingInfo: Equatable {
 }
 
 /// Detail-pane loading view for a worktree whose `wt sw` is still
-/// streaming. Large spinner (or warning glyph on failure), worktree
-/// name, optional command chip, and a 5-line streaming tail with a
-/// head-truncated middle so the latest output stays visible regardless
-/// of line length.
+/// streaming. While creating, a **skeleton header** (placeholder blocks
+/// standing in for the real toolbar's branch-identity + status regions,
+/// which aren't known yet) sits above the worktree name, optional command
+/// chip, and a 5-line streaming tail. The failure path swaps the skeleton
+/// for a warning glyph.
+///
+/// This view is the detail body *only* while `activePendingWorktree != nil`
+/// (resolved in `WorktreeDetailView.detailBody`). On completion the pending
+/// row leaves the array, the detail body swaps to the real
+/// `worktreeToolbarContent` + terminal, and this whole view — including the
+/// skeleton accessibility ids below — is removed from the tree. That
+/// presence-while-loading / absence-on-completion is the probeable signal
+/// (VAL-DETAIL-001 / VAL-DETAIL-003).
 struct WorktreeLoadingView: View {
   let info: WorktreeLoadingInfo
+
+  /// Reduce Motion suppresses the skeleton's decorative light-sweep so the
+  /// in-progress state never depends on animation. The placeholder *blocks*
+  /// and the accessibility ids below stay present either way, keeping the
+  /// loading state perceivable without the sweep (VAL-DETAIL-008). Mirrors
+  /// `PendingWorktreeRow` / `AgentStateRowView`'s reduce-motion gating —
+  /// gated at the call site so the shared `ShimmerModifier` is untouched.
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  /// Stable accessibility identifiers for the loading surface. These are a
+  /// fixed contract that later validation keys on (VAL-DETAIL-001 /
+  /// VAL-DETAIL-003) — DO NOT rename these strings:
+  ///   - `loading-view container` — the loading-view root; present while a
+  ///     worktree is being created, absent once the real header + terminal
+  ///     take over on completion (this whole view is replaced).
+  ///   - `skeleton-left`   — branch/icon-identity placeholder block.
+  ///   - `skeleton-middle` — status placeholder block.
+  enum AccessibilityID {
+    static let container = "loading-view container"
+    static let skeletonLeft = "skeleton-left"
+    static let skeletonMiddle = "skeleton-middle"
+  }
 
   var body: some View {
     let subtitle = subtitleText()
     VStack(spacing: 12) {
-      headerGlyph
+      skeletonHeader
       VStack(spacing: 4) {
         Text(info.name)
           .font(.title3)
@@ -80,26 +111,63 @@ struct WorktreeLoadingView: View {
     .multilineTextAlignment(.center)
     // Collapse the stack to its intrinsic height before the window-filling
     // frame centers it. The indeterminate macOS `ProgressView` in
-    // `headerGlyph` (an `NSProgressIndicator`) otherwise greedily expands
+    // `skeletonHeader` (an `NSProgressIndicator`) otherwise greedily expands
     // along the free vertical axis and self-centers in the detail pane,
     // drifting away from the name/command/tail labels below it at larger pane
     // sizes. Width stays flexible so the command + tail keep truncating.
     .fixedSize(horizontal: false, vertical: true)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: .windowBackgroundColor))
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier(AccessibilityID.container)
   }
 
+  /// Header region for the loading state. While creating/removing it renders
+  /// the real detail header's geometry as skeleton placeholder blocks —
+  /// `skeleton-left` (branch/icon identity) and `skeleton-middle` (status) —
+  /// so the layout reads as the header that is *about* to appear, without
+  /// surfacing any real branch name or status (neither is known yet). On
+  /// failure it falls back to the warning glyph the previous design used.
   @ViewBuilder
-  private var headerGlyph: some View {
+  private var skeletonHeader: some View {
     switch info.kind {
     case .creating, .removing:
-      ProgressView().controlSize(.large)
+      HStack(spacing: 12) {
+        // Left identity placeholder: a small inline spinner (the live "work
+        // is happening" cue, folded in from the old large glyph) followed by
+        // a branch-label-width block. Tagged `skeleton-left`.
+        HStack(spacing: 8) {
+          ProgressView().controlSize(.small)
+          skeletonBlock(width: 120, height: 14)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier(AccessibilityID.skeletonLeft)
+
+        // Middle status placeholder, sized like the header's status capsule.
+        // Tagged `skeleton-middle`.
+        skeletonBlock(width: 84, height: 18)
+          .accessibilityElement(children: .ignore)
+          .accessibilityIdentifier(AccessibilityID.skeletonMiddle)
+      }
+      .fixedSize()
     case .failed:
       Image(systemName: "exclamationmark.triangle.fill")
         .font(.largeTitle)
         .symbolRenderingMode(.multicolor)
         .accessibilityHidden(true)
     }
+  }
+
+  /// A single rounded-rect grey placeholder block with the decorative
+  /// light-sweep. Reuses the system `.secondary` grey (no new color system)
+  /// so it sits flush with the app's other neutral surfaces. The sweep is
+  /// gated off under Reduce Motion; the block itself stays so the skeleton
+  /// keeps its structure (VAL-DETAIL-008).
+  private func skeletonBlock(width: CGFloat, height: CGFloat) -> some View {
+    RoundedRectangle(cornerRadius: height / 3)
+      .fill(.secondary.opacity(0.25))
+      .frame(width: width, height: height)
+      .shimmer(isActive: !reduceMotion)
   }
 
   private var currentProgress: WorktreeLoadingInfo.Progress? {
