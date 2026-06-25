@@ -1097,31 +1097,19 @@ struct RootFeature {
 
       // Post-completion switch gate. The sidebar has already written the
       // catalog and removed the pending row; it delegates the "switch to
-      // the new worktree" decision here because the still-viewing signal
-      // (`activePendingWorktreeID`) lives only on this reducer.
-      //
-      // Switch when EITHER the auto-switch setting is on, OR the user is
-      // still viewing this pending creation. The setting is read LIVE at
+      // the new worktree" decision here. The setting is read LIVE at
       // completion time so a mid-flight toggle decides the outcome.
-      // "Still viewing" falls out of `activePendingWorktreeID == pendingID`:
-      // the clear logic in `.selectionChanged` only fires when a REAL
-      // worktree lands, so empty selection or an open aux window (Settings)
-      // keep the id set → switch; selecting another real worktree or
-      // another pending changes/clears it → stay.
+      //
+      // OFF means never auto-focus the new worktree — even when the user
+      // was still viewing the loading view. The setting is authoritative.
       //
       // A FAILED creation never reaches here (it routes through
       // `pendingWorktreeFailed`), so failure never switches.
-      case .sidebar(.delegate(.worktreeMaterialized(let worktreeID, let projectID, let pendingID))):
+      case .sidebar(.delegate(.worktreeMaterialized(let worktreeID, let projectID, _))):
         let autoSwitch =
           settingsWriter.readSnapshotSync().worktree.autoSwitchToNewWorktree
-        let stillViewing = (state.activePendingWorktreeID == pendingID)
-        let shouldSelect = autoSwitch || stillViewing
+        let shouldSelect = autoSwitch
         guard shouldSelect else {
-          // No switch: leave the current selection untouched. Reaching this
-          // else requires `stillViewing == false`, i.e.
-          // `activePendingWorktreeID != pendingID`, so the id (if set) points
-          // at a DIFFERENT pending the user navigated to mid-flight. Leave it
-          // — that pending's own completion clears it. No-op here on purpose.
           return .none
         }
         // Select the project too for cross-project correctness, then the

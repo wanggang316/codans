@@ -1045,7 +1045,8 @@ struct RootFeatureTests {
 
   /// Builds a gate TestStore with `selectProject`/`selectWorktree` wired
   /// into `recorder`. `autoSwitch` sets the LIVE settings snapshot read at
-  /// completion; `activePendingWorktreeID` is the still-viewing signal.
+  /// completion; `activePendingWorktreeID` seeds the state field (used by
+  /// the loading-view resolver, independent of the switch gate).
   /// `selectionChanges` finishes immediately so the post-select stream does
   /// not feed back a `.selectionChanged` (the gate's switch decision is what
   /// these tests assert, not the downstream auto-seed).
@@ -1140,10 +1141,9 @@ struct RootFeatureTests {
   }
 
   @Test
-  func gateOffWatchingSwitches() async {
-    // VAL-SWITCH-004: auto-switch OFF but the user is STILL viewing this
-    // pending creation → switch (still-viewing wins independently of the
-    // setting).
+  func gateOffWatchingStays() async {
+    // VAL-SWITCH-004: auto-switch OFF + still viewing this pending creation
+    // → stays put. OFF is authoritative; the still-viewing override is removed.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
@@ -1156,16 +1156,15 @@ struct RootFeatureTests {
           .worktreeMaterialized(
             worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
     await store.finish()
-    #expect(rec.project.value == projectID)
-    #expect(rec.worktree.value == worktreeID)
+    #expect(!rec.didSelect)
   }
 
   @Test
-  func gateOffEmptySelectionStillCountsAsWatching() async {
+  func gateOffEmptySelectionStays() async {
     // VAL-SWITCH-005: OFF + the user cleared their selection (empty) or
-    // opened an aux window — neither clears `activePendingWorktreeID`, so it
-    // still equals this pending and the gate switches. We model "empty /
-    // aux-window" as: the active id was never cleared and still matches.
+    // opened an aux window — stays put. OFF is authoritative even when
+    // `activePendingWorktreeID` still matches (the still-viewing override
+    // is removed).
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
@@ -1178,7 +1177,7 @@ struct RootFeatureTests {
           .worktreeMaterialized(
             worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
     await store.finish()
-    #expect(rec.didSelect)
+    #expect(!rec.didSelect)
   }
 
   @Test
