@@ -22,6 +22,12 @@ extension IPC {
     case editorSetGlobalDefault = "editor.setGlobalDefault"
     case editorSetProjectDefault = "editor.setProjectDefault"
 
+    // project — per-Project settings reads/writes that live in
+    // `settings.json` (owned by `SettingsStore`), distinct from the
+    // catalog-backed `hierarchy.*` surface. Handlers live in
+    // `ProjectHandlers`. `listScripts` reads `ProjectSettings.scripts`.
+    case projectListScripts = "project.listScripts"
+
     // hierarchy — reads
     case hierarchyListProjects = "hierarchy.listProjects"
     case hierarchyListWorktrees = "hierarchy.listWorktrees"

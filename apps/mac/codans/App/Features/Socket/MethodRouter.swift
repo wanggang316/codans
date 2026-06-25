@@ -21,18 +21,21 @@ public final class MethodRouter {
   private let hierarchyHandlers: HierarchyHandlers?
   private let terminalHandlers: TerminalHandlers?
   private let editorHandlers: EditorHandlers?
+  private let projectHandlers: ProjectHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
     systemHandlers: SystemHandlers,
     hierarchyHandlers: HierarchyHandlers? = nil,
     terminalHandlers: TerminalHandlers? = nil,
-    editorHandlers: EditorHandlers? = nil
+    editorHandlers: EditorHandlers? = nil,
+    projectHandlers: ProjectHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
     self.terminalHandlers = terminalHandlers
     self.editorHandlers = editorHandlers
+    self.projectHandlers = projectHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -45,6 +48,7 @@ public final class MethodRouter {
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
+    if let outcome = await routeProject(request) { return outcome }
     return notWired(request.method)
   }
 
@@ -163,6 +167,29 @@ public final class MethodRouter {
         return Self.encodeUnary(response)
       } catch let error as EditorIPCError {
         return .failed(Self.mapEditorIPCError(error))
+      } catch let error as DecodingError {
+        return .failed(.invalidParams(message: String(describing: error), path: nil))
+      } catch {
+        return .failed(.internal(String(describing: error)))
+      }
+    default: return nil
+    }
+  }
+
+  /// `project.*` adapter. `ProjectHandlers` throws `IPCError` directly (it is
+  /// the only wire-error type these methods produce), so the catch chain is
+  /// flatter than `routeEditor`'s — no app-tier error translation, just a
+  /// `DecodingError` → `invalidParams` rescue and a programmer-error backstop.
+  private func routeProject(_ request: IPC.Request) async -> RouterOutcome? {
+    guard let h = projectHandlers else { return nil }
+    switch request.method {
+    case .projectListScripts:
+      do {
+        let params = try request.params.decoded(as: ProjectHandlers.ListScriptsRequest.self)
+        let response = try h.listScripts(params)
+        return Self.encodeUnary(response)
+      } catch let error as IPCError {
+        return .failed(error)
       } catch let error as DecodingError {
         return .failed(.invalidParams(message: String(describing: error), path: nil))
       } catch {
