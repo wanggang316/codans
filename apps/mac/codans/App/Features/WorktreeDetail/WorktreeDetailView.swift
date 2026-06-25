@@ -1,7 +1,7 @@
 import AppKit
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Renders the detail column for the selected Worktree: tab bar on top,
 /// split viewport underneath. Both reach into the environment
@@ -467,9 +467,17 @@ struct WorktreeDetailView: View {
     let kind: WorktreeLoadingInfo.Kind
     switch pending.status {
     case .running:
+      // Drive the operation label from the live creation phase (not a
+      // hardcoded "git worktree add") so the detail chip agrees with the
+      // sidebar stage: git-add while `.creatingWorktree`, the configured
+      // setup command while `.runningSetupScript` (VAL-DETAIL-007,
+      // VAL-CROSS-001).
       kind = .creating(
         WorktreeLoadingInfo.Progress(
-          statusCommand: "git worktree add",
+          statusCommand: WorktreeLoadingInfo.Progress.operationLabel(
+            for: pending.phase,
+            setupCommand: pending.spec.setupCommand
+          ),
           statusLines: pending.progressLines
         )
       )

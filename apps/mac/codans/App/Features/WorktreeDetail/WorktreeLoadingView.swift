@@ -18,12 +18,48 @@ struct WorktreeLoadingInfo: Equatable {
   }
 
   /// Streaming-output snapshot for the running case. `statusCommand`
-  /// pins the headline operation ("git worktree add"), `statusLines` is
-  /// the last 5-line tail. Empty `statusLines` falls back to a static
-  /// label so the view never collapses to just a spinner.
+  /// is the headline operation label and reflects the CURRENT creation
+  /// phase (git-add vs. setup-script) — built upstream via
+  /// `operationLabel(for:setupCommand:)` so it tracks the phase instead
+  /// of pinning to git. `statusLines` is the last 5-line tail. Empty
+  /// `statusLines` falls back to a static subtitle so the view never
+  /// collapses to just a spinner.
   struct Progress: Equatable {
     var statusCommand: String?
     var statusLines: [String]
+
+    /// Pure phase → operation-label mapping. This is the probeable,
+    /// unit-tested core of the "operation label reflects the current
+    /// phase" contract (VAL-DETAIL-007): the label MUST differ between
+    /// the two creation legs rather than staying pinned to git.
+    ///   - `.creatingWorktree`  → the git-checkout label ("git worktree add")
+    ///   - `.runningSetupScript` → the configured setup command (trimmed,
+    ///     single-lined) when present, else the generic "setup script"
+    ///     label — so a project with a custom `createScript` shows the
+    ///     command the user actually configured.
+    ///
+    /// `CreationPhase` is a pure `nonisolated enum` (no TCA coupling), so
+    /// this stays a value-type mapping the loading view can render and a
+    /// test can pin without a rendered tree.
+    nonisolated static func operationLabel(
+      for phase: CreationPhase,
+      setupCommand: String?
+    ) -> String {
+      switch phase {
+      case .creatingWorktree:
+        return "git worktree add"
+      case .runningSetupScript:
+        let trimmed =
+          setupCommand?
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "setup script" }
+        // Collapse to the first line so a multi-line setup script renders
+        // as a single-line chip; the chip already middle-truncates.
+        return trimmed.split(
+          whereSeparator: \.isNewline
+        ).first.map(String.init) ?? "setup script"
+      }
+    }
   }
 
   let name: String
@@ -77,10 +113,18 @@ struct WorktreeLoadingView: View {
   ///     take over on completion (this whole view is replaced).
   ///   - `skeleton-left`   — branch/icon-identity placeholder block.
   ///   - `skeleton-middle` — status placeholder block.
+  ///   - `streaming-output` — the live, head-truncated 5-line command tail
+  ///     below the skeleton header. Always present while creating (it
+  ///     reserves its 5-line space and falls back to the "Creating
+  ///     worktree in <repo>…" subtitle before any output streams), so
+  ///     validation can probe that the streaming surface stays visible +
+  ///     updating without depending on whether git has emitted a line yet
+  ///     (VAL-DETAIL-002).
   enum AccessibilityID {
     static let container = "loading-view container"
     static let skeletonLeft = "skeleton-left"
     static let skeletonMiddle = "skeleton-middle"
+    static let streamingOutput = "streaming-output"
   }
 
   var body: some View {
@@ -97,7 +141,19 @@ struct WorktreeLoadingView: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .truncationMode(.middle)
+            // Surface the active phase to accessibility: the chip's TEXT is
+            // the phase-driven operation label, and exposing it as the
+            // element's value makes the current leg (git-add vs. setup
+            // script) readable to a probe without scraping the rendered
+            // glyphs (VAL-DETAIL-007).
+            .accessibilityLabel("Operation")
+            .accessibilityValue(command)
         }
+        // Live command tail. `truncationMode(.head)` keeps the NEWEST text
+        // visible when a single line overflows; `reservesSpace` holds the
+        // 5-line footprint (and the `streaming-output` id) even before any
+        // output streams, where `subtitle` is the fallback "Creating
+        // worktree in <repo>…" copy (VAL-DETAIL-002).
         Text(subtitle)
           .font(.subheadline)
           .monospaced()
@@ -106,6 +162,7 @@ struct WorktreeLoadingView: View {
           .truncationMode(.head)
           .contentTransition(.opacity)
           .animation(.easeInOut, value: subtitle)
+          .accessibilityIdentifier(AccessibilityID.streamingOutput)
       }
     }
     .multilineTextAlignment(.center)
