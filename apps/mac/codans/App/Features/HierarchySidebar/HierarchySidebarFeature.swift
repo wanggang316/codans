@@ -826,12 +826,11 @@ struct HierarchySidebarFeature {
       // are cosmetic side-effects and must not roll back this removal.
       state.pendingWorktrees.remove(id: id)
       // The post-completion "switch to the new worktree" decision is owned
-      // by `RootFeature`: it gates on the auto-switch setting and on
-      // `activePendingWorktreeID` (still-viewing), neither of which this
-      // reducer can read. Delegate up; the sidebar no longer selects the
-      // worktree or seeds its first tab/pane. When RootFeature decides to
-      // switch, the resulting `.selectionChanged` runs
-      // `autoSeedTabAndPaneIfNeeded`, which seeds the first pane.
+      // by `RootFeature`: it gates on the auto-switch setting, read live at
+      // completion. Delegate up; the sidebar no longer selects the worktree
+      // or seeds its first tab/pane. When RootFeature decides to switch, the
+      // resulting `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`,
+      // which seeds the first pane.
       return .send(
         .delegate(
           .worktreeMaterialized(worktreeID: worktreeID, projectID: pid, pendingID: id)))

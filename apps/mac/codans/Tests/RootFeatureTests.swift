@@ -1160,27 +1160,6 @@ struct RootFeatureTests {
   }
 
   @Test
-  func gateOffEmptySelectionStays() async {
-    // VAL-SWITCH-005: OFF + the user cleared their selection (empty) or
-    // opened an aux window — stays put. OFF is authoritative even when
-    // `activePendingWorktreeID` still matches (the still-viewing override
-    // is removed).
-    let projectID = ProjectID()
-    let worktreeID = WorktreeID()
-    let pendingID = PendingWorktreeID()
-    let rec = SelectRecorder()
-    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: pendingID, recorder: rec)
-
-    await store.send(
-      .sidebar(
-        .delegate(
-          .worktreeMaterialized(
-            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
-    await store.finish()
-    #expect(!rec.didSelect)
-  }
-
-  @Test
   func gateReadsLiveSettingAtCompletion() async {
     // VAL-SWITCH-006: a mid-flight toggle decides the outcome — the gate
     // reads the LIVE snapshot at completion, not a value captured at

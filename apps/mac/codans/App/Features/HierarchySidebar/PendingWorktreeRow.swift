@@ -40,23 +40,24 @@ struct PendingWorktreeRow: View {
           .foregroundStyle(secondaryColor)
           .lineLimit(1)
           .truncationMode(.tail)
+          // Stage value rides this leaf so both it and the name's
+          // in-progress/settled value are probeable children under `.contain`.
+          .accessibilityValue(stageAccessibilityValue)
       }
       Spacer()
     }
     .contentShape(Rectangle())
-    // Keep the child Text nodes (display name + streaming second line)
-    // readable to accessibility while exposing the stable stage value at
-    // the container level. `.accessibilityValue` on a `.contain` container
-    // is a no-op — the value is silently dropped — so the stage value is
-    // installed via `.accessibilityRepresentation` instead: a proxy element
-    // that carries the value without collapsing the children-contain
-    // semantics. The name's `in-progress`/`settled` value on the Text leaf
-    // is unaffected — leaf-level values reach the accessibility tree.
+    // Both values are exposed as leaf children under `.contain`:
+    //   • name leaf   → `in-progress`/`settled` via `.accessibilityValue` above
+    //   • status leaf → `creating`/`setupScript`/`failed` via `.accessibilityValue`
+    //     on `Text(secondaryLine)` above
+    // The prior approach set `.accessibilityValue` directly on the `.contain`
+    // container (a no-op — silently dropped) and then used
+    // `.accessibilityRepresentation` to work around that. Per Apple's docs,
+    // `.accessibilityRepresentation` discards the modified subtree's
+    // accessibility entirely, which risked shadowing the leaf values.
+    // Leaf-based exposure is provably correct and simpler.
     .accessibilityElement(children: .contain)
-    .accessibilityRepresentation {
-      Text(pending.displayName)
-        .accessibilityValue(stageAccessibilityValue)
-    }
     .contextMenu {
       switch pending.status {
       case .running:
@@ -101,6 +102,10 @@ struct PendingWorktreeRow: View {
         ProgressView()
           .controlSize(.small)
           .frame(width: 14, height: 14)
+          // Decorative — the status leaf's stage value (`creating`) is the
+          // probeable signal. Hidden for symmetry with the setup-script
+          // glyph's `.accessibilityHidden(true)`.
+          .accessibilityHidden(true)
       case .runningSetupScript:
         // Setup-script leg — the same `truck.box.badge.clock` glyph (blue)
         // the Settings "Setup Script" lifecycle section uses, so the row

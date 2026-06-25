@@ -267,7 +267,6 @@ struct WorktreeLoadingView: View {
           .truncationMode(.head)
           .contentTransition(.opacity)
           .animation(.easeInOut, value: message)
-          .accessibilityIdentifier(AccessibilityID.streamingOutput)
       }
     }
     .multilineTextAlignment(.center)
@@ -277,12 +276,13 @@ struct WorktreeLoadingView: View {
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier(AccessibilityID.loadingFailure)
     // Proxy element carrying the spoken label + error value so VoiceOver
-    // reads "Worktree creation failed" + the message. Direct
+    // reads "Worktree creation failed" + the worktree name + message. Direct
     // `.accessibilityLabel`/`.accessibilityValue` on a `.contain` container
     // are no-ops, so the representation is the only path to the a11y tree.
+    // The name is included so VoiceOver identifies WHICH worktree failed.
     .accessibilityRepresentation {
       Text("Worktree creation failed")
-        .accessibilityValue(message)
+        .accessibilityValue("\(info.name): \(message)")
     }
   }
 
