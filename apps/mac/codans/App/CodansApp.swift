@@ -88,6 +88,14 @@ struct CodansApp: App {
           .frame(minWidth: 800, minHeight: 600)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
+          // Redirect ⌘W (claimed by AppKit's File ▸ Close) to "close active
+          // tab/pane" at the window-delegate level so it can't tear down the
+          // single main window into a headless app. See MainWindowCloseInterceptor.
+          .background(
+            MainWindowCloseRedirector(
+              onCloseChord: { store.send(.closeActiveTabForCurrentWorktree) }
+            )
+          )
         } else {
           // Initial loading state while appState.bringUp runs.
           // The view itself is intentionally cosmetic — bringUp is
