@@ -109,7 +109,37 @@ struct WorktreeDetailView: View {
   @ViewBuilder
   private var detailBody: some View {
     if let pending = activePendingWorktree {
-      WorktreeLoadingView(info: loadingInfo(for: pending))
+      // During creation the content body is JUST the live streaming output
+      // (the slimmed `WorktreeLoadingView`). The window toolbar STAYS
+      // VISIBLE via `pendingSkeletonToolbarContent`, rendering shimmering
+      // skeleton placeholders in the LEFT (branch) and MIDDLE (status)
+      // slots — exactly where the real branch label + status pill land on
+      // completion — and NOTHING in the trailing/right slot (no actions for
+      // a not-yet-created worktree). Mirrors the normal branch's chrome
+      // wiring (`SuppressTitleModifier` so default-placement items flow
+      // leading-to-trailing; `.toolbarBackground` gated on fullscreen).
+      //
+      // The skeleton is suppressed once the row settles into `.failed`: a
+      // shimmering "still loading" cue would contradict the settled-error
+      // reading (VAL-DETAIL-004), so the failure sub-case shows no toolbar
+      // items — matching the chrome the failed state had before this view
+      // took over the toolbar.
+      let info = loadingInfo(for: pending)
+      WorktreeLoadingView(info: info)
+        .modifier(SuppressTitleModifier())
+        .toolbar { pendingSkeletonToolbarContent(isFailure: info.isFailure) }
+        .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
+        .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
+        .onReceive(
+          NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
+        ) { _ in
+          isWindowFullscreen = Self.detectMainWindowFullscreen()
+        }
+        .onReceive(
+          NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)
+        ) { _ in
+          isWindowFullscreen = Self.detectMainWindowFullscreen()
+        }
     } else if let address = resolveAddress() {
       let info = worktreeInfo(for: address)
       VStack(spacing: 0) {
@@ -300,6 +330,75 @@ struct WorktreeDetailView: View {
           )
           .buttonStyle(.plain)
         }
+      }
+    }
+  }
+
+  /// Window-titlebar toolbar content for the *creating* state. Parallels
+  /// `worktreeToolbarContent`'s placement structure across both OS paths so
+  /// the toolbar reads as the same chrome — only the LEFT (branch) and MIDDLE
+  /// (status) slots are swapped for shimmering `SkeletonBlock` placeholders
+  /// (the branch + status aren't known until the worktree exists), and the
+  /// trailing/right slot renders NOTHING (a not-yet-created worktree has no
+  /// Run / editor actions). The placeholders carry the `skeleton-left` /
+  /// `skeleton-middle` accessibility ids — the same contract keys that used
+  /// to ride the loading-view body — so a probe finds them on the toolbar
+  /// (VAL-DETAIL-001 / VAL-DETAIL-003).
+  ///
+  /// macOS 26 uses default placement with a flanking `ToolbarSpacer(.flexible)`
+  /// pair (mirroring `branchToolbarItemDefault` + `centeredStatusBarToolbarItem`);
+  /// pre-26 falls back to `.navigation` / `.principal` zoning (mirroring
+  /// `branchToolbarItem` + `statusBarToolbarItem`).
+  ///
+  /// `isFailure` suppresses every item: a settled `.failed` creation is not
+  /// "still loading", so the shimmering placeholders are dropped and the
+  /// toolbar renders empty (VAL-DETAIL-004).
+  @ToolbarContentBuilder
+  private func pendingSkeletonToolbarContent(isFailure: Bool) -> some ToolbarContent {
+    // `if !isFailure { … }` with no else is the optional form `@ToolbarContentBuilder`
+    // supports (`buildOptional`) — it renders nothing for a settled failure.
+    // An empty `if`/`else` *branch* is NOT valid toolbar content (unlike
+    // `@ViewBuilder`, there is no zero-component `buildBlock`), so the
+    // suppression has to be the outer guard.
+    if !isFailure {
+      if #available(macOS 26.0, *) {
+        // Leading branch-identity placeholder. `.sharedBackgroundVisibility(.hidden)`
+        // matches the real `branchToolbarItemDefault` so the slot reads as plain
+        // content, not a glass capsule.
+        ToolbarItem {
+          SkeletonBlock(width: 120, height: 14)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
+        }
+        .sharedBackgroundVisibility(.hidden)
+        ToolbarSpacer(.flexible)
+        // Centered status placeholder — wider than the branch block to stand in
+        // for the status pill. Default placement so the flanking flexible
+        // spacers center it, mirroring `centeredStatusBarToolbarItem`.
+        ToolbarItem {
+          SkeletonBlock(width: 140, height: 16)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
+        }
+        ToolbarSpacer(.flexible)
+        // No trailing item: a not-yet-created worktree has no Run / editor
+        // actions, so the right slot stays empty during creation.
+      } else {
+        // Pre-26 fallback: branch placeholder in the leading `.navigation`
+        // slot, status placeholder in the centered `.principal` slot — the same
+        // zoning the real `branchToolbarItem` / `statusBarToolbarItem` use.
+        ToolbarItem(placement: .navigation) {
+          SkeletonBlock(width: 120, height: 14)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
+        }
+        ToolbarItem(placement: .principal) {
+          SkeletonBlock(width: 140, height: 16)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
+        }
+        // No `.primaryAction` group: the trailing slot stays empty during
+        // creation.
       }
     }
   }

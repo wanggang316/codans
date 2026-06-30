@@ -81,31 +81,24 @@ struct WorktreeLoadingInfo: Equatable {
 }
 
 /// Detail-pane loading view for a worktree whose `wt sw` is still
-/// streaming. While creating or removing, a **skeleton header bar**
-/// (placeholder blocks standing in for the real toolbar's branch-identity
-/// + status regions, which aren't known yet) is pinned to the top edge of
-/// the view — matching where the real toolbar will sit on completion. The
-/// worktree name, optional command chip, and 5-line streaming tail fill the
-/// content area below it. The failure path swaps the skeleton for a
-/// centered warning glyph + message; no skeleton blocks appear there.
+/// streaming. While creating or removing, this view renders ONLY the
+/// content body — the worktree name, optional command chip, and 5-line
+/// streaming tail — centered in the pane. The branch-identity + status
+/// **skeleton placeholder blocks** (`skeleton-left` / `skeleton-middle`)
+/// live in the **window toolbar** during creation, rendered by
+/// `WorktreeDetailView.pendingSkeletonToolbarContent` so they sit exactly
+/// where the real branch label + status pill appear on completion. The
+/// failure path swaps the body for a centered warning glyph + message.
 ///
 /// This view is the detail body *only* while `activePendingWorktree != nil`
 /// (resolved in `WorktreeDetailView.detailBody`). On completion the pending
 /// row leaves the array, the detail body swaps to the real
-/// `worktreeToolbarContent` + terminal, and this whole view — including the
-/// skeleton accessibility ids below — is removed from the tree. That
+/// `worktreeToolbarContent` + terminal, and this whole view — together with
+/// the pending skeleton toolbar — is removed from the tree. That
 /// presence-while-loading / absence-on-completion is the probeable signal
 /// (VAL-DETAIL-001 / VAL-DETAIL-003).
 struct WorktreeLoadingView: View {
   let info: WorktreeLoadingInfo
-
-  /// Reduce Motion suppresses the skeleton's decorative light-sweep so the
-  /// in-progress state never depends on animation. The placeholder *blocks*
-  /// and the accessibility ids below stay present either way, keeping the
-  /// loading state perceivable without the sweep (VAL-DETAIL-008). Mirrors
-  /// `PendingWorktreeRow` / `AgentStateRowView`'s reduce-motion gating —
-  /// gated at the call site so the shared `ShimmerModifier` is untouched.
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Stable accessibility identifiers for the loading surface. These are a
   /// fixed contract that later validation keys on (VAL-DETAIL-001 /
@@ -113,10 +106,16 @@ struct WorktreeLoadingView: View {
   ///   - `loading-view container` — the loading-view root; present while a
   ///     worktree is being created, absent once the real header + terminal
   ///     take over on completion (this whole view is replaced).
-  ///   - `skeleton-left`   — branch/icon-identity placeholder block.
-  ///   - `skeleton-middle` — status placeholder block.
+  ///   - `skeleton-left`   — branch/icon-identity placeholder block. Lives in
+  ///     the **window toolbar** during creation (rendered by
+  ///     `WorktreeDetailView.pendingSkeletonToolbarContent`), not in this
+  ///     content body — the constant is defined here because it tags the
+  ///     loading surface's contract; the view that wears it sits in the
+  ///     toolbar.
+  ///   - `skeleton-middle` — status placeholder block. Also lives in the
+  ///     window toolbar during creation (see `skeleton-left`).
   ///   - `streaming-output` — the live, head-truncated 5-line command tail
-  ///     below the skeleton header. Always present while creating (it
+  ///     in the content body. Always present while creating (it
   ///     reserves its 5-line space and falls back to the "Creating
   ///     worktree in <repo>…" subtitle before any output streams), so
   ///     validation can probe that the streaming surface stays visible +
@@ -148,86 +147,52 @@ struct WorktreeLoadingView: View {
 
   /// Layout for the `.creating` and `.removing` states.
   ///
-  /// `skeleton-left` (spinner + branch-identity block) and `skeleton-middle`
-  /// (status block) are placed in a top header bar pinned to the leading edge
-  /// of the view — matching the position of the real toolbar that replaces
-  /// them on completion. A trailing `Spacer()` keeps the blocks left-aligned
-  /// across the full pane width.
-  ///
-  /// The content body (name / command chip / streaming tail) fills the
-  /// remaining vertical space below the header bar. No skeleton blocks appear
-  /// in the content body. `.fixedSize(vertical: true)` on the header bar pins
-  /// it to its intrinsic height so the `NSProgressIndicator` inside
-  /// `skeleton-left` cannot expand along the outer `VStack`'s free axis.
+  /// The skeleton placeholders for the branch-identity (`skeleton-left`) and
+  /// status (`skeleton-middle`) regions live in the **window toolbar** now —
+  /// see `WorktreeDetailView.pendingSkeletonToolbarContent`, which renders
+  /// them while `activePendingWorktree != nil` so the placeholders sit exactly
+  /// where the real branch label + status pill appear on completion. This
+  /// content body therefore carries NO skeleton blocks: just the worktree
+  /// name, the current-phase operation chip (only during `.creating`), and the
+  /// 5-line streaming tail (`streaming-output`), centered in the pane below
+  /// the toolbar.
   private var creatingView: some View {
     let subtitle = subtitleText()
-    return VStack(spacing: 0) {
-      // Top header bar — skeleton-left and skeleton-middle, leading-aligned.
-      HStack(spacing: 12) {
-        // Left identity placeholder: small inline spinner (live "work is
-        // happening" cue) followed by a branch-label-width block.
-        // Tagged `skeleton-left`.
-        HStack(spacing: 8) {
-          ProgressView().controlSize(.small)
-          skeletonBlock(width: 120, height: 14)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityIdentifier(AccessibilityID.skeletonLeft)
-
-        // Middle status placeholder, sized like the header's status capsule.
-        // Tagged `skeleton-middle`.
-        skeletonBlock(width: 84, height: 18)
-          .accessibilityElement(children: .ignore)
-          .accessibilityIdentifier(AccessibilityID.skeletonMiddle)
-
-        Spacer()
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      // Pin the header bar to its intrinsic height so the indeterminate
-      // NSProgressIndicator in skeleton-left cannot expand along the free
-      // vertical axis of the outer VStack.
-      .fixedSize(horizontal: false, vertical: true)
-
-      // Content body: worktree name, current-phase operation chip (only
-      // present during `.creating`), and the 5-line streaming tail.
-      // Fills the remaining vertical space. No skeleton blocks here.
-      VStack(spacing: 4) {
-        Text(info.name)
-          .font(.title3)
-        if let command = currentProgress?.statusCommand {
-          Text(command)
-            .font(.subheadline)
-            .monospaced()
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            // Surface the active phase to accessibility: the chip's TEXT is
-            // the phase-driven operation label, and exposing it as the
-            // element's value makes the current leg (git-add vs. setup
-            // script) readable to a probe without scraping the rendered
-            // glyphs (VAL-DETAIL-007).
-            .accessibilityLabel("Operation")
-            .accessibilityValue(command)
-        }
-        // Live command tail. `truncationMode(.head)` keeps the NEWEST text
-        // visible when a single line overflows; `reservesSpace` holds the
-        // 5-line footprint (and the `streaming-output` id) even before any
-        // output streams, where `subtitle` is the fallback "Creating
-        // worktree in <repo>…" copy (VAL-DETAIL-002).
-        Text(subtitle)
+    return VStack(spacing: 4) {
+      Text(info.name)
+        .font(.title3)
+      if let command = currentProgress?.statusCommand {
+        Text(command)
           .font(.subheadline)
           .monospaced()
-          .foregroundStyle(.tertiary)
-          .lineLimit(5, reservesSpace: true)
-          .truncationMode(.head)
-          .contentTransition(.opacity)
-          .animation(.easeInOut, value: subtitle)
-          .accessibilityIdentifier(AccessibilityID.streamingOutput)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          // Surface the active phase to accessibility: the chip's TEXT is
+          // the phase-driven operation label, and exposing it as the
+          // element's value makes the current leg (git-add vs. setup
+          // script) readable to a probe without scraping the rendered
+          // glyphs (VAL-DETAIL-007).
+          .accessibilityLabel("Operation")
+          .accessibilityValue(command)
       }
-      .multilineTextAlignment(.center)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      // Live command tail. `truncationMode(.head)` keeps the NEWEST text
+      // visible when a single line overflows; `reservesSpace` holds the
+      // 5-line footprint (and the `streaming-output` id) even before any
+      // output streams, where `subtitle` is the fallback "Creating
+      // worktree in <repo>…" copy (VAL-DETAIL-002).
+      Text(subtitle)
+        .font(.subheadline)
+        .monospaced()
+        .foregroundStyle(.tertiary)
+        .lineLimit(5, reservesSpace: true)
+        .truncationMode(.head)
+        .contentTransition(.opacity)
+        .animation(.easeInOut, value: subtitle)
+        .accessibilityIdentifier(AccessibilityID.streamingOutput)
     }
+    .multilineTextAlignment(.center)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: .windowBackgroundColor))
     // Tag the root while creating/removing so validation can probe
     // `loading-view container` to confirm the loading state is in-tree.
@@ -284,18 +249,6 @@ struct WorktreeLoadingView: View {
       Text("Worktree creation failed")
         .accessibilityValue("\(info.name): \(message)")
     }
-  }
-
-  /// A single rounded-rect grey placeholder block with the decorative
-  /// light-sweep. Reuses the system `.secondary` grey (no new color system)
-  /// so it sits flush with the app's other neutral surfaces. The sweep is
-  /// gated off under Reduce Motion; the block itself stays so the skeleton
-  /// keeps its structure (VAL-DETAIL-008).
-  private func skeletonBlock(width: CGFloat, height: CGFloat) -> some View {
-    RoundedRectangle(cornerRadius: height / 3)
-      .fill(.secondary.opacity(0.25))
-      .frame(width: width, height: height)
-      .shimmer(isActive: !reduceMotion)
   }
 
   private var currentProgress: WorktreeLoadingInfo.Progress? {
