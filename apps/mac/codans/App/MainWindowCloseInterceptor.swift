@@ -27,9 +27,13 @@ final class MainWindowCloseInterceptor: NSObject, NSWindowDelegate {
   /// the `responds(to:)` / `forwardingTarget(for:)` overrides are nonisolated
   /// on `NSObject` — all access is main-thread (AppKit delegate dispatch).
   nonisolated(unsafe) private weak var forwardTo: NSWindowDelegate?
-  private let onCloseChord: () -> Void
+  /// Closes the focused pane/tab and reports whether anything was closed:
+  /// `true` → a pane/tab was closed (keep the window open), `false` → nothing
+  /// was left to close (let the window close). This drives the
+  /// pane → tab → window escalation.
+  private let onCloseChord: () -> Bool
 
-  init(forwardTo: NSWindowDelegate?, onCloseChord: @escaping () -> Void) {
+  init(forwardTo: NSWindowDelegate?, onCloseChord: @escaping () -> Bool) {
     self.forwardTo = forwardTo
     self.onCloseChord = onCloseChord
     super.init()
@@ -41,8 +45,10 @@ final class MainWindowCloseInterceptor: NSObject, NSWindowDelegate {
       event.modifierFlags.intersection([.command, .option, .control, .shift]) == .command,
       event.keyCode == UInt16(kVK_ANSI_W)
     {
-      onCloseChord()
-      return false
+      // ⌘W escalates pane → tab → window: close the focused pane/tab and keep
+      // the window. Only when there's nothing left to close do we fall through
+      // and let ⌘W close the window itself (matching iTerm / Terminal.app).
+      if onCloseChord() { return false }
     }
     return forwardTo?.windowShouldClose?(sender) ?? true
   }
@@ -58,10 +64,11 @@ final class MainWindowCloseInterceptor: NSObject, NSWindowDelegate {
 
 /// Zero-size host that wraps the enclosing window's delegate with
 /// `MainWindowCloseInterceptor`. Drop once into the main scene's content tree
-/// (mirrors `SettingsWindowTag`); no visual output. `onCloseChord` should
-/// dispatch `RootFeature.closeActiveTabForCurrentWorktree`.
+/// (mirrors `SettingsWindowTag`); no visual output. `onCloseChord` closes the
+/// focused pane/tab and returns `true` when it did so (keep the window) or
+/// `false` when nothing was left to close (let ⌘W close the window).
 struct MainWindowCloseRedirector: NSViewRepresentable {
-  let onCloseChord: () -> Void
+  let onCloseChord: () -> Bool
 
   func makeCoordinator() -> Coordinator { Coordinator(onCloseChord: onCloseChord) }
 
@@ -80,10 +87,10 @@ struct MainWindowCloseRedirector: NSViewRepresentable {
 
   @MainActor
   final class Coordinator {
-    private let onCloseChord: () -> Void
+    private let onCloseChord: () -> Bool
     private var interceptor: MainWindowCloseInterceptor?
 
-    init(onCloseChord: @escaping () -> Void) { self.onCloseChord = onCloseChord }
+    init(onCloseChord: @escaping () -> Bool) { self.onCloseChord = onCloseChord }
 
     func install(on window: NSWindow?) {
       guard let window else { return }
