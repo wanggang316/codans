@@ -1610,13 +1610,17 @@ final class AppState {
 
   /// Drain-loop branch that feeds terminal events into `AgentStateStore`.
   ///
-  /// On structural mutations it also reconciles the registry against live
-  /// catalog membership: a worktree / project teardown can remove a pane
-  /// without delivering a per-pane teardown event to the store, leaving a
-  /// bound entry that resolves to nothing and renders an em-dash ghost row
-  /// (and is re-persisted / re-seeded across launches). `selection` and
-  /// `tags` scopes never change pane membership, so they skip the catalog
-  /// walk to keep the hot selection path cheap.
+  /// On structural mutations it also reconciles the registry against the
+  /// *visible* catalog membership: a worktree / project teardown can remove a
+  /// pane without delivering a per-pane teardown event to the store, and a
+  /// worktree archive (soft-hide) kills its panes' daemons while keeping the
+  /// Panes in the catalog — both leave a bound entry that resolves to nothing
+  /// (or to a hidden worktree) and renders an em-dash ghost row (and is
+  /// re-persisted / re-seeded across launches). Reconciling against
+  /// `visiblePaneIDs()` — not `allPaneIDs()` — is what retires an archived
+  /// worktree's agent rows, since archived panes still live in the catalog.
+  /// `selection` and `tags` scopes never change pane membership, so they skip
+  /// the catalog walk to keep the hot selection path cheap.
   @MainActor
   private static func dispatchToAgentStateStore(
     event: TerminalEvent,
@@ -1625,7 +1629,7 @@ final class AppState {
   ) {
     registry.onTerminalEvent(event)
     if case .hierarchyMutated(let scope) = event, scope != .selection, scope != .tags {
-      registry.reconcileMembership(livePaneIDs: catalog().allPaneIDs())
+      registry.reconcileMembership(livePaneIDs: catalog().visiblePaneIDs())
     }
   }
 
@@ -1769,6 +1773,14 @@ final class GhosttyBackedHierarchyRuntime: HierarchyRuntime {
 
   func closeSurface(for paneID: PaneID) {
     engine?.closeSurface(for: paneID)
+  }
+
+  func suspendSurface(for paneID: PaneID) {
+    engine?.suspendSurface(for: paneID)
+  }
+
+  func announceHierarchyMutated() {
+    engine?.emit(.hierarchyMutated(.catalog))
   }
 
   func hasSurface(for paneID: PaneID) -> Bool {

@@ -10,6 +10,13 @@ final class FakeHierarchyRuntime: HierarchyRuntime {
 
   private(set) var ensureSurfaceCalls: [SurfaceCall] = []
   private(set) var closeSurfaceCalls: [PaneID] = []
+  /// Recorded `suspendSurface` calls — archive's daemon-killing, non-
+  /// announcing teardown. Tests assert archive routes through this rather
+  /// than `closeSurface`.
+  private(set) var suspendSurfaceCalls: [PaneID] = []
+  /// Count of `announceHierarchyMutated` calls. Archive fires one after
+  /// soft-hiding a worktree so the AgentState reconcile re-runs.
+  private(set) var announceHierarchyMutatedCount = 0
   /// Recorded `focusSurfaceView` calls. The manager's tab-switch path
   /// invokes this on the restored last-focused (or leftmost-leaf) pane
   /// id; tests assert the right pane was requested.
@@ -39,6 +46,15 @@ final class FakeHierarchyRuntime: HierarchyRuntime {
     livePaneIDs.remove(paneID)
   }
 
+  func suspendSurface(for paneID: PaneID) {
+    suspendSurfaceCalls.append(paneID)
+    livePaneIDs.remove(paneID)
+  }
+
+  func announceHierarchyMutated() {
+    announceHierarchyMutatedCount += 1
+  }
+
   func hasSurface(for paneID: PaneID) -> Bool {
     livePaneIDs.contains(paneID)
   }
@@ -54,6 +70,8 @@ final class FakeHierarchyRuntime: HierarchyRuntime {
   func reset() {
     ensureSurfaceCalls.removeAll()
     closeSurfaceCalls.removeAll()
+    suspendSurfaceCalls.removeAll()
+    announceHierarchyMutatedCount = 0
     focusSurfaceViewCalls.removeAll()
     livePaneIDs.removeAll()
     currentWorkingDirectories.removeAll()

@@ -304,6 +304,26 @@ final class TerminalEngine {
     handleSurfaceClose(paneID: paneID, processAlive: true)
   }
 
+  /// Archive teardown — see `HierarchyRuntime.suspendSurface`. Two
+  /// deliberate departures from `closeSurface`:
+  ///  1. The daemon is killed even with no registered surface. Surfaces are
+  ///     lazy, so a backgrounded archived pane usually has none — but its
+  ///     zmx daemon is still running and `closeSurface`'s `guard` would let
+  ///     it leak (this is the multi-day daemon leak archive used to cause).
+  ///  2. No `.paneExited` is emitted (`announce: false`). Archive is
+  ///     soft-hide: the Pane must stay in the catalog for restore, and
+  ///     `.paneExited` would route through `paneLifecycleExited → closePane`.
+  func suspendSurface(for paneID: PaneID) {
+    guard let surface = ghosttyRuntime?.surface(for: paneID) else {
+      // No live surface — kill the still-running daemon directly via its
+      // control socket (a missing socket is a silent no-op).
+      ZmxControlClient.kill(for: paneID)
+      return
+    }
+    surface.closeKillingDaemon()
+    handleSurfaceClose(paneID: paneID, processAlive: true, announce: false)
+  }
+
   /// Whether a live surface is currently registered for the pane.
   /// Used by force-remove to size the "terminate N running processes"
   /// confirmation dialog (spec W-Q3).
@@ -363,23 +383,30 @@ final class TerminalEngine {
     }
   }
 
-  private func handleSurfaceClose(paneID: PaneID, processAlive: Bool) {
+  private func handleSurfaceClose(paneID: PaneID, processAlive: Bool, announce: Bool = true) {
     // Snapshot the surface state BEFORE unregistering so a stale registry
     // entry can't drop the lifecycle event. Unregister after emit so any
     // in-flight lookup in subscriber code still resolves the surface.
     let state = ghosttyRuntime?.surface(for: paneID)?.state ?? .ready
     disposeOutputBuffer(for: paneID)
 
-    switch state {
-    case .crashed(let reason):
-      _ = recordPaneCrash(paneID: paneID, reason: reason)
-    case .exited(let code):
-      emit(.paneExited(paneID, code: code, signal: nil))
-    default:
-      // No explicit state set by markExited/markCrashed: use processAlive
-      // to distinguish user-initiated close (code 0) from child exit where
-      // we lack a real exit code (code -1 as a "unknown" sentinel).
-      emit(.paneExited(paneID, code: processAlive ? 0 : -1, signal: nil))
+    // `announce: false` is the archive (soft-hide) path: tear down the
+    // engine's per-pane scratch but emit no lifecycle event, so the Pane is
+    // not routed through `RootFeature.paneLifecycleExited → closePane` and
+    // survives in the catalog for restore. The daemon was already killed by
+    // the `suspendSurface` caller.
+    if announce {
+      switch state {
+      case .crashed(let reason):
+        _ = recordPaneCrash(paneID: paneID, reason: reason)
+      case .exited(let code):
+        emit(.paneExited(paneID, code: code, signal: nil))
+      default:
+        // No explicit state set by markExited/markCrashed: use processAlive
+        // to distinguish user-initiated close (code 0) from child exit where
+        // we lack a real exit code (code -1 as a "unknown" sentinel).
+        emit(.paneExited(paneID, code: processAlive ? 0 : -1, signal: nil))
+      }
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
