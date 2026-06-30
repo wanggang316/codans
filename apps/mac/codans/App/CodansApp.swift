@@ -98,12 +98,19 @@ struct CodansApp: App {
           .background(
             MainWindowCloseRedirector(
               onCloseChord: {
+                // Resolve the worktree from the same `state.selection` that
+                // `closeActiveTabForCurrentWorktree` acts on — it already applies
+                // `currentSelection`'s `selectedProjectID == nil` fallback (a
+                // restored project whose `selectedWorktreeID` is set but with no
+                // top-level selected project). Reading `catalog.selectedProjectID`
+                // here would miss that state and wrongly let ⌘W close the window.
+                let selection = store.state.selection
                 let catalog = appState.hierarchyManager.catalog
                 guard
-                  let projectID = catalog.selectedProjectID,
-                  let project = catalog.projects.first(where: { $0.id == projectID }),
-                  let worktreeID = project.selectedWorktreeID,
-                  let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+                  let projectID = selection.projectID,
+                  let worktreeID = selection.worktreeID,
+                  let worktree = catalog.projects.first(where: { $0.id == projectID })?
+                    .worktrees.first(where: { $0.id == worktreeID }),
                   let activeTabID = worktree.selectedTabID,
                   worktree.tabs.contains(where: { $0.id == activeTabID })
                 else {
