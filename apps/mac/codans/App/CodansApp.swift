@@ -88,12 +88,30 @@ struct CodansApp: App {
           .frame(minWidth: 800, minHeight: 600)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
-          // Redirect ⌘W (claimed by AppKit's File ▸ Close) to "close active
-          // tab/pane" at the window-delegate level so it can't tear down the
-          // single main window into a headless app. See MainWindowCloseInterceptor.
+          // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
+          // down the single main window. ⌘W escalates pane → tab → window:
+          // close the focused pane/tab while one exists; only when the current
+          // worktree has no active tab left does ⌘W fall through and close the
+          // window. The closure returns whether it closed something so the
+          // window-delegate knows to veto (true) or allow (false) the close.
+          // See MainWindowCloseInterceptor.
           .background(
             MainWindowCloseRedirector(
-              onCloseChord: { store.send(.closeActiveTabForCurrentWorktree) }
+              onCloseChord: {
+                let catalog = appState.hierarchyManager.catalog
+                guard
+                  let projectID = catalog.selectedProjectID,
+                  let project = catalog.projects.first(where: { $0.id == projectID }),
+                  let worktreeID = project.selectedWorktreeID,
+                  let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+                  let activeTabID = worktree.selectedTabID,
+                  worktree.tabs.contains(where: { $0.id == activeTabID })
+                else {
+                  return false  // nothing to close → let ⌘W close the window
+                }
+                store.send(.closeActiveTabForCurrentWorktree)
+                return true  // closed a pane/tab → keep the window open
+              }
             )
           )
         } else {
