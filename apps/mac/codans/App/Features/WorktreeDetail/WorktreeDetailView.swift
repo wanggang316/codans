@@ -381,8 +381,24 @@ struct WorktreeDetailView: View {
             .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
         }
         ToolbarSpacer(.flexible)
-        // No trailing item: a not-yet-created worktree has no Run / editor
-        // actions, so the right slot stays empty during creation.
+        // A not-yet-created worktree has no Run / editor actions, so there is
+        // no visible trailing item. But the centered status placeholder relies
+        // on BOTH flexible spacers balancing — and a trailing `ToolbarSpacer`
+        // with nothing after it collapses to zero, letting the leading spacer
+        // expand and shove the middle block to the right edge. The real
+        // `worktreeToolbarContent` avoids this because `trailingButtonsDefault`
+        // always follows its trailing spacer. We give the spacer the same kind
+        // of peer with a hidden 1×1 anchor: zero visual weight, but it pins the
+        // trailing slot so the two flexible spacers split the free space evenly
+        // and the status skeleton stays centered. `.sharedBackgroundVisibility(.hidden)`
+        // keeps the anchor from drawing a glass capsule; it carries no
+        // accessibility id (the suite asserts only skeleton-left / skeleton-middle).
+        ToolbarItem {
+          Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityHidden(true)
+        }
+        .sharedBackgroundVisibility(.hidden)
       } else {
         // Pre-26 fallback: branch placeholder in the leading `.navigation`
         // slot, status placeholder in the centered `.principal` slot — the same
