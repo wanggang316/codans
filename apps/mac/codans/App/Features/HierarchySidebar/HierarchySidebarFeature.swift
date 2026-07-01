@@ -1035,7 +1035,8 @@ struct HierarchySidebarFeature {
           await send(.lifecycleFailed(message: warning))
         }
       } catch {
-        await send(.lifecycleFailed(message: "Delete failed: \(error.localizedDescription)"))
+        let detail = (error as? GitWorktreeError).map(humanReadable) ?? error.localizedDescription
+        await send(.lifecycleFailed(message: "Delete failed: \(detail)"))
       }
       await send(.lifecycleEnded(worktreeID: wid))
     }

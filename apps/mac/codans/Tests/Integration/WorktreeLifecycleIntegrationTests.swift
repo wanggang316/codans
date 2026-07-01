@@ -144,6 +144,86 @@ struct WorktreeLifecycleIntegrationTests {
     #expect(!after.contains { URL(fileURLWithPath: $0.path).standardizedFileURL == worktreePath })
   }
 
+  /// Regression: a *locked* worktree must still be removable. git refuses
+  /// `worktree remove --force` on a locked entry ("cannot remove a locked
+  /// working tree, use -f -f or unlock first") and `prune` silently skips
+  /// it, so before the fix an in-app Remove of a worktree locked by a
+  /// sibling tool fataled with `GitWorktreeError.worktreeLocked` (surfaced
+  /// to the user as "GitWorktreeError error 6"). `removeWorktree` now runs
+  /// a best-effort `worktree unlock` up front.
+  ///
+  /// This variant mirrors the reported state: locked AND the working dir
+  /// already gone, which forces the `forceRemoveWorktree` leg — relocate
+  /// returns nil for a missing dir, so the forced remove is fatal on refusal.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func removeSucceedsWhenLockedAndDirMissing() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+
+    let client = GitWorktreeClient.makeLive()
+    let baseDir = repo.appending(path: ".worktrees", directoryHint: .isDirectory)
+    try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
+    let spec = CreateWorktreeSpec(
+      repoRoot: repo,
+      baseDirectory: baseDir,
+      name: "locked-gone",
+      baseRef: "HEAD",
+      fetchOrigin: false,
+      copyIgnored: false,
+      copyUntracked: false
+    )
+    var createdPath: URL?
+    for try await event in client.createWorktreeStream(spec) {
+      if case .finished(let path) = event { createdPath = path }
+    }
+    let worktreePath = try #require(createdPath)
+
+    // Lock it (as a sibling tool would), then delete the working dir so
+    // the relocate leg is skipped and the forced-remove leg runs.
+    try runGit(["worktree", "lock", worktreePath.path(percentEncoded: false)], cwd: repo)
+    try fm.removeItem(at: worktreePath)
+
+    try await client.removeWorktree(repo, worktreePath)
+    let after = try await client.lsWorktrees(repo)
+    #expect(!after.contains { URL(fileURLWithPath: $0.path).standardizedFileURL == worktreePath })
+  }
+
+  /// Companion to `removeSucceedsWhenLockedAndDirMissing` for the other
+  /// leg: locked but the working dir is still present, so removal goes
+  /// through relocate + `prune --expire=now`. `prune` skips *locked*
+  /// worktrees, so without the up-front unlock the metadata row would
+  /// linger even though the dir was relocated out from under git.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func removeSucceedsWhenLockedWithDirPresent() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+
+    let client = GitWorktreeClient.makeLive()
+    let baseDir = repo.appending(path: ".worktrees", directoryHint: .isDirectory)
+    try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
+    let spec = CreateWorktreeSpec(
+      repoRoot: repo,
+      baseDirectory: baseDir,
+      name: "locked-present",
+      baseRef: "HEAD",
+      fetchOrigin: false,
+      copyIgnored: false,
+      copyUntracked: false
+    )
+    var createdPath: URL?
+    for try await event in client.createWorktreeStream(spec) {
+      if case .finished(let path) = event { createdPath = path }
+    }
+    let worktreePath = try #require(createdPath)
+
+    try runGit(["worktree", "lock", worktreePath.path(percentEncoded: false)], cwd: repo)
+
+    try await client.removeWorktree(repo, worktreePath)
+    #expect(!fm.fileExists(atPath: worktreePath.path(percentEncoded: false)))
+    let after = try await client.lsWorktrees(repo)
+    #expect(!after.contains { URL(fileURLWithPath: $0.path).standardizedFileURL == worktreePath })
+  }
+
   /// Exercises cancelling a `createWorktreeStream`
   /// consumer must terminate the spawned `wt` child. The invariant we
   /// test is the direct one master called out: "cancel 后 Process 不
