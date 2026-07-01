@@ -1,5 +1,17 @@
 import Foundation
 
+/// Determines how a branch-name collision is resolved when creating a new worktree.
+/// The resolved value is the global default; individual creation flows may override it
+/// in the moment (e.g. a confirmation sheet).
+public nonisolated enum BranchConflictResolution: String, Equatable, Codable, Sendable, CaseIterable {
+  /// Append a numeric suffix to produce a unique branch name (e.g. `feat/x-2`).
+  case rename = "rename"
+  /// Reuse the existing branch as-is without modifying it.
+  case reuse = "reuse"
+  /// Delete the existing branch and create a fresh one from the base.
+  case recreate = "recreate"
+}
+
 /// Auto-delete period for archived worktrees. Represents the number of days after
 /// which a worktree archived via `codans worktree archive` is automatically deleted.
 public nonisolated enum AutoDeletePeriod: Int, Equatable, Codable, Sendable, CaseIterable {
@@ -42,6 +54,9 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
   public var autoDeletePeriod: AutoDeletePeriod
   /// Whether to delete the remote branch when deleting a local worktree. Default `false`.
   public var deleteRemoteBranchWithWorktree: Bool
+  /// Default resolution strategy when the desired branch name already exists at worktree
+  /// creation time. Default `.rename` (append a numeric suffix).
+  public var branchConflictResolution: BranchConflictResolution
 
   public init(
     defaultWorktreesDirectory: String? = nil,
@@ -51,7 +66,8 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
     copyUntrackedOnCreate: Bool = false,
     autoDeleteArchived: Bool = false,
     autoDeletePeriod: AutoDeletePeriod = .sevenDays,
-    deleteRemoteBranchWithWorktree: Bool = false
+    deleteRemoteBranchWithWorktree: Bool = false,
+    branchConflictResolution: BranchConflictResolution = .rename
   ) {
     self.defaultWorktreesDirectory = defaultWorktreesDirectory
     self.fetchRemoteOnCreate = fetchRemoteOnCreate
@@ -61,6 +77,7 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
     self.autoDeleteArchived = autoDeleteArchived
     self.autoDeletePeriod = autoDeletePeriod
     self.deleteRemoteBranchWithWorktree = deleteRemoteBranchWithWorktree
+    self.branchConflictResolution = branchConflictResolution
   }
 
   public static let `default` = WorktreeSettings()
@@ -68,6 +85,7 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case defaultWorktreesDirectory, fetchRemoteOnCreate, autoSwitchToNewWorktree, copyIgnoredOnCreate
     case copyUntrackedOnCreate, autoDeleteArchived, autoDeletePeriod, deleteRemoteBranchWithWorktree
+    case branchConflictResolution
   }
 
   public init(from decoder: Decoder) throws {
@@ -82,6 +100,11 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(AutoDeletePeriod.self, forKey: .autoDeletePeriod) ?? .sevenDays
     self.deleteRemoteBranchWithWorktree =
       try container.decodeIfPresent(Bool.self, forKey: .deleteRemoteBranchWithWorktree) ?? false
+    // Lenient decode: read the raw String and map it so an unknown, mis-cased, or absent value
+    // falls back to .rename without throwing. Using decodeIfPresent(BranchConflictResolution.self)
+    // would throw .dataCorrupted for unknown raw values and tank the entire WorktreeSettings decode.
+    let rawBranchConflict = try container.decodeIfPresent(String.self, forKey: .branchConflictResolution)
+    self.branchConflictResolution = rawBranchConflict.flatMap(BranchConflictResolution.init(rawValue:)) ?? .rename
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -107,6 +130,9 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
     }
     if deleteRemoteBranchWithWorktree != false {
       try container.encode(deleteRemoteBranchWithWorktree, forKey: .deleteRemoteBranchWithWorktree)
+    }
+    if branchConflictResolution != .rename {
+      try container.encode(branchConflictResolution, forKey: .branchConflictResolution)
     }
   }
 

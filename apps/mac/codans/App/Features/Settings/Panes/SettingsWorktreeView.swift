@@ -55,6 +55,15 @@ struct SettingsWorktreeView: View {
           "Switch to the new worktree when it's ready",
           isOn: autoSwitchToNewWorktreeBinding
         )
+
+        Picker(
+          "When the branch name already exists",
+          selection: branchConflictResolutionBinding
+        ) {
+          Text("Rename").tag(BranchConflictResolution.rename)
+          Text("Reuse").tag(BranchConflictResolution.reuse)
+          Text("Recreate").tag(BranchConflictResolution.recreate)
+        }
       }
 
       Section {
@@ -176,6 +185,15 @@ struct SettingsWorktreeView: View {
       get: { settingsStore.settings.worktree.deleteRemoteBranchWithWorktree },
       set: { newValue in
         settingsStore.mutateWorktree { $0.deleteRemoteBranchWithWorktree = newValue }
+      }
+    )
+  }
+
+  private var branchConflictResolutionBinding: Binding<BranchConflictResolution> {
+    Binding(
+      get: { settingsStore.settings.worktree.branchConflictResolution },
+      set: { newValue in
+        settingsStore.mutateWorktree { $0.branchConflictResolution = newValue }
       }
     )
   }
