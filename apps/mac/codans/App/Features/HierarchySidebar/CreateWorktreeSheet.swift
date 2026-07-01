@@ -77,8 +77,20 @@ struct CreateWorktreeSheet: View {
               .frame(maxWidth: .infinity, alignment: .leading)
           }
           if store.recreateNeedsConfirm {
+            // Label names the commit count so the control is perceivable
+            // without color (VAL-A11Y-001). "unknown" covers the fail-safe
+            // path where the count threw; a numeric count covers the >0 path.
+            let confirmLabel: String = {
+              if let count = store.recreateUniqueCount, count > 0 {
+                let plural = count == 1 ? "commit" : "commits"
+                return
+                  "I understand that recreating this branch will permanently delete \(count) \(plural)"
+              }
+              return
+                "I understand that recreating this branch will permanently delete an unknown number of commits"
+            }()
             Toggle(
-              "I understand these commits will be permanently deleted",
+              confirmLabel,
               isOn: Binding(
                 get: { store.recreateConfirmed },
                 set: { store.send(.recreateConfirmedToggled($0)) }
