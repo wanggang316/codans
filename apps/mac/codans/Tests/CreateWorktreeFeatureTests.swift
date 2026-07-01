@@ -56,11 +56,10 @@ struct CreateWorktreeFeatureTests {
     }
   }
 
-  // Previously this test expected a hard validationError (dead-end).
-  // M1 replaces it with an inline "rename only" control — no validationError,
-  // selectedResolution forced to .rename, Create button enabled.
+  // M1: checked-out collision forces Rename AND the rename gate blocks Create
+  // with a clear "already exists" message. validationError is now set (not nil).
   @Test
-  func branchDraftMatchingCheckedOutBranchSteersToRename() async {
+  func branchDraftMatchingCheckedOutBranchSteersToRenameAndSetsGate() async {
     let store = TestStore(initialState: initialState()) {
       CreateWorktreeFeature()
     }
@@ -68,27 +67,43 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("main")) {
       $0.branchNameDraft = "main"
       $0.branchCollisionKind = .checkedOut
-      $0.validationError = nil   // no dead-end hard error; inline control explains
+      // Rename gate fires: effectiveResolution(.checkedOut) == .rename + collision.
+      $0.validationError = "Branch \"main\" already exists — choose a different name."
       $0.reuseNotice = nil
       $0.selectedResolution = .rename
     }
   }
 
-  // Previously expected a reuseNotice string. M1 replaces reuseNotice with
-  // the inline resolution picker seeded to savedResolutionDefault.
+  // M1: dangling + savedDefault = .rename → rename gate fires (blocks Create).
   @Test
-  func branchDraftMatchingDanglingBranchSetsCollisionKind() async {
-    let store = TestStore(initialState: initialState()) {
+  func branchDraftMatchingDanglingBranchWithRenameDefaultSetsGate() async {
+    let store = TestStore(initialState: initialState(savedResolutionDefault: .rename)) {
       CreateWorktreeFeature()
     }
     store.exhaustivity = .off
-    // Exists as a ref, no live worktree → dangling; picker seeded to .rename (default).
     await store.send(.branchDraftChanged("feature/existing")) {
       $0.branchNameDraft = "feature/existing"
       $0.branchCollisionKind = .dangling
-      $0.validationError = nil
+      $0.validationError =
+        "Branch \"feature/existing\" already exists — choose a different name."
       $0.reuseNotice = nil
       $0.selectedResolution = .rename  // savedResolutionDefault = .rename
+    }
+  }
+
+  // M1: dangling + savedDefault = .reuse → rename gate DOES NOT fire.
+  @Test
+  func branchDraftMatchingDanglingBranchWithReuseDefaultClearsGate() async {
+    let store = TestStore(initialState: initialState(savedResolutionDefault: .reuse)) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("feature/existing")) {
+      $0.branchNameDraft = "feature/existing"
+      $0.branchCollisionKind = .dangling
+      $0.validationError = nil   // effectiveResolution == .reuse → no gate
+      $0.reuseNotice = nil
+      $0.selectedResolution = .reuse
     }
   }
 
@@ -156,7 +171,9 @@ struct CreateWorktreeFeatureTests {
     store.exhaustivity = .off
     await store.send(.branchDraftChanged("feature//existing")) {
       $0.branchCollisionKind = .dangling
-      $0.validationError = nil
+      // savedResolutionDefault = .rename → gate fires for the normalized name.
+      $0.validationError =
+        "Branch \"feature/existing\" already exists — choose a different name."
       $0.reuseNotice = nil
     }
   }
@@ -226,7 +243,7 @@ struct CreateWorktreeFeatureTests {
   @Test
   func savedDefaultClampsToRenameOnCheckedOutWhenBranchDraftChanged() async {
     // A Reuse/Recreate saved default clamps to Rename when the typed name
-    // collides with a checked-out branch.
+    // collides with a checked-out branch. Rename gate also fires.
     let store = TestStore(initialState: initialState(savedResolutionDefault: .reuse)) {
       CreateWorktreeFeature()
     }
@@ -234,7 +251,9 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("main")) {
       $0.branchCollisionKind = .checkedOut
       $0.selectedResolution = .rename   // clamped from .reuse
-      $0.validationError = nil
+      // Rename gate fires regardless of saved default.
+      $0.validationError =
+        "Branch \"main\" already exists — choose a different name."
     }
   }
 
@@ -298,6 +317,178 @@ struct CreateWorktreeFeatureTests {
       $0.branchCollisionKind = .none
       $0.selectedResolution = .rename   // reset to savedResolutionDefault
     }
+  }
+
+  // MARK: - Rename gate: reactive to resolutionChanged (VAL-RENAME-001/002)
+
+  /// Switching inline picker from Rename to Reuse while a dangling collision
+  /// exists clears the rename gate (Create becomes enabled).
+  @Test
+  func resolutionChangedToReuseWhileDanglingClearsGate() async {
+    // Start: dangling collision + rename selected → gate is active.
+    var state = initialState(savedResolutionDefault: .rename)
+    state.branchCollisionKind = .dangling
+    state.branchNameDraft = "feature/existing"
+    state.selectedResolution = .rename
+    state.validationError =
+      "Branch \"feature/existing\" already exists — choose a different name."
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // User switches inline picker to Reuse → gate clears.
+    await store.send(.resolutionChanged(.reuse)) {
+      $0.selectedResolution = .reuse
+      $0.validationError = nil   // gate cleared; Create is now enabled
+    }
+  }
+
+  /// Switching inline picker back to Rename while a dangling collision
+  /// exists re-activates the rename gate (Create becomes blocked again).
+  @Test
+  func resolutionChangedBackToRenameWhileDanglingReactivatesGate() async {
+    // Start: dangling collision + reuse selected → gate is inactive.
+    var state = initialState(savedResolutionDefault: .reuse)
+    state.branchCollisionKind = .dangling
+    state.branchNameDraft = "feature/existing"
+    state.selectedResolution = .reuse
+    state.validationError = nil
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // User switches inline picker to Rename → gate fires.
+    await store.send(.resolutionChanged(.rename)) {
+      $0.selectedResolution = .rename
+      $0.validationError =
+        "Branch \"feature/existing\" already exists — choose a different name."
+    }
+  }
+
+  /// Rename gate clears when the user types a non-colliding name (VAL-RENAME-001).
+  /// Draft is preserved exactly as typed — no auto-substitution (VAL-RENAME-002).
+  @Test
+  func renameGateClearsWhenUserTypesFreeName() async {
+    // Start: checked-out collision → gate active.
+    var state = initialState()
+    state.branchCollisionKind = .checkedOut
+    state.branchNameDraft = "main"
+    state.selectedResolution = .rename
+    state.validationError =
+      "Branch \"main\" already exists — choose a different name."
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // User types a fresh, non-colliding name.
+    await store.send(.branchDraftChanged("feature/new-branch")) {
+      $0.branchNameDraft = "feature/new-branch"   // preserved as typed
+      $0.branchCollisionKind = .none
+      $0.validationError = nil   // gate cleared
+    }
+  }
+
+  // MARK: - Reuse spec (VAL-REUSE-001 / VAL-CROSS-003)
+
+  /// effectiveResolution for dangling+reuse is .reuse (VAL-REUSE-001).
+  /// The spec's reuseExistingBranch is driven directly by effectiveResolution,
+  /// so asserting the state before the tap is sufficient; the payload assertion
+  /// lives in HierarchySidebarFeature's pending lifecycle tests.
+  @Test
+  func reuseEffectiveResolutionIsTrueWhenDanglingAndReuseSelected() {
+    var state = initialState(savedResolutionDefault: .reuse)
+    state.branchCollisionKind = .dangling
+    state.selectedResolution = .reuse
+    #expect(state.effectiveResolution == .reuse)
+    // createButtonTapped derives: reuseExistingBranch = effectiveResolution == .reuse
+    // → true. Verified directly on state rather than via action payload extraction.
+  }
+
+  /// When effective resolution is .reuse (dangling + reuse), createButtonTapped
+  /// emits beginCreate and does NOT block — gate is inactive for Reuse.
+  @Test
+  func createWithReuseResolutionProceedsWithoutGateBlock() async {
+    var state = initialState(savedResolutionDefault: .reuse)
+    state.branchNameDraft = "feature/existing"
+    state.selectedBaseRef = "origin/main"
+    state.branchCollisionKind = .dangling
+    state.selectedResolution = .reuse
+    state.validationError = nil  // gate not active for .reuse
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped)
+    await store.receive(\.delegate.beginCreate) { _ in }
+    // If we reach here without timeout, the spec was emitted (gate didn't block).
+    // reuseExistingBranch is derived from effectiveResolution == .reuse (tested above).
+  }
+
+  /// A fresh (non-colliding) create does NOT set reuseExistingBranch — git is
+  /// the final arbiter if the branch was created elsewhere since the snapshot
+  /// (VAL-CROSS-003). Verified via effectiveResolution state.
+  @Test
+  func freshCreateEffectiveResolutionIsRenameNotReuse() {
+    // .none collision → effectiveResolution == .rename regardless of selectedResolution.
+    var state = initialState()
+    state.branchCollisionKind = .none
+    state.selectedResolution = .reuse   // irrelevant when .none
+    // effectiveResolution(.none) == .rename → reuseExistingBranch = false in spec.
+    #expect(state.effectiveResolution == .rename)
+    #expect(state.effectiveResolution != .reuse)
+  }
+
+  // MARK: - Submit-time precedence: rename gate before folder-exists (VAL-CROSS-005)
+
+  /// The rename gate (validationError) preempts the folder-exists check. Even
+  /// if a folder happened to exist, the rename-collision error fires first.
+  @Test
+  func renameGatePreemptsCreateButtonTapped() async {
+    // A collision + rename resolution → validationError is set reactively.
+    // Tapping Create must return early on the validationError guard, not
+    // reach the folder-exists check.
+    var state = initialState()
+    state.branchNameDraft = "main"
+    state.selectedBaseRef = "origin/main"
+    state.branchCollisionKind = .checkedOut
+    state.selectedResolution = .rename
+    // Simulate the rename gate already being set by branchDraftChanged.
+    state.validationError =
+      "Branch \"main\" already exists — choose a different name."
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped) {
+      // validationError unchanged; submitError NOT set (folder-exists not reached).
+      $0.validationError =
+        "Branch \"main\" already exists — choose a different name."
+      $0.submitError = nil
+    }
+  }
+
+  // MARK: - Rename path honors base ref + fetch (VAL-RENAME-003)
+
+  /// A rename create (fresh, non-colliding) emits beginCreate, proving it
+  /// flows through the normal path (no rename gate block, no bypass).
+  /// base ref + fetchOrigin are user-controlled state that flow into the spec;
+  /// spec field assertions live in the lifecycle integration test.
+  @Test
+  func renameCreateFlowsThroughNormalPath() async {
+    var state = initialState()
+    state.branchNameDraft = "feature/renamed"
+    state.selectedBaseRef = "origin/develop"
+    state.fetchOrigin = true
+    state.branchCollisionKind = .none   // non-colliding → fresh create; no gate
+    state.validationError = nil
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped)
+    // beginCreate is emitted — no rename gate block; effectiveResolution(.none) = .rename
+    // so reuseExistingBranch = false. base ref and fetchOrigin are in state (above).
+    await store.receive(\.delegate.beginCreate) { _ in }
   }
 
   // MARK: - Other delegate / submit paths

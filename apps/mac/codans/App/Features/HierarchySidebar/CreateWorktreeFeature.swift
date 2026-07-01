@@ -157,6 +157,39 @@ struct CreateWorktreeFeature {
 
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
 
+  // MARK: - Rename gate helper
+
+  /// Re-evaluates the rename-collision gate whenever classification or the
+  /// inline resolution selection changes.  Sets `validationError` when the
+  /// **effective** resolution is `.rename` and there is a real collision;
+  /// clears it when the collision resolves or the user switches away from
+  /// Rename (e.g. to Reuse).
+  ///
+  /// Call this AFTER `branchCollisionKind` and `selectedResolution` are both
+  /// up-to-date so `effectiveResolution` reflects the new state.
+  private static func applyRenameGate(to state: inout State) {
+    guard state.branchCollisionKind != .none else {
+      // No collision at all — gate doesn't apply; clear any rename-gate error
+      // we own (identified by prefix); space/empty errors are cleared elsewhere.
+      if state.validationError?.hasPrefix("Branch \"") == true {
+        state.validationError = nil
+      }
+      return
+    }
+    if state.effectiveResolution == .rename {
+      // Effective rename + collision → block Create until the name is free.
+      let name = state.sanitizedBranchDraft
+      state.validationError =
+        "Branch \"\(name)\" already exists — choose a different name."
+    } else {
+      // User switched to Reuse or Recreate → rename gate no longer applies;
+      // clear any rename-collision error we set previously.
+      if state.validationError?.hasPrefix("Branch \"") == true {
+        state.validationError = nil
+      }
+    }
+  }
+
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
@@ -223,6 +256,9 @@ struct CreateWorktreeFeature {
           state.reuseNotice = nil
           state.selectedResolution = state.savedResolutionDefault
         } else {
+          // Clear any prior validation error before reclassifying — the
+          // correct error (if any) will be re-set by applyRenameGate below.
+          state.validationError = nil
           // Classify on the SANITIZED, lowercased name — identical to the
           // form that git-wt will actually create — so a name that only
           // collides after sanitization (doubled separators, trailing dashes,
@@ -232,27 +268,27 @@ struct CreateWorktreeFeature {
           if state.liveWorktreeBranchesLower.contains(lower) {
             // Checked out by a live worktree — git refuses a second checkout
             // and forbids `branch -D` on a checked-out branch. Neither Reuse
-            // nor Recreate is viable; force Rename and let the inline control
-            // explain rather than dead-ending the form with a hard error.
+            // nor Recreate is viable; force Rename. The rename gate (below)
+            // then blocks Create until the user picks a free name.
             state.branchCollisionKind = .checkedOut
-            state.validationError = nil
             state.reuseNotice = nil
             state.selectedResolution = .rename
           } else if state.localBranchNamesLower.contains(lower) {
             // Dangling branch: exists as a local ref but no worktree checks it
             // out. All three resolutions are valid — seed to the saved default.
             state.branchCollisionKind = .dangling
-            state.validationError = nil
             state.reuseNotice = nil
             state.selectedResolution = state.savedResolutionDefault
           } else {
             // Remote-only names (e.g. origin/foo with no local foo) also
             // land here: classification keys on LOCAL sets only.
             state.branchCollisionKind = .none
-            state.validationError = nil
             state.reuseNotice = nil
             state.selectedResolution = state.savedResolutionDefault
           }
+          // Reactive rename gate: set/clear validationError based on the
+          // now-current (branchCollisionKind, effectiveResolution) pair.
+          Self.applyRenameGate(to: &state)
         }
         return .none
 
@@ -279,6 +315,9 @@ struct CreateWorktreeFeature {
       case .resolutionChanged(let resolution):
         // Per-creation inline override only — no settings write.
         state.selectedResolution = resolution
+        // Reactive rename gate: switching to/from Rename while a collision
+        // exists toggles the Create block.
+        Self.applyRenameGate(to: &state)
         return .none
 
       case .createButtonTapped:
@@ -297,11 +336,13 @@ struct CreateWorktreeFeature {
           return .none
         }
         // Drive the spec flag from the effective resolution (selectedResolution
-        // clamped to viable). checkedOut is forced to .rename by effectiveResolution,
-        // so the block that previously hard-errored on checkedOut is gone — the inline
-        // control already steered the user to Rename. Rename/Recreate execution is a
-        // later milestone; for now they proceed with reuseExistingBranch = false and
-        // git surfaces the result through the pending row.
+        // clamped to viable).  By the time we reach here the rename gate in
+        // `applyRenameGate` has already ensured that if effectiveResolution is
+        // `.rename` AND there is a collision, `validationError` is set and the
+        // guard above has returned early.  So `.reuse` is the only path that
+        // sets `reuseExistingBranch = true`; all other cases (including fresh
+        // `.none` creates) leave it false — making git the final arbiter on
+        // a race (VAL-CROSS-003).
         let reuseExistingBranch = state.effectiveResolution == .reuse
         // Branch names like `feature/abc` map to nested folders
         // (`feature/abc`); `appending(path:)` honours the embedded
