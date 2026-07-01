@@ -5,11 +5,11 @@ import Foundation
 /// in the moment (e.g. a confirmation sheet).
 public nonisolated enum BranchConflictResolution: String, Equatable, Codable, Sendable, CaseIterable {
   /// Append a numeric suffix to produce a unique branch name (e.g. `feat/x-2`).
-  case rename = "rename"
+  case rename
   /// Reuse the existing branch as-is without modifying it.
-  case reuse = "reuse"
+  case reuse
   /// Delete the existing branch and create a fresh one from the base.
-  case recreate = "recreate"
+  case recreate
 }
 
 /// Auto-delete period for archived worktrees. Represents the number of days after
