@@ -102,7 +102,10 @@ nonisolated struct GitWorktreeClient: Sendable {
   /// prune --expire=now` cleans up the metadata, with a `git worktree
   /// remove --force` fallback. Sidesteps git's submodule and uncommitted
   /// guards because once the working dir is gone, `prune` has no reason
-  /// to refuse. The trash directory is rm-rf'd asynchronously so a
+  /// to refuse. A best-effort `git worktree unlock` runs first so a lock
+  /// (which `prune` silently skips and `remove --force` fatals on) — e.g.
+  /// planted by a sibling tool sharing this repo's git dir — cannot strand
+  /// the removal. The trash directory is rm-rf'd asynchronously so a
   /// large `.git` (e.g. submodule history) does not block the caller.
   var removeWorktree: @Sendable (_ repoRoot: URL, _ path: URL) async throws -> Void
   /// Best-effort `git branch -D <branch>` on the project's main repo —
@@ -813,6 +816,23 @@ nonisolated extension GitWorktreeClient {
         // branch-switched, pinned worktree left a row that could never be
         // deleted again (`remove --force` against the emptied path keeps
         // failing with "is not a working tree").
+        //
+        // 0) Best-effort unlock: git refuses to remove a LOCKED worktree
+        //    even with `--force` (fatals: "cannot remove a locked working
+        //    tree, use -f -f or unlock first") and `prune` silently skips
+        //    it, so a locked entry would strand the removal on either leg.
+        //    Locks can be planted by a sibling tool sharing this repo's git
+        //    dir; a user-initiated Remove means "make it gone", so clear the
+        //    lock up front. Unlocking a non-locked worktree is a harmless
+        //    no-op error we ignore.
+        _ = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: [
+            "-C", repoRoot.path(percentEncoded: false),
+            "worktree", "unlock", path.path(percentEncoded: false),
+          ],
+          cwd: repoRoot
+        )
         let relocated = relocateWorktreeForRemoval(path)
         if let relocated {
           scheduleTrashCleanup(relocated)
