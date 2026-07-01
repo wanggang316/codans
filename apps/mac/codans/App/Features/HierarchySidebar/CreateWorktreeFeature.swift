@@ -79,6 +79,16 @@ struct CreateWorktreeFeature {
     // Options loaded asynchronously on presentation.
     var baseRefOptions: [String] = []
     var localBranchNamesLower: Set<String> = []
+    /// ORIGINAL-cased local branch names (as `git for-each-ref` reports them),
+    /// keyed by their lowercased form. Classification matches case-INSENSITIVELY
+    /// via `localBranchNamesLower`, but every git op on a matched dangling ref
+    /// (count / force-delete / attach / recreate) MUST target the branch's real
+    /// casing — the draft's casing may differ from the existing ref, and on a
+    /// case-sensitive filesystem a wrong-cased `git branch -D` misses the real
+    /// ref (creating a duplicate) while a case-insensitive one lands the
+    /// discarded tip's reflog under the wrong name. `resolveDanglingRealName`
+    /// reads this to recover the exact ref for `danglingRealName`.
+    var localBranchNamesByLower: [String: String] = [:]
     /// Lowercased branches currently checked out by a LIVE worktree.
     /// A name in this set is a hard conflict (git won't check the same
     /// branch out twice). A name in `localBranchNamesLower` but NOT here
@@ -135,6 +145,17 @@ struct CreateWorktreeFeature {
     /// Reset to `false` on ANY branch/base edit so a stale confirm can never
     /// carry onto a different branch or base (guard (a)).
     var recreateConfirmed: Bool = false
+    /// The REAL-cased name of the matched dangling ref, resolved at
+    /// classification time from `localBranchNamesByLower`. `nil` when the draft
+    /// is not on a dangling collision. Every git op that touches the EXISTING
+    /// branch — `branchUniqueCommitCount`, `deleteBranchIfExists`, the Reuse
+    /// attach spec, and the Recreate fresh-create name — targets this so it
+    /// operates on the branch git actually has, not the draft's (possibly
+    /// differently-cased) form. The draft casing drives only the
+    /// case-insensitive classification match; once matched, casing is fixed to
+    /// the existing ref. Falls back to the sanitized directory name only when
+    /// this is `nil` (no collision resolved, e.g. a race).
+    var danglingRealName: String?
 
     // MARK: - Derived
 
@@ -213,13 +234,26 @@ struct CreateWorktreeFeature {
       recreateNeedsConfirm && !recreateConfirmed
     }
 
+    /// The branch name every git op on the EXISTING dangling ref must target:
+    /// the real-cased ref recovered at classification (`danglingRealName`),
+    /// falling back to the sanitized directory name when no dangling ref was
+    /// resolved (fresh create, or a race where the map lacked the key). This is
+    /// what `branchUniqueCommitCount`, `deleteBranchIfExists`, the Reuse attach
+    /// spec, and the Recreate fresh-create name all use — so a differently-cased
+    /// draft never targets or reproduces the wrong ref. The draft's casing only
+    /// ever drives the case-insensitive classification MATCH.
+    var operativeBranchName: String {
+      danglingRealName ?? sanitizedBranchDraft
+    }
+
     /// The (branch, base) token to compute the recreate unique-commit count
     /// for, or `nil` when the current form is not a recreate of a dangling
-    /// branch with a selected base. Used both to launch the async count and
+    /// branch with a selected base. Uses the REAL-cased ref (`operativeBranchName`)
+    /// so the count is computed against the branch git actually has. Also used
     /// to validate that a returning result still matches the live selection.
     var recreateGuardToken: RecreateGuardToken? {
       guard isRecreateContext else { return nil }
-      let branch = sanitizedBranchDraft
+      let branch = operativeBranchName
       guard !branch.isEmpty, let base = selectedBaseRef, !base.isEmpty else {
         return nil
       }
@@ -231,7 +265,10 @@ struct CreateWorktreeFeature {
     case onAppear
     case optionsLoaded(
       baseRefs: [String],
-      localBranchNamesLower: Set<String>,
+      /// ORIGINAL-cased local branch names. The reducer derives both the
+      /// lowercased match set and the `[lowercased: original]` map from this so
+      /// git ops on a matched dangling ref can recover its exact casing.
+      localBranchNames: Set<String>,
       liveWorktreeBranchesLower: Set<String>,
       automaticBaseRef: String?
     )
@@ -275,6 +312,32 @@ struct CreateWorktreeFeature {
   }
 
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
+
+  // MARK: - Local-branch ingestion
+
+  /// Derives the two collision-classification structures from a single
+  /// ORIGINAL-cased set of local branch names:
+  /// - `localBranchNamesLower` — the lowercased set used for the
+  ///   case-INSENSITIVE collision match (a draft `feature-login` matches an
+  ///   existing `Feature-Login`).
+  /// - `localBranchNamesByLower` — a `[lowercased: original]` map so a matched
+  ///   ref's EXACT casing can be recovered for every git op. On a collision of
+  ///   two names differing only by case (unusual but legal on a
+  ///   case-sensitive FS) the last one wins; either is a valid delete target.
+  ///
+  /// Keeping both derived from the same source in one place stops them from
+  /// drifting apart.
+  static func ingestLocalBranchNames(_ names: Set<String>, into state: inout State) {
+    var lower = Set<String>()
+    var byLower = [String: String]()
+    for name in names {
+      let key = name.lowercased()
+      lower.insert(key)
+      byLower[key] = name
+    }
+    state.localBranchNamesLower = lower
+    state.localBranchNamesByLower = byLower
+  }
 
   // MARK: - Rename gate helper
 
@@ -368,6 +431,8 @@ struct CreateWorktreeFeature {
           async let live = (try? client.lsWorktrees(repoRoot)) ?? []
           async let auto = (try? client.defaultRemoteBranchRef(repoRoot)) ?? nil
           let loadedRefs = await refs
+          // Original-cased local branch names — the reducer derives the
+          // lowercased match set + the casing-recovery map from these.
           let loadedLocals = await locals
           let loadedLive = Set(
             await live
@@ -378,7 +443,7 @@ struct CreateWorktreeFeature {
           await send(
             .optionsLoaded(
               baseRefs: loadedRefs,
-              localBranchNamesLower: loadedLocals,
+              localBranchNames: loadedLocals,
               liveWorktreeBranchesLower: loadedLive,
               automaticBaseRef: loadedAuto
             ))
@@ -387,7 +452,10 @@ struct CreateWorktreeFeature {
       case .optionsLoaded(let baseRefs, let locals, let live, let auto):
         state.loadingOptions = false
         state.baseRefOptions = baseRefs
-        state.localBranchNamesLower = locals
+        // Derive the lowercased MATCH set (classification is case-insensitive)
+        // and the [lowercased: original] map (git ops recover the real casing)
+        // from the single original-cased source, so the two never drift.
+        Self.ingestLocalBranchNames(locals, into: &state)
         state.liveWorktreeBranchesLower = live
         state.automaticBaseRef = auto
         // Preserve a user-set value if they already picked one while
@@ -411,11 +479,13 @@ struct CreateWorktreeFeature {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
           state.branchCollisionKind = .none
+          state.danglingRealName = nil
           state.validationError = nil
           state.renameGateActive = false
           state.selectedResolution = state.savedResolutionDefault
         } else if trimmed.contains(where: \.isWhitespace) {
           state.branchCollisionKind = .none
+          state.danglingRealName = nil
           state.validationError = "Branch names can't contain spaces."
           // This branch owns validationError directly; drop any gate ownership
           // so a later clear can't retract this space message.
@@ -439,16 +509,23 @@ struct CreateWorktreeFeature {
             // nor Recreate is viable; force Rename. The rename gate (below)
             // then blocks Create until the user picks a free name.
             state.branchCollisionKind = .checkedOut
+            state.danglingRealName = nil
             state.selectedResolution = .rename
           } else if state.localBranchNamesLower.contains(lower) {
             // Dangling branch: exists as a local ref but no worktree checks it
             // out. All three resolutions are valid — seed to the saved default.
             state.branchCollisionKind = .dangling
+            // Recover the EXACT existing ref casing (the draft may differ, e.g.
+            // `feature-login` typed against an existing `Feature-Login`). Every
+            // git op targets this, not the draft's casing. Fall back to the
+            // sanitized draft only if the map somehow lacks the key (race).
+            state.danglingRealName = state.localBranchNamesByLower[lower] ?? sanitized
             state.selectedResolution = state.savedResolutionDefault
           } else {
             // Remote-only names (e.g. origin/foo with no local foo) also
             // land here: classification keys on LOCAL sets only.
             state.branchCollisionKind = .none
+            state.danglingRealName = nil
             state.selectedResolution = state.savedResolutionDefault
           }
           // Reactive rename gate: set/clear validationError based on the
@@ -528,11 +605,19 @@ struct CreateWorktreeFeature {
           state.validationError = "Pick a base ref."
           return .none
         }
-        let directoryName = GitWorktreeClient.sanitizeBranchName(trimmed)
-        guard !directoryName.isEmpty else {
+        let sanitizedDraftName = GitWorktreeClient.sanitizeBranchName(trimmed)
+        guard !sanitizedDraftName.isEmpty else {
           state.validationError = "Branch name produces an empty directory name."
           return .none
         }
+        // The name every git op + the on-disk directory use. For a dangling
+        // Reuse/Recreate this is the EXISTING ref's real casing
+        // (`operativeBranchName`), so the attach/recreate/delete all target the
+        // branch git actually has instead of the draft's casing. For a fresh
+        // create it's the sanitized draft (they're identical when there's no
+        // dangling ref). Using it for the folder path too keeps the directory
+        // consistent with the branch on a case-sensitive filesystem.
+        let branchAndDirName = state.operativeBranchName
         // Drive the spec flag from the effective resolution (selectedResolution
         // clamped to viable).  By the time we reach here the rename gate in
         // `applyRenameGate` has already ensured that if effectiveResolution is
@@ -547,10 +632,10 @@ struct CreateWorktreeFeature {
         // separator, whereas `appending(component:)` would percent-encode
         // the slash and break the diff against `wt ls --json` (HAN-57).
         let targetURL = state.worktreesDirectory
-          .appending(path: directoryName)
+          .appending(path: branchAndDirName)
         if FileManager.default.fileExists(atPath: targetURL.path(percentEncoded: false)) {
           state.submitError = """
-            A folder named \"\(directoryName)\" already exists at the Project's \
+            A folder named \"\(branchAndDirName)\" already exists at the Project's \
             worktrees directory. Choose a different branch name.
             """
           return .none
@@ -577,7 +662,10 @@ struct CreateWorktreeFeature {
         let spec = CreateWorktreeSpec(
           repoRoot: state.repoRoot,
           baseDirectory: state.worktreesDirectory,
-          name: directoryName,
+          // Real-cased ref for Reuse/Recreate (so the attach reuses, and the
+          // recreate reproduces, the SAME-named branch — not a differently-
+          // cased duplicate); sanitized draft for a fresh create.
+          name: branchAndDirName,
           baseRef: baseRef,
           fetchOrigin: state.fetchOrigin,
           copyIgnored: state.copyIgnored,
@@ -610,7 +698,13 @@ struct CreateWorktreeFeature {
         // the branch is left intact. `git branch -D` keeps the discarded tip
         // reflog-recoverable, so no extra recovery code is needed.
         let repoRoot = state.repoRoot
-        let branch = directoryName
+        // Force-delete the EXISTING ref by its real casing (same value the
+        // fresh `-b` create in `spec.name` will reproduce), so on a
+        // case-sensitive FS the delete hits the real branch instead of missing
+        // it (which would `.absent` → leave a duplicate), and on a
+        // case-insensitive FS the discarded tip's reflog lands under the
+        // correct name.
+        let branch = branchAndDirName
         let client = gitWorktreeClient
         return .run { send in
           let outcome = await client.deleteBranchIfExists(repoRoot, branch)

@@ -15,19 +15,23 @@ import Testing
 struct CreateWorktreeFeatureTests {
   private func initialState(
     currentPendingCountForProject: Int = 0,
-    savedResolutionDefault: BranchConflictResolution = .rename
+    savedResolutionDefault: BranchConflictResolution = .rename,
+    localBranchNames: Set<String> = ["main", "feature/existing"]
   ) -> CreateWorktreeFeature.State {
     var state = CreateWorktreeFeature.State(
       projectID: ProjectID(),
       repoRoot: URL(fileURLWithPath: "/tmp/repo"),
       worktreesDirectory: URL(fileURLWithPath: "/tmp/repo/.worktrees"),
       currentPendingCountForProject: currentPendingCountForProject,
-      savedResolutionDefault: savedResolutionDefault,
-      localBranchNamesLower: ["main", "feature/existing"]
+      savedResolutionDefault: savedResolutionDefault
     )
+    // Derive both classification structures from one original-cased source —
+    // exactly as the reducer does on `.optionsLoaded` — so the lowercased match
+    // set and the [lowercased: original] casing-recovery map stay in sync.
     // "main" is checked out by the main worktree (live conflict);
     // "feature/existing" exists as a ref but has no worktree (dangling →
     // reusable on re-create).
+    CreateWorktreeFeature.ingestLocalBranchNames(localBranchNames, into: &state)
     state.liveWorktreeBranchesLower = ["main"]
     return state
   }
@@ -566,13 +570,14 @@ struct CreateWorktreeFeatureTests {
       repoRoot: URL(fileURLWithPath: "/tmp/repo"),
       worktreesDirectory: worktreesDir,
       currentPendingCountForProject: 0,
-      savedResolutionDefault: .reuse,
-      localBranchNamesLower: ["main", "feature/existing"]
+      savedResolutionDefault: .reuse
     )
+    CreateWorktreeFeature.ingestLocalBranchNames(["main", "feature/existing"], into: &state)
     state.liveWorktreeBranchesLower = ["main"]
     state.branchNameDraft = "feature/existing"
     state.selectedBaseRef = "origin/main"
     state.branchCollisionKind = .dangling
+    state.danglingRealName = "feature/existing"
     state.selectedResolution = .reuse
     state.validationError = nil  // reuse → rename gate inactive
     state.renameGateActive = false
@@ -681,14 +686,23 @@ struct CreateWorktreeFeatureTests {
 
   /// Builds a state already sitting on a dangling collision with Recreate
   /// selected and a base picked — the entry point for the unique-commit guard.
+  /// `existing` is the set of ORIGINAL-cased local refs; `branch` is what the
+  /// user typed (its casing may differ from the matched ref). `danglingRealName`
+  /// is resolved exactly as the reducer's classification would, so the operative
+  /// name used by the count/delete/attach reflects the real ref casing.
   private func recreateState(
     branch: String = "feature/existing",
-    base: String = "origin/main"
+    base: String = "origin/main",
+    existing: Set<String> = ["main", "feature/existing"]
   ) -> CreateWorktreeFeature.State {
-    var state = initialState(savedResolutionDefault: .recreate)
+    var state = initialState(
+      savedResolutionDefault: .recreate, localBranchNames: existing
+    )
     state.branchNameDraft = branch
     state.selectedBaseRef = base
     state.branchCollisionKind = .dangling
+    let lower = GitWorktreeClient.sanitizeBranchName(branch).lowercased()
+    state.danglingRealName = state.localBranchNamesByLower[lower]
     state.selectedResolution = .recreate
     return state
   }
@@ -744,8 +758,10 @@ struct CreateWorktreeFeatureTests {
   @Test
   func recreateConfirmResetsOnBranchDraftChanged() async {
     // Two dangling branches so retyping lands on a different dangling collision.
-    var state = recreateState(branch: "feature/existing")
-    state.localBranchNamesLower = ["main", "feature/existing", "feature/other"]
+    var state = recreateState(
+      branch: "feature/existing",
+      existing: ["main", "feature/existing", "feature/other"]
+    )
     state.recreateUniqueCount = 5
     state.recreateConfirmed = true
     let store = TestStore(initialState: state) {
@@ -757,6 +773,7 @@ struct CreateWorktreeFeatureTests {
     // Retype onto the OTHER dangling branch → confirm resets immediately.
     await store.send(.branchDraftChanged("feature/other")) {
       $0.branchNameDraft = "feature/other"
+      $0.danglingRealName = "feature/other"  // re-resolved for the new match
       $0.recreateConfirmed = false  // guard (a): reset on edit
       $0.recreateUniqueCount = nil  // pending recompute (never coerced to 0)
     }
@@ -1087,8 +1104,7 @@ struct CreateWorktreeFeatureTests {
     #expect(deleteCalled.value == false)
     // validationError is still the rename gate message (not clobbered by submitError).
     #expect(
-      store.state.validationError ==
-        "Branch \"feature/existing\" already exists — choose a different name."
+      store.state.validationError == "Branch \"feature/existing\" already exists — choose a different name."
     )
   }
 
@@ -1222,5 +1238,118 @@ struct CreateWorktreeFeatureTests {
     // The effectiveResolution == .recreate → reuseExistingBranch = false in the spec.
     // (the spec's reuseExistingBranch is derived as `effectiveResolution == .reuse`
     //  which is false for .recreate, satisfying VAL-CROSS-002's "fresh -b from base".)
+  }
+
+  // MARK: - M2 review fix: target the REAL-cased ref (VAL-RECREATE case-safety)
+
+  /// Classifying a dangling collision typed in a DIFFERENT case than the
+  /// existing ref resolves `danglingRealName` to the EXISTING ref's real
+  /// casing, and `operativeBranchName` follows it. The draft casing only drives
+  /// the case-insensitive MATCH.
+  @Test
+  func caseMismatchResolvesDanglingRealNameToExistingRef() async {
+    // Existing local ref is mixed-case; user types the all-lowercase form.
+    let store = TestStore(
+      initialState: initialState(localBranchNames: ["main", "Feature-Login"])
+    ) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("feature-login")) {
+      $0.branchNameDraft = "feature-login"
+      $0.branchCollisionKind = .dangling  // matched case-insensitively
+      $0.danglingRealName = "Feature-Login"  // resolved to the REAL casing
+    }
+    #expect(store.state.operativeBranchName == "Feature-Login")
+  }
+
+  /// The Recreate unique-commit count is computed against the REAL-cased ref,
+  /// not the draft — proving the wrong-cased ref is never the count target.
+  @Test
+  func caseMismatchRecreateCountTargetsRealCasedRef() async {
+    let countedBranch = LockIsolated<String?>(nil)
+    // recreateState with a mixed-case existing ref + a lowercase draft.
+    let state = recreateState(
+      branch: "feature-login",
+      base: "origin/main",
+      existing: ["main", "Feature-Login"]
+    )
+    // Sanity: danglingRealName recovered the real casing.
+    #expect(state.danglingRealName == "Feature-Login")
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, branch, _ in
+        countedBranch.setValue(branch)
+        return 2
+      }
+    }
+    store.exhaustivity = .off
+    await store.send(.resolutionChanged(.recreate))
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 2
+    }
+    // The count ran against the EXISTING ref's real casing, not "feature-login".
+    #expect(countedBranch.value == "Feature-Login")
+  }
+
+  /// The Recreate submit force-deletes the REAL-cased ref and reproduces it in
+  /// the fresh-create spec.name — so on a case-sensitive FS the delete hits the
+  /// real branch (no duplicate) and the recreate is the SAME-named branch. The
+  /// delete target is observed directly; `spec.name` is built from the same
+  /// `operativeBranchName`, asserted on state below.
+  @Test
+  func caseMismatchRecreateSubmitDeletesAndRecreatesRealCasedRef() async {
+    let deletedBranch = LockIsolated<String?>(nil)
+    var state = recreateState(
+      branch: "feature-login",
+      base: "origin/main",
+      existing: ["main", "Feature-Login"]
+    )
+    state.recreateUniqueCount = 0  // silent path: still deletes real-cased ref first
+    // The spec's `name` is assigned `= operativeBranchName`; assert the exact
+    // value the fresh `-b` create will reproduce.
+    #expect(state.operativeBranchName == "Feature-Login")
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.deleteBranchIfExists = { _, branch in
+        deletedBranch.setValue(branch)
+        return .deleted
+      }
+    }
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped)
+    await store.receive(\.delegate.beginCreate)
+    // Delete targeted the real ref (observed), BEFORE beginCreate; the recreate
+    // spec.name is the same real-cased value (asserted on state above).
+    #expect(deletedBranch.value == "Feature-Login")
+  }
+
+  /// The Reuse attach spec also carries the REAL-cased ref, so `wt sw --path`
+  /// attaches the existing branch instead of dying on / creating a mis-cased
+  /// one. `spec.name` is built from `operativeBranchName` (asserted on state);
+  /// `effectiveResolution == .reuse` drives `reuseExistingBranch = true`.
+  @Test
+  func caseMismatchReuseAttachSpecCarriesRealCasedRef() async {
+    var state = initialState(
+      savedResolutionDefault: .reuse, localBranchNames: ["main", "Feature-Login"]
+    )
+    state.branchNameDraft = "feature-login"
+    state.selectedBaseRef = "origin/main"
+    state.branchCollisionKind = .dangling
+    state.danglingRealName = "Feature-Login"
+    state.selectedResolution = .reuse
+    // Reuse on a dangling ref → attach the EXISTING branch by its real casing.
+    #expect(state.effectiveResolution == .reuse)  // → spec.reuseExistingBranch = true
+    #expect(state.operativeBranchName == "Feature-Login")  // → spec.name
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped)
+    // beginCreate is emitted (reuse is not blocked); its spec.name is the
+    // real-cased ref built from operativeBranchName (asserted above).
+    await store.receive(\.delegate.beginCreate)
   }
 }
