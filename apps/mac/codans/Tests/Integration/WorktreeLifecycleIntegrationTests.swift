@@ -483,6 +483,25 @@ struct WorktreeLifecycleIntegrationTests {
     #expect(!names.contains("to-delete"))
   }
 
+  /// `localBranchNames` preserves the ref's ORIGINAL casing (it no longer
+  /// case-folds). This is what lets `CreateWorktreeFeature` recover the exact
+  /// existing ref (`danglingRealName`) so a Recreate/Reuse of a mixed-case
+  /// branch targets and reproduces the SAME-cased ref instead of a
+  /// differently-cased duplicate. Asserts the mixed-case name comes back
+  /// verbatim, not lowercased.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func localBranchNamesPreservesOriginalCasing() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    let client = GitWorktreeClient.makeLive()
+
+    try runGit(["branch", "Feature-Login"], cwd: repo)
+
+    let names = try await client.localBranchNames(repo)
+    #expect(names.contains("Feature-Login"))  // original casing preserved
+    #expect(!names.contains("feature-login"))  // NOT case-folded
+  }
+
   /// Deleting a branch that is currently checked out in a worktree is
   /// refused by git even with `-D`. The outcome is `.kept`, not a throw.
   @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))

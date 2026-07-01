@@ -635,10 +635,18 @@ nonisolated extension GitWorktreeClient {
           cwd: repoRoot
         )
         let stdout = try extractStdout(outcome, command: "git for-each-ref refs/heads")
+        // Return ORIGINAL casing (like the sibling `branchRefs` closure). The
+        // collision classifier lowercases for its case-INSENSITIVE match, but
+        // the Recreate/Reuse git ops must recover the EXISTING ref's real
+        // casing (`CreateWorktreeFeature.ingestLocalBranchNames` +
+        // `danglingRealName`) — a wrong-cased `git branch -D` misses the real
+        // ref on a case-sensitive FS (creating a duplicate) and files the
+        // discarded tip's reflog under the wrong name on a case-insensitive
+        // one. Case-folding here would silently defeat that fix.
         return Set(
           stdout
             .components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         )
       },
