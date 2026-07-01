@@ -529,6 +529,72 @@ struct CreateWorktreeFeatureTests {
     }
   }
 
+  /// VAL-CROSS-005 core: a DANGLING branch with Reuse selected
+  /// (effectiveResolution == .reuse) whose target worktree directory ALREADY
+  /// EXISTS on disk must show "folder already exists" and issue NO reuse — the
+  /// folder-exists guard PREEMPTS the create, so no `beginCreate` delegate
+  /// (and thus no `reuseExistingBranch` spec) is ever dispatched.
+  ///
+  /// Driven against a REAL temp `worktreesDirectory` because the guard uses
+  /// `FileManager.default.fileExists` on the computed target path; the create
+  /// action runs under EXHAUSTIVE checking so an accidental `beginCreate`
+  /// effect would fail the test (no matching `receive`).
+  @Test
+  func folderExistsPreemptsReuseForDanglingTarget() async throws {
+    // Real, unique temp dir standing in for the Project's worktrees directory.
+    let worktreesDir = FileManager.default.temporaryDirectory
+      .appending(component: "codans-create-wt-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(
+      at: worktreesDir, withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: worktreesDir) }
+
+    // "feature/existing" is dangling (a local ref with no live worktree).
+    // Pre-create its target subfolder so the folder-exists guard trips.
+    // The name maps to a nested path (`feature/existing`) via appending(path:),
+    // so create intermediate dirs to mirror what `wt sw` would produce.
+    let directoryName = GitWorktreeClient.sanitizeBranchName("feature/existing")
+    let targetDir = worktreesDir.appending(path: directoryName)
+    try FileManager.default.createDirectory(
+      at: targetDir, withIntermediateDirectories: true
+    )
+
+    // Build state directly (initialState hardcodes worktreesDirectory, which is
+    // a `let`). Reuse selected on a dangling branch → effectiveResolution .reuse.
+    var state = CreateWorktreeFeature.State(
+      projectID: ProjectID(),
+      repoRoot: URL(fileURLWithPath: "/tmp/repo"),
+      worktreesDirectory: worktreesDir,
+      currentPendingCountForProject: 0,
+      savedResolutionDefault: .reuse,
+      localBranchNamesLower: ["main", "feature/existing"]
+    )
+    state.liveWorktreeBranchesLower = ["main"]
+    state.branchNameDraft = "feature/existing"
+    state.selectedBaseRef = "origin/main"
+    state.branchCollisionKind = .dangling
+    state.selectedResolution = .reuse
+    state.validationError = nil   // reuse → rename gate inactive
+    state.renameGateActive = false
+    // Sanity: this is genuinely the reuse path (would set reuseExistingBranch).
+    #expect(state.effectiveResolution == .reuse)
+
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    // EXHAUSTIVE (default): if createButtonTapped dispatched .beginCreate, the
+    // store would demand a matching receive and fail — proving no reuse leaked.
+    await store.send(.createButtonTapped) {
+      // Only mutation is the folder-exists submitError; guard returned early.
+      $0.submitError = """
+        A folder named \"\(directoryName)\" already exists at the Project's \
+        worktrees directory. Choose a different branch name.
+        """
+    }
+    // No delegate effect emitted → no reuse dispatched into an existing dir.
+    #expect(store.state.validationError == nil)
+  }
+
   // MARK: - Rename path honors base ref + fetch (VAL-RENAME-003)
 
   /// A rename create (fresh, non-colliding) emits beginCreate, proving it
