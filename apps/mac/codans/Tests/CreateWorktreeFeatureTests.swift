@@ -94,6 +94,92 @@ struct CreateWorktreeFeatureTests {
     }
   }
 
+  // MARK: - branchCollisionKind classification
+
+  @Test
+  func branchCollisionKindNoneForCleanName() async {
+    let store = TestStore(initialState: initialState()) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("feature/brand-new")) {
+      $0.branchCollisionKind = .none
+      $0.validationError = nil
+      $0.reuseNotice = nil
+    }
+  }
+
+  @Test
+  func branchCollisionKindCheckedOutForLiveBranch() async {
+    let store = TestStore(initialState: initialState()) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // "main" is in liveWorktreeBranchesLower → checkedOut
+    await store.send(.branchDraftChanged("main")) {
+      $0.branchCollisionKind = .checkedOut
+    }
+  }
+
+  @Test
+  func branchCollisionKindDanglingForDanglingBranch() async {
+    let store = TestStore(initialState: initialState()) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // "feature/existing" is in localBranchNamesLower but not live → dangling
+    await store.send(.branchDraftChanged("feature/existing")) {
+      $0.branchCollisionKind = .dangling
+    }
+  }
+
+  @Test
+  func branchCollisionKindDoubleSeparatorNormalizesToDangling() async {
+    // "feature//existing" raw ≠ "feature/existing" in the set, but after
+    // sanitizeBranchName the doubled slash collapses → "feature/existing" which
+    // IS in localBranchNamesLower.  Old raw-compare would show .none; fixed
+    // code classifies .dangling while typing.
+    let store = TestStore(initialState: initialState()) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("feature//existing")) {
+      $0.branchCollisionKind = .dangling
+      $0.validationError = nil
+      $0.reuseNotice =
+        "Will reuse existing branch \"feature/existing\" — its commits are kept and the base ref is ignored."
+    }
+  }
+
+  @Test
+  func branchCollisionKindCaseFoldAndSeparatorNormalizesToCheckedOut() async {
+    // "MAIN" (uppercase) sanitizes to "MAIN", then lowercased → "main" which
+    // is in liveWorktreeBranchesLower.  Verifies case-fold path in the
+    // sanitized classification.
+    let store = TestStore(initialState: initialState()) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("MAIN")) {
+      $0.branchCollisionKind = .checkedOut
+    }
+  }
+
+  @Test
+  func branchCollisionKindRemoteOnlyIsNone() async {
+    // "origin/test" has no matching local branch in either set; classification
+    // keys on LOCAL sets only, so remote-only names are .none (fresh create).
+    let store = TestStore(initialState: initialState()) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("origin/test")) {
+      $0.branchCollisionKind = .none
+      $0.validationError = nil
+      $0.reuseNotice = nil
+    }
+  }
+
   @Test
   func cancelEmitsDismissDelegate() async {
     let store = TestStore(initialState: initialState()) {

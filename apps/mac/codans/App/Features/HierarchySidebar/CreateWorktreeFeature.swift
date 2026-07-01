@@ -2,6 +2,21 @@ import ComposableArchitecture
 import Foundation
 import CodansCore
 
+/// Three-way collision classification for a branch-name draft, keyed on
+/// the SANITIZED (directory-safe) lowercased form.  This is the single
+/// source of truth consumed by the resolution UI and by `createButtonTapped`.
+enum BranchCollisionKind: Equatable {
+  /// No local collision — fresh create. Remote-only names also land here
+  /// because classification keys on the LOCAL sets only.
+  case none
+  /// Branch exists as a local ref but no worktree currently checks it out.
+  /// Re-creating will reuse the branch (commits kept, base ref ignored).
+  case dangling
+  /// Branch is checked out by a live worktree.
+  /// Git refuses a second simultaneous checkout.
+  case checkedOut
+}
+
 /// Reducer backing the "+ Create Worktree" sheet. State tracks user
 /// input, three-way option loading (branch refs / local branches /
 /// default remote branch), live branch-name validation, and the
@@ -69,6 +84,10 @@ struct CreateWorktreeFeature {
     /// Non-error hint shown when the typed name matches a dangling local
     /// branch that will be reused (its commits kept, base ref ignored).
     var reuseNotice: String?
+    /// Collision kind for the current `branchNameDraft`, computed at
+    /// keystroke time from the SANITIZED lowercased name.  The single
+    /// source of truth consumed by the resolution UI and `createButtonTapped`.
+    var branchCollisionKind: BranchCollisionKind = .none
   }
 
   enum Action: Equatable {
@@ -157,29 +176,43 @@ struct CreateWorktreeFeature {
         // fetched. The `git check-ref-format` path is also exercised on
         // Create — no need to shell out on every keystroke.
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lower = trimmed.lowercased()
         if trimmed.isEmpty {
+          state.branchCollisionKind = .none
           state.validationError = nil
           state.reuseNotice = nil
         } else if trimmed.contains(where: \.isWhitespace) {
+          state.branchCollisionKind = .none
           state.validationError = "Branch names can't contain spaces."
           state.reuseNotice = nil
-        } else if state.liveWorktreeBranchesLower.contains(lower) {
-          // Checked out by a live worktree — git refuses a second
-          // checkout, and it isn't a dangling ref we can reuse.
-          state.validationError =
-            "Branch \"\(trimmed)\" is already checked out in another worktree."
-          state.reuseNotice = nil
-        } else if state.localBranchNamesLower.contains(lower) {
-          // Dangling branch: it exists but no worktree is on it (e.g. a
-          // prior remove couldn't drop the ref). Re-creating reuses it
-          // instead of failing — surface a hint, not an error.
-          state.validationError = nil
-          state.reuseNotice =
-            "Will reuse existing branch \"\(trimmed)\" — its commits are kept and the base ref is ignored."
         } else {
-          state.validationError = nil
-          state.reuseNotice = nil
+          // Classify on the SANITIZED, lowercased name — identical to the
+          // form that git-wt will actually create — so a name that only
+          // collides after sanitization (doubled separators, trailing dashes,
+          // etc.) is flagged WHILE TYPING, not just on Create.
+          let sanitized = GitWorktreeClient.sanitizeBranchName(trimmed)
+          let lower = sanitized.lowercased()
+          if state.liveWorktreeBranchesLower.contains(lower) {
+            // Checked out by a live worktree — git refuses a second
+            // checkout, and it isn't a dangling ref we can reuse.
+            state.branchCollisionKind = .checkedOut
+            state.validationError =
+              "Branch \"\(sanitized)\" is already checked out in another worktree."
+            state.reuseNotice = nil
+          } else if state.localBranchNamesLower.contains(lower) {
+            // Dangling branch: it exists but no worktree is on it (e.g. a
+            // prior remove couldn't drop the ref). Re-creating reuses it
+            // instead of failing — surface a hint, not an error.
+            state.branchCollisionKind = .dangling
+            state.validationError = nil
+            state.reuseNotice =
+              "Will reuse existing branch \"\(sanitized)\" — its commits are kept and the base ref is ignored."
+          } else {
+            // Remote-only names (e.g. origin/foo with no local foo) also
+            // land here: classification keys on LOCAL sets only.
+            state.branchCollisionKind = .none
+            state.validationError = nil
+            state.reuseNotice = nil
+          }
         }
         return .none
 
@@ -218,18 +251,15 @@ struct CreateWorktreeFeature {
           state.validationError = "Branch name produces an empty directory name."
           return .none
         }
-        // Re-decide reuse against the SANITIZED branch name (what git-wt
-        // actually creates), not the raw draft — sanitization can shift
-        // the name (trailing dashes, doubled slashes). A branch checked
-        // out by a live worktree is a hard conflict; a dangling branch
-        // (exists, no worktree) is reused via `--path`.
-        let branchLower = directoryName.lowercased()
-        if state.liveWorktreeBranchesLower.contains(branchLower) {
+        // Derive collision state from branchCollisionKind (set during
+        // branchDraftChanged on the same sanitized form) — single source
+        // of truth, no duplicate set-contains logic here.
+        if state.branchCollisionKind == .checkedOut {
           state.validationError =
             "Branch \"\(directoryName)\" is already checked out in another worktree."
           return .none
         }
-        let reuseExistingBranch = state.localBranchNamesLower.contains(branchLower)
+        let reuseExistingBranch = state.branchCollisionKind == .dangling
         // Branch names like `feature/abc` map to nested folders
         // (`feature/abc`); `appending(path:)` honours the embedded
         // separator, whereas `appending(component:)` would percent-encode
