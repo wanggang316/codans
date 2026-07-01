@@ -108,6 +108,7 @@ Rules not visible in code. Violating any of these will not fail tests immediatel
 - **Identifiers are UUIDs.** Every Project, Worktree, Tab, Pane, Tag has a stable UUID. Index-based addressing (`codans pane focus 1/2/3`) is convenience sugar resolved to a UUID before any state mutation. Internal code must use UUIDs.
 - **Agent Skill is consumed, never loaded.** The app must not parse, index, or invoke `SKILL.md`. The only skill-related runtime code is the `codans skill install` helper, which copies files to the agent's skill directory.
 - **`codans/Runtime (in-app module)` is TCA-free.** Runtime exposes `@Observable` classes and AsyncStream events. TCA bridging lives in `apps/mac` (the `*Client` types). This keeps Runtime independently testable and portable.
+- **Git counts that gate a destructive action fail closed.** A `GitWorktreeClient` primitive whose result decides whether data may be discarded (e.g. `branchUniqueCommitCount`, which gates the Recreate force-delete) MUST throw on any git error and MUST NOT coerce a failure to `0`. Callers treat a thrown/absent count as "unknown → require explicit confirmation", never as "0 → safe to discard". Collapsing an error into `0` would silently bypass the no-silent-data-loss guard, and a test that asserted the collapsed `0` would still pass — so this is enforced by convention + review, not the type system.
 
 ## Cross-Cutting Concerns
 
