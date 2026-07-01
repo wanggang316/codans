@@ -407,6 +407,119 @@ struct WorktreeLifecycleIntegrationTests {
     try await client.removeWorktree(repo, worktreePath)
   }
 
+  // MARK: - branchUniqueCommitCount
+
+  /// A branch fully merged into base reports zero unique commits.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func uniqueCommitCountMergedBranchIsZero() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    let client = GitWorktreeClient.makeLive()
+
+    // Create a branch from HEAD, commit on it, then merge it back into main.
+    try runGit(["checkout", "-b", "merged-branch"], cwd: repo)
+    try "extra".write(to: repo.appending(path: "extra.txt"), atomically: true, encoding: .utf8)
+    try runGit(["add", "extra.txt"], cwd: repo)
+    try runGit(["commit", "-q", "-m", "extra commit"], cwd: repo)
+    try runGit(["checkout", "main"], cwd: repo)
+    try runGit(["merge", "--no-ff", "-m", "merge merged-branch", "merged-branch"], cwd: repo)
+
+    // merged-branch has no commits that main doesn't already have.
+    let count = try await client.branchUniqueCommitCount(repo, "merged-branch", "main")
+    #expect(count == 0)
+  }
+
+  /// A branch that has commits the base lacks reports a positive count.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func uniqueCommitCountDivergedBranchIsPositive() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    let client = GitWorktreeClient.makeLive()
+
+    // Create a branch with two commits not on main.
+    try runGit(["checkout", "-b", "feature-branch"], cwd: repo)
+    try "file1".write(to: repo.appending(path: "file1.txt"), atomically: true, encoding: .utf8)
+    try runGit(["add", "file1.txt"], cwd: repo)
+    try runGit(["commit", "-q", "-m", "commit one"], cwd: repo)
+    try "file2".write(to: repo.appending(path: "file2.txt"), atomically: true, encoding: .utf8)
+    try runGit(["add", "file2.txt"], cwd: repo)
+    try runGit(["commit", "-q", "-m", "commit two"], cwd: repo)
+
+    let count = try await client.branchUniqueCommitCount(repo, "feature-branch", "main")
+    #expect(count == 2)
+  }
+
+  /// A nonexistent base ref MUST throw, never return 0. This is the critical
+  /// guard: the Recreate path must treat a computation failure as "unknown →
+  /// require confirm", not "safe to discard".
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func uniqueCommitCountBadBaseThrows() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    let client = GitWorktreeClient.makeLive()
+
+    await #expect(throws: (any Error).self) {
+      _ = try await client.branchUniqueCommitCount(repo, "main", "nonexistent-base-ref-xyz")
+    }
+  }
+
+  // MARK: - deleteBranchIfExists (force-delete / Recreate path)
+
+  /// Deleting an existing non-checked-out branch succeeds (`.deleted`).
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func deleteBranchIfExistsNonCheckedOutSucceeds() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    let client = GitWorktreeClient.makeLive()
+
+    // Create a branch (local, not checked out anywhere).
+    try runGit(["branch", "to-delete"], cwd: repo)
+
+    let outcome = await client.deleteBranchIfExists(repo, "to-delete")
+    #expect(outcome == .deleted)
+
+    // Confirm the branch is gone.
+    let names = try await client.localBranchNames(repo)
+    #expect(!names.contains("to-delete"))
+  }
+
+  /// Deleting a branch that is currently checked out in a worktree is
+  /// refused by git even with `-D`. The outcome is `.kept`, not a throw.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func deleteBranchIfExistsCheckedOutYieldsKept() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    let client = GitWorktreeClient.makeLive()
+
+    // Add a worktree on a new branch so that branch is checked out.
+    let baseDir = repo.appending(path: ".worktrees", directoryHint: .isDirectory)
+    try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
+    let spec = CreateWorktreeSpec(
+      repoRoot: repo,
+      baseDirectory: baseDir,
+      name: "checked-out-branch",
+      baseRef: "HEAD",
+      fetchOrigin: false,
+      copyIgnored: false,
+      copyUntracked: false
+    )
+    var createdPath: URL?
+    for try await event in client.createWorktreeStream(spec) {
+      if case .finished(let path) = event { createdPath = path }
+    }
+    let worktreePath = try #require(createdPath)
+    defer { try? fm.removeItem(at: worktreePath) }
+
+    // "checked-out-branch" is now checked out in the worktree; git -D refuses.
+    let outcome = await client.deleteBranchIfExists(repo, "checked-out-branch")
+    guard case .kept = outcome else {
+      #expect(Bool(false), "expected .kept, got \(outcome)")
+      return
+    }
+  }
+
+  // MARK: - Nested branch folders (HAN-57)
+
   /// HAN-57: branches with a `/` create nested directories so the
   /// folder layout mirrors the branch hierarchy (e.g. `feature/abc`
   /// becomes `<base>/feature/abc`, not `<base>/feature-abc`). Exercises

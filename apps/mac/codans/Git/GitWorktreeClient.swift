@@ -138,6 +138,18 @@ nonisolated struct GitWorktreeClient: Sendable {
   /// as `.kept` so the caller can surface why the branch lingered (and
   /// the next same-name create will reuse it via `reuseExistingBranch`).
   var deleteBranchIfExists: @Sendable (_ repoRoot: URL, _ branch: String) async -> BranchDeleteOutcome
+  /// Counts commits reachable from `branch` that are NOT reachable from
+  /// `base` — i.e. unique commits that would be lost if `branch` were
+  /// discarded. Runs `git rev-list --count <base>..<branch>`.
+  ///
+  /// Returns the count on success. ALWAYS throws on any git error (bad ref,
+  /// non-zero exit, decode failure) rather than returning 0 — callers MUST
+  /// be able to distinguish "0 unique commits (safe to discard)" from
+  /// "unknown (computation failed)". The Recreate guard treats a thrown
+  /// error as "unknown → require explicit confirmation", so collapsing an
+  /// error into 0 would silently bypass that guard.
+  var branchUniqueCommitCount: @Sendable (_ repoRoot: URL, _ branch: String, _ base: String) async throws -> Int
+
   /// Best-effort `git push <remote> --delete <branch>` — deletes the remote
   /// tracking branch when the user opted into "Delete remote branch with
   /// worktree". The remote is resolved from the branch's configured upstream
@@ -930,6 +942,33 @@ nonisolated extension GitWorktreeClient {
         return .kept(reason: message.isEmpty ? "git refused to delete the branch" : message)
       },
 
+      branchUniqueCommitCount: { repoRoot, branch, base in
+        // `git rev-list --count <base>..<branch>` prints a single integer
+        // line — the number of commits reachable from `branch` that are NOT
+        // reachable from `base`. A non-zero exit (bad ref, nonexistent
+        // branch/base, etc.) throws rather than returning 0 so the caller
+        // can distinguish "safe to discard" from "unknown". NEVER coerce an
+        // error to 0.
+        let command = "git rev-list --count \(base)..\(branch)"
+        let outcome = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: [
+            "-C", repoRoot.path(percentEncoded: false),
+            "rev-list", "--count", "\(base)..\(branch)",
+          ],
+          cwd: repoRoot
+        )
+        let stdout = try extractStdout(outcome, command: command)
+        let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let count = Int(trimmed) else {
+          throw GitWorktreeError.commandFailed(
+            command: command,
+            stderr: "could not parse rev-list output: \(trimmed.isEmpty ? "(empty)" : trimmed)"
+          )
+        }
+        return count
+      },
+
       deleteRemoteBranchIfExists: { repoRoot, branch in
         // Resolve the remote this branch tracks. Read it from the local
         // branch's upstream config while the branch still exists; fall back
@@ -1172,6 +1211,7 @@ extension GitWorktreeClient: DependencyKey {
     },
     removeWorktree: unimplemented("GitWorktreeClient.removeWorktree"),
     deleteBranchIfExists: { _, _ in .absent },
+    branchUniqueCommitCount: unimplemented("GitWorktreeClient.branchUniqueCommitCount", placeholder: 0),
     deleteRemoteBranchIfExists: { _, _ in },
     pruneWorktrees: unimplemented("GitWorktreeClient.pruneWorktrees", placeholder: 0),
     fetchRemote: unimplemented("GitWorktreeClient.fetchRemote"),
