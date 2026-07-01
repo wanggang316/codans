@@ -8,18 +8,21 @@ import CodansCore
 /// Synchronous-branch coverage for `CreateWorktreeFeature`. The async
 /// option-load and streaming-create paths are exercised end-to-end by
 /// the M13 integration test against a real temp repo; here we lock the
-/// live-validator branches and the cancel delegate because those are
-/// the ones a future refactor is most likely to silently break.
+/// live-validator branches, the cancel delegate, and the M1 inline
+/// resolution-clamp behavior because those are the ones a future refactor
+/// is most likely to silently break.
 @MainActor
 struct CreateWorktreeFeatureTests {
   private func initialState(
-    currentPendingCountForProject: Int = 0
+    currentPendingCountForProject: Int = 0,
+    savedResolutionDefault: BranchConflictResolution = .rename
   ) -> CreateWorktreeFeature.State {
     var state = CreateWorktreeFeature.State(
       projectID: ProjectID(),
       repoRoot: URL(fileURLWithPath: "/tmp/repo"),
       worktreesDirectory: URL(fileURLWithPath: "/tmp/repo/.worktrees"),
       currentPendingCountForProject: currentPendingCountForProject,
+      savedResolutionDefault: savedResolutionDefault,
       localBranchNamesLower: ["main", "feature/existing"]
     )
     // "main" is checked out by the main worktree (live conflict);
@@ -53,31 +56,39 @@ struct CreateWorktreeFeatureTests {
     }
   }
 
+  // Previously this test expected a hard validationError (dead-end).
+  // M1 replaces it with an inline "rename only" control — no validationError,
+  // selectedResolution forced to .rename, Create button enabled.
   @Test
-  func branchDraftCollidingWithLiveWorktreeIsRejected() async {
+  func branchDraftMatchingCheckedOutBranchSteersToRename() async {
     let store = TestStore(initialState: initialState()) {
       CreateWorktreeFeature()
     }
     store.exhaustivity = .off
     await store.send(.branchDraftChanged("main")) {
       $0.branchNameDraft = "main"
-      $0.validationError = "Branch \"main\" is already checked out in another worktree."
+      $0.branchCollisionKind = .checkedOut
+      $0.validationError = nil   // no dead-end hard error; inline control explains
       $0.reuseNotice = nil
+      $0.selectedResolution = .rename
     }
   }
 
+  // Previously expected a reuseNotice string. M1 replaces reuseNotice with
+  // the inline resolution picker seeded to savedResolutionDefault.
   @Test
-  func branchDraftMatchingDanglingBranchShowsReuseNotice() async {
+  func branchDraftMatchingDanglingBranchSetsCollisionKind() async {
     let store = TestStore(initialState: initialState()) {
       CreateWorktreeFeature()
     }
     store.exhaustivity = .off
-    // Exists as a ref, no live worktree → reuse instead of reject.
+    // Exists as a ref, no live worktree → dangling; picker seeded to .rename (default).
     await store.send(.branchDraftChanged("feature/existing")) {
       $0.branchNameDraft = "feature/existing"
+      $0.branchCollisionKind = .dangling
       $0.validationError = nil
-      $0.reuseNotice =
-        "Will reuse existing branch \"feature/existing\" — its commits are kept and the base ref is ignored."
+      $0.reuseNotice = nil
+      $0.selectedResolution = .rename  // savedResolutionDefault = .rename
     }
   }
 
@@ -146,8 +157,7 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("feature//existing")) {
       $0.branchCollisionKind = .dangling
       $0.validationError = nil
-      $0.reuseNotice =
-        "Will reuse existing branch \"feature/existing\" — its commits are kept and the base ref is ignored."
+      $0.reuseNotice = nil
     }
   }
 
@@ -179,6 +189,118 @@ struct CreateWorktreeFeatureTests {
       $0.reuseNotice = nil
     }
   }
+
+  // MARK: - M1 effective-action clamp (collision kind × saved default)
+
+  @Test
+  func effectiveResolutionCheckedOutAlwaysRenameRegardlessOfSavedDefault() {
+    // Even when the saved default is .reuse or .recreate, checkedOut forces .rename.
+    for savedDefault in [BranchConflictResolution.rename, .reuse, .recreate] {
+      var state = initialState(savedResolutionDefault: savedDefault)
+      state.branchCollisionKind = .checkedOut
+      state.selectedResolution = savedDefault
+      #expect(state.effectiveResolution == .rename)
+    }
+  }
+
+  @Test
+  func effectiveResolutionDanglingFollowsSelectedResolution() {
+    // For a dangling branch all three selections are forwarded as-is.
+    for resolution in BranchConflictResolution.allCases {
+      var state = initialState()
+      state.branchCollisionKind = .dangling
+      state.selectedResolution = resolution
+      #expect(state.effectiveResolution == resolution)
+    }
+  }
+
+  @Test
+  func effectiveResolutionNoneIsRename() {
+    // No collision → effectiveResolution is .rename (fresh create, resolution irrelevant).
+    var state = initialState()
+    state.branchCollisionKind = .none
+    state.selectedResolution = .reuse  // irrelevant for .none
+    #expect(state.effectiveResolution == .rename)
+  }
+
+  @Test
+  func savedDefaultClampsToRenameOnCheckedOutWhenBranchDraftChanged() async {
+    // A Reuse/Recreate saved default clamps to Rename when the typed name
+    // collides with a checked-out branch.
+    let store = TestStore(initialState: initialState(savedResolutionDefault: .reuse)) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("main")) {
+      $0.branchCollisionKind = .checkedOut
+      $0.selectedResolution = .rename   // clamped from .reuse
+      $0.validationError = nil
+    }
+  }
+
+  @Test
+  func savedDefaultClampsToRenameOnCheckedOutForRecreate() async {
+    let store = TestStore(initialState: initialState(savedResolutionDefault: .recreate)) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("main")) {
+      $0.branchCollisionKind = .checkedOut
+      $0.selectedResolution = .rename   // clamped from .recreate
+    }
+  }
+
+  @Test
+  func danglingSeededToSavedDefaultWhenDefaultIsReuse() async {
+    let store = TestStore(initialState: initialState(savedResolutionDefault: .reuse)) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("feature/existing")) {
+      $0.branchCollisionKind = .dangling
+      $0.selectedResolution = .reuse   // seeded from savedResolutionDefault
+    }
+  }
+
+  // MARK: - Inline override is per-creation only (no settings write)
+
+  @Test
+  func resolutionChangedUpdatesSelectedResolutionWithoutEffect() async {
+    // The inline picker sends .resolutionChanged — only selectedResolution
+    // changes; no side-effects are emitted (CreateWorktreeFeature has no
+    // SettingsWriter dependency, so settings-write is structurally impossible).
+    var state = initialState()
+    state.branchCollisionKind = .dangling
+    state.selectedResolution = .rename
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.resolutionChanged(.reuse)) {
+      $0.selectedResolution = .reuse
+    }
+    // No effects queued — TestStore would have timed out if any async effect ran.
+  }
+
+  @Test
+  func inlineOverrideResetBySavedDefaultOnNextBranchDraftChange() async {
+    // After the user overrides to .reuse via the picker, changing the branch
+    // name resets selectedResolution back to savedResolutionDefault (.rename).
+    var state = initialState(savedResolutionDefault: .rename)
+    state.branchCollisionKind = .dangling
+    state.selectedResolution = .reuse   // simulate inline override
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // Type a clean name → .none; selectedResolution reset to .rename.
+    await store.send(.branchDraftChanged("feature/brand-new")) {
+      $0.branchCollisionKind = .none
+      $0.selectedResolution = .rename   // reset to savedResolutionDefault
+    }
+  }
+
+  // MARK: - Other delegate / submit paths
 
   @Test
   func cancelEmitsDismissDelegate() async {

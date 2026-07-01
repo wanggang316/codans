@@ -34,11 +34,38 @@ struct CreateWorktreeSheet: View {
           Text(error)
             .font(.caption)
             .foregroundStyle(.red)
-        } else if let notice = store.reuseNotice {
-          Text(notice)
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
+      }
+
+      // Inline resolution control — visible only when a branch collision exists.
+      switch store.branchCollisionKind {
+      case .checkedOut:
+        // Only Rename is viable; offer no picker — just explain why.
+        Text(
+          "\"\(store.sanitizedBranchDraft)\" is checked out in another worktree — reuse/recreate isn't possible; rename it."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      case .dangling:
+        // All three resolutions are valid for a dangling branch.
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Conflict resolution").font(.callout)
+          Picker(
+            "",
+            selection: Binding(
+              get: { store.selectedResolution },
+              set: { store.send(.resolutionChanged($0)) }
+            )
+          ) {
+            Text("Rename (add numeric suffix)").tag(BranchConflictResolution.rename)
+            Text("Reuse existing commits").tag(BranchConflictResolution.reuse)
+            Text("Recreate from base ref").tag(BranchConflictResolution.recreate)
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        }
+      case .none:
+        EmptyView()
       }
 
       VStack(alignment: .leading, spacing: 4) {

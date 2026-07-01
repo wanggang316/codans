@@ -57,6 +57,14 @@ struct CreateWorktreeFeature {
     /// worktrees instead of being silently ignored. Implicit `nil` default keeps
     /// the synthesized memberwise initializer's parameter optional.
     var baseRefOverride: String?
+    /// Saved default from `WorktreeSettings.branchConflictResolution`. Seeded once
+    /// at sheet-open time by the parent; never mutated by the inline picker
+    /// (per-creation overrides live in `selectedResolution` only).
+    var savedResolutionDefault: BranchConflictResolution = .rename
+    /// In-flight, per-creation resolution choice. Reset to `savedResolutionDefault`
+    /// clamped to what is viable whenever `branchDraftChanged` reclassifies the
+    /// collision kind. The inline picker binds here; mutations do NOT write settings.json.
+    var selectedResolution: BranchConflictResolution = .rename
 
     // Options loaded asynchronously on presentation.
     var baseRefOptions: [String] = []
@@ -88,6 +96,31 @@ struct CreateWorktreeFeature {
     /// keystroke time from the SANITIZED lowercased name.  The single
     /// source of truth consumed by the resolution UI and `createButtonTapped`.
     var branchCollisionKind: BranchCollisionKind = .none
+
+    // MARK: - Derived
+
+    /// `selectedResolution` clamped to what is viable for `branchCollisionKind`:
+    /// - `.none`      → `.rename` (fresh create; resolution is irrelevant).
+    /// - `.dangling`  → `selectedResolution` unchanged (all three are valid).
+    /// - `.checkedOut`→ forced `.rename` (git forbids a second checkout of the
+    ///   same branch and refuses `branch -D` on a checked-out branch, so neither
+    ///   Reuse nor Recreate can be executed).
+    var effectiveResolution: BranchConflictResolution {
+      switch branchCollisionKind {
+      case .none: return .rename
+      case .dangling: return selectedResolution
+      case .checkedOut: return .rename
+      }
+    }
+
+    /// Sanitized form of `branchNameDraft` (trim + sanitize), matching the
+    /// directory name that `wt sw` will produce. Used by the checked-out
+    /// explanatory message in the inline resolution control.
+    var sanitizedBranchDraft: String {
+      GitWorktreeClient.sanitizeBranchName(
+        branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+      )
+    }
   }
 
   enum Action: Equatable {
@@ -104,6 +137,9 @@ struct CreateWorktreeFeature {
     case fetchOriginToggled(Bool)
     case copyIgnoredToggled(Bool)
     case copyUntrackedToggled(Bool)
+    /// Inline picker changed the per-creation resolution. Does NOT write settings.json;
+    /// the saved default is unaffected. The next sheet open re-seeds from the saved default.
+    case resolutionChanged(BranchConflictResolution)
 
     case createButtonTapped
 
@@ -180,10 +216,12 @@ struct CreateWorktreeFeature {
           state.branchCollisionKind = .none
           state.validationError = nil
           state.reuseNotice = nil
+          state.selectedResolution = state.savedResolutionDefault
         } else if trimmed.contains(where: \.isWhitespace) {
           state.branchCollisionKind = .none
           state.validationError = "Branch names can't contain spaces."
           state.reuseNotice = nil
+          state.selectedResolution = state.savedResolutionDefault
         } else {
           // Classify on the SANITIZED, lowercased name — identical to the
           // form that git-wt will actually create — so a name that only
@@ -192,26 +230,28 @@ struct CreateWorktreeFeature {
           let sanitized = GitWorktreeClient.sanitizeBranchName(trimmed)
           let lower = sanitized.lowercased()
           if state.liveWorktreeBranchesLower.contains(lower) {
-            // Checked out by a live worktree — git refuses a second
-            // checkout, and it isn't a dangling ref we can reuse.
+            // Checked out by a live worktree — git refuses a second checkout
+            // and forbids `branch -D` on a checked-out branch. Neither Reuse
+            // nor Recreate is viable; force Rename and let the inline control
+            // explain rather than dead-ending the form with a hard error.
             state.branchCollisionKind = .checkedOut
-            state.validationError =
-              "Branch \"\(sanitized)\" is already checked out in another worktree."
+            state.validationError = nil
             state.reuseNotice = nil
+            state.selectedResolution = .rename
           } else if state.localBranchNamesLower.contains(lower) {
-            // Dangling branch: it exists but no worktree is on it (e.g. a
-            // prior remove couldn't drop the ref). Re-creating reuses it
-            // instead of failing — surface a hint, not an error.
+            // Dangling branch: exists as a local ref but no worktree checks it
+            // out. All three resolutions are valid — seed to the saved default.
             state.branchCollisionKind = .dangling
             state.validationError = nil
-            state.reuseNotice =
-              "Will reuse existing branch \"\(sanitized)\" — its commits are kept and the base ref is ignored."
+            state.reuseNotice = nil
+            state.selectedResolution = state.savedResolutionDefault
           } else {
             // Remote-only names (e.g. origin/foo with no local foo) also
             // land here: classification keys on LOCAL sets only.
             state.branchCollisionKind = .none
             state.validationError = nil
             state.reuseNotice = nil
+            state.selectedResolution = state.savedResolutionDefault
           }
         }
         return .none
@@ -236,6 +276,11 @@ struct CreateWorktreeFeature {
         state.copyUntracked = value
         return .none
 
+      case .resolutionChanged(let resolution):
+        // Per-creation inline override only — no settings write.
+        state.selectedResolution = resolution
+        return .none
+
       case .createButtonTapped:
         let trimmed = state.branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, state.validationError == nil else {
@@ -251,15 +296,13 @@ struct CreateWorktreeFeature {
           state.validationError = "Branch name produces an empty directory name."
           return .none
         }
-        // Derive collision state from branchCollisionKind (set during
-        // branchDraftChanged on the same sanitized form) — single source
-        // of truth, no duplicate set-contains logic here.
-        if state.branchCollisionKind == .checkedOut {
-          state.validationError =
-            "Branch \"\(directoryName)\" is already checked out in another worktree."
-          return .none
-        }
-        let reuseExistingBranch = state.branchCollisionKind == .dangling
+        // Drive the spec flag from the effective resolution (selectedResolution
+        // clamped to viable). checkedOut is forced to .rename by effectiveResolution,
+        // so the block that previously hard-errored on checkedOut is gone — the inline
+        // control already steered the user to Rename. Rename/Recreate execution is a
+        // later milestone; for now they proceed with reuseExistingBranch = false and
+        // git surfaces the result through the pending row.
+        let reuseExistingBranch = state.effectiveResolution == .reuse
         // Branch names like `feature/abc` map to nested folders
         // (`feature/abc`); `appending(path:)` honours the embedded
         // separator, whereas `appending(component:)` would percent-encode
