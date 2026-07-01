@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// SwiftUI sheet for `CreateWorktreeFeature`. Minimal form: branch
 /// name + live validator, base-ref dropdown, three toggles, optional
@@ -63,6 +63,29 @@ struct CreateWorktreeSheet: View {
           }
           .labelsHidden()
           .pickerStyle(.menu)
+
+          // Destructive-Recreate guard: a RED warning naming the commits that
+          // will be permanently deleted, plus a DISCRETE confirm Toggle. Shown
+          // only when a Recreate would (or might) discard commits — a proven
+          // 0-count Recreate is silent (no warning, no toggle). `recreateWarning`
+          // is nil while the count is still computing, so nothing flashes.
+          if let warning = store.recreateWarning {
+            Text(warning)
+              .font(.caption)
+              .foregroundStyle(.red)
+              .fixedSize(horizontal: false, vertical: true)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          if store.recreateNeedsConfirm {
+            Toggle(
+              "I understand these commits will be permanently deleted",
+              isOn: Binding(
+                get: { store.recreateConfirmed },
+                set: { store.send(.recreateConfirmedToggled($0)) }
+              )
+            )
+            .font(.caption)
+          }
         }
       case .none:
         EmptyView()
@@ -136,6 +159,9 @@ struct CreateWorktreeSheet: View {
             || store.branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || store.selectedBaseRef == nil
             || store.currentPendingCountForProject >= 8
+            // Destructive Recreate that would discard commits (or whose count
+            // is unknown / still computing) stays disabled until confirmed.
+            || store.recreateBlocksCreate
         )
       }
     }

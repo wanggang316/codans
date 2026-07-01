@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// Three-way collision classification for a branch-name draft, keyed on
 /// the SANITIZED (directory-safe) lowercased form.  This is the single
@@ -15,6 +15,16 @@ enum BranchCollisionKind: Equatable {
   /// Branch is checked out by a live worktree.
   /// Git refuses a second simultaneous checkout.
   case checkedOut
+}
+
+/// Identifies the (branch, base) pair a recreate unique-commit count was
+/// requested for. Carried through the async effect so a result that lands
+/// after the user has already retyped the branch or repicked the base is
+/// recognised as STALE and dropped, rather than being applied to the new
+/// selection (guard (a): a stale count must never carry across an edit).
+struct RecreateGuardToken: Equatable, Sendable {
+  let branch: String
+  let base: String
 }
 
 /// Reducer backing the "+ Create Worktree" sheet. State tracks user
@@ -100,6 +110,32 @@ struct CreateWorktreeFeature {
     /// folder-exists, "Pick a base ref") is never clobbered by the gate.
     var renameGateActive: Bool = false
 
+    // MARK: - Recreate guard (M2)
+
+    /// Count of commits reachable from the dangling branch but NOT from the
+    /// selected base — the commits a Recreate would permanently discard
+    /// (`git rev-list --count <base>..<branch>`). Three-valued semantics:
+    /// - `nil` while the count is being (re)computed OR after the compute
+    ///   THREW (bad base / git error). `nil` is the FAIL-SAFE state: it is
+    ///   NEVER treated as "0 unique commits" — the recreate stays gated
+    ///   behind an explicit confirm. Coercing a throw to 0 would silently
+    ///   bypass the guard, so we deliberately keep it `nil`.
+    /// - `0` → the branch is fully merged into base; discarding it loses
+    ///   nothing, so Recreate proceeds silently (no confirm control).
+    /// - `> 0` → discarding drops N unique commits; a red warning + a
+    ///   discrete confirm are required before Create is enabled.
+    var recreateUniqueCount: Int?
+    /// Set to `true` only after the compute THREW, so the UI can distinguish
+    /// "still computing" (`recreateUniqueCount == nil`, `recreateCountFailed
+    /// == false`) from "compute failed → treat as dangerous" (`nil` + `true`)
+    /// and show a fail-safe warning naming the unknown-count risk.
+    var recreateCountFailed: Bool = false
+    /// Per-attempt acknowledgment for a Recreate that would discard commits
+    /// (or whose count is unknown). Bound by a discrete Toggle in the sheet.
+    /// Reset to `false` on ANY branch/base edit so a stale confirm can never
+    /// carry onto a different branch or base (guard (a)).
+    var recreateConfirmed: Bool = false
+
     // MARK: - Derived
 
     /// `selectedResolution` clamped to what is viable for `branchCollisionKind`:
@@ -124,6 +160,71 @@ struct CreateWorktreeFeature {
         branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
       )
     }
+
+    /// True when the current form is a destructive Recreate of a dangling
+    /// branch — the only context in which the unique-commit guard applies.
+    /// `.none` (fresh create) and `.checkedOut` (forced to `.rename`) never
+    /// reach here, so the guard is inert for them.
+    var isRecreateContext: Bool {
+      branchCollisionKind == .dangling && effectiveResolution == .recreate
+    }
+
+    /// True when a Recreate must be explicitly confirmed before Create is
+    /// enabled — i.e. it would (or MIGHT) discard commits. This is the
+    /// fail-safe gate: it is satisfied ONLY by a proven `0` count. A pending
+    /// (`nil`, still computing), a FAILED (`nil`, threw), or a `> 0` count all
+    /// require confirmation. Because `nil` is never coerced to `0`, an unknown
+    /// count can never silently pass (guard (c)).
+    var recreateNeedsConfirm: Bool {
+      isRecreateContext && recreateUniqueCount != 0
+    }
+
+    /// Red warning copy for the recreate guard, or `nil` when no warning is
+    /// shown (not a recreate context, or a proven-safe 0-count). Names the
+    /// N commits that will be permanently deleted for the `> 0` case, and
+    /// surfaces the fail-safe "couldn't determine" message when the count
+    /// compute threw.
+    var recreateWarning: String? {
+      guard isRecreateContext else { return nil }
+      let name = sanitizedBranchDraft
+      if recreateCountFailed {
+        return
+          "Couldn't determine how many commits recreating \"\(name)\" would delete. "
+          + "It will be force-deleted and recreated — confirm you want to discard it."
+      }
+      switch recreateUniqueCount {
+      case .some(0), .none:
+        // 0 → silent (no warning). nil while still computing → no warning yet;
+        // the pending state simply keeps Create disabled via recreateNeedsConfirm.
+        return nil
+      case .some(let count):
+        let plural = count == 1 ? "commit" : "commits"
+        return
+          "Recreating \"\(name)\" will permanently delete \(count) \(plural) "
+          + "that exist only on this branch."
+      }
+    }
+
+    /// Whether the Create button should be disabled for the recreate guard.
+    /// Mirrors `recreateNeedsConfirm && !recreateConfirmed`; the reducer's
+    /// submit path enforces the same predicate so a directly-dispatched
+    /// `createButtonTapped` cannot bypass the disabled button.
+    var recreateBlocksCreate: Bool {
+      recreateNeedsConfirm && !recreateConfirmed
+    }
+
+    /// The (branch, base) token to compute the recreate unique-commit count
+    /// for, or `nil` when the current form is not a recreate of a dangling
+    /// branch with a selected base. Used both to launch the async count and
+    /// to validate that a returning result still matches the live selection.
+    var recreateGuardToken: RecreateGuardToken? {
+      guard isRecreateContext else { return nil }
+      let branch = sanitizedBranchDraft
+      guard !branch.isEmpty, let base = selectedBaseRef, !base.isEmpty else {
+        return nil
+      }
+      return RecreateGuardToken(branch: branch, base: base)
+    }
   }
 
   enum Action: Equatable {
@@ -143,8 +244,23 @@ struct CreateWorktreeFeature {
     /// Inline picker changed the per-creation resolution. Does NOT write settings.json;
     /// the saved default is unaffected. The next sheet open re-seeds from the saved default.
     case resolutionChanged(BranchConflictResolution)
+    /// Discrete confirm control for a destructive Recreate (guard). Bound by
+    /// the sheet's Toggle; reset to `false` on any branch/base edit.
+    case recreateConfirmedToggled(Bool)
+    /// `branchUniqueCommitCount` resolved for the current recreate context.
+    /// The `token` pins the (branch, base) the count was requested for so a
+    /// stale in-flight result from a prior branch/base can be dropped instead
+    /// of being applied to the current selection.
+    case recreateCountLoaded(count: Int, token: RecreateGuardToken)
+    /// `branchUniqueCommitCount` THREW for the current recreate context — the
+    /// count is unknown. Handled fail-safe: never coerced to 0; forces the
+    /// confirm-required path via `recreateCountFailed`.
+    case recreateCountFailed(token: RecreateGuardToken)
 
     case createButtonTapped
+    /// The submit-time `deleteBranchIfExists` refused (`.kept`) or otherwise
+    /// could not delete the branch — abort with no `beginCreate` (guard (e)).
+    case recreateDeleteFailed(String)
 
     case cancelButtonTapped
     case delegate(Delegate)
@@ -190,6 +306,51 @@ struct CreateWorktreeFeature {
       // message some other validation path currently owns.
       state.validationError = nil
       state.renameGateActive = false
+    }
+  }
+
+  // MARK: - Recreate guard helper
+
+  /// Re-evaluates the destructive-Recreate guard after ANY change that can
+  /// alter the (branch, base, resolution) triple: `branchDraftChanged`,
+  /// `baseRefSelected`, and `resolutionChanged`. Two jobs:
+  ///
+  /// 1. FAIL-SAFE RESET — always clears the prior count, the failed flag, and
+  ///    the per-attempt confirm. Resetting `recreateConfirmed` here is the
+  ///    load-bearing part of guard (a): a stale confirm from a previous branch
+  ///    or base can NEVER survive an edit. Resetting to `nil` (not `0`) keeps
+  ///    Create disabled through the recompute window (guard (c)).
+  /// 2. RECOMPUTE — when the new form is a recreate of a dangling branch with
+  ///    a selected base, returns the async effect that runs
+  ///    `branchUniqueCommitCount`. Otherwise returns `.none`.
+  ///
+  /// The returned effect is tagged with `RecreateGuardToken` so a result that
+  /// lands after another edit is dropped as stale by the reducer.
+  private func refreshRecreateGuard(to state: inout State) -> Effect<Action> {
+    // Always start from a clean, gated slate.
+    state.recreateUniqueCount = nil
+    state.recreateCountFailed = false
+    state.recreateConfirmed = false
+
+    guard let token = state.recreateGuardToken else {
+      // Not a recreate-of-dangling context (or no base yet) → nothing to
+      // compute; the reset above already cleared any prior guard state.
+      return .none
+    }
+
+    let repoRoot = state.repoRoot
+    let client = gitWorktreeClient
+    return .run { send in
+      do {
+        let count = try await client.branchUniqueCommitCount(
+          repoRoot, token.branch, token.base
+        )
+        await send(.recreateCountLoaded(count: count, token: token))
+      } catch {
+        // NEVER coerce a throw to 0 — surface the failure so the reducer
+        // forces the confirm-required path (guard (c)).
+        await send(.recreateCountFailed(token: token))
+      }
     }
   }
 
@@ -294,7 +455,10 @@ struct CreateWorktreeFeature {
           // now-current (branchCollisionKind, effectiveResolution) pair.
           Self.applyRenameGate(to: &state)
         }
-        return .none
+        // Recreate guard (a): every draft edit resets the per-attempt confirm
+        // and recomputes the unique-commit count for the new (branch, base).
+        // A stale confirm from a previous name can never carry over.
+        return refreshRecreateGuard(to: &state)
 
       case .validated(let error):
         state.validationError = error
@@ -302,7 +466,10 @@ struct CreateWorktreeFeature {
 
       case .baseRefSelected(let ref):
         state.selectedBaseRef = ref
-        return .none
+        // Recreate guards (a)+(b): a base change resets the confirm and
+        // re-evaluates the count, so silent(0) ⇄ warn(>0) flips both ways
+        // and a confirm never survives a base swap.
+        return refreshRecreateGuard(to: &state)
 
       case .fetchOriginToggled(let value):
         state.fetchOrigin = value
@@ -322,6 +489,33 @@ struct CreateWorktreeFeature {
         // Reactive rename gate: switching to/from Rename while a collision
         // exists toggles the Create block.
         Self.applyRenameGate(to: &state)
+        // Recreate guard: entering `.recreate` on a dangling branch kicks off
+        // the unique-commit count; leaving it clears the guard. Also resets
+        // the per-attempt confirm so toggling resolutions can't reuse a stale
+        // acknowledgment.
+        return refreshRecreateGuard(to: &state)
+
+      case .recreateConfirmedToggled(let value):
+        state.recreateConfirmed = value
+        return .none
+
+      case .recreateCountLoaded(let count, let token):
+        // Drop a stale result: if the user retyped the branch or repicked the
+        // base while this count was in flight, the live token no longer
+        // matches and applying `count` would poison the guard for the NEW
+        // selection. Ignoring it leaves the guard `nil` (still confirm-gated)
+        // until the recompute for the current token lands.
+        guard state.recreateGuardToken == token else { return .none }
+        state.recreateUniqueCount = count
+        state.recreateCountFailed = false
+        return .none
+
+      case .recreateCountFailed(let token):
+        guard state.recreateGuardToken == token else { return .none }
+        // Fail-safe: keep the count unknown (`nil`, never 0) and flag the
+        // failure so the guard forces the confirm-required path (guard (c)).
+        state.recreateUniqueCount = nil
+        state.recreateCountFailed = true
         return .none
 
       case .createButtonTapped:
@@ -366,6 +560,18 @@ struct CreateWorktreeFeature {
           return .none
         }
 
+        // Recreate confirm re-guard (guard (d)): a destructive Recreate that
+        // still needs confirmation must NOT proceed when dispatched directly
+        // (the button is disabled in the UI, but the reducer is the source of
+        // truth). No delete, no beginCreate — a strict no-op beyond surfacing
+        // the reason. `recreateBlocksCreate` is false for a proven 0-count
+        // (silent) and for a checked-in confirm, so both proceed below.
+        if state.recreateBlocksCreate {
+          state.submitError =
+            "Confirm that recreating this branch will discard its commits before continuing."
+          return .none
+        }
+
         state.submitError = nil
 
         let spec = CreateWorktreeSpec(
@@ -387,7 +593,42 @@ struct CreateWorktreeFeature {
           lastProgressLine: nil,
           startedAt: Date()
         )
-        return .send(.delegate(.beginCreate(pending)))
+
+        // Non-recreate paths (fresh create, rename, reuse) hand straight to
+        // the parent's pending lifecycle. Only the destructive Recreate path
+        // must delete the dangling branch FIRST, sequenced before beginCreate.
+        guard state.effectiveResolution == .recreate else {
+          return .send(.delegate(.beginCreate(pending)))
+        }
+
+        // Recreate execution: force-delete the same-name (dangling) branch,
+        // THEN emit a FRESH create (`reuseExistingBranch` is already false, so
+        // the spec carries `-b` from the selected base). The delete is the
+        // submit-time re-guard for guard (e): if the branch became checked out
+        // since selection, `deleteBranchIfExists` returns `.kept` and we abort
+        // with the reason surfaced and NO beginCreate — nothing is created and
+        // the branch is left intact. `git branch -D` keeps the discarded tip
+        // reflog-recoverable, so no extra recovery code is needed.
+        let repoRoot = state.repoRoot
+        let branch = directoryName
+        let client = gitWorktreeClient
+        return .run { send in
+          let outcome = await client.deleteBranchIfExists(repoRoot, branch)
+          switch outcome {
+          case .deleted, .absent:
+            await send(.delegate(.beginCreate(pending)))
+          case .kept(let reason):
+            await send(.recreateDeleteFailed(reason))
+          }
+        }
+
+      case .recreateDeleteFailed(let reason):
+        // The branch could not be deleted (checked out since selection, or a
+        // git refusal). Surface why and emit NO beginCreate — no half state:
+        // the branch, its commits, and any directory are untouched.
+        state.submitError =
+          "Couldn't recreate the branch — it wasn't deleted, so nothing was created. \(reason)"
+        return .none
 
       case .cancelButtonTapped:
         return .send(.delegate(.dismissed))

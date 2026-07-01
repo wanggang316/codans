@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -101,7 +101,7 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("feature/existing")) {
       $0.branchNameDraft = "feature/existing"
       $0.branchCollisionKind = .dangling
-      $0.validationError = nil   // effectiveResolution == .reuse → no gate
+      $0.validationError = nil  // effectiveResolution == .reuse → no gate
       $0.selectedResolution = .reuse
     }
   }
@@ -246,7 +246,7 @@ struct CreateWorktreeFeatureTests {
     store.exhaustivity = .off
     await store.send(.branchDraftChanged("main")) {
       $0.branchCollisionKind = .checkedOut
-      $0.selectedResolution = .rename   // clamped from .reuse
+      $0.selectedResolution = .rename  // clamped from .reuse
       // Rename gate fires regardless of saved default.
       $0.validationError =
         "Branch \"main\" already exists — choose a different name."
@@ -261,7 +261,7 @@ struct CreateWorktreeFeatureTests {
     store.exhaustivity = .off
     await store.send(.branchDraftChanged("main")) {
       $0.branchCollisionKind = .checkedOut
-      $0.selectedResolution = .rename   // clamped from .recreate
+      $0.selectedResolution = .rename  // clamped from .recreate
     }
   }
 
@@ -273,7 +273,7 @@ struct CreateWorktreeFeatureTests {
     store.exhaustivity = .off
     await store.send(.branchDraftChanged("feature/existing")) {
       $0.branchCollisionKind = .dangling
-      $0.selectedResolution = .reuse   // seeded from savedResolutionDefault
+      $0.selectedResolution = .reuse  // seeded from savedResolutionDefault
     }
   }
 
@@ -303,7 +303,7 @@ struct CreateWorktreeFeatureTests {
     // name resets selectedResolution back to savedResolutionDefault (.rename).
     var state = initialState(savedResolutionDefault: .rename)
     state.branchCollisionKind = .dangling
-    state.selectedResolution = .reuse   // simulate inline override
+    state.selectedResolution = .reuse  // simulate inline override
     let store = TestStore(initialState: state) {
       CreateWorktreeFeature()
     }
@@ -311,7 +311,7 @@ struct CreateWorktreeFeatureTests {
     // Type a clean name → .none; selectedResolution reset to .rename.
     await store.send(.branchDraftChanged("feature/brand-new")) {
       $0.branchCollisionKind = .none
-      $0.selectedResolution = .rename   // reset to savedResolutionDefault
+      $0.selectedResolution = .rename  // reset to savedResolutionDefault
     }
   }
 
@@ -336,7 +336,7 @@ struct CreateWorktreeFeatureTests {
     // User switches inline picker to Reuse → gate clears.
     await store.send(.resolutionChanged(.reuse)) {
       $0.selectedResolution = .reuse
-      $0.validationError = nil   // gate cleared; Create is now enabled
+      $0.validationError = nil  // gate cleared; Create is now enabled
       $0.renameGateActive = false
     }
   }
@@ -383,9 +383,9 @@ struct CreateWorktreeFeatureTests {
     store.exhaustivity = .off
     // User types a fresh, non-colliding name.
     await store.send(.branchDraftChanged("feature/new-branch")) {
-      $0.branchNameDraft = "feature/new-branch"   // preserved as typed
+      $0.branchNameDraft = "feature/new-branch"  // preserved as typed
       $0.branchCollisionKind = .none
-      $0.validationError = nil   // gate cleared
+      $0.validationError = nil  // gate cleared
       $0.renameGateActive = false
     }
   }
@@ -493,7 +493,7 @@ struct CreateWorktreeFeatureTests {
     // .none collision → effectiveResolution == .rename regardless of selectedResolution.
     var state = initialState()
     state.branchCollisionKind = .none
-    state.selectedResolution = .reuse   // irrelevant when .none
+    state.selectedResolution = .reuse  // irrelevant when .none
     // effectiveResolution(.none) == .rename → reuseExistingBranch = false in spec.
     #expect(state.effectiveResolution == .rename)
     #expect(state.effectiveResolution != .reuse)
@@ -574,7 +574,7 @@ struct CreateWorktreeFeatureTests {
     state.selectedBaseRef = "origin/main"
     state.branchCollisionKind = .dangling
     state.selectedResolution = .reuse
-    state.validationError = nil   // reuse → rename gate inactive
+    state.validationError = nil  // reuse → rename gate inactive
     state.renameGateActive = false
     // Sanity: this is genuinely the reuse path (would set reuseExistingBranch).
     #expect(state.effectiveResolution == .reuse)
@@ -607,7 +607,7 @@ struct CreateWorktreeFeatureTests {
     state.branchNameDraft = "feature/renamed"
     state.selectedBaseRef = "origin/develop"
     state.fetchOrigin = true
-    state.branchCollisionKind = .none   // non-colliding → fresh create; no gate
+    state.branchCollisionKind = .none  // non-colliding → fresh create; no gate
     state.validationError = nil
     let store = TestStore(initialState: state) {
       CreateWorktreeFeature()
@@ -675,5 +675,362 @@ struct CreateWorktreeFeatureTests {
     await store.send(.createButtonTapped) {
       $0.submitError = CreateWorktreeFeature.capMessage
     }
+  }
+
+  // MARK: - M2 Recreate guard (VAL-RECREATE-001..011)
+
+  /// Builds a state already sitting on a dangling collision with Recreate
+  /// selected and a base picked — the entry point for the unique-commit guard.
+  private func recreateState(
+    branch: String = "feature/existing",
+    base: String = "origin/main"
+  ) -> CreateWorktreeFeature.State {
+    var state = initialState(savedResolutionDefault: .recreate)
+    state.branchNameDraft = branch
+    state.selectedBaseRef = base
+    state.branchCollisionKind = .dangling
+    state.selectedResolution = .recreate
+    return state
+  }
+
+  /// 0 unique commits → SILENT: Create enabled (recreateBlocksCreate == false),
+  /// no confirm control (recreateNeedsConfirm == false), no warning.
+  @Test
+  func recreateZeroUniqueCountIsSilentAndEnablesCreate() async {
+    let store = TestStore(initialState: recreateState()) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, _, _ in 0 }
+    }
+    store.exhaustivity = .off
+    // Re-enter the recreate context to launch the count effect.
+    await store.send(.resolutionChanged(.recreate))
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 0
+      $0.recreateCountFailed = false
+    }
+    #expect(store.state.recreateNeedsConfirm == false)
+    #expect(store.state.recreateBlocksCreate == false)
+    #expect(store.state.recreateWarning == nil)
+  }
+
+  /// >0 unique commits → WARN + CONFIRM: warning NAMES N, Create disabled until
+  /// the discrete confirm toggles true.
+  @Test
+  func recreatePositiveUniqueCountWarnsAndBlocksUntilConfirmed() async {
+    let store = TestStore(initialState: recreateState()) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, _, _ in 3 }
+    }
+    store.exhaustivity = .off
+    await store.send(.resolutionChanged(.recreate))
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 3
+    }
+    // Warning names the 3 commits; Create is blocked pre-confirm.
+    #expect(store.state.recreateNeedsConfirm == true)
+    #expect(store.state.recreateBlocksCreate == true)
+    #expect(store.state.recreateWarning?.contains("3 commits") == true)
+    // Discrete confirm unblocks Create.
+    await store.send(.recreateConfirmedToggled(true)) {
+      $0.recreateConfirmed = true
+    }
+    #expect(store.state.recreateBlocksCreate == false)
+  }
+
+  /// Guard (a): a `branchDraftChanged` after a confirm RESETS recreateConfirmed
+  /// and re-disables Create — a stale confirm can never carry to a new branch.
+  @Test
+  func recreateConfirmResetsOnBranchDraftChanged() async {
+    // Two dangling branches so retyping lands on a different dangling collision.
+    var state = recreateState(branch: "feature/existing")
+    state.localBranchNamesLower = ["main", "feature/existing", "feature/other"]
+    state.recreateUniqueCount = 5
+    state.recreateConfirmed = true
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, _, _ in 5 }
+    }
+    store.exhaustivity = .off
+    // Retype onto the OTHER dangling branch → confirm resets immediately.
+    await store.send(.branchDraftChanged("feature/other")) {
+      $0.branchNameDraft = "feature/other"
+      $0.recreateConfirmed = false  // guard (a): reset on edit
+      $0.recreateUniqueCount = nil  // pending recompute (never coerced to 0)
+    }
+    // Create is blocked again while the count is pending / unconfirmed.
+    #expect(store.state.recreateBlocksCreate == true)
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 5
+    }
+    // Still blocked — confirm did NOT survive the edit.
+    #expect(store.state.recreateBlocksCreate == true)
+  }
+
+  /// Guard (a): a `baseRefSelected` after a confirm RESETS recreateConfirmed.
+  @Test
+  func recreateConfirmResetsOnBaseRefSelected() async {
+    var state = recreateState(base: "origin/main")
+    state.recreateUniqueCount = 2
+    state.recreateConfirmed = true
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, _, _ in 2 }
+    }
+    store.exhaustivity = .off
+    await store.send(.baseRefSelected("origin/develop")) {
+      $0.selectedBaseRef = "origin/develop"
+      $0.recreateConfirmed = false  // guard (a): reset on base change
+      $0.recreateUniqueCount = nil
+    }
+    #expect(store.state.recreateBlocksCreate == true)
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 2
+    }
+  }
+
+  /// Guard (b): a base change re-evaluates the count in BOTH directions —
+  /// diverged(>0, warn) → merged(0, silent), and back.
+  @Test
+  func recreateBaseChangeFlipsSilentAndWarnBothWays() async {
+    // First base diverges (2), second base is merged (0), third diverges again.
+    let counts = LockIsolated<[String: Int]>([
+      "origin/main": 2, "origin/merged": 0, "origin/other": 4,
+    ])
+    var state = recreateState(base: "origin/main")
+    state.recreateUniqueCount = 2
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, _, base in
+        counts.value[base] ?? 0
+      }
+    }
+    store.exhaustivity = .off
+    // Switch to a merged base → 0 → silent.
+    await store.send(.baseRefSelected("origin/merged")) {
+      $0.selectedBaseRef = "origin/merged"
+      $0.recreateUniqueCount = nil
+    }
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 0
+    }
+    #expect(store.state.recreateNeedsConfirm == false)  // silent
+    #expect(store.state.recreateBlocksCreate == false)
+    // Switch to a diverged base → >0 → warn again.
+    await store.send(.baseRefSelected("origin/other")) {
+      $0.selectedBaseRef = "origin/other"
+      $0.recreateUniqueCount = nil
+    }
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 4
+    }
+    #expect(store.state.recreateNeedsConfirm == true)  // warn
+    #expect(store.state.recreateBlocksCreate == true)
+  }
+
+  /// Guard (c): when the count compute THROWS, the guard is FAIL-SAFE —
+  /// recreateUniqueCount stays nil (never 0), recreateCountFailed is set, and
+  /// Create is blocked (confirm-required), NEVER silent.
+  @Test
+  func recreateCountThrowForcesConfirmNeverSilent() async {
+    struct BadBase: Error {}
+    let store = TestStore(initialState: recreateState()) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, _, _ in throw BadBase() }
+    }
+    store.exhaustivity = .off
+    await store.send(.resolutionChanged(.recreate))
+    await store.receive(\.recreateCountFailed) {
+      $0.recreateUniqueCount = nil  // NEVER coerced to 0
+      $0.recreateCountFailed = true
+    }
+    // Fail-safe: unknown is treated as dangerous → confirm required, not silent.
+    #expect(store.state.recreateNeedsConfirm == true)
+    #expect(store.state.recreateBlocksCreate == true)
+    #expect(store.state.recreateWarning != nil)
+    // A proven-0 (silent) path is impossible here — recreateUniqueCount != 0.
+    #expect(store.state.recreateUniqueCount != 0)
+  }
+
+  /// Guard (d): a >0-count Recreate submitted WITHOUT confirm dispatches NO
+  /// deleteBranchIfExists and NO beginCreate — a strict no-op (branch, commits,
+  /// dir untouched). Runs under EXHAUSTIVE checking so any leaked delegate or
+  /// delete effect would fail the test.
+  @Test
+  func recreateUnconfirmedSubmitDispatchesNoDeleteAndNoBeginCreate() async {
+    let deleteCalled = LockIsolated(false)
+    var state = recreateState()
+    state.recreateUniqueCount = 3  // diverged
+    state.recreateConfirmed = false  // NOT confirmed
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      // Any delete call flips the flag AND would break the .kept path; but the
+      // reducer must never reach it.
+      $0.gitWorktreeClient.deleteBranchIfExists = { _, _ in
+        deleteCalled.setValue(true)
+        return .deleted
+      }
+    }
+    // EXHAUSTIVE: submitError is the ONLY mutation; no beginCreate to receive.
+    await store.send(.createButtonTapped) {
+      $0.submitError =
+        "Confirm that recreating this branch will discard its commits before continuing."
+    }
+    #expect(deleteCalled.value == false)  // guard (d): no delete ever fired
+  }
+
+  /// A confirmed >0-count Recreate submits: delete FIRST (.deleted), THEN
+  /// beginCreate with reuseExistingBranch == false (fresh -b from base).
+  @Test
+  func recreateConfirmedSubmitDeletesThenBeginsCreateWithFreshBranch() async {
+    let deleteBranch = LockIsolated<String?>(nil)
+    var state = recreateState()
+    state.recreateUniqueCount = 3
+    state.recreateConfirmed = true  // confirmed
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.deleteBranchIfExists = { _, branch in
+        deleteBranch.setValue(branch)
+        return .deleted
+      }
+    }
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped)
+    await store.receive(\.delegate.beginCreate) { _ in }
+    // Delete was called with the sanitized branch name, BEFORE beginCreate.
+    #expect(deleteBranch.value == "feature/existing")
+    // Recreate is a fresh create: reuseExistingBranch must be false.
+    #expect(store.state.effectiveResolution == .recreate)
+  }
+
+  /// A 0-count (silent) Recreate also runs delete-then-create — no confirm
+  /// needed, and the delete still fires first.
+  @Test
+  func recreateSilentSubmitDeletesThenBeginsCreate() async {
+    let deleteCalled = LockIsolated(false)
+    var state = recreateState()
+    state.recreateUniqueCount = 0  // silent
+    state.recreateConfirmed = false  // not needed for a 0-count
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.deleteBranchIfExists = { _, _ in
+        deleteCalled.setValue(true)
+        return .deleted
+      }
+    }
+    store.exhaustivity = .off
+    // Sanity: silent means Create is not blocked.
+    #expect(store.state.recreateBlocksCreate == false)
+    await store.send(.createButtonTapped)
+    await store.receive(\.delegate.beginCreate) { _ in }
+    #expect(deleteCalled.value == true)
+  }
+
+  /// Guard (e): if the branch became checked out since selection,
+  /// deleteBranchIfExists returns `.kept` at submit — ABORT with the error
+  /// surfaced and NO beginCreate. The branch is not deleted, nothing created.
+  @Test
+  func recreateSubmitWithKeptDeleteAbortsWithErrorAndNoBeginCreate() async {
+    var state = recreateState()
+    state.recreateUniqueCount = 0  // even a silent recreate must re-guard here
+    state.recreateConfirmed = false
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.deleteBranchIfExists = { _, _ in
+        .kept(reason: "branch is checked out")
+      }
+    }
+    // EXHAUSTIVE for the terminal state; the async delete result arrives via
+    // recreateDeleteFailed, and NO beginCreate is ever received.
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped)
+    await store.receive(\.recreateDeleteFailed) {
+      $0.submitError =
+        "Couldn't recreate the branch — it wasn't deleted, so nothing was created. branch is checked out"
+    }
+  }
+
+  /// A Recreate where the branch is already absent at submit (`.absent`) still
+  /// proceeds to beginCreate — absence is success, not a failure.
+  @Test
+  func recreateSubmitWithAbsentDeleteStillBeginsCreate() async {
+    var state = recreateState()
+    state.recreateUniqueCount = 0
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.deleteBranchIfExists = { _, _ in .absent }
+    }
+    store.exhaustivity = .off
+    await store.send(.createButtonTapped)
+    await store.receive(\.delegate.beginCreate) { _ in }
+  }
+
+  /// Switching AWAY from Recreate (to Reuse) clears the guard — no warning, no
+  /// block — and stops requiring confirmation.
+  @Test
+  func leavingRecreateClearsGuard() async {
+    var state = recreateState()
+    state.recreateUniqueCount = 4
+    state.recreateConfirmed = false
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // Reuse is not a recreate context → guard resets, no count effect runs.
+    await store.send(.resolutionChanged(.reuse)) {
+      $0.selectedResolution = .reuse
+      $0.recreateUniqueCount = nil
+      $0.recreateConfirmed = false
+    }
+    #expect(store.state.isRecreateContext == false)
+    #expect(store.state.recreateNeedsConfirm == false)
+    #expect(store.state.recreateBlocksCreate == false)
+    #expect(store.state.recreateWarning == nil)
+  }
+
+  /// Stale-result drop: a count that returns for a PRIOR (branch, base) token
+  /// after the user has retyped must be ignored, not applied to the new
+  /// selection. Proven by feeding a mismatched token directly.
+  @Test
+  func recreateStaleCountResultIsDropped() async {
+    var state = recreateState(branch: "feature/existing", base: "origin/main")
+    state.recreateUniqueCount = nil
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // A result whose token names a DIFFERENT base than the live selection.
+    let staleToken = RecreateGuardToken(branch: "feature/existing", base: "origin/OLD")
+    await store.send(.recreateCountLoaded(count: 0, token: staleToken))
+    // Ignored: count stays nil (still gated), not coerced to the stale 0.
+    #expect(store.state.recreateUniqueCount == nil)
+    #expect(store.state.recreateBlocksCreate == true)
+  }
+
+  /// Warning copy singularizes for exactly 1 unique commit.
+  @Test
+  func recreateWarningSingularizesForOneCommit() async {
+    let store = TestStore(initialState: recreateState()) {
+      CreateWorktreeFeature()
+    } withDependencies: {
+      $0.gitWorktreeClient.branchUniqueCommitCount = { _, _, _ in 1 }
+    }
+    store.exhaustivity = .off
+    await store.send(.resolutionChanged(.recreate))
+    await store.receive(\.recreateCountLoaded) {
+      $0.recreateUniqueCount = 1
+    }
+    #expect(store.state.recreateWarning?.contains("1 commit ") == true)
+    #expect(store.state.recreateWarning?.contains("1 commits") == false)
   }
 }
