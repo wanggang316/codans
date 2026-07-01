@@ -69,7 +69,7 @@ struct CreateWorktreeFeatureTests {
       $0.branchCollisionKind = .checkedOut
       // Rename gate fires: effectiveResolution(.checkedOut) == .rename + collision.
       $0.validationError = "Branch \"main\" already exists — choose a different name."
-      $0.reuseNotice = nil
+      $0.renameGateActive = true
       $0.selectedResolution = .rename
     }
   }
@@ -86,7 +86,7 @@ struct CreateWorktreeFeatureTests {
       $0.branchCollisionKind = .dangling
       $0.validationError =
         "Branch \"feature/existing\" already exists — choose a different name."
-      $0.reuseNotice = nil
+      $0.renameGateActive = true
       $0.selectedResolution = .rename  // savedResolutionDefault = .rename
     }
   }
@@ -102,7 +102,6 @@ struct CreateWorktreeFeatureTests {
       $0.branchNameDraft = "feature/existing"
       $0.branchCollisionKind = .dangling
       $0.validationError = nil   // effectiveResolution == .reuse → no gate
-      $0.reuseNotice = nil
       $0.selectedResolution = .reuse
     }
   }
@@ -116,7 +115,6 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("feature/new-idea")) {
       $0.branchNameDraft = "feature/new-idea"
       $0.validationError = nil
-      $0.reuseNotice = nil
     }
   }
 
@@ -131,7 +129,6 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("feature/brand-new")) {
       $0.branchCollisionKind = .none
       $0.validationError = nil
-      $0.reuseNotice = nil
     }
   }
 
@@ -174,7 +171,7 @@ struct CreateWorktreeFeatureTests {
       // savedResolutionDefault = .rename → gate fires for the normalized name.
       $0.validationError =
         "Branch \"feature/existing\" already exists — choose a different name."
-      $0.reuseNotice = nil
+      $0.renameGateActive = true
     }
   }
 
@@ -203,7 +200,6 @@ struct CreateWorktreeFeatureTests {
     await store.send(.branchDraftChanged("origin/test")) {
       $0.branchCollisionKind = .none
       $0.validationError = nil
-      $0.reuseNotice = nil
     }
   }
 
@@ -332,6 +328,7 @@ struct CreateWorktreeFeatureTests {
     state.selectedResolution = .rename
     state.validationError =
       "Branch \"feature/existing\" already exists — choose a different name."
+    state.renameGateActive = true
     let store = TestStore(initialState: state) {
       CreateWorktreeFeature()
     }
@@ -340,6 +337,7 @@ struct CreateWorktreeFeatureTests {
     await store.send(.resolutionChanged(.reuse)) {
       $0.selectedResolution = .reuse
       $0.validationError = nil   // gate cleared; Create is now enabled
+      $0.renameGateActive = false
     }
   }
 
@@ -353,6 +351,7 @@ struct CreateWorktreeFeatureTests {
     state.branchNameDraft = "feature/existing"
     state.selectedResolution = .reuse
     state.validationError = nil
+    state.renameGateActive = false
     let store = TestStore(initialState: state) {
       CreateWorktreeFeature()
     }
@@ -362,6 +361,7 @@ struct CreateWorktreeFeatureTests {
       $0.selectedResolution = .rename
       $0.validationError =
         "Branch \"feature/existing\" already exists — choose a different name."
+      $0.renameGateActive = true
     }
   }
 
@@ -376,6 +376,7 @@ struct CreateWorktreeFeatureTests {
     state.selectedResolution = .rename
     state.validationError =
       "Branch \"main\" already exists — choose a different name."
+    state.renameGateActive = true
     let store = TestStore(initialState: state) {
       CreateWorktreeFeature()
     }
@@ -385,7 +386,67 @@ struct CreateWorktreeFeatureTests {
       $0.branchNameDraft = "feature/new-branch"   // preserved as typed
       $0.branchCollisionKind = .none
       $0.validationError = nil   // gate cleared
+      $0.renameGateActive = false
     }
+  }
+
+  /// Ownership model de-risk: when the gate is active and the user then types
+  /// a name with spaces, the space message must WIN and the gate must drop its
+  /// ownership — a subsequent clear can never retract the space message.
+  @Test
+  func gateDoesNotClobberSpaceErrorWhenTransitioningFromGateActive() async {
+    // Start: dangling collision + rename → gate active with its message.
+    var state = initialState(savedResolutionDefault: .rename)
+    state.branchCollisionKind = .dangling
+    state.branchNameDraft = "feature/existing"
+    state.selectedResolution = .rename
+    state.validationError =
+      "Branch \"feature/existing\" already exists — choose a different name."
+    state.renameGateActive = true
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    // User types a name with a space → space message owns validationError,
+    // gate ownership is dropped so it can't retract this message later.
+    await store.send(.branchDraftChanged("feat with space")) {
+      $0.branchNameDraft = "feat with space"
+      $0.branchCollisionKind = .none
+      $0.validationError = "Branch names can't contain spaces."
+      $0.renameGateActive = false
+    }
+    // Now switching resolution must NOT clear the space message (gate is not
+    // the owner). resolutionChanged runs applyRenameGate; since collision is
+    // .none and renameGateActive is false, validationError is untouched.
+    await store.send(.resolutionChanged(.reuse)) {
+      $0.selectedResolution = .reuse
+      // validationError stays as the space message — gate never owned it.
+    }
+    #expect(store.state.validationError == "Branch names can't contain spaces.")
+  }
+
+  /// The gate's clear must never touch a message owned by another path. Here
+  /// applyRenameGate is invoked (via resolutionChanged) while a non-gate error
+  /// ("Pick a base ref." shape) sits in validationError and renameGateActive
+  /// is false → the message must survive untouched.
+  @Test
+  func gateClearLeavesForeignValidationMessageUntouched() async {
+    var state = initialState()
+    state.branchCollisionKind = .none
+    state.selectedResolution = .rename
+    // A foreign, non-gate message that the gate does NOT own.
+    state.validationError = "Pick a base ref."
+    state.renameGateActive = false
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.resolutionChanged(.reuse)) {
+      $0.selectedResolution = .reuse
+      // No change to validationError: renameGateActive == false, so the gate's
+      // clear branch is skipped entirely.
+    }
+    #expect(store.state.validationError == "Pick a base ref.")
   }
 
   // MARK: - Reuse spec (VAL-REUSE-001 / VAL-CROSS-003)
@@ -455,6 +516,7 @@ struct CreateWorktreeFeatureTests {
     // Simulate the rename gate already being set by branchDraftChanged.
     state.validationError =
       "Branch \"main\" already exists — choose a different name."
+    state.renameGateActive = true
     let store = TestStore(initialState: state) {
       CreateWorktreeFeature()
     }

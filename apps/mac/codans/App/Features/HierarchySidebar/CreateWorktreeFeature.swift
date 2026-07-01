@@ -89,13 +89,16 @@ struct CreateWorktreeFeature {
     // Transient derived state.
     var validationError: String?
     var submitError: String?
-    /// Non-error hint shown when the typed name matches a dangling local
-    /// branch that will be reused (its commits kept, base ref ignored).
-    var reuseNotice: String?
     /// Collision kind for the current `branchNameDraft`, computed at
     /// keystroke time from the SANITIZED lowercased name.  The single
     /// source of truth consumed by the resolution UI and `createButtonTapped`.
     var branchCollisionKind: BranchCollisionKind = .none
+    /// True while `validationError` is currently owned by the rename gate
+    /// (effective `.rename` + a real collision). Lets `applyRenameGate` clear
+    /// ONLY its own message without parsing message text, so a future
+    /// non-gate validation message (M2 Recreate warning, empty-name, spaces,
+    /// folder-exists, "Pick a base ref") is never clobbered by the gate.
+    var renameGateActive: Bool = false
 
     // MARK: - Derived
 
@@ -165,28 +168,28 @@ struct CreateWorktreeFeature {
   /// clears it when the collision resolves or the user switches away from
   /// Rename (e.g. to Reuse).
   ///
+  /// Ownership is tracked in `renameGateActive` (not by parsing the message
+  /// text): the clear branch touches `validationError` ONLY when the gate set
+  /// it, so a non-gate message (empty-name, spaces, folder-exists, "Pick a
+  /// base ref", or M2's Recreate warning) is never clobbered.
+  ///
   /// Call this AFTER `branchCollisionKind` and `selectedResolution` are both
   /// up-to-date so `effectiveResolution` reflects the new state.
   private static func applyRenameGate(to state: inout State) {
-    guard state.branchCollisionKind != .none else {
-      // No collision at all — gate doesn't apply; clear any rename-gate error
-      // we own (identified by prefix); space/empty errors are cleared elsewhere.
-      if state.validationError?.hasPrefix("Branch \"") == true {
-        state.validationError = nil
-      }
-      return
-    }
-    if state.effectiveResolution == .rename {
+    let shouldGate =
+      state.branchCollisionKind != .none && state.effectiveResolution == .rename
+    if shouldGate {
       // Effective rename + collision → block Create until the name is free.
       let name = state.sanitizedBranchDraft
       state.validationError =
         "Branch \"\(name)\" already exists — choose a different name."
-    } else {
-      // User switched to Reuse or Recreate → rename gate no longer applies;
-      // clear any rename-collision error we set previously.
-      if state.validationError?.hasPrefix("Branch \"") == true {
-        state.validationError = nil
-      }
+      state.renameGateActive = true
+    } else if state.renameGateActive {
+      // Collision resolved OR user switched off Rename → retract our own
+      // message only. Guarding on renameGateActive means we never clear a
+      // message some other validation path currently owns.
+      state.validationError = nil
+      state.renameGateActive = false
     }
   }
 
@@ -248,17 +251,21 @@ struct CreateWorktreeFeature {
         if trimmed.isEmpty {
           state.branchCollisionKind = .none
           state.validationError = nil
-          state.reuseNotice = nil
+          state.renameGateActive = false
           state.selectedResolution = state.savedResolutionDefault
         } else if trimmed.contains(where: \.isWhitespace) {
           state.branchCollisionKind = .none
           state.validationError = "Branch names can't contain spaces."
-          state.reuseNotice = nil
+          // This branch owns validationError directly; drop any gate ownership
+          // so a later clear can't retract this space message.
+          state.renameGateActive = false
           state.selectedResolution = state.savedResolutionDefault
         } else {
           // Clear any prior validation error before reclassifying — the
           // correct error (if any) will be re-set by applyRenameGate below.
+          // Also drop stale gate ownership; applyRenameGate re-arms it.
           state.validationError = nil
+          state.renameGateActive = false
           // Classify on the SANITIZED, lowercased name — identical to the
           // form that git-wt will actually create — so a name that only
           // collides after sanitization (doubled separators, trailing dashes,
@@ -271,19 +278,16 @@ struct CreateWorktreeFeature {
             // nor Recreate is viable; force Rename. The rename gate (below)
             // then blocks Create until the user picks a free name.
             state.branchCollisionKind = .checkedOut
-            state.reuseNotice = nil
             state.selectedResolution = .rename
           } else if state.localBranchNamesLower.contains(lower) {
             // Dangling branch: exists as a local ref but no worktree checks it
             // out. All three resolutions are valid — seed to the saved default.
             state.branchCollisionKind = .dangling
-            state.reuseNotice = nil
             state.selectedResolution = state.savedResolutionDefault
           } else {
             // Remote-only names (e.g. origin/foo with no local foo) also
             // land here: classification keys on LOCAL sets only.
             state.branchCollisionKind = .none
-            state.reuseNotice = nil
             state.selectedResolution = state.savedResolutionDefault
           }
           // Reactive rename gate: set/clear validationError based on the
