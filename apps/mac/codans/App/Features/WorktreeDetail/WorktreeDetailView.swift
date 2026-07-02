@@ -111,11 +111,12 @@ struct WorktreeDetailView: View {
     if let pending = activePendingWorktree {
       // During creation the content body is JUST the live streaming output
       // (the slimmed `WorktreeLoadingView`). The window toolbar STAYS
-      // VISIBLE via `pendingSkeletonToolbarContent`, rendering shimmering
-      // skeleton placeholders in the LEFT (branch) and MIDDLE (status)
-      // slots — exactly where the real branch label + status pill land on
-      // completion — and NOTHING in the trailing/right slot (no actions for
-      // a not-yet-created worktree). Mirrors the normal branch's chrome
+      // VISIBLE via `pendingSkeletonToolbarContent`, which mirrors the real
+      // toolbar item-for-item with shimmering stand-ins — branch identity
+      // LEFT (sized from the pending name), status pill MIDDLE (plus the
+      // live inbox bell), ghost Run / Open chips RIGHT — so the chrome
+      // reads as the same toolbar and nothing shifts when the real content
+      // takes over on completion. Mirrors the normal branch's chrome
       // wiring (`SuppressTitleModifier` so default-placement items flow
       // leading-to-trailing; `.toolbarBackground` gated on fullscreen).
       //
@@ -127,7 +128,7 @@ struct WorktreeDetailView: View {
       let info = loadingInfo(for: pending)
       WorktreeLoadingView(info: info)
         .modifier(SuppressTitleModifier())
-        .toolbar { pendingSkeletonToolbarContent(isFailure: info.isFailure) }
+        .toolbar { pendingSkeletonToolbarContent(info: info) }
         .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
         .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
         .onReceive(
@@ -334,87 +335,89 @@ struct WorktreeDetailView: View {
     }
   }
 
-  /// Window-titlebar toolbar content for the *creating* state. Parallels
-  /// `worktreeToolbarContent`'s placement structure across both OS paths so
-  /// the toolbar reads as the same chrome — only the LEFT (branch) and MIDDLE
-  /// (status) slots are swapped for shimmering `SkeletonBlock` placeholders
-  /// (the branch + status aren't known until the worktree exists), and the
-  /// trailing/right slot renders NOTHING (a not-yet-created worktree has no
-  /// Run / editor actions). The placeholders carry the `skeleton-left` /
+  /// Window-titlebar toolbar content for the *creating* state. Mirrors
+  /// `worktreeToolbarContent` item-for-item across both OS paths so the
+  /// toolbar reads as the same chrome AND the flexible-spacer math resolves
+  /// identically — every placeholder sits where its real counterpart lands
+  /// on completion instead of jumping when the swap happens:
+  ///   - LEFT: branch-identity cluster sized from the pending worktree's
+  ///     REAL name + project name (`SkeletonBranchClusterView`).
+  ///   - MIDDLE: status pill with the motivational form's footprint
+  ///     (`SkeletonStatusPillView`), plus the LIVE inbox bell — the bell is
+  ///     window-level chrome (global unread count), not worktree data, so
+  ///     it stays real and interactive during creation.
+  ///   - RIGHT: ghost Run / Open chips (`SkeletonActionChipView`). Not
+  ///     actionable yet, but they anchor the trailing flexible spacer with
+  ///     the real button cluster's footprint — replacing the old hidden
+  ///     1×1 anchor, whose near-zero width skewed the spacer split and let
+  ///     the middle slot drift by ~half the button cluster's width.
+  /// The left / middle placeholders carry the `skeleton-left` /
   /// `skeleton-middle` accessibility ids — the same contract keys that used
   /// to ride the loading-view body — so a probe finds them on the toolbar
   /// (VAL-DETAIL-001 / VAL-DETAIL-003).
   ///
-  /// macOS 26 uses default placement with a flanking `ToolbarSpacer(.flexible)`
-  /// pair (mirroring `branchToolbarItemDefault` + `centeredStatusBarToolbarItem`);
-  /// pre-26 falls back to `.navigation` / `.principal` zoning (mirroring
-  /// `branchToolbarItem` + `statusBarToolbarItem`).
-  ///
-  /// `isFailure` suppresses every item: a settled `.failed` creation is not
-  /// "still loading", so the shimmering placeholders are dropped and the
+  /// `info.isFailure` suppresses every item: a settled `.failed` creation
+  /// is not "still loading", so the placeholders are dropped and the
   /// toolbar renders empty (VAL-DETAIL-004).
   @ToolbarContentBuilder
-  private func pendingSkeletonToolbarContent(isFailure: Bool) -> some ToolbarContent {
+  private func pendingSkeletonToolbarContent(info: WorktreeLoadingInfo) -> some ToolbarContent {
     // `if !isFailure { … }` with no else is the optional form `@ToolbarContentBuilder`
     // supports (`buildOptional`) — it renders nothing for a settled failure.
     // An empty `if`/`else` *branch* is NOT valid toolbar content (unlike
     // `@ViewBuilder`, there is no zero-component `buildBlock`), so the
     // suppression has to be the outer guard.
-    if !isFailure {
+    if !info.isFailure {
       if #available(macOS 26.0, *) {
         // Leading branch-identity placeholder. `.sharedBackgroundVisibility(.hidden)`
         // matches the real `branchToolbarItemDefault` so the slot reads as plain
         // content, not a glass capsule.
         ToolbarItem {
-          SkeletonBlock(width: 120, height: 14)
+          SkeletonBranchClusterView(name: info.name, projectName: info.repositoryName)
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
         }
         .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
-        // Centered status placeholder — wider than the branch block to stand in
-        // for the status pill. Default placement so the flanking flexible
-        // spacers center it, mirroring `centeredStatusBarToolbarItem`.
+        // Centered status placeholder in the toolbar's default glass capsule —
+        // the same chrome `centeredStatusBarToolbarItem` gets. The bell rides
+        // immediately after with no spacer, mirroring the real status / bell
+        // pairing at the optical center.
         ToolbarItem {
-          SkeletonBlock(width: 140, height: 16)
+          SkeletonStatusPillView()
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
         }
+        inboxBellToolbarItem()
         ToolbarSpacer(.flexible)
-        // A not-yet-created worktree has no Run / editor actions, so there is
-        // no visible trailing item. But the centered status placeholder relies
-        // on BOTH flexible spacers balancing — and a trailing `ToolbarSpacer`
-        // with nothing after it collapses to zero, letting the leading spacer
-        // expand and shove the middle block to the right edge. The real
-        // `worktreeToolbarContent` avoids this because `trailingButtonsDefault`
-        // always follows its trailing spacer. We give the spacer the same kind
-        // of peer with a hidden 1×1 anchor: zero visual weight, but it pins the
-        // trailing slot so the two flexible spacers split the free space evenly
-        // and the status skeleton stays centered. `.sharedBackgroundVisibility(.hidden)`
-        // keeps the anchor from drawing a glass capsule; it carries no
-        // accessibility id (the suite asserts only skeleton-left / skeleton-middle).
+        // Ghost trailing chips: same item structure as `trailingButtonsDefault`
+        // (item / fixed spacer / item) so each gets its own glass capsule and
+        // the trailing zone weighs what the real buttons will.
         ToolbarItem {
-          Color.clear
-            .frame(width: 1, height: 1)
-            .accessibilityHidden(true)
+          SkeletonActionChipView(labelText: "Run")
         }
-        .sharedBackgroundVisibility(.hidden)
+        ToolbarSpacer(.fixed)
+        ToolbarItem {
+          SkeletonActionChipView(labelText: "Finder")
+        }
       } else {
-        // Pre-26 fallback: branch placeholder in the leading `.navigation`
-        // slot, status placeholder in the centered `.principal` slot — the same
-        // zoning the real `branchToolbarItem` / `statusBarToolbarItem` use.
+        // Pre-26 fallback: the same zoning the real path uses —
+        // `.navigation` branch slot, `.principal` status slot, default-
+        // placement bell, `.primaryAction` trailing chips.
         ToolbarItem(placement: .navigation) {
-          SkeletonBlock(width: 120, height: 14)
+          SkeletonBranchClusterView(name: info.name, projectName: info.repositoryName)
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
         }
         ToolbarItem(placement: .principal) {
-          SkeletonBlock(width: 140, height: 16)
+          SkeletonStatusPillView()
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
         }
-        // No `.primaryAction` group: the trailing slot stays empty during
-        // creation.
+        inboxBellToolbarItem()
+        ToolbarItemGroup(placement: .primaryAction) {
+          SkeletonActionChipView(labelText: "Run")
+          SkeletonActionChipView(labelText: "Finder")
+        }
       }
     }
   }
