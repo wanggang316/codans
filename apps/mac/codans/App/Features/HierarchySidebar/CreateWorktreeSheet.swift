@@ -49,6 +49,11 @@ struct CreateWorktreeSheet: View {
       case .dangling:
         // All three resolutions are valid for a dangling branch.
         VStack(alignment: .leading, spacing: 4) {
+          Text(danglingConflictNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
           Text("Conflict resolution").font(.callout)
           Picker(
             "",
@@ -180,5 +185,19 @@ struct CreateWorktreeSheet: View {
     .padding(20)
     .frame(width: 420)
     .onAppear { store.send(.onAppear) }
+  }
+
+  /// Why the resolution picker is showing: names the EXISTING branch the
+  /// draft collides with. When the match is case-insensitive (draft casing
+  /// differs from the real ref) both spellings are shown, because every
+  /// resolution operates on the real-cased ref — the user should see which
+  /// branch that is.
+  private var danglingConflictNote: String {
+    let draft = store.sanitizedBranchDraft
+    let real = store.danglingRealName ?? draft
+    if real != draft {
+      return "A branch named \"\(real)\" already exists (matches \"\(draft)\" ignoring case)."
+    }
+    return "A branch named \"\(real)\" already exists."
   }
 }
