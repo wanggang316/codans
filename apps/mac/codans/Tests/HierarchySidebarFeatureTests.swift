@@ -478,4 +478,208 @@ struct HierarchySidebarFeatureTests {
     await store.finish()
     #expect(store.state.pendingWorktrees[id: id]?.status != .running)
   }
+
+  // MARK: - Archive / delete lifecycle progress
+
+  /// Catalog with one project owning a main checkout plus one extra
+  /// worktree — the archive/remove guards read it to prove the target is
+  /// NOT the main checkout.
+  private static func makeLifecycleCatalog(
+    projectID: ProjectID, worktreeID: WorktreeID
+  ) -> Catalog {
+    var project = Project(id: projectID, name: "p", rootPath: "/p", gitRoot: "/p")
+    project.worktrees = [
+      Worktree(name: "main", path: "/p"),
+      Worktree(id: worktreeID, name: "feature", path: "/p-wts/feature"),
+    ]
+    return Catalog(projects: [project])
+  }
+
+  /// Archive with a configured archive script: the effect must narrate
+  /// script → finalizing → gone, running the script BEFORE the flag flip.
+  @Test
+  func archiveWithScriptSequencesLifecyclePhases() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let scriptCalls = LockIsolated<[String]>([])
+    let archivedCalls = LockIsolated<[(WorktreeID, Bool)]>([])
+    var settings = Settings()
+    settings.projects[projectID] = ProjectSettings(
+      git: GitProjectSettings(archiveScript: ScriptDefinition(command: "docker compose down"))
+    )
+    let snapshot = settings
+
+    var initial = HierarchySidebarFeature.State()
+    initial.hasShownArchiveExplainer = true
+
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = {
+        Self.makeLifecycleCatalog(projectID: projectID, worktreeID: worktreeID)
+      }
+      $0.hierarchyClient.runWorktreeLifecycleScript = { _, _, command, tabName in
+        scriptCalls.withValue { $0.append("\(tabName): \(command)") }
+      }
+      $0.hierarchyClient.setWorktreeArchived = { wid, archived in
+        archivedCalls.withValue { $0.append((wid, archived)) }
+      }
+      $0[SettingsWriter.self].readSnapshotSync = { snapshot }
+    }
+
+    await store.send(
+      .worktreeArchiveTapped(worktreeID: worktreeID, inProject: projectID, name: "feature")
+    )
+    await store.receive(
+      .lifecycleStarted(
+        worktreeID: worktreeID,
+        progress: WorktreeLifecycleProgress(kind: .archive, phase: .runningScript)
+      )
+    ) {
+      $0.lifecycleProgress[worktreeID] = WorktreeLifecycleProgress(
+        kind: .archive, phase: .runningScript
+      )
+    }
+    await store.receive(
+      .lifecyclePhaseChanged(worktreeID: worktreeID, phase: .finalizing)
+    ) {
+      $0.lifecycleProgress[worktreeID]?.phase = .finalizing
+    }
+    await store.receive(.lifecycleEnded(worktreeID: worktreeID)) {
+      $0.lifecycleProgress = [:]
+    }
+    #expect(scriptCalls.value == ["Archive: docker compose down"])
+    #expect(archivedCalls.value.count == 1)
+    #expect(archivedCalls.value[0].0 == worktreeID)
+    #expect(archivedCalls.value[0].1 == true)
+  }
+
+  /// Archive with NO script configured: the row goes straight to the
+  /// finalizing phase and the script endpoint is never touched.
+  @Test
+  func archiveWithoutScriptSkipsScriptPhase() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let scriptCalls = LockIsolated<Int>(0)
+
+    var initial = HierarchySidebarFeature.State()
+    initial.hasShownArchiveExplainer = true
+
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = {
+        Self.makeLifecycleCatalog(projectID: projectID, worktreeID: worktreeID)
+      }
+      $0.hierarchyClient.runWorktreeLifecycleScript = { _, _, _, _ in
+        scriptCalls.withValue { $0 += 1 }
+      }
+      $0.hierarchyClient.setWorktreeArchived = { _, _ in }
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+    }
+
+    await store.send(
+      .worktreeArchiveTapped(worktreeID: worktreeID, inProject: projectID, name: "feature")
+    )
+    await store.receive(
+      .lifecycleStarted(
+        worktreeID: worktreeID,
+        progress: WorktreeLifecycleProgress(kind: .archive, phase: .finalizing)
+      )
+    ) {
+      $0.lifecycleProgress[worktreeID] = WorktreeLifecycleProgress(
+        kind: .archive, phase: .finalizing
+      )
+    }
+    await store.receive(.lifecycleEnded(worktreeID: worktreeID)) {
+      $0.lifecycleProgress = [:]
+    }
+    #expect(scriptCalls.value == 0)
+  }
+
+  /// Remove with a configured delete script: same narration shape as
+  /// archive, with the git teardown as the finalizing step.
+  @Test
+  func removeWithScriptSequencesLifecyclePhases() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let scriptCalls = LockIsolated<[String]>([])
+    let removeCalls = LockIsolated<Int>(0)
+    var settings = Settings()
+    settings.projects[projectID] = ProjectSettings(
+      git: GitProjectSettings(deleteScript: ScriptDefinition(command: "rm -rf node_modules"))
+    )
+    let snapshot = settings
+
+    var initial = HierarchySidebarFeature.State()
+    initial.pendingWorktreeRemoval = PendingWorktreeRemoval(
+      worktreeID: worktreeID, projectID: projectID, displayName: "feature"
+    )
+
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.runWorktreeLifecycleScript = { _, _, command, tabName in
+        scriptCalls.withValue { $0.append("\(tabName): \(command)") }
+      }
+      $0.hierarchyClient.removeWorktreeWithGit = { _, _ in
+        removeCalls.withValue { $0 += 1 }
+        return nil
+      }
+      $0[SettingsWriter.self].readSnapshotSync = { snapshot }
+    }
+
+    await store.send(.worktreeRemoveConfirmed) {
+      $0.pendingWorktreeRemoval = nil
+    }
+    await store.receive(
+      .lifecycleStarted(
+        worktreeID: worktreeID,
+        progress: WorktreeLifecycleProgress(kind: .remove, phase: .runningScript)
+      )
+    ) {
+      $0.lifecycleProgress[worktreeID] = WorktreeLifecycleProgress(
+        kind: .remove, phase: .runningScript
+      )
+    }
+    await store.receive(
+      .lifecyclePhaseChanged(worktreeID: worktreeID, phase: .finalizing)
+    ) {
+      $0.lifecycleProgress[worktreeID]?.phase = .finalizing
+    }
+    await store.receive(.lifecycleEnded(worktreeID: worktreeID)) {
+      $0.lifecycleProgress = [:]
+    }
+    #expect(scriptCalls.value == ["Delete: rm -rf node_modules"])
+    #expect(removeCalls.value == 1)
+  }
+
+  /// The phase line + stage value pairs are a fixed presentation contract
+  /// (same style as the creation row's `creating`/`setupScript` values) —
+  /// pin them so a rename shows up as a deliberate diff.
+  @Test
+  func lifecycleProgressStringsAreStable() {
+    let cases: [(WorktreeLifecycleProgress, String, String)] = [
+      (
+        WorktreeLifecycleProgress(kind: .archive, phase: .runningScript),
+        "Running archive script…", "archiveScript"
+      ),
+      (
+        WorktreeLifecycleProgress(kind: .archive, phase: .finalizing),
+        "Archiving…", "archiving"
+      ),
+      (
+        WorktreeLifecycleProgress(kind: .remove, phase: .runningScript),
+        "Running delete script…", "deleteScript"
+      ),
+      (
+        WorktreeLifecycleProgress(kind: .remove, phase: .finalizing),
+        "Removing worktree…", "removing"
+      ),
+    ]
+    for (progress, line, stage) in cases {
+      #expect(progress.phaseLine == line)
+      #expect(progress.stageAccessibilityValue == stage)
+    }
+  }
 }

@@ -97,6 +97,10 @@ struct HierarchySidebarView: View {
   /// reveals per-row `⌃N` hotkey hints (and the matching `⌃1`–`⌃9` / `⌃0` bindings).
   @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+  /// Gates the decorative name shimmer on mid-archive / mid-delete rows —
+  /// the non-animated signals (phase icon, phase line + its stage value)
+  /// carry the state on their own. Mirrors `PendingWorktreeRow`'s gating.
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Bridges TCA-owned `currentSelection.worktreeID` ↔ SwiftUI's native
   /// `List(selection:)`. Native binding is what gets us Finder-/Mail-style
@@ -921,7 +925,7 @@ struct HierarchySidebarView: View {
     // SwiftUI Button at the row's leading area would intercept the
     // click, leave the table off-responder, and the row would stay grey
     // even though state moved.
-    let isLifecycleInProgress = store.lifecycleInProgressWorktrees.contains(worktree.id)
+    let lifecycle = store.lifecycleProgress[worktree.id]
     // Aggregated "any pane in this worktree is busy" signal — the union of two
     // sources: (1) the terminal signal via `HierarchyManager.worktreeIsDirty(_:)`
     // (OSC 9;4 progress ∪ a running foreground command), and (2) any bound agent
@@ -934,16 +938,13 @@ struct HierarchySidebarView: View {
       hierarchyManager.worktreeIsDirty(worktree.id) || anyAgentWorking(in: worktree)
     let content = HStack(spacing: 6) {
       Group {
-        if isLifecycleInProgress {
-          // Archive / delete is mid-flight (lifecycle script running in
-          // a pane, then the catalog mutation). Swap the row icon for a
-          // spinner so the click feels acknowledged; the row vanishes
-          // once the wrapper completes (archive → archived list, delete
-          // → gone).
-          ProgressView()
-            .controlSize(.small)
-            .frame(width: 14, height: 14)
-            .accessibilityLabel("Working")
+        if let lifecycle {
+          // Archive / delete is mid-flight — swap the row icon for the
+          // phase glyph (script glyph / finalizing spinner) so the click
+          // feels acknowledged and the row says where the teardown is.
+          // The row vanishes once the lifecycle completes (archive →
+          // archived list, delete → gone).
+          lifecycleIcon(lifecycle)
         } else if isExecuting {
           ProgressView()
             .controlSize(.small)
@@ -962,6 +963,11 @@ struct HierarchySidebarView: View {
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {
           Text(worktree.name)
+            // Decorative light-sweep while an archive / delete lifecycle
+            // runs — the same in-progress affordance the pending-creation
+            // row uses. The phase line's stage value below is the
+            // probeable signal; the shimmer is purely cosmetic.
+            .shimmer(isActive: lifecycle != nil && !reduceMotion)
           // Default-branch marker now lives in WorktreeRowIcon's leading
           // slot (star.fill replaces git-branch for the main checkout),
           // so there's no longer an inline star next to the name.
@@ -974,10 +980,20 @@ struct HierarchySidebarView: View {
               .accessibilityLabel("Pinned")
           }
         }
-        // Suppress the secondary branch line when it restates the worktree name —
-        // the common case (main/main, test0003/test0003) otherwise doubles every
-        // row height for zero information.
-        if let branch = worktree.branch, branch != worktree.name {
+        if let lifecycle {
+          // Mid-archive / mid-delete: the phase line replaces the branch
+          // caption — mirroring the creation row's streaming second line —
+          // so the row narrates the teardown instead of restating a branch
+          // that is about to leave the list.
+          Text(lifecycle.phaseLine)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .accessibilityValue(lifecycle.stageAccessibilityValue)
+        } else if let branch = worktree.branch, branch != worktree.name {
+          // Suppress the secondary branch line when it restates the worktree name —
+          // the common case (main/main, test0003/test0003) otherwise doubles every
+          // row height for zero information.
           Text(branch)
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
@@ -1013,6 +1029,28 @@ struct HierarchySidebarView: View {
       }
     } else {
       content
+    }
+  }
+
+  /// Leading icon for a row mid-archive / mid-delete. The script phase
+  /// shows the same glyph + tint the Settings lifecycle section uses for
+  /// that script (`archivebox` orange / `trash` red) so the row echoes
+  /// which script is running; the finalizing catalog / git step is an
+  /// indeterminate spinner. The glyph is decorative — the phase line's
+  /// stage value is the probeable signal (mirrors `PendingWorktreeRow`).
+  @ViewBuilder
+  private func lifecycleIcon(_ progress: WorktreeLifecycleProgress) -> some View {
+    switch progress.phase {
+    case .runningScript:
+      Image(systemName: progress.kind == .archive ? "archivebox" : "trash")
+        .foregroundStyle(progress.kind == .archive ? Color.orange : Color.red)
+        .frame(width: 14, height: 14)
+        .accessibilityHidden(true)
+    case .finalizing:
+      ProgressView()
+        .controlSize(.small)
+        .frame(width: 14, height: 14)
+        .accessibilityLabel("Working")
     }
   }
 

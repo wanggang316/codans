@@ -1,8 +1,8 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import OSLog
 import Observation
-import CodansCore
 
 /// Logger for the background reconcile path. Matches the project's
 /// `com.gumpw.codans.<area>` subsystem convention (see SettingsStore,
@@ -308,10 +308,14 @@ nonisolated struct HierarchyClient: Sendable {
   /// by relocating the working dir before pruning, so this is a
   /// single-step destructive call — the caller's first confirmation
   /// dialog is the only protection.
+  ///
+  /// Returns a non-fatal warning when removal succeeded but the
+  /// worktree's branch was intentionally kept (it's checked out by the
+  /// main checkout or another worktree); `nil` on a clean removal.
   var removeWorktreeWithGit:
     @MainActor @Sendable (
       _ worktreeID: WorktreeID, _ inProject: ProjectID
-    ) async throws -> Void
+    ) async throws -> String?
 
   /// Forwards `HierarchyManager.runningPaneCount`.
   var runningPaneCount: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Int
@@ -449,31 +453,19 @@ nonisolated struct HierarchyClient: Sendable {
 
   // MARK: - Worktree lifecycle wrappers
 
-  /// Sets `Worktree.archived`. On `archived: true`, if the project has an
-  /// `archiveScript` configured, the script first materializes in a fresh
-  /// tab on the worktree as that pane's `initialCommand`; the archived
-  /// flag flips only after the pane's child process exits. `archived:
-  /// false` is a plain flag flip (no unarchive script hook).
-  var setWorktreeArchivedWithLifecycle:
+  /// Runs a worktree lifecycle script (archive / delete) in a fresh tab on
+  /// the worktree as that pane's `initialCommand`, suspending until the
+  /// script finishes (its shell child exits). Returns as a best-effort
+  /// no-op when the worktree is gone or the tab/pane could not spawn.
+  /// The catalog mutation that follows the script — the archive flag flip
+  /// or the relocate-then-prune removal — is the CALLER's job: the sidebar
+  /// reducer sequences script → mutation itself so each phase is visible
+  /// to the row's in-progress presentation.
+  var runWorktreeLifecycleScript:
     @MainActor @Sendable (
-      _ worktreeID: WorktreeID, _ inProject: ProjectID, _ archived: Bool
-    ) async throws -> Void
-
-  /// Removes a worktree from the sidebar list. If the project has a
-  /// `deleteScript` configured, it materializes in a fresh tab on the
-  /// worktree as that pane's `initialCommand`; the worktree teardown
-  /// (relocate-then-prune via `removeWorktreeWithGit`) waits for the
-  /// pane's child to exit. Removal of an already-archived worktree
-  /// goes through `removeWorktreeWithGit` directly and skips this hook.
-  ///
-  /// Returns a non-fatal warning to surface as a toast when removal
-  /// succeeded but the worktree's branch was intentionally kept (it's
-  /// checked out by the main checkout or another worktree); `nil` on a
-  /// clean removal.
-  var removeWorktreeWithLifecycle:
-    @MainActor @Sendable (
-      _ worktreeID: WorktreeID, _ inProject: ProjectID
-    ) async throws -> String?
+      _ worktreeID: WorktreeID, _ inProject: ProjectID,
+      _ command: String, _ tabName: String
+    ) async -> Void
 
   // MARK: - Worktree sidebar ordering (worktree-sidebar-ordering.md task01)
 
@@ -767,7 +759,7 @@ extension HierarchyClient {
       },
       removeWorktreeWithGit: { [weak settings] worktreeID, projectID in
         let deleteRemote = (settings?.settings ?? .default).worktree.deleteRemoteBranchWithWorktree
-        try await removeWorktreeWithGit(
+        return try await removeWorktreeWithGit(
           worktreeID: worktreeID,
           projectID: projectID,
           manager: manager,
@@ -860,37 +852,12 @@ extension HierarchyClient {
           terminalClient: terminalClient
         )
       },
-      setWorktreeArchivedWithLifecycle: { [weak settings] worktreeID, projectID, archived in
-        let snapshot = settings?.settings ?? .default
-        if archived,
-          let command = snapshot.projects[projectID]?.git?.archiveScript?.command,
-          !command.isEmpty
-        {
-          await openNewTabAndAwaitExit(
-            worktreeID: worktreeID, projectID: projectID,
-            command: command, tabName: "Archive",
-            manager: manager, terminalClient: terminalClient,
-            settings: snapshot
-          )
-        }
-        try manager.setWorktreeArchived(worktreeID: worktreeID, archived: archived)
-      },
-      removeWorktreeWithLifecycle: { [weak settings] worktreeID, projectID in
-        let snapshot = settings?.settings ?? .default
-        if let command = snapshot.projects[projectID]?.git?.deleteScript?.command,
-          !command.isEmpty
-        {
-          await openNewTabAndAwaitExit(
-            worktreeID: worktreeID, projectID: projectID,
-            command: command, tabName: "Delete",
-            manager: manager, terminalClient: terminalClient,
-            settings: snapshot
-          )
-        }
-        return try await removeWorktreeWithGit(
+      runWorktreeLifecycleScript: { [weak settings] worktreeID, projectID, command, tabName in
+        await openNewTabAndAwaitExit(
           worktreeID: worktreeID, projectID: projectID,
-          manager: manager, gitWorktreeClient: gitWorktreeClient,
-          deleteRemoteBranch: snapshot.worktree.deleteRemoteBranchWithWorktree
+          command: command, tabName: tabName,
+          manager: manager, terminalClient: terminalClient,
+          settings: settings?.settings ?? .default
         )
       },
       promoteWorktree: { projectID, worktreeID, mode in
@@ -1272,6 +1239,16 @@ extension HierarchyClient {
     Task.detached(priority: .userInitiated) {
       for await event in eventStream {
         switch event {
+        case .paneInfoChanged(let pid, .childExited) where pid == paneID:
+          // The child ended, but libghostty keeps the surface open (its
+          // embedded API force-enables wait-after-command whenever a
+          // spawn command is set), so `paneExited` would only fire after
+          // a keypress in the dead pane. The child's exit IS the
+          // "finished" the policy is about — apply it now.
+          await MainActor.run {
+            applyOnFinished(policy: policy, paneID: paneID, manager: manager)
+          }
+          return
         case .paneExited(let pid, _, _) where pid == paneID,
           .paneCrashed(let pid, _) where pid == paneID:
           await MainActor.run {
@@ -1311,7 +1288,7 @@ extension HierarchyClient {
   /// `initialCommand`, and suspends until that pane's child process exits
   /// (or crashes). Returns immediately as a no-op when the worktree is
   /// gone, the tab/pane could not be created, or no `TerminalClient` is
-  /// wired. Used by archive / delete lifecycle wrappers — both must wait
+  /// wired. Used by the archive / delete lifecycle flows — both must wait
   /// for the user's script to finish before mutating catalog state.
   ///
   /// `initialCommand` is delivered to the pane via `sendInput`, i.e. it
@@ -1321,9 +1298,18 @@ extension HierarchyClient {
   /// manually `exit`s — the archive flag would never flip. To make
   /// lifecycle scripts terminate deterministically, the command is
   /// wrapped as `<trimmed>; exit\n` so the shell exits after running
-  /// the user's script regardless of its outcome. The pane stays open
-  /// just long enough for the user to read any output before it
-  /// disappears with the worktree teardown.
+  /// the user's script regardless of its outcome.
+  ///
+  /// Completion keys on the CHILD's exit (`paneInfoChanged(.childExited)`),
+  /// not on `paneExited`: libghostty's embedded API force-enables
+  /// `wait-after-command` whenever a spawn command is set (every codans
+  /// pane sets one — `zmx attach`), so a surface whose child died stays
+  /// open until a keypress, and `paneExited` — which fires on SURFACE
+  /// close — would stall the lifecycle until the user pressed a key in
+  /// the dead pane. On a clean exit the transient script tab is torn
+  /// down here; a failing script keeps its tab so the output stays
+  /// readable. The surface-close family is still matched as a fallback
+  /// for races (user closes the tab mid-script, crash, teardown).
   @MainActor
   private static func openNewTabAndAwaitExit(
     worktreeID: WorktreeID,
@@ -1355,8 +1341,9 @@ extension HierarchyClient {
     let wrapped = trimmed.isEmpty ? "exit" : "\(trimmed); exit"
 
     let paneID: PaneID
+    let tabID: TabID
     do {
-      let tabID = try manager.createTab(
+      tabID = try manager.createTab(
         in: worktreeID, in: projectID, name: tabName
       )
       paneID = try await manager.openPane(
@@ -1371,6 +1358,14 @@ extension HierarchyClient {
 
     for await event in stream {
       switch event {
+      case .paneInfoChanged(let pid, .childExited(let code)) where pid == paneID:
+        // The script (and its `; exit` shell) is done — this is the
+        // lifecycle's completion signal. `exit` propagates the last
+        // command's status, so `code` is the script's own outcome.
+        if code == 0 {
+          try? manager.closeTab(tabID, in: worktreeID, in: projectID)
+        }
+        return
       case .paneExited(let pid, _, _) where pid == paneID,
         .paneCrashed(let pid, _) where pid == paneID,
         .paneClosedByTab(let pid, _) where pid == paneID:
@@ -1695,10 +1690,7 @@ extension HierarchyClient: DependencyKey {
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setWorktreeArchivedWithLifecycle: { _, _, _ in
-      fatalError("HierarchyClient.liveValue not configured")
-    },
-    removeWorktreeWithLifecycle: { _, _ in
+    runWorktreeLifecycleScript: { _, _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
     promoteWorktree: { _, _, _ in
@@ -1780,7 +1772,9 @@ extension HierarchyClient: DependencyKey {
     createWorktreeWithGit: unimplemented(
       "HierarchyClient.createWorktreeWithGit", placeholder: WorktreeID()
     ),
-    removeWorktreeWithGit: unimplemented("HierarchyClient.removeWorktreeWithGit"),
+    removeWorktreeWithGit: unimplemented(
+      "HierarchyClient.removeWorktreeWithGit", placeholder: nil
+    ),
     runningPaneCount: unimplemented("HierarchyClient.runningPaneCount", placeholder: 0),
     setProjectLoadState: unimplemented("HierarchyClient.setProjectLoadState"),
     reorderProjects: unimplemented("HierarchyClient.reorderProjects"),
@@ -1799,11 +1793,8 @@ extension HierarchyClient: DependencyKey {
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
     stopScript: unimplemented("HierarchyClient.stopScript"),
-    setWorktreeArchivedWithLifecycle: unimplemented(
-      "HierarchyClient.setWorktreeArchivedWithLifecycle"
-    ),
-    removeWorktreeWithLifecycle: unimplemented(
-      "HierarchyClient.removeWorktreeWithLifecycle", placeholder: nil
+    runWorktreeLifecycleScript: unimplemented(
+      "HierarchyClient.runWorktreeLifecycleScript"
     ),
     promoteWorktree: unimplemented("HierarchyClient.promoteWorktree"),
     setPaneLabel: unimplemented("HierarchyClient.setPaneLabel"),

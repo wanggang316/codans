@@ -30,6 +30,52 @@ struct PendingProjectRemoval: Equatable {
   var displayName: String
 }
 
+/// Sidebar-visible progress of an in-flight worktree archive / delete.
+/// Mirrors the pending-creation row's phase surfacing (`PendingWorktree`):
+/// instead of a bare spinner, the row swaps its icon and second line to
+/// say WHICH lifecycle is running and WHERE it is. Keyed by worktree in
+/// `HierarchySidebarFeature.State.lifecycleProgress`.
+struct WorktreeLifecycleProgress: Equatable {
+  enum Kind: Equatable {
+    case archive
+    case remove
+  }
+
+  /// `runningScript` — the project's archive / delete script is executing
+  /// in its transient tab; `finalizing` — the catalog / git step that
+  /// follows (archive flag flip, relocate-then-prune removal).
+  enum Phase: Equatable {
+    case runningScript
+    case finalizing
+  }
+
+  let kind: Kind
+  var phase: Phase
+
+  /// Human-readable second line for the row while this lifecycle runs.
+  var phaseLine: String {
+    switch (kind, phase) {
+    case (.archive, .runningScript): return "Running archive script…"
+    case (.archive, .finalizing): return "Archiving…"
+    case (.remove, .runningScript): return "Running delete script…"
+    case (.remove, .finalizing): return "Removing worktree…"
+    }
+  }
+
+  /// Stable, machine-readable stage signal, exposed as the phase line's
+  /// accessibility value. Same contract style as the creation row's
+  /// `creating` / `setupScript` vocabulary (`PendingWorktreeRow`) — a
+  /// probe reads the stage without parsing display copy.
+  var stageAccessibilityValue: String {
+    switch (kind, phase) {
+    case (.archive, .runningScript): return "archiveScript"
+    case (.archive, .finalizing): return "archiving"
+    case (.remove, .runningScript): return "deleteScript"
+    case (.remove, .finalizing): return "removing"
+    }
+  }
+}
+
 /// Sidebar reducer for the Project → Worktree hierarchy plus the Tag
 /// chip footer's filter state. Owns local view state (expansion sets,
 /// sheet payloads, confirmation dialogs) and the project-selection
@@ -75,12 +121,15 @@ struct HierarchySidebarFeature {
     /// fires after the script finishes — e.g. `removeWorktreeWithGit`
     /// failing on a dirty index. `nil` = hidden.
     var lifecycleErrorToast: String?
-    /// Worktrees currently mid-archive / mid-delete. Lifecycle scripts
-    /// run in a real pane and we wait for `paneExited` before mutating
-    /// the catalog, which can take seconds (or longer) for cleanup
-    /// scripts. The sidebar row swaps its icon for a spinner while the
-    /// id is in this set so the user sees their click landed.
-    var lifecycleInProgressWorktrees: Set<WorktreeID> = []
+    /// Worktrees currently mid-archive / mid-delete, with the phase each
+    /// lifecycle is in. Lifecycle scripts run in a real pane and the
+    /// effect waits for the pane's child to exit before mutating the
+    /// catalog, which can take seconds (or longer) for cleanup scripts.
+    /// The sidebar row renders the in-progress presentation (phase icon +
+    /// name shimmer + phase line) while an entry exists — inserted by
+    /// `lifecycleStarted`, advanced by `lifecyclePhaseChanged`, removed
+    /// by `lifecycleEnded`.
+    var lifecycleProgress: [WorktreeID: WorktreeLifecycleProgress] = [:]
     /// In-memory placeholders for in-flight `wt sw` creations. Each row
     /// renders inside its Project's section between pinned and unpinned
     /// segments. Not persisted; an app restart clears the set, and the
@@ -195,11 +244,13 @@ struct HierarchySidebarFeature {
     /// wrapper effect's catch arm; renders via `lifecycleErrorToast`.
     case lifecycleFailed(message: String)
     case lifecycleErrorToastDismissed
-    /// Wrapper-effect bookends — the row spinner is driven by the set
-    /// of worktree ids between `started` and `ended`. Always paired:
-    /// the wrapper sends `ended` whether the underlying call succeeded
+    /// Lifecycle-effect bookends plus the phase advance in between — the
+    /// row's in-progress presentation is driven by the `lifecycleProgress`
+    /// entry that lives between `started` and `ended`. Always paired:
+    /// the effect sends `ended` whether the underlying steps succeeded
     /// or threw, so a stuck row should not be possible.
-    case lifecycleStarted(worktreeID: WorktreeID)
+    case lifecycleStarted(worktreeID: WorktreeID, progress: WorktreeLifecycleProgress)
+    case lifecyclePhaseChanged(worktreeID: WorktreeID, phase: WorktreeLifecycleProgress.Phase)
     case lifecycleEnded(worktreeID: WorktreeID)
     case worktreeRevealInFinderTapped(path: String)
     case worktreeOpenInDefaultEditorTapped(
@@ -721,12 +772,18 @@ struct HierarchySidebarFeature {
       state.lifecycleErrorToast = nil
       return .none
 
-    case .lifecycleStarted(let wid):
-      state.lifecycleInProgressWorktrees.insert(wid)
+    case .lifecycleStarted(let wid, let progress):
+      state.lifecycleProgress[wid] = progress
+      return .none
+
+    case .lifecyclePhaseChanged(let wid, let phase):
+      // No-op when the entry is gone — `ended` may have raced ahead of a
+      // late phase send on effect cancellation.
+      state.lifecycleProgress[wid]?.phase = phase
       return .none
 
     case .lifecycleEnded(let wid):
-      state.lifecycleInProgressWorktrees.remove(wid)
+      state.lifecycleProgress.removeValue(forKey: wid)
       return .none
 
     case .archivedWorktreesSheet:
@@ -954,20 +1011,34 @@ struct HierarchySidebarFeature {
     return worktree.path == project.rootPath
   }
 
-  /// Archive button → archive-script flow. The lifecycle wrapper opens a
-  /// new tab in the worktree, runs the script as that pane's
-  /// `initialCommand`, and waits for the pane's child to exit before
-  /// flipping `Worktree.archived = true`. The script's own output lives
-  /// in the spawned pane; only failures of the catalog flag flip
+  /// Archive button → archive-script flow, sequenced here (script →
+  /// flag flip) rather than behind one opaque client call so each phase
+  /// is visible to the row's in-progress presentation: the configured
+  /// archive script (if any) runs first in a transient tab on the
+  /// worktree, then `Worktree.archived` flips. The script's own output
+  /// lives in the spawned pane; only failures of the catalog flag flip
   /// surface here, via `lifecycleErrorToast`.
   private func runArchiveWithLifecycle(
     wid: WorktreeID, pid: ProjectID
   ) -> Effect<Action> {
     let client = hierarchyClient
+    let script = lifecycleScriptCommand(projectID: pid, \.archiveScript)
     return .run { send in
-      await send(.lifecycleStarted(worktreeID: wid))
+      await send(
+        .lifecycleStarted(
+          worktreeID: wid,
+          progress: WorktreeLifecycleProgress(
+            kind: .archive,
+            phase: script == nil ? .finalizing : .runningScript
+          )
+        )
+      )
+      if let script {
+        await client.runWorktreeLifecycleScript(wid, pid, script, "Archive")
+        await send(.lifecyclePhaseChanged(worktreeID: wid, phase: .finalizing))
+      }
       do {
-        try await client.setWorktreeArchivedWithLifecycle(wid, pid, true)
+        try await client.setWorktreeArchived(wid, true)
       } catch {
         let detail = (error as? GitWorktreeError).map(humanReadable) ?? error.localizedDescription
         await send(.lifecycleFailed(message: "Archive failed: \(detail)"))
@@ -976,11 +1047,11 @@ struct HierarchySidebarFeature {
     }
   }
 
-  /// Remove button → delete-script flow. The lifecycle wrapper opens a
-  /// new tab in the worktree, runs the configured `deleteScript` as the
-  /// pane's `initialCommand`, waits for the pane's child to exit, then
-  /// drives the relocate-then-prune `removeWorktreeWithGit`. Removal of
-  /// an *already-archived* worktree goes through `removeWorktreeWithGit`
+  /// Remove button → delete-script flow, sequenced like
+  /// `runArchiveWithLifecycle`: the configured `deleteScript` (if any)
+  /// runs first in a transient tab, then the relocate-then-prune
+  /// `removeWorktreeWithGit` tears the worktree down. Removal of an
+  /// *already-archived* worktree goes through `removeWorktreeWithGit`
   /// directly (skipping the script) — that path is owned by
   /// `ArchivedWorktreesFeature`. The script's own output lives in the
   /// spawned pane; only `removeWorktreeWithGit` failures surface here,
@@ -989,13 +1060,26 @@ struct HierarchySidebarFeature {
     client: HierarchyClient,
     wid: WorktreeID, pid: ProjectID
   ) -> Effect<Action> {
-    .run { send in
-      await send(.lifecycleStarted(worktreeID: wid))
+    let script = lifecycleScriptCommand(projectID: pid, \.deleteScript)
+    return .run { send in
+      await send(
+        .lifecycleStarted(
+          worktreeID: wid,
+          progress: WorktreeLifecycleProgress(
+            kind: .remove,
+            phase: script == nil ? .finalizing : .runningScript
+          )
+        )
+      )
+      if let script {
+        await client.runWorktreeLifecycleScript(wid, pid, script, "Delete")
+        await send(.lifecyclePhaseChanged(worktreeID: wid, phase: .finalizing))
+      }
       do {
         // A non-nil return means removal succeeded but the branch was
         // intentionally kept (checked out elsewhere) — surface it as a
         // non-fatal note via the same toast channel.
-        if let warning = try await client.removeWorktreeWithLifecycle(wid, pid) {
+        if let warning = try await client.removeWorktreeWithGit(wid, pid) {
           await send(.lifecycleFailed(message: warning))
         }
       } catch {
@@ -1003,5 +1087,26 @@ struct HierarchySidebarFeature {
       }
       await send(.lifecycleEnded(worktreeID: wid))
     }
+  }
+
+  /// The project's configured archive / delete script command, or `nil`
+  /// when unset / empty / whitespace-only — the same skip semantics the
+  /// creation stream applies to `setupCommand`. Resolved at effect-build
+  /// time so the lifecycle runs the script that was configured when the
+  /// user clicked, not whatever a mid-flight settings edit produces.
+  private func lifecycleScriptCommand(
+    projectID: ProjectID,
+    _ script: KeyPath<GitProjectSettings, ScriptDefinition?>
+  ) -> String? {
+    guard
+      let command =
+        settingsWriter
+        .readSnapshotSync()
+        .projects[projectID]?
+        .git?[keyPath: script]?
+        .command
+    else { return nil }
+    let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

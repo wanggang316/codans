@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// Reducer backing the "Archived Worktrees" sheet opened from the
 /// Project `⋯` menu. The view reads archived worktrees live from
@@ -69,7 +69,10 @@ struct ArchivedWorktreesFeature {
         state.pendingRemoval = nil
         return .run { send in
           do {
-            try await client.removeWorktreeWithGit(worktreeID, projectID)
+            // The kept-branch warning is surfaced by the main list's
+            // delete flow; this sheet's rows are already archived, so
+            // it's dropped here.
+            _ = try await client.removeWorktreeWithGit(worktreeID, projectID)
             await send(.removeFinished(worktreeID: worktreeID, error: nil))
           } catch let gitError as GitWorktreeError {
             await send(.removeFinished(worktreeID: worktreeID, error: humanReadable(gitError)))
