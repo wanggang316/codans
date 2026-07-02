@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Recursively renders the active Tab's `SplitTree<PaneID>`. Leaves scope
 /// a child `StoreOf<PaneHostFeature>` off the parent store and hand it
@@ -308,6 +308,18 @@ private struct LeafView: View {
       // terminal visually stays on the previously-shown worktree.
       LazyPaneHost(store: childStore)
         .id(paneID)
+        // Bringup trigger. Routed through the PARENT store with a
+        // membership check instead of `childStore.send(.task)` inside
+        // LazyPaneHost: the task body runs a beat after mount, and the
+        // element can be gone by then — e.g. a transient archive/delete
+        // script tab auto-closing the moment its instant script's child
+        // exits. Sending an element action for a removed ID trips TCA's
+        // missing-element runtime warning; the guard re-checks liveness
+        // at send time (both run on MainActor, so no gap in between).
+        .task(id: paneID) {
+          guard store.paneHosts[id: paneID] != nil else { return }
+          store.send(.paneHosts(.element(id: paneID, action: .task)))
+        }
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in

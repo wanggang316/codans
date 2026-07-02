@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import OSLog
-import CodansCore
 
 private let paneHostLogger = Logger(subsystem: "com.gumpw.codans.shell", category: "pane-host")
 
@@ -40,8 +40,9 @@ struct PaneHostFeature {
   }
 
   enum Action: Equatable {
-    /// Fired from `LazyPaneHost.task`. Idempotent: registry short-circuit
-    /// keeps re-renders free.
+    /// Fired from `LeafView`'s `.task` (routed through the parent store
+    /// behind a membership check — see `LazyPaneHost`'s doc). Idempotent:
+    /// registry short-circuit keeps re-renders free.
     case task
     case retryButtonTapped
     /// Internal: the async `ensureSurface` call returned successfully and
