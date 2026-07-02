@@ -1261,6 +1261,177 @@ struct RootFeatureTests {
     #expect(rec.isNewCalls.value.isEmpty)
   }
 
+  // MARK: - Creation focus at kickoff (beginPendingWorktreeCreation)
+
+  /// Recorder that keeps EVERY `selectWorktree` call (including nil
+  /// deselects, which `SelectRecorder`'s single latest-value slot can't
+  /// distinguish from "never called").
+  private struct SelectCallRecorder: Sendable {
+    let projects = LockIsolated<[ProjectID?]>([])
+    let worktrees = LockIsolated<[WorktreeID?]>([])
+    let isNewCalls = LockIsolated<[(WorktreeID, Bool)]>([])
+  }
+
+  /// Harness for the kickoff-focus tests: seeds a prior selection, wires
+  /// the call recorder, stubs the child's creation stream to finish
+  /// immediately (the row appends; no events arrive), and sets the LIVE
+  /// auto-switch snapshot.
+  @MainActor
+  private func makeKickoffStore(
+    autoSwitch: Bool,
+    initial: RootFeature.State,
+    recorder: SelectCallRecorder
+  ) -> TestStore<RootFeature.State, RootFeature.Action> {
+    let settings = Settings(worktree: WorktreeSettings(autoSwitchToNewWorktree: autoSwitch))
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0.gitWorktreeClient.createWorktreeStream = { _ in
+        AsyncThrowingStream { $0.finish() }
+      }
+      $0.hierarchyClient.selectProject = { pid in
+        recorder.projects.withValue { $0.append(pid) }
+      }
+      $0.hierarchyClient.selectWorktree = { wt, _ in
+        recorder.worktrees.withValue { $0.append(wt) }
+      }
+      $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
+        recorder.isNewCalls.withValue { $0.append((wt, isNew)) }
+      }
+    }
+    store.exhaustivity = .off
+    return store
+  }
+
+  private static func makeRootPending(projectID: ProjectID) -> PendingWorktree {
+    PendingWorktree(
+      id: PendingWorktreeID(),
+      projectID: projectID,
+      spec: CreateWorktreeSpec(
+        repoRoot: URL(fileURLWithPath: "/repo"),
+        baseDirectory: URL(fileURLWithPath: "/repo/.worktrees"),
+        name: "feat-x",
+        baseRef: "origin/main",
+        fetchOrigin: false,
+        copyIgnored: false,
+        copyUntracked: false
+      ),
+      displayName: "feat/x",
+      status: .running,
+      lastProgressLine: nil,
+      startedAt: Date(timeIntervalSince1970: 0)
+    )
+  }
+
+  /// Auto-switch ON: clicking Create moves focus to the creation right
+  /// away — the pre-create selection is stashed for a later bounce-back,
+  /// the loading overlay arms, and the manager selection deselects the
+  /// old row (project selected, worktree nil) so the sidebar highlight
+  /// lands on the pending row's manual pill.
+  @Test
+  func beginPendingOnFocusesCreationAndStashesPrior() async {
+    let projectID = ProjectID()
+    let prior = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
+    let pending = Self.makeRootPending(projectID: projectID)
+    let rec = SelectCallRecorder()
+    var initial = RootFeature.State()
+    initial.selection = prior
+    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec)
+
+    await store.send(.sidebar(.beginPendingWorktreeCreation(pending)))
+    await store.finish()
+
+    #expect(store.state.activePendingWorktreeID == pending.id)
+    #expect(store.state.pendingPriorSelection == prior)
+    #expect(rec.projects.value == [projectID])
+    #expect(rec.worktrees.value == [nil], "old row must deselect so the pending pill reads as focus")
+  }
+
+  /// Auto-switch OFF is authoritative from the first click: no loading
+  /// overlay, no selection movement — the user keeps working where they
+  /// are and the creation streams in the background row.
+  @Test
+  func beginPendingOffLeavesFocusUntouched() async {
+    let projectID = ProjectID()
+    let prior = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
+    let pending = Self.makeRootPending(projectID: projectID)
+    let rec = SelectCallRecorder()
+    var initial = RootFeature.State()
+    initial.selection = prior
+    let store = makeKickoffStore(autoSwitch: false, initial: initial, recorder: rec)
+
+    await store.send(.sidebar(.beginPendingWorktreeCreation(pending)))
+    await store.finish()
+
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(store.state.pendingPriorSelection == nil)
+    #expect(rec.projects.value.isEmpty)
+    #expect(rec.worktrees.value.isEmpty)
+  }
+
+  /// Mid-flight OFF flip while still following the creation: completion
+  /// mints the badge AND hands focus back to the stashed pre-create
+  /// selection (the user must not stay parked on a settled loading view
+  /// with nothing selected).
+  @Test
+  func gateOffWatchingRestoresPriorSelection() async {
+    let priorProject = ProjectID()
+    let priorWorktree = WorktreeID()
+    let prior = HierarchySelection(projectID: priorProject, worktreeID: priorWorktree)
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectCallRecorder()
+    var initial = RootFeature.State()
+    initial.activePendingWorktreeID = pendingID
+    initial.pendingPriorSelection = prior
+    let store = makeKickoffStore(autoSwitch: false, initial: initial, recorder: rec)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+
+    #expect(rec.isNewCalls.value.count == 1)
+    #expect(rec.isNewCalls.value.first?.1 == true)
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(store.state.pendingPriorSelection == nil)
+    #expect(rec.projects.value == [priorProject])
+    #expect(rec.worktrees.value == [priorWorktree])
+  }
+
+  /// Cancelling the FOLLOWED creation while still in the git-add leg
+  /// (row discarded, nothing materializes) bounces focus back to the
+  /// stashed pre-create selection.
+  @Test
+  func cancelOfFollowedCreationRestoresPrior() async {
+    let priorProject = ProjectID()
+    let priorWorktree = WorktreeID()
+    let prior = HierarchySelection(projectID: priorProject, worktreeID: priorWorktree)
+    let pending = Self.makeRootPending(projectID: ProjectID())
+    let rec = SelectCallRecorder()
+    var initial = RootFeature.State()
+    initial.sidebar.pendingWorktrees.append(pending)
+    initial.activePendingWorktreeID = pending.id
+    initial.pendingPriorSelection = prior
+    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec)
+
+    await store.send(.sidebar(.pendingWorktreeCancelTapped(pending.id)))
+    await store.finish()
+
+    #expect(store.state.sidebar.pendingWorktrees.isEmpty)
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(store.state.pendingPriorSelection == nil)
+    #expect(rec.projects.value == [priorProject])
+    #expect(rec.worktrees.value == [priorWorktree])
+  }
+
   // MARK: - Loading-view selection scoping (VAL-DETAIL-005 / VAL-DETAIL-006)
 
   /// VAL-DETAIL-005: selecting a REAL worktree mid-creation clears

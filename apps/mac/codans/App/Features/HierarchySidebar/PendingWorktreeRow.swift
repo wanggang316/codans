@@ -3,15 +3,25 @@ import SwiftUI
 /// Sidebar row for an in-flight worktree creation. Renders a spinner +
 /// latest progress line while running; a red dot + truncated error
 /// caption after failure. Right-click exposes Cancel (running) or
-/// Retry / Discard (failed). Not selectable; not eligible for ⌃⌘N.
+/// Retry / Discard (failed). Not natively selectable (no `.tag`); when
+/// the creation is the one the detail pane is following
+/// (`isHighlighted`), the container paints a manual accent background
+/// and this row switches its content to the selected-row light tones.
 /// See `docs/design-docs/worktree-sidebar-ordering.md` §pending 段.
 struct PendingWorktreeRow: View {
   let pending: PendingWorktree
+  /// True while this creation is the active one the detail pane follows —
+  /// the container draws the accent selection background, so every
+  /// explicitly-colored element here must flip to the light selected-row
+  /// tone (the same problem `WorktreeRowIcon` solves via
+  /// `backgroundProminence`, which never fires for this row because the
+  /// highlight is manual, not a native List selection).
+  var isHighlighted: Bool = false
   let onCancel: () -> Void
   let onRetry: () -> Void
   let onDiscard: () -> Void
 
-  /// Reduce Motion suppresses the decorative name shimmer so the
+  /// Reduce Motion suppresses the decorative shimmer on both lines so the
   /// in-progress state never relies on animation alone. The non-animated
   /// signals — the name's `in-progress`/`settled` accessibility value, the
   /// row's stage value, and the streaming second line — carry the state
@@ -29,20 +39,39 @@ struct PendingWorktreeRow: View {
           // remains visible after truncation.
           .lineLimit(1)
           .truncationMode(.tail)
+          .foregroundStyle(primaryColor)
           // Decorative light-sweep while the creation streams; gated off on
           // failure (the row has settled) and under Reduce Motion. The
           // `nameProgressAccessibilityValue` below is the probeable signal —
           // the shimmer is purely cosmetic.
           .shimmer(isActive: pending.isRunning && !reduceMotion)
           .accessibilityValue(pending.nameProgressAccessibilityValue)
-        Text(secondaryLine)
-          .font(.caption)
-          .foregroundStyle(secondaryColor)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          // Stage value rides this leaf so both it and the name's
-          // in-progress/settled value are probeable children under `.contain`.
-          .accessibilityValue(stageAccessibilityValue)
+        HStack(spacing: 3) {
+          // Setup-script phase glyph leads the STREAMING line, not the
+          // leading icon slot: the slot keeps the animated spinner (a
+          // static glyph there reads as "stalled"), while the glyph here
+          // annotates WHAT is streaming. Same glyph the Settings "Setup
+          // Script" lifecycle section uses.
+          if pending.isRunning, pending.phase == .runningSetupScript {
+            Image(systemName: "truck.box.badge.clock")
+              .font(.caption2)
+              .foregroundStyle(scriptGlyphColor)
+              // Decorative — the stage value on the text leaf is the
+              // probeable signal; the glyph only echoes it visually.
+              .accessibilityHidden(true)
+          }
+          Text(secondaryLine)
+            .font(.caption)
+            .foregroundStyle(secondaryColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            // Stage value rides this leaf so both it and the name's
+            // in-progress/settled value are probeable children under `.contain`.
+            .accessibilityValue(stageAccessibilityValue)
+        }
+        // The second line carries the live narration; sweep it together
+        // with the name so the whole row reads as one in-progress unit.
+        .shimmer(isActive: pending.isRunning && !reduceMotion)
       }
       Spacer()
     }
@@ -94,30 +123,16 @@ struct PendingWorktreeRow: View {
   private var icon: some View {
     switch pending.status {
     case .running:
-      switch pending.phase {
-      case .creatingWorktree:
-        // `git worktree add` leg — indeterminate spinner. A project with no
-        // setup script never advances past this phase, so it spins the whole
-        // run; no special-casing needed beyond keying on `phase`.
-        ProgressView()
-          .controlSize(.small)
-          .frame(width: 14, height: 14)
-          // Decorative — the status leaf's stage value (`creating`) is the
-          // probeable signal. Hidden for symmetry with the setup-script
-          // glyph's `.accessibilityHidden(true)`.
-          .accessibilityHidden(true)
-      case .runningSetupScript:
-        // Setup-script leg — the same `truck.box.badge.clock` glyph (blue)
-        // the Settings "Setup Script" lifecycle section uses, so the row
-        // visually echoes which script is running. See
-        // `ProjectGeneralSettingsView.lifecycleSections`.
-        Image(systemName: "truck.box.badge.clock")
-          .foregroundStyle(.blue)
-          .frame(width: 14, height: 14)
-          // Decorative — the row's stage value (`setupScript`) is the
-          // probeable signal; the glyph only echoes it visually.
-          .accessibilityHidden(true)
-      }
+      // Indeterminate spinner for the WHOLE run — including the
+      // setup-script leg. The script glyph annotates the second line
+      // instead (see body); keeping motion in this slot is what tells
+      // the user the creation is alive.
+      ProgressView()
+        .controlSize(.small)
+        .frame(width: 14, height: 14)
+        // Decorative — the status leaf's stage value is the probeable
+        // signal.
+        .accessibilityHidden(true)
     case .failed:
       Circle()
         .fill(Color.red)
@@ -136,10 +151,25 @@ struct PendingWorktreeRow: View {
     }
   }
 
+  private var primaryColor: Color {
+    isHighlighted ? Color(nsColor: .alternateSelectedControlTextColor) : .primary
+  }
+
   private var secondaryColor: Color {
+    if isHighlighted {
+      // Match the dimmed-but-light caption tone native emphasized rows
+      // give their secondary text.
+      return Color(nsColor: .alternateSelectedControlTextColor).opacity(0.85)
+    }
     switch pending.status {
     case .running: return .secondary
     case .failed: return .red
     }
+  }
+
+  private var scriptGlyphColor: Color {
+    isHighlighted
+      ? Color(nsColor: .alternateSelectedControlTextColor)
+      : .blue
   }
 }
