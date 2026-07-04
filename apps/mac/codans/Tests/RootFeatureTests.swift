@@ -953,7 +953,10 @@ struct RootFeatureTests {
     store.exhaustivity = .off
 
     await store.send(.worktreeHeadChanged(worktreeA))
-    await store.receive(\.branchSwitcher.headChangedForCurrentWorktree)
+    // The forward is the LAST step of an effect that first runs a real
+    // local-diff refresh + project reconcile (not stubbed here); under
+    // parallel suite load that can exceed the 1s default receive window.
+    await store.receive(\.branchSwitcher.headChangedForCurrentWorktree, timeout: .seconds(5))
     await store.finish()
   }
 
@@ -1149,7 +1152,10 @@ struct RootFeatureTests {
   @Test
   func gateOffWatchingStays() async {
     // VAL-SWITCH-004: auto-switch OFF + still viewing this pending creation
-    // → stays put. OFF is authoritative; the still-viewing override is removed.
+    // → the NEW worktree never takes focus. With no pre-create selection
+    // stashed (this harness seeds none) there is nothing to restore, so no
+    // selection movement happens at all; the stashed-prior landing is
+    // covered by `gateOffWatchingRestoresPriorSelection`.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
@@ -1327,11 +1333,11 @@ struct RootFeatureTests {
     )
   }
 
-  /// Auto-switch ON: clicking Create moves focus to the creation right
-  /// away — the pre-create selection is stashed for a later bounce-back,
-  /// the loading overlay arms, and the manager selection deselects the
-  /// old row (project selected, worktree nil) so the sidebar highlight
-  /// lands on the pending row's manual pill.
+  /// Clicking Create moves focus to the creation right away — the
+  /// pre-create selection is stashed for the completion landing, the
+  /// loading overlay arms, and the manager selection deselects the old
+  /// row (project selected, worktree nil) so the sidebar highlight lands
+  /// on the pending row's manual pill.
   @Test
   func beginPendingOnFocusesCreationAndStashesPrior() async {
     let projectID = ProjectID()
@@ -1351,11 +1357,12 @@ struct RootFeatureTests {
     #expect(rec.worktrees.value == [nil], "old row must deselect so the pending pill reads as focus")
   }
 
-  /// Auto-switch OFF is authoritative from the first click: no loading
-  /// overlay, no selection movement — the user keeps working where they
-  /// are and the creation streams in the background row.
+  /// Creation focus at kickoff is UNCONDITIONAL — the auto-switch
+  /// setting only decides where focus lands at COMPLETION. OFF must
+  /// behave identically to ON at the click: overlay armed, prior
+  /// stashed, old row deselected.
   @Test
-  func beginPendingOffLeavesFocusUntouched() async {
+  func beginPendingOffAlsoFocusesCreationAtKickoff() async {
     let projectID = ProjectID()
     let prior = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
     let pending = Self.makeRootPending(projectID: projectID)
@@ -1367,16 +1374,17 @@ struct RootFeatureTests {
     await store.send(.sidebar(.beginPendingWorktreeCreation(pending)))
     await store.finish()
 
-    #expect(store.state.activePendingWorktreeID == nil)
-    #expect(store.state.pendingPriorSelection == nil)
-    #expect(rec.projects.value.isEmpty)
-    #expect(rec.worktrees.value.isEmpty)
+    #expect(store.state.activePendingWorktreeID == pending.id)
+    #expect(store.state.pendingPriorSelection == prior)
+    #expect(rec.projects.value == [projectID])
+    #expect(rec.worktrees.value == [nil])
   }
 
-  /// Mid-flight OFF flip while still following the creation: completion
-  /// mints the badge AND hands focus back to the stashed pre-create
-  /// selection (the user must not stay parked on a settled loading view
-  /// with nothing selected).
+  /// Auto-switch OFF landing while still following the creation:
+  /// completion mints the badge AND hands focus back to the stashed
+  /// pre-create selection — OFF's contract is "when it's done, put me
+  /// back where I was", never "leave me parked on a settled loading
+  /// view with nothing selected".
   @Test
   func gateOffWatchingRestoresPriorSelection() async {
     let priorProject = ProjectID()
