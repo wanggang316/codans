@@ -21,6 +21,12 @@ enum BranchCollisionKind: Equatable {
   /// Branch is checked out by a live worktree.
   /// Git refuses a second simultaneous checkout.
   case checkedOut
+  /// Branch belongs to an ARCHIVED worktree — invisible in the sidebar,
+  /// but its git worktree/branch still exists behind the archived flag.
+  /// Presented separately from `.checkedOut` because "checked out by a
+  /// worktree you can't see" reads as a bug; the note points at the
+  /// Archived Worktrees sheet instead.
+  case archivedWorktree
 }
 
 /// A live worktree's claim on a branch: the branch's REAL casing plus the
@@ -91,6 +97,13 @@ struct CreateWorktreeFeature {
     /// same branch out twice); a name in `localBranchNamesLower` but NOT here
     /// is a "dangling" branch.
     var liveWorktreeOwnersByLower: [String: LiveBranchOwner] = [:]
+    /// Branches held by the project's ARCHIVED worktrees, keyed by their
+    /// lowercased form. Seeded at sheet CONSTRUCTION from the catalog (the
+    /// parent sidebar owns that knowledge; git alone can't tell archived
+    /// from live — the git worktree still exists). Classification checks
+    /// this FIRST so a collision with an invisible row is explained as
+    /// "archived", not as a checkout the user can't find.
+    var archivedBranchOwnersByLower: [String: LiveBranchOwner] = [:]
     var automaticBaseRef: String?
     var loadingOptions: Bool = true
 
@@ -122,6 +135,11 @@ struct CreateWorktreeFeature {
     /// draft is not on a checked-out collision. The conflict note names it
     /// as the reason the branch is unavailable.
     var checkedOutOwner: LiveBranchOwner?
+    /// The ARCHIVED worktree holding the drafted name, resolved at
+    /// classification time from `archivedBranchOwnersByLower`. `nil` when
+    /// the draft is not on an archived collision. The conflict note names
+    /// it and points at the Archived Worktrees sheet.
+    var archivedOwner: LiveBranchOwner?
 
     // MARK: - Derived
 
@@ -274,11 +292,13 @@ struct CreateWorktreeFeature {
           state.branchCollisionKind = .none
           state.danglingRealName = nil
           state.checkedOutOwner = nil
+          state.archivedOwner = nil
           state.validationError = nil
         } else if trimmed.contains(where: \.isWhitespace) {
           state.branchCollisionKind = .none
           state.danglingRealName = nil
           state.checkedOutOwner = nil
+          state.archivedOwner = nil
           state.validationError = "Branch names can't contain spaces."
         } else {
           state.validationError = nil
@@ -288,7 +308,17 @@ struct CreateWorktreeFeature {
           // etc.) is flagged WHILE TYPING, not just on Create.
           let sanitized = GitWorktreeClient.sanitizeBranchName(trimmed)
           let lower = sanitized.lowercased()
-          if let owner = state.liveWorktreeOwnersByLower[lower] {
+          if let archived = state.archivedBranchOwnersByLower[lower] {
+            // Held by an ARCHIVED worktree. Checked FIRST: the same branch
+            // usually also appears in the live-git map (archiving keeps the
+            // git worktree), but "checked out by a worktree you can't see
+            // in the sidebar" would read as a bug — name the archived row
+            // and point at the Archived Worktrees sheet instead.
+            state.branchCollisionKind = .archivedWorktree
+            state.archivedOwner = archived
+            state.checkedOutOwner = nil
+            state.danglingRealName = nil
+          } else if let owner = state.liveWorktreeOwnersByLower[lower] {
             // Checked out by a live worktree — git refuses a second
             // checkout, so the name is simply unavailable. The note names
             // the owning worktree; Create stays disabled until the draft
@@ -296,6 +326,7 @@ struct CreateWorktreeFeature {
             state.branchCollisionKind = .checkedOut
             state.checkedOutOwner = owner
             state.danglingRealName = nil
+            state.archivedOwner = nil
           } else if state.localBranchNamesLower.contains(lower) {
             // Dangling branch: exists as a local ref but no worktree checks
             // it out — usually left behind by a removed worktree. Recover
@@ -307,12 +338,14 @@ struct CreateWorktreeFeature {
             state.branchCollisionKind = .dangling
             state.danglingRealName = state.localBranchNamesByLower[lower] ?? sanitized
             state.checkedOutOwner = nil
+            state.archivedOwner = nil
           } else {
             // Remote-only names (e.g. origin/foo with no local foo) also
             // land here: classification keys on LOCAL sets only.
             state.branchCollisionKind = .none
             state.danglingRealName = nil
             state.checkedOutOwner = nil
+            state.archivedOwner = nil
           }
         }
         return .none

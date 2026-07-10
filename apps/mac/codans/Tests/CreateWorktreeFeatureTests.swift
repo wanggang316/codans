@@ -15,7 +15,8 @@ import Testing
 struct CreateWorktreeFeatureTests {
   private func initialState(
     currentPendingCountForProject: Int = 0,
-    localBranchNames: Set<String> = ["main", "feature/existing"]
+    localBranchNames: Set<String> = ["main", "feature/existing"],
+    archivedOwners: [String: LiveBranchOwner] = [:]
   ) -> CreateWorktreeFeature.State {
     var state = CreateWorktreeFeature.State(
       projectID: ProjectID(),
@@ -32,6 +33,7 @@ struct CreateWorktreeFeatureTests {
     state.liveWorktreeOwnersByLower = [
       "main": LiveBranchOwner(branch: "main", worktreeName: "repo")
     ]
+    state.archivedBranchOwnersByLower = archivedOwners
     return state
   }
 
@@ -178,6 +180,52 @@ struct CreateWorktreeFeatureTests {
     }
   }
 
+  /// A branch held by an ARCHIVED worktree classifies as `.archivedWorktree`
+  /// with the owner resolved — the note must say the row is archived, not
+  /// "checked out by a worktree" the user can't see in the sidebar.
+  @Test
+  func branchCollisionKindArchivedForArchivedWorktreeBranch() async {
+    let archived = LiveBranchOwner(branch: "feat/parked", worktreeName: "feat-parked")
+    let store = TestStore(
+      initialState: initialState(
+        localBranchNames: ["main", "feat/parked"],
+        archivedOwners: ["feat/parked": archived]
+      )
+    ) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("feat/parked")) {
+      $0.branchCollisionKind = .archivedWorktree
+      $0.archivedOwner = archived
+      $0.checkedOutOwner = nil
+      $0.danglingRealName = nil
+    }
+  }
+
+  /// Archiving keeps the git worktree, so an archived branch usually also
+  /// appears in the LIVE map — the archived presentation must win, or the
+  /// note would blame an invisible checkout.
+  @Test
+  func archivedClassificationBeatsLiveCheckout() async {
+    let archived = LiveBranchOwner(branch: "feat/parked", worktreeName: "feat-parked")
+    var state = initialState(
+      localBranchNames: ["main", "feat/parked"],
+      archivedOwners: ["feat/parked": archived]
+    )
+    state.liveWorktreeOwnersByLower["feat/parked"] =
+      LiveBranchOwner(branch: "feat/parked", worktreeName: "feat-parked")
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.branchDraftChanged("feat/parked")) {
+      $0.branchCollisionKind = .archivedWorktree
+      $0.archivedOwner = archived
+      $0.checkedOutOwner = nil
+    }
+  }
+
   /// Leaving a collision (typing on to a free name) clears BOTH note
   /// metadata fields so a stale owner / real name can never label the
   /// wrong draft.
@@ -196,6 +244,7 @@ struct CreateWorktreeFeatureTests {
       $0.branchCollisionKind = .none
       $0.checkedOutOwner = nil
       $0.danglingRealName = nil
+      $0.archivedOwner = nil
     }
   }
 
@@ -263,8 +312,17 @@ struct CreateWorktreeFeatureTests {
   /// why — for BOTH collision kinds.
   @Test
   func collisionBlocksDirectlyDispatchedCreate() async {
-    for (draft, expectedName) in [("main", "main"), ("feature/existing", "feature/existing")] {
-      var state = initialState()
+    for (draft, expectedName) in [
+      ("main", "main"),
+      ("feature/existing", "feature/existing"),
+      ("feat/parked", "feat/parked"),
+    ] {
+      var state = initialState(
+        localBranchNames: ["main", "feature/existing", "feat/parked"],
+        archivedOwners: [
+          "feat/parked": LiveBranchOwner(branch: "feat/parked", worktreeName: "feat-parked")
+        ]
+      )
       state.selectedBaseRef = "origin/main"
       let store = TestStore(initialState: state) {
         CreateWorktreeFeature()

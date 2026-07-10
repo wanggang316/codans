@@ -151,6 +151,13 @@ struct CreateWorktreeSheet: View {
         "A local branch named \"\(real)\" already exists without a worktree — it was "
         + "likely kept when its worktree was removed. Choose a different name, or delete "
         + "the branch (git branch -D \"\(real)\") and reopen this dialog."
+    case .archivedWorktree:
+      let branch = store.archivedOwner?.branch ?? store.sanitizedBranchDraft
+      let name = store.archivedOwner?.worktreeName ?? branch
+      return
+        "\"\(branch)\" belongs to the archived worktree \"\(name)\" — it's hidden from "
+        + "the sidebar, but its branch and files still exist. Unarchive or remove it via "
+        + "the Project's ⋯ menu → \"Archived Worktrees…\", or choose a different name."
     case .none:
       return ""
     }

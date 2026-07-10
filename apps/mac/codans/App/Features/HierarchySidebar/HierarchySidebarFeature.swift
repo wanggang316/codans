@@ -607,12 +607,30 @@ struct HierarchySidebarFeature {
         projectGit?.copyUntrackedOnWorktreeCreate ?? globalWorktree.copyUntrackedOnCreate
       let fetchOriginDefault =
         projectGit?.fetchRemoteOnWorktreeCreate ?? globalWorktree.fetchRemoteOnCreate
+      // Branches held by ARCHIVED rows, so the sheet can explain a name
+      // collision the user can't see in the sidebar (archiving keeps the
+      // git worktree + branch; only the catalog knows the row is hidden).
+      let archivedOwners = Dictionary(
+        project.worktrees
+          .filter(\.archived)
+          .compactMap { worktree -> (String, LiveBranchOwner)? in
+            let branch = (worktree.branch ?? worktree.name)
+              .trimmingCharacters(in: .whitespaces)
+            guard !branch.isEmpty else { return nil }
+            return (
+              branch.lowercased(),
+              LiveBranchOwner(branch: branch, worktreeName: worktree.name)
+            )
+          },
+        uniquingKeysWith: { first, _ in first }
+      )
       state.createWorktreeSheet = CreateWorktreeFeature.State(
         projectID: projectID,
         repoRoot: URL(fileURLWithPath: gitRoot),
         worktreesDirectory: defaultWtDir,
         currentPendingCountForProject: pendingCount,
         baseRefOverride: projectGit?.worktreeBaseRef,
+        archivedBranchOwnersByLower: archivedOwners,
         fetchOrigin: fetchOriginDefault,
         copyIgnored: copyIgnoredDefault,
         copyUntracked: copyUntrackedDefault
