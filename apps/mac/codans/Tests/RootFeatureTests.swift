@@ -949,14 +949,16 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
+      // The forward is the LAST step of the head-change effect; the live
+      // diff monitor (testValue == liveValue) would spawn a real
+      // `git diff` subprocess first and blow the receive window under
+      // parallel suite load. A no-op fetch keeps the effect deterministic.
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
     }
     store.exhaustivity = .off
 
     await store.send(.worktreeHeadChanged(worktreeA))
-    // The forward is the LAST step of an effect that first runs a real
-    // local-diff refresh + project reconcile (not stubbed here); under
-    // parallel suite load that can exceed the 1s default receive window.
-    await store.receive(\.branchSwitcher.headChangedForCurrentWorktree, timeout: .seconds(5))
+    await store.receive(\.branchSwitcher.headChangedForCurrentWorktree)
     await store.finish()
   }
 
@@ -979,6 +981,9 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
+      // Same no-op fetch as the match-arm test: keep the effect free of
+      // real `git diff` subprocesses so finish() returns promptly.
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
     }
     store.exhaustivity = .off
 
@@ -1414,6 +1419,48 @@ struct RootFeatureTests {
     #expect(rec.worktrees.value == [priorWorktree])
   }
 
+  /// Clicking the pending row after navigating away re-arms the creation
+  /// focus — the overlay, the pending pill, and the deselect all return,
+  /// and the just-left selection becomes the new restore point. This is
+  /// the "switch back" half of arbitrary switching during a creation.
+  @Test
+  func pendingRowTapRefocusesCreationAfterNavigatingAway() async {
+    let projectID = ProjectID()
+    let pending = Self.makeRootPending(projectID: projectID)
+    let elsewhere = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
+    let rec = SelectCallRecorder()
+    var initial = RootFeature.State()
+    // As after navigating away mid-creation: row still streaming, overlay
+    // and stash both cleared by the real-worktree landing.
+    initial.sidebar.pendingWorktrees.append(pending)
+    initial.selection = elsewhere
+    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec)
+
+    await store.send(.sidebar(.pendingWorktreeRowTapped(pending.id)))
+    await store.finish()
+
+    #expect(store.state.activePendingWorktreeID == pending.id)
+    #expect(store.state.pendingPriorSelection == elsewhere)
+    #expect(rec.projects.value == [projectID])
+    #expect(rec.worktrees.value == [nil])
+  }
+
+  /// A tap racing the row's removal (completion / discard landed first)
+  /// is dropped — no overlay pointing at a row that no longer exists.
+  @Test
+  func pendingRowTapOnRemovedRowIsNoOp() async {
+    let pending = Self.makeRootPending(projectID: ProjectID())
+    let rec = SelectCallRecorder()
+    let store = makeKickoffStore(
+      autoSwitch: true, initial: RootFeature.State(), recorder: rec)
+
+    await store.send(.sidebar(.pendingWorktreeRowTapped(pending.id)))
+    await store.finish()
+
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(rec.projects.value.isEmpty)
+  }
+
   /// Cancelling the FOLLOWED creation while still in the git-add leg
   /// (row discarded, nothing materializes) bounces focus back to the
   /// stashed pre-create selection.
@@ -1495,9 +1542,9 @@ struct RootFeatureTests {
   /// VAL-DETAIL-006: navigating to a NON-worktree selection (a project-only
   /// row, or empty selection) does NOT clear `activePendingWorktreeID`.
   /// Combined with the resolver reading the live `pendingWorktrees` row, this
-  /// is what restores the loading view (streaming continuing) when the user
-  /// returns to the in-progress context — the pending row is not selectable,
-  /// so only a real-worktree landing is allowed to retire the overlay.
+  /// is what keeps the loading view up while the creation is focused (the
+  /// focus move itself lands a nil-worktree selection) — only a REAL
+  /// worktree landing retires the overlay.
   @Test
   func selectingNonWorktreeKeepsActivePendingOverlay() async {
     let projectID = ProjectID()

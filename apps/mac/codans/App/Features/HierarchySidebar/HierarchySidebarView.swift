@@ -819,6 +819,13 @@ struct HierarchySidebarView: View {
       onRetry: { store.send(.pendingWorktreeRetryTapped(pending.id)) },
       onDiscard: { store.send(.pendingWorktreeDiscardTapped(pending.id)) }
     )
+    // Pending rows carry no `.tag`, so the native List selection can't
+    // bring the user back to a creation they navigated away from — this
+    // gesture is that way back (RootFeature re-arms the loading focus).
+    // Right-click still opens the row's context menu. `.isButton` tells
+    // assistive tech the row is activatable despite not being a Button.
+    .onTapGesture { store.send(.pendingWorktreeRowTapped(pending.id)) }
+    .accessibilityAddTraits(.isButton)
     // Match the worktree row's `listRowInsets` so the spinner + name line up
     // with sibling worktree rows. Without this the row renders flush-left
     // because the clip-view shift compensated by `leading: 14` (see

@@ -282,6 +282,10 @@ struct HierarchySidebarFeature {
     case pendingWorktreeRetryTapped(PendingWorktreeID)
     case pendingWorktreeDiscardTapped(PendingWorktreeID)
     case pendingWorktreeCancelTapped(PendingWorktreeID)
+    /// Left-click on a pending row — the user wants to come BACK to the
+    /// creation they navigated away from. Handled by `RootFeature` (it
+    /// owns the loading-overlay focus); a no-op at this level.
+    case pendingWorktreeRowTapped(PendingWorktreeID)
 
     // Sidebar bottom-bar sort mode.
     /// User picked a non-manual sort from the sort popover. Persists and
@@ -934,6 +938,11 @@ struct HierarchySidebarFeature {
 
     case .pendingWorktreeDiscardTapped(let id):
       state.pendingWorktrees.remove(id: id)
+      return .none
+
+    case .pendingWorktreeRowTapped:
+      // RootFeature owns the loading-overlay focus and handles this by
+      // interception; nothing to do at the sidebar level.
       return .none
 
     case .pendingWorktreeCancelTapped(let id):

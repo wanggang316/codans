@@ -1137,15 +1137,18 @@ struct RootFeature {
         // moving focus to a row that doesn't exist would blank the
         // detail pane.
         guard state.sidebar.pendingWorktrees[id: pending.id] != nil else { return .none }
-        // Keep the ORIGINAL pre-creation selection when a second creation
-        // begins while the first is still focused — restoring should land
-        // on the last REAL selection, not on the intermediate nil.
-        if state.pendingPriorSelection == nil {
-          state.pendingPriorSelection = state.selection
-        }
-        state.activePendingWorktreeID = pending.id
-        hierarchyClient.selectProject(pending.projectID)
-        try? hierarchyClient.selectWorktree(nil, pending.projectID)
+        focusPendingCreation(pending, state: &state)
+        return .none
+
+      // Left-click on a pending row: come BACK to a creation the user
+      // navigated away from — the loading overlay, the pending pill, and
+      // the deselected old row are restored exactly as at kickoff, so
+      // switching between the creation and real worktrees works in both
+      // directions for the whole run. The row-gone guard drops taps that
+      // race the row's removal (completion / discard).
+      case .sidebar(.pendingWorktreeRowTapped(let id)):
+        guard let pending = state.sidebar.pendingWorktrees[id: id] else { return .none }
+        focusPendingCreation(pending, state: &state)
         return .none
 
       // The followed creation was abandoned (cancel while still in the
@@ -2185,6 +2188,23 @@ struct RootFeature {
       }
     }
     return nil
+  }
+
+  /// Moves focus to an in-flight creation: stash the current selection as
+  /// the restore point (unless one is already stashed — a second focus
+  /// while the first is live must not overwrite the last REAL selection
+  /// with the intermediate nil), arm the loading overlay, and NIL the
+  /// manager's worktree selection so the old row's native highlight
+  /// retires and the pending row's manual pill reads as the selection.
+  /// Shared by creation kickoff and by clicking a pending row to come
+  /// back to it after navigating away.
+  private func focusPendingCreation(_ pending: PendingWorktree, state: inout State) {
+    if state.pendingPriorSelection == nil {
+      state.pendingPriorSelection = state.selection
+    }
+    state.activePendingWorktreeID = pending.id
+    hierarchyClient.selectProject(pending.projectID)
+    try? hierarchyClient.selectWorktree(nil, pending.projectID)
   }
 
   /// Puts the manager's selection back on the stashed pre-creation

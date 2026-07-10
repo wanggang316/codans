@@ -3,8 +3,10 @@ import SwiftUI
 /// Sidebar row for an in-flight worktree creation. Renders a spinner +
 /// latest progress line while running; a red dot + truncated error
 /// caption after failure. Right-click exposes Cancel (running) or
-/// Retry / Discard (failed). Not natively selectable (no `.tag`); when
-/// the creation is the one the detail pane is following
+/// Retry / Discard (failed). Not natively selectable (no `.tag`) — the
+/// container attaches a tap gesture instead, which re-focuses the
+/// creation (loading view + highlight) after the user navigated away.
+/// When the creation is the one the detail pane is following
 /// (`isHighlighted`), the container paints a manual accent background
 /// and this row switches its content to the selected-row light tones.
 /// See `docs/design-docs/worktree-sidebar-ordering.md` §pending 段.
