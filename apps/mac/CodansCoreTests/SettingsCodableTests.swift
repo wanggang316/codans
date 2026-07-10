@@ -269,95 +269,21 @@ struct WorktreeAutoSwitchCodableTests {
   }
 }
 
-/// `WorktreeSettings.branchConflictResolution` — lenient-decoded enum that falls back to
-/// `.rename` for absent, unknown, or mis-cased raw values without throwing.
-///
-/// The lenient decode path reads a raw `String` and maps it through `init(rawValue:)` so
-/// a future unknown value cannot corrupt the entire `WorktreeSettings` decode.
-struct BranchConflictResolutionCodableTests {
+/// The `branchConflictResolution` key was removed together with the
+/// reuse/recreate resolution machinery — collisions are informational-only
+/// now. A legacy key in `settings.json` must be IGNORED without corrupting
+/// the rest of the `WorktreeSettings` decode.
+struct LegacyBranchConflictKeyTests {
   private let decoder = JSONDecoder.touchCodeDefault
-  private let encoder = JSONEncoder.touchCodeDefault
 
-  /// Decode a `WorktreeSettings` from a plain `[String: Any]` dict so tests are
-  /// agnostic to the encoding shape of unrelated keys.
-  private func decode(from dict: [String: Any]) throws -> WorktreeSettings {
-    let data = try JSONSerialization.data(withJSONObject: dict)
-    return try decoder.decode(WorktreeSettings.self, from: data)
-  }
-
-  private func encodedDict(_ worktree: WorktreeSettings) throws -> [String: Any] {
-    let data = try encoder.encode(worktree)
-    return try #require(
-      try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    )
-  }
-
-  // MARK: Round-trip
-
-  /// `.reuse` survives encode → decode.
+  /// A leftover key (any raw value) decodes cleanly and preserves siblings.
   @Test
-  func reuseRoundTrips() throws {
-    var worktree = WorktreeSettings.default
-    worktree.branchConflictResolution = .reuse
-    let data = try encoder.encode(worktree)
-    let decoded = try decoder.decode(WorktreeSettings.self, from: data)
-    #expect(decoded.branchConflictResolution == .reuse)
-  }
-
-  /// `.recreate` survives encode → decode.
-  @Test
-  func recreateRoundTrips() throws {
-    var worktree = WorktreeSettings.default
-    worktree.branchConflictResolution = .recreate
-    let data = try encoder.encode(worktree)
-    let decoded = try decoder.decode(WorktreeSettings.self, from: data)
-    #expect(decoded.branchConflictResolution == .recreate)
-  }
-
-  // MARK: Absent key
-
-  /// A `settings.json` that has no `branchConflictResolution` key decodes to `.rename`.
-  @Test
-  func missingKeyDecodesToRename() throws {
-    let result = try decode(from: [:])
-    #expect(result.branchConflictResolution == .rename)
-  }
-
-  // MARK: Omit-when-default
-
-  /// Encoding `.rename` omits the key entirely so the settings file stays minimal.
-  @Test
-  func renameIsOmittedFromEncoding() throws {
-    let worktree = WorktreeSettings.default  // branchConflictResolution == .rename
-    let dict = try encodedDict(worktree)
-    #expect(
-      dict["branchConflictResolution"] == nil,
-      "Expected key absent for default .rename; got:\n\(dict)"
-    )
-  }
-
-  // MARK: Lenient decode — unknown raw value
-
-  /// An unknown raw value (`"destroy"`) decodes to `.rename` WITHOUT throwing, and a
-  /// sibling key present in the same dict is preserved after the decode.
-  @Test
-  func unknownRawValueDecodesToRenameWithoutThrowing() throws {
-    let result = try decode(from: [
-      "branchConflictResolution": "destroy",
+  func legacyKeyIsIgnoredWithoutThrowing() throws {
+    let data = try JSONSerialization.data(withJSONObject: [
+      "branchConflictResolution": "recreate",
       "fetchRemoteOnCreate": false,
     ])
-    #expect(result.branchConflictResolution == .rename, "Expected .rename fallback for unknown raw value")
-    // The sibling key must survive — the decode must not have thrown and been caught externally.
-    #expect(result.fetchRemoteOnCreate == false, "Expected sibling key preserved after lenient decode")
-  }
-
-  // MARK: Lenient decode — mis-cased value
-
-  /// A mis-cased value (`"Reuse"`) decodes to `.rename` without throwing because the raw
-  /// value match is case-sensitive and `"Reuse"` != `"reuse"`.
-  @Test
-  func misCasedValueDecodesToRenameWithoutThrowing() throws {
-    let result = try decode(from: ["branchConflictResolution": "Reuse"])
-    #expect(result.branchConflictResolution == .rename, "Expected .rename fallback for mis-cased raw value")
+    let result = try decoder.decode(WorktreeSettings.self, from: data)
+    #expect(result.fetchRemoteOnCreate == false, "Expected sibling key preserved")
   }
 }

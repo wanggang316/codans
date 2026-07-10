@@ -37,75 +37,18 @@ struct CreateWorktreeSheet: View {
         }
       }
 
-      // Inline resolution control — visible only when a branch collision exists.
-      switch store.branchCollisionKind {
-      case .checkedOut:
-        // Only Rename is viable; offer no picker — just explain why.
-        Text(
-          "\"\(store.sanitizedBranchDraft)\" is checked out in another worktree — reuse/recreate isn't possible; rename it."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      case .dangling:
-        // All three resolutions are valid for a dangling branch.
-        VStack(alignment: .leading, spacing: 4) {
-          Text(danglingConflictNote)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-          Text("Conflict resolution").font(.callout)
-          Picker(
-            "",
-            selection: Binding(
-              get: { store.selectedResolution },
-              set: { store.send(.resolutionChanged($0)) }
-            )
-          ) {
-            Text("Rename (add numeric suffix)").tag(BranchConflictResolution.rename)
-            Text("Reuse existing commits").tag(BranchConflictResolution.reuse)
-            Text("Recreate from base ref").tag(BranchConflictResolution.recreate)
-          }
-          .labelsHidden()
-          .pickerStyle(.menu)
-
-          // Destructive-Recreate guard: a RED warning naming the commits that
-          // will be permanently deleted, plus a DISCRETE confirm Toggle. Shown
-          // only when a Recreate would (or might) discard commits — a proven
-          // 0-count Recreate is silent (no warning, no toggle). `recreateWarning`
-          // is nil while the count is still computing, so nothing flashes.
-          if let warning = store.recreateWarning {
-            Text(warning)
-              .font(.caption)
-              .foregroundStyle(.red)
-              .fixedSize(horizontal: false, vertical: true)
-              .frame(maxWidth: .infinity, alignment: .leading)
-          }
-          if store.recreateNeedsConfirm {
-            // Label names the commit count so the control is perceivable
-            // without color (VAL-A11Y-001). "unknown" covers the fail-safe
-            // path where the count threw; a numeric count covers the >0 path.
-            let confirmLabel: String = {
-              if let count = store.recreateUniqueCount, count > 0 {
-                let plural = count == 1 ? "commit" : "commits"
-                return
-                  "I understand that recreating this branch will permanently delete \(count) \(plural)"
-              }
-              return
-                "I understand that recreating this branch will permanently delete an unknown number of commits"
-            }()
-            Toggle(
-              confirmLabel,
-              isOn: Binding(
-                get: { store.recreateConfirmed },
-                set: { store.send(.recreateConfirmedToggled($0)) }
-              )
-            )
-            .font(.caption)
-          }
-        }
-      case .none:
-        EmptyView()
+      // Conflict note — visible only while the draft collides with an
+      // existing branch. Purely informational: it names the branch's REAL
+      // casing and the REASON the name is taken, then leaves the fix to
+      // the user (Create stays disabled meanwhile) — pick a different
+      // name, or clean up / switch to the existing branch outside the
+      // sheet. There is deliberately no in-app resolution machinery.
+      if store.branchCollisionKind != .none {
+        Text(collisionNote)
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
 
       VStack(alignment: .leading, spacing: 4) {
@@ -176,9 +119,9 @@ struct CreateWorktreeSheet: View {
             || store.branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || store.selectedBaseRef == nil
             || store.currentPendingCountForProject >= 8
-            // Destructive Recreate that would discard commits (or whose count
-            // is unknown / still computing) stays disabled until confirmed.
-            || store.recreateBlocksCreate
+            // A name collision blocks Create — the conflict note explains
+            // why the name is taken; the user resolves it themselves.
+            || store.branchCollisionKind != .none
         )
       }
     }
@@ -187,17 +130,29 @@ struct CreateWorktreeSheet: View {
     .onAppear { store.send(.onAppear) }
   }
 
-  /// Why the resolution picker is showing: names the EXISTING branch the
-  /// draft collides with. When the match is case-insensitive (draft casing
-  /// differs from the real ref) both spellings are shown, because every
-  /// resolution operates on the real-cased ref — the user should see which
-  /// branch that is.
-  private var danglingConflictNote: String {
-    let draft = store.sanitizedBranchDraft
-    let real = store.danglingRealName ?? draft
-    if real != draft {
-      return "A branch named \"\(real)\" already exists (matches \"\(draft)\" ignoring case)."
+  /// The conflict note's copy: states the REASON the drafted name is
+  /// unavailable, naming the EXISTING ref's real casing (the draft may
+  /// differ only by case) so the user's follow-up targets the branch git
+  /// actually has.
+  private var collisionNote: String {
+    switch store.branchCollisionKind {
+    case .checkedOut:
+      let branch = store.checkedOutOwner?.branch ?? store.sanitizedBranchDraft
+      let holder =
+        store.checkedOutOwner.map { "the worktree \"\($0.worktreeName)\"" }
+        ?? "another worktree"
+      return
+        "\"\(branch)\" is already checked out by \(holder) — git allows a branch to be "
+        + "checked out by only one worktree at a time. Choose a different name, or work "
+        + "in that worktree instead."
+    case .dangling:
+      let real = store.danglingRealName ?? store.sanitizedBranchDraft
+      return
+        "A local branch named \"\(real)\" already exists without a worktree — it was "
+        + "likely kept when its worktree was removed. Choose a different name, or delete "
+        + "the branch (git branch -D \"\(real)\") and reopen this dialog."
+    case .none:
+      return ""
     }
-    return "A branch named \"\(real)\" already exists."
   }
 }

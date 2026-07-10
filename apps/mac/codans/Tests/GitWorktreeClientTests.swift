@@ -135,31 +135,6 @@ struct GitWorktreeClientTests {
       ])
   }
 
-  @Test
-  func createArgsReuseExistingBranchPassesPath() {
-    // A dangling same-name branch is re-attached via `--path`, which is
-    // what makes git-wt run `git worktree add <path> <branch>` instead
-    // of failing on `-b <branch>`. The path mirrors the default layout.
-    let spec = CreateWorktreeSpec(
-      repoRoot: URL(fileURLWithPath: "/repo"),
-      baseDirectory: URL(fileURLWithPath: "/base"),
-      name: "feature/login",
-      baseRef: "origin/main",
-      fetchOrigin: false,
-      copyIgnored: false,
-      copyUntracked: false,
-      reuseExistingBranch: true
-    )
-    #expect(
-      GitWorktreeClient.makeCreateArguments(for: spec) == [
-        "--base-dir", "/base",
-        "sw",
-        "--from", "origin/main",
-        "--path", "/base/feature/login",
-        "feature/login",
-      ])
-  }
-
   // MARK: - wt ls --json decode
 
   @Test

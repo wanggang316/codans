@@ -40,16 +40,6 @@ nonisolated struct CreateWorktreeSpec: Equatable, Sendable {
   var fetchOrigin: Bool
   var copyIgnored: Bool
   var copyUntracked: Bool
-  /// True when a local branch named `name` already exists but no live
-  /// worktree is checked out on it — a "dangling" branch left behind
-  /// when a prior remove's `git branch -D` was skipped (empty catalog
-  /// branch) or refused (branch checked out elsewhere). `wt sw` only
-  /// attaches an existing branch when an explicit `--path` is supplied
-  /// (otherwise it dies with "branch exists without worktree"), so
-  /// `makeCreateArguments` passes one. The branch's existing commits are
-  /// preserved and the selected base ref is ignored. Fixes the "can't
-  /// re-create a removed worktree under the same name" trap.
-  var reuseExistingBranch: Bool = false
   /// Project setup script run as a tracked phase inside
   /// `createWorktreeStream` once the worktree exists (e.g. `npm
   /// install`). Sourced from `settings.projects[pid].git.createScript`.
@@ -135,21 +125,9 @@ nonisolated struct GitWorktreeClient: Sendable {
   /// branch too" (matches `wt rm`), so we drop it here. Never throws:
   /// git refuses if the branch is checked out elsewhere (main / shared
   /// branch), which must NOT fail the remove — that refusal is reported
-  /// as `.kept` so the caller can surface why the branch lingered (and
-  /// the next same-name create will reuse it via `reuseExistingBranch`).
+  /// as `.kept` so the caller can surface why the branch lingered (the
+  /// create sheet then flags the leftover name as a conflict).
   var deleteBranchIfExists: @Sendable (_ repoRoot: URL, _ branch: String) async -> BranchDeleteOutcome
-  /// Counts commits reachable from `branch` that are NOT reachable from
-  /// `base` — i.e. unique commits that would be lost if `branch` were
-  /// discarded. Runs `git rev-list --count <base>..<branch>`.
-  ///
-  /// Returns the count on success. ALWAYS throws on any git error (bad ref,
-  /// non-zero exit, decode failure) rather than returning 0 — callers MUST
-  /// be able to distinguish "0 unique commits (safe to discard)" from
-  /// "unknown (computation failed)". The Recreate guard treats a thrown
-  /// error as "unknown → require explicit confirmation", so collapsing an
-  /// error into 0 would silently bypass that guard.
-  var branchUniqueCommitCount: @Sendable (_ repoRoot: URL, _ branch: String, _ base: String) async throws -> Int
-
   /// Best-effort `git push <remote> --delete <branch>` — deletes the remote
   /// tracking branch when the user opted into "Delete remote branch with
   /// worktree". The remote is resolved from the branch's configured upstream
@@ -226,16 +204,6 @@ nonisolated extension GitWorktreeClient {
     if !spec.baseRef.isEmpty {
       arguments.append("--from")
       arguments.append(spec.baseRef)
-    }
-    if spec.reuseExistingBranch {
-      // Attach the pre-existing branch instead of creating it (`-b`).
-      // The path mirrors git-wt's own default layout (`<base-dir>/<name>`)
-      // so the resulting worktree lands exactly where a fresh create
-      // would. git-wt ignores `--from` on this path.
-      arguments.append("--path")
-      arguments.append(
-        spec.baseDirectory.appending(path: spec.name).path(percentEncoded: false)
-      )
     }
     if spec.copyIgnored || spec.copyUntracked {
       arguments.append("--verbose")
@@ -637,12 +605,10 @@ nonisolated extension GitWorktreeClient {
         let stdout = try extractStdout(outcome, command: "git for-each-ref refs/heads")
         // Return ORIGINAL casing (like the sibling `branchRefs` closure). The
         // collision classifier lowercases for its case-INSENSITIVE match, but
-        // the Recreate/Reuse git ops must recover the EXISTING ref's real
-        // casing (`CreateWorktreeFeature.ingestLocalBranchNames` +
-        // `danglingRealName`) — a wrong-cased `git branch -D` misses the real
-        // ref on a case-sensitive FS (creating a duplicate) and files the
-        // discarded tip's reflog under the wrong name on a case-insensitive
-        // one. Case-folding here would silently defeat that fix.
+        // the conflict note must name the EXISTING ref's real casing
+        // (`CreateWorktreeFeature.ingestLocalBranchNames` +
+        // `danglingRealName`) so the user acts on the branch git actually
+        // has. Case-folding here would silently defeat that.
         return Set(
           stdout
             .components(separatedBy: "\n")
@@ -950,33 +916,6 @@ nonisolated extension GitWorktreeClient {
         return .kept(reason: message.isEmpty ? "git refused to delete the branch" : message)
       },
 
-      branchUniqueCommitCount: { repoRoot, branch, base in
-        // `git rev-list --count <base>..<branch>` prints a single integer
-        // line — the number of commits reachable from `branch` that are NOT
-        // reachable from `base`. A non-zero exit (bad ref, nonexistent
-        // branch/base, etc.) throws rather than returning 0 so the caller
-        // can distinguish "safe to discard" from "unknown". NEVER coerce an
-        // error to 0.
-        let command = "git rev-list --count \(base)..\(branch)"
-        let outcome = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "rev-list", "--count", "\(base)..\(branch)",
-          ],
-          cwd: repoRoot
-        )
-        let stdout = try extractStdout(outcome, command: command)
-        let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let count = Int(trimmed) else {
-          throw GitWorktreeError.commandFailed(
-            command: command,
-            stderr: "could not parse rev-list output: \(trimmed.isEmpty ? "(empty)" : trimmed)"
-          )
-        }
-        return count
-      },
-
       deleteRemoteBranchIfExists: { repoRoot, branch in
         // Resolve the remote this branch tracks. Read it from the local
         // branch's upstream config while the branch still exists; fall back
@@ -1219,7 +1158,6 @@ extension GitWorktreeClient: DependencyKey {
     },
     removeWorktree: unimplemented("GitWorktreeClient.removeWorktree"),
     deleteBranchIfExists: { _, _ in .absent },
-    branchUniqueCommitCount: unimplemented("GitWorktreeClient.branchUniqueCommitCount", placeholder: 0),
     deleteRemoteBranchIfExists: { _, _ in },
     pruneWorktrees: unimplemented("GitWorktreeClient.pruneWorktrees", placeholder: 0),
     fetchRemote: unimplemented("GitWorktreeClient.fetchRemote"),

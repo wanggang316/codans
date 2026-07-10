@@ -407,63 +407,7 @@ struct WorktreeLifecycleIntegrationTests {
     try await client.removeWorktree(repo, worktreePath)
   }
 
-  // MARK: - branchUniqueCommitCount
-
-  /// A branch fully merged into base reports zero unique commits.
-  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
-  func uniqueCommitCountMergedBranchIsZero() async throws {
-    let repo = try makeTempRepo()
-    defer { try? fm.removeItem(at: repo) }
-    let client = GitWorktreeClient.makeLive()
-
-    // Create a branch from HEAD, commit on it, then merge it back into main.
-    try runGit(["checkout", "-b", "merged-branch"], cwd: repo)
-    try "extra".write(to: repo.appending(path: "extra.txt"), atomically: true, encoding: .utf8)
-    try runGit(["add", "extra.txt"], cwd: repo)
-    try runGit(["commit", "-q", "-m", "extra commit"], cwd: repo)
-    try runGit(["checkout", "main"], cwd: repo)
-    try runGit(["merge", "--no-ff", "-m", "merge merged-branch", "merged-branch"], cwd: repo)
-
-    // merged-branch has no commits that main doesn't already have.
-    let count = try await client.branchUniqueCommitCount(repo, "merged-branch", "main")
-    #expect(count == 0)
-  }
-
-  /// A branch that has commits the base lacks reports a positive count.
-  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
-  func uniqueCommitCountDivergedBranchIsPositive() async throws {
-    let repo = try makeTempRepo()
-    defer { try? fm.removeItem(at: repo) }
-    let client = GitWorktreeClient.makeLive()
-
-    // Create a branch with two commits not on main.
-    try runGit(["checkout", "-b", "feature-branch"], cwd: repo)
-    try "file1".write(to: repo.appending(path: "file1.txt"), atomically: true, encoding: .utf8)
-    try runGit(["add", "file1.txt"], cwd: repo)
-    try runGit(["commit", "-q", "-m", "commit one"], cwd: repo)
-    try "file2".write(to: repo.appending(path: "file2.txt"), atomically: true, encoding: .utf8)
-    try runGit(["add", "file2.txt"], cwd: repo)
-    try runGit(["commit", "-q", "-m", "commit two"], cwd: repo)
-
-    let count = try await client.branchUniqueCommitCount(repo, "feature-branch", "main")
-    #expect(count == 2)
-  }
-
-  /// A nonexistent base ref MUST throw, never return 0. This is the critical
-  /// guard: the Recreate path must treat a computation failure as "unknown →
-  /// require confirm", not "safe to discard".
-  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
-  func uniqueCommitCountBadBaseThrows() async throws {
-    let repo = try makeTempRepo()
-    defer { try? fm.removeItem(at: repo) }
-    let client = GitWorktreeClient.makeLive()
-
-    await #expect(throws: (any Error).self) {
-      _ = try await client.branchUniqueCommitCount(repo, "main", "nonexistent-base-ref-xyz")
-    }
-  }
-
-  // MARK: - deleteBranchIfExists (force-delete / Recreate path)
+  // MARK: - deleteBranchIfExists (worktree-removal branch cleanup)
 
   /// Deleting an existing non-checked-out branch succeeds (`.deleted`).
   @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))

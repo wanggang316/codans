@@ -613,7 +613,6 @@ struct HierarchySidebarFeature {
         worktreesDirectory: defaultWtDir,
         currentPendingCountForProject: pendingCount,
         baseRefOverride: projectGit?.worktreeBaseRef,
-        savedResolutionDefault: globalWorktree.branchConflictResolution,
         fetchOrigin: fetchOriginDefault,
         copyIgnored: copyIgnoredDefault,
         copyUntracked: copyUntrackedDefault

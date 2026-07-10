@@ -3,28 +3,33 @@ import ComposableArchitecture
 import Foundation
 
 /// Three-way collision classification for a branch-name draft, keyed on
-/// the SANITIZED (directory-safe) lowercased form.  This is the single
-/// source of truth consumed by the resolution UI and by `createButtonTapped`.
+/// the SANITIZED (directory-safe) lowercased form. This is the single
+/// source of truth consumed by the sheet's conflict note, the Create
+/// button's disable predicate, and `createButtonTapped`'s guard.
+///
+/// A collision is informational-only: the sheet explains WHY the name is
+/// taken and Create stays disabled until the user resolves it themselves
+/// (pick a different name, or clean up / switch to the existing branch
+/// outside the sheet). There is no in-app resolution machinery.
 enum BranchCollisionKind: Equatable {
   /// No local collision — fresh create. Remote-only names also land here
   /// because classification keys on the LOCAL sets only.
   case none
-  /// Branch exists as a local ref but no worktree currently checks it out.
-  /// Re-creating will reuse the branch (commits kept, base ref ignored).
+  /// Branch exists as a local ref but no worktree currently checks it out —
+  /// typically left behind when a worktree was removed but its branch kept.
   case dangling
   /// Branch is checked out by a live worktree.
   /// Git refuses a second simultaneous checkout.
   case checkedOut
 }
 
-/// Identifies the (branch, base) pair a recreate unique-commit count was
-/// requested for. Carried through the async effect so a result that lands
-/// after the user has already retyped the branch or repicked the base is
-/// recognised as STALE and dropped, rather than being applied to the new
-/// selection (guard (a): a stale count must never carry across an edit).
-struct RecreateGuardToken: Equatable, Sendable {
+/// A live worktree's claim on a branch: the branch's REAL casing plus the
+/// owning worktree's display name (its directory name). Carried into the
+/// checked-out conflict note so it can say WHO holds the name — the reason
+/// the collision exists.
+struct LiveBranchOwner: Equatable, Sendable {
   let branch: String
-  let base: String
+  let worktreeName: String
 }
 
 /// Reducer backing the "+ Create Worktree" sheet. State tracks user
@@ -67,33 +72,25 @@ struct CreateWorktreeFeature {
     /// worktrees instead of being silently ignored. Implicit `nil` default keeps
     /// the synthesized memberwise initializer's parameter optional.
     var baseRefOverride: String?
-    /// Saved default from `WorktreeSettings.branchConflictResolution`. Seeded once
-    /// at sheet-open time by the parent; never mutated by the inline picker
-    /// (per-creation overrides live in `selectedResolution` only).
-    var savedResolutionDefault: BranchConflictResolution = .rename
-    /// In-flight, per-creation resolution choice. Reset to `savedResolutionDefault`
-    /// clamped to what is viable whenever `branchDraftChanged` reclassifies the
-    /// collision kind. The inline picker binds here; mutations do NOT write settings.json.
-    var selectedResolution: BranchConflictResolution = .rename
 
     // Options loaded asynchronously on presentation.
     var baseRefOptions: [String] = []
     var localBranchNamesLower: Set<String> = []
     /// ORIGINAL-cased local branch names (as `git for-each-ref` reports them),
     /// keyed by their lowercased form. Classification matches case-INSENSITIVELY
-    /// via `localBranchNamesLower`, but every git op on a matched dangling ref
-    /// (count / force-delete / attach / recreate) MUST target the branch's real
-    /// casing — the draft's casing may differ from the existing ref, and on a
-    /// case-sensitive filesystem a wrong-cased `git branch -D` misses the real
-    /// ref (creating a duplicate) while a case-insensitive one lands the
-    /// discarded tip's reflog under the wrong name. `resolveDanglingRealName`
-    /// reads this to recover the exact ref for `danglingRealName`.
+    /// via `localBranchNamesLower`, but the conflict note must name the matched
+    /// ref's REAL casing — the draft's casing may differ from the existing ref,
+    /// and the user acts (deletes / inspects) on the branch git actually has.
+    /// `branchDraftChanged` reads this to recover the exact ref for
+    /// `danglingRealName`.
     var localBranchNamesByLower: [String: String] = [:]
-    /// Lowercased branches currently checked out by a LIVE worktree.
-    /// A name in this set is a hard conflict (git won't check the same
-    /// branch out twice). A name in `localBranchNamesLower` but NOT here
-    /// is a "dangling" branch — re-creating reuses it instead of failing.
-    var liveWorktreeBranchesLower: Set<String> = []
+    /// Branches currently checked out by a LIVE worktree, keyed by their
+    /// lowercased form. The value carries the branch's real casing and the
+    /// owning worktree's display name so the conflict note can say WHO holds
+    /// the name. A name in this map is a hard conflict (git won't check the
+    /// same branch out twice); a name in `localBranchNamesLower` but NOT here
+    /// is a "dangling" branch.
+    var liveWorktreeOwnersByLower: [String: LiveBranchOwner] = [:]
     var automaticBaseRef: String?
     var loadingOptions: Bool = true
 
@@ -110,154 +107,31 @@ struct CreateWorktreeFeature {
     var validationError: String?
     var submitError: String?
     /// Collision kind for the current `branchNameDraft`, computed at
-    /// keystroke time from the SANITIZED lowercased name.  The single
-    /// source of truth consumed by the resolution UI and `createButtonTapped`.
+    /// keystroke time from the SANITIZED lowercased name. The single
+    /// source of truth consumed by the conflict note, the Create button's
+    /// disable predicate, and `createButtonTapped`.
     var branchCollisionKind: BranchCollisionKind = .none
-    /// True while `validationError` is currently owned by the rename gate
-    /// (effective `.rename` + a real collision). Lets `applyRenameGate` clear
-    /// ONLY its own message without parsing message text, so a future
-    /// non-gate validation message (M2 Recreate warning, empty-name, spaces,
-    /// folder-exists, "Pick a base ref") is never clobbered by the gate.
-    var renameGateActive: Bool = false
-
-    // MARK: - Recreate guard (M2)
-
-    /// Count of commits reachable from the dangling branch but NOT from the
-    /// selected base — the commits a Recreate would permanently discard
-    /// (`git rev-list --count <base>..<branch>`). Three-valued semantics:
-    /// - `nil` while the count is being (re)computed OR after the compute
-    ///   THREW (bad base / git error). `nil` is the FAIL-SAFE state: it is
-    ///   NEVER treated as "0 unique commits" — the recreate stays gated
-    ///   behind an explicit confirm. Coercing a throw to 0 would silently
-    ///   bypass the guard, so we deliberately keep it `nil`.
-    /// - `0` → the branch is fully merged into base; discarding it loses
-    ///   nothing, so Recreate proceeds silently (no confirm control).
-    /// - `> 0` → discarding drops N unique commits; a red warning + a
-    ///   discrete confirm are required before Create is enabled.
-    var recreateUniqueCount: Int?
-    /// Set to `true` only after the compute THREW, so the UI can distinguish
-    /// "still computing" (`recreateUniqueCount == nil`, `recreateCountFailed
-    /// == false`) from "compute failed → treat as dangerous" (`nil` + `true`)
-    /// and show a fail-safe warning naming the unknown-count risk.
-    var recreateCountFailed: Bool = false
-    /// Per-attempt acknowledgment for a Recreate that would discard commits
-    /// (or whose count is unknown). Bound by a discrete Toggle in the sheet.
-    /// Reset to `false` on ANY branch/base edit so a stale confirm can never
-    /// carry onto a different branch or base (guard (a)).
-    var recreateConfirmed: Bool = false
     /// The REAL-cased name of the matched dangling ref, resolved at
-    /// classification time from `localBranchNamesByLower`. `nil` when the draft
-    /// is not on a dangling collision. Every git op that touches the EXISTING
-    /// branch — `branchUniqueCommitCount`, `deleteBranchIfExists`, the Reuse
-    /// attach spec, and the Recreate fresh-create name — targets this so it
-    /// operates on the branch git actually has, not the draft's (possibly
-    /// differently-cased) form. The draft casing drives only the
-    /// case-insensitive classification match; once matched, casing is fixed to
-    /// the existing ref. Falls back to the sanitized directory name only when
-    /// this is `nil` (no collision resolved, e.g. a race).
+    /// classification time from `localBranchNamesByLower`. `nil` when the
+    /// draft is not on a dangling collision. The conflict note names this
+    /// (not the draft's casing) so the user's cleanup targets the branch
+    /// git actually has.
     var danglingRealName: String?
+    /// The live worktree holding the drafted name, resolved at
+    /// classification time from `liveWorktreeOwnersByLower`. `nil` when the
+    /// draft is not on a checked-out collision. The conflict note names it
+    /// as the reason the branch is unavailable.
+    var checkedOutOwner: LiveBranchOwner?
 
     // MARK: - Derived
 
-    /// `selectedResolution` clamped to what is viable for `branchCollisionKind`:
-    /// - `.none`      → `.rename` (fresh create; resolution is irrelevant).
-    /// - `.dangling`  → `selectedResolution` unchanged (all three are valid).
-    /// - `.checkedOut`→ forced `.rename` (git forbids a second checkout of the
-    ///   same branch and refuses `branch -D` on a checked-out branch, so neither
-    ///   Reuse nor Recreate can be executed).
-    var effectiveResolution: BranchConflictResolution {
-      switch branchCollisionKind {
-      case .none: return .rename
-      case .dangling: return selectedResolution
-      case .checkedOut: return .rename
-      }
-    }
-
     /// Sanitized form of `branchNameDraft` (trim + sanitize), matching the
-    /// directory name that `wt sw` will produce. Used by the checked-out
-    /// explanatory message in the inline resolution control.
+    /// directory name that `wt sw` will produce. Used by the conflict note
+    /// as the fallback display name when no real-cased ref was resolved.
     var sanitizedBranchDraft: String {
       GitWorktreeClient.sanitizeBranchName(
         branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
       )
-    }
-
-    /// True when the current form is a destructive Recreate of a dangling
-    /// branch — the only context in which the unique-commit guard applies.
-    /// `.none` (fresh create) and `.checkedOut` (forced to `.rename`) never
-    /// reach here, so the guard is inert for them.
-    var isRecreateContext: Bool {
-      branchCollisionKind == .dangling && effectiveResolution == .recreate
-    }
-
-    /// True when a Recreate must be explicitly confirmed before Create is
-    /// enabled — i.e. it would (or MIGHT) discard commits. This is the
-    /// fail-safe gate: it is satisfied ONLY by a proven `0` count. A pending
-    /// (`nil`, still computing), a FAILED (`nil`, threw), or a `> 0` count all
-    /// require confirmation. Because `nil` is never coerced to `0`, an unknown
-    /// count can never silently pass (guard (c)).
-    var recreateNeedsConfirm: Bool {
-      isRecreateContext && recreateUniqueCount != 0
-    }
-
-    /// Red warning copy for the recreate guard, or `nil` when no warning is
-    /// shown (not a recreate context, or a proven-safe 0-count). Names the
-    /// N commits that will be permanently deleted for the `> 0` case, and
-    /// surfaces the fail-safe "couldn't determine" message when the count
-    /// compute threw.
-    var recreateWarning: String? {
-      guard isRecreateContext else { return nil }
-      let name = sanitizedBranchDraft
-      if recreateCountFailed {
-        return
-          "Couldn't determine how many commits recreating \"\(name)\" would delete. "
-          + "It will be force-deleted and recreated — confirm you want to discard it."
-      }
-      switch recreateUniqueCount {
-      case .some(0), .none:
-        // 0 → silent (no warning). nil while still computing → no warning yet;
-        // the pending state simply keeps Create disabled via recreateNeedsConfirm.
-        return nil
-      case .some(let count):
-        let plural = count == 1 ? "commit" : "commits"
-        return
-          "Recreating \"\(name)\" will permanently delete \(count) \(plural) "
-          + "that exist only on this branch."
-      }
-    }
-
-    /// Whether the Create button should be disabled for the recreate guard.
-    /// Mirrors `recreateNeedsConfirm && !recreateConfirmed`; the reducer's
-    /// submit path enforces the same predicate so a directly-dispatched
-    /// `createButtonTapped` cannot bypass the disabled button.
-    var recreateBlocksCreate: Bool {
-      recreateNeedsConfirm && !recreateConfirmed
-    }
-
-    /// The branch name every git op on the EXISTING dangling ref must target:
-    /// the real-cased ref recovered at classification (`danglingRealName`),
-    /// falling back to the sanitized directory name when no dangling ref was
-    /// resolved (fresh create, or a race where the map lacked the key). This is
-    /// what `branchUniqueCommitCount`, `deleteBranchIfExists`, the Reuse attach
-    /// spec, and the Recreate fresh-create name all use — so a differently-cased
-    /// draft never targets or reproduces the wrong ref. The draft's casing only
-    /// ever drives the case-insensitive classification MATCH.
-    var operativeBranchName: String {
-      danglingRealName ?? sanitizedBranchDraft
-    }
-
-    /// The (branch, base) token to compute the recreate unique-commit count
-    /// for, or `nil` when the current form is not a recreate of a dangling
-    /// branch with a selected base. Uses the REAL-cased ref (`operativeBranchName`)
-    /// so the count is computed against the branch git actually has. Also used
-    /// to validate that a returning result still matches the live selection.
-    var recreateGuardToken: RecreateGuardToken? {
-      guard isRecreateContext else { return nil }
-      let branch = operativeBranchName
-      guard !branch.isEmpty, let base = selectedBaseRef, !base.isEmpty else {
-        return nil
-      }
-      return RecreateGuardToken(branch: branch, base: base)
     }
   }
 
@@ -267,9 +141,9 @@ struct CreateWorktreeFeature {
       baseRefs: [String],
       /// ORIGINAL-cased local branch names. The reducer derives both the
       /// lowercased match set and the `[lowercased: original]` map from this so
-      /// git ops on a matched dangling ref can recover its exact casing.
+      /// the conflict note can recover a matched ref's exact casing.
       localBranchNames: Set<String>,
-      liveWorktreeBranchesLower: Set<String>,
+      liveWorktreeOwners: [String: LiveBranchOwner],
       automaticBaseRef: String?
     )
     case branchDraftChanged(String)
@@ -278,26 +152,8 @@ struct CreateWorktreeFeature {
     case fetchOriginToggled(Bool)
     case copyIgnoredToggled(Bool)
     case copyUntrackedToggled(Bool)
-    /// Inline picker changed the per-creation resolution. Does NOT write settings.json;
-    /// the saved default is unaffected. The next sheet open re-seeds from the saved default.
-    case resolutionChanged(BranchConflictResolution)
-    /// Discrete confirm control for a destructive Recreate (guard). Bound by
-    /// the sheet's Toggle; reset to `false` on any branch/base edit.
-    case recreateConfirmedToggled(Bool)
-    /// `branchUniqueCommitCount` resolved for the current recreate context.
-    /// The `token` pins the (branch, base) the count was requested for so a
-    /// stale in-flight result from a prior branch/base can be dropped instead
-    /// of being applied to the current selection.
-    case recreateCountLoaded(count: Int, token: RecreateGuardToken)
-    /// `branchUniqueCommitCount` THREW for the current recreate context — the
-    /// count is unknown. Handled fail-safe: never coerced to 0; forces the
-    /// confirm-required path via `recreateCountFailed`.
-    case recreateCountFailed(token: RecreateGuardToken)
 
     case createButtonTapped
-    /// The submit-time `deleteBranchIfExists` refused (`.kept`) or otherwise
-    /// could not delete the branch — abort with no `beginCreate` (guard (e)).
-    case recreateDeleteFailed(String)
 
     case cancelButtonTapped
     case delegate(Delegate)
@@ -321,9 +177,9 @@ struct CreateWorktreeFeature {
   ///   case-INSENSITIVE collision match (a draft `feature-login` matches an
   ///   existing `Feature-Login`).
   /// - `localBranchNamesByLower` — a `[lowercased: original]` map so a matched
-  ///   ref's EXACT casing can be recovered for every git op. On a collision of
-  ///   two names differing only by case (unusual but legal on a
-  ///   case-sensitive FS) the last one wins; either is a valid delete target.
+  ///   ref's EXACT casing can be recovered for the conflict note. On a
+  ///   collision of two names differing only by case (unusual but legal on a
+  ///   case-sensitive FS) the last one wins; either names a real ref.
   ///
   /// Keeping both derived from the same source in one place stops them from
   /// drifting apart.
@@ -337,84 +193,6 @@ struct CreateWorktreeFeature {
     }
     state.localBranchNamesLower = lower
     state.localBranchNamesByLower = byLower
-  }
-
-  // MARK: - Rename gate helper
-
-  /// Re-evaluates the rename-collision gate whenever classification or the
-  /// inline resolution selection changes.  Sets `validationError` when the
-  /// **effective** resolution is `.rename` and there is a real collision;
-  /// clears it when the collision resolves or the user switches away from
-  /// Rename (e.g. to Reuse).
-  ///
-  /// Ownership is tracked in `renameGateActive` (not by parsing the message
-  /// text): the clear branch touches `validationError` ONLY when the gate set
-  /// it, so a non-gate message (empty-name, spaces, folder-exists, "Pick a
-  /// base ref", or M2's Recreate warning) is never clobbered.
-  ///
-  /// Call this AFTER `branchCollisionKind` and `selectedResolution` are both
-  /// up-to-date so `effectiveResolution` reflects the new state.
-  private static func applyRenameGate(to state: inout State) {
-    let shouldGate =
-      state.branchCollisionKind != .none && state.effectiveResolution == .rename
-    if shouldGate {
-      // Effective rename + collision → block Create until the name is free.
-      let name = state.sanitizedBranchDraft
-      state.validationError =
-        "Branch \"\(name)\" already exists — choose a different name."
-      state.renameGateActive = true
-    } else if state.renameGateActive {
-      // Collision resolved OR user switched off Rename → retract our own
-      // message only. Guarding on renameGateActive means we never clear a
-      // message some other validation path currently owns.
-      state.validationError = nil
-      state.renameGateActive = false
-    }
-  }
-
-  // MARK: - Recreate guard helper
-
-  /// Re-evaluates the destructive-Recreate guard after ANY change that can
-  /// alter the (branch, base, resolution) triple: `branchDraftChanged`,
-  /// `baseRefSelected`, and `resolutionChanged`. Two jobs:
-  ///
-  /// 1. FAIL-SAFE RESET — always clears the prior count, the failed flag, and
-  ///    the per-attempt confirm. Resetting `recreateConfirmed` here is the
-  ///    load-bearing part of guard (a): a stale confirm from a previous branch
-  ///    or base can NEVER survive an edit. Resetting to `nil` (not `0`) keeps
-  ///    Create disabled through the recompute window (guard (c)).
-  /// 2. RECOMPUTE — when the new form is a recreate of a dangling branch with
-  ///    a selected base, returns the async effect that runs
-  ///    `branchUniqueCommitCount`. Otherwise returns `.none`.
-  ///
-  /// The returned effect is tagged with `RecreateGuardToken` so a result that
-  /// lands after another edit is dropped as stale by the reducer.
-  private func refreshRecreateGuard(to state: inout State) -> Effect<Action> {
-    // Always start from a clean, gated slate.
-    state.recreateUniqueCount = nil
-    state.recreateCountFailed = false
-    state.recreateConfirmed = false
-
-    guard let token = state.recreateGuardToken else {
-      // Not a recreate-of-dangling context (or no base yet) → nothing to
-      // compute; the reset above already cleared any prior guard state.
-      return .none
-    }
-
-    let repoRoot = state.repoRoot
-    let client = gitWorktreeClient
-    return .run { send in
-      do {
-        let count = try await client.branchUniqueCommitCount(
-          repoRoot, token.branch, token.base
-        )
-        await send(.recreateCountLoaded(count: count, token: token))
-      } catch {
-        // NEVER coerce a throw to 0 — surface the failure so the reducer
-        // forces the confirm-required path (guard (c)).
-        await send(.recreateCountFailed(token: token))
-      }
-    }
   }
 
   var body: some Reducer<State, Action> {
@@ -434,17 +212,31 @@ struct CreateWorktreeFeature {
           // Original-cased local branch names — the reducer derives the
           // lowercased match set + the casing-recovery map from these.
           let loadedLocals = await locals
-          let loadedLive = Set(
-            await live
-              .map { $0.branch.trimmingCharacters(in: .whitespaces).lowercased() }
-              .filter { !$0.isEmpty }
+          // Live worktree claims: lowercased branch → (real casing, owning
+          // worktree's directory name). The note uses the value to say WHO
+          // holds a checked-out name. Two worktrees can never hold the same
+          // branch (git forbids it), so key collisions don't occur in
+          // practice; keep the first defensively.
+          let loadedLive = Dictionary(
+            await live.compactMap { entry -> (String, LiveBranchOwner)? in
+              let branch = entry.branch.trimmingCharacters(in: .whitespaces)
+              guard !branch.isEmpty else { return nil }
+              return (
+                branch.lowercased(),
+                LiveBranchOwner(
+                  branch: branch,
+                  worktreeName: URL(fileURLWithPath: entry.path).lastPathComponent
+                )
+              )
+            },
+            uniquingKeysWith: { first, _ in first }
           )
           let loadedAuto = await auto
           await send(
             .optionsLoaded(
               baseRefs: loadedRefs,
               localBranchNames: loadedLocals,
-              liveWorktreeBranchesLower: loadedLive,
+              liveWorktreeOwners: loadedLive,
               automaticBaseRef: loadedAuto
             ))
         }
@@ -453,10 +245,11 @@ struct CreateWorktreeFeature {
         state.loadingOptions = false
         state.baseRefOptions = baseRefs
         // Derive the lowercased MATCH set (classification is case-insensitive)
-        // and the [lowercased: original] map (git ops recover the real casing)
-        // from the single original-cased source, so the two never drift.
+        // and the [lowercased: original] map (the note recovers the real
+        // casing) from the single original-cased source, so the two never
+        // drift.
         Self.ingestLocalBranchNames(locals, into: &state)
-        state.liveWorktreeBranchesLower = live
+        state.liveWorktreeOwnersByLower = live
         state.automaticBaseRef = auto
         // Preserve a user-set value if they already picked one while
         // options were loading. Otherwise prefer the per-Project override
@@ -480,62 +273,49 @@ struct CreateWorktreeFeature {
         if trimmed.isEmpty {
           state.branchCollisionKind = .none
           state.danglingRealName = nil
+          state.checkedOutOwner = nil
           state.validationError = nil
-          state.renameGateActive = false
-          state.selectedResolution = state.savedResolutionDefault
         } else if trimmed.contains(where: \.isWhitespace) {
           state.branchCollisionKind = .none
           state.danglingRealName = nil
+          state.checkedOutOwner = nil
           state.validationError = "Branch names can't contain spaces."
-          // This branch owns validationError directly; drop any gate ownership
-          // so a later clear can't retract this space message.
-          state.renameGateActive = false
-          state.selectedResolution = state.savedResolutionDefault
         } else {
-          // Clear any prior validation error before reclassifying — the
-          // correct error (if any) will be re-set by applyRenameGate below.
-          // Also drop stale gate ownership; applyRenameGate re-arms it.
           state.validationError = nil
-          state.renameGateActive = false
           // Classify on the SANITIZED, lowercased name — identical to the
           // form that git-wt will actually create — so a name that only
           // collides after sanitization (doubled separators, trailing dashes,
           // etc.) is flagged WHILE TYPING, not just on Create.
           let sanitized = GitWorktreeClient.sanitizeBranchName(trimmed)
           let lower = sanitized.lowercased()
-          if state.liveWorktreeBranchesLower.contains(lower) {
-            // Checked out by a live worktree — git refuses a second checkout
-            // and forbids `branch -D` on a checked-out branch. Neither Reuse
-            // nor Recreate is viable; force Rename. The rename gate (below)
-            // then blocks Create until the user picks a free name.
+          if let owner = state.liveWorktreeOwnersByLower[lower] {
+            // Checked out by a live worktree — git refuses a second
+            // checkout, so the name is simply unavailable. The note names
+            // the owning worktree; Create stays disabled until the draft
+            // stops colliding.
             state.branchCollisionKind = .checkedOut
+            state.checkedOutOwner = owner
             state.danglingRealName = nil
-            state.selectedResolution = .rename
           } else if state.localBranchNamesLower.contains(lower) {
-            // Dangling branch: exists as a local ref but no worktree checks it
-            // out. All three resolutions are valid — seed to the saved default.
+            // Dangling branch: exists as a local ref but no worktree checks
+            // it out — usually left behind by a removed worktree. Recover
+            // the EXACT existing ref casing (the draft may differ, e.g.
+            // `feature-login` typed against an existing `Feature-Login`) so
+            // the note tells the user which branch to act on. Fall back to
+            // the sanitized draft only if the map somehow lacks the key
+            // (race).
             state.branchCollisionKind = .dangling
-            // Recover the EXACT existing ref casing (the draft may differ, e.g.
-            // `feature-login` typed against an existing `Feature-Login`). Every
-            // git op targets this, not the draft's casing. Fall back to the
-            // sanitized draft only if the map somehow lacks the key (race).
             state.danglingRealName = state.localBranchNamesByLower[lower] ?? sanitized
-            state.selectedResolution = state.savedResolutionDefault
+            state.checkedOutOwner = nil
           } else {
             // Remote-only names (e.g. origin/foo with no local foo) also
             // land here: classification keys on LOCAL sets only.
             state.branchCollisionKind = .none
             state.danglingRealName = nil
-            state.selectedResolution = state.savedResolutionDefault
+            state.checkedOutOwner = nil
           }
-          // Reactive rename gate: set/clear validationError based on the
-          // now-current (branchCollisionKind, effectiveResolution) pair.
-          Self.applyRenameGate(to: &state)
         }
-        // Recreate guard (a): every draft edit resets the per-attempt confirm
-        // and recomputes the unique-commit count for the new (branch, base).
-        // A stale confirm from a previous name can never carry over.
-        return refreshRecreateGuard(to: &state)
+        return .none
 
       case .validated(let error):
         state.validationError = error
@@ -543,10 +323,7 @@ struct CreateWorktreeFeature {
 
       case .baseRefSelected(let ref):
         state.selectedBaseRef = ref
-        // Recreate guards (a)+(b): a base change resets the confirm and
-        // re-evaluates the count, so silent(0) ⇄ warn(>0) flips both ways
-        // and a confirm never survives a base swap.
-        return refreshRecreateGuard(to: &state)
+        return .none
 
       case .fetchOriginToggled(let value):
         state.fetchOrigin = value
@@ -558,41 +335,6 @@ struct CreateWorktreeFeature {
 
       case .copyUntrackedToggled(let value):
         state.copyUntracked = value
-        return .none
-
-      case .resolutionChanged(let resolution):
-        // Per-creation inline override only — no settings write.
-        state.selectedResolution = resolution
-        // Reactive rename gate: switching to/from Rename while a collision
-        // exists toggles the Create block.
-        Self.applyRenameGate(to: &state)
-        // Recreate guard: entering `.recreate` on a dangling branch kicks off
-        // the unique-commit count; leaving it clears the guard. Also resets
-        // the per-attempt confirm so toggling resolutions can't reuse a stale
-        // acknowledgment.
-        return refreshRecreateGuard(to: &state)
-
-      case .recreateConfirmedToggled(let value):
-        state.recreateConfirmed = value
-        return .none
-
-      case .recreateCountLoaded(let count, let token):
-        // Drop a stale result: if the user retyped the branch or repicked the
-        // base while this count was in flight, the live token no longer
-        // matches and applying `count` would poison the guard for the NEW
-        // selection. Ignoring it leaves the guard `nil` (still confirm-gated)
-        // until the recompute for the current token lands.
-        guard state.recreateGuardToken == token else { return .none }
-        state.recreateUniqueCount = count
-        state.recreateCountFailed = false
-        return .none
-
-      case .recreateCountFailed(let token):
-        guard state.recreateGuardToken == token else { return .none }
-        // Fail-safe: keep the count unknown (`nil`, never 0) and flag the
-        // failure so the guard forces the confirm-required path (guard (c)).
-        state.recreateUniqueCount = nil
-        state.recreateCountFailed = true
         return .none
 
       case .createButtonTapped:
@@ -610,32 +352,26 @@ struct CreateWorktreeFeature {
           state.validationError = "Branch name produces an empty directory name."
           return .none
         }
-        // The name every git op + the on-disk directory use. For a dangling
-        // Reuse/Recreate this is the EXISTING ref's real casing
-        // (`operativeBranchName`), so the attach/recreate/delete all target the
-        // branch git actually has instead of the draft's casing. For a fresh
-        // create it's the sanitized draft (they're identical when there's no
-        // dangling ref). Using it for the folder path too keeps the directory
-        // consistent with the branch on a case-sensitive filesystem.
-        let branchAndDirName = state.operativeBranchName
-        // Drive the spec flag from the effective resolution (selectedResolution
-        // clamped to viable).  By the time we reach here the rename gate in
-        // `applyRenameGate` has already ensured that if effectiveResolution is
-        // `.rename` AND there is a collision, `validationError` is set and the
-        // guard above has returned early.  So `.reuse` is the only path that
-        // sets `reuseExistingBranch = true`; all other cases (including fresh
-        // `.none` creates) leave it false — making git the final arbiter on
-        // a race (VAL-CROSS-003).
-        let reuseExistingBranch = state.effectiveResolution == .reuse
+        // Collisions are informational-only: the note under the name field
+        // explains WHY the name is taken and the user resolves it outside
+        // the sheet (different name, delete the leftover branch, or work in
+        // the worktree that holds it). The Create button is disabled while
+        // a collision exists; this reducer-side guard covers direct
+        // dispatches — the reducer stays the source of truth.
+        guard state.branchCollisionKind == .none else {
+          state.submitError =
+            "\"\(sanitizedDraftName)\" conflicts with an existing branch — see the note above."
+          return .none
+        }
         // Branch names like `feature/abc` map to nested folders
         // (`feature/abc`); `appending(path:)` honours the embedded
         // separator, whereas `appending(component:)` would percent-encode
         // the slash and break the diff against `wt ls --json` (HAN-57).
         let targetURL = state.worktreesDirectory
-          .appending(path: branchAndDirName)
+          .appending(path: sanitizedDraftName)
         if FileManager.default.fileExists(atPath: targetURL.path(percentEncoded: false)) {
           state.submitError = """
-            A folder named \"\(branchAndDirName)\" already exists at the Project's \
+            A folder named \"\(sanitizedDraftName)\" already exists at the Project's \
             worktrees directory. Choose a different branch name.
             """
           return .none
@@ -645,32 +381,16 @@ struct CreateWorktreeFeature {
           return .none
         }
 
-        // Recreate confirm re-guard (guard (d)): a destructive Recreate that
-        // still needs confirmation must NOT proceed when dispatched directly
-        // (the button is disabled in the UI, but the reducer is the source of
-        // truth). No delete, no beginCreate — a strict no-op beyond surfacing
-        // the reason. `recreateBlocksCreate` is false for a proven 0-count
-        // (silent) and for a checked-in confirm, so both proceed below.
-        if state.recreateBlocksCreate {
-          state.submitError =
-            "Confirm that recreating this branch will discard its commits before continuing."
-          return .none
-        }
-
         state.submitError = nil
 
         let spec = CreateWorktreeSpec(
           repoRoot: state.repoRoot,
           baseDirectory: state.worktreesDirectory,
-          // Real-cased ref for Reuse/Recreate (so the attach reuses, and the
-          // recreate reproduces, the SAME-named branch — not a differently-
-          // cased duplicate); sanitized draft for a fresh create.
-          name: branchAndDirName,
+          name: sanitizedDraftName,
           baseRef: baseRef,
           fetchOrigin: state.fetchOrigin,
           copyIgnored: state.copyIgnored,
-          copyUntracked: state.copyUntracked,
-          reuseExistingBranch: reuseExistingBranch
+          copyUntracked: state.copyUntracked
         )
         let pending = PendingWorktree(
           id: PendingWorktreeID(),
@@ -681,48 +401,7 @@ struct CreateWorktreeFeature {
           lastProgressLine: nil,
           startedAt: Date()
         )
-
-        // Non-recreate paths (fresh create, rename, reuse) hand straight to
-        // the parent's pending lifecycle. Only the destructive Recreate path
-        // must delete the dangling branch FIRST, sequenced before beginCreate.
-        guard state.effectiveResolution == .recreate else {
-          return .send(.delegate(.beginCreate(pending)))
-        }
-
-        // Recreate execution: force-delete the same-name (dangling) branch,
-        // THEN emit a FRESH create (`reuseExistingBranch` is already false, so
-        // the spec carries `-b` from the selected base). The delete is the
-        // submit-time re-guard for guard (e): if the branch became checked out
-        // since selection, `deleteBranchIfExists` returns `.kept` and we abort
-        // with the reason surfaced and NO beginCreate — nothing is created and
-        // the branch is left intact. `git branch -D` keeps the discarded tip
-        // reflog-recoverable, so no extra recovery code is needed.
-        let repoRoot = state.repoRoot
-        // Force-delete the EXISTING ref by its real casing (same value the
-        // fresh `-b` create in `spec.name` will reproduce), so on a
-        // case-sensitive FS the delete hits the real branch instead of missing
-        // it (which would `.absent` → leave a duplicate), and on a
-        // case-insensitive FS the discarded tip's reflog lands under the
-        // correct name.
-        let branch = branchAndDirName
-        let client = gitWorktreeClient
-        return .run { send in
-          let outcome = await client.deleteBranchIfExists(repoRoot, branch)
-          switch outcome {
-          case .deleted, .absent:
-            await send(.delegate(.beginCreate(pending)))
-          case .kept(let reason):
-            await send(.recreateDeleteFailed(reason))
-          }
-        }
-
-      case .recreateDeleteFailed(let reason):
-        // The branch could not be deleted (checked out since selection, or a
-        // git refusal). Surface why and emit NO beginCreate — no half state:
-        // the branch, its commits, and any directory are untouched.
-        state.submitError =
-          "Couldn't recreate the branch — it wasn't deleted, so nothing was created. \(reason)"
-        return .none
+        return .send(.delegate(.beginCreate(pending)))
 
       case .cancelButtonTapped:
         return .send(.delegate(.dismissed))
