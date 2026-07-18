@@ -8,7 +8,7 @@ description: User-test set for the AgentState view — in-app status-bar badge +
 **Status:** Draft
 **Author:** Gump (with Claude)
 **Date:** 2026-05-22
-**Spec:** [docs/product-specs/active-agents-view.md](../product-specs/active-agents-view.md)
+**Spec:** [active-agents-view.md](../design-docs/active-agents-view.md)
 **Design:** [docs/design-docs/active-agents-view.md](../design-docs/active-agents-view.md)
 
 ## Personas Used
@@ -30,7 +30,7 @@ Per [user-test-patterns.md](../user-test-patterns.md), this set probes three sur
 - **Persisted state** — `~/.config/codans/catalog.json` queried with `jq` to verify the `agentKind` / `agentSessionID` fields on a Pane survive a relaunch.
 - **Log stream** — `log stream --predicate 'subsystem == "com.gumpw.codans.agentstate"' …` for identification / state-transition trace lines, used as a ready signal where the UI alone is ambiguous.
 
-A "trigger an OSC 9;4 busy report on pane P" step means: drive `printf '\e]9;4;3\a'` into pane P (via the `codans` CLI's pane-input verb or by typing it into the pane chrome); the matching "clear" step drives `printf '\e]9;4;0\a'`. These exact escape sequences are documented in [memory: OSC 9;4 emitter coverage](../../.claude/projects/-Users-wanggang-dev-00-codans/memory/project_osc94_emitters.md) and have a manual test recipe verified by Gump on 2026-05-03.
+A "trigger an OSC 9;4 busy report on pane P" step means: drive `printf '\e]9;4;3\a'` into pane P (via the `codans` CLI's pane-input verb or by typing it into the pane chrome); the matching "clear" step drives `printf '\e]9;4;0\a'`. These exact escape sequences have a manual test recipe verified by Gump on 2026-05-03.
 
 A "drive a `waitingForInput`-class OSC 9 event on pane P" step means: send `printf '\e]9;Approve this action\a'` into pane P. The title text `"Approve"` causes `DetectionTranslator.classify` to label the event as `waitingForInput` rather than `taskFinished`.
 

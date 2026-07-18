@@ -8,9 +8,6 @@ import CodansCore
 ///
 /// Layout, top → bottom: header (icon + "Tags") · tag list · bottom bar
 /// (collapsed `+` button or expanded create-form) · footer (Done).
-///
-/// Replaces the deleted `SpaceManagerSheet`. See
-/// `docs/design-docs/project-tags.md` §3.4 for the wire-frame.
 struct TagManagerSheet: View {
   @Bindable var store: StoreOf<TagManagerFeature>
   @Environment(HierarchyManager.self) private var hierarchyManager

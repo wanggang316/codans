@@ -108,7 +108,7 @@ nonisolated struct LiveGitHubService: GitHubService {
     _ = try await runExpecting(cmd, cwd: worktreePath)
   }
 
-  // MARK: - v2 batched PR fetch (0013 M3)
+  // MARK: - v2 batched PR fetch
 
   func batchPullRequests(
     host: String,

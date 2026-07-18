@@ -18,8 +18,7 @@ nonisolated struct GitServiceClient: Sendable {
   /// `(repoURL, sha, ignoreWhitespace) -> UnifiedDiff`.
   var commitDiff: @Sendable (URL, String, Bool) async throws -> UnifiedDiff
   /// `(repoURL) -> WorkingTreeStatus`. Used by the sidebar's dirty-indicator to decide
-  /// whether a Worktree row carries a pending-work dot; `GitService.status(at:)` had been
-  /// a protocol-only method waiting for this UI surface (see 0005 M3 review item 2).
+  /// whether a Worktree row carries a pending-work dot.
   var status: @Sendable (URL) async throws -> WorkingTreeStatus
   /// `(repoURL) -> RemoteInfo`. Parses `git remote get-url origin` into host/owner/repo
   /// for the GitHub integration's batched PR fetcher. Throws `GitError.malformedRemoteURL`

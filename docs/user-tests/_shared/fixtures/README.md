@@ -27,7 +27,7 @@ _shared/fixtures/
 ```
 
 All three `.bundle` files are kept under the 200 KB ceiling agreed in the
-[design doc](../../../design-docs/worktree-branch-switcher-and-history.md);
+[design doc](../../../design-docs/worktree.md);
 the largest two are ~22 KB.
 
 ## Bundle contents

@@ -39,7 +39,7 @@ nonisolated struct TerminalClient: Sendable {
 
   /// Event stream from the engine. Multi-consumer: each call returns a fresh
   /// subscriber registration. Lifecycle events always delivered; output
-  /// events drop under per-subscriber backpressure (shipped M4.5 semantic).
+  /// events drop under per-subscriber backpressure.
   var events: @MainActor @Sendable () -> AsyncStream<TerminalEvent>
 
   enum Error: Swift.Error, Equatable, Sendable {

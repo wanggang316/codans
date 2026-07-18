@@ -7,9 +7,9 @@ import CodansCore
 /// Recorder-driven tests for `ProjectReconciler`. The `HierarchyClient`
 /// closures this actor calls are replaced with a `LockIsolated` recorder;
 /// no real `GitWorktreeCLI` fixture is used because worktree-list mutation
-/// is delegated to `reconcileDiscoveredWorktrees` (T-WORKTREE's closure).
-/// That keeps this test surface immune to the T-WORKTREE rebase — the
-/// recorder doesn't care what the real implementation does.
+/// is delegated to `reconcileDiscoveredWorktrees`. That keeps this test
+/// surface immune to the underlying implementation — the recorder doesn't
+/// care what the real implementation does.
 struct ProjectReconcilerTests {
   // MARK: - Recorder
 

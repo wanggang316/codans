@@ -85,8 +85,7 @@ final class PaneSurface {
   var onClose: (@MainActor (_ processAlive: Bool) -> Void)?
 
   /// Engine-provided output callback. Currently unused — surface output
-  /// reaches the engine via ghostty's own rendering layer; the engine hooks
-  /// this in M4 integration (deferred).
+  /// reaches the engine via ghostty's own rendering layer.
   var onOutput: (@MainActor (Data) -> Void)?
 
   init(
@@ -169,8 +168,8 @@ final class PaneSurface {
       return ghostty_surface_new(app, &config)
     }
     guard let surface = created else {
-      // HAN-82: surface the diagnostic context libghostty doesn't return
-      // through its nil-pointer protocol. `retryable: true` tags it as a
+      // Surface the diagnostic context libghostty doesn't return through
+      // its nil-pointer protocol. `retryable: true` tags it as a
       // transient failure so the caller knows it can back off and retry.
       throw GhosttyError.surfaceInitFailed(
         reason: "ghostty_surface_new returned nil for pane \(paneID) (session=\(session))",
@@ -330,7 +329,10 @@ final class PaneSurface {
     if soft, let current = appConfig {
       pushed = ghostty_config_clone(current)
     } else {
-      pushed = GhosttyConfigLoader.makeFreshConfig()
+      // Per-surface hard reload: the surface honors the same transparency
+      // override as the app config; the opacity snapshot is the runtime's
+      // concern, not the surface's, so only the config handle is needed.
+      pushed = GhosttyConfigLoader.makeFreshConfig()?.config
     }
     guard let handle = pushed else { return }
     ghostty_surface_update_config(surface, handle)

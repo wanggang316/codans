@@ -5,7 +5,7 @@ import CodansCore
 @testable import Codans
 
 /// Named consumer-side precedence regression guards for the launch-time
-/// restore wiring (M2, `restore-state-precedence`). These pin the SPECIFIC
+/// restore wiring. These pin the SPECIFIC
 /// precedence outcomes that `AppState.derivePendingRestores` must honour
 /// once `SessionReaper.mergeSnapshotsIntoStates` has resolved each pane to
 /// a single `SessionState`. They are deliberately distinct from
@@ -18,7 +18,7 @@ import CodansCore
 /// reaping orphan sockets). This suite only asserts what the CONSUMER does
 /// with an already-resolved map. Reaper-owned and runtime-only facets
 /// (aging, on-disk file reaping, live PID-differs) are verified by the
-/// reaper's own logic and the M2 user-test stage, not faked here.
+/// reaper's own logic and the user-test stage, not faked here.
 @MainActor
 struct RestoreStatePrecedenceTests {
   private static func session(_ paneID: PaneID) -> Session {

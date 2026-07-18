@@ -6,8 +6,7 @@ import CodansCore
 /// Every method passes the Worktree's absolute path as the subprocess `cwd` so `gh`
 /// resolves the correct repository + remote automatically. User input (branch names,
 /// PR numbers, commit SHAs) is always an argv element — never interpolated into a
-/// shell. Tests inject `any GitHubService` via `GitHubClient` (TCA DependencyKey,
-/// lands in M3).
+/// shell. Tests inject `any GitHubService` via `GitHubClient` (a TCA DependencyKey).
 ///
 /// Methods that read return either a value, `nil` (for "nothing to report" like "no
 /// PR for this branch"), or throw a `GitHubError`. Methods that mutate return Void on

@@ -33,13 +33,9 @@ final class ZmxControlProbe: PaneRuntimeProbe {
 }
 
 /// Handlers for `hierarchy.*` — both reads (list / describe /
-/// resolveAlias) and mutations (create / activate / close / label).
-///
-/// M2 (rm-space) removed the `space.*` RPCs along with the Space level.
-/// M6 added the Tag-scoped RPCs (`hierarchy.listTags`, `hierarchy.createTag`,
-/// `hierarchy.renameTag`, `hierarchy.recolorTag`, `hierarchy.removeTag`,
-/// `hierarchy.setProjectTags`, `hierarchy.setActiveTagFilter`) plus the
-/// `tag` / `untagged` filters on `hierarchy.listProjects`.
+/// resolveAlias) and mutations (create / activate / close / label),
+/// plus the Tag-scoped RPCs and the `tag` / `untagged` filters on
+/// `hierarchy.listProjects`.
 @MainActor
 final class HierarchyHandlers {
   private let manager: HierarchyManager
@@ -83,11 +79,9 @@ final class HierarchyHandlers {
 
   // MARK: - Error mapping
 
-  /// Funnel every mutation catch through here so `HierarchyError` maps
-  /// to the right `IPCError` variant (and therefore the right
-  /// `CLIExitCode` per DEC-8) — previously every catch hardcoded
-  /// `.notFound`, which masked conflict / invariant-violation cases
-  /// behind exit code 2.
+  /// Funnel every mutation catch through here so `HierarchyError` maps to
+  /// the right `IPCError` variant (and therefore the right `CLIExitCode`):
+  /// a blanket `.notFound` would mask conflict / invariant-violation cases.
   private func failure(for error: Error, fallbackKind: String, fallbackID: String) -> RouterOutcome {
     if let h = error as? HierarchyError {
       switch h {
@@ -109,11 +103,10 @@ final class HierarchyHandlers {
   // MARK: - Reads
 
   /// `hierarchy.resolveAlias` — turn a string identifier (index /
-  /// label / glob) into the canonical UUID for `kind`. M6 supports the
-  /// minimum set the CLI drives: `current` / `.` (handled client-side by
+  /// label / glob) into the canonical UUID for `kind`. Supports the set
+  /// the CLI drives: `current` / `.` (handled client-side by
   /// `AliasResolver`, but the server still accepts it as a defensive
-  /// fallback), and pane labels. Extended forms (path glob, index) land
-  /// in M6.1.
+  /// fallback), and pane labels.
   public func resolveAlias(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let request: IPC.AliasResolveRequest
@@ -221,14 +214,12 @@ final class HierarchyHandlers {
     /// Optional. When nil, the daemon resolves the base directory through
     /// `WorktreeSettings.resolveBaseDirectory` (per-project override → global
     /// `defaultWorktreesDirectory` → system fallback) and appends the
-    /// sanitized branch name — mirroring the GUI's Create Worktree sheet
-    /// (HAN-81).
+    /// sanitized branch name — mirroring the GUI's Create Worktree sheet.
     public let path: String?
     public let branch: String?
-    /// HAN-82: when true, a same-canonical-path collision returns the
-    /// existing row's id instead of `.conflict`, so a dispatcher
-    /// replaying create-after-partial-failure stays idempotent. Absent
-    /// (legacy clients) ⇒ strict mode.
+    /// When true, a same-canonical-path collision returns the existing
+    /// row's id instead of `.conflict`, so a dispatcher replaying
+    /// create-after-partial-failure stays idempotent. Absent ⇒ strict mode.
     public let reuseExisting: Bool?
   }
   public struct CreateWorktreeResult: Codable, Sendable {
@@ -710,9 +701,9 @@ final class HierarchyHandlers {
   // MARK: - Extended reads
 
   /// Optional `tag` / `untagged` filters mirror the CLI surface
-  /// (`codans project list --tag <id> | --untagged`). Both are absent by default
-  /// — pre-M6 callers that send `{}` see the unfiltered project list.
-  /// Passing both is a caller error.
+  /// (`codans project list --tag <id> | --untagged`). Both absent (e.g. a
+  /// `{}` body) yields the unfiltered project list; passing both is a
+  /// caller error.
   public struct ListProjectsParams: Codable, Sendable {
     public let tag: TagID?
     public let untagged: Bool?

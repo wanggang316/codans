@@ -62,23 +62,52 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case openSettings
     case checkForUpdates
     case quit
+    case openProject
+    case cloneRepository
+    case showUnreadNotifications
+    case toggleSidebar
+    case openGhosttyConfig
 
     // Worktree
     case selectWorktree(ProjectID, WorktreeID)
     case closeCurrentWorktree
     case refreshCurrentWorktree
     case toggleDiffInspector
+    // Worktree actions that operate on the current selection. They carry no
+    // payload — `RootFeature.route` resolves `state.selection` (and the
+    // catalog where a parameter like the pin state is needed) at activation,
+    // mirroring `closeCurrentWorktree` / `refreshCurrentWorktree` above.
+    case newWorktree
+    case copyCurrentWorktreePath
+    case revealCurrentWorktreeInSidebar
+    case archiveCurrentWorktree
+    case toggleCurrentWorktreePinned
+    case openCurrentPR
+    case openCurrentProjectOnGitHub
+    case showArchivedWorktrees
+
+    // Project — current-selection batch / maintenance actions. `route`
+    // resolves `state.selection.projectID`; the merged-batch variants also
+    // compute their target worktree IDs from the catalog + GitHub snapshots.
+    case openProjectSettings
+    case pruneStaleWorktrees
+    case archiveAllMergedWorktrees
+    case removeAllMergedWorktrees
+    case removeCurrentProject
+
+    // Tab — operate on the current Worktree's active tab.
+    case renameCurrentTab
+    case changeCurrentTabColor
 
     // Editor
     case openCurrentWorktreeInDefaultEditor
     case openCurrentWorktreeIn(EditorID)
     case revealCurrentWorktreeInFinder
 
-    // Project Scripts (Phase 2 / M10) — one Kind per
-    // `ProjectSettings.scripts` entry under the active Project. Carries the
-    // selection's `(projectID, worktreeID)` so the route runs against the
-    // exact selection that built the item, even if the user changes
-    // selection between palette open and activation.
+    // Project Scripts — one Kind per `ProjectSettings.scripts` entry under
+    // the active Project. Carries the selection's `(projectID, worktreeID)`
+    // so the route runs against the exact selection that built the item,
+    // even if the user changes selection between palette open and activation.
     case runProjectScript(ProjectID, WorktreeID, ScriptDefinition.ID)
 
     // Global Commands — one Kind per `GeneralSettings.globalScripts` entry.

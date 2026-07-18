@@ -122,7 +122,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
-  func archiveTearsDownSurfaces() async throws {
+  func archiveSuspendsPanesKeepsThemAndAnnounces() async throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
@@ -140,7 +140,19 @@ struct HierarchyManagerWorktreeMgmtTests {
     fakeRuntime.livePaneIDs.insert(paneID)
 
     try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
-    #expect(fakeRuntime.closeSurfaceCalls == [paneID])
+
+    // Archive routes through suspendSurface (kills the daemon, emits no
+    // .paneExited) — NOT closeSurface, whose .paneExited would route through
+    // paneLifecycleExited → closePane and delete the Pane.
+    #expect(fakeRuntime.suspendSurfaceCalls == [paneID])
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+    // Soft-hide keeps the Pane in the catalog for restore.
+    let worktree = manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }
+    #expect(worktree?.archived == true)
+    #expect(worktree?.tabs.flatMap { $0.panes }.map(\.id) == [paneID])
+    // One structural-mutation announce so the AgentState reconcile runs
+    // against visiblePaneIDs() and retires the hidden worktree's rows.
+    #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
   }
 
   @Test
@@ -305,7 +317,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     #expect(upgraded.branch == "main")
   }
 
-  /// In-place branch update (HAN-62). When the user runs `git checkout`
+  /// In-place branch update. When the user runs `git checkout`
   /// inside a worktree pane, the next reconcile pass surfaces the new
   /// branch. The catalog row must follow HEAD so the sidebar subtitle,
   /// WorktreeHeader, and GitHub PR fetch all observe the new value.
@@ -385,7 +397,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   /// Produces `(varForm, privateForm)` — two aliased paths to the same
   /// on-disk directory, one with the `/var/folders/...` prefix (what
   /// `wt ls --json` emits) and one with the `/private/var/folders/...`
-  /// prefix (what T-PROJECT's canonicalized `Project.rootPath` holds
+  /// prefix (what the project's canonicalized `Project.rootPath` holds
   /// after `resolvingSymlinksInPath()`). The directory itself is real;
   /// `resolvingSymlinksInPath()` only walks symlinks for existing
   /// components, so tests that need both forms to canonicalize to the
@@ -409,14 +421,14 @@ struct HierarchyManagerWorktreeMgmtTests {
 
   @Test
   func reconcileDedupesSymlinkAliases() throws {
-    // On macOS `/var` is a symlink to `/private/var`; T-PROJECT's
+    // On macOS `/var` is a symlink to `/private/var`; the project's
     // Project.rootPath goes through resolvingSymlinksInPath() and ends
     // up in the `/private/var/...` form, while `wt ls --json` emits
     // the unresolved `/var/...` form. Reconcile must canonicalize
     // both sides so the main checkout doesn't duplicate.
     let alias = try Self.makeAliasedTempDir(tag: "reconcile")
     defer { try? FileManager.default.removeItem(at: alias.url) }
-    // Catalog stores the resolved form, matching T-PROJECT's side.
+    // Catalog stores the resolved form, matching the project's side.
     let projectID = manager.addProject(
       name: "p", rootPath: alias.privateForm, gitRoot: alias.privateForm
     )
@@ -436,7 +448,7 @@ struct HierarchyManagerWorktreeMgmtTests {
 
   @Test
   func createWorktreeStoresCanonicalizedPath() throws {
-    // PR #31 review M2: Worktree.path must land in the catalog in the
+    // Worktree.path must land in the catalog in the
     // canonical form that HierarchyManager.canonicalPath produces, so
     // view-layer direct string comparisons against the also-canonical
     // Project.rootPath (main-checkout guard etc.) stay correct under
@@ -663,10 +675,10 @@ struct HierarchyManagerWorktreeMgmtTests {
     #expect(manager.runningPaneCount(worktreeID: unknown) == 0)
   }
 
-  // MARK: - createWorktree uniqueness (HAN-82)
+  // MARK: - createWorktree uniqueness
 
   /// Repeated `codans worktree new` calls for the same `(project, path)`
-  /// used to silently add a fresh row each time (see HAN-82). The
+  /// used to silently add a fresh row each time. The
   /// guard rejects the second call with `.invariantViolation` so the
   /// CLI hits exit 3 (conflict) instead of polluting the catalog.
   @Test
@@ -688,7 +700,7 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   /// Name collision (different path) also rejected — the dispatcher's
-  /// HAN-82 reproduction had every retry use the same display name.
+  /// reproduction had every retry use the same display name.
   @Test
   func createWorktreeRejectsDuplicateName() throws {
     let projectID = manager.addProject(

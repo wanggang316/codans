@@ -17,25 +17,28 @@ struct ContentView: View {
   /// Per-Worktree uncommitted-edits diff cache. Drives the `+N −M` chip on
   /// every worktree row, not just rows with a matched PR.
   let worktreeLocalDiffMonitor: WorktreeLocalDiffMonitor
-  /// v1 notifications roll-up. Threaded via `.environment` so sidebar
+  /// Notifications roll-up. Threaded via `.environment` so sidebar
   /// rows / tab bar / pane chrome can read per-level unread indicators
   /// without each site owning its own derivation.
   let notificationRollup: RollupIndexProvider?
-  /// v1 inbox owner. Threaded so the InboxBellView's popover can read
+  /// Inbox owner. Threaded so the InboxBellView's popover can read
   /// `entries`, mark rows read, and trigger a "Mark all read".
   let notificationStore: NotificationStore?
-  /// v1 banner adapter. Threaded so the Settings → Notifications pane
+  /// Banner adapter. Threaded so the Settings → Notifications pane
   /// reuses the long-lived instance instead of spawning a fresh one
   /// (each spawn re-runs `setNotificationCategories` on the shared
   /// UN center).
   let osNotifier: UserNotificationsOSNotifier?
-  /// T6 (active-agents): registry that backs the worktree-toolbar
-  /// badge + popover. Optional because `AppState.bringUp` constructs
-  /// it lazily; nil renders no badge.
+  /// Registry that backs the worktree-toolbar badge + popover. Optional
+  /// because `AppState.bringUp` constructs it lazily; nil renders no badge.
   let agentStateStore: AgentStateStore?
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
+
+  /// Live Sparkle seam (the global value, shared with the Updates pane) so an
+  /// in-process settings change can re-sync the running `SPUUpdater`.
+  @Dependency(UpdatesClient.self) private var updatesClient
 
   /// Bridges `RootFeature.State.sidebarVisible` (a Bool) to
   /// `NavigationSplitViewVisibility` so the chord, the system disclosure
@@ -124,6 +127,7 @@ struct ContentView: View {
     }
     .environment(hierarchyManager)
     .environment(settingsStore)
+    .environment(UpdatesEnvironment.model)
     .environment(worktreeStatusMonitor)
     .environment(worktreeLocalDiffMonitor)
     .environment(notificationRollup)
@@ -153,6 +157,27 @@ struct ContentView: View {
     // descriptors + globalDefault.
     .onChange(of: settingsStore.settings.general.defaultEditorID) { _, _ in
       store.send(.editor(.onAppear))
+    }
+    // Re-sync the live SPUUpdater whenever the Updates prefs change in-process,
+    // not only through the Updates-pane picker bindings. Any other write path
+    // (or a future settings entry point) would otherwise update settings.json
+    // but leave the running updater on its launch-time cadence — the "set 3h,
+    // app still polls daily" drift. `triggerBackgroundCheck: false` so a
+    // settings edit never itself hits the network; the picker opts into an
+    // immediate probe on its own.
+    .onChange(of: settingsStore.settings.general) { old, new in
+      guard old.updateChannel != new.updateChannel
+        || old.updateCheckInterval != new.updateCheckInterval
+        || old.updatesAutomaticallyCheckForUpdates != new.updatesAutomaticallyCheckForUpdates
+        || old.updatesAutomaticallyDownloadUpdates != new.updatesAutomaticallyDownloadUpdates
+      else { return }
+      updatesClient.applyPreferences(
+        new.updateChannel,
+        new.updateCheckInterval,
+        new.updatesAutomaticallyCheckForUpdates,
+        new.updatesAutomaticallyDownloadUpdates,
+        false
+      )
     }
     .onDisappear {
       store.send(.onQuit)

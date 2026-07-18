@@ -182,7 +182,7 @@ final class TerminalEngine {
     // looks for it.
     // Consume any pending snapshot-restore path exactly once and bake it into
     // the command below. `command` is built a single time and reused for BOTH
-    // the initial PaneSurface attempt and the HAN-82 ticked retry, so the path
+    // the initial PaneSurface attempt and the ticked retry, so the path
     // is consumed once and the retry still restores. A later ensureSurface for
     // the same pane (close + reopen) finds the map already cleared, so it gets a
     // clean cold command with no stale re-restore. Do NOT move this consume into
@@ -205,13 +205,13 @@ final class TerminalEngine {
     var surfaceEnv = env
     surfaceEnv["ZMX_DIR"] = zmxDir.path
 
-    // HAN-82: `ghostty_surface_new` is observed to fail transiently
-    // — the user reported ~10 consecutive failures followed by a clean
-    // success with no input change, suggesting an internal race that
-    // resolves once libghostty has ticked. One ticked retry covers the
-    // race without busy-looping; if it still fails the original
-    // `GhosttyError` (now carrying a reason and a `retryable` flag) is
-    // re-thrown so external callers see actionable diagnostics.
+    // `ghostty_surface_new` is observed to fail transiently — ~10
+    // consecutive failures followed by a clean success with no input
+    // change, suggesting an internal race that resolves once libghostty
+    // has ticked. One ticked retry covers the race without busy-looping;
+    // if it still fails the original `GhosttyError` (carrying a reason and
+    // a `retryable` flag) is re-thrown so external callers see actionable
+    // diagnostics.
     let surface: PaneSurface
     do {
       surface = try PaneSurface(
@@ -270,12 +270,11 @@ final class TerminalEngine {
     // Right-click menu items raise PaneActionRequest values directly on the
     // view; lift them onto the engine's event stream so they reach
     // PaneActionRouterFeature through the same path as libghostty-decoded
-    // intents (new_split / reset / etc.). Same shape as
-    // emitPaneIntent in GhosttyActionDecoder.
+    // intents (new_split / reset / etc.).
     surface.view.onPaneAction = { [weak self] request in
       self?.emit(.paneActionRequested(pane.id, request))
     }
-    // C8a Phase 4d: forward `pane.initialCommand` to the freshly spawned shell so
+    // Forward `pane.initialCommand` to the freshly spawned shell so
     // `.shellEditor` launches ("$EDITOR\n") actually run. HierarchyManager.openPane stores
     // the command on the Pane; this is the one place it gets replayed when the surface
     // comes up.
@@ -303,6 +302,26 @@ final class TerminalEngine {
     else { return }
     surface.closeKillingDaemon()
     handleSurfaceClose(paneID: paneID, processAlive: true)
+  }
+
+  /// Archive teardown — see `HierarchyRuntime.suspendSurface`. Two
+  /// deliberate departures from `closeSurface`:
+  ///  1. The daemon is killed even with no registered surface. Surfaces are
+  ///     lazy, so a backgrounded archived pane usually has none — but its
+  ///     zmx daemon is still running and `closeSurface`'s `guard` would let
+  ///     it leak (this is the multi-day daemon leak archive used to cause).
+  ///  2. No `.paneExited` is emitted (`announce: false`). Archive is
+  ///     soft-hide: the Pane must stay in the catalog for restore, and
+  ///     `.paneExited` would route through `paneLifecycleExited → closePane`.
+  func suspendSurface(for paneID: PaneID) {
+    guard let surface = ghosttyRuntime?.surface(for: paneID) else {
+      // No live surface — kill the still-running daemon directly via its
+      // control socket (a missing socket is a silent no-op).
+      ZmxControlClient.kill(for: paneID)
+      return
+    }
+    surface.closeKillingDaemon()
+    handleSurfaceClose(paneID: paneID, processAlive: true, announce: false)
   }
 
   /// Whether a live surface is currently registered for the pane.
@@ -364,23 +383,30 @@ final class TerminalEngine {
     }
   }
 
-  private func handleSurfaceClose(paneID: PaneID, processAlive: Bool) {
+  private func handleSurfaceClose(paneID: PaneID, processAlive: Bool, announce: Bool = true) {
     // Snapshot the surface state BEFORE unregistering so a stale registry
     // entry can't drop the lifecycle event. Unregister after emit so any
     // in-flight lookup in subscriber code still resolves the surface.
     let state = ghosttyRuntime?.surface(for: paneID)?.state ?? .ready
     disposeOutputBuffer(for: paneID)
 
-    switch state {
-    case .crashed(let reason):
-      _ = recordPaneCrash(paneID: paneID, reason: reason)
-    case .exited(let code):
-      emit(.paneExited(paneID, code: code, signal: nil))
-    default:
-      // No explicit state set by markExited/markCrashed: use processAlive
-      // to distinguish user-initiated close (code 0) from child exit where
-      // we lack a real exit code (code -1 as a "unknown" sentinel).
-      emit(.paneExited(paneID, code: processAlive ? 0 : -1, signal: nil))
+    // `announce: false` is the archive (soft-hide) path: tear down the
+    // engine's per-pane scratch but emit no lifecycle event, so the Pane is
+    // not routed through `RootFeature.paneLifecycleExited → closePane` and
+    // survives in the catalog for restore. The daemon was already killed by
+    // the `suspendSurface` caller.
+    if announce {
+      switch state {
+      case .crashed(let reason):
+        _ = recordPaneCrash(paneID: paneID, reason: reason)
+      case .exited(let code):
+        emit(.paneExited(paneID, code: code, signal: nil))
+      default:
+        // No explicit state set by markExited/markCrashed: use processAlive
+        // to distinguish user-initiated close (code 0) from child exit where
+        // we lack a real exit code (code -1 as a "unknown" sentinel).
+        emit(.paneExited(paneID, code: processAlive ? 0 : -1, signal: nil))
+      }
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
@@ -565,7 +591,7 @@ final class TerminalEngine {
     for siblingID in siblingPaneIDs {
       disposeOutputBuffer(for: siblingID)
       // Forced close, not clean exit — distinct variant so persistence and
-      // C3 hook consumers don't misreport as code-0 exit.
+      // hook consumers don't misreport as code-0 exit.
       emit(.paneClosedByTab(siblingID, cause: cause))
     }
     emit(.tabAutoClosed(location.tabID, cause: cause))
@@ -573,8 +599,7 @@ final class TerminalEngine {
   }
 
   /// Retry a crashed pane. Returns false when the pane no longer exists
-  /// (e.g. its Tab was already auto-closed). M5 replaces the stub body with
-  /// real surface recreation via GhosttyRuntime.createSurface.
+  /// (e.g. its Tab was already auto-closed).
   @discardableResult
   func retryPane(_ paneID: PaneID) -> Bool {
     guard findPane(paneID) != nil else {

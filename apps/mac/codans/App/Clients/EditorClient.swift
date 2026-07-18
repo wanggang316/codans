@@ -7,9 +7,9 @@ import CodansCore
 /// `describe` / `resolve` / `open` through closures without importing the service
 /// type directly.
 ///
-/// C8a change: the service no longer sees `ProjectID`. Per-Project editor overrides are
-/// resolved at the caller layer (TCA reducer or IPC handler) and handed to the service as
-/// an `EditorID?` via the `preferred` parameter.
+/// The service does not see `ProjectID`. Per-Project editor overrides are resolved at the
+/// caller layer (TCA reducer or IPC handler) and handed to the service as an `EditorID?` via
+/// the `preferred` parameter.
 nonisolated struct EditorClient: Sendable {
   var describe: @Sendable () async -> [EditorDescriptor]
   var resolve: @Sendable (_ preferred: EditorID?) async throws -> EditorDescriptor

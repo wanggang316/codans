@@ -514,6 +514,7 @@ struct ProjectGeneralSettingsView: View {
       EnvironmentEditorView(
         envVars: envVarsBinding,
         builtins: BuiltinEnvVar.allCases,
+        builtinValues: builtinEnvValues,
         onChange: { key, newValue in
           routes.writeEnvVar(key: key, value: newValue)
         }
@@ -522,7 +523,7 @@ struct ProjectGeneralSettingsView: View {
       Text("Environment Variables")
     } footer: {
       Text(
-        "TOUCHCODE_WORKTREE_PATH and TOUCHCODE_ROOT_PATH are provided automatically for "
+        "CODANS_WORKTREE_PATH and CODANS_ROOT_PATH are provided automatically for "
           + "every pane. Values are stored in plain text in settings.json — don't paste "
           + "credentials you wouldn't keep in a config file."
       )
@@ -537,6 +538,19 @@ struct ProjectGeneralSettingsView: View {
       // a separate write path.
       set: { _ in }
     )
+  }
+
+  /// Concrete values for the read-only built-ins, scoped to this Project.
+  /// Only `CODANS_ROOT_PATH` has a single project-level value (the Project's
+  /// `rootPath`); `CODANS_WORKTREE_PATH` is resolved per worktree at spawn
+  /// time and has no meaningful project-scoped path, so it is omitted here
+  /// and the row falls back to its descriptive `summary` instead.
+  private var builtinEnvValues: [String: String] {
+    guard
+      let rootPath = hierarchyManager.catalog.projects
+        .first(where: { $0.id == projectID })?.rootPath
+    else { return [:] }
+    return [BuiltinEnvVar.rootPath.key: rootPath]
   }
 
   // MARK: - Worktree Lifecycle Scripts

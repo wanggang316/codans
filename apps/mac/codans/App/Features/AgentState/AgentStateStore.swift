@@ -13,8 +13,8 @@ private let storeLogger = Logger(
 /// unobserved attention bit. Raw state comes from the rendered active
 /// region; `finished` is the display form of an unobserved completion.
 /// Designed to be the single source of truth for the AgentState badge +
-/// view (T5–T7). Nothing is persisted: every entry is reconstructed
-/// from the live event flow at process start.
+/// view. Nothing is persisted: every entry is reconstructed from the
+/// live event flow at process start.
 ///
 /// `entries` is keyed by `PaneID` and exposes one `AgentEntry` per
 /// pane that has been bound via `onAgentBound(_:kind:sessionID:)`. The
@@ -128,8 +128,7 @@ final class AgentStateStore {
 
   // MARK: - Inputs
   //
-  // Reaction table (see docs/design-docs/active-agents-view.md
-  // §"Runtime State Derivation"):
+  // Reaction table:
   //
   //  - onTerminalEvent(.paneViewportChanged): classify the rendered
   //    active region through `PaneAttentionInterpreter`'s agent-specific

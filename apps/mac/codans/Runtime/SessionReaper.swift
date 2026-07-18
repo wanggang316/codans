@@ -9,7 +9,7 @@ import os.log
 /// or rejected our probe, and are removed from `sessions.json` as part
 /// of the same sweep. `.snapshot` entries name a paneID for which a
 /// `<paneID>.snap` file exists in the canonical snapshot directory but
-/// no live daemon was found — set by M3.T3.2's quit-time snapshot tier
+/// no live daemon was found — written by the quit-time snapshot tier
 /// when the "Resume panes on launch" toggle is off.
 public enum SessionState: Sendable, Equatable {
   case alive(Session)
@@ -21,13 +21,13 @@ public enum SessionState: Sendable, Equatable {
 /// `sessions.json` catalog, probes each entry's daemon socket, and
 /// returns a per-paneID state map so the pane-creation path can divert
 /// to `PaneDaemonBringup.reattach` for daemons that survived the last
-/// quit (M2.T2). Dead entries are pruned from the on-disk catalog and
+/// quit. Dead entries are pruned from the on-disk catalog and
 /// their stale socket files unlinked best-effort so a future sweep
 /// starts from a clean slate.
 ///
 /// Force-quit (`kill -9 Codans`) needs no special handling: zmx
 /// daemons run with `posix.setsid()` and survive the app's process
-/// group teardown (verified at T0.3), so the same `connect` probe
+/// group teardown, so the same `connect` probe
 /// identifies them as alive.
 @MainActor
 public final class SessionReaper {
@@ -178,7 +178,7 @@ public final class SessionReaper {
       }
     }
 
-    // M3.T3.3 snapshot fallback: every `<paneID>.snap` file in the
+    // Snapshot fallback: every `<paneID>.snap` file in the
     // canonical snapshot directory becomes a `.snapshot` state unless
     // the paneID already has a live daemon (in which case the snap is
     // stale and is unlinked). Snapshots and live daemons co-existing

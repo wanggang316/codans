@@ -1,9 +1,9 @@
 import AppKit
+import CodansCore
 import Foundation
 import GhosttyKit
 import OSLog
 import SwiftUI
-import CodansCore
 
 private let chromeTintLogger = Logger(
   subsystem: "com.gumpw.codans.runtime", category: "chrome-tint-debug"
@@ -57,6 +57,13 @@ final class GhosttyRuntime {
 
   private(set) var app: ghostty_app_t?
   private var config: ghostty_config_t?
+  /// User's intended `background-opacity`, snapshotted by `GhosttyConfigLoader`
+  /// before the surface-transparency override clobbers it. The window layer
+  /// paints its frosted-glass tint at this value; the live `config` itself
+  /// carries `background-opacity = 0` (surface forced transparent) whenever
+  /// this is below 1, so we can't read it back from `config`. Refreshed on
+  /// every hard reload.
+  private var userBackgroundOpacity: Double = 1
   let dispatcher = CallbackDispatcher()
   private var appFocusObservers: [NSObjectProtocol] = []
   /// Retained `NSWorkspace`-center observers (screen + system wake). Held
@@ -97,10 +104,11 @@ final class GhosttyRuntime {
   init() throws {
     _ = GhosttyBootstrap.initialize
 
-    guard let config = GhosttyConfigLoader.makeFreshConfig() else {
+    guard let loaded = GhosttyConfigLoader.makeFreshConfig() else {
       throw GhosttyError.configInitFailed
     }
-    self.config = config
+    self.config = loaded.config
+    self.userBackgroundOpacity = loaded.userBackgroundOpacity
 
     dispatcher.runtime = self
     // libghostty signals "I have work pending; please call ghostty_app_tick
@@ -189,6 +197,21 @@ final class GhosttyRuntime {
         MainActor.assumeIsolated { self?.resyncAllSurfaceGeometry() }
       }
     )
+
+    // The frosted-glass background is host-applied (libghostty never touches
+    // the embedder's NSWindow), and the full-screen branch in
+    // `applyTerminalWindowBackground` needs a re-apply on the transition:
+    // a window entering full-screen must drop back to opaque or the blur
+    // reveals black behind it, and exiting must restore the glass. Re-stain
+    // every window on the toggle.
+    for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+      appFocusObservers.append(
+        center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+          MainActor.assumeIsolated { self?.applyBackgroundColorToWindows() }
+        }
+      )
+    }
+
     let workspaceCenter = NSWorkspace.shared.notificationCenter
     for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
       workspaceWakeObservers.append(
@@ -348,6 +371,65 @@ final class GhosttyRuntime {
     return NSColor(ghostty: color)
   }
 
+  /// User's intended `background-opacity`, clamped to `[0, 1]`. Returns `1`
+  /// (fully opaque) until the first config load. This is the *snapshot* taken
+  /// before the surface-transparency override, not a live read of `config` —
+  /// when below 1 the live config carries `background-opacity = 0` (surface
+  /// forced transparent) so reading it back would always yield 0. Drives the
+  /// frosted-glass terminal background: `applyTerminalWindowBackground` paints
+  /// the window tint at this alpha and makes the window non-opaque + blurred
+  /// only when it's below 1.
+  func backgroundOpacity() -> Double {
+    userBackgroundOpacity
+  }
+
+  /// Paint one non-Settings window's background to the terminal theme tone,
+  /// honoring `background-opacity` for the translucent frosted-glass look.
+  ///
+  /// In an embedder libghostty never touches the host `NSWindow`, so the glass
+  /// effect is the host's job: when opacity < 1 (and the window isn't
+  /// full-screen) we make the window non-opaque, paint the theme tint at that
+  /// alpha, and ask libghostty to apply the macOS window-background blur — its
+  /// radius / glass style come from the `background-blur` config key (e.g.
+  /// `macos-glass-regular`). The terminal surface itself renders transparent
+  /// (for `macos-glass-*` the renderer forces surface alpha to 0), so this
+  /// window tint is the only visible layer and the blur shows through it.
+  /// Full-screen restores an opaque background so the blur doesn't reveal
+  /// black behind the window.
+  ///
+  /// Callers own skipping the Settings window and any `window.appearance`
+  /// updates; this method only owns background + opacity + blur. The
+  /// `color` / `opacity` arguments let the batch path (`applyBackgroundColor`
+  /// `ToWindows`) resolve them once instead of per window.
+  func applyTerminalWindowBackground(
+    _ window: NSWindow,
+    color: NSColor,
+    opacity: Double
+  ) {
+    // Note: the titlebar's transparency is owned by SwiftUI
+    // (`.windowToolbarStyle(.unified)` + `.toolbarBackground(.hidden)` on the
+    // worktree detail), which already lets the glass extend under the unified
+    // toolbar. We deliberately do NOT touch `titlebarAppearsTransparent` here —
+    // forcing it fights SwiftUI's toolbar management and de-fuses the header.
+    let isFullScreen = window.styleMask.contains(.fullScreen)
+    if opacity < 1, !isFullScreen {
+      window.isOpaque = false
+      window.backgroundColor = color.withAlphaComponent(opacity)
+      if let app {
+        ghostty_set_window_background_blur(app, Unmanaged.passUnretained(window).toOpaque())
+      }
+    } else {
+      window.isOpaque = true
+      window.backgroundColor = color
+    }
+  }
+
+  /// Convenience overload that resolves the current theme color + opacity.
+  /// Used by single-window call sites (e.g. `WindowAppearanceSetter`).
+  func applyTerminalWindowBackground(_ window: NSWindow) {
+    applyTerminalWindowBackground(window, color: backgroundColor(), opacity: backgroundOpacity())
+  }
+
   /// Mirror of ghostty's `Ghostty.Config.unfocusedSplitOpacity`. Reads the
   /// `unfocused-split-opacity` config key (default 0.85 — surface visibility,
   /// not overlay opacity) and returns the inverted overlay opacity used to
@@ -404,16 +486,19 @@ final class GhosttyRuntime {
   /// flips cascade through NSApp.effectiveAppearance untouched.
   private func applyBackgroundColorToWindows() {
     let color = backgroundColor()
+    let opacity = backgroundOpacity()
     let inferred = color.perceivedAppearance
     for window in NSApp.windows {
-      // Settings window opts out of the Ghostty terminal-background stain;
-      // restore the stock `.windowBackgroundColor` so the pane keeps the
-      // standard macOS Settings tone across scheme flips.
+      // Settings window opts out of the Ghostty terminal-background stain (and
+      // the frosted-glass translucency); restore the stock opaque
+      // `.windowBackgroundColor` so the pane keeps the standard macOS Settings
+      // tone across scheme flips.
       if SettingsWindowTagger.matches(window) {
+        window.isOpaque = true
         window.backgroundColor = .windowBackgroundColor
         continue
       }
-      window.backgroundColor = color
+      applyTerminalWindowBackground(window, color: color, opacity: opacity)
       if window.appearance != nil, let inferred {
         window.appearance = inferred
       }
@@ -734,9 +819,14 @@ final class GhosttyRuntime {
     }
     let pushed: ghostty_config_t?
     if soft, let current = config {
+      // Soft reload (color-scheme flip): keep the existing surface override and
+      // the last snapshotted opacity — only the conditional state changed.
       pushed = ghostty_config_clone(current)
+    } else if let fresh = GhosttyConfigLoader.makeFreshConfig() {
+      pushed = fresh.config
+      userBackgroundOpacity = fresh.userBackgroundOpacity
     } else {
-      pushed = GhosttyConfigLoader.makeFreshConfig()
+      pushed = nil
     }
     guard let handle = pushed else {
       chromeTintLogger.log("reloadConfig: no pushed config, bailing")
@@ -803,10 +893,9 @@ enum GhosttyError: Error, Equatable, Sendable, CustomStringConvertible {
   case configInitFailed
   case appInitFailed(reason: String)
   /// `retryable == true` means the caller can re-attempt after a short
-  /// backoff (HAN-82: `ghostty_surface_new` is observed to fail
-  /// transiently — the original throw site bubbled up an opaque
-  /// `surfaceInitFailed` so external scripts had no way to decide
-  /// retry vs. fail-hard).
+  /// backoff: `ghostty_surface_new` is observed to fail transiently, so
+  /// the reason + flag let callers decide retry vs. fail-hard instead of
+  /// seeing an opaque `surfaceInitFailed`.
   case surfaceInitFailed(reason: String, retryable: Bool)
 
   var description: String {

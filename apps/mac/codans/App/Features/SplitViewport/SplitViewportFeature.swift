@@ -4,15 +4,14 @@ import CodansCore
 
 /// Split viewport reducer. Actions mutate the active Tab's `SplitTree`
 /// through `HierarchyClient`; live pane surfaces are created / destroyed
-/// through `TerminalClient`. Per DEC-3 the state seeds `activeTabID:
-/// TabID?` so M5's lazy-surface lifecycle can react to `.tabActivated`
-/// without state restructuring.
+/// through `TerminalClient`. State seeds `activeTabID: TabID?` so the
+/// lazy-surface lifecycle can react to `.tabActivated`.
 @Reducer
 struct SplitViewportFeature {
   @ObservableState
   struct State: Equatable {
     /// The Tab currently rendered in the viewport. Set by parent features
-    /// (RootFeature selection stream in M4; lazy lifecycle in M5).
+    /// (the RootFeature selection stream and the lazy lifecycle).
     var activeTabID: TabID?
     /// Lifecycle state for every pane currently rendered in the viewport.
     /// The view bridges catalog changes into this array via

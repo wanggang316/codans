@@ -95,8 +95,7 @@ nonisolated enum BatchedPullRequestQuery {
 
   // MARK: - Private
 
-  /// Emits one `branchN: pullRequests(...)` selection block. Field list matches the
-  /// design doc (github-integration-batched.md §GraphQL Query Shape):
+  /// Emits one `branchN: pullRequests(...)` selection block. Field list:
   /// - `first: 5` — one branch may have multiple PRs; we take the 5 most recent.
   /// - `states: [OPEN, MERGED]` — closed non-merged PRs are rare dead-ends; skip.
   /// - `orderBy UPDATED_AT DESC` — within the slice, most-recently-active first.

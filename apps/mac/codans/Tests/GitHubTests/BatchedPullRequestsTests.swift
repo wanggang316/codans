@@ -4,7 +4,7 @@ import CodansCore
 
 @testable import Codans
 
-/// Covers the v2 batched PR fetch path (0013 M3): query builder, chunker, parser (dynamic
+/// Covers the v2 batched PR fetch path: query builder, chunker, parser (dynamic
 /// keys + union-type + fork-PR filter), and the `LiveGitHubService.batchPullRequests`
 /// orchestration.
 struct BatchedPullRequestsTests {

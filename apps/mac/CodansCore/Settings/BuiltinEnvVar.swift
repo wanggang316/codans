@@ -7,15 +7,15 @@ import Foundation
 /// when building a pane's environment so a user-defined `envVars` entry
 /// can never shadow the real path.
 ///
-/// Note the spelling is `TOUCHCODE_` (no underscore between TOUCH and
-/// CODE) — distinct from the internal `CODANS_*` IPC/runtime
-/// variables — because these are part of the user-facing scripting
-/// contract documented in the Environment pane.
+/// These share the `CODANS_` prefix with the internal IPC/runtime
+/// variables (e.g. `CODANS_WORKTREE_ID`, `CODANS_SOCKET_PATH`) but are
+/// part of the user-facing scripting contract documented in the
+/// Environment pane.
 public enum BuiltinEnvVar: String, Sendable, CaseIterable {
   /// Absolute path of the worktree the pane belongs to.
-  case worktreePath = "TOUCHCODE_WORKTREE_PATH"
+  case worktreePath = "CODANS_WORKTREE_PATH"
   /// Absolute path of the Project root the worktree was created from.
-  case rootPath = "TOUCHCODE_ROOT_PATH"
+  case rootPath = "CODANS_ROOT_PATH"
 
   /// The literal name written into the child process environment.
   public var key: String { rawValue }

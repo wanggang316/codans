@@ -64,7 +64,7 @@ struct GitHubFeatureTests {
 
   @Test
   func presentPopoverWithCachedSnapshotFetchesWorkflowRun() async {
-    // 0013 M6 retired the per-popover `gh pr checks` fetch; check data now travels
+    // The per-popover `gh pr checks` fetch was retired; check data now travels
     // with the snapshot. The popover still fetches the latest workflow run to seed
     // the "Rerun failed jobs" button — that's all `presentPopover` triggers now.
     let wid = WorktreeID()
@@ -102,7 +102,7 @@ struct GitHubFeatureTests {
 
   @Test
   func mergeSucceededEmitsDelegate() async {
-    // Post-mutation refresh is now project-level (0018 M3): it resolves the owning
+    // Post-mutation refresh is now project-level: it resolves the owning
     // Project from `projectByWorktree`. This Worktree was never part of a batched
     // fetch, so `postMutationRefresh` returns `.none` and the only follow-up is the
     // delegate. A separate test covers the delayed project refresh when the mapping
@@ -295,7 +295,7 @@ struct GitHubFeatureTests {
     }
   }
 
-  // MARK: - v2 project-batched fetch (0013 M4)
+  // MARK: - v2 project-batched fetch
 
   @Test
   func projectActivatedWithEmptyBranchesReturnsEmptyBatch() async {
@@ -359,7 +359,7 @@ struct GitHubFeatureTests {
         seenBranches: ["feature/github01"],
         fetchedAt: Self.fixedDate
       )
-      // Projected into the per-Worktree map for v1-view compatibility during M4–M5.
+      // Projected into the per-Worktree map for v1-view compatibility.
       $0.snapshots[wid] = returnedSnapshot
       $0.snapshotLoadedAt[wid] = Self.fixedDate
     }

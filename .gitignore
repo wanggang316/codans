@@ -21,7 +21,10 @@ build/
 *.xcworkspace/
 **/Tuist/Dependencies/
 **/Tuist/.build/
-**/Tuist/Package.resolved
+# Package.resolved is tracked (committed) to pin the dependency graph —
+# leaving it untracked let CI float transitive deps and pull a newer
+# swift-case-paths whose new CasePathsMacrosSupport module fails to build
+# under the CI Xcode toolchain. See apps/mac/Tuist/Package.resolved.
 
 # Carthage
 Carthage/Build/
@@ -59,3 +62,6 @@ apps/mac/.build/zmx/
 # harness-stack FDD per-plan runtime state (plans, contracts, validation, handoffs).
 # Work-in-progress orchestration state, not a committed artifact — kept local by design.
 .harness-runtime/
+# Earlier runs leaked FDD validation/run artifacts (features.json, validation-state.json,
+# evidence/repro/snapshot files) into docs/runs/. They belong in .harness-runtime/, not docs/.
+docs/runs/

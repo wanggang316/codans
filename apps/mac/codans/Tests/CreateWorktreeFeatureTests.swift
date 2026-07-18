@@ -7,7 +7,7 @@ import Testing
 
 /// Synchronous-branch coverage for `CreateWorktreeFeature`. The async
 /// option-load and streaming-create paths are exercised end-to-end by
-/// the M13 integration test against a real temp repo; here we lock the
+/// the integration test against a real temp repo; here we lock the
 /// live-validator branches, the collision classification + note
 /// metadata, the collision Create-block, and the cancel delegate —
 /// the branches a future refactor is most likely to silently break.

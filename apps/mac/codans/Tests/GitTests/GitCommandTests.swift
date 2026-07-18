@@ -4,7 +4,7 @@ import CodansCore
 
 @testable import Codans
 
-/// Argv-ordering tests for `GitCommand`. Added after the 0005 M4a.1 review caught a bug
+/// Argv-ordering tests for `GitCommand`. Added after a review caught a bug
 /// where `-w` was appended AFTER `--` for `.commit`, turning it into a pathspec named `-w`
 /// instead of an ignore-whitespace flag. Tests now lock the ordering contract per call site.
 struct GitCommandTests {
@@ -50,7 +50,7 @@ struct GitCommandTests {
     #expect(argv.contains("--format="))
   }
 
-  /// **Critical bug guard (0005 M4a.1).** Ensures `-w` lands BEFORE the `--` separator for
+  /// **Critical bug guard.** Ensures `-w` lands BEFORE the `--` separator for
   /// the commit scope. Git treats tokens after `--` as pathspec, so a misplaced `-w` would
   /// silently turn into a filter for a path literally named `-w` rather than enabling
   /// ignore-whitespace.

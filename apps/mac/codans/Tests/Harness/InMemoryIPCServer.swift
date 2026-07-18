@@ -8,8 +8,6 @@ import CodansIPC
 /// `tcTests` can drive the full wire protocol — `system.hello`, unary
 /// methods, and streaming — without a real Unix socket or blocking
 /// `FileHandle.availableData` reads.
-///
-/// Landed in M3 (exec-plan 0003 DEC-11); consumed by M4/M5 tests.
 @MainActor
 public final class InMemoryIPCServer {
   private let router: MethodRouter

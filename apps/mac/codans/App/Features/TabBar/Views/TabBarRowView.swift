@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Horizontal row of tab chips. Kept thin so feature dispatch stays out of
 /// the chip views — select / close / rename / reorder callbacks come from
@@ -17,17 +17,23 @@ import CodansCore
 /// `spring(response: 0.3, dampingFraction: 0.85)` (macOS Safari-style) —
 /// the dragged chip leaves a transparent gap in the row while a lifted
 /// copy follows the cursor in an overlay. The final permutation is
-/// dispatched once via `onReorder` on drop (the catalog mutation stays a
-/// single absolute-order commit, matching the exec-plan's D3).
+/// dispatched once via `onReorder` on drop — the catalog mutation stays a
+/// single absolute-order commit.
 struct TabBarRowView: View {
   let tabs: [CodansCore.Tab]
   let activeTabID: TabID?
-  /// Per-tab dirty lookup. Typically backed by
-  /// `HierarchyManager.tabIsDirty(_:)` so SwiftUI observation re-renders
-  /// the row when a pane's running state flips. Default is a no-op
-  /// returning `false` for callers / previews that do not need dirty
-  /// coverage.
-  var isDirty: (TabID) -> Bool = { _ in false }
+  /// Per-tab terminal-busy lookup — typically `HierarchyManager.tabIsDirty(_:)`
+  /// (OSC 9;4 ∪ foreground command). Drives the chip spinner unconditionally:
+  /// a plain command never animates the title itself, so the spinner is the
+  /// only running indicator. Default no-op for callers / previews that do not
+  /// need dirty coverage.
+  var isTerminalBusy: (TabID) -> Bool = { _ in false }
+  /// Per-tab agent-working lookup — true when a bound agent in the tab is
+  /// `.working`. Kept apart from the terminal signal because coding agents
+  /// (e.g. Claude) animate their own spinner into the live OSC title;
+  /// `ResolvingTabChipView` suppresses the chip spinner while that title is the
+  /// one on screen so the two indicators don't stack. Default no-op.
+  var isAgentWorking: (TabID) -> Bool = { _ in false }
   let onSelect: (TabID) -> Void
   let onClose: (TabID) -> Void
   let onMiddleClick: (TabID) -> Void
@@ -123,7 +129,8 @@ struct TabBarRowView: View {
     ResolvingTabChipView(
       tab: tab,
       isActive: activeTabID == tab.id,
-      isDirty: isDirty(tab.id),
+      terminalBusy: isTerminalBusy(tab.id),
+      agentWorking: isAgentWorking(tab.id),
       isOnlyTab: count <= 1,
       isLastTab: index == count - 1,
       chordHint: chordHint(for: index + 1),
@@ -302,7 +309,16 @@ struct TabBarRowView: View {
 private struct ResolvingTabChipView: View {
   let tab: CodansCore.Tab
   let isActive: Bool
-  let isDirty: Bool
+  /// Terminal-busy signal (OSC 9;4 ∪ foreground command). Drives the spinner
+  /// for a plain command (which does not self-indicate inside the title), but
+  /// is suppressed while the chip shows a working agent's live OSC title —
+  /// there the agent's own OSC 9;4 is what set this flag (see
+  /// `showsSpinner(live:)`).
+  let terminalBusy: Bool
+  /// A bound agent in this tab is `.working`. Drives the spinner only when the
+  /// chip is NOT showing the live OSC title, because a working coding agent
+  /// animates its own spinner into that title (see `showsSpinner(live:)`).
+  let agentWorking: Bool
   let isOnlyTab: Bool
   let isLastTab: Bool
   /// Forwarded to `TabChipView.chordHint`. Resolved at the row level so this view stays
@@ -332,7 +348,7 @@ private struct ResolvingTabChipView: View {
     TabChipView(
       title: resolvedTitle(live: live),
       isActive: isActive,
-      isDirty: isDirty,
+      isDirty: showsSpinner(live: live),
       isOnlyTab: isOnlyTab,
       isLastTab: isLastTab,
       hasUnreadNotification: notificationRollup?.current.unreadTabs.contains(tab.id) == true
@@ -359,6 +375,24 @@ private struct ResolvingTabChipView: View {
       guard let newLive, newLive != tab.cachedDisplayTitle else { return }
       onCacheLiveTitle(newLive)
     }
+  }
+
+  /// Whether to render the chip's running spinner. A working coding agent
+  /// (e.g. Claude) both animates its own spinner into the live OSC title AND
+  /// emits OSC 9;4 while running tool calls — and that OSC 9;4 also lights
+  /// `terminalBusy`. So when the chip is showing the agent's live title, the
+  /// activity is already covered twice over (the title animation plus the
+  /// pane's own progress bar); suppress our spinner there *regardless of*
+  /// `terminalBusy`, or it blinks on with every tool call and stacks on top of
+  /// the title, shoving it into truncation. Otherwise any busy signal drives
+  /// the spinner: a plain command (no self-indication), or a working agent on a
+  /// manually renamed tab (`tab.name` — a static name with no live animation to
+  /// carry the agent's own spinner).
+  private func showsSpinner(live: String?) -> Bool {
+    let showingAgentLiveTitle =
+      agentWorking && (tab.name?.isEmpty ?? true) && live != nil
+    if showingAgentLiveTitle { return false }
+    return terminalBusy || agentWorking
   }
 
   /// Title sourced strictly from the live focused-pane `SurfaceInfo`.

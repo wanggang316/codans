@@ -6,8 +6,7 @@ import SwiftUI
 /// When `isDirty` is `true`, a 12×12 mini progress spinner leads the label
 /// to signal that some pane inside the tab is executing a tracked command.
 /// The slot collapses to zero when `isDirty` is `false` so the label sits
-/// flush with the chip edge the rest of the time. Writers for the dirty
-/// signal land with the C3 hooks plan; M3 wires only the read path.
+/// flush with the chip edge the rest of the time.
 ///
 /// Truncates in the middle so both ends of the title remain visible — a
 /// long path's filename stays readable even as it's clipped.
@@ -15,7 +14,7 @@ struct TabChipLabel: View {
   let title: String
   var isActive: Bool = false
   var isDirty: Bool = false
-  /// L2 unread dot. Rendered as a 4 px filled circle immediately before
+  /// Unread dot. Rendered as a 4 px filled circle immediately before
   /// the title text. Boolean only — no count, no kind distinction.
   var hasUnreadNotification: Bool = false
   /// Resolved SF Symbol from `Tab.resolvedIcon`. The running-spinner and

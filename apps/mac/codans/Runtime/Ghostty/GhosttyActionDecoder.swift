@@ -19,13 +19,10 @@ import os.log
 ///     performs the routing side effects (emit events, write
 ///     `PaneSurface.info`, trigger AppKit calls).
 ///
-/// Rationale (plan 0008 DEC-M7d-1): the earlier design queued the raw
-/// `ghostty_action_s` struct and decoded it on main after the callback
-/// returned; the C union's borrowed pointers became dangling, and the
-/// callback reported `false` even though we still applied the action
-/// asynchronously. Pre-decoding fixes both: the async apply reads only
-/// Swift-owned data, and the callback can return the correct
-/// consumed-ness because decode decides it synchronously.
+/// Two-pass so the async main-thread apply never reads the C union's
+/// borrowed pointers (they dangle once `action_cb` returns), and so the
+/// callback can report correct consumed-ness — decode decides it
+/// synchronously.
 enum GhosttyActionDecoder {
 
   nonisolated static let logger = Logger(
@@ -521,6 +518,22 @@ extension GhosttyActionDecoder {
       pane.markExited(code: code)
       runtime.emitInfoChanged(paneID, .childExited(code: code))
       logger.debug("surface action: show_child_exited (code \(code))")
+      // libghostty's `childExited` does NOT call `self.close()` on macOS: the
+      // `login` wrapper breaks its runtime/exit-code detection, so every child
+      // exit is classified "abnormal" and the surface parks on a blank screen
+      // ("Process exited. Press any key…") until the user presses a key. Nothing
+      // downstream tears the pane down on its own, so a plain `exit` leaves a
+      // ghost pane and a "Close when finished" command's `<cmd>; exit` never
+      // fires its close-tab / close-pane policy (paneExited is what
+      // `scheduleOnFinishedAction` waits on). Drive the normal close path
+      // ourselves. Deferred to the next main-actor hop so libghostty has
+      // unwound out of this action dispatch before the surface is disposed;
+      // re-resolving the surface keeps a concurrent close (the non-abnormal
+      // path emits this action immediately before `self.close()`) from tearing
+      // the pane down twice.
+      Task { @MainActor in
+        runtime.surface(for: paneID)?.requestClose(processAlive: false)
+      }
       return true
     case .undo:
       NSApp.sendAction(#selector(UndoManager.undo), to: nil, from: nil)
@@ -619,7 +632,7 @@ extension GhosttyActionDecoder {
 
   // Note: these six decoders are `internal static` so
   // `@testable import Codans` can reach them from
-  // `GhosttyActionDecoderTests`. See plan 0008 DEC-M7b-1.
+  // `GhosttyActionDecoderTests`.
   nonisolated static func decodeCloseTabMode(
     _ mode: ghostty_action_close_tab_mode_e
   ) -> CloseTabMode? {

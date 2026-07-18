@@ -5,9 +5,7 @@ import Foundation
 /// redirect the invocation (to a different config file, a different working tree, an external
 /// diff tool, an interactive prompter) is explicitly stripped even if present in the parent.
 ///
-/// Historically aligned with an editor-subprocess environment (`EditorEnv`) — that module
-/// retired in C8a when `EditorService` moved to NSWorkspace; Git is now the only subprocess
-/// boundary applying the allowlist-plus-strip discipline.
+/// Git is the only subprocess boundary applying this allowlist-plus-strip discipline.
 ///
 /// Declared `nonisolated` because the app target defaults to `@MainActor` — these members are
 /// pure and safe to call from any context.

@@ -4,14 +4,14 @@ import CodansCore
 
 @testable import Codans
 
-/// White-box backing for the launch-time restore wiring (M2,
-/// `app-restore-threading`). `bootstrapSessionStack` threads the reaper's
+/// White-box backing for the launch-time restore wiring.
+/// `bootstrapSessionStack` threads the reaper's
 /// per-pane sweep result into `engine.pendingRestores` via
 /// `AppState.derivePendingRestores`. These tests pin the derivation: only
 /// `.snapshot(url)` states become restore entries, keyed by their paneID,
 /// with URLs preserved verbatim — `.alive`/`.dead` are excluded. The
 /// runtime end-to-end (PID differs, multi-pane no cross-contamination,
-/// full round trip) is verified at the M2 user-test stage + the green
+/// full round trip) is verified at the user-test stage + the green
 /// bats mechanism; this unit test is the decisive white-box evidence.
 @MainActor
 struct AppRestoreThreadingTests {

@@ -32,9 +32,19 @@ public nonisolated enum AppDirectories {
   /// `sessions.json`, `settings.json`, `notifications.json`, `shortcuts.json`,
   /// `github-snapshots.json`, and the `master-terminal/` subtree.
   public static func configDirectory(
-    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+    override: String? = ProcessInfo.processInfo.environment["CODANS_CONFIG_DIR"]
   ) -> URL {
-    home
+    // `$CODANS_CONFIG_DIR`, when set and non-empty, fully relocates the config
+    // root — every config file (`settings.json`, `catalog.json`, `sessions.json`,
+    // `notifications.json`, …) lands under it. This is the isolation seam for a
+    // dev / smoke / integration run that must not touch the user's real
+    // `~/.config/codans[-dev]/`. When unset, the build-type-suffixed default
+    // applies (Release `codans`, Debug `codans-dev`) — unchanged.
+    if let override, !override.isEmpty {
+      return URL(fileURLWithPath: override, isDirectory: true)
+    }
+    return home
       .appendingPathComponent(".config", isDirectory: true)
       .appendingPathComponent(name, isDirectory: true)
   }

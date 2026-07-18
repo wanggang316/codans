@@ -6,7 +6,7 @@ import CodansCore
 /// maps. The General pane wraps this in a grouped `Section` so each row
 /// renders with native Form chrome (inset card, hairline separators) and
 /// each commit routes through `SettingsWriter.setProjectEnvVar(pid, key,
-/// value)`; M6's per-hook env editor reuses the same component with a
+/// value)`; the per-hook env editor reuses the same component with a
 /// hooks-aware writer.
 ///
 /// Layout mirrors the System-Settings idiom: every row is a
@@ -19,7 +19,7 @@ import CodansCore
 ///
 /// Add and Edit both push a modal sheet (`EnvVarEditorSheet`) rather than
 /// editing inline, matching the Scripts pane's editor. The sheet enforces
-/// the validation rules (Risk R3 from the design doc):
+/// the validation rules:
 ///   - KEY must match POSIX env-var: `^[A-Za-z_][A-Za-z0-9_]*$`.
 ///   - KEY must not collide with a reserved built-in or an existing key.
 ///   - VALUE must not contain `\n` or `\r` — the on-disk JSON is shell-
@@ -32,6 +32,10 @@ struct EnvironmentEditorView: View {
   /// App-provided, read-only variables pinned above the editable rows.
   /// Empty for callers (like the hooks editor) that have no built-ins.
   var builtins: [BuiltinEnvVar] = []
+  /// Concrete resolved value for each built-in, keyed by its `key`. The
+  /// host supplies these (the editor can't resolve project paths itself);
+  /// a built-in with no entry falls back to its `summary` description.
+  var builtinValues: [String: String] = [:]
   /// Per-row commit hook. `value == nil` means delete. Wrapping views use
   /// it to fan out into `SettingsWriter.setProjectEnvVar` etc. without
   /// this view knowing about ProjectIDs.
@@ -62,46 +66,58 @@ struct EnvironmentEditorView: View {
 
   // MARK: - Built-in rows
 
-  /// Read-only row for an app-provided variable: monospaced key over a
-  /// secondary description, with a trailing button that copies the key to
-  /// the pasteboard. The value is resolved per-pane at spawn time, so the
-  /// row documents the meaning rather than showing a concrete value.
+  /// Read-only row for an app-provided variable: monospaced key over its
+  /// resolved value, with a trailing button that copies the key to the
+  /// pasteboard. When the host supplies no concrete value the row falls
+  /// back to the `summary` description.
   @ViewBuilder
   private func builtinRow(_ builtin: BuiltinEnvVar) -> some View {
     LabeledContent {
-      Button {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(builtin.key, forType: .string)
-      } label: {
-        Image(systemName: "doc.on.doc")
-          .accessibilityLabel("Copy \(builtin.key)")
-      }
-      .buttonStyle(.borderless)
-      .help("Copy variable name")
+      copyButton(builtin.key)
     } label: {
       Text(builtin.key).monospaced()
-      Text(builtin.summary)
+      Text(builtinValues[builtin.key] ?? builtin.summary)
     }
+  }
+
+  /// Borderless trailing button that copies a variable's name to the
+  /// pasteboard — shared by built-in and editable rows so the "reference
+  /// this variable in a script" affordance is identical for both.
+  @ViewBuilder
+  private func copyButton(_ key: String) -> some View {
+    Button {
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(key, forType: .string)
+    } label: {
+      Image(systemName: "doc.on.doc")
+        .accessibilityLabel("Copy \(key)")
+    }
+    .buttonStyle(.borderless)
+    .help("Copy variable name")
   }
 
   // MARK: - Existing rows
 
   /// Editable variable: monospaced key over its current value. Tapping the
-  /// row opens the edit sheet; the trailing button removes it.
+  /// row opens the edit sheet; the trailing buttons copy the key and remove
+  /// the variable.
   @ViewBuilder
   private func existingRow(key: String) -> some View {
     let value = envVars[key] ?? ""
     LabeledContent {
-      Button {
-        onChange(key, nil)
-      } label: {
-        Image(systemName: "minus.circle.fill")
-          .foregroundStyle(.secondary)
-          .accessibilityHidden(true)
+      HStack(spacing: 12) {
+        copyButton(key)
+        Button {
+          onChange(key, nil)
+        } label: {
+          Image(systemName: "minus.circle.fill")
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+        }
+        .buttonStyle(.borderless)
+        .help("Remove \(key)")
+        .accessibilityLabel("Remove \(key)")
       }
-      .buttonStyle(.borderless)
-      .help("Remove \(key)")
-      .accessibilityLabel("Remove \(key)")
     } label: {
       Text(key).monospaced()
       Text(value.isEmpty ? "—" : value)
@@ -155,11 +171,14 @@ private struct EnvVarEdit: Identifiable {
   var id: String { isNew ? "\u{0}new" : key }
 }
 
-/// Modal sheet for adding or editing one environment variable. Body is a
-/// System-Settings-style grouped `Form`; edits accumulate in local state
-/// and commit through `onSave` only when valid. On edit the KEY is
-/// read-only — renaming is a remove-then-add — so the value is the only
-/// mutable field.
+/// Modal sheet for adding or editing one environment variable. Built as a
+/// content-hugging card (the app's `TagManagerSheet` / `TabRenameSheetView`
+/// idiom) rather than a `NavigationStack` + grouped `Form`: a custom layout
+/// is the only way to pin the title leading, keep the action buttons tight
+/// against the hint, and let the fields blend borderlessly into the card.
+/// Edits accumulate in local state and commit through `onSave` only when
+/// valid. On edit the KEY is read-only — renaming is a remove-then-add — so
+/// the value is the only mutable field.
 private struct EnvVarEditorSheet: View {
   let isNew: Bool
   /// Current map, used to flag a duplicate KEY when adding.
@@ -169,6 +188,16 @@ private struct EnvVarEditorSheet: View {
 
   @State private var key: String
   @State private var value: String
+
+  /// Which field holds the caret on open — KEY when adding, VALUE when the
+  /// KEY is locked (editing an existing variable).
+  private enum Field { case name, value }
+  @FocusState private var focus: Field?
+
+  /// Horizontal breathing room between each row's label / field and the
+  /// card edge. Applied per row (not to the card) so the hairline divider
+  /// keeps its full-bleed width.
+  private static let rowInset: CGFloat = 10
 
   init(
     key: String,
@@ -187,46 +216,67 @@ private struct EnvVarEditorSheet: View {
   }
 
   var body: some View {
-    NavigationStack {
-      Form {
-        Section {
+    VStack(alignment: .leading, spacing: 14) {
+      Text(isNew ? "Add Variable" : "Edit Variable")
+        .font(.headline)
+
+      // Borderless fields inside a native grouped card: the inputs share the
+      // card's fill so they read as inline values rather than boxed controls.
+      GroupBox {
+        VStack(spacing: 8) {
           LabeledContent("Name") {
-            TextField("EXAMPLE_NAME", text: $key)
-              .textFieldStyle(.roundedBorder)
+            TextField("", text: $key)
+              .textFieldStyle(.plain)
+              .multilineTextAlignment(.trailing)
               .font(.system(.body, design: .monospaced))
-              .frame(minWidth: 220)
+              .foregroundStyle(isNew ? .primary : .secondary)
+              .focused($focus, equals: .name)
               .disabled(!isNew)
           }
+          .padding(.horizontal, Self.rowInset)
+          Divider()
           LabeledContent("Value") {
-            TextField("value", text: $value)
-              .textFieldStyle(.roundedBorder)
-              .frame(minWidth: 220)
+            TextField("", text: $value)
+              .textFieldStyle(.plain)
+              .multilineTextAlignment(.trailing)
+              .focused($focus, equals: .value)
           }
-        } footer: {
-          if let error {
-            Text(error).foregroundStyle(.red)
-          } else if isNew {
-            Text("Letters, digits, and underscores; can't start with a digit.")
-              .foregroundStyle(.secondary)
-          }
+          .padding(.horizontal, Self.rowInset)
         }
+        .padding(.vertical, 2)
       }
-      .formStyle(.grouped)
-      .navigationTitle(isNew ? "Add Variable" : "Edit Variable")
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel", action: onCancel)
-        }
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Save") {
-            onSave(key, value)
-          }
+
+      hint
+
+      HStack(spacing: 12) {
+        Spacer()
+        Button("Cancel", role: .cancel, action: onCancel)
+          .keyboardShortcut(.cancelAction)
+        Button("Save") { onSave(key, value) }
           .keyboardShortcut(.defaultAction)
+          .buttonStyle(.borderedProminent)
           .disabled(!canSave)
-        }
       }
     }
-    .frame(minWidth: 440, idealWidth: 500, minHeight: 220)
+    .padding(20)
+    .frame(width: 440)
+    .onAppear { focus = isNew ? .name : .value }
+  }
+
+  /// Validation feedback / format guidance shown between the card and the
+  /// footer. The KEY rule is rendered as its character-class pattern — the
+  /// symbolic form reads faster for this audience than a prose sentence.
+  @ViewBuilder
+  private var hint: some View {
+    if let error {
+      Text(error)
+        .font(.caption)
+        .foregroundStyle(.red)
+    } else if isNew {
+      Text(verbatim: "[A-Za-z_][A-Za-z0-9_]*")
+        .font(.system(.caption, design: .monospaced))
+        .foregroundStyle(.secondary)
+    }
   }
 
   /// Inline validation message, or nil when the draft is committable. On

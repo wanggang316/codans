@@ -50,6 +50,21 @@ struct AgentKindPatternsTests {
   }
 
   @Test
+  func foregroundJob_matchesClaudeSingleExecutableLauncher() {
+    // Claude Code ships its launcher as a Node single-executable named
+    // `claude.exe` (even on macOS). The `.exe` suffix must not defeat the
+    // process-name match, or the pane never binds an agent and is missing
+    // from the agents view.
+    let path =
+      "/Users/me/.nvm/versions/node/v22.19.0/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+    #expect(
+      AgentKindPatterns.classify(
+        foregroundJob: Self.job(argv0: path, commandLine: "\(path) --resume abc")
+      ) == .claudeCode
+    )
+  }
+
+  @Test
   func foregroundJob_matchesAgentInsideNodeWrapper() {
     #expect(
       AgentKindPatterns.classify(

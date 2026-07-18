@@ -83,7 +83,7 @@ enum CrashReporting {
         // Keep below any plausible free-tier ceiling. Crash + error
         // capture itself is independent of this knob.
         options.tracesSampleRate = 0.05
-        // Disabled in v1 — main-thread hang detection on macOS reports
+        // Disabled — main-thread hang detection on macOS reports
         // a lot of system-induced false positives. Re-evaluate after
         // the baseline is quiet.
         options.enableAppHangTracking = false

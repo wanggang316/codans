@@ -44,7 +44,7 @@ enum GitHubError: Error, Equatable, Sendable {
   case graphQLError(String)
 
   /// `gh` is installed but is older than the minimum version `gh api graphql --hostname`
-  /// is known to work with (2.20+ for 0013). Remediation: `brew upgrade gh`.
+  /// is known to work with (2.20+). Remediation: `brew upgrade gh`.
   case ghCLIOutdated(minVersion: String)
 
   /// Parsing `git remote get-url origin` failed in an upstream `GitService` call. The

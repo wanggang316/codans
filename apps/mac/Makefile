@@ -1,7 +1,6 @@
 .PHONY: help bootstrap build-ghostty build-zmx generate build run-app format lint check check-rename test clean build-cli archive release bump-version regen-completions
 
-# Use full Xcode.app when xcode-select points at Command Line Tools only.
-# See DEC-10 in docs/exec-plans/0001-bootstrap-monorepo.md.
+# Use full Xcode.app when xcode-select points at CLT only.
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 
 help:

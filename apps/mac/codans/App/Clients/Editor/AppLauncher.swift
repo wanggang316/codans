@@ -6,8 +6,7 @@ import Foundation
 /// double to verify `(appURL, urls, configuration.arguments, configuration.createsNewApplicationInstance)`
 /// tuples without ever touching `NSWorkspace`.
 ///
-/// This is the only place `NSWorkspace` is imported outside test code (see design doc
-/// §Component Boundaries).
+/// This is the only place `NSWorkspace` is imported outside test code.
 protocol AppLauncher: Sendable {
   /// Resolves a bundle identifier to a `.app` URL via Launch Services, or `nil` if no
   /// matching bundle is registered on the current system. Matches
@@ -18,8 +17,8 @@ protocol AppLauncher: Sendable {
   /// `NSWorkspace.shared.open(_:withApplicationAt:configuration:completionHandler:)`.
   ///
   /// The live implementation bridges the completion-handler API into Swift concurrency via
-  /// `withCheckedThrowingContinuation`; the continuation resumes exactly once (Risk R6 in the
-  /// design doc). On error, throws the underlying `NSError`.
+  /// `withCheckedThrowingContinuation`; the continuation resumes exactly once. On error, throws
+  /// the underlying `NSError`.
   func open(
     urls: [URL],
     withApplicationAt appURL: URL,

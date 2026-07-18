@@ -4,16 +4,15 @@ import SwiftUI
 /// on first launch before any Project has been added, or after the catalog
 /// pruned every existing Project.
 ///
-/// HAN-65: deliberately blank. The sidebar's empty-state view owns the
-/// "Open Project" call-to-action and the shortcut hint, so the detail
-/// pane only needs to surface the window's background colour. Suppressing
-/// the title + toolbar chrome in `WorktreeDetailView`'s placeholder branch
-/// removes the lingering "codans" window title and the title-bar
-/// divider; this view fills what's left.
+/// Deliberately blank. The sidebar's empty-state view owns the "Open
+/// Project" call-to-action and the shortcut hint, so the detail pane only
+/// needs to surface the window's background colour. Suppressing the title
+/// + toolbar chrome in `WorktreeDetailView`'s placeholder branch removes
+/// the lingering "codans" window title and the title-bar divider; this
+/// view fills what's left.
 ///
-/// Parameter is kept on the type so call sites that already thread a
-/// sidebar-add hook in don't need to change — it is currently unused,
-/// but the empty-state surface might gain a button again later.
+/// `onAddProject` is currently unused but kept on the type so call sites
+/// that thread a sidebar-add hook in don't need to change.
 struct EmptyProjectStateView: View {
   let onAddProject: () -> Void
 

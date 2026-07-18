@@ -5,8 +5,7 @@ import Foundation
 /// Lives on `HierarchySidebarFeature.State.pendingWorktrees`. Distinct
 /// from the persistent `Worktree` (catalog) — pending rows have no on-disk
 /// presence in catalog.json, no `WorktreeID`, no Tab/Pane attachment, and
-/// vanish on app restart. See `docs/design-docs/worktree-sidebar-ordering.md`
-/// §pending 段 for the full contract.
+/// vanish on app restart.
 nonisolated struct PendingWorktreeID: Hashable, Sendable {
   let raw: UUID
   init() { raw = UUID() }

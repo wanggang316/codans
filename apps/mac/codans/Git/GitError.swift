@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors surfaced by `GitService` and the pure parser layer. Mapped 1:1 to UI error banners
-/// by the C7 TCA feature in M3.
+/// by the TCA feature.
 ///
 /// `nonisolated` so the error crosses actor boundaries freely (the type is `Sendable` by
 /// virtue of every associated value being `Sendable`).

@@ -64,8 +64,27 @@ public final class SessionCoordinator {
   /// Idempotent: re-recording the same paneID overwrites the row, which
   /// is exactly the semantics we want when a reattach refreshes
   /// `lastAttachedAt` or when a crashed pane respawns with a new pid.
+  ///
+  /// One field is deliberately NOT overwritten: `sessionEpoch`. It is
+  /// birth identity, not live state — the login (audit) session the daemon
+  /// was spawned into, so the launch-time reaper can tell a daemon that
+  /// outlived its session apart from one still in the current session (see
+  /// `SessionEpoch`). A reattach runs in the *current* session, so
+  /// re-stamping the epoch with `SessionEpoch.current()` would relabel a
+  /// stranded daemon as native to the new session and silently defeat the
+  /// reaper — the exact defect that let a pane survive a WindowServer-restart
+  /// session rotation with no keychain access. We carry the existing stamp
+  /// forward instead. When the reaper recycles a stranded daemon it removes
+  /// the row, so a genuine fresh spawn finds no prior row and stamps
+  /// correctly; a `nil` prior stamp (legacy row) is still adoptable so the
+  /// field can fill in on first re-record.
   public func recordLive(_ session: Session) {
-    snapshot.sessions[session.paneID.raw.uuidString] = session
+    var session = session
+    let key = session.paneID.raw.uuidString
+    if let bornEpoch = snapshot.sessions[key]?.sessionEpoch {
+      session.sessionEpoch = bornEpoch
+    }
+    snapshot.sessions[key] = session
     store.scheduleSave(snapshot)
   }
 

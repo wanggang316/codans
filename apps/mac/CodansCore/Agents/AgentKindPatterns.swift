@@ -105,8 +105,14 @@ public nonisolated enum AgentKindPatterns {
     if value.hasPrefix("-") {
       value.removeFirst()
     }
+    // Strip runtime-packaging suffixes so a single-file launcher matches its
+    // bare agent name: `cli.js` wrappers and Node single-executable builds like
+    // `claude.exe` (Claude Code ships its launcher as a `.exe` SEA even on
+    // macOS) must both reduce to the canonical pattern.
     if value.hasSuffix(".js") {
       value.removeLast(3)
+    } else if value.hasSuffix(".exe") {
+      value.removeLast(4)
     }
     return value
   }

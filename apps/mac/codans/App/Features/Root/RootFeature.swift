@@ -9,7 +9,7 @@ import GhosttyKit
 /// two long-running subscriptions that every feature depends on:
 ///   - `terminalClient.events()` — drives crash / exit / output lifecycle
 ///   - `hierarchyClient.selectionChanges()` — drives worktree-scoped
-///     features (C7 diff viewer, M4 detail column swap)
+///     features (diff viewer, detail column swap)
 ///
 /// The sidebar unconditionally renders the hierarchy tree.
 @Reducer
@@ -20,8 +20,8 @@ struct RootFeature {
     /// this instead of holding a HierarchyManager reference.
     var selection: HierarchySelection = .empty
 
-    /// Most recent engine event — diagnostic only in M2; M3/M4 features
-    /// observe the stream directly via child-feature subscriptions.
+    /// Most recent engine event — diagnostic only; features observe the
+    /// stream directly via child-feature subscriptions.
     var lastEvent: LastEventMarker?
 
     /// Panes whose foreground process group is currently a `git` / `gh`
@@ -29,28 +29,28 @@ struct RootFeature {
     /// leaving this set is the trailing edge of a prompt-run VCS command —
     /// the moment we kick an immediate git + PR refresh for its Project so a
     /// `gh pr create` / `git push` surfaces in the sidebar within seconds
-    /// instead of waiting for the 60 s liveness poll (0018 M4 follow-up).
+    /// instead of waiting for the 60 s liveness poll.
     var panesRunningGitCommand: Set<PaneID> = []
 
     var sidebar: HierarchySidebarFeature.State = .init()
     var detail: WorktreeDetailFeature.State = .init()
-    /// T10: Branch popover / switch state. Owned at the root so the HEAD
+    /// Branch popover / switch state. Owned at the root so the HEAD
     /// watcher's `worktreeHeadChanged` and the sidebar's `selectionChanged`
     /// can both forward into it from a single dispatch site, matching the
     /// per-worktree-aware peer features around it.
     var branchSwitcher: BranchSwitcherFeature.State = .init()
-    /// C8 M6b (0005): editor preferences + per-Project override state.
+    /// Editor preferences + per-Project override state.
     var editor: EditorFeature.State = .init()
-    /// T2: Header feature (bell + Open-in split button + GV toggle).
+    /// Header feature (bell + Open-in split button + GV toggle).
     var worktreeHeader: WorktreeHeaderFeature.State = .init()
-    /// 0012: GitHub integration — per-Worktree PR snapshots + popover state.
+    /// GitHub integration — per-Worktree PR snapshots + popover state.
     var gitHub: GitHubFeature.State = .init()
-    /// 0014: titlebar-center Worktree Status Bar — owns only the transient
+    /// Titlebar-center Worktree Status Bar — owns only the transient
     /// toast slot; PR / motivational forms are view-level projections.
     var statusBar: StatusBarFeature.State = .init()
-    /// 0008: router for tab/split intents decoded from ghostty keybinds.
+    /// Router for tab/split intents decoded from ghostty keybinds.
     var paneActionRouter: PaneActionRouterFeature.State = .init()
-    /// 0008: router for window/app-level intents decoded from ghostty keybinds.
+    /// Router for window/app-level intents decoded from ghostty keybinds.
     var windowActionRouter: WindowActionRouterFeature.State = .init()
 
     /// In-flight `wt sw` whose detail-pane WorktreeLoadingView should
@@ -83,9 +83,8 @@ struct RootFeature {
     /// routes it to a feature action and nils this slot in the same tick).
     @Presents var commandPalette: CommandPaletteFeature.State?
 
-    /// M5 (project-tags): Tag CRUD sheet. `nil` = hidden; non-nil hosts
-    /// `TagManagerSheet`. Opened from the sidebar via
-    /// `.sidebar(.delegate(.openTagManager))`.
+    /// Tag CRUD sheet. `nil` = hidden; non-nil hosts `TagManagerSheet`.
+    /// Opened from the sidebar via `.sidebar(.delegate(.openTagManager))`.
     @Presents var tagManagerSheet: TagManagerFeature.State?
 
     /// Whether the Hierarchy sidebar column is visible. Bound into
@@ -191,7 +190,7 @@ struct RootFeature {
     /// `git` / `gh` command (see `ForegroundJobClassifier.indicatesGitCommand`).
     /// The reducer tracks the running set and, on the trailing edge (a
     /// prompt-run VCS command finishing), kicks an immediate git + PR refresh
-    /// for the pane's Project (0018 M4 follow-up).
+    /// for the pane's Project.
     case paneGitCommandActivity(PaneID, running: Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the
@@ -208,7 +207,7 @@ struct RootFeature {
     /// branch set. Without this, branch flips that happen while the
     /// app stays focused never reach the sidebar / header / PR cache
     /// (the focus-driven reconcile path requires a `didBecomeActive`
-    /// transition the user never triggers). See HAN-62.
+    /// transition the user never triggers).
     case worktreeHeadChanged(WorktreeID)
     /// Emitted by `WorktreeWorkingTreeWatcher` when a file under a
     /// worktree's working tree changes (an edit in a pane / editor). Only
@@ -224,7 +223,7 @@ struct RootFeature {
     /// (Settings → General → Default Git Viewer = None) or the chosen client
     /// is no longer installed.
     case diffInspectorToggledForCurrentWorktree
-    /// T3: ⌘O entry point. Resolves the current Worktree's path from the
+    /// ⌘O entry point. Resolves the current Worktree's path from the
     /// catalog snapshot (via `hierarchyClient` — reducer-scoped dependency,
     /// unlike SwiftUI `Commands` structs where `@Dependency` falls through
     /// to `liveValue` and crashes on the stubbed `snapshot` accessor) and
@@ -237,7 +236,7 @@ struct RootFeature {
     /// PR snapshot has been fetched for it yet (typical for non-GitHub
     /// repos or freshly created branches).
     case openCurrentPRRequested
-    /// ⌘⇧G entry point (HAN-58). Resolves the current Project's gitRoot from
+    /// ⌘⇧G entry point. Resolves the current Project's gitRoot from
     /// the catalog, asks `gitService.remoteInfo` to parse the origin remote,
     /// and forwards `https://<host>/<owner>/<repo>` through the GitHub
     /// delegate's `openURL` hop. Silent no-op when no Project is selected,
@@ -283,6 +282,21 @@ struct RootFeature {
     /// Silent no-op when no tab is active.
     case renameActiveTabForCurrentWorktreeRequested
     case changeActiveTabColorForCurrentWorktreeRequested
+    /// Run a Project command in the current Worktree — the menu-bar Commands
+    /// menu entry point. Carries only `scriptID`; the target Project + Worktree
+    /// are resolved at handle-time by forwarding to the WorktreeHeader delegate
+    /// path, which already owns that selection-resolution (so a chord pressed
+    /// while a terminal pane holds first-responder still targets the live
+    /// worktree). Command chords must live on the menu bar: a terminal pane is
+    /// first-responder during normal use and swallows key events before any
+    /// in-view `.keyboardShortcut` can see them, whereas menu-bar keyEquivalents
+    /// are matched by AppKit ahead of responder-chain dispatch.
+    case runScriptForCurrentWorktree(scriptID: UUID)
+    /// Run a global command in the current Worktree (menu-bar Commands menu).
+    case runGlobalScriptForCurrentWorktree(scriptID: UUID)
+    /// Stop a running command (project or global) in the current Worktree —
+    /// menu-bar Commands menu / ⌘. chord.
+    case stopScriptForCurrentWorktree(scriptID: UUID)
     /// Resolves the current Worktree's path and asks the Finder client
     /// to reveal it. Mirrors the palette's `revealCurrentWorktreeInFinder`
     /// kind so the menu binding and the palette item land on the same
@@ -342,9 +356,8 @@ struct RootFeature {
     /// split).
     case commandPaletteToggle(PaneID?)
     case commandPalette(PresentationAction<CommandPaletteFeature.Action>)
-    /// M5 (project-tags): Tag CRUD sheet presentation. `tagManagerSheetShown`
-    /// kicks the sheet visible, the `PresentationAction` carries child
-    /// actions and dismiss.
+    /// Tag CRUD sheet presentation. `tagManagerSheetShown` kicks the sheet
+    /// visible, the `PresentationAction` carries child actions and dismiss.
     case tagManagerSheet(PresentationAction<TagManagerFeature.Action>)
     case tagManagerSheetShown
     /// v1 notifications navigation. Dispatched by InboxBellView's row tap
@@ -364,10 +377,9 @@ struct RootFeature {
     case statusBar(StatusBarFeature.Action)
     case paneActionRouter(PaneActionRouterFeature.Action)
     case windowActionRouter(WindowActionRouterFeature.Action)
-    /// T6 (active-agents): rows in the AgentStateView dispatch
-    /// here. Cross-Project / Worktree / Tab focus belongs to the same
-    /// reducer that owns selection state — same precedent as
-    /// `.focusHierarchyPath` for inbox-row taps.
+    /// Rows in the AgentStateView dispatch here. Cross-Project / Worktree /
+    /// Tab focus belongs to the same reducer that owns selection state —
+    /// same precedent as `.focusHierarchyPath` for inbox-row taps.
     case agentState(AgentStateAction)
   }
 
@@ -388,12 +400,18 @@ struct RootFeature {
     /// after in-pane / in-editor edits (separate from the HEAD watcher).
     case worktreeWorkingTreeWatcher
     /// `NSApplication.didResignActiveNotification` observation — pauses the GitHub
-    /// liveness poll when the app is no longer frontmost (0018 M1).
+    /// liveness poll when the app is no longer frontmost.
     case appResignActive
     /// Debounces the immediate git + PR refresh kicked when a `git` / `gh`
     /// command finishes in a pane, per owning Project, so a burst of VCS
-    /// commands coalesces into one fetch (0018 M4 follow-up).
+    /// commands coalesces into one fetch.
     case gitCommandRefresh(ProjectID)
+    /// Low-frequency wall-clock pulse that drives the archived-worktree
+    /// auto-delete sweep (Settings → Worktrees → Cleanup) independent of
+    /// window focus. The launch / `didBecomeActive` pulses never fire while
+    /// the app sits frontmost for hours, so without this a long-lived window
+    /// would never age out archived worktrees past their retention period.
+    case periodicCleanup
   }
 
   @Dependency(TerminalClient.self) private var terminalClient
@@ -460,7 +478,7 @@ struct RootFeature {
         let focusStream = NotificationCenter.default.notifications(
           named: NSApplication.didBecomeActiveNotification
         )
-        // 0018 M1: the GitHub liveness poll is gated on the app being frontmost. Resign
+        // The GitHub liveness poll is gated on the app being frontmost. Resign
         // pauses the loop (target → nil); become-active re-points it at the active
         // Project. Held for the app lifetime; `CancelID.appResignActive` stops it at quit.
         let resignStream = NotificationCenter.default.notifications(
@@ -469,10 +487,10 @@ struct RootFeature {
         return .merge(
           .run { send in
             for await event in eventStream {
-              // 0008: action-router events are routed to their dedicated
-              // reducers; everything else just bumps the diagnostic marker.
-              // Intent events also bump the marker so tests that observe
-              // `lastEvent` still see them pass through.
+              // Action-router events are routed to their dedicated reducers;
+              // everything else just bumps the diagnostic marker. Intent
+              // events also bump the marker so tests that observe `lastEvent`
+              // still see them pass through.
               switch event {
               case .paneActionRequested(let paneID, let request):
                 await send(.paneActionRouter(.requested(paneID, request)))
@@ -510,7 +528,7 @@ struct RootFeature {
                     paneID, ForegroundJobClassifier.indicatesRunningCommand(job)))
                 // Same source, narrower predicate: track `git` / `gh` commands
                 // so a finishing `gh pr create` / `git push` triggers an
-                // immediate PR + diff refresh (0018 M4 follow-up).
+                // immediate PR + diff refresh.
                 await send(
                   .paneGitCommandActivity(
                     paneID, running: ForegroundJobClassifier.indicatesGitCommand(job)))
@@ -541,8 +559,8 @@ struct RootFeature {
           // Initial sweep: every persisted Project transitions out of .loading
           // once the reconciler fans out against the current snapshot.
           // After the sweep settles any branch changes that happened while
-          // the app was closed (HAN-62), poke GitHubFeature so the PR badges
-          // reflect the post-reconcile branch set.
+          // the app was closed, poke GitHubFeature so the PR badges reflect
+          // the post-reconcile branch set.
           .run { [projectReconciler, client = hierarchyClient] send in
             await projectReconciler.reconcileAll()
             let actions: [GitHubFeature.Action] = await MainActor.run {
@@ -550,7 +568,7 @@ struct RootFeature {
               if let refresh = Self.makeActiveProjectGitHubRefresh(client: client) {
                 result.append(refresh)
               }
-              // Arm the liveness poll if the app launched frontmost (0018 M1).
+              // Arm the liveness poll if the app launched frontmost.
               result.append(
                 Self.makePollTargetChange(
                   client: client, appActive: NSApplication.shared.isActive
@@ -562,7 +580,7 @@ struct RootFeature {
           },
 
           // Re-sync on window focus. Debounced inside the actor. The
-          // post-reconcile GitHub refresh covers the canonical HAN-62 flow:
+          // post-reconcile GitHub refresh covers the canonical flow:
           // user runs `git checkout` in a pane, switches back to the app —
           // focus fires, reconcile picks up the new branch, GitHubFeature
           // re-evaluates the PR cache against the updated branch set.
@@ -575,7 +593,7 @@ struct RootFeature {
                   result.append(refresh)
                 }
                 // Re-point the liveness poll at the active Project (app is frontmost
-                // because didBecomeActive just fired) — 0018 M1.
+                // because didBecomeActive just fired).
                 result.append(Self.makePollTargetChange(client: client, appActive: true))
                 return result
               }
@@ -584,7 +602,22 @@ struct RootFeature {
           }
           .cancellable(id: CancelID.projectReconcileFocus, cancelInFlight: true),
 
-          // 0018 M1: pause the liveness poll the instant the app resigns active, so a
+          // Wall-clock cleanup pulse. The archived-worktree auto-delete sweep
+          // piggybacks on `reconcileAll`, but the launch / focus pulses above
+          // never fire while the app stays frontmost for hours — a long-lived
+          // window would otherwise never age out archived worktrees. A low-
+          // frequency timer guarantees the sweep runs independent of focus.
+          // Non-force so it coalesces with the in-actor 10s debounce; the
+          // first tick lands one interval after launch (which already swept).
+          .run { [projectReconciler] _ in
+            while !Task.isCancelled {
+              try await Task.sleep(for: .seconds(60 * 60))
+              await projectReconciler.reconcileAll()
+            }
+          }
+          .cancellable(id: CancelID.periodicCleanup, cancelInFlight: true),
+
+          // Pause the liveness poll the instant the app resigns active, so a
           // backgrounded / idle app fires zero `gh api graphql` subprocesses.
           .run { send in
             for await _ in resignStream {
@@ -595,9 +628,9 @@ struct RootFeature {
           }
           .cancellable(id: CancelID.appResignActive, cancelInFlight: true),
 
-          // HAN-62: terminal-initiated `git checkout` / `git switch` inside
-          // a codans pane never fires `didBecomeActive`, so the focus-
-          // driven reconcile path alone wouldn't pick up the new branch.
+          // Terminal-initiated `git checkout` / `git switch` inside a codans
+          // pane never fires `didBecomeActive`, so the focus-driven reconcile
+          // path alone wouldn't pick up the new branch.
           // `WorktreeHeadWatcher` taps `.git/HEAD` via DispatchSource and
           // yields the changed `WorktreeID`; we forward into the reducer
           // for a targeted reconcile + GitHub refresh.
@@ -622,9 +655,9 @@ struct RootFeature {
           }
           .cancellable(id: CancelID.worktreeWorkingTreeWatcher, cancelInFlight: true),
 
-          // 0013 M4 follow-up: hydrate the GitHub integration's in-memory state from
-          // its on-disk snapshot cache so the sidebar paints PR badges on the first
-          // render pass, without the blank-then-populated flash the user sees when
+          // Hydrate the GitHub integration's in-memory state from its on-disk
+          // snapshot cache so the sidebar paints PR badges on the first render
+          // pass, without the blank-then-populated flash the user sees when
           // the first `gh api graphql` round-trip is the only data source. Walks the
           // live catalog once to build the branch→worktreeID map the reducer needs
           // to project cached branches into per-Worktree snapshot state.
@@ -664,6 +697,7 @@ struct RootFeature {
           .cancel(id: CancelID.events),
           .cancel(id: CancelID.selectionChanges),
           .cancel(id: CancelID.projectReconcileFocus),
+          .cancel(id: CancelID.periodicCleanup),
           .cancel(id: CancelID.worktreeHeadWatcher),
           .cancel(id: CancelID.worktreeWorkingTreeWatcher),
           .cancel(id: CancelID.appResignActive)
@@ -719,7 +753,7 @@ struct RootFeature {
         // every selection change: createTab/openPane are no-ops when the
         // Worktree already has tabs/panes (we gate on .isEmpty below).
         autoSeedTabAndPaneIfNeeded(for: selection)
-        // Mirror the selection's active tab into the split viewport so M5
+        // Mirror the selection's active tab into the split viewport so the
         // lazy-surface lifecycle can react without reading HierarchyManager
         // from a reducer. Tab is resolved on-the-fly from the catalog.
         let tabID = resolveActiveTab(selection: selection)
@@ -749,12 +783,12 @@ struct RootFeature {
             .projects.first(where: { $0.id == projectID })?
             .worktrees.first(where: { $0.id == worktreeID })?.path
         }()
-        // T10: forward selection delta into the branch switcher so the
+        // Forward the selection delta into the branch switcher so the
         // next popover open re-fetches against the new worktree path.
         // `resolvedWorktreePath` already resolves to nil when either id is
         // nil, which the reducer treats as a full caches+ids reset.
         //
-        // Phase B: also compute the "blocked branches" map — branches
+        // Also compute the "blocked branches" map — branches
         // checked out in OTHER worktrees of the same Project, keyed by
         // branch short-name → that worktree's folder name. The popover
         // greys these rows so users see the constraint before clicking.
@@ -787,10 +821,9 @@ struct RootFeature {
                 blockedBranches: blockedBranches
               )))
         )
-        // v2 GitHub integration (0013 M4): when the active Project changes, ask
-        // GitHubFeature to batch-fetch PR data for every branch in that Project.
-        // The reducer runs one `gh api graphql` for the whole repo instead of
-        // N per-Worktree calls — see docs/exec-plans/0013-github-integration-batched.md.
+        // When the active Project changes, ask GitHubFeature to batch-fetch PR
+        // data for every branch in that Project. The reducer runs one
+        // `gh api graphql` for the whole repo instead of N per-Worktree calls.
         if selection.projectID != priorProjectID,
           let projectID = selection.projectID,
           let project = lookupProject(projectID: projectID),
@@ -811,7 +844,7 @@ struct RootFeature {
                 .projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
               ))
           )
-          // 0018 M1: re-point the liveness poll at the newly-activated Project (or pause
+          // Re-point the liveness poll at the newly-activated Project (or pause
           // it if the app is not frontmost). `projectActivated` above owns the immediate
           // refresh; this only arms the recurring poll.
           if NSApplication.shared.isActive {
@@ -833,9 +866,9 @@ struct RootFeature {
         // HEAD-file change fired by `WorktreeHeadWatcher`. Resolve the owning
         // Project so the reconciler can rerun `git worktree list --porcelain`
         // for that repo only — cheap, and `reconcileDiscoveredWorktrees`
-        // now updates `Worktree.branch` in place (HAN-62). The trailing
-        // GitHub refresh re-evaluates the active Project's PR cache against
-        // whatever branch set the reconcile settled on.
+        // updates `Worktree.branch` in place. The trailing GitHub refresh
+        // re-evaluates the active Project's PR cache against whatever branch
+        // set the reconcile settled on.
         let catalog = hierarchyClient.snapshot()
         guard
           let projectID = catalog.projects.first(where: { project in
@@ -844,7 +877,7 @@ struct RootFeature {
         else { return .none }
         let worktreePath = catalog.projects.first(where: { $0.id == projectID })?
           .worktrees.first(where: { $0.id == worktreeID })?.path
-        // T10: route the HEAD-change into the branch switcher ONLY when
+        // Route the HEAD-change into the branch switcher ONLY when
         // the watched worktree matches the one the popover currently
         // backs. Reducers run on the main actor, so reading
         // `state.branchSwitcher.worktreeID` here is the authoritative
@@ -1080,8 +1113,7 @@ struct RootFeature {
       case .sidebar(.delegate(.reconcileProjectRequested(let projectID))):
         // Kick the ProjectReconciler so the newly-added (or retried)
         // Project transitions through .loading → .ready (or .failed) and the
-        // worktree list populates via T-WORKTREE's reconcileDiscoveredWorktrees
-        // closure (once that PR lands; currently a no-op stub).
+        // worktree list populates via the reconcileDiscoveredWorktrees closure.
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcile(projectID: projectID)
           if let action = await MainActor.run(body: {
@@ -1095,7 +1127,7 @@ struct RootFeature {
         // Manual refresh from the sidebar bottom-bar. `force: true` bypasses
         // the reconciler's focus-driven debounce so the click takes effect
         // immediately even when a focus-triggered pass just ran. Follow up
-        // with a GitHub refresh so HAN-62-style branch changes propagate
+        // with a GitHub refresh so out-of-band branch changes propagate
         // to the PR badges without waiting for the next selection event.
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcileAll(force: true)
@@ -1222,10 +1254,10 @@ struct RootFeature {
       case .detail:
         return .none
 
-      // 0014 M2: surface editor-open outcomes in the titlebar status bar.
-      // The child `Scope(state: \.editor, ...)` has already mutated
-      // `lastOpenResult`; we only fan a toast out. Success shows the chosen
-      // editor's display name; failure shows a scrubbed one-line reason.
+      // Surface editor-open outcomes in the titlebar status bar. The child
+      // `Scope(state: \.editor, ...)` has already mutated `lastOpenResult`;
+      // we only fan a toast out. Success shows the chosen editor's display
+      // name; failure shows a scrubbed one-line reason.
       case .editor(.openSucceeded(_, let displayName)):
         return .send(.statusBar(.push(.success("Opened in \(displayName)"))))
 
@@ -1381,7 +1413,7 @@ struct RootFeature {
       case .worktreeHeader:
         return .none
 
-      // 0014 M3: surface gh mutation outcomes in the status bar. The child
+      // Surface gh mutation outcomes in the status bar. The child
       // `Scope(state: \.gitHub, ...)` has already updated `mutating` / `lastError`;
       // we only fan a toast out. Message format mirrors the sidebar popover's
       // verb so cross-surface language stays consistent.
@@ -1409,21 +1441,22 @@ struct RootFeature {
         let reason = Self.shortToastMessage(String(describing: error))
         return .send(.statusBar(.push(.warning("Rerun failed: \(reason)"))))
 
-      // 0012: GitHub integration delegate actions. Detailed handling (openURL →
-      // NSWorkspace.open, showSettingsGitHub → SettingsWindowPresenter, pullRequestMerged
-      // → M7 post-merge Worktree action) moves into `GitHubRootBindings` stacked under the
-      // gitHub scope — leaving the inline case a no-op keeps this reducer's switch-body
-      // small enough for Swift's type-inference budget.
+      // GitHub integration delegate actions. Detailed handling (openURL →
+      // NSWorkspace.open, showSettingsGitHub → SettingsWindowPresenter,
+      // pullRequestMerged → post-merge Worktree action) lives in
+      // `GitHubRootBindings` stacked under the gitHub scope — leaving the
+      // inline case a no-op keeps this reducer's switch-body small enough
+      // for Swift's type-inference budget.
       case .gitHub:
         return .none
 
-      // 0014: status-bar child scope is self-contained (toast slot + timers).
-      // Cross-feature toast emission (editor open, gh mutation completion) lands
-      // in subsequent milestones as additional cases BEFORE this catch-all.
+      // Status-bar child scope is self-contained (toast slot + timers).
+      // Cross-feature toast emission (editor open, gh mutation completion)
+      // is handled by additional cases BEFORE this catch-all.
       case .statusBar:
         return .none
 
-      // 0008: pane-action router delegate actions.
+      // Pane-action router delegate actions.
       // `commandPaletteToggleRequested` forwards the ghostty keybind
       // pipeline into the palette's top-level toggle. `presentTerminal`
       // stays an explicit no-op — the sidebar/detail focus flow already
@@ -1684,9 +1717,9 @@ struct RootFeature {
         // Walk the source path against the *live* catalog, re-reading the
         // snapshot between each `select*` mutation so a tab autoclose or
         // pane teardown that lands mid-walk steers us to the deepest
-        // still-existing ancestor (G3 fallback) rather than an empty leaf.
-        // Holding a single `let catalog =` across mutations would tell us
-        // a deleted node still exists — see review notes.
+        // still-existing ancestor rather than an empty leaf. Holding a single
+        // `let catalog =` across mutations would tell us a deleted node still
+        // exists.
         guard hierarchyClient.snapshot().projects.contains(where: { $0.id == source.projectID }) else {
           return .none
         }
@@ -1773,6 +1806,20 @@ struct RootFeature {
           await send(
             .editor(.openSucceeded(editorID: EditorRegistry.shellEditorID, displayName: "$EDITOR")))
         }
+
+      // Menu-bar Commands-menu entry points for user-defined commands. They
+      // forward to the WorktreeHeader delegate handlers, which own the
+      // selection-resolution + run/stop effects — a single dispatch path shared
+      // with the toolbar split-button. Registering the chords as menu-bar
+      // keyEquivalents is what makes them fire while a terminal pane is focused.
+      case .runScriptForCurrentWorktree(let scriptID):
+        return .send(.worktreeHeader(.delegate(.runScriptRequested(scriptID: scriptID))))
+
+      case .runGlobalScriptForCurrentWorktree(let scriptID):
+        return .send(.worktreeHeader(.delegate(.runGlobalScriptRequested(scriptID: scriptID))))
+
+      case .stopScriptForCurrentWorktree(let scriptID):
+        return .send(.worktreeHeader(.delegate(.stopScriptRequested(scriptID: scriptID))))
 
       case .newTabForCurrentWorktree:
         guard
@@ -2005,7 +2052,7 @@ struct RootFeature {
           let worktreeID = target.worktreeID
         else { return .none }
         // After navigating, reveal the new selection in the sidebar so users
-        // see where ⌘⌃[ landed instead of having to scroll for it (HAN-68).
+        // see where ⌘⌃[ landed instead of having to scroll for it.
         state.sidebarVisible = true
         state.revealSelectionTrigger = UUID()
         return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
@@ -2019,7 +2066,7 @@ struct RootFeature {
           let worktreeID = target.worktreeID
         else { return .none }
         // After navigating, reveal the new selection in the sidebar so users
-        // see where ⌘⌃] landed instead of having to scroll for it (HAN-68).
+        // see where ⌘⌃] landed instead of having to scroll for it.
         state.sidebarVisible = true
         state.revealSelectionTrigger = UUID()
         return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
@@ -2047,11 +2094,12 @@ struct RootFeature {
     state.revealSelectionTrigger = UUID()
   }
 
-  // swiftlint:disable cyclomatic_complexity
+  // swiftlint:disable cyclomatic_complexity function_body_length
   /// Dispatches a Command Palette activation into the feature action
   /// that already implements the command. Every case forwards into a
   /// pre-existing action or client — the palette invents no new
-  /// behavior.
+  /// behavior. A flat dispatch table by design, so both the branch-count
+  /// and body-length rules are waived rather than fragmenting the switch.
   private func route(
     _ kind: CommandPaletteItem.Kind,
     state: inout State,
@@ -2066,6 +2114,16 @@ struct RootFeature {
       return .send(.checkForUpdatesRequested)
     case .quit:
       return .send(.windowActionRouter(.requested(.quit)))
+    case .openProject:
+      return .send(.sidebar(.toolbarAddProjectTapped))
+    case .cloneRepository:
+      return .send(.sidebar(.cloneRepoTapped))
+    case .showUnreadNotifications:
+      return .send(.showUnreadRequested)
+    case .toggleSidebar:
+      return .send(.toggleSidebarRequested)
+    case .openGhosttyConfig:
+      return .send(.windowActionRouter(.requested(.openConfig)))
 
     // Worktree
     case .selectWorktree(let projectID, let worktreeID):
@@ -2090,6 +2148,69 @@ struct RootFeature {
       }
     case .toggleDiffInspector:
       return .send(.diffInspectorToggledForCurrentWorktree)
+    case .newWorktree:
+      return .send(.newWorktreeForCurrentProjectRequested)
+    case .copyCurrentWorktreePath:
+      return .send(.copyCurrentWorktreePathRequested)
+    case .revealCurrentWorktreeInSidebar:
+      return .send(.revealCurrentWorktreeInSidebarRequested)
+    case .archiveCurrentWorktree:
+      return .send(.archiveCurrentWorktreeRequested)
+    case .toggleCurrentWorktreePinned:
+      // Resolve the current pin state from the catalog so the sidebar's
+      // toggle flips the right way (the palette item carries no payload).
+      guard
+        let projectID = state.selection.projectID,
+        let worktreeID = state.selection.worktreeID,
+        let worktree = hierarchyClient.snapshot()
+          .projects.first(where: { $0.id == projectID })?
+          .worktrees.first(where: { $0.id == worktreeID })
+      else { return .none }
+      return .send(
+        .sidebar(.worktreePinToggleTapped(worktreeID: worktreeID, current: worktree.isPinned))
+      )
+    case .openCurrentPR:
+      return .send(.openCurrentPRRequested)
+    case .openCurrentProjectOnGitHub:
+      return .send(.openCurrentProjectOnGitHubRequested)
+    case .showArchivedWorktrees:
+      return .send(.showArchivedWorktreesForCurrentProjectRequested)
+
+    // Project — current-selection maintenance / batch actions
+    case .openProjectSettings:
+      guard let projectID = state.selection.projectID else { return .none }
+      return .send(.sidebar(.projectSettingsTapped(projectID: projectID)))
+    case .pruneStaleWorktrees:
+      guard let projectID = state.selection.projectID else { return .none }
+      return .send(.sidebar(.projectPruneTapped(projectID: projectID)))
+    case .archiveAllMergedWorktrees:
+      guard let projectID = state.selection.projectID else { return .none }
+      let ids = Self.mergedWorktreeIDs(
+        projectID: projectID, catalog: hierarchyClient.snapshot(), gitHub: state.gitHub
+      )
+      return .send(
+        .sidebar(.projectArchiveAllMergedTapped(projectID: projectID, worktreeIDs: ids))
+      )
+    case .removeAllMergedWorktrees:
+      guard let projectID = state.selection.projectID else { return .none }
+      let ids = Self.mergedWorktreeIDs(
+        projectID: projectID, catalog: hierarchyClient.snapshot(), gitHub: state.gitHub
+      )
+      return .send(
+        .sidebar(.projectRemoveAllMergedTapped(projectID: projectID, worktreeIDs: ids))
+      )
+    case .removeCurrentProject:
+      guard
+        let projectID = state.selection.projectID,
+        let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })
+      else { return .none }
+      return .send(.sidebar(.projectRemoveTapped(projectID: projectID, name: project.name)))
+
+    // Tab — operate on the current Worktree's active tab
+    case .renameCurrentTab:
+      return .send(.renameActiveTabForCurrentWorktreeRequested)
+    case .changeCurrentTabColor:
+      return .send(.changeActiveTabColorForCurrentWorktreeRequested)
 
     // Editor
     case .openCurrentWorktreeInDefaultEditor:
@@ -2114,10 +2235,10 @@ struct RootFeature {
     case .revealCurrentWorktreeInFinder:
       return .send(.revealCurrentWorktreeInFinderRequested)
 
-    // Project scripts (Phase 2 / M10) — palette item carries the
-    // (projectID, worktreeID, scriptID) triple, fan out into the same
-    // run-script effect the WorktreeHeader split-button and the Scripts
-    // pane Run button use, so failure handling stays in one place.
+    // Project scripts — palette item carries the (projectID, worktreeID,
+    // scriptID) triple, fan out into the same run-script effect the
+    // WorktreeHeader split-button and the Scripts pane Run button use, so
+    // failure handling stays in one place.
     case .runProjectScript(let projectID, let worktreeID, let scriptID):
       let client = hierarchyClient
       return .run { send in
@@ -2159,13 +2280,31 @@ struct RootFeature {
       return .send(.windowActionRouter(.requested(req)))
     }
   }
-  // swiftlint:enable cyclomatic_complexity
+  // swiftlint:enable cyclomatic_complexity function_body_length
+
+  /// Worktrees in `projectID` whose PR has merged — the rule the sidebar's
+  /// Project "⋯" menu uses to drive "Archive / Remove All Merged Worktrees".
+  /// Excludes the main checkout and already-archived worktrees. Mirrors
+  /// `HierarchySidebarView.mergedWorktreeIDs` so the palette's batch commands
+  /// target an identical set; an empty result makes the downstream sidebar
+  /// action a safe no-op (it guards on `!targets.isEmpty`).
+  private static func mergedWorktreeIDs(
+    projectID: ProjectID,
+    catalog: Catalog,
+    gitHub: GitHubFeature.State
+  ) -> [WorktreeID] {
+    guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
+    return project.worktrees
+      .filter { !$0.archived && $0.path != project.rootPath }
+      .filter { gitHub.snapshots[$0.id]?.state == .merged }
+      .map(\.id)
+  }
 
   /// Per-Project editor override, if any. Used to resolve the Header's
   /// default-editor dispatch through `EditorFeature.resolveDefault` without
-  /// the reducer needing to hold a second cache of the catalog. v3 moved
-  /// the override off catalog.json; read via `SettingsWriter`'s sync
-  /// snapshot closure (itself MainActor-assumed internally).
+  /// the reducer needing to hold a second cache of the catalog. Read via
+  /// `SettingsWriter`'s sync snapshot closure (itself MainActor-assumed
+  /// internally).
   private func projectOverrideEditorID(for projectID: ProjectID?) -> EditorID? {
     guard let projectID else { return nil }
     return settingsWriter.readSnapshotSync().projects[projectID]?.defaultEditor
@@ -2368,7 +2507,7 @@ struct RootFeature {
   }
 
   /// Builds the `.gitHub(.projectActivated)` follow-up that runs after a
-  /// reconcile sweep so PR data tracks worktree-branch changes (HAN-62).
+  /// reconcile sweep so PR data tracks worktree-branch changes.
   /// Reconcile updates `Worktree.branch` when `git checkout` lands inside
   /// a pane; GitHubFeature's internal freshness check (30s) plus branch-
   /// set diff (`isCacheFreshAndComplete`) decides whether the dispatch
@@ -2398,7 +2537,7 @@ struct RootFeature {
   }
 
   /// Builds the `.gitHub(.pollTargetChanged)` that drives the active-Project liveness
-  /// poll (0018 M1). Returns a paused target (`nil`) when the app is not frontmost or
+  /// poll. Returns a paused target (`nil`) when the app is not frontmost or
   /// there is no active Project with a git root; otherwise targets the active Project.
   /// Mirrors `makeActiveProjectGitHubRefresh`'s catalog walk so the poll tracks the same
   /// branch set the immediate refresh fetches.

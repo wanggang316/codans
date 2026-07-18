@@ -76,10 +76,6 @@ struct RootFeatureTests {
     await store.send(.onQuit)
   }
 
-  // M0 cleanup: `selectionChangedUpdatesStateAndForwardsToGitViewer` removed —
-  // the GitViewer feature no longer exists; the future Diff feature
-  // (replacing it) will own its own forwarding test.
-
   @Test
   func selectionChangedMirrorsActiveTabFromSnapshot() async {
     // Build a catalog snapshot with a Worktree whose selectedTabID is a
@@ -108,7 +104,7 @@ struct RootFeatureTests {
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
       $0.gitService = GitServiceClient.testValue
-      // 0013 M4 wired a `.gitHub(.projectActivated)` dispatch on projectID transitions.
+      // A `.gitHub(.projectActivated)` dispatch fires on projectID transitions.
       // This test is exhaustivity=off and not about GitHub, but the fetch effect still
       // runs and touches .date + remoteInfo + batchPullRequests — stub each to no-op.
       $0.date = .constant(Date(timeIntervalSince1970: 0))
@@ -438,7 +434,7 @@ struct RootFeatureTests {
     }
 
     await store.send(.onLaunch)
-    // 0018 M1: the launch sweep always arms the liveness poll. With an empty
+    // The launch sweep always arms the liveness poll. With an empty
     // Catalog there is no active Project, so it fires the paused variant
     // (`pollTargetChanged(nil, ...)`), a no-op state change. Receiving it before
     // yielding the selection keeps the merged-effect action order deterministic.
@@ -455,7 +451,7 @@ struct RootFeatureTests {
     // no-op observable change; we omit the trailing closure to satisfy the
     // strict no-change check.
     await store.receive(\.selectionChanged)
-    // T10: `.selectionChanged` also forwards into `.branchSwitcher(.worktreeChanged)`.
+    // `.selectionChanged` also forwards into `.branchSwitcher(.worktreeChanged)`.
     // All-nil ids leave State at its defaults (initial state matches the
     // mutation), so the assertion is a no-change receive.
     await store.receive(\.branchSwitcher.worktreeChanged)
@@ -494,7 +490,7 @@ struct RootFeatureTests {
     }
   }
 
-  // MARK: - 0014 status-bar toast routing
+  // MARK: - status-bar toast routing
 
   /// The multi-line / over-80-char scrubber that the `.editor(.openFailed)`
   /// and `.gitHub(...Completed)` branches pipe through before constructing a
@@ -502,7 +498,7 @@ struct RootFeatureTests {
   /// are locked in without spinning up a `RootFeature` TestStore — a full
   /// multi-scope TestStore interacts badly with the StatusBarFeature suite's
   /// TestClock-driven sleeps when they share the host-app process, so we
-  /// exercise the forwarding itself through the M1/M7 app-run smoke tests
+  /// exercise the forwarding itself through the app-run smoke tests
   /// instead.
   @Test
   func shortToastMessageTakesFirstLineAndCapsAt80Characters() {
@@ -515,7 +511,7 @@ struct RootFeatureTests {
     #expect(clipped.hasSuffix("…"))
   }
 
-  // MARK: - Tab-bar shortcut resolvers (M2-T2.10)
+  // MARK: - Tab-bar shortcut resolvers
 
   /// Builds a catalog with a single worktree carrying `tabCount` tabs;
   /// the `selectedIndex`-th tab is the active one. Each tab has a single

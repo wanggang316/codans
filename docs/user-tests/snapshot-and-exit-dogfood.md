@@ -5,7 +5,7 @@ description: Manual dogfood for the "Snapshot and exit" quit action (snapshot-an
 
 # Dogfood: "Snapshot and exit" end-to-end
 
-**Feature:** [docs/design-docs/snapshot-and-exit-wireup.md](../design-docs/snapshot-and-exit-wireup.md)
+**Feature:** Session lifecycle — quit snapshot + launch restore ([architecture.md](../architecture.md#session-lifecycle-quit-snapshot--launch-restore))
 **Persona:** `dev_running_long_task`
 **Why manual:** full-app launch → snapshot-quit → relaunch → restore is not in the automated harness. The mechanism is already proven by the real-zmx bats suite (`zig build test-integration`) and the Swift unit tests; this confirms the GUI round trip.
 

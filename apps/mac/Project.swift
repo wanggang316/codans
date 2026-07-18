@@ -52,8 +52,7 @@ let project = Project(
     ),
 
     // CodansCore unit tests. Links CodansIPC so IPC codable tests can
-    // live here too (DEC-1: avoid proliferating test targets, per 0003 and
-    // 0005 M1 DEC-5 — dedicated CodansIPCTests not justified).
+    // live here too, avoiding a dedicated CodansIPCTests target.
     .target(
       name: "CodansCoreTests",
       destinations: .macOS,
@@ -113,8 +112,7 @@ let project = Project(
 
     // CodansKit: shared CLI library — Transport / RPCClient / Renderer /
     // ExitCode / SocketDiscovery. The codans binary is a thin wrapper;
-    // parallel plans (C5 for skill command, future CLI extensions) link
-    // into CodansKit rather than the codans binary.
+    // future CLI extensions link into CodansKit rather than the binary.
     .target(
       name: "CodansKit",
       destinations: .macOS,
@@ -247,9 +245,9 @@ let project = Project(
         ),
         // codans CLI embedding. Copies the codans binary built by its sibling
         // target into Resources/bin/codans so the app can ship a single
-        // self-contained .app and `codans skill install` / first-launch
-        // installer (c4-cli D3) have a stable inside-bundle path to
-        // symlink from ~/.local/bin/codans.
+        // self-contained .app and `codans skill install` / the first-launch
+        // installer have a stable inside-bundle path to symlink from
+        // ~/.local/bin/codans.
         .post(
           script: "\"${SRCROOT}/scripts/embed-codans.sh\"",
           name: "Embed codans",

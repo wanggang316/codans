@@ -20,22 +20,40 @@ pnpm preview      # serve the production build locally
 
 ## Layout
 
+The site is a small multi-page app — two HTML entries (`index.html` →
+`main.tsx`, `changelog.html` → `changelog-main.tsx`), no client router.
+GitHub Pages serves the clean `/changelog` URL; in dev a tiny middleware in
+`vite.config.ts` rewrites it to `changelog.html`.
+
 ```
 src/
-├── App.tsx
-├── main.tsx
+├── App.tsx                      # home page
+├── main.tsx                     # home entry  (index.html)
+├── changelog-main.tsx          # changelog entry (changelog.html)
 ├── i18n.ts
+├── vite-env.d.ts               # vite/client + virtual:changelog-raw types
 ├── locales/<en|zh>/landing.json  # all visible strings live here
 ├── styles/globals.css
 ├── lib/
 │   ├── links.ts                # external URLs
+│   ├── changelog.ts            # parse CHANGELOG.md → structured releases
 │   └── useTypewriter.ts        # canned-output typing hook
 ├── components/                 # shared chrome: Nav, Footer, Logo
-└── sections/                   # the page itself:
+├── pages/
+│   └── ChangelogPage.tsx       # /changelog timeline (reuses Nav + Footer)
+└── sections/                   # the home page:
     ├── Hero.tsx                # app screenshot + tagline
     ├── Features.tsx            # "What is Codans?" intro + feature list
     └── CtaStrip.tsx
 ```
+
+## Changelog
+
+The `/changelog` page renders the **repo-root `CHANGELOG.md`** — it is the
+single source of truth, never duplicated here. The `codans-changelog` Vite
+plugin (`vite.config.ts`) exposes the raw markdown as `virtual:changelog-raw`;
+`lib/changelog.ts` parses the Keep a Changelog format into releases. To update
+the page, edit `CHANGELOG.md` at the repo root.
 
 ## Adding a locale
 

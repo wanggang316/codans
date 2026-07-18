@@ -14,7 +14,7 @@ import os.log
 ///
 /// On version mismatch or unparseable JSON the broken file is moved aside as
 /// `shortcuts.json.broken-<yyyyMMdd-HHmmss>` and the in-memory store starts empty. The
-/// store still persists subsequently — unlike `SettingsStore`'s strict v2/v3 migration the
+/// store still persists subsequently — unlike `SettingsStore`'s strict versioned migration the
 /// shortcuts file has no data to preserve across an unsupported version: a fresh user
 /// override layer is the safest recovery.
 @MainActor

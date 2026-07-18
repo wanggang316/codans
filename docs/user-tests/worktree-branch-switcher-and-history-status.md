@@ -6,7 +6,7 @@ description: Verification status for every UT-BSH-* case in docs/user-tests/work
 # UT Status: Worktree Branch Switcher & Diff History
 
 **Parent user-test set:** [worktree-branch-switcher-and-history.md](./worktree-branch-switcher-and-history.md)
-**Exec plan:** [docs/exec-plans/worktree-branch-switcher-and-history.md](../exec-plans/worktree-branch-switcher-and-history.md)
+**Design:** [docs/design-docs/worktree.md](../design-docs/worktree.md)
 **Status author:** Gump (with Claude)
 **Date:** 2026-05-24
 

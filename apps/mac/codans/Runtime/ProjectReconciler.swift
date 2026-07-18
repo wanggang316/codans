@@ -4,13 +4,12 @@ import CodansCore
 
 /// Drives per-Project health reconciliation. Stats the `rootPath`, labels the
 /// Project `.failed(reason:)` when the folder is gone, otherwise hands off to
-/// `HierarchyClient.reconcileDiscoveredWorktrees` (owned by T-WORKTREE;
-/// append-only / idempotent / swallows errors / main-actor serialized) and
-/// flips the load state to `.ready`.
+/// `HierarchyClient.reconcileDiscoveredWorktrees` (append-only / idempotent /
+/// swallows errors / main-actor serialized) and flips the load state to
+/// `.ready`.
 ///
 /// The actor does not import `GitWorktreeCLI`; worktree-list discovery is
-/// entirely the responsibility of the consumed closure. See
-/// `docs/design-docs/pm-project-management.md` §Boundary with T-WORKTREE.
+/// entirely the responsibility of the consumed closure.
 ///
 /// Single-flight by `ProjectID` and debounced at the `reconcileAll` entry
 /// point so focus-change notification storms do not fan out into N calls.
@@ -62,7 +61,7 @@ actor ProjectReconciler {
       return
     }
 
-    // T-WORKTREE's closure handles git-vs-non-git routing, `GitWorktreeCLI`
+    // The injected closure handles git-vs-non-git routing, `GitWorktreeCLI`
     // orchestration, error recovery, and the append-only mutation of
     // `project.worktrees`. Per its contract it does not throw; the Project
     // lands in `.ready` unconditionally after the call returns.

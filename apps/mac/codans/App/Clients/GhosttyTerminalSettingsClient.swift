@@ -19,7 +19,7 @@ nonisolated struct GhosttyTerminalSettingsClient: Sendable {
 
 extension GhosttyTerminalSettingsClient: DependencyKey {
   /// Unwired live value — throws `.configDirectoryUnavailable("unwired")`
-  /// until `AppState.bringUp()` (M4) replaces it with `.appLive()`. We use a
+  /// until `AppState.bringUp()` replaces it with `.appLive()`. We use a
   /// throw rather than a `fatalError` here because the Settings pane renders
   /// errors inline, and an unwired dependency should surface as "Ghostty
   /// config directory is unavailable: unwired" rather than crash the app.
@@ -40,6 +40,8 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         cursorStyle: nil,
         fontFamily: nil,
         fontSize: nil,
+        backgroundOpacity: nil,
+        backgroundBlur: nil,
         availableLightThemes: [],
         availableDarkThemes: [],
         availableFontFamilies: [],
@@ -56,6 +58,8 @@ extension GhosttyTerminalSettingsClient: DependencyKey {
         cursorStyle: draft.cursorStyle,
         fontFamily: draft.fontFamily,
         fontSize: draft.fontSize,
+        backgroundOpacity: draft.backgroundOpacity,
+        backgroundBlur: draft.backgroundBlur,
         availableLightThemes: [],
         availableDarkThemes: [],
         availableFontFamilies: [],

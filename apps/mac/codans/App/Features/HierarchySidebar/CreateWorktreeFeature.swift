@@ -43,10 +43,9 @@ struct LiveBranchOwner: Equatable, Sendable {
 /// default remote branch), live branch-name validation, and the
 /// post-validation hand-off to the parent sidebar reducer.
 ///
-/// After the pending-row redesign (worktree-sidebar-ordering.md
-/// §pending 段), the streaming `wt sw` consumer + catalog write +
-/// setup-script dispatch live on `HierarchySidebarFeature`. This
-/// reducer's responsibility ends at `delegate(.beginCreate(pending))`.
+/// The streaming `wt sw` consumer + catalog write + setup-script dispatch
+/// live on `HierarchySidebarFeature`. This reducer's responsibility ends
+/// at `delegate(.beginCreate(pending))`.
 @Reducer
 struct CreateWorktreeFeature {
   /// Shared user-facing copy for the per-project pending cap (8). Used
@@ -62,9 +61,9 @@ struct CreateWorktreeFeature {
     /// and to derive the Worktree's on-disk path together with
     /// `worktreesDirectory`.
     let repoRoot: URL
-    /// Base directory (spec "Worktree path derivation"). The sheet
+    /// Base directory for deriving the Worktree's on-disk path. The sheet
     /// itself is read-only on this — changing it lives in the Project
-    /// options flow owned by T-PROJECT.
+    /// options flow.
     let worktreesDirectory: URL
     /// Snapshot of how many pending creations the parent sidebar already
     /// holds for this Project. Drives the cap banner + Create-button
@@ -109,7 +108,7 @@ struct CreateWorktreeFeature {
 
     // User input. Seeded from the effective settings (per-project override
     // chained to global default) so the sheet matches what Settings shows
-    // for this Project instead of always starting at false (HAN-83).
+    // for this Project instead of always starting at false.
     var branchNameDraft: String = ""
     var selectedBaseRef: String?
     var fetchOrigin: Bool = true
@@ -399,7 +398,7 @@ struct CreateWorktreeFeature {
         // Branch names like `feature/abc` map to nested folders
         // (`feature/abc`); `appending(path:)` honours the embedded
         // separator, whereas `appending(component:)` would percent-encode
-        // the slash and break the diff against `wt ls --json` (HAN-57).
+        // the slash and break the diff against `wt ls --json`.
         let targetURL = state.worktreesDirectory
           .appending(path: sanitizedDraftName)
         if FileManager.default.fileExists(atPath: targetURL.path(percentEncoded: false)) {

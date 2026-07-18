@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import { LINKS } from "@/lib/links";
+import { useLatestDmgUrl } from "@/lib/useLatestDmg";
 
 export default function CtaStrip() {
   const { t } = useTranslation();
+  const dmgUrl = useLatestDmgUrl();
   return (
     <section className="relative overflow-hidden border-t border-line/60 bg-bg py-28 sm:py-32">
       <motion.div
@@ -18,9 +19,8 @@ export default function CtaStrip() {
         <p className="mx-auto mt-4 max-w-[520px] text-ink-muted">{t("cta.sub")}</p>
         <div className="mt-8 flex items-center justify-center">
           <a
-            href={LINKS.latestDmg}
-            target="_blank"
-            rel="noreferrer"
+            href={dmgUrl}
+            download=""
             className="inline-flex h-11 items-center gap-2 rounded-full bg-acc-500 px-5 text-[14px] font-medium text-white shadow-glow transition-colors hover:bg-acc-400"
           >
             {t("cta.primary")}
@@ -53,10 +53,12 @@ function BrewLine({ command }: { command: string }) {
       type="button"
       onClick={onCopy}
       title="Click to copy"
-      className="group mt-4 inline-flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 font-mono text-[12.5px] text-ink-muted transition-colors hover:bg-white/[0.04] hover:text-ink"
+      className="group mt-4 inline-block max-w-full cursor-pointer rounded-md px-2.5 py-1.5 text-left font-mono text-[12.5px] leading-relaxed text-ink-muted transition-colors hover:bg-white/[0.04] hover:text-ink"
     >
-      <span className="text-acc-300">$</span>
-      <span>{copied ? "Copied to clipboard" : command}</span>
+      <span className="break-words">
+        <span className="mr-1.5 text-acc-300">$</span>
+        {copied ? "Copied to clipboard" : command}
+      </span>
     </button>
   );
 }

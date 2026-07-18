@@ -30,9 +30,10 @@ struct GitHubRootBindings: Reducer {
         }
 
       case .delegate(.pullRequestMerged):
-        // M7 expands this branch to dispatch the post-merge Worktree action (archive /
-        // delete / ask). Today the delegate is a no-op — the popover's success path
-        // already refreshes the badge via the reducer's own .mergeCompleted handler.
+        // Today the delegate is a no-op — the popover's success path already
+        // refreshes the badge via the reducer's own .mergeCompleted handler.
+        // A future post-merge Worktree action (archive / delete / ask) would
+        // expand this branch.
         return .none
 
       default:

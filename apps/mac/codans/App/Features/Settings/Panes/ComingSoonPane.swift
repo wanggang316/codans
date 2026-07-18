@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Shared detail content for sections whose engine is not yet shipped (Shortcuts, Updates).
-/// Spec M7: "Coming in a later release." The pane keeps the selection highlight but avoids
-/// empty-state flicker by occupying the full detail frame.
+/// Keeps the selection highlight but avoids empty-state flicker by occupying the full
+/// detail frame.
 struct ComingSoonPane: View {
   let title: String
 

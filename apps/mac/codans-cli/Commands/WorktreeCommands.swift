@@ -163,10 +163,9 @@ struct WorktreeRemove: AsyncParsableCommand {
       let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
 
       if let byPath {
-        // HAN-82 cleanup mode — list the project's worktrees, filter
-        // by canonical path, then issue per-row removes. Done
-        // client-side to keep the server's `hierarchy.removeWorktree`
-        // surface unchanged.
+        // Cleanup mode — list the project's worktrees, filter by
+        // canonical path, then issue per-row removes. Done client-side to
+        // keep the server's `hierarchy.removeWorktree` surface unchanged.
         guard worktree == nil else {
           throw CLIError(
             code: .userError,

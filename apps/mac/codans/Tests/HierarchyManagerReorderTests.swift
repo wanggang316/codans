@@ -8,9 +8,6 @@ import CodansCore
 /// - `HierarchyManager.reorderWorktrees(in:segment:from:to:)`
 /// - `HierarchyManager.createWorktree`'s unpinned-segment-top insertion
 /// - `HierarchyManager.setWorktreePinned`'s boundary-aware repositioning
-///
-/// See `docs/design-docs/worktree-sidebar-ordering.md` and
-/// `docs/exec-plans/worktree-reorder-catalog.md` for the contract.
 @MainActor
 struct HierarchyManagerReorderTests {
   var fakeRuntime: FakeHierarchyRuntime!

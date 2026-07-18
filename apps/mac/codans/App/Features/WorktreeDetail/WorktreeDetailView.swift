@@ -16,23 +16,23 @@ struct WorktreeDetailView: View {
   /// Scoped editor-feature store; passed in by `ContentView` so the Worktree-header
   /// dropdown shares a single editor-state source of truth with the Settings sheet.
   /// Open-result toasts are driven by `editorStore.state.lastOpenResult` directly from
-  /// `ContentView`, so this view no longer accepts a callback (0005 M6c).
+  /// `ContentView`, so this view does not accept a callback.
   let editorStore: StoreOf<EditorFeature>
   /// AgentState registry (optional). Threaded down to `TabBarView` so a tab
   /// chip lights while a bound agent in that tab is `.working` — the same
   /// registry `ContentView` hands the sidebar, kept in sync by construction.
   var agentStateStore: AgentStateStore?
-  /// T2 Header feature — scoped by `ContentView` from the root. Drives the bell
+  /// Header feature — scoped by `ContentView` from the root. Drives the bell
   /// badge and the Open-in split button's delegate routing.
   let headerStore: StoreOf<WorktreeHeaderFeature>
-  /// 0014: titlebar-center Worktree Status Bar store. Owns the toast slot; PR /
-  /// motivational forms are view-level projections of other scopes (added in M4/M5).
+  /// Titlebar-center Worktree Status Bar store. Owns the toast slot; PR /
+  /// motivational forms are view-level projections of other scopes.
   let statusBarStore: StoreOf<StatusBarFeature>
-  /// 0014 M4: scoped GitHub feature store; read for the PR form's
+  /// Scoped GitHub feature store; read for the PR form's
   /// `snapshots[worktreeID]` lookup. Same store the sidebar badge reads so
   /// the two surfaces stay in sync by construction.
   let gitHubStore: StoreOf<GitHubFeature>
-  /// T10: branch popover + switch state. Threaded through to the leading
+  /// Branch popover + switch state. Threaded through to the leading
   /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
@@ -61,7 +61,7 @@ struct WorktreeDetailView: View {
   let activePendingWorktree: PendingWorktreeBinding?
   @Environment(HierarchyManager.self) private var hierarchyManager
 
-  /// HAN-63: window-toolbar chrome is hidden window-wide (see the
+  /// Window-toolbar chrome is hidden window-wide (see the
   /// `.toolbarBackground(.hidden, ...)` modifier below) to stop tab-switch
   /// repaints from flickering across the translucent sidebar. In fullscreen
   /// the title bar disappears entirely, so the hidden chrome leaves the
@@ -144,9 +144,9 @@ struct WorktreeDetailView: View {
     } else if let address = resolveAddress() {
       let info = worktreeInfo(for: address)
       VStack(spacing: 0) {
-        // T10: inline branch-switch error banner. Renders itself only
-        // when `branchSwitcherStore.switchError` is non-nil, so it stays
-        // a zero-height no-op on the happy path. Placed at the top of
+        // Inline branch-switch error banner. Renders itself only when
+        // `branchSwitcherStore.switchError` is non-nil, so it stays a
+        // zero-height no-op on the happy path. Placed at the top of
         // the detail body — directly under the window toolbar — so the
         // banner reads as a "drop-down notification strip" regardless
         // of which tab / pane is foreground.
@@ -156,20 +156,6 @@ struct WorktreeDetailView: View {
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      // Mount project-script shortcut bindings as a 0-sized background of
-      // the detail body. The toolbar's run-script Menu can only register
-      // its in-menu `.keyboardShortcut` after the dropdown has been opened
-      // (Menu content is lazy) — and even then SwiftUI drops the binding
-      // on the next `.id(_:)`-driven rebuild. Mounting hidden Buttons on
-      // the regular view tree keeps every chord live the whole time the
-      // worktree is on screen.
-      .background(alignment: .topLeading) {
-        ProjectScriptsShortcutBindings(
-          store: headerStore,
-          projectID: address.project,
-          worktreeID: address.worktree
-        )
-      }
       // On macOS 15+ remove the title slot entirely so default-placement
       // toolbar items can flow leading-to-trailing with `ToolbarSpacer`
       // controlling the layout.
@@ -187,10 +173,10 @@ struct WorktreeDetailView: View {
       // `worktreeToolbarContent`) and flickers across the area covered
       // by the translucent sidebar.
       //
-      // HAN-63: re-show the chrome when fullscreen — without it, the
-      // sidebar `+` button and detail toolbar render over the terminal
-      // pane with nothing behind them (the title bar normally provides
-      // the visual backing).
+      // Re-show the chrome when fullscreen — without it, the sidebar `+`
+      // button and detail toolbar render over the terminal pane with
+      // nothing behind them (the title bar normally provides the visual
+      // backing).
       .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
       .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
       .onReceive(
@@ -295,7 +281,7 @@ struct WorktreeDetailView: View {
         // the sidebar shows the synthetic folder row in that case, and
         // `WorktreeHeaderInfoLabel` falls through to the same folder
         // glyph + name rendering via `isSynthetic`. Keeps the header and
-        // sidebar consistent (HAN-60).
+        // sidebar consistent.
         branchToolbarItemDefault(info: info)
         ToolbarSpacer(.flexible)
         centeredStatusBarToolbarItem(address: address, info: info)
@@ -437,7 +423,7 @@ struct WorktreeDetailView: View {
   /// chip. `.sharedBackgroundVisibility(.hidden)` opts the cluster out
   /// of the toolbar's glass capsule so the icon + name + branch + PR
   /// stats read as plain content alongside the trailing action chips,
-  /// matching the sidebar row (HAN-60).
+  /// matching the sidebar row.
   @available(macOS 26.0, *)
   @ToolbarContentBuilder
   private func branchToolbarItemDefault(info: WorktreeInfo) -> some ToolbarContent {
@@ -566,10 +552,10 @@ struct WorktreeDetailView: View {
     EmptyTerminalPaneView(message: "No terminals open")
   }
 
-  /// HAN-65: keep the empty-project state visually blank. Suppress the
-  /// window title (otherwise the app's bundle name — "codans" —
-  /// surfaces in the title bar) and hide the window-toolbar background so
-  /// no chrome divider paints over the detail pane.
+  /// Keep the empty-project state visually blank. Suppress the window
+  /// title (otherwise the app's bundle name — "codans" — surfaces in the
+  /// title bar) and hide the window-toolbar background so no chrome
+  /// divider paints over the detail pane.
   private var placeholder: some View {
     EmptyProjectStateView(onAddProject: onAddProject)
       .modifier(SuppressTitleModifier())

@@ -95,10 +95,10 @@ struct EndToEndRPCIntegrationTests {
 
   struct Empty: Codable, Sendable {}
 
-  /// Scoped stack builder with deterministic, awaited teardown. Review
-  /// #5 on M8 flagged that the earlier `defer { Task { await
-  /// client.shutdown() } }` pattern in each test fired off an
-  /// unstructured Task that was never awaited — the test body returned
+  /// Scoped stack builder with deterministic, awaited teardown. An
+  /// earlier `defer { Task { await client.shutdown() } }` pattern in
+  /// each test fired off an unstructured Task that was never awaited —
+  /// the test body returned
   /// before the client released its inbound-pump / transport. This
   /// closure form tears down in order: `client.shutdown()` *awaited*,
   /// then `transport.stop()` (sync). Errors propagate unchanged.
@@ -162,11 +162,11 @@ struct EndToEndRPCIntegrationTests {
 /// the same code the production server runs: Framing, handshake,
 /// routing, typed Codable decode.
 ///
-/// **Isolation note (per DEC-16):** this adapter is deliberately
+/// **Isolation note:** this adapter is deliberately
 /// `@MainActor` on the class with `nonisolated` `send` / `close` and
 /// `@unchecked Sendable` — a simpler concurrency shape than production
 /// `UnixSocketTransport`. Scoped to tests; must not leak into the `codans`
-/// binary. M8.1's real-socket integration variant inherits the real
+/// binary. The real-socket integration variant inherits the real
 /// transport's stricter isolation.
 @MainActor
 public final class RouterBackedTransport: Transport, @unchecked Sendable {

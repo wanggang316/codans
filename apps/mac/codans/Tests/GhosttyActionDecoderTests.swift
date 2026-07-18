@@ -9,11 +9,10 @@ import CodansCore
 /// `GhosttyActionDecoder`. These helpers are the only slices of the 65-case
 /// action switch that are reachable without constructing a full
 /// `ghostty_action_s` C union; integration coverage of the switch itself
-/// lives in the manual smoke checklist (Milestone 7c).
+/// lives in the manual smoke checklist.
 ///
 /// Visibility note: the six `decode*` helpers are `internal static` (not
-/// `fileprivate`) so `@testable` can cross the boundary. See plan 0008
-/// DEC-M7b-1.
+/// `fileprivate`) so `@testable` can cross the boundary.
 @MainActor
 struct GhosttyActionDecoderTests {
 
@@ -48,8 +47,7 @@ struct GhosttyActionDecoderTests {
 
   // MARK: - decodeNewSplitDirection
   //
-  // Four C directions map 1:1 to four Swift cases (DEC-M2-2 reverted in
-  // P1 rework — see plan 0008 DEC-M7d-4).
+  // Four C directions map 1:1 to four Swift cases.
 
   @Test
   func newSplitDirectionRightMapsToRight() {
@@ -213,7 +211,7 @@ struct GhosttyActionDecoderTests {
   // MARK: - decodeGotoWindowTarget
   //
   // libghostty emits only PREVIOUS/NEXT today. `.last`/`.index` on
-  // `GotoWindowTarget` are reserved for future IPC (DEC-M2-3), so the
+  // `GotoWindowTarget` are reserved for future IPC, so the
   // "unknown" case here returns nil rather than synthesising an index.
 
   @Test

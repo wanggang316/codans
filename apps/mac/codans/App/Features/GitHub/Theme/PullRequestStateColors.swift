@@ -6,8 +6,8 @@ import CodansCore
 /// convention (green open, gray draft, purple merged, dim closed); check hues follow the
 /// conventional green / red / yellow.
 ///
-/// Defined as computed `Color` statics (rather than asset-catalog entries) to land the M4
-/// slice without touching Assets.xcassets. A later polish pass can promote these into the
+/// Defined as computed `Color` statics rather than asset-catalog entries, to avoid
+/// touching Assets.xcassets. A later polish pass can promote these into the
 /// catalog for proper Dark / HighContrast variants — the call sites will not change.
 nonisolated enum PullRequestStateColor {
   static let openFill = Color(red: 0.25, green: 0.55, blue: 0.30)

@@ -21,18 +21,21 @@ public final class MethodRouter {
   private let hierarchyHandlers: HierarchyHandlers?
   private let terminalHandlers: TerminalHandlers?
   private let editorHandlers: EditorHandlers?
+  private let projectHandlers: ProjectHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
     systemHandlers: SystemHandlers,
     hierarchyHandlers: HierarchyHandlers? = nil,
     terminalHandlers: TerminalHandlers? = nil,
-    editorHandlers: EditorHandlers? = nil
+    editorHandlers: EditorHandlers? = nil,
+    projectHandlers: ProjectHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
     self.terminalHandlers = terminalHandlers
     self.editorHandlers = editorHandlers
+    self.projectHandlers = projectHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -45,6 +48,7 @@ public final class MethodRouter {
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
+    if let outcome = await routeProject(request) { return outcome }
     return notWired(request.method)
   }
 
@@ -107,9 +111,8 @@ public final class MethodRouter {
     }
   }
 
-  /// Tag-scoped mutations introduced in M6 alongside the `codans tag` /
-  /// `codans project tag` CLI surface. Lives in its own sub-router so the
-  /// switch in `routeHierarchyMutations` doesn't grow unbounded.
+  /// Tag-scoped mutations. Lives in its own sub-router so the switch in
+  /// `routeHierarchyMutations` doesn't grow unbounded.
   private func routeHierarchyTags(
     _ request: IPC.Request,
     handlers h: HierarchyHandlers
@@ -129,11 +132,6 @@ public final class MethodRouter {
   /// can invoke them directly with `EditorOpenRequest` etc.; the router
   /// decodes `request.params`, invokes the matching method, and re-encodes
   /// the typed response.
-  ///
-  /// C8a Phase 4c: `editor.setDefault` is split into `editor.setGlobalDefault`
-  /// (writes `settings.general.defaultEditorID`) and `editor.setProjectDefault`
-  /// (writes `Project.defaultEditor`); `editor.open` carries a mandatory `path`
-  /// and no longer a `worktreeID`.
   private func routeEditor(_ request: IPC.Request) async -> RouterOutcome? {
     guard let h = editorHandlers else { return nil }
     switch request.method {
@@ -175,6 +173,48 @@ public final class MethodRouter {
         return .failed(.internal(String(describing: error)))
       }
     default: return nil
+    }
+  }
+
+  /// `project.*` adapter. `ProjectHandlers` throws `IPCError` directly (it is
+  /// the only wire-error type these methods produce), so the catch chain is
+  /// flatter than `routeEditor`'s — no app-tier error translation, just a
+  /// `DecodingError` → `invalidParams` rescue and a programmer-error backstop.
+  private func routeProject(_ request: IPC.Request) async -> RouterOutcome? {
+    guard let h = projectHandlers else { return nil }
+    switch request.method {
+    case .projectListScripts:
+      return Self.projectOutcome {
+        try h.listScripts(request.params.decoded(as: ProjectHandlers.ListScriptsRequest.self))
+      }
+    case .projectAddScript:
+      return Self.projectOutcome {
+        try h.addScript(request.params.decoded(as: ProjectHandlers.AddScriptRequest.self))
+      }
+    case .projectUpdateScript:
+      return Self.projectOutcome {
+        try h.updateScript(request.params.decoded(as: ProjectHandlers.UpdateScriptRequest.self))
+      }
+    case .projectRemoveScript:
+      return Self.projectOutcome {
+        try h.removeScript(request.params.decoded(as: ProjectHandlers.RemoveScriptRequest.self))
+      }
+    default: return nil
+    }
+  }
+
+  /// Shared adapter for the `project.*` methods: encode the typed response,
+  /// passing a handler `IPCError` straight through, mapping a `DecodingError`
+  /// to `invalidParams`, and any other throw to a programmer-error `internal`.
+  private static func projectOutcome(_ body: () throws -> some Encodable) -> RouterOutcome {
+    do {
+      return encodeUnary(try body())
+    } catch let error as IPCError {
+      return .failed(error)
+    } catch let error as DecodingError {
+      return .failed(.invalidParams(message: String(describing: error), path: nil))
+    } catch {
+      return .failed(.internal(String(describing: error)))
     }
   }
 
@@ -228,10 +268,8 @@ public final class MethodRouter {
     case .systemStatus: return await systemHandlers.status(request.params)
     case .systemQuit: return await systemHandlers.quit(request.params)
     // Non-system methods fall through to the next sub-router. A future
-    // `system.*` case landing in this router silently reaches
-    // `notWired(.unsupported)` without this branch; reviewer flagged
-    // (M3.0.1 nit #1) as acceptable for now — a proper fix would split
-    // `IPC.Method` into per-namespace sub-enums, tracked for M3.1.
+    // `system.*` case landing in this router would silently reach
+    // `notWired(.unsupported)` without this branch.
     default: return nil
     }
   }

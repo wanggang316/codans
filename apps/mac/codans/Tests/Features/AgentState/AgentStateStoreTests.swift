@@ -58,7 +58,7 @@ struct AgentStateStoreTests {
 
   @Test
   func seededWorkingSurvivesLaunchRebind() {
-    // M6.T6.5 resume: an agent persisted as `.working` at quit must keep
+    // An agent persisted as `.working` at quit must keep
     // that badge after launch. The binder re-identifies the restored agent
     // and fires `onAgentBound`; it must not collapse the seeded state to
     // `.idle` before any live viewport classification arrives.

@@ -39,7 +39,7 @@ final class AgentBinder {
 
   private let client: HierarchyClient
   private let currentAgentKind: @MainActor (PaneID) -> AgentKind?
-  /// Optional T6 hook: fired immediately AFTER `setPaneAgentKind` lands
+  /// Optional post-bind hook: fired immediately AFTER `setPaneAgentKind` lands
   /// a non-nil binding. AppState wires this to `AgentStateStore.onAgentBound`
   /// so the AgentState UI learns about the new agent without a separate
   /// observation pass. Default no-op keeps existing tests / callers
@@ -157,8 +157,8 @@ final class AgentBinder {
       job: job, misses: misses
     )
     client.setPaneAgentKind(paneID, next)
-    // T6 hook — fire AFTER the writer so the registry observes the same
-    // kind that just landed in the catalog. Session-id is not modelled
+    // Post-bind hook — fire AFTER the writer so the registry observes the
+    // same kind that just landed in the catalog. Session-id is not modelled
     // here yet (always nil); when `setPaneAgentSessionID` callers wake
     // up, plumb a third channel down through this hook.
     if let kind = next {

@@ -26,25 +26,47 @@ import CodansCore
 struct MainWindowCommandsTests {
   // MARK: - Structural
 
-  /// Guards against new `@Dependency`, `@Environment`, or other client-resolving stored
-  /// properties on `MainWindowCommands`. `@Dependency` in particular resolves to
-  /// `liveValue` inside a SwiftUI `Commands` struct (TCA's `withDependencies` injection
-  /// does not scope here), so any client whose `liveValue` has a `fatalError` stub crashes
-  /// on first button tap. The allowed fields are inert: a closure to the root store, a
-  /// resolved-shortcut snapshot, and the focus observer used to gate the destructive
-  /// worktree chords. None of them carry a fatalError client.
+  /// Pins the stored-property set of `MainWindowCommands` so a future
+  /// `@Dependency` / `@Environment` field is caught here. `@Dependency` in
+  /// particular resolves to `liveValue` inside a SwiftUI `Commands` struct
+  /// (TCA's `withDependencies` injection does not scope here), so any client
+  /// whose `liveValue` has a `fatalError` stub crashes on first button tap —
+  /// the PR-#13 ⌘E regression. The five allowed fields are all inert: a closure
+  /// to the root store, a resolved-shortcut snapshot, the focus observer that
+  /// gates the destructive worktree chords, and two AppState-owned
+  /// `@Observable` stores (`settingsStore` / `hierarchyManager`, injected for
+  /// the Scripts menu) — none resolve through `@Dependency`, so none carry a
+  /// fatalError client.
   @Test
-  func mainWindowCommandsHasNoDependencyFields() {
+  func mainWindowCommandsHoldsOnlyInjectedFields() {
     let store = Store(initialState: RootFeature.State()) { RootFeature() }
+    let settingsStore = SettingsStore(
+      fileURL: FileManager.default.temporaryDirectory
+        .appending(component: UUID().uuidString + ".json")
+    )
+    let hierarchyManager = HierarchyManager(
+      catalog: .default,
+      store: CatalogStore(
+        fileURL: FileManager.default.temporaryDirectory
+          .appending(component: UUID().uuidString + ".json")
+      ),
+      runtime: FakeHierarchyRuntime()
+    )
     let commands = MainWindowCommands(
       store: { store },
       shortcuts: [:],
-      sidebarFocus: SidebarFocusObserver()
+      sidebarFocus: SidebarFocusObserver(),
+      settingsStore: settingsStore,
+      hierarchyManager: hierarchyManager
     )
     let mirror = Mirror(reflecting: commands)
     let labels = mirror.children.compactMap(\.label)
-    #expect(mirror.children.count == 3)
-    #expect(Set(labels) == ["store", "shortcuts", "sidebarFocus"])
+    #expect(mirror.children.count == 5)
+    #expect(
+      Set(labels) == [
+        "store", "shortcuts", "sidebarFocus", "settingsStore", "hierarchyManager",
+      ]
+    )
   }
 
   // MARK: - ⌘O (Open in Default Editor)

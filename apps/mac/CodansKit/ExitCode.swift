@@ -1,9 +1,9 @@
 import Foundation
 import CodansIPC
 
-/// Stable CLI exit codes. Bound by C4 design doc D8 — agents and shell
-/// scripts branch on these values, so they must not change across
-/// releases within the same major version.
+/// Stable CLI exit codes. Agents and shell scripts branch on these
+/// values, so they must not change across releases within the same
+/// major version.
 public enum CLIExitCode: Int32, Sendable {
   case ok = 0
   case userError = 1

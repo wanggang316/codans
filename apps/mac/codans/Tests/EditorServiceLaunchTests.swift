@@ -5,7 +5,7 @@ import CodansCore
 
 @testable import Codans
 
-/// C8a Phase 6.3 — launch-mode branching. Drives `LiveEditorService.open` against a
+/// Launch-mode branching. Drives `LiveEditorService.open` against a
 /// `RecordingAppLauncher` and pins the exact tuple `(urls, appURL, arguments,
 /// createsNewApplicationInstance)` handed to `NSWorkspace` for each launch mode:
 ///

@@ -15,8 +15,7 @@ import os.log
 /// is only reachable from a `View`'s environment, and the app has no
 /// per-pane window registry yet. The live closures log at `.info` and
 /// no-op; the routing surface is ready to upgrade once a multi-window
-/// model lands (tracked by the design doc's §"multi-window intent"
-/// risk row). Hardening is deliberately deferred — wiring the type
+/// model lands. Hardening is deliberately deferred — wiring the type
 /// contract first lets the decoder + router land without blocking on the
 /// multi-window architectural decision.
 nonisolated struct WindowService: Sendable {

@@ -340,11 +340,18 @@ jobs:
         run: |
           DMG="apps/mac/.build/release/Codans-${{ steps.meta.outputs.version }}.dmg"
           APPCAST="apps/mac/.build/release/appcast.xml"
+          # Stable-named copy of the (already notarized) DMG. It carries no
+          # version in the filename, so `releases/latest/download/Codans.dmg`
+          # is a release-independent direct-download URL the website can link
+          # to without editing per release. The versioned DMG, its checksum,
+          # the cask, and the Sparkle appcast are unaffected.
+          STABLE_DMG="apps/mac/.build/release/Codans.dmg"
+          /bin/cp "$DMG" "$STABLE_DMG"
           gh release create "${{ steps.meta.outputs.tag }}" \
             --draft \
             --title "${{ steps.meta.outputs.tag }}" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
-            "$DMG" "$DMG.sha256" "$APPCAST"
+            "$DMG" "$DMG.sha256" "$STABLE_DMG" "$APPCAST"
 
       - name: Cleanup keychain
         if: always()

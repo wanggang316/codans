@@ -56,7 +56,7 @@ struct IPCEnvelopeCodableTests {
 
   @Test
   func methodEnumOmitsSkillNamespace() throws {
-    // DEC-5: skill.* is deferred to exec-plan 0004.
+    // skill.* methods are deferred and must not appear in the enum yet.
     for method in IPC.Method.allCases {
       #expect(!method.rawValue.hasPrefix("skill."), "Unexpected skill method: \(method.rawValue)")
     }

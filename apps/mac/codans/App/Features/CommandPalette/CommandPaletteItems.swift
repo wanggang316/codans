@@ -27,10 +27,19 @@ enum CommandPaletteItems {
   ) -> [CommandPaletteItem] {
     var items = appItems()
     items.append(contentsOf: worktreeSwitchItems(selection: selection, catalog: catalog))
+    // Project-level maintenance commands surface whenever a Project is
+    // selected, independent of whether a Worktree is also selected.
+    if selection.projectID != nil {
+      items.append(contentsOf: projectItems())
+    }
     if let worktree = resolveWorktree(selection: selection, catalog: catalog) {
-      items.append(contentsOf: worktreeItems(worktreeName: worktree.name))
+      items.append(contentsOf: worktreeItems(worktreeName: worktree.name, isPinned: worktree.isPinned))
+      items.append(contentsOf: worktreeLifecycleItems(worktreeName: worktree.name))
       items.append(contentsOf: editorItems(worktreeName: worktree.name, descriptors: editorDescriptors))
-      // M10: surface user-defined `ProjectSettings.scripts` for the active
+      // Tab commands act on the current Worktree's active tab, so they're
+      // gated on the Worktree selection rather than on precise pane focus.
+      items.append(contentsOf: tabCommandItems(worktreeName: worktree.name))
+      // Surface user-defined `ProjectSettings.scripts` for the active
       // Project. Reads through the SettingsWriter dependency so the palette
       // tracks the live `settings.json` snapshot — switching to a different
       // Project rebuilds and surfaces that Project's scripts instead.
@@ -98,16 +107,58 @@ enum CommandPaletteItems {
   private static func appItems() -> [CommandPaletteItem] {
     [
       CommandPaletteItem(
+        id: "app.open-project",
+        title: "Open Project…",
+        // Scope keyword in `searchText` so a level query ("project") surfaces
+        // the whole group even when the word is absent from the visible title.
+        searchText: "app project",
+        icon: "folder",
+        commandID: .addProject,
+        kind: .openProject
+      ),
+      CommandPaletteItem(
+        id: "app.clone-repository",
+        title: "Clone Repository…",
+        searchText: "app project repository git",
+        icon: "square.and.arrow.down.on.square",
+        kind: .cloneRepository
+      ),
+      CommandPaletteItem(
         id: "app.open-settings",
         title: "Open Settings",
+        searchText: "app",
         icon: "gearshape",
         shortcut: .command(","),
         commandID: .openSettings,
         kind: .openSettings
       ),
       CommandPaletteItem(
+        id: "app.toggle-sidebar",
+        title: "Toggle Sidebar",
+        searchText: "app sidebar",
+        icon: "sidebar.left",
+        commandID: .toggleSidebar,
+        kind: .toggleSidebar
+      ),
+      CommandPaletteItem(
+        id: "app.show-unread",
+        title: "Show Unread Notifications",
+        searchText: "app notifications inbox",
+        icon: "bell.badge",
+        commandID: .showUnread,
+        kind: .showUnreadNotifications
+      ),
+      CommandPaletteItem(
+        id: "app.open-ghostty-config",
+        title: "Open Ghostty Config",
+        searchText: "app config settings",
+        icon: "doc.badge.gearshape",
+        kind: .openGhosttyConfig
+      ),
+      CommandPaletteItem(
         id: "app.check-for-updates",
         title: "Check for Updates…",
+        searchText: "app",
         icon: "arrow.down.circle",
         commandID: .checkForUpdates,
         kind: .checkForUpdates
@@ -115,6 +166,7 @@ enum CommandPaletteItems {
       CommandPaletteItem(
         id: "app.quit",
         title: "Quit Codans",
+        searchText: "app",
         icon: "power",
         shortcut: .command("Q"),
         hiddenWhenQueryEmpty: true,
@@ -135,40 +187,201 @@ enum CommandPaletteItems {
       .worktrees.first(where: { $0.id == worktreeID })
   }
 
-  private static func worktreeItems(worktreeName: String) -> [CommandPaletteItem] {
+  /// Worktree-scoped commands for the current selection. Every item carries
+  /// the "worktree" scope keyword in `searchText` so typing the level name
+  /// surfaces the whole group, even for titles that don't contain the word
+  /// (e.g. "Toggle Git Viewer", "Open PR on GitHub").
+  private static func worktreeItems(
+    worktreeName: String,
+    isPinned: Bool
+  ) -> [CommandPaletteItem] {
     [
       CommandPaletteItem(
         id: "git.toggle-viewer",
         title: "Toggle Git Viewer",
         subtitle: worktreeName,
+        searchText: "worktree git diff viewer",
         icon: "doc.text.magnifyingglass",
         shortcut: .command("G", shift: true),
         commandID: .toggleDiffInspector,
         kind: .toggleDiffInspector
       ),
       CommandPaletteItem(
+        id: "worktree.new",
+        title: "New Worktree…",
+        searchText: "worktree new create branch",
+        icon: "plus.square.on.square",
+        commandID: .newWorktree,
+        kind: .newWorktree
+      ),
+      CommandPaletteItem(
         id: "editor.reveal-in-finder",
         title: "Reveal in Finder",
         subtitle: worktreeName,
+        searchText: "worktree reveal finder",
         icon: "folder",
         commandID: .revealCurrentWorktreeInFinder,
         kind: .revealCurrentWorktreeInFinder
       ),
       CommandPaletteItem(
+        id: "worktree.reveal-in-sidebar",
+        title: "Reveal in Sidebar",
+        subtitle: worktreeName,
+        searchText: "worktree reveal sidebar",
+        icon: "sidebar.left",
+        commandID: .revealCurrentWorktreeInSidebar,
+        kind: .revealCurrentWorktreeInSidebar
+      ),
+      CommandPaletteItem(
+        id: "worktree.copy-path",
+        title: "Copy Worktree Path",
+        subtitle: worktreeName,
+        searchText: "worktree copy path",
+        icon: "doc.on.doc",
+        commandID: .copyCurrentWorktreePath,
+        kind: .copyCurrentWorktreePath
+      ),
+      CommandPaletteItem(
+        id: "worktree.toggle-pin",
+        title: isPinned ? "Unpin Worktree" : "Pin Worktree",
+        subtitle: worktreeName,
+        searchText: "worktree pin unpin",
+        icon: isPinned ? "pin.slash" : "pin",
+        kind: .toggleCurrentWorktreePinned
+      ),
+    ]
+  }
+
+  /// Second half of the worktree band — GitHub + lifecycle commands. Split
+  /// from `worktreeItems` only to keep each builder under the function-length
+  /// lint; emission order across the two builders is preserved.
+  private static func worktreeLifecycleItems(worktreeName: String) -> [CommandPaletteItem] {
+    [
+      CommandPaletteItem(
+        id: "worktree.open-pr",
+        title: "Open PR on GitHub",
+        subtitle: worktreeName,
+        searchText: "worktree github pull request pr",
+        icon: "arrow.up.right.square",
+        commandID: .openCurrentPR,
+        kind: .openCurrentPR
+      ),
+      CommandPaletteItem(
+        id: "worktree.open-project-on-github",
+        title: "Open Project on GitHub",
+        searchText: "worktree project github repository",
+        icon: "arrow.up.right.square",
+        commandID: .openProjectOnGitHub,
+        kind: .openCurrentProjectOnGitHub
+      ),
+      CommandPaletteItem(
         id: "worktree.refresh",
         title: "Refresh Worktree",
         subtitle: worktreeName,
+        searchText: "worktree refresh reload",
         icon: "arrow.clockwise",
         kind: .refreshCurrentWorktree
+      ),
+      CommandPaletteItem(
+        id: "worktree.show-archived",
+        title: "Show Archived Worktrees",
+        searchText: "worktree archived show",
+        icon: "archivebox",
+        commandID: .showArchivedWorktrees,
+        kind: .showArchivedWorktrees
+      ),
+      CommandPaletteItem(
+        id: "worktree.archive",
+        title: "Archive Worktree",
+        subtitle: worktreeName,
+        searchText: "worktree archive",
+        icon: "archivebox",
+        commandID: .archiveCurrentWorktree,
+        hiddenWhenQueryEmpty: true,
+        kind: .archiveCurrentWorktree
       ),
       CommandPaletteItem(
         id: "worktree.close",
         title: "Delete Worktree",
         subtitle: worktreeName,
+        searchText: "worktree delete remove",
         icon: "xmark.square",
         commandID: .deleteCurrentWorktree,
         hiddenWhenQueryEmpty: true,
         kind: .closeCurrentWorktree
+      ),
+    ]
+  }
+
+  /// Project-scoped commands for the current Project selection. Batch and
+  /// destructive maintenance actions that were previously reachable only from
+  /// the sidebar's "⋯" menu. Destructive variants are `hiddenWhenQueryEmpty`
+  /// so they never surface by accident on a bare palette open.
+  private static func projectItems() -> [CommandPaletteItem] {
+    [
+      CommandPaletteItem(
+        id: "project.settings",
+        title: "Project Settings…",
+        searchText: "project settings preferences",
+        icon: "slider.horizontal.3",
+        kind: .openProjectSettings
+      ),
+      CommandPaletteItem(
+        id: "project.prune-stale",
+        title: "Prune Stale Worktrees",
+        searchText: "project worktree prune stale clean",
+        icon: "wand.and.sparkles",
+        kind: .pruneStaleWorktrees
+      ),
+      CommandPaletteItem(
+        id: "project.archive-all-merged",
+        title: "Archive All Merged Worktrees",
+        searchText: "project worktree archive merged batch",
+        icon: "archivebox",
+        hiddenWhenQueryEmpty: true,
+        kind: .archiveAllMergedWorktrees
+      ),
+      CommandPaletteItem(
+        id: "project.remove-all-merged",
+        title: "Remove All Merged Worktrees",
+        searchText: "project worktree remove merged batch",
+        icon: "trash",
+        hiddenWhenQueryEmpty: true,
+        kind: .removeAllMergedWorktrees
+      ),
+      CommandPaletteItem(
+        id: "project.remove",
+        title: "Remove Project",
+        searchText: "project remove delete",
+        icon: "trash",
+        hiddenWhenQueryEmpty: true,
+        kind: .removeCurrentProject
+      ),
+    ]
+  }
+
+  /// Tab-scoped commands that act on the current Worktree's active tab.
+  /// Gated on the Worktree selection (not pane focus) because each routes
+  /// through a `…ForCurrentWorktree` action that resolves the active tab.
+  private static func tabCommandItems(worktreeName: String) -> [CommandPaletteItem] {
+    [
+      CommandPaletteItem(
+        id: "tab.rename",
+        title: "Rename Tab…",
+        subtitle: worktreeName,
+        searchText: "tab rename",
+        icon: "pencil",
+        commandID: .renameActiveTab,
+        kind: .renameCurrentTab
+      ),
+      CommandPaletteItem(
+        id: "tab.change-color",
+        title: "Change Tab Color…",
+        subtitle: worktreeName,
+        searchText: "tab color change",
+        icon: "paintpalette",
+        commandID: .changeActiveTabColor,
+        kind: .changeCurrentTabColor
       ),
     ]
   }
@@ -182,6 +395,7 @@ enum CommandPaletteItems {
         id: "editor.open-default",
         title: "Open in Editor",
         subtitle: worktreeName,
+        searchText: "worktree editor open",
         icon: "arrow.up.forward.app",
         shortcut: .command("E"),
         commandID: .openInEditor,
@@ -194,6 +408,7 @@ enum CommandPaletteItems {
           id: "editor.open.\(descriptor.id)",
           title: "Open in \(descriptor.displayName)",
           subtitle: worktreeName,
+          searchText: "worktree editor open \(descriptor.displayName)",
           icon: "arrow.up.forward.app",
           kind: .openCurrentWorktreeIn(descriptor.id)
         )
@@ -283,21 +498,40 @@ enum CommandPaletteItems {
       CommandPaletteItem(
         id: "pane.new-tab",
         title: "New Tab",
+        searchText: "tab new",
         icon: "plus.rectangle.on.rectangle",
         kind: .paneAction(.newTab)
       ),
       CommandPaletteItem(
         id: "pane.equalize",
         title: "Equalize Splits",
+        searchText: "pane split equalize",
         icon: "rectangle.split.3x1",
         kind: .paneAction(.equalizeSplits)
       ),
       CommandPaletteItem(
         id: "pane.close-tab",
         title: "Close Tab",
+        searchText: "tab close",
         icon: "xmark.circle",
         hiddenWhenQueryEmpty: true,
         kind: .paneAction(.closeTab(mode: .this))
+      ),
+      CommandPaletteItem(
+        id: "pane.close-other-tabs",
+        title: "Close Other Tabs",
+        searchText: "tab close other",
+        icon: "xmark.circle",
+        hiddenWhenQueryEmpty: true,
+        kind: .paneAction(.closeTab(mode: .other))
+      ),
+      CommandPaletteItem(
+        id: "pane.close-tabs-to-right",
+        title: "Close Tabs to the Right",
+        searchText: "tab close right",
+        icon: "xmark.circle",
+        hiddenWhenQueryEmpty: true,
+        kind: .paneAction(.closeTab(mode: .right))
       ),
     ]
   }
@@ -313,74 +547,85 @@ enum CommandPaletteItems {
       CommandPaletteItem(
         id: "pane.split.right",
         title: "Split Right",
+        searchText: "pane split right",
         icon: "rectangle.split.2x1",
         kind: .paneAction(.newSplit(direction: .right))
       ),
       CommandPaletteItem(
         id: "pane.split.down",
         title: "Split Down",
+        searchText: "pane split down",
         icon: "rectangle.split.1x2",
         kind: .paneAction(.newSplit(direction: .down))
       ),
       CommandPaletteItem(
         id: "pane.focus.left",
         title: "Focus Pane Left",
+        searchText: "pane focus left",
         icon: "arrow.left",
         kind: .paneAction(.gotoSplit(direction: .left))
       ),
       CommandPaletteItem(
         id: "pane.focus.right",
         title: "Focus Pane Right",
+        searchText: "pane focus right",
         icon: "arrow.right",
         kind: .paneAction(.gotoSplit(direction: .right))
       ),
       CommandPaletteItem(
         id: "pane.focus.up",
         title: "Focus Pane Up",
+        searchText: "pane focus up",
         icon: "arrow.up",
         kind: .paneAction(.gotoSplit(direction: .up))
       ),
       CommandPaletteItem(
         id: "pane.focus.down",
         title: "Focus Pane Down",
+        searchText: "pane focus down",
         icon: "arrow.down",
         kind: .paneAction(.gotoSplit(direction: .down))
       ),
       CommandPaletteItem(
         id: "pane.toggle-zoom",
         title: "Toggle Split Zoom",
+        searchText: "pane split zoom",
         icon: "plus.magnifyingglass",
         kind: .paneAction(.toggleSplitZoom)
+      ),
+      CommandPaletteItem(
+        id: "pane.close",
+        title: "Close Pane",
+        searchText: "pane close",
+        icon: "xmark.square",
+        hiddenWhenQueryEmpty: true,
+        kind: .paneAction(.closePane)
       ),
     ]
   }
 
+  /// Window-scoped commands. `New Window` and `Show Tab Overview` were
+  /// removed: codans runs a single-instance `Window(id:)` scene (see
+  /// `CodansApp.body`), so `WindowService.openNewWindow` is a logged no-op and
+  /// `NSWindow.toggleTabOverview` has no native window-tab group to act on —
+  /// both surfaced as dead palette rows. `Close Window` and `Toggle
+  /// Fullscreen` map onto real AppKit calls and stay.
   private static func windowItems(focusedPaneID: PaneID) -> [CommandPaletteItem] {
     [
       CommandPaletteItem(
-        id: "window.new",
-        title: "New Window",
-        icon: "macwindow.badge.plus",
-        kind: .windowAction(.new(from: focusedPaneID))
-      ),
-      CommandPaletteItem(
-        id: "window.close",
-        title: "Close Window",
-        icon: "xmark",
-        hiddenWhenQueryEmpty: true,
-        kind: .windowAction(.close(from: focusedPaneID))
-      ),
-      CommandPaletteItem(
         id: "window.toggle-fullscreen",
         title: "Toggle Fullscreen",
+        searchText: "window fullscreen",
         icon: "arrow.up.left.and.arrow.down.right",
         kind: .windowAction(.toggleFullscreen(from: focusedPaneID))
       ),
       CommandPaletteItem(
-        id: "window.toggle-tab-overview",
-        title: "Show Tab Overview",
-        icon: "square.grid.2x2",
-        kind: .windowAction(.toggleTabOverview(from: focusedPaneID))
+        id: "window.close",
+        title: "Close Window",
+        searchText: "window close",
+        icon: "xmark",
+        hiddenWhenQueryEmpty: true,
+        kind: .windowAction(.close(from: focusedPaneID))
       ),
     ]
   }
