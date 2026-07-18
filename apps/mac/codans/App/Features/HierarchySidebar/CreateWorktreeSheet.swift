@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// SwiftUI sheet for `CreateWorktreeFeature`. Minimal form: branch
 /// name + live validator, base-ref dropdown, three toggles, optional
@@ -34,11 +34,21 @@ struct CreateWorktreeSheet: View {
           Text(error)
             .font(.caption)
             .foregroundStyle(.red)
-        } else if let notice = store.reuseNotice {
-          Text(notice)
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
+      }
+
+      // Conflict note — visible only while the draft collides with an
+      // existing branch. Purely informational: it names the branch's REAL
+      // casing and the REASON the name is taken, then leaves the fix to
+      // the user (Create stays disabled meanwhile) — pick a different
+      // name, or clean up / switch to the existing branch outside the
+      // sheet. There is deliberately no in-app resolution machinery.
+      if store.branchCollisionKind != .none {
+        Text(collisionNote)
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
 
       VStack(alignment: .leading, spacing: 4) {
@@ -109,11 +119,47 @@ struct CreateWorktreeSheet: View {
             || store.branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || store.selectedBaseRef == nil
             || store.currentPendingCountForProject >= 8
+            // A name collision blocks Create — the conflict note explains
+            // why the name is taken; the user resolves it themselves.
+            || store.branchCollisionKind != .none
         )
       }
     }
     .padding(20)
     .frame(width: 420)
     .onAppear { store.send(.onAppear) }
+  }
+
+  /// The conflict note's copy: states the REASON the drafted name is
+  /// unavailable, naming the EXISTING ref's real casing (the draft may
+  /// differ only by case) so the user's follow-up targets the branch git
+  /// actually has.
+  private var collisionNote: String {
+    switch store.branchCollisionKind {
+    case .checkedOut:
+      let branch = store.checkedOutOwner?.branch ?? store.sanitizedBranchDraft
+      let holder =
+        store.checkedOutOwner.map { "the worktree \"\($0.worktreeName)\"" }
+        ?? "another worktree"
+      return
+        "\"\(branch)\" is already checked out by \(holder) — git allows a branch to be "
+        + "checked out by only one worktree at a time. Choose a different name, or work "
+        + "in that worktree instead."
+    case .dangling:
+      let real = store.danglingRealName ?? store.sanitizedBranchDraft
+      return
+        "A local branch named \"\(real)\" already exists without a worktree — it was "
+        + "likely kept when its worktree was removed. Choose a different name, or delete "
+        + "the branch (git branch -D \"\(real)\") and reopen this dialog."
+    case .archivedWorktree:
+      let branch = store.archivedOwner?.branch ?? store.sanitizedBranchDraft
+      let name = store.archivedOwner?.worktreeName ?? branch
+      return
+        "\"\(branch)\" belongs to the archived worktree \"\(name)\" — it's hidden from "
+        + "the sidebar, but its branch and files still exist. Unarchive or remove it via "
+        + "the Project's ⋯ menu → \"Archived Worktrees…\", or choose a different name."
+    case .none:
+      return ""
+    }
   }
 }

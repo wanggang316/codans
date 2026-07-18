@@ -84,7 +84,7 @@ git 工作不藏在 `HierarchyClient` 背后——后者的契约是"同步、ma
 
 - `setWorktreeArchived(worktreeID, archived)` / `reconcileDiscoveredWorktrees(projectID)`（背景同步，吞 `GitWorktreeError` + 记日志，绝不崩 app）。
 - `removeWorktreeWithGit(worktreeID, projectID)`：跑 git 删除 + catalog 删行（无 `force` 参数）。
-- **生命周期感知变体** `setWorktreeArchivedWithLifecycle` / `removeWorktreeWithLifecycle`：在元数据突变前后跑用户配置的生命周期脚本（见 §生命周期脚本）。
+- `runWorktreeLifecycleScript(worktreeID, projectID, command, tabName)`：在 worktree 上开临时 tab 跑 archive/delete 生命周期脚本并等其子进程退出；脚本后的 catalog/git 突变由 sidebar reducer 自己编排（脚本 → `setWorktreeArchived` / `removeWorktreeWithGit`），每个阶段因此对行内进度 UI 可见（见 §生命周期脚本）。
 - `reorderWorktrees(projectID, segment, from, to)`：段内拖拽（见 §侧边栏排序）。
 - `promoteWorktree(projectID, worktreeID, .moveToFrontWithinUnpinned)`：被通知子系统调用的离散提升（见 §侧边栏排序 与 notifications 设计）。
 - `runningPanelCount(worktreeID) -> Int`：给删除确认文案（用计数而非布尔，文案才能说"3 running processes"而非含糊的复数）。

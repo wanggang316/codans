@@ -1,15 +1,21 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
-/// Pure renderer for a single pane slot. Drives `PaneHostFeature` via
-/// `.task { store.send(.task) }` and switches over `store.phase` to show
-/// a loading placeholder, the live `PaneHostView`, or a failure with
+/// Pure renderer for a single pane slot. Switches over `store.phase` to
+/// show a loading placeholder, the live `PaneHostView`, or a failure with
 /// retry. All `TerminalClient` calls live in the reducer — this view never
 /// reads `@Dependency` directly, which was the source of the
 /// `TerminalClient.liveValue not configured` fatal-error on launch with
 /// a persisted catalog (reducer-scope overrides don't reach SwiftUI view
 /// bodies).
+///
+/// The `.task` bringup trigger is NOT sent from here: it lives on the
+/// owning `LeafView`, which routes it through the parent store behind a
+/// membership check — a scoped store can't tell that its element was
+/// removed between mount and the task body running (a transient
+/// archive/delete script tab can close that fast), and a stale element
+/// send trips TCA's missing-element runtime warning.
 ///
 /// Surfaces are retained across tab switches by `TerminalEngine`'s
 /// registry. The reducer's registry short-circuit reuses them on
@@ -20,9 +26,6 @@ struct LazyPaneHost: View {
 
   var body: some View {
     content
-      .task(id: store.paneID) {
-        store.send(.task)
-      }
   }
 
   @ViewBuilder

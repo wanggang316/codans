@@ -29,6 +29,8 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
   public var defaultWorktreesDirectory: String?
   /// Whether to fetch the remote before creating a new worktree. Default `true`.
   public var fetchRemoteOnCreate: Bool
+  /// Whether to switch to a newly created worktree once it is ready. Default `true`.
+  public var autoSwitchToNewWorktree: Bool
   /// Whether to copy `.gitignore`-listed files when creating a worktree. Default `false`.
   public var copyIgnoredOnCreate: Bool
   /// Whether to copy untracked files when creating a worktree. Default `false`.
@@ -44,6 +46,7 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
   public init(
     defaultWorktreesDirectory: String? = nil,
     fetchRemoteOnCreate: Bool = true,
+    autoSwitchToNewWorktree: Bool = true,
     copyIgnoredOnCreate: Bool = false,
     copyUntrackedOnCreate: Bool = false,
     autoDeleteArchived: Bool = false,
@@ -52,6 +55,7 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
   ) {
     self.defaultWorktreesDirectory = defaultWorktreesDirectory
     self.fetchRemoteOnCreate = fetchRemoteOnCreate
+    self.autoSwitchToNewWorktree = autoSwitchToNewWorktree
     self.copyIgnoredOnCreate = copyIgnoredOnCreate
     self.copyUntrackedOnCreate = copyUntrackedOnCreate
     self.autoDeleteArchived = autoDeleteArchived
@@ -62,7 +66,7 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
   public static let `default` = WorktreeSettings()
 
   private enum CodingKeys: String, CodingKey {
-    case defaultWorktreesDirectory, fetchRemoteOnCreate, copyIgnoredOnCreate
+    case defaultWorktreesDirectory, fetchRemoteOnCreate, autoSwitchToNewWorktree, copyIgnoredOnCreate
     case copyUntrackedOnCreate, autoDeleteArchived, autoDeletePeriod, deleteRemoteBranchWithWorktree
   }
 
@@ -70,6 +74,7 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.defaultWorktreesDirectory = try container.decodeIfPresent(String.self, forKey: .defaultWorktreesDirectory)
     self.fetchRemoteOnCreate = try container.decodeIfPresent(Bool.self, forKey: .fetchRemoteOnCreate) ?? true
+    self.autoSwitchToNewWorktree = try container.decodeIfPresent(Bool.self, forKey: .autoSwitchToNewWorktree) ?? true
     self.copyIgnoredOnCreate = try container.decodeIfPresent(Bool.self, forKey: .copyIgnoredOnCreate) ?? false
     self.copyUntrackedOnCreate = try container.decodeIfPresent(Bool.self, forKey: .copyUntrackedOnCreate) ?? false
     self.autoDeleteArchived = try container.decodeIfPresent(Bool.self, forKey: .autoDeleteArchived) ?? false
@@ -77,6 +82,8 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent(AutoDeletePeriod.self, forKey: .autoDeletePeriod) ?? .sevenDays
     self.deleteRemoteBranchWithWorktree =
       try container.decodeIfPresent(Bool.self, forKey: .deleteRemoteBranchWithWorktree) ?? false
+    // A legacy `branchConflictResolution` key from the removed resolution
+    // picker is simply ignored (keyed decode skips unknown keys).
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -84,6 +91,9 @@ public nonisolated struct WorktreeSettings: Equatable, Codable, Sendable {
     try container.encodeIfPresent(defaultWorktreesDirectory, forKey: .defaultWorktreesDirectory)
     if fetchRemoteOnCreate != true {
       try container.encode(fetchRemoteOnCreate, forKey: .fetchRemoteOnCreate)
+    }
+    if autoSwitchToNewWorktree != true {
+      try container.encode(autoSwitchToNewWorktree, forKey: .autoSwitchToNewWorktree)
     }
     if copyIgnoredOnCreate != false {
       try container.encode(copyIgnoredOnCreate, forKey: .copyIgnoredOnCreate)

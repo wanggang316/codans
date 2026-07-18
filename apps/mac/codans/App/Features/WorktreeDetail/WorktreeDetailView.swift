@@ -1,7 +1,7 @@
 import AppKit
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Renders the detail column for the selected Worktree: tab bar on top,
 /// split viewport underneath. Both reach into the environment
@@ -109,7 +109,38 @@ struct WorktreeDetailView: View {
   @ViewBuilder
   private var detailBody: some View {
     if let pending = activePendingWorktree {
-      WorktreeLoadingView(info: loadingInfo(for: pending))
+      // During creation the content body is JUST the live streaming output
+      // (the slimmed `WorktreeLoadingView`). The window toolbar STAYS
+      // VISIBLE via `pendingSkeletonToolbarContent`, which mirrors the real
+      // toolbar item-for-item with shimmering stand-ins — branch identity
+      // LEFT (sized from the pending name), status pill MIDDLE (plus the
+      // live inbox bell), ghost Run / Open chips RIGHT — so the chrome
+      // reads as the same toolbar and nothing shifts when the real content
+      // takes over on completion. Mirrors the normal branch's chrome
+      // wiring (`SuppressTitleModifier` so default-placement items flow
+      // leading-to-trailing; `.toolbarBackground` gated on fullscreen).
+      //
+      // The skeleton is suppressed once the row settles into `.failed`: a
+      // shimmering "still loading" cue would contradict the settled-error
+      // reading (VAL-DETAIL-004), so the failure sub-case shows no toolbar
+      // items — matching the chrome the failed state had before this view
+      // took over the toolbar.
+      let info = loadingInfo(for: pending)
+      WorktreeLoadingView(info: info)
+        .modifier(SuppressTitleModifier())
+        .toolbar { pendingSkeletonToolbarContent(info: info) }
+        .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
+        .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
+        .onReceive(
+          NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
+        ) { _ in
+          isWindowFullscreen = Self.detectMainWindowFullscreen()
+        }
+        .onReceive(
+          NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)
+        ) { _ in
+          isWindowFullscreen = Self.detectMainWindowFullscreen()
+        }
     } else if let address = resolveAddress() {
       let info = worktreeInfo(for: address)
       VStack(spacing: 0) {
@@ -290,6 +321,93 @@ struct WorktreeDetailView: View {
     }
   }
 
+  /// Window-titlebar toolbar content for the *creating* state. Mirrors
+  /// `worktreeToolbarContent` item-for-item across both OS paths so the
+  /// toolbar reads as the same chrome AND the flexible-spacer math resolves
+  /// identically — every placeholder sits where its real counterpart lands
+  /// on completion instead of jumping when the swap happens:
+  ///   - LEFT: branch-identity cluster sized from the pending worktree's
+  ///     REAL name + project name (`SkeletonBranchClusterView`).
+  ///   - MIDDLE: status pill with the motivational form's footprint
+  ///     (`SkeletonStatusPillView`), plus the LIVE inbox bell — the bell is
+  ///     window-level chrome (global unread count), not worktree data, so
+  ///     it stays real and interactive during creation.
+  ///   - RIGHT: ghost Run / Open chips (`SkeletonActionChipView`). Not
+  ///     actionable yet, but they anchor the trailing flexible spacer with
+  ///     the real button cluster's footprint — replacing the old hidden
+  ///     1×1 anchor, whose near-zero width skewed the spacer split and let
+  ///     the middle slot drift by ~half the button cluster's width.
+  /// The left / middle placeholders carry the `skeleton-left` /
+  /// `skeleton-middle` accessibility ids — the same contract keys that used
+  /// to ride the loading-view body — so a probe finds them on the toolbar
+  /// (VAL-DETAIL-001 / VAL-DETAIL-003).
+  ///
+  /// `info.isFailure` suppresses every item: a settled `.failed` creation
+  /// is not "still loading", so the placeholders are dropped and the
+  /// toolbar renders empty (VAL-DETAIL-004).
+  @ToolbarContentBuilder
+  private func pendingSkeletonToolbarContent(info: WorktreeLoadingInfo) -> some ToolbarContent {
+    // `if !isFailure { … }` with no else is the optional form `@ToolbarContentBuilder`
+    // supports (`buildOptional`) — it renders nothing for a settled failure.
+    // An empty `if`/`else` *branch* is NOT valid toolbar content (unlike
+    // `@ViewBuilder`, there is no zero-component `buildBlock`), so the
+    // suppression has to be the outer guard.
+    if !info.isFailure {
+      if #available(macOS 26.0, *) {
+        // Leading branch-identity placeholder. `.sharedBackgroundVisibility(.hidden)`
+        // matches the real `branchToolbarItemDefault` so the slot reads as plain
+        // content, not a glass capsule.
+        ToolbarItem {
+          SkeletonBranchClusterView(name: info.name, projectName: info.repositoryName)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
+        }
+        .sharedBackgroundVisibility(.hidden)
+        ToolbarSpacer(.flexible)
+        // Centered status placeholder in the toolbar's default glass capsule —
+        // the same chrome `centeredStatusBarToolbarItem` gets. The bell rides
+        // immediately after with no spacer, mirroring the real status / bell
+        // pairing at the optical center.
+        ToolbarItem {
+          SkeletonStatusPillView()
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
+        }
+        inboxBellToolbarItem()
+        ToolbarSpacer(.flexible)
+        // Ghost trailing chips: same item structure as `trailingButtonsDefault`
+        // (item / fixed spacer / item) so each gets its own glass capsule and
+        // the trailing zone weighs what the real buttons will.
+        ToolbarItem {
+          SkeletonActionChipView(labelText: "Run")
+        }
+        ToolbarSpacer(.fixed)
+        ToolbarItem {
+          SkeletonActionChipView(labelText: "Finder")
+        }
+      } else {
+        // Pre-26 fallback: the same zoning the real path uses —
+        // `.navigation` branch slot, `.principal` status slot, default-
+        // placement bell, `.primaryAction` trailing chips.
+        ToolbarItem(placement: .navigation) {
+          SkeletonBranchClusterView(name: info.name, projectName: info.repositoryName)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
+        }
+        ToolbarItem(placement: .principal) {
+          SkeletonStatusPillView()
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
+        }
+        inboxBellToolbarItem()
+        ToolbarItemGroup(placement: .primaryAction) {
+          SkeletonActionChipView(labelText: "Run")
+          SkeletonActionChipView(labelText: "Finder")
+        }
+      }
+    }
+  }
+
   @ToolbarContentBuilder
   private func inboxBellToolbarItem() -> some ToolbarContent {
     ToolbarItem {
@@ -453,9 +571,17 @@ struct WorktreeDetailView: View {
     let kind: WorktreeLoadingInfo.Kind
     switch pending.status {
     case .running:
+      // Drive the operation label from the live creation phase (not a
+      // hardcoded "git worktree add") so the detail chip agrees with the
+      // sidebar stage: git-add while `.creatingWorktree`, the configured
+      // setup command while `.runningSetupScript` (VAL-DETAIL-007,
+      // VAL-CROSS-001).
       kind = .creating(
         WorktreeLoadingInfo.Progress(
-          statusCommand: "git worktree add",
+          statusCommand: WorktreeLoadingInfo.Progress.operationLabel(
+            for: pending.phase,
+            setupCommand: pending.spec.setupCommand
+          ),
           statusLines: pending.progressLines
         )
       )

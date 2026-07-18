@@ -210,3 +210,80 @@ struct SettingsCodableTests {
     #expect(json.contains("\"defaultEditor\" : \"vscode\""), "Expected nested defaultEditor; got:\n\(json)")
   }
 }
+
+/// `WorktreeSettings.autoSwitchToNewWorktree` is a GLOBAL Bool that defaults to `true`
+/// and is omitted from the encoded JSON when at its default — so a fresh `settings.json`
+/// carries no key (absent == ON). The key is written ONLY when the user turns it off.
+struct WorktreeAutoSwitchCodableTests {
+  private func encodedJSON(_ worktree: WorktreeSettings) throws -> String {
+    let data = try JSONEncoder.touchCodeDefault.encode(worktree)
+    return try #require(String(data: data, encoding: .utf8))
+  }
+
+  /// Default value is `true`, and at the default the key is ABSENT from the encoded JSON.
+  @Test
+  func defaultIsOnAndKeyOmittedWhenDefault() throws {
+    let worktree = WorktreeSettings.default
+    #expect(worktree.autoSwitchToNewWorktree == true)
+    let json = try encodedJSON(worktree)
+    #expect(
+      !json.contains("autoSwitchToNewWorktree"),
+      "Expected key omitted at default; got:\n\(json)"
+    )
+  }
+
+  /// `false` round-trips and writes the key.
+  @Test
+  func falseRoundTripsAndWritesKey() throws {
+    var worktree = WorktreeSettings.default
+    worktree.autoSwitchToNewWorktree = false
+    let json = try encodedJSON(worktree)
+    #expect(
+      json.contains("\"autoSwitchToNewWorktree\" : false"),
+      "Expected key written when false; got:\n\(json)"
+    )
+    let data = try JSONEncoder.touchCodeDefault.encode(worktree)
+    let decoded = try JSONDecoder.touchCodeDefault.decode(WorktreeSettings.self, from: data)
+    #expect(decoded.autoSwitchToNewWorktree == false)
+  }
+
+  /// A JSON missing the key decodes to `true` (absent == ON).
+  @Test
+  func missingKeyDecodesToOn() throws {
+    let data = Data(#"{}"#.utf8)
+    let decoded = try JSONDecoder.touchCodeDefault.decode(WorktreeSettings.self, from: data)
+    #expect(decoded.autoSwitchToNewWorktree == true)
+  }
+
+  /// Toggling `false` → `true` re-omits the key — no residue from the earlier off-state.
+  @Test
+  func togglingBackOnReOmitsKey() throws {
+    var worktree = WorktreeSettings.default
+    worktree.autoSwitchToNewWorktree = false
+    worktree.autoSwitchToNewWorktree = true
+    let json = try encodedJSON(worktree)
+    #expect(
+      !json.contains("autoSwitchToNewWorktree"),
+      "Expected key re-omitted after toggling back on; got:\n\(json)"
+    )
+  }
+}
+
+/// The `branchConflictResolution` key was removed together with the
+/// reuse/recreate resolution machinery — collisions are informational-only
+/// now. A legacy key in `settings.json` must be IGNORED without corrupting
+/// the rest of the `WorktreeSettings` decode.
+struct LegacyBranchConflictKeyTests {
+  private let decoder = JSONDecoder.touchCodeDefault
+
+  /// A leftover key (any raw value) decodes cleanly and preserves siblings.
+  @Test
+  func legacyKeyIsIgnoredWithoutThrowing() throws {
+    let data = try JSONSerialization.data(withJSONObject: [
+      "branchConflictResolution": "recreate",
+      "fetchRemoteOnCreate": false,
+    ])
+    let result = try decoder.decode(WorktreeSettings.self, from: data)
+    #expect(result.fetchRemoteOnCreate == false, "Expected sibling key preserved")
+  }
+}

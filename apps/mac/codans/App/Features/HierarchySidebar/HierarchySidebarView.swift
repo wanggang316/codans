@@ -24,6 +24,13 @@ private let autoOpenLogger = Logger(
 struct HierarchySidebarView: View {
   @Bindable var store: StoreOf<HierarchySidebarFeature>
   let currentSelection: HierarchySelection
+  /// The creation the detail pane is following (`RootFeature.
+  /// activePendingWorktreeID`). The matching pending row paints a manual
+  /// accent "selected" background — pending rows carry no `.tag`, so the
+  /// native List selection can't highlight them, but the sidebar must
+  /// still show WHERE the focus is while the loading view is up.
+  /// Nil when no creation is being followed (previews / tests included).
+  var activePendingWorktreeID: PendingWorktreeID?
   /// Bumped by `RootFeature.revealCurrentWorktreeInSidebarRequested` (⌘⇧J).
   /// `.onChange(of:)` on this UUID triggers a `proxy.scrollTo` so the
   /// selected row comes back into view even when the user has scrolled
@@ -97,6 +104,10 @@ struct HierarchySidebarView: View {
   /// reveals per-row `⌃N` hotkey hints (and the matching `⌃1`–`⌃9` / `⌃0` bindings).
   @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+  /// Gates the decorative name shimmer on mid-archive / mid-delete rows —
+  /// the non-animated signals (phase icon, phase line + its stage value)
+  /// carry the state on their own. Mirrors `PendingWorktreeRow`'s gating.
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// App-wide "is a newer version available?" mirror, injected by
   /// `ContentView`. Drives the persistent update reminder in the sidebar
@@ -867,18 +878,40 @@ struct HierarchySidebarView: View {
   /// Cancel / Retry / Discard handlers dispatched to the lifecycle reducer.
   @ViewBuilder
   private func pendingRow(_ pending: PendingWorktree) -> some View {
+    let isHighlighted = pending.id == activePendingWorktreeID
     PendingWorktreeRow(
       pending: pending,
+      isHighlighted: isHighlighted,
       onCancel: { store.send(.pendingWorktreeCancelTapped(pending.id)) },
       onRetry: { store.send(.pendingWorktreeRetryTapped(pending.id)) },
       onDiscard: { store.send(.pendingWorktreeDiscardTapped(pending.id)) }
     )
+    // Pending rows carry no `.tag`, so the native List selection can't
+    // bring the user back to a creation they navigated away from — this
+    // gesture is that way back (RootFeature re-arms the loading focus).
+    // Right-click still opens the row's context menu. `.isButton` tells
+    // assistive tech the row is activatable despite not being a Button.
+    .onTapGesture { store.send(.pendingWorktreeRowTapped(pending.id)) }
+    .accessibilityAddTraits(.isButton)
     // Match the worktree row's `listRowInsets` so the spinner + name line up
     // with sibling worktree rows. Without this the row renders flush-left
     // because the clip-view shift compensated by `leading: 14` (see
     // `worktreeRow`) is not applied.
     .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
+    // Manual "selected" pill while the detail pane follows this creation.
+    // Approximates the native source-list emphasized selection (accent
+    // fill, rounded, inset from the row edges); `PendingWorktreeRow` flips
+    // its content to the light selected-row tones via `isHighlighted`.
+    .listRowBackground(
+      Group {
+        if isHighlighted {
+          RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(Color.accentColor)
+            .padding(.horizontal, 4)
+        }
+      }
+    )
   }
 
   // MARK: - Worktree row
@@ -919,6 +952,7 @@ struct HierarchySidebarView: View {
         hotkeyNumber: hotkeyNumber,
         isSelected: isSelected
       )
+      newBadgePill(for: worktree)
       diffStatsChip(for: worktree, in: project, snapshot: snapshot)
       gitHubBadge(for: worktree, in: project)
       // Trailing chord hint, after both the row content and the optional PR pill so it
@@ -987,7 +1021,7 @@ struct HierarchySidebarView: View {
     // SwiftUI Button at the row's leading area would intercept the
     // click, leave the table off-responder, and the row would stay grey
     // even though state moved.
-    let isLifecycleInProgress = store.lifecycleInProgressWorktrees.contains(worktree.id)
+    let lifecycle = store.lifecycleProgress[worktree.id]
     // Aggregated "any pane in this worktree is busy" signal — the union of two
     // sources: (1) the terminal signal via `HierarchyManager.worktreeIsDirty(_:)`
     // (OSC 9;4 progress ∪ a running foreground command), and (2) any bound agent
@@ -1000,16 +1034,12 @@ struct HierarchySidebarView: View {
       hierarchyManager.worktreeIsDirty(worktree.id) || anyAgentWorking(in: worktree)
     let content = HStack(spacing: 6) {
       Group {
-        if isLifecycleInProgress {
-          // Archive / delete is mid-flight (lifecycle script running in
-          // a pane, then the catalog mutation). Swap the row icon for a
-          // spinner so the click feels acknowledged; the row vanishes
-          // once the wrapper completes (archive → archived list, delete
-          // → gone).
-          ProgressView()
-            .controlSize(.small)
-            .frame(width: 14, height: 14)
-            .accessibilityLabel("Working")
+        if lifecycle != nil {
+          // Archive / delete is mid-flight — swap the row icon for a
+          // spinner so the click feels acknowledged; the phase line below
+          // says where the teardown is. The row vanishes once the
+          // lifecycle completes (archive → archived list, delete → gone).
+          lifecycleSpinner
         } else if isExecuting {
           ProgressView()
             .controlSize(.small)
@@ -1028,6 +1058,11 @@ struct HierarchySidebarView: View {
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {
           Text(worktree.name)
+            // Decorative light-sweep while an archive / delete lifecycle
+            // runs — the same in-progress affordance the pending-creation
+            // row uses. The phase line's stage value below is the
+            // probeable signal; the shimmer is purely cosmetic.
+            .shimmer(isActive: lifecycle != nil && !reduceMotion)
           // Default-branch marker now lives in WorktreeRowIcon's leading
           // slot (star.fill replaces git-branch for the main checkout),
           // so there's no longer an inline star next to the name.
@@ -1040,10 +1075,18 @@ struct HierarchySidebarView: View {
               .accessibilityLabel("Pinned")
           }
         }
-        // Suppress the secondary branch line when it restates the worktree name —
-        // the common case (main/main, test0003/test0003) otherwise doubles every
-        // row height for zero information.
-        if let branch = worktree.branch, branch != worktree.name {
+        if let lifecycle {
+          // Mid-archive / mid-delete: the phase line replaces the branch
+          // caption — mirroring the creation row's streaming second line —
+          // so the row narrates the teardown instead of restating a branch
+          // that is about to leave the list. Swept together with the name
+          // so the whole row reads as one in-progress unit.
+          LifecyclePhaseLineView(progress: lifecycle)
+            .shimmer(isActive: !reduceMotion)
+        } else if let branch = worktree.branch, branch != worktree.name {
+          // Suppress the secondary branch line when it restates the worktree name —
+          // the common case (main/main, test0003/test0003) otherwise doubles every
+          // row height for zero information.
           Text(branch)
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
@@ -1080,6 +1123,18 @@ struct HierarchySidebarView: View {
     } else {
       content
     }
+  }
+
+  /// Leading icon for a row mid-archive / mid-delete: an indeterminate
+  /// spinner through BOTH phases — motion in this slot is what tells the
+  /// user the lifecycle is alive (a static glyph here reads as
+  /// "stalled"). The script glyph annotates the second line instead —
+  /// see `LifecyclePhaseLineView`.
+  private var lifecycleSpinner: some View {
+    ProgressView()
+      .controlSize(.small)
+      .frame(width: 14, height: 14)
+      .accessibilityLabel("Working")
   }
 
   // Main-checkout guard: the row whose path is the Project's rootPath is the main checkout
@@ -1334,6 +1389,32 @@ struct HierarchySidebarView: View {
       return "Remove Project “\(name)”?"
     }
     return "Remove Project?"
+  }
+
+  // MARK: - New badge pill
+
+  /// "New" pill — shown while `worktree.isNew == true` (cleared on first open by
+  /// `RootFeature`). Mirrors the PR-number-pill stroke style (same corner radius, line
+  /// weight, and padding) so the two read as one component family, but uses accent blue
+  /// to signal "just created" rather than a PR lifecycle state. Placed as the first
+  /// trailing accessory so the row reads: name · New · diff · PR.
+  @ViewBuilder
+  fileprivate func newBadgePill(for worktree: Worktree) -> some View {
+    if worktree.isNew {
+      Text("New")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+        .background(
+          RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .stroke(Color.accentColor.opacity(0.75), lineWidth: 0.75)
+        )
+        // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
+        // not trailing, so the pill's right edge stays flush when no other accessories follow.
+        .padding(.leading, 6)
+        .accessibilityLabel("New")
+    }
   }
 
   private var archiveAllMergedTitle: String {
@@ -1943,4 +2024,44 @@ private func resolveAgentStateSourcePath(
     }
   }
   return nil
+}
+
+/// Second line of a worktree row mid-archive / mid-delete: the lifecycle
+/// script's glyph (during the script phase) leading the phase text. Its
+/// own view so `backgroundProminence` reads the ROW's environment — on an
+/// emphasized (blue) selection an explicitly-tinted glyph must drop to
+/// the light selected-row tone, the same adaptation `WorktreeRowIcon`
+/// does for its glyphs. `.secondary` on the text adapts on its own.
+private struct LifecyclePhaseLineView: View {
+  let progress: WorktreeLifecycleProgress
+
+  @Environment(\.backgroundProminence) private var backgroundProminence
+
+  var body: some View {
+    HStack(spacing: 3) {
+      if progress.phase == .runningScript {
+        // Same glyphs the Settings lifecycle sections use. The leading
+        // icon slot keeps the spinner (motion = alive); this glyph
+        // annotates WHICH script the second line is narrating.
+        Image(systemName: progress.kind == .archive ? "archivebox" : "trash")
+          .font(.caption2)
+          .foregroundStyle(glyphColor)
+          // Decorative — the stage value on the text leaf is the
+          // probeable signal.
+          .accessibilityHidden(true)
+      }
+      Text(progress.phaseLine)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .accessibilityValue(progress.stageAccessibilityValue)
+    }
+  }
+
+  private var glyphColor: Color {
+    if backgroundProminence == .increased {
+      return Color(nsColor: .alternateSelectedControlTextColor)
+    }
+    return progress.kind == .archive ? .orange : .red
+  }
 }

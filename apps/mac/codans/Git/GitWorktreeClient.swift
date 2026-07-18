@@ -40,23 +40,36 @@ nonisolated struct CreateWorktreeSpec: Equatable, Sendable {
   var fetchOrigin: Bool
   var copyIgnored: Bool
   var copyUntracked: Bool
-  /// True when a local branch named `name` already exists but no live
-  /// worktree is checked out on it — a "dangling" branch left behind
-  /// when a prior remove's `git branch -D` was skipped (empty catalog
-  /// branch) or refused (branch checked out elsewhere). `wt sw` only
-  /// attaches an existing branch when an explicit `--path` is supplied
-  /// (otherwise it dies with "branch exists without worktree"), so
-  /// `makeCreateArguments` passes one. The branch's existing commits are
-  /// preserved and the selected base ref is ignored. Fixes the "can't
-  /// re-create a removed worktree under the same name" trap.
-  var reuseExistingBranch: Bool = false
+  /// Project setup script run as a tracked phase inside
+  /// `createWorktreeStream` once the worktree exists (e.g. `npm
+  /// install`). Sourced from `settings.projects[pid].git.createScript`.
+  /// Runs in the newly-created worktree's directory, not `repoRoot`.
+  /// Empty / whitespace-only / nil skips the setup phase entirely —
+  /// the stream goes straight from `git worktree add` to `.finished`.
+  /// A non-zero exit is best-effort: it never throws or rolls back the
+  /// created worktree.
+  var setupCommand: String?
+}
+
+/// Phases a `createWorktreeStream` run moves through. `creatingWorktree`
+/// covers the `wt sw` (`git worktree add`) leg; `runningSetupScript`
+/// covers the optional project setup command that runs afterward in the
+/// new worktree's directory. Consumers track which phase a pending
+/// creation is in to label progress.
+nonisolated enum CreationPhase: Equatable, Sendable {
+  case creatingWorktree
+  case runningSetupScript
 }
 
 /// Stream events emitted while `wt sw` runs. Consumers render
-/// `.progressLine` verbatim in the Create sheet's log area; `.finished`
-/// signals completion and carries the newly-created worktree path.
+/// `.progressLine` verbatim in the Create sheet's log area;
+/// `.setupPhaseBegan` signals the run has finished `git worktree add`
+/// and is now executing the project setup script in the new worktree;
+/// `.finished` signals completion and carries the newly-created
+/// worktree path.
 nonisolated enum CreateWorktreeEvent: Equatable, Sendable {
   case progressLine(String)
+  case setupPhaseBegan(worktreePath: URL)
   case finished(worktreePath: URL)
 }
 
@@ -115,10 +128,9 @@ nonisolated struct GitWorktreeClient: Sendable {
   /// branch too" (matches `wt rm`), so we drop it here. Never throws:
   /// git refuses if the branch is checked out elsewhere (main / shared
   /// branch), which must NOT fail the remove — that refusal is reported
-  /// as `.kept` so the caller can surface why the branch lingered (and
-  /// the next same-name create will reuse it via `reuseExistingBranch`).
-  var deleteBranchIfExists:
-    @Sendable (_ repoRoot: URL, _ branch: String) async -> BranchDeleteOutcome
+  /// as `.kept` so the caller can surface why the branch lingered (the
+  /// create sheet then flags the leftover name as a conflict).
+  var deleteBranchIfExists: @Sendable (_ repoRoot: URL, _ branch: String) async -> BranchDeleteOutcome
   /// Best-effort `git push <remote> --delete <branch>` — deletes the remote
   /// tracking branch when the user opted into "Delete remote branch with
   /// worktree". The remote is resolved from the branch's configured upstream
@@ -195,16 +207,6 @@ nonisolated extension GitWorktreeClient {
     if !spec.baseRef.isEmpty {
       arguments.append("--from")
       arguments.append(spec.baseRef)
-    }
-    if spec.reuseExistingBranch {
-      // Attach the pre-existing branch instead of creating it (`-b`).
-      // The path mirrors git-wt's own default layout (`<base-dir>/<name>`)
-      // so the resulting worktree lands exactly where a fresh create
-      // would. git-wt ignores `--from` on this path.
-      arguments.append("--path")
-      arguments.append(
-        spec.baseDirectory.appending(path: spec.name).path(percentEncoded: false)
-      )
     }
     if spec.copyIgnored || spec.copyUntracked {
       arguments.append("--verbose")
@@ -553,11 +555,15 @@ nonisolated extension GitWorktreeClient {
   // `CodansApp.bringUp()` at startup.
   //
   // `onCreateWorktreeSpawn` is an optional testing seam — the live
-  // `createWorktreeStream` path calls it with the spawned `wt`
-  // Process immediately before `process.run()`. Production code
-  // leaves it nil; integration tests pass a closure that captures a
-  // weak reference to the Process so they can assert
-  // `!process.isRunning` after cancelling the stream.
+  // `createWorktreeStream` path calls it immediately before
+  // `process.run()`. It can fire up to TWICE per creation: first with
+  // the `git worktree add` (`wt`) child, then — when the spec carries a
+  // non-empty `setupCommand` — again with the setup `bash` child.
+  // Consumers that capture "the spawned process" must therefore expect
+  // the LATEST spawn to win (a later `set(_:)` overwrites the earlier
+  // one). Production code leaves it nil; integration tests pass a closure
+  // that captures a weak reference to the Process so they can assert
+  // `!process.isRunning` after cancelling the stream (issue #24 (a)).
   //
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   static func makeLive(
@@ -599,10 +605,16 @@ nonisolated extension GitWorktreeClient {
           cwd: repoRoot
         )
         let stdout = try extractStdout(outcome, command: "git for-each-ref refs/heads")
+        // Return ORIGINAL casing (like the sibling `branchRefs` closure). The
+        // collision classifier lowercases for its case-INSENSITIVE match, but
+        // the conflict note must name the EXISTING ref's real casing
+        // (`CreateWorktreeFeature.ingestLocalBranchNames` +
+        // `danglingRealName`) so the user acts on the branch git actually
+        // has. Case-folding here would silently defeat that.
         return Set(
           stdout
             .components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         )
       },
@@ -771,6 +783,40 @@ nonisolated extension GitWorktreeClient {
                   ))
                 return
               }
+
+              // Optional setup-script phase. Runs as a tracked phase
+              // INSIDE the stream (rather than later as the first pane's
+              // initial command) so a cancelled creation also kills the
+              // setup child — it reuses the SAME `processBox` +
+              // `continuation.onTermination` wiring the `wt sw`
+              // invocation uses. The command runs in the freshly-created
+              // worktree (`worktreeURL`), not `spec.repoRoot`.
+              let setup = spec.setupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
+              if let setup, !setup.isEmpty {
+                continuation.yield(.setupPhaseBegan(worktreePath: worktreeURL))
+                let setupOutcome = await GitWorktreeShell.runStream(
+                  executable: URL(fileURLWithPath: "/bin/bash"),
+                  arguments: ["-lc", setup],
+                  cwd: worktreeURL,
+                  onSpawn: { process in
+                    processBox.set(process)
+                    onCreateWorktreeSpawn?(process)
+                  },
+                  onStdout: { line in continuation.yield(.progressLine(line)) },
+                  onStderr: { line in continuation.yield(.progressLine(line)) }
+                )
+                // Best-effort: a spawn failure or non-zero exit from the
+                // setup script must NOT throw or roll back the worktree.
+                // We note it as a final progress line and still finish.
+                if let reason = setupOutcome.spawnFailedReason {
+                  continuation.yield(
+                    .progressLine("setup script failed to start: \(reason)"))
+                } else if setupOutcome.exitCode != 0 {
+                  continuation.yield(
+                    .progressLine("setup script exited with code \(setupOutcome.exitCode)"))
+                }
+              }
+
               continuation.yield(.finished(worktreePath: worktreeURL))
               continuation.finish()
             } catch {

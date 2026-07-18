@@ -30,6 +30,52 @@ struct PendingProjectRemoval: Equatable {
   var displayName: String
 }
 
+/// Sidebar-visible progress of an in-flight worktree archive / delete.
+/// Mirrors the pending-creation row's phase surfacing (`PendingWorktree`):
+/// instead of a bare spinner, the row swaps its icon and second line to
+/// say WHICH lifecycle is running and WHERE it is. Keyed by worktree in
+/// `HierarchySidebarFeature.State.lifecycleProgress`.
+struct WorktreeLifecycleProgress: Equatable {
+  enum Kind: Equatable {
+    case archive
+    case remove
+  }
+
+  /// `runningScript` — the project's archive / delete script is executing
+  /// in its transient tab; `finalizing` — the catalog / git step that
+  /// follows (archive flag flip, relocate-then-prune removal).
+  enum Phase: Equatable {
+    case runningScript
+    case finalizing
+  }
+
+  let kind: Kind
+  var phase: Phase
+
+  /// Human-readable second line for the row while this lifecycle runs.
+  var phaseLine: String {
+    switch (kind, phase) {
+    case (.archive, .runningScript): return "Running archive script…"
+    case (.archive, .finalizing): return "Archiving…"
+    case (.remove, .runningScript): return "Running delete script…"
+    case (.remove, .finalizing): return "Removing worktree…"
+    }
+  }
+
+  /// Stable, machine-readable stage signal, exposed as the phase line's
+  /// accessibility value. Same contract style as the creation row's
+  /// `creating` / `setupScript` vocabulary (`PendingWorktreeRow`) — a
+  /// probe reads the stage without parsing display copy.
+  var stageAccessibilityValue: String {
+    switch (kind, phase) {
+    case (.archive, .runningScript): return "archiveScript"
+    case (.archive, .finalizing): return "archiving"
+    case (.remove, .runningScript): return "deleteScript"
+    case (.remove, .finalizing): return "removing"
+    }
+  }
+}
+
 /// Batch confirmation payload for the Project ⋯ menu's "Archive / Remove All
 /// Merged Worktrees" items. The set of merged worktrees is resolved in the
 /// view (which holds the GitHub PR snapshots the sidebar reducer does not),
@@ -91,12 +137,15 @@ struct HierarchySidebarFeature {
     /// fires after the script finishes — e.g. `removeWorktreeWithGit`
     /// failing on a dirty index. `nil` = hidden.
     var lifecycleErrorToast: String?
-    /// Worktrees currently mid-archive / mid-delete. Lifecycle scripts
-    /// run in a real pane and we wait for `paneExited` before mutating
-    /// the catalog, which can take seconds (or longer) for cleanup
-    /// scripts. The sidebar row swaps its icon for a spinner while the
-    /// id is in this set so the user sees their click landed.
-    var lifecycleInProgressWorktrees: Set<WorktreeID> = []
+    /// Worktrees currently mid-archive / mid-delete, with the phase each
+    /// lifecycle is in. Lifecycle scripts run in a real pane and the
+    /// effect waits for the pane's child to exit before mutating the
+    /// catalog, which can take seconds (or longer) for cleanup scripts.
+    /// The sidebar row renders the in-progress presentation (phase icon +
+    /// name shimmer + phase line) while an entry exists — inserted by
+    /// `lifecycleStarted`, advanced by `lifecyclePhaseChanged`, removed
+    /// by `lifecycleEnded`.
+    var lifecycleProgress: [WorktreeID: WorktreeLifecycleProgress] = [:]
     /// In-memory placeholders for in-flight `wt sw` creations. Each row
     /// renders inside its Project's section between pinned and unpinned
     /// segments. Not persisted; an app restart clears the set, and the
@@ -220,11 +269,13 @@ struct HierarchySidebarFeature {
     /// wrapper effect's catch arm; renders via `lifecycleErrorToast`.
     case lifecycleFailed(message: String)
     case lifecycleErrorToastDismissed
-    /// Wrapper-effect bookends — the row spinner is driven by the set
-    /// of worktree ids between `started` and `ended`. Always paired:
-    /// the wrapper sends `ended` whether the underlying call succeeded
+    /// Lifecycle-effect bookends plus the phase advance in between — the
+    /// row's in-progress presentation is driven by the `lifecycleProgress`
+    /// entry that lives between `started` and `ended`. Always paired:
+    /// the effect sends `ended` whether the underlying steps succeeded
     /// or threw, so a stuck row should not be possible.
-    case lifecycleStarted(worktreeID: WorktreeID)
+    case lifecycleStarted(worktreeID: WorktreeID, progress: WorktreeLifecycleProgress)
+    case lifecyclePhaseChanged(worktreeID: WorktreeID, phase: WorktreeLifecycleProgress.Phase)
     case lifecycleEnded(worktreeID: WorktreeID)
     case worktreeRevealInFinderTapped(path: String)
     case worktreeOpenInDefaultEditorTapped(
@@ -247,11 +298,19 @@ struct HierarchySidebarFeature {
     // Pending-worktree lifecycle.
     case beginPendingWorktreeCreation(PendingWorktree)
     case pendingWorktreeProgress(PendingWorktreeID, String)
+    /// Stream crossed from `git worktree add` into the setup-script leg.
+    /// Flips the pending row's `phase` to `.runningSetupScript` and records
+    /// the now-materialized worktree path.
+    case pendingWorktreeSetupPhaseBegan(PendingWorktreeID, URL)
     case pendingWorktreeFinished(PendingWorktreeID, URL)
     case pendingWorktreeFailed(PendingWorktreeID, GitWorktreeError)
     case pendingWorktreeRetryTapped(PendingWorktreeID)
     case pendingWorktreeDiscardTapped(PendingWorktreeID)
     case pendingWorktreeCancelTapped(PendingWorktreeID)
+    /// Left-click on a pending row — the user wants to come BACK to the
+    /// creation they navigated away from. Handled by `RootFeature` (it
+    /// owns the loading-overlay focus); a no-op at this level.
+    case pendingWorktreeRowTapped(PendingWorktreeID)
 
     // Sidebar bottom-bar sort mode.
     /// User picked a non-manual sort from the sort popover. Persists and
@@ -316,6 +375,15 @@ struct HierarchySidebarFeature {
       /// Sidebar bottom-bar refresh button. RootFeature routes this to
       /// `ProjectReconciler.reconcileAll(force: true)`.
       case refreshAllProjectsRequested
+      /// A pending creation finished and its catalog row now exists. The
+      /// sidebar has already written the catalog and removed the pending
+      /// row; it delegates the post-completion "switch to the new worktree"
+      /// decision UP to `RootFeature`, which gates it on the auto-switch
+      /// setting and on whether the user is still viewing this pending
+      /// creation (`activePendingWorktreeID`, which only RootFeature owns).
+      /// The sidebar no longer selects or seeds panes itself.
+      case worktreeMaterialized(
+        worktreeID: WorktreeID, projectID: ProjectID, pendingID: PendingWorktreeID)
     }
   }
 
@@ -568,12 +636,30 @@ struct HierarchySidebarFeature {
         projectGit?.copyUntrackedOnWorktreeCreate ?? globalWorktree.copyUntrackedOnCreate
       let fetchOriginDefault =
         projectGit?.fetchRemoteOnWorktreeCreate ?? globalWorktree.fetchRemoteOnCreate
+      // Branches held by ARCHIVED rows, so the sheet can explain a name
+      // collision the user can't see in the sidebar (archiving keeps the
+      // git worktree + branch; only the catalog knows the row is hidden).
+      let archivedOwners = Dictionary(
+        project.worktrees
+          .filter(\.archived)
+          .compactMap { worktree -> (String, LiveBranchOwner)? in
+            let branch = (worktree.branch ?? worktree.name)
+              .trimmingCharacters(in: .whitespaces)
+            guard !branch.isEmpty else { return nil }
+            return (
+              branch.lowercased(),
+              LiveBranchOwner(branch: branch, worktreeName: worktree.name)
+            )
+          },
+        uniquingKeysWith: { first, _ in first }
+      )
       state.createWorktreeSheet = CreateWorktreeFeature.State(
         projectID: projectID,
         repoRoot: URL(fileURLWithPath: gitRoot),
         worktreesDirectory: defaultWtDir,
         currentPendingCountForProject: pendingCount,
         baseRefOverride: projectGit?.worktreeBaseRef,
+        archivedBranchOwnersByLower: archivedOwners,
         fetchOrigin: fetchOriginDefault,
         copyIgnored: copyIgnoredDefault,
         copyUntracked: copyUntrackedDefault
@@ -785,12 +871,18 @@ struct HierarchySidebarFeature {
       state.lifecycleErrorToast = nil
       return .none
 
-    case .lifecycleStarted(let wid):
-      state.lifecycleInProgressWorktrees.insert(wid)
+    case .lifecycleStarted(let wid, let progress):
+      state.lifecycleProgress[wid] = progress
+      return .none
+
+    case .lifecyclePhaseChanged(let wid, let phase):
+      // No-op when the entry is gone — `ended` may have raced ahead of a
+      // late phase send on effect cancellation.
+      state.lifecycleProgress[wid]?.phase = phase
       return .none
 
     case .lifecycleEnded(let wid):
-      state.lifecycleInProgressWorktrees.remove(wid)
+      state.lifecycleProgress.removeValue(forKey: wid)
       return .none
 
     case .archivedWorktreesSheet:
@@ -823,6 +915,16 @@ struct HierarchySidebarFeature {
       // palette, tests).
       let count = state.pendingWorktrees.filter { $0.projectID == pending.projectID }.count
       guard count < 8 else { return .none }
+      // Stash the project's setup script into the spec so the stream runs it
+      // as a tracked in-stream phase (`.setupPhaseBegan` → setup output →
+      // `.finished`). Empty / whitespace / nil skips the phase entirely
+      // (handled inside `createWorktreeStream`). Previously this script ran
+      // later as the first pane's initialCommand; it now runs in-stream.
+      var pending = pending
+      pending.spec.setupCommand =
+        settingsWriter
+        .readSnapshotSync()
+        .projects[pending.projectID]?.git?.createScript?.command
       state.pendingWorktrees.append(pending)
       return runPendingStream(pending)
 
@@ -839,6 +941,16 @@ struct HierarchySidebarFeature {
       if let count = state.pendingWorktrees[id: id]?.progressLines.count, count > window {
         state.pendingWorktrees[id: id]?.progressLines.removeFirst(count - window)
       }
+      return .none
+
+    case .pendingWorktreeSetupPhaseBegan(let id, let path):
+      // Race guard: cancel may have removed the row before this phase
+      // marker drained from the stream. The setup script's own output keeps
+      // arriving as `.progressLine` events, so the second line keeps
+      // streaming through this phase too.
+      guard state.pendingWorktrees[id: id] != nil else { return .none }
+      state.pendingWorktrees[id: id]?.phase = .runningSetupScript
+      state.pendingWorktrees[id: id]?.materializedPath = path
       return .none
 
     case .pendingWorktreeFinished(let id, let path):
@@ -870,33 +982,15 @@ struct HierarchySidebarFeature {
       // row for the same logical creation). The post-catalog steps below
       // are cosmetic side-effects and must not roll back this removal.
       state.pendingWorktrees.remove(id: id)
-      hierarchyClient.selectProject(pid)
-      try? hierarchyClient.selectWorktree(worktreeID, pid)
-      // Create script materializes as the auto-opened pane's
-      // initialCommand — user sees realtime output in that pane. Empty
-      // / unset script = a plain interactive shell.
-      let createCommand =
-        settingsWriter
-        .readSnapshotSync()
-        .projects[pid]?.git?.createScript?.command
-      // Seed the first pane in two phases. The catalog row (`createPaneRow`)
-      // is inserted SYNCHRONOUSLY here so it is observable before the
-      // `.selectionChanged` that `selectWorktree` above just triggered is
-      // processed. Otherwise `RootFeature.autoSeedTabAndPaneIfNeeded` reads
-      // the still-empty tab and races in a second, redundant pane — and the
-      // two concurrent `zmx serve` spawns collide, the loser surfacing
-      // `zmxServeFailed`. The async zmx-daemon + surface bringup follows in
-      // the effect. The create script rides along as the pane's initialCommand.
-      if let tabID = try? hierarchyClient.createTab(worktreeID, pid, nil),
-        let paneID = try? hierarchyClient.createPaneRow(
-          tabID, worktreeID, pid, pathString, createCommand
-        )
-      {
-        return .run { [client = hierarchyClient] _ in
-          try? await client.ensurePaneSurface(paneID, tabID, worktreeID, pid)
-        }
-      }
-      return .none
+      // The post-completion "switch to the new worktree" decision is owned
+      // by `RootFeature`: it gates on the auto-switch setting, read live at
+      // completion. Delegate up; the sidebar no longer selects the worktree
+      // or seeds its first tab/pane. When RootFeature decides to switch, the
+      // resulting `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`,
+      // which seeds the first pane.
+      return .send(
+        .delegate(
+          .worktreeMaterialized(worktreeID: worktreeID, projectID: pid, pendingID: id)))
 
     case .pendingWorktreeFailed(let id, let err):
       // Race guard symmetric with progress / finished arms: a Cancel
@@ -924,7 +1018,32 @@ struct HierarchySidebarFeature {
       state.pendingWorktrees.remove(id: id)
       return .none
 
+    case .pendingWorktreeRowTapped:
+      // RootFeature owns the loading-overlay focus and handles this by
+      // interception; nothing to do at the sidebar level.
+      return .none
+
     case .pendingWorktreeCancelTapped(let id):
+      // Race guard: a Cancel that lands after `pendingWorktreeFinished`
+      // already removed the row (and wrote the catalog) is a harmless
+      // no-op — never both a pending row and a catalog row for the same
+      // logical creation.
+      guard let pending = state.pendingWorktrees[id: id] else { return .none }
+      // Cancel during the setup phase: `git worktree add` already
+      // SUCCEEDED (we hold the materialized path), so discarding now would
+      // orphan an on-disk worktree dir that never reaches the catalog.
+      // Kill the running setup script via the stream's cancel token, then
+      // materialize from the stashed path through the SAME finish path
+      // (`pendingWorktreeFinished` writes the catalog + removes the row).
+      if pending.phase == .runningSetupScript, let path = pending.materializedPath {
+        return .merge(
+          .cancel(id: CancelID.pending(id)),
+          .send(.pendingWorktreeFinished(id, path))
+        )
+      }
+      // Cancel during git-add (not yet materialized): discard cleanly —
+      // remove the row and cancel the stream, whose `onTermination`
+      // terminates the spawned git child. Nothing reaches the catalog.
       state.pendingWorktrees.remove(id: id)
       return .cancel(id: CancelID.pending(id))
 
@@ -957,6 +1076,12 @@ struct HierarchySidebarFeature {
           switch event {
           case .progressLine(let line):
             await send(.pendingWorktreeProgress(id, line))
+          case .setupPhaseBegan(let path):
+            // Worktree now exists on disk; the run has entered the setup
+            // leg. Flip the row's phase + stash the path. The setup
+            // script's own output continues to arrive as `.progressLine`
+            // events, so the row's second line keeps streaming.
+            await send(.pendingWorktreeSetupPhaseBegan(id, path))
           case .finished(let url):
             await send(.pendingWorktreeFinished(id, url))
             return
@@ -990,20 +1115,34 @@ struct HierarchySidebarFeature {
     return worktree.path == project.rootPath
   }
 
-  /// Archive button → archive-script flow. The lifecycle wrapper opens a
-  /// new tab in the worktree, runs the script as that pane's
-  /// `initialCommand`, and waits for the pane's child to exit before
-  /// flipping `Worktree.archived = true`. The script's own output lives
-  /// in the spawned pane; only failures of the catalog flag flip
+  /// Archive button → archive-script flow, sequenced here (script →
+  /// flag flip) rather than behind one opaque client call so each phase
+  /// is visible to the row's in-progress presentation: the configured
+  /// archive script (if any) runs first in a transient tab on the
+  /// worktree, then `Worktree.archived` flips. The script's own output
+  /// lives in the spawned pane; only failures of the catalog flag flip
   /// surface here, via `lifecycleErrorToast`.
   private func runArchiveWithLifecycle(
     wid: WorktreeID, pid: ProjectID
   ) -> Effect<Action> {
     let client = hierarchyClient
+    let script = lifecycleScriptCommand(projectID: pid, \.archiveScript)
     return .run { send in
-      await send(.lifecycleStarted(worktreeID: wid))
+      await send(
+        .lifecycleStarted(
+          worktreeID: wid,
+          progress: WorktreeLifecycleProgress(
+            kind: .archive,
+            phase: script == nil ? .finalizing : .runningScript
+          )
+        )
+      )
+      if let script {
+        await client.runWorktreeLifecycleScript(wid, pid, script, "Archive")
+        await send(.lifecyclePhaseChanged(worktreeID: wid, phase: .finalizing))
+      }
       do {
-        try await client.setWorktreeArchivedWithLifecycle(wid, pid, true)
+        try await client.setWorktreeArchived(wid, true)
       } catch {
         let detail = (error as? GitWorktreeError).map(humanReadable) ?? error.localizedDescription
         await send(.lifecycleFailed(message: "Archive failed: \(detail)"))
@@ -1012,11 +1151,11 @@ struct HierarchySidebarFeature {
     }
   }
 
-  /// Remove button → delete-script flow. The lifecycle wrapper opens a
-  /// new tab in the worktree, runs the configured `deleteScript` as the
-  /// pane's `initialCommand`, waits for the pane's child to exit, then
-  /// drives the relocate-then-prune `removeWorktreeWithGit`. Removal of
-  /// an *already-archived* worktree goes through `removeWorktreeWithGit`
+  /// Remove button → delete-script flow, sequenced like
+  /// `runArchiveWithLifecycle`: the configured `deleteScript` (if any)
+  /// runs first in a transient tab, then the relocate-then-prune
+  /// `removeWorktreeWithGit` tears the worktree down. Removal of an
+  /// *already-archived* worktree goes through `removeWorktreeWithGit`
   /// directly (skipping the script) — that path is owned by
   /// `ArchivedWorktreesFeature`. The script's own output lives in the
   /// spawned pane; only `removeWorktreeWithGit` failures surface here,
@@ -1025,13 +1164,26 @@ struct HierarchySidebarFeature {
     client: HierarchyClient,
     wid: WorktreeID, pid: ProjectID
   ) -> Effect<Action> {
-    .run { send in
-      await send(.lifecycleStarted(worktreeID: wid))
+    let script = lifecycleScriptCommand(projectID: pid, \.deleteScript)
+    return .run { send in
+      await send(
+        .lifecycleStarted(
+          worktreeID: wid,
+          progress: WorktreeLifecycleProgress(
+            kind: .remove,
+            phase: script == nil ? .finalizing : .runningScript
+          )
+        )
+      )
+      if let script {
+        await client.runWorktreeLifecycleScript(wid, pid, script, "Delete")
+        await send(.lifecyclePhaseChanged(worktreeID: wid, phase: .finalizing))
+      }
       do {
         // A non-nil return means removal succeeded but the branch was
         // intentionally kept (checked out elsewhere) — surface it as a
         // non-fatal note via the same toast channel.
-        if let warning = try await client.removeWorktreeWithLifecycle(wid, pid) {
+        if let warning = try await client.removeWorktreeWithGit(wid, pid) {
           await send(.lifecycleFailed(message: warning))
         }
       } catch {
@@ -1040,5 +1192,26 @@ struct HierarchySidebarFeature {
       }
       await send(.lifecycleEnded(worktreeID: wid))
     }
+  }
+
+  /// The project's configured archive / delete script command, or `nil`
+  /// when unset / empty / whitespace-only — the same skip semantics the
+  /// creation stream applies to `setupCommand`. Resolved at effect-build
+  /// time so the lifecycle runs the script that was configured when the
+  /// user clicked, not whatever a mid-flight settings edit produces.
+  private func lifecycleScriptCommand(
+    projectID: ProjectID,
+    _ script: KeyPath<GitProjectSettings, ScriptDefinition?>
+  ) -> String? {
+    guard
+      let command =
+        settingsWriter
+        .readSnapshotSync()
+        .projects[projectID]?
+        .git?[keyPath: script]?
+        .command
+    else { return nil }
+    let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

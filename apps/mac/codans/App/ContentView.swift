@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Root SwiftUI host for the TCA shell. Holds the `StoreOf<RootFeature>`
 /// that composes sidebar + detail sub-features and presents a two-column
@@ -89,6 +89,7 @@ struct ContentView: View {
       HierarchySidebarView(
         store: store.scope(state: \.sidebar, action: \.sidebar),
         currentSelection: store.selection,
+        activePendingWorktreeID: store.activePendingWorktreeID,
         revealTrigger: store.revealSelectionTrigger,
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         editorStore: store.scope(state: \.editor, action: \.editor),
