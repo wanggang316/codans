@@ -20,6 +20,28 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.16] - 2026-07-18
+
+### Changed
+
+- **Worktree creation, archiving, and removal are now narrated, interruptible
+  lifecycles.** The sidebar row streams each phase live (setup output, phase
+  glyphs, a shimmer), focus follows a new worktree while you stay free to click
+  away, and archive/delete finish on their own instead of waiting for a stray
+  keypress. A branch-name conflict now explains exactly why the name is taken
+  instead of opening an in-app resolution flow.
+
+### Fixed
+
+- **⌘W now closes the active pane, then the tab, then the window** (matching
+  iTerm and Terminal.app), instead of tearing down the whole window — which
+  could leave the app running with no window, looking as if it had quit.
+- Archiving a worktree now stops its coding-agent daemons and clears their rows
+  from Active Agents, instead of leaving those processes running in the
+  background for days.
+- Worktrees that git has marked "locked" can now be removed, and a genuine lock
+  shows a readable message instead of a raw error code.
+
 ## [0.4.15] - 2026-06-25
 
 ### Added
