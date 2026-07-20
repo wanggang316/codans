@@ -20,6 +20,21 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.17] - 2026-07-21
+
+### Added
+
+- **Run scripts now have a dedicated, persistent pane.** Re-running a script
+  reuses its own pane — even across an app relaunch — instead of spawning a new
+  one each time. A running script shows as a tinted tab icon plus a pulsing dot
+  on its worktree in the sidebar; hover the dot for a Stop button.
+
+### Fixed
+
+- Stopping a run script — from the toolbar, the sidebar's Stop button, or by
+  archiving or removing its worktree — now fully terminates the underlying
+  process instead of leaving it running in the background.
+
 ## [0.4.16] - 2026-07-18
 
 ### Changed
