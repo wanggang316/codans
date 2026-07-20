@@ -13,6 +13,12 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
   /// UUID) used to correlate the pane with the agent's own session
   /// records. Optional because not every agent exposes one.
   public var agentSessionID: String?
+  /// `ScriptDefinition.id` of the run script this pane is dedicated to,
+  /// `nil` for ordinary panes. Persisted — unlike the agent binding, the
+  /// pane row itself (not its dead pty child) is the identity a relaunch
+  /// must recognize, so the next run reuses this pane instead of piling
+  /// up a fresh tab per launch.
+  public var runScriptID: UUID?
 
   public init(
     id: PaneID = PaneID(),
@@ -20,7 +26,8 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
     initialCommand: String? = nil,
     labels: Set<String> = [],
     agentKind: AgentKind? = nil,
-    agentSessionID: String? = nil
+    agentSessionID: String? = nil,
+    runScriptID: UUID? = nil
   ) {
     self.id = id
     self.workingDirectory = workingDirectory
@@ -28,12 +35,13 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
     self.labels = labels
     self.agentKind = agentKind
     self.agentSessionID = agentSessionID
+    self.runScriptID = runScriptID
   }
 }
 
 extension Pane: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, workingDirectory, labels, agentKind, agentSessionID
+    case id, workingDirectory, labels, agentKind, agentSessionID, runScriptID
   }
 
   public init(from decoder: Decoder) throws {
@@ -50,6 +58,7 @@ extension Pane: Codable {
     // catalogs; decodeIfPresent + nil default keeps backward compat.
     self.agentKind = try container.decodeIfPresent(AgentKind.self, forKey: .agentKind)
     self.agentSessionID = try container.decodeIfPresent(String.self, forKey: .agentSessionID)
+    self.runScriptID = try container.decodeIfPresent(UUID.self, forKey: .runScriptID)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -62,5 +71,6 @@ extension Pane: Codable {
     // emit them only when non-nil.
     try container.encodeIfPresent(agentKind, forKey: .agentKind)
     try container.encodeIfPresent(agentSessionID, forKey: .agentSessionID)
+    try container.encodeIfPresent(runScriptID, forKey: .runScriptID)
   }
 }

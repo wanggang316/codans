@@ -159,6 +159,30 @@ struct CatalogCodableTests {
     #expect(decoded.isNew == false)
   }
 
+  // MARK: - Pane.runScriptID round-trips
+
+  @Test
+  func paneRunScriptIDRoundTrips() throws {
+    // The run-pane association must survive a relaunch, so unlike the
+    // agent binding this field persists.
+    let scriptID = UUID()
+    let pane = Pane(workingDirectory: "/tmp", runScriptID: scriptID)
+    let data = try JSONEncoder().encode(pane)
+    let decoded = try JSONDecoder().decode(Pane.self, from: data)
+    #expect(decoded.runScriptID == scriptID)
+  }
+
+  @Test
+  func paneRunScriptIDNilOmitsKeyFromJSON() throws {
+    let pane = Pane(workingDirectory: "/tmp")
+    let data = try JSONEncoder().encode(pane)
+    let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(dict["runScriptID"] == nil)
+
+    let decoded = try JSONDecoder().decode(Pane.self, from: data)
+    #expect(decoded.runScriptID == nil)
+  }
+
   // MARK: - Tab invariants
 
   @Test
