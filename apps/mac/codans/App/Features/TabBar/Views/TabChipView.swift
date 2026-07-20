@@ -43,6 +43,9 @@ struct TabChipView: View {
   /// hides the leading slot so unlocked tabs without a runtime fallback
   /// keep the chip clean.
   var icon: String? = nil
+  /// Script-tint colour for `icon` while the tab's run pane executes; see
+  /// `TabChipLabel.iconTint`.
+  var iconTint: Color?
 
   @State private var isHovering = false
   @State private var isPressing = false
@@ -62,7 +65,8 @@ struct TabChipView: View {
           isActive: isActive,
           isDirty: isDirty,
           hasUnreadNotification: hasUnreadNotification,
-          icon: icon
+          icon: icon,
+          iconTint: iconTint
         )
         // `maxHeight: .infinity` is the load-bearing piece — without
         // it the label collapses to its intrinsic text height (~16pt)

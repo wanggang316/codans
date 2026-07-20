@@ -70,6 +70,7 @@ final class HierarchyManager {
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
     let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
+    rebuildRunScriptPanes()
     if didStampLegacyTimestamps || didClearAgentBindings {
       // Persist the migration so successive launches start from the
       // backfilled timestamps rather than re-deriving them on every
@@ -1565,14 +1566,27 @@ final class HierarchyManager {
     // set-emptiness check rather than a hierarchy walk.
     guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
     // Walk the catalog once to locate the tab; absent tabs read as idle.
+    // Dedicated run-script panes are excluded: their activity is expressed
+    // by the tab's tinted script icon and the sidebar ping dot, not the
+    // generic spinner (see `isScriptRunning`).
     for project in catalog.projects {
       for worktree in project.worktrees {
         guard let tab = worktree.tabs.first(where: { $0.id == tabID })
         else { continue }
-        return tab.panes.contains { runningPanes.contains($0.id) || commandBusyPanes.contains($0.id) }
+        return tab.panes.contains {
+          $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
+        }
       }
     }
     return false
+  }
+
+  /// Raw terminal-busy read for a single pane (OSC 9;4 progress ∪ running
+  /// foreground command) — the same union `tabIsDirty` aggregates, exposed
+  /// per-pane so run-script affordances (tab icon tint, sidebar ping dot)
+  /// can light up for panes the dirty predicates deliberately skip.
+  func paneIsBusy(_ paneID: PaneID) -> Bool {
+    runningPanes.contains(paneID) || commandBusyPanes.contains(paneID)
   }
 
   /// True when any pane inside `worktreeID` (any tab, any leaf) is
@@ -1580,11 +1594,16 @@ final class HierarchyManager {
   /// glyph on the worktree row even when its tab is unfocused.
   func worktreeIsDirty(_ worktreeID: WorktreeID) -> Bool {
     guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
+    // Run-script panes are excluded for the same reason as `tabIsDirty`:
+    // the worktree row shows a trailing ping dot for those instead of the
+    // leading spinner.
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
       else { continue }
       return worktree.tabs.contains { tab in
-        tab.panes.contains { runningPanes.contains($0.id) || commandBusyPanes.contains($0.id) }
+        tab.panes.contains {
+          $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
+        }
       }
     }
     return false
@@ -1603,8 +1622,27 @@ final class HierarchyManager {
   /// Maps a (worktree, script) pair to the pane a `.newTab` / `.split` run
   /// script last spawned. Lets repeated runs reuse the same pane instead of
   /// piling up tabs, and lets the Run/Stop toggle find the pane to interrupt.
-  /// Runtime-only — panes do not survive a relaunch.
+  /// The persistent identity lives on `Pane.runScriptID`; this map is the
+  /// in-memory index over it, rebuilt from the catalog at init so a relaunch
+  /// still routes the next run into the restored pane.
   private var scriptRunPanes: [ScriptPaneKey: PaneID] = [:]
+
+  /// Rebuilds the (worktree, script) → pane index from the persisted
+  /// `Pane.runScriptID` stamps. Called once from init, before any run can
+  /// mutate the map. Later stamps win on (impossible-by-construction, but
+  /// hand-edited-catalog-safe) duplicates.
+  private func rebuildRunScriptPanes() {
+    for project in catalog.projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs {
+          for pane in tab.panes {
+            guard let scriptID = pane.runScriptID else { continue }
+            scriptRunPanes[ScriptPaneKey(worktree: worktree.id, script: scriptID)] = pane.id
+          }
+        }
+      }
+    }
+  }
 
   /// The live run pane for `(worktreeID, scriptID)`, or `nil` when none was
   /// recorded or the recorded pane has since closed. Lazily prunes stale
@@ -1621,8 +1659,23 @@ final class HierarchyManager {
   }
 
   /// Records the pane a run script spawned so the next run can reuse it.
+  /// Stamps `Pane.runScriptID` in the catalog as well — the persisted half
+  /// of the association that `rebuildRunScriptPanes` reads back after a
+  /// relaunch.
   func setRunScriptPane(worktreeID: WorktreeID, scriptID: UUID, paneID: PaneID) {
     scriptRunPanes[ScriptPaneKey(worktree: worktreeID, script: scriptID)] = paneID
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
+          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else { continue }
+          catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+            .panes[paneIndex].runScriptID = scriptID
+          store.scheduleSave(catalog)
+          return
+        }
+      }
+    }
   }
 
   /// True when the script's tracked run pane exists AND is currently running a

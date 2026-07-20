@@ -955,6 +955,7 @@ struct HierarchySidebarView: View {
       newBadgePill(for: worktree)
       diffStatsChip(for: worktree, in: project, snapshot: snapshot)
       gitHubBadge(for: worktree, in: project)
+      runScriptPingAccessory(for: worktree, in: project)
       // Trailing chord hint, after both the row content and the optional PR pill so it
       // always pins to the right edge of the row instead of being shoved leftwards by
       // the pill's intrinsic width. Visible only while ⌘ is held.
@@ -1030,6 +1031,9 @@ struct HierarchySidebarView: View {
     // while an agent works without emitting OSC 9;4. Both reads are `@Observable`,
     // so the spinner tracks either source automatically. Rendered at the leading
     // icon slot (replacing WorktreeRowIcon) — one consistent "busy" affordance.
+    // Dedicated run-script panes are excluded from `worktreeIsDirty`; their
+    // activity renders as the trailing ping dot (`runScriptPingAccessory`)
+    // so a running script never hijacks the row icon.
     let isExecuting =
       hierarchyManager.worktreeIsDirty(worktree.id) || anyAgentWorking(in: worktree)
     let content = HStack(spacing: 6) {
@@ -1457,6 +1461,40 @@ struct HierarchySidebarView: View {
       // visible accessory.
       .padding(.leading, 6)
     }
+  }
+
+  // MARK: - Run-script ping dot
+
+  /// Trailing indicator that lights while any script's dedicated run pane
+  /// in this worktree is executing. Complements the run tab's tinted icon:
+  /// run activity is deliberately excluded from `worktreeIsDirty`, so this
+  /// dot — not the leading spinner — is the row's "command running" signal.
+  /// The 12 pt frame reserves room for the ping ring's 2× expansion so the
+  /// animation never clips against the row edge.
+  @ViewBuilder
+  fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View {
+    let tints = runningScriptTints(for: worktree, in: project)
+    if !tints.isEmpty {
+      RunScriptPingDot(colors: tints)
+        .frame(width: 12, height: 12)
+        // Own the leading gap from the previous accessory (outer HStack is
+        // `spacing: 0`), same convention as `diffStatsChip`.
+        .padding(.leading, 6)
+        .padding(.trailing, 2)
+    }
+  }
+
+  /// Tints of every script currently executing in `worktree`, project
+  /// commands first, then globals — the order the Run menu lists them.
+  /// Both `isScriptRunning` and the settings read are `@Observable`, so the
+  /// row re-renders when a run starts/stops or a script's tint changes.
+  private func runningScriptTints(for worktree: Worktree, in project: Project) -> [Color] {
+    let settings = settingsStore.settings
+    let scripts = (settings.projects[project.id]?.scripts ?? []) + settings.general.globalScripts
+    return
+      scripts
+      .filter { hierarchyManager.isScriptRunning(worktreeID: worktree.id, scriptID: $0.id) }
+      .map { ScriptTintColorPalette.color(for: $0.resolvedTintColor) }
   }
 
   // MARK: - GitHub badge + popover

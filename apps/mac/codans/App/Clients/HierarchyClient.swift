@@ -970,21 +970,53 @@ extension HierarchyClient {
 
     let onFinishedNeeded = script.resolvedOnFinished != .none
 
-    // Reuse path: if the dedicated run pane from a previous run is still
-    // alive, re-run into it instead of spawning a new tab/pane — this is
-    // what keeps repeated runs on the same pane. Gated on
-    // `onFinished == .none`: a close-on-finish policy tears the pane down,
-    // so there is nothing to reuse and the spawn path below runs instead.
-    if !onFinishedNeeded,
-      script.target == .newTab || script.target == .split,
+    // Reuse path: a run is unique per (worktree, script). If the dedicated
+    // run pane is still alive — from an earlier run this session or restored
+    // from the persisted catalog after a relaunch — never spawn a second
+    // tab/pane for it.
+    if script.target == .newTab || script.target == .split,
       let terminalClient,
       let existing = manager.runScriptPane(worktreeID: worktreeID, scriptID: scriptID)
     {
-      if script.focus, let (proj, wt, tab) = manager.addressOf(paneID: existing) {
-        try? manager.selectTab(tab, in: wt, in: proj)
-        manager.focusSurfaceView(for: existing)
+      if manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID) {
+        // Already executing — surface the run instead of typing a second
+        // command into the busy pty. Honour `focus` so background scripts
+        // stay background.
+        if script.focus, let (proj, wt, tab) = manager.addressOf(paneID: existing) {
+          try? manager.selectTab(tab, in: wt, in: proj)
+          manager.focusSurfaceView(for: existing)
+        }
+        return
       }
-      terminalClient.sendInput(existing, script.command + "\n")
+      // Idle run pane → re-run in place. Subscribe before the send for the
+      // same no-replay reason as the spawn path below.
+      let reuseStream: AsyncStream<TerminalEvent>? =
+        onFinishedNeeded ? terminalClient.events() : nil
+      if let (proj, wt, tab) = manager.addressOf(paneID: existing) {
+        // After a relaunch the restored pane has no live surface yet (they
+        // spawn lazily when a tab is shown); bring it up first or the
+        // sendInput below lands on nothing. No-op when already live.
+        try? await manager.ensurePaneSurface(existing, in: tab, in: wt, in: proj, env: env)
+        if script.focus {
+          try? manager.selectTab(tab, in: wt, in: proj)
+          manager.focusSurfaceView(for: existing)
+        }
+      }
+      // Same wrapping as the spawn path: a close-on-finish policy needs the
+      // shell to exit after the command so `childExited` fires.
+      let rerunCommand = wrapForOnFinished(
+        command: script.command,
+        policy: script.resolvedOnFinished
+      )
+      terminalClient.sendInput(existing, rerunCommand + "\n")
+      if let reuseStream {
+        scheduleOnFinishedAction(
+          paneID: existing,
+          policy: script.resolvedOnFinished,
+          manager: manager,
+          eventStream: reuseStream
+        )
+      }
       return
     }
 
@@ -1042,8 +1074,11 @@ extension HierarchyClient {
     }
   }
 
-  /// Interrupts (Ctrl-C → SIGINT) the pane a run script last spawned in
-  /// `worktreeID`, leaving the pane open for the next run. Best-effort: silent
+  /// Stops the run for `(worktreeID, scriptID)`: interrupts the pane's
+  /// child (Ctrl-C → SIGINT) and then closes the run surface — the whole
+  /// tab when the run pane is its only pane, just the pane otherwise (a
+  /// `.split` run, or a run tab the user split into). Stop is a teardown,
+  /// not a pause: the next run spawns a fresh tab/pane. Best-effort: silent
   /// no-op when no live run pane is tracked or no `TerminalClient` is wired.
   @MainActor
   private static func stopScript(
@@ -1062,8 +1097,24 @@ extension HierarchyClient {
     }
     // Goes through the key-event path (`ghostty_surface_key`), not `sendInput`'s
     // text path — the latter filters control bytes, so a literal 0x03 written
-    // as text never reaches the PTY as an interrupt.
+    // as text never reaches the PTY as an interrupt. The interrupt gives the
+    // child a graceful SIGINT before the surface teardown below hangs up
+    // the pty.
     terminalClient.interrupt(paneID)
+    guard let (projectID, resolvedWorktreeID, tabID) = manager.addressOf(paneID: paneID) else {
+      return
+    }
+    let isOnlyPane =
+      manager.catalog.projects
+      .first(where: { $0.id == projectID })?
+      .worktrees.first(where: { $0.id == resolvedWorktreeID })?
+      .tabs.first(where: { $0.id == tabID })?
+      .panes.count == 1
+    if isOnlyPane {
+      try? manager.closeTab(tabID, in: resolvedWorktreeID, in: projectID)
+    } else {
+      try? manager.closePane(paneID, in: tabID, in: resolvedWorktreeID, in: projectID)
+    }
   }
 
   /// Materializes a `ScriptDefinition` into a runtime action and returns the

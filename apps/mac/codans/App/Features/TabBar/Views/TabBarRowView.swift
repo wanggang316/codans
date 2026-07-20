@@ -365,7 +365,8 @@ private struct ResolvingTabChipView: View {
       onChangeIcon: onChangeIcon,
       onCopyID: onCopyID,
       tabColor: tabColor,
-      icon: icon
+      icon: icon,
+      iconTint: runningScriptIconTint
     )
     .onChange(of: live, initial: true) { _, newLive in
       // Only persist once the surface has actually produced a live
@@ -375,6 +376,26 @@ private struct ResolvingTabChipView: View {
       guard let newLive, newLive != tab.cachedDisplayTitle else { return }
       onCacheLiveTitle(newLive)
     }
+  }
+
+  /// Script tint for the chip's icon while this tab's dedicated run pane is
+  /// executing. Run panes are skipped by `tabIsDirty`, so a running script
+  /// never swaps the chip's glyph for the spinner — the glyph picking up the
+  /// script's colour is the running affordance instead. `nil` when no run
+  /// pane in this tab is busy, or its script no longer exists in Settings.
+  /// Reads `HierarchyManager.paneIsBusy` (@Observable) so the tint tracks
+  /// start/stop automatically.
+  private var runningScriptIconTint: Color? {
+    guard let settings = settingsStore?.settings else { return nil }
+    for pane in tab.panes {
+      guard let scriptID = pane.runScriptID, hierarchyManager.paneIsBusy(pane.id) else { continue }
+      let script =
+        settings.general.globalScripts.first(where: { $0.id == scriptID })
+        ?? settings.projects.values.lazy.flatMap(\.scripts).first(where: { $0.id == scriptID })
+      guard let script else { return nil }
+      return ScriptTintColorPalette.color(for: script.resolvedTintColor)
+    }
+    return nil
   }
 
   /// Whether to render the chip's running spinner. A working coding agent
