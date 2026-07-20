@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Observation
-import CodansCore
 
 enum HierarchyError: Error, Equatable, Sendable {
   case notFound(String)
@@ -485,9 +485,22 @@ final class HierarchyManager {
     if let pathConflict {
       if reuseExisting {
         // Idempotent mode — caller is replaying create after a partial
-        // failure downstream and just wants the existing id. Name /
-        // branch are NOT re-applied to avoid silently rewriting fields
-        // the user may have customized through the UI.
+        // failure downstream, or lost the race against a reconcile pulse
+        // that adopted the freshly materialized worktree, and just wants
+        // the existing id. Name / branch are NOT re-applied to avoid
+        // silently rewriting fields the user may have customized through
+        // the UI — except when the row's name still tracks its branch
+        // (the reconcile-adoption signature): there the caller's name is
+        // the user's original input and wins, provided no other row
+        // already holds it.
+        if pathConflict.name == pathConflict.branch, pathConflict.name != name,
+          !existingWorktrees.contains(where: { $0.name == name }),
+          let conflictIndex = catalog.projects[projectIndex].worktrees
+            .firstIndex(where: { $0.id == pathConflict.id })
+        {
+          catalog.projects[projectIndex].worktrees[conflictIndex].name = name
+          store.scheduleSave(catalog)
+        }
         return pathConflict.id
       }
       throw HierarchyError.invariantViolation(

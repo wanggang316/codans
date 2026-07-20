@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -784,5 +784,56 @@ struct HierarchyManagerWorktreeMgmtTests {
       )
     }
     #expect(manager.catalog.projects[0].worktrees.count == 1)
+  }
+
+  /// Create-vs-reconcile race: a reconcile pulse adopted the freshly
+  /// materialized worktree (name tracks branch), then the creation's
+  /// finish path replays with `reuseExisting`. The adopted row's id
+  /// comes back and the caller's display name — the user's original
+  /// input — replaces the branch-tracking name.
+  @Test
+  func createWorktreeReuseExistingAdoptsCallerNameOnReconciledRow() throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    let appended = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [(path: "/repo/feat-web-ui", branch: "feat-web-ui")]
+    )
+    #expect(appended == 1)
+    let adoptedID = manager.catalog.projects[0].worktrees
+      .first { $0.path == "/repo/feat-web-ui" }?.id
+
+    let replayed = try manager.createWorktree(
+      in: projectID, name: "feat/web-ui",
+      path: "/repo/feat-web-ui", branch: "feat-web-ui",
+      reuseExisting: true
+    )
+    #expect(replayed == adoptedID)
+    #expect(manager.catalog.projects[0].worktrees.count == 1)
+    let row = manager.catalog.projects[0].worktrees.first { $0.id == replayed }
+    #expect(row?.name == "feat/web-ui")
+    #expect(row?.branch == "feat-web-ui")
+  }
+
+  /// A row whose name no longer tracks its branch was customized by the
+  /// user; the `reuseExisting` replay must not rewrite it.
+  @Test
+  func createWorktreeReuseExistingKeepsCustomizedName() throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "my custom name",
+      path: "/repo/feat-x", branch: "feat-x"
+    )
+    let replayed = try manager.createWorktree(
+      in: projectID, name: "feat/x",
+      path: "/repo/feat-x", branch: "feat-x",
+      reuseExisting: true
+    )
+    #expect(replayed == worktreeID)
+    let row = manager.catalog.projects[0].worktrees.first { $0.id == replayed }
+    #expect(row?.name == "my custom name")
   }
 }
