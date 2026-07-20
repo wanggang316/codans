@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Native toolbar split button: primary action runs the Project's
 /// first script (whichever the user has dragged to index 0 in
@@ -177,26 +177,25 @@ struct HeaderRunScriptSplitButton: View {
     }
   }
 
-  /// One menu item. The chord is rendered as part of the item's *title text*
-  /// (see `menuItemTitle`), not via `.keyboardShortcut(_:modifiers:)`: a real
-  /// keyEquivalent makes AppKit reserve a trailing accelerator column across
-  /// *every* row, so the chord-less footers ("Manage … Commands…") get a wide
-  /// empty right gutter and the dropdown balloons past its longest label.
-  /// Folding the chord into the title shows it without that column, so the menu
-  /// still hugs "Manage Project Commands…". Live chord *dispatch* is owned by
-  /// the menu-bar Commands menu (`MainWindowCommands`), which registers each
-  /// command's chord as a keyEquivalent — the only path that fires while a
-  /// terminal pane holds first-responder. This dropdown is display + click only.
+  /// One menu item. When the script carries an enabled chord it is attached
+  /// via `.keyboardShortcut(_:modifiers:)` so macOS renders it right-aligned
+  /// in the native trailing accelerator column — the standard menu look. The
+  /// in-menu keyEquivalent is *display-only*: live chord dispatch is owned by
+  /// the menu-bar Commands menu (`MainWindowCommands`), the only path that
+  /// fires while a terminal pane holds first-responder. Trade-off, accepted:
+  /// the accelerator column widens every row, so the chord-less "Manage …"
+  /// footers show a right gutter — same as any system menu.
   ///
   /// `isGlobal` switches the run dispatch between the project run path
   /// (`runScriptTapped`) and the global run path (`runGlobalScriptTapped`).
   /// Stop is shared (`stopScriptTapped`) because the run pane is keyed by
   /// (worktree, scriptID), unique across both lists.
+  @ViewBuilder
   private func menuButton(for script: ScriptDefinition, isGlobal: Bool = false) -> some View {
     // Mirror the primary half: a running script's menu row becomes a red
     // "Stop …" that interrupts it.
     let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
-    return Button {
+    let button = Button {
       if isRunning {
         store.send(.stopScriptTapped(scriptID: script.id))
       } else if isGlobal {
@@ -209,7 +208,7 @@ struct HeaderRunScriptSplitButton: View {
       // tint must be baked into a non-template image (see `menuIcon`) — a
       // plain `Label(_:systemImage:)` would drop the script's colour.
       Label {
-        Text(Self.menuItemTitle(for: script, isRunning: isRunning))
+        Text(isRunning ? "Stop \(script.displayName)" : script.displayName)
       } icon: {
         ScriptTintColorPalette.menuIcon(
           systemName: isRunning ? "stop.fill" : script.resolvedSystemImage,
@@ -217,26 +216,20 @@ struct HeaderRunScriptSplitButton: View {
         )
       }
     }
-  }
-
-  /// Title text for a command row — the display name plus, when the command
-  /// carries an enabled chord, the chord glyphs appended after a gap. Rendering
-  /// the chord in the title (rather than as a keyEquivalent) keeps it visible
-  /// without making AppKit reserve a trailing accelerator column that would
-  /// balloon the menu (see `menuButton`).
-  private static func menuItemTitle(for script: ScriptDefinition, isRunning: Bool) -> String {
-    let base = isRunning ? "Stop \(script.displayName)" : script.displayName
-    guard let binding = script.keyboardShortcut, binding.isEnabled, binding.keyCode != 0 else {
-      return base
+    if let chord = script.keyboardShortcut, chord.isEnabled, chord.keyCode != 0,
+      let key = ShortcutDisplay.keyEquivalent(for: chord.keyCode)
+    {
+      button.keyboardShortcut(key, modifiers: ShortcutDisplay.eventModifiers(for: chord.modifiers))
+    } else {
+      button
     }
-    return "\(base)   \(ShortcutDisplay.chord(for: binding))"
   }
 
   /// Stable identity for `.id(_:)`. Folds every field that affects the Menu's
   /// rendered output — name + icon + tint + chord + the array's order. id alone
   /// wouldn't change on a same-id edit; including the rendered fields (the chord
-  /// now shows in each row's title) means an edit to any of them still rebuilds
-  /// the cached NSMenu.
+  /// shows in each row's accelerator column) means an edit to any of them still
+  /// rebuilds the cached NSMenu.
   private static func identitySignature(of scripts: [ScriptDefinition]) -> String {
     scripts
       .map { script -> String in
