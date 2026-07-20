@@ -246,6 +246,10 @@ struct HierarchySidebarFeature {
     /// The `current` parameter lets the reducer emit the opposite value without reading
     /// catalog state.
     case worktreePinToggleTapped(worktreeID: WorktreeID, current: Bool)
+    /// Click on the row's run-script ping dot (which reads as a Stop button
+    /// under the cursor). Tears down every script currently executing in the
+    /// worktree via `HierarchyClient.stopAllScripts`.
+    case worktreeStopRunScriptsTapped(worktreeID: WorktreeID)
 
     // Project ⋯ menu: Archived + Prune.
     case projectShowArchivedTapped(projectID: ProjectID)
@@ -760,6 +764,10 @@ struct HierarchySidebarFeature {
       hierarchyClient.setWorktreePinned(wid, !current)
       return .none
 
+    case .worktreeStopRunScriptsTapped(let wid):
+      hierarchyClient.stopAllScripts(wid)
+      return .none
+
     case .projectShowArchivedTapped(let projectID):
       state.archivedWorktreesSheet = ArchivedWorktreesFeature.State(
         projectID: projectID
@@ -1137,6 +1145,11 @@ struct HierarchySidebarFeature {
           )
         )
       )
+      // Tear down executing run scripts first: archive only suspends pane
+      // daemons (soft-hide keeps panes for restore), which would hang up a
+      // running script's pty instead of interrupting it — and a dev server
+      // holding a port must not outlive its hidden worktree.
+      await client.stopAllScripts(wid)
       if let script {
         await client.runWorktreeLifecycleScript(wid, pid, script, "Archive")
         await send(.lifecyclePhaseChanged(worktreeID: wid, phase: .finalizing))
@@ -1175,6 +1188,10 @@ struct HierarchySidebarFeature {
           )
         )
       )
+      // Same teardown-first as the archive lifecycle: interrupt executing
+      // run scripts (SIGINT, then close their panes) before the delete
+      // script and the relocate-then-prune removal touch the directory.
+      await client.stopAllScripts(wid)
       if let script {
         await client.runWorktreeLifecycleScript(wid, pid, script, "Delete")
         await send(.lifecyclePhaseChanged(worktreeID: wid, phase: .finalizing))

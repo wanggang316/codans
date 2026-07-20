@@ -440,6 +440,14 @@ nonisolated struct HierarchyClient: Sendable {
       _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
     ) -> Void
 
+  /// Applies `stopScript`'s interrupt-then-close teardown to every script
+  /// whose tracked run pane in `worktreeID` is currently executing. Callers
+  /// are teardown paths that don't know which scripts are live: the sidebar
+  /// ping dot's hover Stop, and the archive / remove lifecycles — those must
+  /// not leave a script's child process running against a worktree that is
+  /// about to be hidden or deleted. Best-effort, same as `stopScript`.
+  var stopAllScripts: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Void
+
   // MARK: - Worktree lifecycle wrappers
 
   /// Runs a worktree lifecycle script (archive / delete) in a fresh tab on
@@ -838,6 +846,16 @@ extension HierarchyClient {
           manager: manager,
           terminalClient: terminalClient
         )
+      },
+      stopAllScripts: { worktreeID in
+        for scriptID in manager.runningScriptIDs(in: worktreeID) {
+          stopScript(
+            scriptID: scriptID,
+            worktreeID: worktreeID,
+            manager: manager,
+            terminalClient: terminalClient
+          )
+        }
       },
       runWorktreeLifecycleScript: { [weak settings] worktreeID, projectID, command, tabName in
         await openNewTabAndAwaitExit(
@@ -1725,6 +1743,7 @@ extension HierarchyClient: DependencyKey {
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    stopAllScripts: { _ in fatalError("HierarchyClient.liveValue not configured") },
     runWorktreeLifecycleScript: { _, _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
@@ -1828,6 +1847,7 @@ extension HierarchyClient: DependencyKey {
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
     stopScript: unimplemented("HierarchyClient.stopScript"),
+    stopAllScripts: unimplemented("HierarchyClient.stopAllScripts"),
     runWorktreeLifecycleScript: unimplemented(
       "HierarchyClient.runWorktreeLifecycleScript"
     ),

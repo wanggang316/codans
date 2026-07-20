@@ -1,5 +1,40 @@
 import SwiftUI
 
+/// Hover container for the worktree row's run-script indicator: the ping
+/// dot at rest, a red Stop button while the cursor is over it. `onStop`
+/// tears down every script executing in the row's worktree — one dot, one
+/// button, however many tints are cycling through it. The 12 pt frame both
+/// reserves room for the ping ring's 2× expansion and gives the swap a
+/// stable hover/hit region, so the cursor can't fall into a gap between
+/// "dot leaves" and "button arrives".
+struct RunScriptPingStopControl: View {
+  let colors: [Color]
+  let onStop: () -> Void
+  @State private var isHovering = false
+
+  var body: some View {
+    ZStack {
+      if isHovering {
+        Button(action: onStop) {
+          // Same red `stop.fill` as the toolbar's Run⇄Stop toggle so the
+          // two Stop affordances read as one action.
+          Image(systemName: "stop.fill")
+            .font(.system(size: 9))
+            .foregroundStyle(.red)
+        }
+        .buttonStyle(.plain)
+        .help("Stop running command")
+        .accessibilityLabel("Stop running command")
+      } else {
+        RunScriptPingDot(colors: colors)
+      }
+    }
+    .frame(width: 12, height: 12)
+    .contentShape(Rectangle())
+    .onHover { isHovering = $0 }
+  }
+}
+
 /// Trailing "command running" indicator for a worktree row: a solid dot in
 /// the running script's tint with a ring that repeatedly expands and fades
 /// out of it. Quieter than a spinner — the row's leading slot stays on the

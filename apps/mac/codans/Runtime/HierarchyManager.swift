@@ -1678,6 +1678,23 @@ final class HierarchyManager {
     }
   }
 
+  /// Every script whose tracked run pane in `worktreeID` is currently
+  /// executing. Same busy signals and same no-prune discipline as
+  /// `isScriptRunning`, but enumerating instead of probing — this is what
+  /// "stop everything in this worktree" paths (sidebar ping-dot Stop,
+  /// archive / remove teardown) iterate, since callers there don't know
+  /// which scripts are live.
+  func runningScriptIDs(in worktreeID: WorktreeID) -> [UUID] {
+    guard !commandBusyPanes.isEmpty || !runningPanes.isEmpty else { return [] }
+    return scriptRunPanes.compactMap { key, paneID in
+      guard key.worktree == worktreeID,
+        catalog.pane(paneID) != nil,
+        commandBusyPanes.contains(paneID) || runningPanes.contains(paneID)
+      else { return nil }
+      return key.script
+    }
+  }
+
   /// True when the script's tracked run pane exists AND is currently running a
   /// foreground command. Drives the toolbar Run⇄Stop toggle; reuses the same
   /// busy signals (`commandBusyPanes` / `runningPanes`) as the tab spinner so

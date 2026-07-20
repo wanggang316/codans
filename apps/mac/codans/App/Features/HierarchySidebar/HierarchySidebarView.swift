@@ -1469,18 +1469,21 @@ struct HierarchySidebarView: View {
   /// in this worktree is executing. Complements the run tab's tinted icon:
   /// run activity is deliberately excluded from `worktreeIsDirty`, so this
   /// dot — not the leading spinner — is the row's "command running" signal.
-  /// The 12 pt frame reserves room for the ping ring's 2× expansion so the
-  /// animation never clips against the row edge.
+  /// Hovering swaps the dot for a Stop button that tears down every
+  /// executing script in the worktree; its own Button intercepts the click
+  /// so the row selection doesn't also fire (same sibling arrangement as
+  /// `gitHubBadge`).
   @ViewBuilder
   fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View {
     let tints = runningScriptTints(for: worktree, in: project)
     if !tints.isEmpty {
-      RunScriptPingDot(colors: tints)
-        .frame(width: 12, height: 12)
-        // Own the leading gap from the previous accessory (outer HStack is
-        // `spacing: 0`), same convention as `diffStatsChip`.
-        .padding(.leading, 6)
-        .padding(.trailing, 2)
+      RunScriptPingStopControl(colors: tints) {
+        store.send(.worktreeStopRunScriptsTapped(worktreeID: worktree.id))
+      }
+      // Own the leading gap from the previous accessory (outer HStack is
+      // `spacing: 0`), same convention as `diffStatsChip`.
+      .padding(.leading, 6)
+      .padding(.trailing, 2)
     }
   }
 

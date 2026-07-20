@@ -524,6 +524,11 @@ struct HierarchySidebarFeatureTests {
       $0.hierarchyClient.setWorktreeArchived = { wid, archived in
         archivedCalls.withValue { $0.append((wid, archived)) }
       }
+      // Recorded into the same log as the script so the order — running
+      // scripts torn down BEFORE the archive script runs — is pinned.
+      $0.hierarchyClient.stopAllScripts = { _ in
+        scriptCalls.withValue { $0.append("Stop") }
+      }
       $0[SettingsWriter.self].readSnapshotSync = { snapshot }
     }
 
@@ -548,7 +553,7 @@ struct HierarchySidebarFeatureTests {
     await store.receive(.lifecycleEnded(worktreeID: worktreeID)) {
       $0.lifecycleProgress = [:]
     }
-    #expect(scriptCalls.value == ["Archive: docker compose down"])
+    #expect(scriptCalls.value == ["Stop", "Archive: docker compose down"])
     #expect(archivedCalls.value.count == 1)
     #expect(archivedCalls.value[0].0 == worktreeID)
     #expect(archivedCalls.value[0].1 == true)
@@ -575,6 +580,7 @@ struct HierarchySidebarFeatureTests {
         scriptCalls.withValue { $0 += 1 }
       }
       $0.hierarchyClient.setWorktreeArchived = { _, _ in }
+      $0.hierarchyClient.stopAllScripts = { _ in }
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
     }
 
@@ -626,6 +632,11 @@ struct HierarchySidebarFeatureTests {
         removeCalls.withValue { $0 += 1 }
         return nil
       }
+      // Same ordering pin as the archive test: teardown precedes the
+      // delete script.
+      $0.hierarchyClient.stopAllScripts = { _ in
+        scriptCalls.withValue { $0.append("Stop") }
+      }
       $0[SettingsWriter.self].readSnapshotSync = { snapshot }
     }
 
@@ -650,7 +661,7 @@ struct HierarchySidebarFeatureTests {
     await store.receive(.lifecycleEnded(worktreeID: worktreeID)) {
       $0.lifecycleProgress = [:]
     }
-    #expect(scriptCalls.value == ["Delete: rm -rf node_modules"])
+    #expect(scriptCalls.value == ["Stop", "Delete: rm -rf node_modules"])
     #expect(removeCalls.value == 1)
   }
 
@@ -764,6 +775,7 @@ struct HierarchySidebarFeatureTests {
       $0.hierarchyClient.setWorktreeArchived = { wid, _ in
         archived.withValue { $0.append(wid) }
       }
+      $0.hierarchyClient.stopAllScripts = { _ in }
     }
     store.exhaustivity = .off
 
@@ -816,6 +828,7 @@ struct HierarchySidebarFeatureTests {
         removed.withValue { $0.append(wid) }
         return nil
       }
+      $0.hierarchyClient.stopAllScripts = { _ in }
     }
     store.exhaustivity = .off
 

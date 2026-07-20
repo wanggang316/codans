@@ -71,6 +71,25 @@ struct HierarchyManagerRunScriptPaneTests {
   }
 
   @Test
+  func runningScriptIDsEnumeratesOnlyBusyRunPanes() throws {
+    let scriptID = UUID()
+    let fixture = Self.makeFixture(runScriptID: scriptID)
+
+    // Tracked but idle → nothing to stop.
+    #expect(fixture.manager.runningScriptIDs(in: fixture.worktreeID).isEmpty)
+
+    fixture.manager.setPaneCommandBusy(fixture.paneID, true)
+
+    #expect(fixture.manager.runningScriptIDs(in: fixture.worktreeID) == [scriptID])
+    // Scoped to the queried worktree — another worktree's teardown must
+    // not stop this one's run.
+    #expect(fixture.manager.runningScriptIDs(in: WorktreeID()).isEmpty)
+
+    fixture.manager.setPaneCommandBusy(fixture.paneID, false)
+    #expect(fixture.manager.runningScriptIDs(in: fixture.worktreeID).isEmpty)
+  }
+
+  @Test
   func dirtyPredicatesStillLightForOrdinaryPanes() throws {
     let fixture = Self.makeFixture()
 
