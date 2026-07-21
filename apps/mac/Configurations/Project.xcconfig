@@ -1,5 +1,5 @@
-MARKETING_VERSION = 0.4.17
-CURRENT_PROJECT_VERSION = 20260721001
+MARKETING_VERSION = 0.4.18
+CURRENT_PROJECT_VERSION = 20260721004
 
 // Fallback so the SentryDSN substitution in mac-Info.plist never leaves
 // a literal placeholder when Secrets.xcconfig is absent. Must come

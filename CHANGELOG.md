@@ -20,6 +20,17 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.18] - 2026-07-21
+
+### Fixed
+
+- Creating a worktree no longer occasionally fails at the last moment with an
+  error — and a duplicate sidebar row — even though the worktree was actually
+  created; a timing race with the background refresh is resolved.
+- Keyboard shortcuts in the worktree header's command dropdown are now
+  right-aligned in the trailing column like standard macOS menus, instead of
+  running inline after the command name.
+
 ## [0.4.17] - 2026-07-21
 
 ### Added
