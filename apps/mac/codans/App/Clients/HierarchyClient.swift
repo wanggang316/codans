@@ -283,7 +283,9 @@ nonisolated struct HierarchyClient: Sendable {
       _ projectID: ProjectID
     ) async -> Void
 
-  /// Catalog-append step for Create Worktree.
+  /// Catalog-append step for Create Worktree. Idempotent on path: when a
+  /// reconcile pulse already adopted the materialized worktree mid-stream,
+  /// this returns the adopted row's id instead of throwing.
   var createWorktreeWithGit:
     @MainActor @Sendable (
       _ projectID: ProjectID,
@@ -747,9 +749,15 @@ extension HierarchyClient {
         )
       },
       createWorktreeWithGit: { projectID, name, branch, path in
+        // reuseExisting heals the create-vs-reconcile race: a window-focus
+        // reconcile pulse can adopt the freshly materialized worktree into
+        // the catalog while the creation stream is still running its setup
+        // phase. Without it the finish path throws invariantViolation
+        // ("worktree with path … already exists") against its own worktree.
         try manager.createWorktree(
           in: projectID,
-          name: name, path: path, branch: branch
+          name: name, path: path, branch: branch,
+          reuseExisting: true
         )
       },
       removeWorktreeWithGit: { [weak settings] worktreeID, projectID in
