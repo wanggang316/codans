@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Sheet listing a Project's archived Worktrees with Unarchive /
 /// Remove actions per row. State flows through
@@ -10,6 +10,12 @@ import CodansCore
 struct ArchivedWorktreesSheet: View {
   @Bindable var store: StoreOf<ArchivedWorktreesFeature>
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(SettingsStore.self) private var settingsStore
+
+  /// Horizontal inset shared by the header, banner, list rows, and
+  /// footer so their content edges line up while the List itself spans
+  /// the full sheet width (scroller flush with the trailing edge).
+  private static let contentInset: CGFloat = 20
 
   var body: some View {
     let archived = archivedWorktrees()
@@ -17,14 +23,39 @@ struct ArchivedWorktreesSheet: View {
       HStack {
         Text("Archived Worktrees").font(.headline)
         Spacer()
-        Button("Close") { store.send(.closeButtonTapped) }
-          .keyboardShortcut(.cancelAction)
+        Button("Clear") {
+          store.send(.clearAllTapped(archived.map(\.id)))
+        }
+        .disabled(archived.isEmpty)
+        .help("Remove all archived worktrees")
+        .confirmationDialog(
+          "Remove all \(archived.count) archived worktrees?",
+          isPresented: Binding(
+            get: { store.pendingClearAll != nil },
+            set: { if !$0 { store.send(.clearAllCancelled) } }
+          ),
+          titleVisibility: .visible
+        ) {
+          Button("Remove All", role: .destructive) {
+            store.send(.clearAllConfirmed)
+          }
+          Button("Cancel", role: .cancel) {
+            store.send(.clearAllCancelled)
+          }
+        } message: {
+          Text(
+            "Closes all panes and deletes every archived Worktree directory, including any uncommitted changes. This cannot be undone."
+          )
+        }
       }
+      .padding(.horizontal, Self.contentInset)
+      .padding(.top, Self.contentInset)
       if let banner = store.banner {
         Text(banner)
           .font(.caption)
           .foregroundStyle(.red)
           .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, Self.contentInset)
       }
       if archived.isEmpty {
         VStack(spacing: 8) {
@@ -54,6 +85,11 @@ struct ArchivedWorktreesSheet: View {
                   .foregroundStyle(.tertiary)
                   .lineLimit(1)
                   .truncationMode(.middle)
+                if let archivedAt = worktree.archivedAt {
+                  Text(archiveTimeline(archivedAt: archivedAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
               }
               Spacer()
               Button("Unarchive") {
@@ -69,14 +105,26 @@ struct ArchivedWorktreesSheet: View {
               .buttonStyle(.borderless)
               .help("Remove")
             }
-            .padding(.vertical, 4)
+            .listRowInsets(
+              EdgeInsets(
+                top: 4, leading: Self.contentInset,
+                bottom: 4, trailing: Self.contentInset
+              )
+            )
           }
         }
-        .listStyle(.inset)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
       }
+      HStack {
+        Spacer()
+        Button("Close") { store.send(.closeButtonTapped) }
+          .keyboardShortcut(.cancelAction)
+      }
+      .padding(.horizontal, Self.contentInset)
+      .padding(.bottom, 16)
     }
-    .padding(20)
-    .frame(width: 480, height: 360)
+    .frame(width: 480, height: 400)
     .confirmationDialog(
       removalTitle,
       isPresented: Binding(
@@ -103,6 +151,21 @@ struct ArchivedWorktreesSheet: View {
     guard let project = catalog.projects.first(where: { $0.id == store.projectID })
     else { return [] }
     return project.worktrees.filter { $0.archived }
+  }
+
+  /// One-line archive history for a row: when it was archived and — when
+  /// the Cleanup auto-delete sweep is enabled — the earliest time it
+  /// becomes eligible for deletion (`archivedAt` + retention period).
+  private func archiveTimeline(archivedAt: Date) -> String {
+    let format = Date.FormatStyle.dateTime.month(.abbreviated).day().hour().minute()
+    var line = "Archived \(archivedAt.formatted(format))"
+    let worktreeSettings = settingsStore.settings.worktree
+    if worktreeSettings.autoDeleteArchived {
+      let ttl = TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
+      let deleteAt = archivedAt.addingTimeInterval(ttl)
+      line += " · Auto-deletes \(deleteAt.formatted(format))"
+    }
+    return line
   }
 
   private var removalTitle: String {
