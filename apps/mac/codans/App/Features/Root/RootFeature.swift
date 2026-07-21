@@ -1393,6 +1393,34 @@ struct RootFeature {
           hierarchyClient.stopScript(scriptID, projectID, worktreeID)
           return .none
 
+        case .resumeAgentSessionRequested(let agent, let sessionID, let worktreePath):
+          // Same selection-resolution + staleness rationale as
+          // `runScriptRequested`. The resume invocation runs as the fresh
+          // pane's `initialCommand`, so the agent process owns the pane
+          // exactly like a manually-launched agent — AgentBinder classifies
+          // it from the foreground job as usual.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID,
+            let command = AgentSessionResume.command(agent: agent, sessionID: sessionID)
+          else { return .none }
+          let client = hierarchyClient
+          return .run { send in
+            do {
+              let tabID = try await client.createTab(worktreeID, projectID, agent.displayName)
+              let paneID = try await client.openPane(
+                tabID, worktreeID, projectID, worktreePath, command)
+              // Same post-spawn focus dispatch as the run-script path: the
+              // surface view must attach to the hosting window before
+              // `makeFirstResponder` takes.
+              await client.focusSurfaceView(paneID)
+            } catch {
+              await send(
+                .statusBar(
+                  .push(.warning("Resume session failed: \(error.localizedDescription)"))))
+            }
+          }
+
         case .manageScriptsRequested(let projectID):
           let presenter = settingsWindowPresenter
           return .run { _ in

@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// Reducer backing the Worktree Header row: branch label + Open-in split
 /// button.
@@ -53,6 +53,12 @@ struct WorktreeHeaderFeature {
     /// handle-time, same staleness rationale as `runScriptTapped`. Serves both
     /// project and global commands (the run pane is keyed by worktree+scriptID).
     case stopScriptTapped(scriptID: UUID)
+    /// Play button on an Agent Session History row. Carries the agent kind,
+    /// the agent's on-disk session id, and the worktree path the popover was
+    /// scanned against; `RootFeature` resolves the target Project + Worktree
+    /// from `state.selection` at handle-time (same staleness rationale as
+    /// `runScriptTapped`).
+    case resumeAgentSessionTapped(agent: AgentKind, sessionID: String, worktreePath: String)
     /// "Manage Project Commands…" menu footer or primary click on an empty
     /// script list. Carries the source `projectID` so the parent can deep-link
     /// into the Settings window's Project Commands pane for that project.
@@ -91,6 +97,10 @@ struct WorktreeHeaderFeature {
       /// target Project + Worktree from `state.selection` at handle-time (see
       /// `runScriptRequested`) and dispatches to `HierarchyClient.stopScript`.
       case stopScriptRequested(scriptID: UUID)
+      /// Resume a recorded agent session in a fresh tab: RootFeature spawns
+      /// a pane in the worktree whose `initialCommand` is the agent's resume
+      /// invocation (e.g. `claude --resume <id>`).
+      case resumeAgentSessionRequested(agent: AgentKind, sessionID: String, worktreePath: String)
       /// User asked to manage scripts — open the Settings window AND
       /// deep-link into the Project Scripts pane for the given project.
       /// (Earlier shipped a no-deep-link variant; restored after the
@@ -139,6 +149,12 @@ struct WorktreeHeaderFeature {
 
       case .stopScriptTapped(let scriptID):
         return .send(.delegate(.stopScriptRequested(scriptID: scriptID)))
+
+      case .resumeAgentSessionTapped(let agent, let sessionID, let worktreePath):
+        return .send(
+          .delegate(
+            .resumeAgentSessionRequested(
+              agent: agent, sessionID: sessionID, worktreePath: worktreePath)))
 
       case .manageScriptsTapped(let projectID):
         return .send(.delegate(.manageScriptsRequested(projectID: projectID)))
