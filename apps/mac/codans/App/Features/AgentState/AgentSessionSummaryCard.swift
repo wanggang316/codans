@@ -7,8 +7,9 @@ import SwiftUI
 ///
 /// Layout (top → bottom):
 /// - Header: agent logo + display name, state glyph + verb trailing.
-/// - Breadcrumb: `<project> / <worktree>` (project in its configured hue).
-/// - Status line: `<Verb> · <duration since last transition>`, ticking
+/// - Breadcrumb: `<project> / <worktree>` (project in its configured hue),
+///   with the elapsed time since the last state transition pinned to the
+///   trailing edge — directly under the state chip it qualifies, ticking
 ///   once a second via `TimelineView` while the card stays open.
 /// - Session line: the agent's own session id when one was captured
 ///   (hidden otherwise — most binders don't model it yet).
@@ -32,7 +33,6 @@ struct AgentSessionSummaryCard: View {
     VStack(alignment: .leading, spacing: 8) {
       header
       breadcrumb
-      statusLine
       if let sessionID = entry.sessionID {
         sessionLine(sessionID)
       }
@@ -94,8 +94,10 @@ struct AgentSessionSummaryCard: View {
   }
 
   /// `<project> / <worktree>` on one line — project leads in its
-  /// configured hue (matching the row's project caption), worktree
-  /// carries the primary weight since it names the working copy.
+  /// configured hue (matching the row's project caption). The elapsed
+  /// time since the last state transition sits at the trailing edge,
+  /// right under the state chip it qualifies, refreshed once a second
+  /// so a card left open doesn't show a stale age.
   private var breadcrumb: some View {
     HStack(spacing: 4) {
       Text(projectName)
@@ -111,20 +113,13 @@ struct AgentSessionSummaryCard: View {
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .truncationMode(.middle)
-    }
-  }
-
-  /// `<Verb> · <duration>` since the last state transition, refreshed
-  /// once a second so a card left open doesn't show a stale age.
-  private var statusLine: some View {
-    TimelineView(.periodic(from: .now, by: 1)) { context in
-      Text(
-        "\(entry.state.rawValue.capitalized) · "
-          + AgentSessionSummary.durationText(from: entry.lastTransitionAt, to: context.date)
-      )
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .accessibilityIdentifier("agentState.summaryCard.status")
+      Spacer(minLength: 8)
+      TimelineView(.periodic(from: .now, by: 1)) { context in
+        Text(AgentSessionSummary.durationText(from: entry.lastTransitionAt, to: context.date))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .accessibilityIdentifier("agentState.summaryCard.duration")
+      }
     }
   }
 
