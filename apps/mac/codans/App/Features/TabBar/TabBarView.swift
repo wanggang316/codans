@@ -102,9 +102,17 @@ struct TabBarView: View {
       }
       TabBarTrailingAccessories(
         activeTabSplitTree: activeSplitTree(),
+        worktreePath: currentWorktree()?.path,
         onNewTab: {
           store.send(
             .newTabButtonTapped(
+              inWorktree: worktreeID, inProject: projectID
+            ))
+        },
+        onResumeSession: { session in
+          store.send(
+            .resumeAgentSessionTapped(
+              agent: session.agent, sessionID: session.sessionID,
               inWorktree: worktreeID, inProject: projectID
             ))
         },

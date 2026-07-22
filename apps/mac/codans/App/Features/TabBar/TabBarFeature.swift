@@ -73,6 +73,14 @@ struct TabBarFeature {
     case trailingSplitRequested(
       direction: SplitTree<PaneID>.NewDirection,
       inWorktree: WorktreeID, inProject: ProjectID)
+    /// Play button on an Agent Session History row (trailing-accessory
+    /// popover). Opens a fresh tab whose pane runs the agent's resume
+    /// invocation (e.g. `claude --resume <id>`) as `initialCommand`, so the
+    /// agent process owns the pane exactly like a manually-launched agent —
+    /// AgentBinder classifies it from the foreground job as usual.
+    case resumeAgentSessionTapped(
+      agent: AgentKind, sessionID: String,
+      inWorktree: WorktreeID, inProject: ProjectID)
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
@@ -201,6 +209,30 @@ struct TabBarFeature {
             )
           else { return }
           await MainActor.run { client.focusSurfaceView(newPaneID) }
+        }
+
+      case .resumeAgentSessionTapped(let agent, let sessionID, let worktreeID, let projectID):
+        // Same catalog resolution as `newTabButtonTapped`: the pane must
+        // spawn in the Worktree's directory for the agent CLI to find the
+        // session it recorded against that cwd.
+        guard let command = AgentSessionResume.command(agent: agent, sessionID: sessionID)
+        else { return .none }
+        let catalog = hierarchyClient.snapshot()
+        guard
+          let worktree = catalog.projects.first(where: { $0.id == projectID })?
+            .worktrees.first(where: { $0.id == worktreeID })
+        else { return .none }
+        let cwd = worktree.path
+        return .run { [client = hierarchyClient] _ in
+          guard
+            let tabID = try? await client.createTab(worktreeID, projectID, agent.displayName),
+            let paneID = try? await client.openPane(
+              tabID, worktreeID, projectID, cwd, command)
+          else { return }
+          // Same post-spawn focus dispatch as `newTabButtonTapped`: the
+          // surface view must attach to the hosting window before
+          // `makeFirstResponder` takes.
+          await MainActor.run { client.focusSurfaceView(paneID) }
         }
       }
     }

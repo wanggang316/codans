@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// Reducer backing the Worktree Header row: branch label + Open-in split
 /// button.
