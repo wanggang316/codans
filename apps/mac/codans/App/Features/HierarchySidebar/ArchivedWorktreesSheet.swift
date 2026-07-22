@@ -89,7 +89,6 @@ struct ArchivedWorktreesSheet: View {
                   Text(archiveTimeline(archivedAt: archivedAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .help(archiveTooltip(archivedAt: archivedAt))
                 }
               }
               Spacer()
@@ -165,33 +164,23 @@ struct ArchivedWorktreesSheet: View {
     )
   }
 
-  /// Row caption: relative archive age plus the auto-delete ETA. Rows
-  /// already past their ETA read "pending" — they are removed by the
-  /// next cleanup pulse (launch / focus / hourly), so echoing the
-  /// elapsed date would be misleading.
+  /// Row caption: archive timestamp plus the scheduled auto-delete
+  /// time, both in a fixed `yyyy-MM-dd HH:mm` format. Rows already past
+  /// their scheduled time read "pending" — they are removed by the next
+  /// cleanup pulse (launch / focus / hourly), so echoing the elapsed
+  /// date would be misleading.
   private func archiveTimeline(archivedAt: Date) -> String {
-    var line = "Archived \(archivedAt.formatted(.relative(presentation: .named)))"
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm"
+    var line = "Archived \(formatter.string(from: archivedAt))"
     if let deleteAt = autoDeleteDate(archivedAt: archivedAt) {
       line +=
         deleteAt > Date()
-        ? " · Auto-deletes \(deleteAt.formatted(.relative(presentation: .named)))"
+        ? " · Will auto-delete at \(formatter.string(from: deleteAt))"
         : " · Auto-delete pending"
     }
     return line
-  }
-
-  /// Hover tooltip carrying the absolute timestamps behind the relative
-  /// caption.
-  private func archiveTooltip(archivedAt: Date) -> String {
-    let format = Date.FormatStyle.dateTime.year().month().day().hour().minute()
-    var text = "Archived \(archivedAt.formatted(format))"
-    if let deleteAt = autoDeleteDate(archivedAt: archivedAt) {
-      text +=
-        deleteAt > Date()
-        ? "\nAuto-deletes \(deleteAt.formatted(format))"
-        : "\nAuto-delete due since \(deleteAt.formatted(format))"
-    }
-    return text
   }
 
   private var removalTitle: String {
