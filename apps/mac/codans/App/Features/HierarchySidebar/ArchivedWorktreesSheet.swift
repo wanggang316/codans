@@ -11,9 +11,9 @@ struct ArchivedWorktreesSheet: View {
   @Bindable var store: StoreOf<ArchivedWorktreesFeature>
   @Environment(HierarchyManager.self) private var hierarchyManager
 
-  /// Horizontal inset shared by the header, banner, list rows, and
-  /// footer so their content edges line up while the List itself spans
-  /// the full sheet width (scroller flush with the trailing edge).
+  /// Horizontal inset shared by the header, banner, rows, and footer so
+  /// their content edges line up while the scroll view itself spans the
+  /// full sheet width (scroller flush with the trailing edge).
   private static let contentInset: CGFloat = 20
 
   var body: some View {
@@ -42,56 +42,21 @@ struct ArchivedWorktreesSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        List {
-          ForEach(archived) { worktree in
-            HStack(spacing: 8) {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(worktree.name)
-                  .lineLimit(1)
-                if let branch = worktree.branch {
-                  Text(branch)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                }
-                Text(worktree.path)
-                  .font(.caption)
-                  .foregroundStyle(.tertiary)
-                  .lineLimit(1)
-                  .truncationMode(.middle)
-                if let archivedAt = worktree.archivedAt {
-                  Text(archiveTimeline(archivedAt: archivedAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
+        // Not a List: on macOS its NSTableView backing adds intrinsic
+        // horizontal padding beyond `listRowInsets`, so row content can
+        // never sit flush with the header. A plain scroll view keeps
+        // the shared inset authoritative.
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(archived) { worktree in
+              archivedRow(worktree)
+              if worktree.id != archived.last?.id {
+                Divider()
+                  .padding(.leading, Self.contentInset)
               }
-              Spacer()
-              Button {
-                store.send(.unarchiveTapped(worktree.id))
-              } label: {
-                Image(systemName: "tray.and.arrow.up")
-                  .accessibilityLabel("Unarchive Worktree")
-              }
-              .buttonStyle(.borderless)
-              .help("Unarchive")
-              Button(role: .destructive) {
-                store.send(.removeTapped(worktree.id, displayName: worktree.name))
-              } label: {
-                Image(systemName: "trash")
-                  .accessibilityLabel("Remove Worktree")
-              }
-              .buttonStyle(.borderless)
-              .help("Remove")
             }
-            .listRowInsets(
-              EdgeInsets(
-                top: 4, leading: Self.contentInset,
-                bottom: 4, trailing: Self.contentInset
-              )
-            )
           }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
       }
       HStack {
         Spacer()
@@ -121,6 +86,50 @@ struct ArchivedWorktreesSheet: View {
         "Closes all panes and deletes the Worktree directory, including any uncommitted changes. This cannot be undone."
       )
     }
+  }
+
+  @ViewBuilder
+  private func archivedRow(_ worktree: Worktree) -> some View {
+    HStack(spacing: 8) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(worktree.name)
+          .lineLimit(1)
+        if let branch = worktree.branch {
+          Text(branch)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+        }
+        Text(worktree.path)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+        if let archivedAt = worktree.archivedAt {
+          Text(archiveTimeline(archivedAt: archivedAt))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+      Spacer()
+      Button {
+        store.send(.unarchiveTapped(worktree.id))
+      } label: {
+        Image(systemName: "tray.and.arrow.up")
+          .accessibilityLabel("Unarchive Worktree")
+      }
+      .buttonStyle(.borderless)
+      .help("Unarchive")
+      Button(role: .destructive) {
+        store.send(.removeTapped(worktree.id, displayName: worktree.name))
+      } label: {
+        Image(systemName: "trash")
+          .accessibilityLabel("Remove Worktree")
+      }
+      .buttonStyle(.borderless)
+      .help("Remove")
+    }
+    .padding(.vertical, 8)
+    .padding(.horizontal, Self.contentInset)
   }
 
   private func archivedWorktrees() -> [Worktree] {
