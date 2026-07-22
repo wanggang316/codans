@@ -301,12 +301,8 @@ struct WorktreeDetailView: View {
         // group with the action buttons.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
-          // Order: SessionHistory, RunScript, Open. `ToolbarItemGroup`
-          // renders children leading-to-trailing in declaration order.
-          AgentSessionHistoryButton(
-            store: headerStore,
-            worktreePath: info.worktree.path
-          )
+          // Order: RunScript, Open. `ToolbarItemGroup` renders children
+          // leading-to-trailing in declaration order.
           HeaderRunScriptSplitButton(
             store: headerStore,
             projectID: address.project,
@@ -456,14 +452,7 @@ struct WorktreeDetailView: View {
     // No `.buttonStyle` / no manual padding — each ToolbarItem gets
     // the toolbar's native glass capsule + hover state.
     //
-    // Order: SessionHistory, RunScript, Open.
-    ToolbarItem {
-      AgentSessionHistoryButton(
-        store: headerStore,
-        worktreePath: info.worktree.path
-      )
-    }
-    ToolbarSpacer(.fixed)
+    // Order: RunScript, Open.
     ToolbarItem {
       HeaderRunScriptSplitButton(
         store: headerStore,

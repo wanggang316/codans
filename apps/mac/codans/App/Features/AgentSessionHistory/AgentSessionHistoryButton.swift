@@ -1,21 +1,19 @@
 import CodansCore
-import ComposableArchitecture
 import SwiftUI
 
-/// Toolbar entry for the Agent Session History popover — a clock glyph to
-/// the left of the Run (commands) split button. Tapping lists every agent
-/// session the installed agent CLIs recorded against the current worktree
-/// in their own local stores; a row's play button reopens that session in
-/// a fresh tab. Chip styling mirrors `InboxBellView` so the two icon-only
-/// toolbar buttons read as siblings.
+/// Tab-bar trailing accessory for the Agent Session History popover — a
+/// clock glyph to the right of the `+` (new tab) button. Tapping lists
+/// every agent session the installed agent CLIs recorded against the
+/// current worktree in their own local stores; a row's play button reopens
+/// that session in a fresh tab. Chrome mirrors the sibling `+` / split
+/// accessories (22×22 circular hover) so the cluster reads as one family.
 struct AgentSessionHistoryButton: View {
-  /// Dispatch target for the play action. The row sends
-  /// `.resumeAgentSessionTapped`; `RootFeature` resolves the target
-  /// Project + Worktree from the live selection at handle-time.
-  let store: StoreOf<WorktreeHeaderFeature>
   /// Worktree path the popover scans against; also the cwd the resume
   /// tab spawns in.
   let worktreePath: String
+  /// Row play-button callback. `TabBarView` maps this to
+  /// `TabBarFeature.resumeAgentSessionTapped`, which spawns the resume tab.
+  let onResume: (AgentSessionSummary) -> Void
 
   @State private var popoverShown = false
   @State private var isHovering = false
@@ -25,24 +23,19 @@ struct AgentSessionHistoryButton: View {
       action: { popoverShown.toggle() },
       label: {
         Image(systemName: "clock.arrow.circlepath")
-          .font(.title3)
-          .foregroundStyle(Color.primary)
           // Decorative — the button's accessibilityLabel below names the
           // control; announcing the symbol too would double-speak it.
           .accessibilityHidden(true)
-          .padding(.horizontal, 7)
-          .frame(minHeight: 24)
+          .frame(width: 22, height: 22)
           .background(
-            Capsule(style: .continuous)
-              .fill(Color.primary.opacity(isHovering ? 0.10 : 0))
+            Circle()
+              .fill(isHovering ? TabBarColors.hoverBackground : .clear)
           )
-          .contentShape(Capsule(style: .continuous))
+          .contentShape(Circle())
       }
     )
     .buttonStyle(.plain)
-    .onHover { hovering in
-      withAnimation(.easeInOut(duration: 0.12)) { isHovering = hovering }
-    }
+    .onHover { isHovering = $0 }
     .help("Agent Session History")
     .accessibilityLabel("Agent session history")
     .popover(isPresented: $popoverShown, arrowEdge: .bottom) {
@@ -50,12 +43,7 @@ struct AgentSessionHistoryButton: View {
         worktreePath: worktreePath,
         onResume: { session in
           popoverShown = false
-          store.send(
-            .resumeAgentSessionTapped(
-              agent: session.agent,
-              sessionID: session.sessionID,
-              worktreePath: worktreePath
-            ))
+          onResume(session)
         },
         onClose: { popoverShown = false }
       )

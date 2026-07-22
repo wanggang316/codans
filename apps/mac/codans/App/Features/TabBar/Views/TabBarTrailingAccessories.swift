@@ -5,18 +5,31 @@ import CodansCore
 /// outside the scrollable chip row so these buttons stay visible
 /// regardless of how many tabs are open.
 ///
-/// Three actions: `+` creates a new tab in the active worktree; the two
+/// Four actions: `+` creates a new tab in the active worktree; the session
+/// history clock resumes a recorded agent session in a new tab; the two
 /// split buttons cut a new pane horizontally or vertically off the active
 /// tab's leftmost leaf.
 struct TabBarTrailingAccessories: View {
   let activeTabSplitTree: SplitTree<PaneID>?
+  /// Path of the active worktree, scanned by the session-history popover.
+  /// `nil` while no worktree is resolved — the history button hides since
+  /// there is nothing to scan against.
+  let worktreePath: String?
   let onNewTab: () -> Void
+  let onResumeSession: (AgentSessionSummary) -> Void
   let onSplitRight: () -> Void
   let onSplitDown: () -> Void
 
   var body: some View {
     HStack(spacing: 4) {
       NewTabAccessoryButton(action: onNewTab)
+
+      if let worktreePath {
+        AgentSessionHistoryButton(
+          worktreePath: worktreePath,
+          onResume: onResumeSession
+        )
+      }
 
       SplitAccessoryButton(
         systemImage: "rectangle.split.2x1",
