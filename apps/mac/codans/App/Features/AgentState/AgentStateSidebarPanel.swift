@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// AgentState panel anchored at the sidebar's bottom safe-area inset.
 ///
@@ -224,6 +224,7 @@ struct AgentStateSidebarPanel: View {
               projectColor: resolved?.projectColor,
               isSelected: item.paneID == focusedPaneID,
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
+              viewportSnapshot: { registry.viewportSnapshot(for: item.paneID) },
               onTap: { onTapRow(item.paneID) }
             )
           }
