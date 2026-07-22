@@ -7,7 +7,7 @@ import CodansKit
 
 @main
 struct CodansCLI: AsyncParsableCommand {
-  static let version = "0.4.18"
+  static let version = "0.4.19"
 
   static let configuration = CommandConfiguration(
     commandName: "codans",

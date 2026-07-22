@@ -20,6 +20,21 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.19] - 2026-07-22
+
+### Added
+
+- **Resume past agent sessions from the tab bar.** A new history button — the
+  clock next to `+` — lists every Claude Code and Codex session recorded for the
+  current worktree, grouped by agent and newest first. Hit a session's play
+  button to reopen it in a fresh tab with the agent's own resume command.
+
+### Changed
+
+- The Archived Worktrees sheet now shows when each worktree was archived, with a
+  tidied-up layout — aligned rows, a bottom Close bar, and an icon button for
+  Unarchive.
+
 ## [0.4.18] - 2026-07-21
 
 ### Fixed
