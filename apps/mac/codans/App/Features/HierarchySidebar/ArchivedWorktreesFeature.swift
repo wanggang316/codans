@@ -5,9 +5,9 @@ import Foundation
 /// Reducer backing the "Archived Worktrees" sheet opened from the
 /// Project `⋯` menu. The view reads archived worktrees live from
 /// `HierarchyManager.catalog` on each render; this reducer owns only
-/// transient UX state (the in-sheet error banner + pending
-/// removal / clear-all payloads awaiting confirmation). Mirrors the
-/// sidebar's single-confirmation flow — see HierarchySidebarFeature.
+/// transient UX state (the in-sheet error banner + a pending-removal
+/// payload awaiting confirmation). Mirrors the sidebar's
+/// single-confirmation flow — see HierarchySidebarFeature.
 @Reducer
 struct ArchivedWorktreesFeature {
   @ObservableState
@@ -17,9 +17,6 @@ struct ArchivedWorktreesFeature {
     /// Payload for the destructive-remove confirmation dialog. Non-nil
     /// → dialog visible.
     var pendingRemoval: PendingRemoval?
-    /// Worktree IDs captured when Clear was tapped, awaiting the
-    /// destructive clear-all confirmation. Non-nil → dialog visible.
-    var pendingClearAll: [WorktreeID]?
   }
 
   struct PendingRemoval: Equatable {
@@ -33,10 +30,6 @@ struct ArchivedWorktreesFeature {
     case removeConfirmed
     case removeCancelled
     case removeFinished(worktreeID: WorktreeID, error: String?)
-    case clearAllTapped([WorktreeID])
-    case clearAllConfirmed
-    case clearAllCancelled
-    case clearAllFinished(failed: Int, firstError: String?)
     case dismissBanner
     case closeButtonTapped
     case delegate(Delegate)
@@ -94,48 +87,6 @@ struct ArchivedWorktreesFeature {
 
       case .removeFinished(_, let error):
         state.banner = error
-        return .none
-
-      case .clearAllTapped(let worktreeIDs):
-        guard !worktreeIDs.isEmpty else { return .none }
-        state.pendingClearAll = worktreeIDs
-        state.banner = nil
-        return .none
-
-      case .clearAllConfirmed:
-        guard let worktreeIDs = state.pendingClearAll else { return .none }
-        let projectID = state.projectID
-        let client = hierarchyClient
-        state.pendingClearAll = nil
-        return .run { send in
-          // Best-effort across the batch: one failed removal must not
-          // strand the rest, so failures are tallied and summarized.
-          var failed = 0
-          var firstError: String?
-          for worktreeID in worktreeIDs {
-            do {
-              _ = try await client.removeWorktreeWithGit(worktreeID, projectID)
-            } catch let gitError as GitWorktreeError {
-              failed += 1
-              if firstError == nil { firstError = humanReadable(gitError) }
-            } catch {
-              failed += 1
-              if firstError == nil { firstError = error.localizedDescription }
-            }
-          }
-          await send(.clearAllFinished(failed: failed, firstError: firstError))
-        }
-
-      case .clearAllCancelled:
-        state.pendingClearAll = nil
-        return .none
-
-      case .clearAllFinished(let failed, let firstError):
-        if failed > 0, let firstError {
-          state.banner = "Failed to remove \(failed) worktree\(failed == 1 ? "" : "s"): \(firstError)"
-        } else {
-          state.banner = nil
-        }
         return .none
 
       case .dismissBanner:

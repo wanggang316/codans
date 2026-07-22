@@ -10,7 +10,6 @@ import SwiftUI
 struct ArchivedWorktreesSheet: View {
   @Bindable var store: StoreOf<ArchivedWorktreesFeature>
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(SettingsStore.self) private var settingsStore
 
   /// Horizontal inset shared by the header, banner, list rows, and
   /// footer so their content edges line up while the List itself spans
@@ -20,36 +19,10 @@ struct ArchivedWorktreesSheet: View {
   var body: some View {
     let archived = archivedWorktrees()
     VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Text("Archived Worktrees").font(.headline)
-        Spacer()
-        Button("Clear") {
-          store.send(.clearAllTapped(archived.map(\.id)))
-        }
-        .disabled(archived.isEmpty)
-        .help("Remove all archived worktrees")
-        .confirmationDialog(
-          "Remove all \(archived.count) archived worktrees?",
-          isPresented: Binding(
-            get: { store.pendingClearAll != nil },
-            set: { if !$0 { store.send(.clearAllCancelled) } }
-          ),
-          titleVisibility: .visible
-        ) {
-          Button("Remove All", role: .destructive) {
-            store.send(.clearAllConfirmed)
-          }
-          Button("Cancel", role: .cancel) {
-            store.send(.clearAllCancelled)
-          }
-        } message: {
-          Text(
-            "Closes all panes and deletes every archived Worktree directory, including any uncommitted changes. This cannot be undone."
-          )
-        }
-      }
-      .padding(.horizontal, Self.contentInset)
-      .padding(.top, Self.contentInset)
+      Text("Archived Worktrees")
+        .font(.headline)
+        .padding(.horizontal, Self.contentInset)
+        .padding(.top, Self.contentInset)
       if let banner = store.banner {
         Text(banner)
           .font(.caption)
@@ -153,34 +126,13 @@ struct ArchivedWorktreesSheet: View {
     return project.worktrees.filter { $0.archived }
   }
 
-  /// When the Cleanup auto-delete sweep is enabled, the moment this row
-  /// becomes eligible for deletion (`archivedAt` + retention period);
-  /// `nil` when the sweep is off.
-  private func autoDeleteDate(archivedAt: Date) -> Date? {
-    let worktreeSettings = settingsStore.settings.worktree
-    guard worktreeSettings.autoDeleteArchived else { return nil }
-    return archivedAt.addingTimeInterval(
-      TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
-    )
-  }
-
-  /// Row caption: archive timestamp plus the scheduled auto-delete
-  /// time, both in a fixed `yyyy-MM-dd HH:mm` format. Rows already past
-  /// their scheduled time read "pending" — they are removed by the next
-  /// cleanup pulse (launch / focus / hourly), so echoing the elapsed
-  /// date would be misleading.
+  /// Row caption: archive timestamp in a fixed `yyyy-MM-dd HH:mm`
+  /// format.
   private func archiveTimeline(archivedAt: Date) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "yyyy-MM-dd HH:mm"
-    var line = "Archived \(formatter.string(from: archivedAt))"
-    if let deleteAt = autoDeleteDate(archivedAt: archivedAt) {
-      line +=
-        deleteAt > Date()
-        ? " · Will auto-delete at \(formatter.string(from: deleteAt))"
-        : " · Auto-delete pending"
-    }
-    return line
+    return "Archived \(formatter.string(from: archivedAt))"
   }
 
   private var removalTitle: String {
