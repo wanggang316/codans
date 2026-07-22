@@ -65,10 +65,14 @@ struct ArchivedWorktreesSheet: View {
                 }
               }
               Spacer()
-              Button("Unarchive") {
+              Button {
                 store.send(.unarchiveTapped(worktree.id))
+              } label: {
+                Image(systemName: "tray.and.arrow.up")
+                  .accessibilityLabel("Unarchive Worktree")
               }
               .buttonStyle(.borderless)
+              .help("Unarchive")
               Button(role: .destructive) {
                 store.send(.removeTapped(worktree.id, displayName: worktree.name))
               } label: {
