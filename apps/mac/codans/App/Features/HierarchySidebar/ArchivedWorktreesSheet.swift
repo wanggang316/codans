@@ -89,6 +89,7 @@ struct ArchivedWorktreesSheet: View {
                   Text(archiveTimeline(archivedAt: archivedAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .help(archiveTooltip(archivedAt: archivedAt))
                 }
               }
               Spacer()
@@ -153,19 +154,44 @@ struct ArchivedWorktreesSheet: View {
     return project.worktrees.filter { $0.archived }
   }
 
-  /// One-line archive history for a row: when it was archived and — when
-  /// the Cleanup auto-delete sweep is enabled — the earliest time it
-  /// becomes eligible for deletion (`archivedAt` + retention period).
-  private func archiveTimeline(archivedAt: Date) -> String {
-    let format = Date.FormatStyle.dateTime.month(.abbreviated).day().hour().minute()
-    var line = "Archived \(archivedAt.formatted(format))"
+  /// When the Cleanup auto-delete sweep is enabled, the moment this row
+  /// becomes eligible for deletion (`archivedAt` + retention period);
+  /// `nil` when the sweep is off.
+  private func autoDeleteDate(archivedAt: Date) -> Date? {
     let worktreeSettings = settingsStore.settings.worktree
-    if worktreeSettings.autoDeleteArchived {
-      let ttl = TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
-      let deleteAt = archivedAt.addingTimeInterval(ttl)
-      line += " · Auto-deletes \(deleteAt.formatted(format))"
+    guard worktreeSettings.autoDeleteArchived else { return nil }
+    return archivedAt.addingTimeInterval(
+      TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
+    )
+  }
+
+  /// Row caption: relative archive age plus the auto-delete ETA. Rows
+  /// already past their ETA read "pending" — they are removed by the
+  /// next cleanup pulse (launch / focus / hourly), so echoing the
+  /// elapsed date would be misleading.
+  private func archiveTimeline(archivedAt: Date) -> String {
+    var line = "Archived \(archivedAt.formatted(.relative(presentation: .named)))"
+    if let deleteAt = autoDeleteDate(archivedAt: archivedAt) {
+      line +=
+        deleteAt > Date()
+        ? " · Auto-deletes \(deleteAt.formatted(.relative(presentation: .named)))"
+        : " · Auto-delete pending"
     }
     return line
+  }
+
+  /// Hover tooltip carrying the absolute timestamps behind the relative
+  /// caption.
+  private func archiveTooltip(archivedAt: Date) -> String {
+    let format = Date.FormatStyle.dateTime.year().month().day().hour().minute()
+    var text = "Archived \(archivedAt.formatted(format))"
+    if let deleteAt = autoDeleteDate(archivedAt: archivedAt) {
+      text +=
+        deleteAt > Date()
+        ? "\nAuto-deletes \(deleteAt.formatted(format))"
+        : "\nAuto-delete due since \(deleteAt.formatted(format))"
+    }
+    return text
   }
 
   private var removalTitle: String {
