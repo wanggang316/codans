@@ -205,9 +205,92 @@ struct TerminalHandlersTests {
     #expect(result?.text == "prompt\noutput")
   }
 
+  @Test
+  func readTextWaitStablePollsUntilSettled() async throws {
+    let sink = FakeSink()
+    // Auto-advancing clock keeps the routed poll loop deterministic and
+    // instant — no real waiting inside the RPC round-trip.
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let server = Self.makeHarness(sink: sink, clock: clock)
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    let pid = PaneID()
+    sink.registered.insert(pid.raw)
+    // Output churns for the first reads, then holds on "done".
+    sink.textScript[pid.raw] = ["boot", "boot\nrun", "done", "done"]
+    struct WaitStable: Codable {
+      let stableMillis: Int
+      let intervalMillis: Int
+      let timeoutMillis: Int
+    }
+    struct Params: Codable {
+      let paneID: PaneID
+      let extent: String
+      let waitStable: WaitStable
+    }
+    let params = try JSONValue.encoded(
+      Params(
+        paneID: pid, extent: "viewport",
+        waitStable: WaitStable(stableMillis: 30, intervalMillis: 10, timeoutMillis: 1000)))
+    try server.send(
+      IPC.Request(id: "ws1", method: .terminalReadText, params: params)
+    )
+    let response = try await server.awaitResponse()
+    struct Result: Codable {
+      let text: String
+      let stabilized: Bool?
+      let waitedMillis: Int?
+      let samples: Int?
+    }
+    let result = try response.result?.decoded(as: Result.self)
+    #expect(response.error == nil)
+    #expect(result?.text == "done")
+    #expect(result?.stabilized == true)
+    #expect((result?.samples ?? 0) >= 2)
+  }
+
+  @Test
+  func readTextWaitStableOnUnknownPaneReturnsNotFound() async throws {
+    let sink = FakeSink()
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let server = Self.makeHarness(sink: sink, clock: clock)
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    struct WaitStable: Codable {
+      let stableMillis: Int
+      let intervalMillis: Int
+      let timeoutMillis: Int
+    }
+    struct Params: Codable {
+      let paneID: PaneID
+      let extent: String
+      let waitStable: WaitStable
+    }
+    let params = try JSONValue.encoded(
+      Params(
+        paneID: PaneID(), extent: "viewport",
+        waitStable: WaitStable(stableMillis: 30, intervalMillis: 10, timeoutMillis: 1000)))
+    try server.send(
+      IPC.Request(id: "ws2", method: .terminalReadText, params: params)
+    )
+    let response = try await server.awaitResponse()
+    if case .notFound = response.error {
+      // expected — an unregistered pane fails the first read.
+    } else {
+      Issue.record("expected .notFound, got \(String(describing: response.error))")
+    }
+  }
+
   // MARK: - Harness
 
-  static func makeHarness(sink: TerminalHandlers.InputSink?) -> InMemoryIPCServer {
+  static func makeHarness(
+    sink: TerminalHandlers.InputSink?,
+    clock: StabilityClock = SystemStabilityClock()
+  ) -> InMemoryIPCServer {
     let systemHandlers = SystemHandlers(
       versions: .init(server: "0.4.0", appBundle: "0.4.0+test")
     )
@@ -219,7 +302,7 @@ struct TerminalHandlersTests {
       runtime: FakeHierarchyRuntime()
     )
     let hierarchyHandlers = HierarchyHandlers(manager: hierarchy)
-    let terminalHandlers = TerminalHandlers(sink: sink) { hierarchy.catalog }
+    let terminalHandlers = TerminalHandlers(sink: sink, catalog: { hierarchy.catalog }, clock: clock)
     let router = MethodRouter(
       systemHandlers: systemHandlers,
       hierarchyHandlers: hierarchyHandlers,
@@ -251,6 +334,11 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   private(set) var keys: [(paneID: UUID, key: IPC.TerminalNamedKey)] = []
   private(set) var rawBytes: [(paneID: UUID, bytes: [UInt8])] = []
   var textByPane: [UUID: String] = [:]
+  /// A sequence of successive `readText` returns per pane — models output
+  /// that changes across polls then holds steady. Clamps to the last
+  /// element once exhausted. Takes precedence over `textByPane`.
+  var textScript: [UUID: [String]] = [:]
+  private var scriptCursor: [UUID: Int] = [:]
   private let lock = NSLock()
 
   func sendInput(paneID: PaneID, text: String) -> Bool {
@@ -288,6 +376,11 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     guard registered.contains(paneID.raw) else { return nil }
+    if let script = textScript[paneID.raw], !script.isEmpty {
+      let cursor = scriptCursor[paneID.raw] ?? 0
+      scriptCursor[paneID.raw] = cursor + 1
+      return script[min(cursor, script.count - 1)]
+    }
     return textByPane[paneID.raw] ?? ""
   }
 
