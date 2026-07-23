@@ -12,13 +12,6 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Every agent's status now debounces "working → done."** The brief hold that
-  kept a Claude Code pane from flickering between working and finished on a
-  single dropped spinner frame now applies to all coding agents (Codex, Gemini,
-  cursor-agent, opencode, and the rest). Any agent whose activity cue skips a
-  frame between repaints stays "working" through the gap instead of blinking to
-  "done" and back.
-
 ### Deprecated
 
 ### Removed
@@ -26,6 +19,30 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 ### Security
+
+## [0.4.20] - 2026-07-24
+
+### Added
+
+- **Agent session summary card on hover.** Hovering an Agents View row for a
+  moment now pops up a card with the agent's identity, its project and worktree,
+  a live elapsed-time tick, session id, and a tail of the pane's output — so you
+  can size up a session without switching to its pane.
+- **`codans pane capture --wait-stable`.** Pane capture can now wait for a pane's
+  output to settle before reading — fire a command, wait for it to actually
+  finish, then read the stabilized text (tuned with `--stable-ms` /
+  `--interval-ms` / `--timeout-ms`).
+- GoLand joins the editors codans can open a worktree in, alongside the rest of
+  the JetBrains family.
+
+### Changed
+
+- **Every agent's status now debounces "working → done."** The brief hold that
+  kept a Claude Code pane from flickering between working and finished on a
+  single dropped spinner frame now applies to all coding agents (Codex, Gemini,
+  cursor-agent, opencode, and the rest). Any agent whose activity cue skips a
+  frame between repaints stays "working" through the gap instead of blinking to
+  "done" and back.
 
 ## [0.4.19] - 2026-07-22
 
