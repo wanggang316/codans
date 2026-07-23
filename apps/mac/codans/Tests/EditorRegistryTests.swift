@@ -4,7 +4,7 @@ import CodansCore
 
 @testable import Codans
 
-/// Registry sanity coverage. Pins the shape of the 34-entry static registry:
+/// Registry sanity coverage. Pins the shape of the 35-entry static registry:
 /// size, ID uniqueness, bundle-ID invariants, and priority-list consistency. Catches both
 /// accidental duplication (e.g. adding a new editor without pruning the old) and stale
 /// references (priority lists citing IDs that no longer exist in the registry).
@@ -12,8 +12,8 @@ struct EditorRegistryTests {
   // MARK: - Shape
 
   @Test
-  func registryHasThirtyFourEntries() {
-    #expect(EditorRegistry.registry.count == 34)
+  func registryHasThirtyFiveEntries() {
+    #expect(EditorRegistry.registry.count == 35)
   }
 
   @Test
@@ -112,7 +112,9 @@ struct EditorRegistryTests {
 
   @Test
   func jetBrainsFamilyAllUseApplicationWithArguments() {
-    let jetBrainsIDs: Set<EditorID> = ["intellij", "webstorm", "pycharm", "rubymine", "rustrover"]
+    let jetBrainsIDs: Set<EditorID> = [
+      "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "goland",
+    ]
     for id in jetBrainsIDs {
       let row = EditorRegistry.registry.first(where: { $0.id == id })
       #expect(row != nil, "Missing JetBrains entry: \(id)")

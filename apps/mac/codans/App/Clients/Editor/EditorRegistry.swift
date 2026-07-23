@@ -86,6 +86,11 @@ nonisolated enum EditorRegistry {
       launchMode: .applicationWithArguments, appURL: nil,
       alternateBundleIdentifiers: []),
     EditorDescriptor(
+      id: "goland", displayName: "GoLand",
+      bundleIdentifier: "com.jetbrains.goland",
+      launchMode: .applicationWithArguments, appURL: nil,
+      alternateBundleIdentifiers: []),
+    EditorDescriptor(
       id: "androidStudio", displayName: "Android Studio",
       bundleIdentifier: "com.google.android.studio",
       launchMode: .applicationWithArguments, appURL: nil,
@@ -206,7 +211,7 @@ nonisolated enum EditorRegistry {
 
   static let editorPriority: [EditorID] = [
     "cursor", "zed", "vscode", "windsurf", "vscodeInsiders", "vscodium", "sublimeText",
-    "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "androidStudio",
+    "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "goland", "androidStudio",
     "antigravity", "trae", "traeCN", "qoder", "codebuddy",
   ]
 
