@@ -29,7 +29,7 @@ struct AgentSessionSummaryCard: View {
   let viewportSnapshot: () -> String?
 
   var body: some View {
-    let tail = AgentSessionSummary.tailLines(viewportSnapshot())
+    let tail = AgentSummaryCardFormat.tailLines(viewportSnapshot())
     VStack(alignment: .leading, spacing: 8) {
       header
       breadcrumb
@@ -115,7 +115,7 @@ struct AgentSessionSummaryCard: View {
         .truncationMode(.middle)
       Spacer(minLength: 8)
       TimelineView(.periodic(from: .now, by: 1)) { context in
-        Text(AgentSessionSummary.durationText(from: entry.lastTransitionAt, to: context.date))
+        Text(AgentSummaryCardFormat.durationText(from: entry.lastTransitionAt, to: context.date))
           .font(.caption)
           .foregroundStyle(.secondary)
           .accessibilityIdentifier("agentState.summaryCard.duration")
@@ -151,7 +151,7 @@ struct AgentSessionSummaryCard: View {
 
 /// Pure formatting helpers for the summary card, kept off the view so
 /// they stay unit-testable without rendering.
-nonisolated enum AgentSessionSummary {
+nonisolated enum AgentSummaryCardFormat {
   /// Last `maxLines` non-blank lines of a rendered viewport, each
   /// whitespace-trimmed. Blank lines are dropped entirely — the card is
   /// a density-first peek, not a faithful terminal replica.
