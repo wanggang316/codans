@@ -199,6 +199,44 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.DEVELOPMENT_TEAM }}
         run: make mac-archive
 
+      - name: Verify embedded telemetry config
+        # Defense-in-depth against silently shipping a release whose crash
+        # reporting is dead. The Inject step above deliberately tolerates an
+        # empty SENTRY_DSN_REST (release cut before the secret is
+        # provisioned), so this assertion only runs when the secret IS
+        # present. In that case the exported app's embedded SentryDSN must
+        # reassemble to a valid `https://<host>…` — exactly what
+        # CrashReporting.Configuration accepts at launch. A bare scheme, an
+        # empty host, or an unexpanded $(SENTRY_DSN_REST) placeholder fails
+        # the release here instead of quietly disabling crash visibility for
+        # every user of the build. Runs right after Archive so a broken
+        # bundle fails before notarization/dSYM upload waste minutes.
+        env:
+          SENTRY_DSN_REST: ${{ secrets.SENTRY_DSN_REST }}
+        run: |
+          set -euo pipefail
+          PLIST="apps/mac/.build/release/export/Codans.app/Contents/Info.plist"
+          if [ -z "${SENTRY_DSN_REST}" ]; then
+            echo "::notice::SENTRY_DSN_REST empty — skipping embedded telemetry verification (crash reporting intentionally no-ops for this build)"
+            exit 0
+          fi
+          DSN="$(/usr/libexec/PlistBuddy -c 'Print :SentryDSN' "$PLIST")"
+          # Trim surrounding whitespace/newlines, mirroring the trimming in
+          # CrashReporting.Configuration so this gate matches runtime accept.
+          DSN="${DSN#"${DSN%%[![:space:]]*}"}"
+          DSN="${DSN%"${DSN##*[![:space:]]}"}"
+          case "$DSN" in
+            *'$(SENTRY_DSN_REST)'*)
+              echo "::error::embedded SentryDSN still holds the literal \$(SENTRY_DSN_REST) placeholder — xcconfig substitution did not run"
+              exit 1 ;;
+          esac
+          HOST="${DSN#https://}"
+          if [ "$DSN" = "$HOST" ] || [ -z "$HOST" ]; then
+            echo "::error::embedded SentryDSN is not a valid https URL with a non-empty host — release would ship with broken/absent crash reporting"
+            exit 1
+          fi
+          echo "embedded SentryDSN verified (https://<redacted host>)"
+
       - name: Upload dSYMs to Sentry
         # Registers the release `codans@<version>` on Sentry and
         # pushes the dSYMs from the .xcarchive so future crashes resolve
