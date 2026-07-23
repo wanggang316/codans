@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 import Testing
 import CodansCore
@@ -92,6 +93,12 @@ struct AgentNotificationConsistencyTests {
     fixture.registry.onTerminalEvent(output)
     await fixture.detector.handle(output)
 
+    // The working→idle hold applies to every kind, so step the badge clock
+    // past the window before the completion prompt so it settles rather than
+    // debouncing back to working.
+    fixture.nowBox.setValue(
+      fixture.nowBox.value.addingTimeInterval(PaneAttentionInterpreter.agentWorkingHold + 0.5)
+    )
     let idleViewport = TerminalEvent.paneViewportChanged(fixture.paneID, text: "codex> ")
     fixture.registry.onTerminalEvent(idleViewport)
     await fixture.detector.handle(idleViewport)
@@ -135,9 +142,12 @@ struct AgentNotificationConsistencyTests {
     let store: NotificationStore
     let coordinator: NotificationCoordinator
     let detector: NotificationDetector
+    /// Injected badge clock so tests can step past `agentWorkingHold`.
+    let nowBox = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
 
     init() {
-      self.registry = AgentStateStore(focusedPane: { nil })
+      let nowBox = self.nowBox
+      self.registry = AgentStateStore(focusedPane: { nil }, now: { nowBox.value })
 
       let storeURL = FileManager.default.temporaryDirectory.appending(
         component: "notif-consistency-\(UUID().uuidString).json"

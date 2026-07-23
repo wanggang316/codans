@@ -111,13 +111,38 @@ struct AgentStateStoreTests {
     f.viewport("• Working (10s)")
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
+    // The working→idle hold now applies to every kind, so the completion
+    // only settles once the hold window has lapsed.
+    f.advancePastWorkingHold()
+    f.viewport("codex> ")
+    #expect(f.registry.entries[f.paneID]?.state == .finished)
+  }
+
+  @Test
+  func nonClaudeWorkingStateIsHeldThenSettles() {
+    // Generalization regression: the working→idle debounce is no longer
+    // Claude-only. A codex pane whose completion prompt renders within the
+    // hold window keeps `working`, then settles once the window lapses —
+    // eliminating the Working↔Done flicker on a single dropped frame.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (10s)")
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+
+    // Idle prompt arrives immediately (t == lastWorkingAt): held as working.
+    f.viewport("codex> ")
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+
+    // Past the hold, a follow-up idle derivation settles it to finished.
+    f.advancePastWorkingHold()
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .finished)
   }
 
   @Test
   func claudePaneIdleFlushesHeldWorkingToFinished() {
-    // Regression (fix/agents-view-done-wrong): Claude's `claudeWorkingHold`
+    // Regression (fix/agents-view-done-wrong): the `agentWorkingHold`
     // debounces the finishing `working`→`idle` transition. The trailing edge
     // only flips on a follow-up derivation, but once the rendered region
     // settles no further `paneViewportChanged` fires — so the held `working`
@@ -153,6 +178,7 @@ struct AgentStateStoreTests {
     f.viewport("• Working (10s)")
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
+    f.advancePastWorkingHold()
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
@@ -163,6 +189,7 @@ struct AgentStateStoreTests {
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
+    f.advancePastWorkingHold()
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .finished)
 
@@ -176,6 +203,7 @@ struct AgentStateStoreTests {
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
+    f.advancePastWorkingHold()
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .finished)
 
@@ -189,6 +217,7 @@ struct AgentStateStoreTests {
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
+    f.advancePastWorkingHold()
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .finished)
 
@@ -395,6 +424,14 @@ struct AgentStateStoreTests {
 
     func viewport(_ text: String) {
       registry.onTerminalEvent(.paneViewportChanged(paneID, text: text))
+    }
+
+    /// Advance the injected clock past `agentWorkingHold` so a subsequent
+    /// idle classification is no longer debounced as `working`.
+    func advancePastWorkingHold() {
+      nowBox.setValue(
+        nowBox.value.addingTimeInterval(PaneAttentionInterpreter.agentWorkingHold + 0.5)
+      )
     }
   }
 }

@@ -12,6 +12,13 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **Every agent's status now debounces "working → done."** The brief hold that
+  kept a Claude Code pane from flickering between working and finished on a
+  single dropped spinner frame now applies to all coding agents (Codex, Gemini,
+  cursor-agent, opencode, and the rest). Any agent whose activity cue skips a
+  frame between repaints stays "working" through the gap instead of blinking to
+  "done" and back.
+
 ### Deprecated
 
 ### Removed

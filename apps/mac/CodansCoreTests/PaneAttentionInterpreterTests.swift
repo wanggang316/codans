@@ -520,11 +520,12 @@ struct PaneAttentionInterpreterTests {
   }
 
   @Test
-  func claudeWorkingStateIsHeldBriefly() {
+  func workingStateIsHeldBrieflyForAnyKind() {
+    // The hold is kind-independent: a momentary idle frame within the hold
+    // window keeps `working`, and once the window lapses it settles to idle.
     var lastWorkingAt: Date?
     let start = Date(timeIntervalSince1970: 1_000)
     let working = PaneAttentionInterpreter.stabilizeAgentActivity(
-      kind: .claudeCode,
       previous: .idle,
       raw: .working,
       now: start,
@@ -533,13 +534,20 @@ struct PaneAttentionInterpreterTests {
     #expect(working == .working)
 
     let held = PaneAttentionInterpreter.stabilizeAgentActivity(
-      kind: .claudeCode,
       previous: .working,
       raw: .idle,
       now: start.addingTimeInterval(0.5),
       lastWorkingAt: &lastWorkingAt
     )
     #expect(held == .working)
+
+    let settled = PaneAttentionInterpreter.stabilizeAgentActivity(
+      previous: .working,
+      raw: .idle,
+      now: start.addingTimeInterval(PaneAttentionInterpreter.agentWorkingHold + 0.1),
+      lastWorkingAt: &lastWorkingAt
+    )
+    #expect(settled == .idle)
   }
 
   @Test

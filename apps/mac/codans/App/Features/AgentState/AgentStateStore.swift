@@ -424,9 +424,8 @@ final class AgentStateStore {
     let kind = entries[paneID]?.kind
     let previousRaw = s.rawState
     var newRaw = deriveRawState(s, kind: kind)
-    if let kind {
+    if kind != nil {
       newRaw = PaneAttentionInterpreter.stabilizeAgentActivity(
-        kind: kind,
         previous: previousRaw,
         raw: newRaw,
         now: now(),
