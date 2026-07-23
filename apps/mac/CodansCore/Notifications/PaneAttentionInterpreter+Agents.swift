@@ -12,7 +12,12 @@ extension PaneAttentionInterpreter {
   }
 
   public static let agentActivityRecentLineLimit = 24
-  public static let claudeWorkingHold: TimeInterval = 1.2
+  /// How long a rendered `working` cue keeps the badge on `working` after
+  /// the live classification drops back to `idle`. A single missed frame
+  /// between spinner/header repaints must not flip the badge `working →
+  /// idle` and back — the Working↔Done flicker. Applied uniformly to every
+  /// agent kind by `stabilizeAgentActivity`.
+  public static let agentWorkingHold: TimeInterval = 1.2
 
   public static func classifyAgentActivity(
     kind: AgentKind,
@@ -45,18 +50,26 @@ extension PaneAttentionInterpreter {
     }
   }
 
+  /// Hysteresis on the `working → idle` trailing edge, applied uniformly to
+  /// every agent kind. Once a pane has rendered a `working` cue, a following
+  /// `idle` classification is held as `working` until `agentWorkingHold` has
+  /// elapsed since the last working frame. Spinner- and header-based
+  /// detectors alike drop the occasional frame between repaints; without this
+  /// hold that single missed frame flips the badge `working → idle` and back —
+  /// the Working↔Done flicker this store exists to prevent. `blocked` is a
+  /// stable prompt state and is never held; `working` refreshes the timer.
+  ///
+  /// `lastWorkingAt` is per-pane derivation scratch owned by the caller and
+  /// updated in place on each working frame. Callers must supply a fresh idle
+  /// derivation on a timer once the screen settles (see the engine's quiet
+  /// `.paneIdle` nudge) so a held `working` gets a post-hold follow-up and can
+  /// settle to `finished`.
   public static func stabilizeAgentActivity(
-    kind: AgentKind,
     previous: AgentActivityState,
     raw: AgentActivityState,
     now: Date,
     lastWorkingAt: inout Date?
   ) -> AgentActivityState {
-    guard kind == .claudeCode else {
-      lastWorkingAt = nil
-      return raw
-    }
-
     switch raw {
     case .working:
       lastWorkingAt = now
@@ -65,7 +78,7 @@ extension PaneAttentionInterpreter {
       return .blocked
     case .idle where previous == .working:
       guard let lastWorkingAt else { return .idle }
-      return now.timeIntervalSince(lastWorkingAt) < claudeWorkingHold ? .working : .idle
+      return now.timeIntervalSince(lastWorkingAt) < agentWorkingHold ? .working : .idle
     case .idle:
       return .idle
     }

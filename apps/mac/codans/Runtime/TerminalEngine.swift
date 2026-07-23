@@ -817,10 +817,10 @@ final class TerminalEngine {
 
   /// How long after an agent pane's active region goes quiet we keep
   /// nudging the agent-state machine with `.paneIdle`. Sized to comfortably
-  /// outlast `PaneAttentionInterpreter.claudeWorkingHold` so the held
+  /// outlast `PaneAttentionInterpreter.agentWorkingHold` so the held
   /// `working` state always gets at least one post-hold derivation, then
   /// bounded so a long-idle agent pane stops ticking.
-  static let idleNudgeWindow: TimeInterval = PaneAttentionInterpreter.claudeWorkingHold * 2
+  static let idleNudgeWindow: TimeInterval = PaneAttentionInterpreter.agentWorkingHold * 2
 
   enum ViewportPollOutcome: Equatable {
     case changed
@@ -835,7 +835,7 @@ final class TerminalEngine {
   /// - Changed text → `.changed`: the live cue moved, emit `paneViewportChanged`.
   /// - Unchanged within `idleNudgeWindow` → `.idleNudge`: the screen has
   ///   settled but the agent-state machine debounces a finishing agent's
-  ///   `working`→`idle` transition (`claudeWorkingHold`). That trailing edge
+  ///   `working`→`idle` transition (`agentWorkingHold`). That trailing edge
   ///   only flips on a *follow-up* derivation; once the rendered region stops
   ///   changing no further `paneViewportChanged` fires, so the held `working`
   ///   would never settle to `finished`. These bounded `.paneIdle` ticks

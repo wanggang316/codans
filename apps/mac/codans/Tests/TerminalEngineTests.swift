@@ -409,7 +409,7 @@ struct TerminalEngineTests {
 
     // Quiet past the hold but still within the window → must keep nudging:
     // this is the tick that settles the badge.
-    let pastHold = PaneAttentionInterpreter.claudeWorkingHold + 0.3
+    let pastHold = PaneAttentionInterpreter.agentWorkingHold + 0.3
     if case .idleNudge = outcome("a", "a", quiet: pastHold) {
     } else {
       Issue.record("expected a nudge to fire after the hold expires")
@@ -420,10 +420,10 @@ struct TerminalEngineTests {
   }
 
   @Test
-  func idleNudgeWindowOutlastsClaudeWorkingHold() {
+  func idleNudgeWindowOutlastsAgentWorkingHold() {
     // The nudges only fix the badge if at least one fires *after* the hold
     // expires, so the window must strictly exceed the hold.
-    #expect(TerminalEngine.idleNudgeWindow > PaneAttentionInterpreter.claudeWorkingHold)
+    #expect(TerminalEngine.idleNudgeWindow > PaneAttentionInterpreter.agentWorkingHold)
   }
 
   // MARK: - Foreground-job re-delivery (ghost-binding release)
