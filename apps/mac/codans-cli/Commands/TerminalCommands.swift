@@ -277,6 +277,14 @@ struct CaptureCommand: AsyncParsableCommand {
 
       Use --lines=N to keep only the last N non-empty trailing lines.
 
+      Pass --wait-stable to poll the pane until its rendered text stops
+      changing before capturing — useful after firing a command or agent
+      to wait for it to actually settle instead of a fixed sleep. Tune with
+      --stable-ms (quiet window, default 500), --interval-ms (poll cadence,
+      default 100), and --timeout-ms (overall cap, default 5000). In --json
+      mode the result carries stabilized / waitedMs / samples; keep
+      --timeout-ms below the client --timeout (default 10s).
+
       Raw ANSI byte stream capture (OSC/CSI/APC) is not currently
       supported — libghostty exposes parsed text only, not the original
       PTY byte stream. Tracked as a follow-up.
@@ -295,36 +303,72 @@ struct CaptureCommand: AsyncParsableCommand {
   var scope: Scope = .viewport
   @Option(name: .long, help: "Trim output to the last N non-empty lines.")
   var lines: Int?
+  @Flag(name: .long, help: "Poll until the rendered text stops changing before capturing.")
+  var waitStable: Bool = false
+  @Option(name: .long, help: "Wait-stable: quiet window in ms the output must hold unchanged (default 500).")
+  var stableMs: Int = 500
+  @Option(name: .long, help: "Wait-stable: poll interval in ms (default 100).")
+  var intervalMs: Int = 100
+  @Option(name: .long, help: "Wait-stable: overall cap in ms before giving up (default 5000).")
+  var timeoutMs: Int = 5000
 
   func run() async throws {
     await CommandRunner.run {
+      struct WaitStablePayload: Codable {
+        let stableMillis: Int
+        let intervalMillis: Int
+        let timeoutMillis: Int
+      }
+      struct Params: Codable {
+        let paneID: PaneID
+        let extent: String
+        let waitStable: WaitStablePayload?
+      }
+      struct Result: Codable {
+        let text: String
+        let stabilized: Bool?
+        let waitedMillis: Int?
+        let samples: Int?
+      }
       if let lines, lines <= 0 {
         throw CLIError(code: .userError, message: "--lines must be a positive integer")
+      }
+      var wait: WaitStablePayload?
+      if waitStable {
+        guard stableMs > 0, intervalMs > 0, timeoutMs > 0 else {
+          throw CLIError(
+            code: .userError,
+            message: "--stable-ms, --interval-ms, and --timeout-ms must be positive")
+        }
+        guard Double(timeoutMs) / 1000.0 < globals.timeout else {
+          throw CLIError(
+            code: .userError,
+            message:
+              "--timeout-ms (\(timeoutMs)ms) must be below the client --timeout (\(globals.timeout)s); raise --timeout")
+        }
+        wait = WaitStablePayload(
+          stableMillis: stableMs, intervalMillis: intervalMs, timeoutMillis: timeoutMs)
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      struct Params: Codable {
-        let paneID: PaneID
-        let extent: String
-      }
-      struct Result: Codable {
-        let text: String
-      }
       let result: Result = try await client.call(
         .terminalReadText,
-        params: Params(paneID: PaneID(raw: uuid), extent: scope.rawValue)
+        params: Params(paneID: PaneID(raw: uuid), extent: scope.rawValue, waitStable: wait)
       )
       let trimmed = Self.trim(result.text, lastLines: lines)
-      try Renderer.emitObject(
-        [
-          "paneID": uuid.uuidString,
-          "scope": scope.rawValue,
-          "lines": trimmed.lineCount,
-          "text": trimmed.text,
-        ],
-        mode: globals.renderMode
-      ) { obj in
+      var object: [String: Any] = [
+        "paneID": uuid.uuidString,
+        "scope": scope.rawValue,
+        "lines": trimmed.lineCount,
+        "text": trimmed.text,
+      ]
+      if waitStable {
+        object["stabilized"] = result.stabilized ?? false
+        object["waitedMs"] = result.waitedMillis ?? 0
+        object["samples"] = result.samples ?? 0
+      }
+      try Renderer.emitObject(object, mode: globals.renderMode) { obj in
         obj["text"] as? String ?? ""
       }
     }

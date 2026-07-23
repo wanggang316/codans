@@ -30,14 +30,19 @@ public final class TerminalHandlers {
 
   private let sink: InputSink?
   private let catalog: @MainActor () -> Catalog
+  /// Time source for `readText`'s wait-stable poll loop. Injectable so
+  /// tests drive the loop with a virtual clock; production uses the real one.
+  private let clock: StabilityClock
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "terminal")
 
   public init(
     sink: InputSink?,
-    catalog: @escaping @MainActor () -> Catalog
+    catalog: @escaping @MainActor () -> Catalog,
+    clock: StabilityClock = SystemStabilityClock()
   ) {
     self.sink = sink
     self.catalog = catalog
+    self.clock = clock
   }
 
   public struct SendInputParams: Codable, Sendable {
@@ -158,12 +163,34 @@ public final class TerminalHandlers {
     return .unary(.object(["delivered": .int(Int64(count))]))
   }
 
+  /// Tuning for the optional wait-stable poll: read the pane repeatedly
+  /// until its rendered text holds steady for `stableMillis`, capped at
+  /// `timeoutMillis`, sampling every `intervalMillis`.
+  public struct WaitStableParams: Codable, Sendable {
+    public let stableMillis: Int
+    public let intervalMillis: Int
+    public let timeoutMillis: Int
+  }
   public struct ReadTextParams: Codable, Sendable {
     public let paneID: PaneID
     public let extent: ReadExtent?
+    /// When present, poll until stable instead of reading once.
+    public let waitStable: WaitStableParams?
   }
+  /// The stability fields are populated only for wait-stable reads; a plain
+  /// read encodes just `text` (the optionals are omitted).
   public struct ReadTextResult: Codable, Sendable {
     public let text: String
+    public let stabilized: Bool?
+    public let waitedMillis: Int?
+    public let samples: Int?
+
+    public init(text: String, stabilized: Bool? = nil, waitedMillis: Int? = nil, samples: Int? = nil) {
+      self.text = text
+      self.stabilized = stabilized
+      self.waitedMillis = waitedMillis
+      self.samples = samples
+    }
   }
   public func readText(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
@@ -177,11 +204,33 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "readText requires {paneID}", path: nil))
     }
-    guard let text = sink.readText(paneID: req.paneID, extent: req.extent ?? .viewport) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    let extent = req.extent ?? .viewport
+    let result: ReadTextResult
+    if let ws = req.waitStable {
+      let waiter = TerminalStabilityWaiter(
+        clock: clock,
+        stableMillis: ws.stableMillis,
+        intervalMillis: ws.intervalMillis,
+        timeoutMillis: ws.timeoutMillis,
+        read: { [sink] in sink.readText(paneID: req.paneID, extent: extent) }
+      )
+      guard let outcome = await waiter.run() else {
+        return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      }
+      result = ReadTextResult(
+        text: outcome.text,
+        stabilized: outcome.stabilized,
+        waitedMillis: outcome.waitedMillis,
+        samples: outcome.samples
+      )
+    } else {
+      guard let text = sink.readText(paneID: req.paneID, extent: extent) else {
+        return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      }
+      result = ReadTextResult(text: text)
     }
     do {
-      return .unary(try JSONValue.encoded(ReadTextResult(text: text)))
+      return .unary(try JSONValue.encoded(result))
     } catch {
       return .failed(.internal("encode readText result: \(error)"))
     }
