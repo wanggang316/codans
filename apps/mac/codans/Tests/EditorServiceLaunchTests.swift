@@ -101,7 +101,9 @@ struct EditorServiceLaunchTests {
     // Table-driven: every JetBrains family entry routes through `openApplication(at:…)`
     // with the same tuple shape. Catches a regression where only IntelliJ was wired
     // correctly, and pins the NSWorkspace API so the URL-list shape cannot re-creep in.
-    let jetBrainsIDs: [EditorID] = ["intellij", "webstorm", "pycharm", "rubymine", "rustrover"]
+    let jetBrainsIDs: [EditorID] = [
+      "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "goland",
+    ]
     for id in jetBrainsIDs {
       let dir = try Self.tempDir()
       defer { try? FileManager.default.removeItem(at: dir) }
