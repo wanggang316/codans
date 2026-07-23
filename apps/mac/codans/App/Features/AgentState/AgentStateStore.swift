@@ -335,6 +335,18 @@ final class AgentStateStore {
     }
   }
 
+  // MARK: - Reads
+
+  /// Latest rendered viewport text observed for `paneID`, or nil when no
+  /// viewport snapshot has arrived yet (or the pane has been torn down).
+  /// Read by the hover summary card so it can show a live "what is this
+  /// agent doing" tail without a fresh surface read. Reading `scratch`
+  /// inside a SwiftUI body registers `@Observable` tracking, so an open
+  /// card re-renders as new viewport snapshots land.
+  func viewportSnapshot(for paneID: PaneID) -> String? {
+    scratch[paneID]?.lastViewportText
+  }
+
   // MARK: - Derivation
 
   /// Raw state derivation. Display-only finished is intentionally not

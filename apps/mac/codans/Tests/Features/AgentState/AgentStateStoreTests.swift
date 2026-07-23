@@ -406,6 +406,22 @@ struct AgentStateStoreTests {
     #expect(f.registry.entries[f.paneID] == nil)
   }
 
+  @Test
+  func viewportSnapshotTracksLatestViewportAndClearsOnTeardown() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    #expect(f.registry.viewportSnapshot(for: f.paneID) == nil)
+
+    f.viewport("first frame")
+    #expect(f.registry.viewportSnapshot(for: f.paneID) == "first frame")
+
+    f.viewport("second frame")
+    #expect(f.registry.viewportSnapshot(for: f.paneID) == "second frame")
+
+    f.registry.onTerminalEvent(.paneExited(f.paneID, code: 0, signal: nil))
+    #expect(f.registry.viewportSnapshot(for: f.paneID) == nil)
+  }
+
   @MainActor
   final class Fixture {
     let paneID = PaneID()

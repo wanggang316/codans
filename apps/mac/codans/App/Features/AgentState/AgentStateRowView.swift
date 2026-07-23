@@ -1,5 +1,5 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// One Agent row in the AgentState sidebar panel.
 ///
@@ -40,13 +40,29 @@ struct AgentStateRowView: View {
   /// vertical padding. Defaults to `.normal` so the legacy default
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
+  /// Latest rendered viewport text for this row's pane, consumed by the
+  /// hover summary card. Defaults to nil-returning so legacy call sites
+  /// (popover variant, tests) compile unchanged and simply show the
+  /// card without a terminal tail.
+  var viewportSnapshot: () -> String? = { nil }
   let onTap: () -> Void
 
+  /// Delay before the hover summary card opens. Long enough that a
+  /// pointer sweeping the list to click a row never flashes cards,
+  /// short enough to feel like an inspection affordance.
+  private static let summaryCardHoverDelay: Duration = .milliseconds(500)
+
   @State private var isHovering = false
+  /// Whether the hover summary card popover is presented. Driven purely
+  /// by hover dwell — never by click — and torn down on hover exit.
+  @State private var showsSummaryCard = false
+  /// Pending hover-dwell timer. Cancelled on hover exit / row tap so a
+  /// sweep across rows doesn't queue up stale card presentations.
+  @State private var summaryCardTask: Task<Void, Never>?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    Button(action: onTap) {
+    Button(action: handleTap) {
       HStack(alignment: .center, spacing: 10) {
         // Logo tint darkens to `.primary` on the selected row — the
         // primary visual signal that this row is the current focus.
@@ -70,7 +86,24 @@ struct AgentStateRowView: View {
       .background(rowBackground)
     }
     .buttonStyle(.plain)
-    .onHover { isHovering = $0 }
+    .onHover(perform: handleHover)
+    .onDisappear {
+      summaryCardTask?.cancel()
+      summaryCardTask = nil
+    }
+    // Hover summary card — a quick peek at the session behind this row.
+    // Anchored on the trailing edge so it opens over the content area
+    // (the panel lives in the sidebar) and the pointer stays on the row,
+    // keeping hover state stable while the card is up.
+    .popover(isPresented: $showsSummaryCard, arrowEdge: .trailing) {
+      AgentSessionSummaryCard(
+        entry: entry,
+        projectName: projectName,
+        worktreeName: worktreeName,
+        projectColor: projectColor,
+        viewportSnapshot: viewportSnapshot
+      )
+    }
     // `.contain` keeps the `.headline` text and `.state` icon
     // individually addressable by their sub-element identifiers (the
     // user-test contract surface). `.accessibilityLabel` on a `.contain`
@@ -81,8 +114,37 @@ struct AgentStateRowView: View {
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("agentState.row.\(paneID)")
     .accessibilityRepresentation {
-      Button(accessibilityLabelText, action: onTap)
+      Button(accessibilityLabelText, action: handleTap)
     }
+  }
+
+  /// Hover-in schedules the summary card after a dwell delay; hover-out
+  /// cancels a pending presentation and dismisses an open card. The
+  /// instant row-highlight (`isHovering`) stays independent of the
+  /// dwell timer so the row still lights up immediately.
+  private func handleHover(_ hovering: Bool) {
+    isHovering = hovering
+    summaryCardTask?.cancel()
+    summaryCardTask = nil
+    if hovering {
+      summaryCardTask = Task { @MainActor in
+        try? await Task.sleep(for: Self.summaryCardHoverDelay)
+        guard !Task.isCancelled else { return }
+        showsSummaryCard = true
+      }
+    } else {
+      showsSummaryCard = false
+    }
+  }
+
+  /// Row tap focuses the pane — drop any pending / open summary card
+  /// first so the popover doesn't linger over the pane the user just
+  /// jumped to.
+  private func handleTap() {
+    summaryCardTask?.cancel()
+    summaryCardTask = nil
+    showsSummaryCard = false
+    onTap()
   }
 
   /// Identity column. `normal` stacks worktree (primary, callout) over
