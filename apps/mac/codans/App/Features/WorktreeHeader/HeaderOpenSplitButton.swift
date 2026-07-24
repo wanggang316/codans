@@ -17,6 +17,23 @@ struct HeaderOpenSplitButton: View {
   @Environment(SettingsStore.self) private var settingsStore
 
   var body: some View {
+    // Server (remote) worktrees have a remote path a local editor / Finder
+    // can't open, so the toolbar Open button is suppressed for them (matching
+    // the sidebar context-menu guard).
+    if isRemoteProject {
+      EmptyView()
+    } else {
+      openButton
+    }
+  }
+
+  private var isRemoteProject: Bool {
+    hierarchyManager.catalog.projects
+      .first(where: { $0.id == projectID })?.isRemote ?? false
+  }
+
+  @ViewBuilder
+  private var openButton: some View {
     Menu {
       openInMenu
     } label: {
