@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -99,5 +99,71 @@ struct RestoredAgentSeedSelectionTests {
     )
 
     #expect(seeds.isEmpty)
+  }
+
+  /// Dedup: when the launch sweep already covered the pane, its verdict is
+  /// reused and the socket is NOT re-probed. The probe fails the test if it
+  /// ever runs for a pane the sweep map already answered.
+  @Test
+  func knownLivenessShortCircuitsProbe() {
+    let pane = PaneID()
+    var probed = false
+    let seeds = AppState.selectAgentSeeds(
+      restored: [pane: Self.record(pane, state: "working")],
+      knownLiveness: [pane: true],
+      isDaemonAlive: { _ in
+        probed = true
+        return false
+      }
+    )
+
+    #expect(probed == false)
+    #expect(seeds.count == 1)
+    #expect(seeds.first?.paneID == pane)
+  }
+
+  /// A sweep verdict of "dead" drops the record without probing — the sweep
+  /// may have kill-recycled the daemon, so a stale live socket read must not
+  /// resurrect the badge.
+  @Test
+  func knownDeadOverridesProbe() {
+    let pane = PaneID()
+    var probed = false
+    let seeds = AppState.selectAgentSeeds(
+      restored: [pane: Self.record(pane)],
+      knownLiveness: [pane: false],
+      isDaemonAlive: { _ in
+        probed = true
+        return true
+      }
+    )
+
+    #expect(probed == false)
+    #expect(seeds.isEmpty)
+  }
+
+  /// A pane the sweep never saw (empty map for that key — e.g. the
+  /// keepRunning quit path persists `sessions: [:]`) falls back to the
+  /// direct probe, preserving the pre-dedup behavior.
+  @Test
+  func absentFromKnownLivenessFallsBackToProbe() {
+    let seen = PaneID()
+    let unseen = PaneID()
+    var probedPanes: [PaneID] = []
+    let seeds = AppState.selectAgentSeeds(
+      restored: [
+        seen: Self.record(seen, state: "working"),
+        unseen: Self.record(unseen, state: "blocked"),
+      ],
+      knownLiveness: [seen: true],
+      isDaemonAlive: { paneID in
+        probedPanes.append(paneID)
+        return true
+      }
+    )
+
+    // Only the pane absent from the sweep map hits the probe.
+    #expect(probedPanes == [unseen])
+    #expect(seeds.count == 2)
   }
 }
