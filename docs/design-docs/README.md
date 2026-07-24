@@ -30,6 +30,7 @@ Use [_template.md](_template.md) as a starting point.
 - [Master Terminal](master-terminal.md) — 系统级热键唤起的 slide-in NSPanel，承载跑 `claude remote-control` 的 Ghostty surface，app 级、在 Catalog/RPC 之外
 - [Notifications](notifications.md) — 运行时事件 → 持久 inbox + 四级上卷徽标 + 状态栏铃铛；策略闸 `NotificationCoordinator` 统一门控设置与授权
 - [Project Tags + Single-Window](project-tags.md) — 单窗口强制（已上线）+ Project `Tag` 分类模型（已实现，但过滤 UI 当前隐藏）
+- [Remote SSH Projects](remote-ssh-projects.md) — `.server` 项目：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；worktree 创建/删除待接线
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、宽容解码、v1/v2→v3 迁移、四正交通知开关）
 - [Update Channel & Release Pipeline](updates-channel-pipeline.md) — Sparkle 更新通道：单一 feed + 客户端 channel 过滤；含 Developer-ID 签名/公证/CI 发布管线不变量
 - [Worktree](worktree.md) — Worktree 全生命周期（`git-wt` 创建/发现/archive/remove/prune）+ 四段侧边栏排序 + titlebar 状态栏 + header 分支切换器
