@@ -66,6 +66,13 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ name: String, _ rootPath: String, _ gitRoot: String?
     ) -> ProjectID
+  /// Add a Server (remote SSH) project. `rootPath` / `gitRoot` are remote
+  /// path strings; `remoteHost` marks the project `.server`-kind. Forwards to
+  /// `HierarchyManager.addServerProject`.
+  var addServerProject:
+    @MainActor @Sendable (
+      _ name: String, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
+    ) -> ProjectID
   var removeProject: @MainActor @Sendable (_ projectID: ProjectID) throws -> Void
   var renameProject:
     @MainActor @Sendable (
@@ -591,6 +598,11 @@ extension HierarchyClient {
       setActiveTagFilter: { filter in manager.setActiveTagFilter(filter) },
       addProject: { name, rootPath, gitRoot in
         manager.addProject(name: name, rootPath: rootPath, gitRoot: gitRoot)
+      },
+      addServerProject: { name, remoteHost, rootPath, gitRoot in
+        manager.addServerProject(
+          name: name, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
+        )
       },
       removeProject: { projectID in try manager.removeProject(projectID) },
       renameProject: { projectID, name in
@@ -1768,6 +1780,7 @@ extension HierarchyClient: DependencyKey {
     setProjectTags: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setActiveTagFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    addServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectColor: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1859,6 +1872,7 @@ extension HierarchyClient: DependencyKey {
     setProjectTags: unimplemented("HierarchyClient.setProjectTags"),
     setActiveTagFilter: unimplemented("HierarchyClient.setActiveTagFilter"),
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
+    addServerProject: unimplemented("HierarchyClient.addServerProject", placeholder: ProjectID()),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),
     setProjectColor: unimplemented("HierarchyClient.setProjectColor"),

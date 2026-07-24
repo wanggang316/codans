@@ -114,6 +114,10 @@ struct HierarchySidebarFeature {
     /// a `git clone` and, on success, routes the destination back through
     /// the same registration path as a picked local folder.
     var cloneRepoSheet: CloneRepoFeature.State?
+    /// "Connect to Server" sheet reached from the Add Project menu. Validates
+    /// an SSH connection and, on success, routes the destination back through
+    /// `addServerProject` + reconcile.
+    var remoteConnectionSheet: RemoteConnectionFeature.State?
     var archivedWorktreesSheet: ArchivedWorktreesFeature.State?
     var pendingWorktreeRemoval: PendingWorktreeRemoval?
     var pendingProjectRemoval: PendingProjectRemoval?
@@ -193,6 +197,8 @@ struct HierarchySidebarFeature {
     case addProjectGitRootResolved(canonicalPath: String, gitRoot: String?)
     /// Add Project menu → "Clone Repository…". Opens the clone sheet.
     case cloneRepoTapped
+    /// Add Project menu → "Connect to Server…". Opens the remote-connection sheet.
+    case connectServerTapped
 
     // Reorder Projects (ForEach.onMove forwarder).
     case reorderProjects(from: IndexSet, to: Int)
@@ -367,6 +373,8 @@ struct HierarchySidebarFeature {
     case createWorktreeSheet(CreateWorktreeFeature.Action)
     /// Child-feature actions for the Clone Repository sheet.
     case cloneRepoSheet(CloneRepoFeature.Action)
+    /// Child-feature actions for the Connect to Server sheet.
+    case remoteConnectionSheet(RemoteConnectionFeature.Action)
 
     // Delegate up to RootFeature for effects that cross feature boundaries.
     case delegate(Delegate)
@@ -455,6 +463,21 @@ struct HierarchySidebarFeature {
         return .send(.addProjectFolderPicked(URL(fileURLWithPath: localPath)))
       case .cloneRepoSheet:
         return .none
+      case .remoteConnectionSheet(.delegate(.dismissed)):
+        state.remoteConnectionSheet = nil
+        return .none
+      case .remoteConnectionSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
+        // Connection validated; dismiss and register the Server project. The
+        // name is the remote path's leaf (falling back to the host) so the
+        // sidebar reads a recognizable label before the first SSH reconcile
+        // fills in worktrees.
+        state.remoteConnectionSheet = nil
+        let leaf = (remotePath as NSString).lastPathComponent
+        let name = leaf.isEmpty ? host.displayAuthority : leaf
+        let projectID = hierarchyClient.addServerProject(name, host, remotePath, gitRoot)
+        return .send(.delegate(.reconcileProjectRequested(projectID)))
+      case .remoteConnectionSheet:
+        return .none
       case .archivedWorktreesSheet(.delegate(.dismissed)):
         state.archivedWorktreesSheet = nil
         return .none
@@ -469,6 +492,9 @@ struct HierarchySidebarFeature {
     }
     .ifLet(\.cloneRepoSheet, action: \.cloneRepoSheet) {
       CloneRepoFeature()
+    }
+    .ifLet(\.remoteConnectionSheet, action: \.remoteConnectionSheet) {
+      RemoteConnectionFeature()
     }
     .ifLet(\.archivedWorktreesSheet, action: \.archivedWorktreesSheet) {
       ArchivedWorktreesFeature()
@@ -535,6 +561,10 @@ struct HierarchySidebarFeature {
 
     case .cloneRepoTapped:
       state.cloneRepoSheet = CloneRepoFeature.State()
+      return .none
+
+    case .connectServerTapped:
+      state.remoteConnectionSheet = RemoteConnectionFeature.State()
       return .none
 
     // MARK: Tag filter chip footer
@@ -1096,6 +1126,10 @@ struct HierarchySidebarFeature {
       return .none
 
     case .cloneRepoSheet:
+      // Routed through the top-level Reducer; unreachable here.
+      return .none
+
+    case .remoteConnectionSheet:
       // Routed through the top-level Reducer; unreachable here.
       return .none
     }

@@ -382,6 +382,7 @@ struct HierarchySidebarView: View {
           .interactiveDismissDisabled(store.cloneRepoSheet?.isCloning ?? false)
       }
     }
+    .modifier(RemoteConnectionSheetPresenter(store: store))
     .confirmationDialog(
       worktreeRemovalTitle,
       isPresented: Binding(
@@ -551,8 +552,8 @@ struct HierarchySidebarView: View {
   }
 
   /// Shared Add Project menu: open an existing local folder (the current
-  /// flow, also bound to the `.addProject` shortcut) or clone a remote
-  /// repository into a new local path.
+  /// flow, also bound to the `.addProject` shortcut), clone a remote
+  /// repository into a new local path, or connect to a server over SSH.
   @ViewBuilder
   private var addProjectMenuItems: some View {
     Button {
@@ -564,6 +565,11 @@ struct HierarchySidebarView: View {
       store.send(.cloneRepoTapped)
     } label: {
       Label("Clone Repository…", systemImage: "square.and.arrow.down.on.square")
+    }
+    Button {
+      store.send(.connectServerTapped)
+    } label: {
+      Label("Connect to Server…", systemImage: "network")
     }
   }
 

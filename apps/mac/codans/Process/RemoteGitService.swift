@@ -79,21 +79,67 @@ nonisolated struct RemoteGitService: Sendable {
     _ = try unwrap(outcome, command: "git worktree remove")
   }
 
+  /// Resolve a possibly `~`-prefixed remote path to an absolute one. A `~`
+  /// cannot be expanded client-side (we don't know the host's home dir), and
+  /// the remote command quotes every argument (so `cd -- '~/x'` never expands),
+  /// so `~` / `~/…` is resolved by reading the host's `$HOME` and substituting.
+  /// A non-tilde path is returned trimmed and unchanged. `nil` only when the
+  /// home probe itself fails for a tilde path.
+  func expandRemotePath(_ path: String) async -> String? {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    guard trimmed == "~" || trimmed.hasPrefix("~/") else { return trimmed }
+    guard let home = await remoteHomeDirectory() else { return nil }
+    if trimmed == "~" { return home }
+    let suffix = trimmed.dropFirst(2)  // drop the leading "~/"
+    return home.hasSuffix("/") ? "\(home)\(suffix)" : "\(home)/\(suffix)"
+  }
+
+  /// Whether `path` is a directory on the host (`sh -c 'test -d "$1"'`). The
+  /// path is passed as a positional (`$1`) so an odd character in it can't break
+  /// out of the test; it must already be tilde-expanded (double-quoted `$1` does
+  /// not expand `~`). Used at connect time to reject a mistyped remote path
+  /// before a Server project is added.
+  func directoryExists(path: String) async -> Bool {
+    let outcome = await run(
+      executable: "/bin/sh",
+      arguments: ["-c", #"test -d "$1""#, "sh", path],
+      workingDirectory: nil
+    )
+    if case .exited(let code, _, _, _) = outcome, code == 0 { return true }
+    return false
+  }
+
+  /// The host's `$HOME`, read via `sh -c 'printf %s "$HOME"'`. The double-quoted
+  /// `$HOME` survives the remote-command single-quoting and is expanded by the
+  /// remote `sh`. Returns `nil` on any failure.
+  func remoteHomeDirectory() async -> String? {
+    let outcome = await run(
+      executable: "/bin/sh",
+      arguments: ["-c", #"printf %s "$HOME""#],
+      workingDirectory: nil
+    )
+    guard case .exited(let code, let stdout, _, _) = outcome, code == 0 else { return nil }
+    let trimmed = decode(stdout).trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
   // MARK: - Invocation
 
   private func run(
+    executable: String = Self.gitExecutable,
     arguments: [String],
     workingDirectory: String?
   ) async -> CommandOutcome {
-    let (executable, sshArguments) = SSHCommand.invocation(
+    let (sshExecutable, sshArguments) = SSHCommand.invocation(
       host: host,
-      executable: Self.gitExecutable,
+      executable: executable,
       arguments: arguments,
       workingDirectory: workingDirectory,
       extraOptions: SSHCommand.backgroundProbeOptions
     )
     return await runner.run(
-      executable: executable,
+      executable: sshExecutable,
       arguments: sshArguments,
       // ssh (unlike git) needs the local session env: `SSH_AUTH_SOCK` for the
       // agent, `HOME` for `~/.ssh/config` + `known_hosts`, `PATH` for any

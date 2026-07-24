@@ -266,6 +266,51 @@ final class HierarchyManager {
     return projectID
   }
 
+  /// Add a Server (remote SSH) project. Mirrors `addProject` but stamps
+  /// `remoteHost` so the project is `.server`-kind, and `rootPath` / `gitRoot`
+  /// hold **remote** path strings. When `gitRoot` is nil a synthetic worktree
+  /// seeds the row (same as a local folder project) so the sidebar has
+  /// something to show before the first SSH reconcile discovers the real
+  /// worktrees. `rootPath` is stored verbatim — remote paths must never pass
+  /// through the local symlink canonicalizer.
+  func addServerProject(
+    name: String,
+    remoteHost: RemoteHost,
+    rootPath: String,
+    gitRoot: String? = nil
+  ) -> ProjectID {
+    let projectID = ProjectID()
+    var worktrees: [Worktree] = []
+    var selectedWorktreeID: WorktreeID?
+    if gitRoot == nil {
+      let synthetic = Worktree(
+        id: WorktreeID(),
+        name: (rootPath as NSString).lastPathComponent,
+        path: rootPath,
+        branch: nil,
+        tabs: [],
+        selectedTabID: nil
+      )
+      worktrees = [synthetic]
+      selectedWorktreeID = synthetic.id
+    }
+    let nextManualOrder = (catalog.projects.map(\.manualOrder).max() ?? -1) + 1
+    let project = Project(
+      id: projectID,
+      name: name,
+      rootPath: rootPath,
+      gitRoot: gitRoot,
+      remoteHost: remoteHost,
+      worktrees: worktrees,
+      selectedWorktreeID: selectedWorktreeID,
+      addedAt: Date(),
+      manualOrder: nextManualOrder
+    )
+    catalog.projects.append(project)
+    store.scheduleSave(catalog)
+    return projectID
+  }
+
   // MARK: - Project sort mode (sidebar bottom bar)
 
   /// Replaces the catalog-wide `projectSortMode`. Unchanged values are
