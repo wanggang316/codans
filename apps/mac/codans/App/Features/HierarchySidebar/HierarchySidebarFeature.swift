@@ -678,6 +678,11 @@ struct HierarchySidebarFeature {
       guard let project = snapshot.projects.first(where: { $0.id == projectID }),
         let gitRoot = project.gitRoot
       else { return .none }
+      // Server (remote) projects have no local worktree-create path yet — the
+      // create stream drives the bundled local `wt` script. No-op here so a
+      // keyboard-shortcut entry point can't open a sheet that would fail on
+      // spawn. The sidebar "+" affordance is already hidden for remote.
+      guard !project.isRemote else { return .none }
       let settingsSnapshot = settingsWriter.readSnapshotSync()
       let projectSettings = settingsSnapshot.projects[projectID]
       let globalWorktree = settingsSnapshot.worktree
@@ -766,6 +771,13 @@ struct HierarchySidebarFeature {
       // protection. Guard at the lifecycle entry point so every dispatch path
       // is covered by a single check.
       if isMainCheckout(worktreeID: worktreeID, projectID: projectID) {
+        return .none
+      }
+      // Server (remote) worktree removal runs the local relocate-then-prune
+      // git path, which can't act on a remote worktree. No-op for remote until
+      // removal is wired over SSH; the context menu already hides "Remove
+      // Worktree" for remote, this covers the destructive chord (⌘⇧⌫).
+      if hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?.isRemote == true {
         return .none
       }
       state.pendingWorktreeRemoval = PendingWorktreeRemoval(

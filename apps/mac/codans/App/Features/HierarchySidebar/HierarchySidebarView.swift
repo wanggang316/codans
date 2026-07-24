@@ -1169,15 +1169,18 @@ struct HierarchySidebarView: View {
     // the resolved editor by name (project override → global default →
     // priority cascade); the "Open in" submenu lists every installed
     // editor for explicit overrides; "Reveal in Finder" rounds out the
-    // navigation group.
-    openInDefaultButton(worktree: worktree, project: project)
-    openInSubmenu(worktree: worktree, project: project)
-    Button {
-      store.send(.worktreeRevealInFinderTapped(path: worktree.path))
-    } label: {
-      Label("Reveal in Finder", systemImage: "folder")
+    // navigation group. Suppressed for Server (remote) worktrees: the path
+    // is a remote one, so a local editor / Finder can't open it.
+    if !project.isRemote {
+      openInDefaultButton(worktree: worktree, project: project)
+      openInSubmenu(worktree: worktree, project: project)
+      Button {
+        store.send(.worktreeRevealInFinderTapped(path: worktree.path))
+      } label: {
+        Label("Reveal in Finder", systemImage: "folder")
+      }
+      .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
     }
-    .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
 
     // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
     // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
@@ -1230,15 +1233,21 @@ struct HierarchySidebarView: View {
         }
         .appKeyboardShortcut(.archiveCurrentWorktree, in: resolvedShortcuts)
       }
-      Button(role: .destructive) {
-        store.send(
-          .worktreeRemoveTapped(
-            worktreeID: worktree.id, inProject: project.id, name: worktree.name
-          ))
-      } label: {
-        Label("Remove Worktree", systemImage: "trash")
+      // Remove runs the local relocate-then-prune git path, which a remote
+      // worktree can't take; suppressed for Server projects until remote
+      // worktree removal is wired over SSH. Archive (a catalog-only soft-hide)
+      // above still works for remote.
+      if !project.isRemote {
+        Button(role: .destructive) {
+          store.send(
+            .worktreeRemoveTapped(
+              worktreeID: worktree.id, inProject: project.id, name: worktree.name
+            ))
+        } label: {
+          Label("Remove Worktree", systemImage: "trash")
+        }
+        .appKeyboardShortcut(.deleteCurrentWorktree, in: resolvedShortcuts)
       }
-      .appKeyboardShortcut(.deleteCurrentWorktree, in: resolvedShortcuts)
     }
   }
 
@@ -1758,8 +1767,11 @@ private struct ProjectHeaderRow: View {
       HStack(spacing: 2) {
         // Non-git Projects (P-Q4 = a): suppress the Add Worktree affordance.
         // Worktrees are a git-only concept; a scratch folder renders with a
-        // single synthetic Worktree and nothing to add.
-        if project.supportsWorktrees {
+        // single synthetic Worktree and nothing to add. Also suppressed for
+        // Server (remote) projects: worktree creation streams through the
+        // bundled local `wt` script, which has no remote counterpart yet —
+        // remote worktree creation over SSH is a follow-up.
+        if project.supportsWorktrees && !project.isRemote {
           Button {
             store.send(.projectAddWorktreeTapped(projectID: project.id))
           } label: {
