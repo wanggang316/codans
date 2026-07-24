@@ -19,8 +19,18 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Settings → General → Name writes here; clearing the field writes `nil`.
   /// Persistence-only; `name` is still the right thing to read at call sites.
   public var displayName: String?
+  /// For a local project, the canonical local root path. For a Server project
+  /// (`remoteHost != nil`), the **remote** absolute path on the host — the same
+  /// string plumbing carries it, but it is never a valid local filesystem path,
+  /// so local-FS operations must be gated on `isRemote`.
   public var rootPath: String
+  /// Resolved git repository root. For a Server project this is a **remote** path
+  /// string (discovered over SSH), `nil` when the remote root is a plain folder.
   public var gitRoot: String?
+  /// SSH destination this project lives on. `nil` = local. When set, `rootPath` /
+  /// `gitRoot` / each `Worktree.path` are remote path strings and terminals/git
+  /// run over SSH. See `RemoteHost`.
+  public var remoteHost: RemoteHost?
   public var worktrees: [Worktree]
   public var selectedWorktreeID: WorktreeID?
   /// Sidebar disclosure state for this Project's worktree group. Defaults to
@@ -64,6 +74,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     name: String,
     rootPath: String,
     gitRoot: String? = nil,
+    remoteHost: RemoteHost? = nil,
     worktrees: [Worktree] = [],
     selectedWorktreeID: WorktreeID? = nil,
     isExpanded: Bool = true,
@@ -83,6 +94,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     let canonical = (rootPath as NSString).lastPathComponent
     self.displayName = (name.isEmpty || name == canonical) ? nil : name
     self.gitRoot = gitRoot
+    self.remoteHost = remoteHost
     self.worktrees = worktrees
     self.selectedWorktreeID = selectedWorktreeID
     self.isExpanded = isExpanded
@@ -96,8 +108,15 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 
   /// A Project supports Git-backed Worktree operations only when it has a resolved git root.
   /// For non-git Projects, the UI presents a single synthetic Worktree (`Project.rootPath`)
-  /// and the "Add Worktree" affordance is suppressed.
+  /// and the "Add Worktree" affordance is suppressed. Holds for remote git repos too — a
+  /// Server project with a resolved (remote) git root supports worktree operations over SSH.
   public var supportsWorktrees: Bool { gitRoot != nil }
+
+  /// True for a Server project — its `rootPath` / `gitRoot` / worktree paths are
+  /// remote, and terminals / git run over SSH. Local-filesystem operations
+  /// (`FileManager`, `URL(fileURLWithPath:)`, symlink resolution, reveal-in-Finder)
+  /// must be gated on this being `false`.
+  public var isRemote: Bool { remoteHost != nil }
 
   /// Path-derived fallback name. Identical to `name` when the user hasn't
   /// set a custom `displayName`. Worktree base-directory resolution uses
@@ -114,8 +133,8 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, displayName, rootPath, gitRoot, worktrees, selectedWorktreeID, isExpanded,
-      tagIDs, addedAt, lastActiveAt, manualOrder, color
+    case id, name, displayName, rootPath, gitRoot, remoteHost, worktrees, selectedWorktreeID,
+      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color
   }
 
   public init(from decoder: Decoder) throws {
@@ -135,6 +154,7 @@ extension Project: Codable {
       self.displayName = nil
     }
     self.gitRoot = try container.decodeIfPresent(String.self, forKey: .gitRoot)
+    self.remoteHost = try container.decodeIfPresent(RemoteHost.self, forKey: .remoteHost)
     self.worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
     self.selectedWorktreeID = try container.decodeIfPresent(WorktreeID.self, forKey: .selectedWorktreeID)
     self.isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
@@ -160,6 +180,9 @@ extension Project: Codable {
     try container.encodeIfPresent(displayName, forKey: .displayName)
     try container.encode(rootPath, forKey: .rootPath)
     try container.encodeIfPresent(gitRoot, forKey: .gitRoot)
+    // Only emit `remoteHost` for Server projects — keeps existing local catalogs
+    // byte-identical on round-trip.
+    try container.encodeIfPresent(remoteHost, forKey: .remoteHost)
     try container.encode(worktrees, forKey: .worktrees)
     try container.encodeIfPresent(selectedWorktreeID, forKey: .selectedWorktreeID)
     // Only emit `isExpanded` when collapsed — keeps the common case

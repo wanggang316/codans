@@ -56,7 +56,10 @@ struct ProjectGeneralSettingsView: View {
     switch kind {
     case .dir:
       return [.general, .editor, .environment]
-    case .gitRepo:
+    case .gitRepo, .server:
+      // Server projects manage worktrees over SSH just like a local git repo,
+      // so they surface the full section set — keeping remote management
+      // consistent with local.
       return Set(SectionID.allCases)
     }
   }
