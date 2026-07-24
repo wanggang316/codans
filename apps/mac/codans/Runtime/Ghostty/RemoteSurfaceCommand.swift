@@ -85,9 +85,14 @@ nonisolated enum RemoteSurfaceCommand {
   }
 
   /// The default shell for the worktree: cd into the remote path (best-effort)
-  /// then exec a login shell. Never carries a one-shot command.
+  /// then exec an **interactive** login shell. `-i` is load-bearing: without it
+  /// a shell whose stdin isn't perfectly a TTY (some SSH PTY / multiplexing
+  /// paths) treats the connection as a script, reads EOF immediately, and exits
+  /// — which the SSH line surfaces as a fast non-255 exit and the pane closes
+  /// on the spot. Forcing interactive keeps the shell alive for the terminal.
+  /// Never carries a one-shot command.
   private static func worktreeShellCommand(remotePath: String) -> String {
-    "cd -- \(SSHCommand.shellQuote(remotePath)) 2>/dev/null; exec \"$SHELL\" -l"
+    "cd -- \(SSHCommand.shellQuote(remotePath)) 2>/dev/null; exec \"$SHELL\" -il"
   }
 
   /// First-connect script. With host persistence and a host-side `zmx`, the
@@ -143,26 +148,65 @@ nonisolated enum RemoteSurfaceCommand {
     #"printf '\033[2m── Remote session ended while disconnected. ──\033[0m\r\n'; "#
 }
 
-/// Local `/bin/sh` retry loop around two ssh command lines: `connect` runs once
-/// (create-or-attach the host session), `reconnect` runs on every retry
-/// (attach-only). ssh reserves exit 255 for its own connection errors, so 255
-/// retries (with capped exponential backoff, forever, so an overnight sleep still
-/// resumes) and every other exit passes through, closing the surface like a local
-/// shell exit. 255 also covers permanent ssh failures (auth, host key, DNS); the
-/// banner names the exit and ssh's own error text stays visible above it. Ctrl-C
-/// during the wait is the escape hatch (`trap` makes it deterministic; while ssh
-/// is live the tty is raw and Ctrl-C goes to the remote).
+/// Local `/bin/sh` supervisor around two ssh command lines: `connect` runs
+/// first (create-or-attach the host session), `reconnect` runs after a real
+/// session drops (attach-only).
+///
+/// The loop distinguishes a **real interactive session that ended** from a
+/// **failed launch** by how long the ssh line lived (`minSessionSeconds`):
+///
+///   - Ran ≥ threshold, exit ≠ 255 → the user's shell exited → close the pane
+///     (propagate the code), exactly like a local pane's `exit`.
+///   - Ran ≥ threshold, exit 255 → the connection dropped mid-session → switch
+///     to `reconnect` and re-attach.
+///   - Ran < threshold → the ssh line died before an interactive session could
+///     start (auth/host-key 255, a non-interactive remote shell that read EOF,
+///     a missing `$SHELL`, …). Instead of silently closing the pane — which
+///     reads as "the tab flashes and vanishes" — the loop prints the exit code
+///     and retries with capped backoff, so the failure is always visible and
+///     Ctrl-C is the escape hatch. The one exception is `reconnect` mode: a
+///     fast non-255 exit there means the host session ended while away, which
+///     is a legitimate close.
+///
+/// `$SECONDS` (a shell builtin on the local macOS `/bin/sh`) times each attempt
+/// without spawning `date`.
 nonisolated enum SSHReconnectLoop {
   static let maxDelaySeconds = 15
+  static let minSessionSeconds = 3
 
   static func script(connect: String, reconnect: String) -> String {
-    let passExitUnless255 = "; codans_rc=$?; [ \"$codans_rc\" -ne 255 ] && exit \"$codans_rc\""
-    return "trap 'exit 130' INT; "
-      + connect + passExitUnless255 + "; "
-      + "codans_delay=1; while :; do "
-      + #"printf '\033[1;33m── Connection failed (ssh exit 255). Retrying in %ss. Press Ctrl-C to stop. ──\033[0m\r\n' "$codans_delay"; "#
-      + "sleep \"$codans_delay\"; codans_delay=$((codans_delay * 2)); "
-      + "[ \"$codans_delay\" -gt \(maxDelaySeconds) ] && codans_delay=\(maxDelaySeconds); "
-      + reconnect + passExitUnless255 + "; done"
+    let retryNotice =
+      #"printf '\033[1;33m── Connection ended (exit %s). Retrying in %ss. Press Ctrl-C to stop. ──\033[0m\r\n' "$codans_rc" "$codans_delay""#
+    let dropNotice =
+      #"printf '\033[1;33m── Disconnected. Reconnecting… Press Ctrl-C to stop. ──\033[0m\r\n'"#
+    return """
+      trap 'exit 130' INT
+      codans_delay=1
+      codans_mode=connect
+      while :; do
+      codans_t0=$SECONDS
+      if [ "$codans_mode" = connect ]; then
+      \(connect)
+      else
+      \(reconnect)
+      fi
+      codans_rc=$?
+      codans_dur=$((SECONDS - codans_t0))
+      if [ "$codans_dur" -ge \(minSessionSeconds) ]; then
+      [ "$codans_rc" -ne 255 ] && exit "$codans_rc"
+      codans_mode=reconnect
+      codans_delay=1
+      \(dropNotice)
+      continue
+      fi
+      if [ "$codans_mode" = reconnect ] && [ "$codans_rc" -ne 255 ]; then
+      exit "$codans_rc"
+      fi
+      \(retryNotice)
+      sleep "$codans_delay"
+      codans_delay=$((codans_delay * 2))
+      [ "$codans_delay" -gt \(maxDelaySeconds) ] && codans_delay=\(maxDelaySeconds)
+      done
+      """
   }
 }

@@ -9,15 +9,61 @@ struct RemoteSurfaceCommandTests {
   private let paneID = PaneID(raw: UUID(uuidString: "00000000-0000-0000-0000-0000000000AB")!)
 
   @Test
-  func reconnectLoopRetriesOnly255() {
+  func reconnectLoopClosesOnlyAfterARealSession() {
     let script = SSHReconnectLoop.script(connect: "CONNECT", reconnect: "RECONNECT")
-    // Non-255 exits pass through and close the surface; 255 retries.
+    // A session that ran ≥ threshold and exited non-255 closes the pane.
+    #expect(script.contains("-ge \(SSHReconnectLoop.minSessionSeconds)"))
     #expect(script.contains("[ \"$codans_rc\" -ne 255 ] && exit \"$codans_rc\""))
     #expect(script.contains("CONNECT"))
     #expect(script.contains("RECONNECT"))
     // Ctrl-C escape hatch and capped backoff.
     #expect(script.contains("trap 'exit 130' INT"))
     #expect(script.contains("-gt \(SSHReconnectLoop.maxDelaySeconds)"))
+  }
+
+  @Test
+  func reconnectLoopRetriesFastFailureInsteadOfClosing() {
+    let script = SSHReconnectLoop.script(connect: "CONNECT", reconnect: "RECONNECT")
+    // A launch that dies before an interactive session starts must NOT silently
+    // close the pane — it shows the exit code and retries.
+    #expect(script.contains("Connection ended (exit %s)"))
+    #expect(script.contains("codans_mode=reconnect"))
+    // Times each attempt via the shell builtin (no `date` subprocess).
+    #expect(script.contains("codans_t0=$SECONDS"))
+  }
+
+  @Test
+  func buildProducesSyntacticallyValidShellAcrossVariants() throws {
+    // Guards the four-level nested quoting: a regression there would make the
+    // outer `/bin/sh -c` fail to parse, and the pane would flash-and-close.
+    for zmx in ["/opt/zmx", nil] {
+      for persistence in [true, false] {
+        let command = RemoteSurfaceCommand.build(
+          host: host, paneID: paneID, remotePath: "/srv/my app",
+          localZmxPath: zmx, hostPersistence: persistence
+        )
+        try Self.assertShellParses(command, label: "zmx=\(zmx ?? "nil") persist=\(persistence)")
+      }
+    }
+  }
+
+  /// Writes `script` to a temp file and runs `/bin/sh -n` (parse-only). Fails
+  /// the test with the stderr when the shell rejects the syntax.
+  private static func assertShellParses(_ script: String, label: String) throws {
+    let file = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-surface-\(UUID().uuidString).sh")
+    try script.write(to: file, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: file) }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+    proc.arguments = ["-n", file.path]
+    let err = Pipe()
+    proc.standardError = err
+    try proc.run()
+    proc.waitUntilExit()
+    let stderr =
+      String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    #expect(proc.terminationStatus == 0, "sh -n rejected [\(label)]: \(stderr)")
   }
 
   @Test
