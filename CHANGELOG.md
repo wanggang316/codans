@@ -20,6 +20,16 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.4.21] - 2026-07-24
+
+### Changed
+
+- **Faster, better-looking app launch.** Startup is quicker — a redundant
+  daemon check and a non-critical file sweep no longer block the first frame,
+  so a stalled session no longer drags launch out. While the app loads, it now
+  shows a skeleton of its real two-column layout instead of a bare loading
+  screen.
+
 ## [0.4.20] - 2026-07-24
 
 ### Added
