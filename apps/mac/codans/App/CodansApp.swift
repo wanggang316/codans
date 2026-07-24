@@ -1,10 +1,10 @@
 import AppKit
+import CodansCore
+import CodansIPC
 import Combine
 import ComposableArchitecture
 import GhosttyKit
 import SwiftUI
-import CodansCore
-import CodansIPC
 @preconcurrency import UserNotifications
 import os
 
@@ -122,12 +122,15 @@ struct CodansApp: App {
             )
           )
         } else {
-          // Initial loading state while appState.bringUp runs.
-          // The view itself is intentionally cosmetic — bringUp is
-          // kicked off from `.task` below, and the idempotency guard
-          // (`store == nil` check inside bringUp) is load-bearing
-          // because SwiftUI re-runs `.task` on scene reattach.
-          AppBootstrapView()
+          // Initial loading state while appState.bringUp runs. The launch
+          // skeleton mirrors the real two-column NavigationSplitView chrome
+          // (ghost sidebar + detail caption + toolbar) so the window reads
+          // as "our app, loading" instead of a frozen placeholder. It is
+          // intentionally cosmetic — bringUp is kicked off from `.task`
+          // below, and the idempotency guard (`store == nil` check inside
+          // bringUp) is load-bearing because SwiftUI re-runs `.task` on
+          // scene reattach.
+          LaunchSkeletonView()
             .frame(minWidth: 800, minHeight: 600)
             .task {
               appDelegate.appState = appState
@@ -571,6 +574,13 @@ final class AppState {
   /// app process. Built in `bringUp` alongside the engine; nil before
   /// then, which keeps the `willTerminate` observer safe to fire early.
   @ObservationIgnored private(set) var sessionLifecycle: SessionLifecycle?
+  /// Per-pane daemon liveness the launch `SessionReaper.sweep` already
+  /// determined, keyed by `PaneID` (`true` == socket reachable). Consumed by
+  /// `seedRestoredAgents` so the agent-state seed reuses the sweep's verdict
+  /// instead of re-`connect(2)`-probing the same panes. Empty until the
+  /// sweep runs (and on the no-resume / keepRunning paths), where the seed
+  /// falls back to a direct per-pane probe.
+  @ObservationIgnored private var sessionSweepLiveness: [PaneID: Bool] = [:]
   /// Per-Worktree "git status is non-clean" cache. The sidebar row's `.task(id:)`
   /// refreshes this lazily; a small dot is drawn next to the row name when dirty.
   let worktreeStatusMonitor: WorktreeStatusMonitor
@@ -639,6 +649,9 @@ final class AppState {
   /// rebuilding the engine + store and leaking the prior runtime.
   func bringUp() {  // swiftlint:disable:this function_body_length
     guard store == nil else { return }
+    // Phase-time the synchronous bring-up so a slow launch is attributable
+    // to a specific stage from Console alone (see `LaunchProfiler`).
+    let profiler = LaunchProfiler()
     let ghostty = try? GhosttyRuntime()
     self.ghosttyRuntime = ghostty
     let engine = TerminalEngine(
@@ -648,7 +661,8 @@ final class AppState {
     )
     self.terminalEngine = engine
     hierarchyRuntime.attach(engine: engine)
-    bootstrapSessionStack(ghostty: ghostty, engine: engine)
+    profiler.mark("ghostty+engine")
+    bootstrapSessionStack(ghostty: ghostty, engine: engine, profiler: profiler)
 
     // SettingsStore loads itself (and migrates legacy formats) during `init(fileURL:)`.
     let manager = hierarchyManager
@@ -677,6 +691,7 @@ final class AppState {
       settings: settings,
       hierarchy: hierarchy
     )
+    profiler.mark("observers")
     // Wire the quit-time agent snapshot into SessionLifecycle now that
     // both the registry and the engine (PID source) are alive. The
     // closure is invoked from the lifecycle's `detachLiveTier` path —
@@ -782,6 +797,7 @@ final class AppState {
       $0.suspendingClock = SuspendingClock()
       $0.uuid = .init { UUID() }
     }
+    profiler.mark("store")
 
     startHeadWatcherSync()
     startWorkingTreeWatcherSync()
@@ -829,6 +845,7 @@ final class AppState {
         controller?.toggle()
       })
     }
+    profiler.mark("finish")
   }
 
   private func startNotificationObservers(
@@ -1081,7 +1098,9 @@ final class AppState {
   /// next `ensureSurface` for that paneID reattaches instead of spawning
   /// a fresh daemon. Dead rows are pruned from the catalog as part of
   /// the sweep.
-  private func bootstrapSessionStack(ghostty: GhosttyRuntime?, engine: TerminalEngine) {
+  private func bootstrapSessionStack(
+    ghostty: GhosttyRuntime?, engine: TerminalEngine, profiler: LaunchProfiler
+  ) {
     let sessionStore: SessionStore?
     do {
       sessionStore = try SessionStore(fileURL: SessionCatalog.defaultURL())
@@ -1152,6 +1171,12 @@ final class AppState {
       // current on-quit resume setting.
       let states = try reaper.sweep(livePaneIDs: livePaneIDs)
       engine.pendingRestores = Self.derivePendingRestores(from: states)
+      // The sweep already probed every session socket; reuse its verdict so
+      // the agent-state seed doesn't re-`connect(2)` the same panes a second
+      // time (a wedged daemon would otherwise stall launch twice). Panes
+      // absent from this map — e.g. the keepRunning quit path persists
+      // `sessions: [:]` — fall back to a direct probe in `seedRestoredAgents`.
+      self.sessionSweepLiveness = Self.deriveLiveness(from: states)
     } catch {
       // A corrupt catalog or transient I/O error must not block app
       // launch — the worst outcome is a fresh shell per pane. Leave
@@ -1161,13 +1186,26 @@ final class AppState {
       Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session.reaper")
         .error("SessionReaper.sweep failed: \(String(describing: error), privacy: .public)")
     }
+    profiler.mark("session sweep")
+
     // Defense-in-depth: catch daemons whose socket files outlive both
     // the catalog and the hierarchy (e.g. crash mid-spawn before the row
     // was persisted, or daemons left by an older build whose catalog row
     // was wiped). Runs after `sweep` so the catalog is already pruned to
     // the surviving set — anything still on disk after this point is a
     // true filesystem orphan.
-    reaper.sweepFilesystemOrphans(livePaneIDs: livePaneIDs)
+    //
+    // Deferred off the synchronous bring-up path: it scans a directory and
+    // `connect(2)`-probes every stray socket, none of which feed
+    // `pendingRestores` (only `sweep` above does), so it has no bearing on
+    // the first frame or on session restore. Running it in a follow-up task
+    // keeps its filesystem + socket work from stalling the launch while
+    // still reaping orphans moments later. `livePaneIDs` is captured by
+    // value — the pruned set from this sweep is exactly what the orphan pass
+    // needs.
+    Task { @MainActor in
+      reaper.sweepFilesystemOrphans(livePaneIDs: livePaneIDs)
+    }
   }
 
   /// User-initiated "Forget all sessions" from Settings → General. The
@@ -1551,7 +1589,11 @@ final class AppState {
     // waiting for the first live viewport. Each restored record is gated on
     // a direct daemon-socket probe so we never restore a phantom badge for
     // an agent whose daemon died between launches.
-    Self.seedRestoredAgents(coordinator: self.sessionCoordinator, registry: registry)
+    Self.seedRestoredAgents(
+      coordinator: self.sessionCoordinator,
+      registry: registry,
+      knownLiveness: self.sessionSweepLiveness
+    )
     // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
     // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
     // pty child from the previous session can't haunt the panel. The
@@ -1651,16 +1693,31 @@ final class AppState {
   @MainActor
   private static func seedRestoredAgents(
     coordinator: SessionCoordinator?,
-    registry: AgentStateStore
+    registry: AgentStateStore,
+    knownLiveness: [PaneID: Bool] = [:]
   ) {
     guard let coordinator else { return }
     let restored = coordinator.restoredAgents
     guard !restored.isEmpty else { return }
     let seeds = selectAgentSeeds(
       restored: restored,
+      knownLiveness: knownLiveness,
       isDaemonAlive: { SessionReaper.isDaemonAlive(paneID: $0) }
     )
     registry.seedRestored(seeds)
+  }
+
+  /// Collapse the launch sweep's per-pane `SessionState` into a boolean
+  /// liveness map for `seedRestoredAgents`. Only `.alive` counts as a live
+  /// daemon: `.dead` rows were pruned (possibly kill-recycled by the sweep),
+  /// and `.snapshot` panes have no running daemon (they cold-restore from a
+  /// `.snap` on next attach), so an agent badge must not be seeded for
+  /// either — matching a direct `isDaemonAlive` probe of the same socket.
+  static func deriveLiveness(from states: [PaneID: SessionState]) -> [PaneID: Bool] {
+    states.mapValues { state in
+      if case .alive = state { return true }
+      return false
+    }
   }
 
   /// Pure seed-selection policy extracted from `seedRestoredAgents` so the
@@ -1669,12 +1726,17 @@ final class AppState {
   /// and both enum raws still decode in this build.
   static func selectAgentSeeds(
     restored: [PaneID: PersistedAgentRecord],
+    knownLiveness: [PaneID: Bool] = [:],
     isDaemonAlive: (PaneID) -> Bool
   ) -> [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] {
     var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
     seeds.reserveCapacity(restored.count)
     for (paneID, record) in restored {
-      guard isDaemonAlive(paneID) else { continue }
+      // Reuse the launch sweep's verdict when it covered this pane; only
+      // probe the socket directly for panes the sweep never saw (empty
+      // `knownLiveness` on the keepRunning / no-resume paths).
+      let alive = knownLiveness[paneID] ?? isDaemonAlive(paneID)
+      guard alive else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
         let state = AgentStateStore.AgentRuntimeState(rawValue: record.stateRaw)
