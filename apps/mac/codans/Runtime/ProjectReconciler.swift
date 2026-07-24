@@ -53,12 +53,26 @@ actor ProjectReconciler {
 
     await client.setProjectLoadState(projectID, .loading)
 
-    guard FileManager.default.fileExists(atPath: project.rootPath) else {
-      await client.setProjectLoadState(
-        projectID,
-        .failed(reason: "Folder no longer exists at \(project.rootPath)")
-      )
-      return
+    // Health check. A remote path can't be stat'd locally, so a Server project
+    // substitutes an SSH reachability probe (`ssh host true`) for the local
+    // `FileManager.fileExists` — the host being reachable stands in for "the
+    // project's root is still there". Both map failure to `.failed(reason:)`.
+    if let remoteHost = project.remoteHost {
+      guard await RemoteReachabilityProbe.isReachable(host: remoteHost) else {
+        await client.setProjectLoadState(
+          projectID,
+          .failed(reason: "Cannot reach \(remoteHost.displayAuthority)")
+        )
+        return
+      }
+    } else {
+      guard FileManager.default.fileExists(atPath: project.rootPath) else {
+        await client.setProjectLoadState(
+          projectID,
+          .failed(reason: "Folder no longer exists at \(project.rootPath)")
+        )
+        return
+      }
     }
 
     // The injected closure handles git-vs-non-git routing, `GitWorktreeCLI`

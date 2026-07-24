@@ -194,12 +194,36 @@ final class TerminalEngine {
       )
     }
     let session = ZmxAttachCommand.session(for: pane.id)
-    let command = ZmxAttachCommand.build(
-      zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
-      session: session,
-      userCommand: nil,
-      restoreFrom: restorePath
-    )
+    // A Server-project pane runs its shell on the remote host: libghostty
+    // spawns a local `zmx attach` (quit-persistence of the tunnel) wrapping an
+    // SSH reconnect loop that lands in the remote worktree. The remote `cd`
+    // owns the directory, so libghostty's local `working_directory` (which it
+    // chdirs the ssh process into) must be a real *local* path — the remote
+    // worktree path is meaningless locally. Local panes keep the unchanged
+    // `zmx attach <session>` command anchored at the pane's own directory.
+    let remoteHost = remoteHost(forPane: pane.id)
+    let command: String
+    let surfaceWorkingDirectory: String
+    if let remoteHost {
+      command = RemoteSurfaceCommand.build(
+        host: remoteHost,
+        paneID: pane.id,
+        remotePath: pane.workingDirectory,
+        // A missing local zmx degrades to the bare reconnect loop (no
+        // quit-persistence of the tunnel; reconnect still works).
+        localZmxPath: try? PaneDaemonBringup.zmxBinaryURL().path,
+        hostPersistence: true
+      )
+      surfaceWorkingDirectory = NSHomeDirectory()
+    } else {
+      command = ZmxAttachCommand.build(
+        zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
+        session: session,
+        userCommand: nil,
+        restoreFrom: restorePath
+      )
+      surfaceWorkingDirectory = pane.workingDirectory
+    }
     let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
     try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
     var surfaceEnv = env
@@ -216,13 +240,13 @@ final class TerminalEngine {
     do {
       surface = try PaneSurface(
         runtime: runtime, paneID: pane.id, session: session,
-        command: command, workingDirectory: pane.workingDirectory, env: surfaceEnv
+        command: command, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
       )
     } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
       runtime.tick()
       surface = try PaneSurface(
         runtime: runtime, paneID: pane.id, session: session,
-        command: command, workingDirectory: pane.workingDirectory, env: surfaceEnv
+        command: command, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
       )
     }
     runtime.register(pane: surface)
@@ -616,6 +640,14 @@ final class TerminalEngine {
     let projectID: ProjectID
     let worktreeID: WorktreeID
     let tabID: TabID
+  }
+
+  /// The SSH host of the pane's owning Project, or `nil` for a local pane.
+  /// Drives the remote-vs-local surface-command branch in `ensureSurface`.
+  private func remoteHost(forPane paneID: PaneID) -> RemoteHost? {
+    guard let location = findPane(paneID) else { return nil }
+    return hierarchy.catalog.projects
+      .first(where: { $0.id == location.projectID })?.remoteHost
   }
 
   private func findPane(_ paneID: PaneID) -> PaneLocation? {

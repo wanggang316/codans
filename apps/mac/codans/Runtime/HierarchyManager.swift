@@ -957,23 +957,29 @@ final class HierarchyManager {
   ///   - projectID: target Project.
   ///   - entries: on-disk worktree metadata (path, branch) from
   ///     `GitWorktreeClient.lsWorktrees`.
+  ///   - normalizePath: canonicalization applied to every path before dedupe.
+  ///     Defaults to the local symlink-resolving `canonicalPath`; Server
+  ///     (remote) projects pass `normalizeRemotePath` so a remote path is never
+  ///     resolved against the *local* filesystem (which would mangle e.g. a
+  ///     remote `/tmp/...` into `/private/tmp/...`).
   @discardableResult
   func reconcileDiscoveredWorktrees(
     projectID: ProjectID,
-    entries: [(path: String, branch: String?)]
+    entries: [(path: String, branch: String?)],
+    normalizePath: (String) -> String = { HierarchyManager.canonicalPath($0) }
   ) -> Int {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID })
     else { return 0 }
     let project = catalog.projects[projectIndex]
-    let discoveredPaths = Set(entries.map { Self.canonicalPath($0.path) })
-    let rootCanonical = Self.canonicalPath(project.rootPath)
+    let discoveredPaths = Set(entries.map { normalizePath($0.path) })
+    let rootCanonical = normalizePath(project.rootPath)
     var appended = 0
     var upgraded = 0
     for entry in entries {
-      let canonical = Self.canonicalPath(entry.path)
+      let canonical = normalizePath(entry.path)
       let entryBranch = (entry.branch?.isEmpty == false) ? entry.branch! : nil
       if let existingIdx = catalog.projects[projectIndex].worktrees
-        .firstIndex(where: { Self.canonicalPath($0.path) == canonical })
+        .firstIndex(where: { normalizePath($0.path) == canonical })
       {
         // Path already in the catalog. Three cases land here:
         //
@@ -1025,7 +1031,7 @@ final class HierarchyManager {
     var archivedCount = 0
     let snapshot = catalog.projects[projectIndex].worktrees
     for worktree in snapshot {
-      let canonical = Self.canonicalPath(worktree.path)
+      let canonical = normalizePath(worktree.path)
       guard
         !discoveredPaths.contains(canonical),
         canonical != rootCanonical,
@@ -1076,6 +1082,22 @@ final class HierarchyManager {
       .resolvingSymlinksInPath()
       .standardizedFileURL
       .path
+  }
+
+  /// String-only canonicalization for **remote** (Server-project) paths. Unlike
+  /// `canonicalPath`, it never touches the local filesystem — `git rev-parse
+  /// --show-toplevel` and `git worktree list --porcelain` already emit absolute
+  /// canonical paths on the host, so the only normalization needed is trimming
+  /// a trailing slash (except for the root `/`) so the same worktree reported
+  /// with and without one dedupes to a single catalog row. Routing a remote
+  /// path through `canonicalPath` would resolve it against *this* machine's
+  /// symlink table (`/tmp` → `/private/tmp`, etc.), corrupting the identity.
+  nonisolated static func normalizeRemotePath(_ path: String) -> String {
+    var trimmed = path
+    while trimmed.count > 1, trimmed.hasSuffix("/") {
+      trimmed.removeLast()
+    }
+    return trimmed
   }
 
   /// Tears down every terminal surface attached to the Worktree without

@@ -660,12 +660,19 @@ extension HierarchyClient {
         // reconcile catches up, libghostty crashes if it tries to spawn
         // a shell in a non-existent cwd. Reject here so callers'
         // `try?` swallows the error instead of bringing down the app.
-        var isDir: ObjCBool = false
-        guard
-          FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir),
-          isDir.boolValue
-        else {
-          throw HierarchyError.notFound("Worktree path missing: \(cwd)")
+        // Skipped for Server projects: `cwd` is a remote path that never
+        // exists locally, and libghostty is handed a real local cwd — the
+        // remote `cd` (inside the SSH command) owns the directory instead.
+        let isRemote =
+          manager.catalog.projects.first(where: { $0.id == projectID })?.isRemote ?? false
+        if !isRemote {
+          var isDir: ObjCBool = false
+          guard
+            FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir),
+            isDir.boolValue
+          else {
+            throw HierarchyError.notFound("Worktree path missing: \(cwd)")
+          }
         }
         // Resolve project envVars from the SettingsStore so every
         // user-flow openPane (TabBar new-tab, SplitViewport new-tab,
@@ -1473,6 +1480,13 @@ extension HierarchyClient {
   ) async {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID })
     else { return }
+    // Server projects discover + reconcile entirely over SSH (no bundled `wt`,
+    // no local `wt ls`, no local symlink canonicalization). Branch off before
+    // any local-filesystem git path runs.
+    if project.isRemote {
+      await reconcileRemote(project: project, manager: manager)
+      return
+    }
     // Re-detect the git root every time gitRoot is nil. Folder Projects added
     // before the user ran `git init` (or `git clone`) inside the directory
     // would otherwise stay forever marked non-git: gitRoot is set once at
@@ -1521,6 +1535,54 @@ extension HierarchyClient {
       // carries raw git stderr which can embed local absolute paths.
       reconcileLogger.error(
         "reconcileDiscoveredWorktrees failed: project=\(projectID.raw.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+      )
+    }
+  }
+
+  /// Server-project counterpart of `reconcile`: discovers the remote git root
+  /// and worktree list over SSH via `RemoteGitService`, normalizes each path
+  /// string-only (`normalizeRemotePath` — never the local symlink resolver),
+  /// and hands the result to the shared append-only merge. Mirrors the local
+  /// path's "re-detect gitRoot when nil" auto-promotion so a plain remote
+  /// folder becomes a git Server project once the user runs `git init` on the
+  /// host. Swallows and logs errors — reconcile is idempotent and must never
+  /// crash, and a transient SSH failure must not archive live worktree rows
+  /// (the merge only appends / upgrades; the stale-sweep runs against the
+  /// discovered set, so an *empty* discovery from a failed probe never reaches
+  /// it because we return early on `catch`).
+  @MainActor
+  private static func reconcileRemote(
+    project: Project,
+    manager: HierarchyManager
+  ) async {
+    guard let host = project.remoteHost else { return }
+    let projectID = project.id
+    let service = RemoteGitService(host: host)
+    let gitRoot: String? = await {
+      if let existing = project.gitRoot { return existing }
+      if let discovered = await service.discoverGitRoot(candidatePath: project.rootPath),
+        !discovered.isEmpty
+      {
+        manager.setProjectGitRoot(projectID: projectID, gitRoot: discovered)
+        return discovered
+      }
+      return nil
+    }()
+    guard let gitRoot else { return }
+    do {
+      let entries = try await service.listWorktrees(gitRoot: gitRoot)
+      let mapped = entries.map { entry -> (path: String, branch: String?) in
+        let branch = (entry.branch?.isEmpty == false) ? entry.branch : nil
+        return (path: HierarchyManager.normalizeRemotePath(entry.path), branch: branch)
+      }
+      _ = manager.reconcileDiscoveredWorktrees(
+        projectID: projectID,
+        entries: mapped,
+        normalizePath: HierarchyManager.normalizeRemotePath
+      )
+    } catch {
+      reconcileLogger.error(
+        "remote reconcile failed: project=\(projectID.raw.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
       )
     }
   }
