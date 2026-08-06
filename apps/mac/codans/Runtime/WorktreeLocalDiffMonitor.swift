@@ -35,7 +35,7 @@ final class WorktreeLocalDiffMonitor {
   private var inFlight: Set<WorktreeID> = []
 
   @ObservationIgnored
-  private let fetch: @Sendable (URL) async throws -> LocalDiffStats?
+  private var fetch: @Sendable (URL) async throws -> LocalDiffStats?
 
   @ObservationIgnored
   private static let freshness: TimeInterval = 5
@@ -49,6 +49,15 @@ final class WorktreeLocalDiffMonitor {
   static func live() -> WorktreeLocalDiffMonitor {
     let client = GitServiceClient.live()
     return WorktreeLocalDiffMonitor(fetch: client.localDiffStats)
+  }
+
+  /// Swap the fetch closure after construction. `AppState.init` builds the
+  /// monitor before the `HierarchyManager` exists; `bringUp` calls this once
+  /// with the SSH-routing `GitServiceClient` so Server-project worktrees get
+  /// their `+N −M` chip too. Cached stats are untouched — only future
+  /// fetches use the new closure.
+  func rebindFetch(_ fetch: @escaping @Sendable (URL) async throws -> LocalDiffStats?) {
+    self.fetch = fetch
   }
 
   /// Refreshes the local diff stats for the given Worktree, honouring the

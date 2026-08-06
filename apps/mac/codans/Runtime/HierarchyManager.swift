@@ -1145,6 +1145,30 @@ final class HierarchyManager {
     return trimmed
   }
 
+  /// The SSH host owning `path`, or `nil` for a local path. Backs the
+  /// `GitService` transport seam: a path that matches a Server project's
+  /// rootPath / gitRoot / any worktree path (exact match after string-only
+  /// normalization — remote paths never go through the local symlink
+  /// resolver) routes that git invocation over SSH. Every `GitService`
+  /// consumer — the sidebar diff chip, the PR badge's remote-URL probe, the
+  /// branch switcher, the diff inspector — receives worktree-level paths, so
+  /// exact matching is sufficient; subpaths inside a worktree are not
+  /// resolved (none of those callers pass one today).
+  func remoteHost(forPath path: String) -> RemoteHost? {
+    let normalized = Self.normalizeRemotePath(path)
+    for project in catalog.projects {
+      guard let host = project.remoteHost else { continue }
+      if Self.normalizeRemotePath(project.rootPath) == normalized { return host }
+      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == normalized {
+        return host
+      }
+      if project.worktrees.contains(where: { Self.normalizeRemotePath($0.path) == normalized }) {
+        return host
+      }
+    }
+    return nil
+  }
+
   /// Tears down every terminal surface attached to the Worktree without
   /// mutating the catalog. Used by force-remove so any held file handles
   /// are released before `git worktree remove --force` runs; the catalog

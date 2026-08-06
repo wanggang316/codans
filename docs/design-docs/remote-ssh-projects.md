@@ -39,8 +39,10 @@ codans never collects or stores a password or key.
   create path is coupled to the bundled local `wt` script; the SSH git service
   already exposes `addWorktree` / `removeWorktree`, but the UI wiring is a
   follow-up. Discovery, browsing, and terminals are complete.
-- Live diff/status/HEAD watching for remote worktrees. The local file-watchers
-  and diff monitors degrade to no-ops on a remote path (no crash, no data).
+- FSEvents-style *push* change detection for remote worktrees. Remote git
+  status (`+N −M` chip, dirty flag, PR badge, branch switcher, diff inspector)
+  runs over the SSH-routed `GitService` (see below), refreshed by polling and
+  shell-integration markers rather than local file watchers.
 
 ## Design
 
@@ -116,6 +118,21 @@ Git-over-SSH runs through `RemoteGitService` (built on `SSHCommand.invocation` +
 `addWorktree`/`removeWorktree`, plus `expandRemotePath` / `remoteHomeDirectory` /
 `directoryExists` for connect-time validation.
 
+**Transport seam (worktree status parity).** `LiveGitService` funnels every git
+invocation through one `invoke(arguments:cwd:)`, parameterized by a
+`resolveRemoteHost: (URL) async -> RemoteHost?` closure. When the repository
+path belongs to a Server project (resolved live against the catalog via
+`HierarchyManager.remoteHost(forPath:)` — exact string match, never the local
+symlink resolver), the invocation becomes `ssh <controlopts> host 'cd <repo> &&
+git …'` under the host's login shell (bare `git`, PATH-resolved); otherwise it
+is the unchanged local `/usr/bin/git`. The parsers never see the transport, so
+every `GitService` consumer — sidebar `+N −M` chip, dirty flag, the PR badge's
+`remote get-url` probe, branch switcher, diff inspector, commit log — works
+against remote worktrees with no per-feature changes. Freshness comes from the
+sidebar's per-row poll (~20 s while a remote row is visible, riding the shared
+ControlMaster) plus the shell-integration markers remote panes emit through the
+terminal (commit/push in a pane refreshes the chip immediately).
+
 ### Data Storage
 
 `RemoteHost` is `Codable`, and `Project.remoteHost` is `encodeIfPresent` — it is
@@ -184,5 +201,8 @@ passed through the local canonicalizer.
 - **Deferred create/remove reads as "broken."** Mitigation: the affordances are
   hidden for remote (not left to fail), and this doc names the follow-up with the
   exact seams (`RemoteGitService.addWorktree` / `removeWorktree`).
-- **No live remote diff/status.** Local watchers no-op on remote paths.
-  Acceptable for v1; a remote status poll is a natural follow-up.
+- **Remote status is poll-based.** The FS watchers that make local chips
+  instant never fire for remote paths; remote rows refresh on a ~20 s
+  visible-row poll plus in-pane shell-integration markers. A burst of remote
+  edits outside a codans pane can lag by up to one poll interval — accepted;
+  the ControlMaster keeps each tick cheap.

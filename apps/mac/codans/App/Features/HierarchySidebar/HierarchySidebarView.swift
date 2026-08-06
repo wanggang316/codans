@@ -1011,6 +1011,19 @@ struct HierarchySidebarView: View {
       // HEAD-change refresh is wired separately in
       // `RootFeature.worktreeHeadChanged`.
       await worktreeLocalDiffMonitor.refresh(worktreeID: worktree.id, path: url)
+      // Server (remote) worktrees have no local FS watchers — the HEAD /
+      // working-tree watchers that keep local chips live never fire for them.
+      // Poll while the row is visible instead (the task cancels on
+      // disappear); each tick is one probe over the shared SSH ControlMaster,
+      // so the steady-state cost is a few tens of milliseconds.
+      guard project.isRemote else { return }
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(20))
+        guard !Task.isCancelled else { return }
+        worktreeLocalDiffMonitor.invalidate(worktreeID: worktree.id)
+        await worktreeLocalDiffMonitor.refresh(worktreeID: worktree.id, path: url)
+        await worktreeStatusMonitor.refresh(worktreeID: worktree.id, path: url)
+      }
     }
   }
 
