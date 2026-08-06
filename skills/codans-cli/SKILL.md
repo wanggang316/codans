@@ -86,6 +86,24 @@ If you run `codans` from a shell that is *not* inside a codans Pane,
 `current` has no meaning and you'll get a `noContext` error — pass an
 explicit UUID, or use `codans tree` to discover one.
 
+## Detecting codans from a script
+
+Every codans Pane's environment carries a product marker plus
+pane-context variables, so a script or agent can branch on "am I inside
+codans" without probing the socket:
+
+- `TERM_PROGRAM=codans` — set for every pane; `TERM_PROGRAM_VERSION`
+  carries the app version.
+- `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH` — absolute paths of the
+  pane's worktree and its Project root.
+
+```bash
+if [ "$TERM_PROGRAM" = "codans" ]; then
+  # running inside a codans Pane; `current` targeting works
+  codans pane read
+fi
+```
+
 ## Global flags
 
 These work on every subcommand (mounted via `@OptionGroup`):

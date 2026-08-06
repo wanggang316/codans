@@ -10,6 +10,13 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Product marker in every pane's environment.** Panes now export
+  `TERM_PROGRAM=codans` and `TERM_PROGRAM_VERSION=<app version>`, so shell
+  scripts and coding agents can cheaply detect they are running inside
+  codans (same convention as Terminal.app, iTerm2, and ghostty). A
+  `TERM_PROGRAM` inherited from the terminal that launched codans no longer
+  leaks into panes.
+
 ### Changed
 
 ### Deprecated
