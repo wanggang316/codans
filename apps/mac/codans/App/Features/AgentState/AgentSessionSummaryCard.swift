@@ -5,17 +5,22 @@ import SwiftUI
 /// peek at the agent session behind the row so the user can triage
 /// without focusing the pane.
 ///
+/// Pure metadata, no terminal stream: a raw viewport tail proved too
+/// noisy for a small floating card (truncated TUI lines carry little),
+/// so the "what is it doing" role moved to the pane's OSC title — the
+/// one-liner agents themselves keep current as they work.
+///
 /// Layout (top → bottom):
 /// - Header: agent logo + display name, state glyph + verb trailing.
 /// - Breadcrumb: `<project> / <worktree>` (project in its configured hue),
 ///   with the elapsed time since the last state transition pinned to the
 ///   trailing edge — directly under the state chip it qualifies, ticking
 ///   once a second via `TimelineView` while the card stays open.
+/// - Activity line: the pane's latest OSC title. `paneTitle` is called
+///   on every render pass, so an open card tracks retitles live; the
+///   line collapses entirely while no usable title has been observed.
 /// - Session line: the agent's own session id when one was captured
 ///   (hidden otherwise — most binders don't model it yet).
-/// - Terminal tail: the last few non-blank lines of the pane's rendered
-///   viewport, monospaced. `viewportSnapshot` is called on every render
-///   pass, so an open card tracks the live viewport as the agent works.
 ///
 /// Presentation (hover-in delay, popover anchoring, dismissal) is owned
 /// by `AgentStateRowView`; this view is pure content.
@@ -24,21 +29,19 @@ struct AgentSessionSummaryCard: View {
   let projectName: String
   let worktreeName: String
   var projectColor: ProjectColor?
-  /// Latest rendered viewport text for the row's pane. Called lazily on
-  /// each render so the tail stays live while the card is open.
-  let viewportSnapshot: () -> String?
+  /// Latest OSC title of the row's pane. Called lazily on each render
+  /// so the activity line stays live while the card is open.
+  let paneTitle: () -> String?
 
   var body: some View {
-    let tail = AgentSummaryCardFormat.tailLines(viewportSnapshot())
     VStack(alignment: .leading, spacing: 8) {
       header
       breadcrumb
+      if let title = trimmedTitle {
+        activityLine(title)
+      }
       if let sessionID = entry.sessionID {
         sessionLine(sessionID)
-      }
-      if !tail.isEmpty {
-        Divider()
-        terminalTail(tail)
       }
     }
     .padding(12)
@@ -123,6 +126,26 @@ struct AgentSessionSummaryCard: View {
     }
   }
 
+  /// Pane title with surrounding whitespace stripped; nil when the
+  /// terminal has not pushed a usable title, so the activity line
+  /// disappears instead of rendering an empty row.
+  private var trimmedTitle: String? {
+    guard
+      let raw = paneTitle()?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !raw.isEmpty
+    else { return nil }
+    return raw
+  }
+
+  private func activityLine(_ title: String) -> some View {
+    Text(title)
+      .font(.caption)
+      .foregroundStyle(.primary)
+      .lineLimit(2)
+      .truncationMode(.tail)
+      .accessibilityIdentifier("agentState.summaryCard.activity")
+  }
+
   private func sessionLine(_ sessionID: String) -> some View {
     Text("Session \(sessionID)")
       .font(.caption2)
@@ -130,41 +153,11 @@ struct AgentSessionSummaryCard: View {
       .lineLimit(1)
       .truncationMode(.middle)
   }
-
-  private func terminalTail(_ lines: [String]) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-        Text(line)
-          .font(.system(size: 11, design: .monospaced))
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.tail)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(8)
-    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-    .accessibilityElement(children: .combine)
-    .accessibilityIdentifier("agentState.summaryCard.tail")
-  }
 }
 
 /// Pure formatting helpers for the summary card, kept off the view so
 /// they stay unit-testable without rendering.
 nonisolated enum AgentSummaryCardFormat {
-  /// Last `maxLines` non-blank lines of a rendered viewport, each
-  /// whitespace-trimmed. Blank lines are dropped entirely — the card is
-  /// a density-first peek, not a faithful terminal replica.
-  static func tailLines(_ text: String?, maxLines: Int = 8) -> [String] {
-    guard let text else { return [] }
-    let lines =
-      text
-      .split(separator: "\n", omittingEmptySubsequences: false)
-      .map { $0.trimmingCharacters(in: .whitespaces) }
-      .filter { !$0.isEmpty }
-    return Array(lines.suffix(maxLines))
-  }
-
   /// Compact elapsed-time label: "42s", "12m", "1h 3m", "2d". Clamped
   /// at zero so a clock skew between `lastTransitionAt` and the render
   /// date can't produce a negative age.
