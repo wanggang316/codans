@@ -72,6 +72,46 @@ struct RemoteGitRoutingTests {
 
   @Test
   @MainActor
+  func updateServerProjectReseedsRowsOnlyOnPathChange() {
+    let tempURL = FileManager.default.temporaryDirectory
+      .appending(component: UUID().uuidString + ".json")
+    let manager = HierarchyManager(
+      catalog: .default,
+      store: CatalogStore(fileURL: tempURL),
+      runtime: FakeHierarchyRuntime()
+    )
+    let projectID = manager.addServerProject(
+      name: "app", remoteHost: Self.host, rootPath: "/data/app", gitRoot: "/data/app"
+    )
+    _ = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [(path: "/data/app", branch: "main"), (path: "/data/x", branch: "x")],
+      normalizePath: HierarchyManager.normalizeRemotePath
+    )
+    let rowsBefore = manager.catalog.projects[0].worktrees.map(\.id)
+    #expect(rowsBefore.count == 2)
+
+    // Host-only change (e.g. new port): rows keep their identity — the paths
+    // are still valid on the same machine.
+    let movedHost = RemoteHost(alias: "example.com", username: "alice", port: 2200)
+    manager.updateServerProject(
+      projectID: projectID, remoteHost: movedHost, rootPath: "/data/app", gitRoot: "/data/app"
+    )
+    #expect(manager.catalog.projects[0].remoteHost == movedHost)
+    #expect(manager.catalog.projects[0].worktrees.map(\.id) == rowsBefore)
+
+    // Path change: every row's remote path is stale — reseed (empty for a git
+    // root; the next reconcile discovers the real worktrees).
+    manager.updateServerProject(
+      projectID: projectID, remoteHost: movedHost, rootPath: "/data/other", gitRoot: "/data/other"
+    )
+    #expect(manager.catalog.projects[0].rootPath == "/data/other")
+    #expect(manager.catalog.projects[0].worktrees.isEmpty)
+    #expect(manager.catalog.projects[0].selectedWorktreeID == nil)
+  }
+
+  @Test
+  @MainActor
   func managerResolvesRemoteHostForServerProjectPathsOnly() {
     let tempURL = FileManager.default.temporaryDirectory
       .appending(component: UUID().uuidString + ".json")

@@ -73,6 +73,13 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ name: String, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
     ) -> ProjectID
+  /// Apply an edited Server-project connection in place. A rootPath change
+  /// reseeds the worktree rows (the old remote paths are stale). Forwards to
+  /// `HierarchyManager.updateServerProject`.
+  var updateServerProject:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
+    ) -> Void
   var removeProject: @MainActor @Sendable (_ projectID: ProjectID) throws -> Void
   var renameProject:
     @MainActor @Sendable (
@@ -602,6 +609,11 @@ extension HierarchyClient {
       addServerProject: { name, remoteHost, rootPath, gitRoot in
         manager.addServerProject(
           name: name, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
+        )
+      },
+      updateServerProject: { projectID, remoteHost, rootPath, gitRoot in
+        manager.updateServerProject(
+          projectID: projectID, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
         )
       },
       removeProject: { projectID in try manager.removeProject(projectID) },
@@ -1664,9 +1676,16 @@ extension HierarchyClient {
     // `worktree.branch` can be empty/stale (reconciled rows, legacy
     // catalog entries), and a missed branch deletion is exactly what
     // leaves a dangling ref that blocks same-name re-creation. Match by
-    // canonical path; fall back to the catalog value.
+    // canonical path; fall back to the catalog value. Remote paths use the
+    // string-only normalizer — the local symlink resolver would corrupt them.
+    let isRemote = project.isRemote
+    func normalize(_ path: String) -> String {
+      isRemote
+        ? HierarchyManager.normalizeRemotePath(path)
+        : HierarchyManager.canonicalPath(path)
+    }
     let liveBranch = (try? await gitWorktreeClient.lsWorktrees(gitRootURL))?
-      .first { HierarchyManager.canonicalPath($0.path) == HierarchyManager.canonicalPath(worktree.path) }?
+      .first { normalize($0.path) == normalize(worktree.path) }?
       .branch
     let branchToDelete = [liveBranch, worktree.branch]
       .compactMap { $0 }
@@ -1781,6 +1800,7 @@ extension HierarchyClient: DependencyKey {
     setActiveTagFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     addServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    updateServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectColor: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1873,6 +1893,7 @@ extension HierarchyClient: DependencyKey {
     setActiveTagFilter: unimplemented("HierarchyClient.setActiveTagFilter"),
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
     addServerProject: unimplemented("HierarchyClient.addServerProject", placeholder: ProjectID()),
+    updateServerProject: unimplemented("HierarchyClient.updateServerProject"),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),
     setProjectColor: unimplemented("HierarchyClient.setProjectColor"),

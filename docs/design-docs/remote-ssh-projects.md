@@ -1,6 +1,6 @@
 # Design Doc: Remote SSH "Server" Projects
 
-**Status:** Implemented (discovery + terminal); worktree create/remove deferred
+**Status:** Implemented (discovery, terminal, status parity, worktree create/remove, edit connection)
 **Author:** Gump
 **Date:** 2026-07-24
 
@@ -32,17 +32,31 @@ codans never collects or stores a password or key.
   many-worktree sidebar costs a single auth.
 - Zero migration: existing local catalogs round-trip byte-identically.
 
+**Goals (worktree management parity)**
+
+- Remote worktree **create** through the same sheet as local: options (base
+  refs, local branches, default remote branch, collision classification) load
+  over SSH via the routed worktree client; creation runs `git worktree add -b
+  <name> <path> <baseRef>` on the host (with an optional host-side `git fetch`
+  when the base ref tracks a remote), landing beside the repo root. The wt-only
+  copy-ignored / copy-untracked toggles are hidden for remote.
+- Remote worktree **remove** through the same flow as local: the shared
+  removal path routes `git worktree remove --force` + branch cleanup over SSH
+  ("is not a working tree" still maps to idempotent success). No local trash
+  relocation on a host.
+- **Edit Connection** on a Server project (host / port / user / path),
+  re-validated like an add; a path change reseeds the worktree rows, a
+  host-only change keeps them.
+
 **Non-Goals**
 
 - In-app credential management. Auth is `~/.ssh/config` + agent, full stop.
-- Remote worktree **create / remove** through the UI (this pass). The streaming
-  create path is coupled to the bundled local `wt` script; the SSH git service
-  already exposes `addWorktree` / `removeWorktree`, but the UI wiring is a
-  follow-up. Discovery, browsing, and terminals are complete.
 - FSEvents-style *push* change detection for remote worktrees. Remote git
   status (`+N −M` chip, dirty flag, PR badge, branch switcher, diff inspector)
   runs over the SSH-routed `GitService` (see below), refreshed by polling and
   shell-integration markers rather than local file watchers.
+- The `wt` streaming-create extras (copy ignored / untracked, in-stream setup
+  script) on remote hosts — remote creation is plain `git worktree add`.
 
 ## Design
 
@@ -115,8 +129,13 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
 
 Git-over-SSH runs through `RemoteGitService` (built on `SSHCommand.invocation` +
 `FoundationCommandRunner`): `discoverGitRoot`, `listWorktrees` (porcelain),
-`addWorktree`/`removeWorktree`, plus `expandRemotePath` / `remoteHomeDirectory` /
-`directoryExists` for connect-time validation.
+`addWorktree(baseRef:)` / `removeWorktree` / branch queries / fetch / prune /
+status, plus `resolveAbsolutePath` — a single-round-trip probe (`~`-expand +
+exists + `pwd -P`) used by connect-time validation and the reconciler's
+path-vs-unreachable failure classification. `GitWorktreeClient.makeLive` takes
+the same `remoteHostResolver` seam, so the worktree-management surface
+(listing, create-sheet options, removal, prune) routes per call exactly like
+`LiveGitService` does for status.
 
 **Transport seam (worktree status parity).** `LiveGitService` funnels every git
 invocation through one `invoke(arguments:cwd:)`, parameterized by a
@@ -198,9 +217,11 @@ passed through the local canonicalizer.
   the git probes inherit the app process environment; on a launchd session the
   agent socket is present. If it is missing, the interactive terminal still
   prompts (no BatchMode) — only background probes fail fast.
-- **Deferred create/remove reads as "broken."** Mitigation: the affordances are
-  hidden for remote (not left to fail), and this doc names the follow-up with the
-  exact seams (`RemoteGitService.addWorktree` / `removeWorktree`).
+- **Remote creation lacks the wt extras.** Copy-ignored / copy-untracked and
+  the in-stream setup script are local streaming-create capabilities; remote
+  creation is plain `git worktree add` and hides those toggles. Mitigation: the
+  sheet communicates the reduced surface by omission, and git's own errors
+  (branch exists, bad ref) surface verbatim in the pending row.
 - **Remote status is poll-based.** The FS watchers that make local chips
   instant never fire for remote paths; remote rows refresh on a ~20 s
   visible-row poll plus in-pane shell-integration markers. A burst of remote

@@ -61,6 +61,95 @@ struct RemoteGitServiceTests {
   }
 
   @Test
+  func lastNonEmptyLineSkipsLoginBanners() {
+    // A login shell may print banners before the probe's own output; the
+    // result is the final non-empty line, trimmed.
+    let output = "Welcome to the server!\nmotd line\n\n/srv/app\n"
+    #expect(RemoteGitService.lastNonEmptyLine(of: output) == "/srv/app")
+    #expect(RemoteGitService.lastNonEmptyLine(of: "\n \n") == "")
+  }
+
+  @Test
+  func resolvePathScriptExpandsTildeAndCanonicalizes() throws {
+    // The script runs under POSIX sh on the host; local /bin/sh matches that
+    // contract, so exercise it for real: a symlinked directory resolves to
+    // its physical path, and a missing directory exits non-zero.
+    let fm = FileManager.default
+    let base = fm.temporaryDirectory.appendingPathComponent("codans-rp-\(UUID().uuidString)")
+    let real = base.appendingPathComponent("real")
+    let link = base.appendingPathComponent("link")
+    try fm.createDirectory(at: real, withIntermediateDirectories: true)
+    try fm.createSymbolicLink(at: link, withDestinationURL: real)
+    defer { try? fm.removeItem(at: base) }
+
+    func run(_ argument: String) -> (status: Int32, stdout: String) {
+      let proc = Process()
+      proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+      proc.arguments = ["-c", RemoteGitService.resolvePathScript, "sh", argument]
+      let out = Pipe()
+      proc.standardOutput = out
+      proc.standardError = Pipe()
+      try? proc.run()
+      proc.waitUntilExit()
+      let data = out.fileHandleForReading.readDataToEndOfFile()
+      return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    let resolved = run(link.path)
+    #expect(resolved.status == 0)
+    let resolvedPath = RemoteGitService.lastNonEmptyLine(of: resolved.stdout)
+    // `pwd -P` resolves the symlink: the link and the real dir must resolve
+    // to the SAME physical path (compare script-vs-script — Foundation's
+    // `resolvingSymlinksInPath` strips `/private` and can't be the oracle).
+    let direct = run(real.path)
+    #expect(resolvedPath == RemoteGitService.lastNonEmptyLine(of: direct.stdout))
+    #expect(resolvedPath.hasSuffix("/real"))
+    #expect(!resolvedPath.contains("link"))
+
+    let missing = run(base.appendingPathComponent("nope").path)
+    #expect(missing.status != 0)
+  }
+
+  @Test
+  func addWorktreeCarriesBaseRefInRemoteCommand() async throws {
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false)
+    ])
+    let service = RemoteGitService(
+      host: RemoteHost(alias: "example.com"), runner: runner
+    )
+    try await service.addWorktree(
+      gitRoot: "/srv/app", branch: "feat-x", path: "/srv/feat-x", baseRef: "origin/main"
+    )
+    let remote = await runner.calls[0].arguments.last ?? ""
+    #expect(remote.contains("worktree"))
+    #expect(remote.contains("add"))
+    #expect(remote.contains("-b"))
+    #expect(remote.contains("feat-x"))
+    #expect(remote.contains("origin/main"))
+  }
+
+  @Test
+  func deleteBranchMapsRefusalToKept() async {
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(
+        code: 1,
+        stdout: Data(),
+        stderr: Data("error: cannot delete branch 'main' used by worktree at '/srv/app'".utf8),
+        stdoutOverflow: false
+      )
+    ])
+    let service = RemoteGitService(
+      host: RemoteHost(alias: "example.com"), runner: runner
+    )
+    let outcome = await service.deleteBranchIfExists(gitRoot: "/srv/app", branch: "main")
+    guard case .kept = outcome else {
+      Issue.record("expected .kept, got \(outcome)")
+      return
+    }
+  }
+
+  @Test
   func connectionFailureIsFlaggedByExit255() {
     let sshFailure = RemoteGitError.commandFailed(
       command: "git worktree list", exitCode: 255, stderr: "ssh: connect: refused"

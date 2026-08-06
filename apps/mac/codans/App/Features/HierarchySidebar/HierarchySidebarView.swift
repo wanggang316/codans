@@ -1246,21 +1246,15 @@ struct HierarchySidebarView: View {
         }
         .appKeyboardShortcut(.archiveCurrentWorktree, in: resolvedShortcuts)
       }
-      // Remove runs the local relocate-then-prune git path, which a remote
-      // worktree can't take; suppressed for Server projects until remote
-      // worktree removal is wired over SSH. Archive (a catalog-only soft-hide)
-      // above still works for remote.
-      if !project.isRemote {
-        Button(role: .destructive) {
-          store.send(
-            .worktreeRemoveTapped(
-              worktreeID: worktree.id, inProject: project.id, name: worktree.name
-            ))
-        } label: {
-          Label("Remove Worktree", systemImage: "trash")
-        }
-        .appKeyboardShortcut(.deleteCurrentWorktree, in: resolvedShortcuts)
+      Button(role: .destructive) {
+        store.send(
+          .worktreeRemoveTapped(
+            worktreeID: worktree.id, inProject: project.id, name: worktree.name
+          ))
+      } label: {
+        Label("Remove Worktree", systemImage: "trash")
       }
+      .appKeyboardShortcut(.deleteCurrentWorktree, in: resolvedShortcuts)
     }
   }
 
@@ -1774,17 +1768,25 @@ private struct ProjectHeaderRow: View {
         .font(.subheadline)
         .foregroundStyle(projectNameColor)
         .lineLimit(1)
+      // Server projects carry a small network glyph so a remote repo is
+      // distinguishable from a local one at a glance; the tooltip names the
+      // SSH destination.
+      if let host = project.remoteHost {
+        Image(systemName: "network")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .help(host.displayAuthority)
+          .accessibilityLabel("Remote server \(host.displayAuthority)")
+      }
       Spacer(minLength: 4)
       // Keep the hover chrome from collapsing row width when hidden —
       // use opacity, not conditional rendering.
       HStack(spacing: 2) {
         // Non-git Projects (P-Q4 = a): suppress the Add Worktree affordance.
         // Worktrees are a git-only concept; a scratch folder renders with a
-        // single synthetic Worktree and nothing to add. Also suppressed for
-        // Server (remote) projects: worktree creation streams through the
-        // bundled local `wt` script, which has no remote counterpart yet —
-        // remote worktree creation over SSH is a follow-up.
-        if project.supportsWorktrees && !project.isRemote {
+        // single synthetic Worktree and nothing to add. Server (remote)
+        // projects create over SSH (`git worktree add` on the host).
+        if project.supportsWorktrees {
           Button {
             store.send(.projectAddWorktreeTapped(projectID: project.id))
           } label: {
@@ -1799,6 +1801,13 @@ private struct ProjectHeaderRow: View {
             store.send(.projectSettingsTapped(projectID: project.id))
           } label: {
             Label("Project Settings…", systemImage: "slider.horizontal.3")
+          }
+          if project.isRemote {
+            Button {
+              store.send(.projectEditConnectionTapped(projectID: project.id))
+            } label: {
+              Label("Edit Connection…", systemImage: "network")
+            }
           }
           Divider()
           // Worktree operations group: archived list, prune, and the

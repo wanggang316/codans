@@ -57,6 +57,24 @@ struct RemoteConnectionFeatureTests {
   }
 
   @Test
+  func editingSeedsFormFromServerProject() {
+    let host = RemoteHost(alias: "example.com", username: "alice", port: 2222)
+    let project = Project(
+      name: "app", rootPath: "/srv/app", gitRoot: "/srv/app", remoteHost: host
+    )
+    let seeded = RemoteConnectionFeature.State.editing(project: project)
+    #expect(seeded?.mode == .edit(projectID: project.id))
+    #expect(seeded?.isEditing == true)
+    #expect(seeded?.hostDraft == "example.com")
+    #expect(seeded?.portDraft == "2222")
+    #expect(seeded?.usernameDraft == "alice")
+    #expect(seeded?.pathDraft == "/srv/app")
+    // A local project has no connection to edit.
+    let local = Project(name: "local", rootPath: "/tmp/x")
+    #expect(RemoteConnectionFeature.State.editing(project: local) == nil)
+  }
+
+  @Test
   func connectSucceededDelegatesConnected() async {
     let host = RemoteHost(alias: "example.com", username: "alice", port: 2222)
     let store = TestStore(initialState: RemoteConnectionFeature.State(isConnecting: true)) {

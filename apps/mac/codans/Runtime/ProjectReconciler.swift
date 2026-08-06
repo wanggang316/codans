@@ -54,14 +54,25 @@ actor ProjectReconciler {
     await client.setProjectLoadState(projectID, .loading)
 
     // Health check. A remote path can't be stat'd locally, so a Server project
-    // substitutes an SSH reachability probe (`ssh host true`) for the local
-    // `FileManager.fileExists` — the host being reachable stands in for "the
-    // project's root is still there". Both map failure to `.failed(reason:)`.
+    // substitutes SSH probes for the local `FileManager.fileExists`, with the
+    // two failure modes kept distinct so the row names the actual problem:
+    // host unreachable ("Cannot reach …") vs host answered but the configured
+    // path is gone ("… was not found on …").
     if let remoteHost = project.remoteHost {
       guard await RemoteReachabilityProbe.isReachable(host: remoteHost) else {
         await client.setProjectLoadState(
           projectID,
           .failed(reason: "Cannot reach \(remoteHost.displayAuthority)")
+        )
+        return
+      }
+      let service = RemoteGitService(host: remoteHost)
+      guard await service.resolveAbsolutePath(project.rootPath) != nil else {
+        await client.setProjectLoadState(
+          projectID,
+          .failed(
+            reason: "\(project.rootPath) was not found on \(remoteHost.displayAuthority)"
+          )
         )
         return
       }

@@ -311,6 +311,49 @@ final class HierarchyManager {
     return projectID
   }
 
+  /// Apply an edited Server-project connection in place. Host-only changes
+  /// (alias / user / port to the same machine) keep the worktree rows — their
+  /// remote paths are still valid. A `rootPath` change re-points the project
+  /// at a different remote directory, so every existing row's path is stale:
+  /// tear down their surfaces and reseed (synthetic row for a folder, empty
+  /// for a git root — the next reconcile discovers the real worktrees).
+  func updateServerProject(
+    projectID: ProjectID,
+    remoteHost: RemoteHost,
+    rootPath: String,
+    gitRoot: String?
+  ) {
+    guard let index = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[index].remoteHost != nil
+    else { return }
+    let pathChanged = Self.normalizeRemotePath(catalog.projects[index].rootPath)
+      != Self.normalizeRemotePath(rootPath)
+    catalog.projects[index].remoteHost = remoteHost
+    catalog.projects[index].rootPath = rootPath
+    catalog.projects[index].gitRoot = gitRoot
+    if pathChanged {
+      for worktree in catalog.projects[index].worktrees {
+        tearDownWorktreeSurfaces(worktreeID: worktree.id)
+      }
+      if gitRoot == nil {
+        let synthetic = Worktree(
+          id: WorktreeID(),
+          name: (rootPath as NSString).lastPathComponent,
+          path: rootPath,
+          branch: nil,
+          tabs: [],
+          selectedTabID: nil
+        )
+        catalog.projects[index].worktrees = [synthetic]
+        catalog.projects[index].selectedWorktreeID = synthetic.id
+      } else {
+        catalog.projects[index].worktrees = []
+        catalog.projects[index].selectedWorktreeID = nil
+      }
+    }
+    store.scheduleSave(catalog)
+  }
+
   // MARK: - Project sort mode (sidebar bottom bar)
 
   /// Replaces the catalog-wide `projectSortMode`. Unchanged values are

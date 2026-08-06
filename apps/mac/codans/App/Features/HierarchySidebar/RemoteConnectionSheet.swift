@@ -40,7 +40,7 @@ struct RemoteConnectionSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text("Connect to Server")
+      Text(store.isEditing ? "Edit Server Connection" : "Connect to Server")
         .font(.headline)
 
       if let error = store.errorMessage {
@@ -126,7 +126,7 @@ struct RemoteConnectionSheet: View {
         .keyboardShortcut(.cancelAction)
         .disabled(store.isConnecting)
 
-        Button("Connect") {
+        Button(store.isEditing ? "Save" : "Connect") {
           store.send(.connectButtonTapped)
         }
         .keyboardShortcut(.defaultAction)

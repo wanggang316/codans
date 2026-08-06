@@ -672,9 +672,20 @@ final class AppState {
     // handlers share the exact same live instances — avoids two parallel
     // `LiveEditorService`s with divergent settings captures.
     let editor = EditorClient.live(settings: settings)
+    // Server-project transport seam for the worktree-management surface:
+    // paths owned by a remote project route their plain-git operations
+    // (listing, branch queries, removal, prune, status) over SSH. Shared by
+    // the HierarchyClient (reconcile + removal) and the root store (create
+    // sheet option loading) so both sides agree on the transport.
+    let worktreeClient = GitWorktreeClient.makeLive(
+      remoteHostResolver: { [weak manager] path in
+        await MainActor.run { manager?.remoteHost(forPath: path) }
+      }
+    )
     let hierarchy = HierarchyClient.live(
       manager: manager,
       settings: settings,
+      gitWorktreeClient: worktreeClient,
       terminalClient: .live(engine: engine)
     )
     self.editorClient = editor
@@ -786,9 +797,10 @@ final class AppState {
     } withDependencies: {
       $0.hierarchyClient = hierarchy
       $0.terminalClient = .live(engine: engine)
-      // SSH-routing git client (see construction above) so every reducer-side
+      // SSH-routing git clients (see construction above) so every reducer-side
       // git consumer transparently reaches Server-project repositories.
       $0.gitService = routedGitClient
+      $0.gitWorktreeClient = worktreeClient
       // Without these overrides, `EditorClient.liveValue` and
       // `SettingsWriter.liveValue` fatalError on any descendants call. Both factories close
       // over `settings` (global default + custom templates); `editorClient` additionally

@@ -199,6 +199,9 @@ struct HierarchySidebarFeature {
     case cloneRepoTapped
     /// Add Project menu → "Connect to Server…". Opens the remote-connection sheet.
     case connectServerTapped
+    /// Server project's options menu → "Edit Connection…". Opens the
+    /// remote-connection sheet seeded from the project, in edit mode.
+    case projectEditConnectionTapped(projectID: ProjectID)
 
     // Reorder Projects (ForEach.onMove forwarder).
     case reorderProjects(from: IndexSet, to: Int)
@@ -467,15 +470,23 @@ struct HierarchySidebarFeature {
         state.remoteConnectionSheet = nil
         return .none
       case .remoteConnectionSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
-        // Connection validated; dismiss and register the Server project. The
-        // name is the remote path's leaf (falling back to the host) so the
-        // sidebar reads a recognizable label before the first SSH reconcile
-        // fills in worktrees.
+        // Connection validated. Read the mode BEFORE dismissing: edit applies
+        // the change to the existing project in place; add registers a new
+        // one, named by the remote path's leaf (falling back to the host) so
+        // the sidebar reads a recognizable label before the first SSH
+        // reconcile fills in worktrees. Both re-reconcile.
+        let mode = state.remoteConnectionSheet?.mode ?? .add
         state.remoteConnectionSheet = nil
-        let leaf = (remotePath as NSString).lastPathComponent
-        let name = leaf.isEmpty ? host.displayAuthority : leaf
-        let projectID = hierarchyClient.addServerProject(name, host, remotePath, gitRoot)
-        return .send(.delegate(.reconcileProjectRequested(projectID)))
+        switch mode {
+        case .edit(let projectID):
+          hierarchyClient.updateServerProject(projectID, host, remotePath, gitRoot)
+          return .send(.delegate(.reconcileProjectRequested(projectID)))
+        case .add:
+          let leaf = (remotePath as NSString).lastPathComponent
+          let name = leaf.isEmpty ? host.displayAuthority : leaf
+          let projectID = hierarchyClient.addServerProject(name, host, remotePath, gitRoot)
+          return .send(.delegate(.reconcileProjectRequested(projectID)))
+        }
       case .remoteConnectionSheet:
         return .none
       case .archivedWorktreesSheet(.delegate(.dismissed)):
@@ -565,6 +576,14 @@ struct HierarchySidebarFeature {
 
     case .connectServerTapped:
       state.remoteConnectionSheet = RemoteConnectionFeature.State()
+      return .none
+
+    case .projectEditConnectionTapped(let projectID):
+      guard
+        let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+        let seeded = RemoteConnectionFeature.State.editing(project: project)
+      else { return .none }
+      state.remoteConnectionSheet = seeded
       return .none
 
     // MARK: Tag filter chip footer
@@ -678,20 +697,22 @@ struct HierarchySidebarFeature {
       guard let project = snapshot.projects.first(where: { $0.id == projectID }),
         let gitRoot = project.gitRoot
       else { return .none }
-      // Server (remote) projects have no local worktree-create path yet — the
-      // create stream drives the bundled local `wt` script. No-op here so a
-      // keyboard-shortcut entry point can't open a sheet that would fail on
-      // spawn. The sidebar "+" affordance is already hidden for remote.
-      guard !project.isRemote else { return .none }
       let settingsSnapshot = settingsWriter.readSnapshotSync()
       let projectSettings = settingsSnapshot.projects[projectID]
       let globalWorktree = settingsSnapshot.worktree
-      let defaultWtDir = globalWorktree.resolveBaseDirectory(
-        // Use the path-derived canonical name so renaming a project in
-        // Settings → General never relocates the suggested worktree folder.
-        forProjectName: project.canonicalName,
-        projectOverride: projectSettings?.worktreesDirectory
-      )
+      // Server (remote) projects: the sheet's option loading rides the
+      // SSH-routed worktree client, and the new worktree lands beside the
+      // repo root ON THE HOST — the local worktrees-directory setting names a
+      // local path that means nothing there.
+      let defaultWtDir =
+        project.isRemote
+        ? URL(fileURLWithPath: (gitRoot as NSString).deletingLastPathComponent)
+        : globalWorktree.resolveBaseDirectory(
+          // Use the path-derived canonical name so renaming a project in
+          // Settings → General never relocates the suggested worktree folder.
+          forProjectName: project.canonicalName,
+          projectOverride: projectSettings?.worktreesDirectory
+        )
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count
       // Seed the sheet toggles from the effective settings so the
       // checkboxes match what the user pinned in Project Settings → Worktree
@@ -727,11 +748,12 @@ struct HierarchySidebarFeature {
         repoRoot: URL(fileURLWithPath: gitRoot),
         worktreesDirectory: defaultWtDir,
         currentPendingCountForProject: pendingCount,
+        remoteHost: project.remoteHost,
         baseRefOverride: projectGit?.worktreeBaseRef,
         archivedBranchOwnersByLower: archivedOwners,
         fetchOrigin: fetchOriginDefault,
-        copyIgnored: copyIgnoredDefault,
-        copyUntracked: copyUntrackedDefault
+        copyIgnored: project.isRemote ? false : copyIgnoredDefault,
+        copyUntracked: project.isRemote ? false : copyUntrackedDefault
       )
       return .none
 
@@ -771,13 +793,6 @@ struct HierarchySidebarFeature {
       // protection. Guard at the lifecycle entry point so every dispatch path
       // is covered by a single check.
       if isMainCheckout(worktreeID: worktreeID, projectID: projectID) {
-        return .none
-      }
-      // Server (remote) worktree removal runs the local relocate-then-prune
-      // git path, which can't act on a remote worktree. No-op for remote until
-      // removal is wired over SSH; the context menu already hides "Remove
-      // Worktree" for remote, this covers the destructive chord (⌘⇧⌫).
-      if hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?.isRemote == true {
         return .none
       }
       state.pendingWorktreeRemoval = PendingWorktreeRemoval(
@@ -1151,7 +1166,15 @@ struct HierarchySidebarFeature {
   /// for a single pending creation. Cancel-in-flight protects Retry from
   /// overlapping a zombie effect (edge case — by the time Retry fires
   /// the prior effect should already have thrown).
+  ///
+  /// Server (remote) projects route to the SSH creation instead: plain
+  /// `git worktree add` on the host, no local `wt` stream. Both paths share
+  /// the pending-row lifecycle (`pendingWorktreeFinished` / `Failed`), so
+  /// Retry / Cancel / the loading row behave identically.
   private func runPendingStream(_ pending: PendingWorktree) -> Effect<Action> {
+    if let host = pending.remoteHost {
+      return runRemoteCreate(pending, host: host)
+    }
     let client = gitWorktreeClient
     let id = pending.id
     return .run { send in
@@ -1182,6 +1205,50 @@ struct HierarchySidebarFeature {
         await send(
           .pendingWorktreeFailed(
             id, .commandFailed(command: "wt sw", stderr: error.localizedDescription)))
+      }
+    }
+    .cancellable(id: CancelID.pending(id), cancelInFlight: true)
+  }
+
+  /// Remote counterpart of `runPendingStream`: create the worktree on the
+  /// host over SSH (`git worktree add -b <name> <path> <baseRef>`, with an
+  /// optional remote-side fetch when the base ref tracks a remote), then land
+  /// the result through the same `pendingWorktreeFinished` / `Failed` actions
+  /// the local stream uses. The worktree path is `<worktreesDirectory>/<name>`
+  /// as remote strings — never local-canonicalized.
+  private func runRemoteCreate(_ pending: PendingWorktree, host: RemoteHost) -> Effect<Action> {
+    let id = pending.id
+    let spec = pending.spec
+    return .run { send in
+      let service = RemoteGitService(host: host)
+      let gitRoot = spec.repoRoot.path
+      let path = spec.baseDirectory.appending(path: spec.name).path
+      if spec.fetchOrigin {
+        await send(.pendingWorktreeProgress(id, "Fetching on \(host.displayAuthority)…"))
+        await service.fetchIfBaseRefTracksRemote(baseRef: spec.baseRef, gitRoot: gitRoot)
+      }
+      await send(.pendingWorktreeProgress(id, "Creating worktree on \(host.displayAuthority)…"))
+      do {
+        try await service.addWorktree(
+          gitRoot: gitRoot, branch: spec.name, path: path, baseRef: spec.baseRef
+        )
+        await send(.pendingWorktreeFinished(id, URL(fileURLWithPath: path)))
+      } catch let error as RemoteGitError {
+        guard case .commandFailed(let command, _, let stderr) = error else {
+          await send(
+            .pendingWorktreeFailed(
+              id,
+              .commandFailed(command: "git worktree add", stderr: String(describing: error))))
+          return
+        }
+        await send(
+          .pendingWorktreeFailed(id, GitWorktreeClient.mapGitStderr(command: command, stderr: stderr)))
+      } catch is CancellationError {
+        return
+      } catch {
+        await send(
+          .pendingWorktreeFailed(
+            id, .commandFailed(command: "git worktree add", stderr: error.localizedDescription)))
       }
     }
     .cancellable(id: CancelID.pending(id), cancelInFlight: true)
