@@ -87,20 +87,6 @@ struct AgentSessionHistoryScannerTests {
   }
 
   @Test
-  func resumeCommandsCoverClaudeAndCodexOnly() {
-    #expect(
-      AgentSessionResume.command(agent: .claudeCode, sessionID: "abc")
-        == "claude --resume 'abc'")
-    #expect(AgentSessionResume.command(agent: .codex, sessionID: "01X") == "codex resume '01X'")
-    #expect(AgentSessionResume.command(agent: .gemini, sessionID: "x") == nil)
-  }
-
-  @Test
-  func shellQuotedEscapesEmbeddedSingleQuotes() {
-    #expect(AgentSessionResume.shellQuoted("a'b") == #"'a'\''b'"#)
-  }
-
-  @Test
   func scanReadsFixtureStoresScopedToTheWorktree() throws {
     let fileManager = FileManager.default
     let home = fileManager.temporaryDirectory

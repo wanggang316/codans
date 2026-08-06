@@ -2,11 +2,13 @@ import Foundation
 
 /// Coding agents recognised by the AgentState feature. The raw value is
 /// the stable identifier persisted in `catalog.json` (see `Pane.agentKind`)
-/// and reported over the wire; the `displayName` is the user-facing label
-/// rendered in the status-bar popover and any future agent-aware UI.
+/// and reported over the wire; everything else agent-specific (display
+/// name, classifier patterns, resume invocation) lives on the agent's
+/// `AgentRuntimeAdapter`.
 ///
-/// Adding a new case requires extending `AgentKindPatterns` so the
-/// classifier can identify panes running the new agent.
+/// Adding a new case requires registering an adapter in
+/// `AgentRuntimeAdapters.adapter(for:)`; the exhaustive switch there makes
+/// a missing adapter a compile error.
 public nonisolated enum AgentKind: String, Codable, Sendable, CaseIterable, Equatable {
   case claudeCode = "claude-code"
   case codex
@@ -21,18 +23,6 @@ public nonisolated enum AgentKind: String, Codable, Sendable, CaseIterable, Equa
   case amp
 
   public var displayName: String {
-    switch self {
-    case .claudeCode: return "Claude Code"
-    case .codex: return "Codex"
-    case .pi: return "pi"
-    case .opencode: return "opencode"
-    case .gemini: return "Gemini"
-    case .cursorAgent: return "Cursor Agent"
-    case .cline: return "Cline"
-    case .copilot: return "GitHub Copilot"
-    case .kimi: return "Kimi"
-    case .droid: return "Droid"
-    case .amp: return "Amp"
-    }
+    AgentRuntimeAdapters.adapter(for: self).displayName
   }
 }

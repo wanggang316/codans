@@ -6,20 +6,13 @@ import Foundation
 /// the source of truth for agent identity.
 public nonisolated enum AgentKindPatterns {
   /// Process names and executable basenames matched against the pane's
-  /// current foreground process group.
-  public static let processName: [AgentKind: [String]] = [
-    .claudeCode: ["claude", "claude-code"],
-    .codex: ["codex"],
-    .pi: ["pi"],
-    .opencode: ["opencode", "open-code"],
-    .gemini: ["gemini"],
-    .cursorAgent: ["cursor-agent"],
-    .cline: ["cline"],
-    .copilot: ["copilot", "github-copilot", "ghcs"],
-    .kimi: ["kimi", "kimi-code"],
-    .droid: ["droid"],
-    .amp: ["amp", "amp-local"],
-  ]
+  /// current foreground process group. Sourced from each agent's
+  /// `AgentRuntimeAdapter` — the classifier owns matching, the adapters
+  /// own the per-agent patterns.
+  public static let processName: [AgentKind: [String]] =
+    Dictionary(
+      uniqueKeysWithValues: AgentRuntimeAdapters.all.map { ($0.kind, $0.processNames) }
+    )
 
   /// Runtime wrappers that commonly host CLI entrypoints. When one of
   /// these is the visible process name, command-line tokens are inspected
