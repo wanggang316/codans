@@ -340,7 +340,12 @@ struct ProjectRemove: AsyncParsableCommand {
   }
 }
 
-struct ProjectListPayload: Codable { let projects: [Project] }
+struct ProjectListPayload: Codable {
+  let projects: [Project]
+  /// Short-handle map printed by `codans tree` in text mode. Optional:
+  /// an app that predates handles simply omits it.
+  let handles: IPC.TargetHandles?
+}
 
 struct ProjectListRenderable: Encodable, CustomStringConvertible {
   let projects: [Project]

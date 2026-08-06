@@ -101,7 +101,7 @@ struct TabSwitch: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Tab id or 'current'.")
+  @Argument(help: "Tab id, t<n> handle, or 'current'.")
   var tab: String
 
   func run() async throws {
@@ -124,7 +124,7 @@ struct TabClose: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Tab id or 'current'.")
+  @Argument(help: "Tab id, t<n> handle, or 'current'.")
   var tab: String
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"

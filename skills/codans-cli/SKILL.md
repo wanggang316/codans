@@ -77,6 +77,12 @@ Most subcommands accept identifiers in any of these forms:
   `--project`, `--worktree`, `--tab`, and `--pane` flag, so you usually
   don't have to type anything.
 - **Literal UUID** — passed through unchanged; fast path for scripts.
+- **`t<n>` / `p<n>` short handles** (tabs / panes) — the stable integers
+  `codans tree` prints as `Tab t3:` / `Pane p7:`. A handle keeps pointing
+  at the same tab/pane across CLI calls for as long as it lives (unlike
+  positional indices, which shift), is released when the target closes,
+  and is never reused within one app session — a stale handle fails with
+  not-found instead of hitting the wrong target.
 - **`@label`** (panes only) — server-side lookup against pane labels
   applied with `codans pane label`.
 - **Anything else** — sent to the server's alias resolver (e.g. a project
@@ -128,8 +134,10 @@ codans tree --project current        # restrict to one project
 ```
 
 Always run `codans tree` first when you don't know what's around. The text
-form marks the selected worktree/tab with `*` and prints pane labels as
-`@label`.
+form marks the selected worktree/tab with `*`, prints pane labels as
+`@label`, and prints each tab/pane's short handle (`Tab t3:` / `Pane p7:`)
+— pass those handles anywhere a tab/pane id is accepted. JSON output
+carries full UUIDs.
 
 ### `codans project` — manage projects
 

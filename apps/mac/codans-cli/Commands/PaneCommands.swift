@@ -15,7 +15,7 @@ struct PaneList: AsyncParsableCommand {
   var project: String = "current"
   @Option(name: .long, help: "Worktree id or 'current'.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id or 'current'.")
+  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'.")
   var tab: String = "current"
 
   func run() async throws {
@@ -75,7 +75,7 @@ struct PaneNew: AsyncParsableCommand {
   var project: String = "current"
   @Option(name: .long, help: "Worktree id or 'current'.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id or 'current'.")
+  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'.")
   var tab: String = "current"
   @Option(name: .long, help: "Working directory. Defaults to $PWD.")
   var cwd: String?
@@ -121,13 +121,13 @@ struct PaneNew: AsyncParsableCommand {
 }
 
 struct PaneLocatorArgs: ParsableArguments {
-  @Argument(help: "Pane id, @label, or 'current'.")
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String
   @Option(name: .long, help: "Project id, name, or 'current'. Usually inferred from the pane id.")
   var project: String = "current"
   @Option(name: .long, help: "Worktree id or 'current'. Usually inferred from the pane id.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id or 'current'. Usually inferred from the pane id.")
+  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'. Usually inferred from the pane id.")
   var tab: String = "current"
 }
 
@@ -224,7 +224,7 @@ struct PaneReset: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, @label, or 'current'.")
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
 
   func run() async throws {
@@ -254,7 +254,7 @@ struct PaneLabel: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, @label, or 'current'.")
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String
   @Argument(help: "Labels.")
   var labels: [String]
@@ -384,7 +384,7 @@ struct PaneInfo: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, @label, or 'current'.")
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
 
   func run() async throws {
@@ -454,7 +454,7 @@ struct PaneRead: AsyncParsableCommand {
   }
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, @label, or 'current'.")
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
   @Flag(name: .long, help: "Return the vt-format dump with ANSI escapes preserved.")
   var raw: Bool = false
