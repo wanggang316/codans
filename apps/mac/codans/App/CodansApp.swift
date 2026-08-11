@@ -1034,7 +1034,23 @@ final class AppState {
         }
         return ZmxControlProbe(paneID: paneID)
       },
-      sessionCoordinator: sessionCoordinator
+      sessionCoordinator: sessionCoordinator,
+      callerPaneResolver: { [weak terminalEngine] callerPID in
+        // Ground-truth caller attribution: match the connecting process's
+        // ancestry against every live pane's daemon shell PID. Covers CLI
+        // calls whose environment lost CODANS_PANE_ID (agent-spawned
+        // subshells, wrappers) — the ancestor chain still passes through
+        // the pane's shell. The snapshot is rebuilt per call; the map is
+        // small (one entry per live pane) and shell PIDs can change
+        // across pane restarts, so caching would risk staleness.
+        guard let runtime = terminalEngine?.ghosttyRuntime else { return nil }
+        var paneByShellPID: [pid_t: PaneID] = [:]
+        for surface in runtime.allLiveSurfaces() {
+          guard let shellPID = surface.childProcessID() else { continue }
+          paneByShellPID[shellPID] = surface.paneID
+        }
+        return CallerPaneResolver.resolve(callerPID: callerPID, paneByShellPID: paneByShellPID)
+      }
     )
     let terminalHandlers = TerminalHandlers(
       sink: terminalEngine.ghosttyRuntime == nil

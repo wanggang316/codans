@@ -41,10 +41,14 @@ public final class MethodRouter {
   /// Route one decoded request to the appropriate handler. The handshake
   /// verb `system.hello` is routed here alongside other `system.*` calls.
   /// Unknown methods produce `RouterOutcome.failed(.unknownMethod)`.
-  public func route(_ request: IPC.Request) async -> RouterOutcome {
+  ///
+  /// `peerPID` is the connection's kernel-reported peer PID (nil on
+  /// transports without one); only `hierarchy.resolveAlias` consumes it,
+  /// for caller-pane attribution.
+  public func route(_ request: IPC.Request, peerPID: pid_t? = nil) async -> RouterOutcome {
     logger.debug("route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
     if let outcome = await routeSystem(request) { return outcome }
-    if let outcome = await routeHierarchy(request) { return outcome }
+    if let outcome = await routeHierarchy(request, peerPID: peerPID) { return outcome }
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
@@ -67,9 +71,11 @@ public final class MethodRouter {
     }
   }
 
-  private func routeHierarchy(_ request: IPC.Request) async -> RouterOutcome? {
+  private func routeHierarchy(_ request: IPC.Request, peerPID: pid_t?) async -> RouterOutcome? {
     guard let h = hierarchyHandlers else { return nil }
-    if let outcome = await routeHierarchyReads(request, handlers: h) { return outcome }
+    if let outcome = await routeHierarchyReads(request, peerPID: peerPID, handlers: h) {
+      return outcome
+    }
     if let outcome = await routeHierarchyMutations(request, handlers: h) { return outcome }
     if let outcome = await routeHierarchyTags(request, handlers: h) { return outcome }
     return nil
@@ -77,6 +83,7 @@ public final class MethodRouter {
 
   private func routeHierarchyReads(
     _ request: IPC.Request,
+    peerPID: pid_t?,
     handlers h: HierarchyHandlers
   ) async -> RouterOutcome? {
     switch request.method {
@@ -85,7 +92,7 @@ public final class MethodRouter {
     case .hierarchyListTabs: return await h.listTabs(request.params)
     case .hierarchyListPanes: return await h.listPanes(request.params)
     case .hierarchyListTags: return await h.listTags(request.params)
-    case .hierarchyResolveAlias: return await h.resolveAlias(request.params)
+    case .hierarchyResolveAlias: return await h.resolveAlias(request.params, peerPID: peerPID)
     default: return nil
     }
   }

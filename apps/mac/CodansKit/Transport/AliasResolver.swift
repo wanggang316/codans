@@ -11,7 +11,9 @@ import CodansIPC
 /// - **`current` / `.`** — resolves to the relevant `$CODANS_*_ID`
 ///   env var (`SPACE_ID`, `PROJECT_ID`, `WORKTREE_ID`, `TAB_ID`, or
 ///   `PANE_ID` depending on `kind`). Used by commands that default to
-///   the current context.
+///   the current context. For panes, a missing env var falls through to
+///   the server, which attributes the caller to its pane from the
+///   connection's kernel peer PID plus a process-ancestry walk.
 /// - **`@label`** — pane-only. Routed through `hierarchy.resolveAlias`
 ///   via the supplied `RPCClient` so the server can match against
 ///   `Pane.labels`.
@@ -44,7 +46,14 @@ public enum AliasResolver {
       if let envValue = env[envKey(for: kind)], let uuid = UUID(uuidString: envValue) {
         return uuid
       }
-      throw Error.noContext(kind: kind)
+      // Panes have a server-side fallback: the app attributes the calling
+      // process to its pane from the connection's kernel peer PID plus an
+      // ancestor walk, so a subshell or wrapper that dropped
+      // `CODANS_PANE_ID` still resolves. Other kinds have no equivalent
+      // ground truth — keep failing fast.
+      guard kind == .pane else {
+        throw Error.noContext(kind: kind)
+      }
     }
 
     // 3. Everything else → server resolver.
