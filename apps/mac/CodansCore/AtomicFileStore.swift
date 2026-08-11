@@ -4,6 +4,10 @@ import Foundation
 /// directory, `fsync`s it, then `rename(2)`s over the original — so a crash mid-write leaves the
 /// previous file intact. `read` returns nil on missing file; other I/O and decode errors throw.
 ///
+/// When the destination is a symlink (users commonly link `~/.config/codans/*.json` into a
+/// dotfiles repository), `write` resolves the link chain first and renames over the *target*,
+/// so the link survives instead of being replaced by a regular file.
+///
 /// Callers are responsible for version checks on the decoded value; this helper deliberately
 /// does not interpret payloads. It only guarantees the file-system atomicity story.
 public nonisolated enum AtomicFileStore {
@@ -12,6 +16,7 @@ public nonisolated enum AtomicFileStore {
     case temporaryWriteFailed(path: String, code: Int32)
     case renameFailed(from: String, to: String, code: Int32)
     case fsyncFailed(path: String, code: Int32)
+    case tooManySymlinks(path: String)
   }
 
   public static func read<T: Decodable>(
@@ -31,19 +36,47 @@ public nonisolated enum AtomicFileStore {
     encoder: JSONEncoder = .touchCodeDefault
   ) throws {
     let data = try encoder.encode(value)
-    let directory = url.deletingLastPathComponent()
+    let destination = try resolvingSymlinks(at: url)
+    let directory = destination.deletingLastPathComponent()
     try ensureDirectory(directory)
 
-    let tempURL = directory.appendingPathComponent(".\(url.lastPathComponent).tmp-\(UUID().uuidString)")
+    // Temp file lives next to the resolved target so the rename stays on one file system.
+    let tempURL = directory.appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
     try writeAndFsync(data: data, to: tempURL)
 
-    let renameResult = rename(tempURL.path, url.path)
+    let renameResult = rename(tempURL.path, destination.path)
     if renameResult != 0 {
       // Best-effort cleanup of the temp file on rename failure; ignore secondary errors.
       _ = try? FileManager.default.removeItem(at: tempURL)
-      throw Failure.renameFailed(from: tempURL.path, to: url.path, code: errno)
+      throw Failure.renameFailed(from: tempURL.path, to: destination.path, code: errno)
     }
   }
+
+  /// Follows the symlink chain at `url`'s final path component. Unlike `resolvingSymlinksInPath()`
+  /// this also resolves *dangling* links (target not yet created — e.g. a fresh dotfiles checkout),
+  /// so the first write lands at the link's target instead of replacing the link itself.
+  private static func resolvingSymlinks(at url: URL) throws -> URL {
+    let fm = FileManager.default
+    var resolved = url.standardizedFileURL
+    var hops = 0
+    while let target = try? fm.destinationOfSymbolicLink(atPath: resolved.path) {
+      hops += 1
+      if hops > maxSymlinkHops { throw Failure.tooManySymlinks(path: url.path) }
+      if target.hasPrefix("/") {
+        resolved = URL(fileURLWithPath: target)
+      } else {
+        resolved =
+          resolved
+          .deletingLastPathComponent()
+          .appendingPathComponent(target)
+          .standardizedFileURL
+      }
+    }
+    return resolved
+  }
+
+  /// Mirrors the kernel's SYMLOOP_MAX (32 on Darwin) as a loop guard.
+  private static let maxSymlinkHops = 32
 
   private static func ensureDirectory(_ url: URL) throws {
     let fm = FileManager.default
