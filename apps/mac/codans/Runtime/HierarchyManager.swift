@@ -2371,12 +2371,26 @@ final class HierarchyManager {
       }
     }
     env["CODANS_SOCKET_PATH"] = SocketPaths.resolve()
+    // Product marker, written last like the socket path so it always wins.
+    // Surface env vars reach the child as ghostty's `env_override` (applied
+    // after its own exec-time `TERM_PROGRAM=ghostty`), so this is what the
+    // pane's shell actually sees.
+    env[TermProgramEnv.programKey] = TermProgramEnv.program
+    if let version = Self.appMarketingVersion {
+      env[TermProgramEnv.versionKey] = version
+    }
     return env
   }
 
   nonisolated private static let inheritedTerminalEnvVarsToStrip: [String] = [
     "TERM", "TERMCAP", "TERMINFO", "COLORTERM",
+    TermProgramEnv.programKey, TermProgramEnv.versionKey,
   ]
+
+  /// `CFBundleShortVersionString` of the running app; nil under a bare
+  /// `xctest` host, in which case the version key is simply omitted.
+  nonisolated private static let appMarketingVersion: String? =
+    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
 
   /// Merges the per-worktree built-in variables codans provides for
   /// every pane (`CODANS_WORKTREE_PATH`, `CODANS_ROOT_PATH`) into
