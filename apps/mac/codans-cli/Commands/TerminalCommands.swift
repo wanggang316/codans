@@ -22,7 +22,7 @@ struct SendCommand: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Option(name: [.customShort("p"), .long], help: "Target pane id, @label, or 'current'.")
+  @Option(name: [.customShort("p"), .long], help: "Target pane id, p<n> handle, @label, or 'current'.")
   var pane: String?
   @Argument(parsing: .remaining, help: "Text, or target followed by text.")
   var arguments: [String] = []
@@ -140,7 +140,7 @@ struct SendKeyCommand: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Option(name: [.customShort("p"), .long], help: "Target pane id, @label, or 'current'.")
+  @Option(name: [.customShort("p"), .long], help: "Target pane id, p<n> handle, @label, or 'current'.")
   var pane: String?
   @Argument(parsing: .remaining, help: "Key, or target followed by key.")
   var arguments: [String] = []
@@ -227,7 +227,7 @@ struct ReadCommand: AsyncParsableCommand {
   }
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, @label, or 'current'.")
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
   @Option(name: .long, help: "Text extent to read: viewport, screen, or selection.")
   var extent: Extent = .viewport
@@ -297,7 +297,7 @@ struct CaptureCommand: AsyncParsableCommand {
   }
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, @label, or 'current'.")
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
   @Option(name: .long, help: "Capture scope: viewport (default) or screen.")
   var scope: Scope = .viewport
@@ -419,7 +419,7 @@ struct BroadcastCommand: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Option(name: .long, help: "Tab id or 'current'.")
+  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'.")
   var tab: String?
   @Option(name: .long, help: "Worktree id or 'current'.")
   var worktree: String?

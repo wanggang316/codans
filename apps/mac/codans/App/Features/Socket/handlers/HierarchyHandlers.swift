@@ -59,6 +59,10 @@ final class HierarchyHandlers {
   /// Default is `nil` for tests; production wiring passes the shared
   /// `SessionCoordinator`.
   private let sessionCoordinator: SessionCoordinator?
+  /// Short-handle sugar (`t<n>` / `p<n>`) for tabs and panes. Lives with
+  /// the handlers so it spans CLI connections: handles stay stable until
+  /// the entity closes, and are never reused within one app session.
+  private let handleRegistry = TargetHandleRegistry()
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "hierarchy")
 
   init(
@@ -106,7 +110,7 @@ final class HierarchyHandlers {
   /// label / glob) into the canonical UUID for `kind`. Supports the set
   /// the CLI drives: `current` / `.` (handled client-side by
   /// `AliasResolver`, but the server still accepts it as a defensive
-  /// fallback), and pane labels.
+  /// fallback), pane labels, and short target handles (`t<n>` / `p<n>`).
   public func resolveAlias(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let request: IPC.AliasResolveRequest
@@ -132,6 +136,24 @@ final class HierarchyHandlers {
         return .failed(.conflict(reason: "label @\(label) matches \(matches.count) panes"))
       }
       return .failed(.notFound(kind: "pane", id: "@\(label)"))
+    }
+    if request.kind == .tab, let handle = TargetHandleRegistry.parse(request.value, prefix: "t") {
+      handleRegistry.sync(with: manager.catalog)
+      guard let id = handleRegistry.tab(forHandle: handle) else {
+        return .failed(.notFound(kind: "tab", id: request.value))
+      }
+      let result = IPC.AliasResolveResult(kind: .tab, id: id.raw)
+      return (try? JSONValue.encoded(result)).map(RouterOutcome.unary)
+        ?? .failed(.internal("encode resolveAlias result"))
+    }
+    if request.kind == .pane, let handle = TargetHandleRegistry.parse(request.value, prefix: "p") {
+      handleRegistry.sync(with: manager.catalog)
+      guard let id = handleRegistry.pane(forHandle: handle) else {
+        return .failed(.notFound(kind: "pane", id: request.value))
+      }
+      let result = IPC.AliasResolveResult(kind: .pane, id: id.raw)
+      return (try? JSONValue.encoded(result)).map(RouterOutcome.unary)
+        ?? .failed(.internal("encode resolveAlias result"))
     }
     return .failed(.unsupported(reason: "alias form not yet supported: \(request.value)"))
   }
@@ -730,8 +752,12 @@ final class HierarchyHandlers {
     } else {
       filtered = all
     }
+    // Sync against the full catalog (not the tag-filtered slice) so a
+    // filtered listing never shifts handle assignment order.
+    handleRegistry.sync(with: manager.catalog)
+    let handles = handleRegistry.snapshot()
     return await Self.encodeOffMain("listProjects") {
-      try JSONValue.encoded(ListProjectsPayload(projects: filtered))
+      try JSONValue.encoded(ListProjectsPayload(projects: filtered, handles: handles))
     }
   }
 
@@ -1006,7 +1032,17 @@ final class HierarchyHandlers {
 // `nonisolated` on the conformance so `encodeOffMain` can call `encode(to:)`
 // from a detached Task without tripping `InferIsolatedConformances` —
 // the file otherwise infers `@MainActor` for every type defined in it.
-nonisolated struct ListProjectsPayload: Codable, Sendable { let projects: [Project] }
+nonisolated struct ListProjectsPayload: Codable, Sendable {
+  let projects: [Project]
+  /// Short-handle map for the CLI's text renderer. Optional so the
+  /// payload keeps decoding fixtures and responses that predate handles.
+  let handles: IPC.TargetHandles?
+
+  init(projects: [Project], handles: IPC.TargetHandles? = nil) {
+    self.projects = projects
+    self.handles = handles
+  }
+}
 nonisolated struct ListWorktreesPayload: Codable, Sendable { let worktrees: [Worktree] }
 nonisolated struct ListTabsPayload: Codable, Sendable { let tabs: [Tab] }
 nonisolated struct ListPanesPayload: Codable, Sendable { let panes: [Pane] }
