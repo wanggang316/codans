@@ -14,14 +14,10 @@ nonisolated struct AgentSessionSummary: Identifiable, Equatable, Sendable {
 
   var id: String { "\(agent.rawValue):\(sessionID)" }
 
-  /// Compact display id. Claude ids are UUIDs whose leading bytes vary;
-  /// Codex ids are ULIDs whose leading bytes encode the timestamp and so
-  /// repeat across sessions — take the tail for those.
+  /// Compact display id; the per-agent form (UUID prefix vs ULID tail)
+  /// lives on the agent's runtime adapter.
   var shortSessionID: String {
-    switch agent {
-    case .codex: return String(sessionID.suffix(8))
-    default: return String(sessionID.prefix(8))
-    }
+    AgentRuntimeAdapters.adapter(for: agent).shortSessionID(sessionID)
   }
 }
 
@@ -32,31 +28,6 @@ nonisolated struct AgentSessionGroup: Identifiable, Equatable, Sendable {
   let sessions: [AgentSessionSummary]
 
   var id: String { agent.rawValue }
-}
-
-/// Maps an `AgentKind` + session id to the shell command that reattaches
-/// the agent to that session. Only agents whose CLIs expose both a local
-/// session store and a resume flag are supported; the scanner only emits
-/// summaries for those kinds, so a `nil` at dispatch time signals a
-/// programming error upstream, not a user-visible state.
-nonisolated enum AgentSessionResume {
-  static func command(agent: AgentKind, sessionID: String) -> String? {
-    switch agent {
-    case .claudeCode:
-      return "claude --resume \(shellQuoted(sessionID))"
-    case .codex:
-      return "codex resume \(shellQuoted(sessionID))"
-    case .pi, .opencode, .gemini, .cursorAgent, .cline, .copilot, .kimi, .droid, .amp:
-      return nil
-    }
-  }
-
-  /// Single-quote wrap with the standard `'\''` escape. Session ids are
-  /// UUID/ULID-shaped today, but they originate from files we don't own —
-  /// quote instead of trusting the charset.
-  static func shellQuoted(_ raw: String) -> String {
-    "'" + raw.replacingOccurrences(of: "'", with: "'\\''") + "'"
-  }
 }
 
 /// Reads the local session stores of installed agent CLIs and lists the

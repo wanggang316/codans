@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// Tab bar reducer. State-free controller: Worktree.tabs is read from the
 /// environment `HierarchyManager` at render time; actions dispatch create /
@@ -215,7 +215,12 @@ struct TabBarFeature {
         // Same catalog resolution as `newTabButtonTapped`: the pane must
         // spawn in the Worktree's directory for the agent CLI to find the
         // session it recorded against that cwd.
-        guard let command = AgentSessionResume.command(agent: agent, sessionID: sessionID)
+        // The scanner only emits summaries for agents whose adapter can
+        // resume, so a nil here signals a programming error upstream, not
+        // a user-visible state.
+        guard
+          let command = AgentRuntimeAdapters.adapter(for: agent)
+            .resumeCommand(sessionID: sessionID)
         else { return .none }
         let catalog = hierarchyClient.snapshot()
         guard
