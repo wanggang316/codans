@@ -160,6 +160,10 @@ struct HierarchySidebarFeature {
     /// `reorderProjects`. Entered from the footer sort menu's
     /// "Manual Order…" item, dismissed by the inline "Done" control.
     var isReorderingProjects: Bool = false
+    /// Machine-wide `git` availability, filled by the probe on first appear.
+    /// `nil` until the probe answers — the banner stays hidden meanwhile so a
+    /// healthy launch never flashes a warning. Only `.blocked` renders.
+    var gitEnvironment: GitEnvironmentStatus?
   }
 
   /// Payload for the first-archive explainer dialog. Carries the
@@ -199,6 +203,15 @@ struct HierarchySidebarFeature {
       projectID: ProjectID,
       segment: WorktreeSegment, from: IndexSet, to: Int
     )
+
+    /// Sidebar appeared — probe whether `git` is usable machine-wide. Cached
+    /// in the probe actor, so repeated appears cost nothing after the first.
+    case gitEnvironmentProbeRequested
+    /// Banner's Recheck button. Drops the probe's cache and re-runs it, so a
+    /// user who just accepted the license sees the banner disappear without
+    /// relaunching the app.
+    case gitEnvironmentRecheckTapped
+    case gitEnvironmentResolved(GitEnvironmentStatus)
 
     /// Fired from `FailedProjectRow.Retry` (or the context menu). Delegates
     /// to `RootFeature` which calls `ProjectReconciler.reconcile` — same path
@@ -396,6 +409,7 @@ struct HierarchySidebarFeature {
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
   @Dependency(FolderPickerClient.self) private var folderPickerClient
   @Dependency(GitWorktreeCLI.self) private var gitCLI
+  @Dependency(GitEnvironmentProbe.self) private var gitEnvironmentProbe
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
 
   /// Cancellation token namespace for sidebar-owned effects. The single
@@ -579,6 +593,22 @@ struct HierarchySidebarFeature {
 
     case .reorderWorktrees(let projectID, let segment, let source, let destination):
       try? hierarchyClient.reorderWorktrees(projectID, segment, source, destination)
+      return .none
+
+    // MARK: Git environment
+
+    case .gitEnvironmentProbeRequested:
+      return .run { [probe = gitEnvironmentProbe] send in
+        await send(.gitEnvironmentResolved(probe.status()))
+      }
+
+    case .gitEnvironmentRecheckTapped:
+      return .run { [probe = gitEnvironmentProbe] send in
+        await send(.gitEnvironmentResolved(probe.refresh()))
+      }
+
+    case .gitEnvironmentResolved(let status):
+      state.gitEnvironment = status
       return .none
 
     case .retryProjectTapped(let projectID):

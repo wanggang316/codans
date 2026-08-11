@@ -234,6 +234,11 @@ struct HierarchySidebarView: View {
     // transition is cut at the footer's top edge and reads as sliding
     // up from beneath the fixed footer.
     VStack(spacing: 0) {
+      if let block = store.gitEnvironment?.block {
+        GitEnvironmentBanner(block: block) {
+          store.send(.gitEnvironmentRecheckTapped)
+        }
+      }
       if isReordering {
         reorderBanner
       }
@@ -317,6 +322,10 @@ struct HierarchySidebarView: View {
       )
       .zIndex(2)
     }
+    // One-shot `git --version` probe. The probe actor caches, so the repeated
+    // `.task` firings a sidebar sees over a session collapse to a single
+    // subprocess; only the banner's Recheck busts that cache.
+    .task { store.send(.gitEnvironmentProbeRequested) }
     // Auto-open the Agents View panel on the rising edge into "any
     // bound agent is loading" — but only when the user has the
     // Settings → General toggle on. We do NOT auto-close when the
