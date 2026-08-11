@@ -6,12 +6,6 @@ import os
 /// Production `Transport` over a Unix domain socket. Opens a fresh
 /// connection per `codans` invocation; writes are length-prefix framed.
 public final class UnixSocketTransport: Transport, @unchecked Sendable {
-  public enum ConnectError: Error, Equatable, Sendable {
-    case socketCreateFailed(errno: Int32)
-    case pathTooLong(String)
-    case connectFailed(path: String, errno: Int32)
-  }
-
   private struct State {
     var fd: Int32 = -1
     var readerStarted = false
@@ -61,10 +55,10 @@ public final class UnixSocketTransport: Transport, @unchecked Sendable {
         }
         if written < 0 {
           if errno == EINTR { continue }
-          throw ConnectError.connectFailed(path: "(send)", errno: errno)
+          throw SocketConnectionFailure.inFlight(errno: errno, path: path)
         }
         if written == 0 {
-          throw ConnectError.connectFailed(path: "(send=0)", errno: 0)
+          throw SocketConnectionFailure(kind: .connectionLost, path: path)
         }
         remaining.removeFirst(written)
       }
@@ -78,44 +72,12 @@ public final class UnixSocketTransport: Transport, @unchecked Sendable {
   }
 
   /// Synchronously open the socket and connect, if not already connected.
-  /// Caller MUST hold the state lock. Throws on any failure; on success
-  /// populates `state.fd` with a connected SOCK_STREAM fd.
+  /// Caller MUST hold the state lock. Throws a classified
+  /// `SocketConnectionFailure` on any failure; on success populates
+  /// `state.fd` with a connected SOCK_STREAM fd.
   private static func ensureConnectedLocked(state: inout State, path: String) throws {
     if state.fd >= 0 { return }
-    let f = socket(AF_UNIX, SOCK_STREAM, 0)
-    if f < 0 {
-      throw ConnectError.socketCreateFailed(errno: errno)
-    }
-    // SO_NOSIGPIPE: turn writes to a half-closed peer into EPIPE instead
-    // of SIGPIPE-killing the CLI process before any error path can run.
-    var one: Int32 = 1
-    _ = setsockopt(f, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(path.utf8CString)
-    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
-      Darwin.close(f)
-      throw ConnectError.pathTooLong(path)
-    }
-    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-      ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
-        pathBytes.withUnsafeBufferPointer { src in
-          _ = memcpy(dst, src.baseAddress, pathBytes.count)
-        }
-      }
-    }
-    let connectResult = withUnsafePointer(to: &addr) { addrPtr in
-      addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-        Darwin.connect(f, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
-      }
-    }
-    if connectResult < 0 {
-      let err = errno
-      Darwin.close(f)
-      throw ConnectError.connectFailed(path: path, errno: err)
-    }
-    state.fd = f
+    state.fd = try UnixSocketDial.open(path: path)
   }
 
   public func close() {

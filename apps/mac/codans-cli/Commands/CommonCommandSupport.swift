@@ -14,7 +14,7 @@ enum CLISession {
     do {
       transport = try UnixSocketTransport(path: path)
     } catch {
-      CLIError(code: .noSocket, message: "Codans is not running at \(path)").exitProcess()
+      CLIError.from(error).exitProcess()
     }
     return RPCClient(
       transport: transport,
@@ -29,7 +29,15 @@ enum CLISession {
 struct CLIError: Error, CustomStringConvertible {
   let code: CLIExitCode
   let message: String
+  /// Optional next step, rendered as a `  hint: …` line under the error.
+  let hint: String?
   var description: String { message }
+
+  init(code: CLIExitCode, message: String, hint: String? = nil) {
+    self.code = code
+    self.message = message
+    self.hint = hint
+  }
 
   static func from(_ error: Error) -> CLIError {
     if let cli = error as? CLIError { return cli }
@@ -50,8 +58,12 @@ struct CLIError: Error, CustomStringConvertible {
     if let rpc = error as? RPCClient.RPCError {
       return fromRPCError(rpc)
     }
-    if let connect = error as? UnixSocketTransport.ConnectError {
-      return fromConnectError(connect)
+    if let failure = error as? SocketConnectionFailure {
+      return CLIError(
+        code: CLIExitCode.from(failure),
+        message: failure.message,
+        hint: failure.hint
+      )
     }
     return CLIError(code: .internal, message: "\(error)")
   }
@@ -76,19 +88,12 @@ struct CLIError: Error, CustomStringConvertible {
     }
   }
 
-  private static func fromConnectError(_ connect: UnixSocketTransport.ConnectError) -> CLIError {
-    switch connect {
-    case .connectFailed(let path, _):
-      return CLIError(code: .noSocket, message: "Codans is not running at \(path)")
-    case .socketCreateFailed(let errno):
-      return CLIError(code: .noSocket, message: "socket create failed (errno=\(errno))")
-    case .pathTooLong(let path):
-      return CLIError(code: .userError, message: "socket path too long: \(path)")
-    }
-  }
-
   func exitProcess() -> Never {
-    FileHandle.standardError.write(Data("error: \(message)\n".utf8))
+    var rendered = "error: \(message)\n"
+    if let hint {
+      rendered += "  hint: \(hint)\n"
+    }
+    FileHandle.standardError.write(Data(rendered.utf8))
     Darwin.exit(code.rawValue)
   }
 }

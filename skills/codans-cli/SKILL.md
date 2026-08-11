@@ -28,10 +28,19 @@ codans doctor
 
 Three outcomes:
 
-- **Prints `socketReachable   true`** — app is installed and running.
+- **Prints `socketStatus      ok`** — app is installed and running.
   Proceed.
-- **Prints `socketReachable   false`** — app is installed but not running.
-  Run `codans launch` (or open Codans from `/Applications`) and retry.
+- **Prints any other `socketStatus`** — the app is installed but not
+  usable yet. The value says why, so branch on it instead of guessing:
+
+  | `socketStatus` | What happened | What to do |
+  |---|---|---|
+  | `socket-missing` / `app-not-running` | No socket, or a stale one left by a crash | `codans launch`, then retry |
+  | `permission-denied` | The socket belongs to another user | Stop; ask the user — launching will not help |
+  | `not-a-socket` / `path-too-long` | `CODANS_SOCKET_PATH` points somewhere wrong | Stop; fix the env var |
+  | `server-busy` / `timed-out` | App is up but not accepting right now | Wait a moment and retry |
+
+  `codans doctor --json` emits the same value plus a `socketHint` string.
 - **`codans: command not found`** — Codans is not installed. Stop and tell
   the user to install it from the releases page:
 

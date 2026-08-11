@@ -59,13 +59,24 @@ struct LaunchCommand: AsyncParsableCommand {
   func run() async throws {
     await CommandRunner.run {
       let path = SocketDiscovery.resolve()
-      if SocketDiscovery.isReachable(path: path) {
+      let probe = SocketDiscovery.probe(path: path)
+      if probe.isReachable {
         try Renderer.emitObject(
           ["path": path, "alreadyRunning": true],
           mode: renderMode,
           textRender: { _ in "already running at \(path)" }
         )
         return
+      }
+      // A permission or wrong-path failure is not something starting the
+      // app can clear — report it now instead of burning `--wait` seconds
+      // polling a socket we could never connect to.
+      if let failure = probe.failure, !failure.kind.isResolvedByLaunching {
+        throw CLIError(
+          code: CLIExitCode.from(failure),
+          message: failure.message,
+          hint: failure.hint
+        )
       }
 
       let launch = Self.launchArguments()
@@ -142,21 +153,32 @@ struct DoctorCommand: ParsableCommand {
 
   func run() throws {
     let path = globals.resolvedSocketPath
-    let reachable = SocketDiscovery.isReachable(path: path)
-    try Renderer.emitObject(
-      [
-        "socketPath": path,
-        "socketReachable": reachable,
-        "socketFromEnvironment": ProcessInfo.processInfo.environment["CODANS_SOCKET_PATH"] != nil,
-        "clientVersion": CodansCLI.version,
-      ],
-      mode: globals.renderMode
-    ) { obj in
-      """
-      codans                \(obj["clientVersion"] ?? "?")
-      socket            \(obj["socketPath"] ?? "?")
-      socketReachable   \(obj["socketReachable"] ?? false)
-      """
+    let probe = SocketDiscovery.probe(path: path)
+    let failure = probe.failure
+    // `socketStatus` is the scriptable form of "why not": one of the
+    // SocketFailureKind raw values, or "ok". `socketReachable` stays for
+    // callers that only need the boolean.
+    var payload: [String: Any] = [
+      "socketPath": path,
+      "socketReachable": probe.isReachable,
+      "socketStatus": failure?.kind.rawValue ?? "ok",
+      "socketFromEnvironment": ProcessInfo.processInfo.environment["CODANS_SOCKET_PATH"] != nil,
+      "clientVersion": CodansCLI.version,
+    ]
+    if let hint = failure?.hint {
+      payload["socketHint"] = hint
+    }
+    try Renderer.emitObject(payload, mode: globals.renderMode) { obj in
+      var lines = """
+        codans                \(obj["clientVersion"] ?? "?")
+        socket            \(obj["socketPath"] ?? "?")
+        socketReachable   \(obj["socketReachable"] ?? false)
+        socketStatus      \(obj["socketStatus"] ?? "?")
+        """
+      if let hint = obj["socketHint"] as? String {
+        lines += "\n  hint: \(hint)"
+      }
+      return lines
     }
   }
 }

@@ -231,7 +231,9 @@
 
 ### 错误处理模型
 
-- **退出码** 跨版本稳定（`CodansKit/ExitCode.swift`）：`0` 成功 · `1` 用户错误 · `2` not-found · `3` conflict · `4` unsupported · `5` overloaded · `6` versionMismatch · `10` socket 不可达（应用未运行）· `11` 请求超时 · `12` launch 超时 · `20` 内部错误。
+- **退出码** 跨版本稳定（`CodansKit/ExitCode.swift`）：`0` 成功 · `1` 用户错误 · `2` not-found · `3` conflict · `4` unsupported · `5` overloaded · `6` versionMismatch · `10` socket 不可达（应用未运行）· `11` 请求超时 · `12` launch 超时 · `13` socket 权限拒绝 · `14` socket 不可用（路径不是 socket / 过长 / socket(2) 失败）· `20` 内部错误。
+- **socket 连接失败分类。** connect(2) 的 errno 在 `CodansKit/Transport/SocketConnectionFailure.swift` 收敛成一组 `SocketFailureKind`：`socket-missing`（ENOENT）· `app-not-running`（ECONNREFUSED，陈旧 socket 文件）· `permission-denied`（EACCES/EPERM）· `not-a-socket`（ENOTSOCK）· `path-too-long` · `server-busy`（EAGAIN，accept backlog 满）· `timed-out` · `connection-lost`（已连接后 EPIPE/ECONNRESET）· `socket-create-failed` · `unknown`。分类按**调用方该怎么办**映射退出码：起应用后重试（10）、原样重试（5 / 11）、需要人介入（13 / 14）。未映射的 errno 保持 `unknown` 而非并入相邻类别——错误的类别比诚实的"未知"对分支脚本更有害。
+- **分类的可脚本化出口。** 除退出码外，`codans doctor` 输出 `socketStatus`（上述 raw 值，或 `ok`）与可选 `socketHint`，使脚本无须 grep stderr 即可分支。`codans launch` 对起应用无法修复的类别（权限 / 路径）立即失败，不再空转 `--wait` 秒轮询。
 - **stderr 文本模式：** 首行 `error: <message>`，后续 `  hint: <suggestion>`（若适用）；无 backtrace、无 "please file a bug" 样板（贴合 git / Ghostty 风格）。
 - **进程级 SIGPIPE 忽略。** `main()` 进程级 `signal(SIGPIPE, SIG_IGN)`，使任何写路径（stdout 被管到 `head`、半关 socket）返回 EPIPE 而非以 exit 141 在错误路径渲染前杀死 CLI。
 - **取消。** SIGINT 关 socket 中止在飞请求；部分副作用由应用负责回滚（mutation 在 `HierarchyManager` 层原子）。
@@ -345,6 +347,7 @@ CLIFilesystem (probe only; real impl + test fakes)
 - **D5 — `pane send` / `broadcast` 在 wire 上分别走 `terminal.sendInput` / `terminal.broadcastInput`，broadcast 用 `scope` 区分服务端扇出。** 减小客户端复杂度，让单个观察者对单播与扇出一视同仁。
 - **D6 — `--json` 全局且逐动词，每个 result 类型与 RPC 1:1。** 这是 agent 保持可靠的方式；文本 renderer 是人类便利，非主契约。
 - **D7 — 退出码稳定且可枚举。** agent 与 shell 脚本必须能按码分支；预先定一组固定码避免"事事 exit 1"。请求超时（11）与 launch 超时（12）分开，使脚本判 `$? -eq 12` 明确表示"应用没起来"。
+- **D19 — socket 连接失败按"补救动作"分类，而非按 errno 逐一暴露。** 单一 "cannot connect" 桶迫使调用方 grep stderr 才能把"应用没起来"（重启即可）与"socket 属于另一个 uid"（需要人）区分开。类别数保持在能改变调用方行为的粒度上：起应用后重试 / 原样重试 / 停下找人。errno 本身只在 message 里作为佐证出现，不进入契约。
 - **D8 — 流式 RPC 用 `stream: true` + 双向 EOF 终止，无多路复用。** 一连接一流（在其 `system.hello` 之后）；需要两个流就开两个连接。
 - **D9 — 每连接有界在飞队列 64，溢出等 2s 后返回 `IPCError.overloaded`。（解决 backpressure open question。）** 防止陷入循环的 agent 把应用 OOM。
 - **D10 — `system.hello` 是专用首帧 RPC，非逐请求 header；与真实请求 pipelined 一次写。** 使"每次调用开新连接"属性干净存活——每个新连接恰付一次 `system.hello` 往返。
