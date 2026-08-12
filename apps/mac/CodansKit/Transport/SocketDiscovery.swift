@@ -29,30 +29,43 @@ public enum SocketDiscovery {
     return defaultSocketPath()
   }
 
+  /// Outcome of a single connect(2) probe against a socket path.
+  public enum Probe: Equatable, Sendable {
+    case reachable
+    case unreachable(SocketConnectionFailure)
+
+    public var isReachable: Bool {
+      if case .reachable = self { return true }
+      return false
+    }
+
+    /// Category of the failure, or nil when the probe succeeded. This is
+    /// what `codans doctor` reports and what scripts branch on.
+    public var failure: SocketConnectionFailure? {
+      if case .unreachable(let failure) = self { return failure }
+      return nil
+    }
+  }
+
+  /// Dial `path` once and classify the outcome. Uses the same dial path as
+  /// the live transport, so a probe cannot disagree with what a real
+  /// command would hit.
+  public static func probe(path: String) -> Probe {
+    do {
+      let fd = try UnixSocketDial.open(path: path)
+      Darwin.close(fd)
+      return .reachable
+    } catch let failure as SocketConnectionFailure {
+      return .unreachable(failure)
+    } catch {
+      return .unreachable(SocketConnectionFailure(kind: .unknown, path: path))
+    }
+  }
+
   /// Confirm a server is currently accepting on `path`. Returns true iff
-  /// a fresh `connect(2)` succeeds.
+  /// a fresh `connect(2)` succeeds. Prefer `probe(path:)` when the caller
+  /// can act on *why* the socket is unreachable.
   public static func isReachable(path: String) -> Bool {
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    if fd < 0 { return false }
-    defer { Darwin.close(fd) }
-
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(path.utf8CString)
-    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { return false }
-    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-      ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
-        pathBytes.withUnsafeBufferPointer { src in
-          _ = memcpy(dst, src.baseAddress, pathBytes.count)
-        }
-      }
-    }
-
-    let result = withUnsafePointer(to: &addr) { addrPtr in
-      addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-        Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
-      }
-    }
-    return result == 0
+    probe(path: path).isReachable
   }
 }

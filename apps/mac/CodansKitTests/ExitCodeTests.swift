@@ -32,6 +32,28 @@ struct CLIExitCodeTests {
     #expect(CLIExitCode.noSocket.rawValue == 10)
     #expect(CLIExitCode.requestTimeout.rawValue == 11)
     #expect(CLIExitCode.launchTimeout.rawValue == 12)
+    #expect(CLIExitCode.socketPermissionDenied.rawValue == 13)
+    #expect(CLIExitCode.socketUnusable.rawValue == 14)
     #expect(CLIExitCode.internal.rawValue == 20)
+  }
+
+  @Test
+  func socketFailureMappingSplitsByRemedy() {
+    func code(_ kind: SocketFailureKind) -> CLIExitCode {
+      CLIExitCode.from(SocketConnectionFailure(kind: kind, path: "/tmp/x.sock"))
+    }
+    // Retry after launching.
+    #expect(code(.socketMissing) == .noSocket)
+    #expect(code(.appNotRunning) == .noSocket)
+    #expect(code(.connectionLost) == .noSocket)
+    #expect(code(.unknown) == .noSocket)
+    // Retry as-is.
+    #expect(code(.serverBusy) == .overloaded)
+    #expect(code(.timedOut) == .requestTimeout)
+    // Needs a human — never worth a retry loop.
+    #expect(code(.permissionDenied) == .socketPermissionDenied)
+    #expect(code(.notASocket) == .socketUnusable)
+    #expect(code(.pathTooLong) == .socketUnusable)
+    #expect(code(.socketCreateFailed) == .socketUnusable)
   }
 }
