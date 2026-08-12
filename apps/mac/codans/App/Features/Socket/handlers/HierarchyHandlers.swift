@@ -63,6 +63,12 @@ final class HierarchyHandlers {
   /// the handlers so it spans CLI connections: handles stay stable until
   /// the entity closes, and are never reused within one app session.
   private let handleRegistry = TargetHandleRegistry()
+  /// Resolve the pane a connecting process belongs to from its kernel
+  /// peer PID (ancestry walk against live pane shell PIDs). Injected so
+  /// the handler stays independent of the libghostty surface registry;
+  /// the default resolves nothing, matching transports that carry no
+  /// peer PID (tests, in-memory harness).
+  private let callerPaneResolver: @MainActor (pid_t) -> PaneID?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "hierarchy")
 
   init(
@@ -71,7 +77,8 @@ final class HierarchyHandlers {
     settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
     daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
     runtimeProbe: @escaping @MainActor (PaneID) -> PaneRuntimeProbe? = { _ in nil },
-    sessionCoordinator: SessionCoordinator? = nil
+    sessionCoordinator: SessionCoordinator? = nil,
+    callerPaneResolver: @escaping @MainActor (pid_t) -> PaneID? = { _ in nil }
   ) {
     self.manager = manager
     self.envProvider = envProvider
@@ -79,6 +86,7 @@ final class HierarchyHandlers {
     self.daemonKiller = daemonKiller
     self.runtimeProbe = runtimeProbe
     self.sessionCoordinator = sessionCoordinator
+    self.callerPaneResolver = callerPaneResolver
   }
 
   // MARK: - Error mapping
@@ -108,10 +116,11 @@ final class HierarchyHandlers {
 
   /// `hierarchy.resolveAlias` — turn a string identifier (index /
   /// label / glob) into the canonical UUID for `kind`. Supports the set
-  /// the CLI drives: `current` / `.` (handled client-side by
-  /// `AliasResolver`, but the server still accepts it as a defensive
-  /// fallback), pane labels, and short target handles (`t<n>` / `p<n>`).
-  public func resolveAlias(_ params: JSONValue) async -> RouterOutcome {
+  /// the CLI drives: `current` / `.` (resolved client-side from
+  /// `$CODANS_PANE_ID` when present; for panes the server attributes an
+  /// env-less caller via `peerPID` + process ancestry), pane labels, and
+  /// short target handles (`t<n>` / `p<n>`).
+  public func resolveAlias(_ params: JSONValue, peerPID: pid_t? = nil) async -> RouterOutcome {
     await Task.yield()
     let request: IPC.AliasResolveRequest
     do {
@@ -123,6 +132,9 @@ final class HierarchyHandlers {
       let result = IPC.AliasResolveResult(kind: request.kind, id: uuid)
       return (try? JSONValue.encoded(result)).map(RouterOutcome.unary)
         ?? .failed(.internal("encode resolveAlias result"))
+    }
+    if request.value == "current" || request.value == "." {
+      return resolveCurrent(request, peerPID: peerPID)
     }
     if request.kind == .pane, request.value.hasPrefix("@") {
       let label = String(request.value.dropFirst())
@@ -156,6 +168,29 @@ final class HierarchyHandlers {
         ?? .failed(.internal("encode resolveAlias result"))
     }
     return .failed(.unsupported(reason: "alias form not yet supported: \(request.value)"))
+  }
+
+  /// `current` / `.` for panes, server-side. The CLI resolves the pronoun
+  /// from `$CODANS_PANE_ID` locally and only dials when that env var is
+  /// missing (agent-spawned subshells, wrappers, env-scrubbing tools).
+  /// Kernel peer-PID attribution wins over the request's env-derived
+  /// `contextPaneID`: the former is ground truth, the latter is the
+  /// caller's claim.
+  private func resolveCurrent(
+    _ request: IPC.AliasResolveRequest, peerPID: pid_t?
+  ) -> RouterOutcome {
+    guard request.kind == .pane else {
+      return .failed(
+        .unsupported(
+          reason: "current for kind \(request.kind.rawValue) resolves from $CODANS_*_ID only"))
+    }
+    let attributed = peerPID.flatMap { callerPaneResolver($0) }?.raw ?? request.contextPaneID?.raw
+    guard let id = attributed else {
+      return .failed(.notFound(kind: "pane", id: request.value))
+    }
+    let result = IPC.AliasResolveResult(kind: .pane, id: id)
+    return (try? JSONValue.encoded(result)).map(RouterOutcome.unary)
+      ?? .failed(.internal("encode resolveAlias result"))
   }
 
   private static func panesMatchingLabel(label: String, catalog: Catalog) -> [UUID] {

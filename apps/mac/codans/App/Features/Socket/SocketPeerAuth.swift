@@ -33,6 +33,18 @@ nonisolated enum SocketPeerAuth {
     return result == 0 ? peerUID : nil
   }
 
+  /// Kernel-reported PID of the connecting peer process, via
+  /// `getsockopt(LOCAL_PEERPID)`. Read once at accept and carried on the
+  /// connection so `CallerPaneResolver` can attribute a request to the
+  /// caller's pane — unlike an env var, the peer PID cannot be dropped
+  /// or spoofed by the caller. Returns nil on any getsockopt error.
+  static func peerPID(fd: Int32) -> pid_t? {
+    var pid: pid_t = 0
+    var len = socklen_t(MemoryLayout<pid_t>.size)
+    let rc = getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &len)
+    return (rc == 0 && pid > 0) ? pid : nil
+  }
+
   /// Authorise `fd`. Default `expectedUID` is the server process's
   /// own UID — reject anything else.
   static func authorize(

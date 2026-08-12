@@ -12,6 +12,11 @@ import os
 /// before connection close.
 public actor SocketConnection {
   public let id: UUID
+  /// Kernel-reported PID of the peer process (`LOCAL_PEERPID`), read at
+  /// accept time by `SocketServer`. nil for transports with no kernel
+  /// peer (the in-memory test harness). Forwarded to the router with
+  /// every request so handlers can attribute the call to a live pane.
+  public let peerPID: pid_t?
   public let inflightLimit: Int
   private let router: MethodRouter
   private let reader: AsyncStream<Data>
@@ -29,6 +34,7 @@ public actor SocketConnection {
 
   public init(
     id: UUID = UUID(),
+    peerPID: pid_t? = nil,
     router: MethodRouter,
     reader: AsyncStream<Data>,
     write: @escaping @Sendable (Data) async -> Void,
@@ -36,6 +42,7 @@ public actor SocketConnection {
     inflightLimit: Int = 64
   ) {
     self.id = id
+    self.peerPID = peerPID
     self.router = router
     self.reader = reader
     self.write = write
@@ -115,7 +122,7 @@ public actor SocketConnection {
   }
 
   private func handleUnary(_ request: IPC.Request) async {
-    let outcome = await router.route(request)
+    let outcome = await router.route(request, peerPID: peerPID)
     switch outcome {
     case .unary(let result):
       if request.method == .systemHello { helloCompleted = true }
@@ -133,7 +140,7 @@ public actor SocketConnection {
   }
 
   private func handleStreaming(_ request: IPC.Request) async {
-    let outcome = await router.route(request)
+    let outcome = await router.route(request, peerPID: peerPID)
     switch outcome {
     case .streaming(let subscribe):
       let stream = subscribe()

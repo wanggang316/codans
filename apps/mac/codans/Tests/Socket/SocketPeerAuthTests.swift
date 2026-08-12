@@ -59,6 +59,21 @@ struct SocketPeerAuthTests {
     #expect(uid == nil)
   }
 
+  @Test
+  func peerPIDReportsSelfOnSocketpair() throws {
+    let (serverFD, peerFD) = try Self.socketpair()
+    defer {
+      Darwin.close(serverFD)
+      Darwin.close(peerFD)
+    }
+    #expect(SocketPeerAuth.peerPID(fd: serverFD) == getpid())
+  }
+
+  @Test
+  func peerPIDReturnsNilOnInvalidFD() {
+    #expect(SocketPeerAuth.peerPID(fd: -1) == nil)
+  }
+
   // MARK: - Helpers
 
   static func socketpair() throws -> (Int32, Int32) {

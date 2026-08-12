@@ -66,6 +66,41 @@ struct AliasResolverTests {
   }
 
   @Test
+  func currentPaneWithoutEnvRoutesToServer() async throws {
+    // No CODANS_PANE_ID in the env: the pane pronoun must fall through
+    // to the server, which attributes the caller from the connection's
+    // kernel peer PID.
+    let targetID = UUID()
+    let transport = InMemoryTransport()
+    transport.script = { frames in
+      let hello = try JSONDecoder().decode(IPC.Request.self, from: frames[0])
+      let real = try JSONDecoder().decode(IPC.Request.self, from: frames[1])
+      #expect(real.method == .hierarchyResolveAlias)
+      let request = try real.params.decoded(as: IPC.AliasResolveRequest.self)
+      #expect(request.kind == .pane)
+      #expect(request.value == "current")
+      let body = try JSONEncoder().encode(
+        IPC.AliasResolveResult(kind: .pane, id: targetID)
+      )
+      let resultJSON = try JSONDecoder().decode(JSONValue.self, from: body)
+      return [
+        .success(id: hello.id, result: .object([:])),
+        .success(id: real.id, result: resultJSON),
+      ]
+    }
+    let client = RPCClient(transport: transport, versions: .init(clientVersion: "0.3.0"))
+    defer { Task { await client.shutdown() } }
+
+    let resolved = try await AliasResolver.resolve(
+      "current",
+      kind: .pane,
+      env: [:],
+      client: client
+    )
+    #expect(resolved == targetID)
+  }
+
+  @Test
   func labelRoutesToServerAndReturnsResolvedID() async throws {
     let targetID = UUID()
     let transport = InMemoryTransport()
