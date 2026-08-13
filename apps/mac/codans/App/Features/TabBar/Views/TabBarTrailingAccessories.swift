@@ -15,6 +15,9 @@ struct TabBarTrailingAccessories: View {
   /// `nil` while no worktree is resolved — the history button hides since
   /// there is nothing to scan against.
   let worktreePath: String?
+  /// SSH host of the active worktree's project for Server projects, `nil`
+  /// for local — routes the session-history scan to the host's stores.
+  var remoteHost: RemoteHost?
   let onNewTab: () -> Void
   let onResumeSession: (AgentSessionSummary) -> Void
   let onSplitRight: () -> Void
@@ -27,6 +30,7 @@ struct TabBarTrailingAccessories: View {
       if let worktreePath {
         AgentSessionHistoryButton(
           worktreePath: worktreePath,
+          remoteHost: remoteHost,
           onResume: onResumeSession
         )
       }

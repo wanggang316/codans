@@ -9,8 +9,13 @@ import SwiftUI
 /// accessories (22×22 circular hover) so the cluster reads as one family.
 struct AgentSessionHistoryButton: View {
   /// Worktree path the popover scans against; also the cwd the resume
-  /// tab spawns in.
+  /// tab spawns in. A remote path string for Server projects.
   let worktreePath: String
+  /// SSH host for a Server-project worktree, `nil` for local. Routes the
+  /// popover's scan to the host's session stores over SSH; resume needs no
+  /// routing — the command is typed into a pane whose shell already runs
+  /// on the host.
+  var remoteHost: RemoteHost?
   /// Row play-button callback. `TabBarView` maps this to
   /// `TabBarFeature.resumeAgentSessionTapped`, which spawns the resume tab.
   let onResume: (AgentSessionSummary) -> Void
@@ -41,6 +46,7 @@ struct AgentSessionHistoryButton: View {
     .popover(isPresented: $popoverShown, arrowEdge: .bottom) {
       AgentSessionHistoryPopover(
         worktreePath: worktreePath,
+        remoteHost: remoteHost,
         onResume: { session in
           popoverShown = false
           onResume(session)
@@ -58,6 +64,7 @@ struct AgentSessionHistoryButton: View {
 /// focus sits on the anchor toolbar button).
 private struct AgentSessionHistoryPopover: View {
   let worktreePath: String
+  var remoteHost: RemoteHost?
   let onResume: (AgentSessionSummary) -> Void
   let onClose: () -> Void
 
@@ -83,9 +90,16 @@ private struct AgentSessionHistoryPopover: View {
     }
     .task {
       let path = worktreePath
-      groups = await Task.detached(priority: .userInitiated) {
-        AgentSessionHistoryScanner.scan(worktreePath: path)
-      }.value
+      // Server-project worktrees keep their agent session stores in the
+      // HOST's home — scan over SSH; local worktrees read the local stores
+      // on a detached task (dozens of file stats + prefix reads).
+      if let host = remoteHost {
+        groups = await RemoteAgentSessionHistoryScanner.scan(host: host, worktreePath: path)
+      } else {
+        groups = await Task.detached(priority: .userInitiated) {
+          AgentSessionHistoryScanner.scan(worktreePath: path)
+        }.value
+      }
     }
   }
 
