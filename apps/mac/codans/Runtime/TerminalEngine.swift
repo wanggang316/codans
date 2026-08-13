@@ -281,8 +281,17 @@ final class TerminalEngine {
         )
       )
     }
-    foregroundJobPaneIDs.insert(pane.id)
-    startForegroundJobPollingIfNeeded()
+    // Local-process introspection carries no signal for a remote pane: its
+    // local foreground group is permanently the `ssh` tunnel, which the
+    // classifier reads as a running command — pinning the tab / worktree busy
+    // spinner forever on a pane that is just sitting at the remote prompt.
+    // Remote activity signals ride the terminal stream instead (OSC 9;4 and
+    // shell-integration sequences flow through `ssh -tt`), so remote panes
+    // skip the foreground-job poller entirely.
+    if remoteHost == nil {
+      foregroundJobPaneIDs.insert(pane.id)
+      startForegroundJobPollingIfNeeded()
+    }
     surface.onClose = { [weak self] processAlive in
       self?.handleSurfaceClose(paneID: pane.id, processAlive: processAlive)
     }
