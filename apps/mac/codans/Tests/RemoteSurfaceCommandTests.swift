@@ -97,6 +97,27 @@ struct RemoteSurfaceCommandTests {
   }
 
   @Test
+  func worktreeShellWarnsWhenDarwinKeychainIsLocked() throws {
+    // macOS-only, and gated on the keychain actually being locked — a Linux
+    // host or an unlocked keychain prints nothing.
+    let notice = RemoteSurfaceCommand.lockedKeychainNotice
+    #expect(notice.contains(#"[ "$(uname)" = Darwin ]"#))
+    #expect(notice.contains("security show-keychain-info"))
+    #expect(notice.contains("security unlock-keychain"))
+    let script = RemoteSurfaceCommand.connectScript(
+      hostSession: "codans-x", remotePath: "/srv/app", hostPersistence: true
+    )
+    #expect(script.contains("show-keychain-info"))
+    // The full build still parses as valid shell with the notice embedded
+    // (its single-quoted printf crosses every quoting layer).
+    let command = RemoteSurfaceCommand.build(
+      host: host, paneID: paneID, remotePath: "/srv/app",
+      localZmxPath: "/opt/zmx", hostPersistence: true
+    )
+    try Self.assertShellParses(command, label: "keychain-notice")
+  }
+
+  @Test
   func reconnectScriptNeverRecreatesButReattaches() {
     let script = RemoteSurfaceCommand.reconnectScript(
       hostSession: "codans-x", remotePath: "/srv/app", hostPersistence: true

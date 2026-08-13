@@ -84,6 +84,17 @@ nonisolated enum RemoteSurfaceCommand {
     "exec \"$SHELL\" -l -c " + SSHCommand.shellQuote(command)
   }
 
+  /// Printed before the shell when the host is macOS and its default keychain
+  /// is locked for this SSH session (SSH sessions never inherit the GUI
+  /// console's unlock). Keychain-backed CLIs — Claude Code's OAuth token
+  /// lives there — would otherwise report "Not logged in" with no context.
+  /// The check is a single local `security` call on the host; non-Darwin
+  /// hosts skip it entirely. No apostrophes in the text — it crosses several
+  /// single-quoting layers.
+  static let lockedKeychainNotice =
+    #"if [ "$(uname)" = Darwin ] && ! security show-keychain-info >/dev/null 2>&1; then "#
+    + #"printf '\033[2m── Keychain is locked in this SSH session; keychain-backed CLIs (e.g. claude) may ask to log in. Fix: security unlock-keychain ──\033[0m\r\n'; fi; "#
+
   /// The default shell for the worktree: cd into the remote path (best-effort)
   /// then exec an **interactive** login shell. `-i` is load-bearing: without it
   /// a shell whose stdin isn't perfectly a TTY (some SSH PTY / multiplexing
@@ -92,7 +103,9 @@ nonisolated enum RemoteSurfaceCommand {
   /// on the spot. Forcing interactive keeps the shell alive for the terminal.
   /// Never carries a one-shot command.
   private static func worktreeShellCommand(remotePath: String) -> String {
-    "cd -- \(SSHCommand.shellQuote(remotePath)) 2>/dev/null; exec \"$SHELL\" -il"
+    "cd -- \(SSHCommand.shellQuote(remotePath)) 2>/dev/null; "
+      + lockedKeychainNotice
+      + "exec \"$SHELL\" -il"
   }
 
   /// First-connect script. With host persistence and a host-side `zmx`, the
