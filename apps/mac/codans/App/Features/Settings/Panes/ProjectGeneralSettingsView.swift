@@ -217,6 +217,32 @@ struct ProjectGeneralSettingsView: View {
         ProjectColorSwatchRow(selection: projectColorBinding)
       }
     }
+
+    // Server (remote) connection facts, read-only: the connection is edited
+    // through the sidebar's "Edit Connection…" (which re-validates over SSH),
+    // not through free-form fields here.
+    if let host = projectRemoteHost {
+      Section("Server") {
+        LabeledContent("Host", value: host.alias)
+        LabeledContent("User", value: host.username ?? "default")
+        LabeledContent("Port", value: host.port.map(String.init) ?? "22")
+        LabeledContent("Remote path", value: projectRemotePath)
+          .truncationMode(.middle)
+        Text("Edit via the project's ⋯ menu → Edit Connection…. Authentication uses your SSH config and agent.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  /// The SSH host for a Server project, `nil` for local ones — gates the
+  /// read-only Server section above.
+  private var projectRemoteHost: RemoteHost? {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.remoteHost
+  }
+
+  private var projectRemotePath: String {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.rootPath ?? ""
   }
 
   /// Path-derived canonical name. Shown as the field's placeholder so the

@@ -808,6 +808,7 @@ struct HierarchySidebarView: View {
         FailedProjectRow(
           name: project.name,
           rootPath: project.rootPath,
+          remoteAuthority: project.remoteHost?.displayAuthority,
           reason: reason,
           retry: {
             store.send(.retryProjectTapped(projectID: project.id))
