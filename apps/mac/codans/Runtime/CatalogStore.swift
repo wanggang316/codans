@@ -15,10 +15,23 @@ class CatalogStore {
   }
 
   func load() throws -> Catalog {
-    if let existing = try AtomicFileStore.read(Catalog.self, at: fileURL) {
+    if var existing = try AtomicFileStore.read(Catalog.self, at: fileURL) {
+      // Self-heal Server projects whose `remoteHost` was stripped by an older
+      // build sharing this catalog (tolerant decode + full re-encode drops
+      // unknown keys). The sidecar is invisible to those builds, so it
+      // survives; persist the healed catalog immediately so a crash before
+      // the next debounced save can't lose the repair.
+      if RemoteHostSidecar.repair(&existing, sidecarURL: sidecarURL) {
+        logger.notice("restored remoteHost fields from sidecar")
+        try? saveNow(existing)
+      }
       return existing
     }
     return .default
+  }
+
+  private var sidecarURL: URL {
+    RemoteHostSidecar.url(alongsideCatalogAt: fileURL)
   }
 
   func scheduleSave(_ catalog: Catalog) {
@@ -43,6 +56,9 @@ class CatalogStore {
 
   func saveNow(_ catalog: Catalog) throws {
     try AtomicFileStore.write(catalog, to: fileURL)
+    // Mirror Server-project connections into the sidecar on every save, so
+    // the repair source stays current without a separate write path.
+    RemoteHostSidecar.sync(from: catalog, to: sidecarURL)
   }
 
   /// Synchronous flush for app termination. Cancels the pending debounced
