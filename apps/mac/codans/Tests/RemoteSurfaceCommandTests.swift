@@ -67,15 +67,32 @@ struct RemoteSurfaceCommandTests {
   }
 
   @Test
+  func connectScriptRecordsThePaneTTYForTheForegroundProbe() {
+    for persistence in [true, false] {
+      let script = RemoteSurfaceCommand.connectScript(
+        hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+        hostPersistence: persistence
+      )
+      // The worktree shell writes its controlling tty under the probe's
+      // directory, keyed by the pane UUID, in both persistence modes.
+      #expect(script.contains("pane-ttys"))
+      #expect(script.contains(paneID.raw.uuidString))
+      #expect(script.contains("tty >"))
+    }
+  }
+
+  @Test
   func hostSessionNameIsPrefixed() {
-    #expect(RemoteSurfaceCommand.hostSessionName(for: paneID)
-      == "codans-00000000-0000-0000-0000-0000000000AB")
+    #expect(
+      RemoteSurfaceCommand.hostSessionName(for: paneID)
+        == "codans-00000000-0000-0000-0000-0000000000AB")
   }
 
   @Test
   func connectScriptAttachesHostSessionWhenPersistent() {
     let script = RemoteSurfaceCommand.connectScript(
-      hostSession: "codans-x", remotePath: "/srv/app", hostPersistence: true
+      hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+      hostPersistence: true
     )
     #expect(script.contains("command -v zmx"))
     #expect(script.contains("zmx attach codans-x"))
@@ -88,7 +105,8 @@ struct RemoteSurfaceCommandTests {
   @Test
   func connectScriptWithoutPersistenceIsPlainLoginShell() {
     let script = RemoteSurfaceCommand.connectScript(
-      hostSession: "codans-x", remotePath: "/srv/app", hostPersistence: false
+      hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+      hostPersistence: false
     )
     #expect(!script.contains("zmx attach"))
     #expect(script.contains("cd --"))
@@ -105,7 +123,8 @@ struct RemoteSurfaceCommandTests {
     #expect(notice.contains("security show-keychain-info"))
     #expect(notice.contains("security unlock-keychain"))
     let script = RemoteSurfaceCommand.connectScript(
-      hostSession: "codans-x", remotePath: "/srv/app", hostPersistence: true
+      hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+      hostPersistence: true
     )
     #expect(script.contains("show-keychain-info"))
     // The full build still parses as valid shell with the notice embedded
@@ -120,7 +139,8 @@ struct RemoteSurfaceCommandTests {
   @Test
   func reconnectScriptNeverRecreatesButReattaches() {
     let script = RemoteSurfaceCommand.reconnectScript(
-      hostSession: "codans-x", remotePath: "/srv/app", hostPersistence: true
+      hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+      hostPersistence: true
     )
     // Only reattaches an existing session; exits 0 if it ended while away.
     #expect(script.contains("zmx list --short"))

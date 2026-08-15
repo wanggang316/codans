@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 import os.log
 
 /// Public-facing façade that composes `CatalogStore`, `HierarchyManager`, and
@@ -74,6 +74,12 @@ final class TerminalEngine {
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.runtime", category: "runtime.session.lifecycle"
   )
+  /// Remote foreground-probe diagnostics. A network-dependent poll loop must
+  /// be observable: registration, per-host failures, and (at debug) tick
+  /// summaries — `log stream --predicate 'category == "remote.foreground"'`.
+  private static let probeLogger = Logger(
+    subsystem: "com.gumpw.codans.runtime", category: "remote.foreground"
+  )
 
   private let registry = SubscriberRegistry()
   private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
@@ -81,6 +87,12 @@ final class TerminalEngine {
   private let foregroundJobReader: ForegroundJobReader
   private var foregroundJobPollTask: Task<Void, Never>?
   private var foregroundJobPaneIDs: Set<PaneID> = []
+  /// Remote (Server-project) panes and their hosts. These skip the local
+  /// poller — their local foreground is permanently the `ssh` tunnel — and
+  /// are sampled by the host-side foreground probe instead, which feeds the
+  /// SAME snapshot / binder / viewport pipeline as local panes.
+  private var remoteForegroundPanes: [PaneID: RemoteHost] = [:]
+  private var remoteProbeTask: Task<Void, Never>?
   private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
   private var foregroundJobMisses: [PaneID: UInt8] = [:]
   private var viewportSnapshots: [PaneID: String] = [:]
@@ -134,6 +146,7 @@ final class TerminalEngine {
   // Sendable, so it is sound from a nonisolated deinit.
   deinit {
     foregroundJobPollTask?.cancel()
+    remoteProbeTask?.cancel()
   }
 
   // MARK: - Pane surface lifecycle
@@ -285,10 +298,16 @@ final class TerminalEngine {
     // local foreground group is permanently the `ssh` tunnel, which the
     // classifier reads as a running command — pinning the tab / worktree busy
     // spinner forever on a pane that is just sitting at the remote prompt.
-    // Remote activity signals ride the terminal stream instead (OSC 9;4 and
-    // shell-integration sequences flow through `ssh -tt`), so remote panes
-    // skip the foreground-job poller entirely.
-    if remoteHost == nil {
+    // Remote panes are sampled by the host-side foreground probe instead
+    // (`RemoteForegroundProbe`), which feeds the same binder / busy / viewport
+    // pipeline with the pane's REAL foreground job on the host.
+    if let remoteHost {
+      remoteForegroundPanes[pane.id] = remoteHost
+      Self.probeLogger.info(
+        "register pane=\(pane.id.raw.uuidString.prefix(8), privacy: .public) host=\(remoteHost.authority, privacy: .public)"
+      )
+      startRemoteForegroundProbingIfNeeded()
+    } else {
       foregroundJobPaneIDs.insert(pane.id)
       startForegroundJobPollingIfNeeded()
     }
@@ -453,6 +472,8 @@ final class TerminalEngine {
 
     ghosttyRuntime?.unregister(paneID: paneID)
     foregroundJobPaneIDs.remove(paneID)
+    remoteForegroundPanes.removeValue(forKey: paneID)
+    stopRemoteForegroundProbingIfIdle()
     if let snapshot = foregroundJobSnapshots[paneID] {
       // Evict the cache entry for the closing pane's PGID so a recycled
       // group id picked up by a later pane never reads back this pane's
@@ -774,44 +795,116 @@ final class TerminalEngine {
       } else {
         next = ForegroundJob(processGroupID: groupByPane[paneID] ?? 0, processes: [])
       }
+      processForegroundSample(paneID: paneID, next: next, now: now)
+    }
+  }
 
-      if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
-        continue
-      }
-      if next.isEmpty {
-        let misses = min((foregroundJobMisses[paneID] ?? 0) + 1, 3)
-        foregroundJobMisses[paneID] = misses
-        guard misses >= 3 else { continue }
-      } else {
-        foregroundJobMisses[paneID] = 0
-      }
-      let changed = foregroundJobSnapshots[paneID] != next
-      if changed {
-        foregroundJobSnapshots[paneID] = next
-      }
-      // Deliver `next` to the binder on a genuine change, and *also* keep
-      // re-delivering an unchanged job while a bound pane's foreground has
-      // settled on a non-agent program. A TUI agent holds the terminal
-      // foreground for its whole lifetime, so a steady non-agent foreground
-      // means the agent exited — but with change-only emission no further
-      // event would ever fire to retire the now-stale binding, stranding a
-      // ghost agent in the view. The re-delivery lets the binder's release
-      // hysteresis run to completion; it is self-limiting because the pane
-      // stops being bound once released. See `shouldRedeliverForegroundJob`.
-      let paneIsBound = hierarchy.catalog.pane(paneID)?.agentKind != nil
-      let foregroundIsStaleNonAgent =
-        !next.isEmpty && AgentKindPatterns.classify(foregroundJob: next) == nil
-      if Self.shouldRedeliverForegroundJob(
-        changed: changed,
-        paneIsBound: paneIsBound,
-        foregroundIsStaleNonAgent: foregroundIsStaleNonAgent
-      ) {
-        emit(.foregroundJobChanged(paneID, next))
-      }
-      if let surface = ghosttyRuntime.surface(for: paneID) {
-        emitViewportIfNeeded(paneID: paneID, surface: surface, foregroundJob: next, now: now)
+  /// Shared per-pane tail of both foreground samplers (local poll loop and
+  /// remote host probe): empty-sample hysteresis, change detection, binder
+  /// delivery, and the viewport nudge.
+  private func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
+    if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
+      return
+    }
+    if next.isEmpty {
+      let misses = min((foregroundJobMisses[paneID] ?? 0) + 1, 3)
+      foregroundJobMisses[paneID] = misses
+      guard misses >= 3 else { return }
+    } else {
+      foregroundJobMisses[paneID] = 0
+    }
+    let changed = foregroundJobSnapshots[paneID] != next
+    if changed {
+      foregroundJobSnapshots[paneID] = next
+    }
+    // Deliver `next` to the binder on a genuine change, and *also* keep
+    // re-delivering an unchanged job while a bound pane's foreground has
+    // settled on a non-agent program. A TUI agent holds the terminal
+    // foreground for its whole lifetime, so a steady non-agent foreground
+    // means the agent exited — but with change-only emission no further
+    // event would ever fire to retire the now-stale binding, stranding a
+    // ghost agent in the view. The re-delivery lets the binder's release
+    // hysteresis run to completion; it is self-limiting because the pane
+    // stops being bound once released. See `shouldRedeliverForegroundJob`.
+    let paneIsBound = hierarchy.catalog.pane(paneID)?.agentKind != nil
+    let foregroundIsStaleNonAgent =
+      !next.isEmpty && AgentKindPatterns.classify(foregroundJob: next) == nil
+    if Self.shouldRedeliverForegroundJob(
+      changed: changed,
+      paneIsBound: paneIsBound,
+      foregroundIsStaleNonAgent: foregroundIsStaleNonAgent
+    ) {
+      emit(.foregroundJobChanged(paneID, next))
+    }
+    if let surface = ghosttyRuntime?.surface(for: paneID) {
+      emitViewportIfNeeded(paneID: paneID, surface: surface, foregroundJob: next, now: now)
+    }
+  }
+
+  // MARK: - Remote foreground probe
+
+  private func startRemoteForegroundProbingIfNeeded() {
+    guard remoteProbeTask == nil else { return }
+    remoteProbeTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        await self?.probeRemoteForegroundJobs()
+        let interval = self?.remoteProbeInterval() ?? .seconds(3)
+        try? await Task.sleep(for: interval)
       }
     }
+  }
+
+  private func stopRemoteForegroundProbingIfIdle() {
+    guard remoteForegroundPanes.isEmpty else { return }
+    remoteProbeTask?.cancel()
+    remoteProbeTask = nil
+  }
+
+  /// One probe per host per tick, covering every remote pane on it. A failed
+  /// probe (unreachable host) freezes its panes' state — no emission — so a
+  /// network blip cannot release a live agent binding; empty jobs are only
+  /// delivered when the host answered and genuinely reported no foreground.
+  private func probeRemoteForegroundJobs() async {
+    guard !remoteForegroundPanes.isEmpty else { return }
+    var panesByHost: [RemoteHost: [PaneID]] = [:]
+    for (paneID, host) in remoteForegroundPanes {
+      panesByHost[host, default: []].append(paneID)
+    }
+    for (host, paneIDs) in panesByHost {
+      guard let jobs = await RemoteForegroundProbe.run(host: host) else {
+        Self.probeLogger.error(
+          "probe failed host=\(host.authority, privacy: .public) panes=\(paneIDs.count, privacy: .public)"
+        )
+        continue
+      }
+      Self.probeLogger.debug(
+        "probe ok host=\(host.authority, privacy: .public) jobs=\(jobs.count, privacy: .public)"
+      )
+      let now = clock()
+      // Re-check membership: a pane can close during the SSH await.
+      for paneID in paneIDs where remoteForegroundPanes[paneID] != nil {
+        let next = jobs[paneID.raw] ?? ForegroundJob(processGroupID: 0, processes: [])
+        processForegroundSample(paneID: paneID, next: next, now: now)
+      }
+    }
+  }
+
+  /// Remote sampling cadence. SSH round-trips are ~2 orders costlier than
+  /// the local sysctl walk, so the floors sit higher than the local poller:
+  /// a bound/visible agent samples at 1s (release latency), everything else
+  /// at 3s (bind latency for a freshly launched agent).
+  private func remoteProbeInterval() -> Duration {
+    for paneID in remoteForegroundPanes.keys {
+      if hierarchy.catalog.pane(paneID)?.agentKind != nil {
+        return .seconds(1)
+      }
+      if let job = foregroundJobSnapshots[paneID],
+        AgentKindPatterns.classify(foregroundJob: job) != nil
+      {
+        return .seconds(1)
+      }
+    }
+    return .seconds(3)
   }
 
   private func foregroundJobPollInterval() -> Duration {

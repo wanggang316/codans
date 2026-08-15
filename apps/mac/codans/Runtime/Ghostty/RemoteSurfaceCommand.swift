@@ -46,16 +46,23 @@ nonisolated enum RemoteSurfaceCommand {
     hostPersistence: Bool = true
   ) -> String {
     let hostSession = hostSessionName(for: paneID)
+    let paneUUID = paneID.raw.uuidString
     let connectLine = SSHCommand.commandLine(
       host: host,
       remoteCommand: posixShellWrapped(
-        connectScript(hostSession: hostSession, remotePath: remotePath, hostPersistence: hostPersistence)
+        connectScript(
+          hostSession: hostSession, paneUUID: paneUUID, remotePath: remotePath,
+          hostPersistence: hostPersistence
+        )
       )
     )
     let reconnectLine = SSHCommand.commandLine(
       host: host,
       remoteCommand: posixShellWrapped(
-        reconnectScript(hostSession: hostSession, remotePath: remotePath, hostPersistence: hostPersistence)
+        reconnectScript(
+          hostSession: hostSession, paneUUID: paneUUID, remotePath: remotePath,
+          hostPersistence: hostPersistence
+        )
       )
     )
     let loop = SSHReconnectLoop.script(connect: connectLine, reconnect: reconnectLine)
@@ -95,15 +102,18 @@ nonisolated enum RemoteSurfaceCommand {
     #"if [ "$(uname)" = Darwin ] && ! security show-keychain-info >/dev/null 2>&1; then "#
     + #"printf '\033[2m── Keychain is locked in this SSH session; keychain-backed CLIs (e.g. claude) may ask to log in. Fix: security unlock-keychain ──\033[0m\r\n'; fi; "#
 
-  /// The default shell for the worktree: cd into the remote path (best-effort)
-  /// then exec an **interactive** login shell. `-i` is load-bearing: without it
-  /// a shell whose stdin isn't perfectly a TTY (some SSH PTY / multiplexing
-  /// paths) treats the connection as a script, reads EOF immediately, and exits
-  /// — which the SSH line surfaces as a fast non-255 exit and the pane closes
+  /// The default shell for the worktree: cd into the remote path (best-effort),
+  /// record this pane's controlling tty for the host-side foreground probe
+  /// (agent detection — see `RemoteForegroundProbe`), then exec an
+  /// **interactive** login shell. `-i` is load-bearing: without it a shell
+  /// whose stdin isn't perfectly a TTY (some SSH PTY / multiplexing paths)
+  /// treats the connection as a script, reads EOF immediately, and exits —
+  /// which the SSH line surfaces as a fast non-255 exit and the pane closes
   /// on the spot. Forcing interactive keeps the shell alive for the terminal.
   /// Never carries a one-shot command.
-  private static func worktreeShellCommand(remotePath: String) -> String {
+  private static func worktreeShellCommand(paneUUID: String, remotePath: String) -> String {
     "cd -- \(SSHCommand.shellQuote(remotePath)) 2>/dev/null; "
+      + RemoteForegroundProbe.recordTTYFragment(paneUUID: paneUUID)
       + lockedKeychainNotice
       + "exec \"$SHELL\" -il"
   }
@@ -112,8 +122,10 @@ nonisolated enum RemoteSurfaceCommand {
   /// worktree shell runs inside `zmx attach <hostSession>` (created on first
   /// connect). A failed attach falls through to a plain login shell with a notice
   /// rather than an instant, unreadable close.
-  static func connectScript(hostSession: String, remotePath: String, hostPersistence: Bool) -> String {
-    let worktreeShell = worktreeShellCommand(remotePath: remotePath)
+  static func connectScript(
+    hostSession: String, paneUUID: String, remotePath: String, hostPersistence: Bool
+  ) -> String {
+    let worktreeShell = worktreeShellCommand(paneUUID: paneUUID, remotePath: remotePath)
     guard hostPersistence else {
       return loginShellRun(worktreeShell)
     }
@@ -133,8 +145,10 @@ nonisolated enum RemoteSurfaceCommand {
   /// host session if it still exists, exit 0 (closing the pane like a normal
   /// remote exit, with a notice) if it ended while disconnected, and never re-run
   /// any one-shot command. Without host `zmx` it drops into the worktree shell.
-  static func reconnectScript(hostSession: String, remotePath: String, hostPersistence: Bool) -> String {
-    let worktreeShell = worktreeShellCommand(remotePath: remotePath)
+  static func reconnectScript(
+    hostSession: String, paneUUID: String, remotePath: String, hostPersistence: Bool
+  ) -> String {
+    let worktreeShell = worktreeShellCommand(paneUUID: paneUUID, remotePath: remotePath)
     guard hostPersistence else {
       return reconnectShellNotice + loginShellRun(worktreeShell)
     }

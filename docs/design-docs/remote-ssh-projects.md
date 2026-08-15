@@ -170,6 +170,26 @@ Two small sibling files live beside the catalog:
   Server sheet's host-field picker. Connection info only; auth never leaves the
   user's SSH config + agent.
 
+### Agent Detection Parity
+
+Local panes identify coding agents from the pane's foreground process group
+(local sysctl walk → `AgentKindPatterns` → `AgentBinder`), so a remote pane —
+whose local foreground is permanently the `ssh` tunnel — was invisible to the
+Agents View. Parity is restored with a host-side foreground probe:
+
+- The remote worktree shell records its controlling tty under
+  `~/.cache/codans/pane-ttys/<paneUUID>` on the host at connect.
+- `RemoteForegroundProbe` runs one SSH exec per host per tick (3s idle, 1s
+  while an agent is bound) that `ps -t`'s every recorded tty and prints
+  `<paneUUID> <pid> <pgid> <stat> <args>` rows; rows carrying the `+`
+  foreground flag are grouped into the same `ForegroundJob` shape the local
+  reader produces. Records whose tty vanished are pruned host-side.
+- The samples feed the SAME snapshot / hysteresis / `AgentBinder` / viewport
+  pipeline as local panes, so bind, working/blocked classification (rendered
+  text), busy spinners for plain commands, and 6-miss release all behave
+  identically. A failed probe (unreachable host) freezes pane state instead
+  of emitting empty jobs, so a network blip cannot release a live binding.
+
 ### Component Boundaries
 
 - `CodansCore` — `RemoteHost`, `Project.remoteHost`, `ProjectKind.server`
