@@ -36,9 +36,9 @@ struct RemoteConnectionFeature {
     var isConnecting: Bool = false
     /// Validation / connection failure, rendered in the sheet header.
     var errorMessage: String?
-    /// Previously validated connections offered as one-click prefills
-    /// (add mode only; loaded on appear).
-    var recentConnections: [RecentServerConnections.Entry] = []
+    /// Previously validated hosts offered by the host-field picker (loaded on
+    /// appear). Picking one fills host / username / port — never the path.
+    var savedHosts: [RemoteHost] = []
 
     var isEditing: Bool {
       if case .edit = mode { return true }
@@ -63,9 +63,9 @@ struct RemoteConnectionFeature {
     case portChanged(String)
     case usernameChanged(String)
     case pathChanged(String)
-    case recentsRequested
-    case recentsLoaded([RecentServerConnections.Entry])
-    case recentSelected(RecentServerConnections.Entry)
+    case savedHostsRequested
+    case savedHostsLoaded([RemoteHost])
+    case savedHostSelected(RemoteHost)
     case connectButtonTapped
     case connectFailed(String)
     case connectSucceeded(host: RemoteHost, remotePath: String, gitRoot: String?)
@@ -100,22 +100,19 @@ struct RemoteConnectionFeature {
         state.pathDraft = value
         return .none
 
-      case .recentsRequested:
-        // Edit mode pins the form to one project's connection — no prefills.
-        guard !state.isEditing else { return .none }
+      case .savedHostsRequested:
         return .run { send in
-          await send(.recentsLoaded(RecentServerConnections.read()))
+          await send(.savedHostsLoaded(SavedServerHosts.read()))
         }
 
-      case .recentsLoaded(let entries):
-        state.recentConnections = entries
+      case .savedHostsLoaded(let hosts):
+        state.savedHosts = hosts
         return .none
 
-      case .recentSelected(let entry):
-        state.hostDraft = entry.host.alias
-        state.usernameDraft = entry.host.username ?? ""
-        state.portDraft = entry.host.port.map(String.init) ?? ""
-        state.pathDraft = entry.path
+      case .savedHostSelected(let host):
+        state.hostDraft = host.alias
+        state.usernameDraft = host.username ?? ""
+        state.portDraft = host.port.map(String.init) ?? ""
         state.errorMessage = nil
         return .none
 
@@ -191,9 +188,9 @@ struct RemoteConnectionFeature {
       return
     }
     let gitRoot = await service.discoverGitRoot(candidatePath: resolved)
-    // A validated connection is worth remembering (add and edit alike) — it
-    // becomes a one-click prefill in the next Connect to Server sheet.
-    RecentServerConnections.record(host: host, path: resolved)
+    // A validated host is worth remembering (add and edit alike) — it becomes
+    // a one-click prefill in the host-field picker next time.
+    SavedServerHosts.record(host)
     await send(.connectSucceeded(host: host, remotePath: resolved, gitRoot: gitRoot))
   }
 }

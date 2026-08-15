@@ -40,14 +40,8 @@ struct RemoteConnectionSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      HStack {
-        Text(store.isEditing ? "Edit Server Connection" : "Connect to Server")
-          .font(.headline)
-        Spacer()
-        if !store.isEditing && !store.recentConnections.isEmpty {
-          recentsMenu
-        }
-      }
+      Text(store.isEditing ? "Edit Server Connection" : "Connect to Server")
+        .font(.headline)
 
       if let error = store.errorMessage {
         Text(error)
@@ -58,16 +52,22 @@ struct RemoteConnectionSheet: View {
       }
 
       VStack(alignment: .leading, spacing: 4) {
-        Text("Host or SSH alias").font(.callout)
-        TextField(
-          "example.com or my-server",
-          text: Binding(
-            get: { store.hostDraft },
-            set: { store.send(.hostChanged($0)) }
+        Text("Host").font(.callout)
+        HStack(spacing: 6) {
+          TextField(
+            "IP, hostname, or ~/.ssh/config alias",
+            text: Binding(
+              get: { store.hostDraft },
+              set: { store.send(.hostChanged($0)) }
+            )
           )
-        )
-        .textFieldStyle(.roundedBorder)
-        .disabled(store.isConnecting)
+          .textFieldStyle(.roundedBorder)
+          .disabled(store.isConnecting)
+
+          if !store.savedHosts.isEmpty {
+            savedHostsMenu
+          }
+        }
       }
 
       HStack(alignment: .top, spacing: 12) {
@@ -99,7 +99,7 @@ struct RemoteConnectionSheet: View {
       }
 
       VStack(alignment: .leading, spacing: 4) {
-        Text("Remote path").font(.callout)
+        Text("Path").font(.callout)
         TextField(
           "~/project or /srv/app",
           text: Binding(
@@ -111,7 +111,7 @@ struct RemoteConnectionSheet: View {
         .disabled(store.isConnecting)
       }
 
-      Text("Authentication uses your SSH config and agent.")
+      Text("Signs in with your SSH keys (~/.ssh/config + ssh-agent); no password is stored.")
         .font(.caption)
         .foregroundStyle(.secondary)
 
@@ -145,22 +145,25 @@ struct RemoteConnectionSheet: View {
     }
     .padding(20)
     .frame(width: 460)
-    .task { store.send(.recentsRequested) }
+    .task { store.send(.savedHostsRequested) }
   }
 
-  /// One-click prefill from previously validated connections (MRU order).
-  private var recentsMenu: some View {
+  /// Host-field picker: previously validated hosts (MRU order). Picking one
+  /// fills host / username / port; the path field is left alone.
+  private var savedHostsMenu: some View {
     Menu {
-      ForEach(store.recentConnections, id: \.self) { entry in
-        Button("\(entry.host.displayAuthority) — \(entry.path)") {
-          store.send(.recentSelected(entry))
+      ForEach(store.savedHosts, id: \.self) { host in
+        Button(host.displayAuthority) {
+          store.send(.savedHostSelected(host))
         }
       }
     } label: {
-      Label("Recent", systemImage: "clock.arrow.circlepath")
+      Image(systemName: "clock.arrow.circlepath")
+        .accessibilityLabel("Previously used servers")
     }
-    .controlSize(.small)
+    .menuStyle(.borderlessButton)
     .fixedSize()
     .disabled(store.isConnecting)
+    .help("Previously used servers")
   }
 }

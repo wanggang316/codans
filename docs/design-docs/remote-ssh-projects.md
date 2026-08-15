@@ -160,6 +160,16 @@ byte-identical on round-trip and need no migration. A Server project's
 `rootPath`/`gitRoot`/worktree paths are stored verbatim (remote strings), never
 passed through the local canonicalizer.
 
+Two small sibling files live beside the catalog:
+
+- `remote-hosts.json` (`RemoteHostSidecar`) — project-id → host mirror written on
+  every save; heals `remoteHost` fields stripped by older builds sharing the
+  catalog.
+- `saved-server-hosts.json` (`SavedServerHosts`) — MRU list of successfully
+  validated hosts (address + username + port, capped) feeding the Connect to
+  Server sheet's host-field picker. Connection info only; auth never leaves the
+  user's SSH config + agent.
+
 ### Component Boundaries
 
 - `CodansCore` — `RemoteHost`, `Project.remoteHost`, `ProjectKind.server`
