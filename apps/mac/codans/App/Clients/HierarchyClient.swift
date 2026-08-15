@@ -1130,16 +1130,30 @@ extension HierarchyClient {
     guard let (projectID, resolvedWorktreeID, tabID) = manager.addressOf(paneID: paneID) else {
       return
     }
-    let isOnlyPane =
+    let tab =
       manager.catalog.projects
       .first(where: { $0.id == projectID })?
       .worktrees.first(where: { $0.id == resolvedWorktreeID })?
-      .tabs.first(where: { $0.id == tabID })?
-      .panes.count == 1
-    if isOnlyPane {
+      .tabs.first(where: { $0.id == tabID })
+    if tab?.panes.count == 1 {
       try? manager.closeTab(tabID, in: resolvedWorktreeID, in: projectID)
-    } else {
-      try? manager.closePane(paneID, in: tabID, in: resolvedWorktreeID, in: projectID)
+      return
+    }
+    // Resolve the survivor BEFORE the tree mutation invalidates the leaf, then
+    // hand it focus. `closePane` drops the tab's last-focused entry (the run
+    // pane usually owns it — scripts spawn with `focus: true`), and unlike the
+    // ⌘W / pane-action close paths nothing else re-homes input, so the Tab was
+    // left with no focused pane until the user clicked one.
+    //
+    // Called synchronously rather than hopping a turn like the reducer-side
+    // close paths: the survivor's surface view is still attached here (SwiftUI
+    // rebuilds the viewport after this turn), so `makeFirstResponder` takes
+    // immediately, and `GhosttySurfaceView` reclaims first responder on its own
+    // once the rebuild re-attaches it.
+    let focusTarget = tab?.splitTree.focusTargetAfterClosing(paneID)
+    try? manager.closePane(paneID, in: tabID, in: resolvedWorktreeID, in: projectID)
+    if let focusTarget {
+      manager.focusSurfaceView(for: focusTarget)
     }
   }
 
