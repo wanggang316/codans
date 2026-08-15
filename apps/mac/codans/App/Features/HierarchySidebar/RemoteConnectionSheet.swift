@@ -111,7 +111,7 @@ struct RemoteConnectionSheet: View {
         .disabled(store.isConnecting)
       }
 
-      Text("Signs in with your SSH keys (~/.ssh/config + ssh-agent); no password is stored.")
+      Text("Authentication uses your SSH config and agent.")
         .font(.caption)
         .foregroundStyle(.secondary)
 
