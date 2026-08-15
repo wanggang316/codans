@@ -569,7 +569,7 @@ struct HierarchySidebarView: View {
     Button {
       store.send(.connectServerTapped)
     } label: {
-      Label("Connect to Server…", systemImage: "network")
+      Label("Connect to Server…", systemImage: "tv.badge.wifi")
     }
   }
 
@@ -1773,7 +1773,7 @@ private struct ProjectHeaderRow: View {
       // distinguishable from a local one at a glance; the tooltip names the
       // SSH destination.
       if let host = project.remoteHost {
-        Image(systemName: "network")
+        Image(systemName: "tv.badge.wifi")
           .font(.caption2)
           .foregroundStyle(.secondary)
           .help(host.displayAuthority)
@@ -1807,7 +1807,7 @@ private struct ProjectHeaderRow: View {
             Button {
               store.send(.projectEditConnectionTapped(projectID: project.id))
             } label: {
-              Label("Edit Connection…", systemImage: "network")
+              Label("Edit Connection…", systemImage: "tv.badge.wifi")
             }
           }
           Divider()

@@ -24,7 +24,7 @@ struct FailedProjectRow: View {
           Text(name)
             .foregroundStyle(.secondary)
           if let remoteAuthority {
-            Image(systemName: "network")
+            Image(systemName: "tv.badge.wifi")
               .font(.caption2)
               .foregroundStyle(.tertiary)
               .help(remoteAuthority)
