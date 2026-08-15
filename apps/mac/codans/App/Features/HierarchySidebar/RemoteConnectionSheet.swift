@@ -158,7 +158,7 @@ struct RemoteConnectionSheet: View {
         }
       }
     } label: {
-      Image(systemName: "clock.arrow.circlepath")
+      Image(systemName: "tv.badge.wifi")
         .accessibilityLabel("Previously used servers")
     }
     .menuStyle(.borderlessButton)
