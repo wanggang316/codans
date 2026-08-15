@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -72,6 +72,43 @@ struct RemoteConnectionFeatureTests {
     // A local project has no connection to edit.
     let local = Project(name: "local", rootPath: "/tmp/x")
     #expect(RemoteConnectionFeature.State.editing(project: local) == nil)
+  }
+
+  @Test
+  func recentSelectedPrefillsEveryField() async {
+    let entry = RecentServerConnections.Entry(
+      host: RemoteHost(alias: "mini.local", username: "alice", port: 2222),
+      path: "/srv/app"
+    )
+    let store = TestStore(
+      initialState: RemoteConnectionFeature.State(errorMessage: "old error")
+    ) {
+      RemoteConnectionFeature()
+    }
+    await store.send(.recentSelected(entry)) {
+      $0.hostDraft = "mini.local"
+      $0.usernameDraft = "alice"
+      $0.portDraft = "2222"
+      $0.pathDraft = "/srv/app"
+      $0.errorMessage = nil
+    }
+  }
+
+  @Test
+  func recentsAreNotLoadedInEditMode() async {
+    let host = RemoteHost(alias: "example.com")
+    let project = Project(
+      name: "app", rootPath: "/srv/app", gitRoot: "/srv/app", remoteHost: host
+    )
+    guard let seeded = RemoteConnectionFeature.State.editing(project: project) else {
+      Issue.record("editing state failed to seed")
+      return
+    }
+    let store = TestStore(initialState: seeded) {
+      RemoteConnectionFeature()
+    }
+    // Edit mode: no effect, no recents (the form is pinned to one project).
+    await store.send(.recentsRequested)
   }
 
   @Test

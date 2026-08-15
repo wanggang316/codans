@@ -40,8 +40,14 @@ struct RemoteConnectionSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text(store.isEditing ? "Edit Server Connection" : "Connect to Server")
-        .font(.headline)
+      HStack {
+        Text(store.isEditing ? "Edit Server Connection" : "Connect to Server")
+          .font(.headline)
+        Spacer()
+        if !store.isEditing && !store.recentConnections.isEmpty {
+          recentsMenu
+        }
+      }
 
       if let error = store.errorMessage {
         Text(error)
@@ -139,5 +145,22 @@ struct RemoteConnectionSheet: View {
     }
     .padding(20)
     .frame(width: 460)
+    .task { store.send(.recentsRequested) }
+  }
+
+  /// One-click prefill from previously validated connections (MRU order).
+  private var recentsMenu: some View {
+    Menu {
+      ForEach(store.recentConnections, id: \.self) { entry in
+        Button("\(entry.host.displayAuthority) — \(entry.path)") {
+          store.send(.recentSelected(entry))
+        }
+      }
+    } label: {
+      Label("Recent", systemImage: "clock.arrow.circlepath")
+    }
+    .controlSize(.small)
+    .fixedSize()
+    .disabled(store.isConnecting)
   }
 }

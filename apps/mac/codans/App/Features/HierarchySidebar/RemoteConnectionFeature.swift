@@ -36,6 +36,9 @@ struct RemoteConnectionFeature {
     var isConnecting: Bool = false
     /// Validation / connection failure, rendered in the sheet header.
     var errorMessage: String?
+    /// Previously validated connections offered as one-click prefills
+    /// (add mode only; loaded on appear).
+    var recentConnections: [RecentServerConnections.Entry] = []
 
     var isEditing: Bool {
       if case .edit = mode { return true }
@@ -60,6 +63,9 @@ struct RemoteConnectionFeature {
     case portChanged(String)
     case usernameChanged(String)
     case pathChanged(String)
+    case recentsRequested
+    case recentsLoaded([RecentServerConnections.Entry])
+    case recentSelected(RecentServerConnections.Entry)
     case connectButtonTapped
     case connectFailed(String)
     case connectSucceeded(host: RemoteHost, remotePath: String, gitRoot: String?)
@@ -92,6 +98,25 @@ struct RemoteConnectionFeature {
 
       case .pathChanged(let value):
         state.pathDraft = value
+        return .none
+
+      case .recentsRequested:
+        // Edit mode pins the form to one project's connection — no prefills.
+        guard !state.isEditing else { return .none }
+        return .run { send in
+          await send(.recentsLoaded(RecentServerConnections.read()))
+        }
+
+      case .recentsLoaded(let entries):
+        state.recentConnections = entries
+        return .none
+
+      case .recentSelected(let entry):
+        state.hostDraft = entry.host.alias
+        state.usernameDraft = entry.host.username ?? ""
+        state.portDraft = entry.host.port.map(String.init) ?? ""
+        state.pathDraft = entry.path
+        state.errorMessage = nil
         return .none
 
       case .connectButtonTapped:
@@ -155,7 +180,9 @@ struct RemoteConnectionFeature {
     send: Send<Action>
   ) async {
     guard await RemoteReachabilityProbe.isReachable(host: host) else {
-      await send(.connectFailed("Cannot reach \(host.displayAuthority). Check the host and your SSH config."))
+      await send(
+        .connectFailed("Cannot reach \(host.displayAuthority). Check the host and your SSH config.")
+      )
       return
     }
     let service = RemoteGitService(host: host)
@@ -164,6 +191,9 @@ struct RemoteConnectionFeature {
       return
     }
     let gitRoot = await service.discoverGitRoot(candidatePath: resolved)
+    // A validated connection is worth remembering (add and edit alike) — it
+    // becomes a one-click prefill in the next Connect to Server sheet.
+    RecentServerConnections.record(host: host, path: resolved)
     await send(.connectSucceeded(host: host, remotePath: resolved, gitRoot: gitRoot))
   }
 }
