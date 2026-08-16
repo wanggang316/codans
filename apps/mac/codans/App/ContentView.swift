@@ -137,6 +137,13 @@ struct ContentView: View {
       store.send(.onLaunch)
       store.send(.worktreeHeader(.onAppear))
       store.send(.gitHub(.onAppear))
+      // Load editor descriptors up front. The header Open button's own
+      // `.task` used to be the only kick, but a Server worktree renders NO
+      // button until an SSH-capable descriptor exists — a cold launch landing
+      // straight on a remote worktree would never load descriptors and the
+      // remote Open button (and the context menu's editor list) could never
+      // appear.
+      store.send(.editor(.onAppear))
     }
     .onChange(of: store.editor.lastOpenResult) { _, new in
       guard let new else { return }
