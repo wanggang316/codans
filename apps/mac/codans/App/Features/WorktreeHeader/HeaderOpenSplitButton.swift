@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Native toolbar split button: primary action opens the resolved
 /// default editor; the chevron half lists every installed editor. Uses
@@ -17,19 +17,21 @@ struct HeaderOpenSplitButton: View {
   @Environment(SettingsStore.self) private var settingsStore
 
   var body: some View {
-    // Server (remote) worktrees have a remote path a local editor / Finder
-    // can't open, so the toolbar Open button is suppressed for them (matching
-    // the sidebar context-menu guard).
-    if isRemoteProject {
-      EmptyView()
+    // Server (remote) worktrees open through an editor's SSH remoting CLI —
+    // the menu narrows to editors that can express the host (see
+    // `RemoteEditorOpen`), and disappears entirely when none is installed.
+    if let host = projectRemoteHost {
+      if let primary = remoteResolvedDefault(host: host) {
+        remoteOpenButton(host: host, primary: primary)
+      }
     } else {
       openButton
     }
   }
 
-  private var isRemoteProject: Bool {
+  private var projectRemoteHost: RemoteHost? {
     hierarchyManager.catalog.projects
-      .first(where: { $0.id == projectID })?.isRemote ?? false
+      .first(where: { $0.id == projectID })?.remoteHost
   }
 
   @ViewBuilder
@@ -59,6 +61,67 @@ struct HeaderOpenSplitButton: View {
     .accessibilityLabel(primaryDescription)
     .helpWithShortcut(primaryDescription, .openInEditor)
     .task { editorStore.send(.onAppear) }
+  }
+
+  // MARK: - Remote (Server-project) variant
+
+  /// The editor a remote open will land on, mirroring the service cascade so
+  /// the label matches the primary tap. nil = no SSH-capable editor installed.
+  private func remoteResolvedDefault(host: RemoteHost) -> EditorDescriptor? {
+    EditorFeature.resolveRemoteDefault(
+      projectOverride: projectOverrideID,
+      globalDefault: editorStore.state.globalDefault,
+      descriptors: editorStore.state.descriptors,
+      host: host
+    )
+  }
+
+  @ViewBuilder
+  private func remoteOpenButton(host: RemoteHost, primary: EditorDescriptor) -> some View {
+    Menu {
+      remoteOpenInMenu(host: host)
+    } label: {
+      HStack(spacing: 4) {
+        AppIconImage(
+          bundleIdentifier: primary.bundleIdentifier,
+          fallbackSystemName: "arrow.up.right.square"
+        )
+        .commandKeyHint(.openInEditor)
+        Text(primary.displayName)
+          .lineLimit(1)
+      }
+    } primaryAction: {
+      store.send(
+        .openDefaultEditorTapped(
+          worktreePath: worktreePath,
+          projectID: projectID
+        ))
+    }
+    .accessibilityLabel("Open in \(primary.displayName) over SSH")
+    .helpWithShortcut("Open in \(primary.displayName) over SSH", .openInEditor)
+    .task { editorStore.send(.onAppear) }
+  }
+
+  /// Remote dropdown: only editors with an SSH remoting CLI. A row that
+  /// cannot express this host (VS Code family on a non-default port) renders
+  /// disabled with the reason as its tooltip.
+  @ViewBuilder
+  private func remoteOpenInMenu(host: RemoteHost) -> some View {
+    let capable = editorStore.state.descriptors.filter {
+      RemoteEditorOpen.supportsRemote($0.id)
+    }
+    ForEach(capable, id: \.id) { descriptor in
+      let reason = RemoteEditorOpen.disabledReason(
+        editorID: descriptor.id, host: host, displayName: descriptor.displayName
+      )
+      Button {
+        store.send(.pickEditorFromMenuTapped(descriptor.id))
+      } label: {
+        EditorPickerRow.row(for: descriptor)
+      }
+      .disabled(reason != nil)
+      .help(reason ?? descriptor.displayName)
+    }
   }
 
   @ViewBuilder

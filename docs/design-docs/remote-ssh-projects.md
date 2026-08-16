@@ -190,6 +190,27 @@ Agents View. Parity is restored with a host-side foreground probe:
   identically. A failed probe (unreachable host) freezes pane state instead
   of emitting empty jobs, so a network blip cannot release a live binding.
 
+### Open in Editor
+
+A remote worktree cannot be a local file URL, so `EditorService.openRemote`
+routes through the editor's own SSH remoting CLI instead of `NSWorkspace`:
+
+- **Zed**: bundled `Contents/MacOS/cli` with an `ssh://[user@]host[:port]/path`
+  URL (path percent-encoded; custom ports supported).
+- **VS Code family** (VS Code / Insiders / VSCodium / Cursor / Trae / Windsurf /
+  Antigravity): bundled `Contents/Resources/app/bin/<cli>` with
+  `--remote ssh-remote+user@host <path>`. The CLI has no inline port syntax, so
+  a non-default port is inexpressible — the menu row disables with a tooltip
+  pointing at `~/.ssh/config`.
+- Everything else (Finder, Xcode, JetBrains, terminals, git clients) has no SSH
+  story and is not offered for remote worktrees. `$EDITOR` needs no special
+  handling: its Pane already runs the remote shell.
+
+Resolution mirrors the local cascade (project override → global default →
+priority walk) but filtered to editors that can express the host, and is
+lenient on a preference that cannot — the open lands on a capable editor
+whenever one is installed; the header button hides when none is.
+
 ### Component Boundaries
 
 - `CodansCore` — `RemoteHost`, `Project.remoteHost`, `ProjectKind.server`

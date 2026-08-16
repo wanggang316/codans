@@ -449,7 +449,8 @@ struct HierarchySidebarView: View {
         store.send(.worktreeArchiveCancelled)
       }
     } message: {
-      Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
+      Text(
+        "Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
     }
     // Batch "Archive All Merged Worktrees" confirmation (Project ⋯ menu).
     .confirmationDialog(
@@ -467,7 +468,9 @@ struct HierarchySidebarView: View {
         store.send(.projectArchiveAllMergedCancelled)
       }
     } message: {
-      Text("Files and branches are kept. Find them later under “Archived Worktrees” in the Project menu.")
+      Text(
+        "Files and branches are kept. Find them later under “Archived Worktrees” in the Project menu."
+      )
     }
     // Batch "Remove All Merged Worktrees" confirmation (Project ⋯ menu).
     .confirmationDialog(
@@ -596,7 +599,9 @@ struct HierarchySidebarView: View {
   // MARK: - Tree
 
   @ViewBuilder
-  private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double) -> some View {
+  private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double)
+    -> some View
+  {
     if projects.isEmpty {
       emptyState
     } else {
@@ -743,7 +748,9 @@ struct HierarchySidebarView: View {
   }
 
   private var addProjectChord: String? {
-    if let resolved = resolvedShortcuts[.addProject], resolved.isEnabled, let binding = resolved.binding {
+    if let resolved = resolvedShortcuts[.addProject], resolved.isEnabled,
+      let binding = resolved.binding
+    {
       return ShortcutDisplay.chord(for: binding)
     }
     if let fallback = ShortcutSchema.app.entry(for: .addProject)?.defaultBinding {
@@ -1082,7 +1089,8 @@ struct HierarchySidebarView: View {
           WorktreeRowIcon(
             snapshot: snapshot, rollup: rollup, isSelected: isSelected,
             isSynthetic: isSyntheticWorktree,
-            hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
+            hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id)
+              == true
               && settingsStore.settings.notifications.worktreeBellEnabled,
             isDefaultBranch: isMainCheckout && !isSyntheticWorktree
           )
@@ -1183,9 +1191,15 @@ struct HierarchySidebarView: View {
     // the resolved editor by name (project override → global default →
     // priority cascade); the "Open in" submenu lists every installed
     // editor for explicit overrides; "Reveal in Finder" rounds out the
-    // navigation group. Suppressed for Server (remote) worktrees: the path
-    // is a remote one, so a local editor / Finder can't open it.
-    if !project.isRemote {
+    // navigation group. Server (remote) worktrees open through an editor's
+    // SSH remoting CLI instead: the submenu narrows to SSH-capable editors
+    // and Finder (local-only) stays hidden.
+    if let host = project.remoteHost {
+      if remoteResolvedDefaultEditor(for: project, host: host) != nil {
+        openInDefaultButton(worktree: worktree, project: project)
+        remoteOpenInSubmenu(worktree: worktree, project: project, host: host)
+      }
+    } else {
       openInDefaultButton(worktree: worktree, project: project)
       openInSubmenu(worktree: worktree, project: project)
       Button {
@@ -1271,7 +1285,13 @@ struct HierarchySidebarView: View {
     worktree: Worktree, project: Project
   ) -> some View {
     let title: String = {
-      if let descriptor = resolvedDefaultEditor(for: project.id) {
+      let descriptor: EditorDescriptor? =
+        if let host = project.remoteHost {
+          remoteResolvedDefaultEditor(for: project, host: host)
+        } else {
+          resolvedDefaultEditor(for: project.id)
+        }
+      if let descriptor {
         return "Open in \(descriptor.displayName)"
       }
       return "Open in Editor"
@@ -1319,6 +1339,58 @@ struct HierarchySidebarView: View {
         Text("Open in")
       }
     }
+  }
+
+  /// Remote variant of `openInSubmenu`: only editors with an SSH remoting
+  /// CLI, with rows that cannot express this host (VS Code family on a
+  /// non-default port) rendered disabled, the reason as their tooltip.
+  @ViewBuilder
+  private func remoteOpenInSubmenu(
+    worktree: Worktree, project: Project, host: RemoteHost
+  ) -> some View {
+    if let editorStore {
+      let capable = editorStore.descriptors.filter {
+        RemoteEditorOpen.supportsRemote($0.id)
+      }
+      if !capable.isEmpty {
+        Menu {
+          ForEach(capable) { descriptor in
+            let reason = RemoteEditorOpen.disabledReason(
+              editorID: descriptor.id, host: host, displayName: descriptor.displayName
+            )
+            Button {
+              store.send(
+                .worktreeOpenInEditorTapped(
+                  worktreeID: worktree.id,
+                  projectID: project.id,
+                  path: worktree.path,
+                  editorID: descriptor.id
+                ))
+            } label: {
+              editorMenuLabel(for: descriptor)
+            }
+            .disabled(reason != nil)
+            .help(reason ?? descriptor.displayName)
+          }
+        } label: {
+          Text("Open in")
+        }
+      }
+    }
+  }
+
+  /// Mirror of `EditorFeature.resolveRemoteDefault` for the context-menu
+  /// title, so "Open in <Editor>" names what the tap will actually launch.
+  private func remoteResolvedDefaultEditor(
+    for project: Project, host: RemoteHost
+  ) -> EditorDescriptor? {
+    guard let editorStore else { return nil }
+    return EditorFeature.resolveRemoteDefault(
+      projectOverride: settingsStore.settings.projects[project.id]?.defaultEditor,
+      globalDefault: editorStore.globalDefault,
+      descriptors: editorStore.descriptors,
+      host: host
+    )
   }
 
   /// Builds a `Label` for an `EditorDescriptor` whose icon is the
@@ -1506,7 +1578,8 @@ struct HierarchySidebarView: View {
   /// so the row selection doesn't also fire (same sibling arrangement as
   /// `gitHubBadge`).
   @ViewBuilder
-  fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View {
+  fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View
+  {
     let tints = runningScriptTints(for: worktree, in: project)
     if !tints.isEmpty {
       RunScriptPingStopControl(colors: tints) {
@@ -1599,7 +1672,8 @@ struct HierarchySidebarView: View {
       onMerge: { strategy in
         if let pr = snapshot {
           store.send(
-            .mergeRequested(worktreeID, prNumber: pr.number, strategy: strategy, worktreePath: worktreePath)
+            .mergeRequested(
+              worktreeID, prNumber: pr.number, strategy: strategy, worktreePath: worktreePath)
           )
         }
       },
@@ -1610,7 +1684,8 @@ struct HierarchySidebarView: View {
       },
       onMarkReady: {
         if let pr = snapshot {
-          store.send(.markReadyRequested(worktreeID, prNumber: pr.number, worktreePath: worktreePath))
+          store.send(
+            .markReadyRequested(worktreeID, prNumber: pr.number, worktreePath: worktreePath))
         }
       },
       onRerunFailedJobs: {

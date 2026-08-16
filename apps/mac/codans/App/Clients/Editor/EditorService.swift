@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 
 /// External-editor dispatch surface. Consumed by the TCA `EditorClient` bridge and, through
 /// it, by the Worktree-header dropdown and the `editor.*` IPC handlers. The service is a
@@ -38,4 +38,17 @@ public nonisolated protocol EditorService: Sendable {
   ///     branch.
   @discardableResult
   func open(directory: URL, preferred: EditorID?) async throws -> EditorChoice
+
+  /// Opens `remotePath` on `host` through the resolved editor's SSH remoting
+  /// CLI (see `RemoteEditorOpen`). Resolution is lenient on `preferred`: a
+  /// preference that cannot express this host (no SSH story, or a VS Code
+  /// family editor on a non-default port) falls through to the global default
+  /// and then the priority walk, both filtered the same way — so the call
+  /// lands on a host-capable editor whenever one is installed.
+  ///
+  /// Throws `.launchFailed` when no installed editor can open this host, or
+  /// when the editor's CLI exits non-zero.
+  @discardableResult
+  func openRemote(host: RemoteHost, remotePath: String, preferred: EditorID?) async throws
+    -> EditorChoice
 }

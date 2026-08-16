@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// C8a editor feature. Drives the Worktree-header dropdown and the Settings default-editor
 /// picker. State is a cached `describe()` result + the currently stored global default.
@@ -119,7 +119,9 @@ struct EditorFeature {
         // `.shellEditor` cannot launch through `editorClient.open` — the service
         // signature has no Pane/Tab context. Route the spawn out to `RootFeature`
         // via the delegate so it can call `hierarchyClient.openPane(...
-        // initialCommand: "$EDITOR")` for the target worktree's tab.
+        // initialCommand: "$EDITOR")` for the target worktree's tab. This path is
+        // transport-agnostic: a Server project's Pane runs the remote shell, so
+        // `$EDITOR` launches on the host natively.
         if editorID == EditorRegistry.shellEditorID {
           return .send(
             .delegate(
@@ -127,6 +129,23 @@ struct EditorFeature {
             ))
         }
         let client = editorClient
+        // A Server project's worktree path lives on its host — a local file URL
+        // can't express it, so route through the editor's SSH remoting CLI.
+        if let projectID,
+          let host = hierarchyClient.snapshot().projects
+            .first(where: { $0.id == projectID })?.remoteHost
+        {
+          return .run { send in
+            do {
+              let choice = try await client.openRemote(host, worktreePath, editorID)
+              await send(.openSucceeded(editorID: choice.id, displayName: choice.displayName))
+            } catch let error as EditorError {
+              await send(.openFailed(reason: Self.editorErrorDescription(error)))
+            } catch {
+              await send(.openFailed(reason: String(describing: error)))
+            }
+          }
+        }
         let url = URL(fileURLWithPath: worktreePath)
         return .run { send in
           do {
@@ -216,6 +235,38 @@ struct EditorFeature {
     return .finder
   }
 
+  /// View-side mirror of the service's remote resolution: the editor a remote
+  /// open will actually land on, or nil when no installed editor can express
+  /// `host`. Same lenient cascade as `LiveEditorService.resolveRemote` so the
+  /// header label matches what the primary tap opens.
+  nonisolated static func resolveRemoteDefault(
+    projectOverride: EditorID?,
+    globalDefault: EditorID?,
+    descriptors: [EditorDescriptor],
+    host: RemoteHost
+  ) -> EditorDescriptor? {
+    func usable(_ descriptor: EditorDescriptor) -> Bool {
+      RemoteEditorOpen.invocation(editorID: descriptor.id, host: host, remotePath: "/") != nil
+    }
+    if let override = projectOverride,
+      let match = descriptors.first(where: { $0.id == override }), usable(match)
+    {
+      return match
+    }
+    if let global = globalDefault,
+      let match = descriptors.first(where: { $0.id == global }), usable(match)
+    {
+      return match
+    }
+    let byID = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.id, $0) })
+    for id in EditorRegistry.editorPriority {
+      if let match = byID[id], usable(match) {
+        return match
+      }
+    }
+    return nil
+  }
+
   /// Reducer-side resolver for the `preferred` argument handed to `EditorService.open`.
   /// Returns the project override (if installed), else the global default (if installed),
   /// else **nil** — handing off to the service's priority cascade. Never materializes a
@@ -302,9 +353,11 @@ nonisolated struct SettingsWriter: Sendable {
   var readSnapshotSync: @Sendable () -> Settings
   var setDefaultEditorID: @Sendable (EditorID?) async -> Void
   /// Per-Project editor override. `nil` clears.
-  var setProjectDefaultEditor: @Sendable (_ projectID: ProjectID, _ editorID: EditorID?) async -> Void
+  var setProjectDefaultEditor:
+    @Sendable (_ projectID: ProjectID, _ editorID: EditorID?) async -> Void
   /// Per-Project worktree base directory override. `nil` clears.
-  var setProjectWorktreesDirectory: @Sendable (_ projectID: ProjectID, _ path: String?) async -> Void
+  var setProjectWorktreesDirectory:
+    @Sendable (_ projectID: ProjectID, _ path: String?) async -> Void
 
   /// Per-Project mutation of a specific git-subtree field. The closure
   /// ensures `git` is non-nil before applying the field write and runs
@@ -314,12 +367,14 @@ nonisolated struct SettingsWriter: Sendable {
 
   /// Per-Project envVars mutation. `value: nil` removes the key; `""` stores
   /// an empty-string value.
-  var setProjectEnvVar: @Sendable (_ projectID: ProjectID, _ key: String, _ value: String?) async -> Void
+  var setProjectEnvVar:
+    @Sendable (_ projectID: ProjectID, _ key: String, _ value: String?) async -> Void
 
   /// Per-Project scripts replace. The Scripts pane writes the full array
   /// after every edit / reorder / delete; this is simpler than per-script
   /// upsert closures and matches `ForEach.onMove`'s array-back semantics.
-  var setProjectScripts: @Sendable (_ projectID: ProjectID, _ scripts: [ScriptDefinition]) async -> Void
+  var setProjectScripts:
+    @Sendable (_ projectID: ProjectID, _ scripts: [ScriptDefinition]) async -> Void
 
   /// Global scripts replace — `GeneralSettings.globalScripts`. Same
   /// full-array semantics as `setProjectScripts`; the Global Commands pane
@@ -433,7 +488,8 @@ extension SettingsWriter {
 extension SettingsWriter: DependencyKey {
   static let liveValue: SettingsWriter = SettingsWriter(
     readSnapshot: {
-      fatalError("SettingsWriter.liveValue not configured; wire via `.withDependencies` at app startup")
+      fatalError(
+        "SettingsWriter.liveValue not configured; wire via `.withDependencies` at app startup")
     },
     readSnapshotSync: { fatalError("SettingsWriter.liveValue not configured") },
     setDefaultEditorID: { _ in fatalError("SettingsWriter.liveValue not configured") },

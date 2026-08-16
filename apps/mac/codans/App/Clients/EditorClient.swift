@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// TCA dependency-injection bridge over `EditorService`. Closes over the live
 /// `LiveEditorService` built from the app's `SettingsStore`; callers dispatch
@@ -14,6 +14,11 @@ nonisolated struct EditorClient: Sendable {
   var describe: @Sendable () async -> [EditorDescriptor]
   var resolve: @Sendable (_ preferred: EditorID?) async throws -> EditorDescriptor
   var open: @Sendable (_ directory: URL, _ preferred: EditorID?) async throws -> EditorChoice
+  /// Server-project worktrees: open `remotePath` on `host` via the resolved
+  /// editor's SSH remoting CLI (see `EditorService.openRemote`).
+  var openRemote:
+    @Sendable (_ host: RemoteHost, _ remotePath: String, _ preferred: EditorID?) async throws
+      -> EditorChoice
   /// Invalidates the service-level cache backing `describe()`. Settings panes and the IPC
   /// `editor.describe` handler call this on appear so newly-installed editors surface.
   var clearCache: @Sendable () async -> Void
@@ -38,6 +43,9 @@ extension EditorClient {
       open: { directory, preferred in
         try await service.open(directory: directory, preferred: preferred)
       },
+      openRemote: { host, remotePath, preferred in
+        try await service.openRemote(host: host, remotePath: remotePath, preferred: preferred)
+      },
       clearCache: { await service.clearCache() }
     )
   }
@@ -59,6 +67,9 @@ extension EditorClient: DependencyKey {
     open: { _, _ in
       fatalError("EditorClient.liveValue not configured")
     },
+    openRemote: { _, _, _ in
+      fatalError("EditorClient.liveValue not configured")
+    },
     clearCache: {
       fatalError("EditorClient.liveValue not configured")
     }
@@ -72,6 +83,10 @@ extension EditorClient: DependencyKey {
     ),
     open: unimplemented(
       "EditorClient.open",
+      placeholder: TestEditorService.defaultChoice
+    ),
+    openRemote: unimplemented(
+      "EditorClient.openRemote",
       placeholder: TestEditorService.defaultChoice
     ),
     clearCache: unimplemented("EditorClient.clearCache")

@@ -256,6 +256,9 @@ struct RootFeatureTests {
           id: id ?? "finder", displayName: "x", binaryPath: nil
         )
       }
+      // The remote-vs-local branch in `.openRequested` reads the catalog to
+      // decide the transport; an empty catalog keeps this test on the local path.
+      $0.hierarchyClient.snapshot = { Catalog() }
       // .openSucceeded routes through StatusBarFeature which consumes the
       // continuous clock to schedule its auto-clear timer.
       $0.continuousClock = ImmediateClock()
@@ -483,7 +486,10 @@ struct RootFeatureTests {
       (.tabAutoClosed(tab, cause: .other(reason: "x")), .tabAutoClosed),
       (.worktreeActivated(worktree), .worktreeActivated),
       (.hierarchyMutated(.catalog), .hierarchyMutated),
-      (.foregroundJobChanged(pane, ForegroundJob(processGroupID: 1, processes: [])), .foregroundJobChanged),
+      (
+        .foregroundJobChanged(pane, ForegroundJob(processGroupID: 1, processes: [])),
+        .foregroundJobChanged
+      ),
     ]
     for (event, expected) in cases {
       #expect(RootFeature.LastEventMarker(event) == expected)
@@ -1355,7 +1361,8 @@ struct RootFeatureTests {
     #expect(store.state.activePendingWorktreeID == pending.id)
     #expect(store.state.pendingPriorSelection == prior)
     #expect(rec.projects.value == [projectID])
-    #expect(rec.worktrees.value == [nil], "old row must deselect so the pending pill reads as focus")
+    #expect(
+      rec.worktrees.value == [nil], "old row must deselect so the pending pill reads as focus")
   }
 
   /// Creation focus at kickoff is UNCONDITIONAL — the auto-switch
@@ -1676,7 +1683,8 @@ struct RootFeatureTests {
     // The post-switch selection lands and the seed chain runs. `.openPane` is
     // fired from a `Task { @MainActor }` inside the reducer, so let the store
     // settle before asserting the recorded calls.
-    await store.send(.selectionChanged(HierarchySelection(projectID: projectID, worktreeID: worktreeID)))
+    await store.send(
+      .selectionChanged(HierarchySelection(projectID: projectID, worktreeID: worktreeID)))
     await store.finish()
 
     #expect(createTabCalls.value == 1, "the switch must seed a first tab")
