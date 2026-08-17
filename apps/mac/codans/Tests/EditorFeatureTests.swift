@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -38,6 +38,39 @@ struct EditorFeatureTests {
   }
 
   @Test
+  func openRequestedRoutesRemoteWorktreesThroughTheRemoteCLI() async {
+    let host = RemoteHost(alias: "mini.local", username: "alice")
+    let project = Project(
+      name: "srv", rootPath: "/srv/app", gitRoot: "/srv/app", remoteHost: host
+    )
+    var catalog = Catalog()
+    catalog.projects = [project]
+    let remoteCall = LockIsolated<(RemoteHost, String, EditorID?)?>(nil)
+    let store = TestStore(initialState: EditorFeature.State()) {
+      EditorFeature()
+    } withDependencies: {
+      $0.editorClient = EditorClient.testValue
+      // `open` stays unimplemented — a remote worktree must never reach the
+      // local file-URL path.
+      $0.editorClient.openRemote = { host, path, preferred in
+        remoteCall.setValue((host, path, preferred))
+        return EditorChoice(id: "zed", displayName: "Zed", binaryPath: nil)
+      }
+      $0.settingsWriter = SettingsWriter.testValue
+      $0.hierarchyClient = HierarchyClient.testValue
+      $0.hierarchyClient.snapshot = { catalog }
+    }
+    await store.send(
+      .openRequested(editorID: nil, worktreePath: "/srv/app", projectID: project.id))
+    await store.receive(\.openSucceeded) {
+      $0.lastOpenResult = .opened(editorID: "zed", displayName: "Zed")
+    }
+    #expect(remoteCall.value?.0 == host)
+    #expect(remoteCall.value?.1 == "/srv/app")
+    #expect(remoteCall.value?.2 == nil)
+  }
+
+  @Test
   func setGlobalDefaultWritesThroughSettingsWriter() async {
     let writtenID = LockIsolated<EditorID?>(nil)
     let store = TestStore(initialState: EditorFeature.State()) {
@@ -58,7 +91,8 @@ struct EditorFeatureTests {
   @Test
   func editorErrorDescriptionMapsEveryCase() {
     #expect(
-      EditorFeature.editorErrorDescription(.notInstalled(id: "vscode", bundleID: "com.microsoft.VSCode"))
+      EditorFeature.editorErrorDescription(
+        .notInstalled(id: "vscode", bundleID: "com.microsoft.VSCode"))
         == "vscode is not installed")
     #expect(
       EditorFeature.editorErrorDescription(.launchFailed(reason: "Gatekeeper blocked"))

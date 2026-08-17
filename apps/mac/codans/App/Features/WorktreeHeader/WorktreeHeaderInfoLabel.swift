@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Leading cluster in the worktree detail toolbar. Mirrors the sidebar
 /// Worktree row's identity surface so the two read as the same record:
@@ -152,6 +152,18 @@ struct WorktreeHeaderInfoLabel: View {
       } else {
         Text(project.name)
           .foregroundStyle(projectNameColor)
+      }
+      // Server-project marker — same glyph + tooltip as the sidebar
+      // project row, so the header names the host the worktree lives on.
+      // `.small` image scale keeps the wide glyph proportionate to the
+      // caption-sized neighbor text.
+      if let host = project.remoteHost {
+        Image(systemName: "tv.badge.wifi")
+          .font(.caption2)
+          .imageScale(.small)
+          .foregroundStyle(.secondary)
+          .help(host.displayAuthority)
+          .accessibilityLabel("Remote server \(host.displayAuthority)")
       }
     }
     .font(.caption)

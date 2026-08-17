@@ -1,6 +1,6 @@
 import AppKit
-import Foundation
 import CodansCore
+import Foundation
 
 /// In-memory `EditorService` for tests. Holds canned `describe()` / `resolve()` / `open()`
 /// outputs and records every open call for assertion. Designed to drop into TCA `TestStore`s
@@ -18,9 +18,17 @@ final actor TestEditorService: EditorService {
 
   /// Every `open` invocation in call order.
   private(set) var openCalls: [OpenCall] = []
+  /// Every `openRemote` invocation in call order.
+  private(set) var openRemoteCalls: [OpenRemoteCall] = []
 
   struct OpenCall: Equatable, Sendable {
     let directory: URL
+    let preferred: EditorID?
+  }
+
+  struct OpenRemoteCall: Equatable, Sendable {
+    let host: RemoteHost
+    let remotePath: String
     let preferred: EditorID?
   }
 
@@ -37,7 +45,9 @@ final actor TestEditorService: EditorService {
   // MARK: - Stub mutators
 
   func setDescribeStub(_ descriptors: [EditorDescriptor]) { describeStub = descriptors }
-  func setResolveStub(_ stub: (@Sendable (EditorID?) throws -> EditorDescriptor)?) { resolveStub = stub }
+  func setResolveStub(_ stub: (@Sendable (EditorID?) throws -> EditorDescriptor)?) {
+    resolveStub = stub
+  }
   func setOpenStub(_ stub: (@Sendable (URL, EditorID?) throws -> EditorChoice)?) { openStub = stub }
 
   // MARK: - EditorService
@@ -51,6 +61,16 @@ final actor TestEditorService: EditorService {
     }
     return describeStub.first(where: { $0.id == EditorRegistry.finderID })
       ?? Self.defaultDescriptor
+  }
+
+  @discardableResult
+  func openRemote(
+    host: RemoteHost, remotePath: String, preferred: EditorID?
+  ) throws -> EditorChoice {
+    openRemoteCalls.append(
+      OpenRemoteCall(host: host, remotePath: remotePath, preferred: preferred)
+    )
+    return Self.defaultChoice
   }
 
   @discardableResult

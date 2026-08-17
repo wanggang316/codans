@@ -80,20 +80,25 @@ struct CreateWorktreeSheet: View {
             set: { store.send(.fetchOriginToggled($0)) }
           )
         )
-        Toggle(
-          "Copy ignored files",
-          isOn: Binding(
-            get: { store.copyIgnored },
-            set: { store.send(.copyIgnoredToggled($0)) }
+        // Copying ignored / untracked files is a local streaming-create
+        // capability; a remote (SSH) creation runs plain `git worktree add`
+        // on the host, so the toggles would be silent no-ops there.
+        if !store.isRemote {
+          Toggle(
+            "Copy ignored files",
+            isOn: Binding(
+              get: { store.copyIgnored },
+              set: { store.send(.copyIgnoredToggled($0)) }
+            )
           )
-        )
-        Toggle(
-          "Copy untracked files",
-          isOn: Binding(
-            get: { store.copyUntracked },
-            set: { store.send(.copyUntrackedToggled($0)) }
+          Toggle(
+            "Copy untracked files",
+            isOn: Binding(
+              get: { store.copyUntracked },
+              set: { store.send(.copyUntrackedToggled($0)) }
+            )
           )
-        )
+        }
       }
 
       if let error = store.submitError {

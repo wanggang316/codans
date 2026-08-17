@@ -33,7 +33,10 @@ import SwiftUI
 /// after a row tap so the user can fan-jump between agents.
 struct AgentStateSidebarPanel: View {
   let registry: AgentStateStore
-  let resolveSourcePath: (PaneID) -> (project: String, worktree: String, projectColor: ProjectColor?)?
+  let resolveSourcePath:
+    (PaneID) -> (
+      project: String, worktree: String, projectColor: ProjectColor?, remoteAuthority: String?
+    )?
   /// Pane the main window is currently focused on (selection chain bottom).
   /// Drives the selected-row highlight inside the panel so the user can see
   /// at a glance which row corresponds to the pane they're already looking
@@ -222,6 +225,7 @@ struct AgentStateSidebarPanel: View {
               projectName: resolved?.project ?? "—",
               worktreeName: resolved?.worktree ?? "—",
               projectColor: resolved?.projectColor,
+              projectRemoteAuthority: resolved?.remoteAuthority,
               isSelected: item.paneID == focusedPaneID,
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
               viewportSnapshot: { registry.viewportSnapshot(for: item.paneID) },

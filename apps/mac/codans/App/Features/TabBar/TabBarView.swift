@@ -103,6 +103,8 @@ struct TabBarView: View {
       TabBarTrailingAccessories(
         activeTabSplitTree: activeSplitTree(),
         worktreePath: currentWorktree()?.path,
+        remoteHost: hierarchyManager.catalog.projects
+          .first(where: { $0.id == projectID })?.remoteHost,
         onNewTab: {
           store.send(
             .newTabButtonTapped(

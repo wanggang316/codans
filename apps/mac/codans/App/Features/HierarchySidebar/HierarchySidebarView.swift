@@ -382,6 +382,7 @@ struct HierarchySidebarView: View {
           .interactiveDismissDisabled(store.cloneRepoSheet?.isCloning ?? false)
       }
     }
+    .modifier(RemoteConnectionSheetPresenter(store: store))
     .confirmationDialog(
       worktreeRemovalTitle,
       isPresented: Binding(
@@ -448,7 +449,8 @@ struct HierarchySidebarView: View {
         store.send(.worktreeArchiveCancelled)
       }
     } message: {
-      Text("Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
+      Text(
+        "Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
     }
     // Batch "Archive All Merged Worktrees" confirmation (Project ⋯ menu).
     .confirmationDialog(
@@ -466,7 +468,9 @@ struct HierarchySidebarView: View {
         store.send(.projectArchiveAllMergedCancelled)
       }
     } message: {
-      Text("Files and branches are kept. Find them later under “Archived Worktrees” in the Project menu.")
+      Text(
+        "Files and branches are kept. Find them later under “Archived Worktrees” in the Project menu."
+      )
     }
     // Batch "Remove All Merged Worktrees" confirmation (Project ⋯ menu).
     .confirmationDialog(
@@ -551,8 +555,8 @@ struct HierarchySidebarView: View {
   }
 
   /// Shared Add Project menu: open an existing local folder (the current
-  /// flow, also bound to the `.addProject` shortcut) or clone a remote
-  /// repository into a new local path.
+  /// flow, also bound to the `.addProject` shortcut), clone a remote
+  /// repository into a new local path, or connect to a server over SSH.
   @ViewBuilder
   private var addProjectMenuItems: some View {
     Button {
@@ -564,6 +568,11 @@ struct HierarchySidebarView: View {
       store.send(.cloneRepoTapped)
     } label: {
       Label("Clone Repository…", systemImage: "square.and.arrow.down.on.square")
+    }
+    Button {
+      store.send(.connectServerTapped)
+    } label: {
+      Label("Connect to Server…", systemImage: "tv.badge.wifi")
     }
   }
 
@@ -590,7 +599,9 @@ struct HierarchySidebarView: View {
   // MARK: - Tree
 
   @ViewBuilder
-  private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double) -> some View {
+  private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double)
+    -> some View
+  {
     if projects.isEmpty {
       emptyState
     } else {
@@ -737,7 +748,9 @@ struct HierarchySidebarView: View {
   }
 
   private var addProjectChord: String? {
-    if let resolved = resolvedShortcuts[.addProject], resolved.isEnabled, let binding = resolved.binding {
+    if let resolved = resolvedShortcuts[.addProject], resolved.isEnabled,
+      let binding = resolved.binding
+    {
       return ShortcutDisplay.chord(for: binding)
     }
     if let fallback = ShortcutSchema.app.entry(for: .addProject)?.defaultBinding {
@@ -802,6 +815,7 @@ struct HierarchySidebarView: View {
         FailedProjectRow(
           name: project.name,
           rootPath: project.rootPath,
+          remoteAuthority: project.remoteHost?.displayAuthority,
           reason: reason,
           retry: {
             store.send(.retryProjectTapped(projectID: project.id))
@@ -1005,6 +1019,19 @@ struct HierarchySidebarView: View {
       // HEAD-change refresh is wired separately in
       // `RootFeature.worktreeHeadChanged`.
       await worktreeLocalDiffMonitor.refresh(worktreeID: worktree.id, path: url)
+      // Server (remote) worktrees have no local FS watchers — the HEAD /
+      // working-tree watchers that keep local chips live never fire for them.
+      // Poll while the row is visible instead (the task cancels on
+      // disappear); each tick is one probe over the shared SSH ControlMaster,
+      // so the steady-state cost is a few tens of milliseconds.
+      guard project.isRemote else { return }
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(20))
+        guard !Task.isCancelled else { return }
+        worktreeLocalDiffMonitor.invalidate(worktreeID: worktree.id)
+        await worktreeLocalDiffMonitor.refresh(worktreeID: worktree.id, path: url)
+        await worktreeStatusMonitor.refresh(worktreeID: worktree.id, path: url)
+      }
     }
   }
 
@@ -1062,7 +1089,8 @@ struct HierarchySidebarView: View {
           WorktreeRowIcon(
             snapshot: snapshot, rollup: rollup, isSelected: isSelected,
             isSynthetic: isSyntheticWorktree,
-            hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
+            hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id)
+              == true
               && settingsStore.settings.notifications.worktreeBellEnabled,
             isDefaultBranch: isMainCheckout && !isSyntheticWorktree
           )
@@ -1163,15 +1191,24 @@ struct HierarchySidebarView: View {
     // the resolved editor by name (project override → global default →
     // priority cascade); the "Open in" submenu lists every installed
     // editor for explicit overrides; "Reveal in Finder" rounds out the
-    // navigation group.
-    openInDefaultButton(worktree: worktree, project: project)
-    openInSubmenu(worktree: worktree, project: project)
-    Button {
-      store.send(.worktreeRevealInFinderTapped(path: worktree.path))
-    } label: {
-      Label("Reveal in Finder", systemImage: "folder")
+    // navigation group. Server (remote) worktrees open through an editor's
+    // SSH remoting CLI instead: the submenu narrows to SSH-capable editors
+    // and Finder (local-only) stays hidden.
+    if let host = project.remoteHost {
+      if remoteResolvedDefaultEditor(for: project, host: host) != nil {
+        openInDefaultButton(worktree: worktree, project: project)
+        remoteOpenInSubmenu(worktree: worktree, project: project, host: host)
+      }
+    } else {
+      openInDefaultButton(worktree: worktree, project: project)
+      openInSubmenu(worktree: worktree, project: project)
+      Button {
+        store.send(.worktreeRevealInFinderTapped(path: worktree.path))
+      } label: {
+        Label("Reveal in Finder", systemImage: "folder")
+      }
+      .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
     }
-    .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
 
     // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
     // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
@@ -1248,7 +1285,13 @@ struct HierarchySidebarView: View {
     worktree: Worktree, project: Project
   ) -> some View {
     let title: String = {
-      if let descriptor = resolvedDefaultEditor(for: project.id) {
+      let descriptor: EditorDescriptor? =
+        if let host = project.remoteHost {
+          remoteResolvedDefaultEditor(for: project, host: host)
+        } else {
+          resolvedDefaultEditor(for: project.id)
+        }
+      if let descriptor {
         return "Open in \(descriptor.displayName)"
       }
       return "Open in Editor"
@@ -1296,6 +1339,58 @@ struct HierarchySidebarView: View {
         Text("Open in")
       }
     }
+  }
+
+  /// Remote variant of `openInSubmenu`: only editors with an SSH remoting
+  /// CLI, with rows that cannot express this host (VS Code family on a
+  /// non-default port) rendered disabled, the reason as their tooltip.
+  @ViewBuilder
+  private func remoteOpenInSubmenu(
+    worktree: Worktree, project: Project, host: RemoteHost
+  ) -> some View {
+    if let editorStore {
+      let capable = editorStore.descriptors.filter {
+        RemoteEditorOpen.supportsRemote($0.id)
+      }
+      if !capable.isEmpty {
+        Menu {
+          ForEach(capable) { descriptor in
+            let reason = RemoteEditorOpen.disabledReason(
+              editorID: descriptor.id, host: host, displayName: descriptor.displayName
+            )
+            Button {
+              store.send(
+                .worktreeOpenInEditorTapped(
+                  worktreeID: worktree.id,
+                  projectID: project.id,
+                  path: worktree.path,
+                  editorID: descriptor.id
+                ))
+            } label: {
+              editorMenuLabel(for: descriptor)
+            }
+            .disabled(reason != nil)
+            .help(reason ?? descriptor.displayName)
+          }
+        } label: {
+          Text("Open in")
+        }
+      }
+    }
+  }
+
+  /// Mirror of `EditorFeature.resolveRemoteDefault` for the context-menu
+  /// title, so "Open in <Editor>" names what the tap will actually launch.
+  private func remoteResolvedDefaultEditor(
+    for project: Project, host: RemoteHost
+  ) -> EditorDescriptor? {
+    guard let editorStore else { return nil }
+    return EditorFeature.resolveRemoteDefault(
+      projectOverride: settingsStore.settings.projects[project.id]?.defaultEditor,
+      globalDefault: editorStore.globalDefault,
+      descriptors: editorStore.descriptors,
+      host: host
+    )
   }
 
   /// Builds a `Label` for an `EditorDescriptor` whose icon is the
@@ -1483,7 +1578,8 @@ struct HierarchySidebarView: View {
   /// so the row selection doesn't also fire (same sibling arrangement as
   /// `gitHubBadge`).
   @ViewBuilder
-  fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View {
+  fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View
+  {
     let tints = runningScriptTints(for: worktree, in: project)
     if !tints.isEmpty {
       RunScriptPingStopControl(colors: tints) {
@@ -1576,7 +1672,8 @@ struct HierarchySidebarView: View {
       onMerge: { strategy in
         if let pr = snapshot {
           store.send(
-            .mergeRequested(worktreeID, prNumber: pr.number, strategy: strategy, worktreePath: worktreePath)
+            .mergeRequested(
+              worktreeID, prNumber: pr.number, strategy: strategy, worktreePath: worktreePath)
           )
         }
       },
@@ -1587,7 +1684,8 @@ struct HierarchySidebarView: View {
       },
       onMarkReady: {
         if let pr = snapshot {
-          store.send(.markReadyRequested(worktreeID, prNumber: pr.number, worktreePath: worktreePath))
+          store.send(
+            .markReadyRequested(worktreeID, prNumber: pr.number, worktreePath: worktreePath))
         }
       },
       onRerunFailedJobs: {
@@ -1746,13 +1844,24 @@ private struct ProjectHeaderRow: View {
         .font(.subheadline)
         .foregroundStyle(projectNameColor)
         .lineLimit(1)
+      // Server projects carry a small network glyph so a remote repo is
+      // distinguishable from a local one at a glance; the tooltip names the
+      // SSH destination.
+      if let host = project.remoteHost {
+        Image(systemName: "tv.badge.wifi")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .help(host.displayAuthority)
+          .accessibilityLabel("Remote server \(host.displayAuthority)")
+      }
       Spacer(minLength: 4)
       // Keep the hover chrome from collapsing row width when hidden —
       // use opacity, not conditional rendering.
       HStack(spacing: 2) {
         // Non-git Projects (P-Q4 = a): suppress the Add Worktree affordance.
         // Worktrees are a git-only concept; a scratch folder renders with a
-        // single synthetic Worktree and nothing to add.
+        // single synthetic Worktree and nothing to add. Server (remote)
+        // projects create over SSH (`git worktree add` on the host).
         if project.supportsWorktrees {
           Button {
             store.send(.projectAddWorktreeTapped(projectID: project.id))
@@ -1768,6 +1877,13 @@ private struct ProjectHeaderRow: View {
             store.send(.projectSettingsTapped(projectID: project.id))
           } label: {
             Label("Project Settings…", systemImage: "slider.horizontal.3")
+          }
+          if project.isRemote {
+            Button {
+              store.send(.projectEditConnectionTapped(projectID: project.id))
+            } label: {
+              Label("Edit Connection…", systemImage: "tv.badge.wifi")
+            }
           }
           Divider()
           // Worktree operations group: archived list, prune, and the
@@ -2064,13 +2180,13 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
 private func resolveAgentStateSourcePath(
   paneID: PaneID,
   catalog: Catalog
-) -> (project: String, worktree: String, projectColor: ProjectColor?)? {
+) -> (project: String, worktree: String, projectColor: ProjectColor?, remoteAuthority: String?)? {
   for project in catalog.projects {
     for worktree in project.worktrees
     where worktree.tabs.contains(where: { tab in
       tab.panes.contains(where: { $0.id == paneID })
     }) {
-      return (project.name, worktree.name, project.color)
+      return (project.name, worktree.name, project.color, project.remoteHost?.displayAuthority)
     }
   }
   return nil

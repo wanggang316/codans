@@ -381,12 +381,29 @@ final class HierarchyHandlers {
         .invalidParams(
           message: "openPane requires {projectID, worktreeID, tabID, workingDirectory}", path: nil))
     }
+    // Server (remote) projects: the CLI defaults `--cwd` to the CALLER's local
+    // pwd, which is meaningless on the host — the remote shell would `cd` into
+    // whatever local directory the caller happened to be in (when it exists on
+    // the host) or fall back to `$HOME`. Accept the supplied cwd only when it
+    // targets the worktree (or a subpath of it) on the host; otherwise land in
+    // the worktree root, matching what the UI's tab/pane creation does.
+    var workingDirectory = req.workingDirectory
+    if let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
+      project.isRemote,
+      let worktree = project.worktrees.first(where: { $0.id == req.worktreeID })
+    {
+      let requested = HierarchyManager.normalizeRemotePath(req.workingDirectory)
+      let root = HierarchyManager.normalizeRemotePath(worktree.path)
+      if requested != root, !requested.hasPrefix(root + "/") {
+        workingDirectory = worktree.path
+      }
+    }
     do {
       let id = try await manager.openPane(
         in: req.tabID,
         in: req.worktreeID,
         in: req.projectID,
-        workingDirectory: req.workingDirectory,
+        workingDirectory: workingDirectory,
         initialCommand: req.initialCommand
       )
       if !req.labels.isEmpty {

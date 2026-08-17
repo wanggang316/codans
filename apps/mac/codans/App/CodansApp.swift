@@ -672,13 +672,40 @@ final class AppState {
     // handlers share the exact same live instances — avoids two parallel
     // `LiveEditorService`s with divergent settings captures.
     let editor = EditorClient.live(settings: settings)
+    // Server-project transport seam for the worktree-management surface:
+    // paths owned by a remote project route their plain-git operations
+    // (listing, branch queries, removal, prune, status) over SSH. Shared by
+    // the HierarchyClient (reconcile + removal) and the root store (create
+    // sheet option loading) so both sides agree on the transport.
+    let worktreeClient = GitWorktreeClient.makeLive(
+      remoteHostResolver: { [weak manager] path in
+        await MainActor.run { manager?.remoteHost(forPath: path) }
+      }
+    )
     let hierarchy = HierarchyClient.live(
       manager: manager,
       settings: settings,
+      gitWorktreeClient: worktreeClient,
       terminalClient: .live(engine: engine)
     )
     self.editorClient = editor
     self.hierarchyClient = hierarchy
+
+    // Server-project git transport: a GitService whose invocations route over
+    // SSH whenever the repository path belongs to a remote project (resolved
+    // live against the manager's catalog). Installed on the root store (below)
+    // and rebound into the two sidebar monitors, so the `+N −M` chip, dirty
+    // flag, PR badge remote-URL probe, branch switcher, and diff inspector all
+    // work against remote worktrees with no per-feature changes. The global
+    // `gitService` prepared in `CodansApp.init` stays purely local — it cannot
+    // be re-prepared, and no view-side reader needs the remote route.
+    let routedGitClient = GitServiceClient.live(
+      service: Git.makeService(remoteHostResolver: { [weak manager] url in
+        await MainActor.run { manager?.remoteHost(forPath: url.path) }
+      })
+    )
+    worktreeStatusMonitor.rebindFetch(routedGitClient.status)
+    worktreeLocalDiffMonitor.rebindFetch(routedGitClient.localDiffStats)
 
     // Notification observers + coordinator depend on `hierarchy` (the
     // coordinator captures `HierarchyClient` so it can call
@@ -770,6 +797,10 @@ final class AppState {
     } withDependencies: {
       $0.hierarchyClient = hierarchy
       $0.terminalClient = .live(engine: engine)
+      // SSH-routing git clients (see construction above) so every reducer-side
+      // git consumer transparently reaches Server-project repositories.
+      $0.gitService = routedGitClient
+      $0.gitWorktreeClient = worktreeClient
       // Without these overrides, `EditorClient.liveValue` and
       // `SettingsWriter.liveValue` fatalError on any descendants call. Both factories close
       // over `settings` (global default + custom templates); `editorClient` additionally

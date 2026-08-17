@@ -1,6 +1,6 @@
 import AppKit
-import Foundation
 import CodansCore
+import Foundation
 
 /// Production `EditorService` backed by Launch Services via the `AppLauncher` seam.
 ///
@@ -15,14 +15,19 @@ import CodansCore
 final actor LiveEditorService: EditorService {
   private let launcher: any AppLauncher
   private let globalDefault: @Sendable () async -> EditorID?
+  /// Runs the editor's bundled SSH-remoting CLI for `openRemote`. Injected so
+  /// tests can record the spawn instead of launching a real editor.
+  private let runner: any CommandRunner
   private var cachedDescriptors: [EditorDescriptor]?
 
   init(
     launcher: any AppLauncher = LiveAppLauncher(),
-    globalDefault: @escaping @Sendable () async -> EditorID? = { nil }
+    globalDefault: @escaping @Sendable () async -> EditorID? = { nil },
+    runner: any CommandRunner = FoundationCommandRunner()
   ) {
     self.launcher = launcher
     self.globalDefault = globalDefault
+    self.runner = runner
   }
 
   // MARK: - describe
@@ -80,7 +85,8 @@ final actor LiveEditorService: EditorService {
     // Tier 1 — explicit preferred (strict).
     if let preferred {
       guard let match = installed.first(where: { $0.id == preferred }) else {
-        let bundleID = EditorRegistry.registry.first(where: { $0.id == preferred })?.bundleIdentifier ?? ""
+        let bundleID =
+          EditorRegistry.registry.first(where: { $0.id == preferred })?.bundleIdentifier ?? ""
         throw EditorError.notInstalled(id: preferred, bundleID: bundleID)
       }
       return match
@@ -151,6 +157,77 @@ final actor LiveEditorService: EditorService {
     }
 
     return EditorChoice(id: descriptor.id, displayName: descriptor.displayName, binaryPath: nil)
+  }
+
+  // MARK: - openRemote
+
+  @discardableResult
+  func openRemote(
+    host: RemoteHost, remotePath: String, preferred: EditorID?
+  ) async throws -> EditorChoice {
+    let descriptor = try await resolveRemote(host: host, preferred: preferred)
+    guard let appURL = descriptor.appURL,
+      let invocation = RemoteEditorOpen.invocation(
+        editorID: descriptor.id, host: host, remotePath: remotePath
+      )
+    else {
+      throw EditorError.launchFailed(
+        reason: "\(descriptor.displayName) cannot open folders over SSH."
+      )
+    }
+    let cliURL = appURL.appendingPathComponent(invocation.executableRelativePath)
+    let outcome = await runner.run(
+      executable: cliURL,
+      arguments: invocation.arguments,
+      env: ProcessInfo.processInfo.environment,
+      cwd: URL(fileURLWithPath: NSHomeDirectory()),
+      timeout: .seconds(30),
+      maxOutputBytes: 64 * 1024
+    )
+    guard case .exited(let code, _, _, _) = outcome, code == 0 else {
+      var reason = "\(descriptor.displayName)'s remote CLI failed."
+      if case .exited(_, _, let stderr, _) = outcome,
+        let message = String(bytes: stderr, encoding: .utf8)?
+          .trimmingCharacters(in: .whitespacesAndNewlines),
+        !message.isEmpty
+      {
+        reason = message
+      }
+      throw EditorError.launchFailed(reason: reason)
+    }
+    return EditorChoice(id: descriptor.id, displayName: descriptor.displayName, binaryPath: nil)
+  }
+
+  /// Remote resolution cascade — the same tiers as `resolve`, each filtered
+  /// to editors that can express `host` (see the protocol doc for why
+  /// `preferred` is lenient here, unlike the local path).
+  private func resolveRemote(host: RemoteHost, preferred: EditorID?) async throws
+    -> EditorDescriptor
+  {
+    let installed = await describe()
+    func usable(_ descriptor: EditorDescriptor) -> Bool {
+      RemoteEditorOpen.invocation(editorID: descriptor.id, host: host, remotePath: "/") != nil
+    }
+    if let preferred,
+      let match = installed.first(where: { $0.id == preferred }), usable(match)
+    {
+      return match
+    }
+    if let defaultID = await globalDefault(),
+      let match = installed.first(where: { $0.id == defaultID }), usable(match)
+    {
+      return match
+    }
+    for id in EditorRegistry.editorPriority {
+      if let match = installed.first(where: { $0.id == id }), usable(match) {
+        return match
+      }
+    }
+    throw EditorError.launchFailed(
+      reason:
+        "No installed editor can open folders over SSH. "
+        + "Install Zed or a VS Code-family editor (non-default ports go in ~/.ssh/config)."
+    )
   }
 
   // MARK: - Helpers

@@ -29,7 +29,7 @@ final class WorktreeStatusMonitor {
   private var inFlight: Set<WorktreeID> = []
 
   @ObservationIgnored
-  private let fetch: @Sendable (URL) async throws -> WorkingTreeStatus
+  private var fetch: @Sendable (URL) async throws -> WorkingTreeStatus
 
   @ObservationIgnored
   private static let freshness: TimeInterval = 30
@@ -44,6 +44,14 @@ final class WorktreeStatusMonitor {
   static func live() -> WorktreeStatusMonitor {
     let client = GitServiceClient.live()
     return WorktreeStatusMonitor(fetch: client.status)
+  }
+
+  /// Swap the fetch closure after construction. `AppState.init` builds the
+  /// monitor before the `HierarchyManager` exists; `bringUp` calls this once
+  /// with the SSH-routing `GitServiceClient` so Server-project worktrees get
+  /// a live dirty flag too. Cached flags are untouched.
+  func rebindFetch(_ fetch: @escaping @Sendable (URL) async throws -> WorkingTreeStatus) {
+    self.fetch = fetch
   }
 
   /// Refreshes the dirty flag for the given Worktree, honouring the 30 s freshness

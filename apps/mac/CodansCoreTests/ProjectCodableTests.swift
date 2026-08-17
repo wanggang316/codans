@@ -71,4 +71,31 @@ struct ProjectCodableTests {
     #expect(NSDictionary(dictionary: runtimeObject ?? [:])
       .isEqual(to: preMgmtObject ?? [:]))
   }
+
+  @Test
+  func localProjectEncodesNoRemoteHostKey() throws {
+    // A local project must round-trip byte-identical: the new `remoteHost` key is
+    // absent so pre-Server catalogs are untouched.
+    let project = Project(name: "repo", rootPath: "/tmp/repo", gitRoot: "/tmp/repo")
+    let data = try JSONEncoder().encode(project)
+    let object = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+    #expect(object?["remoteHost"] == nil)
+  }
+
+  @Test
+  func serverProjectRoundTripsRemoteHost() throws {
+    let host = RemoteHost(alias: "example.com", username: "alice", port: 2222)
+    let project = Project(
+      name: "app",
+      rootPath: "/srv/app",
+      gitRoot: "/srv/app",
+      remoteHost: host
+    )
+    let data = try JSONEncoder().encode(project)
+    let decoded = try JSONDecoder().decode(Project.self, from: data)
+    #expect(decoded.remoteHost == host)
+    #expect(decoded.isRemote)
+    #expect(decoded.kind == .server)
+    #expect(decoded.rootPath == "/srv/app")
+  }
 }

@@ -1,3 +1,4 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 
@@ -565,12 +566,24 @@ nonisolated extension GitWorktreeClient {
   // that captures a weak reference to the Process so they can assert
   // `!process.isRunning` after cancelling the stream (issue #24 (a)).
   //
+  // `remoteHostResolver` is the Server-project transport seam (the same
+  // pattern as `LiveGitService`): when it maps a repo root to a `RemoteHost`,
+  // the plain-git closures (listing, branch queries, removal, prune, status)
+  // run on that host over SSH via `RemoteGitService` instead of locally. The
+  // streaming `wt sw` creation stays local-only — remote creation goes
+  // through the sidebar's explicit `git worktree add`-over-SSH path.
+  //
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   static func makeLive(
-    onCreateWorktreeSpawn: (@Sendable (Process) -> Void)? = nil
+    onCreateWorktreeSpawn: (@Sendable (Process) -> Void)? = nil,
+    remoteHostResolver: @escaping @Sendable (String) async -> RemoteHost? = { _ in nil }
   ) -> GitWorktreeClient {
     GitWorktreeClient(
       lsWorktrees: { repoRoot in
+        if let host = await remoteHostResolver(repoRoot.path) {
+          let entries = try await remoteListEntries(host: host, gitRoot: repoRoot.path)
+          return entries
+        }
         let wt = try wtScriptURL()
         let outcome = await GitWorktreeShell.run(
           executable: wt, arguments: ["ls", "--json"], cwd: repoRoot
@@ -596,6 +609,11 @@ nonisolated extension GitWorktreeClient {
       },
 
       localBranchNames: { repoRoot in
+        if let host = await remoteHostResolver(repoRoot.path) {
+          return try await remoteMapped(host: host) {
+            try await $0.localBranchNames(gitRoot: repoRoot.path)
+          }
+        }
         let outcome = await GitWorktreeShell.run(
           executable: GitWorktreeShell.gitURL,
           arguments: [
@@ -620,6 +638,11 @@ nonisolated extension GitWorktreeClient {
       },
 
       branchRefs: { repoRoot in
+        if let host = await remoteHostResolver(repoRoot.path) {
+          return try await remoteMapped(host: host) {
+            try await $0.branchRefs(gitRoot: repoRoot.path)
+          }
+        }
         let outcome = await GitWorktreeShell.run(
           executable: GitWorktreeShell.gitURL,
           arguments: [
@@ -637,48 +660,17 @@ nonisolated extension GitWorktreeClient {
       },
 
       defaultRemoteBranchRef: { repoRoot in
-        // Try symbolic-ref first (fast; succeeds when `origin/HEAD` is set locally).
-        let symbolic = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "symbolic-ref", "--short", "refs/remotes/origin/HEAD",
-          ],
-          cwd: repoRoot
-        )
-        if case .exited(let code, let data, _, _) = symbolic, code == 0 {
-          let trimmed = GitWorktreeShell.decodeUTF8(data)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-          if !trimmed.isEmpty { return trimmed }
+        if let host = await remoteHostResolver(repoRoot.path) {
+          return await RemoteGitService(host: host).defaultRemoteBranchRef(gitRoot: repoRoot.path)
         }
-        // Fallback: parse `git remote show origin` for "HEAD branch: X".
-        let show = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "remote", "show", "origin",
-          ],
-          cwd: repoRoot
-        )
-        if case .exited(let code, let data, _, _) = show, code == 0 {
-          let text = GitWorktreeShell.decodeUTF8(data)
-          for line in text.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("HEAD branch:") {
-              let branch =
-                trimmed
-                .dropFirst("HEAD branch:".count)
-                .trimmingCharacters(in: .whitespaces)
-              if !branch.isEmpty && branch != "(unknown)" {
-                return "origin/\(branch)"
-              }
-            }
-          }
-        }
-        return nil
+        return await localDefaultRemoteBranchRef(repoRoot: repoRoot)
       },
 
       isValidBranchName: { repoRoot, name in
+        if let host = await remoteHostResolver(repoRoot.path) {
+          return await RemoteGitService(host: host)
+            .isValidBranchName(gitRoot: repoRoot.path, name: name)
+        }
         let outcome = await GitWorktreeShell.run(
           executable: GitWorktreeShell.gitURL,
           arguments: [
@@ -694,320 +686,81 @@ nonisolated extension GitWorktreeClient {
       },
 
       createWorktreeStream: { spec in
-        AsyncThrowingStream { continuation in
-          // Locked box so `continuation.onTermination` (fires on any
-          // thread / isolation context) can safely read the Process
-          // reference and terminate the child. Without this, a
-          // cancelled consumer leaks the `wt` child until it finishes
-          // on its own.
-          let processBox = CreateWorktreeProcessBox()
-
-          let task = Task {
-            do {
-              let wt = try wtScriptURL()
-              // Optional pre-fetch.
-              if spec.fetchOrigin {
-                let fetch = await GitWorktreeShell.run(
-                  executable: GitWorktreeShell.gitURL,
-                  arguments: [
-                    "-C", spec.repoRoot.path(percentEncoded: false),
-                    "fetch", "origin",
-                  ],
-                  cwd: spec.repoRoot
-                )
-                if case .exited(let code, _, let err, _) = fetch, code != 0 {
-                  continuation.finish(
-                    throwing: GitWorktreeError.fetchFailed(
-                      GitWorktreeShell.decodeUTF8(err)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    ))
-                  return
-                }
-              }
-
-              // Snapshot the live worktree set BEFORE spawning `wt sw`.
-              // After exit we diff against this to identify the new
-              // entry — more robust than treating wt's last-non-empty
-              // stdout line as the path. Best-effort:
-              // if wt ls fails for any reason, we fall through with an
-              // empty snapshot and the diff will surface every
-              // post-create entry; the fallbackStdoutLast path then
-              // picks the right one.
-              let preEntries = await liveLsEntries(wt: wt, repoRoot: spec.repoRoot)
-
-              let args = makeCreateArguments(for: spec)
-              let outcome = await GitWorktreeShell.runStream(
-                executable: wt,
-                arguments: args,
-                cwd: spec.repoRoot,
-                onSpawn: { process in
-                  processBox.set(process)
-                  onCreateWorktreeSpawn?(process)
-                },
-                onStdout: { line in continuation.yield(.progressLine(line)) },
-                onStderr: { line in continuation.yield(.progressLine(line)) }
-              )
-              if let reason = outcome.spawnFailedReason {
-                continuation.finish(
-                  throwing: GitWorktreeError.commandFailed(
-                    command: "wt \(args.joined(separator: " "))",
-                    stderr: reason
-                  ))
-                return
-              }
-              guard outcome.exitCode == 0 else {
-                let command = "wt \(args.joined(separator: " "))"
-                continuation.finish(
-                  throwing: mapGitStderr(
-                    command: command,
-                    stderr: outcome.stderrCollected
-                  ))
-                return
-              }
-
-              // Post-snapshot + diff. We don't require stdoutLast to
-              // be non-empty anymore — it's a tiebreaker, not the
-              // primary source.
-              let postEntries = await liveLsEntries(wt: wt, repoRoot: spec.repoRoot)
-              guard
-                let worktreeURL = pickNewWorktreePath(
-                  preEntries: preEntries,
-                  postEntries: postEntries,
-                  fallbackStdoutLast: outcome.stdoutLast
-                )
-              else {
-                continuation.finish(
-                  throwing: GitWorktreeError.commandFailed(
-                    command: "wt \(args.joined(separator: " "))",
-                    stderr: "wt exited 0 but no new worktree appeared in wt ls"
-                  ))
-                return
-              }
-
-              // Optional setup-script phase. Runs as a tracked phase
-              // INSIDE the stream (rather than later as the first pane's
-              // initial command) so a cancelled creation also kills the
-              // setup child — it reuses the SAME `processBox` +
-              // `continuation.onTermination` wiring the `wt sw`
-              // invocation uses. The command runs in the freshly-created
-              // worktree (`worktreeURL`), not `spec.repoRoot`.
-              let setup = spec.setupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
-              if let setup, !setup.isEmpty {
-                continuation.yield(.setupPhaseBegan(worktreePath: worktreeURL))
-                let setupOutcome = await GitWorktreeShell.runStream(
-                  executable: URL(fileURLWithPath: "/bin/bash"),
-                  arguments: ["-lc", setup],
-                  cwd: worktreeURL,
-                  onSpawn: { process in
-                    processBox.set(process)
-                    onCreateWorktreeSpawn?(process)
-                  },
-                  onStdout: { line in continuation.yield(.progressLine(line)) },
-                  onStderr: { line in continuation.yield(.progressLine(line)) }
-                )
-                // Best-effort: a spawn failure or non-zero exit from the
-                // setup script must NOT throw or roll back the worktree.
-                // We note it as a final progress line and still finish.
-                if let reason = setupOutcome.spawnFailedReason {
-                  continuation.yield(
-                    .progressLine("setup script failed to start: \(reason)"))
-                } else if setupOutcome.exitCode != 0 {
-                  continuation.yield(
-                    .progressLine("setup script exited with code \(setupOutcome.exitCode)"))
-                }
-              }
-
-              continuation.yield(.finished(worktreePath: worktreeURL))
-              continuation.finish()
-            } catch {
-              continuation.finish(throwing: error)
-            }
-          }
-          continuation.onTermination = { _ in
-            // Order matters: terminate the child FIRST so
-            // `runStream`'s terminationHandler fires and resumes its
-            // continuation naturally (Task body completes, reaches
-            // the final `continuation.finish(...)`). Cancelling the
-            // Task first would still leave the wt child alive until
-            // it finished, defeating the point of this handler.
-            processBox.terminateIfRunning()
-            task.cancel()
-          }
-        }
+        // Local-only by design: the stream drives the bundled `wt` script
+        // (copy-ignored / copy-untracked / setup phases). Remote creation is
+        // the sidebar's explicit `git worktree add`-over-SSH path.
+        makeLocalCreateWorktreeStream(spec: spec, onCreateWorktreeSpawn: onCreateWorktreeSpawn)
       },
 
       removeWorktree: { repoRoot, path in
-        // Strategy:
-        // 1) Try to relocate the worktree directory to a trash folder so
-        //    the UI sees it disappear immediately and `git worktree
-        //    prune` can clean the metadata without tripping over git's
-        //    submodule or "modified files" refusals.
-        // 2) If relocate succeeded, run `prune --expire=now`. The working
-        //    directory is already gone, so removal has MATERIALLY
-        //    succeeded — any further git cleanup is best-effort and must
-        //    never throw. If prune fails we still try `remove --force` as
-        //    a cleanup pass, but swallow its outcome.
-        // 3) If relocate failed (path missing, cross-volume, ENOPERM),
-        //    `remove --force <originalPath>` is the REAL removal, so its
-        //    failure is fatal — except the idempotent "is not a working
-        //    tree" case, which `forceRemoveWorktree` already maps to
-        //    success.
-        // 4) Schedule async rm-rf of the relocated dir so a large `.git`
-        //    (submodule history) does not block the caller.
-        //
-        // The post-relocate "best-effort, never throw" rule is load-
-        // bearing: a throw here aborts the caller before it drops the
-        // catalog row, stranding an orphaned node whose backing directory
-        // no longer exists. That is exactly how an in-app Remove on a
-        // branch-switched, pinned worktree left a row that could never be
-        // deleted again (`remove --force` against the emptied path keeps
-        // failing with "is not a working tree").
-        //
-        // 0) Best-effort unlock: git refuses to remove a LOCKED worktree
-        //    even with `--force` (fatals: "cannot remove a locked working
-        //    tree, use -f -f or unlock first") and `prune` silently skips
-        //    it, so a locked entry would strand the removal on either leg.
-        //    Locks can be planted by a sibling tool sharing this repo's git
-        //    dir; a user-initiated Remove means "make it gone", so clear the
-        //    lock up front. Unlocking a non-locked worktree is a harmless
-        //    no-op error we ignore.
-        _ = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "worktree", "unlock", path.path(percentEncoded: false),
-          ],
-          cwd: repoRoot
-        )
-        let relocated = relocateWorktreeForRemoval(path)
-        if let relocated {
-          scheduleTrashCleanup(relocated)
-          let pruneOutcome = await GitWorktreeShell.run(
-            executable: GitWorktreeShell.gitURL,
-            arguments: [
-              "-C", repoRoot.path(percentEncoded: false),
-              "worktree", "prune", "--expire=now",
-            ],
-            cwd: repoRoot
-          )
-          if case .exited(let code, _, _, _) = pruneOutcome, code == 0 {
-            return
+        if let host = await remoteHostResolver(repoRoot.path) {
+          // No local trash to relocate into on a remote host — removal is the
+          // plain forced git command. "is not a working tree" still maps to
+          // idempotent success like the local path.
+          do {
+            try await RemoteGitService(host: host).removeWorktree(
+              gitRoot: repoRoot.path, path: path.path, force: true
+            )
+          } catch let error as RemoteGitError {
+            if case .commandFailed(_, _, let stderr) = error,
+              stderrIndicatesAlreadyRemoved(stderr)
+            {
+              return
+            }
+            throw mapRemoteError(error, command: "git worktree remove --force")
           }
-          // Prune failed — try a forced remove as cleanup, but the dir is
-          // already relocated so removal is done regardless of the result.
-          try? await forceRemoveWorktree(repoRoot: repoRoot, path: path)
           return
         }
-        // Relocate failed: the directory is still in place, so the forced
-        // remove is the actual removal and its failure is fatal.
-        try await forceRemoveWorktree(repoRoot: repoRoot, path: path)
+        try await localRemoveWorktree(repoRoot: repoRoot, path: path)
       },
 
       deleteBranchIfExists: { repoRoot, branch in
-        // Best-effort: git refuses if the branch is checked out by
-        // another worktree (e.g. it's the project's main branch) — that
-        // refusal is exactly when we must NOT delete it, so we report
-        // `.kept` instead of failing the remove flow. A genuinely-absent
-        // branch is `.absent`. Neither aborts the caller.
-        let outcome = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "branch", "-D", branch,
-          ],
-          cwd: repoRoot
-        )
-        guard case .exited(let code, _, let stderr, _) = outcome else {
-          return .kept(reason: "git branch -D did not complete")
+        if let host = await remoteHostResolver(repoRoot.path) {
+          return await RemoteGitService(host: host)
+            .deleteBranchIfExists(gitRoot: repoRoot.path, branch: branch)
         }
-        if code == 0 { return .deleted }
-        let message = GitWorktreeShell.decodeUTF8(stderr)
-          .trimmingCharacters(in: .whitespacesAndNewlines)
-        let lower = message.lowercased()
-        // git's "not found" phrasings vary by version/locale; treat any
-        // of them as already-gone rather than a kept branch.
-        if lower.contains("not found") || lower.contains("no branch named")
-          || lower.contains("couldn't look up")
-        {
-          return .absent
-        }
-        return .kept(reason: message.isEmpty ? "git refused to delete the branch" : message)
+        return await localDeleteBranchIfExists(repoRoot: repoRoot, branch: branch)
       },
 
       deleteRemoteBranchIfExists: { repoRoot, branch in
-        // Resolve the remote this branch tracks. Read it from the local
-        // branch's upstream config while the branch still exists; fall back
-        // to "origin" when there is no configured upstream.
-        let remoteOutcome = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "for-each-ref", "--format=%(upstream:remotename)",
-            "refs/heads/\(branch)",
-          ],
-          cwd: repoRoot
-        )
-        var remote = "origin"
-        if case .exited(let code, let data, _, _) = remoteOutcome, code == 0 {
-          let trimmed = GitWorktreeShell.decodeUTF8(data)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-          if !trimmed.isEmpty { remote = trimmed }
+        if let host = await remoteHostResolver(repoRoot.path) {
+          await RemoteGitService(host: host)
+            .deleteRemoteBranchIfExists(gitRoot: repoRoot.path, branch: branch)
+          return
         }
-        // Best-effort: git fails if the remote ref is already gone or the
-        // network is unreachable — neither should fail the worktree remove.
-        _ = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "push", remote, "--delete", branch,
-          ],
-          cwd: repoRoot
-        )
+        await localDeleteRemoteBranchIfExists(repoRoot: repoRoot, branch: branch)
       },
 
       pruneWorktrees: { repoRoot in
-        // Diff lsWorktrees before/after so the caller can surface an accurate
-        // toast. `git worktree prune` itself prints nothing on success.
-        let wt = try wtScriptURL()
-        let before = await liveLsCount(wt: wt, repoRoot: repoRoot)
-        let outcome = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "worktree", "prune",
-          ],
-          cwd: repoRoot
-        )
-        _ = try extractStdout(outcome, command: "git worktree prune")
-        let after = await liveLsCount(wt: wt, repoRoot: repoRoot)
-        return max(0, before - after)
+        if let host = await remoteHostResolver(repoRoot.path) {
+          return try await remoteMapped(host: host) {
+            try await $0.pruneWorktrees(gitRoot: repoRoot.path)
+          }
+        }
+        return try await localPruneWorktrees(repoRoot: repoRoot)
       },
 
       fetchRemote: { repoRoot, remote in
-        let outcome = await GitWorktreeShell.run(
-          executable: GitWorktreeShell.gitURL,
-          arguments: [
-            "-C", repoRoot.path(percentEncoded: false),
-            "fetch", remote,
-          ],
-          cwd: repoRoot
-        )
-        switch outcome {
-        case .exited(let code, _, _, _) where code == 0:
+        if let host = await remoteHostResolver(repoRoot.path) {
+          do {
+            try await RemoteGitService(host: host).fetchRemote(gitRoot: repoRoot.path, remote: remote)
+          } catch let error as RemoteGitError {
+            if case .commandFailed(_, _, let stderr) = error {
+              throw GitWorktreeError.fetchFailed(stderr)
+            }
+            throw error
+          }
           return
-        case .exited(_, _, let stderrData, _):
-          throw GitWorktreeError.fetchFailed(
-            GitWorktreeShell.decodeUTF8(stderrData)
-              .trimmingCharacters(in: .whitespacesAndNewlines)
-          )
-        case .timedOut:
-          throw GitWorktreeError.fetchFailed("timed out")
-        case .spawnFailed(let reason):
-          throw GitWorktreeError.fetchFailed(reason)
         }
+        try await localFetchRemote(repoRoot: repoRoot, remote: remote)
       },
 
       changedFiles: { worktreeRoot in
+        if let host = await remoteHostResolver(worktreeRoot.path) {
+          return try await remoteMapped(host: host) {
+            try await $0.changedFiles(worktreeRoot: worktreeRoot.path)
+          }
+        }
         let outcome = await GitWorktreeShell.run(
           executable: GitWorktreeShell.gitURL,
           arguments: [
@@ -1020,6 +773,415 @@ nonisolated extension GitWorktreeClient {
         return parsePorcelainPaths(stdout)
       }
     )
+  }
+
+  /// Remote worktree listing mapped into the local `GitWtEntry` shape so the
+  /// reconcile / option-loading callers stay transport-blind.
+  private static func remoteListEntries(host: RemoteHost, gitRoot: String) async throws -> [GitWtEntry] {
+    do {
+      let entries = try await RemoteGitService(host: host).listWorktrees(gitRoot: gitRoot)
+      return entries.map {
+        GitWtEntry(branch: $0.branch ?? "", path: $0.path, head: $0.head, isBare: false)
+      }
+    } catch let error as RemoteGitError {
+      throw mapRemoteError(error, command: "git worktree list --porcelain")
+    }
+  }
+
+  /// Run a `RemoteGitService` call, mapping its transport error into the
+  /// client's `GitWorktreeError` so downstream error handling stays uniform.
+  private static func remoteMapped<T: Sendable>(
+    host: RemoteHost,
+    _ body: @Sendable (RemoteGitService) async throws -> T
+  ) async throws -> T {
+    do {
+      return try await body(RemoteGitService(host: host))
+    } catch let error as RemoteGitError {
+      throw mapRemoteError(error, command: "git (remote)")
+    }
+  }
+
+  private static func mapRemoteError(_ error: RemoteGitError, command: String) -> GitWorktreeError {
+    guard case .commandFailed(let remoteCommand, _, let stderr) = error else {
+      return .commandFailed(command: command, stderr: String(describing: error))
+    }
+    return mapGitStderr(command: remoteCommand, stderr: stderr)
+  }
+
+  /// Local `defaultRemoteBranchRef` body, extracted verbatim so the routed
+  /// closure above stays readable.
+  private static func localDefaultRemoteBranchRef(repoRoot: URL) async -> String? {
+    // Try symbolic-ref first (fast; succeeds when `origin/HEAD` is set locally).
+    let symbolic = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "symbolic-ref", "--short", "refs/remotes/origin/HEAD",
+      ],
+      cwd: repoRoot
+    )
+    if case .exited(let code, let data, _, _) = symbolic, code == 0 {
+      let trimmed = GitWorktreeShell.decodeUTF8(data)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty { return trimmed }
+    }
+    // Fallback: parse `git remote show origin` for "HEAD branch: X".
+    let show = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "remote", "show", "origin",
+      ],
+      cwd: repoRoot
+    )
+    if case .exited(let code, let data, _, _) = show, code == 0 {
+      let text = GitWorktreeShell.decodeUTF8(data)
+      for line in text.components(separatedBy: "\n") {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("HEAD branch:") {
+          let branch =
+            trimmed
+            .dropFirst("HEAD branch:".count)
+            .trimmingCharacters(in: .whitespaces)
+          if !branch.isEmpty && branch != "(unknown)" {
+            return "origin/\(branch)"
+          }
+        }
+      }
+    }
+    return nil
+  }
+
+  // Local streaming `wt sw` creation body, extracted verbatim so the routed
+  // `createWorktreeStream` closure stays readable.
+  // swiftlint:disable:next function_body_length
+  private static func makeLocalCreateWorktreeStream(
+    spec: CreateWorktreeSpec,
+    onCreateWorktreeSpawn: (@Sendable (Process) -> Void)?
+  ) -> AsyncThrowingStream<CreateWorktreeEvent, Error> {
+    AsyncThrowingStream { continuation in
+      // Locked box so `continuation.onTermination` (fires on any
+      // thread / isolation context) can safely read the Process
+      // reference and terminate the child. Without this, a
+      // cancelled consumer leaks the `wt` child until it finishes
+      // on its own.
+      let processBox = CreateWorktreeProcessBox()
+
+      let task = Task {
+        do {
+          let wt = try wtScriptURL()
+          // Optional pre-fetch.
+          if spec.fetchOrigin {
+            let fetch = await GitWorktreeShell.run(
+              executable: GitWorktreeShell.gitURL,
+              arguments: [
+                "-C", spec.repoRoot.path(percentEncoded: false),
+                "fetch", "origin",
+              ],
+              cwd: spec.repoRoot
+            )
+            if case .exited(let code, _, let err, _) = fetch, code != 0 {
+              continuation.finish(
+                throwing: GitWorktreeError.fetchFailed(
+                  GitWorktreeShell.decodeUTF8(err)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                ))
+              return
+            }
+          }
+
+          // Snapshot the live worktree set BEFORE spawning `wt sw`.
+          // After exit we diff against this to identify the new
+          // entry — more robust than treating wt's last-non-empty
+          // stdout line as the path. Best-effort:
+          // if wt ls fails for any reason, we fall through with an
+          // empty snapshot and the diff will surface every
+          // post-create entry; the fallbackStdoutLast path then
+          // picks the right one.
+          let preEntries = await liveLsEntries(wt: wt, repoRoot: spec.repoRoot)
+
+          let args = makeCreateArguments(for: spec)
+          let outcome = await GitWorktreeShell.runStream(
+            executable: wt,
+            arguments: args,
+            cwd: spec.repoRoot,
+            onSpawn: { process in
+              processBox.set(process)
+              onCreateWorktreeSpawn?(process)
+            },
+            onStdout: { line in continuation.yield(.progressLine(line)) },
+            onStderr: { line in continuation.yield(.progressLine(line)) }
+          )
+          if let reason = outcome.spawnFailedReason {
+            continuation.finish(
+              throwing: GitWorktreeError.commandFailed(
+                command: "wt \(args.joined(separator: " "))",
+                stderr: reason
+              ))
+            return
+          }
+          guard outcome.exitCode == 0 else {
+            let command = "wt \(args.joined(separator: " "))"
+            continuation.finish(
+              throwing: mapGitStderr(
+                command: command,
+                stderr: outcome.stderrCollected
+              ))
+            return
+          }
+
+          // Post-snapshot + diff. We don't require stdoutLast to
+          // be non-empty anymore — it's a tiebreaker, not the
+          // primary source.
+          let postEntries = await liveLsEntries(wt: wt, repoRoot: spec.repoRoot)
+          guard
+            let worktreeURL = pickNewWorktreePath(
+              preEntries: preEntries,
+              postEntries: postEntries,
+              fallbackStdoutLast: outcome.stdoutLast
+            )
+          else {
+            continuation.finish(
+              throwing: GitWorktreeError.commandFailed(
+                command: "wt \(args.joined(separator: " "))",
+                stderr: "wt exited 0 but no new worktree appeared in wt ls"
+              ))
+            return
+          }
+
+          // Optional setup-script phase. Runs as a tracked phase
+          // INSIDE the stream (rather than later as the first pane's
+          // initial command) so a cancelled creation also kills the
+          // setup child — it reuses the SAME `processBox` +
+          // `continuation.onTermination` wiring the `wt sw`
+          // invocation uses. The command runs in the freshly-created
+          // worktree (`worktreeURL`), not `spec.repoRoot`.
+          let setup = spec.setupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
+          if let setup, !setup.isEmpty {
+            continuation.yield(.setupPhaseBegan(worktreePath: worktreeURL))
+            let setupOutcome = await GitWorktreeShell.runStream(
+              executable: URL(fileURLWithPath: "/bin/bash"),
+              arguments: ["-lc", setup],
+              cwd: worktreeURL,
+              onSpawn: { process in
+                processBox.set(process)
+                onCreateWorktreeSpawn?(process)
+              },
+              onStdout: { line in continuation.yield(.progressLine(line)) },
+              onStderr: { line in continuation.yield(.progressLine(line)) }
+            )
+            // Best-effort: a spawn failure or non-zero exit from the
+            // setup script must NOT throw or roll back the worktree.
+            // We note it as a final progress line and still finish.
+            if let reason = setupOutcome.spawnFailedReason {
+              continuation.yield(
+                .progressLine("setup script failed to start: \(reason)"))
+            } else if setupOutcome.exitCode != 0 {
+              continuation.yield(
+                .progressLine("setup script exited with code \(setupOutcome.exitCode)"))
+            }
+          }
+
+          continuation.yield(.finished(worktreePath: worktreeURL))
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+      continuation.onTermination = { _ in
+        // Order matters: terminate the child FIRST so
+        // `runStream`'s terminationHandler fires and resumes its
+        // continuation naturally (Task body completes, reaches
+        // the final `continuation.finish(...)`). Cancelling the
+        // Task first would still leave the wt child alive until
+        // it finished, defeating the point of this handler.
+        processBox.terminateIfRunning()
+        task.cancel()
+      }
+    }
+  }
+
+  /// Local relocate-then-prune removal body, extracted verbatim so the routed
+  /// `removeWorktree` closure stays readable.
+  private static func localRemoveWorktree(repoRoot: URL, path: URL) async throws {
+    // Strategy:
+    // 1) Try to relocate the worktree directory to a trash folder so
+    //    the UI sees it disappear immediately and `git worktree
+    //    prune` can clean the metadata without tripping over git's
+    //    submodule or "modified files" refusals.
+    // 2) If relocate succeeded, run `prune --expire=now`. The working
+    //    directory is already gone, so removal has MATERIALLY
+    //    succeeded — any further git cleanup is best-effort and must
+    //    never throw. If prune fails we still try `remove --force` as
+    //    a cleanup pass, but swallow its outcome.
+    // 3) If relocate failed (path missing, cross-volume, ENOPERM),
+    //    `remove --force <originalPath>` is the REAL removal, so its
+    //    failure is fatal — except the idempotent "is not a working
+    //    tree" case, which `forceRemoveWorktree` already maps to
+    //    success.
+    // 4) Schedule async rm-rf of the relocated dir so a large `.git`
+    //    (submodule history) does not block the caller.
+    //
+    // The post-relocate "best-effort, never throw" rule is load-
+    // bearing: a throw here aborts the caller before it drops the
+    // catalog row, stranding an orphaned node whose backing directory
+    // no longer exists. That is exactly how an in-app Remove on a
+    // branch-switched, pinned worktree left a row that could never be
+    // deleted again (`remove --force` against the emptied path keeps
+    // failing with "is not a working tree").
+    //
+    // 0) Best-effort unlock: git refuses to remove a LOCKED worktree
+    //    even with `--force` (fatals: "cannot remove a locked working
+    //    tree, use -f -f or unlock first") and `prune` silently skips
+    //    it, so a locked entry would strand the removal on either leg.
+    //    Locks can be planted by a sibling tool sharing this repo's git
+    //    dir; a user-initiated Remove means "make it gone", so clear the
+    //    lock up front. Unlocking a non-locked worktree is a harmless
+    //    no-op error we ignore.
+    _ = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "worktree", "unlock", path.path(percentEncoded: false),
+      ],
+      cwd: repoRoot
+    )
+    let relocated = relocateWorktreeForRemoval(path)
+    if let relocated {
+      scheduleTrashCleanup(relocated)
+      let pruneOutcome = await GitWorktreeShell.run(
+        executable: GitWorktreeShell.gitURL,
+        arguments: [
+          "-C", repoRoot.path(percentEncoded: false),
+          "worktree", "prune", "--expire=now",
+        ],
+        cwd: repoRoot
+      )
+      if case .exited(let code, _, _, _) = pruneOutcome, code == 0 {
+        return
+      }
+      // Prune failed — try a forced remove as cleanup, but the dir is
+      // already relocated so removal is done regardless of the result.
+      try? await forceRemoveWorktree(repoRoot: repoRoot, path: path)
+      return
+    }
+    // Relocate failed: the directory is still in place, so the forced
+    // remove is the actual removal and its failure is fatal.
+    try await forceRemoveWorktree(repoRoot: repoRoot, path: path)
+  }
+
+  /// Local branch-deletion body, extracted verbatim so the routed
+  /// `deleteBranchIfExists` closure stays readable.
+  private static func localDeleteBranchIfExists(
+    repoRoot: URL, branch: String
+  ) async -> BranchDeleteOutcome {
+    // Best-effort: git refuses if the branch is checked out by
+    // another worktree (e.g. it's the project's main branch) — that
+    // refusal is exactly when we must NOT delete it, so we report
+    // `.kept` instead of failing the remove flow. A genuinely-absent
+    // branch is `.absent`. Neither aborts the caller.
+    let outcome = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "branch", "-D", branch,
+      ],
+      cwd: repoRoot
+    )
+    guard case .exited(let code, _, let stderr, _) = outcome else {
+      return .kept(reason: "git branch -D did not complete")
+    }
+    if code == 0 { return .deleted }
+    let message = GitWorktreeShell.decodeUTF8(stderr)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let lower = message.lowercased()
+    // git's "not found" phrasings vary by version/locale; treat any
+    // of them as already-gone rather than a kept branch.
+    if lower.contains("not found") || lower.contains("no branch named")
+      || lower.contains("couldn't look up")
+    {
+      return .absent
+    }
+    return .kept(reason: message.isEmpty ? "git refused to delete the branch" : message)
+  }
+
+  /// Local remote-branch deletion body, extracted verbatim so the routed
+  /// `deleteRemoteBranchIfExists` closure stays readable.
+  private static func localDeleteRemoteBranchIfExists(repoRoot: URL, branch: String) async {
+    // Resolve the remote this branch tracks. Read it from the local
+    // branch's upstream config while the branch still exists; fall back
+    // to "origin" when there is no configured upstream.
+    let remoteOutcome = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "for-each-ref", "--format=%(upstream:remotename)",
+        "refs/heads/\(branch)",
+      ],
+      cwd: repoRoot
+    )
+    var remote = "origin"
+    if case .exited(let code, let data, _, _) = remoteOutcome, code == 0 {
+      let trimmed = GitWorktreeShell.decodeUTF8(data)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty { remote = trimmed }
+    }
+    // Best-effort: git fails if the remote ref is already gone or the
+    // network is unreachable — neither should fail the worktree remove.
+    _ = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "push", remote, "--delete", branch,
+      ],
+      cwd: repoRoot
+    )
+  }
+
+  /// Local prune body, extracted verbatim so the routed `pruneWorktrees`
+  /// closure stays readable.
+  private static func localPruneWorktrees(repoRoot: URL) async throws -> Int {
+    // Diff lsWorktrees before/after so the caller can surface an accurate
+    // toast. `git worktree prune` itself prints nothing on success.
+    let wt = try wtScriptURL()
+    let before = await liveLsCount(wt: wt, repoRoot: repoRoot)
+    let outcome = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "worktree", "prune",
+      ],
+      cwd: repoRoot
+    )
+    _ = try extractStdout(outcome, command: "git worktree prune")
+    let after = await liveLsCount(wt: wt, repoRoot: repoRoot)
+    return max(0, before - after)
+  }
+
+  /// Local fetch body, extracted verbatim so the routed `fetchRemote` closure
+  /// stays readable.
+  private static func localFetchRemote(repoRoot: URL, remote: String) async throws {
+    let outcome = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: [
+        "-C", repoRoot.path(percentEncoded: false),
+        "fetch", remote,
+      ],
+      cwd: repoRoot
+    )
+    switch outcome {
+    case .exited(let code, _, _, _) where code == 0:
+      return
+    case .exited(_, _, let stderrData, _):
+      throw GitWorktreeError.fetchFailed(
+        GitWorktreeShell.decodeUTF8(stderrData)
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+      )
+    case .timedOut:
+      throw GitWorktreeError.fetchFailed("timed out")
+    case .spawnFailed(let reason):
+      throw GitWorktreeError.fetchFailed(reason)
+    }
   }
 
   /// Best-effort `wt ls --json` → `[GitWtEntry]`. Returns `[]` on any

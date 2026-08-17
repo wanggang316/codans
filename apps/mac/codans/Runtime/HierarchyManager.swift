@@ -266,6 +266,94 @@ final class HierarchyManager {
     return projectID
   }
 
+  /// Add a Server (remote SSH) project. Mirrors `addProject` but stamps
+  /// `remoteHost` so the project is `.server`-kind, and `rootPath` / `gitRoot`
+  /// hold **remote** path strings. When `gitRoot` is nil a synthetic worktree
+  /// seeds the row (same as a local folder project) so the sidebar has
+  /// something to show before the first SSH reconcile discovers the real
+  /// worktrees. `rootPath` is stored verbatim — remote paths must never pass
+  /// through the local symlink canonicalizer.
+  func addServerProject(
+    name: String,
+    remoteHost: RemoteHost,
+    rootPath: String,
+    gitRoot: String? = nil
+  ) -> ProjectID {
+    let projectID = ProjectID()
+    var worktrees: [Worktree] = []
+    var selectedWorktreeID: WorktreeID?
+    if gitRoot == nil {
+      let synthetic = Worktree(
+        id: WorktreeID(),
+        name: (rootPath as NSString).lastPathComponent,
+        path: rootPath,
+        branch: nil,
+        tabs: [],
+        selectedTabID: nil
+      )
+      worktrees = [synthetic]
+      selectedWorktreeID = synthetic.id
+    }
+    let nextManualOrder = (catalog.projects.map(\.manualOrder).max() ?? -1) + 1
+    let project = Project(
+      id: projectID,
+      name: name,
+      rootPath: rootPath,
+      gitRoot: gitRoot,
+      remoteHost: remoteHost,
+      worktrees: worktrees,
+      selectedWorktreeID: selectedWorktreeID,
+      addedAt: Date(),
+      manualOrder: nextManualOrder
+    )
+    catalog.projects.append(project)
+    store.scheduleSave(catalog)
+    return projectID
+  }
+
+  /// Apply an edited Server-project connection in place. Host-only changes
+  /// (alias / user / port to the same machine) keep the worktree rows — their
+  /// remote paths are still valid. A `rootPath` change re-points the project
+  /// at a different remote directory, so every existing row's path is stale:
+  /// tear down their surfaces and reseed (synthetic row for a folder, empty
+  /// for a git root — the next reconcile discovers the real worktrees).
+  func updateServerProject(
+    projectID: ProjectID,
+    remoteHost: RemoteHost,
+    rootPath: String,
+    gitRoot: String?
+  ) {
+    guard let index = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[index].remoteHost != nil
+    else { return }
+    let pathChanged = Self.normalizeRemotePath(catalog.projects[index].rootPath)
+      != Self.normalizeRemotePath(rootPath)
+    catalog.projects[index].remoteHost = remoteHost
+    catalog.projects[index].rootPath = rootPath
+    catalog.projects[index].gitRoot = gitRoot
+    if pathChanged {
+      for worktree in catalog.projects[index].worktrees {
+        tearDownWorktreeSurfaces(worktreeID: worktree.id)
+      }
+      if gitRoot == nil {
+        let synthetic = Worktree(
+          id: WorktreeID(),
+          name: (rootPath as NSString).lastPathComponent,
+          path: rootPath,
+          branch: nil,
+          tabs: [],
+          selectedTabID: nil
+        )
+        catalog.projects[index].worktrees = [synthetic]
+        catalog.projects[index].selectedWorktreeID = synthetic.id
+      } else {
+        catalog.projects[index].worktrees = []
+        catalog.projects[index].selectedWorktreeID = nil
+      }
+    }
+    store.scheduleSave(catalog)
+  }
+
   // MARK: - Project sort mode (sidebar bottom bar)
 
   /// Replaces the catalog-wide `projectSortMode`. Unchanged values are
@@ -957,23 +1045,29 @@ final class HierarchyManager {
   ///   - projectID: target Project.
   ///   - entries: on-disk worktree metadata (path, branch) from
   ///     `GitWorktreeClient.lsWorktrees`.
+  ///   - normalizePath: canonicalization applied to every path before dedupe.
+  ///     Defaults to the local symlink-resolving `canonicalPath`; Server
+  ///     (remote) projects pass `normalizeRemotePath` so a remote path is never
+  ///     resolved against the *local* filesystem (which would mangle e.g. a
+  ///     remote `/tmp/...` into `/private/tmp/...`).
   @discardableResult
   func reconcileDiscoveredWorktrees(
     projectID: ProjectID,
-    entries: [(path: String, branch: String?)]
+    entries: [(path: String, branch: String?)],
+    normalizePath: (String) -> String = { HierarchyManager.canonicalPath($0) }
   ) -> Int {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID })
     else { return 0 }
     let project = catalog.projects[projectIndex]
-    let discoveredPaths = Set(entries.map { Self.canonicalPath($0.path) })
-    let rootCanonical = Self.canonicalPath(project.rootPath)
+    let discoveredPaths = Set(entries.map { normalizePath($0.path) })
+    let rootCanonical = normalizePath(project.rootPath)
     var appended = 0
     var upgraded = 0
     for entry in entries {
-      let canonical = Self.canonicalPath(entry.path)
+      let canonical = normalizePath(entry.path)
       let entryBranch = (entry.branch?.isEmpty == false) ? entry.branch! : nil
       if let existingIdx = catalog.projects[projectIndex].worktrees
-        .firstIndex(where: { Self.canonicalPath($0.path) == canonical })
+        .firstIndex(where: { normalizePath($0.path) == canonical })
       {
         // Path already in the catalog. Three cases land here:
         //
@@ -1025,7 +1119,7 @@ final class HierarchyManager {
     var archivedCount = 0
     let snapshot = catalog.projects[projectIndex].worktrees
     for worktree in snapshot {
-      let canonical = Self.canonicalPath(worktree.path)
+      let canonical = normalizePath(worktree.path)
       guard
         !discoveredPaths.contains(canonical),
         canonical != rootCanonical,
@@ -1076,6 +1170,46 @@ final class HierarchyManager {
       .resolvingSymlinksInPath()
       .standardizedFileURL
       .path
+  }
+
+  /// String-only canonicalization for **remote** (Server-project) paths. Unlike
+  /// `canonicalPath`, it never touches the local filesystem — `git rev-parse
+  /// --show-toplevel` and `git worktree list --porcelain` already emit absolute
+  /// canonical paths on the host, so the only normalization needed is trimming
+  /// a trailing slash (except for the root `/`) so the same worktree reported
+  /// with and without one dedupes to a single catalog row. Routing a remote
+  /// path through `canonicalPath` would resolve it against *this* machine's
+  /// symlink table (`/tmp` → `/private/tmp`, etc.), corrupting the identity.
+  nonisolated static func normalizeRemotePath(_ path: String) -> String {
+    var trimmed = path
+    while trimmed.count > 1, trimmed.hasSuffix("/") {
+      trimmed.removeLast()
+    }
+    return trimmed
+  }
+
+  /// The SSH host owning `path`, or `nil` for a local path. Backs the
+  /// `GitService` transport seam: a path that matches a Server project's
+  /// rootPath / gitRoot / any worktree path (exact match after string-only
+  /// normalization — remote paths never go through the local symlink
+  /// resolver) routes that git invocation over SSH. Every `GitService`
+  /// consumer — the sidebar diff chip, the PR badge's remote-URL probe, the
+  /// branch switcher, the diff inspector — receives worktree-level paths, so
+  /// exact matching is sufficient; subpaths inside a worktree are not
+  /// resolved (none of those callers pass one today).
+  func remoteHost(forPath path: String) -> RemoteHost? {
+    let normalized = Self.normalizeRemotePath(path)
+    for project in catalog.projects {
+      guard let host = project.remoteHost else { continue }
+      if Self.normalizeRemotePath(project.rootPath) == normalized { return host }
+      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == normalized {
+        return host
+      }
+      if project.worktrees.contains(where: { Self.normalizeRemotePath($0.path) == normalized }) {
+        return host
+      }
+    }
+    return nil
   }
 
   /// Tears down every terminal surface attached to the Worktree without

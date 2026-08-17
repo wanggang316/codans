@@ -71,6 +71,18 @@ struct CreateWorktreeFeature {
     /// the parent's pending set.
     let currentPendingCountForProject: Int
 
+    /// Server (remote) project's SSH host, `nil` for local. When set,
+    /// `repoRoot` / `worktreesDirectory` are remote path strings, option
+    /// loading rides the SSH-routed client, and the wt-only toggles (copy
+    /// ignored / untracked) are hidden — creation runs plain `git worktree
+    /// add` on the host. Local-filesystem probes (the target-folder existence
+    /// check) are skipped; git's own "already exists" error covers the
+    /// collision on the host side. Stamped onto the `PendingWorktree` so the
+    /// run needs no catalog lookup.
+    var remoteHost: RemoteHost?
+
+    var isRemote: Bool { remoteHost != nil }
+
     /// Per-Project Worktree base ref override (`projects[pid].git.worktreeBaseRef`).
     /// Wins over the auto-resolved `origin/HEAD` when seeding `selectedBaseRef`,
     /// so the value the user pinned in Project Settings actually drives new
@@ -401,7 +413,11 @@ struct CreateWorktreeFeature {
         // the slash and break the diff against `wt ls --json`.
         let targetURL = state.worktreesDirectory
           .appending(path: sanitizedDraftName)
-        if FileManager.default.fileExists(atPath: targetURL.path(percentEncoded: false)) {
+        // Local-only probe: a remote target can't be stat'd here — git's own
+        // "already exists" failure surfaces the collision on the host instead.
+        if !state.isRemote,
+          FileManager.default.fileExists(atPath: targetURL.path(percentEncoded: false))
+        {
           state.submitError = """
             A folder named \"\(sanitizedDraftName)\" already exists at the Project's \
             worktrees directory. Choose a different branch name.
@@ -427,6 +443,7 @@ struct CreateWorktreeFeature {
         let pending = PendingWorktree(
           id: PendingWorktreeID(),
           projectID: state.projectID,
+          remoteHost: state.remoteHost,
           spec: spec,
           displayName: trimmed,
           status: .running,

@@ -66,6 +66,20 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ name: String, _ rootPath: String, _ gitRoot: String?
     ) -> ProjectID
+  /// Add a Server (remote SSH) project. `rootPath` / `gitRoot` are remote
+  /// path strings; `remoteHost` marks the project `.server`-kind. Forwards to
+  /// `HierarchyManager.addServerProject`.
+  var addServerProject:
+    @MainActor @Sendable (
+      _ name: String, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
+    ) -> ProjectID
+  /// Apply an edited Server-project connection in place. A rootPath change
+  /// reseeds the worktree rows (the old remote paths are stale). Forwards to
+  /// `HierarchyManager.updateServerProject`.
+  var updateServerProject:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
+    ) -> Void
   var removeProject: @MainActor @Sendable (_ projectID: ProjectID) throws -> Void
   var renameProject:
     @MainActor @Sendable (
@@ -592,6 +606,16 @@ extension HierarchyClient {
       addProject: { name, rootPath, gitRoot in
         manager.addProject(name: name, rootPath: rootPath, gitRoot: gitRoot)
       },
+      addServerProject: { name, remoteHost, rootPath, gitRoot in
+        manager.addServerProject(
+          name: name, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
+        )
+      },
+      updateServerProject: { projectID, remoteHost, rootPath, gitRoot in
+        manager.updateServerProject(
+          projectID: projectID, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
+        )
+      },
       removeProject: { projectID in try manager.removeProject(projectID) },
       renameProject: { projectID, name in
         try manager.renameProject(projectID, name: name)
@@ -660,12 +684,19 @@ extension HierarchyClient {
         // reconcile catches up, libghostty crashes if it tries to spawn
         // a shell in a non-existent cwd. Reject here so callers'
         // `try?` swallows the error instead of bringing down the app.
-        var isDir: ObjCBool = false
-        guard
-          FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir),
-          isDir.boolValue
-        else {
-          throw HierarchyError.notFound("Worktree path missing: \(cwd)")
+        // Skipped for Server projects: `cwd` is a remote path that never
+        // exists locally, and libghostty is handed a real local cwd — the
+        // remote `cd` (inside the SSH command) owns the directory instead.
+        let isRemote =
+          manager.catalog.projects.first(where: { $0.id == projectID })?.isRemote ?? false
+        if !isRemote {
+          var isDir: ObjCBool = false
+          guard
+            FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir),
+            isDir.boolValue
+          else {
+            throw HierarchyError.notFound("Worktree path missing: \(cwd)")
+          }
         }
         // Resolve project envVars from the SettingsStore so every
         // user-flow openPane (TabBar new-tab, SplitViewport new-tab,
@@ -1473,6 +1504,13 @@ extension HierarchyClient {
   ) async {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID })
     else { return }
+    // Server projects discover + reconcile entirely over SSH (no bundled `wt`,
+    // no local `wt ls`, no local symlink canonicalization). Branch off before
+    // any local-filesystem git path runs.
+    if project.isRemote {
+      await reconcileRemote(project: project, manager: manager)
+      return
+    }
     // Re-detect the git root every time gitRoot is nil. Folder Projects added
     // before the user ran `git init` (or `git clone`) inside the directory
     // would otherwise stay forever marked non-git: gitRoot is set once at
@@ -1521,6 +1559,54 @@ extension HierarchyClient {
       // carries raw git stderr which can embed local absolute paths.
       reconcileLogger.error(
         "reconcileDiscoveredWorktrees failed: project=\(projectID.raw.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+      )
+    }
+  }
+
+  /// Server-project counterpart of `reconcile`: discovers the remote git root
+  /// and worktree list over SSH via `RemoteGitService`, normalizes each path
+  /// string-only (`normalizeRemotePath` — never the local symlink resolver),
+  /// and hands the result to the shared append-only merge. Mirrors the local
+  /// path's "re-detect gitRoot when nil" auto-promotion so a plain remote
+  /// folder becomes a git Server project once the user runs `git init` on the
+  /// host. Swallows and logs errors — reconcile is idempotent and must never
+  /// crash, and a transient SSH failure must not archive live worktree rows
+  /// (the merge only appends / upgrades; the stale-sweep runs against the
+  /// discovered set, so an *empty* discovery from a failed probe never reaches
+  /// it because we return early on `catch`).
+  @MainActor
+  private static func reconcileRemote(
+    project: Project,
+    manager: HierarchyManager
+  ) async {
+    guard let host = project.remoteHost else { return }
+    let projectID = project.id
+    let service = RemoteGitService(host: host)
+    let gitRoot: String? = await {
+      if let existing = project.gitRoot { return existing }
+      if let discovered = await service.discoverGitRoot(candidatePath: project.rootPath),
+        !discovered.isEmpty
+      {
+        manager.setProjectGitRoot(projectID: projectID, gitRoot: discovered)
+        return discovered
+      }
+      return nil
+    }()
+    guard let gitRoot else { return }
+    do {
+      let entries = try await service.listWorktrees(gitRoot: gitRoot)
+      let mapped = entries.map { entry -> (path: String, branch: String?) in
+        let branch = (entry.branch?.isEmpty == false) ? entry.branch : nil
+        return (path: HierarchyManager.normalizeRemotePath(entry.path), branch: branch)
+      }
+      _ = manager.reconcileDiscoveredWorktrees(
+        projectID: projectID,
+        entries: mapped,
+        normalizePath: HierarchyManager.normalizeRemotePath
+      )
+    } catch {
+      reconcileLogger.error(
+        "remote reconcile failed: project=\(projectID.raw.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
       )
     }
   }
@@ -1590,9 +1676,16 @@ extension HierarchyClient {
     // `worktree.branch` can be empty/stale (reconciled rows, legacy
     // catalog entries), and a missed branch deletion is exactly what
     // leaves a dangling ref that blocks same-name re-creation. Match by
-    // canonical path; fall back to the catalog value.
+    // canonical path; fall back to the catalog value. Remote paths use the
+    // string-only normalizer — the local symlink resolver would corrupt them.
+    let isRemote = project.isRemote
+    func normalize(_ path: String) -> String {
+      isRemote
+        ? HierarchyManager.normalizeRemotePath(path)
+        : HierarchyManager.canonicalPath(path)
+    }
     let liveBranch = (try? await gitWorktreeClient.lsWorktrees(gitRootURL))?
-      .first { HierarchyManager.canonicalPath($0.path) == HierarchyManager.canonicalPath(worktree.path) }?
+      .first { normalize($0.path) == normalize(worktree.path) }?
       .branch
     let branchToDelete = [liveBranch, worktree.branch]
       .compactMap { $0 }
@@ -1706,6 +1799,8 @@ extension HierarchyClient: DependencyKey {
     setProjectTags: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setActiveTagFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    addServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    updateServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectColor: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -1797,6 +1892,8 @@ extension HierarchyClient: DependencyKey {
     setProjectTags: unimplemented("HierarchyClient.setProjectTags"),
     setActiveTagFilter: unimplemented("HierarchyClient.setActiveTagFilter"),
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
+    addServerProject: unimplemented("HierarchyClient.addServerProject", placeholder: ProjectID()),
+    updateServerProject: unimplemented("HierarchyClient.updateServerProject"),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),
     setProjectColor: unimplemented("HierarchyClient.setProjectColor"),

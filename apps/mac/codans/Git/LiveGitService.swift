@@ -15,16 +15,71 @@ import CodansCore
 nonisolated final class LiveGitService: GitService {
   static let maxOutputBytes = 16 * 1024 * 1024  // 16 MiB
   static let defaultTimeout: Duration = .seconds(10)
+  /// Per-invocation ceiling when the repository lives on an SSH host: covers
+  /// the probe `ConnectTimeout` (10 s cold) plus the command itself, while a
+  /// warm ControlMaster keeps the common case tens of milliseconds.
+  static let sshTimeout: Duration = .seconds(30)
 
   let gitExecutable: URL
   let runner: any CommandRunner
+  /// Transport seam: maps a repository path to the SSH host that owns it, or
+  /// `nil` for a local path. Non-nil routes the invocation through
+  /// `ssh` (`SSHCommand.invocation`), running `git` under the host's login
+  /// shell in that remote directory — every `GitService` method then works
+  /// unchanged against Server-project worktrees because the parsers never see
+  /// the transport. Default always-`nil` keeps existing construction sites and
+  /// tests purely local.
+  let resolveRemoteHost: @Sendable (URL) async -> RemoteHost?
 
   init(
     gitExecutable: URL = URL(fileURLWithPath: "/usr/bin/git"),
-    runner: any CommandRunner = FoundationCommandRunner()
+    runner: any CommandRunner = FoundationCommandRunner(),
+    resolveRemoteHost: @escaping @Sendable (URL) async -> RemoteHost? = { _ in nil }
   ) {
     self.gitExecutable = gitExecutable
     self.runner = runner
+    self.resolveRemoteHost = resolveRemoteHost
+  }
+
+  /// Single invocation funnel: every git call in this service goes through
+  /// here so the local-vs-SSH routing decision is made in exactly one place.
+  ///
+  /// Local: `gitExecutable` with the hardened `GitProcessEnv` allowlist, cwd
+  /// at the repo. SSH: `/usr/bin/ssh` wrapping `git` (bare name — the login
+  /// shell restores the host's PATH, so a Homebrew-only git still resolves),
+  /// `cd`'d into the remote repo path; the local process env is passed whole
+  /// because ssh itself needs `SSH_AUTH_SOCK` / `HOME` / `PATH`, and the
+  /// remote git's env is the login shell's own, not this one.
+  private func invoke(
+    arguments: [String],
+    cwd: URL,
+    maxOutputBytes: Int = LiveGitService.maxOutputBytes
+  ) async -> CommandOutcome {
+    if let host = await resolveRemoteHost(cwd) {
+      let (executable, sshArguments) = SSHCommand.invocation(
+        host: host,
+        executable: "git",
+        arguments: arguments,
+        workingDirectory: cwd.path,
+        extraOptions: SSHCommand.backgroundProbeOptions
+      )
+      return await runner.run(
+        executable: executable,
+        arguments: sshArguments,
+        env: ProcessInfo.processInfo.environment,
+        cwd: URL(fileURLWithPath: NSHomeDirectory()),
+        timeout: Self.sshTimeout,
+        maxOutputBytes: maxOutputBytes
+      )
+    }
+    return await runner.run(
+      executable: gitExecutable,
+      arguments: arguments,
+      env: GitProcessEnv.build(),
+      cwd: cwd,
+      timeout: Self.defaultTimeout,
+      maxOutputBytes: maxOutputBytes
+    )
   }
 
   // MARK: - GitService
@@ -102,13 +157,9 @@ nonisolated final class LiveGitService: GitService {
 
   func showFileAtHEAD(_ path: String, at worktreePath: URL) async throws -> String? {
     try await ensureIsRepo(at: worktreePath)
-    let outcome = await runner.run(
-      executable: gitExecutable,
+    let outcome = await invoke(
       arguments: ["show", "HEAD:\(path)"],
-      env: GitProcessEnv.build(),
-      cwd: worktreePath,
-      timeout: Self.defaultTimeout,
-      maxOutputBytes: Self.maxOutputBytes
+      cwd: worktreePath
     )
     switch outcome {
     case .exited(let code, let stdout, let stderr, let overflow):
@@ -184,12 +235,9 @@ nonisolated final class LiveGitService: GitService {
     // Call the runner directly (rather than the shared `run` helper) so we can
     // inspect the exit code without throwing — `git symbolic-ref --short HEAD`
     // returns exit 1 on detached HEAD and we surface that as `nil`.
-    let outcome = await runner.run(
-      executable: gitExecutable,
+    let outcome = await invoke(
       arguments: GitCommand.symbolicRefShortHead(),
-      env: GitProcessEnv.build(),
       cwd: path,
-      timeout: Self.defaultTimeout,
       // `git symbolic-ref --short HEAD` returns a single ref name (≤ 255 chars);
       // mirror the 1024 cap used by `ensureIsRepo` for the same one-line shape.
       maxOutputBytes: 1024
@@ -261,12 +309,9 @@ nonisolated final class LiveGitService: GitService {
   /// log code paths would still fail downstream with opaque errors. Parse stdout to get a
   /// clear `.notARepo` at the edge instead.
   private func ensureIsRepo(at path: URL) async throws {
-    let outcome = await runner.run(
-      executable: gitExecutable,
+    let outcome = await invoke(
       arguments: GitCommand.revParseIsInsideWorkTree(),
-      env: GitProcessEnv.build(),
       cwd: path,
-      timeout: Self.defaultTimeout,
       maxOutputBytes: 1024
     )
     switch outcome {
@@ -285,17 +330,11 @@ nonisolated final class LiveGitService: GitService {
 
   // MARK: - Runner invocation
 
-  /// Runs `gitExecutable` with `arguments`, translating `CommandOutcome` to domain error or
-  /// success. Applies env whitelist + 16 MiB cap + 10 s timeout.
+  /// Runs git with `arguments` (via `invoke`, so remote repos route over SSH),
+  /// translating `CommandOutcome` to domain error or success. Applies the
+  /// 16 MiB cap and the transport's timeout.
   private func run(arguments: [String], cwd: URL) async throws -> Data {
-    let outcome = await runner.run(
-      executable: gitExecutable,
-      arguments: arguments,
-      env: GitProcessEnv.build(),
-      cwd: cwd,
-      timeout: Self.defaultTimeout,
-      maxOutputBytes: Self.maxOutputBytes
-    )
+    let outcome = await invoke(arguments: arguments, cwd: cwd)
     switch outcome {
     case .exited(let code, let stdout, let stderr, let overflow):
       // Non-zero exit wins over overflow: when git itself rejects the invocation (bad

@@ -15,6 +15,11 @@ nonisolated struct PendingWorktreeID: Hashable, Sendable {
 struct PendingWorktree: Equatable, Identifiable {
   let id: PendingWorktreeID
   let projectID: ProjectID
+  /// SSH host for a Server project's creation, `nil` for local. Non-nil
+  /// routes the run to `git worktree add` over SSH instead of the local
+  /// `wt sw` stream. Stamped at sheet construction (the sheet knows its
+  /// project), so the run needs no catalog lookup.
+  var remoteHost: RemoteHost?
   /// Mutable so `beginPendingWorktreeCreation` can stash the project's setup
   /// command into `spec.setupCommand` just before streaming (the sheet
   /// builds the spec without it). Otherwise stable for the row's lifetime.
