@@ -29,6 +29,12 @@ struct AgentStateRowView: View {
   /// worktree-header label; `nil` (No Color) keeps the caption secondary.
   /// Defaults to `nil` so legacy call sites and tests render unchanged.
   var projectColor: ProjectColor?
+  /// Non-nil for a Server (remote) project: the host's display authority
+  /// (`user@host[:port]`). The project line grows the same wifi-badged glyph
+  /// the sidebar project row wears, with the authority as its tooltip, so a
+  /// remote agent is recognizable at a glance. Defaults nil so legacy call
+  /// sites and tests render unchanged.
+  var projectRemoteAuthority: String?
   /// True when this row's pane is the main window's currently-focused
   /// pane. Renders a native-style selected-row tint so the user can
   /// match the row they're hovering to "the pane I'm looking at".
@@ -166,11 +172,14 @@ struct AgentStateRowView: View {
           .lineLimit(1)
           .truncationMode(.middle)
           .accessibilityIdentifier("agentState.row.\(paneID).headline")
-        Text(projectName)
-          .font(.caption2)
-          .foregroundStyle(projectNameStyle)
-          .lineLimit(1)
-          .truncationMode(.middle)
+        HStack(spacing: 3) {
+          Text(projectName)
+            .font(.caption2)
+            .foregroundStyle(projectNameStyle)
+            .lineLimit(1)
+            .truncationMode(.middle)
+          remoteGlyph
+        }
       }
     case .compact:
       // Single-line variant: worktree at the leading edge, a small
@@ -189,12 +198,27 @@ struct AgentStateRowView: View {
           .lineLimit(1)
           .truncationMode(.middle)
           .accessibilityIdentifier("agentState.row.\(paneID).headline")
-        Text(projectName)
-          .font(.caption2)
-          .foregroundStyle(projectNameStyle)
-          .lineLimit(1)
-          .truncationMode(.middle)
+        HStack(spacing: 3) {
+          Text(projectName)
+            .font(.caption2)
+            .foregroundStyle(projectNameStyle)
+            .lineLimit(1)
+            .truncationMode(.middle)
+          remoteGlyph
+        }
       }
+    }
+  }
+
+  /// Server-project marker after the project name. Empty for local projects.
+  @ViewBuilder
+  private var remoteGlyph: some View {
+    if let authority = projectRemoteAuthority {
+      Image(systemName: "tv.badge.wifi")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .help(authority)
+        .accessibilityLabel("Remote server \(authority)")
     }
   }
 

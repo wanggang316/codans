@@ -1,5 +1,5 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// The AgentState view content.
 ///
@@ -21,7 +21,10 @@ import CodansCore
 /// showing an empty frame.
 struct AgentStateView: View {
   let entries: [PaneID: AgentStateStore.AgentEntry]
-  let resolveSourcePath: (PaneID) -> (project: String, worktree: String, projectColor: ProjectColor?)?
+  let resolveSourcePath:
+    (PaneID) -> (
+      project: String, worktree: String, projectColor: ProjectColor?, remoteAuthority: String?
+    )?
   let onTapRow: (PaneID) -> Void
 
   var body: some View {
@@ -75,6 +78,7 @@ struct AgentStateView: View {
           projectName: names?.project ?? "—",
           worktreeName: names?.worktree ?? "—",
           projectColor: names?.projectColor,
+          projectRemoteAuthority: names?.remoteAuthority,
           onTap: { onTapRow(item.paneID) }
         )
       }

@@ -2180,13 +2180,13 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
 private func resolveAgentStateSourcePath(
   paneID: PaneID,
   catalog: Catalog
-) -> (project: String, worktree: String, projectColor: ProjectColor?)? {
+) -> (project: String, worktree: String, projectColor: ProjectColor?, remoteAuthority: String?)? {
   for project in catalog.projects {
     for worktree in project.worktrees
     where worktree.tabs.contains(where: { tab in
       tab.panes.contains(where: { $0.id == paneID })
     }) {
-      return (project.name, worktree.name, project.color)
+      return (project.name, worktree.name, project.color, project.remoteHost?.displayAuthority)
     }
   }
   return nil
