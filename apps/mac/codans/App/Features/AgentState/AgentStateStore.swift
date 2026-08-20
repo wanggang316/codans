@@ -82,6 +82,10 @@ final class AgentStateStore {
     var userInputSeen: Bool
     var lastViewportText: String?
     var lastWorkingAt: Date?
+    /// Latest OSC title the pane's terminal pushed. Display-only cache
+    /// for the hover summary card's "what is the agent doing" line —
+    /// never an input to state derivation (see the reaction table).
+    var lastTitle: String?
     /// True only for a pane seeded from the persisted quit snapshot that
     /// has not yet received a live viewport classification. While set,
     /// `refresh` holds the restored display state instead of deriving a
@@ -101,6 +105,7 @@ final class AgentStateStore {
         userInputSeen: userInputSeen,
         lastViewportText: nil,
         lastWorkingAt: nil,
+        lastTitle: nil,
         awaitingFirstClassification: awaitingFirstClassification
       )
     }
@@ -143,18 +148,22 @@ final class AgentStateStore {
   //  - onPaneKeyboardActivity / onPaneFocused: mark the pane as seen and
   //    optimistically clear a blocked state until the next snapshot
   //    re-derives it.
+  //  - onTerminalEvent(.paneInfoChanged(.title)): cache the pane's
+  //    latest OSC title for the hover summary card's activity line.
+  //    Display-only — never an input to state derivation.
   //  - onAgentBound: ensure scratch exists, derive current state,
   //    materialise an entry.
   //  - onAgentUnbound: drop entry and scratch.
   //
-  // Deliberately NOT in the table: `paneOutput`, and `paneInfoChanged`'s
-  // desktopNotification / bellRang deltas. A bell or OS notification is an
-  // inbox-worthy *event* but not a live activity signal — the agent's
-  // current working/blocked/idle state is whatever the rendered region
-  // says right now, so the notifications detector consumes those deltas
-  // independently while this store stays purely render-derived. Reading
-  // stable snapshots instead of raw byte output also keeps TUI repaint
-  // noise from pinning a pane on `.working`.
+  // Deliberately NOT feeding state derivation: `paneOutput`, and
+  // `paneInfoChanged`'s desktopNotification / bellRang deltas. A bell or
+  // OS notification is an inbox-worthy *event* but not a live activity
+  // signal — the agent's current working/blocked/idle state is whatever
+  // the rendered region says right now, so the notifications detector
+  // consumes those deltas independently while this store stays purely
+  // render-derived (the title delta above is cached for display, never
+  // classified). Reading stable snapshots instead of raw byte output
+  // also keeps TUI repaint noise from pinning a pane on `.working`.
 
   /// Single funnel for the runtime's typed event stream. The store
   /// reacts only to a small subset (viewport / idle / teardown); other
@@ -188,6 +197,16 @@ final class AgentStateStore {
 
     case .paneViewportChanged(let paneID, let text):
       applyViewportText(text, paneID: paneID)
+
+    case .paneInfoChanged(let paneID, .title(let title)):
+      // Display-only title cache — no refresh: the title never feeds
+      // derivation (a "Working…" title must not flip state; see
+      // `titleChangesDoNotDriveWorkingAfterInput`). Scratch is created
+      // if absent so a title observed before the agent binds is already
+      // available when the card first opens.
+      var s = scratch[paneID] ?? .fresh()
+      s.lastTitle = title
+      scratch[paneID] = s
 
     case .paneInfoChanged,
       .paneOutput,
@@ -337,14 +356,14 @@ final class AgentStateStore {
 
   // MARK: - Reads
 
-  /// Latest rendered viewport text observed for `paneID`, or nil when no
-  /// viewport snapshot has arrived yet (or the pane has been torn down).
-  /// Read by the hover summary card so it can show a live "what is this
-  /// agent doing" tail without a fresh surface read. Reading `scratch`
+  /// Latest OSC title observed for `paneID` — the terminal title agents
+  /// push as they work, which doubles as a one-line "what is the agent
+  /// doing" cue — or nil when none has arrived (or the pane has been
+  /// torn down). Read by the hover summary card. Reading `scratch`
   /// inside a SwiftUI body registers `@Observable` tracking, so an open
-  /// card re-renders as new viewport snapshots land.
-  func viewportSnapshot(for paneID: PaneID) -> String? {
-    scratch[paneID]?.lastViewportText
+  /// card re-renders as the agent retitles the pane.
+  func title(for paneID: PaneID) -> String? {
+    scratch[paneID]?.lastTitle
   }
 
   // MARK: - Derivation

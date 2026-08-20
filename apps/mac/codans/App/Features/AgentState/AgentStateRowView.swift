@@ -46,11 +46,16 @@ struct AgentStateRowView: View {
   /// vertical padding. Defaults to `.normal` so the legacy default
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
-  /// Latest rendered viewport text for this row's pane, consumed by the
-  /// hover summary card. Defaults to nil-returning so legacy call sites
-  /// (popover variant, tests) compile unchanged and simply show the
-  /// card without a terminal tail.
-  var viewportSnapshot: () -> String? = { nil }
+  /// Latest OSC title of this row's pane, consumed by the hover summary
+  /// card as its "what is the agent doing" activity line. Defaults to
+  /// nil-returning so legacy call sites (popover variant, tests) compile
+  /// unchanged and simply show the card without an activity line.
+  var paneTitle: () -> String? = { nil }
+  /// Worktree path + remote host for the summary card's session scan.
+  /// Default nil (legacy call sites) renders the card without a session
+  /// block.
+  var worktreePath: String?
+  var remoteHost: RemoteHost?
   let onTap: () -> Void
 
   /// Delay before the hover summary card opens. Long enough that a
@@ -107,8 +112,16 @@ struct AgentStateRowView: View {
         projectName: projectName,
         worktreeName: worktreeName,
         projectColor: projectColor,
-        viewportSnapshot: viewportSnapshot
+        worktreePath: worktreePath,
+        remoteHost: remoteHost,
+        paneTitle: paneTitle
       )
+      // Presentation is exclusively hover-owned (dwell opens, hover
+      // exit / row tap dismisses). Without this, AppKit's transient
+      // popover machinery consumes the outside click that dismisses
+      // the card, so the first click on the row died closing the
+      // popover and only a second click focused the pane.
+      .interactiveDismissDisabled(true)
     }
     // `.contain` keeps the `.headline` text and `.state` icon
     // individually addressable by their sub-element identifiers (the

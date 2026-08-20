@@ -407,19 +407,32 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func viewportSnapshotTracksLatestViewportAndClearsOnTeardown() {
+  func titleTracksLatestPaneInfoAndClearsOnTeardown() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
-    #expect(f.registry.viewportSnapshot(for: f.paneID) == nil)
+    #expect(f.registry.title(for: f.paneID) == nil)
 
-    f.viewport("first frame")
-    #expect(f.registry.viewportSnapshot(for: f.paneID) == "first frame")
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests…")))
+    #expect(f.registry.title(for: f.paneID) == "✳ Running tests…")
 
-    f.viewport("second frame")
-    #expect(f.registry.viewportSnapshot(for: f.paneID) == "second frame")
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Committing…")))
+    #expect(f.registry.title(for: f.paneID) == "✳ Committing…")
 
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title(nil)))
+    #expect(f.registry.title(for: f.paneID) == nil)
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("post-teardown?")))
     f.registry.onTerminalEvent(.paneExited(f.paneID, code: 0, signal: nil))
-    #expect(f.registry.viewportSnapshot(for: f.paneID) == nil)
+    #expect(f.registry.title(for: f.paneID) == nil)
+  }
+
+  @Test
+  func titleObservedBeforeBindSurvivesTheBind() {
+    let f = Fixture()
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("early title")))
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.title(for: f.paneID) == "early title")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   @MainActor

@@ -35,7 +35,8 @@ struct AgentStateSidebarPanel: View {
   let registry: AgentStateStore
   let resolveSourcePath:
     (PaneID) -> (
-      project: String, worktree: String, projectColor: ProjectColor?, remoteAuthority: String?
+      project: String, worktree: String, projectColor: ProjectColor?,
+      worktreePath: String, remoteHost: RemoteHost?
     )?
   /// Pane the main window is currently focused on (selection chain bottom).
   /// Drives the selected-row highlight inside the panel so the user can see
@@ -225,10 +226,12 @@ struct AgentStateSidebarPanel: View {
               projectName: resolved?.project ?? "—",
               worktreeName: resolved?.worktree ?? "—",
               projectColor: resolved?.projectColor,
-              projectRemoteAuthority: resolved?.remoteAuthority,
+              projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
               isSelected: item.paneID == focusedPaneID,
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
-              viewportSnapshot: { registry.viewportSnapshot(for: item.paneID) },
+              paneTitle: { registry.title(for: item.paneID) },
+              worktreePath: resolved?.worktreePath,
+              remoteHost: resolved?.remoteHost,
               onTap: { onTapRow(item.paneID) }
             )
           }
