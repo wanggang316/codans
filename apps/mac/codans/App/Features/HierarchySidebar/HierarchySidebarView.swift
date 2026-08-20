@@ -547,6 +547,13 @@ struct HierarchySidebarView: View {
         addProjectMenuItems
       } label: {
         Label("Add Project", systemImage: "plus")
+          // Pin the glyph to the scheme-derived label color instead of letting
+          // it inherit the toolbar item's implicit content color: after a
+          // dark→light appearance change the implicit one has been observed
+          // staying on the dark-mode white, which renders the "+" invisible on
+          // light chrome while every sibling (including the ⌘-hint text right
+          // next to it) already reads as light.
+          .foregroundStyle(.primary)
           .commandKeyHint(.addProject)
       }
       .menuIndicator(.hidden)
