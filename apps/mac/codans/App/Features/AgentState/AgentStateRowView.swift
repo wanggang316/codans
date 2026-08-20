@@ -51,6 +51,11 @@ struct AgentStateRowView: View {
   /// nil-returning so legacy call sites (popover variant, tests) compile
   /// unchanged and simply show the card without an activity line.
   var paneTitle: () -> String? = { nil }
+  /// Worktree path + remote host for the summary card's session scan.
+  /// Default nil (legacy call sites) renders the card without a session
+  /// block.
+  var worktreePath: String?
+  var remoteHost: RemoteHost?
   let onTap: () -> Void
 
   /// Delay before the hover summary card opens. Long enough that a
@@ -107,6 +112,8 @@ struct AgentStateRowView: View {
         projectName: projectName,
         worktreeName: worktreeName,
         projectColor: projectColor,
+        worktreePath: worktreePath,
+        remoteHost: remoteHost,
         paneTitle: paneTitle
       )
       // Presentation is exclusively hover-owned (dwell opens, hover
