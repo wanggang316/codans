@@ -198,6 +198,10 @@ derive(pane) =
 - 状态图标集：`.blocked` → 琥珀；`.working` → accent 旋转；`.finished` → 绿勾；`.idle` → 次级灰圈。
 - 行密度（两行 `normal` / 一行 `compact`）与 auto-sort 由 `Settings → General → Agents View` 控制。
 
+**行 hover 摘要卡** `AgentSessionSummaryCard`：指针在一行上停留 500ms 后，以 popover（`arrowEdge: .trailing`）弹出该会话的速览——agent logo + 名称、状态 chip、`<project> / <worktree>` 面包屑 + 状态停留时长、session 任务标题（该 worktree 内该 agent 最近一次会话的首条用户 prompt）、可选 activity 行（Pane 的 OSC 标题，仅在其信息量超过 agent 自身名字时显示）、以及 `<short id> · <相对时间>` 页脚。
+
+卡片内容是**开卡前解析好的快照**（`AgentSessionSummarySnapshot`），session 扫描（本地 detached / Server 项目走 SSH）在 hover dwell 之后、popover 弹出之前完成，而非弹出后异步填充：popover 在 presented 状态下改变内容尺寸，会让 SwiftUI 在显示周期内发起带动画的窗口 resize，从而在 CATransaction commit handler 里再嵌套一个 run loop，踩到已释放的 run-loop observer 而崩溃（见 [lessons-learned](../lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md)）。代价是远程项目的卡片要等 SSH 扫描才出现。点击行会先撤下卡片，再把聚焦级联交给下一个 main-loop turn。
+
 排序由 `SortedEntriesProvider` 给出：先按状态优先级桶（triage 顺序），桶内按 `lastTransitionAt` 降序；`AgentStateOrderCoordinator` 对状态驱动的重排做防抖，使列表不随 agent 状态翻动而闪烁（reduce-motion 用户拿到无动画的重排）。
 
 > **附注：** 另有一个 `AgentStateView`（width 320 的 popover 变体，标题 "Active Agents (N)"）保留在 feature 目录中，但当前装配的宿主是侧栏面板，不是 popover。
