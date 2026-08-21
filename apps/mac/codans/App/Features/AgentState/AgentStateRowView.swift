@@ -47,7 +47,8 @@ struct AgentStateRowView: View {
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
   /// Latest OSC title of this row's pane, consumed by the hover summary
-  /// card as its "what is the agent doing" activity line. Defaults to
+  /// card as its "what is the agent doing" activity line. Read once, when
+  /// the card opens, and frozen into that card's snapshot. Defaults to
   /// nil-returning so legacy call sites (popover variant, tests) compile
   /// unchanged and simply show the card without an activity line.
   var paneTitle: () -> String? = { nil }
@@ -64,11 +65,17 @@ struct AgentStateRowView: View {
   private static let summaryCardHoverDelay: Duration = .milliseconds(500)
 
   @State private var isHovering = false
-  /// Whether the hover summary card popover is presented. Driven purely
-  /// by hover dwell — never by click — and torn down on hover exit.
-  @State private var showsSummaryCard = false
-  /// Pending hover-dwell timer. Cancelled on hover exit / row tap so a
-  /// sweep across rows doesn't queue up stale card presentations.
+  /// Frozen payload of the presented hover summary card, or nil when no
+  /// card is up. Driven purely by hover dwell — never by click — and
+  /// cleared on hover exit, row tap, and row teardown.
+  ///
+  /// The card is presented from a *snapshot* (session scan included) so
+  /// its rendered size can never change while the popover is open; see
+  /// `AgentSessionSummarySnapshot` for the crash a resizing popover
+  /// causes.
+  @State private var cardSnapshot: AgentSessionSummarySnapshot?
+  /// Pending hover-dwell + scan task. Cancelled on hover exit / row tap
+  /// so a sweep across rows doesn't queue up stale card presentations.
   @State private var summaryCardTask: Task<Void, Never>?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -101,27 +108,23 @@ struct AgentStateRowView: View {
     .onDisappear {
       summaryCardTask?.cancel()
       summaryCardTask = nil
+      // Drop the card with the row. A popover left presented while its
+      // anchor leaves the hierarchy (list re-sort, pane closed) outlives
+      // the view it points at.
+      cardSnapshot = nil
     }
     // Hover summary card — a quick peek at the session behind this row.
     // Anchored on the trailing edge so it opens over the content area
     // (the panel lives in the sidebar) and the pointer stays on the row,
     // keeping hover state stable while the card is up.
-    .popover(isPresented: $showsSummaryCard, arrowEdge: .trailing) {
-      AgentSessionSummaryCard(
-        entry: entry,
-        projectName: projectName,
-        worktreeName: worktreeName,
-        projectColor: projectColor,
-        worktreePath: worktreePath,
-        remoteHost: remoteHost,
-        paneTitle: paneTitle
-      )
-      // Presentation is exclusively hover-owned (dwell opens, hover
-      // exit / row tap dismisses). Without this, AppKit's transient
-      // popover machinery consumes the outside click that dismisses
-      // the card, so the first click on the row died closing the
-      // popover and only a second click focused the pane.
-      .interactiveDismissDisabled(true)
+    .popover(item: $cardSnapshot, arrowEdge: .trailing) { snapshot in
+      AgentSessionSummaryCard(snapshot: snapshot)
+        // Presentation is exclusively hover-owned (dwell opens, hover
+        // exit / row tap dismisses). Without this, AppKit's transient
+        // popover machinery consumes the outside click that dismisses
+        // the card, so the first click on the row died closing the
+        // popover and only a second click focused the pane.
+        .interactiveDismissDisabled(true)
     }
     // `.contain` keeps the `.headline` text and `.state` icon
     // individually addressable by their sub-element identifiers (the
@@ -141,6 +144,12 @@ struct AgentStateRowView: View {
   /// cancels a pending presentation and dismisses an open card. The
   /// instant row-highlight (`isHovering`) stays independent of the
   /// dwell timer so the row still lights up immediately.
+  ///
+  /// The session scan runs here, between the dwell and the presentation,
+  /// so the popover opens with its final content — a card that grows
+  /// when a scan lands is what crashed the app (see
+  /// `AgentSessionSummarySnapshot`). Cancellation is checked on both
+  /// sides of the scan so a pointer that has already left never presents.
   private func handleHover(_ hovering: Bool) {
     isHovering = hovering
     summaryCardTask?.cancel()
@@ -149,21 +158,41 @@ struct AgentStateRowView: View {
       summaryCardTask = Task { @MainActor in
         try? await Task.sleep(for: Self.summaryCardHoverDelay)
         guard !Task.isCancelled else { return }
-        showsSummaryCard = true
+        let snapshot = await AgentSessionSummarySnapshot.make(
+          paneID: paneID,
+          entry: entry,
+          projectName: projectName,
+          worktreeName: worktreeName,
+          projectColor: projectColor,
+          worktreePath: worktreePath,
+          remoteHost: remoteHost,
+          paneTitle: paneTitle()
+        )
+        guard !Task.isCancelled else { return }
+        cardSnapshot = snapshot
       }
     } else {
-      showsSummaryCard = false
+      cardSnapshot = nil
     }
   }
 
   /// Row tap focuses the pane — drop any pending / open summary card
   /// first so the popover doesn't linger over the pane the user just
   /// jumped to.
+  ///
+  /// The focus cascade itself is handed to the next main-loop turn. It
+  /// walks the catalog and re-selects project → worktree → tab → pane,
+  /// which tears down and rebuilds pane surfaces; running that from
+  /// inside the click that is simultaneously dismissing this row's
+  /// popover means AppKit is destroying views while SwiftUI is still
+  /// flushing the transaction that closed the popover. One turn of
+  /// separation is invisible to the user and keeps the two teardowns off
+  /// the same stack.
   private func handleTap() {
     summaryCardTask?.cancel()
     summaryCardTask = nil
-    showsSummaryCard = false
-    onTap()
+    cardSnapshot = nil
+    Task { @MainActor in onTap() }
   }
 
   /// Identity column. `normal` stacks worktree (primary, callout) over

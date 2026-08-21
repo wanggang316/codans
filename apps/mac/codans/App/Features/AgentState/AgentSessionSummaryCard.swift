@@ -1,57 +1,53 @@
 import CodansCore
 import SwiftUI
 
-/// Hover summary card for one Agents View row — a quick, self-contained
-/// peek at the agent session behind the row so the user can triage
-/// without focusing the pane.
+/// Immutable payload behind one presentation of the hover summary card —
+/// resolved *before* the popover opens, including the session scan.
 ///
-/// The card earns its place with content the row cannot carry: the
-/// session *task* (the first user prompt of the worktree's latest
-/// session for this agent, via the same scanners the tab bar's resume
-/// popover uses) and the live *activity* (the pane's OSC title, shown
-/// only when it says more than the agent's own name — idle agents
-/// retitle the pane to themselves, which reads as noise here).
+/// The card must not change size once it is up, and that is a crash
+/// constraint rather than a style preference. It is hosted in an
+/// `NSPopover`; when its SwiftUI content reports a new size, SwiftUI's
+/// `PopoverHostingView.updateAnimatedWindowSize` calls
+/// `-[NSWindow setFrame:display:animate:]` from inside the window's
+/// display-cycle flush (`NSDisplayCycleFlush` → `layoutIfNeeded` →
+/// `NSHostingView.windowDidLayout`). The animated variant spins a nested
+/// run loop (`-[NSMoveHelper _doAnimation]`) *inside* the CoreAnimation
+/// commit handler, and re-entering AppKit's update cycle that way calls
+/// an already-freed `UC::LoopTapCFRunLoop` observer — EXC_BAD_ACCESS at
+/// 0x0, seen as "click a row in Agents View → instant crash". A card
+/// whose size cannot change never enters that path.
 ///
-/// Layout (top → bottom):
-/// - Header: agent logo + display name, state glyph + verb trailing.
-/// - Breadcrumb: `<project> / <worktree>` (project in its configured hue),
-///   with the elapsed time since the last state transition pinned to the
-///   trailing edge, ticking once a second via `TimelineView`.
-/// - Session block (after the scan lands, hidden when the worktree has
-///   no session for this agent kind): session title, optional activity
-///   line, then `<short id> · <relative age>`.
+/// So everything the card renders is pre-derived here: the featured
+/// session (scanned in `make`, off the main actor / over SSH), the
+/// activity line already filtered for redundancy, and both ages already
+/// formatted — a ticking `TimelineView` is the same hazard on a slower
+/// clock.
 ///
-/// Until the pane carries a real `agentSessionID` the session block is a
-/// most-recent approximation: the newest on-disk session of this agent
-/// kind in this worktree. When the binder starts writing session ids the
-/// exact-match preference in `AgentSummaryCardFormat.latestSession`
-/// takes over automatically.
-///
-/// Presentation (hover-in delay, popover anchoring, dismissal) is owned
-/// by `AgentStateRowView`; this view is pure content.
-struct AgentSessionSummaryCard: View {
+/// The trade-off is deliberate: hovering a Server-project row waits for
+/// the SSH scan before the card appears, rather than opening an empty
+/// card that grows when the scan lands.
+struct AgentSessionSummarySnapshot: Identifiable, Equatable {
+  /// The row's pane. Doubles as the popover item identity, so a card
+  /// captured for one row can never be reused for another.
+  let id: PaneID
   let entry: AgentStateStore.AgentEntry
   let projectName: String
   let worktreeName: String
-  var projectColor: ProjectColor?
-  /// Worktree filesystem path — the session scanners' lookup key. nil
-  /// (legacy call sites, torn-down panes) skips the scan entirely.
-  var worktreePath: String?
-  /// Non-nil for Server (remote) projects: session stores live in the
-  /// HOST's home, so the scan goes over SSH.
-  var remoteHost: RemoteHost?
-  /// Latest OSC title of the row's pane. Called lazily on each render
-  /// so the activity line stays live while the card is open.
-  let paneTitle: () -> String?
+  let projectColor: ProjectColor?
+  /// Featured session for this row, resolved before presentation. nil
+  /// when the worktree has none for this agent kind (or no path to scan)
+  /// — the card then renders without a session block.
+  let session: AgentSessionSummary?
+  /// Pane OSC title worth showing, or nil when it carries nothing beyond
+  /// the agent's own name.
+  let activity: String?
+  /// Elapsed time since `entry.lastTransitionAt`, formatted at capture.
+  let ageText: String
+  /// Relative age of `session.updatedAt`, formatted at capture.
+  let sessionAgeText: String?
 
-  /// Newest matching on-disk session, populated by the scan task. Stays
-  /// nil while scanning and when the worktree has none — both render as
-  /// "no session block" rather than a loading placeholder, so the card
-  /// never pops open with a spinner for what is a glanceable peek.
-  @State private var session: AgentSessionSummary?
-
-  /// Mirrors the tab bar's session-row formatter (`.short` units) so
-  /// ages read identically in both surfaces. Static — one CFLocale/ICU
+  /// Mirrors the tab bar's session-row formatter (`.short` units) so ages
+  /// read identically in both surfaces. Static — one CFLocale/ICU
   /// spin-up per process, not per hover.
   private static let relativeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -59,39 +55,48 @@ struct AgentSessionSummaryCard: View {
     return formatter
   }()
 
-  var body: some View {
-    let activity = activityTitle
-    VStack(alignment: .leading, spacing: 8) {
-      header
-      breadcrumb
-      if session != nil || activity != nil {
-        Divider()
-      }
-      if let session {
-        Text(session.title)
-          .font(.caption)
-          .foregroundStyle(.primary)
-          .lineLimit(2)
-          .truncationMode(.tail)
-          .accessibilityIdentifier("agentState.summaryCard.sessionTitle")
-      }
-      if let activity {
-        activityLine(activity)
-      }
-      if let session {
-        sessionFooter(session)
-      }
+  init(
+    paneID: PaneID,
+    entry: AgentStateStore.AgentEntry,
+    projectName: String,
+    worktreeName: String,
+    projectColor: ProjectColor?,
+    session: AgentSessionSummary?,
+    paneTitle: String?,
+    now: Date = Date()
+  ) {
+    self.id = paneID
+    self.entry = entry
+    self.projectName = projectName
+    self.worktreeName = worktreeName
+    self.projectColor = projectColor
+    self.session = session
+    self.activity = Self.activityLine(from: paneTitle, kind: entry.kind)
+    self.ageText = AgentSummaryCardFormat.durationText(from: entry.lastTransitionAt, to: now)
+    self.sessionAgeText = session.map {
+      Self.relativeFormatter.localizedString(for: $0.updatedAt, relativeTo: now)
     }
-    .padding(12)
-    .frame(width: 320, alignment: .leading)
-    .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("agentState.summaryCard")
-    .task {
-      guard let path = worktreePath else { return }
-      // Server-project worktrees keep their session stores in the host's
-      // home — scan over SSH; local worktrees stat + prefix-read dozens
-      // of files, so that runs on a detached task off the main actor.
-      // Mirrors AgentSessionHistoryPopover's scan dispatch.
+  }
+
+  /// Build a row's card payload, resolving the featured session first.
+  ///
+  /// Server-project worktrees keep their session stores in the host's
+  /// home — scan over SSH; local worktrees stat + prefix-read dozens of
+  /// files, so that runs on a detached task off the main actor. Mirrors
+  /// `AgentSessionHistoryPopover`'s scan dispatch. A nil `worktreePath`
+  /// (legacy call sites, torn-down panes) skips the scan.
+  static func make(
+    paneID: PaneID,
+    entry: AgentStateStore.AgentEntry,
+    projectName: String,
+    worktreeName: String,
+    projectColor: ProjectColor?,
+    worktreePath: String?,
+    remoteHost: RemoteHost?,
+    paneTitle: String?
+  ) async -> AgentSessionSummarySnapshot {
+    var featured: AgentSessionSummary?
+    if let path = worktreePath {
       let groups: [AgentSessionGroup]
       if let host = remoteHost {
         groups = await RemoteAgentSessionHistoryScanner.scan(host: host, worktreePath: path)
@@ -100,10 +105,94 @@ struct AgentSessionSummaryCard: View {
           AgentSessionHistoryScanner.scan(worktreePath: path)
         }.value
       }
-      session = AgentSummaryCardFormat.latestSession(
+      featured = AgentSummaryCardFormat.latestSession(
         in: groups, kind: entry.kind, preferredID: entry.sessionID
       )
     }
+    return AgentSessionSummarySnapshot(
+      paneID: paneID,
+      entry: entry,
+      projectName: projectName,
+      worktreeName: worktreeName,
+      projectColor: projectColor,
+      session: featured,
+      paneTitle: paneTitle
+    )
+  }
+
+  /// Pane title worth showing: trimmed, non-empty, and saying more than
+  /// the agent's own name (idle agents set the title to themselves).
+  private static func activityLine(from title: String?, kind: AgentKind) -> String? {
+    guard
+      let raw = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !raw.isEmpty,
+      !AgentSummaryCardFormat.isRedundantActivityTitle(raw, agentDisplayName: kind.displayName)
+    else { return nil }
+    return raw
+  }
+}
+
+/// Hover summary card for one Agents View row — a quick, self-contained
+/// peek at the agent session behind the row so the user can triage
+/// without focusing the pane.
+///
+/// The card earns its place with content the row cannot carry: the
+/// session *task* (the first user prompt of the worktree's latest
+/// session for this agent, via the same scanners the tab bar's resume
+/// popover uses) and the *activity* (the pane's OSC title, shown only
+/// when it says more than the agent's own name — idle agents retitle the
+/// pane to themselves, which reads as noise here).
+///
+/// Layout (top → bottom):
+/// - Header: agent logo + display name, state glyph + verb trailing.
+/// - Breadcrumb: `<project> / <worktree>` (project in its configured hue),
+///   with the elapsed time since the last state transition pinned to the
+///   trailing edge.
+/// - Session block (hidden when the worktree has no session for this
+///   agent kind): session title, optional activity line, then
+///   `<short id> · <relative age>`.
+///
+/// Until the pane carries a real `agentSessionID` the session block is a
+/// most-recent approximation: the newest on-disk session of this agent
+/// kind in this worktree. When the binder starts writing session ids the
+/// exact-match preference in `AgentSummaryCardFormat.latestSession`
+/// takes over automatically.
+///
+/// The card is a still frame of the session at hover time, not a live
+/// view — see `AgentSessionSummarySnapshot` for why it must stay one.
+/// Presentation (hover-in delay, popover anchoring, dismissal) is owned
+/// by `AgentStateRowView`; this view is pure content.
+struct AgentSessionSummaryCard: View {
+  let snapshot: AgentSessionSummarySnapshot
+
+  private var entry: AgentStateStore.AgentEntry { snapshot.entry }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      header
+      breadcrumb
+      if snapshot.session != nil || snapshot.activity != nil {
+        Divider()
+      }
+      if let session = snapshot.session {
+        Text(session.title)
+          .font(.caption)
+          .foregroundStyle(.primary)
+          .lineLimit(2)
+          .truncationMode(.tail)
+          .accessibilityIdentifier("agentState.summaryCard.sessionTitle")
+      }
+      if let activity = snapshot.activity {
+        activityLine(activity)
+      }
+      if let session = snapshot.session {
+        sessionFooter(session)
+      }
+    }
+    .padding(12)
+    .frame(width: 320, alignment: .leading)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("agentState.summaryCard")
   }
 
   private var header: some View {
@@ -155,44 +244,28 @@ struct AgentSessionSummaryCard: View {
   /// `<project> / <worktree>` on one line — project leads in its
   /// configured hue (matching the row's project caption). The elapsed
   /// time since the last state transition sits at the trailing edge,
-  /// right under the state chip it qualifies, refreshed once a second
-  /// so a card left open doesn't show a stale age.
+  /// right under the state chip it qualifies, frozen at hover time.
   private var breadcrumb: some View {
     HStack(spacing: 4) {
-      Text(projectName)
+      Text(snapshot.projectName)
         .font(.caption)
-        .foregroundStyle(projectColor?.swiftUIColor ?? .secondary)
+        .foregroundStyle(snapshot.projectColor?.swiftUIColor ?? .secondary)
         .lineLimit(1)
         .truncationMode(.middle)
       Text("/")
         .font(.caption)
         .foregroundStyle(.tertiary)
-      Text(worktreeName)
+      Text(snapshot.worktreeName)
         .font(.caption)
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .truncationMode(.middle)
       Spacer(minLength: 8)
-      TimelineView(.periodic(from: .now, by: 1)) { context in
-        Text(AgentSummaryCardFormat.durationText(from: entry.lastTransitionAt, to: context.date))
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .accessibilityIdentifier("agentState.summaryCard.duration")
-      }
+      Text(snapshot.ageText)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("agentState.summaryCard.duration")
     }
-  }
-
-  /// Pane title worth showing: trimmed, non-empty, and saying more than
-  /// the agent's own name (idle agents set the title to themselves).
-  private var activityTitle: String? {
-    guard
-      let raw = paneTitle()?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !raw.isEmpty,
-      !AgentSummaryCardFormat.isRedundantActivityTitle(
-        raw, agentDisplayName: entry.kind.displayName
-      )
-    else { return nil }
-    return raw
   }
 
   private func activityLine(_ title: String) -> some View {
@@ -211,7 +284,7 @@ struct AgentSessionSummaryCard: View {
       Text(session.shortSessionID)
         .monospaced()
       Text("·")
-      Text(Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()))
+      Text(snapshot.sessionAgeText ?? "")
     }
     .font(.caption2)
     .foregroundStyle(.tertiary)
