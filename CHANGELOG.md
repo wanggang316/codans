@@ -18,6 +18,15 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- Worktrees no longer disappear when the disk fills up. A `git worktree list`
+  that dies under disk pressure reached codans as an empty — but perfectly
+  valid-looking — result, and every non-pinned worktree in the project was
+  soft-archived and its panes torn down, agents included. An empty discovery
+  is now treated as a failed one, and auto-archiving leaves a log entry.
+- A failed catalog save no longer endangers the catalog. When the disk was
+  full, codans moved the last good `catalog.json` aside, so the next launch
+  could come up with no projects at all.
+
 ### Security
 
 ## [0.5.0] - 2026-08-25

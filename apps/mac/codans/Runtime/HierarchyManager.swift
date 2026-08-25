@@ -1,6 +1,17 @@
 import CodansCore
 import Foundation
+import OSLog
 import Observation
+
+/// Breadcrumbs for the catalog-side half of the reconcile path. Shares the
+/// `com.gumpw.codans.hierarchy` / `reconcile` address with `HierarchyClient`'s
+/// logger so one predicate covers both halves — the client logs discovery
+/// failures that threw, this logs the sweep decisions taken on the results
+/// that did not.
+private let reconcileLogger = Logger(
+  subsystem: "com.gumpw.codans.hierarchy",
+  category: "reconcile"
+)
 
 enum HierarchyError: Error, Equatable, Sendable {
   case notFound(String)
@@ -1109,6 +1120,26 @@ final class HierarchyManager {
       catalog.projects[projectIndex].worktrees.append(worktree)
       appended += 1
     }
+    // An EMPTY discovery set never means "every worktree was deleted".
+    // `git worktree list` on a healthy repo always reports at least the main
+    // checkout, so zero entries can only mean discovery itself failed — and
+    // that failure is not always visible as a thrown error. The bundled
+    // `wt ls --json` reads `git worktree list --porcelain` through a process
+    // substitution, whose exit status is invisible to `set -euo pipefail`, so
+    // a git that dies under disk pressure yields `[]` on stdout and exit 0.
+    // The caller sees a successful, well-formed, empty response.
+    //
+    // On 2026-08-25 that combination soft-archived every non-pinned worktree
+    // across four projects while the directories were all still on disk. `wt`
+    // is a third-party submodule, so the invariant has to be enforced here:
+    // treat an empty set as append-only and leave the sweep for a pass whose
+    // discovery we can believe.
+    guard !entries.isEmpty else {
+      reconcileLogger.error(
+        "empty discovery set — skipping stale sweep: project=\(projectID.raw.uuidString, privacy: .public) catalogRows=\(project.worktrees.count, privacy: .public)"
+      )
+      return appended
+    }
     // Bidirectional sync: rows whose canonical path is no longer in the
     // discovered set are stale (the worktree was deleted via `git worktree
     // remove` or `git worktree prune` outside the app). Soft-archive them
@@ -1139,6 +1170,15 @@ final class HierarchyManager {
         catalog.projects[projectIndex].worktrees[idx].archivedAt = Date()
         archivedCount += 1
       }
+    }
+    if archivedCount > 0 {
+      // Auto-archive is the one reconcile outcome the user did not ask for,
+      // and it is silent in the UI (rows just vanish). Leave a breadcrumb so
+      // a future "where did my worktrees go?" is answerable from the log
+      // instead of archaeology on `archivedAt` timestamps in catalog.json.
+      reconcileLogger.notice(
+        "auto-archived \(archivedCount, privacy: .public) stale worktree(s): project=\(projectID.raw.uuidString, privacy: .public) discovered=\(entries.count, privacy: .public)"
+      )
     }
     if appended > 0 || upgraded > 0 || archivedCount > 0 {
       store.scheduleSave(catalog)

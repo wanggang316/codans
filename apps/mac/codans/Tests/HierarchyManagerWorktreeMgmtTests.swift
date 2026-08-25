@@ -636,6 +636,64 @@ struct HierarchyManagerWorktreeMgmtTests {
     #expect(archivedAfterSecond == 1)
   }
 
+  @Test
+  func reconcileSkipsStaleSweepWhenDiscoveryIsEmpty() throws {
+    // Regression (2026-08-25): a `git worktree list` that dies under disk
+    // pressure surfaces here as a successful, well-formed, EMPTY response —
+    // the bundled `wt ls --json` reads git through a process substitution, so
+    // the child's non-zero exit is invisible to `set -euo pipefail` and the
+    // script prints `[]` and exits 0. Sweeping on that archived every
+    // non-pinned worktree across four projects while every directory was
+    // still on disk. Zero entries means discovery failed, not that the repo
+    // lost all its worktrees.
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    _ = try manager.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main"
+    )
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feature", branch: "feature"
+    )
+    _ = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID, entries: []
+    )
+    let feature = manager.catalog.projects[0].worktrees
+      .first { $0.id == featureID }
+    #expect(feature?.archived == false)
+    #expect(manager.catalog.projects[0].worktrees.filter(\.archived).isEmpty)
+  }
+
+  @Test
+  func reconcileKeepsPanesWhenDiscoveryIsEmpty() async throws {
+    // The user-visible cost of sweeping on a failed discovery is not just the
+    // hidden sidebar row — `closeSurface` tears down the pty, killing whatever
+    // agent was running in it. Mirror of
+    // `reconcileTearsDownPanesOnAutoArchive` for the untrusted-discovery path.
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    _ = try manager.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main"
+    )
+    let featureID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feature", branch: "feature"
+    )
+    let tabID = try manager.createTab(
+      in: featureID, in: projectID, name: nil
+    )
+    let paneID = try await manager.openPane(
+      in: tabID, in: featureID, in: projectID,
+      workingDirectory: "/repo/feature", initialCommand: nil
+    )
+    fakeRuntime.reset()
+    fakeRuntime.livePaneIDs.insert(paneID)
+    _ = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID, entries: []
+    )
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+  }
+
   // MARK: - runningPaneCount
 
   @Test
