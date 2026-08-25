@@ -42,7 +42,16 @@ public nonisolated enum AtomicFileStore {
 
     // Temp file lives next to the resolved target so the rename stays on one file system.
     let tempURL = directory.appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
-    try writeAndFsync(data: data, to: tempURL)
+    do {
+      try writeAndFsync(data: data, to: tempURL)
+    } catch {
+      // `open` may have succeeded before `write`/`fsync` hit ENOSPC, leaving a
+      // partial (often zero-byte) temp file next to the target. Without this
+      // cleanup every failed save leaks one, so a full disk accumulates litter
+      // in the very directory it cannot spare bytes in.
+      _ = try? FileManager.default.removeItem(at: tempURL)
+      throw error
+    }
 
     let renameResult = rename(tempURL.path, destination.path)
     if renameResult != 0 {

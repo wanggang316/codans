@@ -47,8 +47,13 @@ class CatalogStore {
         do {
           try saveNow(toSave)
         } catch {
-          logger.error("Failed to save catalog: \(error)")
-          backupBrokenFile()
+          // Deliberately leave the on-disk file alone. `AtomicFileStore.write`
+          // only ever renames a fully-written temp file over the target, so a
+          // failed save means the *previous* catalog is still intact and still
+          // the best copy we have. Moving it aside here (as this path used to)
+          // turned a transient ENOSPC into total config loss: the next launch
+          // found no file and loaded `.default` — an empty project list.
+          logger.error("Failed to save catalog (on-disk copy left intact): \(error)")
         }
       }
     }
@@ -74,13 +79,6 @@ class CatalogStore {
     } catch {
       logger.error("Failed to flush catalog on termination: \(error)")
     }
-  }
-
-  private func backupBrokenFile() {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    let backupURL = fileURL.deletingLastPathComponent()
-      .appendingPathComponent("catalog.json.broken-\(timestamp)")
-    try? FileManager.default.moveItem(at: fileURL, to: backupURL)
   }
 }
 
