@@ -46,6 +46,10 @@ struct MergeSplitButton: View {
       } label: {
         Image(systemName: "chevron.down")
           .imageScale(.small)
+          // The borderless-button menu style doesn't adapt its label to the
+          // colour scheme here — pin `.primary` so the caret stays legible
+          // in dark mode.
+          .foregroundStyle(.primary)
           .padding(.horizontal, 6)
       }
       .menuStyle(.borderlessButton)

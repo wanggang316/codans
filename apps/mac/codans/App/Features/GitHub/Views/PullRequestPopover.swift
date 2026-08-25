@@ -188,22 +188,13 @@ struct PullRequestPopover: View {
         onSetProjectDefault: onSetProjectDefaultStrategy
       )
       if snapshot.state == .open {
-        Button("Close") { onClose() }
-          .buttonStyle(.borderedProminent)
-          .tint(Color.secondary.opacity(0.25))
-          .foregroundStyle(.primary)
+        secondaryActionButton("Close") { onClose() }
       }
       if snapshot.isDraft && snapshot.state == .open {
-        Button("Mark ready") { onMarkReady() }
-          .buttonStyle(.borderedProminent)
-          .tint(Color.secondary.opacity(0.25))
-          .foregroundStyle(.primary)
+        secondaryActionButton("Mark ready") { onMarkReady() }
       }
       if let run = workflowRun, run.conclusion == .failure {
-        Button("Rerun failed") { onRerunFailedJobs() }
-          .buttonStyle(.borderedProminent)
-          .tint(Color.secondary.opacity(0.25))
-          .foregroundStyle(.primary)
+        secondaryActionButton("Rerun failed") { onRerunFailedJobs() }
       }
       Spacer()
       Button {
@@ -214,6 +205,19 @@ struct PullRequestPopover: View {
       .buttonStyle(.borderless)
       .help("Open on GitHub")
     }
+  }
+
+  /// Grey secondary-action capsule. `.borderedProminent` derives its label colour from
+  /// the tint's raw luminance, and the translucent grey tint reads as "light" — so the
+  /// style forces dark text even in dark mode. Styling the label `Text` directly wins
+  /// over the button style and keeps the label adaptive (`.primary`) in both schemes.
+  private func secondaryActionButton(_ title: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Text(title)
+        .foregroundStyle(.primary)
+    }
+    .buttonStyle(.borderedProminent)
+    .tint(Color.secondary.opacity(0.25))
   }
 
   // MARK: - loading / error / no-PR
