@@ -10,13 +10,6 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **Product marker in every pane's environment.** Panes now export
-  `TERM_PROGRAM=codans` and `TERM_PROGRAM_VERSION=<app version>`, so shell
-  scripts and coding agents can cheaply detect they are running inside
-  codans (same convention as Terminal.app, iTerm2, and ghostty). A
-  `TERM_PROGRAM` inherited from the terminal that launched codans no longer
-  leaks into panes.
-
 ### Changed
 
 ### Deprecated
@@ -26,6 +19,62 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 ### Security
+
+## [0.5.0] - 2026-08-25
+
+### Added
+
+- **Server projects — work on a remote machine as if it were local.** Add a
+  project by host, user, port, and path, and codans manages that remote
+  directory exactly like a local one: worktree discovery, create and remove,
+  terminals that reconnect after a dropped connection or an app relaunch,
+  git status chips in the sidebar, agent detection in the Agents View,
+  session history, and Open in Editor through Zed and the VS Code family's
+  SSH remoting. Authentication is your existing `~/.ssh/config` and
+  ssh-agent — codans never stores a credential.
+- **A summary card when you hover an Agents View row.** The card leads with
+  the task the agent was given, followed by what it is doing right now, so
+  you can tell sessions apart without focusing each pane.
+- **A sidebar banner when git cannot run at all.** If the Xcode license has
+  never been accepted or the Command Line Tools are missing, every project
+  used to come up empty with no explanation. codans now says what is wrong,
+  shows the exact command that fixes it, and offers a Recheck button.
+- **Product marker in every pane's environment.** Panes now export
+  `TERM_PROGRAM=codans` and `TERM_PROGRAM_VERSION=<app version>`, so shell
+  scripts and coding agents can cheaply detect they are running inside
+  codans (same convention as Terminal.app, iTerm2, and ghostty). A
+  `TERM_PROGRAM` inherited from the terminal that launched codans no longer
+  leaks into panes.
+- **Short handles for tabs and panes in the CLI.** `codans tree` now prints
+  `Tab t3:` / `Pane p7:`, and every command that takes a tab or pane accepts
+  those handles. They stay stable for the life of the app and are never
+  reused, so a handle from a closed tab fails outright instead of hitting
+  the wrong one.
+
+### Changed
+
+- **CLI connection errors say what to do about them.** Instead of one
+  "cannot connect" bucket, the CLI distinguishes "the app is not running"
+  from "the socket belongs to another user", prints a `hint:` line with the
+  fix, returns a distinct exit code per category, and reports the same
+  status through `codans doctor`. `codans launch` now fails fast on
+  problems that starting the app cannot clear.
+- **CLI commands find their own pane more reliably.** A command run inside a
+  pane resolves `current` / `.` to that pane even when the environment was
+  scrubbed — agent-spawned subshells and wrapper scripts no longer lose
+  their context.
+
+### Fixed
+
+- Clicking a row in the Agents View could close the app outright. It no
+  longer can.
+- Closing one half of a split — including stopping a run pane — no longer
+  leaves the surviving pane blank until you switch away and back, and that
+  pane now takes keyboard focus immediately instead of waiting for a click.
+- The Add Project "+" in the sidebar toolbar could render white-on-white
+  after switching to light appearance, so it read as missing.
+- A settings file you symlinked into a dotfiles repository stays a symlink;
+  saving settings no longer replaces the link with a plain file.
 
 ## [0.4.21] - 2026-07-24
 
