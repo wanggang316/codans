@@ -113,6 +113,8 @@ struct SettingsWindowView: View {
       GlobalCommandsSettingsView(
         store: store.scope(state: \.globalCommands, action: \.globalCommands)
       )
+    case .agents:
+      AgentsSettingsView()
     case .github:
       GitHubSettingsView(settingsStore: settingsStore)
     case .worktree:

@@ -147,6 +147,13 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  /// Agents pane writer. Full-subtree mutation matches how the pane edits:
+  /// every row change rewrites the profile array in place.
+  func mutateAgents(_ transform: (inout AgentSettings) -> Void) {
+    transform(&settings.agents)
+    scheduleSave()
+  }
+
   func mutateNotifications(_ transform: (inout NotificationsSettings) -> Void) {
     transform(&settings.notifications)
     scheduleSave()

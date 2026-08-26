@@ -86,6 +86,7 @@ struct CodansApp: App {
             agentStateStore: appState.agentStateStore
           )
           .frame(minWidth: 800, minHeight: 600)
+          .environment(appState.agentInstallation)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
           // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
@@ -196,6 +197,7 @@ struct CodansApp: App {
           .environment(appState.settingsStore)
           .environment(appState.developerPaneDependencies)
           .environment(appState.osNotifier)
+          .environment(appState.agentInstallation)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
         } else {
@@ -473,6 +475,11 @@ final class AppState {
   let hierarchyManager: HierarchyManager
   let settingsStore: SettingsStore
   let shortcutsStore: ShortcutsStore
+  /// Which coding-agent CLIs are present on this Mac. App-scoped (not owned
+  /// by the Settings pane) because two surfaces read it — the Agents pane
+  /// greys out missing agents, and the worktree toolbar's Agents menu hides
+  /// them — and they must not disagree.
+  let agentInstallation = AgentInstallationStore()
   /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.config/codans/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
@@ -659,6 +666,10 @@ final class AppState {
     // Phase-time the synchronous bring-up so a slow launch is attributable
     // to a specific stage from Console alone (see `LaunchProfiler`).
     let profiler = LaunchProfiler()
+    // Detached from bring-up: the probe spawns a login shell to resolve PATH,
+    // and nothing on the launch path blocks on the answer (both readers treat
+    // "not scanned yet" as "assume installed").
+    Task { [agentInstallation] in await agentInstallation.scanIfNeeded() }
     let ghostty = try? GhosttyRuntime()
     self.ghosttyRuntime = ghostty
     let engine = TerminalEngine(
