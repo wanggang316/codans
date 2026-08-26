@@ -209,15 +209,20 @@ struct PullRequestPopover: View {
 
   /// Grey secondary-action capsule. `.borderedProminent` derives its label colour from
   /// the tint's raw luminance, and the translucent grey tint reads as "light" — so the
-  /// style forces dark text even in dark mode. Styling the label `Text` directly wins
-  /// over the button style and keeps the label adaptive (`.primary`) in both schemes.
+  /// style forces dark text even in dark mode, overriding any `foregroundStyle` on the
+  /// label. Drawing the capsule ourselves keeps the label on SwiftUI's adaptive
+  /// `.primary` in both schemes; metrics mirror the `.borderedProminent` pill so the
+  /// row still reads as uniformly-shaped capsules next to the Merge split button.
   private func secondaryActionButton(_ title: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       Text(title)
         .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule(style: .continuous).fill(Color.secondary.opacity(0.25)))
+        .contentShape(Capsule(style: .continuous))
     }
-    .buttonStyle(.borderedProminent)
-    .tint(Color.secondary.opacity(0.25))
+    .buttonStyle(.plain)
   }
 
   // MARK: - loading / error / no-PR

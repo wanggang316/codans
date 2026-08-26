@@ -33,29 +33,39 @@ struct MergeSplitButton: View {
       .disabled(isDisabled)
       .help(isDisabled ? (disabledReason ?? "") : "Merge with \(defaultStrategy.displayName)")
 
-      Menu {
-        ForEach(MergeStrategy.allCases, id: \.self) { strategy in
-          Button(strategy.displayName) { onMerge(strategy) }
-        }
-        Divider()
-        Menu("Set as default for this Project") {
-          ForEach(MergeStrategy.allCases, id: \.self) { strategy in
-            Button(strategy.displayName) { onSetProjectDefault(strategy) }
+      // Self-drawn caret with a clear-label Menu overlaid as the click target.
+      // The borderless-button menu style renders its label through AppKit, so
+      // inside the sidebar-anchored popover the glyph's colour is outside
+      // SwiftUI's control (`foregroundStyle` on the label is ignored) and the
+      // disabled dimming erased it entirely on dark backgrounds. Drawing the
+      // glyph ourselves keeps it `.primary`-adaptive in both schemes and lets
+      // the disabled state dim without vanishing; the transparent Menu on top
+      // still opens the strategy menu.
+      Image(systemName: "chevron.down")
+        .imageScale(.small)
+        .foregroundStyle(.primary)
+        .opacity(isDisabled ? 0.35 : 1)
+        .padding(.horizontal, 6)
+        .accessibilityHidden(true)
+        .overlay {
+          Menu {
+            ForEach(MergeStrategy.allCases, id: \.self) { strategy in
+              Button(strategy.displayName) { onMerge(strategy) }
+            }
+            Divider()
+            Menu("Set as default for this Project") {
+              ForEach(MergeStrategy.allCases, id: \.self) { strategy in
+                Button(strategy.displayName) { onSetProjectDefault(strategy) }
+              }
+            }
+          } label: {
+            Color.clear
           }
+          .menuStyle(.borderlessButton)
+          .menuIndicator(.hidden)
+          .disabled(isDisabled)
         }
-      } label: {
-        Image(systemName: "chevron.down")
-          .imageScale(.small)
-          // The borderless-button menu style doesn't adapt its label to the
-          // colour scheme here — pin `.primary` so the caret stays legible
-          // in dark mode.
-          .foregroundStyle(.primary)
-          .padding(.horizontal, 6)
-      }
-      .menuStyle(.borderlessButton)
-      .menuIndicator(.hidden)
-      .disabled(isDisabled)
-      .fixedSize()
+        .fixedSize()
     }
     .background(
       // Matches the corner radius of macOS 26's `.borderedProminent`
