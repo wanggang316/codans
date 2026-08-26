@@ -309,6 +309,17 @@ struct MainWindowCommands: Commands {
 
       Divider()
 
+      // Pane-scoped: queues commands on the current tab's focused pane.
+      // Lives in the Tab menu next to the other pane verbs; the reducer
+      // resolves the target pane the same way the palette does.
+      Button("Command Queue…") {
+        store()?.send(.commandQueueToggle(nil))
+      }
+      .appKeyboardShortcut(.toggleCommandQueue, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
+      Divider()
+
       Button("Rename Tab…") {
         store()?.send(.renameActiveTabForCurrentWorktreeRequested)
       }

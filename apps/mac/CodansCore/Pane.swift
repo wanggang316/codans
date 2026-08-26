@@ -19,6 +19,11 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
   /// must recognize, so the next run reuses this pane instead of piling
   /// up a fresh tab per launch.
   public var runScriptID: UUID?
+  /// Commands the user has parked on this pane, waiting on the pane going
+  /// quiet or on a wall-clock time. Persisted for the same reason as
+  /// `runScriptID`: the pane row is the identity the deferred work belongs
+  /// to, so a relaunch must restore what the pane still owes.
+  public var commandQueue: [QueuedCommand]
 
   public init(
     id: PaneID = PaneID(),
@@ -27,7 +32,8 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
     labels: Set<String> = [],
     agentKind: AgentKind? = nil,
     agentSessionID: String? = nil,
-    runScriptID: UUID? = nil
+    runScriptID: UUID? = nil,
+    commandQueue: [QueuedCommand] = []
   ) {
     self.id = id
     self.workingDirectory = workingDirectory
@@ -36,12 +42,14 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
     self.agentKind = agentKind
     self.agentSessionID = agentSessionID
     self.runScriptID = runScriptID
+    self.commandQueue = commandQueue
   }
 }
 
 extension Pane: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, workingDirectory, labels, agentKind, agentSessionID, runScriptID
+    case commandQueue
   }
 
   public init(from decoder: Decoder) throws {
@@ -59,6 +67,12 @@ extension Pane: Codable {
     self.agentKind = try container.decodeIfPresent(AgentKind.self, forKey: .agentKind)
     self.agentSessionID = try container.decodeIfPresent(String.self, forKey: .agentSessionID)
     self.runScriptID = try container.decodeIfPresent(UUID.self, forKey: .runScriptID)
+    // Lenient on purpose. A queue written by a build that knows a timing kind
+    // this one doesn't would otherwise throw here and take the entire catalog
+    // decode down with it. Losing a queue across a downgrade is recoverable;
+    // losing every project is not.
+    self.commandQueue =
+      (try? container.decodeIfPresent([QueuedCommand].self, forKey: .commandQueue)) ?? []
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -72,5 +86,6 @@ extension Pane: Codable {
     try container.encodeIfPresent(agentKind, forKey: .agentKind)
     try container.encodeIfPresent(agentSessionID, forKey: .agentSessionID)
     try container.encodeIfPresent(runScriptID, forKey: .runScriptID)
+    if !commandQueue.isEmpty { try container.encode(commandQueue, forKey: .commandQueue) }
   }
 }

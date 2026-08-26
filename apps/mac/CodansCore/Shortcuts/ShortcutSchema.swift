@@ -428,6 +428,16 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_0), modifiers: .command)
     ),
+    // ⌘⌥L is unclaimed by AppKit and by ghostty's default keybinds, so the
+    // chord reaches the menu item even while a terminal pane holds
+    // first responder.
+    .init(
+      id: .toggleCommandQueue,
+      title: "Command Queue…",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_L), modifiers: [.command, .option])
+    ),
   ]
 
   private static let actionEntries: [Entry] = [

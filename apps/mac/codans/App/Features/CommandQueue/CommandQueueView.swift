@@ -1,0 +1,268 @@
+import CodansCore
+import ComposableArchitecture
+import SwiftUI
+
+/// Overlay UI for a Pane's Command Queue (⌘⌥L, or a click on the pane's
+/// queue badge). Presented as a floating card over the split viewport,
+/// mirroring `CommandPaletteView`'s presentation so the two keyboard-summoned
+/// surfaces read as siblings.
+///
+/// The queued list is read from the live catalog rather than from reducer
+/// state: an entry that drains while the panel is open should vanish from the
+/// list on the same frame it is typed into the terminal.
+struct CommandQueueView: View {
+  @Bindable var store: StoreOf<CommandQueueFeature>
+  /// Sent on Esc / scrim tap. Dismissal is "parent nils the `@Presents`
+  /// slot", same contract as the Command Palette.
+  let onDismiss: () -> Void
+
+  @Environment(HierarchyManager.self) private var hierarchyManager
+  @FocusState private var draftFocused: Bool
+
+  private let cardCornerRadius: CGFloat = 12
+
+  var body: some View {
+    ZStack(alignment: .top) {
+      Color.clear
+        .contentShape(.rect)
+        .onTapGesture { onDismiss() }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Dismiss Command Queue")
+
+      VStack(spacing: 0) {
+        header
+        Divider()
+        composer
+        Divider()
+        queueList
+      }
+      .frame(maxWidth: 560)
+      .background(
+        VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
+          .overlay(Color(nsColor: .textBackgroundColor).opacity(0.18))
+          .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+          .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+      .padding(.top, 80)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .onAppear { draftFocused = true }
+  }
+
+  // MARK: - Header
+
+  private var header: some View {
+    HStack(spacing: 8) {
+      Image(systemName: CommandQueueBadgeStyle.symbol)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      Text("Command Queue")
+        .font(.system(size: 13, weight: .semibold))
+      if let target = paneLabel {
+        Text(target)
+          .font(.system(size: 12))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+      }
+      Spacer()
+      if !entries.isEmpty {
+        Button("Clear All") { store.send(.clearAllTapped) }
+          .buttonStyle(.link)
+          .font(.system(size: 11))
+      }
+    }
+    .padding(.horizontal, 14)
+    .frame(height: 38)
+  }
+
+  // MARK: - Composer
+
+  private var composer: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      TextField(
+        "Command to send…",
+        text: $store.draft.sending(\.draftChanged),
+        axis: .vertical
+      )
+      .textFieldStyle(.plain)
+      .lineLimit(1...4)
+      .font(.system(size: 14))
+      .focused($draftFocused)
+      .onKeyPress(.escape) {
+        onDismiss()
+        return .handled
+      }
+      // Return submits; Shift-Return is left to the field so a multi-line
+      // prompt (common for agent panes) is still typeable.
+      .onKeyPress(.return, phases: .down) { press in
+        guard !press.modifiers.contains(.shift) else { return .ignored }
+        store.send(.submitted)
+        return .handled
+      }
+
+      Picker("", selection: $store.mode.sending(\.modeChanged)) {
+        ForEach(CommandQueueFeature.State.Mode.allCases, id: \.self) { mode in
+          Text(mode.title).tag(mode)
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+
+      if store.mode == .scheduled {
+        scheduleControls
+      }
+
+      HStack {
+        Text(modeHint)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Spacer()
+        Button(store.mode == .now ? "Send" : "Add to Queue") {
+          store.send(.submitted)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(!store.canSubmit)
+      }
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 12)
+  }
+
+  private var scheduleControls: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
+        Text("At").font(.system(size: 12)).foregroundStyle(.secondary)
+        DatePicker(
+          "",
+          selection: $store.scheduledAt.sending(\.scheduledAtChanged),
+          displayedComponents: [.date, .hourAndMinute]
+        )
+        .labelsHidden()
+        .datePickerStyle(.compact)
+      }
+      HStack(spacing: 8) {
+        Toggle(
+          "Repeat every",
+          isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged)
+        )
+        .font(.system(size: 12))
+        TextField(
+          "",
+          value: $store.repeatAmount.sending(\.repeatAmountChanged),
+          format: .number
+        )
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 56)
+        .disabled(!store.repeatEnabled)
+        Picker("", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
+          ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
+            Text(unit.title).tag(unit)
+          }
+        }
+        .labelsHidden()
+        .frame(width: 100)
+        .disabled(!store.repeatEnabled)
+      }
+    }
+  }
+
+  private var modeHint: String {
+    switch store.mode {
+    case .now:
+      return "Typed into the pane right away."
+    case .afterCurrentTask:
+      return "Waits until the pane finishes what it is doing."
+    case .scheduled:
+      return store.repeatInterval == nil
+        ? "Fires once at the chosen time."
+        : "Fires at the chosen time, then repeats."
+    }
+  }
+
+  // MARK: - Queued list
+
+  @ViewBuilder
+  private var queueList: some View {
+    if entries.isEmpty {
+      Text("Nothing queued for this pane.")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity)
+    } else {
+      ScrollView {
+        VStack(spacing: 1) {
+          ForEach(entries) { entry in
+            row(entry)
+          }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+      }
+      .scrollIndicators(.never)
+      .frame(maxHeight: 220)
+    }
+  }
+
+  private func row(_ entry: QueuedCommand) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: entry.timing.fireDate == nil ? "arrow.turn.down.right" : "clock")
+        .font(.system(size: 11))
+        .frame(width: 16)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(entry.text)
+          .font(.system(size: 12, design: .monospaced))
+          .lineLimit(2)
+        Text(CommandQueueBadgeStyle.description(of: entry.timing))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Spacer()
+      Button {
+        store.send(.removeTapped(entry.id))
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+          .foregroundStyle(.secondary)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Remove queued command")
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 6)
+    .background(
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(Color.primary.opacity(0.04))
+    )
+  }
+
+  // MARK: - Catalog reads
+
+  /// Live queue for the edited pane. Read inside `body`'s tracking scope so
+  /// `@Observable` re-renders the list when the runner drains an entry.
+  private var entries: [QueuedCommand] {
+    hierarchyManager.catalog.pane(store.paneID)?.commandQueue ?? []
+  }
+
+  /// Best-effort human label for the pane being edited — the tab's name if it
+  /// has one, else its cached live title, else the pane's cwd basename.
+  private var paneLabel: String? {
+    for project in hierarchyManager.catalog.projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs {
+          guard let pane = tab.panes.first(where: { $0.id == store.paneID }) else { continue }
+          if let name = tab.name, !name.isEmpty { return name }
+          if let cached = tab.cachedDisplayTitle, !cached.isEmpty { return cached }
+          return URL(fileURLWithPath: pane.workingDirectory).lastPathComponent
+        }
+      }
+    }
+    return nil
+  }
+}

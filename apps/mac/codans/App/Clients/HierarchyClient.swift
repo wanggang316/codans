@@ -564,6 +564,16 @@ nonisolated struct HierarchyClient: Sendable {
       _ projectID: ProjectID,
       _ segment: WorktreeSegment, _ from: IndexSet, _ to: Int
     ) throws -> Void
+
+  /// Commands parked on `paneID`, `[]` for an unknown pane. Read by the
+  /// Command Queue panel so the reducer edits against live catalog state
+  /// rather than a snapshot taken when the panel opened.
+  var commandQueue: @MainActor @Sendable (_ paneID: PaneID) -> [QueuedCommand]
+
+  /// Replaces `paneID`'s command queue wholesale. Read-modify-write is the
+  /// intended usage; the manager side is the single canonical writer and
+  /// no-ops on an unknown pane or an unchanged queue.
+  var setCommandQueue: @MainActor @Sendable (_ paneID: PaneID, _ queue: [QueuedCommand]) -> Void
 }
 
 enum RunScriptError: Error, Equatable, Sendable {
@@ -1019,7 +1029,9 @@ extension HierarchyClient {
           in: projectID,
           segment: segment, from: from, to: to
         )
-      }
+      },
+      commandQueue: { paneID in manager.commandQueue(for: paneID) },
+      setCommandQueue: { paneID, queue in manager.setCommandQueue(queue, for: paneID) }
     )
   }
 
@@ -2068,6 +2080,10 @@ extension HierarchyClient: DependencyKey {
     },
     reorderWorktrees: { _, _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
+    },
+    commandQueue: { _ in [] },
+    setCommandQueue: { _, _ in
+      fatalError("HierarchyClient.liveValue not configured")
     }
   )
 
@@ -2168,7 +2184,12 @@ extension HierarchyClient: DependencyKey {
     setPaneAgentKind: unimplemented("HierarchyClient.setPaneAgentKind"),
     setPaneAgentSessionID: unimplemented("HierarchyClient.setPaneAgentSessionID"),
     updatePaneWorkingDirectory: unimplemented("HierarchyClient.updatePaneWorkingDirectory"),
-    reorderWorktrees: unimplemented("HierarchyClient.reorderWorktrees")
+    reorderWorktrees: unimplemented("HierarchyClient.reorderWorktrees"),
+    // Quiet `[]` mirrors the liveValue fallback: SwiftUI bodies read the
+    // queue on every render of a pane badge, and a detached render pass in
+    // the test host must not record an issue against `unimplemented(...)`.
+    commandQueue: { _ in [] },
+    setCommandQueue: unimplemented("HierarchyClient.setCommandQueue")
   )
 }
 

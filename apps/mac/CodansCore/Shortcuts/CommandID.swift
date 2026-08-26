@@ -75,6 +75,9 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case switchToTab9
   case switchToTab10
 
+  // Window — pane.
+  case toggleCommandQueue
+
   // Sidebar row hotkeys.
   case selectWorktreeAt1
   case selectWorktreeAt2

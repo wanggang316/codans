@@ -2596,6 +2596,54 @@ final class HierarchyManager {
     throw HierarchyError.notFound("Pane \(paneID)")
   }
 
+  // MARK: - Command queue
+
+  /// The commands parked on `paneID`, or `[]` when the pane is unknown.
+  func commandQueue(for paneID: PaneID) -> [QueuedCommand] {
+    catalog.pane(paneID)?.commandQueue ?? []
+  }
+
+  /// **Single canonical writer** for `Pane.commandQueue` — the editor panel,
+  /// the badge's per-row delete, and the runner's post-fire re-arm all land
+  /// here, so every queue mutation persists through the same
+  /// `CatalogStore.scheduleSave` as the rest of the hierarchy.
+  ///
+  /// Silently no-ops for an unknown pane rather than throwing: every caller
+  /// is a best-effort UI action or a background drain pass racing a pane
+  /// close, and neither has anything useful to do with the error.
+  func setCommandQueue(_ queue: [QueuedCommand], for paneID: PaneID) {
+    for projectIndex in catalog.projects.indices {
+      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
+        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
+          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
+          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else { continue }
+          guard panes[paneIndex].commandQueue != queue else { return }
+          catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+            .panes[paneIndex].commandQueue = queue
+          store.scheduleSave(catalog)
+          return
+        }
+      }
+    }
+  }
+
+  /// Every pane that currently owes the user something, paired with its
+  /// queue. One catalog walk per drain pass; the runner needs the pairing
+  /// rather than a per-pane probe so a tick costs a single traversal.
+  func panesWithQueuedCommands() -> [(paneID: PaneID, queue: [QueuedCommand])] {
+    var result: [(paneID: PaneID, queue: [QueuedCommand])] = []
+    for project in catalog.projects {
+      for worktree in project.worktrees where !worktree.archived {
+        for tab in worktree.tabs {
+          for pane in tab.panes where !pane.commandQueue.isEmpty {
+            result.append((paneID: pane.id, queue: pane.commandQueue))
+          }
+        }
+      }
+    }
+    return result
+  }
+
   // MARK: - Env resolution
 
   /// Resolves the merged environment for a Project's spawned subprocesses.

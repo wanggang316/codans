@@ -84,6 +84,19 @@ struct ContentView: View {
           HandoffOverlayView(store: handoffStore)
             .zIndex(100)
         }
+        if let queueStore = store.scope(
+          state: \.commandQueue, action: \.commandQueue.presented
+        ) {
+          CommandQueueView(
+            store: queueStore,
+            // Pass the pane explicitly: `.commandQueueToggle(nil)` would
+            // re-resolve the focused pane, and if focus moved while the
+            // panel was open the toggle would re-target instead of close.
+            onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
+          )
+          .environment(hierarchyManager)
+          .zIndex(101)
+        }
       }
     }
   }
@@ -137,6 +150,11 @@ struct ContentView: View {
       PaneHUDActions(handOff: { paneID in store.send(.handoffRequested(paneID)) })
     )
     .environment(settingsStore)
+    // Lets a pane's queue badge open the panel without threading a callback
+    // through `SubtreeView`'s split recursion.
+    .environment(\.openCommandQueue) { paneID in
+      store.send(.commandQueueToggle(paneID))
+    }
     .environment(UpdatesEnvironment.model)
     .environment(worktreeStatusMonitor)
     .environment(worktreeLocalDiffMonitor)
