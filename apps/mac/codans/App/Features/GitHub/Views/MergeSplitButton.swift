@@ -6,13 +6,12 @@ import CodansCore
 /// for this Project" sub-menu (per UI design Surface 2).
 ///
 /// Layout is a `.borderedProminent` primary `Button` (accent-blue capsule) plus a
-/// borderless caret `Menu`, both wrapped in a single `Capsule(style: .continuous)`
+/// self-drawn caret, both wrapped in a single `Capsule(style: .continuous)`
 /// stroke so the chevron area shares one frame with the Merge half. The outer
 /// `Capsule` matches the inner pill's curvature on macOS 26; the sibling Close /
-/// Mark-ready / Rerun-failed buttons in `PullRequestPopover` are styled
-/// `.borderedProminent` with a grey tint so the whole action row reads as
-/// uniformly-shaped capsules — only the colour distinguishes primary from
-/// secondary actions.
+/// Mark-ready / Rerun-failed buttons in `PullRequestPopover` draw their own grey
+/// capsule at matching metrics so the whole action row reads as uniformly-shaped
+/// capsules — only the colour distinguishes primary from secondary actions.
 struct MergeSplitButton: View {
   let defaultStrategy: MergeStrategy
   let isDisabled: Bool
