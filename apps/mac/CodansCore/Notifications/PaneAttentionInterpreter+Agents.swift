@@ -47,9 +47,29 @@ extension PaneAttentionInterpreter {
       return detectDroid(screen)
     case .amp:
       return detectAmp(screen)
+    case .grok:
+      return detectGenericInterruptCue(screen)
     case .omp:
       return detectOmp(screen)
     }
+  }
+
+  /// Fallback classifier for agents whose TUI we have not profiled yet: the
+  /// two cues almost every CLI agent renders — a yes/no confirmation prompt
+  /// (blocked) and an "esc to interrupt / cancel" hint (working). Less
+  /// precise than a hand-tuned detector, but it keeps the badge honest
+  /// instead of pinning a live agent on idle.
+  private static func detectGenericInterruptCue(_ content: String) -> AgentActivityState {
+    let lower = content.lowercased()
+    if hasConfirmationPrompt(lower) || lower.contains("[y/n]") || lower.contains("(y/n)") {
+      return .blocked
+    }
+    if hasInterruptPattern(lower) || lower.contains("esc to cancel")
+      || lower.contains("esc to stop")
+    {
+      return .working
+    }
+    return .idle
   }
 
   /// Hysteresis on the `working → idle` trailing edge, applied uniformly to

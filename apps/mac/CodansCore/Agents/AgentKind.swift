@@ -21,6 +21,7 @@ public nonisolated enum AgentKind: String, Codable, Sendable, CaseIterable, Equa
   case kimi
   case droid
   case amp
+  case grok
   case omp
 
   public var displayName: String {

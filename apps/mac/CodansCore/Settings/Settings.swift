@@ -24,6 +24,10 @@ public nonisolated struct Settings: Equatable, Sendable {
   /// v1.1 notifications system knobs. Additive in v1.1; pre-v1.1 settings.json files
   /// decode this field via `decodeIfPresent` and fall back to `.default`.
   public var notifications: NotificationsSettings
+  /// Coding-agent launch presets. Additive: files written before the Agents
+  /// pane shipped carry no `agents` key and decode to `.default`, which seeds
+  /// one profile per built-in agent.
+  public var agents: AgentSettings
 
   public init(
     version: Int = Settings.currentVersion,
@@ -31,7 +35,8 @@ public nonisolated struct Settings: Equatable, Sendable {
     developer: DeveloperSettings = .default,
     worktree: WorktreeSettings = .default,
     projects: [ProjectID: ProjectSettings] = [:],
-    notifications: NotificationsSettings = .default
+    notifications: NotificationsSettings = .default,
+    agents: AgentSettings = .default
   ) {
     self.version = version
     self.general = general
@@ -39,6 +44,7 @@ public nonisolated struct Settings: Equatable, Sendable {
     self.worktree = worktree
     self.projects = projects
     self.notifications = notifications
+    self.agents = agents
   }
 
   public static let `default` = Settings()
@@ -110,7 +116,7 @@ extension Settings: Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, general, developer, worktree, projects, notifications
+    case version, general, developer, worktree, projects, notifications, agents
   }
 
   public init(from decoder: Decoder) throws {
@@ -127,6 +133,7 @@ extension Settings: Codable {
     self.worktree = try container.decodeIfPresent(WorktreeSettings.self, forKey: .worktree) ?? .default
     self.notifications =
       try container.decodeIfPresent(NotificationsSettings.self, forKey: .notifications) ?? .default
+    self.agents = try container.decodeIfPresent(AgentSettings.self, forKey: .agents) ?? .default
 
     // `projects` is encoded as a JSON object keyed by the ProjectID UUID string so the file
     // is human-diffable and hand-editable. ProjectID itself is a Codable struct (encoded as
@@ -164,6 +171,7 @@ extension Settings: Codable {
     try container.encode(developer, forKey: .developer)
     try container.encode(worktree, forKey: .worktree)
     try container.encode(notifications, forKey: .notifications)
+    try container.encode(agents, forKey: .agents)
     var stringKeyed: [String: ProjectSettings] = [:]
     stringKeyed.reserveCapacity(projects.count)
     for (projectID, value) in projects {

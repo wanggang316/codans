@@ -1,19 +1,13 @@
 import SwiftUI
 import CodansCore
 
-/// Per-kind agent logo shared between `AgentStateRowView` (16pt) and
-/// `AgentStateView` (14pt). Centralises the symbol choice so a
-/// future swap stays in one file.
+/// Per-kind agent logo shared between `AgentStateRowView` (16pt),
+/// `AgentStateView` (14pt), and the Agents settings pane. The asset name
+/// comes from the agent's `AgentDescriptor`, so adding an agent is a
+/// descriptor edit plus a bundled SVG — no switch to keep in sync here.
 ///
-/// Glyph assignment (all rendered template-style to inherit the
-/// surrounding `foregroundStyle`):
-///
-/// - `.claudeCode` → SVG asset `claude-code` (Anthropic Claude
-///   wordmark; thick strokes survive small-size rasterisation).
-/// - `.codex`      → SVG asset `codex` (OpenAI Codex brand glyph).
-/// - `.pi`         → SVG asset `pi` (Inflection pi glyph).
-/// - `.opencode`   → SVG asset `opencode` (opencode brand glyph).
-/// - Other agent kinds map to one template SVG asset each.
+/// Every glyph is rendered template-style so it inherits the surrounding
+/// `foregroundStyle`.
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
@@ -33,65 +27,14 @@ struct AgentLogoView: View {
   var tint: HierarchicalShapeStyle = .secondary
 
   var body: some View {
-    Group {
-      switch kind {
-      case .claudeCode:
-        Image("claude-code")
-          .resizable()
-          .scaledToFit()
-      case .codex:
-        // Visually inset the codex glyph so it reads ~15% smaller than
-        // the claude / pi marks at the same outer frame. The bundled
-        // glyph carries less negative padding than the other two, so
-        // without the inset it looks chunkier in the row.
-        Image("codex")
-          .resizable()
-          .scaledToFit()
-          .padding(size * 0.15)
-      case .pi:
-        Image("pi")
-          .resizable()
-          .scaledToFit()
-      case .opencode:
-        Image("opencode")
-          .resizable()
-          .scaledToFit()
-      case .gemini:
-        Image("gemini")
-          .resizable()
-          .scaledToFit()
-      case .cursorAgent:
-        Image("cursor-agent")
-          .resizable()
-          .scaledToFit()
-      case .cline:
-        Image("cline")
-          .resizable()
-          .scaledToFit()
-      case .copilot:
-        Image("github-copilot")
-          .resizable()
-          .scaledToFit()
-      case .kimi:
-        Image("kimi")
-          .resizable()
-          .scaledToFit()
-      case .droid:
-        Image("droid")
-          .resizable()
-          .scaledToFit()
-      case .amp:
-        Image("amp")
-          .resizable()
-          .scaledToFit()
-      case .omp:
-        Image("omp")
-          .resizable()
-          .scaledToFit()
-      }
-    }
-    .frame(width: size, height: size)
-    .foregroundStyle(tint)
-    .accessibilityHidden(true)
+    Image(AgentCatalog.descriptor(for: kind).iconAssetName)
+      .resizable()
+      .scaledToFit()
+      // The codex glyph carries less negative padding than its peers, so
+      // without an inset it reads ~15% chunkier at the same outer frame.
+      .padding(kind == .codex ? size * 0.15 : 0)
+      .frame(width: size, height: size)
+      .foregroundStyle(tint)
+      .accessibilityHidden(true)
   }
 }
