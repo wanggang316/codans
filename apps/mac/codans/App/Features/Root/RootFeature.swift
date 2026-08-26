@@ -1441,6 +1441,33 @@ struct RootFeature {
               presenter.openAt(.globalCommands)
             }
           }
+
+        case .launchAgentRequested(let profileID):
+          // Same selection-resolution + staleness rationale as
+          // `runScriptRequested`.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
+          let client = hierarchyClient
+          return .run { send in
+            do {
+              try await client.launchAgentProfile(profileID, projectID, worktreeID)
+            } catch let error as RunScriptError {
+              await send(.statusBar(.push(.warning(Self.launchAgentErrorMessage(error)))))
+            } catch {
+              await send(
+                .statusBar(.push(.warning("Launch agent failed: \(error.localizedDescription)"))))
+            }
+          }
+
+        case .manageAgentsRequested:
+          let presenter = settingsWindowPresenter
+          return .run { _ in
+            await MainActor.run {
+              presenter.openAt(.agents)
+            }
+          }
         }
 
       case .worktreeHeader:
@@ -2531,6 +2558,20 @@ struct RootFeature {
       return "Run script failed: worktree not available"
     case .missingProject:
       return "Run script failed: project not available"
+    }
+  }
+
+  /// Agent-launch sibling of `runScriptErrorMessage`. Same failure set (the
+  /// launch reuses the script pipeline) with the vocabulary the user was
+  /// working in — "profile", not "script".
+  static func launchAgentErrorMessage(_ error: RunScriptError) -> String {
+    switch error {
+    case .unknownScript:
+      return "Launch agent failed: profile no longer exists"
+    case .missingWorktree:
+      return "Launch agent failed: worktree not available"
+    case .missingProject:
+      return "Launch agent failed: project not available"
     }
   }
 

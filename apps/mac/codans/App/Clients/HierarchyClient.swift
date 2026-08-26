@@ -447,6 +447,19 @@ nonisolated struct HierarchyClient: Sendable {
       _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
     ) async throws -> Void
 
+  /// Launches an `AgentProfile` from `Settings.agents` in the given Worktree.
+  /// Renders the profile through `AgentLaunchCommand` and dispatches it the
+  /// same way a script is dispatched (new tab / split / focused pane), with
+  /// one deliberate difference: agent launches are *not* tracked as run panes,
+  /// so invoking the same profile twice opens a second session rather than
+  /// re-typing into the first. Throws `RunScriptError.unknownScript` when the
+  /// profile id is gone (removed between click and dispatch);
+  /// `.missingWorktree` when the worktree is.
+  var launchAgentProfile:
+    @MainActor @Sendable (
+      _ profileID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
+    ) async throws -> Void
+
   /// Interrupts a running script by sending Ctrl-C (`\u{3}`) to the pane the
   /// script last spawned in `worktreeID`. The pane is left open so the next
   /// run reuses it. Best-effort: a no-op when no run pane is tracked (or it
@@ -878,6 +891,16 @@ extension HierarchyClient {
           terminalClient: terminalClient
         )
       },
+      launchAgentProfile: { [weak settings] profileID, projectID, worktreeID in
+        try await launchAgentProfile(
+          profileID: profileID,
+          projectID: projectID,
+          worktreeID: worktreeID,
+          manager: manager,
+          settings: settings,
+          terminalClient: terminalClient
+        )
+      },
       stopScript: { scriptID, _, worktreeID in
         stopScript(
           scriptID: scriptID,
@@ -997,12 +1020,70 @@ extension HierarchyClient {
     )
   }
 
+  /// Resolves an `AgentProfile` and launches it through the shared script
+  /// pipeline. The profile renders into a synthetic `ScriptDefinition` — the
+  /// dispatcher already knows how to open a tab / split / focused pane with a
+  /// command and a tab icon, and an agent launch is exactly that plus a
+  /// different way of composing the command string.
+  ///
+  /// `tracksRunPane: false` is the one behavioural difference: an agent is a
+  /// session, not a job, so a second launch of the same profile opens a
+  /// second session instead of re-typing into the first one's pane (which is
+  /// what the Run/Stop toggle wants for scripts).
+  @MainActor
+  private static func launchAgentProfile(
+    profileID: UUID,
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    manager: HierarchyManager,
+    settings: SettingsStore?,
+    terminalClient: TerminalClient?
+  ) async throws {
+    let snapshot = settings?.settings ?? .default
+    guard let profile = snapshot.agents.profile(id: profileID) else {
+      throw RunScriptError.unknownScript(profileID)
+    }
+    if profile.usesDedicatedHome {
+      // The agent CLI will write config / credentials under this HOME on
+      // first run; most refuse to create a missing home themselves.
+      try? FileManager.default.createDirectory(
+        at: AgentLaunchCommand.dedicatedHomeURL(for: profile),
+        withIntermediateDirectories: true
+      )
+    }
+    let script = ScriptDefinition(
+      id: profile.id,
+      kind: .custom,
+      name: profile.displayName,
+      command: AgentLaunchCommand.render(profile: profile),
+      systemImage: "sparkles",
+      target: profile.target,
+      direction: profile.direction,
+      onFinished: .none,
+      focus: true
+    )
+    try await runResolvedScript(
+      script: script,
+      projectID: projectID,
+      worktreeID: worktreeID,
+      manager: manager,
+      snapshot: snapshot,
+      terminalClient: terminalClient,
+      tracksRunPane: false
+    )
+  }
+
   /// Shared execution pipeline for a fully-resolved `ScriptDefinition`,
-  /// regardless of whether it came from a Project's `scripts` or the global
-  /// `general.globalScripts` list. Resolves the worktree cwd + env, honours
-  /// the run-pane reuse / Run-Stop tracking / onFinished policy, and spawns
-  /// the tab/pane. Run-pane tracking keys on (worktreeID, scriptID); global
-  /// and project scripts never collide because each carries a distinct UUID.
+  /// regardless of whether it came from a Project's `scripts`, the global
+  /// `general.globalScripts` list, or an agent profile. Resolves the worktree
+  /// cwd + env, honours the run-pane reuse / Run-Stop tracking / onFinished
+  /// policy, and spawns the tab/pane. Run-pane tracking keys on (worktreeID,
+  /// scriptID); global and project scripts never collide because each carries
+  /// a distinct UUID.
+  ///
+  /// `tracksRunPane: false` opts a caller out of both halves of that tracking
+  /// — no reuse lookup on the way in, no `setRunScriptPane` on the way out —
+  /// so every invocation spawns a fresh surface.
   @MainActor
   private static func runResolvedScript(
     script: ScriptDefinition,
@@ -1010,7 +1091,8 @@ extension HierarchyClient {
     worktreeID: WorktreeID,
     manager: HierarchyManager,
     snapshot: Settings,
-    terminalClient: TerminalClient?
+    terminalClient: TerminalClient?,
+    tracksRunPane: Bool = true
   ) async throws {
     let scriptID = script.id
     var foundWorktreePath: String?
@@ -1031,7 +1113,8 @@ extension HierarchyClient {
     // run pane is still alive — from an earlier run this session or restored
     // from the persisted catalog after a relaunch — never spawn a second
     // tab/pane for it.
-    if script.target == .newTab || script.target == .split,
+    if tracksRunPane,
+      script.target == .newTab || script.target == .split,
       let terminalClient,
       let existing = manager.runScriptPane(worktreeID: worktreeID, scriptID: scriptID)
     {
@@ -1097,7 +1180,8 @@ extension HierarchyClient {
     // Record the dedicated pane so the next run reuses it and the toolbar
     // Run/Stop toggle can find it. Only `.newTab` / `.split` create one;
     // `.focused` returns nil (it writes into the user's focused pane).
-    if let spawnedPaneID,
+    if tracksRunPane,
+      let spawnedPaneID,
       script.target == .newTab || script.target == .split
     {
       manager.setRunScriptPane(
@@ -1859,6 +1943,7 @@ extension HierarchyClient: DependencyKey {
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    launchAgentProfile: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopAllScripts: { _ in fatalError("HierarchyClient.liveValue not configured") },
     runWorktreeLifecycleScript: { _, _, _, _ in
@@ -1965,6 +2050,7 @@ extension HierarchyClient: DependencyKey {
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
+    launchAgentProfile: unimplemented("HierarchyClient.launchAgentProfile"),
     stopScript: unimplemented("HierarchyClient.stopScript"),
     stopAllScripts: unimplemented("HierarchyClient.stopAllScripts"),
     runWorktreeLifecycleScript: unimplemented(

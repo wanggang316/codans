@@ -328,7 +328,11 @@ struct WorktreeDetailView: View {
         // of one shared cluster background. `ToolbarSpacer(.fixed)` keeps
         // them visually distinct without collapsing the gap. No
         // `.buttonStyle` / no manual padding: each item gets the toolbar's
-        // native glass capsule + hover state. Order: RunScript, Open.
+        // native glass capsule + hover state. Order: Agents, RunScript,
+        // Open — agents first because starting one is the more frequent
+        // entry point for this app's audience.
+        ToolbarItem { agentSlot(mode) }
+        ToolbarSpacer(.fixed)
         ToolbarItem { runSlot(mode) }
         ToolbarSpacer(.fixed)
         ToolbarItem { openSlot(mode) }
@@ -341,8 +345,9 @@ struct WorktreeDetailView: View {
         // group with the action buttons.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
-          // Order: RunScript, Open. `ToolbarItemGroup` renders children
-          // leading-to-trailing in declaration order.
+          // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
+          // children leading-to-trailing in declaration order.
+          agentSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
           openSlot(mode).buttonStyle(.plain)
         }
@@ -402,6 +407,18 @@ struct WorktreeDetailView: View {
           worktreePath: URL(fileURLWithPath: info.worktree.path),
           branch: info.worktree.branch
         )
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func agentSlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating:
+      SkeletonActionChipView(labelText: "Agents")
+    case .worktree(_, let info):
+      if info != nil {
+        HeaderAgentSplitButton(store: headerStore)
       }
     }
   }
