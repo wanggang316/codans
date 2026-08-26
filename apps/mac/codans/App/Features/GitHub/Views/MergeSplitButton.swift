@@ -6,13 +6,12 @@ import CodansCore
 /// for this Project" sub-menu (per UI design Surface 2).
 ///
 /// Layout is a `.borderedProminent` primary `Button` (accent-blue capsule) plus a
-/// borderless caret `Menu`, both wrapped in a single `Capsule(style: .continuous)`
+/// self-drawn caret, both wrapped in a single `Capsule(style: .continuous)`
 /// stroke so the chevron area shares one frame with the Merge half. The outer
 /// `Capsule` matches the inner pill's curvature on macOS 26; the sibling Close /
-/// Mark-ready / Rerun-failed buttons in `PullRequestPopover` are styled
-/// `.borderedProminent` with a grey tint so the whole action row reads as
-/// uniformly-shaped capsules — only the colour distinguishes primary from
-/// secondary actions.
+/// Mark-ready / Rerun-failed buttons in `PullRequestPopover` draw their own grey
+/// capsule at matching metrics so the whole action row reads as uniformly-shaped
+/// capsules — only the colour distinguishes primary from secondary actions.
 struct MergeSplitButton: View {
   let defaultStrategy: MergeStrategy
   let isDisabled: Bool
@@ -33,25 +32,39 @@ struct MergeSplitButton: View {
       .disabled(isDisabled)
       .help(isDisabled ? (disabledReason ?? "") : "Merge with \(defaultStrategy.displayName)")
 
-      Menu {
-        ForEach(MergeStrategy.allCases, id: \.self) { strategy in
-          Button(strategy.displayName) { onMerge(strategy) }
-        }
-        Divider()
-        Menu("Set as default for this Project") {
-          ForEach(MergeStrategy.allCases, id: \.self) { strategy in
-            Button(strategy.displayName) { onSetProjectDefault(strategy) }
+      // Self-drawn caret with a clear-label Menu overlaid as the click target.
+      // The borderless-button menu style renders its label through AppKit, so
+      // inside the sidebar-anchored popover the glyph's colour is outside
+      // SwiftUI's control (`foregroundStyle` on the label is ignored) and the
+      // disabled dimming erased it entirely on dark backgrounds. Drawing the
+      // glyph ourselves keeps it `.primary`-adaptive in both schemes and lets
+      // the disabled state dim without vanishing; the transparent Menu on top
+      // still opens the strategy menu.
+      Image(systemName: "chevron.down")
+        .imageScale(.small)
+        .foregroundStyle(.primary)
+        .opacity(isDisabled ? 0.35 : 1)
+        .padding(.horizontal, 6)
+        .accessibilityHidden(true)
+        .overlay {
+          Menu {
+            ForEach(MergeStrategy.allCases, id: \.self) { strategy in
+              Button(strategy.displayName) { onMerge(strategy) }
+            }
+            Divider()
+            Menu("Set as default for this Project") {
+              ForEach(MergeStrategy.allCases, id: \.self) { strategy in
+                Button(strategy.displayName) { onSetProjectDefault(strategy) }
+              }
+            }
+          } label: {
+            Color.clear
           }
+          .menuStyle(.borderlessButton)
+          .menuIndicator(.hidden)
+          .disabled(isDisabled)
         }
-      } label: {
-        Image(systemName: "chevron.down")
-          .imageScale(.small)
-          .padding(.horizontal, 6)
-      }
-      .menuStyle(.borderlessButton)
-      .menuIndicator(.hidden)
-      .disabled(isDisabled)
-      .fixedSize()
+        .fixedSize()
     }
     .background(
       // Matches the corner radius of macOS 26's `.borderedProminent`
