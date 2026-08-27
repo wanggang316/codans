@@ -11,9 +11,11 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
   public var cachedDisplayTitle: String?
   /// Per-tab accent color for the active underline stripe. `nil` = system accent.
   public var color: TabColor?
-  /// SF Symbol name shown in the tab chip. `nil` means "let the auto
-  /// fallback decide" — the runtime computes a default from the
-  /// foreground job. See `iconLock` for who last wrote the icon.
+  /// Glyph shown in the tab chip: an SF Symbol name, or an
+  /// `agent:<kind>` reference to a bundled brand mark (see `TabIconRef`).
+  /// `nil` means "let the auto fallback decide" — the runtime computes a
+  /// default from the foreground job. See `iconLock` for who last wrote
+  /// the icon.
   public var icon: String?
   /// Authority of the most recent icon write. `.user` and `.script`
   /// stick across auto re-derivation; `.auto` writes are best-effort

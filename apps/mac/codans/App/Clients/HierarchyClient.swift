@@ -1056,7 +1056,10 @@ extension HierarchyClient {
       kind: .custom,
       name: profile.displayName,
       command: AgentLaunchCommand.render(profile: profile),
-      systemImage: "sparkles",
+      // Brand mark rather than a generic glyph: the tab chip resolves the
+      // `agent:` reference to the same asset the Agents pane and the
+      // toolbar menu show, so one agent reads the same across surfaces.
+      systemImage: profile.tabIcon,
       target: profile.target,
       direction: profile.direction,
       onFinished: .none,

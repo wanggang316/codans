@@ -22,6 +22,11 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
   /// Unchecked profiles stay configured but are hidden from the toolbar
   /// Agents menu. Mirrors the list pane's leading checkbox.
   public var isEnabled: Bool
+  /// SF Symbol that replaces the agent's brand mark wherever this profile
+  /// is drawn — list row, toolbar button, menu, spawned tab. `nil` keeps
+  /// the brand mark. Lets two profiles for the same agent be told apart at
+  /// a glance (a "Plan" Claude Code next to a "Build" one).
+  public var systemImage: String?
 
   public var modelID: String?
   public var reasoningEffortID: String?
@@ -50,6 +55,7 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
     kind: AgentKind,
     name: String = "",
     isEnabled: Bool = true,
+    systemImage: String? = nil,
     modelID: String? = nil,
     reasoningEffortID: String? = nil,
     executionModeID: String? = nil,
@@ -63,6 +69,7 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
     self.kind = kind
     self.name = name
     self.isEnabled = isEnabled
+    self.systemImage = systemImage
     self.modelID = modelID
     self.reasoningEffortID = reasoningEffortID
     self.executionModeID = executionModeID
@@ -80,6 +87,22 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
 
   public var descriptor: AgentDescriptor {
     AgentCatalog.descriptor(for: kind)
+  }
+
+  /// Glyph identity for every surface that draws this profile. Falls back
+  /// to the agent's brand mark when the user has set no override.
+  public var icon: AgentIconRef {
+    if let systemImage, !systemImage.isEmpty { return .symbol(systemImage) }
+    return .brand(kind)
+  }
+
+  /// Value written to `Tab.icon` for a tab this profile spawns. The two
+  /// `AgentIconRef` cases map onto the two `Tab.icon` forms exactly.
+  public var tabIcon: String {
+    switch icon {
+    case .brand(let kind): return TabIconRef.icon(for: kind)
+    case .symbol(let name): return name
+    }
   }
 
   // MARK: - Seeding
@@ -123,7 +146,7 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
   // MARK: - Codable
 
   private enum CodingKeys: String, CodingKey {
-    case id, kind, name, isEnabled
+    case id, kind, name, isEnabled, systemImage
     case modelID, reasoningEffortID, executionModeID
     case target, direction
     case extraArguments, envVars, usesDedicatedHome
@@ -135,6 +158,7 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
     self.kind = try c.decode(AgentKind.self, forKey: .kind)
     self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
     self.isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+    self.systemImage = try c.decodeIfPresent(String.self, forKey: .systemImage)
     self.modelID = try c.decodeIfPresent(String.self, forKey: .modelID)
     self.reasoningEffortID = try c.decodeIfPresent(String.self, forKey: .reasoningEffortID)
     self.executionModeID = try c.decodeIfPresent(String.self, forKey: .executionModeID)
@@ -153,6 +177,7 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
     try c.encode(kind, forKey: .kind)
     if !name.isEmpty { try c.encode(name, forKey: .name) }
     if !isEnabled { try c.encode(isEnabled, forKey: .isEnabled) }
+    try c.encodeIfPresent(systemImage, forKey: .systemImage)
     try c.encodeIfPresent(modelID, forKey: .modelID)
     try c.encodeIfPresent(reasoningEffortID, forKey: .reasoningEffortID)
     try c.encodeIfPresent(executionModeID, forKey: .executionModeID)

@@ -1,3 +1,4 @@
+import CodansCore
 import SwiftUI
 
 /// The text portion of a tab chip. Kept separate from the chip container so
@@ -17,10 +18,11 @@ struct TabChipLabel: View {
   /// Unread dot. Rendered as a 4 px filled circle immediately before
   /// the title text. Boolean only — no count, no kind distinction.
   var hasUnreadNotification: Bool = false
-  /// Resolved SF Symbol from `Tab.resolvedIcon`. The running-spinner and
-  /// bell still claim their slots first; the icon prefixes the title
-  /// only when those quieter signals are absent so the chip never tries
-  /// to render three leading glyphs at once.
+  /// Resolved glyph from `Tab.resolvedIcon` — an SF Symbol name, or an
+  /// `agent:<kind>` brand reference (see `TabIconRef`). The
+  /// running-spinner and bell still claim their slots first; the icon
+  /// prefixes the title only when those quieter signals are absent so the
+  /// chip never tries to render three leading glyphs at once.
   var icon: String? = nil
   /// Tint applied to `icon` while this tab's dedicated run-script pane is
   /// executing. A run tab keeps its script glyph instead of swapping to
@@ -40,9 +42,11 @@ struct TabChipLabel: View {
           .foregroundStyle(.orange)
           .accessibilityLabel("Has unread notifications")
       } else if let icon, !icon.isEmpty {
-        Image(systemName: icon)
+        glyph(for: icon)
           .font(.system(size: 10))
-          .foregroundStyle(iconTint ?? (isActive ? TabBarColors.activeText : TabBarColors.inactiveText))
+          .foregroundStyle(
+            iconTint ?? (isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
+          )
           .accessibilityHidden(true)
       }
       Text(title)
@@ -50,6 +54,24 @@ struct TabChipLabel: View {
         .truncationMode(.middle)
         .font(.caption)
         .foregroundStyle(isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
+    }
+  }
+
+  /// Brand mark for an `agent:<kind>` reference, SF Symbol otherwise. The
+  /// brand asset is template-rendered and boxed to the SF Symbol's optical
+  /// size so both paths sit on the same baseline and inherit the same tint.
+  @ViewBuilder
+  private func glyph(for icon: String) -> some View {
+    if let kind = TabIconRef.agentKind(from: icon) {
+      Image(AgentCatalog.descriptor(for: kind).iconAssetName)
+        .renderingMode(.template)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 11, height: 11)
+        .accessibilityHidden(true)
+    } else {
+      Image(systemName: icon)
+        .accessibilityHidden(true)
     }
   }
 }

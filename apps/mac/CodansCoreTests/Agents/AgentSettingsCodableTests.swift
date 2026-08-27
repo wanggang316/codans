@@ -80,4 +80,40 @@ struct AgentSettingsCodableTests {
       #expect(!descriptor.displayName.isEmpty)
     }
   }
+
+  @Test
+  func iconFallsBackToTheBrandMarkAndOverridesToASymbol() {
+    var profile = AgentProfile(kind: .codex)
+    #expect(profile.icon == .brand(.codex))
+    #expect(profile.tabIcon == "agent:codex")
+
+    profile.systemImage = "sparkles"
+    #expect(profile.icon == .symbol("sparkles"))
+    #expect(profile.tabIcon == "sparkles")
+
+    // An empty string is a cleared override, not a nameless symbol — the
+    // picker writes "" when the user empties the text field.
+    profile.systemImage = ""
+    #expect(profile.icon == .brand(.codex))
+  }
+
+  @Test
+  func tabIconReferencesRoundTripAndRejectPlainSymbols() {
+    for kind in AgentKind.allCases {
+      #expect(TabIconRef.agentKind(from: TabIconRef.icon(for: kind)) == kind)
+    }
+    // Plain SF Symbols and unknown agents both fall through to the
+    // SF-Symbol render path rather than resolving to a bogus kind.
+    #expect(TabIconRef.agentKind(from: "sparkles") == nil)
+    #expect(TabIconRef.agentKind(from: "agent:not-an-agent") == nil)
+  }
+
+  @Test
+  func iconOverrideSurvivesARoundTripAndSwappingAgentsKeepsIt() throws {
+    let profile = AgentProfile(kind: .codex, systemImage: "bolt.fill")
+    let decoded = try JSONDecoder().decode(
+      AgentProfile.self, from: JSONEncoder().encode(profile))
+    #expect(decoded.systemImage == "bolt.fill")
+    #expect(decoded.icon == .symbol("bolt.fill"))
+  }
 }

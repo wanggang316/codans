@@ -2,7 +2,7 @@ import AppKit
 import CodansCore
 import SwiftUI
 
-/// Agent brand glyph sized for a native menu row.
+/// Agent glyph sized for a native menu row.
 ///
 /// A bare `Image("codex")` inside a `Menu`'s `Label` renders at the asset's
 /// intrinsic size — SwiftUI's usual `.resizable().frame(…)` chain does not
@@ -15,7 +15,25 @@ enum AgentMenuIcon {
   static let size: CGFloat = 14
 
   static func image(for kind: AgentKind) -> Image {
-    let assetName = AgentCatalog.descriptor(for: kind).iconAssetName
+    image(for: .brand(kind))
+  }
+
+  static func image(for icon: AgentIconRef) -> Image {
+    switch icon {
+    case .brand(let kind):
+      return brandImage(assetName: AgentCatalog.descriptor(for: kind).iconAssetName)
+    case .symbol(let name):
+      let configuration = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
+      guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil),
+        let sized = base.withSymbolConfiguration(configuration)
+      else {
+        return Image(systemName: name)
+      }
+      return Image(nsImage: sized)
+    }
+  }
+
+  private static func brandImage(assetName: String) -> Image {
     guard let base = NSImage(named: assetName) else {
       return Image(systemName: "sparkles")
     }
