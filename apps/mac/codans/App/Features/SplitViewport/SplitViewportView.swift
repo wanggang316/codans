@@ -9,8 +9,10 @@ import SwiftUI
 /// `PaneHostFeature`; this view only bridges catalog changes into the
 /// reducer via `.panesInActiveTabChanged(_:)`.
 ///
-/// Empty-Tab UX: centered "No panes" placeholder with a "New Pane" button.
-/// The Tab is never auto-closed by this view.
+/// Empty-Tab UX: centered "No panes" placeholder with a "New Pane" button,
+/// held back for `emptyStateGrace` so a Tab that is still seeding its first
+/// Pane shows `warmingPlaceholder` instead. The Tab is never auto-closed by
+/// this view.
 struct SplitViewportView: View {
   @Bindable var store: StoreOf<SplitViewportFeature>
   let projectID: ProjectID
@@ -22,6 +24,17 @@ struct SplitViewportView: View {
   /// follows the cursor across panes and always clears on drop — see
   /// `PaneDropHighlight`.
   @State private var dropHighlight = PaneDropHighlight()
+  /// False until `emptyStateGrace` has elapsed for the current Tab — see
+  /// `warmingPlaceholder` for why the empty state is held back that long.
+  /// Re-armed per `tabID`, so switching Tabs starts a fresh window while a
+  /// Tab that empties out *later* (the user closed its last Pane) keeps the
+  /// flag true and shows the affordance immediately, which is the settled
+  /// state the placeholder is actually for.
+  @State private var emptyStateSettled = false
+
+  /// How long a just-shown Tab is allowed to look empty before the
+  /// actionable "No panes" affordance appears.
+  private static let emptyStateGrace: Duration = .milliseconds(400)
 
   var body: some View {
     Group {
@@ -36,13 +49,37 @@ struct SplitViewportView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(dropHighlight)
-      } else {
+      } else if emptyStateSettled {
         emptyPlaceholder
+      } else {
+        warmingPlaceholder
       }
     }
     .task(id: currentPaneSeedsKey()) {
       syncPaneHosts()
     }
+    .task(id: tabID) {
+      emptyStateSettled = false
+      try? await Task.sleep(for: Self.emptyStateGrace)
+      emptyStateSettled = true
+    }
+  }
+
+  /// Neutral stand-in for a Tab whose first Pane row has not landed yet.
+  /// Opening a Tab is two steps — the Tab row is inserted synchronously,
+  /// its first Pane follows once the async zmx bringup path reaches
+  /// `createPaneRow` — so a brand-new (or just-switched-to) Tab renders
+  /// with an empty split tree for a frame or two. Showing `emptyPlaceholder`
+  /// in that window flashes a prominent "New Pane" call to action the user
+  /// never needs to press. This mirrors `LeafView`'s cold-pane branch —
+  /// small spinner over Ghostty's terminal background — so the whole
+  /// empty → spinning-up → live progression stays on a single tone.
+  private var warmingPlaceholder: some View {
+    let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
+    return ProgressView()
+      .controlSize(.small)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(nsColor: terminalBackground))
   }
 
   private var emptyPlaceholder: some View {
