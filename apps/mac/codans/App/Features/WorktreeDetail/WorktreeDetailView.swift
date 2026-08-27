@@ -108,27 +108,32 @@ struct WorktreeDetailView: View {
 
   @ViewBuilder
   private var detailBody: some View {
-    if let pending = activePendingWorktree {
-      // During creation the content body is JUST the live streaming output
-      // (the slimmed `WorktreeLoadingView`). The window toolbar STAYS
-      // VISIBLE via `pendingSkeletonToolbarContent`, which mirrors the real
-      // toolbar item-for-item with shimmering stand-ins — branch identity
-      // LEFT (sized from the pending name), status pill MIDDLE (plus the
-      // live inbox bell), ghost Run / Open chips RIGHT — so the chrome
-      // reads as the same toolbar and nothing shifts when the real content
-      // takes over on completion. Mirrors the normal branch's chrome
-      // wiring (`SuppressTitleModifier` so default-placement items flow
-      // leading-to-trailing; `.toolbarBackground` gated on fullscreen).
-      //
-      // The skeleton is suppressed once the row settles into `.failed`: a
-      // shimmering "still loading" cue would contradict the settled-error
-      // reading (VAL-DETAIL-004), so the failure sub-case shows no toolbar
-      // items — matching the chrome the failed state had before this view
-      // took over the toolbar.
-      let info = loadingInfo(for: pending)
-      WorktreeLoadingView(info: info)
+    if let mode = resolveDetailMode() {
+      detailContent(mode)
+        // On macOS 15+ remove the title slot entirely so default-placement
+        // toolbar items can flow leading-to-trailing with `ToolbarSpacer`
+        // controlling the layout.
+        // `.navigationTitle("")` still reserves a leading region and would
+        // push default-placement items toward the trailing edge — which is
+        // why earlier centering attempts collapsed onto the right side.
+        // macOS 14 keeps `.navigationTitle("")` + the older `.principal`
+        // zoning since `.toolbar(removing:)` is 15+.
         .modifier(SuppressTitleModifier())
-        .toolbar { pendingSkeletonToolbarContent(info: info) }
+        // ONE toolbar declaration for both modes — see
+        // `worktreeToolbarContent(mode:)` for why the creating and settled
+        // states must not each bring their own.
+        .toolbar { worktreeToolbarContent(mode: mode) }
+        // Drop the system-painted window-toolbar chrome so the macOS 26
+        // floating-sidebar overlay only blends against the detail body
+        // underneath it. Without this, the toolbar's full-window glass
+        // repaints on every toolbar-state change (tab switch rebuilds
+        // `worktreeToolbarContent`) and flickers across the area covered
+        // by the translucent sidebar.
+        //
+        // Re-show the chrome when fullscreen — without it, the sidebar `+`
+        // button and detail toolbar render over the terminal pane with
+        // nothing behind them (the title bar normally provides the visual
+        // backing).
         .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
         .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
         .onReceive(
@@ -141,8 +146,44 @@ struct WorktreeDetailView: View {
         ) { _ in
           isWindowFullscreen = Self.detectMainWindowFullscreen()
         }
-    } else if let address = resolveAddress() {
-      let info = worktreeInfo(for: address)
+    } else {
+      placeholder
+    }
+  }
+
+  /// Which worktree surface the detail column renders. Resolved once per
+  /// body evaluation and shared by the content region and the toolbar so
+  /// the two can never disagree about which state they are drawing.
+  private enum DetailMode {
+    /// A creation is streaming: the content body is JUST the live output
+    /// (the slimmed `WorktreeLoadingView`) and the toolbar slots hold
+    /// shimmering stand-ins.
+    case creating(WorktreeLoadingInfo)
+    /// A real Worktree is selected. `info` is nil only in the sliver
+    /// between a selection and the catalog rows it names being pruned out
+    /// from under it, where the toolbar renders no items.
+    case worktree(Address, WorktreeInfo?)
+  }
+
+  /// A pending creation wins over the selection: the user stays on the row
+  /// being created until it settles. The resolver in `ContentView` already
+  /// drops `activePendingWorktree` back to nil when the pending row leaves
+  /// the array (success / cancel / discard), so this view doesn't have to
+  /// track the transition itself.
+  private func resolveDetailMode() -> DetailMode? {
+    if let pending = activePendingWorktree {
+      return .creating(loadingInfo(for: pending))
+    }
+    guard let address = resolveAddress() else { return nil }
+    return .worktree(address, worktreeInfo(for: address))
+  }
+
+  @ViewBuilder
+  private func detailContent(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating(let info):
+      WorktreeLoadingView(info: info)
+    case .worktree(let address, _):
       VStack(spacing: 0) {
         // Inline branch-switch error banner. Renders itself only when
         // `branchSwitcherStore.switchError` is non-nil, so it stays a
@@ -156,41 +197,6 @@ struct WorktreeDetailView: View {
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      // On macOS 15+ remove the title slot entirely so default-placement
-      // toolbar items can flow leading-to-trailing with `ToolbarSpacer`
-      // controlling the layout.
-      // `.navigationTitle("")` still reserves a leading region and would
-      // push default-placement items toward the trailing edge — which is
-      // why earlier centering attempts collapsed onto the right side.
-      // macOS 14 keeps `.navigationTitle("")` + the older `.principal`
-      // zoning since `.toolbar(removing:)` is 15+.
-      .modifier(SuppressTitleModifier())
-      .toolbar { worktreeToolbarContent(address: address, info: info) }
-      // Drop the system-painted window-toolbar chrome so the macOS 26
-      // floating-sidebar overlay only blends against the detail body
-      // underneath it. Without this, the toolbar's full-window glass
-      // repaints on every toolbar-state change (tab switch rebuilds
-      // `worktreeToolbarContent`) and flickers across the area covered
-      // by the translucent sidebar.
-      //
-      // Re-show the chrome when fullscreen — without it, the sidebar `+`
-      // button and detail toolbar render over the terminal pane with
-      // nothing behind them (the title bar normally provides the visual
-      // backing).
-      .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
-      .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
-      .onReceive(
-        NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
-      ) { _ in
-        isWindowFullscreen = Self.detectMainWindowFullscreen()
-      }
-      .onReceive(
-        NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)
-      ) { _ in
-        isWindowFullscreen = Self.detectMainWindowFullscreen()
-      }
-    } else {
-      placeholder
     }
   }
 
@@ -254,47 +260,81 @@ struct WorktreeDetailView: View {
     }
   }
 
-  /// Window-titlebar toolbar content for the active Worktree. Branch label
-  /// on the leading edge (`.navigation` placement), bell / open-in on the
-  /// trailing edge (`.primaryAction`). Mirrors the
-  /// layout that used to live as the right cluster of the content-region
-  /// header; moving it into `.toolbar {}` reclaims vertical pixels above
-  /// the tab bar and matches macOS native chrome (Xcode, Finder).
+  /// Window-titlebar toolbar content — ONE declaration serving both the
+  /// creating and the settled state. Branch label on the leading edge,
+  /// status pill + bell at the optical center, Run / Open on the trailing
+  /// edge. Mirrors the layout that used to live as the right cluster of the
+  /// content-region header; moving it into `.toolbar {}` reclaims vertical
+  /// pixels above the tab bar and matches macOS native chrome.
+  ///
+  /// macOS 26 layout: every item in default placement, ordering plus
+  /// `ToolbarSpacer(.flexible)` splits horizontal space evenly so the
+  /// status capsule sits visually equidistant between the branch label and
+  /// the trailing buttons. Pre-26 keeps the older `.navigation` /
+  /// `.principal` / `.primaryAction` zoning since `ToolbarSpacer` is 26+.
+  ///
+  /// Both modes MUST flow through this single `.toolbar { }` with an
+  /// identical item structure. When each mode declared its own toolbar,
+  /// SwiftUI handed AppKit a completely different item set the moment a
+  /// creation started or finished; NSToolbar tore every item down and
+  /// re-inserted it, and the freshly built hosting views visibly slid in
+  /// from the window's leading edge — growing into place over a second or
+  /// more before settling. Switching only the *content* of each slot keeps
+  /// the toolbar items themselves alive, so the swap is an in-place repaint.
+  ///
+  /// Slot-for-slot the creating state mirrors the settled one, so the
+  /// flexible-spacer math resolves identically and nothing shifts when the
+  /// real content takes over:
+  ///   - LEFT: `SkeletonBranchClusterView`, sized from the pending
+  ///     worktree's REAL name + project name.
+  ///   - MIDDLE: `SkeletonStatusPillView` carrying the motivational form's
+  ///     footprint. The bell beside it stays LIVE and interactive — it is
+  ///     window-level chrome (global unread count), not worktree data.
+  ///   - RIGHT: ghost Run / Open chips holding the real buttons' footprint,
+  ///     so the trailing flexible spacer weighs the same in both modes.
+  /// The left / middle stand-ins carry the `skeleton-left` /
+  /// `skeleton-middle` accessibility ids (VAL-DETAIL-001 / VAL-DETAIL-003).
   ///
   /// `ContentView` contributes one additional trailing `ToolbarItem`
   /// (Settings gear) — SwiftUI merges both sources, with Settings rendered
   /// after the items declared here.
   @ToolbarContentBuilder
-  private func worktreeToolbarContent(
-    address: Address,
-    info: WorktreeInfo?
-  ) -> some ToolbarContent {
-    if let info {
-      // macOS 26 layout: every item in default placement, ordering
-      // plus ToolbarSpacer(.flexible) splits
-      // horizontal space evenly so the status capsule sits visually
-      // equidistant between the branch label and the trailing buttons.
-      // Pre-26 keeps the older `.navigation` / `.principal` /
-      // `.primaryAction` zoning since ToolbarSpacer is macOS 26+.
+  private func worktreeToolbarContent(mode: DetailMode) -> some ToolbarContent {
+    // `if … { }` with no else is the optional form `@ToolbarContentBuilder`
+    // supports (`buildOptional`). An empty `if`/`else` *branch* is NOT valid
+    // toolbar content (unlike `@ViewBuilder`, there is no zero-component
+    // `buildBlock`), so the suppression has to be the outer guard.
+    if hasToolbarItems(mode) {
       if #available(macOS 26.0, *) {
-        // Always render the identity cluster, even for non-git Projects —
-        // the sidebar shows the synthetic folder row in that case, and
-        // `WorktreeHeaderInfoLabel` falls through to the same folder
-        // glyph + name rendering via `isSynthetic`. Keeps the header and
-        // sidebar consistent.
-        branchToolbarItemDefault(info: info)
+        // `.sharedBackgroundVisibility(.hidden)` opts the identity cluster
+        // out of the toolbar's glass capsule so the icon + name + branch +
+        // PR stats read as plain content alongside the trailing action
+        // chips, matching the sidebar row.
+        ToolbarItem { identitySlot(mode) }
+          .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
-        centeredStatusBarToolbarItem(address: address, info: info)
+        // No `.sharedBackgroundVisibility(.hidden)` here — the status slot
+        // keeps macOS 26's standard glass capsule so it reads as a peer of
+        // the trailing button cluster instead of a hand-rolled chip.
+        ToolbarItem { statusSlot(mode) }
         // Bell is intentionally placed *immediately* after the status
         // capsule with no flexible spacer between them — keeps the
         // status / bell pair visually grouped at the window's
         // optical center.
         inboxBellToolbarItem()
         ToolbarSpacer(.flexible)
-        trailingButtonsDefault(address: address, info: info)
+        // Each trailing chip lives in its own `ToolbarItem` so the system
+        // wraps it in a separate glass capsule — two discrete chips instead
+        // of one shared cluster background. `ToolbarSpacer(.fixed)` keeps
+        // them visually distinct without collapsing the gap. No
+        // `.buttonStyle` / no manual padding: each item gets the toolbar's
+        // native glass capsule + hover state. Order: RunScript, Open.
+        ToolbarItem { runSlot(mode) }
+        ToolbarSpacer(.fixed)
+        ToolbarItem { openSlot(mode) }
       } else {
-        branchToolbarItem(info: info)
-        statusBarToolbarItem(address: address, info: info)
+        ToolbarItem(placement: .navigation) { identitySlot(mode) }
+        ToolbarItem(placement: .principal) { statusSlot(mode) }
         // Same as the modern path: bell sits adjacent to the principal
         // status item so the user reads "[status] [bell]" as one
         // cluster rather than seeing the bell in the trailing button
@@ -303,107 +343,98 @@ struct WorktreeDetailView: View {
         ToolbarItemGroup(placement: .primaryAction) {
           // Order: RunScript, Open. `ToolbarItemGroup` renders children
           // leading-to-trailing in declaration order.
-          HeaderRunScriptSplitButton(
-            store: headerStore,
-            projectID: address.project,
-            worktreeID: address.worktree
-          )
-          .buttonStyle(.plain)
-          HeaderOpenSplitButton(
-            store: headerStore,
-            editorStore: editorStore,
-            projectID: address.project,
-            worktreePath: info.worktree.path
-          )
-          .buttonStyle(.plain)
+          runSlot(mode).buttonStyle(.plain)
+          openSlot(mode).buttonStyle(.plain)
         }
       }
     }
   }
 
-  /// Window-titlebar toolbar content for the *creating* state. Mirrors
-  /// `worktreeToolbarContent` item-for-item across both OS paths so the
-  /// toolbar reads as the same chrome AND the flexible-spacer math resolves
-  /// identically — every placeholder sits where its real counterpart lands
-  /// on completion instead of jumping when the swap happens:
-  ///   - LEFT: branch-identity cluster sized from the pending worktree's
-  ///     REAL name + project name (`SkeletonBranchClusterView`).
-  ///   - MIDDLE: status pill with the motivational form's footprint
-  ///     (`SkeletonStatusPillView`), plus the LIVE inbox bell — the bell is
-  ///     window-level chrome (global unread count), not worktree data, so
-  ///     it stays real and interactive during creation.
-  ///   - RIGHT: ghost Run / Open chips (`SkeletonActionChipView`). Not
-  ///     actionable yet, but they anchor the trailing flexible spacer with
-  ///     the real button cluster's footprint — replacing the old hidden
-  ///     1×1 anchor, whose near-zero width skewed the spacer split and let
-  ///     the middle slot drift by ~half the button cluster's width.
-  /// The left / middle placeholders carry the `skeleton-left` /
-  /// `skeleton-middle` accessibility ids — the same contract keys that used
-  /// to ride the loading-view body — so a probe finds them on the toolbar
-  /// (VAL-DETAIL-001 / VAL-DETAIL-003).
-  ///
-  /// `info.isFailure` suppresses every item: a settled `.failed` creation
-  /// is not "still loading", so the placeholders are dropped and the
-  /// toolbar renders empty (VAL-DETAIL-004).
-  @ToolbarContentBuilder
-  private func pendingSkeletonToolbarContent(info: WorktreeLoadingInfo) -> some ToolbarContent {
-    // `if !isFailure { … }` with no else is the optional form `@ToolbarContentBuilder`
-    // supports (`buildOptional`) — it renders nothing for a settled failure.
-    // An empty `if`/`else` *branch* is NOT valid toolbar content (unlike
-    // `@ViewBuilder`, there is no zero-component `buildBlock`), so the
-    // suppression has to be the outer guard.
-    if !info.isFailure {
-      if #available(macOS 26.0, *) {
-        // Leading branch-identity placeholder. `.sharedBackgroundVisibility(.hidden)`
-        // matches the real `branchToolbarItemDefault` so the slot reads as plain
-        // content, not a glass capsule.
-        ToolbarItem {
-          SkeletonBranchClusterView(name: info.name, projectName: info.repositoryName)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
-        }
-        .sharedBackgroundVisibility(.hidden)
-        ToolbarSpacer(.flexible)
-        // Centered status placeholder in the toolbar's default glass capsule —
-        // the same chrome `centeredStatusBarToolbarItem` gets. The bell rides
-        // immediately after with no spacer, mirroring the real status / bell
-        // pairing at the optical center.
-        ToolbarItem {
-          SkeletonStatusPillView()
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
-        }
-        inboxBellToolbarItem()
-        ToolbarSpacer(.flexible)
-        // Ghost trailing chips: same item structure as `trailingButtonsDefault`
-        // (item / fixed spacer / item) so each gets its own glass capsule and
-        // the trailing zone weighs what the real buttons will.
-        ToolbarItem {
-          SkeletonActionChipView(labelText: "Run")
-        }
-        ToolbarSpacer(.fixed)
-        ToolbarItem {
-          SkeletonActionChipView(labelText: "Finder")
-        }
-      } else {
-        // Pre-26 fallback: the same zoning the real path uses —
-        // `.navigation` branch slot, `.principal` status slot, default-
-        // placement bell, `.primaryAction` trailing chips.
-        ToolbarItem(placement: .navigation) {
-          SkeletonBranchClusterView(name: info.name, projectName: info.repositoryName)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
-        }
-        ToolbarItem(placement: .principal) {
-          SkeletonStatusPillView()
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
-        }
-        inboxBellToolbarItem()
-        ToolbarItemGroup(placement: .primaryAction) {
-          SkeletonActionChipView(labelText: "Run")
-          SkeletonActionChipView(labelText: "Finder")
-        }
+  /// Toolbar items are suppressed in exactly two states: a settled creation
+  /// failure — a shimmering "still loading" cue would contradict the
+  /// settled-error reading (VAL-DETAIL-004), so the failed state renders
+  /// the same empty chrome it had before this view owned the toolbar — and
+  /// a selection whose catalog rows were pruned out from under it.
+  private func hasToolbarItems(_ mode: DetailMode) -> Bool {
+    switch mode {
+    case .creating(let loading): return !loading.isFailure
+    case .worktree(_, let info): return info != nil
+    }
+  }
+
+  @ViewBuilder
+  private func identitySlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating(let loading):
+      SkeletonBranchClusterView(name: loading.name, projectName: loading.repositoryName)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonLeft)
+    case .worktree(_, let info):
+      // Always render the identity cluster, even for non-git Projects —
+      // the sidebar shows the synthetic folder row in that case, and
+      // `WorktreeHeaderInfoLabel` falls through to the same folder glyph +
+      // name rendering via `isSynthetic`. Keeps header and sidebar
+      // consistent.
+      if let info {
+        WorktreeHeaderInfoLabel(
+          worktree: info.worktree,
+          project: info.project,
+          gitHubStore: gitHubStore,
+          branchSwitcherStore: branchSwitcherStore
+        )
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func statusSlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating:
+      SkeletonStatusPillView()
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
+    case .worktree(let address, let info):
+      if let info {
+        StatusBarView(
+          store: statusBarStore,
+          gitHubStore: gitHubStore,
+          worktreeID: address.worktree,
+          worktreePath: URL(fileURLWithPath: info.worktree.path),
+          branch: info.worktree.branch
+        )
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func runSlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating:
+      SkeletonActionChipView(labelText: "Run")
+    case .worktree(let address, let info):
+      if info != nil {
+        HeaderRunScriptSplitButton(
+          store: headerStore,
+          projectID: address.project,
+          worktreeID: address.worktree
+        )
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func openSlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating:
+      SkeletonActionChipView(labelText: "Finder")
+    case .worktree(let address, let info):
+      if let info {
+        HeaderOpenSplitButton(
+          store: headerStore,
+          editorStore: editorStore,
+          projectID: address.project,
+          worktreePath: info.worktree.path
+        )
       }
     }
   }
@@ -414,114 +445,6 @@ struct WorktreeDetailView: View {
       InboxBellView(
         onFocusHierarchyPath: onFocusHierarchyPath,
         popoverTrigger: inboxBellPopoverTrigger
-      )
-    }
-  }
-
-  /// macOS 26 leading identity item. Default placement so it sits before
-  /// the leading `ToolbarSpacer(.flexible)` and reads as the leftmost
-  /// chip. `.sharedBackgroundVisibility(.hidden)` opts the cluster out
-  /// of the toolbar's glass capsule so the icon + name + branch + PR
-  /// stats read as plain content alongside the trailing action chips,
-  /// matching the sidebar row.
-  @available(macOS 26.0, *)
-  @ToolbarContentBuilder
-  private func branchToolbarItemDefault(info: WorktreeInfo) -> some ToolbarContent {
-    ToolbarItem {
-      WorktreeHeaderInfoLabel(
-        worktree: info.worktree,
-        project: info.project,
-        gitHubStore: gitHubStore,
-        branchSwitcherStore: branchSwitcherStore
-      )
-    }
-    .sharedBackgroundVisibility(.hidden)
-  }
-
-  /// macOS 26 trailing buttons. Each lives in its own `ToolbarItem` so
-  /// the system wraps it in a separate glass capsule — two discrete
-  /// chips instead of one shared cluster background. `ToolbarSpacer(.fixed)`
-  /// between siblings keeps them visually distinct without collapsing
-  /// the gap. Default placement; ordering after the trailing flexible
-  /// spacer pins the row to the right edge.
-  @available(macOS 26.0, *)
-  @ToolbarContentBuilder
-  private func trailingButtonsDefault(
-    address: Address, info: WorktreeInfo
-  ) -> some ToolbarContent {
-    // No `.buttonStyle` / no manual padding — each ToolbarItem gets
-    // the toolbar's native glass capsule + hover state.
-    //
-    // Order: RunScript, Open.
-    ToolbarItem {
-      HeaderRunScriptSplitButton(
-        store: headerStore,
-        projectID: address.project,
-        worktreeID: address.worktree
-      )
-    }
-    ToolbarSpacer(.fixed)
-    ToolbarItem {
-      HeaderOpenSplitButton(
-        store: headerStore,
-        editorStore: editorStore,
-        projectID: address.project,
-        worktreePath: info.worktree.path
-      )
-    }
-  }
-
-  @ToolbarContentBuilder
-  private func branchToolbarItem(info: WorktreeInfo) -> some ToolbarContent {
-    let item = ToolbarItem(placement: .navigation) {
-      WorktreeHeaderInfoLabel(
-        worktree: info.worktree,
-        project: info.project,
-        gitHubStore: gitHubStore,
-        branchSwitcherStore: branchSwitcherStore
-      )
-    }
-    if #available(macOS 26.0, *) {
-      item.sharedBackgroundVisibility(.hidden)
-    } else {
-      item
-    }
-  }
-
-  @ToolbarContentBuilder
-  private func statusBarToolbarItem(address: Address, info: WorktreeInfo) -> some ToolbarContent {
-    // No `.sharedBackgroundVisibility(.hidden)` — let macOS 26's toolbar
-    // provide the standard glass capsule so the status slot reads as a
-    // peer of the trailing button cluster instead of a hand-rolled chip.
-    // Used as the pre-26 fallback when `ToolbarSpacer` is unavailable.
-    ToolbarItem(placement: .principal) {
-      StatusBarView(
-        store: statusBarStore,
-        gitHubStore: gitHubStore,
-        worktreeID: address.worktree,
-        worktreePath: URL(fileURLWithPath: info.worktree.path),
-        branch: info.worktree.branch
-      )
-    }
-  }
-
-  /// macOS 26+ variant. Uses default placement so the surrounding
-  /// `ToolbarSpacer(.flexible)` pair distributes free horizontal space
-  /// equally on both sides — making the status capsule visually
-  /// equidistant from the branch label and the trailing button cluster
-  /// (instead of pinned to the title-bar's geometric center).
-  @available(macOS 26.0, *)
-  @ToolbarContentBuilder
-  private func centeredStatusBarToolbarItem(
-    address: Address, info: WorktreeInfo
-  ) -> some ToolbarContent {
-    ToolbarItem {
-      StatusBarView(
-        store: statusBarStore,
-        gitHubStore: gitHubStore,
-        worktreeID: address.worktree,
-        worktreePath: URL(fileURLWithPath: info.worktree.path),
-        branch: info.worktree.branch
       )
     }
   }

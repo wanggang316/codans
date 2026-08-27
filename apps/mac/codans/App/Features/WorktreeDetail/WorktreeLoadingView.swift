@@ -86,7 +86,7 @@ struct WorktreeLoadingInfo: Equatable {
 /// streaming tail — centered in the pane. The branch-identity + status
 /// **skeleton placeholder blocks** (`skeleton-left` / `skeleton-middle`)
 /// live in the **window toolbar** during creation, rendered by
-/// `WorktreeDetailView.pendingSkeletonToolbarContent` so they sit exactly
+/// `WorktreeDetailView.worktreeToolbarContent` so they sit exactly
 /// where the real branch label + status pill appear on completion. The
 /// failure path swaps the body for a centered warning glyph + message.
 ///
@@ -108,7 +108,7 @@ struct WorktreeLoadingView: View {
   ///     take over on completion (this whole view is replaced).
   ///   - `skeleton-left`   — branch/icon-identity placeholder block. Lives in
   ///     the **window toolbar** during creation (rendered by
-  ///     `WorktreeDetailView.pendingSkeletonToolbarContent`), not in this
+  ///     `WorktreeDetailView.worktreeToolbarContent`), not in this
   ///     content body — the constant is defined here because it tags the
   ///     loading surface's contract; the view that wears it sits in the
   ///     toolbar.
@@ -149,7 +149,7 @@ struct WorktreeLoadingView: View {
   ///
   /// The skeleton placeholders for the branch-identity (`skeleton-left`) and
   /// status (`skeleton-middle`) regions live in the **window toolbar** now —
-  /// see `WorktreeDetailView.pendingSkeletonToolbarContent`, which renders
+  /// see `WorktreeDetailView.worktreeToolbarContent`, which renders
   /// them while `activePendingWorktree != nil` so the placeholders sit exactly
   /// where the real branch label + status pill appear on completion. This
   /// content body therefore carries NO skeleton blocks: just the worktree
