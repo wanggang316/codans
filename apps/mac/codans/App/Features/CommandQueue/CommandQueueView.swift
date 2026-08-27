@@ -37,21 +37,28 @@ struct CommandQueueView: View {
         queueList
       }
       .frame(maxWidth: 560)
-      // SwiftUI's own material rather than `VisualEffectBackground`. The
-      // AppKit bridge is an NSView in a `.background`, and this card — unlike
-      // the Command Palette's — is full of AppKit-backed controls (segmented
-      // picker, date picker, toggle, stepper field). Mixing the two lets the
-      // effect view escape SwiftUI's z-order and composite a blurred slab
-      // over its own content.
+      // Opaque, deliberately — no blur of any kind.
+      //
+      // Both a translucent `Material` and an `NSVisualEffectView` backdrop
+      // produced the same defect here: a blurred slab, correctly clipped to
+      // nothing, floating over the card AND the terminal below it, vanishing
+      // with the panel. A backdrop filter needs its own compositing layer by
+      // construction, and that layer was escaping the card's `clipShape` and
+      // rendering at a stale frame. A flat fill needs no layer of its own —
+      // it draws straight into the parent's display list — so the whole
+      // class of defect goes away. It also reads better over a busy
+      // terminal, which is what is always behind this card.
       .background(
-        .ultraThickMaterial,
-        in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+          .fill(Color(nsColor: .windowBackgroundColor))
       )
       .overlay(
         RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-          .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+          .stroke(Color.primary.opacity(0.12), lineWidth: 1)
       )
       .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+      // Restores the sense of a floating panel that the blur used to carry.
+      .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
       .padding(.top, 80)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -106,13 +113,7 @@ struct CommandQueueView: View {
           return .handled
         }
 
-      Picker("", selection: $store.mode.sending(\.modeChanged)) {
-        ForEach(CommandQueueFeature.State.Mode.allCases, id: \.self) { mode in
-          Text(mode.title).tag(mode)
-        }
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
+      modeSelector
 
       if store.mode == .scheduled {
         scheduleControls
@@ -132,6 +133,51 @@ struct CommandQueueView: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
+  }
+
+  /// Self-drawn three-way selector instead of `Picker(.segmented)`.
+  ///
+  /// `.segmented` is an `NSSegmentedControl`, and this codebase has a
+  /// standing rule that AppKit controls hosted inside a floating overlay
+  /// misbehave in ways that are cheaper to sidestep than to diagnose (the
+  /// same reasoning retired the tinted `borderedProminent` label in the PR
+  /// popover). Drawing it ourselves also lets the selected segment keep a
+  /// legible label in both colour schemes rather than inheriting whatever
+  /// contrast AppKit picks for a tinted segment.
+  private var modeSelector: some View {
+    HStack(spacing: 2) {
+      ForEach(CommandQueueFeature.State.Mode.allCases, id: \.self) { mode in
+        modeSegment(mode)
+      }
+    }
+    .padding(2)
+    .background(
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(Color.primary.opacity(0.06))
+    )
+  }
+
+  private func modeSegment(_ mode: CommandQueueFeature.State.Mode) -> some View {
+    let selected = store.mode == mode
+    return Button {
+      store.send(.modeChanged(mode))
+    } label: {
+      Text(mode.title)
+        .font(.system(size: 12, weight: selected ? .semibold : .regular))
+        // White on the accent fill in both schemes — the accent is
+        // saturated enough that a `.primary` label would wash out in light
+        // mode and disappear in dark.
+        .foregroundStyle(selected ? Color.white : Color.primary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 5)
+        .background(
+          RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(selected ? Color.accentColor : Color.clear)
+        )
+        .contentShape(.rect)
+    }
+    .buttonStyle(.plain)
+    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
   }
 
   private var scheduleControls: some View {
