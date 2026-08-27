@@ -18,10 +18,6 @@ import SwiftUI
 struct HeaderAgentSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
   @Environment(SettingsStore.self) private var settingsStore
-  /// App-scoped install probe. A profile whose CLI is missing is dropped from
-  /// the menu entirely — the Agents settings pane already greys it out, and
-  /// offering it here would only spawn a pane that prints "command not found".
-  @Environment(AgentInstallationStore.self) private var installation
 
   var body: some View {
     // Read the profiles once, here, inside body — Observation only tracks
@@ -30,7 +26,6 @@ struct HeaderAgentSplitButton: View {
     // cached NSMenu instead of serving stale items. Same rationale as
     // `HeaderRunScriptSplitButton`.
     let profiles = settingsStore.settings.agents.enabledProfiles
-      .filter { installation.isInstalled($0.kind) }
     let primary = profiles.first
     let primaryName = primary?.displayName ?? "Agents"
 
@@ -42,7 +37,7 @@ struct HeaderAgentSplitButton: View {
       // fight a custom leading glyph.
       HStack(spacing: 6) {
         if let primary {
-          AgentLogoView(kind: primary.kind, size: 16, tint: .primary)
+          AgentLogoView(icon: primary.icon, size: 16, tint: .primary)
         } else {
           Image(systemName: "sparkles")
             .frame(width: 16, height: 16)
@@ -77,7 +72,7 @@ struct HeaderAgentSplitButton: View {
           } icon: {
             // The Label's Text already announces the profile; letting
             // VoiceOver read the glyph too would double-speak it.
-            AgentMenuIcon.image(for: profile.kind)
+            AgentMenuIcon.image(for: profile.icon)
               .accessibilityHidden(true)
           }
         }
@@ -94,7 +89,7 @@ struct HeaderAgentSplitButton: View {
   /// invalidates the cached NSMenu.
   private static func identitySignature(of profiles: [AgentProfile]) -> String {
     profiles
-      .map { "\($0.id)|\($0.displayName)|\($0.kind.rawValue)" }
+      .map { "\($0.id)|\($0.displayName)|\($0.kind.rawValue)|\($0.systemImage ?? "")" }
       .joined(separator: "·")
   }
 }
