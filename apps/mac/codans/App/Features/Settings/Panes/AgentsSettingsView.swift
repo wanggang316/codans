@@ -7,7 +7,8 @@ import SwiftUI
 /// Navigation is a local `@State` swap rather than a nested `NavigationStack`
 /// on purpose — this pane lives in the detail column of the Settings window's
 /// `NavigationSplitView`, and a nested stack would fight the window for the
-/// `navigationTitle` binding. The back button below restores the list.
+/// `navigationTitle` binding. The detail screen contributes a `.navigation`
+/// toolbar item that returns here.
 ///
 /// Reads come from `@Environment(SettingsStore.self)` so an edit in the
 /// detail screen reflects in the list without a manual refresh; writes go
@@ -52,24 +53,25 @@ struct AgentsSettingsView: View {
           row(for: profile)
         }
         addRow
-      } header: {
-        Text("Agent Profiles")
       } footer: {
         Text(
-          "Named launch presets for the agents installed on this Mac, available from the "
-            + "worktree toolbar's Agents menu. Profiles for an agent codans cannot find on "
-            + "your PATH are shown greyed out."
+          "Named launch presets available from the worktree toolbar's Agents menu. A dimmed "
+            + "row means codans could not find that agent on your shell's PATH."
         )
       }
     }
     .formStyle(.grouped)
   }
 
-  /// One profile row: enable checkbox, brand glyph, name, the agent it
-  /// launches, and a chevron into the detail screen. An agent that is not
-  /// installed renders the whole row secondary and blocks the checkbox — the
-  /// profile stays editable (tap through to the detail screen) but cannot be
-  /// armed for a launch that would only produce "command not found".
+  /// One profile row: enable checkbox, brand glyph, name, and a chevron
+  /// into the detail screen. The agent behind the profile is carried by the
+  /// glyph alone — spelling it out again on the trailing edge only repeats
+  /// the name for every profile the user has not renamed.
+  ///
+  /// An agent codans could not find on the user's shell PATH renders
+  /// secondary. That is a hint, not a gate: the probe can be wrong in the
+  /// "missing" direction (see `AgentInstallationStore`), so the checkbox
+  /// stays live and the profile stays launchable.
   ///
   /// The checkbox is a sibling of — not nested inside — the navigating
   /// Button: a `LabeledContent` row with an `onTapGesture` does not reliably
@@ -81,7 +83,7 @@ struct AgentsSettingsView: View {
     HStack(spacing: 8) {
       Toggle(
         isOn: Binding(
-          get: { profile.isEnabled && installed },
+          get: { profile.isEnabled },
           set: { newValue in
             var updated = profile
             updated.isEnabled = newValue
@@ -93,20 +95,16 @@ struct AgentsSettingsView: View {
       }
       .labelsHidden()
       .toggleStyle(.checkbox)
-      .disabled(!installed)
       .accessibilityLabel("Enable \(profile.displayName)")
 
       Button {
         editingProfileID = profile.id
       } label: {
         HStack(spacing: 8) {
-          AgentLogoView(kind: profile.kind, size: 16, tint: installed ? .primary : .tertiary)
+          AgentLogoView(icon: profile.icon, size: 16, tint: installed ? .primary : .tertiary)
           Text(profile.displayName)
             .lineLimit(1)
           Spacer(minLength: 12)
-          Text(profile.descriptor.displayName)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
           Image(systemName: "chevron.right")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
@@ -115,7 +113,7 @@ struct AgentsSettingsView: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .accessibilityHint(installed ? "Edit profile" : "Agent not installed — edit profile")
+      .accessibilityHint(installed ? "Edit profile" : "Agent not found on PATH — edit profile")
     }
     .foregroundStyle(installed ? .primary : .secondary)
   }

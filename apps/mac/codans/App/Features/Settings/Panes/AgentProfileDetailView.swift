@@ -25,17 +25,12 @@ struct AgentProfileDetailView: View {
   let onBack: () -> Void
 
   @State private var isConfirmingRemoval = false
+  @State private var isPickingIcon = false
 
   private var descriptor: AgentDescriptor { profile.descriptor }
 
   var body: some View {
     Form {
-      Section {
-        backButton
-      }
-      .listRowInsets(EdgeInsets())
-      .listRowBackground(Color.clear)
-
       if !isInstalled {
         Section {
           Label(
@@ -59,6 +54,18 @@ struct AgentProfileDetailView: View {
       }
     }
     .formStyle(.grouped)
+    // Window-toolbar back affordance, not a row in the form: this is the
+    // same place System Settings puts it, and the detail column's toolbar
+    // merges into the Settings window's own.
+    .toolbar {
+      ToolbarItem(placement: .navigation) {
+        Button(action: onBack) {
+          Image(systemName: "chevron.backward")
+        }
+        .help("Back to Agents")
+        .accessibilityLabel("Back to Agents")
+      }
+    }
     .confirmationDialog(
       "Remove \"\(profile.displayName)\"?",
       isPresented: $isConfirmingRemoval,
@@ -69,16 +76,6 @@ struct AgentProfileDetailView: View {
     } message: {
       Text("The profile disappears from the toolbar Agents menu. The agent itself is untouched.")
     }
-  }
-
-  // MARK: - Back
-
-  private var backButton: some View {
-    Button(action: onBack) {
-      Label("Agents", systemImage: "chevron.left")
-        .font(.callout)
-    }
-    .buttonStyle(.borderless)
   }
 
   // MARK: - Profile
@@ -100,15 +97,29 @@ struct AgentProfileDetailView: View {
         }
       }
 
-      LabeledContent {
-        EmptyView()
-      } label: {
-        HStack(spacing: 12) {
-          AgentLogoView(kind: profile.kind, size: 22, tint: .primary)
-            .frame(width: 38, height: 38)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Icon")
+      iconRow
+    }
+  }
+
+  /// Icon row: current glyph, what it is, and a popover to swap it for any
+  /// SF Symbol. Two profiles on the same agent are otherwise indistinguishable
+  /// at a glance in the toolbar menu and the tab strip.
+  private var iconRow: some View {
+    LabeledContent {
+      Button("Change…") { isPickingIcon = true }
+        .popover(isPresented: $isPickingIcon, arrowEdge: .bottom) { iconPicker }
+    } label: {
+      HStack(spacing: 12) {
+        AgentLogoView(icon: profile.icon, size: 22, tint: .primary)
+          .frame(width: 38, height: 38)
+          .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Icon")
+          if let symbol = profile.systemImage, !symbol.isEmpty {
+            Text(symbol)
+              .font(.system(.callout, design: .monospaced))
+              .foregroundStyle(.secondary)
+          } else {
             Text(descriptor.iconSummary)
               .font(.callout)
               .foregroundStyle(.secondary)
@@ -116,6 +127,50 @@ struct AgentProfileDetailView: View {
         }
       }
     }
+  }
+
+  private var iconPicker: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Icon")
+        .font(.headline)
+      Text("Pick a symbol, or type any SF Symbol name your system has.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      SFSymbolPicker(selection: symbolBinding)
+
+      Divider()
+
+      // Clearing the override is the only way back to the brand mark — an
+      // empty text field would read as "no icon" rather than "the default".
+      Button {
+        var updated = profile
+        updated.systemImage = nil
+        onChange(updated)
+      } label: {
+        Label("Use \(descriptor.displayName) Icon", systemImage: "arrow.uturn.backward")
+      }
+      .buttonStyle(.borderless)
+      .disabled(profile.systemImage == nil)
+    }
+    .padding(12)
+    .frame(width: 360)
+  }
+
+  /// Live symbol name for the picker. Reading falls back to a neutral
+  /// placeholder so the grid has something to highlight before the user has
+  /// overridden anything; writing an empty string clears the override.
+  private var symbolBinding: Binding<String> {
+    Binding(
+      get: { profile.systemImage ?? "" },
+      set: { newValue in
+        var updated = profile
+        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+        updated.systemImage = trimmed.isEmpty ? nil : trimmed
+        onChange(updated)
+      }
+    )
   }
 
   // MARK: - Launch preview
