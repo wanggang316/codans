@@ -51,9 +51,10 @@ struct CommandQueueRunnerTests {
 
     #expect(h.sent.count == 1)
     #expect(h.sent.first?.paneID == h.paneID)
-    // The trailing newline is what submits the command; without it the text
-    // would sit unsent in the pane's prompt.
-    #expect(h.sent.first?.text == "make test\n")
+    // No trailing newline: submission is a separate Return keypress issued
+    // by `TerminalClient.sendCommand`, so an agent TUI can't read the
+    // command and its newline as one pasted block.
+    #expect(h.sent.first?.text == "make test")
     #expect(h.queues[h.paneID]?.isEmpty == true)
   }
 
@@ -100,11 +101,11 @@ struct CommandQueueRunnerTests {
     runner.drain()
     h.now = h.now.addingTimeInterval(0.5)
     runner.drain()
-    #expect(h.sent.map(\.text) == ["first\n"])
+    #expect(h.sent.map(\.text) == ["first"])
 
     h.now = h.now.addingTimeInterval(CommandQueueRunner.settleWindow)
     runner.drain()
-    #expect(h.sent.map(\.text) == ["first\n", "second\n"])
+    #expect(h.sent.map(\.text) == ["first", "second"])
   }
 
   @Test
@@ -117,7 +118,7 @@ struct CommandQueueRunnerTests {
 
     h.makeRunner().drain()
 
-    #expect(h.sent.map(\.text) == ["/compact\n"])
+    #expect(h.sent.map(\.text) == ["/compact"])
     #expect(h.queues[h.paneID]?.isEmpty == true)
   }
 
@@ -154,7 +155,7 @@ struct CommandQueueRunnerTests {
     // Next period. Past the settle window, so nothing throttles it.
     h.now = h.now.addingTimeInterval(60)
     runner.drain()
-    #expect(h.sent.map(\.text) == ["/compact\n", "/compact\n"])
+    #expect(h.sent.map(\.text) == ["/compact", "/compact"])
   }
 
   @Test
@@ -167,7 +168,7 @@ struct CommandQueueRunnerTests {
 
     h.makeRunner().drain()
 
-    #expect(Set(h.sent.map(\.text)) == ["a\n", "b\n"])
+    #expect(Set(h.sent.map(\.text)) == ["a", "b"])
   }
 
   // MARK: - Readiness predicate

@@ -154,8 +154,9 @@ struct CommandQueueFeature {
         case .now:
           // Never enters the queue — it is already delivered. The panel is
           // always opened on a pane the user is looking at, so a live
-          // surface is a given here.
-          terminalClient.sendInput(paneID, text + "\n")
+          // surface is a given here. `sendCommand` (not `sendInput`) so the
+          // Return arrives as its own keypress; see its docstring.
+          terminalClient.sendCommand(paneID, text)
         case .afterCurrentTask:
           append(.init(text: text, timing: .afterCurrentTask, createdAt: date.now), to: paneID)
         case .scheduled:

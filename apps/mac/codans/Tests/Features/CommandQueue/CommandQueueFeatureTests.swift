@@ -34,7 +34,7 @@ struct CommandQueueFeatureTests {
       $0.date = .constant(epoch)
       $0[HierarchyClient.self].commandQueue = { _ in recorder.queue }
       $0[HierarchyClient.self].setCommandQueue = { _, queue in recorder.queue = queue }
-      $0[TerminalClient.self].sendInput = { _, text in recorder.sent.append(text) }
+      $0[TerminalClient.self].sendCommand = { _, text in recorder.sent.append(text) }
     }
   }
 
@@ -45,7 +45,8 @@ struct CommandQueueFeatureTests {
     await store.send(.draftChanged("ls -la")) { $0.draft = "ls -la" }
     await store.send(.submitted) { $0.draft = "" }
 
-    #expect(recorder.sent == ["ls -la\n"])
+    // No trailing newline — `sendCommand` owns the Return keypress.
+    #expect(recorder.sent == ["ls -la"])
     #expect(recorder.queue.isEmpty)
   }
 

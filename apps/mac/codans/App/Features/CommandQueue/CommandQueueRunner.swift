@@ -38,6 +38,8 @@ final class CommandQueueRunner {
   private let setQueue: @MainActor (PaneID, [QueuedCommand]) -> Void
   private let isPaneReady: @MainActor (PaneID) -> Bool
   private let hasLiveSurface: @MainActor (PaneID) -> Bool
+  /// Delivers one command to a pane: types it, then submits it. Wired to
+  /// `TerminalClient.sendCommand`, which owns the gap between the two.
   private let send: @MainActor (PaneID, String) -> Void
   private let now: () -> Date
 
@@ -111,7 +113,10 @@ final class CommandQueueRunner {
       runnerLogger.info(
         "fire pane=\(paneID.raw.uuidString, privacy: .public) repeating=\(command.timing.isRepeating, privacy: .public)"
       )
-      send(paneID, command.text + "\n")
+      // Text only — `send` is `TerminalClient.sendCommand`, which submits
+      // with a separate Return keypress so an agent TUI doesn't read the
+      // command and its newline as one pasted block.
+      send(paneID, command.text)
       lastFiredAt[paneID] = now
       setQueue(paneID, queue.advancing(command, firedAt: now))
       fired.append(paneID)

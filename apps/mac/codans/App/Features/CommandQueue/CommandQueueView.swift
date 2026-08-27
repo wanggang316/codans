@@ -37,10 +37,15 @@ struct CommandQueueView: View {
         queueList
       }
       .frame(maxWidth: 560)
+      // SwiftUI's own material rather than `VisualEffectBackground`. The
+      // AppKit bridge is an NSView in a `.background`, and this card — unlike
+      // the Command Palette's — is full of AppKit-backed controls (segmented
+      // picker, date picker, toggle, stepper field). Mixing the two lets the
+      // effect view escape SwiftUI's z-order and composite a blurred slab
+      // over its own content.
       .background(
-        VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
-          .overlay(Color(nsColor: .textBackgroundColor).opacity(0.18))
-          .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+        .ultraThickMaterial,
+        in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
       )
       .overlay(
         RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
@@ -84,26 +89,22 @@ struct CommandQueueView: View {
 
   private var composer: some View {
     VStack(alignment: .leading, spacing: 10) {
-      TextField(
-        "Command to send…",
-        text: $store.draft.sending(\.draftChanged),
-        axis: .vertical
-      )
-      .textFieldStyle(.plain)
-      .lineLimit(1...4)
-      .font(.system(size: 14))
-      .focused($draftFocused)
-      .onKeyPress(.escape) {
-        onDismiss()
-        return .handled
-      }
-      // Return submits; Shift-Return is left to the field so a multi-line
-      // prompt (common for agent panes) is still typeable.
-      .onKeyPress(.return, phases: .down) { press in
-        guard !press.modifiers.contains(.shift) else { return .ignored }
-        store.send(.submitted)
-        return .handled
-      }
+      // Single-line by design: one entry is one command and one Return. A
+      // multi-line draft would put embedded newlines into the delivered
+      // text, and each of those submits on its own — the first line would
+      // fire and the rest would arrive as separate prompts.
+      TextField("Command to send…", text: $store.draft.sending(\.draftChanged))
+        .textFieldStyle(.plain)
+        .font(.system(size: 14))
+        .focused($draftFocused)
+        .onKeyPress(.escape) {
+          onDismiss()
+          return .handled
+        }
+        .onKeyPress(.return) {
+          store.send(.submitted)
+          return .handled
+        }
 
       Picker("", selection: $store.mode.sending(\.modeChanged)) {
         ForEach(CommandQueueFeature.State.Mode.allCases, id: \.self) { mode in
@@ -143,7 +144,11 @@ struct CommandQueueView: View {
           displayedComponents: [.date, .hourAndMinute]
         )
         .labelsHidden()
-        .datePickerStyle(.compact)
+        // `.field`, not `.compact`: the compact style owns a calendar
+        // popover, and a popover anchored inside a transient overlay card
+        // outlives the card's own layout — it is the other candidate for
+        // the blurred slab this panel was showing.
+        .datePickerStyle(.field)
       }
       HStack(spacing: 8) {
         Toggle(

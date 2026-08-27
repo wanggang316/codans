@@ -1930,6 +1930,9 @@ final class AppState {
   /// signal for an agent pane.
   private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
     guard commandQueueRunner == nil else { return }
+    // Delivery goes through `sendCommand`, not `sendInput`: a queued command
+    // aimed at an agent pane needs its Return as a separate keypress.
+    let terminal = TerminalClient.live(engine: engine)
     let runner = CommandQueueRunner(
       queuedPanes: { [weak manager] in manager?.panesWithQueuedCommands() ?? [] },
       setQueue: { [weak manager] paneID, queue in
@@ -1944,9 +1947,7 @@ final class AppState {
       hasLiveSurface: { [weak engine] paneID in
         engine?.ghosttyRuntime?.surface(for: paneID) != nil
       },
-      send: { [weak engine] paneID, text in
-        engine?.ghosttyRuntime?.surface(for: paneID)?.sendInput(text)
-      }
+      send: { paneID, text in terminal.sendCommand(paneID, text) }
     )
     self.commandQueueRunner = runner
     runner.start()
