@@ -84,19 +84,6 @@ struct ContentView: View {
           HandoffOverlayView(store: handoffStore)
             .zIndex(100)
         }
-        if let queueStore = store.scope(
-          state: \.commandQueue, action: \.commandQueue.presented
-        ) {
-          CommandQueueView(
-            store: queueStore,
-            // Pass the pane explicitly: `.commandQueueToggle(nil)` would
-            // re-resolve the focused pane, and if focus moved while the
-            // panel was open the toggle would re-target instead of close.
-            onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
-          )
-          .environment(hierarchyManager)
-          .zIndex(101)
-        }
       }
     }
   }
@@ -214,6 +201,22 @@ struct ContentView: View {
         new.updatesAutomaticallyDownloadUpdates,
         false
       )
+    }
+    // Presented as a sheet, not a ZStack overlay, so it picks up the same
+    // container chrome and dismissal behaviour as the app's other dialogs.
+    // Attached here rather than inside `detail:` so it doesn't share a
+    // presentation slot with the Tag Manager sheet.
+    .sheet(
+      item: $store.scope(state: \.commandQueue, action: \.commandQueue)
+    ) { queueStore in
+      CommandQueueView(
+        store: queueStore,
+        // Pass the pane explicitly: `.commandQueueToggle(nil)` would
+        // re-resolve the focused pane, and if focus moved while the sheet
+        // was open the toggle would re-target instead of close.
+        onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
+      )
+      .environment(hierarchyManager)
     }
     .onDisappear {
       store.send(.onQuit)
