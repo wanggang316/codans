@@ -69,6 +69,24 @@ struct AgentSessionHistoryScannerTests {
   }
 
   @Test
+  func ompSessionMetaParsesHeaderLineAndSkipsTitleLine() {
+    let file =
+      #"{"type":"title","title":"draft title"}"# + "\n"
+      + #"{"type":"session","id":"01a0477f","cwd":"/tmp/wt","title":"fix the bug"}"# + "\n"
+      + #"{"type":"message","message":{"role":"user"}}"#
+    let meta = AgentSessionHistoryScanner.ompSessionMeta(fromPrefix: Data(file.utf8))
+    #expect(
+      meta == AgentSessionHistoryScanner.OmpSessionMeta(
+        id: "01a0477f", cwd: "/tmp/wt", title: "fix the bug"))
+  }
+
+  @Test
+  func ompSessionMetaReturnsNilWithoutSessionHeader() {
+    let file = #"{"type":"title","title":"no header yet"}"#
+    #expect(AgentSessionHistoryScanner.ompSessionMeta(fromPrefix: Data(file.utf8)) == nil)
+  }
+
+  @Test
   func groupedOrdersSectionsByNewestSessionAndRowsNewestFirst() {
     let base = Date(timeIntervalSince1970: 1_000_000)
     func summary(
@@ -119,9 +137,38 @@ struct AgentSessionHistoryScannerTests {
     let index = #"{"id":"01ULID","thread_name":"codex thread","updated_at":"t"}"#
     try Data(index.utf8).write(to: home.appendingPathComponent(".codex/session_index.jsonl"))
 
+    // omp: one header-matched session for this worktree, one for another
+    // cwd that must be filtered out, plus a draft-only session that the
+    // scanner must skip.
+    let ompDir = home.appendingPathComponent(
+      ".omp/agent/sessions/-tmp-wt-feature-x", isDirectory: true)
+    try fileManager.createDirectory(at: ompDir, withIntermediateDirectories: true)
+    let ompHeaders =
+      #"{"type":"title","title":"Fix the login bug"}"# + "\n"
+      + #"{"type":"session","id":"01a0477f-d7ea-72ca-bf81-d581728ced6e","cwd":"/tmp/wt/feature-x","title":"fix the login bug"}"#
+      + "\n" + #"{"type":"message","message":{"role":"user"}}"#
+    try Data(ompHeaders.utf8).write(
+      to: ompDir.appendingPathComponent("2026-08-28T08-32-35-818Z_01a0477f-d7ea-72ca-bf81-d581728ced6e.jsonl"))
+    let ompForeignDir = home.appendingPathComponent(
+      ".omp/agent/sessions/-tmp-other", isDirectory: true)
+    try fileManager.createDirectory(at: ompForeignDir, withIntermediateDirectories: true)
+    let ompForeign =
+      #"{"type":"session","id":"01a04999-9999-9999-9999-999999999999","cwd":"/tmp/other","title":"other"}"#
+    try Data(ompForeign.utf8).write(
+      to: ompForeignDir.appendingPathComponent("2026-08-28T09-00-00-000Z_01a04999-9999-9999-9999-999999999999.jsonl"))
+    let ompDraftID = "01a04888-8888-8888-8888-888888888888"
+    let ompDraftDir = home.appendingPathComponent(
+      ".omp/agent/sessions/-tmp-wt-feature-x/2026-08-28T07-00-00-000Z_\(ompDraftID)",
+      isDirectory: true)
+    try fileManager.createDirectory(at: ompDraftDir, withIntermediateDirectories: true)
+    try Data("".utf8).write(to: ompDraftDir.appendingPathComponent(".draft-only-session"))
+    try Data(#"{"type":"session","id":"\#(ompDraftID)","cwd":"/tmp/wt/feature-x"}"#.utf8)
+      .write(
+        to: ompDir.appendingPathComponent("2026-08-28T07-00-00-000Z_\(ompDraftID).jsonl"))
+
     let groups = AgentSessionHistoryScanner.scan(worktreePath: worktree, home: home)
     let all = groups.flatMap(\.sessions)
-    #expect(all.count == 2)
+    #expect(all.count == 3)
     #expect(
       all.contains {
         $0.agent == .claudeCode && $0.sessionID == claudeID && $0.title == "claude prompt"
@@ -129,6 +176,11 @@ struct AgentSessionHistoryScannerTests {
     #expect(
       all.contains {
         $0.agent == .codex && $0.sessionID == "01ULID" && $0.title == "codex thread"
+      })
+    #expect(
+      all.contains {
+        $0.agent == .omp && $0.sessionID == "01a0477f-d7ea-72ca-bf81-d581728ced6e"
+          && $0.title == "fix the login bug"
       })
   }
 }

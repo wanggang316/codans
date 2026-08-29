@@ -76,6 +76,7 @@ struct RemoteAgentSessionHistoryScannerTests {
     let runner = RecordingCommandRunner(outcomes: [
       .exited(code: 0, stdout: Data(claudeStream.utf8), stderr: Data(), stdoutOverflow: false),
       .exited(code: 0, stdout: Data(codexStream.utf8), stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false),
     ])
     let groups = await RemoteAgentSessionHistoryScanner.scan(
       host: Self.host, worktreePath: "/srv/app", runner: runner
@@ -91,11 +92,51 @@ struct RemoteAgentSessionHistoryScannerTests {
     // Newest-first group ordering: codex (1755000100) leads claude.
     #expect(groups.first?.agent == .codex)
 
-    // Both invocations rode ssh with the cwd needle as a codex positional.
+    // All three invocations rode ssh; codex and omp carry the cwd needle
+    // as a positional argument.
     let calls = await runner.calls
-    #expect(calls.count == 2)
+    #expect(calls.count == 3)
     #expect(calls.allSatisfy { $0.executable.path == "/usr/bin/ssh" })
     #expect(calls[1].arguments.last?.contains(#""cwd":"/srv/app""#) == true)
+    #expect(calls[2].arguments.last?.contains(#""cwd":"/srv/app""#) == true)
+  }
+
+  @Test
+  func ompScriptEmitsHeaderLinesAndScanFiltersLocally() async {
+    // Script shape: host-side prefilter greps the `session` header line
+    // (line 2), and only the two header lines cross the wire.
+    let script = RemoteAgentSessionHistoryScanner.ompScript
+    #expect(script.contains(".omp/agent/sessions"))
+    #expect(script.contains("sed -n 2p"))
+    #expect(script.contains("head -n 2"))
+    #expect(script.contains("stat -c '%Y'"))
+    #expect(script.contains("stat -f '%m'"))
+    #expect(script.contains("===CODANS-SESSION"))
+
+    // A matching omp session yields its recorded title; a foreign-cwd
+    // chunk (substring prefilter hit) is dropped by the exact match.
+    let matchingHeaders =
+      #"{"type":"title","title":"old"}"# + "\n"
+      + #"{"type":"session","id":"01a0477f","cwd":"/srv/app","title":"ship it"}"#
+    let foreignHeaders =
+      #"{"type":"session","id":"01a09999","cwd":"/srv/app-other","title":"other"}"#
+    let ompStream = """
+      ===CODANS-SESSION 1755000200 /h/.omp/agent/sessions/-srv-app/a.jsonl===
+      \(matchingHeaders)
+      ===CODANS-SESSION 1755000300 /h/.omp/agent/sessions/-srv-app-other/b.jsonl===
+      \(foreignHeaders)
+      """
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: Data(ompStream.utf8), stderr: Data(), stdoutOverflow: false),
+    ])
+    let groups = await RemoteAgentSessionHistoryScanner.scan(
+      host: Self.host, worktreePath: "/srv/app", runner: runner
+    )
+    let omp = groups.flatMap(\.sessions).filter { $0.agent == .omp }
+    #expect(omp.map(\.sessionID) == ["01a0477f"])
+    #expect(omp.first?.title == "ship it")
   }
 
   @Test

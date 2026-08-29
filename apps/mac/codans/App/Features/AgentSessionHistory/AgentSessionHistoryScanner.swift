@@ -51,6 +51,7 @@ nonisolated enum AgentSessionHistoryScanner {
     var sessions: [AgentSessionSummary] = []
     sessions += claudeSessions(worktreePath: path, home: home)
     sessions += codexSessions(worktreePath: path, home: home)
+    sessions += ompSessions(worktreePath: path, home: home)
     return grouped(sessions)
   }
 
@@ -290,6 +291,98 @@ nonisolated enum AgentSessionHistoryScanner {
       case id
       case threadName = "thread_name"
     }
+  }
+
+  // MARK: - omp (oh-my-pi)
+
+  /// Byte budget when sniffing an omp session file. Only the header lines
+  /// are needed (`title`, then `session`); the first message payload starts
+  /// on line 3 and can be arbitrarily large.
+  private static let ompPrefixBytes = 64 * 1024
+
+  struct OmpSessionMeta: Equatable {
+    let id: String
+    let cwd: String
+    let title: String?
+  }
+
+  private static func ompSessions(
+    worktreePath: String, home: URL
+  ) -> [AgentSessionSummary] {
+    let sessionsDir = home
+      .appendingPathComponent(".omp", isDirectory: true)
+      .appendingPathComponent("agent", isDirectory: true)
+      .appendingPathComponent("sessions", isDirectory: true)
+    guard
+      let enumerator = FileManager.default.enumerator(
+        at: sessionsDir,
+        includingPropertiesForKeys: [.contentModificationDateKey],
+        options: [.skipsHiddenFiles]
+      )
+    else { return [] }
+    // omp groups session files under per-project directories, but the
+    // recorded `cwd` in the file header is authoritative; match on the
+    // parsed cwd like the Codex scanner.
+    var result: [AgentSessionSummary] = []
+    for case let url as URL in enumerator {
+      guard url.pathExtension == "jsonl" else { continue }
+      // Session files are named `<timestamp>_<uuid>.jsonl`; sibling
+      // directories hold per-session tool logs, not sessions.
+      guard
+        let stem = url.deletingPathExtension().lastPathComponent.split(separator: "_").last,
+        UUID(uuidString: String(stem)) != nil
+      else { continue }
+      guard !ompDraftOnly(sessionFile: url) else { continue }
+      guard
+        let meta = ompSessionMeta(fromPrefix: filePrefix(of: url, maxBytes: ompPrefixBytes)),
+        normalized(meta.cwd) == worktreePath,
+        let modified = modificationDate(of: url)
+      else { continue }
+      let title =
+        meta.title.map(condensed).flatMap { $0.isEmpty ? nil : $0 }
+        ?? "Session \(meta.id.prefix(8))"
+      result.append(
+        AgentSessionSummary(agent: .omp, sessionID: meta.id, title: title, updatedAt: modified))
+    }
+    return result
+  }
+
+  /// Parses the `session` header line of an omp session file. It follows a
+  /// `title` line and carries the id, cwd, and auto-generated title; later
+  /// `title_change` events only refine the transcript, so the header value
+  /// is the stable fallback (a miss just degrades the row title).
+  static func ompSessionMeta(fromPrefix data: Data) -> OmpSessionMeta? {
+    let decoder = JSONDecoder()
+    for lineData in data.split(separator: UInt8(ascii: "\n")) {
+      guard
+        let line = try? decoder.decode(OmpSessionLine.self, from: Data(lineData)),
+        line.type == "session",
+        let id = line.id,
+        let cwd = line.cwd
+      else { continue }
+      return OmpSessionMeta(id: id, cwd: cwd, title: line.title)
+    }
+    return nil
+  }
+
+  private struct OmpSessionLine: Decodable {
+    let type: String?
+    let id: String?
+    let cwd: String?
+    let title: String?
+  }
+
+  /// omp marks composer drafts that never produced a turn with a
+  /// `.draft-only-session` marker inside the per-session directory; there
+  /// is nothing to resume, so the scanner skips them.
+  private static func ompDraftOnly(sessionFile: URL) -> Bool {
+    let dir = sessionFile.deletingPathExtension()
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDirectory),
+      isDirectory.boolValue
+    else { return false }
+    return FileManager.default.fileExists(
+      atPath: dir.appendingPathComponent(".draft-only-session").path)
   }
 
   // MARK: - Shared helpers

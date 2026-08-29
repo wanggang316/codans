@@ -26,6 +26,7 @@ struct AgentKindPatternsTests {
       ("droid", .droid),
       ("amp", .amp),
       ("amp-local", .amp),
+      ("omp", .omp),
     ]
 
     for sample in samples {
