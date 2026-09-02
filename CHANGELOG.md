@@ -15,6 +15,21 @@ and the project does not yet follow semantic versioning — every release until
   activity badges tuned to its loader and approval-selector rendering, the
   omp glyph, and resumable session history — local and on remote hosts —
   via `omp --resume`.
+- **Agent profiles — named launch presets for coding agents.** Settings →
+  Agents holds one profile per agent (model, reasoning effort, execution
+  mode, placement, extra arguments, launch-scoped environment variables, an
+  optional dedicated home, a custom icon), with a live preview of the exact
+  command codans types. Start one from the worktree toolbar's Agents button,
+  the Command Palette ("Launch Agent: …"), or the CLI (`codans agent list` /
+  `codans agent launch`).
+- **Hand off a task between agents.** `codans handoff to <agent> --brief -`
+  archives the previous round under the worktree's `.codans/handoff/`,
+  installs the source agent's own briefing, regenerates repository and
+  session context, and starts the receiver in a background tab with a
+  kickoff prompt; `codans handoff save` checkpoints without a receiver. In
+  the app, "Hand Off…" (Agents menu, Command Palette, Agents View row) asks
+  the live agent to run that same command with its briefing and jumps to the
+  receiver when it finishes, with a context-only fallback while waiting.
 
 ### Changed
 

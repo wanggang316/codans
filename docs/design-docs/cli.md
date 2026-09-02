@@ -3,7 +3,7 @@
 **状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
-> **现状 vs 未接线（读前须知）。** 核心动词集已上线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群、`pane send` / `broadcast`。**已定义但未接线**（源码中存在，但未挂进 `CodansCLI.subcommands` 或对应 `*Command.subcommands`，故 `codans <cmd>` 报 unknown subcommand）：各级 `list` 子命令、顶层 `open`、`help-json`。**完全未实现**：`skill.*` 与 `hook.*` 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`）。下文逐处标注，勿把未接线 / 未实现当现状能力。
+> **现状 vs 未接线（读前须知）。** 核心动词集已上线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群、`pane send` / `broadcast`、`agent` / `handoff` 各群。**已定义但未接线**（源码中存在，但未挂进 `CodansCLI.subcommands` 或对应 `*Command.subcommands`，故 `codans <cmd>` 报 unknown subcommand）：各级 `list` 子命令、顶层 `open`、`help-json`。**完全未实现**：`skill.*` 与 `hook.*` 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`）。下文逐处标注，勿把未接线 / 未实现当现状能力。
 
 ## 背景与范围
 
@@ -101,7 +101,7 @@
 
 #### 顶层命令
 
-`CodansCLI.configuration.subcommands` 显式挂载：`status`、`launch`、`doctor`、`tree`、`project`、`worktree`、`tab`、`pane`、`broadcast`。
+`CodansCLI.configuration.subcommands` 显式挂载：`status`、`launch`、`doctor`、`tree`、`project`、`worktree`、`tab`、`pane`、`broadcast`、`agent`、`handoff`。
 
 | Subcommand | IPC method | 说明 |
 |---|---|---|
@@ -188,6 +188,32 @@
 | `codans broadcast --label TAG TEXT` | `terminal.broadcastInput` | `--label TAG`，`TEXT`，`[--stdin] [--no-enter]` |
 
 三个作用域标志互斥（由 `CLIBroadcastScopeSelection` 强制）。`broadcast` 用 `IPC.BroadcastScope`（`CodansIPC` 里的 wire 类型，`case tab/worktree/label`）做服务端扇出，省去客户端枚举目标。响应回带 `delivered`（命中 pane 数）。
+
+#### `codans agent …`
+
+`AgentCommand.subcommands`：`list`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 worktree toolbar 的 Agents 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
+
+| Subcommand | IPC method | Anchors to | Args |
+|---|---|---|---|
+| `codans agent list` | `agent.listProfiles` | `AgentHandlers.listProfiles` | 无；每行回带 id、名字、agent、enabled、PATH 探测结果（未探测完为 null）、是否支持 prompt、完整启动命令 |
+| `codans agent launch [PROFILE]` | `agent.launch` | `HierarchyClient.launchAgent` | `[PROFILE]`（名字或 id）或 `--agent TOKEN`（该 agent 第一个启用的 profile，缺则临时裸预设），`[--project P] [--worktree W] [--prompt TEXT\|-] [--tab \| --split right\|left\|up\|down] [--background]` |
+
+`launch` 走与 toolbar 相同的管线（渲染 profile → 合成 `ScriptDefinition` → 新 tab / 分屏 / 当前 pane），永不复用 run pane。禁用的 profile 以 `conflict` 拒绝；不支持初始 prompt 的 agent 带 `--prompt` 以 `unsupported` 拒绝；重名 profile 以 `conflict` 要求传 id。
+
+#### `codans handoff …`
+
+`HandoffCommand.subcommands`：`to`、`save`。源 pane 默认为**调用方 pane**（`--pane` 覆盖），因此 agent 在自己 pane 里执行即交接自己。工件在 worktree 的 `.codans/handoff/` 下。
+
+| Subcommand | IPC method | Anchors to | Args |
+|---|---|---|---|
+| `codans handoff to AGENT` | `handoff.to` | `HandoffHandlers.to` | `AGENT`（raw value / 可执行名 / 显示名），`--brief TEXT\|-` 或 `--no-brief`（二选一，必填），`[--pane PANE] [--profile NAME\|ID] [--note TEXT] [--no-launch]` |
+| `codans handoff save` | `handoff.save` | `HandoffHandlers.save` | `--brief TEXT\|-` 或 `--no-brief`，`[--pane PANE] [--note TEXT]` |
+
+- 可启动的接收方是有 `promptStyle` 的 agent（当前 `claude-code` / `codex` / `gemini`）；其它 agent 只能配合 `--no-launch`。
+- briefing 缺失 → `invalidParams` 并附可直接粘贴的 heredoc；不合格（缺 `## Objective` / `## Current State` / `## Next Steps`）→ `invalidParams` 且零副作用。
+- Server 项目 → `unsupported`（工件目录在远端）。
+- 环境变量 `CODANS_HANDOFF_REQUEST_ID`（仅应用内面板注入的请求会设置）随请求上送；已被处理或被面板回退取代的请求以 `conflict` 拒绝。
+- 响应回带 `artifactPath`、`outgoingAgent`、`receiver`、`branch`、`changedFileCount`、`archivedPath`、`sessionExcerptPath`、`briefing`（`inline`/`none`）、`hasBriefing`、`launchedPane`。
 
 #### `codans open`
 
@@ -353,6 +379,7 @@ CLIFilesystem (probe only; real impl + test fakes)
 - **D10 — `system.hello` 是专用首帧 RPC，非逐请求 header；与真实请求 pipelined 一次写。** 使"每次调用开新连接"属性干净存活——每个新连接恰付一次 `system.hello` 往返。
 - **D11 — CLI 本地做 UUID 快路径，其余都是 mutation 前一次服务端往返。** 用延迟换一致性；本地 socket 往返成本（亚毫秒）可忽略。
 - **D14 — `codans open` 用 `EditorService` 的内建注册表 + 用户模板，走 `editor.*` IPC 面。** 服务端 4 级优先级（显式 `--in` → per-Project 覆盖 → 全局默认 → Finder 回退）比 CLI 侧 Launch Services 发现更简单，且把"哪个编辑器"的真相留在应用侧。
+- **D20 — `handoff` 的源默认是调用方 pane，且 briefing 必须显式给出或显式放弃。** 让在线 agent 交接自己是主路径（它持有任何 transcript 都无法复原的工作上下文）；`--brief`/`--no-brief` 二选一避免 codans 替第三方调用方发起模型调用。接收方只在 `AgentCatalog` 有已验证 `promptStyle` 时可启动；其它 agent 走 `--no-launch`。见 [agent-handoff.md](agent-handoff.md)。
 - **D18 — `broadcast` 在顶层命名空间，而 `send` 在 `codans pane` 下。** `broadcast` 是显式的扇出动作、置于顶层减少键入；`send`/`send-key`/`read`/`capture` 作为 pane 级操作归在 `pane` 子命令树下（与 `codans pane send` 的 discussion 示例一致）。
 
 ## Cross-Cutting
