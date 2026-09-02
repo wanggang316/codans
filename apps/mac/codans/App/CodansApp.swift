@@ -814,10 +814,26 @@ final class AppState {
         self.settingsWindowStore?.send(.selectionChanged(section))
       }
     )
+    // Handoff transition core, shared by the `handoff.*` IPC handler and the
+    // in-app Hand Off panel's fallback so both run the exact same sequence.
+    let handoffHandlers = makeHandoffHandlers(
+      hierarchy: manager, hierarchyClient: hierarchy,
+      settingsStore: settings, engine: engine, gitClient: routedGitClient
+    )
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient = hierarchy
+      $0.handoffClient = .live(
+        handlers: handoffHandlers,
+        registry: self.handoffRegistry,
+        engine: engine,
+        source: { [weak self, weak manager] paneID in
+          guard let manager else { return nil }
+          return Self.handoffSource(
+            for: paneID, manager: manager, agentState: self?.agentStateStore)
+        }
+      )
       $0.terminalClient = .live(engine: engine)
       // SSH-routing git clients (see construction above) so every reducer-side
       // git consumer transparently reaches Server-project repositories.
@@ -866,7 +882,7 @@ final class AppState {
 
     startIPC(
       hierarchy: manager, editor: editor, hierarchyClient: hierarchy,
-      settingsStore: settings, terminalEngine: engine, gitClient: routedGitClient
+      settingsStore: settings, terminalEngine: engine, handoffHandlers: handoffHandlers
     )
 
     self.developerPaneDependencies = DeveloperPaneDependencies.live(
@@ -1045,7 +1061,7 @@ final class AppState {
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
     terminalEngine: TerminalEngine,
-    gitClient: GitServiceClient
+    handoffHandlers: HandoffHandlers
   ) {
     if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
       || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -1142,10 +1158,7 @@ final class AppState {
         hierarchy: hierarchyClient,
         installation: agentInstallation
       ),
-      handoffHandlers: makeHandoffHandlers(
-        hierarchy: hierarchy, hierarchyClient: hierarchyClient,
-        settingsStore: settingsStore, inputSink: inputSink, gitClient: gitClient
-      )
+      handoffHandlers: handoffHandlers
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
@@ -1163,15 +1176,15 @@ final class AppState {
     }
   }
 
-  /// `handoff.*` handler wired to the live runtime: pane → source through
-  /// the catalog + `AgentStateStore`, screen text through the terminal input
-  /// sink, git facts through the SSH-routed git client, and the receiver
-  /// launch through the shared agent pipeline.
+  /// Handoff transition core wired to the live runtime: pane → source
+  /// through the catalog + `AgentStateStore`, screen text straight off the
+  /// pane's surface, git facts through the SSH-routed git client, and the
+  /// receiver launch through the shared agent pipeline.
   private func makeHandoffHandlers(
     hierarchy: HierarchyManager,
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
-    inputSink: TerminalInputSink?,
+    engine: TerminalEngine,
     gitClient: GitServiceClient
   ) -> HandoffHandlers {
     HandoffHandlers(
@@ -1182,8 +1195,8 @@ final class AppState {
         return Self.handoffSource(
           for: paneID, manager: manager, agentState: self?.agentStateStore)
       },
-      readScreen: { paneID in
-        inputSink?.readText(paneID: paneID, extent: .viewport)
+      readScreen: { [weak engine] paneID in
+        engine?.ghosttyRuntime?.surface(for: paneID)?.readText(.viewport)
       },
       collectRepoState: { root in
         await Self.handoffRepoState(at: root, git: gitClient)

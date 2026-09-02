@@ -80,6 +80,10 @@ struct ContentView: View {
           )
           .zIndex(100)
         }
+        if let handoffStore = store.scope(state: \.handoff, action: \.handoff.presented) {
+          HandoffOverlayView(store: handoffStore)
+            .zIndex(100)
+        }
       }
     }
   }
@@ -173,10 +177,11 @@ struct ContentView: View {
     // settings edit never itself hits the network; the picker opts into an
     // immediate probe on its own.
     .onChange(of: settingsStore.settings.general) { old, new in
-      guard old.updateChannel != new.updateChannel
-        || old.updateCheckInterval != new.updateCheckInterval
-        || old.updatesAutomaticallyCheckForUpdates != new.updatesAutomaticallyCheckForUpdates
-        || old.updatesAutomaticallyDownloadUpdates != new.updatesAutomaticallyDownloadUpdates
+      guard
+        old.updateChannel != new.updateChannel
+          || old.updateCheckInterval != new.updateCheckInterval
+          || old.updatesAutomaticallyCheckForUpdates != new.updatesAutomaticallyCheckForUpdates
+          || old.updatesAutomaticallyDownloadUpdates != new.updatesAutomaticallyDownloadUpdates
       else { return }
       updatesClient.applyPreferences(
         new.updateChannel,

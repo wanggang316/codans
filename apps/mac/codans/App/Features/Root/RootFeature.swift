@@ -87,6 +87,12 @@ struct RootFeature {
     /// Opened from the sidebar via `.sidebar(.delegate(.openTagManager))`.
     @Presents var tagManagerSheet: TagManagerFeature.State?
 
+    /// Hand Off panel. `nil` = hidden; non-nil renders the floating card
+    /// over the main split, same presentation as the Command Palette.
+    /// Opened by `.handoffRequested` from the toolbar Agents menu, the
+    /// palette, or an AgentState row; cleared on the child's dismiss.
+    @Presents var handoff: HandoffFeature.State?
+
     /// Whether the Hierarchy sidebar column is visible. Bound into
     /// `NavigationSplitView`'s `columnVisibility` from `ContentView` so the
     /// menu chord (⌘[) and the system disclosure button stay in sync.
@@ -359,6 +365,11 @@ struct RootFeature {
     /// split).
     case commandPaletteToggle(PaneID?)
     case commandPalette(PresentationAction<CommandPaletteFeature.Action>)
+    /// Open the Hand Off panel for `paneID`, or for the selected worktree's
+    /// focused pane when nil. Refused with a status toast when no agent is
+    /// detected in that pane — a handoff needs an agent to ask.
+    case handoffRequested(PaneID?)
+    case handoff(PresentationAction<HandoffFeature.Action>)
     /// Tag CRUD sheet presentation. `tagManagerSheetShown` kicks the sheet
     /// visible, the `PresentationAction` carries child actions and dismiss.
     case tagManagerSheet(PresentationAction<TagManagerFeature.Action>)
@@ -426,6 +437,7 @@ struct RootFeature {
   @Dependency(WorktreeWorkingTreeWatcher.self) private var worktreeWorkingTreeWatcher
   @Dependency(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
+  @Dependency(HandoffClient.self) private var handoffClient
   @Dependency(GitHubSnapshotCacheClient.self) private var gitHubSnapshotCache
   @Dependency(GitServiceClient.self) private var gitServiceClient
 
@@ -1468,6 +1480,7 @@ struct RootFeature {
               presenter.openAt(.agents)
             }
           }
+
         }
 
       case .worktreeHeader:
@@ -1647,6 +1660,41 @@ struct RootFeature {
 
       case .commandPalette(.dismiss):
         state.commandPalette = nil
+        return .none
+
+      case .handoffRequested(let explicitPaneID):
+        guard state.handoff == nil else { return .none }
+        let paneID = explicitPaneID ?? focusedPaneForSelection(state)
+        guard let paneID, let source = handoffClient.source(paneID) else {
+          return .send(.statusBar(.push(.warning("Hand off needs a focused pane"))))
+        }
+        guard let agent = source.agentKind else {
+          return .send(.statusBar(.push(.warning("No agent detected in the focused pane"))))
+        }
+        guard !source.isRemote else {
+          return .send(
+            .statusBar(.push(.warning("Hand off is not available for Server projects"))))
+        }
+        state.handoff = HandoffFeature.State.make(
+          source: HandoffFeature.Source(
+            paneID: paneID,
+            projectID: source.projectID,
+            worktreeID: source.worktreeID,
+            agent: agent
+          ),
+          profiles: settingsWriter.readSnapshotSync().agents.profiles
+        )
+        return .none
+
+      case .handoff(.presented(.delegate(.dismiss))), .handoff(.dismiss):
+        state.handoff = nil
+        return .none
+
+      case .handoff(.presented(.delegate(.focusPane(let paneID)))):
+        // Same focus walk an AgentState row tap performs.
+        return .send(.agentState(.rowTapped(paneID)))
+
+      case .handoff:
         return .none
 
       case .commandPalette:
@@ -2135,6 +2183,9 @@ struct RootFeature {
     .ifLet(\.$commandPalette, action: \.commandPalette) {
       CommandPaletteFeature()
     }
+    .ifLet(\.$handoff, action: \.handoff) {
+      HandoffFeature()
+    }
     .ifLet(\.$tagManagerSheet, action: \.tagManagerSheet) {
       TagManagerFeature()
     }
@@ -2573,6 +2624,22 @@ struct RootFeature {
     case .missingProject:
       return "Run script failed: project not available"
     }
+  }
+
+  /// The pane a selection-scoped hand-off targets: the selected worktree's
+  /// active tab's last-focused pane, else that tab's first pane. Same
+  /// resolution the Command Palette uses for its fallback source.
+  private func focusedPaneForSelection(_ state: State) -> PaneID? {
+    let catalog = hierarchyClient.snapshot()
+    let activeTabID = catalog
+      .projects.first(where: { $0.id == state.selection.projectID })?
+      .worktrees.first(where: { $0.id == state.selection.worktreeID })?
+      .selectedTabID
+    let lastFocused = activeTabID.flatMap { hierarchyClient.lastFocusedPane($0) }
+    return CommandPaletteItems.resolveFocusedPaneID(
+      selection: state.selection, catalog: catalog,
+      lastFocusedPane: { _ in lastFocused }
+    )
   }
 
   /// Agent-launch sibling of `runScriptErrorMessage`. Same failure set (the
