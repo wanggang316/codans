@@ -20,6 +20,7 @@ struct CodansCLI: AsyncParsableCommand {
         codans pane send <pane> 'git status --short'
         codans pane new --label agent codex
         codans agent launch --agent claude
+        codans handoff to codex --brief - <<'EOF' … EOF
       """,
     version: "Codans \(CodansCLI.version)",
     subcommands: [
@@ -33,6 +34,7 @@ struct CodansCLI: AsyncParsableCommand {
       PaneCommand.self,
       BroadcastCommand.self,
       AgentCommand.self,
+      HandoffCommand.self,
     ]
   )
 

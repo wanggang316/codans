@@ -23,6 +23,7 @@ public final class MethodRouter {
   private let editorHandlers: EditorHandlers?
   private let projectHandlers: ProjectHandlers?
   private let agentHandlers: AgentHandlers?
+  private let handoffHandlers: HandoffHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -31,7 +32,8 @@ public final class MethodRouter {
     terminalHandlers: TerminalHandlers? = nil,
     editorHandlers: EditorHandlers? = nil,
     projectHandlers: ProjectHandlers? = nil,
-    agentHandlers: AgentHandlers? = nil
+    agentHandlers: AgentHandlers? = nil,
+    handoffHandlers: HandoffHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -39,6 +41,7 @@ public final class MethodRouter {
     self.editorHandlers = editorHandlers
     self.projectHandlers = projectHandlers
     self.agentHandlers = agentHandlers
+    self.handoffHandlers = handoffHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -57,6 +60,7 @@ public final class MethodRouter {
     if let outcome = await routeEditor(request) { return outcome }
     if let outcome = await routeProject(request) { return outcome }
     if let outcome = await routeAgent(request) { return outcome }
+    if let outcome = await routeHandoff(request) { return outcome }
     return notWired(request.method)
   }
 
@@ -224,6 +228,23 @@ public final class MethodRouter {
     case .agentLaunch:
       return await Self.asyncOutcome {
         try await h.launch(request.params.decoded(as: IPC.AgentLaunchRequest.self))
+      }
+    default: return nil
+    }
+  }
+
+  /// `handoff.*` adapter. Both verbs share one request shape; the handler
+  /// enforces the per-verb fields.
+  private func routeHandoff(_ request: IPC.Request) async -> RouterOutcome? {
+    guard let h = handoffHandlers else { return nil }
+    switch request.method {
+    case .handoffSave:
+      return await Self.asyncOutcome {
+        try await h.save(request.params.decoded(as: IPC.HandoffRequest.self))
+      }
+    case .handoffTo:
+      return await Self.asyncOutcome {
+        try await h.to(request.params.decoded(as: IPC.HandoffRequest.self))
       }
     default: return nil
     }

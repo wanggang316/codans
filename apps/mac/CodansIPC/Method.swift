@@ -38,6 +38,12 @@ extension IPC {
     case agentListProfiles = "agent.listProfiles"
     case agentLaunch = "agent.launch"
 
+    // handoff — agent-to-agent transition over `.codans/handoff/`. The
+    // source pane is resolved by the CLI (`current` → caller pane);
+    // handlers live in `HandoffHandlers`.
+    case handoffSave = "handoff.save"
+    case handoffTo = "handoff.to"
+
     // hierarchy — reads
     case hierarchyListProjects = "hierarchy.listProjects"
     case hierarchyListWorktrees = "hierarchy.listWorktrees"

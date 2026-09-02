@@ -480,6 +480,10 @@ final class AppState {
   /// greys out missing agents, and the worktree toolbar's Agents menu hides
   /// them — and they must not disagree.
   let agentInstallation = AgentInstallationStore()
+  /// One-shot authorization + completion fan-out for panel-injected handoff
+  /// requests. Shared by the `handoff.*` IPC handler (claims / publishes)
+  /// and the in-app Hand Off panel (registers / observes).
+  let handoffRegistry = HandoffRequestRegistry()
   /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.config/codans/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
@@ -862,7 +866,7 @@ final class AppState {
 
     startIPC(
       hierarchy: manager, editor: editor, hierarchyClient: hierarchy,
-      settingsStore: settings, terminalEngine: engine
+      settingsStore: settings, terminalEngine: engine, gitClient: routedGitClient
     )
 
     self.developerPaneDependencies = DeveloperPaneDependencies.live(
@@ -1040,7 +1044,8 @@ final class AppState {
     editor: EditorClient,
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
-    terminalEngine: TerminalEngine
+    terminalEngine: TerminalEngine,
+    gitClient: GitServiceClient
   ) {
     if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
       || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -1136,6 +1141,10 @@ final class AppState {
         settings: settingsStore,
         hierarchy: hierarchyClient,
         installation: agentInstallation
+      ),
+      handoffHandlers: makeHandoffHandlers(
+        hierarchy: hierarchy, hierarchyClient: hierarchyClient,
+        settingsStore: settingsStore, inputSink: inputSink, gitClient: gitClient
       )
     )
     let resolvedSocketPath = SocketPaths.resolve()
@@ -1152,6 +1161,80 @@ final class AppState {
         "SocketServer bind failed at \(resolvedSocketPath, privacy: .public): \(String(describing: error), privacy: .public)"
       )
     }
+  }
+
+  /// `handoff.*` handler wired to the live runtime: pane → source through
+  /// the catalog + `AgentStateStore`, screen text through the terminal input
+  /// sink, git facts through the SSH-routed git client, and the receiver
+  /// launch through the shared agent pipeline.
+  private func makeHandoffHandlers(
+    hierarchy: HierarchyManager,
+    hierarchyClient: HierarchyClient,
+    settingsStore: SettingsStore,
+    inputSink: TerminalInputSink?,
+    gitClient: GitServiceClient
+  ) -> HandoffHandlers {
+    HandoffHandlers(
+      settings: settingsStore,
+      registry: handoffRegistry,
+      resolveSource: { [weak hierarchy, weak self] paneID in
+        guard let manager = hierarchy else { return nil }
+        return Self.handoffSource(
+          for: paneID, manager: manager, agentState: self?.agentStateStore)
+      },
+      readScreen: { paneID in
+        inputSink?.readText(paneID: paneID, extent: .viewport)
+      },
+      collectRepoState: { root in
+        await Self.handoffRepoState(at: root, git: gitClient)
+      },
+      launch: { spec in try await hierarchyClient.launchAgent(spec) }
+    )
+  }
+
+  /// Resolves a pane to the outgoing side of a handoff. Agent identity
+  /// prefers the live `AgentStateStore` entry (what the classifier sees
+  /// now) and falls back to the persisted pane binding, so a pane restored
+  /// after relaunch still names its agent.
+  static func handoffSource(
+    for paneID: PaneID,
+    manager: HierarchyManager,
+    agentState: AgentStateStore?
+  ) -> HandoffSource? {
+    guard let (projectID, worktreeID, tabID) = manager.addressOf(paneID: paneID),
+      let project = manager.catalog.projects.first(where: { $0.id == projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+      let tab = worktree.tabs.first(where: { $0.id == tabID })
+    else { return nil }
+    let pane = tab.panes.first { $0.id == paneID }
+    let entry = agentState?.entries[paneID]
+    return HandoffSource(
+      paneID: paneID,
+      projectID: projectID,
+      worktreeID: worktreeID,
+      tabID: tabID,
+      worktreePath: worktree.path,
+      isRemote: project.isRemote,
+      agentKind: entry?.kind ?? pane?.agentKind,
+      sessionID: entry?.sessionID ?? pane?.agentSessionID,
+      paneTitle: tab.cachedDisplayTitle ?? tab.name
+    )
+  }
+
+  /// Git facts for `context.md`. Read-only (`status`, branch, shortstat);
+  /// any failure — not a repository, git missing — degrades to "not git"
+  /// rather than blocking the handoff.
+  nonisolated static func handoffRepoState(at root: URL, git: GitServiceClient) async -> HandoffRepoState {
+    guard let status = try? await git.status(root) else { return .notGit }
+    let branch = try? await git.currentBranch(root)
+    let stats = (try? await git.localDiffStats(root)) ?? nil
+    return HandoffRepoState(
+      branch: branch ?? nil,
+      isGit: true,
+      changedFiles: status.entries.map(\.path),
+      additions: stats?.additions ?? 0,
+      deletions: stats?.deletions ?? 0
+    )
   }
 
   static func bundleVersion() -> String {
