@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 
 /// One row in the Command Palette.
 ///
@@ -119,6 +119,9 @@ struct CommandPaletteItem: Equatable, Identifiable {
     // Agents — one Kind per enabled `AgentProfile`, launched in the exact
     // Worktree that built the item (same staleness rationale as scripts).
     case launchAgentProfile(ProjectID, WorktreeID, UUID)
+    // Hand the focused pane's task to another agent. The source pane is
+    // resolved at activation from the palette's focused pane.
+    case handOff
 
     // Pane / Window (thin wrappers over the existing request enums)
     case paneAction(PaneActionRequest)

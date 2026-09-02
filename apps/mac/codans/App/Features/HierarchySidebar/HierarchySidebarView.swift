@@ -54,6 +54,9 @@ struct HierarchySidebarView: View {
   /// `RootFeature.agentState(.rowTapped)`. Closure (rather than direct
   /// store write) keeps Sidebar decoupled from Root.
   var onAgentStateRowTapped: (PaneID) -> Void = { _ in }
+  /// Row context-menu "Hand Off…" dispatcher — routes to
+  /// `RootFeature.agentState(.handOffTapped)`.
+  var onAgentStateRowHandOff: (PaneID) -> Void = { _ in }
   /// Whether the AgentState bottom panel is currently expanded.
   /// Persisted so the footer toggle's last state survives a relaunch —
   /// users who keep the panel open during long sessions should not
@@ -281,6 +284,7 @@ struct HierarchySidebarView: View {
                 agentStatePanelOpen = false
               }
             },
+            onHandOffRow: { paneID in onAgentStateRowHandOff(paneID) },
             height: $agentStatePanelHeight,
             minHeight: Self.agentStatePanelMinHeight,
             maxHeight: max(Self.agentStatePanelMinHeight, sidebarHeightObservation * 0.5)
@@ -1591,8 +1595,7 @@ struct HierarchySidebarView: View {
   /// so the row selection doesn't also fire (same sibling arrangement as
   /// `gitHubBadge`).
   @ViewBuilder
-  fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View
-  {
+  fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View {
     let tints = runningScriptTints(for: worktree, in: project)
     if !tints.isEmpty {
       RunScriptPingStopControl(colors: tints) {

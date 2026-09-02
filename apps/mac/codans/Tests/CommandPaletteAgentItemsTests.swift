@@ -7,11 +7,11 @@ import Testing
 @testable import Codans
 
 /// `CommandPaletteItems.build` surfaces one "Launch Agent" item per enabled
-/// profile while a Worktree is selected.
+/// profile plus a single "Hand Off…" row while a Worktree is selected.
 @MainActor
 struct CommandPaletteAgentItemsTests {
   @Test
-  func buildEmitsOneItemPerEnabledProfile() {
+  func buildEmitsEnabledProfilesAndTheHandOffRow() {
     var catalog = Catalog()
     var project = Project(name: "P", rootPath: "/tmp/p", gitRoot: "/tmp/p")
     let worktree = Worktree(name: "wt", path: "/tmp/p/wt", branch: "main")
@@ -48,6 +48,10 @@ struct CommandPaletteAgentItemsTests {
       return nil
     }
     #expect(ids == [build.id, plain.id])
+
+    let handOff = items.filter { $0.kind == .handOff }
+    #expect(handOff.count == 1)
+    #expect(handOff.first?.subtitle == "wt")
   }
 
   @Test
@@ -59,8 +63,10 @@ struct CommandPaletteAgentItemsTests {
         selection: HierarchySelection(projectID: nil, worktreeID: nil), catalog: Catalog())
     }
     let agentItems = items.filter {
-      if case .launchAgentProfile = $0.kind { return true }
-      return false
+      switch $0.kind {
+      case .launchAgentProfile, .handOff: return true
+      default: return false
+      }
     }
     #expect(agentItems.isEmpty)
   }

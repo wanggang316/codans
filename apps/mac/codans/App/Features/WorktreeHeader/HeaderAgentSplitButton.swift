@@ -8,7 +8,8 @@ import SwiftUI
 /// because that is the more frequent entry point for this app's audience.
 ///
 /// Primary action launches the first enabled `AgentProfile`; the chevron half
-/// lists every enabled profile plus a "Manage Agents…" footer. Empty-state:
+/// leads with "Hand Off…" (pass the focused pane's task to another agent),
+/// then lists every enabled profile plus a "Manage Agents…" footer. Empty-state:
 /// both halves route to the Agents settings pane so a user with no configured
 /// profile lands where they can make one.
 ///
@@ -62,6 +63,15 @@ struct HeaderAgentSplitButton: View {
 
   @ViewBuilder
   private func caretMenu(profiles: [AgentProfile]) -> some View {
+    // Leads the menu: the source is whatever agent runs in the focused
+    // pane, so the row is always offered and RootFeature explains (via a
+    // status toast) when there is no agent to ask.
+    Button {
+      store.send(.handOffTapped)
+    } label: {
+      Label("Hand Off…", systemImage: "arrow.right.arrow.left")
+    }
+    Divider()
     if !profiles.isEmpty {
       ForEach(profiles) { profile in
         Button {

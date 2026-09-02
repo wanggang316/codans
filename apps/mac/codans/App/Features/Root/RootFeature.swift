@@ -405,6 +405,9 @@ struct RootFeature {
   /// programmatic close chord land without a reshuffle.
   enum AgentStateAction: Equatable {
     case rowTapped(PaneID)
+    /// Row context menu "Hand Off…" — opens the panel for the row's own
+    /// pane, whatever pane currently holds focus.
+    case handOffTapped(PaneID)
     case dismissRequested
   }
 
@@ -1481,6 +1484,8 @@ struct RootFeature {
             }
           }
 
+        case .handOffRequested:
+          return .send(.handoffRequested(nil))
         }
 
       case .worktreeHeader:
@@ -1548,6 +1553,9 @@ struct RootFeature {
       case .branchSwitcher:
         // Sub-feature transitions handled by the Scope; ignore in root.
         return .none
+
+      case .agentState(.handOffTapped(let paneID)):
+        return .send(.handoffRequested(paneID))
 
       case .agentState(.rowTapped(let paneID)):
         // Walk the live catalog to the (project, worktree, tab) chain
@@ -2390,6 +2398,9 @@ struct RootFeature {
             .statusBar(.push(.warning("Launch agent failed: \(error.localizedDescription)"))))
         }
       }
+
+    case .handOff:
+      return .send(.handoffRequested(sourcePaneID))
 
     // Pane / Window — thin wrappers over the routers
     case .paneAction(let req):

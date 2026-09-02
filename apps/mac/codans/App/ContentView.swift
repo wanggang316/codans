@@ -98,7 +98,8 @@ struct ContentView: View {
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         editorStore: store.scope(state: \.editor, action: \.editor),
         agentStateStore: agentStateStore,
-        onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) }
+        onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) },
+        onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) }
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {

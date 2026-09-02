@@ -56,6 +56,7 @@ enum CommandPaletteItems {
         items.append(
           contentsOf: agentProfileItems(projectID: projectID, worktreeID: worktreeID)
         )
+        items.append(handOffItem(worktreeName: worktree.name))
       }
     }
     if let focusedPaneID {
@@ -491,6 +492,20 @@ enum CommandPaletteItems {
         kind: .launchAgentProfile(projectID, worktreeID, profile.id)
       )
     }
+  }
+
+  /// Single "Hand Off…" row. Always offered while a Worktree is selected;
+  /// RootFeature reports (via a status toast) when the focused pane has no
+  /// agent to ask.
+  private static func handOffItem(worktreeName: String) -> CommandPaletteItem {
+    CommandPaletteItem(
+      id: "agent.handoff",
+      title: "Hand Off…",
+      subtitle: worktreeName,
+      searchText: "agent hand off handoff switch briefing",
+      icon: "arrow.right.arrow.left",
+      kind: .handOff
+    )
   }
 
   /// Resolves a PaneID for palette actions opened without a precise
