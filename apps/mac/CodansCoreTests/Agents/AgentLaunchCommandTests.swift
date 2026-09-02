@@ -106,3 +106,50 @@ struct AgentLaunchCommandTests {
     }
   }
 }
+
+/// A handoff seeds the receiver with a kickoff prompt; the descriptor decides
+/// how (and whether) the CLI can take one.
+struct AgentLaunchCommandPromptTests {
+  private static let configRoot = URL(fileURLWithPath: "/tmp/codans-tests", isDirectory: true)
+
+  @Test
+  func promptTrailsEveryOtherArgumentInTheAgentsOwnSpelling() {
+    let claude = AgentProfile(kind: .claudeCode, executionModeID: "plan", extraArguments: "--verbose")
+    #expect(
+      AgentLaunchCommand.render(profile: claude, prompt: "take over", configDirectory: Self.configRoot)
+        == "claude --permission-mode plan --verbose 'take over'")
+
+    let gemini = AgentProfile(kind: .gemini, modelID: "gemini-2.5-pro")
+    #expect(
+      AgentLaunchCommand.render(profile: gemini, prompt: "it's go", configDirectory: Self.configRoot)
+        == "gemini --model 'gemini-2.5-pro' -i 'it'\\''s go'")
+  }
+
+  @Test
+  func agentsWithoutAPromptStyleIgnoreThePrompt() {
+    let amp = AgentProfile(kind: .amp)
+    #expect(AgentLaunchCommand.render(profile: amp, prompt: "x", configDirectory: Self.configRoot) == "amp")
+    #expect(!AgentCatalog.descriptor(for: .amp).supportsInitialPrompt)
+    #expect(AgentCatalog.handoffReceivers == [.claudeCode, .codex, .gemini])
+  }
+
+  @Test
+  func emptyPromptRendersNothing() {
+    let codex = AgentProfile(kind: .codex)
+    #expect(AgentLaunchCommand.render(profile: codex, prompt: "", configDirectory: Self.configRoot) == "codex")
+  }
+}
+
+struct AgentKindTokenTests {
+  @Test
+  func acceptsRawValueExecutableAndDisplayName() {
+    #expect(AgentKind(token: "claude-code") == .claudeCode)
+    #expect(AgentKind(token: "claude") == .claudeCode)
+    #expect(AgentKind(token: " Claude Code ") == .claudeCode)
+    #expect(AgentKind(token: "CODEX") == .codex)
+    #expect(AgentKind(token: "omp") == .omp)
+    #expect(AgentKind(token: "Grok Build") == .grok)
+    #expect(AgentKind(token: "") == nil)
+    #expect(AgentKind(token: "aider") == nil)
+  }
+}

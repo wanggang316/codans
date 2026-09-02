@@ -7,7 +7,7 @@ import Foundation
 ///
 /// Shape:
 ///
-///     [env KEY='value' … HOME='…'] <executable> [model] [effort] [mode] [extra]
+///     [env KEY='value' … HOME='…'] <executable> [model] [effort] [mode] [extra] [prompt]
 ///
 /// Overrides ride an `env` prefix rather than the pane's spawn environment on
 /// purpose: the variables must reach the agent process and nothing else, so
@@ -28,12 +28,17 @@ public nonisolated enum AgentLaunchCommand {
       .appendingPathComponent(profile.id.uuidString, isDirectory: true)
   }
 
-  /// Full command line for `profile`.
+  /// Full command line for `profile`, optionally seeded with a kickoff
+  /// `prompt` (a handoff's receiver instruction). The prompt is rendered
+  /// through the descriptor's `promptStyle` and trails everything else, so it
+  /// can never be mistaken for a flag value; an agent without a prompt style
+  /// ignores the prompt rather than emitting an argument it cannot parse.
   ///
   /// `configDirectory` is injected so tests can render a dedicated-home
   /// command without touching the user's real config root.
   public static func render(
     profile: AgentProfile,
+    prompt: String? = nil,
     configDirectory: URL = AppDirectories.configDirectory()
   ) -> String {
     let descriptor = profile.descriptor
@@ -66,6 +71,9 @@ public nonisolated enum AgentLaunchCommand {
     let extra = profile.extraArguments.trimmingCharacters(in: .whitespacesAndNewlines)
     if !extra.isEmpty {
       command += " " + extra
+    }
+    if let prompt, !prompt.isEmpty, let style = descriptor.promptStyle {
+      command += " " + style.arguments(for: prompt).joined(separator: " ")
     }
     return command
   }

@@ -46,6 +46,27 @@ public nonisolated enum AgentFlagStyle: Equatable, Sendable, Hashable {
   }
 }
 
+/// How an agent CLI accepts an initial prompt while still starting its
+/// interactive session. `nil` on a descriptor means codans has no verified
+/// spelling for it — such an agent can be launched bare but cannot receive a
+/// handoff kickoff, so it is not offered as a handoff destination.
+public nonisolated enum AgentPromptStyle: Equatable, Sendable, Hashable {
+  /// `claude 'prompt'` — the prompt is the trailing positional argument.
+  case positional
+  /// `gemini -i 'prompt'` — the prompt rides a flag.
+  case flag(String)
+
+  /// Renders the prompt as argv fragments, shell-quoted.
+  public func arguments(for prompt: String) -> [String] {
+    switch self {
+    case .positional:
+      return [ShellQuoting.quoted(prompt)]
+    case .flag(let flag):
+      return [flag, ShellQuoting.quoted(prompt)]
+    }
+  }
+}
+
 /// Static, per-agent launch metadata: the executable codans looks for on
 /// `PATH`, the brand asset that identifies it, and the option catalogue its
 /// CLI exposes. Everything the Agents settings pane renders and everything
@@ -78,6 +99,9 @@ public nonisolated struct AgentDescriptor: Equatable, Sendable {
   /// "Standard" no-flag mode and is what a profile with no stored mode
   /// resolves to.
   public let executionModes: [AgentLaunchChoice]
+  /// How this CLI takes a kickoff prompt, or `nil` when it cannot start
+  /// interactively with one.
+  public let promptStyle: AgentPromptStyle?
 
   public var displayName: String {
     AgentRuntimeAdapters.adapter(for: kind).displayName
@@ -92,7 +116,8 @@ public nonisolated struct AgentDescriptor: Equatable, Sendable {
     models: [AgentLaunchChoice] = [],
     reasoningEffortFlag: AgentFlagStyle? = nil,
     reasoningEfforts: [AgentLaunchChoice] = [],
-    executionModes: [AgentLaunchChoice] = []
+    executionModes: [AgentLaunchChoice] = [],
+    promptStyle: AgentPromptStyle? = nil
   ) {
     self.kind = kind
     self.executable = executable
@@ -103,7 +128,11 @@ public nonisolated struct AgentDescriptor: Equatable, Sendable {
     self.reasoningEffortFlag = reasoningEffortFlag
     self.reasoningEfforts = reasoningEfforts
     self.executionModes = executionModes
+    self.promptStyle = promptStyle
   }
+
+  /// Whether a handoff can launch this agent with its kickoff prompt.
+  public var supportsInitialPrompt: Bool { promptStyle != nil }
 
   /// Execution mode a profile resolves to when it stores none, or stores one
   /// that this agent no longer offers (agent swapped on an existing profile,
@@ -157,6 +186,11 @@ public nonisolated enum AgentCatalog {
     AgentKind.allCases.map(descriptor(for:))
   }
 
+  /// Agents a handoff can launch with a kickoff prompt, in catalogue order.
+  public static var handoffReceivers: [AgentKind] {
+    all.filter(\.supportsInitialPrompt).map(\.kind)
+  }
+
   // MARK: - Per-agent catalogues
 
   private static let claudeCode = AgentDescriptor(
@@ -181,7 +215,8 @@ public nonisolated enum AgentCatalog {
       AgentLaunchChoice(
         id: "bypass", label: "Bypass Permissions",
         arguments: ["--permission-mode", "bypassPermissions"]),
-    ]
+    ],
+    promptStyle: .positional
   )
 
   private static let codex = AgentDescriptor(
@@ -208,7 +243,8 @@ public nonisolated enum AgentCatalog {
       AgentLaunchChoice(
         id: "bypass", label: "Bypass Approvals",
         arguments: ["--dangerously-bypass-approvals-and-sandbox"]),
-    ]
+    ],
+    promptStyle: .positional
   )
 
   private static let gemini = AgentDescriptor(
@@ -224,7 +260,9 @@ public nonisolated enum AgentCatalog {
     executionModes: [
       AgentLaunchChoice(id: "standard", label: "Standard"),
       AgentLaunchChoice(id: "yolo", label: "Auto-approve", arguments: ["--yolo"]),
-    ]
+    ],
+    // `-i` / `--prompt-interactive`: seed the prompt and stay in the TUI.
+    promptStyle: .flag("-i")
   )
 
   private static let cursorAgent = AgentDescriptor(
