@@ -116,6 +116,10 @@ struct CommandPaletteItem: Equatable, Identifiable {
     // built the item even if the selection changes before activation.
     case runGlobalScript(ProjectID, WorktreeID, ScriptDefinition.ID)
 
+    // Agents — one Kind per enabled `AgentProfile`, launched in the exact
+    // Worktree that built the item (same staleness rationale as scripts).
+    case launchAgentProfile(ProjectID, WorktreeID, UUID)
+
     // Pane / Window (thin wrappers over the existing request enums)
     case paneAction(PaneActionRequest)
     case windowAction(WindowActionRequest)

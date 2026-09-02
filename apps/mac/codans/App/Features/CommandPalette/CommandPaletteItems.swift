@@ -1,6 +1,6 @@
+import CodansCore
 import Dependencies
 import Foundation
-import CodansCore
 
 /// Builds the list of `CommandPaletteItem` shown when the palette opens.
 ///
@@ -51,6 +51,10 @@ enum CommandPaletteItems {
         // Worktree, so they're gated on the same selection as project scripts.
         items.append(
           contentsOf: globalScriptItems(projectID: projectID, worktreeID: worktreeID)
+        )
+        // Agent profiles start a fresh session in the selected Worktree.
+        items.append(
+          contentsOf: agentProfileItems(projectID: projectID, worktreeID: worktreeID)
         )
       }
     }
@@ -461,6 +465,30 @@ enum CommandPaletteItems {
         subtitle: "Global Command",
         icon: script.resolvedSystemImage,
         kind: .runGlobalScript(projectID, worktreeID, script.id)
+      )
+    }
+  }
+
+  /// One "Launch Agent: <profile>" item per enabled `AgentProfile`, in
+  /// Settings order — the same rows the toolbar Agents menu lists. Reads the
+  /// live settings snapshot like the script builders so a profile added in
+  /// Settings appears on the next palette open.
+  private static func agentProfileItems(
+    projectID: ProjectID,
+    worktreeID: WorktreeID
+  ) -> [CommandPaletteItem] {
+    @Dependency(SettingsWriter.self) var settingsWriter
+    let profiles = settingsWriter.readSnapshotSync().agents.enabledProfiles
+    return profiles.map { profile in
+      CommandPaletteItem(
+        id: "agent.launch.\(profile.id.uuidString)",
+        title: "Launch Agent: \(profile.displayName)",
+        subtitle: profile.kind.displayName,
+        searchText: "agent launch \(profile.displayName) \(profile.kind.displayName)",
+        // A brand mark has no SF Symbol name; the palette row renders a
+        // generic glyph and the title carries the identity.
+        icon: profile.systemImage ?? "sparkles",
+        kind: .launchAgentProfile(projectID, worktreeID, profile.id)
       )
     }
   }

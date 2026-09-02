@@ -2326,6 +2326,20 @@ struct RootFeature {
         }
       }
 
+    // Agent profiles — same effect the toolbar Agents menu dispatches.
+    case .launchAgentProfile(let projectID, let worktreeID, let profileID):
+      let client = hierarchyClient
+      return .run { send in
+        do {
+          try await client.launchAgentProfile(profileID, projectID, worktreeID)
+        } catch let error as RunScriptError {
+          await send(.statusBar(.push(.warning(Self.launchAgentErrorMessage(error)))))
+        } catch {
+          await send(
+            .statusBar(.push(.warning("Launch agent failed: \(error.localizedDescription)"))))
+        }
+      }
+
     // Pane / Window — thin wrappers over the routers
     case .paneAction(let req):
       guard
