@@ -1101,18 +1101,20 @@ final class AppState {
         return CallerPaneResolver.resolve(callerPID: callerPID, paneByShellPID: paneByShellPID)
       }
     )
+    let inputSink: TerminalInputSink? =
+      terminalEngine.ghosttyRuntime == nil
+      ? nil
+      : TerminalInputSink(
+        engine: terminalEngine,
+        onPaneInput: { [weak hierarchy] paneID in
+          guard let manager = hierarchy,
+            let projectID = manager.catalog.projectID(forPane: paneID)
+          else { return }
+          manager.bumpProjectActivity(projectID)
+        }
+      )
     let terminalHandlers = TerminalHandlers(
-      sink: terminalEngine.ghosttyRuntime == nil
-        ? nil
-        : TerminalInputSink(
-          engine: terminalEngine,
-          onPaneInput: { [weak hierarchy] paneID in
-            guard let manager = hierarchy,
-              let projectID = manager.catalog.projectID(forPane: paneID)
-            else { return }
-            manager.bumpProjectActivity(projectID)
-          }
-        ),
+      sink: inputSink,
       catalog: { hierarchy.catalog }
     )
     let editorHandlers = EditorHandlers(
@@ -1129,7 +1131,12 @@ final class AppState {
       hierarchyHandlers: hierarchyHandlers,
       terminalHandlers: terminalHandlers,
       editorHandlers: editorHandlers,
-      projectHandlers: projectHandlers
+      projectHandlers: projectHandlers,
+      agentHandlers: AgentHandlers(
+        settings: settingsStore,
+        hierarchy: hierarchyClient,
+        installation: agentInstallation
+      )
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)

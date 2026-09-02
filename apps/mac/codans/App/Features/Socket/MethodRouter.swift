@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 import os
 
 /// Dispatch target for a streaming request. Handlers that respond with
@@ -22,6 +22,7 @@ public final class MethodRouter {
   private let terminalHandlers: TerminalHandlers?
   private let editorHandlers: EditorHandlers?
   private let projectHandlers: ProjectHandlers?
+  private let agentHandlers: AgentHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -29,13 +30,15 @@ public final class MethodRouter {
     hierarchyHandlers: HierarchyHandlers? = nil,
     terminalHandlers: TerminalHandlers? = nil,
     editorHandlers: EditorHandlers? = nil,
-    projectHandlers: ProjectHandlers? = nil
+    projectHandlers: ProjectHandlers? = nil,
+    agentHandlers: AgentHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
     self.terminalHandlers = terminalHandlers
     self.editorHandlers = editorHandlers
     self.projectHandlers = projectHandlers
+    self.agentHandlers = agentHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -53,6 +56,7 @@ public final class MethodRouter {
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
     if let outcome = await routeProject(request) { return outcome }
+    if let outcome = await routeAgent(request) { return outcome }
     return notWired(request.method)
   }
 
@@ -210,12 +214,40 @@ public final class MethodRouter {
     }
   }
 
+  /// `agent.*` adapter — same flat catch chain as `project.*`, with the
+  /// async `launch` going through `asyncOutcome`.
+  private func routeAgent(_ request: IPC.Request) async -> RouterOutcome? {
+    guard let h = agentHandlers else { return nil }
+    switch request.method {
+    case .agentListProfiles:
+      return Self.projectOutcome { h.listProfiles() }
+    case .agentLaunch:
+      return await Self.asyncOutcome {
+        try await h.launch(request.params.decoded(as: IPC.AgentLaunchRequest.self))
+      }
+    default: return nil
+    }
+  }
+
   /// Shared adapter for the `project.*` methods: encode the typed response,
   /// passing a handler `IPCError` straight through, mapping a `DecodingError`
   /// to `invalidParams`, and any other throw to a programmer-error `internal`.
   private static func projectOutcome(_ body: () throws -> some Encodable) -> RouterOutcome {
     do {
       return encodeUnary(try body())
+    } catch let error as IPCError {
+      return .failed(error)
+    } catch let error as DecodingError {
+      return .failed(.invalidParams(message: String(describing: error), path: nil))
+    } catch {
+      return .failed(.internal(String(describing: error)))
+    }
+  }
+
+  /// `projectOutcome` for handlers that await (agent launch, handoff).
+  private static func asyncOutcome(_ body: () async throws -> some Encodable) async -> RouterOutcome {
+    do {
+      return encodeUnary(try await body())
     } catch let error as IPCError {
       return .failed(error)
     } catch let error as DecodingError {

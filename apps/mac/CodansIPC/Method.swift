@@ -31,6 +31,13 @@ extension IPC {
     case projectUpdateScript = "project.updateScript"
     case projectRemoveScript = "project.removeScript"
 
+    // agent — launch presets from `Settings.agents`. Handlers live in
+    // `AgentHandlers`. `launch` renders the profile through the same
+    // pipeline the toolbar Agents menu uses, optionally seeded with a
+    // kickoff prompt.
+    case agentListProfiles = "agent.listProfiles"
+    case agentLaunch = "agent.launch"
+
     // hierarchy — reads
     case hierarchyListProjects = "hierarchy.listProjects"
     case hierarchyListWorktrees = "hierarchy.listWorktrees"

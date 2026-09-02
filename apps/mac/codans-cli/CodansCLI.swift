@@ -1,9 +1,9 @@
 import ArgumentParser
-import Darwin
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Darwin
+import Foundation
 
 @main
 struct CodansCLI: AsyncParsableCommand {
@@ -19,6 +19,7 @@ struct CodansCLI: AsyncParsableCommand {
         codans pane send 'pwd'
         codans pane send <pane> 'git status --short'
         codans pane new --label agent codex
+        codans agent launch --agent claude
       """,
     version: "Codans \(CodansCLI.version)",
     subcommands: [
@@ -31,6 +32,7 @@ struct CodansCLI: AsyncParsableCommand {
       TabCommand.self,
       PaneCommand.self,
       BroadcastCommand.self,
+      AgentCommand.self,
     ]
   )
 
