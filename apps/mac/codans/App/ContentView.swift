@@ -131,6 +131,11 @@ struct ContentView: View {
       }
     }
     .environment(hierarchyManager)
+    .environment(agentStateStore)
+    .environment(
+      \.paneHUDActions,
+      PaneHUDActions(handOff: { paneID in store.send(.handoffRequested(paneID)) })
+    )
     .environment(settingsStore)
     .environment(UpdatesEnvironment.model)
     .environment(worktreeStatusMonitor)
