@@ -109,7 +109,7 @@ validate briefing → archiveCurrent(from, to) → writeBriefing | removeCurrent
 
 - `codans handoff` 默认源是**调用方 pane**：`AliasResolver` 先看 `CODANS_PANE_ID`，缺失则由服务端按进程祖先链归属（见 [cli.md](cli.md#寻址与别名解析)）。因此在自己 pane 里执行 `codans handoff to …` 的 agent 交接的就是它自己，与用户当前聚焦无关。
 - `--pane` 显式覆盖。
-- 应用内入口：toolbar Agents 菜单 / Command Palette 取选中 worktree 的聚焦 pane；AgentState 行右键取该行自己的 pane。
+- 应用内入口：toolbar Agents 菜单 / Command Palette 取选中 worktree 的聚焦 pane；AgentState 行右键与 pane 右上角的信息菜单取该行 / 该 pane 自己的 pane id。pane 菜单是最贴近语义的入口——交接是这个 pane 里那个 agent 的属性——它在展开时顺带展示 pane 所属 worktree 的 path / branch / 未提交行数。
 
 源 agent 身份优先取 `AgentStateStore` 的实时条目（分类器此刻看到的），回退到 pane 持久化绑定（`Pane.agentKind` / `agentSessionID`），因此重启后恢复的 pane 仍能报出 agent。
 

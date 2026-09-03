@@ -30,6 +30,11 @@ and the project does not yet follow semantic versioning — every release until
   the app, "Hand Off…" (Agents menu, Command Palette, Agents View row) asks
   the live agent to run that same command with its briefing and jumps to the
   receiver when it finishes, with a context-only fallback while waiting.
+- **Per-pane info menu.** Every terminal pane carries a collapsed info
+  button in its top-right corner. Opening it shows the worktree the pane
+  runs in — path, branch, uncommitted `+N −M` — and the agent bound to it,
+  and offers "Hand Off…" for that pane. Clicking anywhere else, or Escape,
+  collapses it.
 
 ### Changed
 
