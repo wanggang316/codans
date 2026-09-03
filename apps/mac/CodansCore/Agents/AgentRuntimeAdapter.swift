@@ -79,6 +79,8 @@ public nonisolated enum AgentRuntimeAdapters {
     case .amp:
       return ObservedAgentAdapter(
         kind: .amp, displayName: "Amp", processNames: ["amp", "amp-local"])
+    case .omp:
+      return OmpAdapter()
     }
   }
 
@@ -131,4 +133,17 @@ nonisolated struct ObservedAgentAdapter: AgentRuntimeAdapter {
   let kind: AgentKind
   let displayName: String
   let processNames: [String]
+}
+
+/// omp (oh-my-pi): sessions live under `~/.omp/agent/sessions/` and
+/// reattach via `omp --resume <id>` (the CLI resolves a session by id
+/// prefix regardless of the launching directory).
+nonisolated struct OmpAdapter: AgentRuntimeAdapter {
+  let kind: AgentKind = .omp
+  let displayName = "omp"
+  let processNames = ["omp"]
+
+  func resumeCommand(sessionID: String) -> String? {
+    "omp --resume \(AgentRuntimeAdapters.shellQuoted(sessionID))"
+  }
 }

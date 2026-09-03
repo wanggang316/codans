@@ -40,6 +40,7 @@ nonisolated enum RemoteAgentSessionHistoryScanner {
     // call order keeps the recording-runner tests simple.
     var sessions = await claudeSessions(host: host, worktreePath: path, runner: runner)
     sessions += await codexSessions(host: host, worktreePath: path, runner: runner)
+    sessions += await ompSessions(host: host, worktreePath: path, runner: runner)
     return AgentSessionHistoryScanner.grouped(sessions)
   }
 
@@ -122,6 +123,48 @@ nonisolated enum RemoteAgentSessionHistoryScanner {
       let title = titles[meta.id].flatMap { $0.isEmpty ? nil : $0 } ?? "Session \(meta.id.suffix(8))"
       return AgentSessionSummary(
         agent: .codex, sessionID: meta.id, title: title, updatedAt: chunk.mtime)
+    }
+  }
+
+  // MARK: - omp (oh-my-pi)
+
+  /// One round trip: every omp session file whose header mentions this
+  /// worktree's cwd (host-side substring prefilter on the `session` header
+  /// line, exactly like the codex prefilter; the exact cwd match happens
+  /// locally on the parsed meta). Only the two header lines cross the
+  /// wire — message payloads start on line 3 and can be megabytes.
+  static let ompScript = """
+    [ -d "$HOME/.omp/agent/sessions" ] || exit 0
+    find "$HOME/.omp/agent/sessions" -type f -name '*.jsonl' 2>/dev/null \
+    | while IFS= read -r f; do
+      if head -n 2 "$f" 2>/dev/null | sed -n 2p | grep -F -q -- "$1"; then
+        mt=$(stat -c '%Y' "$f" 2>/dev/null || stat -f '%m' "$f" 2>/dev/null)
+        printf '===CODANS-SESSION %s %s===\\n' "$mt" "$f"
+        head -n 2 "$f" 2>/dev/null
+        printf '\\n'
+      fi
+    done
+    """
+
+  private static func ompSessions(
+    host: RemoteHost, worktreePath: String, runner: any CommandRunner
+  ) async -> [AgentSessionSummary] {
+    guard
+      let stdout = await runScript(
+        ompScript, arguments: ["\"cwd\":\"\(worktreePath)\""], host: host, runner: runner
+      )
+    else { return [] }
+    return parseSessionChunks(stdout).compactMap { chunk in
+      guard
+        let meta = AgentSessionHistoryScanner.ompSessionMeta(fromPrefix: chunk.body),
+        AgentSessionHistoryScanner.normalized(meta.cwd) == worktreePath
+      else { return nil }
+      let title =
+        meta.title.map { $0.split(whereSeparator: \.isNewline).joined(separator: " ") }
+          .flatMap { $0.isEmpty ? nil : $0 }
+        ?? "Session \(meta.id.prefix(8))"
+      return AgentSessionSummary(
+        agent: .omp, sessionID: meta.id, title: title, updatedAt: chunk.mtime)
     }
   }
 

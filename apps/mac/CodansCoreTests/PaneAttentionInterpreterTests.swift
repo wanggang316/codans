@@ -489,6 +489,12 @@ struct PaneAttentionInterpreterTests {
         blocked: "Waiting for approval\nInvoke tool\nApprove\nAllow all for this session",
         idle: "amp> "
       ),
+      .init(
+        kind: .omp,
+        working: "⠋ Working… ⟦esc⟧",
+        blocked: "Allow tool: bash\nReason: destructive\n❯ Approve\n  Deny",
+        idle: "❯ fix the login bug"
+      ),
     ]
 
     for sample in samples {
@@ -578,6 +584,46 @@ struct PaneAttentionInterpreterTests {
     // spinner detection.
     #expect(activity(.claudeCode, "✻ Searching…") == .working)
     #expect(activity(.claudeCode, "✶ Thinking…") == .working)
+  }
+
+  @Test
+  func ompActivityClassifiesLoaderAndApprovalStates() {
+    // Working loader, as observed live on v18.0.7 (titanium theme):
+    // `⠋ Working… ⟦esc⟧`. The bracket pair is theme-configurable, so the
+    // hint matcher accepts any esc token trailing the ellipsis; the bare
+    // message covers a redraw without the hint.
+    #expect(activity(.omp, "⠋ Working… ⟦esc⟧") == .working)
+    #expect(activity(.omp, "Working… [esc]") == .working)
+    #expect(activity(.omp, "Still working… ⟦esc⟧") == .working)
+    #expect(activity(.omp, "Working…") == .working)
+    // A transcript line with esc BEFORE the ellipsis is not a hint.
+    #expect(activity(.omp, "press esc… done") == .idle)
+    // Approval selector: title cue alone, and the Approve/Deny option
+    // rows with the default cursor symbol.
+    #expect(activity(.omp, "Allow tool: bash\n❯ Approve\n  Deny") == .blocked)
+    #expect(activity(.omp, "Allow tool: bash") == .blocked)
+    #expect(activity(.omp, "❯ Approve\n  Deny") == .blocked)
+    // Idle composer: no loader, no approval dialog (live idle screen).
+    #expect(activity(.omp, "╭── π  > ⬢ GLM-5.3 · ◒ high > 🗑 omp-probe > ⑂ main\n❯ ") == .idle)
+  }
+
+  @Test
+  func ompProseMentioningApproveDenyStaysIdle() {
+    // Guard the reverse of the selector cue: transcript prose that merely
+    // contains the words "approve"/"deny" inside longer lines must not
+    // read as the approval dialog (options render as standalone rows).
+    #expect(
+      activity(.omp, "You can approve or deny the tool call in settings.\n❯ ")
+        == .idle)
+  }
+
+  @Test
+  func ompWorkingOutranksNothingWhenBlocked() {
+    // A blocked frame wins: the approval dialog can render while the
+    // loader line is still on screen, and the user's action is required.
+    #expect(
+      activity(.omp, "Working… [esc]\nAllow tool: bash\n❯ Approve\n  Deny")
+        == .blocked)
   }
 
   private func activity(

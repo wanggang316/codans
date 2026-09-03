@@ -47,6 +47,8 @@ extension PaneAttentionInterpreter {
       return detectDroid(screen)
     case .amp:
       return detectAmp(screen)
+    case .omp:
+      return detectOmp(screen)
     }
   }
 
@@ -291,6 +293,46 @@ extension PaneAttentionInterpreter {
       return .working
     }
     return .idle
+  }
+
+  private static func detectOmp(_ content: String) -> AgentActivityState {
+    let lower = content.lowercased()
+    // Approval selector: omp's tool-approval prompt titles the dialog
+    // `Allow tool: <name>` and renders Approve/Deny as select-list rows
+    // (cursor-prefixed), so require them as standalone option lines.
+    if lower.contains("allow tool:") || hasOmpSelectorOptions(content) {
+      return .blocked
+    }
+    // Working loader: omp renders the live working line as
+    // `<message>…<bracketed esc>` (verified live on v18.0.7:
+    // `⠋ Working… ⟦esc⟧` under the titanium theme; ASCII `[esc]` on
+    // default themes). The hint renders only while a turn is running.
+    if lower.contains("working…") || hasOmpInterruptHint(content) {
+      return .working
+    }
+    return .idle
+  }
+
+  /// The bracket pair is theme-configurable (`[esc]`, `⟦esc⟧`, …), so
+  /// match the shape: an `esc` token trailing the message's ellipsis on
+  /// one line. Transcript lines never carry that shape.
+  private static func hasOmpInterruptHint(_ content: String) -> Bool {
+    content.split(separator: "\n").contains { line in
+      let lowered = line.lowercased()
+      guard let ellipsis = lowered.range(of: "…") else { return false }
+      return lowered[ellipsis.upperBound...].contains("esc")
+    }
+  }
+
+  private static func hasOmpSelectorOptions(_ content: String) -> Bool {
+    var hasApprove = false
+    var hasDeny = false
+    for line in content.split(separator: "\n") {
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      if trimmed == "Approve" || trimmed == "❯ Approve" { hasApprove = true }
+      if trimmed == "Deny" || trimmed == "❯ Deny" { hasDeny = true }
+    }
+    return hasApprove && hasDeny
   }
 
   private static func contentAbovePromptBox(_ content: String) -> String {

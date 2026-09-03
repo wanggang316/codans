@@ -95,6 +95,7 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable, Equatable {
     case kimi
     case droid
     case amp
+    case omp
     // displayName maps each to its user-facing label
     // (e.g., .copilot → "GitHub Copilot").
 }

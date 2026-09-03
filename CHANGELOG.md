@@ -10,6 +10,12 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **omp agent support.** The Agents View now recognises [omp](https://omp.sh/)
+  (oh-my-pi) panes: foreground-process detection, working / blocked / idle
+  activity badges tuned to its loader and approval-selector rendering, the
+  omp glyph, and resumable session history — local and on remote hosts —
+  via `omp --resume`.
+
 ### Changed
 
 ### Deprecated

@@ -84,6 +84,10 @@ struct AgentLogoView: View {
         Image("amp")
           .resizable()
           .scaledToFit()
+      case .omp:
+        Image("omp")
+          .resizable()
+          .scaledToFit()
       }
     }
     .frame(width: size, height: size)

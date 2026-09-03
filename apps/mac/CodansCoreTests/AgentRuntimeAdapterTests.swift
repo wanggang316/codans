@@ -24,14 +24,18 @@ struct AgentRuntimeAdapterTests {
   // MARK: - resume invocation
 
   @Test
-  func resumeCommandsCoverClaudeAndCodexOnly() {
+  func resumeCommandsCoverResumableAgentsOnly() {
     #expect(
       AgentRuntimeAdapters.adapter(for: .claudeCode).resumeCommand(sessionID: "abc")
         == "claude --resume 'abc'")
     #expect(
       AgentRuntimeAdapters.adapter(for: .codex).resumeCommand(sessionID: "01X")
         == "codex resume '01X'")
-    for kind in AgentKind.allCases where kind != .claudeCode && kind != .codex {
+    #expect(
+      AgentRuntimeAdapters.adapter(for: .omp).resumeCommand(sessionID: "01abc")
+        == "omp --resume '01abc'")
+    for kind in AgentKind.allCases
+    where kind != .claudeCode && kind != .codex && kind != .omp {
       #expect(AgentRuntimeAdapters.adapter(for: kind).resumeCommand(sessionID: "x") == nil)
     }
   }
