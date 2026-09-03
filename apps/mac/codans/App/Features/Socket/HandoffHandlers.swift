@@ -164,7 +164,10 @@ final class HandoffHandlers {
     var launched: IPC.HandoffLaunchedPane?
     if request.launch {
       launched = await launchReceiver(profile: profile, source: source, transition: transition)
-      guard let launched else {
+      guard launched != nil else {
+        // The artifact is already written and the outgoing round archived, so
+        // record the failed launch before throwing — the log has to show that
+        // this transition happened and where its snapshot went.
         try? await log(
           coordinator, from: source.agentKind, to: receiver, disposition: .failed,
           transition: transition, note: request.note, now: timestamp)
