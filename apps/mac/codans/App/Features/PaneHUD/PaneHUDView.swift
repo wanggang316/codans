@@ -30,7 +30,12 @@ struct PaneHUDView: View {
   var body: some View {
     if let model = resolveModel() {
       card(model)
-        .padding(8)
+        // `LeafView` layers `PaneDragHandle` — a 10pt full-width strip — over
+        // the same surface and above this overlay, so clear it vertically.
+        // Without the inset the button's top edge would sit under the handle
+        // and hovering there would arm a pane drag instead.
+        .padding(.top, 14)
+        .padding(.trailing, 8)
     }
   }
 
