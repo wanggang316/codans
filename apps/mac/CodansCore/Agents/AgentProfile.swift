@@ -219,7 +219,30 @@ public nonisolated struct AgentSettings: Equatable, Codable, Sendable {
     // A present-but-empty list is a real state (the user removed every
     // profile) and must survive a round trip — only an absent key re-seeds.
     self.profiles =
-      try container.decodeIfPresent([AgentProfile].self, forKey: .profiles)
+      try container.decodeIfPresent([RecognisedAgentProfile].self, forKey: .profiles)?
+      .compactMap(\.profile)
       ?? AgentProfile.defaults
+  }
+}
+
+/// Decodes an `AgentProfile`, or `nil` when its `kind` names an agent this
+/// build does not know. settings.json is shared by every codans build on the
+/// machine, so a profile seeded by a build with a newer `AgentKind` must not
+/// make the whole file unreadable for an older one. Any other malformation
+/// still throws, so a genuinely corrupt entry is not papered over.
+private nonisolated struct RecognisedAgentProfile: Decodable {
+  let profile: AgentProfile?
+
+  private enum ProbeKeys: String, CodingKey {
+    case kind
+  }
+
+  init(from decoder: Decoder) throws {
+    let raw = try decoder.container(keyedBy: ProbeKeys.self).decode(String.self, forKey: .kind)
+    guard AgentKind(rawValue: raw) != nil else {
+      self.profile = nil
+      return
+    }
+    self.profile = try AgentProfile(from: decoder)
   }
 }

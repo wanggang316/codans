@@ -23,6 +23,29 @@ struct AgentSettingsCodableTests {
   }
 
   @Test
+  func profileForAnUnknownAgentKindIsSkipped() throws {
+    // settings.json is shared across builds; a profile seeded by a build that
+    // knows a newer agent must not make the file unreadable for this one.
+    let settings = try Self.decodeSettings(
+      #"""
+      {"version": 3, "agents": {"profiles": [
+        {"id": "636F6465-7800-0000-0000-000000000000", "kind": "codex"},
+        {"id": "11111111-2222-3333-4444-555555555555", "kind": "agent-from-the-future"}
+      ]}}
+      """#)
+    let kinds = settings.agents.profiles.map(\.kind)
+    #expect(kinds == [.codex])
+  }
+
+  @Test
+  func malformedProfileOfAKnownKindStillFails() {
+    #expect(throws: DecodingError.self) {
+      try Self.decodeSettings(
+        #"{"version": 3, "agents": {"profiles": [{"kind": "codex"}]}}"#)
+    }
+  }
+
+  @Test
   func emptyProfileListSurvivesARoundTrip() throws {
     let settings = try Self.decodeSettings(#"{"version": 3, "agents": {"profiles": []}}"#)
     #expect(settings.agents.profiles.isEmpty)
