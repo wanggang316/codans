@@ -696,6 +696,7 @@ final class HierarchyManager {
     for pane in worktree.tabs.flatMap({ $0.panes }) {
       runtime.closeSurface(for: pane.id)
     }
+    purgeRuntimeState(forTabs: worktree.tabs)
 
     catalog.projects[projectIndex].worktrees.remove(at: worktreeIndex)
     if catalog.projects[projectIndex].selectedWorktreeID == id {
@@ -708,6 +709,10 @@ final class HierarchyManager {
         catalog.projects[projectIndex].worktrees.first { !$0.archived }?.id
     }
     store.scheduleSave(catalog)
+    // `closeSurface` emits `.paneExited` only for Panes that had a live
+    // surface, so a Worktree of never-opened Panes leaves the membership
+    // reconcilers with no signal at all. Announce unconditionally.
+    runtime.announceHierarchyMutated()
   }
 
   func selectWorktree(_ id: WorktreeID?, in projectID: ProjectID) throws {
@@ -1202,11 +1207,16 @@ final class HierarchyManager {
         !worktree.isPinned,
         !worktree.archived
       else { continue }
+      // Archive semantics, so `suspendSurface` — the same call
+      // `setWorktreeArchived` makes, for the same two reasons. `closeSurface`
+      // was wrong here twice over: it left a never-opened Pane's daemon
+      // running, and for a Pane that DID have a surface its `.paneExited`
+      // routed through `paneLifecycleExited` into `closeTab` / `closePane`,
+      // deleting the very rows soft-hide keeps in the catalog for restore.
       for pane in worktree.tabs.flatMap({ $0.panes }) {
-        runtime.closeSurface(for: pane.id)
-        runningPanes.remove(pane.id)
-        commandBusyPanes.remove(pane.id)
+        runtime.suspendSurface(for: pane.id)
       }
+      purgeRuntimeState(forTabs: worktree.tabs)
       if let idx = catalog.projects[projectIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
         catalog.projects[projectIndex].worktrees[idx].archived = true
         // Stamp the archive time for the Cleanup auto-delete sweep (the loop
@@ -1227,6 +1237,13 @@ final class HierarchyManager {
     }
     if appended > 0 || upgraded > 0 || archivedCount > 0 {
       store.scheduleSave(catalog)
+    }
+    // Soft-hide emits no per-Pane lifecycle event, so without this the
+    // membership reconcilers never learn the rows went away — same reason
+    // `setWorktreeArchived` announces. This path archives without the user
+    // asking, which makes a lingering ghost row especially confusing.
+    if archivedCount > 0 {
+      runtime.announceHierarchyMutated()
     }
     return appended
   }
