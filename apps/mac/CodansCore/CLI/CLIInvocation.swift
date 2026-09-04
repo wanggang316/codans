@@ -22,24 +22,48 @@ public nonisolated enum CLIInvocation {
     #endif
   }()
 
-  /// What to actually write: this build's installed command name when it is
-  /// on disk, and otherwise the absolute path of the binary the app bundles.
+  /// What to actually write: this build's command name when the installed
+  /// symlink resolves to *this* build's binary, and otherwise the absolute
+  /// path of the binary the app bundles.
   ///
-  /// The fallback is what makes a handoff work in a build whose CLI was never
-  /// installed. Writing the uninstalled name would fail with "command not
-  /// found", and writing plain `codans` instead would silently reach the
-  /// Release app. An absolute path is less pretty and always right.
+  /// Existence at the install path is not enough. `/usr/local/bin/codans` is
+  /// normally a symlink into `/Applications/Codans.app`, so a locally-built
+  /// Release app that wrote the bare name would be handing its work to the
+  /// installed app instead of itself — the same class of bug as a Debug build
+  /// writing `codans`. Resolving the link and comparing is what makes the
+  /// short form safe.
+  ///
+  /// The absolute-path fallback is also what makes a handoff work at all in a
+  /// build whose CLI was never installed, where the name would simply be
+  /// "command not found". It is less pretty and always addresses this build.
+  ///
+  /// With no bundled binary to compare against there is nothing better to
+  /// offer, so the bare name stands.
   public static func command(
     named name: String = commandName,
     installDirectory: URL = installDirectory,
     bundledBinary: URL?,
     fileManager: FileManager = .default
   ) -> String {
-    let installed = installDirectory.appendingPathComponent(name, isDirectory: false)
-    if fileManager.isExecutableFile(atPath: installed.path(percentEncoded: false)) {
-      return name
-    }
     guard let bundledBinary else { return name }
+    let installed = installDirectory.appendingPathComponent(name, isDirectory: false)
+    if isSameFile(installed, bundledBinary, fileManager: fileManager) { return name }
     return ShellQuoting.quoted(bundledBinary.path(percentEncoded: false))
+  }
+
+  /// Symlink- and prefix-resolved identity test. `/usr/local/bin/codans` is a
+  /// link, and a temporary directory reaches the same file through both
+  /// `/var` and `/private/var`, so the raw paths of one binary routinely
+  /// differ.
+  private static func isSameFile(
+    _ lhs: URL,
+    _ rhs: URL,
+    fileManager: FileManager
+  ) -> Bool {
+    let left = lhs.resolvingSymlinksInPath().standardizedFileURL
+    guard fileManager.isExecutableFile(atPath: left.path(percentEncoded: false)) else {
+      return false
+    }
+    return left == rhs.resolvingSymlinksInPath().standardizedFileURL
   }
 }
