@@ -309,6 +309,57 @@ struct HierarchyManagerTests {
   }
 
   @Test
+  func removeProjectSuspendsEveryPaneAndAnnounces() async throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let liveWorktree = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let liveTab = try manager.createTab(in: liveWorktree, in: projectID, name: nil)
+    let livePane = try await manager.openPane(
+      in: liveTab, in: liveWorktree, in: projectID,
+      workingDirectory: "/repo/feat", initialCommand: nil
+    )
+    let archivedWorktree = try manager.createWorktree(
+      in: projectID, name: "old", path: "/repo/old", branch: "old"
+    )
+    let archivedTab = try manager.createTab(in: archivedWorktree, in: projectID, name: nil)
+    let archivedPane = try await manager.openPane(
+      in: archivedTab, in: archivedWorktree, in: projectID,
+      workingDirectory: "/repo/old", initialCommand: nil
+    )
+    try manager.setWorktreeArchived(worktreeID: archivedWorktree, archived: true)
+    fakeRuntime.reset()
+
+    try manager.removeProject(projectID)
+
+    // Suspend, not close: surfaces are lazy, so a backgrounded pane's zmx
+    // daemon would otherwise leak, and `.paneExited` would route through
+    // paneLifecycleExited → closePane for panes already deleted wholesale.
+    // Archived worktrees are included — their control socket is gone, which
+    // the live runtime treats as a no-op.
+    #expect(Set(fakeRuntime.suspendSurfaceCalls) == Set([livePane, archivedPane]))
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+    // One structural-mutation announce so the AgentState reconcile runs
+    // against the now-smaller catalog and retires the project's agent rows.
+    #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
+    #expect(manager.catalog.projects.isEmpty)
+  }
+
+  @Test
+  func removeProjectClearsSelectionAndRejectsUnknownID() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    manager.selectProject(projectID)
+
+    #expect(throws: HierarchyError.self) {
+      try manager.removeProject(ProjectID())
+    }
+    #expect(manager.catalog.projects.count == 1)
+
+    try manager.removeProject(projectID)
+    #expect(manager.catalog.selectedProjectID == nil)
+  }
+
+  @Test
   func isPathRegisteredReturnsPairForCanonicalizedMatch() throws {
     let projectID = manager.addProject(
       name: "p",

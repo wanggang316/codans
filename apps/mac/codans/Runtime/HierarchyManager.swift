@@ -458,15 +458,39 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Drops the Project from the catalog. The on-disk repository is never
+  /// touched — this only unregisters it.
+  ///
+  /// Every Pane under the Project is torn down through
+  /// `runtime.suspendSurface(for:)` first, for the same two reasons archive
+  /// uses it (see `setWorktreeArchived`): surfaces are lazy, so a
+  /// backgrounded Pane usually has no registered surface while its zmx
+  /// daemon is still running, and `.paneExited` would route through
+  /// `paneLifecycleExited → closePane` for Panes this call has already
+  /// deleted wholesale. Archived Worktrees are included: their daemons were
+  /// killed at archive time and a missing control socket is a silent no-op.
+  ///
+  /// Suspend emits no per-Pane lifecycle event, so the removal ends with
+  /// `announceHierarchyMutated()` — that is what makes the AgentState
+  /// reconcile run against the now-smaller catalog and retire the Project's
+  /// agent rows, which would otherwise linger as em-dash ghosts (and be
+  /// re-seeded from the quit snapshot on the next launch).
   func removeProject(_ id: ProjectID) throws {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")
+    }
+    let panes = catalog.projects[projectIndex].worktrees
+      .flatMap { $0.tabs }
+      .flatMap { $0.panes }
+    for pane in panes {
+      runtime.suspendSurface(for: pane.id)
     }
     catalog.projects.remove(at: projectIndex)
     if catalog.selectedProjectID == id {
       catalog.selectedProjectID = nil
     }
     store.scheduleSave(catalog)
+    runtime.announceHierarchyMutated()
   }
 
   /// Set the user's currently-selected Project at the top level. Single-

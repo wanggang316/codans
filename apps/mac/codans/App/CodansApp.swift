@@ -1641,6 +1641,13 @@ final class AppState {
       registry: registry,
       knownLiveness: self.sessionSweepLiveness
     )
+    // The snapshot is keyed on daemon liveness, not catalog membership, so it
+    // can carry a pane whose Project / Worktree was removed while its daemon
+    // outlived the removal. Such an entry resolves to nothing and renders as
+    // an em-dash ghost row. The drain loop only reconciles on the next
+    // structural mutation, which may never come in a quiet session — sweep
+    // the seed against the catalog immediately.
+    registry.reconcileMembership(livePaneIDs: manager.catalog.visiblePaneIDs())
     // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
     // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
     // pty child from the previous session can't haunt the panel. The
