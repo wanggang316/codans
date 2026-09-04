@@ -105,6 +105,63 @@ struct HierarchyClientTests {
     #expect(manager.catalog.selectedProjectID == nil)
   }
 
+  @Test
+  func removeProjectDropsItsSettingsEntry() throws {
+    let tempURL = FileManager.default.temporaryDirectory
+      .appending(component: UUID().uuidString + ".json")
+    let settingsURL = FileManager.default.temporaryDirectory
+      .appending(component: "settings-\(UUID().uuidString).json")
+    defer {
+      try? FileManager.default.removeItem(at: tempURL)
+      try? FileManager.default.removeItem(at: settingsURL)
+    }
+    let manager = HierarchyManager(
+      catalog: .default,
+      store: CatalogStore(fileURL: tempURL),
+      runtime: FakeHierarchyRuntime()
+    )
+    let settings = SettingsStore(fileURL: settingsURL)
+    let client = HierarchyClient.live(manager: manager, settings: settings)
+
+    let projectID = client.addProject("p", "/tmp/p", "/tmp/p")
+    settings.mutateProject(projectID) { $0.defaultEditor = EditorID("vscode") }
+    #expect(settings.settings.projects[projectID] != nil)
+
+    try client.removeProject(projectID)
+
+    // `Settings.garbageCollect` only sweeps effectively-empty entries, so a
+    // populated orphan would survive every future save. Re-adding the same
+    // repository mints a new ProjectID, making it unreachable.
+    #expect(settings.settings.projects[projectID] == nil)
+  }
+
+  @Test
+  func removeProjectOfUnknownIDLeavesSettingsIntact() throws {
+    let tempURL = FileManager.default.temporaryDirectory
+      .appending(component: UUID().uuidString + ".json")
+    let settingsURL = FileManager.default.temporaryDirectory
+      .appending(component: "settings-\(UUID().uuidString).json")
+    defer {
+      try? FileManager.default.removeItem(at: tempURL)
+      try? FileManager.default.removeItem(at: settingsURL)
+    }
+    let manager = HierarchyManager(
+      catalog: .default,
+      store: CatalogStore(fileURL: tempURL),
+      runtime: FakeHierarchyRuntime()
+    )
+    let settings = SettingsStore(fileURL: settingsURL)
+    let client = HierarchyClient.live(manager: manager, settings: settings)
+
+    let projectID = client.addProject("p", "/tmp/p", "/tmp/p")
+    settings.mutateProject(projectID) { $0.defaultEditor = EditorID("vscode") }
+
+    #expect(throws: HierarchyError.self) {
+      try client.removeProject(ProjectID())
+    }
+    #expect(settings.settings.projects[projectID] != nil)
+  }
+
   // HierarchyClient no longer exposes per-Project editor / worktree-dir writers. Those
   // values live in `Settings.projects[pid]` (v3 schema) and tests for that storage live
   // in `SettingsStoreTests` / `SettingsWriter` coverage inside each consumer feature.

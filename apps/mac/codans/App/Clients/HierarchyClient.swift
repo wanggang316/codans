@@ -616,7 +616,12 @@ extension HierarchyClient {
           projectID: projectID, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
         )
       },
-      removeProject: { projectID in try manager.removeProject(projectID) },
+      removeProject: { projectID in
+        try manager.removeProject(projectID)
+        // Only after the catalog mutation succeeds — a throwing removal
+        // (unknown id) must not strip a live Project's settings.
+        settings?.removeProjectSettings(projectID)
+      },
       renameProject: { projectID, name in
         try manager.renameProject(projectID, name: name)
       },
