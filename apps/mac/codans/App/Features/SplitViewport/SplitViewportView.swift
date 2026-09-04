@@ -77,15 +77,20 @@ struct SplitViewportView: View {
   /// `createPaneRow` — so a brand-new (or just-switched-to) Tab renders
   /// with an empty split tree for a frame or two. Showing `emptyPlaceholder`
   /// in that window flashes a prominent "New Pane" call to action the user
-  /// never needs to press. This mirrors `LeafView`'s cold-pane branch —
-  /// small spinner over Ghostty's terminal background — so the whole
-  /// empty → spinning-up → live progression stays on a single tone.
+  /// never needs to press.
+  ///
+  /// Deliberately bare: nothing but Ghostty's terminal background. A warm
+  /// Tab lands its first Pane in ~350ms, and a spinner that appears and
+  /// disappears inside that window reads as a flash rather than as
+  /// progress. The one indicator worth showing belongs to a spawn slow
+  /// enough to need explaining, and `LazyPaneHost.loadingPlaceholder`
+  /// owns it behind its own delay. Sharing the terminal tone with
+  /// `LeafView`'s cold-pane branch keeps the whole empty → live
+  /// progression on a single flat colour.
   private var warmingPlaceholder: some View {
     let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
-    return ProgressView()
-      .controlSize(.small)
+    return Color(nsColor: terminalBackground)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(Color(nsColor: terminalBackground))
   }
 
   private var emptyPlaceholder: some View {
@@ -389,12 +394,13 @@ private struct LeafView: View {
       // the hand-off to `LazyPaneHost.loadingPlaceholder` and then the
       // live surface stays on a single tone — earlier we used
       // `underPageBackgroundColor` here, which produced a visible grey
-      // flash before the terminal theme settled in.
+      // flash before the terminal theme settled in. No spinner either:
+      // this phase is a handful of frames on the way to `LazyPaneHost`,
+      // which owns the one bringup indicator and only reveals it once a
+      // spawn is slow enough to be worth reporting.
       let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
-      ProgressView()
-        .controlSize(.small)
+      Color(nsColor: terminalBackground)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: terminalBackground))
     }
   }
 
