@@ -40,16 +40,7 @@ struct HandoffOverlayView: View {
         }
       }
       .frame(maxWidth: 520)
-      .background(
-        VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
-          .overlay(Color(nsColor: .textBackgroundColor).opacity(0.18))
-          .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-          .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+      .floatingCard(cornerRadius: cardCornerRadius)
       .padding(.top, 80)
       // Keyboard ownership follows the phase; see the type doc.
       .focusable(capturesKeyboard)
