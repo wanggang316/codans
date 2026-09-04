@@ -24,17 +24,22 @@ struct SplitViewportView: View {
   /// follows the cursor across panes and always clears on drop — see
   /// `PaneDropHighlight`.
   @State private var dropHighlight = PaneDropHighlight()
-  /// False until `emptyStateGrace` has elapsed for the current Tab — see
-  /// `warmingPlaceholder` for why the empty state is held back that long.
-  /// Re-armed per `tabID`, so switching Tabs starts a fresh window while a
-  /// Tab that empties out *later* (the user closed its last Pane) keeps the
-  /// flag true and shows the affordance immediately, which is the settled
-  /// state the placeholder is actually for.
-  @State private var emptyStateSettled = false
+  /// The Tab whose `emptyStateGrace` has already elapsed, or nil before any
+  /// has. It is compared against `tabID` *inside* the render pass, so a Tab
+  /// the view has just been pointed at fails the check on its very first
+  /// frame. A Bool re-armed from `.task` cannot do that: `.task` runs after
+  /// that frame is already on screen, so the previous Tab's settled `true`
+  /// leaks the "New Pane" call to action through for ~100ms. A Tab that
+  /// empties out *later* (the user closed its last Pane) still matches and
+  /// shows the affordance immediately, which is the settled state the
+  /// placeholder is actually for.
+  @State private var settledTabID: TabID?
 
   /// How long a just-shown Tab is allowed to look empty before the
-  /// actionable "No panes" affordance appears.
-  private static let emptyStateGrace: Duration = .milliseconds(400)
+  /// actionable "No panes" affordance appears. Warm bringup of a Tab's first
+  /// Pane measures ~350ms end to end, so this leaves headroom for a cold zmx
+  /// daemon without stranding a genuinely Pane-less Tab behind a spinner.
+  private static let emptyStateGrace: Duration = .milliseconds(1500)
 
   var body: some View {
     Group {
@@ -49,7 +54,7 @@ struct SplitViewportView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(dropHighlight)
-      } else if emptyStateSettled {
+      } else if settledTabID == tabID {
         emptyPlaceholder
       } else {
         warmingPlaceholder
@@ -59,9 +64,10 @@ struct SplitViewportView: View {
       syncPaneHosts()
     }
     .task(id: tabID) {
-      emptyStateSettled = false
+      let graced = tabID
       try? await Task.sleep(for: Self.emptyStateGrace)
-      emptyStateSettled = true
+      guard !Task.isCancelled else { return }
+      settledTabID = graced
     }
   }
 
