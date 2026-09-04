@@ -23,6 +23,15 @@ import SwiftUI
 /// `HierarchyClient.closePane` → `TerminalEngine.closeSurface`.
 struct LazyPaneHost: View {
   @Bindable var store: StoreOf<PaneHostFeature>
+  /// False until `loadingChromeDelay` has elapsed on the current
+  /// `loadingPlaceholder` — see there for why the chrome waits.
+  @State private var showsLoadingChrome = false
+
+  /// How long a spawn runs before the placeholder admits to being one.
+  /// A warm pane reaches `.ready` in ~350ms, well inside this, so the
+  /// common case is a flat terminal-coloured hand-off with no chrome to
+  /// blink at the user.
+  private static let loadingChromeDelay: Duration = .milliseconds(600)
 
   var body: some View {
     content
@@ -82,11 +91,13 @@ struct LazyPaneHost: View {
 
   private var loadingPlaceholder: some View {
     // Spinner + shimmering caption for panes that are still negotiating
-    // with the engine. Background tracks Ghostty's terminal `background`
-    // color so the hand-off to the live surface is a no-op visually —
-    // switching to a fresh worktree previously flashed grey
-    // (underPageBackgroundColor) for the spawn window before settling
-    // onto the terminal's theme tone.
+    // with the engine, held back by `loadingChromeDelay`. Background
+    // tracks Ghostty's terminal `background` color so the hand-off to the
+    // live surface is a no-op visually — switching to a fresh worktree
+    // previously flashed grey (underPageBackgroundColor) for the spawn
+    // window before settling onto the terminal's theme tone. The chrome
+    // fades in rather than cutting in, so a spawn that crosses the delay
+    // by a hair still doesn't register as a blink.
     let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
     return VStack(spacing: 8) {
       Image(systemName: "apple.terminal.on.rectangle")
@@ -100,8 +111,15 @@ struct LazyPaneHost: View {
         .foregroundStyle(.secondary)
         .shimmer(isActive: true)
     }
+    .opacity(showsLoadingChrome ? 1 : 0)
+    .animation(.easeIn(duration: 0.2), value: showsLoadingChrome)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: terminalBackground))
+    .task {
+      try? await Task.sleep(for: Self.loadingChromeDelay)
+      guard !Task.isCancelled else { return }
+      showsLoadingChrome = true
+    }
   }
 
   private func failurePlaceholder(message: String) -> some View {

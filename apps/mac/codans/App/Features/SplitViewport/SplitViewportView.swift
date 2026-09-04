@@ -9,8 +9,10 @@ import SwiftUI
 /// `PaneHostFeature`; this view only bridges catalog changes into the
 /// reducer via `.panesInActiveTabChanged(_:)`.
 ///
-/// Empty-Tab UX: centered "No panes" placeholder with a "New Pane" button.
-/// The Tab is never auto-closed by this view.
+/// Empty-Tab UX: centered "No panes" placeholder with a "New Pane" button,
+/// held back for `emptyStateGrace` so a Tab that is still seeding its first
+/// Pane shows `warmingPlaceholder` instead. The Tab is never auto-closed by
+/// this view.
 struct SplitViewportView: View {
   @Bindable var store: StoreOf<SplitViewportFeature>
   let projectID: ProjectID
@@ -22,6 +24,22 @@ struct SplitViewportView: View {
   /// follows the cursor across panes and always clears on drop — see
   /// `PaneDropHighlight`.
   @State private var dropHighlight = PaneDropHighlight()
+  /// The Tab whose `emptyStateGrace` has already elapsed, or nil before any
+  /// has. It is compared against `tabID` *inside* the render pass, so a Tab
+  /// the view has just been pointed at fails the check on its very first
+  /// frame. A Bool re-armed from `.task` cannot do that: `.task` runs after
+  /// that frame is already on screen, so the previous Tab's settled `true`
+  /// leaks the "New Pane" call to action through for ~100ms. A Tab that
+  /// empties out *later* (the user closed its last Pane) still matches and
+  /// shows the affordance immediately, which is the settled state the
+  /// placeholder is actually for.
+  @State private var settledTabID: TabID?
+
+  /// How long a just-shown Tab is allowed to look empty before the
+  /// actionable "No panes" affordance appears. Warm bringup of a Tab's first
+  /// Pane measures ~350ms end to end, so this leaves headroom for a cold zmx
+  /// daemon without stranding a genuinely Pane-less Tab behind a spinner.
+  private static let emptyStateGrace: Duration = .milliseconds(1500)
 
   var body: some View {
     Group {
@@ -36,13 +54,43 @@ struct SplitViewportView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(dropHighlight)
-      } else {
+      } else if settledTabID == tabID {
         emptyPlaceholder
+      } else {
+        warmingPlaceholder
       }
     }
     .task(id: currentPaneSeedsKey()) {
       syncPaneHosts()
     }
+    .task(id: tabID) {
+      let graced = tabID
+      try? await Task.sleep(for: Self.emptyStateGrace)
+      guard !Task.isCancelled else { return }
+      settledTabID = graced
+    }
+  }
+
+  /// Neutral stand-in for a Tab whose first Pane row has not landed yet.
+  /// Opening a Tab is two steps — the Tab row is inserted synchronously,
+  /// its first Pane follows once the async zmx bringup path reaches
+  /// `createPaneRow` — so a brand-new (or just-switched-to) Tab renders
+  /// with an empty split tree for a frame or two. Showing `emptyPlaceholder`
+  /// in that window flashes a prominent "New Pane" call to action the user
+  /// never needs to press.
+  ///
+  /// Deliberately bare: nothing but Ghostty's terminal background. A warm
+  /// Tab lands its first Pane in ~350ms, and a spinner that appears and
+  /// disappears inside that window reads as a flash rather than as
+  /// progress. The one indicator worth showing belongs to a spawn slow
+  /// enough to need explaining, and `LazyPaneHost.loadingPlaceholder`
+  /// owns it behind its own delay. Sharing the terminal tone with
+  /// `LeafView`'s cold-pane branch keeps the whole empty → live
+  /// progression on a single flat colour.
+  private var warmingPlaceholder: some View {
+    let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
+    return Color(nsColor: terminalBackground)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   private var emptyPlaceholder: some View {
@@ -346,12 +394,13 @@ private struct LeafView: View {
       // the hand-off to `LazyPaneHost.loadingPlaceholder` and then the
       // live surface stays on a single tone — earlier we used
       // `underPageBackgroundColor` here, which produced a visible grey
-      // flash before the terminal theme settled in.
+      // flash before the terminal theme settled in. No spinner either:
+      // this phase is a handful of frames on the way to `LazyPaneHost`,
+      // which owns the one bringup indicator and only reveals it once a
+      // spawn is slow enough to be worth reporting.
       let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
-      ProgressView()
-        .controlSize(.small)
+      Color(nsColor: terminalBackground)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: terminalBackground))
     }
   }
 
