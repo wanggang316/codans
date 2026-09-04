@@ -106,7 +106,8 @@ struct GitHubFeature {
     /// build the mapping.
     case seedFromCache(
       cached: [ProjectID: BatchedPullRequests],
-      branchPairsByProject: [ProjectID: [WorktreeBranchPair]]
+      branchPairsByProject: [ProjectID: [WorktreeBranchPair]],
+      liveProjectIDs: Set<ProjectID>
     )
     case refreshAvailabilityRequested
     case availabilityProbed(GitHubAvailability, probedAt: Date)
@@ -188,6 +189,14 @@ struct GitHubFeature {
     /// error-state retry so a retry repaints the whole repo with full check rollups
     /// instead of the empty-checks v1 single-branch result.
     case worktreeRefreshRequested(WorktreeID)
+
+    /// Drop every entry keyed by an ID the catalog no longer contains, and
+    /// pause the poll when its target is among them. Sent by RootFeature on
+    /// each structural hierarchy mutation. Nothing else in this feature ever
+    /// removes a key: the maps are written by fetches and read by views that
+    /// are already keyed to live rows, so without this they only grow, and
+    /// `snapshotsByProject` carries the growth to disk.
+    case pruneToCatalog(projectIDs: Set<ProjectID>, worktreeIDs: Set<WorktreeID>)
 
     case delegate(Delegate)
 
@@ -290,16 +299,28 @@ struct GitHubFeature {
         }
         return probeAvailabilityEffect()
 
-      case .seedFromCache(let cached, let branchPairsByProject):
+      case .seedFromCache(let cached, let branchPairsByProject, let liveProjectIDs):
         // Hydrate reducer state from disk. Two writes:
         //   1. `state.snapshotsByProject` — drives the `projectActivated`
         //      cache-hit check so we don't immediately over-fetch on bootstrap.
         //   2. `state.snapshots[worktreeID]` — what views read. Projected from
         //      each cached `byBranch` entry via the caller-supplied
         //      `branchPairsByProject` mapping.
-        state.snapshotsByProject.merge(cached) { _, new in new }
+        //
+        // Filter to live Projects first. The cache is written back whole on
+        // every successful fetch, so a Project the user removed would be
+        // merged in here, re-persisted, and merged in again next launch —
+        // the file grew without bound and kept PR titles and branch names
+        // for repositories that were unregistered months earlier.
+        let live = cached.filter { liveProjectIDs.contains($0.key) }
+        if live.count != cached.count {
+          Self.logger.info(
+            "seed dropped \(cached.count - live.count, privacy: .public) cached project(s) absent from the catalog"
+          )
+        }
+        state.snapshotsByProject.merge(live) { _, new in new }
         for (projectID, pairs) in branchPairsByProject {
-          guard let batched = cached[projectID] else { continue }
+          guard let batched = live[projectID] else { continue }
           for pair in pairs {
             if let snap = batched.byBranch[pair.branch] {
               state.snapshots[pair.worktreeID] = snap
@@ -550,6 +571,40 @@ struct GitHubFeature {
           projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
         )
         return .merge(fetch, schedulePollTick(projectID, after: cadence))
+
+      case .pruneToCatalog(let projectIDs, let worktreeIDs):
+        let hadProjects = state.snapshotsByProject.count
+        state.snapshots = state.snapshots.filter { worktreeIDs.contains($0.key) }
+        state.snapshotLoadedAt = state.snapshotLoadedAt.filter { worktreeIDs.contains($0.key) }
+        state.worktreePaths = state.worktreePaths.filter { worktreeIDs.contains($0.key) }
+        state.lastError = state.lastError.filter { worktreeIDs.contains($0.key) }
+        state.projectByWorktree = state.projectByWorktree.filter { worktreeIDs.contains($0.key) }
+        state.loading.formIntersection(worktreeIDs)
+        state.mutating.formIntersection(worktreeIDs)
+        state.snapshotsByProject = state.snapshotsByProject.filter { projectIDs.contains($0.key) }
+        state.lastErrorByProject = state.lastErrorByProject.filter { projectIDs.contains($0.key) }
+        state.projectGitRoots = state.projectGitRoots.filter { projectIDs.contains($0.key) }
+        state.projectWorktreePairs = state.projectWorktreePairs.filter { projectIDs.contains($0.key) }
+        state.inFlightFetchProjects.formIntersection(projectIDs)
+        state.queuedRefreshByProject.formIntersection(projectIDs)
+        // Persist the pruned map so the removal survives a relaunch even if no
+        // fetch succeeds before quit.
+        if state.snapshotsByProject.count != hadProjects {
+          let snapshotOnDisk = state.snapshotsByProject
+          let cache = gitHubSnapshotCache
+          Task.detached(priority: .utility) {
+            cache.save(snapshotOnDisk)
+          }
+        }
+        // A poll aimed at a Project that just left the catalog would keep
+        // shelling out `git remote get-url` + `gh api graphql` against a
+        // repository the user unregistered, and each success would write the
+        // dead Project straight back into the on-disk cache.
+        if let target = state.pollTarget, !projectIDs.contains(target) {
+          state.pollTarget = nil
+          return .cancel(id: CancelID.poll)
+        }
+        return .none
 
       case .worktreeRefreshRequested(let worktreeID):
         guard let projectID = state.projectByWorktree[worktreeID],

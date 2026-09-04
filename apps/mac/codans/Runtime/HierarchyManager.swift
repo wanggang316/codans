@@ -776,9 +776,10 @@ final class HierarchyManager {
       // Archive emits no per-pane `.paneExited` (see `suspendSurface`), so
       // nudge a structural-mutation event to re-run the AgentState reconcile
       // against `visiblePaneIDs()` — that is what retires the now-hidden
-      // worktree's agent rows. Unarchive needs no nudge: its panes had no
-      // running daemon to surface a row for.
-      if archived { runtime.announceHierarchyMutated() }
+      // worktree's agent rows. Unarchive announces too: nothing else tells
+      // the GitHub poll its branch set grew, so the restored row would keep
+      // painting the PR snapshot captured at archive time.
+      runtime.announceHierarchyMutated()
       return
     }
   }

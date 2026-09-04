@@ -611,6 +611,96 @@ struct GitHubFeatureTests {
     }
   }
 
+  // MARK: - catalog membership
+
+  @Test
+  func seedFromCacheDropsProjectsAbsentFromTheCatalog() async {
+    let live = ProjectID()
+    let dead = ProjectID()
+    let wid = WorktreeID()
+    let snap = Self.snapshot(state: .open, checkStatus: .completed, merge: .clean)
+    let batched = { (branch: String) in
+      BatchedPullRequests(
+        host: "github.com", owner: "w", repo: "r",
+        byBranch: [branch: snap], seenBranches: [branch], fetchedAt: Self.fixedDate
+      )
+    }
+    let store = Self.makeStore()
+
+    await store.send(
+      .seedFromCache(
+        cached: [live: batched("main"), dead: batched("old")],
+        branchPairsByProject: [
+          live: [.init(worktreeID: wid, branch: "main")]
+        ],
+        liveProjectIDs: [live]
+      )
+    ) {
+      // The dead Project never enters state, so the next successful fetch
+      // writes a cache file without it.
+      $0.snapshotsByProject[live] = batched("main")
+      $0.snapshots[wid] = snap
+      $0.snapshotLoadedAt[wid] = Self.fixedDate
+    }
+  }
+
+  @Test
+  func pruneToCatalogDropsDeadKeysAndPausesThePoll() async {
+    let live = ProjectID()
+    let dead = ProjectID()
+    let liveWID = WorktreeID()
+    let deadWID = WorktreeID()
+    let snap = Self.snapshot(state: .open, checkStatus: .completed, merge: .clean)
+    var seed = GitHubFeature.State()
+    seed.snapshots = [liveWID: snap, deadWID: snap]
+    seed.snapshotLoadedAt = [liveWID: Self.fixedDate, deadWID: Self.fixedDate]
+    seed.worktreePaths = [
+      liveWID: URL(fileURLWithPath: "/repo"), deadWID: URL(fileURLWithPath: "/gone"),
+    ]
+    seed.projectByWorktree = [liveWID: live, deadWID: dead]
+    seed.mutating = [deadWID]
+    seed.projectGitRoots = [
+      live: URL(fileURLWithPath: "/repo"), dead: URL(fileURLWithPath: "/gone"),
+    ]
+    seed.projectWorktreePairs = [
+      live: [.init(worktreeID: liveWID, branch: "main")],
+      dead: [.init(worktreeID: deadWID, branch: "old")],
+    ]
+    seed.inFlightFetchProjects = [dead]
+    seed.queuedRefreshByProject = [dead]
+    seed.pollTarget = dead
+    let store = Self.makeStore(initialState: seed)
+
+    await store.send(
+      .pruneToCatalog(projectIDs: [live], worktreeIDs: [liveWID])
+    ) {
+      $0.snapshots = [liveWID: snap]
+      $0.snapshotLoadedAt = [liveWID: Self.fixedDate]
+      $0.worktreePaths = [liveWID: URL(fileURLWithPath: "/repo")]
+      $0.projectByWorktree = [liveWID: live]
+      $0.mutating = []
+      $0.projectGitRoots = [live: URL(fileURLWithPath: "/repo")]
+      $0.projectWorktreePairs = [live: [.init(worktreeID: liveWID, branch: "main")]]
+      $0.inFlightFetchProjects = []
+      $0.queuedRefreshByProject = []
+      // A poll left aimed at a removed Project keeps shelling out
+      // `gh api graphql` against a repository the user unregistered, and each
+      // success writes it straight back into the on-disk cache.
+      $0.pollTarget = nil
+    }
+  }
+
+  @Test
+  func pruneToCatalogKeepsAPollWhoseProjectSurvived() async {
+    let live = ProjectID()
+    var seed = GitHubFeature.State()
+    seed.pollTarget = live
+    seed.projectGitRoots = [live: URL(fileURLWithPath: "/repo")]
+    let store = Self.makeStore(initialState: seed)
+
+    await store.send(.pruneToCatalog(projectIDs: [live], worktreeIDs: []))
+  }
+
   /// Cadence-predicate fixture: an open/settled/in-flight snapshot in one line.
   private static func snapshot(
     state: PullRequestState,
