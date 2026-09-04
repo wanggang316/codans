@@ -1683,7 +1683,11 @@ final class AppState {
     self.notificationDetectorTask = Task { @MainActor in
       for await event in detectorEvents {
         await detector.handle(event)
-        Self.dispatchToAgentBinder(event: event, binder: binder)
+        Self.dispatchToAgentBinder(
+          event: event,
+          binder: binder,
+          catalog: { manager.catalog }
+        )
         Self.dispatchToAgentStateStore(
           event: event,
           registry: registry,
@@ -1857,7 +1861,8 @@ final class AppState {
   @MainActor
   private static func dispatchToAgentBinder(
     event: TerminalEvent,
-    binder: AgentBinder
+    binder: AgentBinder,
+    catalog: @MainActor () -> Catalog
   ) {
     switch event {
     case .foregroundJobChanged(let paneID, let job):
@@ -1866,6 +1871,12 @@ final class AppState {
       .paneCrashed(let paneID, _),
       .paneClosedByTab(let paneID, _):
       binder.unbind(paneID)
+    case .hierarchyMutated(let scope) where scope != .selection && scope != .tags:
+      // Same reconcile the AgentState registry runs, for the same reason —
+      // see `AgentBinder.reconcileMembership`. Keyed on `visiblePaneIDs()`
+      // so an archived worktree's panes count as gone: that is what lets a
+      // later unarchive re-materialize the binding.
+      binder.reconcileMembership(livePaneIDs: catalog().visiblePaneIDs())
     default:
       break
     }
