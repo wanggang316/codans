@@ -22,10 +22,24 @@ public enum SocketDiscovery {
     #endif
   }
 
+  /// Precedence: an explicit `override` (a `--socket` flag), then
+  /// `$CODANS_SOCKET_PATH`, then the build default.
+  ///
+  /// The environment is consulted in the body rather than as a default
+  /// argument. As a default it silently dropped out whenever a caller passed
+  /// its own optional through — `resolve(override: flag)` with no flag
+  /// supplies an explicit `nil`, which replaces the default and skipped the
+  /// env lookup entirely. Every CLI command run inside a Debug app's pane
+  /// then dialled the Release socket, because the pane exports
+  /// `CODANS_SOCKET_PATH` for exactly this purpose and it was ignored.
   public static func resolve(
-    override: String? = ProcessInfo.processInfo.environment["CODANS_SOCKET_PATH"]
+    override: String? = nil,
+    environment: [String: String] = ProcessInfo.processInfo.environment
   ) -> String {
     if let override, !override.isEmpty { return override }
+    if let fromEnvironment = environment["CODANS_SOCKET_PATH"], !fromEnvironment.isEmpty {
+      return fromEnvironment
+    }
     return defaultSocketPath()
   }
 

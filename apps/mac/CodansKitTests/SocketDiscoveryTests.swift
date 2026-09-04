@@ -37,6 +37,29 @@ struct SocketDiscoveryTests {
   }
 
   @Test
+  func environmentIsConsultedWhenNoOverrideIsGiven() {
+    let environment = ["CODANS_SOCKET_PATH": "/tmp/from-env.sock"]
+    #expect(SocketDiscovery.resolve(environment: environment) == "/tmp/from-env.sock")
+    // The trap this guards: a caller forwarding its own empty flag passes an
+    // explicit nil, which must not skip the environment.
+    let flag: String? = nil
+    #expect(SocketDiscovery.resolve(override: flag, environment: environment) == "/tmp/from-env.sock")
+  }
+
+  @Test
+  func explicitOverrideOutranksTheEnvironment() {
+    let environment = ["CODANS_SOCKET_PATH": "/tmp/from-env.sock"]
+    let resolved = SocketDiscovery.resolve(override: "/tmp/flag.sock", environment: environment)
+    #expect(resolved == "/tmp/flag.sock")
+  }
+
+  @Test
+  func emptyEnvironmentValueFallsBackToTheBuildDefault() {
+    let resolved = SocketDiscovery.resolve(environment: ["CODANS_SOCKET_PATH": ""])
+    #expect(resolved == SocketDiscovery.defaultSocketPath())
+  }
+
+  @Test
   func isReachableReturnsFalseForMissingPath() {
     let absent = "/tmp/codans-tests-\(UUID().uuidString).sock"
     #expect(SocketDiscovery.isReachable(path: absent) == false)

@@ -69,6 +69,8 @@ struct GlobalOptions: ParsableArguments {
   }
 
   var resolvedSocketPath: String {
+    // `--socket` wins, then `$CODANS_SOCKET_PATH`, then the build default —
+    // the precedence `SocketDiscovery.resolve` implements.
     SocketDiscovery.resolve(override: socket)
   }
 
