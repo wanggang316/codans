@@ -89,8 +89,8 @@ struct RootFeature {
 
     /// Hand Off panel. `nil` = hidden; non-nil renders the floating card
     /// over the main split, same presentation as the Command Palette.
-    /// Opened by `.handoffRequested` from the toolbar Agents menu, the
-    /// palette, or an AgentState row; cleared on the child's dismiss.
+    /// Opened by `.handoffRequested` from a pane's info menu, the palette,
+    /// or an AgentState row; cleared on the child's dismiss.
     @Presents var handoff: HandoffFeature.State?
 
     /// Whether the Hierarchy sidebar column is visible. Bound into
@@ -1484,8 +1484,6 @@ struct RootFeature {
             }
           }
 
-        case .handOffRequested:
-          return .send(.handoffRequested(nil))
         }
 
       case .worktreeHeader:

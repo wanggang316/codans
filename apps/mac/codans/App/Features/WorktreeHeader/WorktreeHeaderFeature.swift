@@ -70,7 +70,6 @@ struct WorktreeHeaderFeature {
     case manageAgentsTapped
     /// "Hand Off…" menu row. RootFeature resolves the source pane (the
     /// selected worktree's focused pane) and opens the Hand Off panel.
-    case handOffTapped
     case delegate(Delegate)
 
     /// Parent-consumed delegate. `RootFeature` routes these into the existing
@@ -119,8 +118,6 @@ struct WorktreeHeaderFeature {
       /// User asked to manage agents — open the Settings window AND deep-link
       /// into the Agents pane.
       case manageAgentsRequested
-      /// Open the Hand Off panel for the selected worktree's focused pane.
-      case handOffRequested
     }
   }
 
@@ -172,9 +169,6 @@ struct WorktreeHeaderFeature {
 
       case .manageAgentsTapped:
         return .send(.delegate(.manageAgentsRequested))
-
-      case .handOffTapped:
-        return .send(.delegate(.handOffRequested))
 
       case .delegate:
         // Consumed by the parent; reducer has no local state change.

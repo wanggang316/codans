@@ -27,7 +27,7 @@ and the project does not yet follow semantic versioning — every release until
   installs the source agent's own briefing, regenerates repository and
   session context, and starts the receiver in a background tab with a
   kickoff prompt; `codans handoff save` checkpoints without a receiver. In
-  the app, "Hand Off…" (Agents menu, Command Palette, Agents View row) asks
+  the app, "Hand Off…" (a pane's info menu, Command Palette, Agents View row) asks
   the live agent to run that same command with its briefing and jumps to the
   receiver when it finishes, with a context-only fallback while waiting.
 - **Per-pane info menu.** Every terminal pane carries a collapsed info
