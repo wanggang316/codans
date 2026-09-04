@@ -32,16 +32,22 @@ struct PaneHUDView: View {
   /// here they resolve against the overlay's proposal, which is the entire
   /// pane, and the card swallows the terminal.
   private static let cardWidth: CGFloat = 240
+  private static let buttonSize: CGFloat = 22
+  private static let buttonCornerRadius: CGFloat = 6
+  /// Inset from the container's top-right corner to the button, applied in
+  /// both states so the button is the fixed point the card grows away from.
+  private static let chromeInset: CGFloat = 10
 
   var body: some View {
     if let model = resolveModel() {
       card(model)
-        // `LeafView` layers `PaneDragHandle` — a 10pt full-width strip — over
-        // the same surface and above this overlay, so clear it vertically.
-        // Without the inset the button's top edge would sit under the handle
-        // and hovering there would arm a pane drag instead.
-        .padding(.top, 14)
-        .padding(.trailing, 8)
+        // Squares the button off the pane's corner: with the container's own
+        // `chromeInset` this puts it 14pt in from both edges. The vertical
+        // half also has to clear `PaneDragHandle`, a 10pt full-width strip
+        // `LeafView` layers over the same surface and above this overlay —
+        // under it, hovering the button's top edge would arm a pane drag.
+        .padding(.top, 4)
+        .padding(.trailing, 4)
     }
   }
 
@@ -64,8 +70,13 @@ struct PaneHUDView: View {
       }
       infoButton
     }
-    .padding(isExpanded ? 12 : 3)
-    .background(background)
+    // Constant in both states on purpose. The button is a layout sibling of
+    // the card body, so an equal inset from the container's top-right corner
+    // is what holds it still while the card grows out from under it. A
+    // smaller collapsed inset shifted the button by the difference, which
+    // read as the whole control jumping on every open.
+    .padding(Self.chromeInset)
+    .background(cardBackground)
     .dismissOnClickOutside(isPresented: isExpanded) { isExpanded = false }
     .animation(.snappy(duration: 0.22), value: isExpanded)
     // Refresh on expand rather than on a timer. The monitor holds a 5 s
@@ -81,23 +92,27 @@ struct PaneHUDView: View {
     }
   }
 
+  /// Only the expanded card is painted here. Collapsed, the container is the
+  /// button's padding frame — filling that would draw a chip several times
+  /// the button's size — so the button carries its own chrome instead.
   @ViewBuilder
-  private var background: some View {
+  private var cardBackground: some View {
     if isExpanded {
-      RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous)
-        .fill(.regularMaterial)
-        .overlay(
-          RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous)
-            .stroke(Color.primary.opacity(0.10), lineWidth: 1)
-        )
+      chrome(cornerRadius: Self.cardCornerRadius)
         .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
-    } else {
-      // Collapsed the chrome is only a hover affordance — an always-on chip
-      // would sit on top of terminal output in every pane of every split.
-      RoundedRectangle(cornerRadius: 7, style: .continuous)
-        .fill(.regularMaterial)
-        .opacity(isButtonHovered ? 1 : 0)
     }
+  }
+
+  /// Frosted fill plus a hairline edge. Terminal output sits directly behind
+  /// this, so the fill is what stops glyphs reading through the control; the
+  /// edge is what separates it from output of a similar tone.
+  private func chrome(cornerRadius: CGFloat) -> some View {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      .fill(.regularMaterial)
+      .overlay(
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+          .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+      )
   }
 
   private var infoButton: some View {
@@ -105,10 +120,17 @@ struct PaneHUDView: View {
       isExpanded.toggle()
     } label: {
       Image(systemName: "info.circle")
-        .font(.system(size: 13))
-        .foregroundStyle(isExpanded || isButtonHovered ? .primary : .secondary)
-        .opacity(isExpanded || isButtonHovered ? 1 : 0.55)
-        .frame(width: 22, height: 22)
+        .font(.system(size: 13, weight: .regular))
+        // Full strength always. Fading the glyph left terminal text legible
+        // through it, which read as a rendering fault rather than restraint.
+        .foregroundStyle(isButtonHovered ? Color.primary : Color.secondary)
+        .frame(width: Self.buttonSize, height: Self.buttonSize)
+        .background {
+          // Expanded, the card behind the button already provides both.
+          if !isExpanded {
+            chrome(cornerRadius: Self.buttonCornerRadius)
+          }
+        }
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
