@@ -1514,12 +1514,20 @@ final class AppState {
     worktreeHeadWatcherSyncTask?.cancel()
     let manager = hierarchyManager
     let watcher = worktreeHeadWatcher
+    let statusMonitor = worktreeStatusMonitor
+    let diffMonitor = worktreeLocalDiffMonitor
     worktreeHeadWatcherSyncTask = Task { @MainActor in
       var last: [WorktreeID: String] = [:]
       while !Task.isCancelled {
         let current = Self.headWatcherPairs(from: manager.catalog)
         if current != last {
           watcher.setWorktrees(current.map { (id: $0.key, path: $0.value) })
+          // The two sidebar monitors cache lazily and had no removal path,
+          // so a removed or archived Worktree kept its chip data forever.
+          // This projection is already exactly the live, non-archived set.
+          let live = Set(current.keys)
+          statusMonitor.retain(liveWorktreeIDs: live)
+          diffMonitor.retain(liveWorktreeIDs: live)
           last = current
         }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in

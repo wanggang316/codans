@@ -169,8 +169,8 @@ struct NotificationCoordinatorTests {
   /// merges a second candidate into the prior entry (same `(paneID, kind)`
   /// within the 30 s dedup window, preserving the prior `readAt`), the
   /// coordinator must report `inAppAppended == false` for the merged
-  /// candidate and must not double-count the worktree in
-  /// `unreadByWorktree`. Without this guard, the promote logic would
+  /// candidate and must not double-count the worktree's unread total.
+  /// Without this guard, the promote logic would
   /// see a synthetic 0→N edge for chatty panes whose dedup was designed
   /// to suppress exactly that.
   @Test
@@ -203,7 +203,7 @@ struct NotificationCoordinatorTests {
     #expect(firstAppended == true)
     #expect(secondAppended == false)
     #expect(inbox.entries.count == 1)
-    #expect(coordinator.unreadByWorktree[source.worktreeID] == 1)
+    #expect(inbox.entries.filter { $0.source.worktreeID == source.worktreeID && $0.isUnread }.count == 1)
   }
 
   /// AC-V11-S-001: with the inbox off and system banners on, only the

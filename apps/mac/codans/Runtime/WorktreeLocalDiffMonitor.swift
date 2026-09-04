@@ -42,6 +42,18 @@ final class WorktreeLocalDiffMonitor {
 
   private static let logger = Logger(subsystem: "com.gumpw.codans.sidebar", category: "localDiff")
 
+  /// Drop every cached entry for a Worktree the catalog no longer shows.
+  ///
+  /// Entries are created lazily by the sidebar row's `.task` and had no
+  /// removal path at all, so a Worktree that was removed or archived kept
+  /// its cached value for the life of the process. Driven by the same
+  /// catalog-observation pump that keeps the HEAD watcher in sync, which
+  /// already projects exactly this set.
+  func retain(liveWorktreeIDs: Set<WorktreeID>) {
+    stats = stats.filter { liveWorktreeIDs.contains($0.key) }
+    lastFetchedAt = lastFetchedAt.filter { liveWorktreeIDs.contains($0.key) }
+  }
+
   init(fetch: @escaping @Sendable (URL) async throws -> LocalDiffStats?) {
     self.fetch = fetch
   }

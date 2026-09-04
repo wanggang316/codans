@@ -28,6 +28,8 @@ struct GitHubFeature {
     /// carry workflow-run IDs.
     var latestWorkflowRuns: [Int: WorkflowRun] = [:]
 
+    /// Worktrees whose owning Project has a batched fetch in flight (or
+    /// queued behind one). The badge and popover render a spinner from this.
     var loading: Set<WorktreeID> = []
 
     /// Mutation operations in flight per Worktree. Views observe this to disable the
@@ -158,15 +160,6 @@ struct GitHubFeature {
       TaskResult<BatchedPullRequests>
     )
 
-    /// Emitted by the sidebar when a terminal-initiated `git checkout` changes a
-    /// Worktree's branch. Invalidates the Project's cache and kicks a refresh.
-    case worktreeBranchChanged(
-      WorktreeID,
-      newBranch: String,
-      projectID: ProjectID,
-      gitRoot: URL,
-      worktreeBranches: [WorktreeBranchPair]
-    )
 
     // MARK: - active-Project liveness poll
 
@@ -495,6 +488,7 @@ struct GitHubFeature {
           "projectBatchLoaded success project=\(projectID.raw.uuidString, privacy: .public) branches=\(batched.byBranch.count, privacy: .public)/\(pairs.count, privacy: .public)"
         )
         state.inFlightFetchProjects.remove(projectID)
+        state.loading.subtract(pairs.map(\.worktreeID))
         state.lastErrorByProject[projectID] = nil
         state.snapshotsByProject[projectID] = batched
         // Best-effort persist to disk so the NEXT app launch hydrates instantly.
@@ -525,21 +519,14 @@ struct GitHubFeature {
         }
         return .none
 
-      case .projectBatchLoaded(let projectID, _, .failure(let error)):
+      case .projectBatchLoaded(let projectID, let pairs, .failure(let error)):
         Self.logger.error(
           "projectBatchLoaded failure project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .public)"
         )
         state.inFlightFetchProjects.remove(projectID)
+        state.loading.subtract(pairs.map(\.worktreeID))
         state.lastErrorByProject[projectID] = (error as? GitHubError) ?? .other(String(describing: error))
         return .none
-
-      case .worktreeBranchChanged(_, _, let projectID, let gitRoot, let pairs):
-        // Branch change invalidates whatever was cached for the Project and kicks a
-        // fresh batched fetch. The Worktree's own per-row snapshot is not cleared here
-        // — waiting ~500ms for the batched result to arrive avoids a visible flicker.
-        return enqueueProjectFetch(
-          projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
-        )
 
       // MARK: - active-Project liveness poll
 
@@ -640,6 +627,11 @@ struct GitHubFeature {
     // current even when this call collapses into the queued-refresh slot.
     state.projectWorktreePairs[projectID] = pairs
     for pair in pairs { state.projectByWorktree[pair.worktreeID] = projectID }
+    // Marked before the in-flight short-circuit: a call that collapses into
+    // the queued-refresh slot still has a fetch pending on its behalf.
+    // Nothing wrote this set before, so the spinner the badge and popover
+    // were built to show could never appear.
+    state.loading.formUnion(pairs.map(\.worktreeID))
     if state.inFlightFetchProjects.contains(projectID) {
       state.queuedRefreshByProject.insert(projectID)
       return .none

@@ -346,6 +346,7 @@ struct GitHubFeatureTests {
       $0.projectWorktreePairs[projectID] = [pair]
       $0.projectByWorktree[wid] = projectID
       $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
       $0.projectGitRoots[projectID] = gitRoot
     }
     await store.receive { action in
@@ -353,6 +354,7 @@ struct GitHubFeatureTests {
       return pid == projectID && pairs == [pair]
     } assert: {
       $0.inFlightFetchProjects.remove(projectID)
+      $0.loading.remove(wid)
       $0.snapshotsByProject[projectID] = BatchedPullRequests(
         host: "github.com", owner: "wanggang316", repo: "codans",
         byBranch: ["feature/github01": returnedSnapshot],
@@ -421,44 +423,6 @@ struct GitHubFeatureTests {
   }
 
   @Test
-  func worktreeBranchChangedKicksProjectRefetch() async {
-    let projectID = ProjectID()
-    let wid = WorktreeID()
-    let gitRoot = URL(fileURLWithPath: "/tmp/r")
-    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "new-branch")
-    let store = Self.makeStore { client in
-      client.batchPullRequests = { _, _, _, _ in [:] }
-    } customizeGit: { git in
-      git.remoteInfo = { _ in
-        RemoteInfo(host: "github.com", owner: "w", repo: "r")
-      }
-    }
-    await store.send(
-      .worktreeBranchChanged(
-        wid, newBranch: "new-branch",
-        projectID: projectID, gitRoot: gitRoot, worktreeBranches: [pair]
-      )
-    ) {
-      $0.projectWorktreePairs[projectID] = [pair]
-      $0.projectByWorktree[wid] = projectID
-      $0.inFlightFetchProjects.insert(projectID)
-      $0.projectGitRoots[projectID] = gitRoot
-    }
-    await store.receive { action in
-      guard case .projectBatchLoaded(let pid, _, .success(let batched)) = action else { return false }
-      return pid == projectID && batched.byBranch.isEmpty
-    } assert: {
-      $0.inFlightFetchProjects.remove(projectID)
-      $0.snapshotsByProject[projectID] = BatchedPullRequests(
-        host: "github.com", owner: "w", repo: "r",
-        byBranch: [:], seenBranches: ["new-branch"], fetchedAt: Self.fixedDate
-      )
-    }
-  }
-
-  // MARK: - active-Project liveness poll (0018)
-
-  @Test
   func pollTargetChangedArmsTickThenFetchesOnAdvance() async {
     let clock = TestClock()
     let projectID = ProjectID()
@@ -482,12 +446,14 @@ struct GitHubFeatureTests {
     await clock.advance(by: .seconds(60))
     await store.receive(.pollTick(projectID)) {
       $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
     }
     await store.receive { action in
       guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
       return pid == projectID
     } assert: {
       $0.inFlightFetchProjects.remove(projectID)
+      $0.loading.remove(wid)
       $0.snapshotsByProject[projectID] = BatchedPullRequests(
         host: "github.com", owner: "w", repo: "r",
         byBranch: ["feature/x": returnedSnapshot],
@@ -596,12 +562,14 @@ struct GitHubFeatureTests {
       .projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: [pair])
     ) {
       $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
     }
     await store.receive { action in
       guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
       return pid == projectID
     } assert: {
       $0.inFlightFetchProjects.remove(projectID)
+      $0.loading.remove(wid)
       $0.snapshotsByProject[projectID] = BatchedPullRequests(
         host: "github.com", owner: "w", repo: "r",
         byBranch: ["feature/x": snap], seenBranches: ["feature/x"], fetchedAt: Self.fixedDate

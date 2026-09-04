@@ -25,13 +25,6 @@ final class NotificationCoordinator {
     category: "coordinator"
   )
 
-  /// Unread count per worktree, maintained alongside `inbox` mutations.
-  /// Surfaced for tests; the live "promote notified worktree to top"
-  /// behaviour reads the per-call `before` delta directly off
-  /// `inbox.entries` rather than this cache so a same-tick mutation
-  /// outside the coordinator cannot desync the gate.
-  internal private(set) var unreadByWorktree: [WorktreeID: Int] = [:]
-
   /// Test seam: drop reasons logged on the most recent `handle(_:)` call.
   /// Reset at the top of every `handle` invocation. Production reads only
   /// the `Decision` return value; this exists so a test can assert the
@@ -50,15 +43,6 @@ final class NotificationCoordinator {
     self.settingsReader = settingsReader
     self.catalog = catalog
     self.now = now
-
-    // Bootstrap the unread-per-worktree cache from any inbox entries that
-    // were rehydrated from disk. Without this, a process restart with
-    // persisted unread entries would leave the cache at zero and the
-    // promotion logic would never fire until a brand-new notification
-    // landed on that worktree.
-    for entry in inbox.entries where entry.isUnread {
-      unreadByWorktree[entry.source.worktreeID, default: 0] += 1
-    }
   }
 
   /// Every candidate notification passes through here. Returns the decision
@@ -94,9 +78,7 @@ final class NotificationCoordinator {
     let didAppend: Bool
     if settings.inAppEnabled {
       inbox.append(candidate.entry)
-      let after = unreadCount(inWorktree: worktreeID)
-      unreadByWorktree[worktreeID] = after
-      didAppend = (after > before)
+      didAppend = unreadCount(inWorktree: worktreeID) > before
     } else {
       didAppend = false
       logger.debug("drop inAppDisabled (inbox not appended)")
