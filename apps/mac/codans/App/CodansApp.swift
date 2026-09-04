@@ -828,6 +828,7 @@ final class AppState {
         handlers: handoffHandlers,
         registry: self.handoffRegistry,
         engine: engine,
+        cli: Self.cliInvocation(),
         source: { [weak self, weak manager] paneID in
           guard let manager else { return nil }
           return Self.handoffSource(
@@ -1201,7 +1202,8 @@ final class AppState {
       collectRepoState: { root in
         await Self.handoffRepoState(at: root, git: gitClient)
       },
-      launch: { spec in try await hierarchyClient.launchAgent(spec) }
+      launch: { spec in try await hierarchyClient.launchAgent(spec) },
+      cli: Self.cliInvocation()
     )
   }
 
@@ -1232,6 +1234,14 @@ final class AppState {
       sessionID: entry?.sessionID ?? pane?.agentSessionID,
       paneTitle: tab.cachedDisplayTitle ?? tab.name
     )
+  }
+
+  /// How this app writes its own CLI in a command an agent will run. Prefers
+  /// the installed command name, and falls back to the bundled binary's
+  /// absolute path when this build's CLI was never installed — a Debug app
+  /// must not write plain `codans`, which the Release app would answer.
+  nonisolated static func cliInvocation() -> String {
+    CLIInvocation.command(bundledBinary: try? CLIBundleLocator.locateBinary())
   }
 
   /// Git facts for `context.md`. Read-only (`status`, branch, shortstat);

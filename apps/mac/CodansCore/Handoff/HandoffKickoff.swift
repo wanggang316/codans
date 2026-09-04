@@ -23,7 +23,16 @@ public nonisolated enum HandoffKickoff {
   /// One self-contained line typed into the source agent's input. The agent
   /// composes the heredoc itself — nothing multi-line is ever injected, so
   /// any TUI input box can take it.
-  public static func sourceInstruction(for request: Request, requestID: UUID) -> String {
+  ///
+  /// `cli` is how this build spells its own CLI (see `CLIInvocation`). It is
+  /// a parameter rather than a literal because a Debug app writing plain
+  /// `codans` would be answered by the installed Release app instead of
+  /// itself.
+  public static func sourceInstruction(
+    for request: Request,
+    requestID: UUID,
+    cli: String = CLIInvocation.commandName
+  ) -> String {
     let env = "\(requestIDEnvironmentKey)=\(requestID.uuidString) "
     let sections = HandoffBriefing.sectionSkeleton.joined(separator: ", ")
     let ask: String
@@ -31,9 +40,11 @@ public nonisolated enum HandoffKickoff {
     case .handOff(let receiver):
       ask =
         "Please hand this task off to \(receiver.displayName): run "
-        + "`\(env)codans handoff to \(receiver.rawValue) --brief -`"
+        + "`\(env)\(cli) handoff to \(receiver.rawValue) --brief -`"
     case .checkpoint:
-      ask = "Please checkpoint your progress for a later handoff: run `\(env)codans handoff save --brief -`"
+      ask =
+        "Please checkpoint your progress for a later handoff: run "
+        + "`\(env)\(cli) handoff save --brief -`"
     }
     return "[codans] \(ask) with your briefing on stdin as a heredoc — a markdown document "
       + "with the sections \(sections), written from your current working knowledge. "

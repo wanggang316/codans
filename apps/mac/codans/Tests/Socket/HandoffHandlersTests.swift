@@ -80,6 +80,10 @@ struct HandoffHandlersTests {
         return AgentLaunchOutcome(
           profile: spec.profile, command: "cmd", tabID: launches.tabID, paneID: launches.paneID)
       },
+      // Pinned rather than defaulted: the default follows the build channel
+      // (`codans-dev` in Debug), and the guidance assertions below are about
+      // the shape of the command, not which build wrote it.
+      cli: "codans",
       now: { Date(timeIntervalSince1970: 1_700_000_000) }
     )
     return Harness(

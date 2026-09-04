@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 import os.log
 
 /// Idempotent installer for the codans CLI. Release builds symlink `codans`
@@ -32,11 +32,7 @@ final class CLIInstallerClient {
       let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
       let usrLocalBin = URL(fileURLWithPath: "/usr/local/bin", isDirectory: true)
       let legacyLocalBin = home.appendingPathComponent(".local/bin", isDirectory: true)
-      #if DEBUG
-        let tcName = "codans-dev"
-      #else
-        let tcName = "codans"
-      #endif
+      let tcName = CLIInvocation.commandName
       return Paths(
         tcSymlink: usrLocalBin.appendingPathComponent(tcName, isDirectory: false),
         legacyLocalBinTc: legacyLocalBin.appendingPathComponent(tcName, isDirectory: false),

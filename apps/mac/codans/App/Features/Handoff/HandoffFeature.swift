@@ -174,7 +174,8 @@ struct HandoffFeature {
           }
         let requestID = uuid()
         handoffClient.register(requestID)
-        let instruction = HandoffKickoff.sourceInstruction(for: request, requestID: requestID)
+        let instruction = HandoffKickoff.sourceInstruction(
+          for: request, requestID: requestID, cli: handoffClient.cli)
         state.phase = .running(Run(target: target, requestID: requestID, stage: .requesting))
         let paneID = state.source.paneID
         let client = handoffClient

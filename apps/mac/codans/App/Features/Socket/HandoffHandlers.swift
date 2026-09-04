@@ -46,6 +46,10 @@ final class HandoffHandlers {
   private let collectRepoState: RepoStateCollector
   private let launch: Launcher
   private let registry: HandoffRequestRegistry
+  /// How this build spells its own CLI. The `--brief` guidance below is a
+  /// command the agent will re-run, so it has to name the binary that
+  /// answers on *this* app's socket.
+  private let cli: String
   private let now: @Sendable () -> Date
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "handoff")
 
@@ -56,6 +60,7 @@ final class HandoffHandlers {
     readScreen: @escaping ScreenReader = { _ in nil },
     collectRepoState: @escaping RepoStateCollector = { _ in .notGit },
     launch: @escaping Launcher,
+    cli: String = CLIInvocation.commandName,
     now: @escaping @Sendable () -> Date = { Date() }
   ) {
     self.settings = settings
@@ -64,6 +69,7 @@ final class HandoffHandlers {
     self.readScreen = readScreen
     self.collectRepoState = collectRepoState
     self.launch = launch
+    self.cli = cli
     self.now = now
   }
 
@@ -78,7 +84,7 @@ final class HandoffHandlers {
   /// it replaces) and refresh generated context. No receiver, no launch.
   func save(_ request: IPC.HandoffRequest) async throws -> IPC.HandoffResponse {
     let source = try resolvedSource(request)
-    let briefing = try preparedBriefing(request, command: "codans handoff save --brief -")
+    let briefing = try preparedBriefing(request, command: "\(cli) handoff save --brief -")
     try authorize(request)
 
     let coordinator = HandoffCoordinator(
@@ -137,7 +143,7 @@ final class HandoffHandlers {
     }
     let source = try resolvedSource(request)
     let briefing = try preparedBriefing(
-      request, command: "codans handoff to \(receiver.rawValue) --brief -")
+      request, command: "\(cli) handoff to \(receiver.rawValue) --brief -")
     // Resolve the profile before any side effect so a bad `--profile` is a
     // clean error rather than an archived-but-unlaunched handoff.
     let profile = try AgentProfileSelector.resolve(

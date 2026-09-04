@@ -8,13 +8,20 @@ struct HandoffKickoffTests {
 
   @Test
   func sourceInstructionIsOneLineAndCarriesTheRequestID() {
-    let text = HandoffKickoff.sourceInstruction(for: .handOff(to: .codex), requestID: Self.requestID)
+    // Pass the invocation explicitly: the default follows the build channel
+    // (`codans-dev` in Debug), which is not what this test is about.
+    let text = HandoffKickoff.sourceInstruction(
+      for: .handOff(to: .codex), requestID: Self.requestID, cli: "codans")
     #expect(!text.contains("\n"))
     #expect(text.hasPrefix("[codans] Please hand this task off to Codex: run "))
-    #expect(text.contains("`CODANS_HANDOFF_REQUEST_ID=\(Self.requestID.uuidString) codans handoff to codex --brief -`"))
+    #expect(
+      text.contains(
+        "`CODANS_HANDOFF_REQUEST_ID=\(Self.requestID.uuidString) codans handoff to codex --brief -`"
+      ))
     #expect(text.contains("## Suggested Prompt For Next Agent"))
 
-    let checkpoint = HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: Self.requestID)
+    let checkpoint = HandoffKickoff.sourceInstruction(
+      for: .checkpoint, requestID: Self.requestID, cli: "codans")
     #expect(checkpoint.contains("codans handoff save --brief -`"))
   }
 
@@ -35,5 +42,15 @@ struct HandoffKickoffTests {
     #expect(message.contains("codans handoff to codex --brief - <<'EOF'"))
     #expect(message.contains("  ## Next Steps\n  …"))
     #expect(message.hasSuffix("context-only handoff."))
+  }
+
+  @Test
+  func sourceInstructionNamesTheCallersOwnCLI() {
+    // The whole point of threading the invocation: a Debug app writing plain
+    // `codans` would be answered by the installed Release app.
+    let text = HandoffKickoff.sourceInstruction(
+      for: .handOff(to: .codex), requestID: Self.requestID, cli: "/opt/build/codans")
+    #expect(text.contains("/opt/build/codans handoff to codex --brief -"))
+    #expect(!text.contains(" codans handoff"))
   }
 }

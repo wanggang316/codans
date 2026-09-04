@@ -21,6 +21,10 @@ nonisolated struct HandoffClient: Sendable {
   /// Runs a handoff transition in-process — the panel's fallback when the
   /// live agent cannot be asked. Same code path as the CLI verbs.
   var run: @MainActor @Sendable (_ request: IPC.HandoffRequest) async throws -> HandoffCompletion
+  /// How this build spells its own CLI, resolved once at wire-up. The panel
+  /// types it into the source pane, so it has to name the binary that answers
+  /// on this app's socket — never the installed Release `codans`.
+  var cli: String = CLIInvocation.commandName
 }
 
 extension HandoffClient {
@@ -29,6 +33,7 @@ extension HandoffClient {
     handlers: HandoffHandlers,
     registry: HandoffRequestRegistry,
     engine: TerminalEngine,
+    cli: String,
     source: @escaping @MainActor @Sendable (PaneID) -> HandoffSource?
   ) -> HandoffClient {
     HandoffClient(
@@ -57,7 +62,8 @@ extension HandoffClient {
           launched: response.launchedPane,
           requestID: request.requestID
         )
-      }
+      },
+      cli: cli
     )
   }
 }
