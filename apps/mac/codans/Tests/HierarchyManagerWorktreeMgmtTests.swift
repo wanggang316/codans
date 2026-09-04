@@ -156,6 +156,36 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
+  func archiveClearsBusySetsSoTheRunControlDoesNotStickOnRunning() async throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+    let paneID = try await manager.openPane(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/repo/feat", initialCommand: nil
+    )
+    let scriptID = UUID()
+    manager.setRunScriptPane(worktreeID: worktreeID, scriptID: scriptID, paneID: paneID)
+    manager.setPaneCommandBusy(paneID, true)
+    manager.setLastFocusedPane(paneID, in: tabID)
+    #expect(manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID))
+
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
+
+    // Soft-hide keeps the Pane in the catalog, so `isScriptRunning`'s
+    // "catalog.pane is gone" guard cannot retire the entry — only clearing
+    // the busy set does. Archive already killed the daemon, so a control
+    // still reading "running" here would never resolve, even on unarchive.
+    #expect(!manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID))
+    #expect(!manager.paneIsBusy(paneID))
+    #expect(manager.lastFocusedPane(in: tabID) == nil)
+  }
+
+  @Test
   func archiveAdvancesSelectionWhenItPointsAtTheArchivedRow() throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"

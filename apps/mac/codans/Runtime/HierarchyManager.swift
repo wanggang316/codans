@@ -458,6 +458,27 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Drops the runtime-only bookkeeping every Pane / Tab in `tabs` owns:
+  /// the two busy sets and the tab's remembered focus.
+  ///
+  /// `closePane` / `closeTab` clear these inline, but they only run for
+  /// teardown that emits `.paneExited`. The archive and project-removal
+  /// paths use `suspendSurface`, which deliberately emits none, so without
+  /// this the entries survive their Pane. For archive that is a live bug
+  /// rather than a leak: soft-hide keeps the Pane in the catalog, so a
+  /// stale `commandBusyPanes` member keeps `isScriptRunning` true forever
+  /// and pins the Worktree's Run / Stop control to "running" even though
+  /// archive already killed the daemon.
+  private func purgeRuntimeState(forTabs tabs: [Tab]) {
+    for tab in tabs {
+      for pane in tab.panes {
+        runningPanes.remove(pane.id)
+        commandBusyPanes.remove(pane.id)
+      }
+      lastFocusedPaneByTab.removeValue(forKey: tab.id)
+    }
+  }
+
   /// Drops the Project from the catalog. The on-disk repository is never
   /// touched — this only unregisters it.
   ///
@@ -479,12 +500,11 @@ final class HierarchyManager {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")
     }
-    let panes = catalog.projects[projectIndex].worktrees
-      .flatMap { $0.tabs }
-      .flatMap { $0.panes }
-    for pane in panes {
+    let tabs = catalog.projects[projectIndex].worktrees.flatMap { $0.tabs }
+    for pane in tabs.flatMap({ $0.panes }) {
       runtime.suspendSurface(for: pane.id)
     }
+    purgeRuntimeState(forTabs: tabs)
     catalog.projects.remove(at: projectIndex)
     if catalog.selectedProjectID == id {
       catalog.selectedProjectID = nil
@@ -727,6 +747,7 @@ final class HierarchyManager {
           // no `.paneExited` so soft-hide keeps the Pane in the catalog.
           runtime.suspendSurface(for: pane.id)
         }
+        purgeRuntimeState(forTabs: worktree.tabs)
       }
       catalog.projects[projectIndex].worktrees[worktreeIndex].archived = archived
       // Stamp the archive time so the Cleanup auto-delete sweep can age the

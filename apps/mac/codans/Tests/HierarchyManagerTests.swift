@@ -346,6 +346,30 @@ struct HierarchyManagerTests {
   }
 
   @Test
+  func removeProjectClearsBusySetsAndFocusMemory() async throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+    let paneID = try await manager.openPane(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/repo/feat", initialCommand: nil
+    )
+    manager.setPaneCommandBusy(paneID, true)
+    manager.markPaneRunning(paneID)
+    manager.setLastFocusedPane(paneID, in: tabID)
+
+    try manager.removeProject(projectID)
+
+    // Removal suspends rather than closes, so the `.paneExited` cleanup in
+    // closePane never runs. Stale members keep the O(1) short-circuit in
+    // the dirty predicates from ever firing again.
+    #expect(!manager.paneIsBusy(paneID))
+    #expect(manager.lastFocusedPane(in: tabID) == nil)
+  }
+
+  @Test
   func removeProjectClearsSelectionAndRejectsUnknownID() throws {
     let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
     manager.selectProject(projectID)
