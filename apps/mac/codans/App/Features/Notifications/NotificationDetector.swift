@@ -103,6 +103,39 @@ public final class NotificationDetector {
   /// catalog walk → SourcePath, mute label check, then hands a
   /// `Candidate` to `NotificationCoordinator`. The coordinator owns
   /// inbox append, banner posting, dock badge, and the focused-pane drop.
+  /// Catalog-membership backstop for the two per-pane caches and the
+  /// keystroke tracker they share.
+  ///
+  /// Their only other cleaner is the interpreter's teardown branch, driven
+  /// by `.paneExited` / `.paneCrashed` / `.paneClosedByTab`. Archive and
+  /// project removal tear down through `suspendSurface`, which deliberately
+  /// emits none of those, so every pane under them kept its entries for the
+  /// life of the process. Two consequences beyond the growth: a teardown
+  /// event still queued in the drain could resolve through the stale
+  /// `paneSourceCache` and mint an unread entry for a pane that no longer
+  /// exists, and a stale `hasProducedOutput` membership let an unarchived
+  /// pane fire an idle notification before it had produced anything this
+  /// session.
+  public func reconcileMembership(livePaneIDs: Set<PaneID>) {
+    let departed = hasProducedOutput.subtracting(livePaneIDs)
+      .union(paneSourceCache.keys.filter { !livePaneIDs.contains($0) })
+    guard !departed.isEmpty else { return }
+    hasProducedOutput.subtract(departed)
+    for paneID in departed {
+      paneSourceCache.removeValue(forKey: paneID)
+      tracker.purge(paneID)
+    }
+  }
+
+  /// Panes the detector is currently holding state for, across both
+  /// caches. `internal` so `@testable` tests can assert `reconcileMembership`
+  /// actually dropped one — the caches are otherwise unobservable, and the
+  /// notification a stale entry produces is swallowed by the coordinator's
+  /// own dedupe. Nothing in the app reads this.
+  var trackedPanesForTesting: Set<PaneID> {
+    hasProducedOutput.union(paneSourceCache.keys)
+  }
+
   public func handle(_ event: TerminalEvent) async {
     let notifSettings = settingsReader.notifications
     let context = PaneAttentionInterpreter.Context(

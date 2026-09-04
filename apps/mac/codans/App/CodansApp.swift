@@ -1202,7 +1202,7 @@ final class AppState {
     )
 
     let reaper = SessionReaper(coordinator: coordinator)
-    let livePaneIDs = Self.livePaneIDs(in: hierarchyManager.catalog)
+    let livePaneIDs = hierarchyManager.catalog.allPaneIDs()
     do {
       // Pass the current hierarchy's pane ids so the reaper can kill any
       // alive daemon whose paneID no longer maps to a surface — without
@@ -1430,13 +1430,21 @@ final class AppState {
   /// stale entries inherited from prior launches), then re-arms an
   /// Observation tracker on every pane / tab / worktree / project field
   /// whose mutation could remove a pane id.
+  ///
+  /// Keyed on `visiblePaneIDs()`, not `allPaneIDs()`, so an archived
+  /// Worktree's panes count as gone — the same choice the AgentState
+  /// reconcile makes. Archive is soft-hide: the Panes stay in the catalog,
+  /// so an unread entry from one used to survive here and keep the
+  /// collapsed project's bell (and the status-bar / Dock badge) lit while
+  /// the sidebar rendered no row the user could open to clear it. The
+  /// trade is that unarchiving does not resurrect those unreads.
   @MainActor
   private static func observeOrphanUnreadsSweep(
     catalog: @escaping @MainActor () -> Catalog,
     store: NotificationStore
   ) async {
     while !Task.isCancelled {
-      store.sweepOrphanUnreads(livePaneIDs: livePaneIDs(in: catalog()))
+      store.sweepOrphanUnreads(livePaneIDs: catalog().visiblePaneIDs())
       let stream = AsyncStream<Void> { continuation in
         withObservationTracking {
           let snap = catalog()
@@ -1462,24 +1470,6 @@ final class AppState {
         break
       }
     }
-  }
-
-  /// Flatten the catalog to the set of currently-live pane ids. Used by
-  /// the orphan sweep to decide which unread entries point at panes that
-  /// no longer exist.
-  @MainActor
-  private static func livePaneIDs(in catalog: Catalog) -> Set<PaneID> {
-    var ids: Set<PaneID> = []
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          for pane in tab.panes {
-            ids.insert(pane.id)
-          }
-        }
-      }
-    }
-    return ids
   }
 
   /// Reduce a launch-time sweep's per-pane state map to the restore queue
@@ -1683,6 +1673,12 @@ final class AppState {
     self.notificationDetectorTask = Task { @MainActor in
       for await event in detectorEvents {
         await detector.handle(event)
+        if case .hierarchyMutated(let scope) = event, scope != .selection, scope != .tags {
+          // Same backstop, same reason as the binder and registry below —
+          // the detector's caches are cleared only by `.paneExited` and its
+          // siblings, which the suspend-based teardown paths never emit.
+          detector.reconcileMembership(livePaneIDs: manager.catalog.visiblePaneIDs())
+        }
         Self.dispatchToAgentBinder(
           event: event,
           binder: binder,
