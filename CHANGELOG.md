@@ -44,6 +44,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- The CLI now honours `$CODANS_SOCKET_PATH` when no `--socket` flag is
+  given, so a command run inside a pane reaches the app that spawned it
+  rather than the installed release build.
+
 - Worktrees no longer disappear when the disk fills up. A `git worktree list`
   that dies under disk pressure reached codans as an empty — but perfectly
   valid-looking — result, and every non-pinned worktree in the project was
