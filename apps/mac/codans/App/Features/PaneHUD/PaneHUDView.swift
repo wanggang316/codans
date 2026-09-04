@@ -26,6 +26,12 @@ struct PaneHUDView: View {
   @State private var isButtonHovered = false
 
   private static let cardCornerRadius: CGFloat = 10
+  /// Definite width for the expanded card. The rows below are deliberately
+  /// greedy — a full-width divider, and an action row whose whole strip is the
+  /// tap target — so something has to bound them. Without a definite width
+  /// here they resolve against the overlay's proposal, which is the entire
+  /// pane, and the card swallows the terminal.
+  private static let cardWidth: CGFloat = 240
 
   var body: some View {
     if let model = resolveModel() {
@@ -122,25 +128,35 @@ struct PaneHUDView: View {
         .foregroundStyle(.secondary)
 
       VStack(alignment: .leading, spacing: 5) {
-        row(icon: "folder") {
+        row {
+          Image(systemName: "folder")
+            .accessibilityHidden(true)
+        } content: {
           Text(model.displayPath)
             .lineLimit(1)
             .truncationMode(.head)
             .textSelection(.enabled)
         }
-        row(icon: "arrow.triangle.branch") {
+        row {
+          Image(systemName: "arrow.triangle.branch")
+            .accessibilityHidden(true)
+        } content: {
           Text(model.branch ?? "(detached)")
             .lineLimit(1)
         }
-        row(icon: "plusminus") {
+        row {
+          Image(systemName: "plusminus")
+            .accessibilityHidden(true)
+        } content: {
           diffStats(model.diff)
         }
         if let agent = model.agent {
-          row(icon: nil) {
-            HStack(spacing: 5) {
-              AgentLogoView(kind: agent, size: 12)
-              Text(agent.displayName)
-            }
+          // The brand mark sits in the same leading column as the symbols
+          // above, so all four rows share one text baseline column.
+          row {
+            AgentLogoView(kind: agent, size: 12)
+          } content: {
+            Text(agent.displayName)
           }
         }
       }
@@ -149,27 +165,23 @@ struct PaneHUDView: View {
       Divider()
       handOffButton(model)
     }
-    .frame(minWidth: 190, alignment: .leading)
+    .frame(width: Self.cardWidth, alignment: .leading)
   }
 
-  private func row<Content: View>(
-    icon: String?,
+  /// One `<glyph> <value>` line. The leading slot is a fixed 14pt box in both
+  /// axes so every row's text starts on the same x whether the glyph is an SF
+  /// Symbol or an agent's brand mark, and so nothing in it can stretch the
+  /// card.
+  private func row<Leading: View, Content: View>(
+    @ViewBuilder leading: () -> Leading,
     @ViewBuilder content: () -> Content
   ) -> some View {
     HStack(spacing: 7) {
-      Group {
-        if let icon {
-          Image(systemName: icon)
-        } else {
-          Color.clear
-        }
-      }
-      .font(.system(size: 11))
-      .foregroundStyle(.secondary)
-      // Fixed leading column so every row's text starts on the same x,
-      // including the agent row whose glyph is a brand mark, not a symbol.
-      .frame(width: 14, alignment: .center)
-      .accessibilityHidden(true)
+      leading()
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .frame(width: 14, height: 14, alignment: .center)
+        .accessibilityHidden(true)
       content()
     }
   }
@@ -202,7 +214,7 @@ struct PaneHUDView: View {
       HStack(spacing: 7) {
         Image(systemName: "arrow.left.arrow.right")
           .font(.system(size: 11))
-          .frame(width: 14, alignment: .center)
+          .frame(width: 14, height: 14, alignment: .center)
           .accessibilityHidden(true)
         Text("Hand Off…")
         Spacer(minLength: 0)
