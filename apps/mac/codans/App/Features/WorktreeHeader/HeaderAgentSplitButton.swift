@@ -7,8 +7,10 @@ import SwiftUI
 /// the toolbar's action cluster are "start something here", with agents first
 /// because that is the more frequent entry point for this app's audience.
 ///
-/// Primary action launches the first enabled `AgentProfile`; the chevron half
-/// lists every enabled profile plus a "Manage Agents…" footer. Empty-state:
+/// Primary action launches the first offered `AgentProfile`; the chevron half
+/// lists every offered profile plus a "Manage Agents…" footer. "Offered" is
+/// the enabled profiles minus those whose CLI the shell could not resolve —
+/// see `offeredProfiles` for why that filter fails open. Empty-state:
 /// both halves route to the Agents settings pane so a user with no configured
 /// profile lands where they can make one.
 ///
@@ -22,6 +24,7 @@ import SwiftUI
 struct HeaderAgentSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
   @Environment(SettingsStore.self) private var settingsStore
+  @Environment(AgentInstallationStore.self) private var installation
 
   var body: some View {
     // Read the profiles once, here, inside body — Observation only tracks
@@ -29,7 +32,10 @@ struct HeaderAgentSplitButton: View {
     // the Menu's `.id(_:)` identity so a Settings-side edit rebuilds the
     // cached NSMenu instead of serving stale items. Same rationale as
     // `HeaderRunScriptSplitButton`.
-    let profiles = settingsStore.settings.agents.enabledProfiles
+    let profiles = Self.offeredProfiles(
+      enabled: settingsStore.settings.agents.enabledProfiles,
+      isInstalled: installation.isInstalled
+    )
     let primary = profiles.first
     let primaryName = primary?.displayName ?? "Agents"
 
@@ -91,6 +97,26 @@ struct HeaderAgentSplitButton: View {
   /// Stable identity for `.id(_:)`. Folds every field the menu renders plus
   /// the list's order, so a rename / reorder / enable-toggle in Settings
   /// invalidates the cached NSMenu.
+  /// What the toolbar offers: the enabled profiles, minus any whose CLI the
+  /// shell could not resolve. Both halves of the split button read this, so
+  /// the primary action can never start an agent the menu would have hidden.
+  ///
+  /// It fails open, because the probe is advisory and is wrong in the
+  /// "missing" direction more often than the other (see
+  /// `AgentInstallationStore`): before a scan has answered, `isInstalled`
+  /// reports everything present, and if filtering would empty a non-empty
+  /// list every profile comes back. An empty menu is far likelier to mean
+  /// codans could not read the user's shell than that the machine has no
+  /// agents on it, and hiding the last one would leave nothing to launch
+  /// from here and no hint why.
+  static func offeredProfiles(
+    enabled: [AgentProfile],
+    isInstalled: (AgentKind) -> Bool
+  ) -> [AgentProfile] {
+    let runnable = enabled.filter { isInstalled($0.kind) }
+    return runnable.isEmpty ? enabled : runnable
+  }
+
   private static func identitySignature(of profiles: [AgentProfile]) -> String {
     profiles
       .map { "\($0.id)|\($0.displayName)|\($0.kind.rawValue)|\($0.systemImage ?? "")" }
