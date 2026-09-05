@@ -131,7 +131,15 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
           session: session,
           command: command,
           workingDirectory: MasterTerminalBootstrap.userDirectory.path,
-          env: [CodansEnvironment.Key.zmxDirectory.rawValue: zmxDir.path]
+          // Same two stages as a worktree pane, minus a project to take
+          // overrides from — so this shell also sees the socket, the
+          // product marker, and a cleared `ZMX_SESSION`, which a bare
+          // `ZMX_DIR`-only environment used to leave out.
+          env: PaneEnvironment.forSurface(
+            PaneEnvironment.processBase(overrides: [:], socketPath: SocketPaths.resolve()),
+            paneID: paneID,
+            zmxDirectory: zmxDir
+          )
         )
         self.installSurface(surface)
       } catch {

@@ -2607,40 +2607,11 @@ final class HierarchyManager {
     for projectID: ProjectID,
     in settings: Settings
   ) -> [String: String] {
-    var env = ProcessInfo.processInfo.environment
-    // Strip terminal-describing variables inherited from the parent process so
-    // libghostty's own PTY-spawn TERM injection (`xterm-ghostty`) is what the
-    // child shell sees. When codans.app is launched from a non-interactive
-    // context (e.g. `make` → `open`, an IDE compile shell) parent `TERM=dumb`
-    // would otherwise flow through `ghostty_surface_config.env_vars` and
-    // override ghostty's value, breaking starship and other TUIs.
-    for key in Self.inheritedTerminalEnvVarsToStrip {
-      env.removeValue(forKey: key)
-    }
-    if let overrides = settings.projects[projectID]?.envVars {
-      for (key, value) in overrides {
-        env[key] = value
-      }
-    }
-    env[CodansEnvironment.Key.socketPath.rawValue] = SocketPaths.resolve()
-    // Product marker, written last like the socket path so it always wins.
-    // Surface env vars reach the child as ghostty's `env_override` (applied
-    // after its own exec-time `TERM_PROGRAM=ghostty`), so this is what the
-    // pane's shell actually sees.
-    env[TermProgramEnv.programKey] = TermProgramEnv.program
-    if let version = Self.appMarketingVersion {
-      env[TermProgramEnv.versionKey] = version
-    }
-    return env
+    PaneEnvironment.processBase(
+      overrides: settings.projects[projectID]?.envVars ?? [:],
+      socketPath: SocketPaths.resolve()
+    )
   }
-
-  nonisolated private static let inheritedTerminalEnvVarsToStrip =
-    CodansEnvironment.inheritedTerminalKeysToStrip
-
-  /// `CFBundleShortVersionString` of the running app; nil under a bare
-  /// `xctest` host, in which case the version key is simply omitted.
-  nonisolated private static let appMarketingVersion: String? =
-    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
 
   /// Merges the per-worktree built-in variables codans provides for
   /// every pane (`CODANS_WORKTREE_PATH`, `CODANS_ROOT_PATH`) into
