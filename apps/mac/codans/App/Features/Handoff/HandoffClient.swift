@@ -29,6 +29,11 @@ nonisolated struct HandoffClient: Sendable {
   /// that records a new choice. Defaults keep tests that do not care silent.
   var lastPlacement: @Sendable () -> HandoffPlacement = { .default }
   var rememberPlacement: @Sendable (HandoffPlacement) -> Void = { _ in }
+  /// The advisory install probe (`AgentInstallationStore.isInstalled`), so the
+  /// panel lists the same agents the toolbar offers. Everything counts as
+  /// installed by default, which is also what the store answers before its
+  /// first scan.
+  var isInstalled: @MainActor @Sendable (AgentKind) -> Bool = { _ in true }
 }
 
 extension HandoffClient {
@@ -38,6 +43,7 @@ extension HandoffClient {
     registry: HandoffRequestRegistry,
     engine: TerminalEngine,
     cli: String,
+    installation: AgentInstallationStore,
     source: @escaping @MainActor @Sendable (PaneID) -> HandoffSource?
   ) -> HandoffClient {
     HandoffClient(
@@ -69,7 +75,8 @@ extension HandoffClient {
       },
       cli: cli,
       lastPlacement: { HandoffPlacementPersistence.load() },
-      rememberPlacement: { HandoffPlacementPersistence.save($0) }
+      rememberPlacement: { HandoffPlacementPersistence.save($0) },
+      isInstalled: { installation.isInstalled($0) }
     )
   }
 }

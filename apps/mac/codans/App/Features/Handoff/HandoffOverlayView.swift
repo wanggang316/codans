@@ -46,8 +46,10 @@ struct HandoffOverlayView: View {
       .focusable(capturesKeyboard)
       .focusEffectDisabled()
       .focused($cardFocused)
-      .onKeyPress(.upArrow) { keyMove(-1) }
-      .onKeyPress(.downArrow) { keyMove(1) }
+      .onKeyPress(.upArrow) { keyMove(.up) }
+      .onKeyPress(.downArrow) { keyMove(.down) }
+      .onKeyPress(.leftArrow) { keyMove(.left) }
+      .onKeyPress(.rightArrow) { keyMove(.right) }
       .onKeyPress(.return) { keyConfirm() }
       .onKeyPress(.escape) { keyEscape() }
     }
@@ -114,13 +116,29 @@ struct HandoffOverlayView: View {
 
   // MARK: - Choose
 
+  /// Profiles in a two-column grid of names, the checkpoint row spanning the
+  /// width beneath. Rows carry no description; the tooltip does.
   private var chooseStep: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      VStack(spacing: 2) {
-        ForEach(Array(store.targets.enumerated()), id: \.element.id) { index, target in
-          HandoffTargetRow(target: target, isSelected: index == store.selectedIndex) {
-            store.send(.setSelectedIndex(index))
+    let rows = Array(store.targets.enumerated())
+    let profiles = rows.filter { $0.element.kind != .checkpoint }
+    let checkpoints = rows.filter { $0.element.kind == .checkpoint }
+    return VStack(alignment: .leading, spacing: 0) {
+      VStack(alignment: .leading, spacing: 2) {
+        if profiles.isEmpty {
+          Text("No enabled agent to hand off to. Enable one under Settings › Agents.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+        } else {
+          LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 2) {
+            ForEach(profiles, id: \.element.id) { index, target in
+              targetRow(target, at: index)
+            }
           }
+        }
+        ForEach(checkpoints, id: \.element.id) { index, target in
+          targetRow(target, at: index)
         }
       }
       .padding(8)
@@ -140,43 +158,78 @@ struct HandoffOverlayView: View {
     }
   }
 
-  /// Where the receiver opens. Two choices, not a direction picker: a split
-  /// always goes to the right of the source pane, which is what "beside the
-  /// agent I am handing off from" means in a left-to-right layout. The CLI
-  /// keeps the full direction set for scripts.
-  private var placementPicker: some View {
-    HStack(spacing: 8) {
-      Text("Open in")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        // The footer row is tight; without this the label wraps one word
-        // per line before the buttons give up any width.
-        .fixedSize()
-      Picker("Open in", selection: placementSelection) {
-        Text("New Tab").tag(HandoffPlacement.newTab)
-        Text("Split").tag(HandoffPlacement.split(.right))
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .controlSize(.small)
-      .fixedSize()
-      .accessibilityIdentifier("handoff.placement")
+  private var gridColumns: [GridItem] {
+    Array(
+      repeating: GridItem(.flexible(), spacing: 2, alignment: .leading),
+      count: HandoffFeature.State.columns)
+  }
+
+  private func targetRow(_ target: HandoffFeature.Target, at index: Int) -> some View {
+    HandoffTargetRow(target: target, isSelected: index == store.selectedIndex) {
+      store.send(.setSelectedIndex(index))
     }
   }
 
-  /// Any remembered split maps onto the picker's one split tag; the choice the
-  /// picker writes back is exactly one of its two tags.
-  private var placementSelection: Binding<HandoffPlacement> {
+  /// Where the receiver opens: a target menu, and for a split a second menu
+  /// for the side. Same pair the script command editor in Settings uses, minus
+  /// "In Place" — a hand-off must never type over the outgoing agent's pane.
+  private var placementPicker: some View {
+    HStack(spacing: 8) {
+      Picker("Open in", selection: targetSelection) {
+        Text("New Tab").tag(ScriptTarget.newTab)
+        Text("Split").tag(ScriptTarget.split)
+      }
+      .pickerStyle(.menu)
+      .labelsHidden()
+      .controlSize(.small)
+      .fixedSize()
+      .help("Where the receiving agent opens")
+      .accessibilityIdentifier("handoff.placement")
+
+      if store.placement.target == .split {
+        Picker("Split Direction", selection: directionSelection) {
+          Text("Right").tag(ScriptSplitDirection.right)
+          Text("Down").tag(ScriptSplitDirection.down)
+          Text("Left").tag(ScriptSplitDirection.left)
+          Text("Up").tag(ScriptSplitDirection.up)
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .controlSize(.small)
+        .fixedSize()
+        .help("Which side of this pane the split opens on")
+        .accessibilityIdentifier("handoff.placement.direction")
+      }
+    }
+  }
+
+  /// Switching to Split keeps the direction already chosen, or starts on the
+  /// right — beside the agent being handed off from, in a left-to-right layout.
+  private var targetSelection: Binding<ScriptTarget> {
     Binding(
-      get: { store.placement.target == .split ? .split(.right) : .newTab },
-      set: { store.send(.setPlacement($0)) }
+      get: { store.placement.target },
+      set: { target in
+        let placement: HandoffPlacement =
+          target == .split ? .split(store.placement.direction ?? .right) : .newTab
+        store.send(.setPlacement(placement))
+      }
+    )
+  }
+
+  private var directionSelection: Binding<ScriptSplitDirection> {
+    Binding(
+      get: { store.placement.direction ?? .right },
+      set: { store.send(.setPlacement(.split($0))) }
     )
   }
 
   private var placementPhrase: String {
     switch store.placement {
     case .newTab: return "in a new tab"
-    case .split: return "in a split beside this pane"
+    case .split(.right): return "in a split to the right of this pane"
+    case .split(.left): return "in a split to the left of this pane"
+    case .split(.down): return "in a split below this pane"
+    case .split(.up): return "in a split above this pane"
     }
   }
 
@@ -304,9 +357,9 @@ struct HandoffOverlayView: View {
     }
   }
 
-  private func keyMove(_ delta: Int) -> KeyPress.Result {
+  private func keyMove(_ move: HandoffFeature.Move) -> KeyPress.Result {
     guard store.isChoosing else { return .ignored }
-    store.send(.moveSelection(delta: delta))
+    store.send(.moveSelection(move))
     return .handled
   }
 
@@ -353,22 +406,16 @@ private struct HandoffTargetRow: View {
             .frame(width: 18, height: 18)
             .accessibilityHidden(true)
         }
-        VStack(alignment: .leading, spacing: 1) {
-          HStack(spacing: 6) {
-            Text(target.title)
-              .font(.body)
-            if target.isSameAgent {
-              Text("fresh session")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(.quaternary, in: Capsule())
-            }
-          }
-          Text(target.subtitle)
-            .font(.caption)
+        Text(target.title)
+          .font(.body)
+          .lineLimit(1)
+        if target.isSameAgent {
+          Text("fresh session")
+            .font(.caption2)
             .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
         }
         Spacer(minLength: 0)
       }
@@ -377,6 +424,7 @@ private struct HandoffTargetRow: View {
       .contentShape(.rect)
     }
     .buttonStyle(.plain)
+    .help(target.help)
     .background(
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)

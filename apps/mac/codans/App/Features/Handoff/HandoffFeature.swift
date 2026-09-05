@@ -31,7 +31,9 @@ struct HandoffFeature {
 
     let kind: Kind
     let title: String
-    let subtitle: String
+    /// Tooltip only. The rows are a compact grid of names; how the kickoff
+    /// reaches this agent is one hover away rather than a line under each.
+    let help: String
     /// Receiver is the same agent as the source — a fresh-session restart.
     let isSameAgent: Bool
 
@@ -75,9 +77,20 @@ struct HandoffFeature {
     case finished(Outcome)
   }
 
+  /// Arrow-key movement over the choose step's grid.
+  enum Move: Equatable, Sendable {
+    case up, down, left, right
+  }
+
   @ObservableState
   struct State: Equatable {
+    /// Profile rows fill a grid this many across; the checkpoint row spans
+    /// the full width beneath them.
+    static let columns = 2
+
     let source: Source
+    /// Profiles first, the checkpoint row last — `index(moving:)` relies on
+    /// that order.
     let targets: [Target]
     var selectedIndex = 0
     var phase: Phase = .choosing
@@ -92,45 +105,72 @@ struct HandoffFeature {
 
     var isChoosing: Bool { phase == .choosing }
 
-    /// Receivers are the enabled profiles in Settings order, followed by the
-    /// checkpoint row. An agent whose CLI takes no kickoff argument is still a
-    /// receiver: the prompt is typed into its pane once it is up, without
-    /// Enter, and the row says so.
+    /// Receivers are the enabled profiles the machine can run, in Settings
+    /// order, followed by the checkpoint row. "Can run" is the same advisory
+    /// filter as the toolbar Agents menu (`AgentInstallationStore
+    /// .offeredProfiles`), fail-open included. An agent whose CLI takes no
+    /// kickoff argument is still a receiver: the prompt is typed into its
+    /// pane once it is up, without Enter, and the row's tooltip says so.
     static func make(
       source: Source,
       profiles: [AgentProfile],
+      isInstalled: (AgentKind) -> Bool = { _ in true },
       placement: HandoffPlacement = .default
     ) -> State {
-      var targets =
-        profiles
-        .filter(\.isEnabled)
-        .map { profile in
-          // Where the session opens is the picker's business, not the row's.
-          var subtitle = profile.name.isEmpty ? "New session" : "\(profile.kind.displayName) · new session"
-          if !profile.descriptor.supportsInitialPrompt {
-            subtitle += " · kickoff typed in once it starts, you press Enter"
-          }
-          return Target(
-            kind: .profile(profile),
-            title: profile.displayName,
-            subtitle: subtitle,
-            isSameAgent: profile.kind == source.agent
-          )
+      var targets = AgentInstallationStore.offeredProfiles(
+        enabled: profiles.filter(\.isEnabled), isInstalled: isInstalled
+      )
+      .map { profile in
+        // Where the session opens is the picker's business, not the row's.
+        var help = profile.name.isEmpty ? "New session" : "\(profile.kind.displayName) · new session"
+        if !profile.descriptor.supportsInitialPrompt {
+          help += " · kickoff typed in once it starts, you press Enter"
         }
+        return Target(
+          kind: .profile(profile),
+          title: profile.displayName,
+          help: help,
+          isSameAgent: profile.kind == source.agent
+        )
+      }
       targets.append(
         Target(
           kind: .checkpoint,
           title: "Only save progress, don't hand off",
-          subtitle: "Writes a briefing checkpoint for a later hand-off",
+          help: "Writes a briefing checkpoint for a later hand-off",
           isSameAgent: false
         )
       )
       return State(source: source, targets: targets, placement: placement)
     }
+
+    /// Where an arrow key lands. Left/right walk the whole list and wrap.
+    /// Up/down move by a grid row: below the last profile row sits the
+    /// checkpoint, below the checkpoint the list wraps to the top, and above
+    /// the first row it wraps to the checkpoint.
+    func index(moving move: Move) -> Int {
+      let count = targets.count
+      guard count > 0 else { return 0 }
+      let checkpoint = count - 1
+      switch move {
+      case .left:
+        return (selectedIndex - 1 + count) % count
+      case .right:
+        return (selectedIndex + 1) % count
+      case .down:
+        guard selectedIndex != checkpoint else { return 0 }
+        let below = selectedIndex + Self.columns
+        return below < checkpoint ? below : checkpoint
+      case .up:
+        guard selectedIndex != checkpoint else { return max(checkpoint - 1, 0) }
+        let above = selectedIndex - Self.columns
+        return above >= 0 ? above : checkpoint
+      }
+    }
   }
 
   enum Action: Equatable {
-    case moveSelection(delta: Int)
+    case moveSelection(Move)
     case setSelectedIndex(Int)
     case setPlacement(HandoffPlacement)
     case confirmSelection
@@ -164,10 +204,9 @@ struct HandoffFeature {
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .moveSelection(let delta):
+      case .moveSelection(let move):
         guard state.isChoosing, !state.targets.isEmpty else { return .none }
-        let count = state.targets.count
-        state.selectedIndex = (state.selectedIndex + delta + count) % count
+        state.selectedIndex = state.index(moving: move)
         return .none
 
       case .setSelectedIndex(let index):

@@ -95,6 +95,25 @@ final class AgentInstallationStore {
     hasScanned ? installed.contains(kind) : true
   }
 
+  /// What a launch surface offers: the enabled profiles, minus any whose CLI
+  /// the shell could not resolve. The toolbar Agents menu and the Hand Off
+  /// panel both go through here, so one rule decides what "installed" hides.
+  ///
+  /// It fails open, because the probe is advisory and is wrong in the
+  /// "missing" direction more often than the other (see the type doc):
+  /// before a scan has answered, `isInstalled` reports everything present,
+  /// and if filtering would empty a non-empty list every profile comes back.
+  /// An empty list is far likelier to mean codans could not read the user's
+  /// shell than that the machine has no agents on it, and hiding the last
+  /// one would leave nothing to launch and no hint why.
+  nonisolated static func offeredProfiles(
+    enabled: [AgentProfile],
+    isInstalled: (AgentKind) -> Bool
+  ) -> [AgentProfile] {
+    let runnable = enabled.filter { isInstalled($0.kind) }
+    return runnable.isEmpty ? enabled : runnable
+  }
+
   // MARK: - Resolution
 
   /// Batch `command -v` under one interactive login shell — the closest

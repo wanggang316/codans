@@ -1689,6 +1689,7 @@ struct RootFeature {
             agent: agent
           ),
           profiles: settingsWriter.readSnapshotSync().agents.profiles,
+          isInstalled: handoffClient.isInstalled,
           placement: handoffClient.lastPlacement()
         )
         return .none

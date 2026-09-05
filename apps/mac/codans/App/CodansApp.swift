@@ -829,6 +829,7 @@ final class AppState {
         registry: self.handoffRegistry,
         engine: engine,
         cli: Self.cliInvocation(),
+        installation: self.agentInstallation,
         source: { [weak self, weak manager] paneID in
           guard let manager else { return nil }
           return Self.handoffSource(

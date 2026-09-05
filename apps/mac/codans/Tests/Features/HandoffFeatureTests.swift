@@ -24,14 +24,15 @@ struct HandoffFeatureTests {
     )
   }
 
-  private static func makeState() -> HandoffFeature.State {
+  private static func makeState(isInstalled: (AgentKind) -> Bool = { _ in true }) -> HandoffFeature.State {
     HandoffFeature.State.make(
       source: source,
       profiles: [
         codexProfile,
         AgentProfile(kind: .amp),  // no prompt argument → kickoff is typed in
         AgentProfile(kind: .claudeCode, isEnabled: false),  // disabled → not a receiver
-      ]
+      ],
+      isInstalled: isInstalled
     )
   }
 
@@ -43,12 +44,23 @@ struct HandoffFeatureTests {
     #expect(state.targets.first?.profile?.id == Self.codexProfile.id)
     #expect(state.targets.last?.kind == .checkpoint)
     #expect(state.targets.first?.isSameAgent == false)
-    // The row tells the user how the prompt reaches an agent without one.
-    #expect(state.targets[0].subtitle.contains("typed in") == false)
-    #expect(state.targets[1].subtitle.contains("kickoff typed in"))
+    // The tooltip tells the user how the prompt reaches an agent without one.
+    #expect(state.targets[0].help.contains("typed in") == false)
+    #expect(state.targets[1].help.contains("kickoff typed in"))
 
     let same = HandoffFeature.State.make(source: Self.source, profiles: [AgentProfile(kind: .claudeCode)])
     #expect(same.targets.first?.isSameAgent == true)
+  }
+
+  /// Same rule as the toolbar Agents menu: agents the shell could not resolve
+  /// are hidden, unless that would hide every one of them.
+  @Test
+  func agentsTheMachineCannotRunAreHiddenUnlessThatWouldHideAll() {
+    let filtered = Self.makeState(isInstalled: { $0 != .amp })
+    #expect(filtered.targets.map(\.title) == ["Build", "Only save progress, don't hand off"])
+
+    let failedOpen = Self.makeState(isInstalled: { _ in false })
+    #expect(failedOpen.targets.count == 3)
   }
 
   @Test
@@ -270,15 +282,41 @@ struct HandoffFeatureTests {
   }
 
   @Test
-  func selectionWrapsAndIsFrozenOnceRunning() async {
+  func selectionWalksTheGridAndIsFrozenOnceRunning() async {
     let store = TestStore(initialState: Self.makeState()) {
       HandoffFeature()
     }
-    // Three rows: Build, Amp, checkpoint — a step back from the top wraps to the last.
-    await store.send(.moveSelection(delta: -1)) { $0.selectedIndex = 2 }
-    await store.send(.moveSelection(delta: 1)) { $0.selectedIndex = 0 }
+    // One grid row (Build, Amp) over the checkpoint. Left/right walk the list
+    // and wrap; down from the row lands on the checkpoint, down again wraps
+    // to the top, up from the top wraps to the checkpoint.
+    await store.send(.moveSelection(.left)) { $0.selectedIndex = 2 }
+    await store.send(.moveSelection(.right)) { $0.selectedIndex = 0 }
+    await store.send(.moveSelection(.right)) { $0.selectedIndex = 1 }
+    await store.send(.moveSelection(.down)) { $0.selectedIndex = 2 }
+    await store.send(.moveSelection(.down)) { $0.selectedIndex = 0 }
+    await store.send(.moveSelection(.up)) { $0.selectedIndex = 2 }
+    await store.send(.moveSelection(.up)) { $0.selectedIndex = 1 }
     await store.send(.setSelectedIndex(5))
     await store.send(.cancelTapped)
     await store.receive(.delegate(.dismiss))
+  }
+
+  /// Up/down step a whole grid row, and the checkpoint is the row below the
+  /// last profile even when that row is not full.
+  @Test
+  func verticalMovesStepByGridRow() {
+    var state = HandoffFeature.State.make(
+      source: Self.source,
+      profiles: [Self.codexProfile, AgentProfile(kind: .amp), AgentProfile(kind: .gemini)])
+    // Grid: [Build, Amp] / [Gemini] / checkpoint
+    #expect(state.index(moving: .down) == 2)
+    state.selectedIndex = 1
+    #expect(state.index(moving: .down) == 3)
+    state.selectedIndex = 2
+    #expect(state.index(moving: .down) == 3)
+    #expect(state.index(moving: .up) == 0)
+    state.selectedIndex = 3
+    #expect(state.index(moving: .up) == 2)
+    #expect(state.index(moving: .down) == 0)
   }
 }
