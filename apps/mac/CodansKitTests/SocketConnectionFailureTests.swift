@@ -1,3 +1,4 @@
+import CodansCore
 import Darwin
 import Foundation
 import Testing
@@ -41,7 +42,7 @@ struct SocketConnectionFailureTests {
     let missing = SocketConnectionFailure.connect(errno: ENOENT, path: "/tmp/codans-9.sock")
     #expect(missing.message.contains("/tmp/codans-9.sock"))
     #expect(missing.message.contains("not running"))
-    #expect(missing.hint == "start it with `codans launch`")
+    #expect(missing.hint == "start it with `\(CLIInvocation.commandName) launch`")
 
     let denied = SocketConnectionFailure.connect(errno: EACCES, path: "/tmp/codans-9.sock")
     #expect(denied.message.contains("permission denied"))

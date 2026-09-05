@@ -9,18 +9,23 @@ import Foundation
 struct CodansCLI: AsyncParsableCommand {
   static let version = "0.5.0"
 
+  /// The CLI answers to its build channel's name — `codans-dev` in Debug —
+  /// so help text, error hints, and the completion scripts generated from
+  /// this tree spell the command the user actually has.
+  static let commandName = CLIInvocation.commandName
+
   static let configuration = CommandConfiguration(
-    commandName: "codans",
+    commandName: commandName,
     abstract: "Control Codans from the terminal.",
     discussion: """
       Common examples:
-        codans status
-        codans tree
-        codans pane send 'pwd'
-        codans pane send <pane> 'git status --short'
-        codans pane new --label agent codex
-        codans agent launch --agent claude
-        codans handoff to codex --brief - <<'EOF' … EOF
+        \(commandName) status
+        \(commandName) tree
+        \(commandName) pane send 'pwd'
+        \(commandName) pane send <pane> 'git status --short'
+        \(commandName) pane new --label agent codex
+        \(commandName) agent launch --agent claude
+        \(commandName) handoff to codex --brief - <<'EOF' … EOF
       """,
     version: "Codans \(CodansCLI.version)",
     subcommands: [

@@ -1,3 +1,4 @@
+import CodansCore
 import Darwin
 import Foundation
 
@@ -127,7 +128,7 @@ public struct SocketConnectionFailure: Error, Equatable, Sendable {
   public var hint: String? {
     switch kind {
     case .socketMissing, .appNotRunning:
-      return "start it with `codans launch`"
+      return "start it with `\(CLIInvocation.commandName) launch`"
     case .permissionDenied:
       return "the socket belongs to another user; check `ls -l \(path)` or point CODANS_SOCKET_PATH at your own"
     case .notASocket:
@@ -137,9 +138,9 @@ public struct SocketConnectionFailure: Error, Equatable, Sendable {
     case .serverBusy:
       return "retry in a moment"
     case .timedOut:
-      return "the app may be wedged; check `codans status`"
+      return "the app may be wedged; check `\(CLIInvocation.commandName) status`"
     case .connectionLost:
-      return "the app may have quit or crashed; check `codans doctor`"
+      return "the app may have quit or crashed; check `\(CLIInvocation.commandName) doctor`"
     case .socketCreateFailed, .unknown:
       return nil
     }

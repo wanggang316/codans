@@ -20,7 +20,7 @@ enum CLISession {
       transport: transport,
       versions: RPCClient.Versions(
         clientVersion: CodansCLI.version,
-        clientBinary: "codans"
+        clientBinary: CodansCLI.commandName
       )
     )
   }

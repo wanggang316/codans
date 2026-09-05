@@ -13,7 +13,7 @@ public actor RPCClient {
   public struct Versions: Sendable {
     public let clientVersion: String
     public let clientBinary: String
-    public init(clientVersion: String, clientBinary: String = "codans") {
+    public init(clientVersion: String, clientBinary: String = CLIInvocation.commandName) {
       self.clientVersion = clientVersion
       self.clientBinary = clientBinary
     }
