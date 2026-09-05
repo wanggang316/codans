@@ -66,6 +66,11 @@ final class WorktreeLocalDiffMonitor {
   /// already projects exactly this set.
   func retain(liveWorktreeIDs: Set<WorktreeID>) {
     evictedWhileInFlight.formUnion(inFlight.subtracting(liveWorktreeIDs))
+    // Queued requests from before the eviction die with it. Replaying one
+    // would re-fetch and re-cache a Worktree that is gone — the replay path
+    // exists for a Worktree that came back and asked again, which can only
+    // be a request recorded after this point.
+    pendingRefresh = pendingRefresh.filter { liveWorktreeIDs.contains($0.key) }
     stats = stats.filter { liveWorktreeIDs.contains($0.key) }
     lastFetchedAt = lastFetchedAt.filter { liveWorktreeIDs.contains($0.key) }
   }

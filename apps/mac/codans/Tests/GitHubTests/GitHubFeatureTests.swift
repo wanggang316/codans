@@ -562,9 +562,7 @@ struct GitHubFeatureTests {
     await store.receive(.delegate(.pullRequestMerged(wid, snapshot: snap)))
     // Delayed 2 s so GitHub settles the write before we read it back.
     await clock.advance(by: .seconds(2))
-    await store.receive(
-      .projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: [pair])
-    ) {
+    await store.receive(.delayedProjectRefreshFired(projectID)) {
       $0.inFlightFetchProjects.insert(projectID)
       $0.loading.insert(wid)
     }
@@ -581,6 +579,114 @@ struct GitHubFeatureTests {
       $0.snapshots[wid] = snap
       $0.snapshotLoadedAt[wid] = Self.fixedDate
     }
+  }
+
+  @Test
+  func aDelayedRefreshDoesNotReviveAProjectRemovedWhileItWaited() async {
+    let clock = TestClock()
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let gitRoot = URL(fileURLWithPath: "/tmp/r")
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let snap = Self.stubSnapshot(number: 99, state: .open, headRefName: "feature/x")
+    var seed = GitHubFeature.State()
+    seed.snapshots[wid] = snap
+    seed.projectByWorktree[wid] = projectID
+    seed.projectGitRoots[projectID] = gitRoot
+    seed.projectWorktreePairs[projectID] = [pair]
+    let store = Self.makeStore(initialState: seed, clock: clock) { client in
+      client.merge = { _, _, _ in }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
+    }
+    await store.send(.mergeRequested(wid, prNumber: 99, strategy: .squash, worktreePath: Self.path)) {
+      $0.mutating.insert(wid)
+      $0.worktreePaths[wid] = Self.path
+    }
+    await store.receive(.mergeCompleted(wid, prNumber: 99, .success(.init()))) {
+      $0.mutating.remove(wid)
+    }
+    await store.receive(.delegate(.pullRequestMerged(wid, snapshot: snap)))
+
+    // The Project leaves the catalog inside the two-second window.
+    await store.send(.pruneToCatalog(projectIDs: [], worktreeIDs: [])) {
+      $0.projectByWorktree = [:]
+      $0.projectGitRoots = [:]
+      $0.projectWorktreePairs = [:]
+      $0.snapshots = [:]
+      $0.snapshotLoadedAt = [:]
+      $0.worktreePaths = [:]
+    }
+
+    // Firing resolves membership from state, so there is nothing to refetch.
+    // Replaying the pairs captured when the timer was armed would put the
+    // Project back into `projectGitRoots` and `loading`.
+    await clock.advance(by: .seconds(2))
+    await store.receive(.delayedProjectRefreshFired(projectID))
+  }
+
+  @Test
+  func aDelayedRefreshSkipsAWorktreeRemovedWhileItWaited() async {
+    let clock = TestClock()
+    let projectID = ProjectID()
+    let keptWID = WorktreeID()
+    let goneWID = WorktreeID()
+    let gitRoot = URL(fileURLWithPath: "/tmp/r")
+    let kept = GitHubFeature.Action.WorktreeBranchPair(worktreeID: keptWID, branch: "main")
+    let gone = GitHubFeature.Action.WorktreeBranchPair(worktreeID: goneWID, branch: "old")
+    let snap = Self.stubSnapshot(number: 99, state: .open, headRefName: "main")
+    var seed = GitHubFeature.State()
+    seed.snapshots[goneWID] = snap
+    seed.projectByWorktree = [keptWID: projectID, goneWID: projectID]
+    seed.projectGitRoots[projectID] = gitRoot
+    seed.projectWorktreePairs[projectID] = [kept, gone]
+    let store = Self.makeStore(initialState: seed, clock: clock) { client in
+      client.merge = { _, _, _ in }
+      client.batchPullRequests = { _, _, _, _ in ["main": snap] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
+    }
+    await store.send(
+      .mergeRequested(goneWID, prNumber: 99, strategy: .squash, worktreePath: Self.path)
+    ) {
+      $0.mutating.insert(goneWID)
+      $0.worktreePaths[goneWID] = Self.path
+    }
+    await store.receive(.mergeCompleted(goneWID, prNumber: 99, .success(.init()))) {
+      $0.mutating.remove(goneWID)
+    }
+    await store.receive(.delegate(.pullRequestMerged(goneWID, snapshot: snap)))
+
+    // Only the merged Worktree is removed; its Project survives.
+    await store.send(.pruneToCatalog(projectIDs: [projectID], worktreeIDs: [keptWID])) {
+      $0.projectByWorktree = [keptWID: projectID]
+      $0.projectWorktreePairs[projectID] = [kept]
+      $0.snapshots = [:]
+      $0.worktreePaths = [:]
+    }
+
+    await clock.advance(by: .seconds(2))
+    await store.receive(.delayedProjectRefreshFired(projectID)) {
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(keptWID)
+    }
+    await store.receive { action in
+      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
+      return pid == projectID
+    } assert: {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.loading.remove(keptWID)
+      $0.lastErrorByProject[projectID] = nil
+      $0.snapshotsByProject[projectID] = BatchedPullRequests(
+        host: "github.com", owner: "w", repo: "r",
+        byBranch: ["main": snap], seenBranches: ["main"], fetchedAt: Self.fixedDate
+      )
+      $0.snapshots[keptWID] = snap
+      $0.snapshotLoadedAt[keptWID] = Self.fixedDate
+      $0.lastError[keptWID] = nil
+    }
+    #expect(store.state.projectByWorktree[goneWID] == nil)
+    #expect(store.state.snapshots[goneWID] == nil)
   }
 
   // MARK: - catalog membership

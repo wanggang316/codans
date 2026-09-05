@@ -97,6 +97,25 @@ struct GitHubFeature {
     }
   }
 
+  /// Monotonic stamp handed to every on-disk cache write so a save that
+  /// started earlier cannot land after a newer one. See
+  /// `GitHubSnapshotCache.save(_:sequence:)`.
+  ///
+  /// Lives outside `State` because it orders side effects, not UI: bumping
+  /// it must not read as a state change to `TestStore` assertions.
+  private static let cacheWriteSequence = CacheWriteSequence()
+
+  final class CacheWriteSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+    func next() -> UInt64 {
+      lock.lock()
+      defer { lock.unlock() }
+      value += 1
+      return value
+    }
+  }
+
   enum Action: Equatable {
     case onAppear
     /// Hydrates the v2 project-batched state from the on-disk snapshot cache so the
@@ -190,6 +209,12 @@ struct GitHubFeature {
     /// are already keyed to live rows, so without this they only grow, and
     /// `snapshotsByProject` carries the growth to disk.
     case pruneToCatalog(projectIDs: Set<ProjectID>, worktreeIDs: Set<WorktreeID>)
+
+    /// The post-mutation timer elapsed. Carries only the Project id: the
+    /// gitRoot and pairs are resolved from state when it fires, never
+    /// captured when it was armed. A removal during the two-second wait
+    /// would otherwise be undone by the stale membership it replayed.
+    case delayedProjectRefreshFired(ProjectID)
 
     case delegate(Delegate)
 
@@ -501,8 +526,9 @@ struct GitHubFeature {
         // Best-effort persist to disk so the NEXT app launch hydrates instantly.
         let snapshotOnDisk = state.snapshotsByProject
         let cache = gitHubSnapshotCache
+        let sequence = Self.cacheWriteSequence.next()
         Task.detached(priority: .utility) {
-          cache.save(snapshotOnDisk)
+          cache.save(snapshotOnDisk, sequence)
         }
         // Project into per-Worktree `snapshots` so v1 view code keeps rendering
         // consistent data. Branches absent from `batched.byBranch` are dropped from
@@ -561,6 +587,17 @@ struct GitHubFeature {
           projectID, after: Self.pollCadence(for: state.snapshotsByProject[projectID])
         )
 
+      case .delayedProjectRefreshFired(let projectID):
+        guard let gitRoot = state.projectGitRoots[projectID],
+          let pairs = state.projectWorktreePairs[projectID]
+        else {
+          // The Project left the catalog while the timer ran.
+          return .none
+        }
+        return enqueueProjectFetch(
+          projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
+        )
+
       case .pollTick(let projectID):
         // Defensive: cancellation normally prevents a stale tick from a prior target.
         guard state.pollTarget == projectID else { return .none }
@@ -606,8 +643,9 @@ struct GitHubFeature {
         if state.snapshotsByProject.count != hadProjects {
           let snapshotOnDisk = state.snapshotsByProject
           let cache = gitHubSnapshotCache
+          let sequence = Self.cacheWriteSequence.next()
           Task.detached(priority: .utility) {
-            cache.save(snapshotOnDisk)
+            cache.save(snapshotOnDisk, sequence)
           }
         }
         // A poll aimed at a Project that just left the catalog would keep
@@ -786,15 +824,10 @@ struct GitHubFeature {
   private func postMutationRefresh(
     worktreeID: WorktreeID, state: inout State
   ) -> Effect<Action> {
-    guard let projectID = state.projectByWorktree[worktreeID],
-      let gitRoot = state.projectGitRoots[projectID],
-      let pairs = state.projectWorktreePairs[projectID]
-    else { return .none }
+    guard let projectID = state.projectByWorktree[worktreeID] else { return .none }
     return .run { [clock] send in
       try await clock.sleep(for: .seconds(2))
-      await send(
-        .projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
-      )
+      await send(.delayedProjectRefreshFired(projectID))
     }
     .cancellable(id: CancelID.delayedProjectRefresh(projectID), cancelInFlight: true)
   }

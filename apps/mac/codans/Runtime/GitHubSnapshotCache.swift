@@ -18,6 +18,9 @@ import os.log
 /// degradation, not a correctness issue.
 nonisolated final class GitHubSnapshotCache: Sendable {
   private let fileURL: URL
+  private let writeLock = NSLock()
+  /// Highest `sequence` committed to disk. Guarded by `writeLock`.
+  private nonisolated(unsafe) var lastWrittenSequence: UInt64 = 0
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.github", category: "snapshot-cache"
   )
@@ -52,9 +55,26 @@ nonisolated final class GitHubSnapshotCache: Sendable {
   }
 
   /// Writes atomically. Swallows errors with a log line — the cache is best-effort.
-  func save(_ snapshots: [ProjectID: BatchedPullRequests]) {
+  ///
+  /// `sequence` orders concurrent writers. Two detached saves can be in
+  /// flight at once — a batch completion and a prune — and `AtomicFileStore`
+  /// only guarantees each write lands whole, not that the newer one wins. A
+  /// batch save that started before a prune and finished after it would put
+  /// the pruned Projects straight back on disk. Writes carrying a sequence
+  /// no newer than the last one committed are dropped, and the lock keeps
+  /// the compare and the write from interleaving.
+  func save(_ snapshots: [ProjectID: BatchedPullRequests], sequence: UInt64) {
+    writeLock.lock()
+    defer { writeLock.unlock() }
+    guard sequence > lastWrittenSequence else {
+      Self.logger.info(
+        "snapshot-cache save skipped: sequence \(sequence, privacy: .public) is not newer than \(self.lastWrittenSequence, privacy: .public)"
+      )
+      return
+    }
     do {
       try AtomicFileStore.write(snapshots, to: fileURL)
+      lastWrittenSequence = sequence
     } catch {
       Self.logger.error(
         "snapshot-cache save failed: \(String(describing: error), privacy: .public)"

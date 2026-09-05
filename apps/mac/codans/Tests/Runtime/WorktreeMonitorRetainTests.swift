@@ -102,6 +102,36 @@ struct WorktreeMonitorRetainTests {
     #expect(monitor.isDirty[wid] == true)
   }
 
+  @Test
+  func statusARequestQueuedBeforeTheEvictionIsNotReplayed() async {
+    let gate = Gate()
+    let calls = CallCounter()
+    let monitor = WorktreeStatusMonitor(fetch: { _ in
+      calls.bump()
+      gate.markEntered()
+      await gate.wait()
+      return WorkingTreeStatus(entries: [dirtyEntry])
+    })
+    let gone = WorktreeID()
+    let path = URL(fileURLWithPath: "/gone")
+
+    async let first: Void = monitor.refresh(worktreeID: gone, path: path)
+    await gate.waitUntilEntered()
+    // A second request queues behind the running one, and only then does the
+    // Worktree go away.
+    await monitor.refresh(worktreeID: gone, path: path)
+    monitor.retain(liveWorktreeIDs: [])
+
+    gate.open()
+    await first
+
+    // Replaying the queued request would re-fetch and re-cache a Worktree
+    // that is gone. The replay path exists for one that came back and asked
+    // again, which can only be a request recorded after the eviction.
+    #expect(calls.value == 1)
+    #expect(monitor.isDirty[gone] == nil)
+  }
+
   // MARK: - WorktreeLocalDiffMonitor
 
   @Test
@@ -151,6 +181,48 @@ struct WorktreeMonitorRetainTests {
     await first
 
     #expect(monitor.stats[wid] == stats)
+  }
+
+  @Test
+  func localDiffARequestQueuedBeforeTheEvictionIsNotReplayed() async {
+    let gate = Gate()
+    let calls = CallCounter()
+    let stats = LocalDiffStats(additions: 2, deletions: 3)
+    let monitor = WorktreeLocalDiffMonitor(fetch: { _ in
+      calls.bump()
+      gate.markEntered()
+      await gate.wait()
+      return stats
+    })
+    let gone = WorktreeID()
+    let path = URL(fileURLWithPath: "/gone")
+
+    async let first: Void = monitor.refresh(worktreeID: gone, path: path)
+    await gate.waitUntilEntered()
+    await monitor.refresh(worktreeID: gone, path: path)
+    monitor.retain(liveWorktreeIDs: [])
+
+    gate.open()
+    await first
+
+    #expect(calls.value == 1)
+    #expect(monitor.stats[gone] == nil)
+  }
+
+  /// Counts stub invocations across the actor hop.
+  private final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func bump() {
+      lock.lock()
+      count += 1
+      lock.unlock()
+    }
+    var value: Int {
+      lock.lock()
+      defer { lock.unlock() }
+      return count
+    }
   }
 
   /// One-shot gate so a test can hold a stubbed fetch open across a `retain`,
