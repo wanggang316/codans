@@ -522,8 +522,16 @@ struct GitHubFeature {
         if state.queuedRefreshByProject.remove(projectID) != nil,
           let gitRoot = state.projectGitRoots[projectID]
         {
+          // Current pairs, not the ones this request captured: a Worktree
+          // removed while it was in flight is still in `pairs`, and
+          // re-issuing with those would put it back into
+          // `projectByWorktree` and `loading` — after which the next
+          // result sails past the guards above and restores it.
+          let currentPairs = state.projectWorktreePairs[projectID] ?? []
           return .send(
-            .projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
+            .projectRefreshRequested(
+              projectID, gitRoot: gitRoot, worktreeBranches: currentPairs
+            )
           )
         }
         return .none
@@ -585,7 +593,12 @@ struct GitHubFeature {
         state.snapshotsByProject = state.snapshotsByProject.filter { projectIDs.contains($0.key) }
         state.lastErrorByProject = state.lastErrorByProject.filter { projectIDs.contains($0.key) }
         state.projectGitRoots = state.projectGitRoots.filter { projectIDs.contains($0.key) }
-        state.projectWorktreePairs = state.projectWorktreePairs.filter { projectIDs.contains($0.key) }
+        // Nested pairs too, not just the Project key: a surviving Project's
+        // stashed pairs still name a Worktree that just left, and every
+        // re-issued fetch is parameterised by them.
+        state.projectWorktreePairs = state.projectWorktreePairs
+          .filter { projectIDs.contains($0.key) }
+          .mapValues { $0.filter { worktreeIDs.contains($0.worktreeID) } }
         state.inFlightFetchProjects.formIntersection(projectIDs)
         state.queuedRefreshByProject.formIntersection(projectIDs)
         // Persist the pruned map so the removal survives a relaunch even if no

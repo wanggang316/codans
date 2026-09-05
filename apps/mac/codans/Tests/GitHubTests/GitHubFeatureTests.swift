@@ -775,6 +775,9 @@ struct GitHubFeatureTests {
     await store.send(.pruneToCatalog(projectIDs: [live], worktreeIDs: [keptWID])) {
       $0.projectByWorktree = [keptWID: live]
       $0.loading = [keptWID]
+      // Nested pairs are pruned too, so a re-issued fetch cannot name the
+      // removed Worktree.
+      $0.projectWorktreePairs[live] = [kept]
     }
 
     let keptSnap = Self.stubSnapshot(number: 1, headRefName: "main")
@@ -797,6 +800,100 @@ struct GitHubFeatureTests {
       $0.snapshotLoadedAt[keptWID] = Self.fixedDate
       $0.lastError[keptWID] = nil
     }
+  }
+
+  @Test
+  func aQueuedRefreshDoesNotReviveAWorktreeRemovedMidFlight() async {
+    let project = ProjectID()
+    let keptWID = WorktreeID()
+    let goneWID = WorktreeID()
+    let kept = GitHubFeature.Action.WorktreeBranchPair(worktreeID: keptWID, branch: "main")
+    let gone = GitHubFeature.Action.WorktreeBranchPair(worktreeID: goneWID, branch: "old")
+    let gitRoot = URL(fileURLWithPath: "/repo")
+    let keptSnap = Self.stubSnapshot(number: 1, headRefName: "main")
+    let goneSnap = Self.stubSnapshot(number: 2, headRefName: "old")
+    let gate = Gate()
+    let store = Self.makeStore { client in
+      client.batchPullRequests = { _, _, _, branches in
+        await gate.wait()
+        var out: [String: PullRequestSnapshot] = [:]
+        if branches.contains("main") { out["main"] = keptSnap }
+        if branches.contains("old") { out["old"] = goneSnap }
+        return out
+      }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
+    }
+
+    // A fetch for both Worktrees goes in flight.
+    await store.send(
+      .projectActivated(project, gitRoot: gitRoot, worktreeBranches: [kept, gone])
+    ) {
+      $0.projectGitRoots[project] = gitRoot
+      $0.projectWorktreePairs[project] = [kept, gone]
+      $0.projectByWorktree = [keptWID: project, goneWID: project]
+      $0.loading = [keptWID, goneWID]
+      $0.inFlightFetchProjects = [project]
+    }
+
+    // A second refresh queues behind it, then one Worktree is removed.
+    await store.send(
+      .projectRefreshRequested(project, gitRoot: gitRoot, worktreeBranches: [kept, gone])
+    ) {
+      $0.queuedRefreshByProject = [project]
+    }
+    await store.send(.pruneToCatalog(projectIDs: [project], worktreeIDs: [keptWID])) {
+      $0.projectWorktreePairs[project] = [kept]
+      $0.projectByWorktree = [keptWID: project]
+      $0.loading = [keptWID]
+    }
+
+    gate.open()
+
+    // The in-flight result lands and drains the queued refresh. Re-issuing
+    // with the captured pairs would put the removed Worktree back into
+    // `projectByWorktree` and `loading`, after which the second result would
+    // sail past the completion guards and restore its snapshot.
+    await store.receive { action in
+      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
+      return pid == project
+    } assert: {
+      $0.inFlightFetchProjects = []
+      $0.loading = []
+      $0.lastErrorByProject[project] = nil
+      $0.snapshotsByProject[project] = BatchedPullRequests(
+        host: "github.com", owner: "w", repo: "r",
+        byBranch: ["main": keptSnap, "old": goneSnap],
+        seenBranches: ["main", "old"], fetchedAt: Self.fixedDate
+      )
+      $0.snapshots[keptWID] = keptSnap
+      $0.snapshotLoadedAt[keptWID] = Self.fixedDate
+      $0.lastError[keptWID] = nil
+      $0.queuedRefreshByProject = []
+    }
+    await store.receive(
+      .projectRefreshRequested(project, gitRoot: gitRoot, worktreeBranches: [kept])
+    ) {
+      $0.loading = [keptWID]
+      $0.inFlightFetchProjects = [project]
+    }
+    await store.receive { action in
+      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
+      return pid == project
+    } assert: {
+      $0.inFlightFetchProjects = []
+      $0.loading = []
+      $0.snapshotsByProject[project] = BatchedPullRequests(
+        host: "github.com", owner: "w", repo: "r",
+        byBranch: ["main": keptSnap],
+        seenBranches: ["main"], fetchedAt: Self.fixedDate
+      )
+    }
+
+    #expect(store.state.projectByWorktree[goneWID] == nil)
+    #expect(store.state.snapshots[goneWID] == nil)
+    #expect(!store.state.loading.contains(goneWID))
+    #expect(store.state.projectWorktreePairs[project] == [kept])
   }
 
   @Test

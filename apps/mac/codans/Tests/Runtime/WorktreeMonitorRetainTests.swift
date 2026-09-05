@@ -72,6 +72,36 @@ struct WorktreeMonitorRetainTests {
     #expect(monitor.isDirty[gone] == true)
   }
 
+  @Test
+  func statusRefreshRequestedDuringADiscardedRunIsServedAfterwards() async {
+    let gate = Gate()
+    let monitor = WorktreeStatusMonitor(fetch: { _ in
+      gate.markEntered()
+      await gate.wait()
+      return WorkingTreeStatus(entries: [dirtyEntry])
+    })
+    let wid = WorktreeID()
+    let path = URL(fileURLWithPath: "/repo")
+
+    async let first: Void = monitor.refresh(worktreeID: wid, path: path)
+    await gate.waitUntilEntered()
+
+    // Archive, then unarchive before the first `git status` returns. The
+    // sidebar row remounts and asks again, but the first request still holds
+    // the in-flight slot, so this call cannot start its own fetch.
+    monitor.retain(liveWorktreeIDs: [])
+    monitor.retain(liveWorktreeIDs: [wid])
+    await monitor.refresh(worktreeID: wid, path: path)
+    #expect(monitor.isDirty[wid] == nil)
+
+    gate.open()
+    await first
+
+    // The discarded run must hand off to the request it displaced —
+    // `.task(id:)` has already fired and will not retry on its own.
+    #expect(monitor.isDirty[wid] == true)
+  }
+
   // MARK: - WorktreeLocalDiffMonitor
 
   @Test
@@ -95,6 +125,32 @@ struct WorktreeMonitorRetainTests {
     #expect(monitor.stats[gone] == nil)
     await monitor.refresh(worktreeID: gone, path: URL(fileURLWithPath: "/gone"))
     #expect(monitor.stats[gone] == stats)
+  }
+
+  @Test
+  func localDiffRefreshRequestedDuringADiscardedRunIsServedAfterwards() async {
+    let gate = Gate()
+    let stats = LocalDiffStats(additions: 2, deletions: 3)
+    let monitor = WorktreeLocalDiffMonitor(fetch: { _ in
+      gate.markEntered()
+      await gate.wait()
+      return stats
+    })
+    let wid = WorktreeID()
+    let path = URL(fileURLWithPath: "/repo")
+
+    async let first: Void = monitor.refresh(worktreeID: wid, path: path)
+    await gate.waitUntilEntered()
+
+    monitor.retain(liveWorktreeIDs: [])
+    monitor.retain(liveWorktreeIDs: [wid])
+    await monitor.refresh(worktreeID: wid, path: path)
+    #expect(monitor.stats[wid] == nil)
+
+    gate.open()
+    await first
+
+    #expect(monitor.stats[wid] == stats)
   }
 
   /// One-shot gate so a test can hold a stubbed fetch open across a `retain`,

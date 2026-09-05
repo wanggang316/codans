@@ -42,6 +42,13 @@ final class WorktreeLocalDiffMonitor {
   @ObservationIgnored
   private var evictedWhileInFlight: Set<WorktreeID> = []
 
+  /// Refresh requests that arrived while another was in flight for the same
+  /// Worktree, keyed by the path they asked for. Replayed only when the
+  /// in-flight run's result is discarded — otherwise that result already
+  /// answers them.
+  @ObservationIgnored
+  private var pendingRefresh: [WorktreeID: URL] = [:]
+
   @ObservationIgnored
   private var fetch: @Sendable (URL) async throws -> LocalDiffStats?
 
@@ -85,26 +92,39 @@ final class WorktreeLocalDiffMonitor {
   /// freshness window. Re-entrant calls while a fetch is in flight are
   /// deduped. Safe to call on every `.task(id:)`.
   func refresh(worktreeID: WorktreeID, path: URL) async {
-    if inFlight.contains(worktreeID) { return }
+    if inFlight.contains(worktreeID) {
+      // Remember it. If the running request's result is discarded by
+      // `retain`, nothing else re-drives this Worktree.
+      pendingRefresh[worktreeID] = path
+      return
+    }
     if let fetchedAt = lastFetchedAt[worktreeID],
       Date().timeIntervalSince(fetchedAt) < Self.freshness
     {
       return
     }
     inFlight.insert(worktreeID)
-    defer {
-      inFlight.remove(worktreeID)
-      evictedWhileInFlight.remove(worktreeID)
-    }
+    let fetched: LocalDiffStats??
     do {
-      let result = try await fetch(path)
-      guard !evictedWhileInFlight.contains(worktreeID) else { return }
-      stats[worktreeID] = result
-      lastFetchedAt[worktreeID] = Date()
+      fetched = try await fetch(path)
     } catch {
+      fetched = nil
       Self.logger.debug(
         "local-diff fetch failed for \(path.path, privacy: .private(mask: .hash)): \(String(describing: error), privacy: .public)"
       )
+    }
+    inFlight.remove(worktreeID)
+    let wasEvicted = evictedWhileInFlight.remove(worktreeID) != nil
+    let queued = pendingRefresh.removeValue(forKey: worktreeID)
+    if let fetched, !wasEvicted {
+      stats[worktreeID] = fetched
+      lastFetchedAt[worktreeID] = Date()
+    }
+    // This run was discarded, so a request that arrived while it was in
+    // flight has nothing to show for it. Serve it now: the caller's
+    // `.task(id:)` has already fired and will not retry on its own.
+    if wasEvicted, let queued {
+      await refresh(worktreeID: worktreeID, path: queued)
     }
   }
 
