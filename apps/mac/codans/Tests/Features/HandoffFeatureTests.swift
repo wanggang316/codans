@@ -99,6 +99,69 @@ struct HandoffFeatureTests {
     await store.receive(.delegate(.dismiss))
   }
 
+  /// The placement rides on the typed command, is remembered through the
+  /// client, and reaches the context-only fallback as wire fields.
+  @Test
+  func placementIsRememberedAndTravelsWithBothPaths() async {
+    let remembered = LockIsolated<[HandoffPlacement]>([])
+    let typed = LockIsolated<[String]>([])
+    let ran = LockIsolated<[IPC.HandoffRequest]>([])
+    let fallback = HandoffCompletion(
+      action: .to, sourcePaneID: Self.paneID, receiver: .codex, briefing: .none,
+      launched: nil, requestID: nil)
+
+    let store = TestStore(initialState: Self.makeState()) {
+      HandoffFeature()
+    } withDependencies: {
+      $0.uuid = .constant(Self.requestID)
+      $0.handoffClient.cli = "codans"
+      $0.handoffClient.rememberPlacement = { placement in remembered.withValue { $0.append(placement) } }
+      $0.handoffClient.register = { _ in }
+      $0.handoffClient.completions = { AsyncStream { $0.finish() } }
+      $0.handoffClient.sendInstruction = { _, text in
+        typed.withValue { $0.append(text) }
+        return false
+      }
+      $0.handoffClient.supersede = { _ in true }
+      $0.handoffClient.run = { request in
+        ran.withValue { $0.append(request) }
+        return fallback
+      }
+    }
+
+    await store.send(.setPlacement(.split(.right))) { state in
+      state.placement = .split(.right)
+    }
+    // Re-choosing the same placement is not a change worth recording.
+    await store.send(.setPlacement(.split(.right)))
+    #expect(remembered.value == [.split(.right)])
+
+    await store.send(.confirmSelection) { state in
+      state.phase = .running(
+        HandoffFeature.Run(target: state.targets[0], requestID: Self.requestID, stage: .requesting))
+    }
+    await store.receive(.deliveryFailed) { state in
+      state.phase = .running(
+        HandoffFeature.Run(target: state.targets[0], requestID: Self.requestID, stage: .finishing))
+    }
+    await store.receive(.fallbackFinished(fallback)) { state in
+      state.phase = .finished(.handedOff(profileName: "Build"))
+    }
+    #expect(typed.value.first?.contains("codans handoff to codex --split right --brief -") == true)
+    #expect(ran.value.first?.target == .split)
+    #expect(ran.value.first?.direction == .right)
+
+    // Frozen once running.
+    await store.send(.setPlacement(.newTab))
+  }
+
+  @Test
+  func placementOpensOnTheRememberedChoice() {
+    let state = HandoffFeature.State.make(source: Self.source, profiles: [Self.codexProfile], placement: .split(.down))
+    #expect(state.placement == .split(.down))
+    #expect(Self.makeState().placement == .newTab)
+  }
+
   @Test
   func undeliverableRequestFallsBackToContextOnly() async {
     let superseded = LockIsolated<[UUID]>([])

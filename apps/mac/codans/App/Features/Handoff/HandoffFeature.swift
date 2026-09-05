@@ -81,6 +81,9 @@ struct HandoffFeature {
     let targets: [Target]
     var selectedIndex = 0
     var phase: Phase = .choosing
+    /// Where the receiver opens. Seeded from the last choice and remembered
+    /// on every change, so the picker opens where the user left it.
+    var placement: HandoffPlacement = .default
 
     var run: Run? {
       guard case .running(let run) = phase else { return nil }
@@ -91,7 +94,11 @@ struct HandoffFeature {
 
     /// Receivers are the enabled profiles whose agent can start with a
     /// kickoff prompt, in Settings order, followed by the checkpoint row.
-    static func make(source: Source, profiles: [AgentProfile]) -> State {
+    static func make(
+      source: Source,
+      profiles: [AgentProfile],
+      placement: HandoffPlacement = .default
+    ) -> State {
       var targets =
         profiles
         .filter { $0.isEnabled && $0.descriptor.supportsInitialPrompt }
@@ -99,9 +106,10 @@ struct HandoffFeature {
           Target(
             kind: .profile(profile),
             title: profile.displayName,
+            // Where the session opens is the picker's business, not the row's.
             subtitle: profile.name.isEmpty
-              ? "New session in a background tab"
-              : "\(profile.kind.displayName) · new session in a background tab",
+              ? "New session"
+              : "\(profile.kind.displayName) · new session",
             isSameAgent: profile.kind == source.agent
           )
         }
@@ -113,13 +121,14 @@ struct HandoffFeature {
           isSameAgent: false
         )
       )
-      return State(source: source, targets: targets)
+      return State(source: source, targets: targets, placement: placement)
     }
   }
 
   enum Action: Equatable {
     case moveSelection(delta: Int)
     case setSelectedIndex(Int)
+    case setPlacement(HandoffPlacement)
     case confirmSelection
     /// The pane could not take the injected request.
     case deliveryFailed
@@ -162,6 +171,12 @@ struct HandoffFeature {
         state.selectedIndex = index
         return .none
 
+      case .setPlacement(let placement):
+        guard state.isChoosing, state.placement != placement else { return .none }
+        state.placement = placement
+        handoffClient.rememberPlacement(placement)
+        return .none
+
       case .confirmSelection:
         guard state.isChoosing, state.targets.indices.contains(state.selectedIndex) else {
           return .none
@@ -175,7 +190,7 @@ struct HandoffFeature {
         let requestID = uuid()
         handoffClient.register(requestID)
         let instruction = HandoffKickoff.sourceInstruction(
-          for: request, requestID: requestID, cli: handoffClient.cli)
+          for: request, requestID: requestID, cli: handoffClient.cli, placement: state.placement)
         state.phase = .running(Run(target: target, requestID: requestID, stage: .requesting))
         let paneID = state.source.paneID
         let client = handoffClient
@@ -258,7 +273,9 @@ struct HandoffFeature {
           paneID: state.source.paneID,
           receiver: profile.kind.rawValue,
           profile: profile.id.uuidString,
-          contextOnly: true
+          contextOnly: true,
+          target: state.placement.target,
+          direction: state.placement.direction
         )
       case .checkpoint:
         IPC.HandoffRequest(action: .save, paneID: state.source.paneID, contextOnly: true)

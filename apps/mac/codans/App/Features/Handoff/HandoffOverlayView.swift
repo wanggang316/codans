@@ -95,7 +95,7 @@ struct HandoffOverlayView: View {
     let agent = store.source.agentName
     switch store.phase {
     case .choosing:
-      return "Pass this task to another agent in a new tab. \(agent) writes its own briefing first."
+      return "Pass this task to another agent. \(agent) writes its own briefing first."
     case .running(let run):
       switch run.stage {
       case .requesting:
@@ -104,7 +104,7 @@ struct HandoffOverlayView: View {
         return "Finishing the hand-off with generated context only"
       }
     case .finished(.handedOff):
-      return "The receiving agent picks up the task in a new tab"
+      return "The receiving agent picks up the task \(placementPhrase)"
     case .finished(.saved):
       return "The current state is saved under .codans/handoff/ for a later hand-off"
     case .finished(.failed(let message)):
@@ -127,7 +127,8 @@ struct HandoffOverlayView: View {
 
       Divider()
 
-      HStack {
+      HStack(spacing: 12) {
+        placementPicker
         Spacer()
         Button("Cancel") { store.send(.cancelTapped) }
           .keyboardShortcut(.cancelAction)
@@ -136,6 +137,43 @@ struct HandoffOverlayView: View {
           .keyboardShortcut(.defaultAction)
       }
       .padding(12)
+    }
+  }
+
+  /// Where the receiver opens. Two choices, not a direction picker: a split
+  /// always goes to the right of the source pane, which is what "beside the
+  /// agent I am handing off from" means in a left-to-right layout. The CLI
+  /// keeps the full direction set for scripts.
+  private var placementPicker: some View {
+    HStack(spacing: 8) {
+      Text("Open in")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Picker("Open in", selection: placementSelection) {
+        Text("New Tab").tag(HandoffPlacement.newTab)
+        Text("Split").tag(HandoffPlacement.split(.right))
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .controlSize(.small)
+      .fixedSize()
+      .accessibilityIdentifier("handoff.placement")
+    }
+  }
+
+  /// Any remembered split maps onto the picker's one split tag; the choice the
+  /// picker writes back is exactly one of its two tags.
+  private var placementSelection: Binding<HandoffPlacement> {
+    Binding(
+      get: { store.placement.target == .split ? .split(.right) : .newTab },
+      set: { store.send(.setPlacement($0)) }
+    )
+  }
+
+  private var placementPhrase: String {
+    switch store.placement {
+    case .newTab: return "in a new tab"
+    case .split: return "in a split beside this pane"
     }
   }
 
@@ -235,7 +273,7 @@ struct HandoffOverlayView: View {
 
   private func finishedMessage(_ outcome: HandoffFeature.Outcome) -> String {
     switch outcome {
-    case .handedOff(let name): return "New tab opened with \(name)"
+    case .handedOff(let name): return "\(name) started \(placementPhrase)"
     case .saved: return "Hand-off notes are up to date"
     case .failed: return "Nothing was launched"
     }

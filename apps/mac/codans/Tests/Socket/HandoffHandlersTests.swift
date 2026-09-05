@@ -100,7 +100,9 @@ struct HandoffHandlersTests {
     contextOnly: Bool = false,
     launch: Bool = true,
     requestID: UUID? = nil,
-    paneID: PaneID? = nil
+    paneID: PaneID? = nil,
+    target: ScriptTarget? = nil,
+    direction: ScriptSplitDirection? = nil
   ) -> IPC.HandoffRequest {
     IPC.HandoffRequest(
       action: action,
@@ -111,7 +113,9 @@ struct HandoffHandlersTests {
       contextOnly: contextOnly,
       note: nil,
       launch: launch,
-      requestID: requestID
+      requestID: requestID,
+      target: target,
+      direction: direction
     )
   }
 
@@ -219,12 +223,49 @@ struct HandoffHandlersTests {
     #expect(spec.profile.kind == .codex)
     #expect(spec.prompt == HandoffKickoff.receiverPrompt(hasBriefing: true))
     #expect(spec.target == .newTab)
+    #expect(spec.direction == nil)
+    #expect(spec.anchorPaneID == harness.source.paneID)
     #expect(spec.focus == false)
     #expect(spec.tabName == "Hand off → Codex")
     #expect(spec.projectID == harness.source.projectID)
 
     let log = try String(contentsOf: harness.store.logURL, encoding: .utf8)
     #expect(log.contains("claude-code -> codex  pane=\(harness.launches.paneID)  briefing=inline  source=cli"))
+  }
+
+  /// `--split` opens the receiver beside the *source* pane, not beside
+  /// whatever pane happens to have focus, so the launch spec names the anchor.
+  @Test
+  func handoffToSplitsTheSourcePaneWhenAsked() async throws {
+    let harness = try Self.makeHarness()
+
+    _ = try await harness.handlers.to(
+      Self.request(.to, harness, receiver: "codex", brief: Self.briefing, target: .split, direction: .down))
+
+    let spec = try #require(harness.launches.specs.first)
+    #expect(spec.target == .split)
+    #expect(spec.direction == .down)
+    #expect(spec.anchorPaneID == harness.source.paneID)
+    #expect(spec.focus == false)
+  }
+
+  /// A hand-off never types over the outgoing agent, so the one `ScriptTarget`
+  /// that would is refused before anything is written.
+  @Test
+  func handoffToRefusesTheFocusedTarget() async throws {
+    let harness = try Self.makeHarness()
+    let error = await Self.ipcError {
+      try await harness.handlers.to(
+        Self.request(.to, harness, receiver: "codex", brief: Self.briefing, target: .focused))
+    }
+    guard case .invalidParams(let message, let path) = error else {
+      Issue.record("expected invalidParams, got \(String(describing: error))")
+      return
+    }
+    #expect(message.contains("focused"))
+    #expect(path == ["target"])
+    #expect(harness.launches.specs.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: harness.store.handoffDirectory.path(percentEncoded: false)))
   }
 
   @Test

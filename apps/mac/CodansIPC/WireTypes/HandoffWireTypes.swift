@@ -30,6 +30,11 @@ extension IPC {
     public let launch: Bool
     /// One-shot id from an app-injected request; ordinary CLI use omits it.
     public let requestID: UUID?
+    /// Where the receiver opens: `.newTab` (the default when nil) or `.split`
+    /// beside the source pane. `.focused` is refused by the server.
+    public let target: ScriptTarget?
+    /// Consumed only with `.split`; nil means right.
+    public let direction: ScriptSplitDirection?
 
     public init(
       action: HandoffAction,
@@ -40,7 +45,9 @@ extension IPC {
       contextOnly: Bool = false,
       note: String? = nil,
       launch: Bool = true,
-      requestID: UUID? = nil
+      requestID: UUID? = nil,
+      target: ScriptTarget? = nil,
+      direction: ScriptSplitDirection? = nil
     ) {
       self.action = action
       self.paneID = paneID
@@ -51,6 +58,8 @@ extension IPC {
       self.note = note
       self.launch = launch
       self.requestID = requestID
+      self.target = target
+      self.direction = direction
     }
   }
 

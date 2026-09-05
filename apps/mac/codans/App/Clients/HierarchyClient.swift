@@ -586,6 +586,10 @@ nonisolated struct AgentLaunchSpec: Sendable, Equatable {
   /// Placement overrides. `nil` keeps the profile's saved target / direction.
   var target: ScriptTarget?
   var direction: ScriptSplitDirection?
+  /// Pane a `.split` divides. `nil` splits the worktree's focused pane, the
+  /// interactive default; a hand-off names its source pane so the receiver
+  /// lands beside the agent it takes over from.
+  var anchorPaneID: PaneID?
   /// `false` spawns without selecting the tab or stealing focus.
   var focus: Bool
   /// Tab title override; `nil` uses the profile's display name.
@@ -598,6 +602,7 @@ nonisolated struct AgentLaunchSpec: Sendable, Equatable {
     prompt: String? = nil,
     target: ScriptTarget? = nil,
     direction: ScriptSplitDirection? = nil,
+    anchorPaneID: PaneID? = nil,
     focus: Bool = true,
     tabName: String? = nil
   ) {
@@ -607,6 +612,7 @@ nonisolated struct AgentLaunchSpec: Sendable, Equatable {
     self.prompt = prompt
     self.target = target
     self.direction = direction
+    self.anchorPaneID = anchorPaneID
     self.focus = focus
     self.tabName = tabName
   }
@@ -1134,7 +1140,8 @@ extension HierarchyClient {
       manager: manager,
       snapshot: snapshot,
       terminalClient: terminalClient,
-      tracksRunPane: false
+      tracksRunPane: false,
+      anchorPaneID: spec.anchorPaneID
     )
     let tabID = paneID.flatMap { manager.addressOf(paneID: $0)?.2 }
     return AgentLaunchOutcome(profile: profile, command: command, tabID: tabID, paneID: paneID)
@@ -1152,6 +1159,10 @@ extension HierarchyClient {
   /// — no reuse lookup on the way in, no `setRunScriptPane` on the way out —
   /// so every invocation spawns a fresh surface.
   ///
+  /// `anchorPaneID` names the pane a `.split` divides. Left nil, the split
+  /// anchors on the worktree's focused pane; a pane that is not in this
+  /// worktree is ignored the same way.
+  ///
   /// Returns the pane the command landed in when a fresh surface was spawned;
   /// `nil` for a reused run pane or a `.focused` dispatch.
   @MainActor
@@ -1163,7 +1174,8 @@ extension HierarchyClient {
     manager: HierarchyManager,
     snapshot: Settings,
     terminalClient: TerminalClient?,
-    tracksRunPane: Bool = true
+    tracksRunPane: Bool = true,
+    anchorPaneID: PaneID? = nil
   ) async throws -> PaneID? {
     let scriptID = script.id
     var foundWorktreePath: String?
@@ -1245,7 +1257,8 @@ extension HierarchyClient {
       cwd: cwd,
       env: env,
       manager: manager,
-      terminalClient: terminalClient
+      terminalClient: terminalClient,
+      anchorPaneID: anchorPaneID
     )
 
     // Record the dedicated pane so the next run reuses it and the toolbar
@@ -1356,7 +1369,8 @@ extension HierarchyClient {
     cwd: String,
     env: [String: String],
     manager: HierarchyManager,
-    terminalClient: TerminalClient?
+    terminalClient: TerminalClient?,
+    anchorPaneID: PaneID? = nil
   ) async throws -> PaneID? {
     // initialCommand is replayed by TerminalEngine via `sendInput(command + "\n")`
     // into an interactive shell, so the shell stays at a prompt after the user's
@@ -1412,7 +1426,9 @@ extension HierarchyClient {
       return try await openInNewTab()
 
     case .split:
-      if let anchor = focusedAnchor(worktreeID: worktreeID, in: manager) {
+      if let anchor = explicitAnchor(anchorPaneID, worktreeID: worktreeID, in: manager)
+        ?? focusedAnchor(worktreeID: worktreeID, in: manager)
+      {
         return try await manager.splitPane(
           anchor.paneID,
           direction: mapSplitDirection(script.direction),
@@ -1440,6 +1456,19 @@ extension HierarchyClient {
     guard policy != .none else { return command }
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? "exit" : "\(trimmed); exit"
+  }
+
+  /// A caller-named split anchor, accepted only while it is still a pane of
+  /// this worktree; anything else falls through to the focused-pane rule.
+  @MainActor
+  private static func explicitAnchor(
+    _ paneID: PaneID?,
+    worktreeID: WorktreeID,
+    in manager: HierarchyManager
+  ) -> (tabID: TabID, paneID: PaneID)? {
+    guard let paneID, let address = manager.addressOf(paneID: paneID), address.1 == worktreeID
+    else { return nil }
+    return (address.2, paneID)
   }
 
   /// Picks the worktree's selected (or first) tab and returns its

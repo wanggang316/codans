@@ -25,6 +25,10 @@ nonisolated struct HandoffClient: Sendable {
   /// types it into the source pane, so it has to name the binary that answers
   /// on this app's socket — never the installed Release `codans`.
   var cli: String = CLIInvocation.commandName
+  /// The placement the panel opens with — the last one chosen — and the hook
+  /// that records a new choice. Defaults keep tests that do not care silent.
+  var lastPlacement: @Sendable () -> HandoffPlacement = { .default }
+  var rememberPlacement: @Sendable (HandoffPlacement) -> Void = { _ in }
 }
 
 extension HandoffClient {
@@ -63,7 +67,9 @@ extension HandoffClient {
           requestID: request.requestID
         )
       },
-      cli: cli
+      cli: cli,
+      lastPlacement: { HandoffPlacementPersistence.load() },
+      rememberPlacement: { HandoffPlacementPersistence.save($0) }
     )
   }
 }

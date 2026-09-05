@@ -26,6 +26,17 @@ struct HandoffKickoffTests {
   }
 
   @Test
+  func sourceInstructionCarriesASplitPlacementAsCLIFlags() {
+    let split = HandoffKickoff.sourceInstruction(
+      for: .handOff(to: .codex), requestID: Self.requestID, cli: "codans", placement: .split(.down))
+    #expect(split.contains(" codans handoff to codex --split down --brief -`"))
+    // A checkpoint has no receiver to place.
+    let checkpoint = HandoffKickoff.sourceInstruction(
+      for: .checkpoint, requestID: Self.requestID, cli: "codans", placement: .split(.down))
+    #expect(!checkpoint.contains("--split"))
+  }
+
+  @Test
   func receiverPromptPointsAtTheArtifactPaths() {
     let withBriefing = HandoffKickoff.receiverPrompt(hasBriefing: true)
     #expect(withBriefing.contains(".codans/handoff/current.md"))

@@ -14,7 +14,8 @@ struct HandoffCommand: AsyncParsableCommand {
 
       A handoff needs a briefing from the source agent (--brief -, read from stdin
       as a heredoc) or an explicit --no-brief. Artifacts live under the worktree's
-      .codans/handoff/ directory; the receiver starts in a new background tab.
+      .codans/handoff/ directory; the receiver starts in a new background tab, or
+      beside the source pane with --split <direction>.
 
         codans handoff to codex --brief - <<'EOF'
         # Handoff
@@ -85,9 +86,16 @@ struct HandoffTo: AsyncParsableCommand {
   var note: String?
   @Flag(name: .customLong("no-launch"), help: "Archive and save only; do not start the receiver.")
   var noLaunch: Bool = false
+  @Flag(name: .long, help: "Open the receiver in a new tab (the default).")
+  var tab: Bool = false
+  @Option(name: .long, help: "Split the source pane for the receiver: right, left, up, or down.")
+  var split: AgentLaunch.Split?
 
   func run() async throws {
     await CommandRunner.run {
+      if tab, split != nil {
+        throw CLIError(code: .userError, message: "--tab and --split are mutually exclusive")
+      }
       guard AgentKind(token: agent) != nil else {
         throw CLIError(
           code: .userError,
@@ -109,7 +117,9 @@ struct HandoffTo: AsyncParsableCommand {
           contextOnly: resolvedBrief.contextOnly,
           note: note,
           launch: !noLaunch,
-          requestID: HandoffRequestContext.requestID()
+          requestID: HandoffRequestContext.requestID(),
+          target: tab ? .newTab : (split == nil ? nil : .split),
+          direction: split?.direction
         )
       )
       try Renderer.emit(HandoffRenderable(response: response), mode: globals.renderMode)

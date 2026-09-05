@@ -33,16 +33,21 @@ public nonisolated enum HandoffKickoff {
   public static func sourceInstruction(
     for request: Request,
     requestID: UUID,
-    cli: String = CLIInvocation.commandName
+    cli: String = CLIInvocation.commandName,
+    placement: HandoffPlacement = .default
   ) -> String {
     let env = "\(requestIDEnvironmentKey)=\(requestID.uuidString) "
     let sections = HandoffBriefing.sectionSkeleton.joined(separator: ", ")
     let ask: String
     switch request {
     case .handOff(let receiver):
+      // The placement rides on the command the agent runs, so the CLI path
+      // and the panel agree without a second channel; the default adds
+      // nothing to the line.
+      let placementFlags = placement.cliArguments.map { " \($0)" }.joined()
       ask =
         "Please hand this task off to \(receiver.displayName): run "
-        + "`\(env)\(cli) handoff to \(receiver.rawValue) --brief -`"
+        + "`\(env)\(cli) handoff to \(receiver.rawValue)\(placementFlags) --brief -`"
     case .checkpoint:
       ask =
         "Please checkpoint your progress for a later handoff: run "

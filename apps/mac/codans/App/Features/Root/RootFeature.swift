@@ -1688,7 +1688,8 @@ struct RootFeature {
             worktreeID: source.worktreeID,
             agent: agent
           ),
-          profiles: settingsWriter.readSnapshotSync().agents.profiles
+          profiles: settingsWriter.readSnapshotSync().agents.profiles,
+          placement: handoffClient.lastPlacement()
         )
         return .none
 

@@ -141,6 +141,11 @@ final class HandoffHandlers {
         reason: "handoff can only launch: \(Self.receiverTokens). Use --no-launch for \(receiver.displayName)."
       )
     }
+    guard let placement = HandoffPlacement(target: request.target, direction: request.direction) else {
+      throw IPCError.invalidParams(
+        message: "handoff cannot target the focused pane; use a new tab (default) or --split",
+        path: ["target"])
+    }
     let source = try resolvedSource(request)
     let briefing = try preparedBriefing(
       request, command: "\(cli) handoff to \(receiver.rawValue) --brief -")
@@ -169,7 +174,8 @@ final class HandoffHandlers {
 
     var launched: IPC.HandoffLaunchedPane?
     if request.launch {
-      launched = await launchReceiver(profile: profile, source: source, transition: transition)
+      launched = await launchReceiver(
+        profile: profile, source: source, transition: transition, placement: placement)
       guard launched != nil else {
         // The artifact is already written and the outgoing round archived, so
         // record the failed launch before throwing — the log has to show that
@@ -268,16 +274,21 @@ final class HandoffHandlers {
   private func launchReceiver(
     profile: AgentProfile,
     source: HandoffSource,
-    transition: HandoffCoordinator.Transition
+    transition: HandoffCoordinator.Transition,
+    placement: HandoffPlacement
   ) async -> IPC.HandoffLaunchedPane? {
     let spec = AgentLaunchSpec(
       profile: profile,
       projectID: source.projectID,
       worktreeID: source.worktreeID,
       prompt: HandoffKickoff.receiverPrompt(hasBriefing: transition.hasBriefing),
-      // Always a fresh tab: a handoff must never type over the outgoing
-      // agent's pane, whatever placement the profile saves for manual use.
-      target: .newTab,
+      // The request's placement, never the profile's saved one, and never
+      // `.focused`: a handoff must not type over the outgoing agent's pane.
+      // A split anchors on the source pane so the receiver appears beside
+      // the agent it takes over from, wherever focus happens to be.
+      target: placement.target,
+      direction: placement.direction,
+      anchorPaneID: source.paneID,
       focus: false,
       tabName: "Hand off → \(profile.displayName)"
     )
