@@ -38,6 +38,13 @@ public nonisolated enum CodansEnvironment {
     /// read it as "switch to that session" and fail because it lives in
     /// another `ZMX_DIR`.
     case zmxSession = "ZMX_SESSION"
+    /// Absolute path of the CLI bundled with the app that spawned the pane.
+    /// The same directory is also put first on the pane's `PATH`, so a bare
+    /// `codans` inside the pane is *this* app's CLI, not whatever is
+    /// installed system-wide — a Debug pane must never fall through to the
+    /// Release binary. The variable exists for the case a shell rc file
+    /// rebuilds `PATH` from scratch and drops the entry.
+    case cli = "CODANS_CLI"
     /// Product marker for shells and TUIs. Written last, like the socket.
     case termProgram = "TERM_PROGRAM"
     /// The app's marketing version, next to `termProgram`.

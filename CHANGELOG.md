@@ -51,6 +51,11 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- A bare `codans` inside a pane is now the CLI bundled with the app that
+  spawned the pane: its `bin/` directory is put first on the pane's
+  `PATH`, and `CODANS_CLI` carries the absolute path for shells whose rc
+  rebuilds `PATH`. Previously a Debug pane fell through to the installed
+  Release CLI, which is older and dials the Release socket.
 - The Master Terminal's shell now gets the same environment a worktree
   pane does — socket path, product marker, and a cleared `ZMX_SESSION` —
   instead of a bare `ZMX_DIR`.

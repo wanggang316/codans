@@ -87,8 +87,9 @@ processBase(inheriting:overrides:socketPath:marketingVersion:)
      —— 让 libghostty 在 PTY 时写入的值生效；从 make → open 启动的 app
         会带着 TERM=dumb，透传下去会弄坏 starship 一类 TUI
   3. 叠加项目 envVars
-  4. 最后写 CODANS_SOCKET_PATH、TERM_PROGRAM、TERM_PROGRAM_VERSION
-     —— 写在最后，所以项目自定义的同名变量永远遮不住它们
+  4. 最后写 CODANS_SOCKET_PATH、CODANS_CLI、TERM_PROGRAM、TERM_PROGRAM_VERSION，
+     并把本 app 内置 CLI 的目录放到 PATH 最前
+     —— 写在最后，所以项目自定义的同名变量（包括自己重建的 PATH）永远遮不住它们
 
 forSurface(base, paneID:, zmxDirectory:)
   5. ZMX_DIR      钉死到本通道的缓存目录
@@ -101,12 +102,19 @@ worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` �
 
 只注入 `CODANS_PANE_ID` 而不注入 tab / worktree / project id 是有意的：pane id 终生不变，烘进环境是安全的；其余三个会随 pane 被移动而过期，所以由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认这五个键，是为了让调用方手动导出时能就地短路，但 app 只写 pane 那一个。
 
+### pane 里的 `codans` 指向谁
+
+pane 里输入或脚本执行的裸 `codans`，必须是**生成这个 pane 的 app** 自带的 CLI。系统里装的 `/usr/local/bin/codans` 指向 `/Applications` 的 Release 包，通常比分支构建旧（缺新子命令），且老版本会忽略 `CODANS_SOCKET_PATH` 拨到 Release socket；Debug pane 落到它上面，症状是「命令被另一个 app 应答」。所以 `PaneEnvironment` 把内置 CLI 所在目录（`Contents/Resources/bin/`，同目录还有 `zmx`）放到 `PATH` 最前，并导出 `CODANS_CLI` 为绝对路径——后者给 rc 文件重建了 `PATH` 的 shell 兜底。两者都在项目 overrides 之后写入，不会被项目自定义的 `PATH` 顶掉；同一目录在 `PATH` 里只保留一份，从 pane 里再开 pane 不会堆叠。
+
+Skill 与文档里的命令因此保持裸 `codans` 即可；只有 kickoff 那行例外，它由 codans 自动生成，为最大稳健性写内置二进制的绝对路径。
+
 ### 覆盖点（隔离缝）
 
 | 变量 | 作用 | 典型用法 |
 |---|---|---|
 | `CODANS_CONFIG_DIR` | 整体搬走配置根，所有 JSON store 跟着走 | 冒烟 / 集成测试，或给某个 worktree 的 dev 构建单独一套数据 |
 | `CODANS_SOCKET_PATH` | 指定 IPC socket | pane 内由 app 注入；手动指定实例 |
+| `CODANS_CLI` | 生成该 pane 的 app 自带 CLI 的绝对路径 | pane 内由 app 注入；`PATH` 被 rc 重建时用 `"$CODANS_CLI"` |
 | `CODANS_CLI_BINARY` | 安装器指向 `.app` 外新编的 CLI | dev |
 | `CODANS_GHOSTTY_RESOURCES` | libghostty 资源树的替代根 | 未打包的 `xcodebuild run` |
 | `CODANS_DISABLE_ACTION_ROUTING` / `CODANS_DISABLE_THEME_DEV_FALLBACK` | 诊断与测试开关 | 值为 `"1"` 生效 |

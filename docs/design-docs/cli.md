@@ -89,8 +89,10 @@
                                           Release: /tmp/codans-$UID.sock)
 
   Injected env vars inside every Pane (built by PaneEnvironment):
-    CODANS_SOCKET_PATH, CODANS_PANE_ID, CODANS_WORKTREE_PATH, CODANS_ROOT_PATH,
-    ZMX_DIR, ZMX_SESSION (cleared), TERM_PROGRAM, TERM_PROGRAM_VERSION
+    CODANS_SOCKET_PATH, CODANS_CLI, CODANS_PANE_ID, CODANS_WORKTREE_PATH,
+    CODANS_ROOT_PATH, ZMX_DIR, ZMX_SESSION (cleared), TERM_PROGRAM,
+    TERM_PROGRAM_VERSION; PATH is prefixed with the spawning app's bundled
+    bin/ so a bare `codans` in the pane is that app's CLI
   Read by `current` if a caller exports them by hand (never injected):
     CODANS_PROJECT_ID, CODANS_WORKTREE_ID, CODANS_TAB_ID, CODANS_TAG_ID
 ```

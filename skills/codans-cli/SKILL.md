@@ -39,6 +39,7 @@ Three outcomes:
   | `permission-denied` | The socket belongs to another user | Stop; ask the user — launching will not help |
   | `not-a-socket` / `path-too-long` | `CODANS_SOCKET_PATH` points somewhere wrong | Stop; fix the env var |
   | `server-busy` / `timed-out` | App is up but not accepting right now | Wait a moment and retry |
+  | `ok`, but the socket shown is not `$CODANS_SOCKET_PATH`, or a documented verb is "unknown" | `codans` resolved to a different install than the app that owns this pane | Run `"$CODANS_CLI"` instead of `codans` for the rest of the session |
 
   `codans doctor --json` emits the same value plus a `socketHint` string.
 - **`codans: command not found`** — Codans is not installed. Stop and tell
