@@ -262,8 +262,8 @@ struct WorktreeDetailView: View {
 
   /// Window-titlebar toolbar content — ONE declaration serving both the
   /// creating and the settled state. Branch label on the leading edge,
-  /// status pill + bell at the optical center, Run / Open on the trailing
-  /// edge. Mirrors the layout that used to live as the right cluster of the
+  /// status pill + bell at the optical center, Agents / Run / Open on the
+  /// trailing edge. Mirrors the layout that used to live as the right cluster of the
   /// content-region header; moving it into `.toolbar {}` reclaims vertical
   /// pixels above the tab bar and matches macOS native chrome.
   ///
@@ -290,7 +290,7 @@ struct WorktreeDetailView: View {
   ///   - MIDDLE: `SkeletonStatusPillView` carrying the motivational form's
   ///     footprint. The bell beside it stays LIVE and interactive — it is
   ///     window-level chrome (global unread count), not worktree data.
-  ///   - RIGHT: ghost Run / Open chips holding the real buttons' footprint,
+  ///   - RIGHT: ghost Agents / Run / Open chips holding the real buttons' footprint,
   ///     so the trailing flexible spacer weighs the same in both modes.
   /// The left / middle stand-ins carry the `skeleton-left` /
   /// `skeleton-middle` accessibility ids (VAL-DETAIL-001 / VAL-DETAIL-003).
