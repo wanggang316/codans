@@ -26,9 +26,10 @@ and the project does not yet follow semantic versioning — every release until
   archives the previous round under the worktree's `.codans/handoff/`,
   installs the source agent's own briefing, regenerates repository and
   session context, and starts the receiver with a kickoff prompt — in a
-  new background tab, or split beside the source pane (`--split`, or the
-  panel's "Open in" picker, which remembers the last choice). Every enabled
-  agent is a receiver: agents whose CLI takes no prompt argument get the
+  new background tab, or split off the source pane on the side you choose
+  (`--split <dir>`, or the panel's placement menus, which remember the last
+  choice). The panel offers the enabled agents your shell can run, as a
+  compact grid of names; agents whose CLI takes no prompt argument get the
   kickoff typed into their pane once they are up, without Enter, for the
   user to send. `codans handoff save`
   checkpoints without a receiver. In
