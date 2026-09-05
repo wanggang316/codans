@@ -121,6 +121,11 @@ struct HierarchyClientTests {
       runtime: FakeHierarchyRuntime()
     )
     let settings = SettingsStore(fileURL: settingsURL)
+    // Production wiring: the hook lives on the manager, not the client, so
+    // `codans project rm` through HierarchyHandlers is covered too.
+    manager.onProjectRemoved = { [weak settings] projectID in
+      settings?.removeProjectSettings(projectID)
+    }
     let client = HierarchyClient.live(manager: manager, settings: settings)
 
     let projectID = client.addProject("p", "/tmp/p", "/tmp/p")
@@ -151,6 +156,11 @@ struct HierarchyClientTests {
       runtime: FakeHierarchyRuntime()
     )
     let settings = SettingsStore(fileURL: settingsURL)
+    // Production wiring: the hook lives on the manager, not the client, so
+    // `codans project rm` through HierarchyHandlers is covered too.
+    manager.onProjectRemoved = { [weak settings] projectID in
+      settings?.removeProjectSettings(projectID)
+    }
     let client = HierarchyClient.live(manager: manager, settings: settings)
 
     let projectID = client.addProject("p", "/tmp/p", "/tmp/p")

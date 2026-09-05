@@ -489,6 +489,13 @@ struct GitHubFeature {
         )
         state.inFlightFetchProjects.remove(projectID)
         state.loading.subtract(pairs.map(\.worktreeID))
+        // Cancellation is cooperative, so a result dispatched before the
+        // prune landed can still arrive. `projectGitRoots` is written by
+        // every path that starts a fetch and removed only by
+        // `pruneToCatalog`, so its absence means this Project left the
+        // catalog mid-flight — writing the batch back would undo the prune
+        // and re-persist a dead Project to disk.
+        guard state.projectGitRoots[projectID] != nil else { return .none }
         state.lastErrorByProject[projectID] = nil
         state.snapshotsByProject[projectID] = batched
         // Best-effort persist to disk so the NEXT app launch hydrates instantly.
@@ -500,7 +507,9 @@ struct GitHubFeature {
         // Project into per-Worktree `snapshots` so v1 view code keeps rendering
         // consistent data. Branches absent from `batched.byBranch` are dropped from
         // `snapshots` so a PR that was closed between fetches doesn't linger as stale.
-        for pair in pairs {
+        // Same reasoning one level down: the Project can survive while one of
+        // its Worktrees is removed, and `pairs` was captured before that.
+        for pair in pairs where state.projectByWorktree[pair.worktreeID] != nil {
           if let snap = batched.byBranch[pair.branch] {
             state.snapshots[pair.worktreeID] = snap
             state.snapshotLoadedAt[pair.worktreeID] = now
@@ -525,6 +534,7 @@ struct GitHubFeature {
         )
         state.inFlightFetchProjects.remove(projectID)
         state.loading.subtract(pairs.map(\.worktreeID))
+        guard state.projectGitRoots[projectID] != nil else { return .none }
         state.lastErrorByProject[projectID] = (error as? GitHubError) ?? .other(String(describing: error))
         return .none
 
@@ -561,6 +571,10 @@ struct GitHubFeature {
 
       case .pruneToCatalog(let projectIDs, let worktreeIDs):
         let hadProjects = state.snapshotsByProject.count
+        // Fetches outlive the prune otherwise, and `projectBatchLoaded`
+        // would write the removed Project's batch straight back into state
+        // and on to disk.
+        let departedInFlight = state.inFlightFetchProjects.subtracting(projectIDs)
         state.snapshots = state.snapshots.filter { worktreeIDs.contains($0.key) }
         state.snapshotLoadedAt = state.snapshotLoadedAt.filter { worktreeIDs.contains($0.key) }
         state.worktreePaths = state.worktreePaths.filter { worktreeIDs.contains($0.key) }
@@ -587,11 +601,12 @@ struct GitHubFeature {
         // shelling out `git remote get-url` + `gh api graphql` against a
         // repository the user unregistered, and each success would write the
         // dead Project straight back into the on-disk cache.
+        var effects = departedInFlight.map { Effect<Action>.cancel(id: CancelID.projectFetch($0)) }
         if let target = state.pollTarget, !projectIDs.contains(target) {
           state.pollTarget = nil
-          return .cancel(id: CancelID.poll)
+          effects.append(.cancel(id: CancelID.poll))
         }
-        return .none
+        return .merge(effects)
 
       case .worktreeRefreshRequested(let worktreeID):
         guard let projectID = state.projectByWorktree[worktreeID],

@@ -28,6 +28,14 @@ final class WorktreeStatusMonitor {
   @ObservationIgnored
   private var inFlight: Set<WorktreeID> = []
 
+  /// Worktrees evicted by `retain` while a fetch for them was still awaiting.
+  /// Their result must be discarded: writing it back would resurrect the
+  /// entry `retain` just dropped, and would stamp a fresh `lastFetchedAt`
+  /// that blocks a real refresh for the whole freshness window if the
+  /// Worktree comes back.
+  @ObservationIgnored
+  private var evictedWhileInFlight: Set<WorktreeID> = []
+
   @ObservationIgnored
   private var fetch: @Sendable (URL) async throws -> WorkingTreeStatus
 
@@ -44,6 +52,7 @@ final class WorktreeStatusMonitor {
   /// catalog-observation pump that keeps the HEAD watcher in sync, which
   /// already projects exactly this set.
   func retain(liveWorktreeIDs: Set<WorktreeID>) {
+    evictedWhileInFlight.formUnion(inFlight.subtracting(liveWorktreeIDs))
     isDirty = isDirty.filter { liveWorktreeIDs.contains($0.key) }
     lastFetchedAt = lastFetchedAt.filter { liveWorktreeIDs.contains($0.key) }
   }
@@ -78,9 +87,13 @@ final class WorktreeStatusMonitor {
       return
     }
     inFlight.insert(worktreeID)
-    defer { inFlight.remove(worktreeID) }
+    defer {
+      inFlight.remove(worktreeID)
+      evictedWhileInFlight.remove(worktreeID)
+    }
     do {
       let status = try await fetch(path)
+      guard !evictedWhileInFlight.contains(worktreeID) else { return }
       isDirty[worktreeID] = !status.isClean
       lastFetchedAt[worktreeID] = Date()
     } catch {

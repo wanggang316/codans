@@ -74,6 +74,17 @@ final class HierarchyManager {
   /// insert/remove; the dirty predicates OR the two together.
   private var commandBusyPanes: Set<PaneID> = []
 
+  /// Fired after a Project is dropped from the catalog, with its id.
+  ///
+  /// Both removal entry points — the sidebar through `HierarchyClient` and
+  /// `codans project rm` through `HierarchyHandlers` — land here, which the
+  /// client-level closure this replaces did not: the RPC handler calls the
+  /// manager directly and bypassed it entirely. A settable property rather
+  /// than an init parameter because `AppState` builds the manager before the
+  /// `SettingsStore` exists; a closure rather than a direct reference so the
+  /// Runtime layer keeps its Settings independence.
+  var onProjectRemoved: (@MainActor (ProjectID) -> Void)?
+
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog
     self.store = store
@@ -511,6 +522,9 @@ final class HierarchyManager {
     }
     store.scheduleSave(catalog)
     runtime.announceHierarchyMutated()
+    // After the catalog mutation, so a throwing removal cannot strip a live
+    // Project's settings.
+    onProjectRemoved?(id)
   }
 
   /// Set the user's currently-selected Project at the top level. Single-

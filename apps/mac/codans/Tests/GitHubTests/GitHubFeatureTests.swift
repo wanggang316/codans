@@ -389,6 +389,10 @@ struct GitHubFeatureTests {
     let projectID = ProjectID()
     var seed = GitHubFeature.State()
     seed.inFlightFetchProjects.insert(projectID)
+    // `enqueueProjectFetch` writes this before dispatching, so every real
+    // `projectBatchLoaded` has it. Its absence is how the reducer recognises
+    // a Project pruned mid-flight.
+    seed.projectGitRoots[projectID] = URL(fileURLWithPath: "/repo")
     let store = Self.makeStore(initialState: seed)
     await store.send(
       .projectBatchLoaded(
@@ -659,6 +663,143 @@ struct GitHubFeatureTests {
   }
 
   @Test
+  func pruneCancelsAnInFlightFetchForARemovedProject() async {
+    let dead = ProjectID()
+    let wid = WorktreeID()
+    let gitRoot = URL(fileURLWithPath: "/gone")
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "main")
+    let gate = Gate()
+    let snap = Self.stubSnapshot(number: 1, headRefName: "main")
+    let store = Self.makeStore { client in
+      client.batchPullRequests = { _, _, _, _ in
+        await gate.wait()
+        return ["main": snap]
+      }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
+    }
+
+    await store.send(.projectActivated(dead, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.projectGitRoots[dead] = gitRoot
+      $0.projectWorktreePairs[dead] = [pair]
+      $0.projectByWorktree[wid] = dead
+      $0.loading.insert(wid)
+      $0.inFlightFetchProjects.insert(dead)
+    }
+
+    // The Project leaves the catalog while `gh api graphql` is still running.
+    await store.send(.pruneToCatalog(projectIDs: [], worktreeIDs: [])) {
+      $0.projectGitRoots = [:]
+      $0.projectWorktreePairs = [:]
+      $0.projectByWorktree = [:]
+      $0.loading = []
+      $0.inFlightFetchProjects = []
+    }
+
+    // Releasing the fetch must produce nothing: TestStore fails the test if a
+    // `projectBatchLoaded` arrives unasserted.
+    gate.open()
+    await store.finish()
+  }
+
+  @Test
+  func aLateSuccessForAPrunedProjectIsNotWrittenBack() async {
+    let dead = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "main")
+    var seed = GitHubFeature.State()
+    seed.projectGitRoots = [dead: URL(fileURLWithPath: "/gone")]
+    seed.projectWorktreePairs = [dead: [pair]]
+    seed.projectByWorktree = [wid: dead]
+    seed.inFlightFetchProjects = [dead]
+    seed.loading = [wid]
+    let store = Self.makeStore(initialState: seed)
+
+    await store.send(.pruneToCatalog(projectIDs: [], worktreeIDs: [])) {
+      $0.projectGitRoots = [:]
+      $0.projectWorktreePairs = [:]
+      $0.projectByWorktree = [:]
+      $0.inFlightFetchProjects = []
+      $0.loading = []
+    }
+
+    // Cancellation is cooperative, so a result already dispatched can still
+    // land. Only `inFlightFetchProjects` and `loading` may move — restoring
+    // the batch would undo the prune and re-persist a dead Project to disk.
+    let batched = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: ["main": Self.stubSnapshot(number: 1, headRefName: "main")],
+      seenBranches: ["main"], fetchedAt: Self.fixedDate
+    )
+    await store.send(
+      .projectBatchLoaded(dead, worktreeBranches: [pair], .success(batched))
+    )
+  }
+
+  @Test
+  func aLateFailureForAPrunedProjectDoesNotRestoreItsError() async {
+    let dead = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "main")
+    var seed = GitHubFeature.State()
+    seed.projectGitRoots = [dead: URL(fileURLWithPath: "/gone")]
+    seed.inFlightFetchProjects = [dead]
+    seed.loading = [wid]
+    let store = Self.makeStore(initialState: seed)
+
+    await store.send(.pruneToCatalog(projectIDs: [], worktreeIDs: [])) {
+      $0.projectGitRoots = [:]
+      $0.inFlightFetchProjects = []
+      $0.loading = []
+    }
+    await store.send(
+      .projectBatchLoaded(dead, worktreeBranches: [pair], .failure(GitHubError.network("DNS")))
+    )
+  }
+
+  @Test
+  func aLateSuccessSkipsWorktreesRemovedWhileTheProjectSurvived() async {
+    let live = ProjectID()
+    let keptWID = WorktreeID()
+    let goneWID = WorktreeID()
+    let kept = GitHubFeature.Action.WorktreeBranchPair(worktreeID: keptWID, branch: "main")
+    let gone = GitHubFeature.Action.WorktreeBranchPair(worktreeID: goneWID, branch: "old")
+    var seed = GitHubFeature.State()
+    seed.projectGitRoots = [live: URL(fileURLWithPath: "/repo")]
+    seed.projectWorktreePairs = [live: [kept, gone]]
+    seed.projectByWorktree = [keptWID: live, goneWID: live]
+    seed.inFlightFetchProjects = [live]
+    seed.loading = [keptWID, goneWID]
+    let store = Self.makeStore(initialState: seed)
+
+    await store.send(.pruneToCatalog(projectIDs: [live], worktreeIDs: [keptWID])) {
+      $0.projectByWorktree = [keptWID: live]
+      $0.loading = [keptWID]
+    }
+
+    let keptSnap = Self.stubSnapshot(number: 1, headRefName: "main")
+    let goneSnap = Self.stubSnapshot(number: 2, headRefName: "old")
+    let batched = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: ["main": keptSnap, "old": goneSnap],
+      seenBranches: ["main", "old"], fetchedAt: Self.fixedDate
+    )
+    await store.send(
+      .projectBatchLoaded(live, worktreeBranches: [kept, gone], .success(batched))
+    ) {
+      $0.inFlightFetchProjects = []
+      $0.loading = []
+      $0.lastErrorByProject[live] = nil
+      $0.snapshotsByProject[live] = batched
+      // Only the surviving Worktree is projected; `pairs` was captured
+      // before the removal and still names the dead one.
+      $0.snapshots[keptWID] = keptSnap
+      $0.snapshotLoadedAt[keptWID] = Self.fixedDate
+      $0.lastError[keptWID] = nil
+    }
+  }
+
+  @Test
   func pruneToCatalogKeepsAPollWhoseProjectSurvived() async {
     let live = ProjectID()
     var seed = GitHubFeature.State()
@@ -667,6 +808,37 @@ struct GitHubFeatureTests {
     let store = Self.makeStore(initialState: seed)
 
     await store.send(.pruneToCatalog(projectIDs: [live], worktreeIDs: []))
+  }
+
+  /// One-shot gate so a test can hold a stubbed fetch open across other
+  /// actions, then release it. Models a `gh api graphql` still running when
+  /// the catalog mutates underneath it.
+  private final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+
+    func wait() async {
+      await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+        lock.lock()
+        if opened {
+          lock.unlock()
+          c.resume()
+          return
+        }
+        continuation = c
+        lock.unlock()
+      }
+    }
+
+    func open() {
+      lock.lock()
+      opened = true
+      let pending = continuation
+      continuation = nil
+      lock.unlock()
+      pending?.resume()
+    }
   }
 
   /// Cadence-predicate fixture: an open/settled/in-flight snapshot in one line.

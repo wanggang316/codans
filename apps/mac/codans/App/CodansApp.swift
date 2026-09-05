@@ -635,7 +635,14 @@ final class AppState {
     self.catalogStore = catalogStore
     self.hierarchyRuntime = runtime
     self.hierarchyManager = manager
-    self.settingsStore = SettingsStore()
+    let settingsStore = SettingsStore()
+    self.settingsStore = settingsStore
+    // Wired here rather than at the `HierarchyClient` seam: `codans project
+    // rm` reaches `HierarchyHandlers`, which calls the manager directly and
+    // never passes through the client.
+    manager.onProjectRemoved = { [weak settingsStore] projectID in
+      settingsStore?.removeProjectSettings(projectID)
+    }
     self.shortcutsStore = ShortcutsStore()
     self.notificationStore = NotificationStore()
     self.worktreeStatusMonitor = .live()
