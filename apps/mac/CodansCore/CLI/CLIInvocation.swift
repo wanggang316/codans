@@ -16,20 +16,19 @@ public nonisolated enum CLIInvocation {
   /// app entirely.
   public static let commandName: String = BuildChannel.current.slug
 
-  /// What to actually write: this build's command name when the installed
-  /// symlink resolves to *this* build's binary, and otherwise the absolute
-  /// path of the binary the app bundles.
+  /// What to actually write for a command that will run inside one of this
+  /// app's panes: the command name whenever that name reaches *this* build's
+  /// binary there, otherwise the absolute path of the binary the app bundles.
   ///
-  /// Existence at the install path is not enough. `/usr/local/bin/codans` is
-  /// normally a symlink into `/Applications/Codans.app`, so a locally-built
-  /// Release app that wrote the bare name would be handing its work to the
-  /// installed app instead of itself — the same class of bug as a Debug build
-  /// writing `codans`. Resolving the link and comparing is what makes the
-  /// short form safe.
-  ///
-  /// The absolute-path fallback is also what makes a handoff work at all in a
-  /// build whose CLI was never installed, where the name would simply be
-  /// "command not found". It is less pretty and always addresses this build.
+  /// The name reaches us in two cases. Either nothing is installed under it,
+  /// so the only candidate is the bundle's own `bin/` — which every pane has
+  /// on PATH (`PaneEnvironment`), and which no shell reordering can displace
+  /// when there is no competitor. Or the installed symlink resolves to our
+  /// bundled binary. Existence alone is not enough: `/usr/local/bin/codans`
+  /// normally links into `/Applications/Codans.app`, so a locally-built
+  /// Release app that wrote the bare name would hand its work to the
+  /// installed app instead of itself. Only the install directory is checked;
+  /// a same-named binary elsewhere on the user's PATH is not detected.
   ///
   /// With no bundled binary to compare against there is nothing better to
   /// offer, so the bare name stands.
@@ -41,8 +40,15 @@ public nonisolated enum CLIInvocation {
   ) -> String {
     guard let bundledBinary else { return name }
     let installed = installDirectory.appendingPathComponent(name, isDirectory: false)
+    guard entryExists(installed, fileManager: fileManager) else { return name }
     if isSameFile(installed, bundledBinary, fileManager: fileManager) { return name }
     return ShellQuoting.quoted(bundledBinary.path(percentEncoded: false))
+  }
+
+  /// True for any directory entry at `url`, including a dangling symlink,
+  /// which `fileExists` reports as absent but which still shadows the name.
+  private static func entryExists(_ url: URL, fileManager: FileManager) -> Bool {
+    (try? fileManager.attributesOfItem(atPath: url.path(percentEncoded: false))) != nil
   }
 
   /// Symlink- and prefix-resolved identity test. `/usr/local/bin/codans` is a
