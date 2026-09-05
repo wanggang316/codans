@@ -34,6 +34,21 @@ final class WorktreeLocalDiffMonitor {
   @ObservationIgnored
   private var inFlight: Set<WorktreeID> = []
 
+  /// Worktrees evicted by `retain` while a fetch for them was still awaiting.
+  /// Their result must be discarded: writing it back would resurrect the
+  /// entry `retain` just dropped, and would stamp a fresh `lastFetchedAt`
+  /// that blocks a real refresh for the whole freshness window if the
+  /// Worktree comes back.
+  @ObservationIgnored
+  private var evictedWhileInFlight: Set<WorktreeID> = []
+
+  /// Refresh requests that arrived while another was in flight for the same
+  /// Worktree, keyed by the path they asked for. Replayed only when the
+  /// in-flight run's result is discarded — otherwise that result already
+  /// answers them.
+  @ObservationIgnored
+  private var pendingRefresh: [WorktreeID: URL] = [:]
+
   @ObservationIgnored
   private var fetch: @Sendable (URL) async throws -> LocalDiffStats?
 
@@ -41,6 +56,24 @@ final class WorktreeLocalDiffMonitor {
   private static let freshness: TimeInterval = 5
 
   private static let logger = Logger(subsystem: "com.gumpw.codans.sidebar", category: "localDiff")
+
+  /// Drop every cached entry for a Worktree the catalog no longer shows.
+  ///
+  /// Entries are created lazily by the sidebar row's `.task` and had no
+  /// removal path at all, so a Worktree that was removed or archived kept
+  /// its cached value for the life of the process. Driven by the same
+  /// catalog-observation pump that keeps the HEAD watcher in sync, which
+  /// already projects exactly this set.
+  func retain(liveWorktreeIDs: Set<WorktreeID>) {
+    evictedWhileInFlight.formUnion(inFlight.subtracting(liveWorktreeIDs))
+    // Queued requests from before the eviction die with it. Replaying one
+    // would re-fetch and re-cache a Worktree that is gone — the replay path
+    // exists for a Worktree that came back and asked again, which can only
+    // be a request recorded after this point.
+    pendingRefresh = pendingRefresh.filter { liveWorktreeIDs.contains($0.key) }
+    stats = stats.filter { liveWorktreeIDs.contains($0.key) }
+    lastFetchedAt = lastFetchedAt.filter { liveWorktreeIDs.contains($0.key) }
+  }
 
   init(fetch: @escaping @Sendable (URL) async throws -> LocalDiffStats?) {
     self.fetch = fetch
@@ -64,22 +97,39 @@ final class WorktreeLocalDiffMonitor {
   /// freshness window. Re-entrant calls while a fetch is in flight are
   /// deduped. Safe to call on every `.task(id:)`.
   func refresh(worktreeID: WorktreeID, path: URL) async {
-    if inFlight.contains(worktreeID) { return }
+    if inFlight.contains(worktreeID) {
+      // Remember it. If the running request's result is discarded by
+      // `retain`, nothing else re-drives this Worktree.
+      pendingRefresh[worktreeID] = path
+      return
+    }
     if let fetchedAt = lastFetchedAt[worktreeID],
       Date().timeIntervalSince(fetchedAt) < Self.freshness
     {
       return
     }
     inFlight.insert(worktreeID)
-    defer { inFlight.remove(worktreeID) }
+    let fetched: LocalDiffStats??
     do {
-      let result = try await fetch(path)
-      stats[worktreeID] = result
-      lastFetchedAt[worktreeID] = Date()
+      fetched = try await fetch(path)
     } catch {
+      fetched = nil
       Self.logger.debug(
         "local-diff fetch failed for \(path.path, privacy: .private(mask: .hash)): \(String(describing: error), privacy: .public)"
       )
+    }
+    inFlight.remove(worktreeID)
+    let wasEvicted = evictedWhileInFlight.remove(worktreeID) != nil
+    let queued = pendingRefresh.removeValue(forKey: worktreeID)
+    if let fetched, !wasEvicted {
+      stats[worktreeID] = fetched
+      lastFetchedAt[worktreeID] = Date()
+    }
+    // This run was discarded, so a request that arrived while it was in
+    // flight has nothing to show for it. Serve it now: the caller's
+    // `.task(id:)` has already fired and will not retry on its own.
+    if wasEvicted, let queued {
+      await refresh(worktreeID: worktreeID, path: queued)
     }
   }
 

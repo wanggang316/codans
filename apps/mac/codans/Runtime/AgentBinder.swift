@@ -130,6 +130,27 @@ final class AgentBinder {
     )
   }
 
+  /// Catalog-membership backstop for the two per-pane maps.
+  ///
+  /// `unbind` is the only other cleaner and it rides on `.paneExited` /
+  /// `.paneCrashed` / `.paneClosedByTab`. Archive and project removal use
+  /// `suspendSurface`, which emits none of those, so a pane torn down that
+  /// way keeps its `materializedBindings` membership forever. Archive makes
+  /// that user-visible: soft-hide keeps the same `PaneID` and leaves
+  /// `Pane.agentKind` set, so when the user unarchives and the agent runs
+  /// again `consider` sees `classified == existing` with the pane still
+  /// marked materialized and takes the noop branch — `agentBoundHandler`
+  /// never fires and the Agents View row the archive retired never returns.
+  ///
+  /// Deliberately does NOT write a nil binding through the client the way
+  /// `unbind` does: this runs from the catalog-mutation drain, and writing
+  /// back into the catalog here would feed itself. Dropping the local maps
+  /// is enough — the next `consider` re-materializes from scratch.
+  func reconcileMembership(livePaneIDs: Set<PaneID>) {
+    presenceByPane = presenceByPane.filter { livePaneIDs.contains($0.key) }
+    materializedBindings.formIntersection(livePaneIDs)
+  }
+
   // MARK: - Helpers
 
   private func writeIfChanged(

@@ -7,7 +7,7 @@ import CodansCore
 /// sidebar from disk before any `gh` round-trip returns.
 nonisolated struct GitHubSnapshotCacheClient: Sendable {
   var load: @Sendable () -> [ProjectID: BatchedPullRequests]
-  var save: @Sendable ([ProjectID: BatchedPullRequests]) -> Void
+  var save: @Sendable ([ProjectID: BatchedPullRequests], UInt64) -> Void
 }
 
 extension GitHubSnapshotCacheClient: DependencyKey {
@@ -15,13 +15,13 @@ extension GitHubSnapshotCacheClient: DependencyKey {
     let cache = GitHubSnapshotCache()
     return GitHubSnapshotCacheClient(
       load: { cache.load() },
-      save: { cache.save($0) }
+      save: { cache.save($0, sequence: $1) }
     )
   }()
 
   static let testValue = GitHubSnapshotCacheClient(
     load: { [:] },
-    save: { _ in }
+    save: { _, _ in }
   )
 }
 

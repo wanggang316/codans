@@ -18,7 +18,15 @@ struct FailedProjectRow: View {
   @State private var showingFailure = false
 
   var body: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 6) {
+      // Reserve the healthy Project header's leading disclosure slot (a
+      // 10pt-wide chevron followed by the same 6pt spacing). A failed
+      // Project has nothing to expand, so the slot stays empty — drawing
+      // no chevron at all would pull the name a glyph's width left of
+      // every sibling Project.
+      Color.clear
+        .frame(width: 10, height: 1)
+        .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 4) {
           Text(name)
@@ -41,7 +49,12 @@ struct FailedProjectRow: View {
       Button {
         showingFailure.toggle()
       } label: {
+        // 22x22 hit target, matching the "+" / "..." affordances on a
+        // healthy Project header so the trailing edge lines up.
         Image(systemName: "exclamationmark.triangle.fill")
+          .font(.system(size: 11, weight: .medium))
+          .frame(width: 22, height: 22)
+          .contentShape(Circle())
           .accessibilityHidden(true)
       }
       .buttonStyle(.borderless)

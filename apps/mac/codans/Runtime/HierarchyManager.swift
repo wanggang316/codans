@@ -74,6 +74,17 @@ final class HierarchyManager {
   /// insert/remove; the dirty predicates OR the two together.
   private var commandBusyPanes: Set<PaneID> = []
 
+  /// Fired after a Project is dropped from the catalog, with its id.
+  ///
+  /// Both removal entry points — the sidebar through `HierarchyClient` and
+  /// `codans project rm` through `HierarchyHandlers` — land here, which the
+  /// client-level closure this replaces did not: the RPC handler calls the
+  /// manager directly and bypassed it entirely. A settable property rather
+  /// than an init parameter because `AppState` builds the manager before the
+  /// `SettingsStore` exists; a closure rather than a direct reference so the
+  /// Runtime layer keeps its Settings independence.
+  var onProjectRemoved: (@MainActor (ProjectID) -> Void)?
+
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog
     self.store = store
@@ -458,15 +469,62 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Drops the runtime-only bookkeeping every Pane / Tab in `tabs` owns:
+  /// the two busy sets and the tab's remembered focus.
+  ///
+  /// `closePane` / `closeTab` clear these inline, but they only run for
+  /// teardown that emits `.paneExited`. The archive and project-removal
+  /// paths use `suspendSurface`, which deliberately emits none, so without
+  /// this the entries survive their Pane. For archive that is a live bug
+  /// rather than a leak: soft-hide keeps the Pane in the catalog, so a
+  /// stale `commandBusyPanes` member keeps `isScriptRunning` true forever
+  /// and pins the Worktree's Run / Stop control to "running" even though
+  /// archive already killed the daemon.
+  private func purgeRuntimeState(forTabs tabs: [Tab]) {
+    for tab in tabs {
+      for pane in tab.panes {
+        runningPanes.remove(pane.id)
+        commandBusyPanes.remove(pane.id)
+      }
+      lastFocusedPaneByTab.removeValue(forKey: tab.id)
+    }
+  }
+
+  /// Drops the Project from the catalog. The on-disk repository is never
+  /// touched — this only unregisters it.
+  ///
+  /// Every Pane under the Project is torn down through
+  /// `runtime.suspendSurface(for:)` first, for the same two reasons archive
+  /// uses it (see `setWorktreeArchived`): surfaces are lazy, so a
+  /// backgrounded Pane usually has no registered surface while its zmx
+  /// daemon is still running, and `.paneExited` would route through
+  /// `paneLifecycleExited → closePane` for Panes this call has already
+  /// deleted wholesale. Archived Worktrees are included: their daemons were
+  /// killed at archive time and a missing control socket is a silent no-op.
+  ///
+  /// Suspend emits no per-Pane lifecycle event, so the removal ends with
+  /// `announceHierarchyMutated()` — that is what makes the AgentState
+  /// reconcile run against the now-smaller catalog and retire the Project's
+  /// agent rows, which would otherwise linger as em-dash ghosts (and be
+  /// re-seeded from the quit snapshot on the next launch).
   func removeProject(_ id: ProjectID) throws {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")
     }
+    let tabs = catalog.projects[projectIndex].worktrees.flatMap { $0.tabs }
+    for pane in tabs.flatMap({ $0.panes }) {
+      runtime.suspendSurface(for: pane.id)
+    }
+    purgeRuntimeState(forTabs: tabs)
     catalog.projects.remove(at: projectIndex)
     if catalog.selectedProjectID == id {
       catalog.selectedProjectID = nil
     }
     store.scheduleSave(catalog)
+    runtime.announceHierarchyMutated()
+    // After the catalog mutation, so a throwing removal cannot strip a live
+    // Project's settings.
+    onProjectRemoved?(id)
   }
 
   /// Set the user's currently-selected Project at the top level. Single-
@@ -652,6 +710,7 @@ final class HierarchyManager {
     for pane in worktree.tabs.flatMap({ $0.panes }) {
       runtime.closeSurface(for: pane.id)
     }
+    purgeRuntimeState(forTabs: worktree.tabs)
 
     catalog.projects[projectIndex].worktrees.remove(at: worktreeIndex)
     if catalog.projects[projectIndex].selectedWorktreeID == id {
@@ -664,6 +723,10 @@ final class HierarchyManager {
         catalog.projects[projectIndex].worktrees.first { !$0.archived }?.id
     }
     store.scheduleSave(catalog)
+    // `closeSurface` emits `.paneExited` only for Panes that had a live
+    // surface, so a Worktree of never-opened Panes leaves the membership
+    // reconcilers with no signal at all. Announce unconditionally.
+    runtime.announceHierarchyMutated()
   }
 
   func selectWorktree(_ id: WorktreeID?, in projectID: ProjectID) throws {
@@ -703,6 +766,7 @@ final class HierarchyManager {
           // no `.paneExited` so soft-hide keeps the Pane in the catalog.
           runtime.suspendSurface(for: pane.id)
         }
+        purgeRuntimeState(forTabs: worktree.tabs)
       }
       catalog.projects[projectIndex].worktrees[worktreeIndex].archived = archived
       // Stamp the archive time so the Cleanup auto-delete sweep can age the
@@ -726,9 +790,10 @@ final class HierarchyManager {
       // Archive emits no per-pane `.paneExited` (see `suspendSurface`), so
       // nudge a structural-mutation event to re-run the AgentState reconcile
       // against `visiblePaneIDs()` — that is what retires the now-hidden
-      // worktree's agent rows. Unarchive needs no nudge: its panes had no
-      // running daemon to surface a row for.
-      if archived { runtime.announceHierarchyMutated() }
+      // worktree's agent rows. Unarchive announces too: nothing else tells
+      // the GitHub poll its branch set grew, so the restored row would keep
+      // painting the PR snapshot captured at archive time.
+      runtime.announceHierarchyMutated()
       return
     }
   }
@@ -1157,11 +1222,16 @@ final class HierarchyManager {
         !worktree.isPinned,
         !worktree.archived
       else { continue }
+      // Archive semantics, so `suspendSurface` — the same call
+      // `setWorktreeArchived` makes, for the same two reasons. `closeSurface`
+      // was wrong here twice over: it left a never-opened Pane's daemon
+      // running, and for a Pane that DID have a surface its `.paneExited`
+      // routed through `paneLifecycleExited` into `closeTab` / `closePane`,
+      // deleting the very rows soft-hide keeps in the catalog for restore.
       for pane in worktree.tabs.flatMap({ $0.panes }) {
-        runtime.closeSurface(for: pane.id)
-        runningPanes.remove(pane.id)
-        commandBusyPanes.remove(pane.id)
+        runtime.suspendSurface(for: pane.id)
       }
+      purgeRuntimeState(forTabs: worktree.tabs)
       if let idx = catalog.projects[projectIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
         catalog.projects[projectIndex].worktrees[idx].archived = true
         // Stamp the archive time for the Cleanup auto-delete sweep (the loop
@@ -1182,6 +1252,13 @@ final class HierarchyManager {
     }
     if appended > 0 || upgraded > 0 || archivedCount > 0 {
       store.scheduleSave(catalog)
+    }
+    // Soft-hide emits no per-Pane lifecycle event, so without this the
+    // membership reconcilers never learn the rows went away — same reason
+    // `setWorktreeArchived` announces. This path archives without the user
+    // asking, which makes a lingering ghost row especially confusing.
+    if archivedCount > 0 {
+      runtime.announceHierarchyMutated()
     }
     return appended
   }

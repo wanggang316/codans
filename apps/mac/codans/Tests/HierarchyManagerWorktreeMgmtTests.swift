@@ -156,6 +156,36 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   @Test
+  func archiveClearsBusySetsSoTheRunControlDoesNotStickOnRunning() async throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+    let paneID = try await manager.openPane(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/repo/feat", initialCommand: nil
+    )
+    let scriptID = UUID()
+    manager.setRunScriptPane(worktreeID: worktreeID, scriptID: scriptID, paneID: paneID)
+    manager.setPaneCommandBusy(paneID, true)
+    manager.setLastFocusedPane(paneID, in: tabID)
+    #expect(manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID))
+
+    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
+
+    // Soft-hide keeps the Pane in the catalog, so `isScriptRunning`'s
+    // "catalog.pane is gone" guard cannot retire the entry — only clearing
+    // the busy set does. Archive already killed the daemon, so a control
+    // still reading "running" here would never resolve, even on unarchive.
+    #expect(!manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID))
+    #expect(!manager.paneIsBusy(paneID))
+    #expect(manager.lastFocusedPane(in: tabID) == nil)
+  }
+
+  @Test
   func archiveAdvancesSelectionWhenItPointsAtTheArchivedRow() throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
@@ -248,6 +278,50 @@ struct HierarchyManagerWorktreeMgmtTests {
   }
 
   // MARK: - reconcileDiscoveredWorktrees
+
+  @Test
+  func reconcileWithNothingStaleDoesNotAnnounce() throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    _ = try manager.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main"
+    )
+    fakeRuntime.reset()
+
+    _ = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID, entries: [(path: "/repo", branch: "main")]
+    )
+
+    #expect(fakeRuntime.announceHierarchyMutatedCount == 0)
+  }
+
+  @Test
+  func removeWorktreeAnnouncesAndClearsBusySets() async throws {
+    let projectID = manager.addProject(
+      name: "p", rootPath: "/repo", gitRoot: "/repo"
+    )
+    let worktreeID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
+    )
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+    let paneID = try await manager.openPane(
+      in: tabID, in: worktreeID, in: projectID,
+      workingDirectory: "/repo/feat", initialCommand: nil
+    )
+    manager.setPaneCommandBusy(paneID, true)
+    manager.setLastFocusedPane(paneID, in: tabID)
+    fakeRuntime.reset()
+
+    try manager.removeWorktree(worktreeID, from: projectID)
+
+    // `closeSurface` emits `.paneExited` only for Panes that had a live
+    // surface, so a Worktree of never-opened Panes would otherwise leave the
+    // membership reconcilers with no signal at all.
+    #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
+    #expect(!manager.paneIsBusy(paneID))
+    #expect(manager.lastFocusedPane(in: tabID) == nil)
+  }
 
   @Test
   func reconcileAppendsUnknownEntries() throws {
@@ -599,13 +673,26 @@ struct HierarchyManagerWorktreeMgmtTests {
       in: tabID, in: staleID, in: projectID,
       workingDirectory: "/repo/stale", initialCommand: nil
     )
+    manager.setPaneCommandBusy(paneID, true)
     fakeRuntime.reset()
     fakeRuntime.livePaneIDs.insert(paneID)
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
       entries: [(path: "/repo", branch: "main")]
     )
-    #expect(fakeRuntime.closeSurfaceCalls == [paneID])
+    // Suspend, not close. This path archives, and `closeSurface`'s
+    // `.paneExited` routes through `paneLifecycleExited` into `closeTab` /
+    // `closePane`, deleting the very rows soft-hide keeps for restore. It
+    // also left a never-opened Pane's daemon running.
+    #expect(fakeRuntime.suspendSurfaceCalls == [paneID])
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+    let stale = manager.catalog.projects[0].worktrees.first { $0.id == staleID }
+    #expect(stale?.archived == true)
+    #expect(stale?.tabs.flatMap { $0.panes }.map(\.id) == [paneID])
+    #expect(!manager.paneIsBusy(paneID))
+    // Auto-archive fires without the user asking, so a ghost row left behind
+    // in the Agents View here is especially confusing.
+    #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
   }
 
   @Test

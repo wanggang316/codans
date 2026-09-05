@@ -166,6 +166,18 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  /// Drops a Project's whole settings entry. Called when the Project leaves
+  /// the catalog — `Settings.garbageCollect` only sweeps entries that are
+  /// *effectively empty*, so a populated orphan (scripts, editor override,
+  /// git subtree) would otherwise be re-encoded into `settings.json` on
+  /// every save for the life of the install. Re-adding the same repository
+  /// mints a fresh `ProjectID`, so the orphan is unreachable, not dormant.
+  /// No-op when the Project had no settings.
+  func removeProjectSettings(_ projectID: ProjectID) {
+    guard settings.projects.removeValue(forKey: projectID) != nil else { return }
+    scheduleSave()
+  }
+
   // MARK: - Editor convenience (legacy surface kept for SettingsWriter)
 
   func setDefaultEditorID(_ id: EditorID?) {

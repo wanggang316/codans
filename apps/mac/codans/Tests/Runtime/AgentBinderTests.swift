@@ -35,6 +35,27 @@ struct AgentBinderTests {
   }
 
   @Test
+  func reconcileMembershipLetsARetiredPaneMaterializeAgain() {
+    let f = Fixture(initialAgentKind: .codex)
+    let job = Self.job(argv0: "codex", commandLine: "codex")
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(job))
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(job))
+    // Classified matches the existing binding, so the second pass takes the
+    // noop branch — exactly one materialize so far.
+    #expect(f.boundCalls.value.count == 1)
+
+    // Archive's shape: the pane leaves `visiblePaneIDs()` while staying in
+    // the catalog with its `agentKind` intact.
+    f.binder.reconcileMembership(livePaneIDs: [])
+
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(job))
+    #expect(f.boundCalls.value.count == 2)
+    // The reconcile itself must not write a binding back through the client:
+    // it runs from the catalog-mutation drain and would feed itself.
+    #expect(f.calls.value.isEmpty)
+  }
+
+  @Test
   func foregroundJobRetainsAcrossTransientMisses() {
     let f = Fixture(initialAgentKind: .codex)
     f.binder.consider(

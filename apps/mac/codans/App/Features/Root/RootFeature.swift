@@ -168,6 +168,9 @@ struct RootFeature {
     case onLaunch
     case onQuit
     case selectionChanged(HierarchySelection)
+    /// A structural hierarchy mutation landed (Project / Worktree removal,
+    /// archive, auto-archive). Re-derives GitHub state from the live catalog.
+    case catalogMembershipChanged
     case engineEventReceived(LastEventMarker)
     /// Emitted from the event stream when libghostty reports a surface
     /// has exited (child died, user-initiated close via `close_surface`
@@ -541,6 +544,12 @@ struct RootFeature {
                 if let pwd, !pwd.isEmpty {
                   await send(.paneLivePwdChanged(paneID, pwd))
                 }
+              case .hierarchyMutated(let scope)
+              where scope != .selection && scope != .tags:
+                // Only `announceHierarchyMutated` emits this, and only on the
+                // four structural paths (remove Project / Worktree, archive,
+                // auto-archive), so this is rare enough to re-derive on.
+                await send(.catalogMembershipChanged)
               default:
                 break
               }
@@ -667,18 +676,19 @@ struct RootFeature {
             let catalog = await MainActor.run { client.snapshot() }
             var pairsByProject: [ProjectID: [GitHubFeature.Action.WorktreeBranchPair]] = [:]
             for project in catalog.projects {
-              let pairs = project.worktrees.compactMap {
-                worktree -> GitHubFeature.Action.WorktreeBranchPair? in
-                guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty
-                else { return nil }
-                return GitHubFeature.Action.WorktreeBranchPair(
-                  worktreeID: worktree.id, branch: branch
-                )
-              }
+              let pairs = Self.branchPairs(in: project)
               if !pairs.isEmpty { pairsByProject[project.id] = pairs }
             }
+            // The live set is every Project, not just those with branch pairs:
+            // a Project whose worktrees are all archived or detached still owns
+            // its cache entry and must not be swept as an orphan.
             await send(
-              .gitHub(.seedFromCache(cached: cached, branchPairsByProject: pairsByProject))
+              .gitHub(
+                .seedFromCache(
+                  cached: cached,
+                  branchPairsByProject: pairsByProject,
+                  liveProjectIDs: Set(catalog.projects.map(\.id))
+                ))
             )
           }
         )
@@ -830,14 +840,7 @@ struct RootFeature {
           let gitRootString = project.gitRoot
         {
           let gitRoot = URL(fileURLWithPath: gitRootString)
-          let pairs = project.worktrees.compactMap { worktree -> GitHubFeature.Action.WorktreeBranchPair? in
-            guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty else {
-              return nil
-            }
-            return GitHubFeature.Action.WorktreeBranchPair(
-              worktreeID: worktree.id, branch: branch
-            )
-          }
+          let pairs = Self.branchPairs(in: project)
           effects.append(
             .send(
               .gitHub(
@@ -859,6 +862,36 @@ struct RootFeature {
               .send(.gitHub(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])))
             )
           }
+        }
+        return .merge(effects)
+
+      case .catalogMembershipChanged:
+        let catalog = hierarchyClient.snapshot()
+        let projectIDs = Set(catalog.projects.map(\.id))
+        let worktreeIDs = Set(catalog.projects.flatMap { $0.worktrees.map(\.id) })
+        var effects: [Effect<Action>] = [
+          .send(.gitHub(.pruneToCatalog(projectIDs: projectIDs, worktreeIDs: worktreeIDs)))
+        ]
+        // Rebuild the poll context from the live catalog. `projectWorktreePairs`
+        // is otherwise only written on a Project switch, so an unarchived
+        // Worktree never re-enters it: the poll keeps fetching the branch set
+        // captured while the row was hidden, and the restored row paints
+        // whatever its snapshot held at archive time. `pruneToCatalog` above
+        // already pauses a poll whose Project is gone, so this only re-arms a
+        // target that survived.
+        if let target = state.gitHub.pollTarget,
+          let project = catalog.projects.first(where: { $0.id == target }),
+          let gitRootString = project.gitRoot
+        {
+          effects.append(
+            .send(
+              .gitHub(
+                .pollTargetChanged(
+                  target,
+                  gitRoot: URL(fileURLWithPath: gitRootString),
+                  worktreeBranches: Self.branchPairs(in: project)
+                )))
+          )
         }
         return .merge(effects)
 
@@ -2288,6 +2321,22 @@ struct RootFeature {
   /// `HierarchySidebarView.mergedWorktreeIDs` so the palette's batch commands
   /// target an identical set; an empty result makes the downstream sidebar
   /// action a safe no-op (it guards on `!targets.isEmpty`).
+  /// Live, non-archived branch pairs for a Project — the shape every GitHub
+  /// batched fetch is parameterised by. Archived rows are excluded because
+  /// their daemons are dead and their badges are not rendered.
+  private nonisolated static func branchPairs(
+    in project: Project
+  ) -> [GitHubFeature.Action.WorktreeBranchPair] {
+    project.worktrees.compactMap { worktree in
+      guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty else {
+        return nil
+      }
+      return GitHubFeature.Action.WorktreeBranchPair(
+        worktreeID: worktree.id, branch: branch
+      )
+    }
+  }
+
   private static func mergedWorktreeIDs(
     projectID: ProjectID,
     catalog: Catalog,

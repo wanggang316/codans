@@ -635,7 +635,14 @@ final class AppState {
     self.catalogStore = catalogStore
     self.hierarchyRuntime = runtime
     self.hierarchyManager = manager
-    self.settingsStore = SettingsStore()
+    let settingsStore = SettingsStore()
+    self.settingsStore = settingsStore
+    // Wired here rather than at the `HierarchyClient` seam: `codans project
+    // rm` reaches `HierarchyHandlers`, which calls the manager directly and
+    // never passes through the client.
+    manager.onProjectRemoved = { [weak settingsStore] projectID in
+      settingsStore?.removeProjectSettings(projectID)
+    }
     self.shortcutsStore = ShortcutsStore()
     self.notificationStore = NotificationStore()
     self.worktreeStatusMonitor = .live()
@@ -1202,7 +1209,7 @@ final class AppState {
     )
 
     let reaper = SessionReaper(coordinator: coordinator)
-    let livePaneIDs = Self.livePaneIDs(in: hierarchyManager.catalog)
+    let livePaneIDs = hierarchyManager.catalog.allPaneIDs()
     do {
       // Pass the current hierarchy's pane ids so the reaper can kill any
       // alive daemon whose paneID no longer maps to a surface — without
@@ -1430,13 +1437,21 @@ final class AppState {
   /// stale entries inherited from prior launches), then re-arms an
   /// Observation tracker on every pane / tab / worktree / project field
   /// whose mutation could remove a pane id.
+  ///
+  /// Keyed on `visiblePaneIDs()`, not `allPaneIDs()`, so an archived
+  /// Worktree's panes count as gone — the same choice the AgentState
+  /// reconcile makes. Archive is soft-hide: the Panes stay in the catalog,
+  /// so an unread entry from one used to survive here and keep the
+  /// collapsed project's bell (and the status-bar / Dock badge) lit while
+  /// the sidebar rendered no row the user could open to clear it. The
+  /// trade is that unarchiving does not resurrect those unreads.
   @MainActor
   private static func observeOrphanUnreadsSweep(
     catalog: @escaping @MainActor () -> Catalog,
     store: NotificationStore
   ) async {
     while !Task.isCancelled {
-      store.sweepOrphanUnreads(livePaneIDs: livePaneIDs(in: catalog()))
+      store.sweepOrphanUnreads(livePaneIDs: catalog().visiblePaneIDs())
       let stream = AsyncStream<Void> { continuation in
         withObservationTracking {
           let snap = catalog()
@@ -1462,24 +1477,6 @@ final class AppState {
         break
       }
     }
-  }
-
-  /// Flatten the catalog to the set of currently-live pane ids. Used by
-  /// the orphan sweep to decide which unread entries point at panes that
-  /// no longer exist.
-  @MainActor
-  private static func livePaneIDs(in catalog: Catalog) -> Set<PaneID> {
-    var ids: Set<PaneID> = []
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          for pane in tab.panes {
-            ids.insert(pane.id)
-          }
-        }
-      }
-    }
-    return ids
   }
 
   /// Reduce a launch-time sweep's per-pane state map to the restore queue
@@ -1524,12 +1521,20 @@ final class AppState {
     worktreeHeadWatcherSyncTask?.cancel()
     let manager = hierarchyManager
     let watcher = worktreeHeadWatcher
+    let statusMonitor = worktreeStatusMonitor
+    let diffMonitor = worktreeLocalDiffMonitor
     worktreeHeadWatcherSyncTask = Task { @MainActor in
       var last: [WorktreeID: String] = [:]
       while !Task.isCancelled {
         let current = Self.headWatcherPairs(from: manager.catalog)
         if current != last {
           watcher.setWorktrees(current.map { (id: $0.key, path: $0.value) })
+          // The two sidebar monitors cache lazily and had no removal path,
+          // so a removed or archived Worktree kept its chip data forever.
+          // This projection is already exactly the live, non-archived set.
+          let live = Set(current.keys)
+          statusMonitor.retain(liveWorktreeIDs: live)
+          diffMonitor.retain(liveWorktreeIDs: live)
           last = current
         }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -1641,6 +1646,13 @@ final class AppState {
       registry: registry,
       knownLiveness: self.sessionSweepLiveness
     )
+    // The snapshot is keyed on daemon liveness, not catalog membership, so it
+    // can carry a pane whose Project / Worktree was removed while its daemon
+    // outlived the removal. Such an entry resolves to nothing and renders as
+    // an em-dash ghost row. The drain loop only reconciles on the next
+    // structural mutation, which may never come in a quiet session — sweep
+    // the seed against the catalog immediately.
+    registry.reconcileMembership(livePaneIDs: manager.catalog.visiblePaneIDs())
     // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
     // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
     // pty child from the previous session can't haunt the panel. The
@@ -1676,7 +1688,17 @@ final class AppState {
     self.notificationDetectorTask = Task { @MainActor in
       for await event in detectorEvents {
         await detector.handle(event)
-        Self.dispatchToAgentBinder(event: event, binder: binder)
+        if case .hierarchyMutated(let scope) = event, scope != .selection, scope != .tags {
+          // Same backstop, same reason as the binder and registry below —
+          // the detector's caches are cleared only by `.paneExited` and its
+          // siblings, which the suspend-based teardown paths never emit.
+          detector.reconcileMembership(livePaneIDs: manager.catalog.visiblePaneIDs())
+        }
+        Self.dispatchToAgentBinder(
+          event: event,
+          binder: binder,
+          catalog: { manager.catalog }
+        )
         Self.dispatchToAgentStateStore(
           event: event,
           registry: registry,
@@ -1850,7 +1872,8 @@ final class AppState {
   @MainActor
   private static func dispatchToAgentBinder(
     event: TerminalEvent,
-    binder: AgentBinder
+    binder: AgentBinder,
+    catalog: @MainActor () -> Catalog
   ) {
     switch event {
     case .foregroundJobChanged(let paneID, let job):
@@ -1859,6 +1882,12 @@ final class AppState {
       .paneCrashed(let paneID, _),
       .paneClosedByTab(let paneID, _):
       binder.unbind(paneID)
+    case .hierarchyMutated(let scope) where scope != .selection && scope != .tags:
+      // Same reconcile the AgentState registry runs, for the same reason —
+      // see `AgentBinder.reconcileMembership`. Keyed on `visiblePaneIDs()`
+      // so an archived worktree's panes count as gone: that is what lets a
+      // later unarchive re-materialize the binding.
+      binder.reconcileMembership(livePaneIDs: catalog().visiblePaneIDs())
     default:
       break
     }

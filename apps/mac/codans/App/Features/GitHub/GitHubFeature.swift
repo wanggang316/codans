@@ -28,6 +28,8 @@ struct GitHubFeature {
     /// carry workflow-run IDs.
     var latestWorkflowRuns: [Int: WorkflowRun] = [:]
 
+    /// Worktrees whose owning Project has a batched fetch in flight (or
+    /// queued behind one). The badge and popover render a spinner from this.
     var loading: Set<WorktreeID> = []
 
     /// Mutation operations in flight per Worktree. Views observe this to disable the
@@ -95,6 +97,25 @@ struct GitHubFeature {
     }
   }
 
+  /// Monotonic stamp handed to every on-disk cache write so a save that
+  /// started earlier cannot land after a newer one. See
+  /// `GitHubSnapshotCache.save(_:sequence:)`.
+  ///
+  /// Lives outside `State` because it orders side effects, not UI: bumping
+  /// it must not read as a state change to `TestStore` assertions.
+  private static let cacheWriteSequence = CacheWriteSequence()
+
+  final class CacheWriteSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+    func next() -> UInt64 {
+      lock.lock()
+      defer { lock.unlock() }
+      value += 1
+      return value
+    }
+  }
+
   enum Action: Equatable {
     case onAppear
     /// Hydrates the v2 project-batched state from the on-disk snapshot cache so the
@@ -106,7 +127,8 @@ struct GitHubFeature {
     /// build the mapping.
     case seedFromCache(
       cached: [ProjectID: BatchedPullRequests],
-      branchPairsByProject: [ProjectID: [WorktreeBranchPair]]
+      branchPairsByProject: [ProjectID: [WorktreeBranchPair]],
+      liveProjectIDs: Set<ProjectID>
     )
     case refreshAvailabilityRequested
     case availabilityProbed(GitHubAvailability, probedAt: Date)
@@ -157,15 +179,6 @@ struct GitHubFeature {
       TaskResult<BatchedPullRequests>
     )
 
-    /// Emitted by the sidebar when a terminal-initiated `git checkout` changes a
-    /// Worktree's branch. Invalidates the Project's cache and kicks a refresh.
-    case worktreeBranchChanged(
-      WorktreeID,
-      newBranch: String,
-      projectID: ProjectID,
-      gitRoot: URL,
-      worktreeBranches: [WorktreeBranchPair]
-    )
 
     // MARK: - active-Project liveness poll
 
@@ -188,6 +201,20 @@ struct GitHubFeature {
     /// error-state retry so a retry repaints the whole repo with full check rollups
     /// instead of the empty-checks v1 single-branch result.
     case worktreeRefreshRequested(WorktreeID)
+
+    /// Drop every entry keyed by an ID the catalog no longer contains, and
+    /// pause the poll when its target is among them. Sent by RootFeature on
+    /// each structural hierarchy mutation. Nothing else in this feature ever
+    /// removes a key: the maps are written by fetches and read by views that
+    /// are already keyed to live rows, so without this they only grow, and
+    /// `snapshotsByProject` carries the growth to disk.
+    case pruneToCatalog(projectIDs: Set<ProjectID>, worktreeIDs: Set<WorktreeID>)
+
+    /// The post-mutation timer elapsed. Carries only the Project id: the
+    /// gitRoot and pairs are resolved from state when it fires, never
+    /// captured when it was armed. A removal during the two-second wait
+    /// would otherwise be undone by the stale membership it replayed.
+    case delayedProjectRefreshFired(ProjectID)
 
     case delegate(Delegate)
 
@@ -290,16 +317,28 @@ struct GitHubFeature {
         }
         return probeAvailabilityEffect()
 
-      case .seedFromCache(let cached, let branchPairsByProject):
+      case .seedFromCache(let cached, let branchPairsByProject, let liveProjectIDs):
         // Hydrate reducer state from disk. Two writes:
         //   1. `state.snapshotsByProject` — drives the `projectActivated`
         //      cache-hit check so we don't immediately over-fetch on bootstrap.
         //   2. `state.snapshots[worktreeID]` — what views read. Projected from
         //      each cached `byBranch` entry via the caller-supplied
         //      `branchPairsByProject` mapping.
-        state.snapshotsByProject.merge(cached) { _, new in new }
+        //
+        // Filter to live Projects first. The cache is written back whole on
+        // every successful fetch, so a Project the user removed would be
+        // merged in here, re-persisted, and merged in again next launch —
+        // the file grew without bound and kept PR titles and branch names
+        // for repositories that were unregistered months earlier.
+        let live = cached.filter { liveProjectIDs.contains($0.key) }
+        if live.count != cached.count {
+          Self.logger.info(
+            "seed dropped \(cached.count - live.count, privacy: .public) cached project(s) absent from the catalog"
+          )
+        }
+        state.snapshotsByProject.merge(live) { _, new in new }
         for (projectID, pairs) in branchPairsByProject {
-          guard let batched = cached[projectID] else { continue }
+          guard let batched = live[projectID] else { continue }
           for pair in pairs {
             if let snap = batched.byBranch[pair.branch] {
               state.snapshots[pair.worktreeID] = snap
@@ -474,18 +513,29 @@ struct GitHubFeature {
           "projectBatchLoaded success project=\(projectID.raw.uuidString, privacy: .public) branches=\(batched.byBranch.count, privacy: .public)/\(pairs.count, privacy: .public)"
         )
         state.inFlightFetchProjects.remove(projectID)
+        state.loading.subtract(pairs.map(\.worktreeID))
+        // Cancellation is cooperative, so a result dispatched before the
+        // prune landed can still arrive. `projectGitRoots` is written by
+        // every path that starts a fetch and removed only by
+        // `pruneToCatalog`, so its absence means this Project left the
+        // catalog mid-flight — writing the batch back would undo the prune
+        // and re-persist a dead Project to disk.
+        guard state.projectGitRoots[projectID] != nil else { return .none }
         state.lastErrorByProject[projectID] = nil
         state.snapshotsByProject[projectID] = batched
         // Best-effort persist to disk so the NEXT app launch hydrates instantly.
         let snapshotOnDisk = state.snapshotsByProject
         let cache = gitHubSnapshotCache
+        let sequence = Self.cacheWriteSequence.next()
         Task.detached(priority: .utility) {
-          cache.save(snapshotOnDisk)
+          cache.save(snapshotOnDisk, sequence)
         }
         // Project into per-Worktree `snapshots` so v1 view code keeps rendering
         // consistent data. Branches absent from `batched.byBranch` are dropped from
         // `snapshots` so a PR that was closed between fetches doesn't linger as stale.
-        for pair in pairs {
+        // Same reasoning one level down: the Project can survive while one of
+        // its Worktrees is removed, and `pairs` was captured before that.
+        for pair in pairs where state.projectByWorktree[pair.worktreeID] != nil {
           if let snap = batched.byBranch[pair.branch] {
             state.snapshots[pair.worktreeID] = snap
             state.snapshotLoadedAt[pair.worktreeID] = now
@@ -498,27 +548,29 @@ struct GitHubFeature {
         if state.queuedRefreshByProject.remove(projectID) != nil,
           let gitRoot = state.projectGitRoots[projectID]
         {
+          // Current pairs, not the ones this request captured: a Worktree
+          // removed while it was in flight is still in `pairs`, and
+          // re-issuing with those would put it back into
+          // `projectByWorktree` and `loading` — after which the next
+          // result sails past the guards above and restores it.
+          let currentPairs = state.projectWorktreePairs[projectID] ?? []
           return .send(
-            .projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
+            .projectRefreshRequested(
+              projectID, gitRoot: gitRoot, worktreeBranches: currentPairs
+            )
           )
         }
         return .none
 
-      case .projectBatchLoaded(let projectID, _, .failure(let error)):
+      case .projectBatchLoaded(let projectID, let pairs, .failure(let error)):
         Self.logger.error(
           "projectBatchLoaded failure project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .public)"
         )
         state.inFlightFetchProjects.remove(projectID)
+        state.loading.subtract(pairs.map(\.worktreeID))
+        guard state.projectGitRoots[projectID] != nil else { return .none }
         state.lastErrorByProject[projectID] = (error as? GitHubError) ?? .other(String(describing: error))
         return .none
-
-      case .worktreeBranchChanged(_, _, let projectID, let gitRoot, let pairs):
-        // Branch change invalidates whatever was cached for the Project and kicks a
-        // fresh batched fetch. The Worktree's own per-row snapshot is not cleared here
-        // — waiting ~500ms for the batched result to arrive avoids a visible flicker.
-        return enqueueProjectFetch(
-          projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
-        )
 
       // MARK: - active-Project liveness poll
 
@@ -533,6 +585,17 @@ struct GitHubFeature {
         // Arm only — the immediate refresh is owned by projectActivated / focus-gained.
         return schedulePollTick(
           projectID, after: Self.pollCadence(for: state.snapshotsByProject[projectID])
+        )
+
+      case .delayedProjectRefreshFired(let projectID):
+        guard let gitRoot = state.projectGitRoots[projectID],
+          let pairs = state.projectWorktreePairs[projectID]
+        else {
+          // The Project left the catalog while the timer ran.
+          return .none
+        }
+        return enqueueProjectFetch(
+          projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
         )
 
       case .pollTick(let projectID):
@@ -550,6 +613,51 @@ struct GitHubFeature {
           projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
         )
         return .merge(fetch, schedulePollTick(projectID, after: cadence))
+
+      case .pruneToCatalog(let projectIDs, let worktreeIDs):
+        let hadProjects = state.snapshotsByProject.count
+        // Fetches outlive the prune otherwise, and `projectBatchLoaded`
+        // would write the removed Project's batch straight back into state
+        // and on to disk.
+        let departedInFlight = state.inFlightFetchProjects.subtracting(projectIDs)
+        state.snapshots = state.snapshots.filter { worktreeIDs.contains($0.key) }
+        state.snapshotLoadedAt = state.snapshotLoadedAt.filter { worktreeIDs.contains($0.key) }
+        state.worktreePaths = state.worktreePaths.filter { worktreeIDs.contains($0.key) }
+        state.lastError = state.lastError.filter { worktreeIDs.contains($0.key) }
+        state.projectByWorktree = state.projectByWorktree.filter { worktreeIDs.contains($0.key) }
+        state.loading.formIntersection(worktreeIDs)
+        state.mutating.formIntersection(worktreeIDs)
+        state.snapshotsByProject = state.snapshotsByProject.filter { projectIDs.contains($0.key) }
+        state.lastErrorByProject = state.lastErrorByProject.filter { projectIDs.contains($0.key) }
+        state.projectGitRoots = state.projectGitRoots.filter { projectIDs.contains($0.key) }
+        // Nested pairs too, not just the Project key: a surviving Project's
+        // stashed pairs still name a Worktree that just left, and every
+        // re-issued fetch is parameterised by them.
+        state.projectWorktreePairs = state.projectWorktreePairs
+          .filter { projectIDs.contains($0.key) }
+          .mapValues { $0.filter { worktreeIDs.contains($0.worktreeID) } }
+        state.inFlightFetchProjects.formIntersection(projectIDs)
+        state.queuedRefreshByProject.formIntersection(projectIDs)
+        // Persist the pruned map so the removal survives a relaunch even if no
+        // fetch succeeds before quit.
+        if state.snapshotsByProject.count != hadProjects {
+          let snapshotOnDisk = state.snapshotsByProject
+          let cache = gitHubSnapshotCache
+          let sequence = Self.cacheWriteSequence.next()
+          Task.detached(priority: .utility) {
+            cache.save(snapshotOnDisk, sequence)
+          }
+        }
+        // A poll aimed at a Project that just left the catalog would keep
+        // shelling out `git remote get-url` + `gh api graphql` against a
+        // repository the user unregistered, and each success would write the
+        // dead Project straight back into the on-disk cache.
+        var effects = departedInFlight.map { Effect<Action>.cancel(id: CancelID.projectFetch($0)) }
+        if let target = state.pollTarget, !projectIDs.contains(target) {
+          state.pollTarget = nil
+          effects.append(.cancel(id: CancelID.poll))
+        }
+        return .merge(effects)
 
       case .worktreeRefreshRequested(let worktreeID):
         guard let projectID = state.projectByWorktree[worktreeID],
@@ -585,6 +693,11 @@ struct GitHubFeature {
     // current even when this call collapses into the queued-refresh slot.
     state.projectWorktreePairs[projectID] = pairs
     for pair in pairs { state.projectByWorktree[pair.worktreeID] = projectID }
+    // Marked before the in-flight short-circuit: a call that collapses into
+    // the queued-refresh slot still has a fetch pending on its behalf.
+    // Nothing wrote this set before, so the spinner the badge and popover
+    // were built to show could never appear.
+    state.loading.formUnion(pairs.map(\.worktreeID))
     if state.inFlightFetchProjects.contains(projectID) {
       state.queuedRefreshByProject.insert(projectID)
       return .none
@@ -711,15 +824,10 @@ struct GitHubFeature {
   private func postMutationRefresh(
     worktreeID: WorktreeID, state: inout State
   ) -> Effect<Action> {
-    guard let projectID = state.projectByWorktree[worktreeID],
-      let gitRoot = state.projectGitRoots[projectID],
-      let pairs = state.projectWorktreePairs[projectID]
-    else { return .none }
+    guard let projectID = state.projectByWorktree[worktreeID] else { return .none }
     return .run { [clock] send in
       try await clock.sleep(for: .seconds(2))
-      await send(
-        .projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
-      )
+      await send(.delayedProjectRefreshFired(projectID))
     }
     .cancellable(id: CancelID.delayedProjectRefresh(projectID), cancelInFlight: true)
   }

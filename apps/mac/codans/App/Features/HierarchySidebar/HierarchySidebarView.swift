@@ -835,6 +835,12 @@ struct HierarchySidebarView: View {
               ))
           }
         )
+        // Same row metrics as the healthy Project header below — without
+        // them the failed row falls back to the sidebar's default insets and
+        // sits at a different indent than its siblings.
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
       case .loading, .ready:
         // Header is its own List row. DisclosureGroup used to nest the worktree rows
         // inside the header row — that made AppKit animate the single wrapping row's

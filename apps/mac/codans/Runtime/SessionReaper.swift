@@ -253,6 +253,48 @@ public final class SessionReaper {
       _ = Darwin.unlink(url.path)
       deleteSnapshotFile(for: paneID)
     }
+
+    sweepOrphanSnapshots(claimedPaneIDs: claimedPaneIDs)
+  }
+
+  /// Delete `<paneID>.snap` files whose pane is claimed by neither the
+  /// session catalog nor the hierarchy.
+  ///
+  /// The socket scan above reaches a snapshot only when its daemon's socket
+  /// is still on disk. A pane whose daemon already exited leaves a snapshot
+  /// that nothing visits: `mergeSnapshotsIntoStates` deletes only the ones
+  /// whose pane came back `.alive`, and `deleteSnapshotFile`'s other caller
+  /// is the 7-day reap, which needs a `sessions.json` row. So the file sat
+  /// there forever and was re-discovered as a resumable pane on every
+  /// launch. `deleteSnapshotFile`'s doc comment promised this sweep existed;
+  /// now it does.
+  private func sweepOrphanSnapshots(claimedPaneIDs: Set<PaneID>) {
+    let fm = FileManager.default
+    guard fm.fileExists(atPath: snapshotDirectory.path) else { return }
+    let contents: [URL]
+    do {
+      contents = try fm.contentsOfDirectory(
+        at: snapshotDirectory,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+      )
+    } catch {
+      logger.error(
+        "FS orphan snapshot scan failed at \(self.snapshotDirectory.path, privacy: .public): \(String(describing: error), privacy: .public)"
+      )
+      return
+    }
+    for url in contents where url.pathExtension == "snap" {
+      guard let uuid = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else {
+        continue
+      }
+      let paneID = PaneID(raw: uuid)
+      if claimedPaneIDs.contains(paneID) { continue }
+      logger.notice(
+        "Removing FS-orphan snapshot at \(url.path, privacy: .public) (no catalog row, no hierarchy pane)"
+      )
+      deleteSnapshotFile(for: paneID)
+    }
   }
 
   /// Scan `snapshotDirectory` for `<uuid>.snap` files and merge them
@@ -452,8 +494,8 @@ public final class SessionReaper {
   /// does not get picked up by the snapshot-tier merge as a "ghost"
   /// resumable pane. Missing-file and any other I/O failure is
   /// non-fatal — the merge already skips paneIDs whose UUID does
-  /// not parse, and a stranded snap will eventually be reaped by
-  /// the orphan-snap sweep in the bring-up path.
+  /// not parse, and a stranded snap is reaped by `sweepOrphanSnapshots`,
+  /// which `sweepFilesystemOrphans` runs during bring-up.
   private func deleteSnapshotFile(for paneID: PaneID) {
     let snapURL = snapshotDirectory.appendingPathComponent("\(paneID.raw.uuidString).snap")
     let fm = FileManager.default

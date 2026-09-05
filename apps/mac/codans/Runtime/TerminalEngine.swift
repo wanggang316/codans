@@ -358,9 +358,18 @@ final class TerminalEngine {
   /// here — it goes through `SessionLifecycle.detachAllForQuit`, which
   /// decides keep-running vs. snapshot — so resume is unaffected.
   func closeSurface(for paneID: PaneID) {
-    guard let runtime = ghosttyRuntime,
-      let surface = runtime.surface(for: paneID)
-    else { return }
+    guard let surface = ghosttyRuntime?.surface(for: paneID) else {
+      // Surfaces are lazy. A Pane the user never opened this session has
+      // none, yet its zmx daemon is running — and every caller here is
+      // deleting the Pane outright, so nothing will ever reattach. The old
+      // bare `return` leaked that daemon until the next launch's
+      // filesystem orphan sweep. Kill it directly through its control
+      // socket, exactly as `suspendSurface` does; a missing socket is a
+      // silent no-op. No `.paneExited` is emitted: there was no surface to
+      // close, and the event's consumers all key off surface teardown.
+      ZmxControlClient.kill(for: paneID)
+      return
+    }
     surface.closeKillingDaemon()
     handleSurfaceClose(paneID: paneID, processAlive: true)
   }
@@ -484,6 +493,13 @@ final class TerminalEngine {
     foregroundJobMisses.removeValue(forKey: paneID)
     viewportSnapshots.removeValue(forKey: paneID)
     viewportChangedAt.removeValue(forKey: paneID)
+    // The crash ring is the one per-pane map `recordPaneCrash` owns: it
+    // appends here and clears on the auto-close / retry branches, so it must
+    // survive a crash close. Every other close ends the pane for good and
+    // nothing can ever append to its ring again.
+    if case .crashed = state, announce {} else {
+      crashRings.removeValue(forKey: paneID)
+    }
     stopForegroundJobPollingIfIdle()
   }
 
