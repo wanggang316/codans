@@ -79,10 +79,11 @@ struct GlobalOptions: ParsableArguments {
     json ? .json : .text(useColor: true)
   }
 
-  var resolvedSocketPath: String {
-    // `--socket` wins, then `$CODANS_SOCKET_PATH`, then the build default —
-    // the precedence `SocketDiscovery.resolve` implements.
-    SocketDiscovery.resolve(override: socket)
+  /// `--socket` wins, then `$CODANS_SOCKET_PATH`, then the build default —
+  /// the precedence `SocketDiscovery.resolve` implements, including its
+  /// refusal to drive a development pane from the release CLI.
+  func resolveSocketPath() throws(SocketDiscovery.ForeignPaneRefusal) -> String {
+    try SocketDiscovery.resolve(override: socket)
   }
 
   var rpcTimeout: Duration {

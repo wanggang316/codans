@@ -6,11 +6,37 @@ import Foundation
 /// come from `BuildChannel`, which the app-side `SocketPaths` reads too, so
 /// the two cannot drift.
 ///
-/// This resolver has no foreign-channel guard, and must not grow one: a CLI
-/// run inside a pane is *supposed* to dial whatever socket that pane's host
-/// exported, whichever channel the host is. The guard belongs only to an app
-/// deciding which socket to *bind* — see `SocketPaths.resolve`.
+/// The CLI's name is its channel: `codans` drives the release app and
+/// `codans-dev` the development app. `$CODANS_SOCKET_PATH`, which every pane
+/// exports naming its own app's socket, refines the target *within* that
+/// channel; when it names the other channel's default socket, the wrong CLI
+/// was invoked for this pane and `resolve` says so rather than crossing.
 public enum SocketDiscovery {
+  /// The CLI refused to act on a pane that belongs to the other build
+  /// channel. Rendered as exit code `CLIExitCode.wrongChannel` with the
+  /// command to use instead.
+  public struct ForeignPaneRefusal: Error, Equatable, Sendable {
+    /// Channel that owns the pane, per the socket its environment exports.
+    public let paneChannel: BuildChannel
+    /// The socket the pane exported.
+    public let socketPath: String
+
+    public init(paneChannel: BuildChannel, socketPath: String) {
+      self.paneChannel = paneChannel
+      self.socketPath = socketPath
+    }
+
+    public var message: String {
+      "this pane belongs to a \(paneChannel.rawValue) build of Codans (\(socketPath)); "
+        + "`\(paneChannel.other.slug)` will not act on it"
+    }
+
+    public var hint: String {
+      "run `\(paneChannel.slug)` here instead, or pass --socket to target the "
+        + "\(paneChannel.other.rawValue) app on purpose"
+    }
+  }
+
   public static func productionSocketPath(uid: uid_t = getuid()) -> String {
     BuildChannel.release.socketPath(uid: uid)
   }
@@ -26,6 +52,21 @@ public enum SocketDiscovery {
   /// Precedence: an explicit `override` (a `--socket` flag), then
   /// `$CODANS_SOCKET_PATH`, then the build default.
   ///
+  /// An environment value equal to the *other* channel's default socket means
+  /// the pane was spawned by the other build, and the two directions differ:
+  ///
+  /// - The release `codans` inside a development pane **refuses**. Nothing an
+  ///   agent types into a development pane may reach the release app by
+  ///   accident; the refusal names the command to use instead.
+  /// - The development `codans-dev` inside a release pane **ignores** the
+  ///   inherited path and dials the development socket. It is the developer's
+  ///   tool for the development app, and a release pane is where a developer
+  ///   usually runs it from.
+  ///
+  /// An explicit `--socket` always wins: crossing on purpose is a legitimate
+  /// way to drive one app from the other's pane. Any other environment value
+  /// is a custom socket and is honoured by both channels.
+  ///
   /// The environment is consulted in the body rather than as a default
   /// argument. As a default it silently dropped out whenever a caller passed
   /// its own optional through — `resolve(override: flag)` with no flag
@@ -35,15 +76,25 @@ public enum SocketDiscovery {
   /// `CODANS_SOCKET_PATH` for exactly this purpose and it was ignored.
   public static func resolve(
     override: String? = nil,
-    environment: [String: String] = ProcessInfo.processInfo.environment
-  ) -> String {
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    channel: BuildChannel = .current,
+    uid: uid_t = getuid()
+  ) throws(ForeignPaneRefusal) -> String {
     if let override, !override.isEmpty { return override }
-    if let fromEnvironment = environment[CodansEnvironment.Key.socketPath.rawValue],
+    guard let fromEnvironment = environment[CodansEnvironment.Key.socketPath.rawValue],
       !fromEnvironment.isEmpty
-    {
-      return fromEnvironment
+    else {
+      return channel.socketPath(uid: uid)
     }
-    return defaultSocketPath()
+    if fromEnvironment == channel.other.socketPath(uid: uid) {
+      switch channel {
+      case .release:
+        throw ForeignPaneRefusal(paneChannel: .development, socketPath: fromEnvironment)
+      case .development:
+        return channel.socketPath(uid: uid)
+      }
+    }
+    return fromEnvironment
   }
 
   /// Outcome of a single connect(2) probe against a socket path.

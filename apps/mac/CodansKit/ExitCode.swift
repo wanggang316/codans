@@ -17,6 +17,7 @@ public enum CLIExitCode: Int32, Sendable {
   case launchTimeout = 12  // codans launch / auto-launch never saw the socket come up
   case socketPermissionDenied = 13  // socket exists but this uid may not connect
   case socketUnusable = 14  // path is not a usable socket (wrong file, too long, fd exhaustion)
+  case wrongChannel = 15  // the pane belongs to the other build channel; this CLI will not cross into it
   case `internal` = 20
 
   /// Map an `IPCError` to the matching exit code. Unknown/novel error

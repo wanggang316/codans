@@ -59,7 +59,7 @@ struct LaunchCommand: AsyncParsableCommand {
 
   func run() async throws {
     await CommandRunner.run {
-      let path = SocketDiscovery.resolve()
+      let path = try SocketDiscovery.resolve()
       let probe = SocketDiscovery.probe(path: path)
       if probe.isReachable {
         try Renderer.emitObject(
@@ -80,7 +80,7 @@ struct LaunchCommand: AsyncParsableCommand {
         )
       }
 
-      let launch = Self.launchArguments()
+      let launch = try Self.launchArguments()
       let process = Process()
       process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
       process.arguments = launch.arguments
@@ -116,9 +116,19 @@ struct LaunchCommand: AsyncParsableCommand {
     }
   }
 
-  private static func launchArguments() -> (arguments: [String], description: String) {
+  /// Prefer the app this binary ships inside. Only the release CLI may fall
+  /// back to LaunchServices by name: `open -ga Codans` resolves to the
+  /// installed release app, which a development CLI must never start.
+  private static func launchArguments() throws -> (arguments: [String], description: String) {
     if let appPath = coBuiltAppPath() {
       return (["-g", appPath], "open -g \(appPath)")
+    }
+    guard BuildChannel.current == .release else {
+      throw CLIError(
+        code: .notFound,
+        message: "cannot find the development app this CLI was built with",
+        hint: "run the copy embedded in the Debug Codans.app, or open that app yourself"
+      )
     }
     return (["-ga", "Codans"], "open -ga Codans")
   }
@@ -152,27 +162,42 @@ struct DoctorCommand: ParsableCommand {
 
   @OptionGroup var globals: GlobalOptions
 
+  /// `socketStatus` value for a pane that belongs to the other build channel.
+  /// Not a `SocketFailureKind`: nothing was dialled. The hint carries the
+  /// command to switch to.
+  static let wrongChannelStatus = "wrong-channel"
+
   func run() throws {
-    let path = globals.resolvedSocketPath
-    let probe = SocketDiscovery.probe(path: path)
-    let failure = probe.failure
     // `socketStatus` is the scriptable form of "why not": one of the
-    // SocketFailureKind raw values, or "ok". `socketReachable` stays for
-    // callers that only need the boolean.
+    // SocketFailureKind raw values, `wrong-channel`, or "ok".
+    // `socketReachable` stays for callers that only need the boolean.
     var payload: [String: Any] = [
-      "socketPath": path,
-      "socketReachable": probe.isReachable,
-      "socketStatus": failure?.kind.rawValue ?? "ok",
+      "client": CodansCLI.commandName,
+      "clientVersion": CodansCLI.version,
+      "channel": BuildChannel.current.rawValue,
       "socketFromEnvironment":
         ProcessInfo.processInfo.environment[CodansEnvironment.Key.socketPath.rawValue] != nil,
-      "clientVersion": CodansCLI.version,
     ]
-    if let hint = failure?.hint {
-      payload["socketHint"] = hint
+    do {
+      let path = try globals.resolveSocketPath()
+      let probe = SocketDiscovery.probe(path: path)
+      payload["socketPath"] = path
+      payload["socketReachable"] = probe.isReachable
+      payload["socketStatus"] = probe.failure?.kind.rawValue ?? "ok"
+      if let hint = probe.failure?.hint {
+        payload["socketHint"] = hint
+      }
+    } catch {
+      // Diagnostic command: report the refusal instead of exiting on it, so
+      // a script reads the status and switches command.
+      payload["socketPath"] = error.socketPath
+      payload["socketReachable"] = false
+      payload["socketStatus"] = Self.wrongChannelStatus
+      payload["socketHint"] = error.hint
     }
     try Renderer.emitObject(payload, mode: globals.renderMode) { obj in
       var lines = """
-        codans                \(obj["clientVersion"] ?? "?")
+        client            \(obj["client"] ?? "?") \(obj["clientVersion"] ?? "?") (\(obj["channel"] ?? "?"))
         socket            \(obj["socketPath"] ?? "?")
         socketReachable   \(obj["socketReachable"] ?? false)
         socketStatus      \(obj["socketStatus"] ?? "?")
