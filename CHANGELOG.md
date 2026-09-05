@@ -27,17 +27,17 @@ and the project does not yet follow semantic versioning — every release until
   installs the source agent's own briefing, regenerates repository and
   session context, and starts the receiver in a background tab with a
   kickoff prompt; `codans handoff save` checkpoints without a receiver. In
-  the app, "Hand Off…" (a pane's info menu, Command Palette, Agents View row) asks
+  the app, "Hand Off…" (a pane's actions menu, Command Palette, Agents View row) asks
   the live agent to run that same command with its briefing and jumps to the
   receiver when it finishes, with a context-only fallback while waiting.
 - The worktree toolbar's Agents menu now lists only agents whose CLI the
   shell can resolve. The check fails open: nothing is hidden before the
   scan answers, and if it would hide every profile they all come back.
-- **Per-pane info menu.** Every terminal pane carries a collapsed info
-  button in its top-right corner. Opening it shows the worktree the pane
-  runs in — path, branch, uncommitted `+N −M` — and the agent bound to it,
-  and offers "Hand Off…" for that pane. Clicking anywhere else, or Escape,
-  collapses it.
+- **Per-pane actions menu.** Every terminal pane carries a collapsed
+  button in its top-right corner. Opening it offers the actions scoped to
+  that pane — "Hand Off…" today. It repeats no workspace facts: path,
+  branch, diff and agent are already shown in the header, sidebar and
+  Agents view. Clicking anywhere else, or Escape, collapses it.
 
 ### Changed
 

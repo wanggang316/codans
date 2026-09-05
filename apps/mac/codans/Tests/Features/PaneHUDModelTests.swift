@@ -4,34 +4,31 @@ import Testing
 
 @testable import Codans
 
-/// The HUD resolves its whole card from one catalog walk, so these cover the
-/// two decisions the view cannot re-derive: which worktree a pane belongs to,
-/// and whether hand off is offered there.
+/// The HUD resolves its decisions from one catalog walk, so these cover what
+/// the view cannot re-derive: whether the pane is still known, which agent it
+/// carries, and whether hand off is offered there.
 @MainActor
 struct PaneHUDModelTests {
-  private static let home = "/Users/tester"
-
   private static func catalog(
     remoteHost: RemoteHost? = nil,
     agentKind: AgentKind? = nil,
-    branch: String? = "main",
     paneID: PaneID
   ) -> Catalog {
     let pane = Pane(
       id: paneID,
-      workingDirectory: "\(home)/dev/app",
+      workingDirectory: "/Users/tester/dev/app",
       agentKind: agentKind
     )
     let tab = Tab(splitTree: SplitTree(leaf: paneID), panes: [pane])
     let worktree = Worktree(
       name: "app",
-      path: "\(home)/dev/app",
-      branch: branch,
+      path: "/Users/tester/dev/app",
+      branch: "main",
       tabs: [tab]
     )
     let project = Project(
       name: "app",
-      rootPath: "\(home)/dev/app",
+      rootPath: "/Users/tester/dev/app",
       remoteHost: remoteHost,
       worktrees: [worktree]
     )
@@ -39,18 +36,14 @@ struct PaneHUDModelTests {
   }
 
   @Test
-  func resolvesTheWorktreeThePaneRunsIn() {
+  func offersHandOffForAPaneWithAPersistedAgent() {
     let paneID = PaneID()
     let model = PaneHUDModel.resolve(
       paneID: paneID,
       in: Self.catalog(agentKind: .claudeCode, paneID: paneID),
-      agent: nil,
-      diff: { _ in LocalDiffStats(additions: 3, deletions: 1) },
-      homeDirectory: Self.home
+      agent: nil
     )
-    #expect(model?.displayPath == "~/dev/app")
-    #expect(model?.branch == "main")
-    #expect(model?.diff == LocalDiffStats(additions: 3, deletions: 1))
+    #expect(model?.agent == .claudeCode)
     #expect(model?.canHandOff == true)
   }
 
@@ -59,9 +52,7 @@ struct PaneHUDModelTests {
     let model = PaneHUDModel.resolve(
       paneID: PaneID(),
       in: Self.catalog(paneID: PaneID()),
-      agent: nil,
-      diff: { _ in nil },
-      homeDirectory: Self.home
+      agent: nil
     )
     #expect(model == nil)
   }
@@ -72,9 +63,7 @@ struct PaneHUDModelTests {
     let model = PaneHUDModel.resolve(
       paneID: paneID,
       in: Self.catalog(agentKind: nil, paneID: paneID),
-      agent: .codex,
-      diff: { _ in nil },
-      homeDirectory: Self.home
+      agent: .codex
     )
     #expect(model?.agent == .codex)
     #expect(model?.canHandOff == true)
@@ -86,9 +75,7 @@ struct PaneHUDModelTests {
     let model = PaneHUDModel.resolve(
       paneID: paneID,
       in: Self.catalog(agentKind: nil, paneID: paneID),
-      agent: nil,
-      diff: { _ in nil },
-      homeDirectory: Self.home
+      agent: nil
     )
     #expect(model?.canHandOff == false)
     #expect(model?.handOffBlockedReason?.contains("No agent") == true)
@@ -104,21 +91,9 @@ struct PaneHUDModelTests {
         agentKind: .claudeCode,
         paneID: paneID
       ),
-      agent: .claudeCode,
-      diff: { _ in nil },
-      homeDirectory: Self.home
+      agent: .claudeCode
     )
     #expect(model?.canHandOff == false)
     #expect(model?.handOffBlockedReason?.contains("Server") == true)
-  }
-
-  @Test
-  func pathsOutsideHomeStayAbsolute() {
-    #expect(PaneHUDModel.displayPath("/opt/src", home: Self.home) == "/opt/src")
-    #expect(PaneHUDModel.displayPath(Self.home, home: Self.home) == "~")
-    #expect(PaneHUDModel.displayPath("\(Self.home)/a", home: Self.home) == "~/a")
-    // A sibling directory whose name starts with the home path must not be
-    // mistaken for a child of it.
-    #expect(PaneHUDModel.displayPath("\(Self.home)-old/a", home: Self.home) == "\(Self.home)-old/a")
   }
 }

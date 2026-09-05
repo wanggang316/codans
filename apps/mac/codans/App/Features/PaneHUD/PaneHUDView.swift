@@ -1,24 +1,24 @@
 import CodansCore
 import SwiftUI
 
-/// Per-pane heads-up display, anchored to the pane's top-right corner.
+/// Per-pane actions menu, anchored to the pane's top-right corner.
 ///
-/// Collapsed it is a single info button. Expanded it grows into a card naming
-/// the worktree the pane runs in — path, branch, uncommitted line counts —
-/// and the agent bound to it, plus the pane-scoped actions that need that
-/// context. Handing the task off to another agent is the first: it is a
-/// property of *this* pane's agent, so the pane is where it belongs.
+/// Collapsed it is a single button. Expanded it lists the actions that are a
+/// property of *this* pane — handing its agent's task off to another agent
+/// is the first — so the pane is where they live. It shows no workspace
+/// facts on purpose: the worktree's path, branch and uncommitted counts are
+/// already in the header and sidebar, and the agent in the Agents view, so
+/// repeating them here only duplicated what the eye had just passed.
 ///
 /// The button holds its position across both states, so expanding reads as
 /// the card growing out from under it rather than as a separate surface
-/// appearing. It is deliberately not an `NSPopover`: this card's height
-/// changes as the diff stats resolve, and a popover whose SwiftUI content
-/// resizes after presentation crashes — see `AgentSessionSummaryCard`.
+/// appearing. It is deliberately not an `NSPopover`: a popover whose SwiftUI
+/// content resizes after presentation crashes — see `AgentSessionSummaryCard`
+/// — and this card will grow rows as actions are added.
 struct PaneHUDView: View {
   let paneID: PaneID
 
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(WorktreeLocalDiffMonitor.self) private var diffMonitor
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
   @Environment(\.paneHUDActions) private var actions
 
@@ -26,12 +26,11 @@ struct PaneHUDView: View {
   @State private var isButtonHovered = false
 
   private static let cardCornerRadius: CGFloat = 10
-  /// Definite width for the expanded card. The rows below are deliberately
-  /// greedy — a full-width divider, and an action row whose whole strip is the
-  /// tap target — so something has to bound them. Without a definite width
-  /// here they resolve against the overlay's proposal, which is the entire
-  /// pane, and the card swallows the terminal.
-  private static let cardWidth: CGFloat = 240
+  /// Definite width for the expanded card. The action rows are deliberately
+  /// greedy — the whole strip is the tap target — so something has to bound
+  /// them. Without a definite width here they resolve against the overlay's
+  /// proposal, which is the entire pane, and the card swallows the terminal.
+  private static let cardWidth: CGFloat = 176
   /// Chrome box around the glyph. Deliberately larger than the 13pt symbol:
   /// at 22pt the fill read as a tight outline rather than a control.
   private static let buttonSize: CGFloat = 30
@@ -66,9 +65,7 @@ struct PaneHUDView: View {
     PaneHUDModel.resolve(
       paneID: paneID,
       in: hierarchyManager.catalog,
-      agent: agentStateStore?.entries[paneID]?.kind,
-      diff: { diffMonitor.stats[$0] ?? nil },
-      homeDirectory: NSHomeDirectory()
+      agent: agentStateStore?.entries[paneID]?.kind
     )
   }
 
@@ -84,7 +81,7 @@ struct PaneHUDView: View {
             .scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity)
           )
       }
-      infoButton
+      menuButton
     }
     // Constant in both states on purpose. The button is a layout sibling of
     // the card body, so an equal inset from the container's top-right corner
@@ -94,17 +91,6 @@ struct PaneHUDView: View {
     .padding(Self.chromeInset)
     .background(cardBackground)
     .dismissOnClickOutside(isPresented: isExpanded) { setExpanded(false) }
-    // Refresh on expand rather than on a timer. The monitor holds a 5 s
-    // freshness window and dedupes in-flight fetches, so re-opening the card
-    // costs at most one `git diff --shortstat` and can never show a value
-    // older than the last open.
-    .task(id: isExpanded) {
-      guard isExpanded else { return }
-      await diffMonitor.refresh(
-        worktreeID: model.worktreeID,
-        path: URL(fileURLWithPath: model.worktreePath, isDirectory: true)
-      )
-    }
   }
 
   /// Painted only for the expanded card. Collapsed, the container is the
@@ -138,11 +124,13 @@ struct PaneHUDView: View {
       )
   }
 
-  private var infoButton: some View {
+  private var menuButton: some View {
     Button {
       setExpanded(!isExpanded)
     } label: {
-      Image(systemName: "info.circle")
+      // The system's "more actions" glyph: this is a menu of things to do to
+      // the pane, not a readout about it.
+      Image(systemName: "ellipsis.circle")
         .font(.system(size: 13, weight: .regular))
         // Full strength always. Fading the glyph left terminal text legible
         // through it, which read as a rendering fault rather than restraint.
@@ -161,93 +149,16 @@ struct PaneHUDView: View {
     .buttonStyle(.plain)
     .onHover { isButtonHovered = $0 }
     .accessibilityIdentifier("pane_hud.toggle")
-    .accessibilityLabel(isExpanded ? "Hide pane details" : "Show pane details")
+    .accessibilityLabel(isExpanded ? "Hide pane actions" : "Show pane actions")
   }
 
   // MARK: - Expanded body
 
   private func expandedBody(_ model: PaneHUDModel) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("Workspace")
-        .font(.system(size: 10, weight: .semibold))
-        .textCase(.uppercase)
-        .kerning(0.6)
-        .foregroundStyle(.secondary)
-
-      VStack(alignment: .leading, spacing: 5) {
-        row {
-          Image(systemName: "folder")
-            .accessibilityHidden(true)
-        } content: {
-          Text(model.displayPath)
-            .lineLimit(1)
-            .truncationMode(.head)
-            .textSelection(.enabled)
-        }
-        row {
-          Image(systemName: "arrow.triangle.branch")
-            .accessibilityHidden(true)
-        } content: {
-          Text(model.branch ?? "(detached)")
-            .lineLimit(1)
-        }
-        row {
-          Image(systemName: "plusminus")
-            .accessibilityHidden(true)
-        } content: {
-          diffStats(model.diff)
-        }
-        if let agent = model.agent {
-          // The brand mark sits in the same leading column as the symbols
-          // above, so all four rows share one text baseline column.
-          row {
-            AgentLogoView(kind: agent, size: 12)
-          } content: {
-            Text(agent.displayName)
-          }
-        }
-      }
-      .font(.system(size: 12))
-
-      Divider()
+    VStack(alignment: .leading, spacing: 0) {
       handOffButton(model)
     }
     .frame(width: Self.cardWidth, alignment: .leading)
-  }
-
-  /// One `<glyph> <value>` line. The leading slot is a fixed 14pt box in both
-  /// axes so every row's text starts on the same x whether the glyph is an SF
-  /// Symbol or an agent's brand mark, and so nothing in it can stretch the
-  /// card.
-  private func row<Leading: View, Content: View>(
-    @ViewBuilder leading: () -> Leading,
-    @ViewBuilder content: () -> Content
-  ) -> some View {
-    HStack(spacing: 7) {
-      leading()
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .frame(width: 14, height: 14, alignment: .center)
-        .accessibilityHidden(true)
-      content()
-    }
-  }
-
-  @ViewBuilder
-  private func diffStats(_ diff: LocalDiffStats?) -> some View {
-    if let diff {
-      HStack(spacing: 5) {
-        Text("+\(diff.additions)").foregroundStyle(DiffStatColor.additions)
-        Text("−\(diff.deletions)").foregroundStyle(DiffStatColor.deletions)
-      }
-      .monospacedDigit()
-      .accessibilityElement(children: .combine)
-      .accessibilityLabel("\(diff.additions) additions, \(diff.deletions) deletions")
-    } else {
-      Text("—")
-        .foregroundStyle(.secondary)
-        .accessibilityLabel("Uncommitted changes not measured yet")
-    }
   }
 
   // MARK: - Actions
@@ -267,6 +178,9 @@ struct PaneHUDView: View {
         Spacer(minLength: 0)
       }
       .font(.system(size: 12))
+      // Matches the button's own height, so the single-row card reads as a
+      // menu item rather than a label floating in a box.
+      .frame(minHeight: Self.buttonSize)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)

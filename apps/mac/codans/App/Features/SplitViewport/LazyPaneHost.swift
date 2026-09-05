@@ -60,10 +60,9 @@ struct LazyPaneHost: View {
           .overlay(alignment: .top) {
             PaneSurfaceProgressOverlay(surface: surface)
           }
-          // Top-right heads-up display: collapsed to an info button, and
-          // expanded to the pane's worktree identity plus the actions that
-          // need it (hand off). Layered above the progress strip so the
-          // card is never clipped by it.
+          // Top-right actions menu: collapsed to a single button, expanded
+          // to the actions scoped to this pane (hand off). Layered above the
+          // progress strip so the card is never clipped by it.
           .overlay(alignment: .topTrailing) {
             PaneHUDView(paneID: store.paneID)
           }
