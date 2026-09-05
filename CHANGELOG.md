@@ -41,11 +41,19 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- Every pane now exports `CODANS_PANE_ID`, so `codans` commands run inside
+  a pane resolve `current` locally instead of always asking the app to
+  walk process ancestry.
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- The Master Terminal's shell now gets the same environment a worktree
+  pane does — socket path, product marker, and a cleared `ZMX_SESSION` —
+  instead of a bare `ZMX_DIR`.
 
 - The CLI now honours `$CODANS_SOCKET_PATH` when no `--socket` flag is
   given, so a command run inside a pane reaches the app that spawned it

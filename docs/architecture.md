@@ -141,8 +141,8 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
   - Success: `{"id": "uuid", "result": {...}}`
   - Error: `{"id": "uuid", "error": {"code": Int, "message": "…"}}`
 - **Methods:** namespaced — `system.*`, `editor.*`, `hierarchy.*`, `pane.*`, `terminal.*` (enumerated in `CodansIPC/Method.swift`). `git.*` and `skill.*` are reserved namespaces with no live methods yet.
-- **Discovery in `apps/cli`:** env var `CODANS_SOCKET_PATH` → build-channel default path probe → (optional) launch app and wait up to 10s
-- **Context pane id:** the app sets `CODANS_PANE_ID` in each Pane's environment so `codans` commands run inside a Pane can default to that Pane's UUID without an explicit flag (mirrors `SUPATERM_PANE_ID`)
+- **Discovery in `apps/cli`:** `--socket` flag → env var `CODANS_SOCKET_PATH` → build-channel default (`BuildChannel.current.socketPath`). The app-side resolver additionally discards an inherited *other-channel* default before binding; the CLI must not — see [Environment](design-docs/environment.md)
+- **Context pane id:** the app sets `CODANS_PANE_ID` in each Pane's environment so `codans` commands run inside a Pane can default to that Pane's UUID without an explicit flag; tab / worktree / project ids are *not* injected (they go stale when a pane moves) and resolve server-side from process ancestry. The full injected set is built by `PaneEnvironment` and catalogued in `CodansEnvironment.Key`
 
 ### URL scheme
 
@@ -152,7 +152,7 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
 
 ### Persistence
 
-Files under `~/.config/codans/` (JSON, UTF-8, pretty-printed with sorted keys for determinism):
+Files under `~/.config/codans/` — `~/.config/codans-dev/` for Debug builds, see [Environment](design-docs/environment.md) — (JSON, UTF-8, pretty-printed with sorted keys for determinism):
 
 | File | Version | Contents |
 |---|---|---|

@@ -88,9 +88,11 @@
     3. build-channel default             (Debug: /tmp/codans-dev-$UID.sock;
                                           Release: /tmp/codans-$UID.sock)
 
-  Injected env vars inside every Pane:
-    CODANS_SOCKET_PATH, CODANS_PROJECT_ID, CODANS_WORKTREE_ID,
-    CODANS_TAB_ID, CODANS_PANE_ID
+  Injected env vars inside every Pane (built by PaneEnvironment):
+    CODANS_SOCKET_PATH, CODANS_PANE_ID, CODANS_WORKTREE_PATH, CODANS_ROOT_PATH,
+    ZMX_DIR, ZMX_SESSION (cleared), TERM_PROGRAM, TERM_PROGRAM_VERSION
+  Read by `current` if a caller exports them by hand (never injected):
+    CODANS_PROJECT_ID, CODANS_WORKTREE_ID, CODANS_TAB_ID, CODANS_TAG_ID
 ```
 
 > 顶层没有 `space` 命名空间，也没有 `CODANS_SPACE_ID`。最高层级是 Project；早期的 Space 容器已被 per-Project `Tag` 取代（见 [project-tags](project-tags.md)）。

@@ -23,6 +23,7 @@ Use [_template.md](_template.md) as a starting point.
 - [CLI (`codans`)](cli.md) — `codans` 动词集与 system/hierarchy/pane/terminal/editor RPC 契约；stateless RPC client、alias→UUID、`/usr/local/bin` 管理员授权安装（list/open/help-json 未接线，skill/hook 未实现）
 - [Command Palette](command-palette.md) — ⌘P 模糊搜索面板：分层评分 + recency 衰减 + 稳定 ID，按需从实时 Catalog 生成项
 - [Editor Integration](editor-integration.md) — 在外部工具打开 Worktree：NSWorkspace/Launch Services 按 bundle id 检测+启动，34 条注册表（编辑器/终端/git 客户端/Finder）；含 Git Viewer（委托外部 git 客户端）
+- [Environment](environment.md) — 构建通道（Debug/Release）、路径与环境变量的单一来源：`BuildChannel` 一处 `#if DEBUG`、`CodansEnvironment.Key` 变量名目录、`HandoffLayout`、`PaneEnvironment` 两阶段 pane 环境；写明通道隔离了什么与没隔离什么、两个 socket resolver 的故意不对称
 - [Ghostty Action Routing](ghostty-action-routing.md) — libghostty `action_cb` 两遍解码 + Info/Effect/Intent/Config 四桶路由，保持 Runtime TCA-free
 - [GitHub Integration](github-integration.md) — repository-batched `gh api graphql` PR 取数（成本 O(Repositories)）、事件驱动失效、fork-PR 过滤；零应用内 HTTP / 零 Keychain
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — 统一快捷键注册表：物理键持久化、三态模型、三级冲突 + 级联重置、独立 `shortcuts.json`
