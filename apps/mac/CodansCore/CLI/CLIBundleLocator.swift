@@ -1,8 +1,13 @@
 import Foundation
 
-/// Resolves the app-bundled `codans` binary's absolute URL. Mirrors
+/// Resolves the app-bundled CLI binary's absolute URL. Mirrors
 /// `SkillBundleLocator`'s 3-phase discovery so the installer can find the
 /// binary in `.app` builds and in dev runs without hard-coding paths.
+///
+/// Inside a bundle the binary is named after the build channel
+/// (`CLIInvocation.commandName`: `codans-dev` in Debug, `codans` in Release),
+/// which is what `scripts/embed-codans.sh` writes. Loose build products keep
+/// the product name `codans`.
 public enum CLIBundleLocator {
   public enum LocatorError: Error, Equatable {
     case binaryNotFound
@@ -16,8 +21,9 @@ public enum CLIBundleLocator {
 
   /// Resolution order:
   /// 0. `$CODANS_CLI_BINARY` — dev override.
-  /// 1. `<app>/Contents/Resources/bin/codans` — the canonical bundled helper
-  ///    path used by release packaging and the system CLI installer.
+  /// 1. `<app>/Contents/Resources/bin/<CLIInvocation.commandName>` — the
+  ///    canonical bundled helper path used by packaging, the CLI installer,
+  ///    and the PATH entry every pane gets.
   /// 2. `<Bundle.main.executableURL>.deletingLastPathComponent()/codans` —
   ///    sibling of the running app's main executable inside `Contents/MacOS/`.
   ///    This is Tuist's default placement when an `.app` depends on a
@@ -55,7 +61,7 @@ public enum CLIBundleLocator {
       contentsDirectory
       .appendingPathComponent("Resources", isDirectory: true)
       .appendingPathComponent("bin", isDirectory: true)
-      .appendingPathComponent("codans", isDirectory: false)
+      .appendingPathComponent(CLIInvocation.commandName, isDirectory: false)
     return isExecutableFile(candidate) ? candidate : nil
   }
 

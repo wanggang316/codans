@@ -44,8 +44,11 @@ struct CLIInstallStatusCard: View {
     case .notInstalled:
       return
         "Not installed. Click Install to symlink `\(commandName)` into /usr/local/bin (requires admin password)."
-    case .installed(let url, _):
+    case .installed(let url, true):
       return "Installed at \(url.path). `\(commandName)` is reachable from any shell."
+    case .installed(let url, false):
+      return
+        "\(url.path) points at another build of Codans. Click Reinstall to point `\(commandName)` at this app."
     case .collision(let owner):
       return
         "Another file is at \(owner.path). Codans will not overwrite a tool it did not install."
@@ -87,7 +90,14 @@ struct CLIInstallStatusCard: View {
       Button("Install", action: performInstall)
         .buttonStyle(.borderedProminent)
         .disabled(isBusy)
-    case .installed:
+    case .installed(_, true):
+      Button("Uninstall", action: performUninstall)
+        .buttonStyle(.bordered)
+        .disabled(isBusy)
+    case .installed(_, false):
+      Button("Reinstall", action: performInstall)
+        .buttonStyle(.borderedProminent)
+        .disabled(isBusy)
       Button("Uninstall", action: performUninstall)
         .buttonStyle(.bordered)
         .disabled(isBusy)
@@ -172,7 +182,8 @@ private struct StatusPill: View {
     switch status {
     case .unknown: return "Checking"
     case .notInstalled: return "Not installed"
-    case .installed: return "Installed"
+    case .installed(_, true): return "Installed"
+    case .installed(_, false): return "Stale"
     case .collision: return "Collision"
     case .failed: return "Failed"
     }
@@ -182,7 +193,8 @@ private struct StatusPill: View {
     switch status {
     case .unknown: return .secondary
     case .notInstalled: return .secondary
-    case .installed: return .green
+    case .installed(_, true): return .green
+    case .installed(_, false): return .orange
     case .collision: return .orange
     case .failed: return .red
     }

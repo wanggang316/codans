@@ -70,7 +70,9 @@ private final class AppFixture {
     try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: resourcesBin, withIntermediateDirectories: true)
     appExecutable = macos.appending(component: "Codans", directoryHint: .notDirectory)
-    resourcesTc = resourcesBin.appending(component: "codans", directoryHint: .notDirectory)
+    // The embedded copy carries the channel name; loose products stay `codans`.
+    resourcesTc = resourcesBin.appending(
+      component: CLIInvocation.commandName, directoryHint: .notDirectory)
     macosTc = macos.appending(component: "codans", directoryHint: .notDirectory)
     try writeExecutable(at: appExecutable)
   }

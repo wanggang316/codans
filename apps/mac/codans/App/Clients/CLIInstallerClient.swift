@@ -48,9 +48,11 @@ final class CLIInstallerClient {
   enum InstallStatus: Equatable {
     case unknown
     case notInstalled
-    /// The symlink is present and resolves to our bundled binary.
+    /// The symlink is present. `pointsToBundle` is false when it is a codans
+    /// symlink that resolves to another build's binary, or to one that no
+    /// longer exists — Install replaces it.
     case installed(at: URL, pointsToBundle: Bool)
-    /// A file exists at `tcSymlink` that is not our symlink. We never
+    /// A file exists at `tcSymlink` that codans did not create. We never
     /// overwrite it.
     case collision(owner: URL)
     case failed(CLIInstallError, lastAttempt: Date?)
@@ -88,7 +90,8 @@ final class CLIInstallerClient {
   /// casing.
   ///
   /// - foreign destination → `.collision(owner:)`
-  /// - our symlink → `.installed(...)`
+  /// - our symlink → `.installed(pointsToBundle: true)`
+  /// - a codans symlink into another build → `.installed(pointsToBundle: false)`
   /// - absent → `.notInstalled`
   func probe() -> InstallStatus {
     switch inspect(paths.tcSymlink) {
@@ -96,6 +99,8 @@ final class CLIInstallerClient {
       return .collision(owner: paths.tcSymlink)
     case .ourSymlink:
       return .installed(at: paths.tcSymlink, pointsToBundle: true)
+    case .staleOurs:
+      return .installed(at: paths.tcSymlink, pointsToBundle: false)
     case .absent:
       return .notInstalled
     }
@@ -108,7 +113,9 @@ final class CLIInstallerClient {
   /// destination aborts before the auth dialog opens, with **zero mutations**.
   ///
   /// Skips the auth dialog entirely when the symlink already resolves to our
-  /// bundled binary (idempotent re-install).
+  /// bundled binary (idempotent re-install). A codans symlink that points at
+  /// another build — or at a binary a rebuild renamed away — is replaced in
+  /// the same privileged call.
   func install() -> Result<InstallStatus, CLIInstallError> {
     guard let bundled = paths.bundledTcBinary else {
       return .failure(.bundleMissing(nil))
@@ -117,19 +124,23 @@ final class CLIInstallerClient {
       return .failure(.bundleMissing(bundled))
     }
 
+    let replacing: [URL]
     switch inspect(paths.tcSymlink) {
     case .foreign:
       return .failure(.destinationExistsNotOurs(paths.tcSymlink))
     case .ourSymlink:
       return .success(.installed(at: paths.tcSymlink, pointsToBundle: true))
+    case .staleOurs:
+      replacing = [paths.tcSymlink]
     case .absent:
-      break
+      replacing = []
     }
 
     let legacyToCleanup = ourLegacyPaths()
     let script = Self.composeInstallScript(
       bundled: bundled,
       absentPaths: [paths.tcSymlink],
+      replacing: replacing,
       legacyToCleanup: legacyToCleanup
     )
     do {
@@ -162,7 +173,7 @@ final class CLIInstallerClient {
       return .success(.collision(owner: paths.tcSymlink))
     case .absent:
       return .success(.notInstalled)
-    case .ourSymlink:
+    case .ourSymlink, .staleOurs:
       break
     }
 
@@ -187,16 +198,29 @@ final class CLIInstallerClient {
 
   /// Composes the `do shell script` body for an install. Includes `mkdir -p`
   /// for `/usr/local/bin` (idempotent; admin priv covers the create on bare
-  /// macOS), one `ln -s` per absent destination, and one `rm` per legacy
-  /// `~/.local/bin/codans` that the unprivileged probe verified is our own
-  /// symlink. Foreign legacy entries are not touched.
+  /// macOS), an `rm` for each stale codans symlink being replaced, one
+  /// `ln -s` per destination, and one `rm` per legacy `~/.local/bin/codans`
+  /// that the unprivileged probe verified is our own symlink. Foreign
+  /// entries are not touched.
   static func composeInstallScript(
     bundled: URL,
     absentPaths: [URL],
+    replacing: [URL] = [],
     legacyToCleanup: [URL] = []
   ) -> String {
     var lines: [String] = ["set -e", "mkdir -p /usr/local/bin"]
     let target = shellEscape(bundled.path)
+    for stale in replacing {
+      // Same TOCTOU shape as the legacy cleanup below: re-check under
+      // privilege that the entry is still a symlink into some app bundle's
+      // `Resources/bin/` before removing it. If a foreign file took its
+      // place, the guard skips the `rm` and the `ln -s` then fails loudly
+      // instead of clobbering it.
+      let path = shellEscape(stale.path)
+      lines.append(
+        "[ -L \(path) ] && case \"$(readlink \(path))\" in *\(bundledCLIPathMarker)*) rm \(path) ;; esac || true"
+      )
+    }
     for destination in absentPaths {
       lines.append("ln -s \(target) \(shellEscape(destination.path))")
     }
@@ -237,8 +261,19 @@ final class CLIInstallerClient {
   private enum LinkState: Equatable {
     case absent
     case ourSymlink
+    /// A symlink codans wrote — it points into some app bundle's
+    /// `Resources/bin/` — that does not resolve to this build's binary:
+    /// another build's copy, or a target a rebuild renamed away (a Debug
+    /// bundle embeds `codans-dev` where older ones embedded `codans`).
+    case staleOurs
     case foreign
   }
+
+  /// Only a codans installer links into an app bundle's `Resources/bin/`, so
+  /// a symlink whose target contains this is ours to replace even when the
+  /// target is gone. Checked against the link's literal destination, which
+  /// survives a dangling target.
+  static let bundledCLIPathMarker = ".app/Contents/Resources/bin/"
 
   /// Returns the legacy `~/.local/bin/codans` path if it resolves to our
   /// bundled binary. Foreign or absent entries are excluded — only an entry we
@@ -249,7 +284,8 @@ final class CLIInstallerClient {
 
   /// Classifies the destination path without mutating the filesystem. A path is
   /// "ours" iff it is a symlink and its resolved target (as absolute canonical
-  /// path) equals the bundled binary's canonical path.
+  /// path) equals the bundled binary's canonical path; a symlink into any other
+  /// app bundle's `Resources/bin/` is ours but stale.
   private func inspect(_ destination: URL) -> LinkState {
     let attrs = try? fileSystem.attributesOfItem(atPath: destination.path)
     let isSymlink = (attrs?[.type] as? FileAttributeType) == .typeSymbolicLink
@@ -278,7 +314,8 @@ final class CLIInstallerClient {
     let resolvedPath = resolvedTarget.resolvingSymlinksInPath().path
     guard let bundled = paths.bundledTcBinary else { return .foreign }
     let bundledPath = bundled.resolvingSymlinksInPath().path
-    return resolvedPath == bundledPath ? .ourSymlink : .foreign
+    if resolvedPath == bundledPath { return .ourSymlink }
+    return rawTarget.contains(Self.bundledCLIPathMarker) ? .staleOurs : .foreign
   }
 
 }
