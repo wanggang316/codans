@@ -20,8 +20,10 @@ import Foundation
 /// wrote. Pure filesystem work — no subprocesses — so the type is
 /// `nonisolated` and `Sendable` and runs off the main actor.
 public nonisolated struct HandoffStore: Sendable {
-  public static let stateDirectoryName = ".codans"
-  public static let handoffDirectoryName = "handoff"
+  /// Kept for callers that spell the directories through the store; the
+  /// names themselves live in `HandoffLayout` alongside the file names.
+  public static let stateDirectoryName = HandoffLayout.stateDirectoryName
+  public static let handoffDirectoryName = HandoffLayout.directoryName
 
   /// The worktree root the artifact lives under.
   public let rootURL: URL
@@ -38,15 +40,15 @@ public nonisolated struct HandoffStore: Sendable {
   public var handoffDirectory: URL {
     stateDirectory.appending(path: Self.handoffDirectoryName, directoryHint: .isDirectory)
   }
-  public var currentURL: URL { handoffDirectory.appending(path: "current.md") }
-  public var contextURL: URL { handoffDirectory.appending(path: "context.md") }
-  public var logURL: URL { handoffDirectory.appending(path: "log.md") }
-  public var ignoreURL: URL { handoffDirectory.appending(path: ".gitignore") }
+  public var currentURL: URL { handoffDirectory.appending(path: HandoffLayout.briefingFileName) }
+  public var contextURL: URL { handoffDirectory.appending(path: HandoffLayout.contextFileName) }
+  public var logURL: URL { handoffDirectory.appending(path: HandoffLayout.logFileName) }
+  public var ignoreURL: URL { handoffDirectory.appending(path: HandoffLayout.ignoreFileName) }
   public var archiveDirectory: URL {
-    handoffDirectory.appending(path: "archive", directoryHint: .isDirectory)
+    handoffDirectory.appending(path: HandoffLayout.archiveDirectoryName, directoryHint: .isDirectory)
   }
   public var sessionsDirectory: URL {
-    handoffDirectory.appending(path: "sessions", directoryHint: .isDirectory)
+    handoffDirectory.appending(path: HandoffLayout.sessionsDirectoryName, directoryHint: .isDirectory)
   }
 
   public var hasCurrentBriefing: Bool {

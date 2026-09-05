@@ -10,10 +10,12 @@ public nonisolated enum HandoffKickoff {
   /// use never sets it.
   public static let requestIDEnvironmentKey = "CODANS_HANDOFF_REQUEST_ID"
 
-  /// Relative paths the receiver is pointed at, spelled once.
-  public static let currentPath = ".codans/handoff/current.md"
-  public static let contextPath = ".codans/handoff/context.md"
-  public static let archivePath = ".codans/handoff/archive/"
+  /// Worktree-relative paths the receiver is pointed at. Derived from
+  /// `HandoffLayout` so the prompt and the store can never disagree about
+  /// where a file is.
+  public static let currentPath = HandoffLayout.worktreeRelativePath(HandoffLayout.briefingFileName)
+  public static let contextPath = HandoffLayout.worktreeRelativePath(HandoffLayout.contextFileName)
+  public static let archivePath = HandoffLayout.worktreeRelativePath(HandoffLayout.archiveDirectoryName) + "/"
 
   public enum Request: Equatable, Sendable {
     case handOff(to: AgentKind)
