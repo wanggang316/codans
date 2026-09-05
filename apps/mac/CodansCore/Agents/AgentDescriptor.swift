@@ -309,14 +309,20 @@ public nonisolated enum AgentCatalog {
     kind: .grok,
     executable: "grok",
     iconAssetName: "grok",
-    iconSummary: "Grok Build brand icon"
+    iconSummary: "Grok Build brand icon",
+    // `grok [OPTIONS] [PROMPT]` — "Initial prompt for the interactive
+    // session, e.g. `grok \"fix the bug\"`".
+    promptStyle: .positional
   )
 
   private static let pi = AgentDescriptor(
     kind: .pi,
     executable: "pi",
     iconAssetName: "pi",
-    iconSummary: "Pi brand icon"
+    iconSummary: "Pi brand icon",
+    // `pi [options] [--] [@files...] [messages...]` — trailing messages are
+    // sent as the first turn, the same shape as its fork `omp`.
+    promptStyle: .positional
   )
 
   private static let omp = AgentDescriptor(

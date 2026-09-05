@@ -30,8 +30,8 @@ and the project does not yet follow semantic versioning — every release until
   (`--split <dir>`, or the panel's placement menus, which remember the last
   choice). The panel offers the enabled agents your shell can run, as a
   compact grid of names; agents whose CLI takes no prompt argument get the
-  kickoff typed into their pane once they are up, without Enter, for the
-  user to send. `codans handoff save`
+  kickoff typed into their pane and sent once their input box is up.
+  `codans handoff save`
   checkpoints without a receiver. In
   the app, "Hand Off…" (a pane's actions menu, Command Palette, Agents View row) asks
   the live agent to run that same command with its briefing, closes at once,

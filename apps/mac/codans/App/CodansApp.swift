@@ -1215,13 +1215,17 @@ final class AppState {
 
   /// Kickoff delivery for a receiver whose CLI takes no prompt argument.
   /// Waits until the classifier sees `kind` in the pane — typing earlier would
-  /// hand the text to the shell — then gives the TUI a moment to draw its
-  /// input box before typing. An agent that never appears gets nothing.
+  /// hand the text to the shell — then until the screen has stopped changing,
+  /// so the TUI has drawn its input box rather than still loading; types the
+  /// prompt; and submits it once the screen shows the text sitting in the
+  /// input box. An agent that never appears gets nothing.
   ///
-  /// The text is typed without Enter. A TUI that opens on a dialog (an update
-  /// prompt, first-run setup) would take the newline as an answer to it, so
-  /// the user reviews the prompt in the input box and sends it. Letters that
-  /// land in a dialog are inert; an Enter is not.
+  /// The Enter is conditional on that last check. A TUI that opens on a dialog
+  /// (an update prompt, first-run setup) swallows the typed letters, and an
+  /// Enter there would answer the dialog instead of sending anything; when the
+  /// text is not on screen nothing is submitted and the miss is logged.
+  /// OpenCode folds a typed burst into a "[Pasted ~N lines]" chip, which counts
+  /// as "on screen".
   static func typeKickoffOnceAgentIsUp(
     paneID: PaneID,
     kind: AgentKind,
@@ -1231,15 +1235,49 @@ final class AppState {
     timeout: Duration = .seconds(30),
     settle: Duration = .milliseconds(1500)
   ) async -> Bool {
+    let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "handoff")
     let deadline = ContinuousClock.now + timeout
     while agentState.entries[paneID]?.kind != kind {
-      guard ContinuousClock.now < deadline else { return false }
+      guard ContinuousClock.now < deadline else {
+        logger.error(
+          "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)")
+        return false
+      }
       try? await Task.sleep(for: .milliseconds(250))
     }
-    try? await Task.sleep(for: settle)
-    guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return false }
+    guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else {
+      logger.error("kickoff: pane \(paneID.description, privacy: .public) has no surface to type into")
+      return false
+    }
+    // Ready = the screen held still for `settle` (at least one full read
+    // apart), capped so a TUI with a spinner still gets its prompt.
+    var previous = surface.readText(.active) ?? ""
+    var stillSince = ContinuousClock.now
+    let readyDeadline = ContinuousClock.now + .seconds(10)
+    while ContinuousClock.now < readyDeadline {
+      try? await Task.sleep(for: .milliseconds(250))
+      let current = surface.readText(.active) ?? ""
+      if current != previous {
+        previous = current
+        stillSince = ContinuousClock.now
+      } else if ContinuousClock.now - stillSince >= settle, !current.isEmpty {
+        break
+      }
+    }
     surface.sendInput(prompt)
-    return true
+    let marker = String(prompt.prefix(19))
+    for _ in 0..<12 {
+      try? await Task.sleep(for: .milliseconds(250))
+      guard let screen = surface.readText(.active) else { continue }
+      if screen.contains(marker) || screen.contains("Pasted") {
+        // CR is what TUIs read as Enter; LF only breaks the line.
+        surface.sendInput("\r")
+        return true
+      }
+    }
+    logger.error(
+      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted")
+    return false
   }
 
   /// Resolves a pane to the outgoing side of a handoff. Agent identity

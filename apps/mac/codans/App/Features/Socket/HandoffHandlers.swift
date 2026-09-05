@@ -309,7 +309,7 @@ final class HandoffHandlers {
         Task { @MainActor in
           if await typeKickoff(paneID, kind, prompt) { return }
           logger.error(
-            "kickoff not typed: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)"
+            "kickoff not delivered: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public), or its input box never showed the text"
           )
         }
       }

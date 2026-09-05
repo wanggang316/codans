@@ -56,7 +56,7 @@ toolbar / palette   agent.launch (CLI)   codans handoff   HandoffFeature (面板
 
 `AgentProfile`（`CodansCore/Agents/AgentProfile.swift`）：`id`、`kind`、`name`、`isEnabled`、`systemImage`、`modelID` / `reasoningEffortID` / `executionModeID`、`target` + `direction`（复用 `ScriptTarget` / `ScriptSplitDirection`）、`extraArguments`、`envVars`、`usesDedicatedHome`。覆盖字段为 `nil` 即"Runtime default"——codans 不贡献 flag，由 agent CLI 自己决定。
 
-`AgentDescriptor`（`AgentCatalog`）是每个 agent 的静态事实：可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——该 CLI 如何在保持交互式的同时接受初始 prompt（Claude Code / Codex / Cursor Agent / omp 位置参数，Gemini `-i`，均据各自 `--help` 核实）。没有 `promptStyle` 的 agent 仍可作为 handoff 的接收方：裸启动后，app 等分类器在新 pane 里认出该 agent、再留 1.5 s 让 TUI 画出输入框，然后把 kickoff prompt 键入（`HandoffHandlers.typeKickoff` → `CodansApp.typeKickoffOnceAgentIsUp`），**不带回车**：TUI 可能开在一个对话框上（更新提示、首次运行设置，GUI 测试里 OpenCode 正是如此），回车会被当作对它的回答，字母则无害；由用户在输入框里确认后发送。提前键入会把文字交给 shell，所以 30 s 内没出现的 agent 什么都收不到，只记一条日志。
+`AgentDescriptor`（`AgentCatalog`）是每个 agent 的静态事实：可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——该 CLI 如何在保持交互式的同时接受初始 prompt（Claude Code / Codex / Cursor Agent / Grok Build / Pi / omp 位置参数，Gemini `-i`，均据各自 `--help` 核实）。没有 `promptStyle` 的 agent 仍可作为 handoff 的接收方：裸启动后，app 等分类器在新 pane 里认出该 agent、再留 1.5 s 让 TUI 画出输入框，然后把 kickoff prompt 键入（`HandoffHandlers.typeKickoff` → `CodansApp.typeKickoffOnceAgentIsUp`），**不带回车**：TUI 可能开在一个对话框上（更新提示、首次运行设置，GUI 测试里 OpenCode 正是如此），回车会被当作对它的回答，字母则无害；由用户在输入框里确认后发送。提前键入会把文字交给 shell，所以 30 s 内没出现的 agent 什么都收不到，只记一条日志。
 
 渲染形状：
 
@@ -140,7 +140,7 @@ pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把�
 
 - **D1 — profile 是确定性 argv，不是 shell 片段。** 预览即真相；`extraArguments` 是唯一原样拼接的逃生口。
 - **D2 — 环境变量用 `env` 前缀，不进 spawn env。** launch-scoped：agent 退出后 pane 回到用户环境；同一 pane 里手动再起的 agent 不继承 profile 的账号。
-- **D3 — 任何 agent 都可作接收方；kickoff 的送达方式按 `promptStyle` 分两路。** 有 `promptStyle` 的在命令行上带 prompt；没有的裸启动后由 app 键入（见上文），代价是 30 s 等待与 1.5 s 稳定期这两个启发式。只对能从 `--help` 核实的 CLI 登记 `promptStyle`，不猜。`--no-launch` 仍接受任何 agent token。
+- **D3 — 任何 agent 都可作接收方；kickoff 的送达方式按 `promptStyle` 分两路。** 有 `promptStyle` 的在命令行上带 prompt；没有的裸启动后由 app 键入并在输入框显示出文字后发 Enter（见上文），代价是 30 s 等待、1.5 s 稳定期和「文字已上屏」这三个启发式。只对能从 `--help` 核实的 CLI 登记 `promptStyle`，不猜。`--no-launch` 仍接受任何 agent token。
 - **D4 — briefing 必须显式给出或显式放弃。** codans 不替第三方调用方发起模型调用；`--brief`/`--no-brief` 缺失时返回可直接粘贴的 heredoc 指引。
 - **D5 — 领域层不 shell out。** git 事实由 app 层采集为值传入，`HandoffStore` 保持 `nonisolated` + `Sendable`，可在 `Task.detached` 里跑且可用临时目录单测。
 - **D6 — 面板与 CLI 共用一个 `HandoffHandlers` 实例。** 回退路径不复制迁移逻辑；registry 的 claim/supersede 使两条路径互斥。

@@ -94,7 +94,7 @@ struct HandoffFeature {
     /// filter as the toolbar Agents menu (`AgentInstallationStore
     /// .offeredProfiles`), fail-open included. An agent whose CLI takes no
     /// kickoff argument is still a receiver: the prompt is typed into its
-    /// pane once it is up, without Enter, and the row's tooltip says so.
+    /// pane and submitted once it is up, and the row's tooltip says so.
     static func make(
       source: Source,
       profiles: [AgentProfile],
@@ -108,7 +108,7 @@ struct HandoffFeature {
         // Where the session opens is the picker's business, not the row's.
         var help = profile.name.isEmpty ? "New session" : "\(profile.kind.displayName) · new session"
         if !profile.descriptor.supportsInitialPrompt {
-          help += " · kickoff typed in once it starts, you press Enter"
+          help += " · kickoff typed in once it starts"
         }
         return Target(
           kind: .profile(profile),
