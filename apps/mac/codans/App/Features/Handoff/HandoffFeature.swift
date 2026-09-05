@@ -4,12 +4,16 @@ import ComposableArchitecture
 import Foundation
 
 /// The staged Hand Off panel: choose a receiving profile (or "only save
-/// progress"), then ask the *live* source agent to run the CLI handoff
-/// itself by typing a one-line request into its pane. The agent writes its
-/// own briefing and the shared CLI transition completes headlessly; the
-/// panel observes the completion through the request registry and jumps to
-/// the receiver. Context-only is the explicit fallback while waiting.
-/// codans never starts a hidden model turn to author a briefing.
+/// progress"), then either ask the *live* source agent to run the CLI
+/// handoff itself by typing a one-line request into its pane (Hand Off with
+/// Brief: the agent writes its own briefing and the shared CLI transition
+/// completes headlessly; the panel observes the completion through the
+/// request registry and jumps to the receiver), or run the transition in
+/// process right away with generated context only (Hand Off with Context).
+/// The two paths part at the confirm button and never meet again: once the
+/// agent has been asked there is no switching to context-only, so the agent
+/// is never asked for a briefing that will be refused. codans never starts a
+/// hidden model turn to author a briefing.
 @Reducer
 struct HandoffFeature {
   /// The outgoing side, captured once when the panel opens.
@@ -55,14 +59,16 @@ struct HandoffFeature {
   enum Stage: Equatable, Sendable {
     /// Request typed into the source agent; waiting for its CLI call.
     case requesting
-    /// The fallback transition is running; it is not cancellable.
+    /// The in-process, context-only transition is running; not cancellable.
     case finishing
   }
 
   struct Run: Equatable, Sendable {
     let target: Target
-    let requestID: UUID
-    var stage: Stage
+    /// The one-shot id of the injected request; nil for a context-only
+    /// hand-off, which never asks the agent.
+    let requestID: UUID?
+    let stage: Stage
   }
 
   enum Outcome: Equatable, Sendable {
@@ -173,14 +179,18 @@ struct HandoffFeature {
     case moveSelection(Move)
     case setSelectedIndex(Int)
     case setPlacement(HandoffPlacement)
+    /// Hand Off with Brief (or Save Progress): ask the live agent to run the
+    /// CLI hand-off with its own briefing.
     case confirmSelection
+    /// Hand Off with Context: run the transition now, without a briefing and
+    /// without involving the agent.
+    case confirmContextOnly
     /// The pane could not take the injected request.
     case deliveryFailed
-    case contextOnlyTapped
     /// A handoff completed somewhere in the app; ignored unless it is the
     /// one this panel asked for.
     case completionReceived(HandoffCompletion)
-    case fallbackFinished(HandoffCompletion)
+    case contextOnlyFinished(HandoffCompletion)
     case failed(message: String)
     case cancelTapped
     case closeTapped
@@ -251,18 +261,52 @@ struct HandoffFeature {
         }
         .cancellable(id: CancelID.completions, cancelInFlight: true)
 
-      case .deliveryFailed:
-        // The pane is gone or wedged — retire the request the agent will
-        // never see and take the context-only path ourselves.
-        guard let run = state.run, run.stage == .requesting else { return .none }
-        _ = handoffClient.supersede(run.requestID)
-        return .merge(.cancel(id: CancelID.completions), startFallback(&state))
+      case .confirmContextOnly:
+        guard state.isChoosing, state.targets.indices.contains(state.selectedIndex) else {
+          return .none
+        }
+        let target = state.targets[state.selectedIndex]
+        // A checkpoint is the agent's own words or nothing; the panel offers
+        // no context-only variant of it.
+        guard let profile = target.profile else { return .none }
+        state.phase = .running(Run(target: target, requestID: nil, stage: .finishing))
+        let request = IPC.HandoffRequest(
+          action: .to,
+          paneID: state.source.paneID,
+          receiver: profile.kind.rawValue,
+          profile: profile.id.uuidString,
+          contextOnly: true,
+          target: state.placement.target,
+          direction: state.placement.direction
+        )
+        let client = handoffClient
+        return .run { send in
+          let completion = try await client.run(request)
+          await send(.contextOnlyFinished(completion))
+        } catch: { error, send in
+          let message = (error as? IPCError)?.displayMessage ?? error.localizedDescription
+          await send(.failed(message: message))
+        }
 
-      case .contextOnlyTapped:
-        guard let run = state.run, run.stage == .requesting,
-          handoffClient.supersede(run.requestID)
-        else { return .none }
-        return .merge(.cancel(id: CancelID.completions), startFallback(&state))
+      case .deliveryFailed:
+        // The pane is gone or wedged. Retire the request the agent will never
+        // see and stop: starting the receiver without a briefing is the
+        // user's call (Hand Off with Context), not a silent downgrade.
+        guard let run = state.run, run.stage == .requesting else { return .none }
+        if let requestID = run.requestID {
+          _ = handoffClient.supersede(requestID)
+        }
+        let agent = state.source.agentName
+        let message =
+          switch run.target.kind {
+          case .profile:
+            "\(agent)'s pane could not take the request. Nothing was launched; "
+              + "Hand Off with Context starts \(run.target.title) without a briefing."
+          case .checkpoint:
+            "\(agent)'s pane could not take the request. Nothing was saved."
+          }
+        state.phase = .finished(.failed(message: message))
+        return .cancel(id: CancelID.completions)
 
       case .completionReceived(let completion):
         guard let run = state.run, run.stage == .requesting,
@@ -271,8 +315,8 @@ struct HandoffFeature {
         else { return .none }
         return .merge(.cancel(id: CancelID.completions), finish(&state, with: completion))
 
-      case .fallbackFinished(let completion):
-        guard state.run != nil else { return .none }
+      case .contextOnlyFinished(let completion):
+        guard let run = state.run, run.stage == .finishing else { return .none }
         return finish(&state, with: completion)
 
       case .failed(let message):
@@ -299,37 +343,6 @@ struct HandoffFeature {
       case .delegate:
         return .none
       }
-    }
-  }
-
-  /// Crosses the fallback's commit boundary: from here the transition runs
-  /// to one consistent outcome and the panel offers no cancel.
-  private func startFallback(_ state: inout State) -> Effect<Action> {
-    guard var run = state.run else { return .none }
-    run.stage = .finishing
-    state.phase = .running(run)
-    let request: IPC.HandoffRequest =
-      switch run.target.kind {
-      case .profile(let profile):
-        IPC.HandoffRequest(
-          action: .to,
-          paneID: state.source.paneID,
-          receiver: profile.kind.rawValue,
-          profile: profile.id.uuidString,
-          contextOnly: true,
-          target: state.placement.target,
-          direction: state.placement.direction
-        )
-      case .checkpoint:
-        IPC.HandoffRequest(action: .save, paneID: state.source.paneID, contextOnly: true)
-      }
-    let client = handoffClient
-    return .run { send in
-      let completion = try await client.run(request)
-      await send(.fallbackFinished(completion))
-    } catch: { error, send in
-      let message = (error as? IPCError)?.displayMessage ?? error.localizedDescription
-      await send(.failed(message: message))
     }
   }
 

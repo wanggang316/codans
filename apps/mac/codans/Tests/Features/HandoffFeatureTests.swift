@@ -6,9 +6,10 @@ import Testing
 
 @testable import Codans
 
-/// The Hand Off panel's state machine: choose → ask the live agent → observe
-/// the CLI completion (or fall back to context-only) → finish. Every effect
-/// goes through `HandoffClient`, stubbed here.
+/// The Hand Off panel's state machine: choose → either ask the live agent and
+/// observe the CLI completion (Hand Off with Brief) or run the context-only
+/// transition in process (Hand Off with Context) → finish. Every effect goes
+/// through `HandoffClient`, stubbed here.
 @MainActor
 struct HandoffFeatureTests {
   private static let paneID = PaneID()
@@ -24,7 +25,10 @@ struct HandoffFeatureTests {
     )
   }
 
-  private static func makeState(isInstalled: (AgentKind) -> Bool = { _ in true }) -> HandoffFeature.State {
+  private static func makeState(
+    isInstalled: (AgentKind) -> Bool = { _ in true },
+    placement: HandoffPlacement = .default
+  ) -> HandoffFeature.State {
     HandoffFeature.State.make(
       source: source,
       profiles: [
@@ -32,7 +36,8 @@ struct HandoffFeatureTests {
         AgentProfile(kind: .amp),  // no prompt argument → kickoff is typed in
         AgentProfile(kind: .claudeCode, isEnabled: false),  // disabled → not a receiver
       ],
-      isInstalled: isInstalled
+      isInstalled: isInstalled,
+      placement: placement
     )
   }
 
@@ -115,14 +120,15 @@ struct HandoffFeatureTests {
     await store.receive(.delegate(.dismiss))
   }
 
-  /// The placement rides on the typed command, is remembered through the
-  /// client, and reaches the context-only fallback as wire fields.
+  /// The placement rides on the typed command (Hand Off with Brief), is
+  /// remembered through the client, and reaches the in-process context-only
+  /// request (Hand Off with Context) as wire fields.
   @Test
   func placementIsRememberedAndTravelsWithBothPaths() async {
     let remembered = LockIsolated<[HandoffPlacement]>([])
     let typed = LockIsolated<[String]>([])
     let ran = LockIsolated<[IPC.HandoffRequest]>([])
-    let fallback = HandoffCompletion(
+    let contextOnly = HandoffCompletion(
       action: .to, sourcePaneID: Self.paneID, receiver: .codex, briefing: .none,
       launched: nil, requestID: nil)
 
@@ -133,15 +139,14 @@ struct HandoffFeatureTests {
       $0.handoffClient.cli = "codans"
       $0.handoffClient.rememberPlacement = { placement in remembered.withValue { $0.append(placement) } }
       $0.handoffClient.register = { _ in }
-      $0.handoffClient.completions = { AsyncStream { $0.finish() } }
+      $0.handoffClient.completions = { AsyncStream { _ in } }
       $0.handoffClient.sendInstruction = { _, text in
         typed.withValue { $0.append(text) }
-        return false
+        return true
       }
-      $0.handoffClient.supersede = { _ in true }
       $0.handoffClient.run = { request in
         ran.withValue { $0.append(request) }
-        return fallback
+        return contextOnly
       }
     }
 
@@ -156,19 +161,30 @@ struct HandoffFeatureTests {
       state.phase = .running(
         HandoffFeature.Run(target: state.targets[0], requestID: Self.requestID, stage: .requesting))
     }
-    await store.receive(.deliveryFailed) { state in
-      state.phase = .running(
-        HandoffFeature.Run(target: state.targets[0], requestID: Self.requestID, stage: .finishing))
-    }
-    await store.receive(.fallbackFinished(fallback)) { state in
-      state.phase = .finished(.handedOff(profileName: "Build"))
-    }
     #expect(typed.value.first?.contains("codans handoff to codex --split right --brief -") == true)
-    #expect(ran.value.first?.target == .split)
-    #expect(ran.value.first?.direction == .right)
-
     // Frozen once running.
     await store.send(.setPlacement(.newTab))
+    await store.send(.cancelTapped)
+    await store.receive(.delegate(.dismiss))
+
+    let direct = TestStore(initialState: Self.makeState(placement: .split(.right))) {
+      HandoffFeature()
+    } withDependencies: {
+      $0.handoffClient.run = { request in
+        ran.withValue { $0.append(request) }
+        return contextOnly
+      }
+    }
+    await direct.send(.confirmContextOnly) { state in
+      state.phase = .running(
+        HandoffFeature.Run(target: state.targets[0], requestID: nil, stage: .finishing))
+    }
+    await direct.receive(.contextOnlyFinished(contextOnly)) { state in
+      state.phase = .finished(.handedOff(profileName: "Build"))
+    }
+    #expect(ran.value.first?.contextOnly == true)
+    #expect(ran.value.first?.target == .split)
+    #expect(ran.value.first?.direction == .right)
   }
 
   @Test
@@ -178,13 +194,11 @@ struct HandoffFeatureTests {
     #expect(Self.makeState().placement == .newTab)
   }
 
+  /// An undeliverable request retires its id and fails visibly. Starting the
+  /// receiver without a briefing is the user's call, not a silent downgrade.
   @Test
-  func undeliverableRequestFallsBackToContextOnly() async {
+  func undeliverableRequestFailsInsteadOfDowngrading() async {
     let superseded = LockIsolated<[UUID]>([])
-    let ran = LockIsolated<[IPC.HandoffRequest]>([])
-    let fallback = HandoffCompletion(
-      action: .to, sourcePaneID: Self.paneID, receiver: .codex, briefing: .none,
-      launched: nil, requestID: nil)
 
     let store = TestStore(initialState: Self.makeState()) {
       HandoffFeature()
@@ -197,10 +211,6 @@ struct HandoffFeatureTests {
         superseded.withValue { $0.append(id) }
         return true
       }
-      $0.handoffClient.run = { request in
-        ran.withValue { $0.append(request) }
-        return fallback
-      }
     }
 
     await store.send(.confirmSelection) { state in
@@ -208,59 +218,61 @@ struct HandoffFeatureTests {
         HandoffFeature.Run(target: state.targets[0], requestID: Self.requestID, stage: .requesting))
     }
     await store.receive(.deliveryFailed) { state in
-      state.phase = .running(
-        HandoffFeature.Run(target: state.targets[0], requestID: Self.requestID, stage: .finishing))
-    }
-    await store.receive(.fallbackFinished(fallback)) { state in
-      state.phase = .finished(.handedOff(profileName: "Build"))
+      state.phase = .finished(
+        .failed(
+          message: "Claude Code's pane could not take the request. Nothing was launched; "
+            + "Hand Off with Context starts Build without a briefing."))
     }
     #expect(superseded.value == [Self.requestID])
+    await store.send(.closeTapped)
+    await store.receive(.delegate(.dismiss))
+  }
+
+  /// Hand Off with Context never touches the agent: no request is registered
+  /// or typed, the in-process transition runs, and the outcome jumps to the
+  /// receiver. The checkpoint row has no context-only variant.
+  @Test
+  func contextOnlyFromTheMenuNeverAsksTheAgent() async {
+    let ran = LockIsolated<[IPC.HandoffRequest]>([])
+    let launched = IPC.HandoffLaunchedPane(
+      projectID: Self.source.projectID, worktreeID: Self.source.worktreeID,
+      tabID: TabID(), paneID: PaneID(), profileName: "Build")
+    let completion = HandoffCompletion(
+      action: .to, sourcePaneID: Self.paneID, receiver: .codex, briefing: .none,
+      launched: launched, requestID: nil)
+
+    let store = TestStore(initialState: Self.makeState()) {
+      HandoffFeature()
+    } withDependencies: {
+      $0.handoffClient.run = { request in
+        ran.withValue { $0.append(request) }
+        return completion
+      }
+    }
+
+    await store.send(.confirmContextOnly) { state in
+      state.phase = .running(
+        HandoffFeature.Run(target: state.targets[0], requestID: nil, stage: .finishing))
+    }
+    await store.receive(.contextOnlyFinished(completion)) { state in
+      state.phase = .finished(.handedOff(profileName: "Build"))
+    }
+    await store.receive(.delegate(.focusPane(launched.paneID)))
+    // Committed: cancel is a no-op once the transition has run.
+    await store.send(.cancelTapped)
     let request = ran.value.first
     #expect(request?.action == .to)
     #expect(request?.contextOnly == true)
     #expect(request?.receiver == "codex")
     #expect(request?.profile == Self.codexProfile.id.uuidString)
     #expect(request?.requestID == nil)
-  }
 
-  @Test
-  func contextOnlyWhileWaitingSupersedesTheRequestAndCheckpointsThroughSave() async {
-    var state = Self.makeState()
-    state.selectedIndex = 2  // checkpoint row, after Build and Amp
-    let saved = HandoffCompletion(
-      action: .save, sourcePaneID: Self.paneID, receiver: nil, briefing: .none,
-      launched: nil, requestID: nil)
-    let ran = LockIsolated<[IPC.HandoffRequest]>([])
-
-    let store = TestStore(initialState: state) {
+    var checkpoint = Self.makeState()
+    checkpoint.selectedIndex = 2  // checkpoint row, after Build and Amp
+    let ignored = TestStore(initialState: checkpoint) {
       HandoffFeature()
-    } withDependencies: {
-      $0.uuid = .constant(Self.requestID)
-      $0.handoffClient.register = { _ in }
-      $0.handoffClient.completions = { AsyncStream { _ in } }
-      $0.handoffClient.sendInstruction = { _, _ in true }
-      $0.handoffClient.supersede = { _ in true }
-      $0.handoffClient.run = { request in
-        ran.withValue { $0.append(request) }
-        return saved
-      }
     }
-
-    await store.send(.confirmSelection) { state in
-      state.phase = .running(
-        HandoffFeature.Run(target: state.targets[2], requestID: Self.requestID, stage: .requesting))
-    }
-    await store.send(.contextOnlyTapped) { state in
-      state.phase = .running(
-        HandoffFeature.Run(target: state.targets[2], requestID: Self.requestID, stage: .finishing))
-    }
-    await store.receive(.fallbackFinished(saved)) { state in
-      state.phase = .finished(.saved)
-    }
-    #expect(ran.value.first?.action == .save)
-    #expect(ran.value.first?.contextOnly == true)
-    // The fallback committed: cancel is a no-op from here.
-    await store.send(.cancelTapped)
+    await ignored.send(.confirmContextOnly)
   }
 
   @Test

@@ -35,7 +35,9 @@ and the project does not yet follow semantic versioning — every release until
   checkpoints without a receiver. In
   the app, "Hand Off…" (a pane's actions menu, Command Palette, Agents View row) asks
   the live agent to run that same command with its briefing and jumps to the
-  receiver when it finishes, with a context-only fallback while waiting.
+  receiver when it finishes. The confirm button's menu offers Hand Off with
+  Context, which starts the receiver right away from generated context
+  without asking the agent; the two paths never run at once.
 - The worktree toolbar's Agents menu now lists only agents whose CLI the
   shell can resolve. The check fails open: nothing is hidden before the
   scan answers, and if it would hide every profile they all come back.

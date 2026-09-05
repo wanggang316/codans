@@ -11,8 +11,8 @@ import SwiftUI
 /// - *requesting*: the card is non-modal. The keyboard stays with the
 ///   terminal — the request may trigger a permission prompt the user has to
 ///   approve in the source agent — and a click outside collapses the card;
-///   the hand-off still completes headlessly.
-/// - *finishing*: the fallback transition has committed; no cancel.
+///   the hand-off still completes headlessly. Nothing here switches paths.
+/// - *finishing*: the context-only transition has committed; no cancel.
 struct HandoffOverlayView: View {
   @Bindable var store: StoreOf<HandoffFeature>
 
@@ -97,13 +97,15 @@ struct HandoffOverlayView: View {
     let agent = store.source.agentName
     switch store.phase {
     case .choosing:
-      return "Pass this task to another agent. \(agent) writes its own briefing first."
+      return "Pass this task to another agent. Hand Off with Brief asks \(agent) to write its "
+        + "briefing first; Hand Off with Context starts the receiver now from generated context."
     case .running(let run):
       switch run.stage {
       case .requesting:
-        return "Waiting for \(agent) to write its briefing and run the hand-off"
+        return "Waiting for \(agent) to write its briefing and run the hand-off. "
+          + "If \(agent) asks you to approve the command, approve it in its pane."
       case .finishing:
-        return "Finishing the hand-off with generated context only"
+        return "Handing off with generated context only"
       }
     case .finished(.handedOff):
       return "The receiving agent picks up the task \(placementPhrase)"
@@ -150,11 +152,46 @@ struct HandoffOverlayView: View {
         Spacer()
         Button("Cancel") { store.send(.cancelTapped) }
           .keyboardShortcut(.cancelAction)
-        Button(continueTitle) { store.send(.confirmSelection) }
-          .buttonStyle(.borderedProminent)
-          .keyboardShortcut(.defaultAction)
+        confirmControl
       }
       .padding(12)
+    }
+  }
+
+  private var selectedTarget: HandoffFeature.Target? {
+    guard store.targets.indices.contains(store.selectedIndex) else { return nil }
+    return store.targets[store.selectedIndex]
+  }
+
+  /// Hand Off with Brief is the primary action; the chevron's menu offers
+  /// Hand Off with Context, which starts the receiver now from generated
+  /// context and never asks the agent. This is the only place the two paths
+  /// meet — once the agent has been asked there is no switching. Return
+  /// still confirms the primary action (see `keyConfirm`).
+  @ViewBuilder
+  private var confirmControl: some View {
+    if selectedTarget?.kind == .checkpoint {
+      Button("Save Progress") { store.send(.confirmSelection) }
+        .buttonStyle(.borderedProminent)
+        .help("Ask \(store.source.agentName) to write a briefing checkpoint")
+        .accessibilityIdentifier("handoff.confirm")
+    } else {
+      Menu {
+        Button("Hand Off with Brief") { store.send(.confirmSelection) }
+        Button("Hand Off with Context") { store.send(.confirmContextOnly) }
+      } label: {
+        Text("Hand Off with Brief")
+      } primaryAction: {
+        store.send(.confirmSelection)
+      }
+      .menuStyle(.button)
+      .buttonStyle(.borderedProminent)
+      .menuIndicator(.visible)
+      .help(
+        "Ask \(store.source.agentName) to write its briefing, then hand off to "
+          + "\(selectedTarget?.title ?? "the agent"). The menu hands off now with generated context only."
+      )
+      .accessibilityIdentifier("handoff.confirm")
     }
   }
 
@@ -233,15 +270,6 @@ struct HandoffOverlayView: View {
     }
   }
 
-  private var continueTitle: String {
-    guard store.targets.indices.contains(store.selectedIndex) else { return "Continue" }
-    let target = store.targets[store.selectedIndex]
-    switch target.kind {
-    case .profile: return "Hand Off to \(target.title)"
-    case .checkpoint: return "Save Progress"
-    }
-  }
-
   // MARK: - Running
 
   private func runStep(_ run: HandoffFeature.Run) -> some View {
@@ -261,15 +289,14 @@ struct HandoffOverlayView: View {
       HStack {
         Text(
           run.stage == .requesting
-            ? "The request is queued if \(store.source.agentName) is busy."
+            ? "The request is queued if \(store.source.agentName) is busy; the hand-off completes even if you close this panel."
             : "This hand-off has started and will finish in the background."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
         Spacer()
         if run.stage == .requesting {
-          Button("Context Only") { store.send(.contextOnlyTapped) }
-            .help("Don't wait: hand off with generated context only, no briefing")
           Button("Cancel") { store.send(.cancelTapped) }
             .help("Close this panel; if \(store.source.agentName) still hands off, it completes in the background")
         }
@@ -288,7 +315,7 @@ struct HandoffOverlayView: View {
         return "Asked \(store.source.agentName) to write a briefing checkpoint"
       }
     case .finishing:
-      return "Archiving the previous round and starting the receiver"
+      return "Archiving the previous round and starting \(run.target.title) from generated context"
     }
   }
 
@@ -331,7 +358,7 @@ struct HandoffOverlayView: View {
     switch outcome {
     case .handedOff(let name): return "\(name) started \(placementPhrase)"
     case .saved: return "Hand-off notes are up to date"
-    case .failed: return "Nothing was launched"
+    case .failed: return "Nothing was changed"
     }
   }
 
