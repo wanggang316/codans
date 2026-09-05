@@ -186,7 +186,9 @@ public nonisolated enum AgentCatalog {
     AgentKind.allCases.map(descriptor(for:))
   }
 
-  /// Agents a handoff can launch with a kickoff prompt, in catalogue order.
+  /// Agents whose CLI takes the kickoff prompt as an argument, in catalogue
+  /// order. A handoff can start any agent; for the rest it types the prompt
+  /// into the pane once the agent is up.
   public static var handoffReceivers: [AgentKind] {
     all.filter(\.supportsInitialPrompt).map(\.kind)
   }
@@ -269,7 +271,10 @@ public nonisolated enum AgentCatalog {
     kind: .cursorAgent,
     executable: "cursor-agent",
     iconAssetName: "cursor-agent",
-    iconSummary: "Cursor Agent brand icon"
+    iconSummary: "Cursor Agent brand icon",
+    // `cursor-agent [options] [prompt...]` — the trailing words start an
+    // interactive session with that prompt.
+    promptStyle: .positional
   )
 
   private static let opencode = AgentDescriptor(
@@ -318,7 +323,10 @@ public nonisolated enum AgentCatalog {
     kind: .omp,
     executable: "omp",
     iconAssetName: "omp",
-    iconSummary: "omp brand icon"
+    iconSummary: "omp brand icon",
+    // `omp [MESSAGES]` — a trailing message opens interactive mode with it
+    // as the first turn.
+    promptStyle: .positional
   )
 
   private static let cline = AgentDescriptor(

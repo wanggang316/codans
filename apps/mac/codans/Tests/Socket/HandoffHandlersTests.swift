@@ -36,6 +36,16 @@ struct HandoffHandlersTests {
     var failure: Error?
     let tabID = TabID()
     let paneID = PaneID()
+    /// `(pane, agent, prompt)` handed to the kickoff typer, which the handler
+    /// runs detached; `awaitKickoff` yields until it lands.
+    var kickoffs: [(PaneID, AgentKind, String)] = []
+
+    func awaitKickoff() async -> (PaneID, AgentKind, String)? {
+      for _ in 0..<200 where kickoffs.isEmpty {
+        await Task.yield()
+      }
+      return kickoffs.first
+    }
   }
 
   private static func makeHarness(
@@ -79,6 +89,10 @@ struct HandoffHandlersTests {
         if let failure = launches.failure { throw failure }
         return AgentLaunchOutcome(
           profile: spec.profile, command: "cmd", tabID: launches.tabID, paneID: launches.paneID)
+      },
+      typeKickoff: { paneID, agent, prompt in
+        launches.kickoffs.append((paneID, agent, prompt))
+        return true
       },
       // Pinned rather than defaulted: the default follows the build channel
       // (`codans-dev` in Debug), and the guidance assertions below are about
@@ -314,18 +328,32 @@ struct HandoffHandlersTests {
     #expect(try String(contentsOf: harness.store.logURL, encoding: .utf8).contains("claude-code -> amp  (no launch)"))
   }
 
+  /// An agent whose CLI takes no prompt argument is still a receiver: it is
+  /// launched like any other and the kickoff is typed into its pane once it
+  /// is up, without holding the response.
   @Test
-  func launchingAnAgentWithoutAPromptStyleIsUnsupported() async throws {
+  func agentsWithoutAPromptArgumentGetTheKickoffTypedIn() async throws {
     let harness = try Self.makeHarness()
-    let error = await Self.ipcError {
-      try await harness.handlers.to(Self.request(.to, harness, receiver: "amp", brief: Self.briefing))
-    }
-    guard case .unsupported(let reason) = error else {
-      Issue.record("expected unsupported, got \(String(describing: error))")
-      return
-    }
-    #expect(reason.contains("--no-launch"))
-    #expect(!FileManager.default.fileExists(atPath: harness.store.handoffDirectory.path(percentEncoded: false)))
+
+    let response = try await harness.handlers.to(
+      Self.request(.to, harness, receiver: "amp", brief: Self.briefing))
+
+    #expect(response.launchedPane?.paneID == harness.launches.paneID)
+    let spec = try #require(harness.launches.specs.first)
+    #expect(spec.profile.kind == .amp)
+    let kickoff = try #require(await harness.launches.awaitKickoff())
+    #expect(kickoff.0 == harness.launches.paneID)
+    #expect(kickoff.1 == .amp)
+    #expect(kickoff.2 == HandoffKickoff.receiverPrompt(hasBriefing: true))
+  }
+
+  /// Agents that take the prompt on their command line are never typed at.
+  @Test
+  func agentsWithAPromptArgumentAreNotTypedAt() async throws {
+    let harness = try Self.makeHarness()
+    _ = try await harness.handlers.to(Self.request(.to, harness, receiver: "codex", brief: Self.briefing))
+    for _ in 0..<20 { await Task.yield() }
+    #expect(harness.launches.kickoffs.isEmpty)
   }
 
   @Test

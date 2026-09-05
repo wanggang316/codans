@@ -130,7 +130,7 @@ struct AgentLaunchCommandPromptTests {
     let amp = AgentProfile(kind: .amp)
     #expect(AgentLaunchCommand.render(profile: amp, prompt: "x", configDirectory: Self.configRoot) == "amp")
     #expect(!AgentCatalog.descriptor(for: .amp).supportsInitialPrompt)
-    #expect(AgentCatalog.handoffReceivers == [.claudeCode, .codex, .gemini])
+    #expect(AgentCatalog.handoffReceivers == [.claudeCode, .codex, .gemini, .cursorAgent, .omp])
   }
 
   @Test

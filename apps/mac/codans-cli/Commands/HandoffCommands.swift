@@ -75,7 +75,7 @@ struct HandoffTo: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Receiving agent: claude, codex, gemini, or any agent token with --no-launch.")
+  @Argument(help: "Receiving agent token: claude, codex, gemini, omp, cursor-agent, …")
   var agent: String
   @Option(name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
   var pane: String = "current"

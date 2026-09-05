@@ -1203,8 +1203,37 @@ final class AppState {
         await Self.handoffRepoState(at: root, git: gitClient)
       },
       launch: { spec in try await hierarchyClient.launchAgent(spec) },
+      typeKickoff: { [weak self, weak engine] paneID, kind, prompt in
+        guard let engine, let agentState = self?.agentStateStore else { return false }
+        return await Self.typeKickoffOnceAgentIsUp(
+          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine)
+      },
       cli: Self.cliInvocation()
     )
+  }
+
+  /// Kickoff delivery for a receiver whose CLI takes no prompt argument.
+  /// Waits until the classifier sees `kind` in the pane — typing earlier would
+  /// hand the text to the shell — then gives the TUI a moment to draw its
+  /// input box before typing. An agent that never appears gets nothing.
+  static func typeKickoffOnceAgentIsUp(
+    paneID: PaneID,
+    kind: AgentKind,
+    prompt: String,
+    agentState: AgentStateStore,
+    engine: TerminalEngine,
+    timeout: Duration = .seconds(30),
+    settle: Duration = .milliseconds(1500)
+  ) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while agentState.entries[paneID]?.kind != kind {
+      guard ContinuousClock.now < deadline else { return false }
+      try? await Task.sleep(for: .milliseconds(250))
+    }
+    try? await Task.sleep(for: settle)
+    guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return false }
+    surface.sendInput(prompt + "\n")
+    return true
   }
 
   /// Resolves a pane to the outgoing side of a handoff. Agent identity

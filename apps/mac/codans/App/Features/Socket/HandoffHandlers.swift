@@ -28,7 +28,10 @@ nonisolated struct HandoffSource: Sendable, Equatable {
 /// - `readScreen` captures the pane's visible text for the session excerpt;
 /// - `collectRepoState` asks git about the worktree (app tier owns
 ///   subprocesses, so this is injected rather than run by the store);
-/// - `launch` starts the receiver through the shared agent pipeline.
+/// - `launch` starts the receiver through the shared agent pipeline;
+/// - `typeKickoff` delivers the kickoff prompt to a receiver whose CLI takes
+///   none as an argument, by typing it into the new pane once the agent is
+///   up. It runs detached from the response.
 ///
 /// The handler never focuses anything: a CLI handoff is headless and adds a
 /// background tab. The in-app panel that asked for it jumps to the receiver
@@ -39,12 +42,14 @@ final class HandoffHandlers {
   typealias ScreenReader = @MainActor (PaneID) -> String?
   typealias RepoStateCollector = @Sendable (URL) async -> HandoffRepoState
   typealias Launcher = @MainActor (AgentLaunchSpec) async throws -> AgentLaunchOutcome
+  typealias KickoffTyper = @MainActor (_ paneID: PaneID, _ agent: AgentKind, _ prompt: String) async -> Bool
 
   private let settings: SettingsStore
   private let resolveSource: SourceResolver
   private let readScreen: ScreenReader
   private let collectRepoState: RepoStateCollector
   private let launch: Launcher
+  private let typeKickoff: KickoffTyper
   private let registry: HandoffRequestRegistry
   /// How this build spells its own CLI. The `--brief` guidance below is a
   /// command the agent will re-run, so it has to name the binary that
@@ -60,6 +65,7 @@ final class HandoffHandlers {
     readScreen: @escaping ScreenReader = { _ in nil },
     collectRepoState: @escaping RepoStateCollector = { _ in .notGit },
     launch: @escaping Launcher,
+    typeKickoff: @escaping KickoffTyper = { _, _, _ in false },
     cli: String = CLIInvocation.commandName,
     now: @escaping @Sendable () -> Date = { Date() }
   ) {
@@ -69,13 +75,15 @@ final class HandoffHandlers {
     self.readScreen = readScreen
     self.collectRepoState = collectRepoState
     self.launch = launch
+    self.typeKickoff = typeKickoff
     self.cli = cli
     self.now = now
   }
 
-  /// Human-readable receiver list for error text.
+  /// Human-readable receiver list for error text: every agent, since a
+  /// receiver without a prompt argument gets its kickoff typed in.
   static var receiverTokens: String {
-    AgentCatalog.handoffReceivers.map(\.rawValue).joined(separator: ", ")
+    AgentKind.allCases.map(\.rawValue).joined(separator: ", ")
   }
 
   // MARK: - save
@@ -133,13 +141,8 @@ final class HandoffHandlers {
   func to(_ request: IPC.HandoffRequest) async throws -> IPC.HandoffResponse {
     guard let token = request.receiver, let receiver = AgentKind(token: token) else {
       throw IPCError.invalidParams(
-        message: "handoff to requires an agent; launchable receivers: \(Self.receiverTokens)",
+        message: "handoff to requires an agent; receivers: \(Self.receiverTokens)",
         path: ["receiver"])
-    }
-    if request.launch, !AgentCatalog.descriptor(for: receiver).supportsInitialPrompt {
-      throw IPCError.unsupported(
-        reason: "handoff can only launch: \(Self.receiverTokens). Use --no-launch for \(receiver.displayName)."
-      )
     }
     guard let placement = HandoffPlacement(target: request.target, direction: request.direction) else {
       throw IPCError.invalidParams(
@@ -277,11 +280,12 @@ final class HandoffHandlers {
     transition: HandoffCoordinator.Transition,
     placement: HandoffPlacement
   ) async -> IPC.HandoffLaunchedPane? {
+    let prompt = HandoffKickoff.receiverPrompt(hasBriefing: transition.hasBriefing)
     let spec = AgentLaunchSpec(
       profile: profile,
       projectID: source.projectID,
       worktreeID: source.worktreeID,
-      prompt: HandoffKickoff.receiverPrompt(hasBriefing: transition.hasBriefing),
+      prompt: prompt,
       // The request's placement, never the profile's saved one, and never
       // `.focused`: a handoff must not type over the outgoing agent's pane.
       // A split anchors on the source pane so the receiver appears beside
@@ -295,6 +299,20 @@ final class HandoffHandlers {
     do {
       let outcome = try await launch(spec)
       guard let tabID = outcome.tabID, let paneID = outcome.paneID else { return nil }
+      if !profile.descriptor.supportsInitialPrompt {
+        // The command line carried no prompt for this agent, so type it once
+        // the agent is up. Detached: the response must not wait on a TUI's
+        // startup, and the CLI's request timeout is far shorter than that.
+        let typeKickoff = self.typeKickoff
+        let logger = self.logger
+        let kind = profile.kind
+        Task { @MainActor in
+          if await typeKickoff(paneID, kind, prompt) { return }
+          logger.error(
+            "kickoff not typed: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)"
+          )
+        }
+      }
       return IPC.HandoffLaunchedPane(
         projectID: source.projectID,
         worktreeID: source.worktreeID,

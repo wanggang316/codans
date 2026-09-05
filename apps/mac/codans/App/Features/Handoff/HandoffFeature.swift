@@ -92,8 +92,10 @@ struct HandoffFeature {
 
     var isChoosing: Bool { phase == .choosing }
 
-    /// Receivers are the enabled profiles whose agent can start with a
-    /// kickoff prompt, in Settings order, followed by the checkpoint row.
+    /// Receivers are the enabled profiles in Settings order, followed by the
+    /// checkpoint row. An agent whose CLI takes no kickoff argument is still a
+    /// receiver: the prompt is typed into its pane once it is up, and the row
+    /// says so.
     static func make(
       source: Source,
       profiles: [AgentProfile],
@@ -101,15 +103,17 @@ struct HandoffFeature {
     ) -> State {
       var targets =
         profiles
-        .filter { $0.isEnabled && $0.descriptor.supportsInitialPrompt }
+        .filter(\.isEnabled)
         .map { profile in
-          Target(
+          // Where the session opens is the picker's business, not the row's.
+          var subtitle = profile.name.isEmpty ? "New session" : "\(profile.kind.displayName) · new session"
+          if !profile.descriptor.supportsInitialPrompt {
+            subtitle += " · kickoff typed in once it starts"
+          }
+          return Target(
             kind: .profile(profile),
             title: profile.displayName,
-            // Where the session opens is the picker's business, not the row's.
-            subtitle: profile.name.isEmpty
-              ? "New session"
-              : "\(profile.kind.displayName) · new session",
+            subtitle: subtitle,
             isSameAgent: profile.kind == source.agent
           )
         }

@@ -29,19 +29,23 @@ struct HandoffFeatureTests {
       source: source,
       profiles: [
         codexProfile,
-        AgentProfile(kind: .amp),  // no prompt style → not a receiver
+        AgentProfile(kind: .amp),  // no prompt argument → kickoff is typed in
         AgentProfile(kind: .claudeCode, isEnabled: false),  // disabled → not a receiver
       ]
     )
   }
 
   @Test
-  func targetsAreThePromptCapableEnabledProfilesPlusTheCheckpointRow() {
+  func targetsAreTheEnabledProfilesPlusTheCheckpointRow() {
     let state = Self.makeState()
-    #expect(state.targets.map(\.title) == ["Build", "Only save progress, don't hand off"])
+    #expect(
+      state.targets.map(\.title) == ["Build", AgentKind.amp.displayName, "Only save progress, don't hand off"])
     #expect(state.targets.first?.profile?.id == Self.codexProfile.id)
     #expect(state.targets.last?.kind == .checkpoint)
     #expect(state.targets.first?.isSameAgent == false)
+    // The row tells the user how the prompt reaches an agent without one.
+    #expect(state.targets[0].subtitle.contains("typed in") == false)
+    #expect(state.targets[1].subtitle.contains("kickoff typed in"))
 
     let same = HandoffFeature.State.make(source: Self.source, profiles: [AgentProfile(kind: .claudeCode)])
     #expect(same.targets.first?.isSameAgent == true)
@@ -210,7 +214,7 @@ struct HandoffFeatureTests {
   @Test
   func contextOnlyWhileWaitingSupersedesTheRequestAndCheckpointsThroughSave() async {
     var state = Self.makeState()
-    state.selectedIndex = 1  // checkpoint row
+    state.selectedIndex = 2  // checkpoint row, after Build and Amp
     let saved = HandoffCompletion(
       action: .save, sourcePaneID: Self.paneID, receiver: nil, briefing: .none,
       launched: nil, requestID: nil)
@@ -232,11 +236,11 @@ struct HandoffFeatureTests {
 
     await store.send(.confirmSelection) { state in
       state.phase = .running(
-        HandoffFeature.Run(target: state.targets[1], requestID: Self.requestID, stage: .requesting))
+        HandoffFeature.Run(target: state.targets[2], requestID: Self.requestID, stage: .requesting))
     }
     await store.send(.contextOnlyTapped) { state in
       state.phase = .running(
-        HandoffFeature.Run(target: state.targets[1], requestID: Self.requestID, stage: .finishing))
+        HandoffFeature.Run(target: state.targets[2], requestID: Self.requestID, stage: .finishing))
     }
     await store.receive(.fallbackFinished(saved)) { state in
       state.phase = .finished(.saved)
@@ -270,7 +274,8 @@ struct HandoffFeatureTests {
     let store = TestStore(initialState: Self.makeState()) {
       HandoffFeature()
     }
-    await store.send(.moveSelection(delta: -1)) { $0.selectedIndex = 1 }
+    // Three rows: Build, Amp, checkpoint — a step back from the top wraps to the last.
+    await store.send(.moveSelection(delta: -1)) { $0.selectedIndex = 2 }
     await store.send(.moveSelection(delta: 1)) { $0.selectedIndex = 0 }
     await store.send(.setSelectedIndex(5))
     await store.send(.cancelTapped)
