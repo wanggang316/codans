@@ -131,7 +131,7 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
           session: session,
           command: command,
           workingDirectory: MasterTerminalBootstrap.userDirectory.path,
-          env: ["ZMX_DIR": zmxDir.path]
+          env: [CodansEnvironment.Key.zmxDirectory.rawValue: zmxDir.path]
         )
         self.installSurface(surface)
       } catch {

@@ -8,7 +8,7 @@ public nonisolated enum HandoffKickoff {
   /// source agent to run. Carries the one-shot request id so the CLI can
   /// prove the transition was the one the HUD is waiting on. Ordinary CLI
   /// use never sets it.
-  public static let requestIDEnvironmentKey = "CODANS_HANDOFF_REQUEST_ID"
+  public static let requestIDEnvironmentKey = CodansEnvironment.Key.handoffRequestID.rawValue
 
   /// Worktree-relative paths the receiver is pointed at. Derived from
   /// `HandoffLayout` so the prompt and the store can never disagree about

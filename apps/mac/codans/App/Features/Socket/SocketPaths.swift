@@ -37,7 +37,7 @@ public nonisolated enum SocketPaths {
   /// An explicit override to any *other* path (isolation, custom dev socket)
   /// is still honored.
   public static func resolve(
-    override: String? = ProcessInfo.processInfo.environment["CODANS_SOCKET_PATH"],
+    override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.socketPath.rawValue],
     uid: uid_t = getuid()
   ) -> String {
     guard let override, !override.isEmpty else { return defaultSocketPath(uid: uid) }

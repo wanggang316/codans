@@ -11,14 +11,20 @@ import Foundation
 /// variables (e.g. `CODANS_WORKTREE_ID`, `CODANS_SOCKET_PATH`) but are
 /// part of the user-facing scripting contract documented in the
 /// Environment pane.
-public enum BuiltinEnvVar: String, Sendable, CaseIterable {
+public enum BuiltinEnvVar: Sendable, CaseIterable {
   /// Absolute path of the worktree the pane belongs to.
-  case worktreePath = "CODANS_WORKTREE_PATH"
+  case worktreePath
   /// Absolute path of the Project root the worktree was created from.
-  case rootPath = "CODANS_ROOT_PATH"
+  case rootPath
 
-  /// The literal name written into the child process environment.
-  public var key: String { rawValue }
+  /// The literal name written into the child process environment. Spelled
+  /// in `CodansEnvironment.Key`, which is the master list of every variable.
+  public var key: String {
+    switch self {
+    case .worktreePath: return CodansEnvironment.Key.worktreePath.rawValue
+    case .rootPath: return CodansEnvironment.Key.rootPath.rawValue
+    }
+  }
 
   /// One-line description of what the variable resolves to, shown as the
   /// value of the read-only row in the Environment editor (the concrete
@@ -31,5 +37,5 @@ public enum BuiltinEnvVar: String, Sendable, CaseIterable {
   }
 
   /// Names a user cannot define by hand in the Environment editor.
-  public static let reservedKeys: Set<String> = Set(allCases.map(\.rawValue))
+  public static let reservedKeys: Set<String> = Set(allCases.map(\.key))
 }

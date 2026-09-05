@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 import GhosttyKit
 import os.log
@@ -255,7 +256,7 @@ struct GhosttyConfigFile {
   /// file; let the user own whatever App Support contains.
   func resolvedConfigURL() -> URL {
     let xdgBase: URL
-    if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
+    if let xdg = environment[CodansEnvironment.Key.xdgConfigHome.rawValue], !xdg.isEmpty {
       xdgBase = URL(fileURLWithPath: xdg, isDirectory: true)
     } else {
       xdgBase = homeDirectoryURL.appendingPathComponent(".config", isDirectory: true)

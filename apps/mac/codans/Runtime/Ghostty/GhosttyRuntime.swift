@@ -537,7 +537,7 @@ final class GhosttyRuntime {
     // "consumed" verdict synchronously, so the C return value always
     // matches what the applier will do — no more false-return-but-
     // applied races.
-    if ProcessInfo.processInfo.environment["CODANS_DISABLE_ACTION_ROUTING"] == "1" {
+    if ProcessInfo.processInfo.environment[CodansEnvironment.Key.disableActionRouting.rawValue] == "1" {
       return false
     }
 

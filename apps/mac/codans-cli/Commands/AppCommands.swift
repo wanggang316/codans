@@ -1,8 +1,9 @@
 import ArgumentParser
-import Darwin
-import Foundation
+import CodansCore
 import CodansIPC
 import CodansKit
+import Darwin
+import Foundation
 
 struct StatusCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -162,7 +163,8 @@ struct DoctorCommand: ParsableCommand {
       "socketPath": path,
       "socketReachable": probe.isReachable,
       "socketStatus": failure?.kind.rawValue ?? "ok",
-      "socketFromEnvironment": ProcessInfo.processInfo.environment["CODANS_SOCKET_PATH"] != nil,
+      "socketFromEnvironment":
+        ProcessInfo.processInfo.environment[CodansEnvironment.Key.socketPath.rawValue] != nil,
       "clientVersion": CodansCLI.version,
     ]
     if let hint = failure?.hint {

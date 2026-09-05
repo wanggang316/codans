@@ -38,7 +38,9 @@ public enum SocketDiscovery {
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) -> String {
     if let override, !override.isEmpty { return override }
-    if let fromEnvironment = environment["CODANS_SOCKET_PATH"], !fromEnvironment.isEmpty {
+    if let fromEnvironment = environment[CodansEnvironment.Key.socketPath.rawValue],
+      !fromEnvironment.isEmpty
+    {
       return fromEnvironment
     }
     return defaultSocketPath()

@@ -348,7 +348,8 @@ final class HierarchyManager {
     guard let index = catalog.projects.firstIndex(where: { $0.id == projectID }),
       catalog.projects[index].remoteHost != nil
     else { return }
-    let pathChanged = Self.normalizeRemotePath(catalog.projects[index].rootPath)
+    let pathChanged =
+      Self.normalizeRemotePath(catalog.projects[index].rootPath)
       != Self.normalizeRemotePath(rootPath)
     catalog.projects[index].remoteHost = remoteHost
     catalog.projects[index].rootPath = rootPath
@@ -2621,7 +2622,7 @@ final class HierarchyManager {
         env[key] = value
       }
     }
-    env["CODANS_SOCKET_PATH"] = SocketPaths.resolve()
+    env[CodansEnvironment.Key.socketPath.rawValue] = SocketPaths.resolve()
     // Product marker, written last like the socket path so it always wins.
     // Surface env vars reach the child as ghostty's `env_override` (applied
     // after its own exec-time `TERM_PROGRAM=ghostty`), so this is what the
@@ -2633,10 +2634,8 @@ final class HierarchyManager {
     return env
   }
 
-  nonisolated private static let inheritedTerminalEnvVarsToStrip: [String] = [
-    "TERM", "TERMCAP", "TERMINFO", "COLORTERM",
-    TermProgramEnv.programKey, TermProgramEnv.versionKey,
-  ]
+  nonisolated private static let inheritedTerminalEnvVarsToStrip =
+    CodansEnvironment.inheritedTerminalKeysToStrip
 
   /// `CFBundleShortVersionString` of the running app; nil under a bare
   /// `xctest` host, in which case the version key is simply omitted.

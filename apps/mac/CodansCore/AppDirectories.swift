@@ -24,7 +24,7 @@ public nonisolated enum AppDirectories {
   /// `github-snapshots.json`, and the `master-terminal/` subtree.
   public static func configDirectory(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
-    override: String? = ProcessInfo.processInfo.environment["CODANS_CONFIG_DIR"]
+    override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.configDirectory.rawValue]
   ) -> URL {
     // `$CODANS_CONFIG_DIR`, when set and non-empty, fully relocates the config
     // root — every config file (`settings.json`, `catalog.json`, `sessions.json`,

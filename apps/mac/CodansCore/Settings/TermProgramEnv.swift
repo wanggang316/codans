@@ -13,9 +13,9 @@ import Foundation
 /// hosting product.
 public enum TermProgramEnv {
   /// Environment key identifying the hosting terminal product.
-  public static let programKey = "TERM_PROGRAM"
+  public static let programKey = CodansEnvironment.Key.termProgram.rawValue
   /// The value written for `TERM_PROGRAM`.
   public static let program = "codans"
   /// Environment key carrying the hosting product's marketing version.
-  public static let versionKey = "TERM_PROGRAM_VERSION"
+  public static let versionKey = CodansEnvironment.Key.termProgramVersion.rawValue
 }

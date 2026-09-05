@@ -11,7 +11,7 @@ public enum CLIBundleLocator {
   /// Environment-variable override. Takes precedence over bundle lookup — used
   /// in dev to point the installer at a freshly-built `codans` outside the `.app`.
   public enum EnvKey {
-    public static let binary = "CODANS_CLI_BINARY"
+    public static let binary = CodansEnvironment.Key.cliBinary.rawValue
   }
 
   /// Resolution order:

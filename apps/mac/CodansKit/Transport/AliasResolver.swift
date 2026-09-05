@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 
 /// Resolve CLI-side identifiers into canonical UUIDs before issuing the
 /// mutation RPC.
@@ -58,7 +58,7 @@ public enum AliasResolver {
 
     // 3. Everything else → server resolver.
     let rpc = try client()
-    let contextPaneID: PaneID? = env["CODANS_PANE_ID"].flatMap(UUID.init(uuidString:)).map(PaneID.init(raw:))
+    let contextPaneID: PaneID? = env[Self.envKey(for: .pane)].flatMap(UUID.init(uuidString:)).map(PaneID.init(raw:))
     let request = IPC.AliasResolveRequest(
       kind: kind,
       value: value,
@@ -75,13 +75,18 @@ public enum AliasResolver {
     }
   }
 
+  /// Only `.pane` is ever injected by the app; the others resolve a
+  /// `current` pronoun locally only when a caller exported them by hand.
+  /// See `CodansEnvironment.Key`.
   public static func envKey(for kind: IPC.AliasResolveRequest.Kind) -> String {
-    switch kind {
-    case .project: return "CODANS_PROJECT_ID"
-    case .worktree: return "CODANS_WORKTREE_ID"
-    case .tab: return "CODANS_TAB_ID"
-    case .pane: return "CODANS_PANE_ID"
-    case .tag: return "CODANS_TAG_ID"
-    }
+    let key: CodansEnvironment.Key =
+      switch kind {
+      case .project: .projectID
+      case .worktree: .worktreeID
+      case .tab: .tabID
+      case .pane: .paneID
+      case .tag: .tagID
+      }
+    return key.rawValue
   }
 }

@@ -240,7 +240,7 @@ final class TerminalEngine {
     let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
     try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
     var surfaceEnv = env
-    surfaceEnv["ZMX_DIR"] = zmxDir.path
+    surfaceEnv[CodansEnvironment.Key.zmxDirectory.rawValue] = zmxDir.path
     // Each pane is its own top-level zmx session, addressed by its paneUUID.
     // When codans is launched from inside a codans/zmx pane (developing codans
     // in codans), the app inherits `ZMX_SESSION`, and libghostty would forward
@@ -249,7 +249,7 @@ final class TerminalEngine {
     // `session "<parent>" does not exist` (the parent isn't in this pane's
     // ZMX_DIR) — which surfaced as a Server-project tab that flashed and
     // vanished. Clearing it forces attach to create/attach THIS pane's session.
-    surfaceEnv["ZMX_SESSION"] = ""
+    surfaceEnv[CodansEnvironment.Key.zmxSession.rawValue] = ""
 
     // `ghostty_surface_new` is observed to fail transiently — ~10
     // consecutive failures followed by a clean success with no input

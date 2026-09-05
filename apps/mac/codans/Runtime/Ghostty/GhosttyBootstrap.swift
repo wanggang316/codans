@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 import GhosttyKit
 
@@ -19,8 +20,8 @@ enum GhosttyBootstrap {
 
   static let initialize: Void = {
     let dirs = resolveResourceDirs()
-    setenv("GHOSTTY_RESOURCES_DIR", dirs.ghostty.path, 1)
-    setenv("TERMINFO_DIRS", dirs.terminfo.path, 1)
+    setenv(CodansEnvironment.Key.ghosttyResourcesDirectory.rawValue, dirs.ghostty.path, 1)
+    setenv(CodansEnvironment.Key.terminfoDirectories.rawValue, dirs.terminfo.path, 1)
 
     argv.withUnsafeBufferPointer { buffer in
       let argc = UInt(max(0, buffer.count - 1))
@@ -37,7 +38,7 @@ enum GhosttyBootstrap {
     {
       return pair
     }
-    if let override = ProcessInfo.processInfo.environment["CODANS_GHOSTTY_RESOURCES"],
+    if let override = ProcessInfo.processInfo.environment[CodansEnvironment.Key.ghosttyResources.rawValue],
       let pair = candidatePair(at: URL(fileURLWithPath: override), fileManager: fm)
     {
       return pair
