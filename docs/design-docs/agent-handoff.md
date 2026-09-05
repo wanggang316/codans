@@ -56,7 +56,7 @@ toolbar / palette   agent.launch (CLI)   codans handoff   HandoffFeature (面板
 
 `AgentProfile`（`CodansCore/Agents/AgentProfile.swift`）：`id`、`kind`、`name`、`isEnabled`、`systemImage`、`modelID` / `reasoningEffortID` / `executionModeID`、`target` + `direction`（复用 `ScriptTarget` / `ScriptSplitDirection`）、`extraArguments`、`envVars`、`usesDedicatedHome`。覆盖字段为 `nil` 即"Runtime default"——codans 不贡献 flag，由 agent CLI 自己决定。
 
-`AgentDescriptor`（`AgentCatalog`）是每个 agent 的静态事实：可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——该 CLI 如何在保持交互式的同时接受初始 prompt（Claude Code / Codex / Cursor Agent / omp 位置参数，Gemini `-i`，均据各自 `--help` 核实）。没有 `promptStyle` 的 agent 仍可作为 handoff 的接收方：裸启动后，app 等分类器在新 pane 里认出该 agent、再留 1.5 s 让 TUI 画出输入框，然后把 kickoff prompt 键入（`HandoffHandlers.typeKickoff` → `CodansApp.typeKickoffOnceAgentIsUp`）。提前键入会把文字交给 shell，所以 30 s 内没出现的 agent 什么都收不到，只记一条日志。
+`AgentDescriptor`（`AgentCatalog`）是每个 agent 的静态事实：可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——该 CLI 如何在保持交互式的同时接受初始 prompt（Claude Code / Codex / Cursor Agent / omp 位置参数，Gemini `-i`，均据各自 `--help` 核实）。没有 `promptStyle` 的 agent 仍可作为 handoff 的接收方：裸启动后，app 等分类器在新 pane 里认出该 agent、再留 1.5 s 让 TUI 画出输入框，然后把 kickoff prompt 键入（`HandoffHandlers.typeKickoff` → `CodansApp.typeKickoffOnceAgentIsUp`），**不带回车**：TUI 可能开在一个对话框上（更新提示、首次运行设置，GUI 测试里 OpenCode 正是如此），回车会被当作对它的回答，字母则无害；由用户在输入框里确认后发送。提前键入会把文字交给 shell，所以 30 s 内没出现的 agent 什么都收不到，只记一条日志。
 
 渲染形状：
 

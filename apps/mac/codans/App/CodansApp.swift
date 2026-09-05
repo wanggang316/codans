@@ -1216,6 +1216,11 @@ final class AppState {
   /// Waits until the classifier sees `kind` in the pane — typing earlier would
   /// hand the text to the shell — then gives the TUI a moment to draw its
   /// input box before typing. An agent that never appears gets nothing.
+  ///
+  /// The text is typed without Enter. A TUI that opens on a dialog (an update
+  /// prompt, first-run setup) would take the newline as an answer to it, so
+  /// the user reviews the prompt in the input box and sends it. Letters that
+  /// land in a dialog are inert; an Enter is not.
   static func typeKickoffOnceAgentIsUp(
     paneID: PaneID,
     kind: AgentKind,
@@ -1232,7 +1237,7 @@ final class AppState {
     }
     try? await Task.sleep(for: settle)
     guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return false }
-    surface.sendInput(prompt + "\n")
+    surface.sendInput(prompt)
     return true
   }
 

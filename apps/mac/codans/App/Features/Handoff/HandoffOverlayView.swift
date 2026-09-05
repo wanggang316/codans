@@ -149,6 +149,9 @@ struct HandoffOverlayView: View {
       Text("Open in")
         .font(.caption)
         .foregroundStyle(.secondary)
+        // The footer row is tight; without this the label wraps one word
+        // per line before the buttons give up any width.
+        .fixedSize()
       Picker("Open in", selection: placementSelection) {
         Text("New Tab").tag(HandoffPlacement.newTab)
         Text("Split").tag(HandoffPlacement.split(.right))

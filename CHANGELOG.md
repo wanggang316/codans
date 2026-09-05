@@ -29,7 +29,8 @@ and the project does not yet follow semantic versioning — every release until
   new background tab, or split beside the source pane (`--split`, or the
   panel's "Open in" picker, which remembers the last choice). Every enabled
   agent is a receiver: agents whose CLI takes no prompt argument get the
-  kickoff typed into their pane once they are up. `codans handoff save`
+  kickoff typed into their pane once they are up, without Enter, for the
+  user to send. `codans handoff save`
   checkpoints without a receiver. In
   the app, "Hand Off…" (a pane's actions menu, Command Palette, Agents View row) asks
   the live agent to run that same command with its briefing and jumps to the

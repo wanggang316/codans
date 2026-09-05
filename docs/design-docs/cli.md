@@ -217,7 +217,7 @@
 | `codans handoff to AGENT` | `handoff.to` | `HandoffHandlers.to` | `AGENT`（raw value / 可执行名 / 显示名），`--brief TEXT\|-` 或 `--no-brief`（二选一，必填），`[--pane PANE] [--profile NAME\|ID] [--note TEXT] [--no-launch] [--tab \| --split right\|left\|up\|down]` |
 | `codans handoff save` | `handoff.save` | `HandoffHandlers.save` | `--brief TEXT\|-` 或 `--no-brief`，`[--pane PANE] [--note TEXT]` |
 
-- 任何 agent 都可作接收方。有 `promptStyle` 的（`claude-code` / `codex` / `gemini` / `cursor-agent` / `omp`）在命令行上带 kickoff prompt 启动；其它 agent 裸启动，由 app 在分类器认出该 agent 后把 prompt 键入其 pane（`HandoffHandlers.typeKickoff`，与响应解耦）。`--no-launch` 只归档 + 写 briefing，不启动。
+- 任何 agent 都可作接收方。有 `promptStyle` 的（`claude-code` / `codex` / `gemini` / `cursor-agent` / `omp`）在命令行上带 kickoff prompt 启动；其它 agent 裸启动，由 app 在分类器认出该 agent 后把 prompt 键入其 pane、不带回车（`HandoffHandlers.typeKickoff`，与响应解耦），用户按 Enter 发送。`--no-launch` 只归档 + 写 briefing，不启动。
 - 放置：默认在同一 worktree 的后台新 tab；`--split <方向>` 以**源 pane** 为锚分屏（不是当前聚焦的 pane），`--tab` 显式选新 tab。`.focused` 不可用——交接绝不覆盖源 agent 的 pane。
 - briefing 缺失 → `invalidParams` 并附可直接粘贴的 heredoc；不合格（缺 `## Objective` / `## Current State` / `## Next Steps`）→ `invalidParams` 且零副作用。
 - Server 项目 → `unsupported`（工件目录在远端）。

@@ -368,7 +368,8 @@ Rules:
   fences); otherwise the command errors with zero side effects.
 - Any agent token is a receiver. `claude`/`claude-code`, `codex`, `gemini`,
   `cursor-agent` and `omp` take the kickoff prompt on their command line;
-  for the others codans types it into the new pane once the agent is up.
+  for the others codans types it into the new pane once the agent is up,
+  without Enter — the user reviews and sends it.
   `--no-launch` archives and briefs without starting anyone.
 - The receiver starts in the background in the same worktree: a **new tab**
   by default, or beside the source pane with `--split right|left|up|down`.
