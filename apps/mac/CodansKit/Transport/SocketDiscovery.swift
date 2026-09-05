@@ -1,25 +1,26 @@
+import CodansCore
 import Darwin
 import Foundation
 
-/// Resolve the codans Unix socket path. Env override wins; default is
-/// build-channel aware. Debug builds use `/tmp/codans-dev-<uid>.sock`;
-/// Release builds use `/tmp/codans-<uid>.sock`. Must stay in lockstep
-/// with the app-side `SocketPaths` helper.
+/// Resolve the codans Unix socket path from the CLI's side. The spellings
+/// come from `BuildChannel`, which the app-side `SocketPaths` reads too, so
+/// the two cannot drift.
+///
+/// This resolver has no foreign-channel guard, and must not grow one: a CLI
+/// run inside a pane is *supposed* to dial whatever socket that pane's host
+/// exported, whichever channel the host is. The guard belongs only to an app
+/// deciding which socket to *bind* — see `SocketPaths.resolve`.
 public enum SocketDiscovery {
   public static func productionSocketPath(uid: uid_t = getuid()) -> String {
-    "/tmp/codans-\(uid).sock"
+    BuildChannel.release.socketPath(uid: uid)
   }
 
   public static func developmentSocketPath(uid: uid_t = getuid()) -> String {
-    "/tmp/codans-dev-\(uid).sock"
+    BuildChannel.development.socketPath(uid: uid)
   }
 
   public static func defaultSocketPath(uid: uid_t = getuid()) -> String {
-    #if DEBUG
-      developmentSocketPath(uid: uid)
-    #else
-      productionSocketPath(uid: uid)
-    #endif
+    BuildChannel.current.socketPath(uid: uid)
   }
 
   /// Precedence: an explicit `override` (a `--socket` flag), then

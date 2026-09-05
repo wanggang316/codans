@@ -14,13 +14,7 @@ public nonisolated enum CLIInvocation {
   /// installed Release build, and its CLI resolves the Release socket — so a
   /// command typed into a Debug app's pane would be answered by a different
   /// app entirely.
-  public static let commandName: String = {
-    #if DEBUG
-      return "codans-dev"
-    #else
-      return "codans"
-    #endif
-  }()
+  public static let commandName: String = BuildChannel.current.slug
 
   /// What to actually write: this build's command name when the installed
   /// symlink resolves to *this* build's binary, and otherwise the absolute

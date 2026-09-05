@@ -56,8 +56,14 @@ struct GlobalOptions: ParsableArguments {
 
   @Option(
     name: .long,
-    help:
-      "Override the socket path (default: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock)."
+    // Built from `BuildChannel` rather than spelled here so the help text
+    // (and the completion scripts generated from it) cannot drift from the
+    // paths the app actually binds.
+    help: ArgumentHelp(
+      "Override the socket path (default: $CODANS_SOCKET_PATH → Debug "
+        + "\(BuildChannel.development.socketPathTemplate), Release "
+        + "\(BuildChannel.release.socketPathTemplate))."
+    )
   )
   var socket: String?
 

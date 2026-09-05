@@ -12,21 +12,12 @@ import Foundation
 /// answered by) the other. Release builds keep the original `codans`
 /// paths, so the shipped app's on-disk location is unchanged.
 ///
-/// Build type — not bundle identity — is the discriminator on purpose: the
-/// `codans` CLI links this module too, and a Debug-built `codans` must resolve the
-/// same root as its Debug-built app. `#if DEBUG` gives both the same answer
-/// at compile time; reading `Bundle.main` would diverge (the CLI's bundle is
-/// the CLI, not the app).
+/// The suffix comes from `BuildChannel`, which is where the build-type
+/// decision is made and why.
 public nonisolated enum AppDirectories {
   /// Base directory name used under both `~/.config` and `~/Library/Caches`.
   /// `codans-dev` for Debug builds, `codans` for Release.
-  public static let name: String = {
-    #if DEBUG
-      return "codans-dev"
-    #else
-      return "codans"
-    #endif
-  }()
+  public static let name: String = BuildChannel.current.slug
 
   /// `~/.config/<name>` — user-facing config root holding `catalog.json`,
   /// `sessions.json`, `settings.json`, `notifications.json`, `shortcuts.json`,
@@ -44,7 +35,8 @@ public nonisolated enum AppDirectories {
     if let override, !override.isEmpty {
       return URL(fileURLWithPath: override, isDirectory: true)
     }
-    return home
+    return
+      home
       .appendingPathComponent(".config", isDirectory: true)
       .appendingPathComponent(name, isDirectory: true)
   }
