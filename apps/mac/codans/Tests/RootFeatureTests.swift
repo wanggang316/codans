@@ -1,4 +1,5 @@
 import CodansCore
+import CodansIPC
 import ComposableArchitecture
 import Foundation
 import Testing
@@ -1834,5 +1835,147 @@ struct RootFeatureTests {
     await store.finish()
 
     #expect(isNewCalls.value.isEmpty, "must not call setWorktreeIsNew for an unbadged worktree")
+  }
+
+  // MARK: - Hand-off orders
+
+  private static func handoffSource(paneID: PaneID) -> HandoffFeature.Source {
+    HandoffFeature.Source(
+      paneID: paneID, projectID: ProjectID(raw: UUID()), worktreeID: WorktreeID(raw: UUID()),
+      agent: .claudeCode)
+  }
+
+  /// A brief order closes the panel at once, registers a one-shot request,
+  /// types the instruction into the source pane, and reports the matching
+  /// CLI completion as a toast. Nothing waits on screen.
+  @Test
+  func briefHandOffClosesThePanelAndFinishesOnTheMatchingCompletion() async {
+    let paneID = PaneID()
+    let requestID = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
+    let (completions, continuation) = AsyncStream<HandoffCompletion>.makeStream()
+    let registered = LockIsolated<[UUID]>([])
+    let typed = LockIsolated<[(PaneID, String)]>([])
+    var initial = RootFeature.State()
+    let source = Self.handoffSource(paneID: paneID)
+    initial.handoff = HandoffFeature.State.make(source: source, profiles: [AgentProfile(kind: .codex)])
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.uuid = .constant(requestID)
+      $0.handoffClient.cli = "codans"
+      $0.handoffClient.register = { id in registered.withValue { $0.append(id) } }
+      $0.handoffClient.completions = { completions }
+      $0.handoffClient.sendInstruction = { pane, text in
+        typed.withValue { $0.append((pane, text)) }
+        return true
+      }
+      // The toast the outcome pushes arms its own dismiss timer.
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.handoff(.presented(.confirmSelection)))
+    await store.receive(\.handoff.presented.delegate.handOff) { state in
+      state.handoff = nil
+    }
+    #expect(registered.value == [requestID])
+    #expect(typed.value.first?.0 == paneID)
+    #expect(
+      typed.value.first?.1
+        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, cli: "codans")
+        || typed.value.first?.1
+          == HandoffKickoff.sourceInstruction(for: .handOff(to: .codex), requestID: requestID, cli: "codans")
+    )
+
+    // A completion for another request is not ours.
+    continuation.yield(
+      HandoffCompletion(
+        action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .inline, launched: nil,
+        requestID: UUID()))
+    // Ours, without a launched pane so no focus walk is needed here.
+    let mine = HandoffCompletion(
+      action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .inline, launched: nil,
+      requestID: requestID)
+    continuation.yield(mine)
+    await store.receive(.handoffFinished(mine, targetTitle: "Codex"))
+    await store.receive(.statusBar(.push(.success("Handed off to Codex"))))
+    continuation.finish()
+  }
+
+  /// An undeliverable instruction retires the request and surfaces a warning
+  /// instead of quietly downgrading to a context-only hand-off.
+  @Test
+  func undeliverableBriefRequestWarnsAndSupersedes() async {
+    let paneID = PaneID()
+    let requestID = UUID()
+    let superseded = LockIsolated<[UUID]>([])
+    var initial = RootFeature.State()
+    initial.handoff = HandoffFeature.State.make(
+      source: Self.handoffSource(paneID: paneID), profiles: [AgentProfile(kind: .codex)])
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.uuid = .constant(requestID)
+      $0.handoffClient.register = { _ in }
+      $0.handoffClient.completions = { AsyncStream { $0.finish() } }
+      $0.handoffClient.sendInstruction = { _, _ in false }
+      $0.handoffClient.supersede = { id in
+        superseded.withValue { $0.append(id) }
+        return true
+      }
+      // The toast the outcome pushes arms its own dismiss timer.
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.handoff(.presented(.confirmSelection)))
+    await store.receive(\.handoff.presented.delegate.handOff) { state in
+      state.handoff = nil
+    }
+    await store.receive(\.handoffFailed)
+    await store.receive(\.statusBar.push)
+    #expect(superseded.value == [requestID])
+  }
+
+  /// Hand Off with Context runs the in-process transition straight away and
+  /// lands on the receiver.
+  @Test
+  func contextOnlyHandOffRunsAtOnceAndReportsTheOutcome() async {
+    let paneID = PaneID()
+    let ran = LockIsolated<[IPC.HandoffRequest]>([])
+    let source = Self.handoffSource(paneID: paneID)
+    let profile = AgentProfile(kind: .codex, name: "Build")
+    var initial = RootFeature.State()
+    initial.handoff = HandoffFeature.State.make(source: source, profiles: [profile], placement: .split(.right))
+    let completion = HandoffCompletion(
+      action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .none, launched: nil, requestID: nil)
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.handoffClient.run = { request in
+        ran.withValue { $0.append(request) }
+        return completion
+      }
+      // The toast the outcome pushes arms its own dismiss timer.
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.handoff(.presented(.confirmContextOnly)))
+    await store.receive(\.handoff.presented.delegate.handOff) { state in
+      state.handoff = nil
+    }
+    await store.receive(.handoffFinished(completion, targetTitle: "Build"))
+    await store.receive(.statusBar(.push(.success("Handed off to Build"))))
+    let request = ran.value.first
+    #expect(request?.contextOnly == true)
+    #expect(request?.receiver == "codex")
+    #expect(request?.profile == profile.id.uuidString)
+    #expect(request?.target == .split)
+    #expect(request?.direction == .right)
+    #expect(request?.requestID == nil)
   }
 }

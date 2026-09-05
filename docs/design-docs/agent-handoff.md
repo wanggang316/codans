@@ -116,13 +116,14 @@ validate briefing → archiveCurrent(from, to) → writeBriefing | removeCurrent
 
 ### 应用内 Hand Off 面板
 
-`HandoffFeature`（TCA，`@Presents` 于 `RootFeature.handoff`，与 Command Palette 同宿主同外观）三阶段：
+`HandoffFeature`（TCA，`@Presents` 于 `RootFeature.handoff`，与 Command Palette 同宿主同外观）只有**一步**：两列网格列出已启用且本机能运行的 profile（过滤规则与 toolbar Agents 菜单同源：`AgentInstallationStore.offeredProfiles`，探测失败时全部显示），下方一行 "Only save progress"。行内只有名字，说明放在 tooltip 里；没有 `promptStyle` 的行 tooltip 注明 kickoff 会在启动后键入。方向键在网格内移动。底部两个下拉框：New Tab / Split，选 Split 后右侧再出现 Right / Down / Left / Up（默认 Right）；默认 New Tab，上次的选择（含方向）记在 `UserDefaults`（`HandoffPlacementPersistence`），下次打开即恢复。
 
-1. **choosing**——两列网格列出已启用且本机能运行的 profile（过滤规则与 toolbar Agents 菜单同源：`AgentInstallationStore.offeredProfiles`，探测失败时全部显示），下方一行 "Only save progress"。行内只有名字，说明放在 tooltip 里；没有 `promptStyle` 的行 tooltip 注明 kickoff 会在启动后键入。方向键在网格内移动。底部两个下拉框：New Tab / Split，选 Split 后右侧再出现 Right / Down / Left / Up（默认 Right）；默认 New Tab，上次的选择（含方向）记在 `UserDefaults`（`HandoffPlacementPersistence`），下次打开即恢复。确认按钮是分裂按钮：主按钮 **Hand Off with Brief** 走下面的 requesting 路径；右侧下拉里的 **Hand Off with Context** 直接在进程内经同一个 `HandoffHandlers` 跑 context-only 迁移，不登记 `requestID`、不询问 agent。两条路径只在这里相遇，进入等待后没有中途切换——agent 不会被要求写一份注定被拒收的 briefing。选中 "Only save progress" 时确认按钮是普通的 **Save Progress**，没有 context-only 变体。
-2. **running(requesting)**——生成一次性 `requestID`、在 `HandoffRequestRegistry` 登记，把一行请求键入源 pane：`[codans] Please hand this task off to <Agent>: run \`CODANS_HANDOFF_REQUEST_ID=<id> codans handoff to <agent> [--split right] --brief -\` with your briefing on stdin as a heredoc …`。放置选择就以 CLI flag 的形式随命令走，CLI 路径与面板不需要第二条通道；context-only 回退把同一放置写进 wire 字段。面板此时**非模态**：键盘留给终端（请求可能触发需要用户批准的权限提示，文案提示用户去 agent 的 pane 里批准），只有 Cancel 一个按钮，点外面即收起，交接仍在后台完成。
-3. **finished**——`HandoffHandlers` 完成后经 registry 广播 `HandoffCompletion`，面板按 `requestID` + 源 pane 匹配，跳到接收方 pane。
+确认按钮是分裂按钮。面板本身不执行任何事：确认即以 `delegate(.handOff(source, order, placement))` 把订单交给 `RootFeature`，面板随即关闭，没有等待页，也没有中途切换的机会。`RootFeature` 在后台执行订单：
 
-pane 无法接收注入的请求时（surface 不存在），面板把请求标记 superseded 并以失败结束，提示用户改用 Hand Off with Context；不再静默降级为 context-only。registry 的 claim / supersede 在 main actor 上串行，保证同一个请求最多执行一次。Cancel 只关面板——已键入的请求无法撤回，agent 若仍交接，tab 照常出现。
+- **Hand Off with Brief**（主按钮；选中 "Only save progress" 时是普通的 **Save Progress**）——生成一次性 `requestID`、在 `HandoffRequestRegistry` 登记，把一行请求键入源 pane：`[codans] Please hand this task off to <Agent>: run \`CODANS_HANDOFF_REQUEST_ID=<id> codans handoff to <agent> [--split right] --brief -\` with your briefing on stdin as a heredoc …`。放置选择以 CLI flag 的形式随命令走，CLI 路径与面板不需要第二条通道。agent 写好 briefing、执行命令后，`HandoffHandlers` 经 registry 广播 `HandoffCompletion`，`RootFeature` 按 `requestID` + 源 pane 匹配，弹 toast 并跳到接收方 pane。请求可能触发 agent 的权限审批，用户在 agent 的 pane 里批准即可；等待期间 UI 上没有任何东西可点。
+- **Hand Off with Context**（下拉菜单）——直接在进程内经同一个 `HandoffHandlers` 跑 context-only 迁移，不登记 `requestID`、不询问 agent，完成后同样弹 toast 并跳到接收方。
+
+pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把请求标记 superseded 并弹警告，提示改用 Hand Off with Context；不再静默降级为 context-only。registry 的 claim / supersede 在 main actor 上串行，保证同一个请求最多执行一次。两条路径只在确认按钮上相遇，agent 不会被要求写一份注定被拒收的 briefing。
 
 ### 组件边界
 

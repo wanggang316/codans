@@ -2,17 +2,11 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Floating card hosting the Hand Off flow, presented over the main split
-/// the same way the Command Palette is. The panel is a projection of
-/// `HandoffFeature` state:
-///
-/// - *choosing* / *finished*: the card owns the keyboard (arrows, Return,
-///   Escape) and a click outside dismisses it;
-/// - *requesting*: the card is non-modal. The keyboard stays with the
-///   terminal — the request may trigger a permission prompt the user has to
-///   approve in the source agent — and a click outside collapses the card;
-///   the hand-off still completes headlessly. Nothing here switches paths.
-/// - *finishing*: the context-only transition has committed; no cancel.
+/// Floating card hosting the Hand Off chooser, presented over the main split
+/// the same way the Command Palette is. One step: pick the receiver, the
+/// placement, and Brief or Context, and the card closes; `RootFeature` does
+/// the work and lands on the receiver. The card owns the keyboard (arrows,
+/// Return, Escape) and a click outside dismisses it.
 struct HandoffOverlayView: View {
   @Bindable var store: StoreOf<HandoffFeature>
 
@@ -23,104 +17,61 @@ struct HandoffOverlayView: View {
     ZStack(alignment: .top) {
       Color.clear
         .contentShape(.rect)
-        .onTapGesture { tapOutside() }
+        .onTapGesture { store.send(.cancelTapped) }
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Dismiss Hand Off")
 
       VStack(alignment: .leading, spacing: 0) {
         header
         Divider()
-        switch store.phase {
-        case .choosing:
-          chooseStep
-        case .running(let run):
-          runStep(run)
-        case .finished(let outcome):
-          finishedStep(outcome)
-        }
+        chooser
       }
       .frame(maxWidth: 520)
       .floatingCard(cornerRadius: cardCornerRadius)
       .padding(.top, 80)
-      // Keyboard ownership follows the phase; see the type doc.
-      .focusable(capturesKeyboard)
+      .focusable()
       .focusEffectDisabled()
       .focused($cardFocused)
       .onKeyPress(.upArrow) { keyMove(.up) }
       .onKeyPress(.downArrow) { keyMove(.down) }
       .onKeyPress(.leftArrow) { keyMove(.left) }
       .onKeyPress(.rightArrow) { keyMove(.right) }
-      .onKeyPress(.return) { keyConfirm() }
-      .onKeyPress(.escape) { keyEscape() }
+      .onKeyPress(.return) {
+        store.send(.confirmSelection)
+        return .handled
+      }
+      .onKeyPress(.escape) {
+        store.send(.cancelTapped)
+        return .handled
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .onAppear { cardFocused = true }
-    .onChange(of: capturesKeyboard) { _, captures in
-      cardFocused = captures
-    }
   }
 
   // MARK: - Header
 
   private var header: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(headerTitle)
+      Text("Hand Off")
         .font(.headline)
-      Text(headerSubtitle)
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+      Text(
+        "Pass this task to another agent. Hand Off with Brief asks \(store.source.agentName) to write "
+          + "its briefing first; Hand Off with Context starts the receiver now from generated context."
+      )
+      .font(.subheadline)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
     }
     .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
-  private var headerTitle: String {
-    switch store.phase {
-    case .choosing:
-      return "Hand Off"
-    case .running(let run):
-      switch run.target.kind {
-      case .profile: return "Handing off to \(run.target.title)"
-      case .checkpoint: return "Saving progress"
-      }
-    case .finished(.handedOff(let name)):
-      return "Handed off to \(name)"
-    case .finished(.saved):
-      return "Progress saved"
-    case .finished(.failed):
-      return "Hand off failed"
-    }
-  }
-
-  private var headerSubtitle: String {
-    let agent = store.source.agentName
-    switch store.phase {
-    case .choosing:
-      return "Pass this task to another agent. Hand Off with Brief asks \(agent) to write its "
-        + "briefing first; Hand Off with Context starts the receiver now from generated context."
-    case .running(let run):
-      switch run.stage {
-      case .requesting:
-        return "Waiting for \(agent) to write its briefing and run the hand-off. "
-          + "If \(agent) asks you to approve the command, approve it in its pane."
-      case .finishing:
-        return "Handing off with generated context only"
-      }
-    case .finished(.handedOff):
-      return "The receiving agent picks up the task \(placementPhrase)"
-    case .finished(.saved):
-      return "The current state is saved under .codans/handoff/ for a later hand-off"
-    case .finished(.failed(let message)):
-      return message
-    }
-  }
-
-  // MARK: - Choose
+  // MARK: - Chooser
 
   /// Profiles in a two-column grid of names, the checkpoint row spanning the
   /// width beneath. Rows carry no description; the tooltip does.
-  private var chooseStep: some View {
+  private var chooser: some View {
     let rows = Array(store.targets.enumerated())
     let profiles = rows.filter { $0.element.kind != .checkpoint }
     let checkpoints = rows.filter { $0.element.kind == .checkpoint }
@@ -158,19 +109,24 @@ struct HandoffOverlayView: View {
     }
   }
 
-  private var selectedTarget: HandoffFeature.Target? {
-    guard store.targets.indices.contains(store.selectedIndex) else { return nil }
-    return store.targets[store.selectedIndex]
+  private var gridColumns: [GridItem] {
+    Array(
+      repeating: GridItem(.flexible(), spacing: 2, alignment: .leading),
+      count: HandoffFeature.State.columns)
+  }
+
+  private func targetRow(_ target: HandoffFeature.Target, at index: Int) -> some View {
+    HandoffTargetRow(target: target, isSelected: index == store.selectedIndex) {
+      store.send(.setSelectedIndex(index))
+    }
   }
 
   /// Hand Off with Brief is the primary action; the chevron's menu offers
   /// Hand Off with Context, which starts the receiver now from generated
-  /// context and never asks the agent. This is the only place the two paths
-  /// meet — once the agent has been asked there is no switching. Return
-  /// still confirms the primary action (see `keyConfirm`).
+  /// context and never asks the agent. Return confirms the primary action.
   @ViewBuilder
   private var confirmControl: some View {
-    if selectedTarget?.kind == .checkpoint {
+    if store.selectedTarget?.kind == .checkpoint {
       Button("Save Progress") { store.send(.confirmSelection) }
         .buttonStyle(.borderedProminent)
         .help("Ask \(store.source.agentName) to write a briefing checkpoint")
@@ -189,21 +145,9 @@ struct HandoffOverlayView: View {
       .menuIndicator(.visible)
       .help(
         "Ask \(store.source.agentName) to write its briefing, then hand off to "
-          + "\(selectedTarget?.title ?? "the agent"). The menu hands off now with generated context only."
+          + "\(store.selectedTarget?.title ?? "the agent"). The menu hands off now with generated context only."
       )
       .accessibilityIdentifier("handoff.confirm")
-    }
-  }
-
-  private var gridColumns: [GridItem] {
-    Array(
-      repeating: GridItem(.flexible(), spacing: 2, alignment: .leading),
-      count: HandoffFeature.State.columns)
-  }
-
-  private func targetRow(_ target: HandoffFeature.Target, at index: Int) -> some View {
-    HandoffTargetRow(target: target, isSelected: index == store.selectedIndex) {
-      store.send(.setSelectedIndex(index))
     }
   }
 
@@ -260,160 +204,11 @@ struct HandoffOverlayView: View {
     )
   }
 
-  private var placementPhrase: String {
-    switch store.placement {
-    case .newTab: return "in a new tab"
-    case .split(.right): return "in a split to the right of this pane"
-    case .split(.left): return "in a split to the left of this pane"
-    case .split(.down): return "in a split below this pane"
-    case .split(.up): return "in a split above this pane"
-    }
-  }
-
-  // MARK: - Running
-
-  private func runStep(_ run: HandoffFeature.Run) -> some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack(spacing: 10) {
-        ProgressView()
-          .controlSize(.small)
-        Text(stageDescription(run))
-          .font(.body)
-          .fixedSize(horizontal: false, vertical: true)
-        Spacer(minLength: 0)
-      }
-      .padding(16)
-
-      Divider()
-
-      HStack {
-        Text(
-          run.stage == .requesting
-            ? "The request is queued if \(store.source.agentName) is busy; the hand-off completes even if you close this panel."
-            : "This hand-off has started and will finish in the background."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-        Spacer()
-        if run.stage == .requesting {
-          Button("Cancel") { store.send(.cancelTapped) }
-            .help("Close this panel; if \(store.source.agentName) still hands off, it completes in the background")
-        }
-      }
-      .padding(12)
-    }
-  }
-
-  private func stageDescription(_ run: HandoffFeature.Run) -> String {
-    switch run.stage {
-    case .requesting:
-      switch run.target.kind {
-      case .profile:
-        return "Asked \(store.source.agentName) to write its briefing and hand off to \(run.target.title)"
-      case .checkpoint:
-        return "Asked \(store.source.agentName) to write a briefing checkpoint"
-      }
-    case .finishing:
-      return "Archiving the previous round and starting \(run.target.title) from generated context"
-    }
-  }
-
-  // MARK: - Finished
-
-  private func finishedStep(_ outcome: HandoffFeature.Outcome) -> some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack(spacing: 10) {
-        switch outcome {
-        case .handedOff, .saved:
-          Image(systemName: "checkmark.circle.fill")
-            .foregroundStyle(.green)
-            .font(.title2)
-            .accessibilityLabel("Success")
-        case .failed:
-          Image(systemName: "exclamationmark.triangle.fill")
-            .foregroundStyle(.yellow)
-            .font(.title2)
-            .accessibilityLabel("Failure")
-        }
-        Text(finishedMessage(outcome))
-          .font(.body)
-        Spacer(minLength: 0)
-      }
-      .padding(16)
-
-      Divider()
-
-      HStack {
-        Spacer()
-        Button("Close") { store.send(.closeTapped) }
-          .buttonStyle(.borderedProminent)
-          .keyboardShortcut(.defaultAction)
-      }
-      .padding(12)
-    }
-  }
-
-  private func finishedMessage(_ outcome: HandoffFeature.Outcome) -> String {
-    switch outcome {
-    case .handedOff(let name): return "\(name) started \(placementPhrase)"
-    case .saved: return "Hand-off notes are up to date"
-    case .failed: return "Nothing was changed"
-    }
-  }
-
   // MARK: - Interaction
 
-  private var capturesKeyboard: Bool {
-    switch store.phase {
-    case .choosing, .finished: return true
-    case .running: return false
-    }
-  }
-
-  private func tapOutside() {
-    switch store.phase {
-    case .choosing:
-      store.send(.cancelTapped)
-    case .finished:
-      store.send(.closeTapped)
-    case .running(let run) where run.stage == .requesting:
-      store.send(.cancelTapped)
-    case .running:
-      break
-    }
-  }
-
   private func keyMove(_ move: HandoffFeature.Move) -> KeyPress.Result {
-    guard store.isChoosing else { return .ignored }
     store.send(.moveSelection(move))
     return .handled
-  }
-
-  private func keyConfirm() -> KeyPress.Result {
-    switch store.phase {
-    case .choosing:
-      store.send(.confirmSelection)
-      return .handled
-    case .finished:
-      store.send(.closeTapped)
-      return .handled
-    case .running:
-      return .ignored
-    }
-  }
-
-  private func keyEscape() -> KeyPress.Result {
-    switch store.phase {
-    case .choosing:
-      store.send(.cancelTapped)
-      return .handled
-    case .finished:
-      store.send(.closeTapped)
-      return .handled
-    case .running:
-      return .ignored
-    }
   }
 }
 
