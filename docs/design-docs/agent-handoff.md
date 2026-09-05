@@ -10,7 +10,7 @@ codans 的用户同时驱动多个编码 agent（Claude Code、Codex、Gemini CL
 本设计交付两件事：
 
 1. **Agent Profiles**——命名的启动预设（agent、模型、推理强度、执行模式、放置位置、额外参数、launch-scoped 环境变量、独立 HOME），从 Settings → Agents 编辑，从 worktree toolbar 的 Agents 菜单、Command Palette、`codans agent launch` 一键启动。
-2. **Handoff**——agent 到 agent 的任务交接：以 worktree 下的 `.codans/handoff/` 为唯一持久通道，由**在线的源 agent 自己**写 briefing 并通过 `codans handoff` 完成迁移，接收方在同一 worktree 的后台 tab 里带着 kickoff prompt 启动。应用内的 Hand Off 面板只是这条 CLI 迁移的触发器与观察者。
+2. **Handoff**——agent 到 agent 的任务交接：以 worktree 下的 `.codans/handoff/` 为唯一持久通道，由**在线的源 agent 自己**写 briefing 并通过 `codans handoff` 完成迁移，接收方在同一 worktree 里带着 kickoff prompt 启动——默认后台新 tab，也可分屏到源 pane 旁。应用内的 Hand Off 面板只是这条 CLI 迁移的触发器与观察者。
 
 不在范围：agent 内部会话的 fork / 续写（codans 永远不替 agent 起隐藏的模型调用）；Server（SSH）项目的 handoff（工件目录在远端）；跨 worktree 的交接。
 
@@ -56,7 +56,7 @@ toolbar / palette   agent.launch (CLI)   codans handoff   HandoffFeature (面板
 
 `AgentProfile`（`CodansCore/Agents/AgentProfile.swift`）：`id`、`kind`、`name`、`isEnabled`、`systemImage`、`modelID` / `reasoningEffortID` / `executionModeID`、`target` + `direction`（复用 `ScriptTarget` / `ScriptSplitDirection`）、`extraArguments`、`envVars`、`usesDedicatedHome`。覆盖字段为 `nil` 即"Runtime default"——codans 不贡献 flag，由 agent CLI 自己决定。
 
-`AgentDescriptor`（`AgentCatalog`）是每个 agent 的静态事实：可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——该 CLI 如何在保持交互式的同时接受初始 prompt（Claude Code / Codex 位置参数，Gemini `-i`）。没有 `promptStyle` 的 agent 可以裸启动，但不能作为 handoff 的接收方。
+`AgentDescriptor`（`AgentCatalog`）是每个 agent 的静态事实：可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——该 CLI 如何在保持交互式的同时接受初始 prompt（Claude Code / Codex / Cursor Agent / omp 位置参数，Gemini `-i`，均据各自 `--help` 核实）。没有 `promptStyle` 的 agent 仍可作为 handoff 的接收方：裸启动后，app 等分类器在新 pane 里认出该 agent、再留 1.5 s 让 TUI 画出输入框，然后把 kickoff prompt 键入（`HandoffHandlers.typeKickoff` → `CodansApp.typeKickoffOnceAgentIsUp`）。提前键入会把文字交给 shell，所以 30 s 内没出现的 agent 什么都收不到，只记一条日志。
 
 渲染形状：
 
@@ -118,8 +118,8 @@ validate briefing → archiveCurrent(from, to) → writeBriefing | removeCurrent
 
 `HandoffFeature`（TCA，`@Presents` 于 `RootFeature.handoff`，与 Command Palette 同宿主同外观）三阶段：
 
-1. **choosing**——列出可作为接收方的已启用 profile（其 agent 有 `promptStyle`）+ "Only save progress"。
-2. **running(requesting)**——生成一次性 `requestID`、在 `HandoffRequestRegistry` 登记，把一行请求键入源 pane：`[codans] Please hand this task off to <Agent>: run \`CODANS_HANDOFF_REQUEST_ID=<id> codans handoff to <agent> --brief -\` with your briefing on stdin as a heredoc …`。面板此时**非模态**：键盘留给终端（请求可能触发需要用户批准的权限提示），点外面即收起，交接仍在后台完成。
+1. **choosing**——列出全部已启用 profile + "Only save progress"；没有 `promptStyle` 的行注明 kickoff 会在启动后键入。底部 "Open in" 分段选择 New Tab / Split，默认 New Tab，上次的选择记在 `UserDefaults`（`HandoffPlacementPersistence`），下次打开即恢复。
+2. **running(requesting)**——生成一次性 `requestID`、在 `HandoffRequestRegistry` 登记，把一行请求键入源 pane：`[codans] Please hand this task off to <Agent>: run \`CODANS_HANDOFF_REQUEST_ID=<id> codans handoff to <agent> [--split right] --brief -\` with your briefing on stdin as a heredoc …`。放置选择就以 CLI flag 的形式随命令走，CLI 路径与面板不需要第二条通道；context-only 回退把同一放置写进 wire 字段。面板此时**非模态**：键盘留给终端（请求可能触发需要用户批准的权限提示），点外面即收起，交接仍在后台完成。
 3. **finished**——`HandoffHandlers` 完成后经 registry 广播 `HandoffCompletion`，面板按 `requestID` + 源 pane 匹配，跳到接收方 pane。
 
 回退：**Context Only** 把待处理请求标记 superseded，再在进程内经同一个 `HandoffHandlers` 跑 context-only 迁移；pane 无法接收输入时自动走同一路径。registry 的 claim / supersede 在 main actor 上串行，保证 CLI 与面板**不可能各执行一次**迁移。Cancel 只关面板——已键入的请求无法撤回，agent 若仍交接，tab 照常出现。
@@ -139,11 +139,11 @@ validate briefing → archiveCurrent(from, to) → writeBriefing | removeCurrent
 
 - **D1 — profile 是确定性 argv，不是 shell 片段。** 预览即真相；`extraArguments` 是唯一原样拼接的逃生口。
 - **D2 — 环境变量用 `env` 前缀，不进 spawn env。** launch-scoped：agent 退出后 pane 回到用户环境；同一 pane 里手动再起的 agent 不继承 profile 的账号。
-- **D3 — 只有带 `promptStyle` 的 agent 可作 handoff 接收方。** 扩大 `AgentKind` 目录不会自动暴露一个未验证 kickoff 语义的接收方；`--no-launch` 仍接受任何 agent token。
+- **D3 — 任何 agent 都可作接收方；kickoff 的送达方式按 `promptStyle` 分两路。** 有 `promptStyle` 的在命令行上带 prompt；没有的裸启动后由 app 键入（见上文），代价是 30 s 等待与 1.5 s 稳定期这两个启发式。只对能从 `--help` 核实的 CLI 登记 `promptStyle`，不猜。`--no-launch` 仍接受任何 agent token。
 - **D4 — briefing 必须显式给出或显式放弃。** codans 不替第三方调用方发起模型调用；`--brief`/`--no-brief` 缺失时返回可直接粘贴的 heredoc 指引。
 - **D5 — 领域层不 shell out。** git 事实由 app 层采集为值传入，`HandoffStore` 保持 `nonisolated` + `Sendable`，可在 `Task.detached` 里跑且可用临时目录单测。
 - **D6 — 面板与 CLI 共用一个 `HandoffHandlers` 实例。** 回退路径不复制迁移逻辑；registry 的 claim/supersede 使两条路径互斥。
-- **D7 — 接收方永远在新 tab、后台启动。** 无论 profile 保存的放置位置是什么，handoff 不能覆盖源 agent 的 pane；是否聚焦由在场的用户（面板）决定，CLI 路径不抢焦点。
+- **D7 — 接收方在后台启动，放置只有两种：新 tab（默认）或以源 pane 为锚的分屏。** 无论 profile 保存的放置位置是什么，handoff 不能覆盖源 agent 的 pane（`.focused` 被服务端拒绝）；分屏锚在源 pane 而不是当前聚焦的 pane，因为「在我交接出去的 agent 旁边」才是分屏的意义。是否聚焦由在场的用户（面板）决定，CLI 路径不抢焦点。`HandoffPlacement`（CodansCore）是两种放置、wire 映射、CLI flag 与持久化 token 的唯一拼写。
 - **D8 — `codans handoff to <agent>` 接受 raw value / 可执行名 / 显示名。** 人与 agent 都按自己习惯的拼法叫它（`claude` = `claude-code`）。
 
 ## 备选方案（Alternatives）

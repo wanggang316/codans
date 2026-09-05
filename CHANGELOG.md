@@ -25,8 +25,12 @@ and the project does not yet follow semantic versioning — every release until
 - **Hand off a task between agents.** `codans handoff to <agent> --brief -`
   archives the previous round under the worktree's `.codans/handoff/`,
   installs the source agent's own briefing, regenerates repository and
-  session context, and starts the receiver in a background tab with a
-  kickoff prompt; `codans handoff save` checkpoints without a receiver. In
+  session context, and starts the receiver with a kickoff prompt — in a
+  new background tab, or split beside the source pane (`--split`, or the
+  panel's "Open in" picker, which remembers the last choice). Every enabled
+  agent is a receiver: agents whose CLI takes no prompt argument get the
+  kickoff typed into their pane once they are up. `codans handoff save`
+  checkpoints without a receiver. In
   the app, "Hand Off…" (a pane's actions menu, Command Palette, Agents View row) asks
   the live agent to run that same command with its briefing and jumps to the
   receiver when it finishes, with a context-only fallback while waiting.

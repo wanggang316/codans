@@ -354,7 +354,8 @@ codans handoff save --brief - <<'EOF'      # checkpoint: briefing + context, no 
 …
 EOF
 codans handoff to claude --no-brief         # context-only (explicit) — no briefing written
-codans handoff to amp --no-launch --brief - # archive + brief for an agent codans can't launch
+codans handoff to codex --split right --brief -       # receiver in a split beside this pane
+codans handoff to amp --no-launch --brief - # archive + brief only; don't start the receiver
 codans handoff to codex --profile "Build" --brief -   # launch a specific profile
 codans handoff to codex --pane p3 --brief -           # another pane is the source
 ```
@@ -365,10 +366,13 @@ Rules:
   copy-pasteable heredoc, nothing written. A briefing must contain at least
   `## Objective`, `## Current State`, and `## Next Steps` (outside code
   fences); otherwise the command errors with zero side effects.
-- Launchable receivers: `claude`/`claude-code`, `codex`, `gemini`. Any other
-  agent token works with `--no-launch`.
-- The receiver starts in a **new background tab** of the same worktree; the
-  handoff never types into your pane and never focuses anything.
+- Any agent token is a receiver. `claude`/`claude-code`, `codex`, `gemini`,
+  `cursor-agent` and `omp` take the kickoff prompt on their command line;
+  for the others codans types it into the new pane once the agent is up.
+  `--no-launch` archives and briefs without starting anyone.
+- The receiver starts in the background in the same worktree: a **new tab**
+  by default, or beside the source pane with `--split right|left|up|down`.
+  The handoff never types into your pane and never focuses anything.
 - If the app's Hand Off panel asked you to run this, keep the
   `CODANS_HANDOFF_REQUEST_ID=…` prefix it gave you — that is how the panel
   knows the transition it is waiting on completed.

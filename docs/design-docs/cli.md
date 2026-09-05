@@ -214,10 +214,11 @@
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
-| `codans handoff to AGENT` | `handoff.to` | `HandoffHandlers.to` | `AGENT`（raw value / 可执行名 / 显示名），`--brief TEXT\|-` 或 `--no-brief`（二选一，必填），`[--pane PANE] [--profile NAME\|ID] [--note TEXT] [--no-launch]` |
+| `codans handoff to AGENT` | `handoff.to` | `HandoffHandlers.to` | `AGENT`（raw value / 可执行名 / 显示名），`--brief TEXT\|-` 或 `--no-brief`（二选一，必填），`[--pane PANE] [--profile NAME\|ID] [--note TEXT] [--no-launch] [--tab \| --split right\|left\|up\|down]` |
 | `codans handoff save` | `handoff.save` | `HandoffHandlers.save` | `--brief TEXT\|-` 或 `--no-brief`，`[--pane PANE] [--note TEXT]` |
 
-- 可启动的接收方是有 `promptStyle` 的 agent（当前 `claude-code` / `codex` / `gemini`）；其它 agent 只能配合 `--no-launch`。
+- 任何 agent 都可作接收方。有 `promptStyle` 的（`claude-code` / `codex` / `gemini` / `cursor-agent` / `omp`）在命令行上带 kickoff prompt 启动；其它 agent 裸启动，由 app 在分类器认出该 agent 后把 prompt 键入其 pane（`HandoffHandlers.typeKickoff`，与响应解耦）。`--no-launch` 只归档 + 写 briefing，不启动。
+- 放置：默认在同一 worktree 的后台新 tab；`--split <方向>` 以**源 pane** 为锚分屏（不是当前聚焦的 pane），`--tab` 显式选新 tab。`.focused` 不可用——交接绝不覆盖源 agent 的 pane。
 - briefing 缺失 → `invalidParams` 并附可直接粘贴的 heredoc；不合格（缺 `## Objective` / `## Current State` / `## Next Steps`）→ `invalidParams` 且零副作用。
 - Server 项目 → `unsupported`（工件目录在远端）。
 - 环境变量 `CODANS_HANDOFF_REQUEST_ID`（仅应用内面板注入的请求会设置）随请求上送；已被处理或被面板回退取代的请求以 `conflict` 拒绝。
@@ -387,7 +388,7 @@ CLIFilesystem (probe only; real impl + test fakes)
 - **D10 — `system.hello` 是专用首帧 RPC，非逐请求 header；与真实请求 pipelined 一次写。** 使"每次调用开新连接"属性干净存活——每个新连接恰付一次 `system.hello` 往返。
 - **D11 — CLI 本地做 UUID 快路径，其余都是 mutation 前一次服务端往返。** 用延迟换一致性；本地 socket 往返成本（亚毫秒）可忽略。
 - **D14 — `codans open` 用 `EditorService` 的内建注册表 + 用户模板，走 `editor.*` IPC 面。** 服务端 4 级优先级（显式 `--in` → per-Project 覆盖 → 全局默认 → Finder 回退）比 CLI 侧 Launch Services 发现更简单，且把"哪个编辑器"的真相留在应用侧。
-- **D20 — `handoff` 的源默认是调用方 pane，且 briefing 必须显式给出或显式放弃。** 让在线 agent 交接自己是主路径（它持有任何 transcript 都无法复原的工作上下文）；`--brief`/`--no-brief` 二选一避免 codans 替第三方调用方发起模型调用。接收方只在 `AgentCatalog` 有已验证 `promptStyle` 时可启动；其它 agent 走 `--no-launch`。见 [agent-handoff.md](agent-handoff.md)。
+- **D20 — `handoff` 的源默认是调用方 pane，且 briefing 必须显式给出或显式放弃。** 让在线 agent 交接自己是主路径（它持有任何 transcript 都无法复原的工作上下文）；`--brief`/`--no-brief` 二选一避免 codans 替第三方调用方发起模型调用。接收方任何 agent 均可启动：有已验证 `promptStyle` 的走命令行参数，其余在 agent 出现后由 app 键入 kickoff；`--no-launch` 仍可只归档不启动。见 [agent-handoff.md](agent-handoff.md)。
 - **D18 — `broadcast` 在顶层命名空间，而 `send` 在 `codans pane` 下。** `broadcast` 是显式的扇出动作、置于顶层减少键入；`send`/`send-key`/`read`/`capture` 作为 pane 级操作归在 `pane` 子命令树下（与 `codans pane send` 的 discussion 示例一致）。
 
 ## Cross-Cutting
