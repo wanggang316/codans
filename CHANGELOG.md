@@ -51,11 +51,28 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
-- A bare `codans` inside a pane is now the CLI bundled with the app that
-  spawned the pane: its `bin/` directory is put first on the pane's
-  `PATH`, and `CODANS_CLI` carries the absolute path for shells whose rc
-  rebuilds `PATH`. Previously a Debug pane fell through to the installed
-  Release CLI, which is older and dials the Release socket.
+- **Development builds are now a separate application from the release
+  build, CLI included.** A Debug build embeds and installs its CLI as
+  `codans-dev`, and that CLI calls itself `codans-dev` in help, hints and
+  the handshake. Every pane has its own app's `bin/` on `PATH` and
+  `CODANS_CLI` carries the absolute path, so `codans-dev` resolves to the
+  app that spawned the pane however the login shell reorders `PATH`.
+  Previously the Debug bundle also named its CLI `codans`, so commands
+  typed in a Debug pane resolved to the installed release CLI and were
+  answered by the release app.
+- The CLI stays inside its build channel. The release `codans` refuses to
+  act on a pane that belongs to a development build (exit code 15,
+  `codans doctor` reports `socketStatus wrong-channel`) and names
+  `codans-dev` instead; `codans-dev` run from a release pane dials the
+  development socket. `--socket` still crosses on purpose. `doctor` now
+  also prints the client name and channel. `launch` from a development
+  CLI no longer falls back to opening the installed release app.
+- The hand-off kickoff line written into the source pane now says
+  `codans-dev` (or `codans`) whenever nothing in `/usr/local/bin` shadows
+  that name, instead of the bundled binary's absolute path.
+- Settings → Developer recognises a `codans` symlink that points at another
+  build, or at a binary a rebuild renamed away, as stale and offers
+  Reinstall instead of reporting a collision.
 - The Master Terminal's shell now gets the same environment a worktree
   pane does — socket path, product marker, and a cleared `ZMX_SESSION` —
   instead of a bare `ZMX_DIR`.

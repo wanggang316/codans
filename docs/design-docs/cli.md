@@ -85,14 +85,18 @@
   Socket path resolution (SocketDiscovery.resolve):
     1. --socket flag override
     2. $CODANS_SOCKET_PATH               (set by the app in every Pane's env)
+       equal to the *other* channel's default → the wrong CLI for this
+       pane: release `codans` refuses (exit 15, wrong-channel) and names
+       `codans-dev`; development `codans-dev` ignores it and dials its own
     3. build-channel default             (Debug: /tmp/codans-dev-$UID.sock;
                                           Release: /tmp/codans-$UID.sock)
 
   Injected env vars inside every Pane (built by PaneEnvironment):
     CODANS_SOCKET_PATH, CODANS_CLI, CODANS_PANE_ID, CODANS_WORKTREE_PATH,
     CODANS_ROOT_PATH, ZMX_DIR, ZMX_SESSION (cleared), TERM_PROGRAM,
-    TERM_PROGRAM_VERSION; PATH is prefixed with the spawning app's bundled
-    bin/ so a bare `codans` in the pane is that app's CLI
+    TERM_PROGRAM_VERSION; PATH gains the spawning app's bundled bin/, whose
+    CLI is named for its channel (`codans-dev` in Debug), so that name
+    reaches this app however the shell reorders PATH
   Read by `current` if a caller exports them by hand (never injected):
     CODANS_PROJECT_ID, CODANS_WORKTREE_ID, CODANS_TAB_ID, CODANS_TAG_ID
 ```
@@ -261,9 +265,9 @@
 
 ### 错误处理模型
 
-- **退出码** 跨版本稳定（`CodansKit/ExitCode.swift`）：`0` 成功 · `1` 用户错误 · `2` not-found · `3` conflict · `4` unsupported · `5` overloaded · `6` versionMismatch · `10` socket 不可达（应用未运行）· `11` 请求超时 · `12` launch 超时 · `13` socket 权限拒绝 · `14` socket 不可用（路径不是 socket / 过长 / socket(2) 失败）· `20` 内部错误。
+- **退出码** 跨版本稳定（`CodansKit/ExitCode.swift`）：`0` 成功 · `1` 用户错误 · `2` not-found · `3` conflict · `4` unsupported · `5` overloaded · `6` versionMismatch · `10` socket 不可达（应用未运行）· `11` 请求超时 · `12` launch 超时 · `13` socket 权限拒绝 · `14` socket 不可用（路径不是 socket / 过长 / socket(2) 失败）· `15` wrong-channel（pane 属于另一构建通道，CLI 拒绝跨越）· `20` 内部错误。
 - **socket 连接失败分类。** connect(2) 的 errno 在 `CodansKit/Transport/SocketConnectionFailure.swift` 收敛成一组 `SocketFailureKind`：`socket-missing`（ENOENT）· `app-not-running`（ECONNREFUSED，陈旧 socket 文件）· `permission-denied`（EACCES/EPERM）· `not-a-socket`（ENOTSOCK）· `path-too-long` · `server-busy`（EAGAIN，accept backlog 满）· `timed-out` · `connection-lost`（已连接后 EPIPE/ECONNRESET）· `socket-create-failed` · `unknown`。分类按**调用方该怎么办**映射退出码：起应用后重试（10）、原样重试（5 / 11）、需要人介入（13 / 14）。未映射的 errno 保持 `unknown` 而非并入相邻类别——错误的类别比诚实的"未知"对分支脚本更有害。
-- **分类的可脚本化出口。** 除退出码外，`codans doctor` 输出 `socketStatus`（上述 raw 值，或 `ok`）与可选 `socketHint`，使脚本无须 grep stderr 即可分支。`codans launch` 对起应用无法修复的类别（权限 / 路径）立即失败，不再空转 `--wait` 秒轮询。
+- **分类的可脚本化出口。** 除退出码外，`codans doctor` 输出 `socketStatus`（上述 raw 值、`wrong-channel`，或 `ok`）与可选 `socketHint`，使脚本无须 grep stderr 即可分支。`codans launch` 对起应用无法修复的类别（权限 / 路径）立即失败，不再空转 `--wait` 秒轮询。
 - **stderr 文本模式：** 首行 `error: <message>`，后续 `  hint: <suggestion>`（若适用）；无 backtrace、无 "please file a bug" 样板（贴合 git / Ghostty 风格）。
 - **进程级 SIGPIPE 忽略。** `main()` 进程级 `signal(SIGPIPE, SIG_IGN)`，使任何写路径（stdout 被管到 `head`、半关 socket）返回 EPIPE 而非以 exit 141 在错误路径渲染前杀死 CLI。
 - **取消。** SIGINT 关 socket 中止在飞请求；部分副作用由应用负责回滚（mutation 在 `HierarchyManager` 层原子）。
@@ -304,14 +308,14 @@ Dependencies:
 
 > 取代早先"首次启动安装进 `~/.local/bin` + `codans install-cli` + PATH 提示"的方案。该方案的 PATH 提示在结构上有误导（它读 GUI 进程的 `PATH`，那来自 launchd，永不反映 shell rc），且 `~/.local/bin` 不在 macOS 默认 `PATH` 上。
 
-CLI 二进制已由 `scripts/embed-codans.sh` 内嵌到应用 bundle 的 `Contents/Resources/bin/codans`，release 构建随应用一起签名，故 symlink 目标已是稳定、已签名、已公证的产物。
+CLI 二进制已由 `scripts/embed-codans.sh` 内嵌到应用 bundle 的 `Contents/Resources/bin/<名字>`——Debug 为 `codans-dev`，Release 为 `codans`，名字来自 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置并与 `BuildChannel.slug` 一致——release 构建随应用一起签名，故 symlink 目标已是稳定、已签名、已公证的产物。
 
 ### 模型
 
 安装器对每次 install / uninstall 发出**一条管理员授权的 shell 命令**，经进程内 `NSAppleScript` 执行，使授权对话框以 codans 应用图标与 bundle 名渲染。
 
 - **安装路径：** Release 构建管理 `/usr/local/bin/codans`；Debug 构建管理 `/usr/local/bin/codans-dev`，以免本地开发夺走生产 `codans`。选 `/usr/local/bin` 正因它在默认 macOS PATH 上、位于 `/usr/bin` 之前（`/etc/paths` 如此排）；而 `/opt/homebrew/bin` 不在非 Homebrew shell 的 PATH 上。一个新用户（含读 Skill 的 agent）经单次对话框 + 一次回车即得到可用 `codans`。
-- **symlink 目标：** bundle 内 `Bundle.main.resourceURL/bin/codans`。应用移动与 Sparkle 升级保留该相对路径，故 symlink 无需重指。
+- **symlink 目标：** bundle 内 `Bundle.main.resourceURL/bin/<名字>`。应用移动与 Sparkle 升级保留该相对路径，故 symlink 无需重指。指向别的构建、或指向已不存在的内置二进制（旧 Debug 包内嵌的是 `bin/codans`）的软链判为 stale：卡片显示 Stale / Reinstall，Install 在同一次特权调用里替换，不当作外来文件。
 - **特权模型：** 特权工作是一次 shell 脚本调用，做 (a) `mkdir -p /usr/local/bin`，(b) 仅对在先前非特权探测中已核实为缺失或我方自有 symlink 的项 `rm -f`，(c) 对缺失项 `ln -s`。探测是非特权的、每次 Settings 卡片出现都跑。
 - **PATH 提示：** 移除。`installed && !onPath` 这个状态空间不复存在。
 

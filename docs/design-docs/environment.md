@@ -42,15 +42,20 @@ app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane
 
 ### 通道隔离了什么
 
-`BuildChannel.current.slug` 派生出全部四样按通道分开的资源：
+`BuildChannel.current.slug` 派生出全部按通道分开的资源：
 
 ```
-                     Debug                          Release
-config root          ~/.config/codans-dev/          ~/.config/codans/
-ZMX_DIR              ~/Library/Caches/codans-dev/   ~/Library/Caches/codans/
-IPC socket           /tmp/codans-dev-<uid>.sock     /tmp/codans-<uid>.sock
-CLI 安装名           /usr/local/bin/codans-dev      /usr/local/bin/codans
+                     Debug                               Release
+config root          ~/.config/codans-dev/               ~/.config/codans/
+ZMX_DIR              ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
+IPC socket           /tmp/codans-dev-<uid>.sock          /tmp/codans-<uid>.sock
+CLI 名               codans-dev                          codans
+  包内文件           Contents/Resources/bin/codans-dev   Contents/Resources/bin/codans
+  安装软链           /usr/local/bin/codans-dev           /usr/local/bin/codans
+  自称               --help / 报错提示 / 握手 clientBinary 都用本名
 ```
+
+两个构建是**两个应用**：名字本身携带通道，一个通道的 CLI 只拨自己通道的 socket（见下文两节）。包内文件名由 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置给出（Debug `codans-dev`，Release `codans`），`embed-codans.sh` 按它落盘，`CLIBundleLocator` 按 `CLIInvocation.commandName` 查找；两者必须与 `BuildChannel.slug` 一致。
 
 用构建类型而不是 bundle 身份做判别是刻意的：`codans` CLI 链接同一个 CodansCore，Debug 构建的 CLI 必须和 Debug 构建的 app 算出同一组路径，编译期常量能保证；读 `Bundle.main` 则会分叉，因为 CLI 的 bundle 是它自己。
 
@@ -67,14 +72,19 @@ CLI 安装名           /usr/local/bin/codans-dev      /usr/local/bin/codans
 socket 路径的拼写只有一份，但**解析规则故意有两份**，因为两侧回答的问题不同：
 
 ```
-CLI（SocketDiscovery.resolve）        app（SocketPaths.resolve）
-  --socket 标志                          $CODANS_SOCKET_PATH
-  → $CODANS_SOCKET_PATH                  → 若等于「对方通道」的默认值：丢弃，用自己的
-  → 本通道默认值                         → 否则采用
-                                         → 未设置：本通道默认值
+CLI（SocketDiscovery.resolve）                      app（SocketPaths.resolve）
+  --socket 标志                                       $CODANS_SOCKET_PATH
+  → $CODANS_SOCKET_PATH                               → 若等于「对方通道」的默认值：丢弃，用自己的
+      等于对方通道默认值时：                            → 否则采用
+        release `codans` 在 dev pane → 拒绝（exit 15） → 未设置：本通道默认值
+        dev `codans-dev` 在 release pane → 忽略，用自己的
+      否则采用
+  → 本通道默认值
 ```
 
-app 侧的守卫处理「从 Release 的 pane 里 `make mac-run-app`」：子 app 继承了宿主注入的 `CODANS_SOCKET_PATH`，若照单全收会去绑宿主的 socket，报 `alreadyInUse`，自己的 server 起不来，还把错误的 socket 广告给自己的 pane。CLI 侧**绝不能**有这个守卫：pane 里的 CLI 就该拨宿主导出的那个 socket，宿主是哪个通道都一样。两处各自的注释都替对方说明了理由。
+app 侧的守卫处理「从 Release 的 pane 里 `make mac-run-app`」：子 app 继承了宿主注入的 `CODANS_SOCKET_PATH`，若照单全收会去绑宿主的 socket，报 `alreadyInUse`，自己的 server 起不来，还把错误的 socket 广告给自己的 pane。
+
+CLI 侧的规则是**名字即通道**：`codans` 只驱动 release app，`codans-dev` 只驱动 dev app，`$CODANS_SOCKET_PATH` 只能在通道内细化目标。它等于对方通道的默认 socket，说明这个 pane 里敲了错的 CLI，两个方向处理不同：release 的 `codans` 出现在 dev pane 里**拒绝**（`CLIExitCode.wrongChannel` = 15，提示改用 `codans-dev`），因为 dev pane 里 agent 敲的任何东西都不允许误触生产 app；dev 的 `codans-dev` 出现在 release pane 里**忽略**继承值、拨 dev socket，因为开发者就是在生产 pane 里调 dev app 的。显式 `--socket` 永远生效，是有意跨通道的出口；其他任何值视为自定义 socket，两个通道都照用。`codans doctor` 把拒绝报成 `socketStatus wrong-channel` 而不退出。
 
 历史上 CLI 侧曾把 `$CODANS_SOCKET_PATH` 的读取写在默认参数里，调用方转发自己的可选标志时显式传入 nil、把默认参数顶掉，环境变量从未被读到——dev pane 里的每条命令都打到了生产 app。教训：**读环境变量不要放在 Swift 默认参数里**。
 
@@ -102,11 +112,15 @@ worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` �
 
 只注入 `CODANS_PANE_ID` 而不注入 tab / worktree / project id 是有意的：pane id 终生不变，烘进环境是安全的；其余三个会随 pane 被移动而过期，所以由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认这五个键，是为了让调用方手动导出时能就地短路，但 app 只写 pane 那一个。
 
-### pane 里的 `codans` 指向谁
+### pane 里的 CLI 叫什么
 
-pane 里输入或脚本执行的裸 `codans`，必须是**生成这个 pane 的 app** 自带的 CLI。系统里装的 `/usr/local/bin/codans` 指向 `/Applications` 的 Release 包，通常比分支构建旧（缺新子命令），且老版本会忽略 `CODANS_SOCKET_PATH` 拨到 Release socket；Debug pane 落到它上面，症状是「命令被另一个 app 应答」。所以 `PaneEnvironment` 把内置 CLI 所在目录（`Contents/Resources/bin/`，同目录还有 `zmx`）放到 `PATH` 最前，并导出 `CODANS_CLI` 为绝对路径——后者给 rc 文件重建了 `PATH` 的 shell 兜底。两者都在项目 overrides 之后写入，不会被项目自定义的 `PATH` 顶掉；同一目录在 `PATH` 里只保留一份，从 pane 里再开 pane 不会堆叠。
+pane 里 agent 或脚本执行的 codans 命令，必须落到**生成这个 pane 的 app** 自带的 CLI。做法是让名字携带通道：Debug 构建把 CLI 内嵌为 `bin/codans-dev`，Release 为 `bin/codans`；`PaneEnvironment` 把内置 `bin/` 目录（同目录还有 `zmx`）加进 `PATH`，并导出 `CODANS_CLI` 为绝对路径。两者都在项目 overrides 之后写入；同一目录在 `PATH` 里只保留一份。
 
-Skill 与文档里的命令因此保持裸 `codans` 即可；只有 kickoff 那行例外，它由 codans 自动生成，为最大稳健性写内置二进制的绝对路径。
+靠 `PATH` **顺序**是不够的，这是前一版的错误：pane 的 shell 是 login shell，macOS 的 `/etc/zprofile` 会运行 `path_helper`，把 `/etc/paths` 里的系统目录（含 `/usr/local/bin`）排到最前，app 前置的目录被挤到后面。同名的 `codans` 永远输给 `/usr/local/bin/codans`，也就是生产包。唯一的名字不需要顺序：系统里没有第二个 `codans-dev`，目录排在哪都能找到；找不到时是 command not found，而不是悄悄打到另一个 app——失败的方向是对的。
+
+由 codans 自己生成的命令（handoff 的 kickoff 那行）由 `CLIInvocation.command` 拼写：`/usr/local/bin` 下没有该名字的条目、或该条目就指向本构建 → 写短名；条目指向别处（含失效软链）→ 写内置二进制的绝对路径。安装器把指向别的构建或已不存在的内置二进制的软链判为 stale，Install 直接替换。
+
+agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守一道（上一节）：release 的 `codans` 发现所在 pane 属于 dev 构建就拒绝并指出该用 `codans-dev`。这道守卫只对**带守卫的 CLI 版本**有效；已安装的旧 Release CLI 没有它，也忽略 `CODANS_SOCKET_PATH`，只有升级安装后才闭合。
 
 ### 覆盖点（隔离缝）
 
@@ -145,6 +159,9 @@ Skill 与文档里的命令因此保持裸 `codans` 即可；只有 kickoff 那�
 
 - **跨分支共享 `codans-dev`。** 一个分支的 Debug 构建写入新枚举值或新字段，老分支的构建读不出来或剥掉。本设计不解决（非目标）；缓解是 `CODANS_CONFIG_DIR`，以及让 catalog 解码对未知枚举值宽容（另行处理）。
 - **`ProcessInfo` 默认参数陷阱再次出现。** 缓解：`CodansEnvironment` 的注释与本文档明确禁止；code review 检查。
+- **已安装的旧 Release CLI。** 开发机上 `/usr/local/bin/codans` 指向的生产包若早于本设计，既无通道守卫又忽略 `CODANS_SOCKET_PATH`，dev pane 里裸敲 `codans` 仍会拨到生产 socket。只有发版并重新安装才消除；在此之前 codans 自己写出的命令全部走 `codans-dev`，剩余风险只在 agent 自发敲 `codans`。
+- **`/usr/local/bin` 之外的同名二进制。** `CLIInvocation.command` 只检查安装目录，`/opt/homebrew/bin/codans` 一类不会被察觉。对 dev 通道无影响（没有人往那里放 `codans-dev`），对本地构建、未安装的 Release app 有。
+- **`CODANS_CLI_NAME` 与 `BuildChannel.slug` 分叉。** 两处各写一份；`CLIBundleLocator` 在真实 bundle 上找不到二进制时安装器会报 bundleMissing，是最早的信号。
 - **第三方键的语义漂移。** `ZMX_*`、`GHOSTTY_*` 由外部工具定义；目录里登记的是 codans 对它们的用法，不是它们的规范。
 
 ## 后续项
@@ -156,6 +173,7 @@ Skill 与文档里的命令因此保持裸 `codans` 即可；只有 kickoff 那�
 - 工具二进制路径各自拼写：`/usr/bin/git` 四处、`/bin/sh` 三处。
 - `settings.json` 的文件名在迁移备份代码里拼了四次。
 - `WindowActionRouterFeature` 打开 Ghostty 配置时硬编码 `~/.config/ghostty/config`，未按 `GhosttyConfigFile.resolvedConfigURL()` 尊重 `XDG_CONFIG_HOME`。
+- 随包分发的补全脚本由 Release 构建生成、只描述 `codans`；Debug 包里 `codans-dev` 没有补全。
 
 ## 参考
 

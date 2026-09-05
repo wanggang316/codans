@@ -39,7 +39,7 @@ Three outcomes:
   | `permission-denied` | The socket belongs to another user | Stop; ask the user — launching will not help |
   | `not-a-socket` / `path-too-long` | `CODANS_SOCKET_PATH` points somewhere wrong | Stop; fix the env var |
   | `server-busy` / `timed-out` | App is up but not accepting right now | Wait a moment and retry |
-  | `ok`, but the socket shown is not `$CODANS_SOCKET_PATH`, or a documented verb is "unknown" | `codans` resolved to a different install than the app that owns this pane | Run `"$CODANS_CLI"` instead of `codans` for the rest of the session |
+  | `wrong-channel` | This pane belongs to a development build of Codans, whose CLI is `codans-dev` | Use `codans-dev` for the rest of the session; see [Development builds](#development-builds) |
 
   `codans doctor --json` emits the same value plus a `socketHint` string.
 - **`codans: command not found`** — Codans is not installed. Stop and tell
@@ -101,6 +101,19 @@ Most subcommands accept identifiers in any of these forms:
 If you run `codans` from a shell that is *not* inside a codans Pane,
 `current` has no meaning and you'll get a `noContext` error — pass an
 explicit UUID, or use `codans tree` to discover one.
+
+## Development builds
+
+A development build of Codans is a separate app: its own socket, its own
+config, and its CLI is named `codans-dev`. Inside a pane spawned by a
+development build, type `codans-dev` wherever this skill says `codans`.
+`$CODANS_CLI` always holds the absolute path of the CLI that belongs to
+the pane you are in, so `basename "$CODANS_CLI"` is the command to use.
+
+The release `codans` refuses to run inside a development pane (exit code
+15, `codans doctor` reports `socketStatus wrong-channel`) and its hint
+names the command to switch to. `codans-dev` run from a release pane
+still drives the development app.
 
 ## Detecting codans from a script
 
