@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Per-pane actions menu, anchored to the pane's top-right corner.
 ///
-/// Collapsed it is a single button, wearing a count while the pane holds
-/// queued commands. Expanded it lists the actions that are a property
+/// Collapsed it is a single button, with a queue button beneath it while the
+/// pane holds queued commands. Expanded it lists the actions that are a property
 /// of *this* pane — handing its agent's task off to another agent, opening
 /// its command queue — so the pane is where they live. It shows no workspace
 /// facts on purpose: the worktree's path, branch and uncommitted counts are
@@ -25,6 +25,7 @@ struct PaneHUDView: View {
 
   @State private var isExpanded = false
   @State private var isButtonHovered = false
+  @State private var isQueueButtonHovered = false
 
   private static let cardCornerRadius: CGFloat = 10
   /// Definite width for the expanded card. The action rows are deliberately
@@ -82,7 +83,14 @@ struct PaneHUDView: View {
             .scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity)
           )
       }
-      menuButton(model)
+      // The queue button stacks under the menu button rather than beside it,
+      // so the corner stays one column of same-sized controls.
+      VStack(spacing: 6) {
+        menuButton(model)
+        if model.queuedCommandCount > 0 {
+          queueButton(model)
+        }
+      }
     }
     // Constant in both states on purpose. The button is a layout sibling of
     // the card body, so an equal inset from the container's top-right corner
@@ -148,28 +156,35 @@ struct PaneHUDView: View {
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    // The queue count rides the button's corner rather than sitting beside
-    // it: this corner is one control, and the menu behind it is where the
-    // queue is reached. Hidden while expanded, where the Command Queue row
-    // carries the count.
-    .overlay(alignment: .topTrailing) {
-      if model.queuedCommandCount > 0, !isExpanded {
-        PaneCommandQueueBadge(count: model.queuedCommandCount)
-          .offset(x: 5, y: -5)
-          .transition(.opacity)
-      }
-    }
     .onHover { isButtonHovered = $0 }
-    .help(Self.buttonHelp(model))
     .accessibilityIdentifier("pane_hud.toggle")
-    .accessibilityLabel(
-      (isExpanded ? "Hide pane actions" : "Show pane actions")
-        + (model.queuedCommandCount > 0 ? ", \(Self.queuedPhrase(model))" : "")
-    )
+    .accessibilityLabel(isExpanded ? "Hide pane actions" : "Show pane actions")
   }
 
-  private static func buttonHelp(_ model: PaneHUDModel) -> String {
-    model.queuedCommandCount > 0 ? "Pane actions · \(queuedPhrase(model))" : "Pane actions"
+  /// Opens the Command Queue sheet directly. Same box as the menu button so
+  /// the two read as one stack; static, because a parked queue is a state to
+  /// glance at rather than an alarm.
+  private func queueButton(_ model: PaneHUDModel) -> some View {
+    Button {
+      setExpanded(false)
+      actions.commandQueue(paneID)
+    } label: {
+      Image(systemName: CommandQueueStyle.symbol)
+        .font(.system(size: 13, weight: .regular))
+        .foregroundStyle(isQueueButtonHovered ? Color.primary : Color.secondary)
+        .frame(width: Self.buttonSize, height: Self.buttonSize)
+        .background {
+          chrome(cornerRadius: Self.buttonCornerRadius)
+            .opacity(isExpanded ? 0 : 1)
+            .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onHover { isQueueButtonHovered = $0 }
+    .help(Self.queuedPhrase(model))
+    .accessibilityIdentifier("pane_hud.queue")
+    .accessibilityLabel("Command queue, \(Self.queuedPhrase(model))")
   }
 
   private static func queuedPhrase(_ model: PaneHUDModel) -> String {
@@ -221,7 +236,7 @@ struct PaneHUDView: View {
       actions.commandQueue(paneID)
     } label: {
       HStack(spacing: 7) {
-        Image(systemName: CommandQueueBadgeStyle.symbol)
+        Image(systemName: CommandQueueStyle.symbol)
           .font(.system(size: 11))
           .frame(width: 14, height: 14, alignment: .center)
           .accessibilityHidden(true)

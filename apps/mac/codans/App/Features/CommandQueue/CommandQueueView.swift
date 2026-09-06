@@ -115,7 +115,7 @@ struct CommandQueueView: View {
           .font(Self.composerFont)
           .lineLimit(1)
           .truncationMode(.tail)
-        Text(CommandQueueBadgeStyle.description(of: entry.timing))
+        Text(CommandQueueStyle.description(of: entry.timing))
           .font(.caption)
           .foregroundStyle(.secondary)
       }

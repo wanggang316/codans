@@ -21,9 +21,8 @@ and the project does not yet follow semantic versioning — every release until
   running a coding agent, "after the current task" follows the agent's own
   state rather than raw terminal activity, so it waits for the agent to
   actually be done — and never types into an agent that is waiting on your
-  answer. A pane holding queued commands shows a breathing count on its
-  actions button; the menu's Command Queue row opens the panel to review,
-  edit, or drop entries. Queues are
+  answer. A pane holding queued commands shows a queue button under its
+  actions button; click it to review, edit, or drop entries. Queues are
   saved with the pane, so a scheduled or repeating command survives a
   relaunch — a repeat that came due while codans was closed fires once, not
   once per missed period. Closing a pane or tab that still holds queued
