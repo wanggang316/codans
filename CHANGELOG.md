@@ -11,12 +11,15 @@ and the project does not yet follow semantic versioning — every release until
 ### Added
 
 - **Command queue — park work on a pane and let it run itself.** ⌘⌥L opens a
-  queue panel for the focused pane. Type a command and pick when it goes:
-  right now, after the pane finishes what it is doing, or at a wall-clock
-  time with an optional repeat. Queue as many as you like; they drain one at
-  a time so a three-deep queue doesn't collapse into a single prompt. For a
-  pane running a coding agent, "after the current task" follows the agent's
-  own state rather than raw terminal activity, so it waits for the agent to
+  queue panel for the focused pane, laid out like a chat box: the queue on
+  top, a multi-line composer under it. Type a command or a prompt and pick
+  when it goes: right now, after the pane finishes what it is doing, or at
+  a wall-clock time with an optional repeat. A multi-line prompt is
+  delivered as one paste, so an agent receives it whole instead of one line
+  at a time. Queue as many as you like; they drain one at a time so a
+  three-deep queue doesn't collapse into a single prompt. For a pane
+  running a coding agent, "after the current task" follows the agent's own
+  state rather than raw terminal activity, so it waits for the agent to
   actually be done — and never types into an agent that is waiting on your
   answer. A pane holding queued commands shows a breathing badge beside its
   actions button; click it to review, edit, or drop entries. Queues are

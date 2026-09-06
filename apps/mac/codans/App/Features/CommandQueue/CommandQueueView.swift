@@ -2,39 +2,56 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Sheet-hosted editor for a Pane's Command Queue (⌘⌥L, or a click on the
-/// pane's queue badge).
+/// Sheet-hosted editor for a Pane's Command Queue (⌘⌥L, or the pane's
+/// actions menu).
 ///
-/// Presented with `.sheet(item:)` like the app's other dialogs rather than as
-/// a floating overlay: it inherits the standard container metrics
-/// (`padding(24)`, fixed width, headline + caption header, trailing
-/// Cancel / default-action footer) from `TabRenameSheetView` and friends, and
-/// a real AppKit presentation lets the controls be native — a segmented
-/// `Picker` layered over the terminal's Metal surface in a `ZStack` was what
-/// forced the hand-drawn selector this replaces.
+/// Laid out like a chat box: the queue reads top-down as the history, the
+/// multi-line composer sits under it, and the bottom bar pairs the send
+/// timing on the left with the send button on the right. Return sends and
+/// ⇧Return breaks a line. The composer is multi-line because a prompt to an
+/// agent often is, and `TerminalClient.sendCommand` delivers the body as one
+/// paste, so those line breaks arrive as line breaks rather than as
+/// submissions.
+///
+/// Presented with `.sheet(item:)` like the app's other dialogs, sharing their
+/// container metrics (`padding(24)`, fixed width, headline + caption header,
+/// Cancel on `.cancelAction`).
 ///
 /// The queued list is read from the live catalog rather than from reducer
 /// state: an entry that drains while the sheet is open should vanish from the
 /// list on the same frame it is typed into the terminal.
 struct CommandQueueView: View {
   @Bindable var store: StoreOf<CommandQueueFeature>
-  /// Sent by Cancel. Dismissal is "parent nils the `@Presents` slot".
+  /// Sent by Cancel and Escape. Dismissal is "parent nils the `@Presents`
+  /// slot".
   let onDismiss: () -> Void
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @FocusState private var draftFocused: Bool
 
+  private static let width: CGFloat = 480
+  private static let boxCornerRadius: CGFloat = 6
+  /// The list keeps a floor so an empty queue still reads as the place
+  /// entries will appear, and the composer does not jump when the first one
+  /// lands.
+  private static let queueMinHeight: CGFloat = 112
+  private static let queueMaxHeight: CGFloat = 200
+  /// About five lines of the composer's monospaced 12pt.
+  private static let composerHeight: CGFloat = 92
+  private static let composerFont = Font.system(size: 12, design: .monospaced)
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
+    VStack(alignment: .leading, spacing: 12) {
       header
+      queuedList
       composer
-      if !entries.isEmpty {
-        queuedSection
+      if store.mode == .scheduled {
+        scheduleControls
       }
-      footer
+      bottomBar
     }
     .padding(24)
-    .frame(width: 460)
+    .frame(width: Self.width)
     .onAppear { draftFocused = true }
   }
 
@@ -59,35 +76,134 @@ struct CommandQueueView: View {
     return "Queued on \(paneLabel)."
   }
 
+  // MARK: - Queued list
+
+  private var queuedList: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 6) {
+        Text("Queued")
+          .font(.subheadline.weight(.medium))
+        if !entries.isEmpty {
+          Text("\(entries.count)")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
+        Spacer()
+        Button("Clear All") { store.send(.clearAllTapped) }
+          .buttonStyle(.link)
+          .font(.caption)
+          .disabled(entries.isEmpty)
+          // Kept in the row (hidden, not removed) so the header's height does
+          // not change with the first entry.
+          .opacity(entries.isEmpty ? 0 : 1)
+      }
+
+      ScrollViewReader { proxy in
+        ScrollView {
+          if entries.isEmpty {
+            Text("Nothing queued yet")
+              .font(.caption)
+              .foregroundStyle(.tertiary)
+              .frame(maxWidth: .infinity, minHeight: Self.queueMinHeight)
+          } else {
+            VStack(spacing: 0) {
+              ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                if index > 0 { Divider() }
+                row(entry)
+                  .id(entry.id)
+              }
+            }
+          }
+        }
+        .scrollIndicators(.automatic)
+        .frame(minHeight: Self.queueMinHeight, maxHeight: Self.queueMaxHeight)
+        // Newest at the bottom, like a transcript: follow it as entries land.
+        .onChange(of: entries.count) { _, _ in
+          guard let last = entries.last else { return }
+          withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+        }
+      }
+      .background(box)
+      .overlay(boxEdge(focused: false))
+    }
+  }
+
+  private func row(_ entry: QueuedCommand) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Image(systemName: entry.timing.fireDate == nil ? "arrow.turn.down.right" : "clock")
+        .font(.caption)
+        .frame(width: 14)
+        .padding(.top, 2)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(entry.text)
+          .font(Self.composerFont)
+          .lineLimit(3)
+          .truncationMode(.tail)
+        Text(CommandQueueBadgeStyle.description(of: entry.timing))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 8)
+      Button {
+        store.send(.removeTapped(entry.id))
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+          .foregroundStyle(.secondary)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Remove queued command")
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 6)
+  }
+
   // MARK: - Composer
 
   private var composer: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      // Single-line by design: one entry is one command and one Return. A
-      // multi-line draft would put embedded newlines into the delivered
-      // text, and each of those submits on its own — the first line would
-      // fire and the rest would arrive as separate prompts.
-      TextField("Command to send…", text: $store.draft.sending(\.draftChanged))
-        .textFieldStyle(.roundedBorder)
-        .focused($draftFocused)
-
-      Picker("", selection: $store.mode.sending(\.modeChanged)) {
-        ForEach(CommandQueueFeature.State.Mode.allCases, id: \.self) { mode in
-          Text(mode.title).tag(mode)
+    TextEditor(text: $store.draft.sending(\.draftChanged))
+      .font(Self.composerFont)
+      .scrollContentBackground(.hidden)
+      .focusEffectDisabled()
+      .padding(.horizontal, 4)
+      .padding(.vertical, 6)
+      .frame(height: Self.composerHeight)
+      .background(box)
+      .overlay(boxEdge(focused: draftFocused))
+      .overlay(alignment: .topLeading) {
+        if store.draft.isEmpty {
+          // `TextEditor` has no placeholder of its own; this sits where the
+          // first line of text will, matching the text container's inset.
+          Text("Command or prompt…")
+            .font(Self.composerFont)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .allowsHitTesting(false)
         }
       }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-
-      if store.mode == .scheduled {
-        scheduleControls
-          .padding(.top, 2)
+      .focused($draftFocused)
+      .onKeyPress(.return, phases: .down) { press in
+        // Return sends; ⇧Return and ⌥Return break a line — the chat
+        // convention the layout borrows. An empty draft swallows Return
+        // rather than opening with a blank line.
+        if press.modifiers.contains(.shift) || press.modifiers.contains(.option) {
+          return .ignored
+        }
+        if store.canSubmit {
+          store.send(.submitted)
+        }
+        return .handled
       }
-
-      Text(modeHint)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
+      .onKeyPress(.escape) {
+        // NSTextView binds Escape to word completion; claim it so the sheet
+        // closes like the app's other dialogs do.
+        onDismiss()
+        return .handled
+      }
+      .accessibilityLabel("Command")
   }
 
   private var scheduleControls: some View {
@@ -133,6 +249,47 @@ struct CommandQueueView: View {
     }
   }
 
+  // MARK: - Bottom bar
+
+  /// Send timing on the left, actions on the right. Cancel closes the sheet
+  /// and discards the draft; it does not undo entries already added, which
+  /// land in the catalog the moment they are sent. The send button stays put
+  /// rather than dismissing, because queueing several commands in one
+  /// sitting is the common case.
+  private var bottomBar: some View {
+    HStack(spacing: 10) {
+      Picker("Send", selection: $store.mode.sending(\.modeChanged)) {
+        ForEach(CommandQueueFeature.State.Mode.allCases, id: \.self) { mode in
+          Text(mode.title).tag(mode)
+        }
+      }
+      .pickerStyle(.menu)
+      .labelsHidden()
+      .fixedSize()
+      .help(modeHint)
+      Text("⇧↩ new line")
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+      Spacer()
+      Button("Cancel", role: .cancel) { onDismiss() }
+        .keyboardShortcut(.cancelAction)
+      Button(sendTitle) { store.send(.submitted) }
+        // ⌘↩ as well as the composer's plain Return, so sending works from
+        // the schedule fields too.
+        .keyboardShortcut(.return, modifiers: .command)
+        .buttonStyle(.borderedProminent)
+        .disabled(!store.canSubmit)
+    }
+  }
+
+  private var sendTitle: String {
+    switch store.mode {
+    case .now: return "Send"
+    case .afterCurrentTask: return "Queue"
+    case .scheduled: return "Schedule"
+    }
+  }
+
   private var modeHint: String {
     switch store.mode {
     case .now:
@@ -146,92 +303,22 @@ struct CommandQueueView: View {
     }
   }
 
-  // MARK: - Queued list
+  // MARK: - Chrome
 
-  private var queuedSection: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 6) {
-        Text("Queued")
-          .font(.subheadline.weight(.medium))
-        Text("\(entries.count)")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .monospacedDigit()
-        Spacer()
-        Button("Clear All") { store.send(.clearAllTapped) }
-          .buttonStyle(.link)
-          .font(.caption)
-      }
-
-      ScrollView {
-        VStack(spacing: 0) {
-          ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-            if index > 0 { Divider() }
-            row(entry)
-          }
-        }
-      }
-      .scrollIndicators(.automatic)
-      .frame(maxHeight: 150)
-      .background(
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(Color(nsColor: .textBackgroundColor))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-      )
-    }
+  /// The list and the composer share one box treatment so the sheet reads
+  /// as two panes of the same surface, the way a transcript and its input
+  /// do.
+  private var box: some View {
+    RoundedRectangle(cornerRadius: Self.boxCornerRadius, style: .continuous)
+      .fill(Color(nsColor: .textBackgroundColor))
   }
 
-  private func row(_ entry: QueuedCommand) -> some View {
-    HStack(spacing: 8) {
-      Image(systemName: entry.timing.fireDate == nil ? "arrow.turn.down.right" : "clock")
-        .font(.caption)
-        .frame(width: 14)
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(entry.text)
-          .font(.system(size: 12, design: .monospaced))
-          .lineLimit(1)
-          .truncationMode(.middle)
-        Text(CommandQueueBadgeStyle.description(of: entry.timing))
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      Spacer(minLength: 8)
-      Button {
-        store.send(.removeTapped(entry.id))
-      } label: {
-        Image(systemName: "xmark.circle.fill")
-          .foregroundStyle(.secondary)
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Remove queued command")
-    }
-    .padding(.horizontal, 8)
-    .padding(.vertical, 6)
-  }
-
-  // MARK: - Footer
-
-  /// Cancel closes the sheet and discards the draft — it does not undo
-  /// entries already added, which land in the catalog the moment the default
-  /// button is pressed. The default button stays put rather than dismissing,
-  /// because queueing several commands in one sitting is the common case.
-  private var footer: some View {
-    HStack {
-      Spacer()
-      Button("Cancel", role: .cancel) { onDismiss() }
-        .keyboardShortcut(.cancelAction)
-      Button(store.mode == .now ? "Send" : "Add to Queue") {
-        store.send(.submitted)
-      }
-      .keyboardShortcut(.defaultAction)
-      .buttonStyle(.borderedProminent)
-      .disabled(!store.canSubmit)
-    }
+  private func boxEdge(focused: Bool) -> some View {
+    RoundedRectangle(cornerRadius: Self.boxCornerRadius, style: .continuous)
+      .stroke(
+        focused ? Color.accentColor : Color(nsColor: .separatorColor),
+        lineWidth: 1
+      )
   }
 
   // MARK: - Catalog reads
