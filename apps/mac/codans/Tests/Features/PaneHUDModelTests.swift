@@ -12,12 +12,14 @@ struct PaneHUDModelTests {
   private static func catalog(
     remoteHost: RemoteHost? = nil,
     agentKind: AgentKind? = nil,
+    commandQueue: [QueuedCommand] = [],
     paneID: PaneID
   ) -> Catalog {
     let pane = Pane(
       id: paneID,
       workingDirectory: "/Users/tester/dev/app",
-      agentKind: agentKind
+      agentKind: agentKind,
+      commandQueue: commandQueue
     )
     let tab = Tab(splitTree: SplitTree(leaf: paneID), panes: [pane])
     let worktree = Worktree(
@@ -45,6 +47,32 @@ struct PaneHUDModelTests {
     )
     #expect(model?.agent == .claudeCode)
     #expect(model?.canHandOff == true)
+  }
+
+  @Test
+  func countsThePanesQueuedCommands() {
+    let paneID = PaneID()
+    let queue = [
+      QueuedCommand(text: "make test", timing: .afterCurrentTask),
+      QueuedCommand(text: "git status", timing: .scheduled(at: .distantFuture, repeatEvery: nil)),
+    ]
+    let model = PaneHUDModel.resolve(
+      paneID: paneID,
+      in: Self.catalog(commandQueue: queue, paneID: paneID),
+      agent: nil
+    )
+    #expect(model?.queuedCommandCount == 2)
+  }
+
+  @Test
+  func reportsAnEmptyQueueAsZero() {
+    let paneID = PaneID()
+    let model = PaneHUDModel.resolve(
+      paneID: paneID,
+      in: Self.catalog(paneID: paneID),
+      agent: nil
+    )
+    #expect(model?.queuedCommandCount == 0)
   }
 
   @Test

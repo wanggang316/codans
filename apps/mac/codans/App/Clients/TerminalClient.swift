@@ -8,6 +8,21 @@ import CodansCore
 /// `.withDependencies`.
 nonisolated struct TerminalClient: Sendable {
   var sendInput: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
+
+  /// Deliver `text` to the pane as one paste, then submit it with a real
+  /// Return keypress after a short gap.
+  ///
+  /// Both halves matter for coding-agent panes. `sendInput` is the script
+  /// path — it presses Return after every line, which is what makes a run
+  /// script execute in a shell — so a multi-line prompt sent through it would
+  /// arrive as several submissions. Here the body goes through the paste
+  /// path whole and lands in an agent's composer with its line breaks
+  /// intact. The gap is load-bearing too: a Return that reaches the agent in
+  /// the same read as the text is taken as part of the paste and never
+  /// submits, which is how `text + "\n"` used to leave a newline sitting in
+  /// the composer. Anything aimed at a pane that may be running an agent
+  /// must go through here.
+  var sendCommand: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
   /// Interrupt the pane's foreground process (Ctrl-C → SIGINT). Goes through
   /// the key-event path rather than `sendInput`, whose text path filters
   /// control bytes. No-op when the pane has no live surface.
@@ -46,6 +61,11 @@ nonisolated struct TerminalClient: Sendable {
     case worktreeNotFound(WorktreeID)
     case paneNotFound(PaneID)
   }
+
+  /// Gap between the typed text and the Return that submits it. Long enough
+  /// to clear a TUI's read-coalescing / paste-detection window, short enough
+  /// that a user watching the pane sees one action.
+  static let submitDelay: Duration = .milliseconds(150)
 }
 
 // MARK: - Live bridge
@@ -56,6 +76,17 @@ extension TerminalClient {
     TerminalClient(
       sendInput: { paneID, text in
         engine.ghosttyRuntime?.surface(for: paneID)?.sendInput(text)
+      },
+      sendCommand: { paneID, text in
+        guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return }
+        surface.sendText(text)
+        Task { @MainActor in
+          try? await Task.sleep(for: TerminalClient.submitDelay)
+          // Re-resolve rather than capturing `surface`: the pane can be
+          // closed inside the gap, and submitting into a dead surface is
+          // a no-op we'd rather express as "the pane is gone".
+          engine.ghosttyRuntime?.surface(for: paneID)?.sendNamedKey(.enter)
+        }
       },
       interrupt: { paneID in
         engine.ghosttyRuntime?.surface(for: paneID)?.sendInterrupt()
@@ -90,6 +121,7 @@ extension TerminalClient: DependencyKey {
     sendInput: { _, _ in
       fatalError("TerminalClient.liveValue not configured; wire via .withDependencies at app startup")
     },
+    sendCommand: { _, _ in fatalError("TerminalClient.liveValue not configured") },
     interrupt: { _ in fatalError("TerminalClient.liveValue not configured") },
     setFocus: { _, _ in fatalError("TerminalClient.liveValue not configured") },
     retryPane: { _ in fatalError("TerminalClient.liveValue not configured") },
@@ -101,6 +133,7 @@ extension TerminalClient: DependencyKey {
 
   static let testValue: TerminalClient = TerminalClient(
     sendInput: unimplemented("TerminalClient.sendInput"),
+    sendCommand: unimplemented("TerminalClient.sendCommand"),
     interrupt: unimplemented("TerminalClient.interrupt"),
     setFocus: unimplemented("TerminalClient.setFocus"),
     retryPane: unimplemented("TerminalClient.retryPane", placeholder: false),

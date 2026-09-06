@@ -93,6 +93,12 @@ struct RootFeature {
     /// Opened by `.handoffRequested` from a pane's info menu, the palette,
     /// or an AgentState row; cleared on the child's dismiss.
     @Presents var handoff: HandoffFeature.State?
+    /// Command Queue panel (⌘⌥L, or a click on a pane's queue badge).
+    /// `nil` = hidden. Scoped to exactly one pane for the presentation's
+    /// lifetime; re-opening on a different pane replaces the state rather
+    /// than re-targeting it, so a half-typed draft can never land in a pane
+    /// the user did not mean.
+    @Presents var commandQueue: CommandQueueFeature.State?
 
     /// Whether the Hierarchy sidebar column is visible. Bound into
     /// `NavigationSplitView`'s `columnVisibility` from `ContentView` so the
@@ -374,6 +380,13 @@ struct RootFeature {
     /// A hand-off ordered from the panel finished; the panel is long gone.
     case handoffFinished(HandoffCompletion, targetTitle: String)
     case handoffFailed(message: String)
+    /// Toggle the Command Queue panel. `nil` resolves the target pane the
+    /// same way `commandPaletteToggle` does (the active tab's last-focused
+    /// leaf), which is what the ⌘⌥L menu binding sends; the pane badge sends
+    /// its own id. Toggling while the panel is open on a *different* pane
+    /// re-targets rather than closing — the user asked for that pane.
+    case commandQueueToggle(PaneID?)
+    case commandQueue(PresentationAction<CommandQueueFeature.Action>)
     /// Tag CRUD sheet presentation. `tagManagerSheetShown` kicks the sheet
     /// visible, the `PresentationAction` carries child actions and dismiss.
     case tagManagerSheet(PresentationAction<TagManagerFeature.Action>)
@@ -1738,6 +1751,26 @@ struct RootFeature {
       case .commandPalette:
         return .none
 
+      case .commandQueueToggle(let sourcePaneID):
+        guard let paneID = sourcePaneID ?? focusedPaneID(state: state) else {
+          // No pane to attach a queue to (empty worktree, no tab). Silently
+          // no-op rather than opening a panel that can't commit anything.
+          return .none
+        }
+        if state.commandQueue?.paneID == paneID {
+          state.commandQueue = nil
+        } else {
+          state.commandQueue = CommandQueueFeature.State(paneID: paneID)
+        }
+        return .none
+
+      case .commandQueue(.dismiss):
+        state.commandQueue = nil
+        return .none
+
+      case .commandQueue:
+        return .none
+
       case .diffInspectorToggledForCurrentWorktree:
         guard
           let projectID = state.selection.projectID,
@@ -2227,6 +2260,9 @@ struct RootFeature {
     .ifLet(\.$tagManagerSheet, action: \.tagManagerSheet) {
       TagManagerFeature()
     }
+    .ifLet(\.$commandQueue, action: \.commandQueue) {
+      CommandQueueFeature()
+    }
   }
 
   /// Reveal the just-selected worktree in the sidebar: expand its parent
@@ -2237,6 +2273,24 @@ struct RootFeature {
   /// that's scrolled off-screen or hidden under a collapsed project always
   /// comes into view. The sidebar reads the scroll target from the live
   /// catalog, so callers must have already committed the worktree selection.
+  /// The pane a pane-scoped command with no explicit source should target:
+  /// the active tab's last-focused leaf, falling back to that tab's first
+  /// leaf. Reuses the Command Palette's resolver so ⌘⌥L and a menu-triggered
+  /// ⌘P agree on what "the current pane" means.
+  private func focusedPaneID(state: State) -> PaneID? {
+    let catalog = hierarchyClient.snapshot()
+    let activeTabID = catalog
+      .projects.first(where: { $0.id == state.selection.projectID })?
+      .worktrees.first(where: { $0.id == state.selection.worktreeID })?
+      .selectedTabID
+    let lastFocused = activeTabID.flatMap { hierarchyClient.lastFocusedPane($0) }
+    return CommandPaletteItems.resolveFocusedPaneID(
+      selection: state.selection,
+      catalog: catalog,
+      lastFocusedPane: { _ in lastFocused }
+    )
+  }
+
   private func revealWorktreeInSidebar(projectID: ProjectID, state: inout State) {
     hierarchyClient.setProjectExpanded(projectID, true)
     state.sidebarVisible = true

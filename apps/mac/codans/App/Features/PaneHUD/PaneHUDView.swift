@@ -3,9 +3,10 @@ import SwiftUI
 
 /// Per-pane actions menu, anchored to the pane's top-right corner.
 ///
-/// Collapsed it is a single button. Expanded it lists the actions that are a
-/// property of *this* pane — handing its agent's task off to another agent
-/// is the first — so the pane is where they live. It shows no workspace
+/// Collapsed it is a single button, with a queue button beneath it while the
+/// pane holds queued commands. Expanded it lists the actions that are a property
+/// of *this* pane — handing its agent's task off to another agent, opening
+/// its command queue — so the pane is where they live. It shows no workspace
 /// facts on purpose: the worktree's path, branch and uncommitted counts are
 /// already in the header and sidebar, and the agent in the Agents view, so
 /// repeating them here only duplicated what the eye had just passed.
@@ -22,8 +23,16 @@ struct PaneHUDView: View {
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
   @Environment(\.paneHUDActions) private var actions
 
-  @State private var isExpanded = false
+  @State private var isExpanded: Bool
   @State private var isButtonHovered = false
+  @State private var isQueueButtonHovered = false
+
+  /// `expanded` seeds the card's state. The app always starts collapsed;
+  /// the seed exists so a rendering test can lay out the open card.
+  init(paneID: PaneID, expanded: Bool = false) {
+    self.paneID = paneID
+    _isExpanded = State(initialValue: expanded)
+  }
 
   private static let cardCornerRadius: CGFloat = 10
   /// Definite width for the expanded card. The action rows are deliberately
@@ -38,7 +47,13 @@ struct PaneHUDView: View {
   private static let expansion = Animation.snappy(duration: 0.24, extraBounce: 0.02)
   /// Inset from the container's top-right corner to the button, applied in
   /// both states so the button is the fixed point the card grows away from.
-  private static let chromeInset: CGFloat = 10
+  private static let chromeInset: CGFloat = 6
+  /// Leading inset for the card's rows. The button's glyph sits 8.5pt inside
+  /// its 30pt box and a row's 11pt glyph 1.5pt inside its 14pt box, so this
+  /// is what puts the rows as far from the card's left edge as the glyph is
+  /// from its right — measured, not eyeballed: without it the left inset is
+  /// 7pt shorter than the right.
+  private static let rowLeadingInset: CGFloat = 7
 
   var body: some View {
     if let model = resolveModel() {
@@ -48,8 +63,8 @@ struct PaneHUDView: View {
         // half also has to clear `PaneDragHandle`, a 10pt full-width strip
         // `LeafView` layers over the same surface and above this overlay —
         // under it, hovering the button's top edge would arm a pane drag.
-        .padding(.top, 4)
-        .padding(.trailing, 4)
+        .padding(.top, 8)
+        .padding(.trailing, 8)
     }
   }
 
@@ -81,7 +96,17 @@ struct PaneHUDView: View {
             .scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity)
           )
       }
-      menuButton
+      // The queue button stacks under the menu button rather than beside it,
+      // so the corner stays one column of same-sized controls. Collapsed
+      // only: expanded, the card's Command Queue row is the same action, and
+      // the button would sit on top of the card beside it.
+      VStack(spacing: 6) {
+        menuButton(model)
+        if model.queuedCommandCount > 0, !isExpanded {
+          queueButton(model)
+            .transition(.opacity)
+        }
+      }
     }
     // Constant in both states on purpose. The button is a layout sibling of
     // the card body, so an equal inset from the container's top-right corner
@@ -124,7 +149,7 @@ struct PaneHUDView: View {
       )
   }
 
-  private var menuButton: some View {
+  private func menuButton(_ model: PaneHUDModel) -> some View {
     Button {
       setExpanded(!isExpanded)
     } label: {
@@ -152,12 +177,45 @@ struct PaneHUDView: View {
     .accessibilityLabel(isExpanded ? "Hide pane actions" : "Show pane actions")
   }
 
+  /// Opens the Command Queue sheet directly. Same box as the menu button so
+  /// the two read as one stack; static, because a parked queue is a state to
+  /// glance at rather than an alarm.
+  private func queueButton(_ model: PaneHUDModel) -> some View {
+    Button {
+      setExpanded(false)
+      actions.commandQueue(paneID)
+    } label: {
+      Image(systemName: CommandQueueStyle.symbol)
+        .font(.system(size: 13, weight: .regular))
+        .foregroundStyle(isQueueButtonHovered ? Color.primary : Color.secondary)
+        .frame(width: Self.buttonSize, height: Self.buttonSize)
+        .background {
+          chrome(cornerRadius: Self.buttonCornerRadius)
+            .opacity(isExpanded ? 0 : 1)
+            .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onHover { isQueueButtonHovered = $0 }
+    .help(Self.queuedPhrase(model))
+    .accessibilityIdentifier("pane_hud.queue")
+    .accessibilityLabel("Command queue, \(Self.queuedPhrase(model))")
+  }
+
+  private static func queuedPhrase(_ model: PaneHUDModel) -> String {
+    let count = model.queuedCommandCount
+    return count == 1 ? "1 queued command" : "\(count) queued commands"
+  }
+
   // MARK: - Expanded body
 
   private func expandedBody(_ model: PaneHUDModel) -> some View {
     VStack(alignment: .leading, spacing: 0) {
       handOffButton(model)
+      commandQueueButton(model)
     }
+    .padding(.leading, Self.rowLeadingInset)
     .frame(width: Self.cardWidth, alignment: .leading)
   }
 
@@ -187,5 +245,32 @@ struct PaneHUDView: View {
     .disabled(!model.canHandOff)
     .help(model.handOffBlockedReason ?? "Hand this task to another agent")
     .accessibilityIdentifier("pane_hud.hand_off")
+  }
+
+  private func commandQueueButton(_ model: PaneHUDModel) -> some View {
+    Button {
+      setExpanded(false)
+      actions.commandQueue(paneID)
+    } label: {
+      HStack(spacing: 7) {
+        Image(systemName: CommandQueueStyle.symbol)
+          .font(.system(size: 11))
+          .frame(width: 14, height: 14, alignment: .center)
+          .accessibilityHidden(true)
+        Text("Command Queue…")
+        Spacer(minLength: 0)
+        if model.queuedCommandCount > 0 {
+          Text("\(model.queuedCommandCount)")
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
+      }
+      .font(.system(size: 12))
+      .frame(minHeight: Self.buttonSize)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .help("Queue commands to send to this pane")
+    .accessibilityIdentifier("pane_hud.command_queue")
   }
 }

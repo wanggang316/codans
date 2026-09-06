@@ -531,6 +531,11 @@ final class AppState {
   /// bind/unbind) wired in `startNotificationObservers`. Held long-lived
   /// so SwiftUI consumers outlive any scene reattach.
   @ObservationIgnored private(set) var agentStateStore: AgentStateStore?
+  /// Drains every pane's `Pane.commandQueue`. Constructed after the agent
+  /// registry exists (its readiness predicate consults it) and held for the
+  /// app lifetime — the poll loop is the only thing that fires a deferred
+  /// command, so dropping it would silently strand every queue.
+  @ObservationIgnored private(set) var commandQueueRunner: CommandQueueRunner?
   /// Long-running focus observer for AgentStateStore. Re-arms on every
   /// catalog mutation that could change the globally-focused pane and
   /// forwards new ids to `registry.onPaneFocused`. Same re-arming
@@ -760,6 +765,7 @@ final class AppState {
         }
       }
     }
+    startCommandQueueRunner(manager: manager, engine: engine)
     // SwiftUI views (e.g. `ProjectGeneralSettingsView`) read `@Dependency(SettingsWriter.self)`
     // directly; that resolution bypasses the per-store `withDependencies` overrides below and
     // would otherwise hit the `liveValue` `fatalError` placeholders. Install the live
@@ -1914,6 +1920,37 @@ final class AppState {
       )
     }
     return binder
+  }
+
+  /// Build and start the Command Queue drain loop.
+  ///
+  /// Readiness routes through `AgentStateStore` first and falls back to the
+  /// raw terminal-busy union only for panes with no bound agent — see
+  /// `CommandQueueRunner.isReady` for why the busy sets alone are the wrong
+  /// signal for an agent pane.
+  private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
+    guard commandQueueRunner == nil else { return }
+    // Delivery goes through `sendCommand`, not `sendInput`: a queued command
+    // aimed at an agent pane needs its Return as a separate keypress.
+    let terminal = TerminalClient.live(engine: engine)
+    let runner = CommandQueueRunner(
+      queuedPanes: { [weak manager] in manager?.panesWithQueuedCommands() ?? [] },
+      setQueue: { [weak manager] paneID, queue in
+        manager?.setCommandQueue(queue, for: paneID)
+      },
+      isPaneReady: { [weak manager, weak registry = self.agentStateStore] paneID in
+        CommandQueueRunner.isReady(
+          agentState: registry?.entries[paneID]?.state,
+          terminalBusy: manager?.paneIsBusy(paneID) ?? false
+        )
+      },
+      hasLiveSurface: { [weak engine] paneID in
+        engine?.ghosttyRuntime?.surface(for: paneID) != nil
+      },
+      send: { paneID, text in terminal.sendCommand(paneID, text) }
+    )
+    self.commandQueueRunner = runner
+    runner.start()
   }
 
   /// Drain-loop branch that feeds terminal events into `AgentStateStore`.

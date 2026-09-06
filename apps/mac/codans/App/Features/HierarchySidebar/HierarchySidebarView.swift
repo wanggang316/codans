@@ -402,9 +402,7 @@ struct HierarchySidebarView: View {
         store.send(.worktreeRemoveCancelled)
       }
     } message: {
-      Text(
-        "Closes all panes and deletes the Worktree directory, including any uncommitted changes. This cannot be undone."
-      )
+      Text(worktreeRemovalMessage)
     }
     .confirmationDialog(
       projectRemovalTitle,
@@ -421,7 +419,7 @@ struct HierarchySidebarView: View {
         store.send(.projectRemoveCancelled)
       }
     } message: {
-      Text("Removes the Project and closes all its panes. Files on disk are not affected.")
+      Text(projectRemovalMessage)
     }
     // Archived Worktrees sheet (opened from Project ⋯ menu).
     .sheet(
@@ -1514,6 +1512,35 @@ struct HierarchySidebarView: View {
       return "Remove Project “\(name)”?"
     }
     return "Remove Project?"
+  }
+
+  /// The removal prompts already stand between the user and the delete, so
+  /// a queue is mentioned there instead of in a second dialog.
+  private var worktreeRemovalMessage: String {
+    let base =
+      "Closes all panes and deletes the Worktree directory, including any uncommitted changes. "
+      + "This cannot be undone."
+    guard
+      let pending = store.pendingWorktreeRemoval,
+      let count = hierarchyManager.catalog.projects
+        .first(where: { $0.id == pending.projectID })?
+        .worktrees.first(where: { $0.id == pending.worktreeID })?
+        .queuedCommandCount,
+      count > 0
+    else { return base }
+    return base + " " + QueuedCommandDiscard.discardNotice(count)
+  }
+
+  private var projectRemovalMessage: String {
+    let base = "Removes the Project and closes all its panes. Files on disk are not affected."
+    guard
+      let pending = store.pendingProjectRemoval,
+      let count = hierarchyManager.catalog.projects
+        .first(where: { $0.id == pending.projectID })?
+        .queuedCommandCount,
+      count > 0
+    else { return base }
+    return base + " " + QueuedCommandDiscard.discardNotice(count)
   }
 
   // MARK: - New badge pill
