@@ -1,3 +1,4 @@
+import CodansCore
 import Darwin
 import Foundation
 
@@ -127,8 +128,12 @@ public struct SocketConnectionFailure: Error, Equatable, Sendable {
   public var hint: String? {
     switch kind {
     case .socketMissing, .appNotRunning:
-      return "start it with `codans launch`"
+      return "start it with `\(CLIInvocation.commandName) launch`"
     case .permissionDenied:
+      if Self.isOwnedByCurrentUser(path) {
+        return "the socket is yours, so a sandbox is denying this process Unix sockets (Codex runs "
+          + "commands in one); rerun outside the sandbox, or approve that when the agent asks"
+      }
       return "the socket belongs to another user; check `ls -l \(path)` or point CODANS_SOCKET_PATH at your own"
     case .notASocket:
       return "remove that file, or point CODANS_SOCKET_PATH at the real socket"
@@ -137,12 +142,22 @@ public struct SocketConnectionFailure: Error, Equatable, Sendable {
     case .serverBusy:
       return "retry in a moment"
     case .timedOut:
-      return "the app may be wedged; check `codans status`"
+      return "the app may be wedged; check `\(CLIInvocation.commandName) status`"
     case .connectionLost:
-      return "the app may have quit or crashed; check `codans doctor`"
+      return "the app may have quit or crashed; check `\(CLIInvocation.commandName) doctor`"
     case .socketCreateFailed, .unknown:
       return nil
     }
+  }
+
+  /// EACCES on connect has two very different causes: the socket is another
+  /// uid's, or it is ours and the *process* is sandboxed away from Unix
+  /// sockets — what an agent's sandboxed shell hits when it runs the CLI.
+  /// `stat(2)` on the path tells them apart.
+  static func isOwnedByCurrentUser(_ path: String) -> Bool {
+    var info = stat()
+    guard stat(path, &info) == 0 else { return false }
+    return info.st_uid == getuid()
   }
 
   private var errnoSuffix: String {

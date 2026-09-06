@@ -1,3 +1,4 @@
+import CodansCore
 import Darwin
 import Foundation
 import Testing
@@ -41,7 +42,7 @@ struct SocketConnectionFailureTests {
     let missing = SocketConnectionFailure.connect(errno: ENOENT, path: "/tmp/codans-9.sock")
     #expect(missing.message.contains("/tmp/codans-9.sock"))
     #expect(missing.message.contains("not running"))
-    #expect(missing.hint == "start it with `codans launch`")
+    #expect(missing.hint == "start it with `\(CLIInvocation.commandName) launch`")
 
     let denied = SocketConnectionFailure.connect(errno: EACCES, path: "/tmp/codans-9.sock")
     #expect(denied.message.contains("permission denied"))
@@ -153,5 +154,20 @@ struct SocketProbeTests {
     #expect(probe.failure?.kind == .pathTooLong)
     // Classified before any syscall, so no errno to report.
     #expect(probe.failure?.errnoValue == nil)
+  }
+
+  /// EACCES on a socket we own is a sandbox denying the process, not another
+  /// user's socket — the hint has to send the agent to its approval prompt.
+  @Test
+  func permissionDeniedHintTellsASandboxFromAnotherUsersSocket() throws {
+    let mine = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-owned-\(UUID().uuidString).sock").path
+    try Data().write(to: URL(fileURLWithPath: mine))
+    defer { try? FileManager.default.removeItem(atPath: mine) }
+    let sandboxed = SocketConnectionFailure.connect(errno: EACCES, path: mine)
+    #expect(sandboxed.hint?.contains("sandbox") == true)
+
+    let foreign = SocketConnectionFailure.connect(errno: EACCES, path: "/nonexistent/other.sock")
+    #expect(foreign.hint?.contains("another user") == true)
   }
 }

@@ -47,8 +47,14 @@ build-cli: generate
 # so codans-cli/Resources/completions/{codans.zsh,codans.bash,codans.fish}
 # (shipped inside the .app bundle) stay in sync. CI can `git diff --exit-code`
 # after this target to fail loudly when contributors forget.
-regen-completions: build-cli
-	@CODANS=$$(xcodebuild -workspace codans.xcworkspace -scheme codans-cli -configuration Debug -showBuildSettings 2>/dev/null | awk '$$1=="BUILT_PRODUCTS_DIR"{d=$$3} END{print d "/codans"}') && \
+#
+# Built in the Release configuration on purpose: the CLI answers to its build
+# channel's name, and a Debug build would generate completions for
+# `codans-dev` instead of the shipped `codans`. Signing is skipped so the
+# build needs no Developer ID.
+regen-completions: generate
+	@xcodebuild -workspace codans.xcworkspace -scheme codans-cli -configuration Release CODE_SIGNING_ALLOWED=NO build >/dev/null && \
+	  CODANS=$$(xcodebuild -workspace codans.xcworkspace -scheme codans-cli -configuration Release -showBuildSettings 2>/dev/null | awk '$$1=="BUILT_PRODUCTS_DIR"{d=$$3} END{print d "/codans"}') && \
 	  cd codans-cli/Resources/completions && \
 	  "$$CODANS" --generate-completion-script zsh  > codans.zsh  && \
 	  "$$CODANS" --generate-completion-script bash > codans.bash && \

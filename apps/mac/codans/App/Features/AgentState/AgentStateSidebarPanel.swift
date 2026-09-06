@@ -48,6 +48,10 @@ struct AgentStateSidebarPanel: View {
   /// button — the host (sidebar) still uses this to collapse the panel
   /// from the keyboard / programmatic paths if it ever needs to.
   let onClose: () -> Void
+  /// Row context-menu "Hand Off…" — routes to
+  /// `RootFeature.agentState(.handOffTapped)`. Defaulted so previews and
+  /// tests that don't wire it still render rows.
+  var onHandOffRow: (PaneID) -> Void = { _ in }
 
   /// Current panel height in points. The view writes to this binding as
   /// the user drags the handle; the host is responsible for persisting
@@ -232,7 +236,8 @@ struct AgentStateSidebarPanel: View {
               paneTitle: { registry.title(for: item.paneID) },
               worktreePath: resolved?.worktreePath,
               remoteHost: resolved?.remoteHost,
-              onTap: { onTapRow(item.paneID) }
+              onTap: { onTapRow(item.paneID) },
+              onHandOff: { onHandOffRow(item.paneID) }
             )
           }
         }

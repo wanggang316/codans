@@ -101,6 +101,63 @@ struct CLIInstallerClientTests {
     }
   }
 
+  /// A Debug bundle embeds `codans-dev` where earlier builds embedded
+  /// `codans`, so after a rebuild the installed link dangles. It is still a
+  /// codans link — it points into an app bundle's `Resources/bin/` — and the
+  /// installer must own it rather than report a collision.
+  @Test
+  func probe_symlinkIntoAnotherBundle_returnsInstalledNotPointingAtBundle() throws {
+    let home = try TempHome()
+    let paths = home.paths()
+    let otherBuild = home.root.appending(
+      path: "Other/Codans.app/Contents/Resources/bin/codans", directoryHint: .notDirectory)
+    try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: otherBuild)
+    let (client, _) = makeClient(paths: paths)
+
+    #expect(client.probe() == .installed(at: paths.tcSymlink, pointsToBundle: false))
+  }
+
+  @Test
+  func install_staleSymlink_replacesItUnderPrivilege() throws {
+    let home = try TempHome()
+    let paths = home.paths()
+    let otherBuild = home.root.appending(
+      path: "Other/Codans.app/Contents/Resources/bin/codans", directoryHint: .notDirectory)
+    try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: otherBuild)
+    let (client, shell) = makeClient(paths: paths)
+
+    let result = client.install()
+
+    switch result {
+    case .success(let status): assertInstalled(status)
+    case .failure(let error): Issue.record("Install failed: \(error)")
+    }
+    #expect(shell.calls.count == 1)
+    let script = shell.calls.first?.command ?? ""
+    let link = "'\(paths.tcSymlink.path)'"
+    // The guarded rm must precede the ln, and only fire while the entry is
+    // still a codans link into some bundle's Resources/bin.
+    let removeIndex = try #require(script.range(of: "rm \(link)"))
+    let linkIndex = try #require(script.range(of: "ln -s '\(home.bundledTc.path)' \(link)"))
+    #expect(removeIndex.lowerBound < linkIndex.lowerBound)
+    #expect(script.contains("[ -L \(link) ] && case \"$(readlink \(link))\" in *.app/Contents/Resources/bin/*)"))
+  }
+
+  @Test
+  func uninstall_staleSymlink_removesIt() throws {
+    let home = try TempHome()
+    let paths = home.paths()
+    let otherBuild = home.root.appending(
+      path: "Other/Codans.app/Contents/Resources/bin/codans", directoryHint: .notDirectory)
+    try FileManager.default.createSymbolicLink(at: paths.tcSymlink, withDestinationURL: otherBuild)
+    let (client, shell) = makeClient(paths: paths)
+
+    let result = client.uninstall()
+
+    #expect(result == .success(.notInstalled))
+    #expect(shell.calls.first?.command.contains("rm '\(paths.tcSymlink.path)'") == true)
+  }
+
   // MARK: - Install
 
   @Test

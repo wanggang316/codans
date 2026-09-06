@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 import os.log
 
@@ -128,7 +129,7 @@ enum GhosttyThemeCatalogReader {
     var roots: [URL] = []
 
     // User-writable paths first so custom themes shadow bundled ones.
-    if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
+    if let xdg = environment[CodansEnvironment.Key.xdgConfigHome.rawValue], !xdg.isEmpty {
       roots.append(
         URL(fileURLWithPath: xdg, isDirectory: true)
           .appendingPathComponent("ghostty", isDirectory: true)
@@ -144,7 +145,9 @@ enum GhosttyThemeCatalogReader {
 
     // GhosttyBootstrap exports GHOSTTY_RESOURCES_DIR at startup pointing at
     // Ghostty's own resources tree — that's where the ~200 bundled themes live.
-    if let resourcesDir = environment["GHOSTTY_RESOURCES_DIR"], !resourcesDir.isEmpty {
+    if let resourcesDir = environment[CodansEnvironment.Key.ghosttyResourcesDirectory.rawValue],
+      !resourcesDir.isEmpty
+    {
       roots.append(
         URL(fileURLWithPath: resourcesDir, isDirectory: true)
           .appendingPathComponent("themes", isDirectory: true)
@@ -154,7 +157,7 @@ enum GhosttyThemeCatalogReader {
     // `GhosttyBootstrap.resolveResourceDirs` probes so tests and unbundled
     // `xcodebuild run` flows still see themes even when GHOSTTY_RESOURCES_DIR
     // was not set for some reason (e.g. Settings opened before bringUp ran).
-    if let override = environment["CODANS_GHOSTTY_RESOURCES"], !override.isEmpty {
+    if let override = environment[CodansEnvironment.Key.ghosttyResources.rawValue], !override.isEmpty {
       roots.append(
         URL(fileURLWithPath: override, isDirectory: true)
           .appendingPathComponent("ghostty", isDirectory: true)
@@ -166,7 +169,7 @@ enum GhosttyThemeCatalogReader {
     // worktree, which pollutes "empty catalog" assertions. Tests set this env
     // key to opt out of the implicit fallback while still being able to drive
     // explicit roots via XDG_CONFIG_HOME / HOME / GHOSTTY_RESOURCES_DIR.
-    let suppressImplicit = environment["CODANS_DISABLE_THEME_DEV_FALLBACK"] == "1"
+    let suppressImplicit = environment[CodansEnvironment.Key.disableThemeDevFallback.rawValue] == "1"
     if !suppressImplicit, let devFallback = srcrootGhosttyThemesDirectory() {
       roots.append(devFallback)
     }

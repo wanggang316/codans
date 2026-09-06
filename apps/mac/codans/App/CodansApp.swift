@@ -86,6 +86,7 @@ struct CodansApp: App {
             agentStateStore: appState.agentStateStore
           )
           .frame(minWidth: 800, minHeight: 600)
+          .environment(appState.agentInstallation)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
           // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
@@ -196,6 +197,7 @@ struct CodansApp: App {
           .environment(appState.settingsStore)
           .environment(appState.developerPaneDependencies)
           .environment(appState.osNotifier)
+          .environment(appState.agentInstallation)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
         } else {
@@ -473,6 +475,15 @@ final class AppState {
   let hierarchyManager: HierarchyManager
   let settingsStore: SettingsStore
   let shortcutsStore: ShortcutsStore
+  /// Which coding-agent CLIs are present on this Mac. App-scoped (not owned
+  /// by the Settings pane) because two surfaces read it — the Agents pane
+  /// greys out missing agents, and the worktree toolbar's Agents menu hides
+  /// them — and they must not disagree.
+  let agentInstallation = AgentInstallationStore()
+  /// One-shot authorization + completion fan-out for panel-injected handoff
+  /// requests. Shared by the `handoff.*` IPC handler (claims / publishes)
+  /// and the in-app Hand Off panel (registers / observes).
+  let handoffRegistry = HandoffRequestRegistry()
   /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.config/codans/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
@@ -659,6 +670,10 @@ final class AppState {
     // Phase-time the synchronous bring-up so a slow launch is attributable
     // to a specific stage from Console alone (see `LaunchProfiler`).
     let profiler = LaunchProfiler()
+    // Detached from bring-up: the probe spawns a login shell to resolve PATH,
+    // and nothing on the launch path blocks on the answer (both readers treat
+    // "not scanned yet" as "assume installed").
+    Task { [agentInstallation] in await agentInstallation.scanIfNeeded() }
     let ghostty = try? GhosttyRuntime()
     self.ghosttyRuntime = ghostty
     let engine = TerminalEngine(
@@ -799,10 +814,28 @@ final class AppState {
         self.settingsWindowStore?.send(.selectionChanged(section))
       }
     )
+    // Handoff transition core, shared by the `handoff.*` IPC handler and the
+    // in-app Hand Off panel's fallback so both run the exact same sequence.
+    let handoffHandlers = makeHandoffHandlers(
+      hierarchy: manager, hierarchyClient: hierarchy,
+      settingsStore: settings, engine: engine, gitClient: routedGitClient
+    )
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient = hierarchy
+      $0.handoffClient = .live(
+        handlers: handoffHandlers,
+        registry: self.handoffRegistry,
+        engine: engine,
+        cli: Self.cliInvocation(),
+        installation: self.agentInstallation,
+        source: { [weak self, weak manager] paneID in
+          guard let manager else { return nil }
+          return Self.handoffSource(
+            for: paneID, manager: manager, agentState: self?.agentStateStore)
+        }
+      )
       $0.terminalClient = .live(engine: engine)
       // SSH-routing git clients (see construction above) so every reducer-side
       // git consumer transparently reaches Server-project repositories.
@@ -851,7 +884,7 @@ final class AppState {
 
     startIPC(
       hierarchy: manager, editor: editor, hierarchyClient: hierarchy,
-      settingsStore: settings, terminalEngine: engine
+      settingsStore: settings, terminalEngine: engine, handoffHandlers: handoffHandlers
     )
 
     self.developerPaneDependencies = DeveloperPaneDependencies.live(
@@ -1029,7 +1062,8 @@ final class AppState {
     editor: EditorClient,
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
-    terminalEngine: TerminalEngine
+    terminalEngine: TerminalEngine,
+    handoffHandlers: HandoffHandlers
   ) {
     if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
       || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -1090,18 +1124,20 @@ final class AppState {
         return CallerPaneResolver.resolve(callerPID: callerPID, paneByShellPID: paneByShellPID)
       }
     )
+    let inputSink: TerminalInputSink? =
+      terminalEngine.ghosttyRuntime == nil
+      ? nil
+      : TerminalInputSink(
+        engine: terminalEngine,
+        onPaneInput: { [weak hierarchy] paneID in
+          guard let manager = hierarchy,
+            let projectID = manager.catalog.projectID(forPane: paneID)
+          else { return }
+          manager.bumpProjectActivity(projectID)
+        }
+      )
     let terminalHandlers = TerminalHandlers(
-      sink: terminalEngine.ghosttyRuntime == nil
-        ? nil
-        : TerminalInputSink(
-          engine: terminalEngine,
-          onPaneInput: { [weak hierarchy] paneID in
-            guard let manager = hierarchy,
-              let projectID = manager.catalog.projectID(forPane: paneID)
-            else { return }
-            manager.bumpProjectActivity(projectID)
-          }
-        ),
+      sink: inputSink,
       catalog: { hierarchy.catalog }
     )
     let editorHandlers = EditorHandlers(
@@ -1118,7 +1154,13 @@ final class AppState {
       hierarchyHandlers: hierarchyHandlers,
       terminalHandlers: terminalHandlers,
       editorHandlers: editorHandlers,
-      projectHandlers: projectHandlers
+      projectHandlers: projectHandlers,
+      agentHandlers: AgentHandlers(
+        settings: settingsStore,
+        hierarchy: hierarchyClient,
+        installation: agentInstallation
+      ),
+      handoffHandlers: handoffHandlers
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
@@ -1134,6 +1176,161 @@ final class AppState {
         "SocketServer bind failed at \(resolvedSocketPath, privacy: .public): \(String(describing: error), privacy: .public)"
       )
     }
+  }
+
+  /// Handoff transition core wired to the live runtime: pane → source
+  /// through the catalog + `AgentStateStore`, screen text straight off the
+  /// pane's surface, git facts through the SSH-routed git client, and the
+  /// receiver launch through the shared agent pipeline.
+  private func makeHandoffHandlers(
+    hierarchy: HierarchyManager,
+    hierarchyClient: HierarchyClient,
+    settingsStore: SettingsStore,
+    engine: TerminalEngine,
+    gitClient: GitServiceClient
+  ) -> HandoffHandlers {
+    HandoffHandlers(
+      settings: settingsStore,
+      registry: handoffRegistry,
+      resolveSource: { [weak hierarchy, weak self] paneID in
+        guard let manager = hierarchy else { return nil }
+        return Self.handoffSource(
+          for: paneID, manager: manager, agentState: self?.agentStateStore)
+      },
+      readScreen: { [weak engine] paneID in
+        engine?.ghosttyRuntime?.surface(for: paneID)?.readText(.viewport)
+      },
+      collectRepoState: { root in
+        await Self.handoffRepoState(at: root, git: gitClient)
+      },
+      launch: { spec in try await hierarchyClient.launchAgent(spec) },
+      typeKickoff: { [weak self, weak engine] paneID, kind, prompt in
+        guard let engine, let agentState = self?.agentStateStore else { return false }
+        return await Self.typeKickoffOnceAgentIsUp(
+          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine)
+      },
+      cli: Self.cliInvocation()
+    )
+  }
+
+  /// Kickoff delivery for a receiver whose CLI takes no prompt argument.
+  /// Waits until the classifier sees `kind` in the pane — typing earlier would
+  /// hand the text to the shell — then until the screen has stopped changing,
+  /// so the TUI has drawn its input box rather than still loading; types the
+  /// prompt; and submits it once the screen shows the text sitting in the
+  /// input box. An agent that never appears gets nothing.
+  ///
+  /// The Enter is conditional on that last check. A TUI that opens on a dialog
+  /// (an update prompt, first-run setup) swallows the typed letters, and an
+  /// Enter there would answer the dialog instead of sending anything; when the
+  /// text is not on screen nothing is submitted and the miss is logged.
+  /// OpenCode folds a typed burst into a "[Pasted ~N lines]" chip, which counts
+  /// as "on screen".
+  static func typeKickoffOnceAgentIsUp(
+    paneID: PaneID,
+    kind: AgentKind,
+    prompt: String,
+    agentState: AgentStateStore,
+    engine: TerminalEngine,
+    timeout: Duration = .seconds(30),
+    settle: Duration = .milliseconds(1500)
+  ) async -> Bool {
+    let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "handoff")
+    let deadline = ContinuousClock.now + timeout
+    while agentState.entries[paneID]?.kind != kind {
+      guard ContinuousClock.now < deadline else {
+        logger.error(
+          "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)")
+        return false
+      }
+      try? await Task.sleep(for: .milliseconds(250))
+    }
+    guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else {
+      logger.error("kickoff: pane \(paneID.description, privacy: .public) has no surface to type into")
+      return false
+    }
+    // Ready = the screen held still for `settle` (at least one full read
+    // apart), capped so a TUI with a spinner still gets its prompt.
+    var previous = surface.readText(.active) ?? ""
+    var stillSince = ContinuousClock.now
+    let readyDeadline = ContinuousClock.now + .seconds(10)
+    while ContinuousClock.now < readyDeadline {
+      try? await Task.sleep(for: .milliseconds(250))
+      let current = surface.readText(.active) ?? ""
+      if current != previous {
+        previous = current
+        stillSince = ContinuousClock.now
+      } else if ContinuousClock.now - stillSince >= settle, !current.isEmpty {
+        break
+      }
+    }
+    surface.sendInput(prompt)
+    let marker = String(prompt.prefix(19))
+    for _ in 0..<12 {
+      try? await Task.sleep(for: .milliseconds(250))
+      guard let screen = surface.readText(.active) else { continue }
+      if screen.contains(marker) || screen.contains("Pasted") {
+        // CR is what TUIs read as Enter; LF only breaks the line.
+        surface.sendInput("\r")
+        return true
+      }
+    }
+    logger.error(
+      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted")
+    return false
+  }
+
+  /// Resolves a pane to the outgoing side of a handoff. Agent identity
+  /// prefers the live `AgentStateStore` entry (what the classifier sees
+  /// now) and falls back to the persisted pane binding, so a pane restored
+  /// after relaunch still names its agent.
+  static func handoffSource(
+    for paneID: PaneID,
+    manager: HierarchyManager,
+    agentState: AgentStateStore?
+  ) -> HandoffSource? {
+    guard let (projectID, worktreeID, tabID) = manager.addressOf(paneID: paneID),
+      let project = manager.catalog.projects.first(where: { $0.id == projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+      let tab = worktree.tabs.first(where: { $0.id == tabID })
+    else { return nil }
+    let pane = tab.panes.first { $0.id == paneID }
+    let entry = agentState?.entries[paneID]
+    return HandoffSource(
+      paneID: paneID,
+      projectID: projectID,
+      worktreeID: worktreeID,
+      tabID: tabID,
+      worktreePath: worktree.path,
+      isRemote: project.isRemote,
+      agentKind: entry?.kind ?? pane?.agentKind,
+      sessionID: entry?.sessionID ?? pane?.agentSessionID,
+      paneTitle: tab.cachedDisplayTitle ?? tab.name
+    )
+  }
+
+  /// How this app writes its own CLI in a command an agent will run. Prefers
+  /// the installed command name, and falls back to the bundled binary's
+  /// absolute path when this build's CLI was never installed — a Debug app
+  /// must not write plain `codans`, which the Release app would answer.
+  nonisolated static func cliInvocation() -> String {
+    CLIInvocation.command(bundledBinary: try? CLIBundleLocator.locateBinary())
+  }
+
+  /// Git facts for `context.md`. Read-only (`status`, branch, shortstat);
+  /// any failure — not a repository, git missing — degrades to "not git"
+  /// rather than blocking the handoff.
+  nonisolated static func handoffRepoState(at root: URL, git: GitServiceClient) async -> HandoffRepoState {
+    guard let status = try? await git.status(root) else { return .notGit }
+    let branch = try? await git.currentBranch(root)
+    let stats = (try? await git.localDiffStats(root)) ?? nil
+    return HandoffRepoState(
+      branch: branch ?? nil,
+      isGit: true,
+      changedFiles: status.entries.map(\.path),
+      additions: stats?.additions ?? 0,
+      deletions: stats?.deletions ?? 0
+    )
   }
 
   static func bundleVersion() -> String {

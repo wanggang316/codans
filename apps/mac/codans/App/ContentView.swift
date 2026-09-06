@@ -80,6 +80,10 @@ struct ContentView: View {
           )
           .zIndex(100)
         }
+        if let handoffStore = store.scope(state: \.handoff, action: \.handoff.presented) {
+          HandoffOverlayView(store: handoffStore)
+            .zIndex(100)
+        }
       }
     }
   }
@@ -94,7 +98,8 @@ struct ContentView: View {
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         editorStore: store.scope(state: \.editor, action: \.editor),
         agentStateStore: agentStateStore,
-        onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) }
+        onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) },
+        onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) }
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {
@@ -126,6 +131,11 @@ struct ContentView: View {
       }
     }
     .environment(hierarchyManager)
+    .environment(agentStateStore)
+    .environment(
+      \.paneHUDActions,
+      PaneHUDActions(handOff: { paneID in store.send(.handoffRequested(paneID)) })
+    )
     .environment(settingsStore)
     .environment(UpdatesEnvironment.model)
     .environment(worktreeStatusMonitor)
@@ -173,10 +183,11 @@ struct ContentView: View {
     // settings edit never itself hits the network; the picker opts into an
     // immediate probe on its own.
     .onChange(of: settingsStore.settings.general) { old, new in
-      guard old.updateChannel != new.updateChannel
-        || old.updateCheckInterval != new.updateCheckInterval
-        || old.updatesAutomaticallyCheckForUpdates != new.updatesAutomaticallyCheckForUpdates
-        || old.updatesAutomaticallyDownloadUpdates != new.updatesAutomaticallyDownloadUpdates
+      guard
+        old.updateChannel != new.updateChannel
+          || old.updateCheckInterval != new.updateCheckInterval
+          || old.updatesAutomaticallyCheckForUpdates != new.updatesAutomaticallyCheckForUpdates
+          || old.updatesAutomaticallyDownloadUpdates != new.updatesAutomaticallyDownloadUpdates
       else { return }
       updatesClient.applyPreferences(
         new.updateChannel,

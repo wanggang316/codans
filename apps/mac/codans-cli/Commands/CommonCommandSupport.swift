@@ -9,9 +9,9 @@ struct EmptyParams: Codable, Sendable {}
 
 enum CLISession {
   static func connect(globals: GlobalOptions) -> RPCClient {
-    let path = globals.resolvedSocketPath
     let transport: Transport
     do {
+      let path = try globals.resolveSocketPath()
       transport = try UnixSocketTransport(path: path)
     } catch {
       CLIError.from(error).exitProcess()
@@ -20,7 +20,7 @@ enum CLISession {
       transport: transport,
       versions: RPCClient.Versions(
         clientVersion: CodansCLI.version,
-        clientBinary: "codans"
+        clientBinary: CodansCLI.commandName
       )
     )
   }
@@ -64,6 +64,9 @@ struct CLIError: Error, CustomStringConvertible {
         message: failure.message,
         hint: failure.hint
       )
+    }
+    if let refusal = error as? SocketDiscovery.ForeignPaneRefusal {
+      return CLIError(code: .wrongChannel, message: refusal.message, hint: refusal.hint)
     }
     return CLIError(code: .internal, message: "\(error)")
   }

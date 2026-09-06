@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -424,6 +424,43 @@ struct GitHubFeatureTests {
       }
     }
     await store.send(.projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: [pair]))
+  }
+
+  /// The spinner means "nothing known yet": a refresh over a cached batch
+  /// leaves `loading` alone, so PR-less rows do not flip to "loading" on
+  /// every poll tick while the rows already show what the cache knows.
+  @Test
+  func aRefreshOverACachedBatchDoesNotMarkLoading() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let gitRoot = URL(fileURLWithPath: "/tmp/test-repo")
+    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "main")
+    let cached = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: [:], seenBranches: ["main"], fetchedAt: Self.fixedDate
+    )
+    var seed = GitHubFeature.State()
+    seed.snapshotsByProject[projectID] = cached
+    let store = Self.makeStore(initialState: seed) { client in
+      client.batchPullRequests = { _, _, _, _ in [:] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
+    }
+
+    await store.send(.projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.projectGitRoots[projectID] = gitRoot
+      $0.projectWorktreePairs[projectID] = [pair]
+      $0.projectByWorktree[wid] = projectID
+      $0.inFlightFetchProjects = [projectID]
+    }
+    #expect(store.state.loading.isEmpty)
+    await store.receive { action in
+      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
+      return pid == projectID
+    } assert: {
+      $0.inFlightFetchProjects = []
+      $0.snapshotsByProject[projectID] = cached
+    }
   }
 
   @Test
@@ -980,7 +1017,7 @@ struct GitHubFeatureTests {
     await store.receive(
       .projectRefreshRequested(project, gitRoot: gitRoot, worktreeBranches: [kept])
     ) {
-      $0.loading = [keptWID]
+      // A batch is cached by now, so the drained refresh shows no spinner.
       $0.inFlightFetchProjects = [project]
     }
     await store.receive { action in

@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Overlay UI for the Command Palette. Presented as a floating card
 /// centered near the top of the window, over whatever the
@@ -46,20 +46,7 @@ struct CommandPaletteView: View {
         }
       }
       .frame(maxWidth: 560)
-      // Real AppKit glass (NSVisualEffectView). `.withinWindow` samples the
-      // bright app content beneath the overlay rather than the (often darker)
-      // desktop behind the window, and a faint adaptive tint lifts it to a
-      // Spotlight-like frost instead of the gray `.behindWindow` cast.
-      .background(
-        VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
-          .overlay(Color(nsColor: .textBackgroundColor).opacity(0.18))
-          .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-          .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+      .floatingCard(cornerRadius: cardCornerRadius)
       .padding(.top, 80)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)

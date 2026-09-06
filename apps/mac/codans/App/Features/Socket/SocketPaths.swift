@@ -1,30 +1,24 @@
+import CodansCore
 import Darwin
 import Foundation
 
-/// Shared path convention for the codans Unix domain socket.
-///
-/// Centralises the default-path-vs-env-override precedence so both the
-/// app-side `SocketServer` and the CLI-side `SocketDiscovery` agree on
-/// exactly one place. No inline `getuid()` calls elsewhere.
+/// The socket the *app* binds and advertises. Spellings come from
+/// `BuildChannel`, shared with the CLI-side `SocketDiscovery`; what is
+/// specific to this side is the foreign-channel guard in `resolve`.
 public nonisolated enum SocketPaths {
   /// `/tmp/codans-<uid>.sock` — the production default.
   public static func productionSocketPath(uid: uid_t = getuid()) -> String {
-    "/tmp/codans-\(uid).sock"
+    BuildChannel.release.socketPath(uid: uid)
   }
 
   /// `/tmp/codans-dev-<uid>.sock` — the Debug/development default.
   public static func developmentSocketPath(uid: uid_t = getuid()) -> String {
-    "/tmp/codans-dev-\(uid).sock"
+    BuildChannel.development.socketPath(uid: uid)
   }
 
-  /// Build-channel-aware default. Debug builds use the development socket;
-  /// Release builds use the production socket.
+  /// This build's own socket.
   public static func defaultSocketPath(uid: uid_t = getuid()) -> String {
-    #if DEBUG
-      developmentSocketPath(uid: uid)
-    #else
-      productionSocketPath(uid: uid)
-    #endif
+    BuildChannel.current.socketPath(uid: uid)
   }
 
   /// Resolve the socket path, preferring `$CODANS_SOCKET_PATH` if set and
@@ -43,7 +37,7 @@ public nonisolated enum SocketPaths {
   /// An explicit override to any *other* path (isolation, custom dev socket)
   /// is still honored.
   public static func resolve(
-    override: String? = ProcessInfo.processInfo.environment["CODANS_SOCKET_PATH"],
+    override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.socketPath.rawValue],
     uid: uid_t = getuid()
   ) -> String {
     guard let override, !override.isEmpty else { return defaultSocketPath(uid: uid) }
@@ -56,10 +50,6 @@ public nonisolated enum SocketPaths {
   /// Debug's foreign default is the production socket; Release's is the
   /// development socket. Used by `resolve` to discard an inherited host path.
   static func foreignChannelDefaultSocketPath(uid: uid_t = getuid()) -> String {
-    #if DEBUG
-      productionSocketPath(uid: uid)
-    #else
-      developmentSocketPath(uid: uid)
-    #endif
+    BuildChannel.current.other.socketPath(uid: uid)
   }
 }

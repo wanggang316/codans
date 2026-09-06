@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 import os.log
 
 /// TCA reducer owning the GitHub integration's per-app state — availability probe result,
@@ -178,7 +178,6 @@ struct GitHubFeature {
       worktreeBranches: [WorktreeBranchPair],
       TaskResult<BatchedPullRequests>
     )
-
 
     // MARK: - active-Project liveness poll
 
@@ -693,11 +692,16 @@ struct GitHubFeature {
     // current even when this call collapses into the queued-refresh slot.
     state.projectWorktreePairs[projectID] = pairs
     for pair in pairs { state.projectByWorktree[pair.worktreeID] = projectID }
+    // The spinner means "nothing known yet", so only a Project's first fetch
+    // marks its Worktrees. A refresh over a cached batch — poll ticks, the
+    // post-mutation refetch, a fresh-on-activation miss — runs silently; the
+    // rows keep showing what they know until the new batch lands. Marking on
+    // every refresh made every PR-less row flip to a spinner on each poll.
     // Marked before the in-flight short-circuit: a call that collapses into
     // the queued-refresh slot still has a fetch pending on its behalf.
-    // Nothing wrote this set before, so the spinner the badge and popover
-    // were built to show could never appear.
-    state.loading.formUnion(pairs.map(\.worktreeID))
+    if state.snapshotsByProject[projectID] == nil {
+      state.loading.formUnion(pairs.map(\.worktreeID))
+    }
     if state.inFlightFetchProjects.contains(projectID) {
       state.queuedRefreshByProject.insert(projectID)
       return .none

@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -28,12 +28,27 @@ struct HierarchyManagerResolvedEnvTests {
   }
 
   /// The always-wins keys `resolvedEnv` writes after project overrides.
+  /// `PATH` is handled by `expectingCLI` because it is a transform of the
+  /// inherited value, not a fixed one.
   private static func alwaysInjected() -> [String: String] {
     var env = ["CODANS_SOCKET_PATH": SocketPaths.resolve()]
     env[TermProgramEnv.programKey] = TermProgramEnv.program
     if let version = appMarketingVersion {
       env[TermProgramEnv.versionKey] = version
     }
+    if let cli = PaneEnvironment.bundledCLI {
+      env[CodansEnvironment.Key.cli.rawValue] = cli.path
+    }
+    return env
+  }
+
+  /// Applies the same `PATH` prefix the builder applies, so full-dictionary
+  /// comparisons below stay exact whether or not a bundled CLI is locatable
+  /// under this test host.
+  private static func expectingCLI(_ env: [String: String]) -> [String: String] {
+    guard let cli = PaneEnvironment.bundledCLI else { return env }
+    var env = env
+    env["PATH"] = PaneEnvironment.prefixingPath(env["PATH"], with: cli.deletingLastPathComponent().path)
     return env
   }
 
@@ -43,7 +58,7 @@ struct HierarchyManagerResolvedEnvTests {
     var settings = Settings.default
     settings.projects[pid] = ProjectSettings()
     let resolved = HierarchyManager.resolvedEnv(for: pid, in: settings)
-    let expected = Self.expectedInheritedEnv().merging(Self.alwaysInjected()) { _, b in b }
+    let expected = Self.expectingCLI(Self.expectedInheritedEnv().merging(Self.alwaysInjected()) { _, b in b })
     #expect(resolved == expected)
   }
 
@@ -55,7 +70,13 @@ struct HierarchyManagerResolvedEnvTests {
     let resolved = HierarchyManager.resolvedEnv(for: pid, in: settings)
     #expect(resolved["MY_PROJECT_VAR"] == "hello")
     // Process env keys still present.
-    #expect(resolved["PATH"] == ProcessInfo.processInfo.environment["PATH"])
+    // Inherited `PATH` survives, behind this app's CLI directory.
+    if let cli = PaneEnvironment.bundledCLI {
+      #expect(resolved["PATH"]?.hasPrefix(cli.deletingLastPathComponent().path + ":") == true)
+      #expect(resolved["PATH"]?.hasSuffix(ProcessInfo.processInfo.environment["PATH"] ?? "") == true)
+    } else {
+      #expect(resolved["PATH"] == ProcessInfo.processInfo.environment["PATH"])
+    }
   }
 
   @Test
@@ -95,7 +116,7 @@ struct HierarchyManagerResolvedEnvTests {
   func unknownProjectIDReturnsProcessEnvMinusTerminalVars() {
     let pid = ProjectID()  // not in settings.projects
     let resolved = HierarchyManager.resolvedEnv(for: pid, in: .default)
-    let expected = Self.expectedInheritedEnv().merging(Self.alwaysInjected()) { _, b in b }
+    let expected = Self.expectingCLI(Self.expectedInheritedEnv().merging(Self.alwaysInjected()) { _, b in b })
     #expect(resolved == expected)
   }
 

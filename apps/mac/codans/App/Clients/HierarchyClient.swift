@@ -447,6 +447,26 @@ nonisolated struct HierarchyClient: Sendable {
       _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
     ) async throws -> Void
 
+  /// Launches an `AgentProfile` from `Settings.agents` in the given Worktree.
+  /// Renders the profile through `AgentLaunchCommand` and dispatches it the
+  /// same way a script is dispatched (new tab / split / focused pane), with
+  /// one deliberate difference: agent launches are *not* tracked as run panes,
+  /// so invoking the same profile twice opens a second session rather than
+  /// re-typing into the first. Throws `RunScriptError.unknownScript` when the
+  /// profile id is gone (removed between click and dispatch);
+  /// `.missingWorktree` when the worktree is.
+  var launchAgentProfile:
+    @MainActor @Sendable (
+      _ profileID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
+    ) async throws -> Void
+
+  /// Lower-level sibling of `launchAgentProfile` for callers that already
+  /// hold a resolved profile and need to know where the agent landed: the
+  /// `agent.launch` IPC handler and the handoff receiver launch. Same
+  /// dispatch, same "never reuse a run pane" rule. Throws
+  /// `RunScriptError.missingWorktree` when the worktree is gone.
+  var launchAgent: @MainActor @Sendable (_ spec: AgentLaunchSpec) async throws -> AgentLaunchOutcome
+
   /// Interrupts a running script by sending Ctrl-C (`\u{3}`) to the pane the
   /// script last spawned in `worktreeID`. The pane is left open so the next
   /// run reuses it. Best-effort: a no-op when no run pane is tracked (or it
@@ -550,6 +570,61 @@ enum RunScriptError: Error, Equatable, Sendable {
   case unknownScript(UUID)
   case missingWorktree(WorktreeID)
   case missingProject(ProjectID)
+}
+
+/// Everything a single agent launch needs. Carries the resolved
+/// `AgentProfile` value (not an id) so callers that build a transient
+/// preset — a handoff receiver for an agent with no enabled profile — go
+/// through the same pipeline as a saved one.
+nonisolated struct AgentLaunchSpec: Sendable, Equatable {
+  var profile: AgentProfile
+  var projectID: ProjectID
+  var worktreeID: WorktreeID
+  /// Kickoff prompt appended in the agent's own spelling; ignored by agents
+  /// without a prompt style.
+  var prompt: String?
+  /// Placement overrides. `nil` keeps the profile's saved target / direction.
+  var target: ScriptTarget?
+  var direction: ScriptSplitDirection?
+  /// Pane a `.split` divides. `nil` splits the worktree's focused pane, the
+  /// interactive default; a hand-off names its source pane so the receiver
+  /// lands beside the agent it takes over from.
+  var anchorPaneID: PaneID?
+  /// `false` spawns without selecting the tab or stealing focus.
+  var focus: Bool
+  /// Tab title override; `nil` uses the profile's display name.
+  var tabName: String?
+
+  init(
+    profile: AgentProfile,
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    prompt: String? = nil,
+    target: ScriptTarget? = nil,
+    direction: ScriptSplitDirection? = nil,
+    anchorPaneID: PaneID? = nil,
+    focus: Bool = true,
+    tabName: String? = nil
+  ) {
+    self.profile = profile
+    self.projectID = projectID
+    self.worktreeID = worktreeID
+    self.prompt = prompt
+    self.target = target
+    self.direction = direction
+    self.anchorPaneID = anchorPaneID
+    self.focus = focus
+    self.tabName = tabName
+  }
+}
+
+/// What an agent launch produced. `tabID` / `paneID` are nil when the
+/// command was typed into the focused pane rather than a fresh surface.
+nonisolated struct AgentLaunchOutcome: Sendable, Equatable {
+  let profile: AgentProfile
+  let command: String
+  let tabID: TabID?
+  let paneID: PaneID?
 }
 
 /// Full hierarchy address a `PaneID` resolves to. Carries the IDs of every
@@ -878,6 +953,26 @@ extension HierarchyClient {
           terminalClient: terminalClient
         )
       },
+      launchAgentProfile: { [weak settings] profileID, projectID, worktreeID in
+        let snapshot = settings?.settings ?? .default
+        guard let profile = snapshot.agents.profile(id: profileID) else {
+          throw RunScriptError.unknownScript(profileID)
+        }
+        _ = try await launchAgent(
+          spec: AgentLaunchSpec(profile: profile, projectID: projectID, worktreeID: worktreeID),
+          manager: manager,
+          snapshot: snapshot,
+          terminalClient: terminalClient
+        )
+      },
+      launchAgent: { [weak settings] spec in
+        try await launchAgent(
+          spec: spec,
+          manager: manager,
+          snapshot: settings?.settings ?? .default,
+          terminalClient: terminalClient
+        )
+      },
       stopScript: { scriptID, _, worktreeID in
         stopScript(
           scriptID: scriptID,
@@ -997,21 +1092,91 @@ extension HierarchyClient {
     )
   }
 
-  /// Shared execution pipeline for a fully-resolved `ScriptDefinition`,
-  /// regardless of whether it came from a Project's `scripts` or the global
-  /// `general.globalScripts` list. Resolves the worktree cwd + env, honours
-  /// the run-pane reuse / Run-Stop tracking / onFinished policy, and spawns
-  /// the tab/pane. Run-pane tracking keys on (worktreeID, scriptID); global
-  /// and project scripts never collide because each carries a distinct UUID.
+  /// Launches a resolved `AgentProfile` through the shared script pipeline.
+  /// The profile renders into a synthetic `ScriptDefinition` — the
+  /// dispatcher already knows how to open a tab / split / focused pane with a
+  /// command and a tab icon, and an agent launch is exactly that plus a
+  /// different way of composing the command string.
+  ///
+  /// `tracksRunPane: false` is the one behavioural difference: an agent is a
+  /// session, not a job, so a second launch of the same profile opens a
+  /// second session instead of re-typing into the first one's pane (which is
+  /// what the Run/Stop toggle wants for scripts).
   @MainActor
+  private static func launchAgent(
+    spec: AgentLaunchSpec,
+    manager: HierarchyManager,
+    snapshot: Settings,
+    terminalClient: TerminalClient?
+  ) async throws -> AgentLaunchOutcome {
+    let profile = spec.profile
+    if profile.usesDedicatedHome {
+      // The agent CLI will write config / credentials under this HOME on
+      // first run; most refuse to create a missing home themselves.
+      try? FileManager.default.createDirectory(
+        at: AgentLaunchCommand.dedicatedHomeURL(for: profile),
+        withIntermediateDirectories: true
+      )
+    }
+    let command = AgentLaunchCommand.render(profile: profile, prompt: spec.prompt)
+    let script = ScriptDefinition(
+      id: profile.id,
+      kind: .custom,
+      name: spec.tabName ?? profile.displayName,
+      command: command,
+      // Brand mark rather than a generic glyph: the tab chip resolves the
+      // `agent:` reference to the same asset the Agents pane and the
+      // toolbar menu show, so one agent reads the same across surfaces.
+      systemImage: profile.tabIcon,
+      target: spec.target ?? profile.target,
+      direction: spec.direction ?? profile.direction,
+      onFinished: .none,
+      focus: spec.focus
+    )
+    let paneID = try await runResolvedScript(
+      script: script,
+      projectID: spec.projectID,
+      worktreeID: spec.worktreeID,
+      manager: manager,
+      snapshot: snapshot,
+      terminalClient: terminalClient,
+      tracksRunPane: false,
+      anchorPaneID: spec.anchorPaneID
+    )
+    let tabID = paneID.flatMap { manager.addressOf(paneID: $0)?.2 }
+    return AgentLaunchOutcome(profile: profile, command: command, tabID: tabID, paneID: paneID)
+  }
+
+  /// Shared execution pipeline for a fully-resolved `ScriptDefinition`,
+  /// regardless of whether it came from a Project's `scripts`, the global
+  /// `general.globalScripts` list, or an agent profile. Resolves the worktree
+  /// cwd + env, honours the run-pane reuse / Run-Stop tracking / onFinished
+  /// policy, and spawns the tab/pane. Run-pane tracking keys on (worktreeID,
+  /// scriptID); global and project scripts never collide because each carries
+  /// a distinct UUID.
+  ///
+  /// `tracksRunPane: false` opts a caller out of both halves of that tracking
+  /// — no reuse lookup on the way in, no `setRunScriptPane` on the way out —
+  /// so every invocation spawns a fresh surface.
+  ///
+  /// `anchorPaneID` names the pane a `.split` divides. Left nil, the split
+  /// anchors on the worktree's focused pane; a pane that is not in this
+  /// worktree is ignored the same way.
+  ///
+  /// Returns the pane the command landed in when a fresh surface was spawned;
+  /// `nil` for a reused run pane or a `.focused` dispatch.
+  @MainActor
+  @discardableResult
   private static func runResolvedScript(
     script: ScriptDefinition,
     projectID: ProjectID,
     worktreeID: WorktreeID,
     manager: HierarchyManager,
     snapshot: Settings,
-    terminalClient: TerminalClient?
-  ) async throws {
+    terminalClient: TerminalClient?,
+    tracksRunPane: Bool = true,
+    anchorPaneID: PaneID? = nil
+  ) async throws -> PaneID? {
     let scriptID = script.id
     var foundWorktreePath: String?
     outer: for project in manager.catalog.projects where project.id == projectID {
@@ -1031,7 +1196,8 @@ extension HierarchyClient {
     // run pane is still alive — from an earlier run this session or restored
     // from the persisted catalog after a relaunch — never spawn a second
     // tab/pane for it.
-    if script.target == .newTab || script.target == .split,
+    if tracksRunPane,
+      script.target == .newTab || script.target == .split,
       let terminalClient,
       let existing = manager.runScriptPane(worktreeID: worktreeID, scriptID: scriptID)
     {
@@ -1043,7 +1209,7 @@ extension HierarchyClient {
           try? manager.selectTab(tab, in: wt, in: proj)
           manager.focusSurfaceView(for: existing)
         }
-        return
+        return nil
       }
       // Idle run pane → re-run in place. Subscribe before the send for the
       // same no-replay reason as the spawn path below.
@@ -1074,7 +1240,7 @@ extension HierarchyClient {
           eventStream: reuseStream
         )
       }
-      return
+      return nil
     }
 
     // Subscribe before spawn: events() is broadcast and does not
@@ -1091,13 +1257,15 @@ extension HierarchyClient {
       cwd: cwd,
       env: env,
       manager: manager,
-      terminalClient: terminalClient
+      terminalClient: terminalClient,
+      anchorPaneID: anchorPaneID
     )
 
     // Record the dedicated pane so the next run reuses it and the toolbar
     // Run/Stop toggle can find it. Only `.newTab` / `.split` create one;
     // `.focused` returns nil (it writes into the user's focused pane).
-    if let spawnedPaneID,
+    if tracksRunPane,
+      let spawnedPaneID,
       script.target == .newTab || script.target == .split
     {
       manager.setRunScriptPane(
@@ -1129,6 +1297,7 @@ extension HierarchyClient {
         manager.focusSurfaceView(for: spawnedPaneID)
       }
     }
+    return spawnedPaneID
   }
 
   /// Stops the run for `(worktreeID, scriptID)`: interrupts the pane's
@@ -1200,7 +1369,8 @@ extension HierarchyClient {
     cwd: String,
     env: [String: String],
     manager: HierarchyManager,
-    terminalClient: TerminalClient?
+    terminalClient: TerminalClient?,
+    anchorPaneID: PaneID? = nil
   ) async throws -> PaneID? {
     // initialCommand is replayed by TerminalEngine via `sendInput(command + "\n")`
     // into an interactive shell, so the shell stays at a prompt after the user's
@@ -1256,7 +1426,9 @@ extension HierarchyClient {
       return try await openInNewTab()
 
     case .split:
-      if let anchor = focusedAnchor(worktreeID: worktreeID, in: manager) {
+      if let anchor = explicitAnchor(anchorPaneID, worktreeID: worktreeID, in: manager)
+        ?? focusedAnchor(worktreeID: worktreeID, in: manager)
+      {
         return try await manager.splitPane(
           anchor.paneID,
           direction: mapSplitDirection(script.direction),
@@ -1284,6 +1456,19 @@ extension HierarchyClient {
     guard policy != .none else { return command }
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? "exit" : "\(trimmed); exit"
+  }
+
+  /// A caller-named split anchor, accepted only while it is still a pane of
+  /// this worktree; anything else falls through to the focused-pane rule.
+  @MainActor
+  private static func explicitAnchor(
+    _ paneID: PaneID?,
+    worktreeID: WorktreeID,
+    in manager: HierarchyManager
+  ) -> (tabID: TabID, paneID: PaneID)? {
+    guard let paneID, let address = manager.addressOf(paneID: paneID), address.1 == worktreeID
+    else { return nil }
+    return (address.2, paneID)
   }
 
   /// Picks the worktree's selected (or first) tab and returns its
@@ -1859,6 +2044,8 @@ extension HierarchyClient: DependencyKey {
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    launchAgentProfile: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    launchAgent: { _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopAllScripts: { _ in fatalError("HierarchyClient.liveValue not configured") },
     runWorktreeLifecycleScript: { _, _, _, _ in
@@ -1965,6 +2152,12 @@ extension HierarchyClient: DependencyKey {
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
+    launchAgentProfile: unimplemented("HierarchyClient.launchAgentProfile"),
+    launchAgent: unimplemented(
+      "HierarchyClient.launchAgent",
+      placeholder: AgentLaunchOutcome(
+        profile: AgentProfile(kind: .claudeCode), command: "", tabID: nil, paneID: nil)
+    ),
     stopScript: unimplemented("HierarchyClient.stopScript"),
     stopAllScripts: unimplemented("HierarchyClient.stopAllScripts"),
     runWorktreeLifecycleScript: unimplemented(

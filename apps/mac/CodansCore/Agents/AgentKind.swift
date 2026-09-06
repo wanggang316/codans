@@ -21,9 +21,27 @@ public nonisolated enum AgentKind: String, Codable, Sendable, CaseIterable, Equa
   case kimi
   case droid
   case amp
+  case grok
   case omp
 
   public var displayName: String {
     AgentRuntimeAdapters.adapter(for: self).displayName
+  }
+
+  /// Resolves a user-typed agent name: the persisted raw value
+  /// (`claude-code`), the executable (`claude`), or the display name
+  /// (`Claude Code`), case-insensitively. This is what `codans handoff to
+  /// <agent>` accepts, so a human and an agent can both spell the receiver
+  /// the way they already think of it.
+  public init?(token: String) {
+    let wanted = token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !wanted.isEmpty else { return nil }
+    let match = AgentKind.allCases.first { kind in
+      kind.rawValue == wanted
+        || AgentCatalog.descriptor(for: kind).executable.lowercased() == wanted
+        || kind.displayName.lowercased() == wanted
+    }
+    guard let match else { return nil }
+    self = match
   }
 }

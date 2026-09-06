@@ -1,6 +1,6 @@
 ---
 name: codans
-description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, send keystrokes or text to a pane, read back its rendered output, broadcast input across panes, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
+description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, send keystrokes or text to a pane, read back its rendered output, broadcast input across panes, launch agent profiles, hand a task off to another agent, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
 ---
 
 # codans CLI (`codans`)
@@ -39,6 +39,7 @@ Three outcomes:
   | `permission-denied` | The socket belongs to another user | Stop; ask the user — launching will not help |
   | `not-a-socket` / `path-too-long` | `CODANS_SOCKET_PATH` points somewhere wrong | Stop; fix the env var |
   | `server-busy` / `timed-out` | App is up but not accepting right now | Wait a moment and retry |
+  | `wrong-channel` | This pane belongs to a development build of Codans, whose CLI is `codans-dev` | Use `codans-dev` for the rest of the session; see [Development builds](#development-builds) |
 
   `codans doctor --json` emits the same value plus a `socketHint` string.
 - **`codans: command not found`** — Codans is not installed. Stop and tell
@@ -100,6 +101,19 @@ Most subcommands accept identifiers in any of these forms:
 If you run `codans` from a shell that is *not* inside a codans Pane,
 `current` has no meaning and you'll get a `noContext` error — pass an
 explicit UUID, or use `codans tree` to discover one.
+
+## Development builds
+
+A development build of Codans is a separate app: its own socket, its own
+config, and its CLI is named `codans-dev`. Inside a pane spawned by a
+development build, type `codans-dev` wherever this skill says `codans`.
+`$CODANS_CLI` always holds the absolute path of the CLI that belongs to
+the pane you are in, so `basename "$CODANS_CLI"` is the command to use.
+
+The release `codans` refuses to run inside a development pane (exit code
+15, `codans doctor` reports `socketStatus wrong-channel`) and its hint
+names the command to switch to. `codans-dev` run from a release pane
+still drives the development app.
 
 ## Detecting codans from a script
 
@@ -276,6 +290,97 @@ codans broadcast --label deploy --stdin <<<'rolling restart'
 Exactly one of `--tab`, `--worktree`, or `--label` must be given. The
 returned `delivered` count tells you how many panes received the input.
 
+### `codans agent` — launch agent profiles
+
+Profiles are the launch presets from Settings > Agents (agent, model, effort,
+execution mode, placement, extra args, env). Launching one opens a fresh tab
+(or split) in the target worktree and types the profile's command into it.
+
+```bash
+codans agent list                                    # id, name, agent, command per profile
+codans agent launch "Claude Code"                     # by name (or id)
+codans agent launch --agent codex                     # first enabled Codex profile
+codans agent launch --agent claude --split right      # override placement
+codans agent launch --agent codex --background        # don't steal focus
+codans agent launch --agent claude --prompt - <<'EOF' # seed the session with a task
+Review the diff on this branch and list risks.
+EOF
+```
+
+Notes:
+
+- `--prompt` works only for agents that can start interactively with an
+  initial prompt (Claude Code, Codex, Gemini CLI); others reject it.
+- A disabled profile is refused — enable it in Settings > Agents.
+- `--json` returns `profileID`, `profileName`, `agent`, `command`, `tabID`,
+  `paneID`.
+
+### `codans handoff` — hand a task to another agent
+
+Agents are separate processes with separate context; the filesystem is the
+only durable channel between them. `handoff` makes that channel structured:
+it archives the previous round under the worktree's `.codans/handoff/`,
+installs **your** briefing as `current.md`, regenerates `context.md`
+(branch, changed files, a screen excerpt of your pane, and a resume command
+for your session), then starts the receiving agent in a background tab with
+a kickoff prompt pointing at those files.
+
+**You are the source.** Run it inside your own pane and codans hands off the
+task you are working on. Write the briefing yourself, from your working
+knowledge, as a heredoc on stdin:
+
+```bash
+codans handoff to codex --brief - <<'EOF'
+# Handoff
+## Objective
+…
+## Current State
+…
+## What Has Been Done
+…
+## Open Questions
+…
+## Risks / Watch Out
+…
+## Next Steps
+1. …
+## Suggested Prompt For Next Agent
+…
+EOF
+```
+
+```bash
+codans handoff save --brief - <<'EOF'      # checkpoint: briefing + context, no receiver
+…
+EOF
+codans handoff to claude --no-brief         # context-only (explicit) — no briefing written
+codans handoff to codex --split right --brief -       # receiver in a split beside this pane
+codans handoff to amp --no-launch --brief - # archive + brief only; don't start the receiver
+codans handoff to codex --profile "Build" --brief -   # launch a specific profile
+codans handoff to codex --pane p3 --brief -           # another pane is the source
+```
+
+Rules:
+
+- `--brief -` or `--no-brief` is required. Missing → error with a
+  copy-pasteable heredoc, nothing written. A briefing must contain at least
+  `## Objective`, `## Current State`, and `## Next Steps` (outside code
+  fences); otherwise the command errors with zero side effects.
+- Any agent token is a receiver. `claude`/`claude-code`, `codex`, `gemini`,
+  `cursor-agent`, `grok`, `pi` and `omp` take the kickoff prompt on their
+  command line; for the others codans types it into the new pane once the
+  agent is up and presses Enter once the input box shows the text (a TUI
+  that opens on a dialog gets no Enter; the miss is logged).
+  `--no-launch` archives and briefs without starting anyone.
+- The receiver starts in the background in the same worktree: a **new tab**
+  by default, or beside the source pane with `--split right|left|up|down`.
+  The handoff never types into your pane and never focuses anything.
+- If the app's Hand Off panel asked you to run this, keep the
+  `CODANS_HANDOFF_REQUEST_ID=…` prefix it gave you — that is how the panel
+  knows the transition it is waiting on completed.
+- Handoff only reads git (`status`, branch, shortstat); it never commits or
+  pushes. `.codans/handoff/` ignores itself.
+
 ## Common patterns
 
 ### Read a sibling pane (agent A inspecting agent B)
@@ -307,6 +412,21 @@ codans worktree switch "$(codans tree --json | jq -r '.projects[0].worktrees[-1]
 codans tab new "dev"
 codans pane new -- npm run dev
 ```
+
+### Take over a task from the previous agent
+
+If you were started by a handoff, your kickoff prompt names the files. Read
+them before touching code:
+
+```bash
+cat .codans/handoff/current.md    # the previous agent's briefing (may be absent)
+cat .codans/handoff/context.md    # generated state: branch, changed files, session excerpt
+ls .codans/handoff/archive/       # earlier rounds, newest last
+```
+
+Continue from **Next Steps**; do not redo what is listed under **What Has
+Been Done**. When you are done or blocked, hand off again with
+`codans handoff to <agent> --brief -` or checkpoint with `codans handoff save`.
 
 ### JSON-driven scripting
 

@@ -1,24 +1,31 @@
 import ArgumentParser
-import Darwin
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Darwin
+import Foundation
 
 @main
 struct CodansCLI: AsyncParsableCommand {
   static let version = "0.5.0"
 
+  /// The CLI answers to its build channel's name — `codans-dev` in Debug —
+  /// so help text, error hints, and the completion scripts generated from
+  /// this tree spell the command the user actually has.
+  static let commandName = CLIInvocation.commandName
+
   static let configuration = CommandConfiguration(
-    commandName: "codans",
+    commandName: commandName,
     abstract: "Control Codans from the terminal.",
     discussion: """
       Common examples:
-        codans status
-        codans tree
-        codans pane send 'pwd'
-        codans pane send <pane> 'git status --short'
-        codans pane new --label agent codex
+        \(commandName) status
+        \(commandName) tree
+        \(commandName) pane send 'pwd'
+        \(commandName) pane send <pane> 'git status --short'
+        \(commandName) pane new --label agent codex
+        \(commandName) agent launch --agent claude
+        \(commandName) handoff to codex --brief - <<'EOF' … EOF
       """,
     version: "Codans \(CodansCLI.version)",
     subcommands: [
@@ -31,6 +38,8 @@ struct CodansCLI: AsyncParsableCommand {
       TabCommand.self,
       PaneCommand.self,
       BroadcastCommand.self,
+      AgentCommand.self,
+      HandoffCommand.self,
     ]
   )
 
@@ -52,8 +61,14 @@ struct GlobalOptions: ParsableArguments {
 
   @Option(
     name: .long,
-    help:
-      "Override the socket path (default: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock)."
+    // Built from `BuildChannel` rather than spelled here so the help text
+    // (and the completion scripts generated from it) cannot drift from the
+    // paths the app actually binds.
+    help: ArgumentHelp(
+      "Override the socket path (default: $CODANS_SOCKET_PATH → Debug "
+        + "\(BuildChannel.development.socketPathTemplate), Release "
+        + "\(BuildChannel.release.socketPathTemplate))."
+    )
   )
   var socket: String?
 
@@ -64,8 +79,11 @@ struct GlobalOptions: ParsableArguments {
     json ? .json : .text(useColor: true)
   }
 
-  var resolvedSocketPath: String {
-    SocketDiscovery.resolve(override: socket)
+  /// `--socket` wins, then `$CODANS_SOCKET_PATH`, then the build default —
+  /// the precedence `SocketDiscovery.resolve` implements, including its
+  /// refusal to drive a development pane from the release CLI.
+  func resolveSocketPath() throws(SocketDiscovery.ForeignPaneRefusal) -> String {
+    try SocketDiscovery.resolve(override: socket)
   }
 
   var rpcTimeout: Duration {

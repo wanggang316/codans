@@ -1,19 +1,16 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
-/// Per-kind agent logo shared between `AgentStateRowView` (16pt) and
-/// `AgentStateView` (14pt). Centralises the symbol choice so a
-/// future swap stays in one file.
+/// Agent glyph shared between `AgentStateRowView` (16pt), `AgentStateView`
+/// (14pt), and the Agents settings pane.
 ///
-/// Glyph assignment (all rendered template-style to inherit the
-/// surrounding `foregroundStyle`):
+/// Draws whatever the `AgentIconRef` names: an agent's bundled brand mark
+/// (asset name from its `AgentDescriptor`, so adding an agent is a
+/// descriptor edit plus a bundled SVG — no switch to keep in sync here) or
+/// the SF Symbol a profile overrode it with.
 ///
-/// - `.claudeCode` → SVG asset `claude-code` (Anthropic Claude
-///   wordmark; thick strokes survive small-size rasterisation).
-/// - `.codex`      → SVG asset `codex` (OpenAI Codex brand glyph).
-/// - `.pi`         → SVG asset `pi` (Inflection pi glyph).
-/// - `.opencode`   → SVG asset `opencode` (opencode brand glyph).
-/// - Other agent kinds map to one template SVG asset each.
+/// Every glyph is rendered template-style so it inherits the surrounding
+/// `foregroundStyle`.
 ///
 /// The logo is always `accessibilityHidden(true)` — the surrounding
 /// row / badge already carries an a11y label that encodes the kind by
@@ -24,7 +21,7 @@ import CodansCore
 /// the glyph from the default `.secondary` to `.primary` so the
 /// selected row reads as visually heavier than its neighbours.
 struct AgentLogoView: View {
-  let kind: AgentKind
+  let icon: AgentIconRef
   /// Render size in points. Row uses 16; badge uses 14.
   let size: CGFloat
   /// Foreground style applied to the template-rendered glyph. Defaults
@@ -32,66 +29,44 @@ struct AgentLogoView: View {
   /// reads alongside the bolder title.
   var tint: HierarchicalShapeStyle = .secondary
 
+  /// Brand-mark convenience for the agent-state surfaces, which observe a
+  /// live pane's `AgentKind` and have no profile to carry an override.
+  init(kind: AgentKind, size: CGFloat, tint: HierarchicalShapeStyle = .secondary) {
+    self.init(icon: .brand(kind), size: size, tint: tint)
+  }
+
+  init(icon: AgentIconRef, size: CGFloat, tint: HierarchicalShapeStyle = .secondary) {
+    self.icon = icon
+    self.size = size
+    self.tint = tint
+  }
+
   var body: some View {
-    Group {
-      switch kind {
-      case .claudeCode:
-        Image("claude-code")
-          .resizable()
-          .scaledToFit()
-      case .codex:
-        // Visually inset the codex glyph so it reads ~15% smaller than
-        // the claude / pi marks at the same outer frame. The bundled
-        // glyph carries less negative padding than the other two, so
-        // without the inset it looks chunkier in the row.
-        Image("codex")
-          .resizable()
-          .scaledToFit()
-          .padding(size * 0.15)
-      case .pi:
-        Image("pi")
-          .resizable()
-          .scaledToFit()
-      case .opencode:
-        Image("opencode")
-          .resizable()
-          .scaledToFit()
-      case .gemini:
-        Image("gemini")
-          .resizable()
-          .scaledToFit()
-      case .cursorAgent:
-        Image("cursor-agent")
-          .resizable()
-          .scaledToFit()
-      case .cline:
-        Image("cline")
-          .resizable()
-          .scaledToFit()
-      case .copilot:
-        Image("github-copilot")
-          .resizable()
-          .scaledToFit()
-      case .kimi:
-        Image("kimi")
-          .resizable()
-          .scaledToFit()
-      case .droid:
-        Image("droid")
-          .resizable()
-          .scaledToFit()
-      case .amp:
-        Image("amp")
-          .resizable()
-          .scaledToFit()
-      case .omp:
-        Image("omp")
-          .resizable()
-          .scaledToFit()
-      }
+    glyph
+      .frame(width: size, height: size)
+      .foregroundStyle(tint)
+      .accessibilityHidden(true)
+  }
+
+  @ViewBuilder
+  private var glyph: some View {
+    switch icon {
+    case .brand(let kind):
+      Image(AgentCatalog.descriptor(for: kind).iconAssetName)
+        .resizable()
+        .scaledToFit()
+        // The codex glyph carries less negative padding than its peers, so
+        // without an inset it reads ~15% chunkier at the same outer frame.
+        .padding(kind == .codex ? size * 0.15 : 0)
+        .accessibilityHidden(true)
+    case .symbol(let name):
+      Image(systemName: name)
+        .resizable()
+        .scaledToFit()
+        // SF Symbols carry less built-in padding than the brand SVGs; inset
+        // so both read at the same weight for one `size`.
+        .padding(size * 0.1)
+        .accessibilityHidden(true)
     }
-    .frame(width: size, height: size)
-    .foregroundStyle(tint)
-    .accessibilityHidden(true)
   }
 }

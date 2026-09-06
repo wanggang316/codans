@@ -56,12 +56,13 @@ public nonisolated enum AgentRuntimeAdapters {
     case .codex:
       return CodexAdapter()
     case .pi:
-      return ObservedAgentAdapter(kind: .pi, displayName: "pi", processNames: ["pi"])
+      return ObservedAgentAdapter(kind: .pi, displayName: "Pi", processNames: ["pi"])
     case .opencode:
       return ObservedAgentAdapter(
-        kind: .opencode, displayName: "opencode", processNames: ["opencode", "open-code"])
+        kind: .opencode, displayName: "OpenCode", processNames: ["opencode", "open-code"])
     case .gemini:
-      return ObservedAgentAdapter(kind: .gemini, displayName: "Gemini", processNames: ["gemini"])
+      return ObservedAgentAdapter(
+        kind: .gemini, displayName: "Gemini CLI", processNames: ["gemini"])
     case .cursorAgent:
       return ObservedAgentAdapter(
         kind: .cursorAgent, displayName: "Cursor Agent", processNames: ["cursor-agent"])
@@ -79,6 +80,9 @@ public nonisolated enum AgentRuntimeAdapters {
     case .amp:
       return ObservedAgentAdapter(
         kind: .amp, displayName: "Amp", processNames: ["amp", "amp-local"])
+    case .grok:
+      return ObservedAgentAdapter(
+        kind: .grok, displayName: "Grok Build", processNames: ["grok", "grok-cli"])
     case .omp:
       return OmpAdapter()
     }
@@ -93,7 +97,7 @@ public nonisolated enum AgentRuntimeAdapters {
   /// UUID/ULID-shaped today, but they originate from files we don't own —
   /// quote instead of trusting the charset.
   static func shellQuoted(_ raw: String) -> String {
-    "'" + raw.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    ShellQuoting.quoted(raw)
   }
 }
 

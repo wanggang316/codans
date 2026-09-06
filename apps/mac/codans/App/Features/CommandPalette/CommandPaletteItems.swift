@@ -1,6 +1,6 @@
+import CodansCore
 import Dependencies
 import Foundation
-import CodansCore
 
 /// Builds the list of `CommandPaletteItem` shown when the palette opens.
 ///
@@ -52,6 +52,11 @@ enum CommandPaletteItems {
         items.append(
           contentsOf: globalScriptItems(projectID: projectID, worktreeID: worktreeID)
         )
+        // Agent profiles start a fresh session in the selected Worktree.
+        items.append(
+          contentsOf: agentProfileItems(projectID: projectID, worktreeID: worktreeID)
+        )
+        items.append(handOffItem(worktreeName: worktree.name))
       }
     }
     if let focusedPaneID {
@@ -463,6 +468,44 @@ enum CommandPaletteItems {
         kind: .runGlobalScript(projectID, worktreeID, script.id)
       )
     }
+  }
+
+  /// One "Launch Agent: <profile>" item per enabled `AgentProfile`, in
+  /// Settings order — the same rows the toolbar Agents menu lists. Reads the
+  /// live settings snapshot like the script builders so a profile added in
+  /// Settings appears on the next palette open.
+  private static func agentProfileItems(
+    projectID: ProjectID,
+    worktreeID: WorktreeID
+  ) -> [CommandPaletteItem] {
+    @Dependency(SettingsWriter.self) var settingsWriter
+    let profiles = settingsWriter.readSnapshotSync().agents.enabledProfiles
+    return profiles.map { profile in
+      CommandPaletteItem(
+        id: "agent.launch.\(profile.id.uuidString)",
+        title: "Launch Agent: \(profile.displayName)",
+        subtitle: profile.kind.displayName,
+        searchText: "agent launch \(profile.displayName) \(profile.kind.displayName)",
+        // A brand mark has no SF Symbol name; the palette row renders a
+        // generic glyph and the title carries the identity.
+        icon: profile.systemImage ?? "sparkles",
+        kind: .launchAgentProfile(projectID, worktreeID, profile.id)
+      )
+    }
+  }
+
+  /// Single "Hand Off…" row. Always offered while a Worktree is selected;
+  /// RootFeature reports (via a status toast) when the focused pane has no
+  /// agent to ask.
+  private static func handOffItem(worktreeName: String) -> CommandPaletteItem {
+    CommandPaletteItem(
+      id: "agent.handoff",
+      title: "Hand Off…",
+      subtitle: worktreeName,
+      searchText: "agent hand off handoff switch briefing",
+      icon: "arrow.right.arrow.left",
+      kind: .handOff
+    )
   }
 
   /// Resolves a PaneID for palette actions opened without a precise

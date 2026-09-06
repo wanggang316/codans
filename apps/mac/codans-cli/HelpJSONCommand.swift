@@ -12,7 +12,7 @@ struct HelpJSONCommand: ParsableCommand {
   )
 
   func run() throws {
-    let tree = Self.walk(CodansCLI.self, name: "codans")
+    let tree = Self.walk(CodansCLI.self, name: CodansCLI.commandName)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(tree)

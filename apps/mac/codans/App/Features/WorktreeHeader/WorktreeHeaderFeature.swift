@@ -60,6 +60,16 @@ struct WorktreeHeaderFeature {
     /// "Manage Global Commands…" menu footer. Deep-links into the Settings
     /// window's Global Commands pane (no project context needed).
     case manageGlobalScriptsTapped
+    /// Agents split button — primary or menu activation. Carries only the
+    /// profile id; RootFeature resolves the target Project + Worktree from
+    /// `state.selection` at handle-time, same staleness rationale as
+    /// `runScriptTapped`.
+    case launchAgentTapped(profileID: UUID)
+    /// "Manage Agents…" menu footer, and the primary half's fallback when no
+    /// profile is enabled. Deep-links into the Settings window's Agents pane.
+    case manageAgentsTapped
+    /// "Hand Off…" menu row. RootFeature resolves the source pane (the
+    /// selected worktree's focused pane) and opens the Hand Off panel.
     case delegate(Delegate)
 
     /// Parent-consumed delegate. `RootFeature` routes these into the existing
@@ -100,6 +110,14 @@ struct WorktreeHeaderFeature {
       /// User asked to manage global commands — open the Settings window AND
       /// deep-link into the Global Commands pane.
       case manageGlobalScriptsRequested
+      /// Launch a configured agent profile. RootFeature resolves the target
+      /// Project + Worktree from `state.selection` at handle-time (see
+      /// `runScriptRequested`) and dispatches to
+      /// `HierarchyClient.launchAgentProfile`.
+      case launchAgentRequested(profileID: UUID)
+      /// User asked to manage agents — open the Settings window AND deep-link
+      /// into the Agents pane.
+      case manageAgentsRequested
     }
   }
 
@@ -145,6 +163,12 @@ struct WorktreeHeaderFeature {
 
       case .manageGlobalScriptsTapped:
         return .send(.delegate(.manageGlobalScriptsRequested))
+
+      case .launchAgentTapped(let profileID):
+        return .send(.delegate(.launchAgentRequested(profileID: profileID)))
+
+      case .manageAgentsTapped:
+        return .send(.delegate(.manageAgentsRequested))
 
       case .delegate:
         // Consumed by the parent; reducer has no local state change.

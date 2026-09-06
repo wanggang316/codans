@@ -34,6 +34,7 @@ A native macOS application, built on libghostty, that treats **terminals as the 
 | C5 | Published Agent Skill | A standard-format Agent Skill (Claude Code / Codex / pi compatible — `SKILL.md` + `references/` + optional `agents/`) that teaches coding agents how to drive codans via its CLI and concepts. Distributed as an independent package; consumed by the coding agent, not by the app. Zero runtime coupling with the app. The app ships installation helpers (e.g. `codans skill install --claude-code`) that copy or symlink the bundled skill into the agent's skill directory | Planned | — |
 | C6 | Agent notification aggregation | Detect agent completion / blocking-on-input states; surface as OS notifications, badge counts, and an in-app active-agents inbox | Shipped | Beta |
 | C7 | Git viewer delegation (open in external git client) | Open the current Worktree in the user's external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge, etc.) via the "Toggle Git Viewer" command (⌘⌥G chord / menu / command palette); default git client configurable globally (`general.defaultGitViewerID`). Shares the same registry, launcher, and open path as C8 — a separate global default pointed at the registry's git-client category. There is no built-in in-app diff/history viewer | Shipped | Beta |
+| C9 | Agent profiles & handoff | Named launch presets per coding agent (Settings → Agents; toolbar Agents button, Command Palette, `codans agent launch`) and agent-to-agent task handoff over a worktree-local `.codans/handoff/` artifact: the live source agent writes its own briefing via `codans handoff`, the receiver starts in a background tab with a kickoff prompt; an in-app Hand Off panel triggers and observes that same transition | Shipped | Beta |
 | C8 | External editor integration | Open the current Worktree directory in an external editor or file manager (VSCode / Cursor / Zed / Xcode / Sublime Text / Finder, etc.) via CLI (`codans open`) or a button on the Worktree header; default editor configurable globally and per-Project. Worktree-level only — no file-level or diff-level open in v1 | Shipped | Beta |
 
 ### Capability Dependencies
@@ -42,7 +43,8 @@ A native macOS application, built on libghostty, that treats **terminals as the 
 C1 Terminal engine (libghostty)
  ├── C2 Project / Worktree / Tab / Pane hierarchy with Tag classification
  │    ├── C7 Git viewer delegation        (opens the Worktree C2 selects in an external git client)
- │    └── C8 External editor integration  (opens the current Worktree directory in an external editor)
+ │    ├── C8 External editor integration  (opens the current Worktree directory in an external editor)
+ │    └── C9 Agent profiles & handoff     (launches agents into C2 panes; handoff rides C4's `codans handoff`)
  └── C3 Lifecycle hooks
       ├── C4 CLI (`codans`)                   (invokes hooks, dispatches across Panes; also exposes `codans open`)
       └── C6 Agent notification aggregation   (consumer of hooks)

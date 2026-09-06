@@ -262,8 +262,8 @@ struct WorktreeDetailView: View {
 
   /// Window-titlebar toolbar content — ONE declaration serving both the
   /// creating and the settled state. Branch label on the leading edge,
-  /// status pill + bell at the optical center, Run / Open on the trailing
-  /// edge. Mirrors the layout that used to live as the right cluster of the
+  /// status pill + bell at the optical center, Agents / Run / Open on the
+  /// trailing edge. Mirrors the layout that used to live as the right cluster of the
   /// content-region header; moving it into `.toolbar {}` reclaims vertical
   /// pixels above the tab bar and matches macOS native chrome.
   ///
@@ -290,7 +290,7 @@ struct WorktreeDetailView: View {
   ///   - MIDDLE: `SkeletonStatusPillView` carrying the motivational form's
   ///     footprint. The bell beside it stays LIVE and interactive — it is
   ///     window-level chrome (global unread count), not worktree data.
-  ///   - RIGHT: ghost Run / Open chips holding the real buttons' footprint,
+  ///   - RIGHT: ghost Agents / Run / Open chips holding the real buttons' footprint,
   ///     so the trailing flexible spacer weighs the same in both modes.
   /// The left / middle stand-ins carry the `skeleton-left` /
   /// `skeleton-middle` accessibility ids (VAL-DETAIL-001 / VAL-DETAIL-003).
@@ -328,7 +328,11 @@ struct WorktreeDetailView: View {
         // of one shared cluster background. `ToolbarSpacer(.fixed)` keeps
         // them visually distinct without collapsing the gap. No
         // `.buttonStyle` / no manual padding: each item gets the toolbar's
-        // native glass capsule + hover state. Order: RunScript, Open.
+        // native glass capsule + hover state. Order: Agents, RunScript,
+        // Open — agents first because starting one is the more frequent
+        // entry point for this app's audience.
+        ToolbarItem { agentSlot(mode) }
+        ToolbarSpacer(.fixed)
         ToolbarItem { runSlot(mode) }
         ToolbarSpacer(.fixed)
         ToolbarItem { openSlot(mode) }
@@ -341,8 +345,9 @@ struct WorktreeDetailView: View {
         // group with the action buttons.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
-          // Order: RunScript, Open. `ToolbarItemGroup` renders children
-          // leading-to-trailing in declaration order.
+          // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
+          // children leading-to-trailing in declaration order.
+          agentSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
           openSlot(mode).buttonStyle(.plain)
         }
@@ -402,6 +407,18 @@ struct WorktreeDetailView: View {
           worktreePath: URL(fileURLWithPath: info.worktree.path),
           branch: info.worktree.branch
         )
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func agentSlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating:
+      SkeletonActionChipView(labelText: "Agents")
+    case .worktree(_, let info):
+      if info != nil {
+        HeaderAgentSplitButton(store: headerStore)
       }
     }
   }

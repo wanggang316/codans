@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// Inline, spreadsheet-style editor for a Project's custom commands.
 ///
@@ -448,17 +448,6 @@ private struct ScriptIconPopover: View {
   let script: ScriptDefinition
   let onUpdate: (ScriptDefinition) -> Void
 
-  private static let presets: [String] = [
-    "terminal", "terminal.fill", "play.fill", "stop.fill",
-    "hammer.fill", "shippingbox.fill", "doc.text.fill", "sparkles",
-    "bolt.fill", "flame.fill", "wand.and.stars", "wrench.and.screwdriver.fill",
-    "checkmark.circle.fill", "xmark.circle.fill", "exclamationmark.triangle.fill", "ladybug.fill",
-    "clock.fill", "repeat", "arrow.clockwise", "folder.fill",
-    "archivebox.fill", "paperplane.fill", "cloud.fill", "tray.and.arrow.down.fill",
-    "tray.and.arrow.up.fill", "icloud.and.arrow.up.fill", "square.and.arrow.up.fill", "arrow.triangle.2.circlepath",
-    "folder.badge.plus", "doc.badge.plus",
-  ]
-
   private var symbolBinding: Binding<String> {
     Binding(
       get: { script.systemImage ?? script.resolvedSystemImage },
@@ -491,33 +480,10 @@ private struct ScriptIconPopover: View {
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
-      HStack(spacing: 8) {
-        TextField("SF Symbol name", text: symbolBinding)
-          .textFieldStyle(.roundedBorder)
-        Button("Open SF Symbols", action: openSFSymbols)
-      }
-
-      ScrollView {
-        LazyVGrid(
-          columns: Array(repeating: GridItem(.fixed(24), spacing: 8), count: 10),
-          spacing: 8
-        ) {
-          ForEach(Self.presets, id: \.self) { name in
-            Button {
-              symbolBinding.wrappedValue = name
-            } label: {
-              Image(systemName: name)
-                .foregroundStyle(name == symbolBinding.wrappedValue ? ScriptTintColorPalette.color(for: script.resolvedTintColor) : .primary)
-                .frame(width: 24, height: 24)
-                .accessibilityHidden(true)
-            }
-            .buttonStyle(.plain)
-            .help(name)
-          }
-        }
-        .padding(12)
-      }
-      .frame(maxHeight: 124)
+      SFSymbolPicker(
+        selection: symbolBinding,
+        highlight: ScriptTintColorPalette.color(for: script.resolvedTintColor)
+      )
 
       Divider()
 
@@ -527,17 +493,6 @@ private struct ScriptIconPopover: View {
     .frame(width: 360)
   }
 
-  /// Launch the SF Symbols app, falling back to the web reference.
-  private func openSFSymbols() {
-    let workspace = NSWorkspace.shared
-    if let url = workspace.urlForApplication(withBundleIdentifier: "com.apple.SFSymbols") {
-      workspace.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-      return
-    }
-    if let url = URL(string: "https://developer.apple.com/sf-symbols/") {
-      workspace.open(url)
-    }
-  }
 }
 
 /// Horizontal palette of `ScriptTintColor` swatches, styled with the shared

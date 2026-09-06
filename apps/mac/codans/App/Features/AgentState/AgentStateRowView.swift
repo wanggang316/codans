@@ -58,6 +58,9 @@ struct AgentStateRowView: View {
   var worktreePath: String?
   var remoteHost: RemoteHost?
   let onTap: () -> Void
+  /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
+  /// sites and tests render the row without a menu.
+  var onHandOff: (() -> Void)?
 
   /// Delay before the hover summary card opens. Long enough that a
   /// pointer sweeping the list to click a row never flashes cards,
@@ -104,6 +107,15 @@ struct AgentStateRowView: View {
       .background(rowBackground)
     }
     .buttonStyle(.plain)
+    .contextMenu {
+      if let onHandOff {
+        Button {
+          onHandOff()
+        } label: {
+          Label("Hand Off…", systemImage: "arrow.right.arrow.left")
+        }
+      }
+    }
     .onHover(perform: handleHover)
     .onDisappear {
       summaryCardTask?.cancel()

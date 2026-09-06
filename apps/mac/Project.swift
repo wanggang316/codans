@@ -17,6 +17,13 @@ let project = Project(
       // CODE_SIGN_STYLE=Manual etc. passed at invocation time), which
       // outrank anything set here.
       "CODE_SIGN_STYLE": "Automatic",
+      // File name the CLI is embedded under (`Contents/Resources/bin/<name>`)
+      // and installed as. Mirrors `BuildChannel.slug` in CodansCore: a
+      // development build's CLI is `codans-dev`, so looking that name up on
+      // a pane's PATH can only ever find a development build, however the
+      // shell reorders PATH. `CLIBundleLocator` expects the same name.
+      "CODANS_CLI_NAME[config=Debug]": "codans-dev",
+      "CODANS_CLI_NAME[config=Release]": "codans",
       "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
       "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
       "SWIFT_VERSION": "6.0",
@@ -244,10 +251,10 @@ let project = Project(
           basedOnDependencyAnalysis: false
         ),
         // codans CLI embedding. Copies the codans binary built by its sibling
-        // target into Resources/bin/codans so the app can ship a single
-        // self-contained .app and `codans skill install` / the first-launch
-        // installer have a stable inside-bundle path to symlink from
-        // ~/.local/bin/codans.
+        // target into Resources/bin/$(CODANS_CLI_NAME) so the app can ship a
+        // single self-contained .app, the installer has a stable inside-bundle
+        // path to symlink from /usr/local/bin, and every pane can reach its
+        // own app's CLI by that name through PATH.
         .post(
           script: "\"${SRCROOT}/scripts/embed-codans.sh\"",
           name: "Embed codans",
@@ -255,7 +262,7 @@ let project = Project(
             "$(CONFIGURATION_BUILD_DIR)/codans",
           ],
           outputPaths: [
-            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/codans",
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/$(CODANS_CLI_NAME)",
           ],
           basedOnDependencyAnalysis: true
         ),

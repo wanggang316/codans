@@ -15,14 +15,80 @@ and the project does not yet follow semantic versioning — every release until
   activity badges tuned to its loader and approval-selector rendering, the
   omp glyph, and resumable session history — local and on remote hosts —
   via `omp --resume`.
+- **Agent profiles — named launch presets for coding agents.** Settings →
+  Agents holds one profile per agent (model, reasoning effort, execution
+  mode, placement, extra arguments, launch-scoped environment variables, an
+  optional dedicated home, a custom icon), with a live preview of the exact
+  command codans types. Start one from the worktree toolbar's Agents button,
+  the Command Palette ("Launch Agent: …"), or the CLI (`codans agent list` /
+  `codans agent launch`).
+- **Hand off a task between agents.** `codans handoff to <agent> --brief -`
+  archives the previous round under the worktree's `.codans/handoff/`,
+  installs the source agent's own briefing, regenerates repository and
+  session context, and starts the receiver with a kickoff prompt — in a
+  new background tab, or split off the source pane on the side you choose
+  (`--split <dir>`, or the panel's placement menus, which remember the last
+  choice). The panel offers the enabled agents your shell can run, as a
+  compact grid of names; agents whose CLI takes no prompt argument get the
+  kickoff typed into their pane and sent once their input box is up.
+  `codans handoff save`
+  checkpoints without a receiver. In
+  the app, "Hand Off…" (a pane's actions menu, Command Palette, Agents View row) asks
+  the live agent to run that same command with its briefing, closes at once,
+  and jumps to the receiver when the agent finishes. The confirm button's
+  menu offers Hand Off with Context, which starts the receiver right away
+  from generated context without asking the agent; the two paths never run
+  at once.
+- The worktree toolbar's Agents menu now lists only agents whose CLI the
+  shell can resolve. The check fails open: nothing is hidden before the
+  scan answers, and if it would hide every profile they all come back.
+- **Per-pane actions menu.** Every terminal pane carries a collapsed
+  button in its top-right corner. Opening it offers the actions scoped to
+  that pane — "Hand Off…" today. It repeats no workspace facts: path,
+  branch, diff and agent are already shown in the header, sidebar and
+  Agents view. Clicking anywhere else, or Escape, collapses it.
 
 ### Changed
+
+- Every pane now exports `CODANS_PANE_ID`, so `codans` commands run inside
+  a pane resolve `current` locally instead of always asking the app to
+  walk process ancestry.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **Development builds are now a separate application from the release
+  build, CLI included.** A Debug build embeds and installs its CLI as
+  `codans-dev`, and that CLI calls itself `codans-dev` in help, hints and
+  the handshake. Every pane has its own app's `bin/` on `PATH` and
+  `CODANS_CLI` carries the absolute path, so `codans-dev` resolves to the
+  app that spawned the pane however the login shell reorders `PATH`.
+  Previously the Debug bundle also named its CLI `codans`, so commands
+  typed in a Debug pane resolved to the installed release CLI and were
+  answered by the release app.
+- The CLI stays inside its build channel. The release `codans` refuses to
+  act on a pane that belongs to a development build (exit code 15,
+  `codans doctor` reports `socketStatus wrong-channel`) and names
+  `codans-dev` instead; `codans-dev` run from a release pane dials the
+  development socket. `--socket` still crosses on purpose. `doctor` now
+  also prints the client name and channel. `launch` from a development
+  CLI no longer falls back to opening the installed release app.
+- The hand-off kickoff line written into the source pane now says
+  `codans-dev` (or `codans`) whenever nothing in `/usr/local/bin` shadows
+  that name, instead of the bundled binary's absolute path.
+- Settings → Developer recognises a `codans` symlink that points at another
+  build, or at a binary a rebuild renamed away, as stale and offers
+  Reinstall instead of reporting a collision.
+- The Master Terminal's shell now gets the same environment a worktree
+  pane does — socket path, product marker, and a cleared `ZMX_SESSION` —
+  instead of a bare `ZMX_DIR`.
+
+- The CLI now honours `$CODANS_SOCKET_PATH` when no `--socket` flag is
+  given, so a command run inside a pane reaches the app that spawned it
+  rather than the installed release build.
 
 - Worktrees no longer disappear when the disk fills up. A `git worktree list`
   that dies under disk pressure reached codans as an empty — but perfectly
