@@ -553,13 +553,14 @@ struct HierarchySidebarView: View {
           // it inherit the toolbar item's implicit content color: after a
           // dark→light appearance change the implicit one has been observed
           // staying on the dark-mode white, which renders the "+" invisible on
-          // light chrome while every sibling (including the ⌘-hint text right
-          // next to it) already reads as light.
+          // light chrome while every sibling already reads as light.
           .foregroundStyle(.primary)
-          .commandKeyHint(.addProject)
       }
       .menuIndicator(.hidden)
-      .helpWithShortcut("Add Project", .addProject)
+      // No chord on the button: `+` only opens the menu. The `.addProject`
+      // binding belongs to "Open Project…", the first item, which shows it
+      // as its key equivalent.
+      .help("Add Project")
     }
   }
 
@@ -573,6 +574,7 @@ struct HierarchySidebarView: View {
     } label: {
       Label("Open Project…", systemImage: "folder")
     }
+    .appKeyboardShortcut(.addProject, in: resolvedShortcuts)
     Button {
       store.send(.cloneRepoTapped)
     } label: {
@@ -728,7 +730,6 @@ struct HierarchySidebarView: View {
         addProjectMenuItems
       } label: {
         Label("Open Project", systemImage: "plus")
-          .commandKeyHint(.addProject)
       }
       .menuStyle(.button)
       .menuIndicator(.hidden)
