@@ -5,8 +5,9 @@ import SwiftUI
 /// Sheet-hosted editor for a Pane's Command Queue (⌘⌥L, or the pane's
 /// actions menu).
 ///
-/// Laid out like a chat box: the queue reads top-down as the history and the
-/// composer sits under it, carrying its own controls inside the box — the
+/// Laid out like a chat box: the queue reads top-down as the history — a
+/// native list, present only while something is queued — and the composer
+/// sits under it, carrying its own controls inside the box — the
 /// send timing at the bottom-left, the send button at the bottom-right, and
 /// the schedule fields on a row of their own when that timing is chosen.
 /// Return sends and ⇧Return breaks a line. The composer is multi-line
@@ -32,11 +33,12 @@ struct CommandQueueView: View {
 
   private static let width: CGFloat = 560
   private static let boxCornerRadius: CGFloat = 6
-  /// The list keeps a floor so an empty queue still reads as the place
-  /// entries will appear, and the composer does not jump when the first one
-  /// lands.
-  private static let queueMinHeight: CGFloat = 112
-  private static let queueMaxHeight: CGFloat = 200
+  /// Rows are uniform — one line of command, one caption — so the list's
+  /// height is arithmetic rather than measured; `List` cannot size itself
+  /// to its content.
+  private static let rowHeight: CGFloat = 44
+  private static let rowInsets = EdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 10)
+  private static let maxVisibleRows = 7
   /// About five lines of the composer's monospaced 12pt.
   private static let editorHeight: CGFloat = 88
   private static let composerFont = Font.system(size: 12, design: .monospaced)
@@ -44,7 +46,9 @@ struct CommandQueueView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
-      queuedList
+      if !entries.isEmpty {
+        queuedList
+      }
       composer
     }
     .padding(24)
@@ -70,53 +74,52 @@ struct CommandQueueView: View {
 
   // MARK: - Queued list
 
+  /// A native bordered list, shown only while something is queued: an empty
+  /// queue needs no box, and the composer moves up under the title.
   private var queuedList: some View {
     ScrollViewReader { proxy in
-      ScrollView {
-        if entries.isEmpty {
-          Text("Nothing queued yet")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, minHeight: Self.queueMinHeight)
-        } else {
-          VStack(spacing: 0) {
-            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-              if index > 0 { Divider() }
-              row(entry)
-                .id(entry.id)
-            }
-          }
+      List {
+        ForEach(entries) { entry in
+          row(entry)
+            .id(entry.id)
+            .listRowInsets(Self.rowInsets)
+            .listRowSeparator(.hidden)
         }
       }
-      .scrollIndicators(.automatic)
-      .frame(minHeight: Self.queueMinHeight, maxHeight: Self.queueMaxHeight)
+      .listStyle(.bordered)
+      .alternatingRowBackgrounds(.enabled)
+      .frame(height: Self.listHeight(for: entries.count))
       // Newest at the bottom, like a transcript: follow it as entries land.
       .onChange(of: entries.count) { _, _ in
         guard let last = entries.last else { return }
         withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
       }
     }
-    .background(box)
-    .overlay(boxEdge(focused: false))
+  }
+
+  /// One row per entry up to `maxVisibleRows`, plus the bordered style's
+  /// top and bottom hairlines.
+  private static func listHeight(for count: Int) -> CGFloat {
+    CGFloat(min(count, maxVisibleRows)) * rowHeight + 2
   }
 
   private func row(_ entry: QueuedCommand) -> some View {
-    HStack(alignment: .top, spacing: 8) {
+    HStack(spacing: 10) {
       Image(systemName: entry.timing.fireDate == nil ? "arrow.turn.down.right" : "clock")
-        .font(.caption)
-        .frame(width: 14)
-        .padding(.top, 2)
+        .font(.system(size: 12))
+        .frame(width: 16)
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
-        Text(entry.text)
+        Text(Self.oneLine(entry.text))
           .font(Self.composerFont)
-          .lineLimit(3)
+          .lineLimit(1)
           .truncationMode(.tail)
         Text(CommandQueueBadgeStyle.description(of: entry.timing))
           .font(.caption)
           .foregroundStyle(.secondary)
       }
+      .frame(height: Self.rowHeight - Self.rowInsets.top - Self.rowInsets.bottom)
       Spacer(minLength: 8)
       Button {
         store.send(.removeTapped(entry.id))
@@ -127,8 +130,16 @@ struct CommandQueueView: View {
       .buttonStyle(.plain)
       .accessibilityLabel("Remove queued command")
     }
-    .padding(.horizontal, 8)
-    .padding(.vertical, 6)
+    // Rows are one line; the full body is a hover away.
+    .help(entry.text)
+  }
+
+  /// A multi-line body on one line, with its breaks kept visible so
+  /// `echo hi ⏎ date` does not read as one command.
+  private static func oneLine(_ text: String) -> String {
+    text
+      .split(omittingEmptySubsequences: true, whereSeparator: \.isNewline)
+      .joined(separator: " ⏎ ")
   }
 
   // MARK: - Composer
@@ -299,9 +310,9 @@ struct CommandQueueView: View {
 
   // MARK: - Chrome
 
-  /// The list and the composer share one box treatment so the sheet reads
-  /// as two panes of the same surface, the way a transcript and its input
-  /// do.
+  /// The composer's box. Its edge takes the accent colour while the editor
+  /// has focus, standing in for the focus ring the editor itself no longer
+  /// draws.
   private var box: some View {
     RoundedRectangle(cornerRadius: Self.boxCornerRadius, style: .continuous)
       .fill(Color(nsColor: .textBackgroundColor))
