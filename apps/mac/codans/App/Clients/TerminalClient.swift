@@ -9,17 +9,19 @@ import CodansCore
 nonisolated struct TerminalClient: Sendable {
   var sendInput: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
 
-  /// Type `text` into the pane and then submit it with a real Return
-  /// keypress, separated by a short gap.
+  /// Deliver `text` to the pane as one paste, then submit it with a real
+  /// Return keypress after a short gap.
   ///
-  /// The gap is load-bearing for coding-agent panes. Sending `text + "\n"`
-  /// through `sendInput` puts the characters and the CR into the same PTY
-  /// write, and a TUI agent that reads them in one chunk classifies the
-  /// batch as a paste — the newline lands in its composer as a literal line
-  /// break instead of submitting. Shells are line-buffered by the tty and
-  /// don't care, which is why `initialCommand` and run scripts get away with
-  /// the concatenated form. Anything aimed at a pane that may be running an
-  /// agent must go through here.
+  /// Both halves matter for coding-agent panes. `sendInput` is the script
+  /// path — it presses Return after every line, which is what makes a run
+  /// script execute in a shell — so a multi-line prompt sent through it would
+  /// arrive as several submissions. Here the body goes through the paste
+  /// path whole and lands in an agent's composer with its line breaks
+  /// intact. The gap is load-bearing too: a Return that reaches the agent in
+  /// the same read as the text is taken as part of the paste and never
+  /// submits, which is how `text + "\n"` used to leave a newline sitting in
+  /// the composer. Anything aimed at a pane that may be running an agent
+  /// must go through here.
   var sendCommand: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
   /// Interrupt the pane's foreground process (Ctrl-C → SIGINT). Goes through
   /// the key-event path rather than `sendInput`, whose text path filters
@@ -77,7 +79,7 @@ extension TerminalClient {
       },
       sendCommand: { paneID, text in
         guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return }
-        surface.sendInput(text)
+        surface.sendText(text)
         Task { @MainActor in
           try? await Task.sleep(for: TerminalClient.submitDelay)
           // Re-resolve rather than capturing `surface`: the pane can be

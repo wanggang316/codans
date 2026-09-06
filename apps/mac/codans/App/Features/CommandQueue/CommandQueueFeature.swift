@@ -65,6 +65,8 @@ struct CommandQueueFeature {
       return TimeInterval(repeatAmount) * repeatUnit.seconds
     }
 
+    /// Trimmed at the ends only: a line break inside the draft is part of
+    /// the prompt and is delivered as one.
     var trimmedDraft: String {
       draft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -155,7 +157,8 @@ struct CommandQueueFeature {
           // Never enters the queue — it is already delivered. The panel is
           // always opened on a pane the user is looking at, so a live
           // surface is a given here. `sendCommand` (not `sendInput`) so the
-          // Return arrives as its own keypress; see its docstring.
+          // body lands as one paste and the Return arrives as its own
+          // keypress; see its docstring.
           terminalClient.sendCommand(paneID, text)
         case .afterCurrentTask:
           append(.init(text: text, timing: .afterCurrentTask, createdAt: date.now), to: paneID)

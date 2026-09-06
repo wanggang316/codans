@@ -351,6 +351,21 @@ final class PaneSurface {
     }
   }
 
+  /// Deliver `text` in one write, newlines included.
+  ///
+  /// The paste path: libghostty frames the body with bracketed-paste markers
+  /// when the foreground program enabled them, so a paste-aware program (a
+  /// coding agent's TUI, zsh, bash ≥ 5.1) takes it as a single insertion and
+  /// waits for a separate Return. A program without bracketed paste receives
+  /// each newline as a carriage return, the only reading it has.
+  func sendText(_ text: String) {
+    guard let surface else { return }
+    sendTextChunk(text, to: surface)
+  }
+
+  /// Type `text` line by line: every newline becomes a Return keypress, so a
+  /// multi-line body runs as a script in a shell. For a body that has to
+  /// land whole — a prompt to an agent — use `sendText`.
   func sendInput(_ text: String) {
     guard let surface, !text.isEmpty else { return }
     var chunk = ""

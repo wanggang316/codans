@@ -108,6 +108,19 @@ struct CommandQueueFeatureTests {
   /// The panel reads the live catalog on every append, so an entry the runner
   /// drained between opening the panel and submitting is not resurrected.
   @Test
+  func lineBreaksInsideTheDraftSurviveTrimming() async {
+    let recorder = Recorder()
+    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.mode = .now }
+    let draft = "\nRefactor the parser.\n\nKeep the public API.\n"
+    await store.send(.draftChanged(draft)) { $0.draft = draft }
+    await store.send(.submitted) { $0.draft = "" }
+
+    // Only the ends are trimmed. The blank line is part of the prompt, and
+    // `sendCommand` delivers the body as one paste.
+    #expect(recorder.sent == ["Refactor the parser.\n\nKeep the public API."])
+  }
+
+  @Test
   func appendReadsTheLiveQueueRatherThanASnapshot() async {
     let recorder = Recorder()
     recorder.queue = [QueuedCommand(text: "already there", timing: .afterCurrentTask)]
