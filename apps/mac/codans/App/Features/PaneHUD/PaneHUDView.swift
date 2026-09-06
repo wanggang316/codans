@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Per-pane actions menu, anchored to the pane's top-right corner.
 ///
-/// Collapsed it is a single button, joined by the queue badge while the pane
-/// holds queued commands. Expanded it lists the actions that are a property
+/// Collapsed it is a single button, wearing a count while the pane holds
+/// queued commands. Expanded it lists the actions that are a property
 /// of *this* pane — handing its agent's task off to another agent, opening
 /// its command queue — so the pane is where they live. It shows no workspace
 /// facts on purpose: the worktree's path, branch and uncommitted counts are
@@ -81,17 +81,8 @@ struct PaneHUDView: View {
           .transition(
             .scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity)
           )
-      } else if model.queuedCommandCount > 0 {
-        // This corner is the pane's one chrome slot, so the badge shares the
-        // row with the button rather than stacking on top of it. Expanded,
-        // the Command Queue row carries the count instead.
-        PaneCommandQueueBadge(paneID: paneID)
-          // Centred on the button's box: the row's `.top` alignment exists
-          // for the card body, and would pin a shorter capsule to the top.
-          .frame(height: Self.buttonSize)
-          .transition(.opacity)
       }
-      menuButton
+      menuButton(model)
     }
     // Constant in both states on purpose. The button is a layout sibling of
     // the card body, so an equal inset from the container's top-right corner
@@ -134,7 +125,7 @@ struct PaneHUDView: View {
       )
   }
 
-  private var menuButton: some View {
+  private func menuButton(_ model: PaneHUDModel) -> some View {
     Button {
       setExpanded(!isExpanded)
     } label: {
@@ -157,9 +148,33 @@ struct PaneHUDView: View {
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    // The queue count rides the button's corner rather than sitting beside
+    // it: this corner is one control, and the menu behind it is where the
+    // queue is reached. Hidden while expanded, where the Command Queue row
+    // carries the count.
+    .overlay(alignment: .topTrailing) {
+      if model.queuedCommandCount > 0, !isExpanded {
+        PaneCommandQueueBadge(count: model.queuedCommandCount)
+          .offset(x: 5, y: -5)
+          .transition(.opacity)
+      }
+    }
     .onHover { isButtonHovered = $0 }
+    .help(Self.buttonHelp(model))
     .accessibilityIdentifier("pane_hud.toggle")
-    .accessibilityLabel(isExpanded ? "Hide pane actions" : "Show pane actions")
+    .accessibilityLabel(
+      (isExpanded ? "Hide pane actions" : "Show pane actions")
+        + (model.queuedCommandCount > 0 ? ", \(Self.queuedPhrase(model))" : "")
+    )
+  }
+
+  private static func buttonHelp(_ model: PaneHUDModel) -> String {
+    model.queuedCommandCount > 0 ? "Pane actions · \(queuedPhrase(model))" : "Pane actions"
+  }
+
+  private static func queuedPhrase(_ model: PaneHUDModel) -> String {
+    let count = model.queuedCommandCount
+    return count == 1 ? "1 queued command" : "\(count) queued commands"
   }
 
   // MARK: - Expanded body

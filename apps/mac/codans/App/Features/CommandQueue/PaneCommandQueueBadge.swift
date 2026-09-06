@@ -11,7 +11,6 @@ enum CommandQueueBadgeStyle {
   /// One breath. Slow enough to read as "waiting", not as "error".
   static let breathDuration: Double = 1.2
   static let dimOpacity: Double = 0.45
-  static let dimScale: CGFloat = 0.92
 
   static func description(of timing: QueuedCommandTiming) -> String {
     switch timing {
@@ -40,75 +39,37 @@ enum CommandQueueBadgeStyle {
   }
 }
 
-/// Breathing badge shown beside a pane's actions button while that pane owes
-/// the user queued commands. Click opens the same sheet ⌘⌥L summons.
-///
-/// `PaneHUDView` owns the pane's top-right corner and places this in its
-/// collapsed row, so the badge carries no corner inset of its own and reaches
-/// the root store through the HUD's `paneHUDActions` seam.
-///
-/// Renders nothing at all for a pane with an empty queue — the terminal's
-/// corner belongs to the terminal unless there is something to say.
+/// Count pip the pane's actions button wears while the pane holds queued
+/// commands. It breathes so a parked queue reads as "waiting" rather than as
+/// a static number, and it is not itself a control: the button under it
+/// opens the pane menu, whose Command Queue row opens the sheet.
 struct PaneCommandQueueBadge: View {
-  let paneID: PaneID
-
-  @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(\.paneHUDActions) private var actions
-  @State private var isHovering = false
+  let count: Int
   /// Drives the breathing loop. Flipped once on appear; the repeating
-  /// animation attached to it runs for as long as the badge is mounted.
+  /// animation attached to it runs for as long as the pip is mounted.
   @State private var breathing = false
 
   var body: some View {
-    let queue = hierarchyManager.catalog.pane(paneID)?.commandQueue ?? []
-    if !queue.isEmpty {
-      Button {
-        actions.commandQueue(paneID)
-      } label: {
-        HStack(spacing: 4) {
-          Image(systemName: CommandQueueBadgeStyle.symbol)
-            .font(.system(size: 10, weight: .semibold))
-            .accessibilityHidden(true)
-          Text("\(queue.count)")
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background {
-          Capsule(style: .continuous)
-            .fill(Color.accentColor.opacity(isHovering ? 0.32 : 0.22))
-        }
-        .overlay {
-          Capsule(style: .continuous)
-            .stroke(Color.accentColor.opacity(0.45), lineWidth: 1)
-        }
-        .foregroundStyle(Color.accentColor)
-        // Breathing loop: `breathing` flips exactly once, on appear, and the
-        // autoreversing repeat attached to that single change oscillates the
-        // badge for as long as it is mounted. Driving it from one state flip
-        // (rather than a timer) keeps it free of a retained ticker.
-        .opacity(breathing ? 1 : CommandQueueBadgeStyle.dimOpacity)
-        .scaleEffect(breathing ? 1 : CommandQueueBadgeStyle.dimScale)
-        .animation(
-          .easeInOut(duration: CommandQueueBadgeStyle.breathDuration)
-            .repeatForever(autoreverses: true),
-          value: breathing
-        )
-      }
-      .buttonStyle(.plain)
-      .onHover { isHovering = $0 }
+    Text("\(count)")
+      .font(.system(size: 9, weight: .bold, design: .rounded))
+      .monospacedDigit()
+      .foregroundStyle(.white)
+      .padding(.horizontal, 4)
+      .frame(minWidth: 15, minHeight: 15)
+      .background(Capsule(style: .continuous).fill(Color.accentColor))
+      // Breathing loop: `breathing` flips exactly once, on appear, and the
+      // autoreversing repeat attached to that single change oscillates the
+      // pip for as long as it is mounted. Driving it from one state flip
+      // (rather than a timer) keeps it free of a retained ticker.
+      .opacity(breathing ? 1 : CommandQueueBadgeStyle.dimOpacity)
+      .animation(
+        .easeInOut(duration: CommandQueueBadgeStyle.breathDuration)
+          .repeatForever(autoreverses: true),
+        value: breathing
+      )
       .onAppear { breathing = true }
-      .help(helpText(queue))
-      .accessibilityLabel("Command queue, \(queue.count) pending")
-    }
-  }
-
-  private func helpText(_ queue: [QueuedCommand]) -> String {
-    let head = queue.prefix(3).map { entry in
-      "• \(entry.text) — \(CommandQueueBadgeStyle.description(of: entry.timing))"
-    }
-    let more = queue.count > 3 ? ["… and \(queue.count - 3) more"] : []
-    return (head + more).joined(separator: "\n")
+      .allowsHitTesting(false)
+      // The button's accessibility label carries the count.
+      .accessibilityHidden(true)
   }
 }
