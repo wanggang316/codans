@@ -84,11 +84,14 @@ struct PaneHUDView: View {
           )
       }
       // The queue button stacks under the menu button rather than beside it,
-      // so the corner stays one column of same-sized controls.
+      // so the corner stays one column of same-sized controls. Collapsed
+      // only: expanded, the card's Command Queue row is the same action, and
+      // the button would sit on top of the card beside it.
       VStack(spacing: 6) {
         menuButton(model)
-        if model.queuedCommandCount > 0 {
+        if model.queuedCommandCount > 0, !isExpanded {
           queueButton(model)
+            .transition(.opacity)
         }
       }
     }
