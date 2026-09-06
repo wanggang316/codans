@@ -675,9 +675,54 @@ extension HierarchyClient {
     settings: SettingsStore? = nil,
     gitWorktreeClient: GitWorktreeClient = .makeLive(),
     gitCLI: GitWorktreeCLI = GitWorktreeCLI(),
-    terminalClient: TerminalClient? = nil
+    terminalClient: TerminalClient? = nil,
+    confirmQueueDiscard: @escaping @MainActor (
+      QueuedCommandDiscard, _ completion: @escaping @MainActor (Bool) -> Void
+    ) -> Void = { discard, completion in
+      QueuedCommandsCloseDialog.present(discard, completion: completion)
+    }
   ) -> HierarchyClient {
-    HierarchyClient(
+    /// Closing a pane that still holds queued commands is asked first. The
+    /// gate sits here, on the UI's bridge, rather than in the manager: the
+    /// CLI and the run-script auto-close policies reach the manager directly
+    /// and must never block on a prompt. It also steps aside when none of
+    /// the panes has a live surface — a pane whose process already exited
+    /// is being tidied up, not closed, and its queue could not run anyway.
+    /// When it does ask, the close happens in the answer's completion, so
+    /// the caller's `try` returns having closed nothing yet.
+    func closeAfterConfirming(
+      panes: [Pane],
+      subject: QueuedCommandDiscard.Subject,
+      _ close: @escaping @MainActor () throws -> Void
+    ) throws {
+      let queued = panes.reduce(0) { $0 + $1.commandQueue.count }
+      let anyLive =
+        terminalClient.map { client in panes.contains { client.surface($0.id) != nil } } ?? true
+      guard queued > 0, anyLive else {
+        try close()
+        return
+      }
+      confirmQueueDiscard(QueuedCommandDiscard(subject: subject, queuedCount: queued)) { confirmed in
+        guard confirmed else { return }
+        try? close()
+      }
+    }
+    func tabs(in worktreeID: WorktreeID, _ projectID: ProjectID) -> [Tab] {
+      manager.catalog.projects.first(where: { $0.id == projectID })?
+        .worktrees.first(where: { $0.id == worktreeID })?.tabs ?? []
+    }
+    func closeTabsAfterConfirming(
+      _ doomed: [Tab], in worktreeID: WorktreeID, _ projectID: ProjectID,
+      _ close: @escaping @MainActor () throws -> Void
+    ) throws {
+      try closeAfterConfirming(
+        panes: doomed.flatMap(\.panes),
+        subject: doomed.count == 1 ? .tab : .tabs(doomed.count),
+        close
+      )
+    }
+
+    return HierarchyClient(
       createTag: { name, color in
         manager.createTag(name: name, color: color)
       },
@@ -722,7 +767,10 @@ extension HierarchyClient {
         try manager.createTab(in: worktreeID, in: projectID, name: name)
       },
       closeTab: { tabID, worktreeID, projectID in
-        try manager.closeTab(tabID, in: worktreeID, in: projectID)
+        let doomed = tabs(in: worktreeID, projectID).filter { $0.id == tabID }
+        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
+          try manager.closeTab(tabID, in: worktreeID, in: projectID)
+        }
       },
       selectTab: { tabID, worktreeID, projectID in
         try manager.selectTab(tabID, in: worktreeID, in: projectID)
@@ -743,15 +791,26 @@ extension HierarchyClient {
           in: worktreeID, in: projectID, orderedIDs: orderedIDs)
       },
       closeOtherTabs: { keepID, worktreeID, projectID in
-        try manager.closeOtherTabs(
-          keeping: keepID, in: worktreeID, in: projectID)
+        let doomed = tabs(in: worktreeID, projectID).filter { $0.id != keepID }
+        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
+          try manager.closeOtherTabs(
+            keeping: keepID, in: worktreeID, in: projectID)
+        }
       },
       closeTabsToRight: { pivotID, worktreeID, projectID in
-        try manager.closeTabsToRight(
-          of: pivotID, in: worktreeID, in: projectID)
+        let all = tabs(in: worktreeID, projectID)
+        let doomed = all.firstIndex(where: { $0.id == pivotID })
+          .map { Array(all[($0 + 1)...]) } ?? []
+        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
+          try manager.closeTabsToRight(
+            of: pivotID, in: worktreeID, in: projectID)
+        }
       },
       closeAllTabs: { worktreeID, projectID in
-        try manager.closeAllTabs(in: worktreeID, in: projectID)
+        let doomed = tabs(in: worktreeID, projectID)
+        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
+          try manager.closeAllTabs(in: worktreeID, in: projectID)
+        }
       },
       selectAdjacentTab: { direction, worktreeID, projectID in
         try manager.selectAdjacentTab(
@@ -827,7 +886,10 @@ extension HierarchyClient {
         )
       },
       closePane: { paneID, tabID, worktreeID, projectID in
-        try manager.closePane(paneID, in: tabID, in: worktreeID, in: projectID)
+        let doomed = [manager.catalog.pane(paneID)].compactMap { $0 }
+        try closeAfterConfirming(panes: doomed, subject: .pane) {
+          try manager.closePane(paneID, in: tabID, in: worktreeID, in: projectID)
+        }
       },
       focusPane: { paneID, tabID, worktreeID, projectID in
         try manager.focusPane(paneID, in: tabID, in: worktreeID, in: projectID)

@@ -171,3 +171,26 @@ extension Array where Element == QueuedCommand {
     }
   }
 }
+
+// MARK: - What a close would discard
+
+extension Tab {
+  /// Queued commands parked on this tab's panes — what closing it discards.
+  public var queuedCommandCount: Int {
+    panes.reduce(0) { $0 + $1.commandQueue.count }
+  }
+}
+
+extension Worktree {
+  public var queuedCommandCount: Int {
+    tabs.reduce(0) { $0 + $1.queuedCommandCount }
+  }
+}
+
+extension Project {
+  /// Counts archived worktrees too: their queues are dormant, but removing
+  /// the project takes them along.
+  public var queuedCommandCount: Int {
+    worktrees.reduce(0) { $0 + $1.queuedCommandCount }
+  }
+}

@@ -26,7 +26,9 @@ and the project does not yet follow semantic versioning — every release until
   edit, or drop entries. Queues are
   saved with the pane, so a scheduled or repeating command survives a
   relaunch — a repeat that came due while codans was closed fires once, not
-  once per missed period.
+  once per missed period. Closing a pane or tab that still holds queued
+  commands asks first, and the Remove Worktree / Remove Project prompts say
+  how many would go with them.
 
 ### Changed
 

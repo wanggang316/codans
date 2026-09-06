@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -385,5 +385,100 @@ struct HierarchyClientTests {
     client.setPaneLabel(paneID, "notifications:muted", false)
     client.setPaneLabel(paneID, "notifications:muted", true)
     #expect(labels(of: paneID, in: manager).contains("notifications:muted"))
+  }
+
+  // MARK: - Closing with queued commands
+
+  /// Stands in for the confirmation sheet: records what it was asked and
+  /// answers with a scripted verdict.
+  @MainActor
+  private final class ConfirmProbe {
+    var asked: [QueuedCommandDiscard] = []
+    var answer = false
+  }
+
+  private func makeConfirmingClient() -> (HierarchyClient, HierarchyManager, ConfirmProbe) {
+    let tempURL = FileManager.default.temporaryDirectory
+      .appending(component: UUID().uuidString + ".json")
+    let manager = HierarchyManager(
+      catalog: .default, store: CatalogStore(fileURL: tempURL), runtime: FakeHierarchyRuntime()
+    )
+    let probe = ConfirmProbe()
+    let client = HierarchyClient.live(
+      manager: manager,
+      confirmQueueDiscard: { discard, completion in
+        probe.asked.append(discard)
+        completion(probe.answer)
+      }
+    )
+    return (client, manager, probe)
+  }
+
+  /// A worktree with two tabs, the first holding one queued command.
+  private func seedQueuedTab(
+    _ client: HierarchyClient, _ manager: HierarchyManager
+  ) throws -> (projectID: ProjectID, worktreeID: WorktreeID, queuedTab: TabID) {
+    let projectID = client.addProject("p", "/tmp", "/tmp")
+    let worktreeID = try client.createWorktree(projectID, "w", "/tmp/w", "main")
+    // `createTab` seeds no pane; the pane row is a separate insert.
+    let queuedTab = try client.createTab(worktreeID, projectID, nil)
+    let queuedPane = try client.createPaneRow(queuedTab, worktreeID, projectID, "/tmp/w", nil)
+    let plainTab = try client.createTab(worktreeID, projectID, nil)
+    _ = try client.createPaneRow(plainTab, worktreeID, projectID, "/tmp/w", nil)
+    manager.setCommandQueue(
+      [QueuedCommand(text: "make test", timing: .afterCurrentTask)], for: queuedPane
+    )
+    return (projectID, worktreeID, queuedTab)
+  }
+
+  private func tabIDs(_ manager: HierarchyManager, _ worktreeID: WorktreeID) -> [TabID] {
+    manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.tabs.map(\.id) ?? []
+  }
+
+  @Test
+  func closingATabWithQueuedCommandsAsksAndHonoursNo() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+
+    try client.closeTab(seed.queuedTab, seed.worktreeID, seed.projectID)
+
+    #expect(probe.asked == [QueuedCommandDiscard(subject: .tab, queuedCount: 1)])
+    #expect(tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
+  }
+
+  @Test
+  func closingATabWithQueuedCommandsClosesOnYes() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+    probe.answer = true
+
+    try client.closeTab(seed.queuedTab, seed.worktreeID, seed.projectID)
+
+    #expect(probe.asked.count == 1)
+    #expect(!tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
+  }
+
+  @Test
+  func closingATabWithoutQueuedCommandsNeverAsks() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+    let plainTab = try #require(tabIDs(manager, seed.worktreeID).first { $0 != seed.queuedTab })
+
+    try client.closeTab(plainTab, seed.worktreeID, seed.projectID)
+
+    #expect(probe.asked.isEmpty)
+    #expect(!tabIDs(manager, seed.worktreeID).contains(plainTab))
+  }
+
+  @Test
+  func closingAllTabsCountsEveryQueuedCommandOnce() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+    let before = tabIDs(manager, seed.worktreeID).count
+
+    try client.closeAllTabs(seed.worktreeID, seed.projectID)
+
+    #expect(probe.asked == [QueuedCommandDiscard(subject: .tabs(before), queuedCount: 1)])
+    #expect(tabIDs(manager, seed.worktreeID).count == before)
   }
 }

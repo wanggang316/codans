@@ -186,4 +186,30 @@ struct CommandQueueTests {
     #expect(decoded.commandQueue.isEmpty)
     #expect(decoded.workingDirectory == "/tmp")
   }
+
+  // MARK: - What a close would discard
+
+  @Test
+  func countsQueuedCommandsThroughTheHierarchy() {
+    let queued = Pane(
+      id: PaneID(), workingDirectory: "/tmp/w",
+      commandQueue: [
+        QueuedCommand(text: "a", timing: .afterCurrentTask),
+        QueuedCommand(text: "b", timing: .afterCurrentTask),
+      ]
+    )
+    let idle = Pane(id: PaneID(), workingDirectory: "/tmp/w")
+    let tab = Tab(splitTree: SplitTree(leaf: queued.id), panes: [queued, idle])
+    let emptyTab = Tab(splitTree: SplitTree(leaf: idle.id), panes: [idle])
+    var archived = Worktree(name: "old", path: "/tmp/old", branch: "old", tabs: [tab])
+    archived.archived = true
+    let live = Worktree(name: "w", path: "/tmp/w", branch: "main", tabs: [tab, emptyTab])
+    let project = Project(name: "p", rootPath: "/tmp", worktrees: [live, archived])
+
+    #expect(tab.queuedCommandCount == 2)
+    #expect(emptyTab.queuedCommandCount == 0)
+    #expect(live.queuedCommandCount == 2)
+    // Removing the project takes the archived worktree's dormant queue too.
+    #expect(project.queuedCommandCount == 4)
+  }
 }
