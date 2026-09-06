@@ -6,7 +6,7 @@ import SwiftUI
 /// reads the same wherever it appears.
 enum CommandQueueBadgeStyle {
   /// SF Symbol for "there is deferred work parked here".
-  static let symbol = "text.line.first.and.arrowtriangle.forward"
+  static let symbol = "text.append"
 
   /// One breath. Slow enough to read as "waiting", not as "error".
   static let breathDuration: Double = 1.2
