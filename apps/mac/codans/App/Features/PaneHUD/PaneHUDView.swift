@@ -23,9 +23,16 @@ struct PaneHUDView: View {
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
   @Environment(\.paneHUDActions) private var actions
 
-  @State private var isExpanded = false
+  @State private var isExpanded: Bool
   @State private var isButtonHovered = false
   @State private var isQueueButtonHovered = false
+
+  /// `expanded` seeds the card's state. The app always starts collapsed;
+  /// the seed exists so a rendering test can lay out the open card.
+  init(paneID: PaneID, expanded: Bool = false) {
+    self.paneID = paneID
+    _isExpanded = State(initialValue: expanded)
+  }
 
   private static let cardCornerRadius: CGFloat = 10
   /// Definite width for the expanded card. The action rows are deliberately
@@ -40,7 +47,13 @@ struct PaneHUDView: View {
   private static let expansion = Animation.snappy(duration: 0.24, extraBounce: 0.02)
   /// Inset from the container's top-right corner to the button, applied in
   /// both states so the button is the fixed point the card grows away from.
-  private static let chromeInset: CGFloat = 10
+  private static let chromeInset: CGFloat = 6
+  /// Leading inset for the card's rows. The button's glyph sits 8.5pt inside
+  /// its 30pt box and a row's 11pt glyph 1.5pt inside its 14pt box, so this
+  /// is what puts the rows as far from the card's left edge as the glyph is
+  /// from its right — measured, not eyeballed: without it the left inset is
+  /// 7pt shorter than the right.
+  private static let rowLeadingInset: CGFloat = 7
 
   var body: some View {
     if let model = resolveModel() {
@@ -50,8 +63,8 @@ struct PaneHUDView: View {
         // half also has to clear `PaneDragHandle`, a 10pt full-width strip
         // `LeafView` layers over the same surface and above this overlay —
         // under it, hovering the button's top edge would arm a pane drag.
-        .padding(.top, 4)
-        .padding(.trailing, 4)
+        .padding(.top, 8)
+        .padding(.trailing, 8)
     }
   }
 
@@ -202,6 +215,7 @@ struct PaneHUDView: View {
       handOffButton(model)
       commandQueueButton(model)
     }
+    .padding(.leading, Self.rowLeadingInset)
     .frame(width: Self.cardWidth, alignment: .leading)
   }
 
