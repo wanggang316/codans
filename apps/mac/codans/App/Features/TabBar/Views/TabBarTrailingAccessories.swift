@@ -36,7 +36,7 @@ struct TabBarTrailingAccessories: View {
       }
 
       SplitAccessoryButton(
-        systemImage: "rectangle.split.2x1",
+        systemImage: "rectangle.righthalf.inset.filled",
         accessibilityLabel: "Split Right",
         chordCommandID: .splitRight,
         splitTree: activeTabSplitTree,
@@ -44,7 +44,7 @@ struct TabBarTrailingAccessories: View {
       )
 
       SplitAccessoryButton(
-        systemImage: "rectangle.split.1x2",
+        systemImage: "rectangle.bottomhalf.inset.filled",
         accessibilityLabel: "Split Down",
         chordCommandID: .splitDown,
         splitTree: activeTabSplitTree,
