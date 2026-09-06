@@ -38,20 +38,22 @@ struct PaneHUDView: View {
   private static let buttonSize: CGFloat = 30
   private static let buttonCornerRadius: CGFloat = 8
   private static let expansion = Animation.snappy(duration: 0.24, extraBounce: 0.02)
-  /// Inset from the container's top-right corner to the button, applied in
-  /// both states so the button is the fixed point the card grows away from.
-  private static let chromeInset: CGFloat = 10
+  /// Inset from the pane's corner to the button — clears `PaneDragHandle`,
+  /// a 10pt full-width strip `LeafView` layers over the same surface and
+  /// above this overlay; under it, hovering the button's top edge would arm
+  /// a pane drag.
+  private static let cornerInset: CGFloat = 14
+  /// Card padding on its leading and bottom edges only. The button is the
+  /// card's top-right corner in both states, so the card can grow only
+  /// leftward and downward from it; any top or trailing inset would show up
+  /// as the card growing toward the pane's corner on open.
+  private static let cardInset: CGFloat = 10
 
   var body: some View {
     if let model = resolveModel() {
       card(model)
-        // Squares the button off the pane's corner: with the container's own
-        // `chromeInset` this puts it 14pt in from both edges. The vertical
-        // half also has to clear `PaneDragHandle`, a 10pt full-width strip
-        // `LeafView` layers over the same surface and above this overlay —
-        // under it, hovering the button's top edge would arm a pane drag.
-        .padding(.top, 4)
-        .padding(.trailing, 4)
+        .padding(.top, Self.cornerInset)
+        .padding(.trailing, Self.cornerInset)
     }
   }
 
@@ -95,12 +97,11 @@ struct PaneHUDView: View {
         }
       }
     }
-    // Constant in both states on purpose. The button is a layout sibling of
-    // the card body, so an equal inset from the container's top-right corner
-    // is what holds it still while the card grows out from under it. A
-    // smaller collapsed inset shifted the button by the difference, which
-    // read as the whole control jumping on every open.
-    .padding(Self.chromeInset)
+    // Constant in both states on purpose: the button is a layout sibling of
+    // the card body and sits flush in the container's top-right corner, so
+    // it holds still while the card grows out from under it.
+    .padding(.leading, Self.cardInset)
+    .padding(.bottom, Self.cardInset)
     .background(cardBackground)
     .dismissOnClickOutside(isPresented: isExpanded) { setExpanded(false) }
   }
