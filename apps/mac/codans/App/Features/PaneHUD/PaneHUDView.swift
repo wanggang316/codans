@@ -46,8 +46,12 @@ struct PaneHUDView: View {
   /// Card padding on its leading and bottom edges only. The button is the
   /// card's top-right corner in both states, so the card can grow only
   /// leftward and downward from it; any top or trailing inset would show up
-  /// as the card growing toward the pane's corner on open.
-  private static let cardInset: CGFloat = 10
+  /// as the card growing toward the pane's corner on open. The two insets
+  /// that remain are sized to the button's own glyph inset (8.5pt in a 30pt
+  /// box), so the rows sit as far from the left edge as the glyph does from
+  /// the right, with a touch more underneath than above.
+  private static let cardLeadingInset: CGFloat = 8
+  private static let cardBottomInset: CGFloat = 4
 
   var body: some View {
     if let model = resolveModel() {
@@ -100,8 +104,8 @@ struct PaneHUDView: View {
     // Constant in both states on purpose: the button is a layout sibling of
     // the card body and sits flush in the container's top-right corner, so
     // it holds still while the card grows out from under it.
-    .padding(.leading, Self.cardInset)
-    .padding(.bottom, Self.cardInset)
+    .padding(.leading, Self.cardLeadingInset)
+    .padding(.bottom, Self.cardBottomInset)
     .background(cardBackground)
     .dismissOnClickOutside(isPresented: isExpanded) { setExpanded(false) }
   }
