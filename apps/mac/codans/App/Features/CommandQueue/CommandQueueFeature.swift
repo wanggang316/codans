@@ -43,10 +43,11 @@ struct CommandQueueFeature {
 
     /// Which of the three send timings the draft will use. `.now` is not a
     /// queue timing — it writes to the pane immediately and never becomes an
-    /// entry (see `QueuedCommandTiming`).
+    /// entry (see `QueuedCommandTiming`). Declared in menu order, with the
+    /// default first.
     enum Mode: String, CaseIterable, Equatable {
-      case now
       case afterCurrentTask
+      case now
       case scheduled
 
       var title: String {

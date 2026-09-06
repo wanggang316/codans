@@ -44,7 +44,7 @@ struct CommandQueueView: View {
   private static let composerFont = Font.system(size: 12, design: .monospaced)
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 16) {
       header
       if !entries.isEmpty {
         queuedList
@@ -274,7 +274,7 @@ struct CommandQueueView: View {
       store.send(.submitted)
     } label: {
       Image(systemName: "arrow.up.circle.fill")
-        .font(.system(size: 22))
+        .font(.system(size: 26))
         .symbolRenderingMode(.hierarchical)
         .foregroundStyle(store.canSubmit ? Color.accentColor : Color.secondary)
     }
