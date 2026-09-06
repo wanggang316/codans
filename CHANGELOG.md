@@ -10,6 +10,20 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.5.1] - 2026-09-06
+
+### Added
+
 - **omp agent support.** The Agents View now recognises [omp](https://omp.sh/)
   (oh-my-pi) panes: foreground-process detection, working / blocked / idle
   activity badges tuned to its loader and approval-selector rendering, the
@@ -21,32 +35,27 @@ and the project does not yet follow semantic versioning — every release until
   optional dedicated home, a custom icon), with a live preview of the exact
   command codans types. Start one from the worktree toolbar's Agents button,
   the Command Palette ("Launch Agent: …"), or the CLI (`codans agent list` /
-  `codans agent launch`).
+  `codans agent launch`). The toolbar menu lists only the profiles whose CLI
+  your shell can run; nothing is hidden before that check answers, and if it
+  would hide every profile they all stay visible.
 - **Hand off a task between agents.** `codans handoff to <agent> --brief -`
   archives the previous round under the worktree's `.codans/handoff/`,
   installs the source agent's own briefing, regenerates repository and
-  session context, and starts the receiver with a kickoff prompt — in a
-  new background tab, or split off the source pane on the side you choose
-  (`--split <dir>`, or the panel's placement menus, which remember the last
-  choice). The panel offers the enabled agents your shell can run, as a
-  compact grid of names; agents whose CLI takes no prompt argument get the
-  kickoff typed into their pane and sent once their input box is up.
-  `codans handoff save`
-  checkpoints without a receiver. In
-  the app, "Hand Off…" (a pane's actions menu, Command Palette, Agents View row) asks
-  the live agent to run that same command with its briefing, closes at once,
-  and jumps to the receiver when the agent finishes. The confirm button's
-  menu offers Hand Off with Context, which starts the receiver right away
-  from generated context without asking the agent; the two paths never run
-  at once.
-- The worktree toolbar's Agents menu now lists only agents whose CLI the
-  shell can resolve. The check fails open: nothing is hidden before the
-  scan answers, and if it would hide every profile they all come back.
-- **Per-pane actions menu.** Every terminal pane carries a collapsed
-  button in its top-right corner. Opening it offers the actions scoped to
-  that pane — "Hand Off…" today. It repeats no workspace facts: path,
-  branch, diff and agent are already shown in the header, sidebar and
-  Agents view. Clicking anywhere else, or Escape, collapses it.
+  session context, and starts the receiver with a kickoff prompt — in a new
+  background tab, or split off the source pane on the side you choose
+  (`--split <dir>`; the panel's placement menus remember your last choice).
+  The receiver picker is a compact grid of the enabled agents your shell can
+  run; agents whose CLI takes no prompt argument get the kickoff typed into
+  their pane once their input box is up. `codans handoff save` checkpoints
+  without a receiver. In the app, "Hand Off…" (a pane's actions menu, the
+  Command Palette, an Agents View row) asks the live agent to run that same
+  command with its briefing, closes at once, and jumps to the receiver when
+  the agent finishes. The confirm button's menu offers Hand Off with
+  Context, which starts the receiver right away from generated context
+  without asking the agent.
+- **Per-pane actions menu.** Every terminal pane carries a collapsed button
+  in its top-right corner. Opening it offers the actions scoped to that
+  pane — "Hand Off…" today. Clicking anywhere else, or Escape, collapses it.
 
 ### Changed
 
@@ -54,21 +63,18 @@ and the project does not yet follow semantic versioning — every release until
   a pane resolve `current` locally instead of always asking the app to
   walk process ancestry.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
 - **Development builds are now a separate application from the release
   build, CLI included.** A Debug build embeds and installs its CLI as
   `codans-dev`, and that CLI calls itself `codans-dev` in help, hints and
-  the handshake. Every pane has its own app's `bin/` on `PATH` and
-  `CODANS_CLI` carries the absolute path, so `codans-dev` resolves to the
-  app that spawned the pane however the login shell reorders `PATH`.
-  Previously the Debug bundle also named its CLI `codans`, so commands
-  typed in a Debug pane resolved to the installed release CLI and were
-  answered by the release app.
+  the handshake. Every pane has its own app's `bin/` on `PATH`, `CODANS_CLI`
+  carries the absolute path, and the CLI honours `CODANS_SOCKET_PATH` when
+  no `--socket` flag is given — so a command run inside a pane reaches the
+  app that spawned it however the login shell reorders `PATH`. Previously
+  the Debug bundle also named its CLI `codans`, so commands typed in a Debug
+  pane resolved to the installed release CLI and were answered by the
+  release app.
 - The CLI stays inside its build channel. The release `codans` refuses to
   act on a pane that belongs to a development build (exit code 15,
   `codans doctor` reports `socketStatus wrong-channel`) and names
@@ -85,11 +91,6 @@ and the project does not yet follow semantic versioning — every release until
 - The Master Terminal's shell now gets the same environment a worktree
   pane does — socket path, product marker, and a cleared `ZMX_SESSION` —
   instead of a bare `ZMX_DIR`.
-
-- The CLI now honours `$CODANS_SOCKET_PATH` when no `--socket` flag is
-  given, so a command run inside a pane reaches the app that spawned it
-  rather than the installed release build.
-
 - Worktrees no longer disappear when the disk fills up. A `git worktree list`
   that dies under disk pressure reached codans as an empty — but perfectly
   valid-looking — result, and every non-pinned worktree in the project was
@@ -98,8 +99,6 @@ and the project does not yet follow semantic versioning — every release until
 - A failed catalog save no longer endangers the catalog. When the disk was
   full, codans moved the last good `catalog.json` aside, so the next launch
   could come up with no projects at all.
-
-### Security
 
 ## [0.5.0] - 2026-08-25
 
