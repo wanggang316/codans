@@ -5,7 +5,8 @@ import Foundation
 /// Two consumers need the same names in two different forms: `HandoffStore`
 /// builds `URL`s to read and write the files, and `HandoffKickoff` writes
 /// worktree-relative strings into the prompt the receiving agent starts
-/// with. Before this type each spelled the layout itself, so a rename in the
+/// with. Every path handed to an agent or a CLI caller is worktree-relative
+/// (`.codans/handoff/…`): agents read from the worktree root. Before this type each spelled the layout itself, so a rename in the
 /// store would have left the prompt pointing at files that no longer existed
 /// — and nothing would have failed until an agent went looking.
 public nonisolated enum HandoffLayout {
@@ -19,7 +20,9 @@ public nonisolated enum HandoffLayout {
   public static let contextFileName = "context.md"
   /// Append-only history of transitions and checkpoints.
   public static let logFileName = "log.md"
-  /// Makes the directory ignore itself.
+  /// Makes `.codans/` ignore itself. Lives at the state directory's root,
+  /// not inside `handoff/`: anything that lands one level up must stay out
+  /// of `git status` too, or it shows up in the next `context.md`.
   public static let ignoreFileName = ".gitignore"
   /// Outgoing snapshot of each transition.
   public static let archiveDirectoryName = "archive"

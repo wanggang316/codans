@@ -222,7 +222,7 @@
 - briefing 缺失 → `invalidParams` 并附可直接粘贴的 heredoc；不合格（缺 `## Objective` / `## Current State` / `## Next Steps`）→ `invalidParams` 且零副作用。
 - Server 项目 → `unsupported`（工件目录在远端）。
 - 环境变量 `CODANS_HANDOFF_REQUEST_ID`（仅应用内面板注入的请求会设置）随请求上送；已被处理或被面板回退取代的请求以 `conflict` 拒绝。
-- 响应回带 `artifactPath`、`outgoingAgent`、`receiver`、`branch`、`changedFileCount`、`archivedPath`、`sessionExcerptPath`、`briefing`（`inline`/`none`）、`hasBriefing`、`launchedPane`。
+- 响应回带 `artifactPath`、`outgoingAgent`、`receiver`、`branch`、`changedFileCount`、`archivedPath`、`sessionExcerptPath`、`briefing`（`inline`/`none`）、`hasBriefing`、`launchedPane`。`archivedPath` / `sessionExcerptPath` 相对 worktree 根（形如 `.codans/handoff/archive/…`），与 kickoff 提示词、`context.md` 同一基准；`artifactPath` 是绝对路径。
 
 #### `codans open`
 

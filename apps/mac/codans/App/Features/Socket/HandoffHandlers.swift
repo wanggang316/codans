@@ -98,6 +98,10 @@ final class HandoffHandlers {
     let coordinator = HandoffCoordinator(
       store: HandoffStore(rootURL: URL(fileURLWithPath: source.worktreePath, isDirectory: true)))
     let session = sessionContext(for: source)
+    // Lay the state directory out first so its ignore file is in place
+    // before git status is read: a worktree from an earlier build, or one
+    // that never had a hand-off, would otherwise list `.codans/` itself.
+    try? coordinator.store.ensureLayout()
     let repo = await collectRepoState(coordinator.store.rootURL)
     let timestamp = now()
     let note = request.note
@@ -161,6 +165,10 @@ final class HandoffHandlers {
     let coordinator = HandoffCoordinator(
       store: HandoffStore(rootURL: URL(fileURLWithPath: source.worktreePath, isDirectory: true)))
     let session = sessionContext(for: source)
+    // Lay the state directory out first so its ignore file is in place
+    // before git status is read: a worktree from an earlier build, or one
+    // that never had a hand-off, would otherwise list `.codans/` itself.
+    try? coordinator.store.ensureLayout()
     let repo = await collectRepoState(coordinator.store.rootURL)
     let timestamp = now()
     let transition: HandoffCoordinator.Transition

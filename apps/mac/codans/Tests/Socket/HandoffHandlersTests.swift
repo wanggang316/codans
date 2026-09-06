@@ -204,13 +204,13 @@ struct HandoffHandlersTests {
     // The session file is named after the pane id; the slug lowercases the
     // UUID and keeps its dashes.
     let paneSlug = harness.source.paneID.description.lowercased()
-    #expect(response.sessionExcerptPath == "handoff/sessions/20231114-221320-\(paneSlug).md")
+    #expect(response.sessionExcerptPath == ".codans/handoff/sessions/20231114-221320-\(paneSlug).md")
     #expect(try String(contentsOf: harness.store.currentURL, encoding: .utf8) == Self.briefing + "\n")
     let context = try String(contentsOf: harness.store.contextURL, encoding: .utf8)
     #expect(context.contains("- Agent: Claude Code"))
     #expect(context.contains("- Reattach to the outgoing session: `claude --resume 'sess-1'`"))
     let excerpt = try String(
-      contentsOf: harness.store.stateDirectory.appending(path: response.sessionExcerptPath!), encoding: .utf8)
+      contentsOf: harness.store.rootURL.appending(path: response.sessionExcerptPath!), encoding: .utf8)
     #expect(excerpt.contains("last screen"))
     #expect(try String(contentsOf: harness.store.logURL, encoding: .utf8).contains("save  agent=claude-code"))
     #expect(harness.launches.specs.isEmpty)
@@ -228,7 +228,7 @@ struct HandoffHandlersTests {
 
     #expect(response.receiver == "codex")
     #expect(response.hasBriefing)
-    #expect(response.archivedPath == "handoff/archive/20231114-221320-claude-code-to-codex.md")
+    #expect(response.archivedPath == ".codans/handoff/archive/20231114-221320-claude-code-to-codex.md")
     #expect(response.launchedPane?.paneID == harness.launches.paneID)
     #expect(response.launchedPane?.tabID == harness.launches.tabID)
     #expect(response.launchedPane?.profileName == "Codex")

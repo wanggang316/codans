@@ -5,8 +5,9 @@ import Foundation
 ///
 /// Layout:
 /// ```
+/// <worktree>/.codans/
+///   .gitignore            "*" — the whole state directory ignores itself
 /// <worktree>/.codans/handoff/
-///   .gitignore            "*" — the whole directory ignores itself
 ///   current.md            agent-authored briefing (absent when none)
 ///   context.md            codans-generated repository and session state
 ///   log.md                append-only handoff history
@@ -43,7 +44,9 @@ public nonisolated struct HandoffStore: Sendable {
   public var currentURL: URL { handoffDirectory.appending(path: HandoffLayout.briefingFileName) }
   public var contextURL: URL { handoffDirectory.appending(path: HandoffLayout.contextFileName) }
   public var logURL: URL { handoffDirectory.appending(path: HandoffLayout.logFileName) }
-  public var ignoreURL: URL { handoffDirectory.appending(path: HandoffLayout.ignoreFileName) }
+  public var ignoreURL: URL { stateDirectory.appending(path: HandoffLayout.ignoreFileName) }
+  /// Where the ignore file lived before it moved up to `.codans/`.
+  private var legacyIgnoreURL: URL { handoffDirectory.appending(path: HandoffLayout.ignoreFileName) }
   public var archiveDirectory: URL {
     handoffDirectory.appending(path: HandoffLayout.archiveDirectoryName, directoryHint: .isDirectory)
   }
@@ -55,10 +58,11 @@ public nonisolated struct HandoffStore: Sendable {
     FileManager.default.fileExists(atPath: currentURL.path(percentEncoded: false))
   }
 
-  /// Path of `url` relative to the `.codans/` directory — the form the
-  /// receiver's kickoff prompt and the CLI payload quote.
+  /// Path of `url` relative to the worktree root (`.codans/handoff/…`) —
+  /// the form the kickoff prompt, `context.md`, and the CLI payload quote,
+  /// so an agent reading from the worktree root can open it as written.
   public func relativePath(of url: URL) -> String {
-    let base = stateDirectory.path(percentEncoded: false)
+    let base = rootURL.path(percentEncoded: false)
     let full = url.path(percentEncoded: false)
     guard full.hasPrefix(base) else { return full }
     return String(full.dropFirst(base.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -66,9 +70,11 @@ public nonisolated struct HandoffStore: Sendable {
 
   // MARK: - Layout
 
-  /// Creates the directory tree and its self-ignoring `.gitignore`. Never
-  /// seeds `current.md`: the briefing exists only as the product of a
-  /// validated agent document.
+  /// Creates the directory tree and the `.gitignore` that makes `.codans/`
+  /// ignore itself. Never seeds `current.md`: the briefing exists only as the
+  /// product of a validated agent document. A worktree laid out by an
+  /// earlier build carries the ignore file inside `handoff/`; it is retired
+  /// once the root one exists, so the layout has one ignore file, not two.
   public func ensureLayout() throws {
     let fileManager = FileManager.default
     try fileManager.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
@@ -76,6 +82,7 @@ public nonisolated struct HandoffStore: Sendable {
     if !fileManager.fileExists(atPath: ignoreURL.path(percentEncoded: false)) {
       try "*\n".write(to: ignoreURL, atomically: true, encoding: .utf8)
     }
+    try? fileManager.removeItem(at: legacyIgnoreURL)
   }
 
   // MARK: - Briefing
@@ -114,7 +121,7 @@ public nonisolated struct HandoffStore: Sendable {
   /// Copies the current briefing plus generated context into
   /// `archive/<ts>-<from>-to-<to>.md`, leaving `current.md` in place for the
   /// caller to replace or remove. Returns the archived path relative to
-  /// `.codans/`, or `nil` when there was nothing to archive.
+  /// the worktree root, or `nil` when there was nothing to archive.
   @discardableResult
   public func archiveCurrent(from: String, to: String, now: Date) throws -> String? {
     guard hasCurrentBriefing else { return nil }

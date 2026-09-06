@@ -27,10 +27,11 @@ struct HandoffLayoutTests {
   }
 
   @Test
-  func storeRelativePathsAreRootedAtTheStateDirectory() {
-    // A different base on purpose: IPC payloads and `context.md` quote paths
-    // relative to `.codans/`, which is what `relativePath(of:)` produces.
+  func storeRelativePathsAreRootedAtTheWorktree() {
+    // Same base as the kickoff prompt: IPC payloads and `context.md` quote
+    // paths an agent can open from the worktree root as written.
     #expect(
-      store.relativePath(of: store.currentURL) == "\(HandoffLayout.directoryName)/\(HandoffLayout.briefingFileName)")
+      store.relativePath(of: store.currentURL) == HandoffLayout.worktreeRelativePath(HandoffLayout.briefingFileName))
+    #expect(store.ignoreURL == store.stateDirectory.appending(path: HandoffLayout.ignoreFileName))
   }
 }

@@ -36,10 +36,10 @@ struct HandoffCoordinatorTests {
       now: Self.stamp
     )
     #expect(result.hasBriefing)
-    #expect(result.archivedPath == "handoff/archive/20231114-221320-claude-code-to-codex.md")
+    #expect(result.archivedPath == ".codans/handoff/archive/20231114-221320-claude-code-to-codex.md")
     #expect(result.session?.resumeCommand == "claude --resume 's1'")
     #expect(try Self.read(store.currentURL) == Self.briefing)
-    #expect(try Self.read(store.stateDirectory.appending(path: result.archivedPath!)).hasPrefix("# old"))
+    #expect(try Self.read(store.rootURL.appending(path: result.archivedPath!)).hasPrefix("# old"))
     #expect(try Self.read(store.contextURL).contains("- Branch: main"))
   }
 
@@ -54,7 +54,7 @@ struct HandoffCoordinatorTests {
       briefing: .contextOnly, now: Self.stamp
     )
     #expect(!result.hasBriefing)
-    #expect(result.archivedPath == "handoff/archive/20231114-221320-agent-to-codex.md")
+    #expect(result.archivedPath == ".codans/handoff/archive/20231114-221320-agent-to-codex.md")
     #expect(!store.hasCurrentBriefing)
     #expect(result.session == nil)
   }

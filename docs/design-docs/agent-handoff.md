@@ -37,7 +37,7 @@ codans 的用户同时驱动多个编码 agent（Claude Code、Codex、Gemini CL
 ```
 Settings.agents (settings.json)          .codans/handoff/ (per worktree)
    │ AgentProfile[]                          current.md / context.md / log.md
-   ▼                                          archive/ / sessions/ / .gitignore
+   ▼                                          archive/ / sessions/ (+ .codans/.gitignore)
 AgentCatalog.descriptor(kind)                 ▲
    │  models / efforts / modes / promptStyle  │ HandoffStore (pure FS)
    ▼                                          │ HandoffCoordinator (sequence)
@@ -75,8 +75,9 @@ toolbar / palette   agent.launch (CLI)   codans handoff   HandoffFeature (面板
 ### Handoff 工件
 
 ```
+<worktree>/.codans/
+  .gitignore            "*"——整个状态目录自我忽略（早期构建把它放在 handoff/ 里，新布局建立时顺手移除）
 <worktree>/.codans/handoff/
-  .gitignore            "*"——整个目录自我忽略
   current.md            源 agent 写的 briefing（无则不存在）
   context.md            codans 生成的仓库 + 会话状态；每次 save 重写
   log.md                append-only 历史
@@ -156,7 +157,7 @@ pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把�
 
 ## Cross-Cutting
 
-- **安全**：handoff 只**读** git（status / branch / shortstat），从不 commit / push；`.codans/handoff/` 自我忽略；屏幕摘录与 session id 属于本地状态。profile 的 `envVars` 明文存于 `settings.json`，Launch Preview 会显示值——用户需自行避免把密钥写进 profile。
+- **安全**：handoff 只**读** git（status / branch / shortstat），从不 commit / push；`.codans/` 自我忽略；屏幕摘录与 session id 属于本地状态。profile 的 `envVars` 明文存于 `settings.json`，Launch Preview 会显示值——用户需自行避免把密钥写进 profile。
 - **可观测性**：每次 save / transition 追加一行到 `log.md`（含 `source=cli` / 面板、pane、briefing 来源）；启动失败记 `launch=failed` 并保留归档路径。
 - **测试**：`CodansCoreTests/Handoff/*` 用临时目录断言布局与不变量；`CodansTests/Socket/HandoffHandlersTests` 以闭包桩验证零副作用拒绝、迁移、启动、授权；`HandoffFeatureTests` 用 `TestStore` 覆盖面板状态机；`AgentHandlersTests` / `CommandPaletteAgentItemsTests` 覆盖 profile 选择与 palette 项。
 

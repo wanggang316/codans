@@ -63,15 +63,15 @@ struct HandoffStoreTests {
     try store.writeBriefing("# brief\n", archivingPrevious: false, now: Self.stamp)
     try store.writeContext(outgoingAgent: .claudeCode, repo: .notGit, session: nil, now: Self.stamp)
     let path = try store.archiveCurrent(from: "claude-code", to: "codex", now: Self.stamp)
-    #expect(path == "handoff/archive/20231114-221320-claude-code-to-codex.md")
-    let snapshot = try Self.read(store.stateDirectory.appending(path: path!))
+    #expect(path == ".codans/handoff/archive/20231114-221320-claude-code-to-codex.md")
+    let snapshot = try Self.read(store.rootURL.appending(path: path!))
     #expect(snapshot.hasPrefix("# brief\n\n# Handoff Context"))
     // The current briefing stays until the caller replaces or removes it.
     #expect(store.hasCurrentBriefing)
 
     // A same-second second archive gets a numbered sibling, never an overwrite.
     let second = try store.archiveCurrent(from: "claude-code", to: "codex", now: Self.stamp)
-    #expect(second == "handoff/archive/20231114-221320-claude-code-to-codex-2.md")
+    #expect(second == ".codans/handoff/archive/20231114-221320-claude-code-to-codex-2.md")
   }
 
   @Test
@@ -85,9 +85,9 @@ struct HandoffStoreTests {
       screenExcerpt: "  > done\n"
     )
     let record = try store.writeSession(session, now: Self.stamp)
-    #expect(record.excerptPath == "handoff/sessions/20231114-221320-p-1.md")
+    #expect(record.excerptPath == ".codans/handoff/sessions/20231114-221320-p-1.md")
     #expect(record.resumeCommand == "codex resume '01HXYZ'")
-    let excerpt = try Self.read(store.stateDirectory.appending(path: record.excerptPath))
+    let excerpt = try Self.read(store.rootURL.appending(path: record.excerptPath))
     #expect(excerpt.contains("```text\n> done\n```"))
     #expect(excerpt.contains("- Reattach: `codex resume '01HXYZ'`"))
 
@@ -100,7 +100,7 @@ struct HandoffStoreTests {
     #expect(context.contains("- Changed files: 2"))
     #expect(context.contains("- Uncommitted diff: +3 / -1"))
     #expect(context.contains("- `b/c.md`"))
-    #expect(context.contains("- Screen excerpt: `handoff/sessions/20231114-221320-p-1.md`"))
+    #expect(context.contains("- Screen excerpt: `.codans/handoff/sessions/20231114-221320-p-1.md`"))
     #expect(context.contains("- Reattach to the outgoing session: `codex resume '01HXYZ'`"))
   }
 
