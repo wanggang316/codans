@@ -3,9 +3,10 @@ import SwiftUI
 
 /// Per-pane actions menu, anchored to the pane's top-right corner.
 ///
-/// Collapsed it is a single button. Expanded it lists the actions that are a
-/// property of *this* pane — handing its agent's task off to another agent
-/// is the first — so the pane is where they live. It shows no workspace
+/// Collapsed it is a single button, joined by the queue badge while the pane
+/// holds queued commands. Expanded it lists the actions that are a property
+/// of *this* pane — handing its agent's task off to another agent, opening
+/// its command queue — so the pane is where they live. It shows no workspace
 /// facts on purpose: the worktree's path, branch and uncommitted counts are
 /// already in the header and sidebar, and the agent in the Agents view, so
 /// repeating them here only duplicated what the eye had just passed.
@@ -80,6 +81,15 @@ struct PaneHUDView: View {
           .transition(
             .scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity)
           )
+      } else if model.queuedCommandCount > 0 {
+        // This corner is the pane's one chrome slot, so the badge shares the
+        // row with the button rather than stacking on top of it. Expanded,
+        // the Command Queue row carries the count instead.
+        PaneCommandQueueBadge(paneID: paneID)
+          // Centred on the button's box: the row's `.top` alignment exists
+          // for the card body, and would pin a shorter capsule to the top.
+          .frame(height: Self.buttonSize)
+          .transition(.opacity)
       }
       menuButton
     }
@@ -157,6 +167,7 @@ struct PaneHUDView: View {
   private func expandedBody(_ model: PaneHUDModel) -> some View {
     VStack(alignment: .leading, spacing: 0) {
       handOffButton(model)
+      commandQueueButton(model)
     }
     .frame(width: Self.cardWidth, alignment: .leading)
   }
@@ -187,5 +198,32 @@ struct PaneHUDView: View {
     .disabled(!model.canHandOff)
     .help(model.handOffBlockedReason ?? "Hand this task to another agent")
     .accessibilityIdentifier("pane_hud.hand_off")
+  }
+
+  private func commandQueueButton(_ model: PaneHUDModel) -> some View {
+    Button {
+      setExpanded(false)
+      actions.commandQueue(paneID)
+    } label: {
+      HStack(spacing: 7) {
+        Image(systemName: CommandQueueBadgeStyle.symbol)
+          .font(.system(size: 11))
+          .frame(width: 14, height: 14, alignment: .center)
+          .accessibilityHidden(true)
+        Text("Command Queue…")
+        Spacer(minLength: 0)
+        if model.queuedCommandCount > 0 {
+          Text("\(model.queuedCommandCount)")
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
+      }
+      .font(.system(size: 12))
+      .frame(minHeight: Self.buttonSize)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .help("Queue commands to send to this pane")
+    .accessibilityIdentifier("pane_hud.command_queue")
   }
 }

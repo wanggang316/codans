@@ -20,6 +20,9 @@ struct PaneHUDActions {
   /// `RootFeature.handoffRequested`, which re-checks the pane's agent and
   /// project kind before presenting.
   var handOff: (PaneID) -> Void = { _ in }
+  /// Opens the Command Queue sheet for the given pane — the same one ⌘⌥L
+  /// summons. Routed to `RootFeature.commandQueueToggle`.
+  var commandQueue: (PaneID) -> Void = { _ in }
 }
 
 extension EnvironmentValues {

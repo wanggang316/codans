@@ -134,14 +134,12 @@ struct ContentView: View {
     .environment(agentStateStore)
     .environment(
       \.paneHUDActions,
-      PaneHUDActions(handOff: { paneID in store.send(.handoffRequested(paneID)) })
+      PaneHUDActions(
+        handOff: { paneID in store.send(.handoffRequested(paneID)) },
+        commandQueue: { paneID in store.send(.commandQueueToggle(paneID)) }
+      )
     )
     .environment(settingsStore)
-    // Lets a pane's queue badge open the panel without threading a callback
-    // through `SubtreeView`'s split recursion.
-    .environment(\.openCommandQueue) { paneID in
-      store.send(.commandQueueToggle(paneID))
-    }
     .environment(UpdatesEnvironment.model)
     .environment(worktreeStatusMonitor)
     .environment(worktreeLocalDiffMonitor)

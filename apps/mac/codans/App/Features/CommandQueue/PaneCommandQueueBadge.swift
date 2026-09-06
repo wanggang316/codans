@@ -40,25 +40,12 @@ enum CommandQueueBadgeStyle {
   }
 }
 
-/// Injects "open the Command Queue panel for this pane" into the view tree.
+/// Breathing badge shown beside a pane's actions button while that pane owes
+/// the user queued commands. Click opens the same sheet ⌘⌥L summons.
 ///
-/// A closure in the environment rather than a threaded parameter because the
-/// pane leaf that renders the badge sits at the bottom of `SubtreeView`'s
-/// recursion — threading a callback through every split node would put a
-/// presentation concern into the layout recursion's signature.
-private struct CommandQueueOpenerKey: EnvironmentKey {
-  static let defaultValue: @MainActor (PaneID) -> Void = { _ in }
-}
-
-extension EnvironmentValues {
-  var openCommandQueue: @MainActor (PaneID) -> Void {
-    get { self[CommandQueueOpenerKey.self] }
-    set { self[CommandQueueOpenerKey.self] = newValue }
-  }
-}
-
-/// Breathing badge pinned to a pane's top-right corner while that pane owes
-/// the user queued commands. Click opens the same panel ⌘⌥L summons.
+/// `PaneHUDView` owns the pane's top-right corner and places this in its
+/// collapsed row, so the badge carries no corner inset of its own and reaches
+/// the root store through the HUD's `paneHUDActions` seam.
 ///
 /// Renders nothing at all for a pane with an empty queue — the terminal's
 /// corner belongs to the terminal unless there is something to say.
@@ -66,7 +53,7 @@ struct PaneCommandQueueBadge: View {
   let paneID: PaneID
 
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(\.openCommandQueue) private var openCommandQueue
+  @Environment(\.paneHUDActions) private var actions
   @State private var isHovering = false
   /// Drives the breathing loop. Flipped once on appear; the repeating
   /// animation attached to it runs for as long as the badge is mounted.
@@ -76,7 +63,7 @@ struct PaneCommandQueueBadge: View {
     let queue = hierarchyManager.catalog.pane(paneID)?.commandQueue ?? []
     if !queue.isEmpty {
       Button {
-        openCommandQueue(paneID)
+        actions.commandQueue(paneID)
       } label: {
         HStack(spacing: 4) {
           Image(systemName: CommandQueueBadgeStyle.symbol)
@@ -110,8 +97,6 @@ struct PaneCommandQueueBadge: View {
         )
       }
       .buttonStyle(.plain)
-      .padding(.top, 6)
-      .padding(.trailing, 8)
       .onHover { isHovering = $0 }
       .onAppear { breathing = true }
       .help(helpText(queue))

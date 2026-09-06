@@ -304,12 +304,6 @@ private struct LeafView: View {
             PaneDragHandle(paneID: paneID)
           }
         }
-        // Queue badge. Layered after the drag handle so its small corner rect
-        // wins hit-testing against the handle's full-width strip; renders
-        // nothing when the pane has no queued commands.
-        .overlay(alignment: .topTrailing) {
-          PaneCommandQueueBadge(paneID: paneID)
-        }
         // Drop target. The custom `.touchCodePaneID` type (declared in the
         // app's Info.plist `UTExportedTypeDeclarations`) is what makes
         // `validateDrop` match the dragged item — without that declaration the

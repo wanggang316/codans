@@ -13,6 +13,9 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
   /// display; the same conditions `RootFeature.handoffRequested` re-checks
   /// authoritatively when the row is actually tapped.
   let handOffBlockedReason: String?
+  /// Commands parked on this pane. Drives the collapsed badge and the count
+  /// on the Command Queue row; zero renders neither.
+  let queuedCommandCount: Int
 
   var canHandOff: Bool { handOffBlockedReason == nil }
 
@@ -34,10 +37,12 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
     else {
       return nil
     }
-    let resolvedAgent = agent ?? catalog.pane(paneID)?.agentKind
+    let pane = catalog.pane(paneID)
+    let resolvedAgent = agent ?? pane?.agentKind
     return PaneHUDModel(
       agent: resolvedAgent,
-      handOffBlockedReason: handOffBlockedReason(project: project, agent: resolvedAgent)
+      handOffBlockedReason: handOffBlockedReason(project: project, agent: resolvedAgent),
+      queuedCommandCount: pane?.commandQueue.count ?? 0
     )
   }
 
