@@ -2313,9 +2313,11 @@ final class HierarchyManager {
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
     let rootPath = catalog.projects[projectIndex].rootPath
+    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: newPane, in: worktree,
-      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+      env: Self.injectingBuiltins(
+        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
     )
 
     store.scheduleSave(catalog)
@@ -2442,9 +2444,11 @@ final class HierarchyManager {
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
     let rootPath = catalog.projects[projectIndex].rootPath
+    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: pane, in: worktree,
-      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+      env: Self.injectingBuiltins(
+        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
     )
   }
 
@@ -2880,11 +2884,21 @@ final class HierarchyManager {
   nonisolated static func injectingBuiltins(
     _ env: [String: String],
     worktreePath: String,
-    rootPath: String
+    rootPath: String,
+    workspaceRoot: String? = nil
   ) -> [String: String] {
     var merged = env
     merged[BuiltinEnvVar.worktreePath.key] = worktreePath
     merged[BuiltinEnvVar.rootPath.key] = rootPath
+    // Present only inside a workspace, so its absence is itself a signal.
+    // A user-defined entry of the same name is dropped either way: the
+    // editor refuses the key, and a stale value from a project's envVars
+    // must not leak into a non-workspace pane.
+    if let workspaceRoot {
+      merged[BuiltinEnvVar.workspaceRoot.key] = workspaceRoot
+    } else {
+      merged.removeValue(forKey: BuiltinEnvVar.workspaceRoot.key)
+    }
     return merged
   }
 

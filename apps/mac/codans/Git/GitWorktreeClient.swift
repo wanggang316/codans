@@ -127,6 +127,18 @@ nonisolated struct GitWorktreeClient: Sendable {
   var defaultRemoteBranchRef: @Sendable (_ repoRoot: URL) async throws -> String?
   var isValidBranchName: @Sendable (_ repoRoot: URL, _ name: String) async -> Bool
 
+  /// `git worktree add` at a caller-named destination — the workspace
+  /// member checkout. `createWorktreeStream` drives the bundled `wt` script,
+  /// which derives the directory from the branch name; a workspace needs the
+  /// folder named after the repository instead. Local only: workspaces never
+  /// span hosts. Defaults to a throwing stub so existing memberwise callers
+  /// (tests) stay source-compatible.
+  var addWorktreeAt:
+    @Sendable (_ repoRoot: URL, _ destination: URL, _ checkout: WorkspaceCheckout) async throws -> Void =
+      { _, _, _ in
+        throw GitWorktreeError.commandFailed(command: "git worktree add", stderr: "not configured")
+      }
+
   var createWorktreeStream:
     @Sendable (_ spec: CreateWorktreeSpec)
       -> AsyncThrowingStream<CreateWorktreeEvent, Error>
@@ -717,6 +729,23 @@ nonisolated extension GitWorktreeClient {
           return true
         }
         return false
+      },
+
+      addWorktreeAt: { repoRoot, destination, checkout in
+        var arguments = ["-C", repoRoot.path(percentEncoded: false), "worktree", "add"]
+        switch checkout {
+        case .newBranch(let branch, let baseRef):
+          arguments += ["-b", branch, destination.path(percentEncoded: false)]
+          if let baseRef, !baseRef.isEmpty {
+            arguments.append(baseRef)
+          }
+        case .existingBranch(let branch):
+          arguments += [destination.path(percentEncoded: false), branch]
+        }
+        let outcome = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL, arguments: arguments, cwd: repoRoot
+        )
+        _ = try extractStdout(outcome, command: "git worktree add")
       },
 
       createWorktreeStream: { spec in
@@ -1367,6 +1396,7 @@ extension GitWorktreeClient: DependencyKey {
     branchRefs: unimplemented("GitWorktreeClient.branchRefs", placeholder: []),
     defaultRemoteBranchRef: unimplemented("GitWorktreeClient.defaultRemoteBranchRef", placeholder: nil),
     isValidBranchName: unimplemented("GitWorktreeClient.isValidBranchName", placeholder: false),
+    addWorktreeAt: unimplemented("GitWorktreeClient.addWorktreeAt"),
     createWorktreeStream: { _ in
       AsyncThrowingStream { $0.finish() }
     },

@@ -170,6 +170,19 @@ struct HierarchyManagerWorkspaceTests {
   }
 
   @Test
+  func builtinEnvCarriesTheWorkspaceRootOnlyInsideAWorkspace() {
+    let inside = HierarchyManager.injectingBuiltins(
+      ["CODANS_WORKSPACE_ROOT": "stale"], worktreePath: "/tmp/ws/app", rootPath: "/tmp/ws",
+      workspaceRoot: "/tmp/ws")
+    #expect(inside[BuiltinEnvVar.workspaceRoot.key] == "/tmp/ws")
+    #expect(inside[BuiltinEnvVar.rootPath.key] == "/tmp/ws")
+    let outside = HierarchyManager.injectingBuiltins(
+      ["CODANS_WORKSPACE_ROOT": "stale"], worktreePath: "/tmp/p", rootPath: "/tmp/p")
+    #expect(outside[BuiltinEnvVar.workspaceRoot.key] == nil)
+    #expect(BuiltinEnvVar.reservedKeys.contains("CODANS_WORKSPACE_ROOT"))
+  }
+
+  @Test
   func manifestSetterIsTransient() {
     let projectID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
     let manifest = WorkspaceManifest(title: "Checkout Flow")

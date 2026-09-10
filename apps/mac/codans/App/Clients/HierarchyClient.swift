@@ -2037,7 +2037,17 @@ extension HierarchyClient {
     let ttl = TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
     let deleteRemoteBranch = worktreeSettings.deleteRemoteBranchWithWorktree
     let due = manager.archivedWorktreesDue(in: projectID, now: Date(), ttl: ttl)
+    let rows = manager.catalog.projects.first(where: { $0.id == projectID })?.worktrees ?? []
     for worktreeID in due {
+      // A row that is also a workspace member's checkout belongs to that
+      // workspace: removing it here would pull the folder out from under
+      // the workspace's own row. Membership changes go through the
+      // workspace flow, never the sweep.
+      if let path = rows.first(where: { $0.id == worktreeID })?.path,
+        manager.workspaceMembership(forPath: path) != nil
+      {
+        continue
+      }
       do {
         try await removeWorktreeWithGit(
           worktreeID: worktreeID,
