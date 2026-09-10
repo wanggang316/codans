@@ -1473,7 +1473,7 @@ final class HierarchyManager {
   /// any drift (e.g. one side adding trimming) would silently break
   /// the symmetry the PR body guarantees. Route all call-sites
   /// through this function.
-  static func canonicalPath(_ path: String) -> String {
+  nonisolated static func canonicalPath(_ path: String) -> String {
     URL(fileURLWithPath: path)
       .resolvingSymlinksInPath()
       .standardizedFileURL
