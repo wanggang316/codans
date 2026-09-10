@@ -173,13 +173,13 @@ _codans() {
     unset 'unparsed_words[0]'
     unparsed_words=("${unparsed_words[@]}")
     case "${subcommand}" in
-    status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|help)
+    status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|open|help)
         # Offer subcommand argument completions
         "_codans_${subcommand}"
         ;;
     *)
         # Offer subcommand completions
-        COMPREPLY+=($(compgen -W 'status launch doctor tree project worktree tab pane broadcast agent handoff help' -- "${cur}"))
+        COMPREPLY+=($(compgen -W 'status launch doctor tree project worktree tab pane broadcast agent handoff open help' -- "${cur}"))
         ;;
     esac
 }
@@ -268,13 +268,31 @@ _codans_project() {
     unset 'unparsed_words[0]'
     unparsed_words=("${unparsed_words[@]}")
     case "${subcommand}" in
-    add|rm|commands)
+    list|add|rm|commands)
         # Offer subcommand argument completions
         "_codans_project_${subcommand}"
         ;;
     *)
         # Offer subcommand completions
-        COMPREPLY+=($(compgen -W 'add rm commands' -- "${cur}"))
+        COMPREPLY+=($(compgen -W 'list add rm commands' -- "${cur}"))
+        ;;
+    esac
+}
+
+_codans_project_list() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout)
+    __codans_offer_flags_options 0
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
         ;;
     esac
 }
@@ -481,13 +499,34 @@ _codans_worktree() {
     unset 'unparsed_words[0]'
     unparsed_words=("${unparsed_words[@]}")
     case "${subcommand}" in
-    new|switch|rm)
+    list|new|switch|rm)
         # Offer subcommand argument completions
         "_codans_worktree_${subcommand}"
         ;;
     *)
         # Offer subcommand completions
-        COMPREPLY+=($(compgen -W 'new switch rm' -- "${cur}"))
+        COMPREPLY+=($(compgen -W 'list new switch rm' -- "${cur}"))
+        ;;
+    esac
+}
+
+_codans_worktree_list() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --project)
+    __codans_offer_flags_options 0
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--project')
+        return
         ;;
     esac
 }
@@ -496,7 +535,7 @@ _codans_worktree_new() {
     repeating_flags=()
     non_repeating_flags=(--json --reuse-existing --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --path --name)
+    non_repeating_options=(--socket --timeout --base --project --path --name)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -505,6 +544,9 @@ _codans_worktree_new() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--base')
         return
         ;;
     '--project')
@@ -539,7 +581,7 @@ _codans_worktree_switch() {
 
 _codans_worktree_rm() {
     repeating_flags=()
-    non_repeating_flags=(--json --all --version -h --help)
+    non_repeating_flags=(--json --all --delete --version -h --help)
     repeating_options=()
     non_repeating_options=(--socket --timeout --project --by-path)
     __codans_offer_flags_options 1
@@ -573,13 +615,37 @@ _codans_tab() {
     unset 'unparsed_words[0]'
     unparsed_words=("${unparsed_words[@]}")
     case "${subcommand}" in
-    new|switch|close)
+    list|new|switch|close)
         # Offer subcommand argument completions
         "_codans_tab_${subcommand}"
         ;;
     *)
         # Offer subcommand completions
-        COMPREPLY+=($(compgen -W 'new switch close' -- "${cur}"))
+        COMPREPLY+=($(compgen -W 'list new switch close' -- "${cur}"))
+        ;;
+    esac
+}
+
+_codans_tab_list() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --project --worktree)
+    __codans_offer_flags_options 0
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--project')
+        return
+        ;;
+    '--worktree')
+        return
         ;;
     esac
 }
@@ -662,13 +728,40 @@ _codans_pane() {
     unset 'unparsed_words[0]'
     unparsed_words=("${unparsed_words[@]}")
     case "${subcommand}" in
-    new|focus|close|label|reset|send|send-key|read|info|capture)
+    list|new|focus|close|label|reset|send|send-key|read|info|capture)
         # Offer subcommand argument completions
         "_codans_pane_${subcommand}"
         ;;
     *)
         # Offer subcommand completions
-        COMPREPLY+=($(compgen -W 'new focus close label reset send send-key read info capture' -- "${cur}"))
+        COMPREPLY+=($(compgen -W 'list new focus close label reset send send-key read info capture' -- "${cur}"))
+        ;;
+    esac
+}
+
+_codans_pane_list() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --project --worktree --tab)
+    __codans_offer_flags_options 0
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--project')
+        return
+        ;;
+    '--worktree')
+        return
+        ;;
+    '--tab')
+        return
         ;;
     esac
 }
@@ -1044,9 +1137,9 @@ _codans_handoff() {
 
 _codans_handoff_to() {
     repeating_flags=()
-    non_repeating_flags=(--json --no-brief --no-launch --version -h --help)
+    non_repeating_flags=(--json --no-brief --no-launch --tab --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --pane --profile --brief --note)
+    non_repeating_options=(--socket --timeout --pane --profile --brief --note --split)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -1067,6 +1160,10 @@ _codans_handoff_to() {
         return
         ;;
     '--note')
+        return
+        ;;
+    '--split')
+        __codans_add_completions -W 'right'$'\n''left'$'\n''up'$'\n''down'
         return
         ;;
     esac
@@ -1094,6 +1191,27 @@ _codans_handoff_save() {
         return
         ;;
     '--note')
+        return
+        ;;
+    esac
+}
+
+_codans_open() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --in)
+    __codans_offer_flags_options 1
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--in')
         return
         ;;
     esac
