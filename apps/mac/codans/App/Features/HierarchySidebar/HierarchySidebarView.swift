@@ -388,6 +388,7 @@ struct HierarchySidebarView: View {
     }
     .modifier(RemoteConnectionSheetPresenter(store: store))
     .modifier(CreateWorkspaceSheetPresenter(store: store))
+    .modifier(WorkspaceRemovalDialogs(store: store))
     .confirmationDialog(
       worktreeRemovalTitle,
       isPresented: Binding(
@@ -1278,6 +1279,18 @@ struct HierarchySidebarView: View {
         )
       }
     }
+    // A workspace child's lifecycle is membership: removing it unregisters
+    // the checkout from its repository and edits the manifest.
+    if !isMainCheckout, project.isWorkspace {
+      Divider()
+      Button(role: .destructive) {
+        store.send(
+          .workspaceMemberRemoveTapped(
+            worktreeID: worktree.id, inProject: project.id, name: worktree.name))
+      } label: {
+        Label("Remove from Workspace…", systemImage: "trash")
+      }
+    }
     // A source Project's row that a workspace lists as a child is likewise
     // the workspace's to archive or remove.
     let isWorkspaceMember =
@@ -1910,6 +1923,22 @@ private struct ProjectHeaderRow: View {
       .map(\.id)
   }
 
+  /// Open and merged pull-request counts over a workspace's member rows,
+  /// nil when nothing is known yet.
+  private var workspacePullRequestSummary: String? {
+    guard project.isWorkspace, let gitHubStore else { return nil }
+    let snapshots = project.worktrees
+      .filter { !$0.archived && $0.path != project.rootPath }
+      .compactMap { gitHubStore.snapshots[$0.id] }
+    guard !snapshots.isEmpty else { return nil }
+    let merged = snapshots.filter { $0.state == .merged }.count
+    let open = snapshots.count - merged
+    var parts: [String] = []
+    if open > 0 { parts.append(open == 1 ? "1 PR" : "\(open) PRs") }
+    if merged > 0 { parts.append("\(merged) merged") }
+    return parts.joined(separator: " · ")
+  }
+
   /// Project name tint — hover-driven only. The Project color deliberately
   /// does *not* reach the name: the icon to its left already carries it, and
   /// tinting both painted the same signal twice and cost the name the
@@ -1967,6 +1996,15 @@ private struct ProjectHeaderRow: View {
           .foregroundStyle(.secondary)
           .help("Workspace")
           .accessibilityLabel("Workspace")
+        // Pull requests across every member repository, rolled up on the
+        // header so the task reads as one unit: "3 PRs · 1 merged".
+        if let summary = workspacePullRequestSummary {
+          Text(summary)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .accessibilityLabel("Pull requests: \(summary)")
+        }
       }
       Spacer(minLength: 4)
       // Keep the hover chrome from collapsing row width when hidden —
@@ -2073,12 +2111,20 @@ private struct ProjectHeaderRow: View {
           // → global TagManager via `.openTagManager`) are retained — only
           // the menu entry is suppressed. Re-add the line below to restore.
           // ProjectTagsMenu(project: project, store: store)
-          Button(role: .destructive) {
-            store.send(
-              .projectRemoveTapped(projectID: project.id, name: project.name)
-            )
-          } label: {
-            Label("Remove Project", systemImage: "trash")
+          if project.isWorkspace {
+            Button(role: .destructive) {
+              store.send(.workspaceRemoveTapped(projectID: project.id, name: project.name))
+            } label: {
+              Label("Remove Workspace…", systemImage: "trash")
+            }
+          } else {
+            Button(role: .destructive) {
+              store.send(
+                .projectRemoveTapped(projectID: project.id, name: project.name)
+              )
+            } label: {
+              Label("Remove Project", systemImage: "trash")
+            }
           }
         } label: {
           iconLabel(systemName: "ellipsis", isHovering: isMenuHovering)

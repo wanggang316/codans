@@ -125,6 +125,11 @@ struct HierarchySidebarFeature {
     var archivedWorktreesSheet: ArchivedWorktreesFeature.State?
     var pendingWorktreeRemoval: PendingWorktreeRemoval?
     var pendingProjectRemoval: PendingProjectRemoval?
+    /// "Remove from Workspace" confirmation for one member checkout.
+    var pendingWorkspaceMemberRemoval: PendingWorktreeRemoval?
+    /// "Remove Workspace" confirmation; the dialog offers entry-only or
+    /// delete-checkouts.
+    var pendingWorkspaceRemoval: PendingProjectRemoval?
     /// Pending "Archive All Merged Worktrees" batch awaiting its confirm
     /// dialog. Non-nil → dialog visible.
     var pendingArchiveAllMerged: PendingMergedBatch?
@@ -396,6 +401,18 @@ struct HierarchySidebarFeature {
     case workspaceAddRepositoryTapped(projectID: ProjectID)
     case workspaceAddRepositoryPicked(projectID: ProjectID, URL?)
     case workspaceAddRepositoryFailed(String)
+    /// Child-row context menu: unregister the member's checkout and drop it
+    /// from the manifest (its branch goes too, like Delete Worktree).
+    case workspaceMemberRemoveTapped(worktreeID: WorktreeID, inProject: ProjectID, name: String)
+    case workspaceMemberRemoveConfirmed
+    case workspaceMemberRemoveCancelled
+    case workspaceMemberRemoveFinished(message: String?)
+    /// Project ⋯ menu on a workspace: entry-only, or delete every checkout
+    /// and the folder.
+    case workspaceRemoveTapped(projectID: ProjectID, name: String)
+    case workspaceRemoveConfirmed(deleteFiles: Bool)
+    case workspaceRemoveCancelled
+    case workspaceRemoveFinished(message: String?)
     /// Child-feature actions for the Connect to Server sheet.
     case remoteConnectionSheet(RemoteConnectionFeature.Action)
 
@@ -676,6 +693,64 @@ struct HierarchySidebarFeature {
 
     case .workspaceAddRepositoryFailed(let message):
       state.lifecycleErrorToast = message
+      return .none
+
+    case .workspaceMemberRemoveTapped(let worktreeID, let projectID, let name):
+      guard isWorkspaceChild(worktreeID: worktreeID, projectID: projectID) else { return .none }
+      state.pendingWorkspaceMemberRemoval = PendingWorktreeRemoval(
+        worktreeID: worktreeID, projectID: projectID, displayName: name)
+      return .none
+
+    case .workspaceMemberRemoveConfirmed:
+      guard let pending = state.pendingWorkspaceMemberRemoval else { return .none }
+      state.pendingWorkspaceMemberRemoval = nil
+      return .run { [client = workspaceClient] send in
+        do {
+          let warning = try await client.drop(pending.projectID, pending.worktreeID, true)
+          await send(.workspaceMemberRemoveFinished(message: warning))
+        } catch {
+          await send(.workspaceMemberRemoveFinished(message: error.localizedDescription))
+        }
+      }
+
+    case .workspaceMemberRemoveCancelled:
+      state.pendingWorkspaceMemberRemoval = nil
+      return .none
+
+    case .workspaceMemberRemoveFinished(let message):
+      if let message { state.lifecycleErrorToast = message }
+      return .none
+
+    case .workspaceRemoveTapped(let projectID, let name):
+      guard hierarchyClient.kind(projectID) == .workspace else { return .none }
+      state.pendingWorkspaceRemoval = PendingProjectRemoval(projectID: projectID, displayName: name)
+      return .none
+
+    case .workspaceRemoveConfirmed(let deleteFiles):
+      guard let pending = state.pendingWorkspaceRemoval else { return .none }
+      state.pendingWorkspaceRemoval = nil
+      return .run { [client = workspaceClient] send in
+        do {
+          let outcome = try await client.remove(
+            pending.projectID, WorkspaceCleanup(deleteFiles: deleteFiles))
+          var notes: [String] = []
+          if !outcome.failures.isEmpty {
+            notes.append(
+              "Could not unregister \(outcome.failures.joined(separator: ", ")); the folder was kept.")
+          }
+          notes.append(contentsOf: outcome.keptBranches)
+          await send(.workspaceRemoveFinished(message: notes.isEmpty ? nil : notes.joined(separator: " ")))
+        } catch {
+          await send(.workspaceRemoveFinished(message: error.localizedDescription))
+        }
+      }
+
+    case .workspaceRemoveCancelled:
+      state.pendingWorkspaceRemoval = nil
+      return .none
+
+    case .workspaceRemoveFinished(let message):
+      if let message { state.lifecycleErrorToast = message }
       return .none
 
     case .connectServerTapped:
