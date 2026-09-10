@@ -29,8 +29,9 @@ struct ProjectList: AsyncParsableCommand {
 struct ProjectCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "project",
-    abstract: "Create and remove projects.",
+    abstract: "List, create, and remove projects.",
     subcommands: [
+      ProjectList.self,
       ProjectAdd.self,
       ProjectRemove.self,
       ProjectScriptsCommand.self,
@@ -279,7 +280,12 @@ struct ProjectCommandsRemove: AsyncParsableCommand {
 struct ProjectAdd: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "add",
-    abstract: "Add an existing directory as a project."
+    abstract: "Add an existing directory as a project.",
+    discussion: """
+      The directory must exist and not be registered already. Its git root is
+      detected, so a repository gets its worktrees listed like one added from
+      the sidebar; a plain folder becomes a folder project.
+      """
   )
 
   @OptionGroup var globals: GlobalOptions
@@ -299,16 +305,26 @@ struct ProjectAdd: AsyncParsableCommand {
         let rootPath: String
         let gitRoot: String?
       }
-      struct Result: Codable { let id: ProjectID }
+      struct Result: Codable {
+        let id: ProjectID
+        let rootPath: String?
+        let gitRoot: String?
+      }
       let result: Result = try await client.call(
         .hierarchyAddProject,
         params: Params(name: displayName, rootPath: resolvedPath, gitRoot: nil)
       )
       try Renderer.emitObject(
-        ["id": result.id.description, "name": displayName, "path": resolvedPath],
+        [
+          "id": result.id.description,
+          "name": displayName,
+          "path": result.rootPath ?? resolvedPath,
+          "gitRoot": result.gitRoot.map { JSONValue.string($0) } ?? JSONValue.null,
+        ],
         mode: globals.renderMode
       ) { obj in
-        "added project \(obj["id"] ?? "?")  \(displayName)"
+        let kind = (obj["gitRoot"] as? JSONValue) == .null ? "folder project" : "project"
+        return "added \(kind) \(obj["id"] ?? "?")  \(displayName)"
       }
     }
   }

@@ -1,8 +1,8 @@
 import ArgumentParser
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Foundation
 
 struct WorktreeList: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -35,8 +35,9 @@ struct WorktreeList: AsyncParsableCommand {
 struct WorktreeCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "worktree",
-    abstract: "Create, switch, and remove worktrees.",
+    abstract: "List, create, switch, and remove worktrees.",
     subcommands: [
+      WorktreeList.self,
       WorktreeNew.self,
       WorktreeSwitch.self,
       WorktreeRemove.self,
@@ -47,12 +48,21 @@ struct WorktreeCommand: AsyncParsableCommand {
 struct WorktreeNew: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "new",
-    abstract: "Create a worktree entry."
+    abstract: "Create a git worktree for a branch and add it to the project.",
+    discussion: """
+      Runs the same pipeline as the New Worktree sheet: the branch is created
+      from --base (default: the repo's default remote branch, else HEAD) or
+      checked out if it already exists, the project's copy / fetch / setup
+      settings apply, and the new worktree becomes the project's selection.
+      A --path that already exists on disk is registered as-is.
+      """
   )
 
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Branch name.")
   var branch: String
+  @Option(name: .long, help: "Committish a new branch starts from (e.g. origin/main).")
+  var base: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
   @Option(
@@ -82,10 +92,12 @@ struct WorktreeNew: AsyncParsableCommand {
         let path: String?
         let branch: String?
         let reuseExisting: Bool
+        let baseRef: String?
       }
       struct Result: Codable {
         let id: WorktreeID
         let path: String
+        let created: Bool?
       }
       let result: Result = try await client.call(
         .hierarchyCreateWorktree,
@@ -94,14 +106,19 @@ struct WorktreeNew: AsyncParsableCommand {
           name: displayName,
           path: explicitPath,
           branch: branch,
-          reuseExisting: reuseExisting
+          reuseExisting: reuseExisting,
+          baseRef: base
         )
       )
+      let created = result.created ?? false
       try Renderer.emitObject(
-        ["id": result.id.description, "name": displayName, "path": result.path],
+        [
+          "id": result.id.description, "name": displayName, "path": result.path,
+          "created": created,
+        ],
         mode: globals.renderMode
       ) { _ in
-        "created worktree \(result.id.description)  \(displayName)"
+        "\(created ? "created" : "registered") worktree \(result.id.description)  \(displayName)  \(result.path)"
       }
     }
   }
@@ -114,7 +131,7 @@ struct WorktreeSwitch: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Worktree id or 'current'.")
+  @Argument(help: "Worktree id, name, branch, or 'current'.")
   var worktree: String
 
   func run() async throws {
@@ -139,7 +156,7 @@ struct WorktreeRemove: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Worktree id or 'current'. Omit when using --by-path.")
+  @Argument(help: "Worktree id, name, branch, or 'current'. Omit when using --by-path.")
   var worktree: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
@@ -155,14 +172,20 @@ struct WorktreeRemove: AsyncParsableCommand {
       "With --by-path, allow removing more than one matching row. Without --all, --by-path requires exactly one match."
   )
   var all: Bool = false
+  @Flag(
+    name: .long,
+    help:
+      "Also remove the git worktree from disk (and its branch, per Settings), like the sidebar's Remove Worktree. Without it only the entry is forgotten, and a real git worktree comes back on the next reconcile."
+  )
+  var delete: Bool = false
 
   func run() async throws {
     await CommandRunner.run {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
 
       if let byPath {
+        let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
         // Cleanup mode — list the project's worktrees, filter by
         // canonical path, then issue per-row removes. Done client-side to
         // keep the server's `hierarchy.removeWorktree` surface unchanged.
@@ -197,20 +220,22 @@ struct WorktreeRemove: AsyncParsableCommand {
         struct RemoveParams: Codable {
           let id: WorktreeID
           let projectID: ProjectID
+          let deleteFromDisk: Bool
         }
         var removed: [String] = []
         for match in matches {
           _ = try await client.callRaw(
             .hierarchyRemoveWorktree,
-            params: RemoveParams(id: match.id, projectID: ProjectID(raw: projectUUID))
+            params: RemoveParams(
+              id: match.id, projectID: ProjectID(raw: projectUUID), deleteFromDisk: delete)
           )
           removed.append(match.id.description)
         }
         try Renderer.emitObject(
-          ["removed": removed, "path": canonical],
+          ["removed": removed, "path": canonical, "deleted": delete],
           mode: globals.renderMode
         ) { _ in
-          "removed \(removed.count) worktree(s) at \(canonical)"
+          "\(delete ? "deleted" : "removed") \(removed.count) worktree(s) at \(canonical)"
         }
         return
       }
@@ -221,19 +246,30 @@ struct WorktreeRemove: AsyncParsableCommand {
           message: "codans worktree rm: missing worktree id (or pass --by-path <path>)"
         )
       }
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
         let id: WorktreeID
         let projectID: ProjectID
+        let deleteFromDisk: Bool
       }
-      _ = try await client.callRaw(
+      struct Result: Codable {
+        let warning: String?
+      }
+      let result: Result = try await client.call(
         .hierarchyRemoveWorktree,
-        params: Params(id: WorktreeID(raw: worktreeUUID), projectID: ProjectID(raw: projectUUID))
+        params: Params(id: scope.worktreeID, projectID: scope.projectID, deleteFromDisk: delete)
       )
-      try Renderer.emit(
-        IDMessage(id: worktreeUUID.uuidString, message: "removed worktree \(worktreeUUID.uuidString)"),
+      try Renderer.emitObject(
+        [
+          "id": scope.worktreeID.description, "deleted": delete,
+          "warning": result.warning.map { JSONValue.string($0) } ?? JSONValue.null,
+        ],
         mode: globals.renderMode
-      )
+      ) { _ in
+        var line = "\(delete ? "deleted" : "removed") worktree \(scope.worktreeID)"
+        if let warning = result.warning { line += "\n  note: \(warning)" }
+        return line
+      }
     }
   }
 

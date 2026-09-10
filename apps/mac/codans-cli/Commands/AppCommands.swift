@@ -119,9 +119,23 @@ struct LaunchCommand: AsyncParsableCommand {
   /// Prefer the app this binary ships inside. Only the release CLI may fall
   /// back to LaunchServices by name: `open -ga Codans` resolves to the
   /// installed release app, which a development CLI must never start.
-  private static func launchArguments() throws -> (arguments: [String], description: String) {
+  ///
+  /// `open` starts the app from launchd, not from this shell, so the socket
+  /// and config-directory overrides the CLI itself runs under are forwarded
+  /// with `--env`: otherwise `launch` would wait on a socket the app was
+  /// never told to bind.
+  private static func launchArguments(
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) throws -> (arguments: [String], description: String) {
+    var arguments: [String] = []
+    for key in [CodansEnvironment.Key.socketPath, .configDirectory] {
+      if let value = environment[key.rawValue], !value.isEmpty {
+        arguments += ["--env", "\(key.rawValue)=\(value)"]
+      }
+    }
     if let appPath = coBuiltAppPath() {
-      return (["-g", appPath], "open -g \(appPath)")
+      arguments += ["-g", appPath]
+      return (arguments, "open \(arguments.joined(separator: " "))")
     }
     guard BuildChannel.current == .release else {
       throw CLIError(
@@ -130,7 +144,8 @@ struct LaunchCommand: AsyncParsableCommand {
         hint: "run the copy embedded in the Debug Codans.app, or open that app yourself"
       )
     }
-    return (["-ga", "Codans"], "open -ga Codans")
+    arguments += ["-ga", "Codans"]
+    return (arguments, "open \(arguments.joined(separator: " "))")
   }
 
   private static func coBuiltAppPath() -> String? {

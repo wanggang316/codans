@@ -13,18 +13,16 @@ struct PaneList: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'.")
+  @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'.")
   var tab: String = "current"
 
   func run() async throws {
     await CommandRunner.run {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
-      let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
+      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
       struct Params: Codable {
         let tabID: TabID
         let worktreeID: WorktreeID
@@ -32,11 +30,7 @@ struct PaneList: AsyncParsableCommand {
       }
       let result: PaneListPayload = try await client.call(
         .hierarchyListPanes,
-        params: Params(
-          tabID: TabID(raw: tabUUID),
-          worktreeID: WorktreeID(raw: worktreeUUID),
-          projectID: ProjectID(raw: projectUUID)
-        )
+        params: Params(tabID: scope.tabID, worktreeID: scope.worktreeID, projectID: scope.projectID)
       )
       try Renderer.emit(PaneListRenderable(panes: result.panes), mode: globals.renderMode)
     }
@@ -46,8 +40,9 @@ struct PaneList: AsyncParsableCommand {
 struct PaneCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "pane",
-    abstract: "Create, focus, close, label, read, reset, and send panes.",
+    abstract: "List, create, focus, close, label, read, reset, and send panes.",
     subcommands: [
+      PaneList.self,
       PaneNew.self,
       PaneFocus.self,
       PaneClose.self,
@@ -73,9 +68,9 @@ struct PaneNew: AsyncParsableCommand {
   var command: [String] = []
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'.")
+  @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'.")
   var tab: String = "current"
   @Option(name: .long, help: "Working directory. Defaults to $PWD.")
   var cwd: String?
@@ -86,9 +81,7 @@ struct PaneNew: AsyncParsableCommand {
     await CommandRunner.run {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
-      let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
+      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
       let initialCommand = command.isEmpty ? nil : command.joined(separator: " ")
       struct Params: Codable {
         let projectID: ProjectID
@@ -102,9 +95,9 @@ struct PaneNew: AsyncParsableCommand {
       let result: Result = try await client.call(
         .hierarchyOpenPane,
         params: Params(
-          projectID: ProjectID(raw: projectUUID),
-          worktreeID: WorktreeID(raw: worktreeUUID),
-          tabID: TabID(raw: tabUUID),
+          projectID: scope.projectID,
+          worktreeID: scope.worktreeID,
+          tabID: scope.tabID,
           workingDirectory: PathResolver.absolute(cwd),
           initialCommand: initialCommand,
           labels: label
@@ -125,9 +118,9 @@ struct PaneLocatorArgs: ParsableArguments {
   var pane: String
   @Option(name: .long, help: "Project id, name, or 'current'. Usually inferred from the pane id.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'. Usually inferred from the pane id.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'. Usually inferred from the pane id.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'. Usually inferred from the pane id.")
+  @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'. Usually inferred from the pane id.")
   var tab: String = "current"
 }
 

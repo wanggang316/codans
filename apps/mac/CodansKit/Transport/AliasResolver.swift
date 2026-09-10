@@ -41,19 +41,16 @@ public enum AliasResolver {
       return uuid
     }
 
-    // 2. `current` / `.` pronoun via env vars.
-    if value == "current" || value == "." {
-      if let envValue = env[envKey(for: kind)], let uuid = UUID(uuidString: envValue) {
-        return uuid
-      }
-      // Panes have a server-side fallback: the app attributes the calling
-      // process to its pane from the connection's kernel peer PID plus an
-      // ancestor walk, so a subshell or wrapper that dropped
-      // `CODANS_PANE_ID` still resolves. Other kinds have no equivalent
-      // ground truth — keep failing fast.
-      guard kind == .pane else {
-        throw Error.noContext(kind: kind)
-      }
+    // 2. `current` / `.` pronoun via env vars. A pane only exports its own
+    // id, so for every other kind this is a hand-exported override; the
+    // server derives project / worktree / tab from the calling pane
+    // (kernel peer PID plus an ancestor walk, or `contextPaneID`) when the
+    // variable is absent, which also covers a subshell or wrapper that
+    // dropped `CODANS_PANE_ID`.
+    if value == "current" || value == ".",
+      let envValue = env[envKey(for: kind)], let uuid = UUID(uuidString: envValue)
+    {
+      return uuid
     }
 
     // 3. Everything else → server resolver.

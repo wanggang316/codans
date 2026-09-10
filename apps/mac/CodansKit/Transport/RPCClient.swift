@@ -33,14 +33,20 @@ public actor RPCClient {
 
   private let transport: Transport
   private let versions: Versions
+  /// Deadline applied to every unary call that does not name its own.
+  /// The CLI sets it from `--timeout` once, at connect time, so a command
+  /// cannot forget to thread the flag through and silently fall back to
+  /// a hard-coded ten seconds.
+  private let defaultTimeout: Duration
   private var buffer = Data()
   private let inboundPump: InboundPump
   private let logger = Logger(subsystem: "com.gumpw.codans.cli", category: "rpc")
   private var didShutdown = false
 
-  public init(transport: Transport, versions: Versions) {
+  public init(transport: Transport, versions: Versions, defaultTimeout: Duration = .seconds(10)) {
     self.transport = transport
     self.versions = versions
+    self.defaultTimeout = defaultTimeout
     self.inboundPump = InboundPump(stream: transport.inbound)
   }
 
@@ -80,8 +86,9 @@ public actor RPCClient {
     _ method: IPC.Method,
     params: Params,
     resultType: ResultType.Type = ResultType.self,
-    timeout: Duration = .seconds(10)
+    timeout explicitTimeout: Duration? = nil
   ) async throws -> ResultType {
+    let timeout = explicitTimeout ?? defaultTimeout
     let requestID = UUID().uuidString
     let helloID = "hello-\(UUID().uuidString.prefix(8))"
     let paramsJSON = try JSONValue.encoded(params)
@@ -119,7 +126,7 @@ public actor RPCClient {
   public func callRaw<Params: Encodable>(
     _ method: IPC.Method,
     params: Params,
-    timeout: Duration = .seconds(10)
+    timeout: Duration? = nil
   ) async throws -> JSONValue {
     try await call(method, params: params, resultType: JSONValue.self, timeout: timeout)
   }

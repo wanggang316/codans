@@ -77,7 +77,7 @@ struct AgentLaunch: AsyncParsableCommand {
   var agent: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
   @Option(name: .long, help: "Kickoff prompt; pass '-' to read it from stdin.")
   var prompt: String?
@@ -99,13 +99,12 @@ struct AgentLaunch: AsyncParsableCommand {
       let resolvedPrompt = try Self.resolvePrompt(prompt)
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       let response: IPC.AgentLaunchResponse = try await client.call(
         .agentLaunch,
         params: IPC.AgentLaunchRequest(
-          projectID: ProjectID(raw: projectUUID),
-          worktreeID: WorktreeID(raw: worktreeUUID),
+          projectID: scope.projectID,
+          worktreeID: scope.worktreeID,
           profile: profile,
           agent: agent,
           prompt: resolvedPrompt,
