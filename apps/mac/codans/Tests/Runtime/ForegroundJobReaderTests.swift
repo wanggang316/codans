@@ -1,4 +1,6 @@
+import CodansCore
 import Darwin
+import Foundation
 import Testing
 
 @testable import Codans
@@ -52,6 +54,31 @@ struct ForegroundJobReaderTests {
   func processArgumentsReadsCurrentProcess() {
     let arguments = ForegroundJobReader.processArguments(pid: getpid())
     #expect(arguments?.isEmpty == false)
+  }
+
+  @Test
+  func processSampleIncludesKernelStartTime() throws {
+    let process = try #require(ForegroundJobReader.process(pid: getpid()))
+    let startedAt = try #require(process.startedAt)
+    #expect(startedAt == ForegroundJobReader.processStartedAt(pid: getpid()))
+    #expect(startedAt <= Date.now)
+  }
+
+  @Test
+  func legacyRemoteSampleDecodesWithoutStartTime() throws {
+    let data = Data(
+      #"{"pid":12,"parentPID":1,"processGroupID":12,"argv0":"node","commandLine":"node server.js"}"#.utf8
+    )
+    let process = try JSONDecoder().decode(ForegroundProcess.self, from: data)
+    #expect(process.startedAt == nil)
+    #expect(process.pid == 12)
+  }
+
+  @Test
+  func processStartTimeSurvivesCoding() throws {
+    let process = try #require(ForegroundJobReader.process(pid: getpid()))
+    let decoded = try JSONDecoder().decode(ForegroundProcess.self, from: JSONEncoder().encode(process))
+    #expect(decoded == process)
   }
 
   private static func procargsBuffer(execPath: String, argv: [String]) -> [UInt8] {

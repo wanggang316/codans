@@ -1,6 +1,6 @@
+import CodansCore
 import Darwin
 import Foundation
-import CodansCore
 
 nonisolated struct ForegroundJobReader: Sendable {
   private static let procargsRetryLimit = 3
@@ -76,7 +76,10 @@ nonisolated struct ForegroundJobReader: Sendable {
       parentPID: Int32(info.pbi_ppid),
       processGroupID: Int32(info.pbi_pgid),
       argv0: argv0,
-      commandLine: commandLine
+      commandLine: commandLine,
+      startedAt: Date(
+        timeIntervalSince1970:
+          TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000)
     )
   }
 

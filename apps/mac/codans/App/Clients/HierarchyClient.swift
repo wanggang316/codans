@@ -676,11 +676,12 @@ extension HierarchyClient {
     gitWorktreeClient: GitWorktreeClient = .makeLive(),
     gitCLI: GitWorktreeCLI = GitWorktreeCLI(),
     terminalClient: TerminalClient? = nil,
-    confirmQueueDiscard: @escaping @MainActor (
-      QueuedCommandDiscard, _ completion: @escaping @MainActor (Bool) -> Void
-    ) -> Void = { discard, completion in
-      QueuedCommandsCloseDialog.present(discard, completion: completion)
-    }
+    confirmQueueDiscard:
+      @escaping @MainActor (
+        QueuedCommandDiscard, _ completion: @escaping @MainActor (Bool) -> Void
+      ) -> Void = { discard, completion in
+        QueuedCommandsCloseDialog.present(discard, completion: completion)
+      }
   ) -> HierarchyClient {
     /// Closing a pane that still holds queued commands is asked first. The
     /// gate sits here, on the UI's bridge, rather than in the manager: the
@@ -799,7 +800,8 @@ extension HierarchyClient {
       },
       closeTabsToRight: { pivotID, worktreeID, projectID in
         let all = tabs(in: worktreeID, projectID)
-        let doomed = all.firstIndex(where: { $0.id == pivotID })
+        let doomed =
+          all.firstIndex(where: { $0.id == pivotID })
           .map { Array(all[($0 + 1)...]) } ?? []
         try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
           try manager.closeTabsToRight(
@@ -1305,6 +1307,7 @@ extension HierarchyClient {
         command: script.command,
         policy: script.resolvedOnFinished
       )
+      manager.recordProcessLaunch(paneID: existing, name: script.displayName, kind: .run)
       terminalClient.sendInput(existing, rerunCommand + "\n")
       if let reuseStream {
         scheduleOnFinishedAction(
@@ -1324,15 +1327,10 @@ extension HierarchyClient {
     let preSubscribedStream: AsyncStream<TerminalEvent>? =
       onFinishedNeeded ? terminalClient?.events() : nil
 
-    let spawnedPaneID = try await dispatchScript(
-      script: script,
-      worktreeID: worktreeID,
-      projectID: projectID,
-      cwd: cwd,
-      env: env,
-      manager: manager,
-      terminalClient: terminalClient,
-      anchorPaneID: anchorPaneID
+    let spawnedPaneID = try await dispatchTrackedScript(
+      script: script, worktreeID: worktreeID, projectID: projectID, cwd: cwd,
+      env: env, manager: manager, terminalClient: terminalClient,
+      tracksRunPane: tracksRunPane, anchorPaneID: anchorPaneID
     )
 
     // Record the dedicated pane so the next run reuses it and the toolbar
@@ -1371,6 +1369,61 @@ extension HierarchyClient {
         manager.focusSurfaceView(for: spawnedPaneID)
       }
     }
+    return spawnedPaneID
+  }
+
+  /// Launch attribution is separate from the dedicated Run pane reuse index.
+  /// Capture focused-pane intent before dispatch so process birth can reject
+  /// input sent to an already-running command.
+  @MainActor
+  private static func dispatchTrackedScript(
+    script: ScriptDefinition,
+    worktreeID: WorktreeID,
+    projectID: ProjectID,
+    cwd: String,
+    env: [String: String],
+    manager: HierarchyManager,
+    terminalClient: TerminalClient?,
+    tracksRunPane: Bool,
+    anchorPaneID: PaneID?
+  ) async throws -> PaneID? {
+    let processLaunchRequestedAt = Date.now
+    let focusedProcessPane =
+      script.target == .focused && terminalClient != nil
+      ? focusedAnchor(worktreeID: worktreeID, in: manager)?.paneID : nil
+    if let focusedProcessPane {
+      manager.recordProcessLaunch(
+        paneID: focusedProcessPane, name: script.displayName, kind: tracksRunPane ? .run : .agent,
+        now: processLaunchRequestedAt, requiresIdle: true
+      )
+    }
+    let spawnedPaneID: PaneID?
+    do {
+      spawnedPaneID = try await dispatchScript(
+        script: script,
+        worktreeID: worktreeID,
+        projectID: projectID,
+        cwd: cwd,
+        env: env,
+        manager: manager,
+        terminalClient: terminalClient,
+        anchorPaneID: anchorPaneID
+      )
+    } catch {
+      if let focusedProcessPane,
+        manager.processRegistry.launches[focusedProcessPane]?.requestedAt == processLaunchRequestedAt
+      {
+        manager.processRegistry.launches.removeValue(forKey: focusedProcessPane)
+      }
+      throw error
+    }
+
+    if let spawnedPaneID {
+      manager.recordProcessLaunch(
+        paneID: spawnedPaneID, name: script.displayName, kind: tracksRunPane ? .run : .agent
+      )
+    }
+
     return spawnedPaneID
   }
 
