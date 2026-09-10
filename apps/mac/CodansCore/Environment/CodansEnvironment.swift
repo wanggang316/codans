@@ -29,6 +29,11 @@ public nonisolated enum CodansEnvironment {
     /// Absolute root of the Project the worktree came from. User-facing,
     /// like `worktreePath`.
     case rootPath = "CODANS_ROOT_PATH"
+    /// Absolute root of the workspace the pane belongs to. Written only
+    /// into panes of a workspace Project — the root row and every child
+    /// checkout — and absent everywhere else, so a script can test for it.
+    /// User-facing, like `worktreePath`.
+    case workspaceRoot = "CODANS_WORKSPACE_ROOT"
     /// Where zmx keeps its per-pane daemon sockets — this channel's cache
     /// directory, pinned so the reaper and the control client look in the
     /// same place zmx writes to.
