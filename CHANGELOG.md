@@ -20,6 +20,32 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.6.1] - 2026-09-10
+
+### Added
+
+- **Live worktree tasks in the header.** The toolbar now shows what the
+  selected worktree is actually running, one entry per pane — a command you
+  typed yourself, a Run script, or a coding agent, including one that is
+  waiting on your answer. Hover or click the badge for the list, with each
+  task's icon, name, process id, and elapsed time; picking a row jumps to the
+  pane that owns it. Entries come only from live processes, so nothing lingers
+  after a task exits and nothing is restored from stale state after a relaunch.
+
+### Changed
+
+- The worktree toolbar's Agent, Run, and Open buttons are icon only now, so the
+  three read as one compact row. Each button's name stays in its tooltip.
+- Split Right and Split Down use the same symbols everywhere: the tab bar, the
+  Command Palette, and the pane context menu.
+- The shortcut hint that appears beside a button while ⌘ is held is larger and
+  better spaced.
+
+### Fixed
+
+- The Open Project shortcut now sits on the Open Project menu item instead of
+  the sidebar's + button, which only opens a menu.
+
 ## [0.6.0] - 2026-09-07
 
 ### Added
