@@ -86,6 +86,58 @@ extension IPC {
     }
   }
 
+  /// Params for `workspace.drop` — remove one member by its folder name.
+  public struct WorkspaceDropRequest: Codable, Equatable, Sendable {
+    public let projectID: ProjectID
+    public let member: String
+    /// Leave the member's branch in the source repository.
+    public let keepBranch: Bool
+
+    public init(projectID: ProjectID, member: String, keepBranch: Bool = false) {
+      self.projectID = projectID
+      self.member = member
+      self.keepBranch = keepBranch
+    }
+  }
+
+  /// Response for `workspace.drop`.
+  public struct WorkspaceDropResponse: Codable, Equatable, Sendable {
+    public let name: String
+    public let path: String
+    /// Set when the branch was kept because git refused to delete it.
+    public let warning: String?
+
+    public init(name: String, path: String, warning: String? = nil) {
+      self.name = name
+      self.path = path
+      self.warning = warning
+    }
+  }
+
+  /// Params for `workspace.remove`.
+  public struct WorkspaceRemoveRequest: Codable, Equatable, Sendable {
+    public let projectID: ProjectID
+    public let cleanup: WorkspaceCleanup
+
+    public init(projectID: ProjectID, cleanup: WorkspaceCleanup = .entryOnly) {
+      self.projectID = projectID
+      self.cleanup = cleanup
+    }
+  }
+
+  /// Response for `workspace.remove`.
+  public struct WorkspaceRemoveResponse: Codable, Equatable, Sendable {
+    public let projectID: ProjectID
+    public let rootPath: String
+    public let outcome: WorkspaceRemovalOutcome
+
+    public init(projectID: ProjectID, rootPath: String, outcome: WorkspaceRemovalOutcome) {
+      self.projectID = projectID
+      self.rootPath = rootPath
+      self.outcome = outcome
+    }
+  }
+
   /// Params for `workspace.describe`.
   public struct WorkspaceDescribeRequest: Codable, Equatable, Sendable {
     public let projectID: ProjectID

@@ -81,6 +81,14 @@ public final class MethodRouter {
       return await Self.asyncOutcome {
         try await h.add(request.params.decoded(as: IPC.WorkspaceAddRequest.self))
       }
+    case .workspaceDrop:
+      return await Self.asyncOutcome {
+        try await h.drop(request.params.decoded(as: IPC.WorkspaceDropRequest.self))
+      }
+    case .workspaceRemove:
+      return await Self.asyncOutcome {
+        try await h.remove(request.params.decoded(as: IPC.WorkspaceRemoveRequest.self))
+      }
     case .workspaceDescribe:
       return Self.projectOutcome {
         try h.describe(request.params.decoded(as: IPC.WorkspaceDescribeRequest.self))

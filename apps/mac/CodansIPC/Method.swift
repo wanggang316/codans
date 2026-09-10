@@ -54,6 +54,8 @@ extension IPC {
     // live in `WorkspaceHandlers`.
     case workspaceCreate = "workspace.create"
     case workspaceAdd = "workspace.add"
+    case workspaceDrop = "workspace.drop"
+    case workspaceRemove = "workspace.remove"
     case workspaceDescribe = "workspace.describe"
 
     // hierarchy — reads

@@ -15,9 +15,126 @@ struct WorkspaceCommand: AsyncParsableCommand {
     subcommands: [
       WorkspaceCreate.self,
       WorkspaceAdd.self,
+      WorkspaceDrop.self,
+      WorkspaceRemove.self,
       WorkspaceShow.self,
     ]
   )
+}
+
+struct WorkspaceDrop: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "drop",
+    abstract: "Remove a repository from a workspace, unregistering its checkout.",
+    discussion: """
+      The member's folder is moved out of the workspace and unregistered from
+      its source repository; the branch it was on is deleted too unless
+      --keep-branch is given (git keeps a branch that is checked out elsewhere
+      either way, and the response says so).
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Workspace project id, name, or 'current'.")
+  var workspace: String
+  @Argument(help: "Member folder name, as shown by `workspace show`.")
+  var member: String
+  @Flag(name: .long, help: "Keep the member's branch in the source repository.")
+  var keepBranch: Bool = false
+
+  func run() async throws {
+    await CommandRunner.run(self, globals: globals) {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
+      let response: IPC.WorkspaceDropResponse = try await client.call(
+        .workspaceDrop,
+        params: IPC.WorkspaceDropRequest(
+          projectID: ProjectID(raw: workspaceUUID), member: member, keepBranch: keepBranch),
+        timeout: globals.rpcTimeout)
+      try Renderer.emitObject(
+        ["name": response.name, "path": response.path, "warning": response.warning ?? ""],
+        mode: globals.renderMode
+      ) { _ in
+        var line = "dropped \(response.name)  \(response.path)"
+        if let warning = response.warning { line += "\n  note: \(warning)" }
+        return line
+      }
+    }
+  }
+}
+
+struct WorkspaceRemove: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "remove",
+    abstract: "Remove a workspace from Codans, optionally deleting its checkouts.",
+    discussion: """
+      Without flags only the sidebar entry goes; every checkout and branch
+      stays on disk. --delete-files unregisters each member from its source
+      repository and deletes the workspace folder — but only when every
+      member could be unregistered, so a source repository is never left
+      pointing at a folder that is gone. --delete-branches additionally
+      deletes each member's branch.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Workspace project id, name, or 'current'.")
+  var workspace: String
+  @Flag(name: .long, help: "Unregister every checkout and delete the workspace folder.")
+  var deleteFiles: Bool = false
+  @Flag(name: .long, help: "With --delete-files: also delete each member's branch.")
+  var deleteBranches: Bool = false
+
+  func run() async throws {
+    await CommandRunner.run(self, globals: globals) {
+      if deleteBranches, !deleteFiles {
+        throw CLIError(
+          code: .userError, message: "--delete-branches requires --delete-files",
+          hint: "pass --delete-files to unregister the checkouts first")
+      }
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
+      let response: IPC.WorkspaceRemoveResponse = try await client.call(
+        .workspaceRemove,
+        params: IPC.WorkspaceRemoveRequest(
+          projectID: ProjectID(raw: workspaceUUID),
+          cleanup: WorkspaceCleanup(deleteFiles: deleteFiles, deleteBranches: deleteBranches)),
+        timeout: globals.rpcTimeout)
+      try Renderer.emit(WorkspaceRemovalRenderable(response: response), mode: globals.renderMode)
+    }
+  }
+}
+
+struct WorkspaceRemovalRenderable: Encodable, CustomStringConvertible {
+  let response: IPC.WorkspaceRemoveResponse
+
+  private enum Key: String, CodingKey {
+    case id, rootPath, deletedFolder, failures, keptBranches
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: Key.self)
+    try container.encode(response.projectID.description, forKey: .id)
+    try container.encode(response.rootPath, forKey: .rootPath)
+    try container.encode(response.outcome.deletedFolder, forKey: .deletedFolder)
+    try container.encode(response.outcome.failures, forKey: .failures)
+    try container.encode(response.outcome.keptBranches, forKey: .keptBranches)
+  }
+
+  var description: String {
+    var lines = ["removed workspace \(response.projectID)  \(response.rootPath)"]
+    lines.append(
+      response.outcome.deletedFolder ? "  folder deleted" : "  folder kept on disk")
+    if !response.outcome.failures.isEmpty {
+      lines.append("  could not unregister: \(response.outcome.failures.joined(separator: ", "))")
+    }
+    for kept in response.outcome.keptBranches {
+      lines.append("  note: \(kept)")
+    }
+    return lines.joined(separator: "\n")
+  }
 }
 
 struct WorkspaceCreate: AsyncParsableCommand {

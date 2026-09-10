@@ -1145,13 +1145,15 @@ _codans_workspace() {
         local -ar subcommands=(
             'create:Create a workspace from two or more repositories.'
             'add:Add a repository to a workspace.'
+            'drop:Remove a repository from a workspace, unregistering its checkout.'
+            'remove:Remove a workspace from Codans, optionally deleting its checkouts.'
             'show:Describe a workspace and its repositories.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        create|add|show)
+        create|add|drop|remove|show)
             "_codans_workspace_${words[1]}" && ret=0
             ;;
         esac
@@ -1197,6 +1199,40 @@ _codans_workspace_add() {
         '--base[Base ref for a new branch.]:base:'
         '--existing[Check out an existing branch instead of creating one.]'
         '--role[Short role recorded in the manifest, e.g. backend.]:role:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workspace_drop() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':workspace:'
+        ':member:'
+        '--keep-branch[Keep the member'\''s branch in the source repository.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workspace_remove() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':workspace:'
+        '--delete-files[Unregister every checkout and delete the workspace folder.]'
+        '--delete-branches[With --delete-files\: also delete each member'\''s branch.]'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )

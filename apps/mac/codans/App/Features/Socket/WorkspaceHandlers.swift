@@ -88,6 +88,45 @@ final class WorkspaceHandlers {
     return added
   }
 
+  // MARK: - drop / remove
+
+  func drop(_ request: IPC.WorkspaceDropRequest) async throws -> IPC.WorkspaceDropResponse {
+    let summary = try describe(IPC.WorkspaceDescribeRequest(projectID: request.projectID))
+    guard let member = summary.members.first(where: { $0.name == request.member }) else {
+      throw IPCError.notFound(kind: "workspace member", id: request.member)
+    }
+    guard let worktreeID = member.worktreeID else {
+      throw IPCError.conflict(
+        reason: "\(request.member) has no checkout on disk yet; refresh the workspace first")
+    }
+    let warning: String?
+    do {
+      warning = try await workspace.drop(request.projectID, worktreeID, !request.keepBranch)
+    } catch {
+      throw Self.ipcError(for: error)
+    }
+    return IPC.WorkspaceDropResponse(name: member.name, path: member.path, warning: warning)
+  }
+
+  func remove(_ request: IPC.WorkspaceRemoveRequest) async throws -> IPC.WorkspaceRemoveResponse {
+    guard let project = hierarchy.snapshot().projects.first(where: { $0.id == request.projectID })
+    else {
+      throw IPCError.notFound(kind: "project", id: request.projectID.description)
+    }
+    guard project.isWorkspace else {
+      throw IPCError.invalidParams(
+        message: "\(project.name) is not a workspace", path: ["projectID"])
+    }
+    let outcome: WorkspaceRemovalOutcome
+    do {
+      outcome = try await workspace.remove(request.projectID, request.cleanup)
+    } catch {
+      throw Self.ipcError(for: error)
+    }
+    return IPC.WorkspaceRemoveResponse(
+      projectID: project.id, rootPath: project.rootPath, outcome: outcome)
+  }
+
   // MARK: - describe
 
   func describe(_ request: IPC.WorkspaceDescribeRequest) throws -> IPC.WorkspaceSummary {
@@ -206,10 +245,13 @@ final class WorkspaceHandlers {
       case .invalidPlan, .rootIsFile, .rootInsideRepository, .sourceNotRepository,
         .invalidBranchName:
         return .invalidParams(message: workspace.localizedDescription, path: nil)
-      case .rootAlreadyRegistered, .rootAlreadyWorkspace, .destinationExists, .memberExists:
+      case .rootAlreadyRegistered, .rootAlreadyWorkspace, .destinationExists, .memberExists,
+        .memberWithoutSource, .cannotDropRoot:
         return .conflict(reason: workspace.localizedDescription)
       case .notWorkspace(let id):
         return .notFound(kind: "workspace", id: id.description)
+      case .memberNotFound(let name):
+        return .notFound(kind: "workspace member", id: name)
       case .cancelled, .memberNotRegistered:
         return .internal(workspace.localizedDescription)
       }
