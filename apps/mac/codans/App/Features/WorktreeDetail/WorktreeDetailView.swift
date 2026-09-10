@@ -316,12 +316,7 @@ struct WorktreeDetailView: View {
         // No `.sharedBackgroundVisibility(.hidden)` here — the status slot
         // keeps macOS 26's standard glass capsule so it reads as a peer of
         // the trailing button cluster instead of a hand-rolled chip.
-        ToolbarItem { statusSlot(mode) }
-        // Bell is intentionally placed *immediately* after the status
-        // capsule with no flexible spacer between them — keeps the
-        // status / bell pair visually grouped at the window's
-        // optical center.
-        inboxBellToolbarItem()
+        centerToolbarItems(mode)
         ToolbarSpacer(.flexible)
         // Each trailing chip lives in its own `ToolbarItem` so the system
         // wraps it in a separate glass capsule — two discrete chips instead
@@ -339,10 +334,7 @@ struct WorktreeDetailView: View {
       } else {
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
         ToolbarItem(placement: .principal) { statusSlot(mode) }
-        // Same as the modern path: bell sits adjacent to the principal
-        // status item so the user reads "[status] [bell]" as one
-        // cluster rather than seeing the bell in the trailing button
-        // group with the action buttons.
+        // The inbox stays outside the principal status/process item.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
           // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
@@ -353,6 +345,15 @@ struct WorktreeDetailView: View {
         }
       }
     }
+  }
+
+  @available(macOS 26.0, *)
+  @ToolbarContentBuilder
+  private func centerToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
+    ToolbarItem { statusSlot(mode) }
+    // Keep the inbox in a separate group after the status/process capsule.
+    ToolbarSpacer(.fixed)
+    inboxBellToolbarItem()
   }
 
   /// Toolbar items are suppressed in exactly two states: a settled creation
@@ -400,13 +401,30 @@ struct WorktreeDetailView: View {
         .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
     case .worktree(let address, let info):
       if let info {
-        StatusBarView(
-          store: statusBarStore,
-          gitHubStore: gitHubStore,
-          worktreeID: address.worktree,
-          worktreePath: URL(fileURLWithPath: info.worktree.path),
-          branch: info.worktree.branch
-        )
+        HStack(spacing: 0) {
+          StatusBarView(
+            store: statusBarStore,
+            gitHubStore: gitHubStore,
+            worktreeID: address.worktree,
+            worktreePath: URL(fileURLWithPath: info.worktree.path),
+            branch: info.worktree.branch
+          )
+          Divider().frame(height: 14)
+          WorktreeProcessesView(entries: hierarchyManager.processEntries(in: address.worktree)) { entry in
+            guard hierarchyManager.isCurrentProcess(entry) else { return }
+            onFocusHierarchyPath(
+              InboxEntry.SourcePath(
+                projectID: entry.projectID,
+                worktreeID: entry.worktreeID,
+                tabID: entry.tabID,
+                paneID: entry.paneID
+              )
+            )
+          }
+          .id(address.worktree)
+          .fixedSize()
+          .layoutPriority(1)
+        }
       }
     }
   }

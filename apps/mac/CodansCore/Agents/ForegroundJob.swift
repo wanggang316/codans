@@ -5,6 +5,7 @@ public nonisolated struct ForegroundProcess: Sendable, Equatable, Codable {
   public var parentPID: Int32
   public var processGroupID: Int32
   public var argv0: String
+  public var startedAt: Date?
   public var commandLine: String
 
   public init(
@@ -12,8 +13,10 @@ public nonisolated struct ForegroundProcess: Sendable, Equatable, Codable {
     parentPID: Int32,
     processGroupID: Int32,
     argv0: String,
-    commandLine: String
+    commandLine: String,
+    startedAt: Date? = nil
   ) {
+    self.startedAt = startedAt
     self.pid = pid
     self.parentPID = parentPID
     self.processGroupID = processGroupID

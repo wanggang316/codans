@@ -296,6 +296,7 @@ final class TerminalEngine {
     // pipeline with the pane's REAL foreground job on the host.
     if let remoteHost {
       remoteForegroundPanes[pane.id] = remoteHost
+      remoteProcessGenerations[pane.id] = UUID()
       Self.probeLogger.info(
         "register pane=\(pane.id.raw.uuidString.prefix(8), privacy: .public) host=\(remoteHost.authority, privacy: .public)"
       )
@@ -475,6 +476,7 @@ final class TerminalEngine {
     ghosttyRuntime?.unregister(paneID: paneID)
     foregroundJobPaneIDs.remove(paneID)
     remoteForegroundPanes.removeValue(forKey: paneID)
+    remoteProcessGenerations.removeValue(forKey: paneID)
     stopRemoteForegroundProbingIfIdle()
     if let snapshot = foregroundJobSnapshots[paneID] {
       // Evict the cache entry for the closing pane's PGID so a recycled
@@ -482,6 +484,7 @@ final class TerminalEngine {
       // last job description.
       foregroundJobCache.removeValue(forKey: snapshot.processGroupID)
     }
+    hierarchy.processRegistry.remove(paneID)
     foregroundJobSnapshots.removeValue(forKey: paneID)
     foregroundJobMisses.removeValue(forKey: paneID)
     viewportSnapshots.removeValue(forKey: paneID)
@@ -490,7 +493,8 @@ final class TerminalEngine {
     // appends here and clears on the auto-close / retry branches, so it must
     // survive a crash close. Every other close ends the pane for good and
     // nothing can ever append to its ring again.
-    if case .crashed = state, announce {} else {
+    if case .crashed = state, announce {
+    } else {
       crashRings.removeValue(forKey: paneID)
     }
     stopForegroundJobPollingIfIdle()
@@ -813,6 +817,7 @@ final class TerminalEngine {
   /// delivery, and the viewport nudge.
   private func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
     if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
+      hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
       return
     }
     if next.isEmpty {
@@ -822,6 +827,7 @@ final class TerminalEngine {
     } else {
       foregroundJobMisses[paneID] = 0
     }
+    hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
     let changed = foregroundJobSnapshots[paneID] != next
     if changed {
       foregroundJobSnapshots[paneID] = next
@@ -869,10 +875,13 @@ final class TerminalEngine {
     remoteProbeTask = nil
   }
 
+  private var remoteProcessGenerations: [PaneID: UUID] = [:]
+
   /// One probe per host per tick, covering every remote pane on it. A failed
   /// probe (unreachable host) freezes its panes' state — no emission — so a
   /// network blip cannot release a live agent binding; empty jobs are only
   /// delivered when the host answered and genuinely reported no foreground.
+  /// Process rows are cleared on failure because their liveness is unknown.
   private func probeRemoteForegroundJobs() async {
     guard !remoteForegroundPanes.isEmpty else { return }
     var panesByHost: [RemoteHost: [PaneID]] = [:]
@@ -880,10 +889,14 @@ final class TerminalEngine {
       panesByHost[host, default: []].append(paneID)
     }
     for (host, paneIDs) in panesByHost {
+      let generations = remoteProcessGenerations
       guard let jobs = await RemoteForegroundProbe.run(host: host) else {
         Self.probeLogger.error(
           "probe failed host=\(host.authority, privacy: .public) panes=\(paneIDs.count, privacy: .public)"
         )
+        for paneID in paneIDs where generations[paneID] == remoteProcessGenerations[paneID] {
+          hierarchy.suspendProcessSample(paneID: paneID, now: clock())
+        }
         continue
       }
       Self.probeLogger.debug(
@@ -891,7 +904,10 @@ final class TerminalEngine {
       )
       let now = clock()
       // Re-check membership: a pane can close during the SSH await.
-      for paneID in paneIDs where remoteForegroundPanes[paneID] != nil {
+      for paneID in paneIDs
+      where remoteForegroundPanes[paneID] != nil
+        && generations[paneID] == remoteProcessGenerations[paneID]
+      {
         let next = jobs[paneID.raw] ?? ForegroundJob(processGroupID: 0, processes: [])
         processForegroundSample(paneID: paneID, next: next, now: now)
       }

@@ -52,6 +52,7 @@ enum WorktreePromotionMode: Sendable, Equatable {
 final class HierarchyManager {
   private(set) var catalog: Catalog
   private let store: CatalogStore
+  var processRegistry = WorktreeProcessRegistry()
   private let runtime: HierarchyRuntime
 
   /// Runtime-only map of the pane the user most recently focused inside a
@@ -486,6 +487,7 @@ final class HierarchyManager {
       for pane in tab.panes {
         runningPanes.remove(pane.id)
         commandBusyPanes.remove(pane.id)
+        processRegistry.remove(pane.id)
       }
       lastFocusedPaneByTab.removeValue(forKey: tab.id)
     }
@@ -1343,6 +1345,7 @@ final class HierarchyManager {
         runtime.closeSurface(for: pane.id)
         runningPanes.remove(pane.id)
         commandBusyPanes.remove(pane.id)
+        processRegistry.remove(pane.id)
       }
       for tab in worktree.tabs {
         lastFocusedPaneByTab.removeValue(forKey: tab.id)
@@ -1428,6 +1431,7 @@ final class HierarchyManager {
       runtime.closeSurface(for: pane.id)
       runningPanes.remove(pane.id)
       commandBusyPanes.remove(pane.id)
+      processRegistry.remove(pane.id)
     }
     lastFocusedPaneByTab.removeValue(forKey: id)
 
@@ -2145,6 +2149,7 @@ final class HierarchyManager {
     runtime.closeSurface(for: paneID)
     runningPanes.remove(paneID)
     commandBusyPanes.remove(paneID)
+    processRegistry.remove(paneID)
     if lastFocusedPaneByTab[tabID] == paneID {
       lastFocusedPaneByTab.removeValue(forKey: tabID)
     }
