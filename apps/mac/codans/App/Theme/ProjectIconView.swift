@@ -18,6 +18,11 @@ struct ProjectIconView: View {
   var size: CGFloat = 13
   /// Tint used when the Project carries no color of its own.
   var fallbackTint: Color = .secondary
+  /// Glyph drawn when the Project has picked no icon. Callers that know the
+  /// Project pass `defaultSymbol(for:)` so a workspace reads as a stack of
+  /// checkouts rather than a folder; the plain default keeps previews and
+  /// pickers folder-shaped.
+  var defaultSymbol: String = ProjectIconView.folderSymbol
 
   var body: some View {
     content
@@ -29,13 +34,20 @@ struct ProjectIconView: View {
   /// pair: SF Symbols has no open-folder glyph, `folder.fill` reads as
   /// "selected" rather than "open", and a hand-drawn substitute is not worth
   /// maintaining against the system set.
-  private static let defaultSymbol = "folder"
+  static let folderSymbol = "folder"
+  /// Workspace roots are a folder of checkouts, not a repository, so they get
+  /// their own default glyph; a user-picked icon still wins.
+  static let workspaceSymbol = "square.stack.3d.up"
+
+  static func defaultSymbol(for project: Project) -> String {
+    project.isWorkspace ? workspaceSymbol : folderSymbol
+  }
 
   @ViewBuilder
   private var content: some View {
     switch icon {
     case .none:
-      symbolImage(named: Self.defaultSymbol)
+      symbolImage(named: defaultSymbol)
     case .symbol(let name):
       symbolImage(named: name)
     case .custom(let fileName):
@@ -51,7 +63,7 @@ struct ProjectIconView: View {
         // The file is gone (hand-deleted config directory, a half-restored
         // backup). Show the default glyph rather than an empty slot so the
         // row keeps its shape and stays clickable.
-        symbolImage(named: Self.defaultSymbol)
+        symbolImage(named: defaultSymbol)
       }
     }
   }

@@ -29,12 +29,17 @@ enum CommandPaletteItems {
     items.append(contentsOf: worktreeSwitchItems(selection: selection, catalog: catalog))
     // Project-level maintenance commands surface whenever a Project is
     // selected, independent of whether a Worktree is also selected.
-    if selection.projectID != nil {
-      items.append(contentsOf: projectItems())
+    let project = selection.projectID.flatMap { id in catalog.projects.first { $0.id == id } }
+    if let project {
+      items.append(contentsOf: projectItems(project: project))
     }
-    if let worktree = resolveWorktree(selection: selection, catalog: catalog) {
-      items.append(contentsOf: worktreeItems(worktreeName: worktree.name, isPinned: worktree.isPinned))
-      items.append(contentsOf: worktreeLifecycleItems(worktreeName: worktree.name))
+    if let project, let worktree = resolveWorktree(selection: selection, catalog: catalog) {
+      items.append(
+        contentsOf: worktreeItems(
+          worktreeName: worktree.name, isPinned: worktree.isPinned, project: project))
+      items.append(
+        contentsOf: worktreeLifecycleItems(
+          worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace))
       items.append(contentsOf: editorItems(worktreeName: worktree.name, descriptors: editorDescriptors))
       // Tab commands act on the current Worktree's active tab, so they're
       // gated on the Worktree selection rather than on precise pane focus.
@@ -198,9 +203,10 @@ enum CommandPaletteItems {
   /// (e.g. "Toggle Git Viewer", "Open PR on GitHub").
   private static func worktreeItems(
     worktreeName: String,
-    isPinned: Bool
+    isPinned: Bool,
+    project: Project
   ) -> [CommandPaletteItem] {
-    [
+    var items: [CommandPaletteItem] = [
       CommandPaletteItem(
         id: "git.changes",
         title: "Show Changes",
@@ -218,15 +224,22 @@ enum CommandPaletteItems {
         shortcut: .command("G", shift: true),
         commandID: .toggleDiffInspector,
         kind: .toggleDiffInspector
-      ),
-      CommandPaletteItem(
-        id: "worktree.new",
-        title: "New Worktree…",
-        searchText: "worktree new create branch",
-        icon: "plus.square.on.square",
-        commandID: .newWorktree,
-        kind: .newWorktree
-      ),
+      )
+    ]
+    // `git worktree add` needs a repository root the Project owns; a dir or
+    // workspace Project has none, and the reducer would no-op anyway.
+    if project.supportsWorktrees {
+      items.append(
+        CommandPaletteItem(
+          id: "worktree.new",
+          title: "New Worktree…",
+          searchText: "worktree new create branch",
+          icon: "plus.square.on.square",
+          commandID: .newWorktree,
+          kind: .newWorktree
+        ))
+    }
+    items.append(contentsOf: [
       CommandPaletteItem(
         id: "editor.reveal-in-finder",
         title: "Reveal in Finder",
@@ -262,14 +275,21 @@ enum CommandPaletteItems {
         icon: isPinned ? "pin.slash" : "pin",
         kind: .toggleCurrentWorktreePinned
       ),
-    ]
+    ])
+    return items
   }
 
   /// Second half of the worktree band — GitHub + lifecycle commands. Split
   /// from `worktreeItems` only to keep each builder under the function-length
-  /// lint; emission order across the two builders is preserved.
-  private static func worktreeLifecycleItems(worktreeName: String) -> [CommandPaletteItem] {
-    [
+  /// lint; emission order across the two builders is preserved. Workspace
+  /// rows drop the repository-wide and lifecycle entries: the Project has no
+  /// single repository to open, and archive / delete are worktree-of-this-
+  /// repo operations the workspace flow owns instead.
+  private static func worktreeLifecycleItems(
+    worktreeName: String,
+    isWorkspaceRow: Bool
+  ) -> [CommandPaletteItem] {
+    var items: [CommandPaletteItem] = [
       CommandPaletteItem(
         id: "worktree.open-pr",
         title: "Open PR on GitHub",
@@ -278,15 +298,20 @@ enum CommandPaletteItems {
         icon: "arrow.up.right.square",
         commandID: .openCurrentPR,
         kind: .openCurrentPR
-      ),
-      CommandPaletteItem(
-        id: "worktree.open-project-on-github",
-        title: "Open Project on GitHub",
-        searchText: "worktree project github repository",
-        icon: "arrow.up.right.square",
-        commandID: .openProjectOnGitHub,
-        kind: .openCurrentProjectOnGitHub
-      ),
+      )
+    ]
+    if !isWorkspaceRow {
+      items.append(
+        CommandPaletteItem(
+          id: "worktree.open-project-on-github",
+          title: "Open Project on GitHub",
+          searchText: "worktree project github repository",
+          icon: "arrow.up.right.square",
+          commandID: .openProjectOnGitHub,
+          kind: .openCurrentProjectOnGitHub
+        ))
+    }
+    items.append(contentsOf: [
       CommandPaletteItem(
         id: "worktree.refresh",
         title: "Refresh Worktree",
@@ -303,65 +328,78 @@ enum CommandPaletteItems {
         commandID: .showArchivedWorktrees,
         kind: .showArchivedWorktrees
       ),
-      CommandPaletteItem(
-        id: "worktree.archive",
-        title: "Archive Worktree",
-        subtitle: worktreeName,
-        searchText: "worktree archive",
-        icon: "archivebox",
-        commandID: .archiveCurrentWorktree,
-        hiddenWhenQueryEmpty: true,
-        kind: .archiveCurrentWorktree
-      ),
-      CommandPaletteItem(
-        id: "worktree.close",
-        title: "Delete Worktree",
-        subtitle: worktreeName,
-        searchText: "worktree delete remove",
-        icon: "xmark.square",
-        commandID: .deleteCurrentWorktree,
-        hiddenWhenQueryEmpty: true,
-        kind: .closeCurrentWorktree
-      ),
-    ]
+    ])
+    if !isWorkspaceRow {
+      items.append(contentsOf: [
+        CommandPaletteItem(
+          id: "worktree.archive",
+          title: "Archive Worktree",
+          subtitle: worktreeName,
+          searchText: "worktree archive",
+          icon: "archivebox",
+          commandID: .archiveCurrentWorktree,
+          hiddenWhenQueryEmpty: true,
+          kind: .archiveCurrentWorktree
+        ),
+        CommandPaletteItem(
+          id: "worktree.close",
+          title: "Delete Worktree",
+          subtitle: worktreeName,
+          searchText: "worktree delete remove",
+          icon: "xmark.square",
+          commandID: .deleteCurrentWorktree,
+          hiddenWhenQueryEmpty: true,
+          kind: .closeCurrentWorktree
+        ),
+      ])
+    }
+    return items
   }
 
   /// Project-scoped commands for the current Project selection. Batch and
   /// destructive maintenance actions that were previously reachable only from
   /// the sidebar's "⋯" menu. Destructive variants are `hiddenWhenQueryEmpty`
-  /// so they never surface by accident on a bare palette open.
-  private static func projectItems() -> [CommandPaletteItem] {
-    [
+  /// so they never surface by accident on a bare palette open. Prune and the
+  /// merged batches act on one repository's worktree list, so a workspace —
+  /// whose rows belong to several — offers neither.
+  private static func projectItems(project: Project) -> [CommandPaletteItem] {
+    var items: [CommandPaletteItem] = [
       CommandPaletteItem(
         id: "project.settings",
         title: "Project Settings…",
         searchText: "project settings preferences",
         icon: "slider.horizontal.3",
         kind: .openProjectSettings
-      ),
-      CommandPaletteItem(
-        id: "project.prune-stale",
-        title: "Prune Stale Worktrees",
-        searchText: "project worktree prune stale clean",
-        icon: "wand.and.sparkles",
-        kind: .pruneStaleWorktrees
-      ),
-      CommandPaletteItem(
-        id: "project.archive-all-merged",
-        title: "Archive All Merged Worktrees",
-        searchText: "project worktree archive merged batch",
-        icon: "archivebox",
-        hiddenWhenQueryEmpty: true,
-        kind: .archiveAllMergedWorktrees
-      ),
-      CommandPaletteItem(
-        id: "project.remove-all-merged",
-        title: "Remove All Merged Worktrees",
-        searchText: "project worktree remove merged batch",
-        icon: "trash",
-        hiddenWhenQueryEmpty: true,
-        kind: .removeAllMergedWorktrees
-      ),
+      )
+    ]
+    if !project.isWorkspace {
+      items.append(contentsOf: [
+        CommandPaletteItem(
+          id: "project.prune-stale",
+          title: "Prune Stale Worktrees",
+          searchText: "project worktree prune stale clean",
+          icon: "wand.and.sparkles",
+          kind: .pruneStaleWorktrees
+        ),
+        CommandPaletteItem(
+          id: "project.archive-all-merged",
+          title: "Archive All Merged Worktrees",
+          searchText: "project worktree archive merged batch",
+          icon: "archivebox",
+          hiddenWhenQueryEmpty: true,
+          kind: .archiveAllMergedWorktrees
+        ),
+        CommandPaletteItem(
+          id: "project.remove-all-merged",
+          title: "Remove All Merged Worktrees",
+          searchText: "project worktree remove merged batch",
+          icon: "trash",
+          hiddenWhenQueryEmpty: true,
+          kind: .removeAllMergedWorktrees
+        ),
+      ])
+    }
+    items.append(
       CommandPaletteItem(
         id: "project.remove",
         title: "Remove Project",
@@ -369,8 +407,8 @@ enum CommandPaletteItems {
         icon: "trash",
         hiddenWhenQueryEmpty: true,
         kind: .removeCurrentProject
-      ),
-    ]
+      ))
+    return items
   }
 
   /// Tab-scoped commands that act on the current Worktree's active tab.

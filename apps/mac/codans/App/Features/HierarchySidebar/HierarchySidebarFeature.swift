@@ -195,6 +195,9 @@ struct HierarchySidebarFeature {
     case toolbarAddProjectTapped
     case addProjectFolderPicked(URL?)
     case addProjectGitRootResolved(canonicalPath: String, gitRoot: String?)
+    /// The picked folder carries `.codans/workspace.json`: register it as a
+    /// workspace root instead of probing it for a git root.
+    case addWorkspaceFolderResolved(canonicalPath: String)
     /// Add Project menu → "Clone Repository…". Opens the clone sheet.
     case cloneRepoTapped
     /// Add Project menu → "Connect to Server…". Opens the remote-connection sheet.
@@ -560,6 +563,13 @@ struct HierarchySidebarFeature {
         return .send(.delegate(.revealExistingProject(existing)))
       }
       return .run { [cli = gitCLI] send in
+        // A workspace manifest wins over git detection: the root is a plain
+        // folder by construction, and probing it for a repository is exactly
+        // the mistake the workspace kind exists to prevent.
+        if WorkspaceManifestStore.hasManifest(rootPath: canonical) {
+          await send(.addWorkspaceFolderResolved(canonicalPath: canonical))
+          return
+        }
         let gitRoot = try? await cli.discoverGitRoot(candidatePath: canonical)
         await send(.addProjectGitRootResolved(canonicalPath: canonical, gitRoot: gitRoot))
       }
@@ -569,6 +579,13 @@ struct HierarchySidebarFeature {
       guard !name.isEmpty else { return .none }
       // addProject is non-throwing and returns a non-optional ProjectID.
       let projectID = hierarchyClient.addProject(name, canonical, gitRoot)
+      return .send(.delegate(.reconcileProjectRequested(projectID)))
+
+    case .addWorkspaceFolderResolved(let canonical):
+      let name = (canonical as NSString).lastPathComponent
+      guard !name.isEmpty else { return .none }
+      let projectID = hierarchyClient.addWorkspaceProject(name, canonical)
+      // The reconcile reads the manifest and appends the child rows.
       return .send(.delegate(.reconcileProjectRequested(projectID)))
 
     case .cloneRepoTapped:
@@ -793,7 +810,9 @@ struct HierarchySidebarFeature {
       // chord (⌘⇧⌫) and any future caller would otherwise bypass that
       // protection. Guard at the lifecycle entry point so every dispatch path
       // is covered by a single check.
-      if isMainCheckout(worktreeID: worktreeID, projectID: projectID) {
+      if isMainCheckout(worktreeID: worktreeID, projectID: projectID)
+        || isWorkspaceChild(worktreeID: worktreeID, projectID: projectID)
+      {
         return .none
       }
       state.pendingWorktreeRemoval = PendingWorktreeRemoval(
@@ -821,7 +840,9 @@ struct HierarchySidebarFeature {
       // and then flips `Worktree.archived = true` — for the main checkout
       // this would hide the project's root from the sidebar with no way back
       // short of editing the catalog file by hand.
-      if isMainCheckout(worktreeID: wid, projectID: pid) {
+      if isMainCheckout(worktreeID: wid, projectID: pid)
+        || isWorkspaceChild(worktreeID: wid, projectID: pid)
+      {
         return .none
       }
       if state.hasShownArchiveExplainer {
@@ -1265,6 +1286,22 @@ struct HierarchySidebarFeature {
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return false }
     return worktree.path == project.rootPath
+  }
+
+  /// `true` when the Worktree is a child checkout of a workspace Project.
+  /// Archive and Remove are worktree-of-this-repo operations — a child's
+  /// repository is elsewhere, and removing it edits the workspace manifest —
+  /// so the plain worktree lifecycle refuses them; the workspace flow owns
+  /// membership changes. The view trims the menu items; this guard covers the
+  /// chords.
+  private func isWorkspaceChild(worktreeID: WorktreeID, projectID: ProjectID) -> Bool {
+    let snapshot = hierarchyClient.snapshot()
+    guard
+      let project = snapshot.projects.first(where: { $0.id == projectID }),
+      project.isWorkspace,
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+    else { return false }
+    return worktree.path != project.rootPath
   }
 
   /// Archive button → archive-script flow, sequenced here (script →

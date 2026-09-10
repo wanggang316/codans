@@ -65,6 +65,11 @@ struct WorktreeHeaderInfoLabel: View {
 
   private var isMainCheckout: Bool { worktree.path == project.rootPath }
 
+  /// The workspace root folder: no branch to show and no repository to list
+  /// branches from, so the headline names the kind and is not a popover
+  /// target.
+  private var isWorkspaceRoot: Bool { isMainCheckout && project.isWorkspace }
+
   /// Project name tint in the caption row. Uses the project's configured
   /// color when set; otherwise keeps the caption `.secondary` hue so a
   /// No-Color project reads exactly as before.
@@ -74,16 +79,23 @@ struct WorktreeHeaderInfoLabel: View {
 
   // MARK: - Row 1: branch (click target)
 
+  @ViewBuilder
   private var branchRowButton: some View {
-    Button {
-      branchSwitcherStore.send(.popoverTapped)
-    } label: {
+    if isWorkspaceRoot {
       branchRowContent
+        .accessibilityIdentifier("worktree_header.branch_text")
+        .accessibilityLabel(branchTitle)
+    } else {
+      Button {
+        branchSwitcherStore.send(.popoverTapped)
+      } label: {
+        branchRowContent
+      }
+      .buttonStyle(.plain)
+      .onHover { isBranchRowHovered = $0 }
+      .accessibilityIdentifier("worktree_header.branch_button")
+      .accessibilityLabel("Branch \(branchTitle)")
     }
-    .buttonStyle(.plain)
-    .onHover { isBranchRowHovered = $0 }
-    .accessibilityIdentifier("worktree_header.branch_button")
-    .accessibilityLabel("Branch \(branchTitle)")
   }
 
   private var branchRowContent: some View {
@@ -178,6 +190,7 @@ struct WorktreeHeaderInfoLabel: View {
   /// Source of truth is the model field. Detached HEAD renders explicit
   /// text rather than a `git rev-parse` short sha.
   private var branchTitle: String {
-    worktree.branch ?? "(detached)"
+    if isWorkspaceRoot { return "Workspace" }
+    return worktree.branch ?? "(detached)"
   }
 }

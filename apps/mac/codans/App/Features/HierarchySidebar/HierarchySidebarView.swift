@@ -1257,6 +1257,9 @@ struct HierarchySidebarView: View {
 
     // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
     // guard: cannot pin / archive / remove the project's root worktree).
+    // Workspace children keep Pin but not Archive / Remove: those act on a
+    // worktree of *this* repository, and a child's repository is elsewhere —
+    // membership changes go through the workspace flow.
     if !isMainCheckout {
       Divider()
       Button {
@@ -1267,6 +1270,8 @@ struct HierarchySidebarView: View {
           systemImage: worktree.isPinned ? "pin.slash" : "pin"
         )
       }
+    }
+    if !isMainCheckout, !project.isWorkspace {
       if worktree.archived {
         Button {
           store.send(
@@ -1906,6 +1911,15 @@ private struct ProjectHeaderRow: View {
           .help(host.displayAuthority)
           .accessibilityLabel("Remote server \(host.displayAuthority)")
       }
+      // Workspaces carry a stack glyph: the rows below are checkouts of
+      // several repositories, not worktrees of one.
+      if project.isWorkspace {
+        Image(systemName: "square.stack.3d.up")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .help("Workspace")
+          .accessibilityLabel("Workspace")
+      }
       Spacer(minLength: 4)
       // Keep the hover chrome from collapsing row width when hidden —
       // use opacity, not conditional rendering.
@@ -1952,42 +1966,47 @@ private struct ProjectHeaderRow: View {
             )
           }
           .appKeyboardShortcut(.showArchivedWorktrees, in: resolvedShortcuts)
-          Button {
-            store.send(.projectPruneTapped(projectID: project.id))
-          } label: {
-            Label("Prune Stale Worktrees", systemImage: "wand.and.sparkles")
-          }
-          let mergedIDs = mergedWorktreeIDs
-          Button {
-            store.send(
-              .projectArchiveAllMergedTapped(
-                projectID: project.id, worktreeIDs: mergedIDs
+          // Prune and the merged batches act on one repository's worktree
+          // list; a workspace's rows belong to several, so the items are
+          // withheld rather than left to no-op.
+          if !project.isWorkspace {
+            Button {
+              store.send(.projectPruneTapped(projectID: project.id))
+            } label: {
+              Label("Prune Stale Worktrees", systemImage: "wand.and.sparkles")
+            }
+            let mergedIDs = mergedWorktreeIDs
+            Button {
+              store.send(
+                .projectArchiveAllMergedTapped(
+                  projectID: project.id, worktreeIDs: mergedIDs
+                )
               )
-            )
-          } label: {
-            Label(
-              mergedIDs.isEmpty
-                ? "Archive All Merged"
-                : "Archive All Merged (\(mergedIDs.count))",
-              systemImage: "archivebox"
-            )
-          }
-          .disabled(mergedIDs.isEmpty)
-          Button(role: .destructive) {
-            store.send(
-              .projectRemoveAllMergedTapped(
-                projectID: project.id, worktreeIDs: mergedIDs
+            } label: {
+              Label(
+                mergedIDs.isEmpty
+                  ? "Archive All Merged"
+                  : "Archive All Merged (\(mergedIDs.count))",
+                systemImage: "archivebox"
               )
-            )
-          } label: {
-            Label(
-              mergedIDs.isEmpty
-                ? "Remove All Merged"
-                : "Remove All Merged (\(mergedIDs.count))",
-              systemImage: "trash"
-            )
+            }
+            .disabled(mergedIDs.isEmpty)
+            Button(role: .destructive) {
+              store.send(
+                .projectRemoveAllMergedTapped(
+                  projectID: project.id, worktreeIDs: mergedIDs
+                )
+              )
+            } label: {
+              Label(
+                mergedIDs.isEmpty
+                  ? "Remove All Merged"
+                  : "Remove All Merged (\(mergedIDs.count))",
+                systemImage: "trash"
+              )
+            }
+            .disabled(mergedIDs.isEmpty)
           }
-          .disabled(mergedIDs.isEmpty)
           Divider()
           // Tags entry intentionally hidden for now. `ProjectTagsMenu` and
           // its tag-assignment logic (inline color palette + "Tags…"

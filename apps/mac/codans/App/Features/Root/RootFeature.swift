@@ -884,13 +884,19 @@ struct RootFeature {
           else { return [:] }
           let snapshot = hierarchyClient.snapshot()
           guard
-            let project = snapshot.projects.first(where: { $0.id == projectID })
+            let project = snapshot.projects.first(where: { $0.id == projectID }),
+            let current = project.worktrees.first(where: { $0.id == worktreeID })
           else { return [:] }
+          // Only siblings of the same repository can hold a branch checked
+          // out: a workspace's rows span several repositories, and repo B's
+          // `main` says nothing about whether repo A's is free.
+          let currentRepo = project.repoRoot(for: current)
           var map: [String: String] = [:]
           for worktree in project.worktrees {
             // The active worktree's own branch is never "blocked from
             // itself"; detached worktrees (branch == nil) cannot block.
             if worktree.id == worktreeID { continue }
+            guard project.repoRoot(for: worktree) == currentRepo else { continue }
             guard let branch = worktree.branch else { continue }
             map[branch] = worktree.name
           }
