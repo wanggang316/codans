@@ -826,10 +826,16 @@ final class AppState {
       hierarchy: manager, hierarchyClient: hierarchy,
       settingsStore: settings, engine: engine, gitClient: routedGitClient
     )
+    // Workspace creation core, shared by the sidebar's New Workspace sheet
+    // and the `workspace.*` IPC handlers so both materialize and register
+    // identically. Local-only: it never routes through the SSH seam.
+    let workspaceClient = WorkspaceClient.live(
+      hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI())
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient = hierarchy
+      $0.workspaceClient = workspaceClient
       $0.handoffClient = .live(
         handlers: handoffHandlers,
         registry: self.handoffRegistry,
@@ -891,7 +897,7 @@ final class AppState {
     startIPC(
       hierarchy: manager, editor: editor, hierarchyClient: hierarchy,
       settingsStore: settings, terminalEngine: engine, handoffHandlers: handoffHandlers,
-      gitWorktreeClient: worktreeClient
+      gitWorktreeClient: worktreeClient, workspaceClient: workspaceClient
     )
 
     self.developerPaneDependencies = DeveloperPaneDependencies.live(
@@ -1154,7 +1160,8 @@ final class AppState {
     settingsStore: SettingsStore,
     terminalEngine: TerminalEngine,
     handoffHandlers: HandoffHandlers,
-    gitWorktreeClient: GitWorktreeClient
+    gitWorktreeClient: GitWorktreeClient,
+    workspaceClient: WorkspaceClient
   ) {
     if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
       || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -1232,7 +1239,12 @@ final class AppState {
           )
         }
       ),
-      handoffHandlers: handoffHandlers
+      handoffHandlers: handoffHandlers,
+      workspaceHandlers: WorkspaceHandlers(
+        hierarchy: hierarchyClient,
+        workspace: workspaceClient,
+        gitCLI: GitWorktreeCLI()
+      )
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)

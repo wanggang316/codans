@@ -111,6 +111,34 @@ public enum CLISendInput {
   }
 }
 
+/// One `--project` or `--repo` occurrence on `codans workspace create` /
+/// `add`, in the order the user gave them (projects first, then repos —
+/// ArgumentParser collects each option separately).
+public enum CLIWorkspaceMemberSource: Equatable, Sendable {
+  case project(String)
+  case repo(String)
+
+  /// `create` needs at least `minimum` members; `add` takes exactly one.
+  public static func resolve(
+    projects: [String],
+    repos: [String],
+    minimum: Int,
+    maximum: Int? = nil
+  ) throws -> [CLIWorkspaceMemberSource] {
+    let sources =
+      projects.map(CLIWorkspaceMemberSource.project) + repos.map(CLIWorkspaceMemberSource.repo)
+    if sources.count < minimum {
+      throw CLIArgumentError.invalidArgumentCount(
+        message: "pass at least \(minimum) repositor\(minimum == 1 ? "y" : "ies") with --project or --repo (got \(sources.count))")
+    }
+    if let maximum, sources.count > maximum {
+      throw CLIArgumentError.invalidArgumentCount(
+        message: "pass at most \(maximum) repositor\(maximum == 1 ? "y" : "ies") with --project or --repo (got \(sources.count))")
+    }
+    return sources
+  }
+}
+
 public enum CLIBroadcastScopeSelection: Equatable, Sendable {
   case tab(String)
   case worktree(String)

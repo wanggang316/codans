@@ -72,6 +72,33 @@ struct HierarchyHandlersWorkspaceTests {
     #expect(manager.catalog.projects[0].worktrees.count == 1)
   }
 
+  @Test
+  func removeWorktreeRefusesWorkspaceChildrenAndTheirMirrorRows() async throws {
+    let (handlers, manager) = Self.makeFixture()
+    let workspaceID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
+    _ = manager.reconcileWorkspaceChildren(
+      projectID: workspaceID,
+      observations: [
+        HierarchyManager.WorkspaceChildObservation(
+          name: "app", path: "/tmp/ws/app", exists: true, branch: "feat", sourceGitRoot: "/src/app")
+      ])
+    let childID = manager.catalog.projects[0].worktrees[1].id
+    let sourceID = manager.addProject(name: "app", rootPath: "/src/app", gitRoot: "/src/app")
+    let mirrorID = try manager.createWorktree(in: sourceID, name: "feat", path: "/tmp/ws/app", branch: "feat")
+
+    for (id, projectID) in [(childID, workspaceID), (mirrorID, sourceID)] {
+      let params = try JSONValue.encoded(
+        HierarchyHandlers.RemoveWorktreeParams(id: id, projectID: projectID))
+      let outcome = await handlers.removeWorktree(params)
+      guard case .failed(let error) = outcome, case .conflict = error else {
+        Issue.record("expected conflict, got \(outcome)")
+        continue
+      }
+    }
+    #expect(manager.catalog.projects[0].worktrees.count == 2)
+    #expect(manager.catalog.projects[1].worktrees.count == 1)
+  }
+
   private static func makeWorkspaceRoot() throws -> URL {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent("codans-ws-handlers-\(UUID().uuidString)", isDirectory: true)

@@ -800,6 +800,23 @@ final class HierarchyHandlers {
     do { req = try params.decoded(as: RemoveWorktreeParams.self) } catch {
       return .failed(.invalidParams(message: "removeWorktree requires {id, projectID}", path: nil))
     }
+    // Workspace membership is edited through the workspace flow: a child row
+    // is a checkout the manifest still names, and the same folder listed
+    // under its source repository belongs to the workspace too.
+    if let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == req.id })
+    {
+      if project.isWorkspace, worktree.path != project.rootPath {
+        return .failed(
+          .conflict(reason: "\(worktree.name) is a workspace repository; remove it from the workspace instead"))
+      }
+      if !project.isWorkspace, let membership = manager.workspaceMembership(forPath: worktree.path) {
+        return .failed(
+          .conflict(
+            reason:
+              "\(worktree.name) is checked out for workspace \(membership.workspaceName); remove it there"))
+      }
+    }
     do {
       var warning: String?
       if req.deleteFromDisk == true {

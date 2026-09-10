@@ -45,6 +45,7 @@ struct CodansCLI: AsyncParsableCommand {
       BroadcastCommand.self,
       AgentCommand.self,
       HandoffCommand.self,
+      WorkspaceCommand.self,
       OpenCommand.self,
       SkillCommand.self,
       HelpJSONCommand.self,

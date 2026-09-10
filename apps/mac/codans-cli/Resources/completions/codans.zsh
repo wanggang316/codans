@@ -61,6 +61,7 @@ _codans() {
             'broadcast:Send text to a tab, worktree, or label scope.'
             'agent:List and launch coding-agent profiles.'
             'handoff:Hand a task off between coding agents: archive, brief, and launch the receiver.'
+            'workspace:Create and extend multi-repository workspaces.'
             'open:Open a directory in an external editor (or terminal / git client / Finder).'
             'skill:Install the bundled agent skills into your agents'\'' skill folders.'
             'help:Show subcommand help information.'
@@ -69,7 +70,7 @@ _codans() {
         ;;
     arg)
         case "${words[1]}" in
-        status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|open|skill|help)
+        status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|workspace|open|skill|help)
             "_codans_${words[1]}" && ret=0
             ;;
         esac
@@ -1122,6 +1123,95 @@ _codans_handoff_save() {
         '--brief[Inline briefing; pass '\''-'\'' to read it from stdin (heredoc).]:brief:'
         '--no-brief[Context-only\: skip the briefing entirely.]'
         '--note[Note appended to the handoff log.]:note:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workspace() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+        '(-): :->command'
+        '(-)*:: :->arg'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+    case "${state}" in
+    command)
+        local -ar subcommands=(
+            'create:Create a workspace from two or more repositories.'
+            'add:Add a repository to a workspace.'
+            'show:Describe a workspace and its repositories.'
+        )
+        _describe -V subcommand subcommands && ret=0
+        ;;
+    arg)
+        case "${words[1]}" in
+        create|add|show)
+            "_codans_workspace_${words[1]}" && ret=0
+            ;;
+        esac
+        ;;
+    esac
+
+    return "${ret}"
+}
+
+_codans_workspace_create() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':title:'
+        '*--project[Registered project to include (repeatable).]:project:'
+        '*--repo[Local repository path to include (repeatable).]:repo:'
+        '--branch[Branch every member checks out. Default\: slug of the title.]:branch:'
+        '--base[Base ref for new branches. Default\: each repository'\''s default remote branch.]:base:'
+        '--existing[Check out an existing branch instead of creating one.]'
+        '--path[Workspace folder. Default\: ~/.codans/workspaces/<slug>.]:path:'
+        '--description[Task summary stored in the manifest.]:description:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workspace_add() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':workspace:'
+        '*--project[Registered project to add.]:project:'
+        '*--repo[Local repository path to add.]:repo:'
+        '--name[Folder name under the workspace root. Default\: the repository'\''s folder name.]:name:'
+        '--branch[Branch to check out. Default\: slug of the workspace title.]:branch:'
+        '--base[Base ref for a new branch.]:base:'
+        '--existing[Check out an existing branch instead of creating one.]'
+        '--role[Short role recorded in the manifest, e.g. backend.]:role:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workspace_show() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':workspace:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
