@@ -384,6 +384,7 @@ struct HierarchyHandlersCreateWorktreeTests {
     var ids: [WorktreeID] = []
   }
 
+  @MainActor
   private struct Fixture {
     let handlers: HierarchyHandlers
     let projectID: ProjectID
