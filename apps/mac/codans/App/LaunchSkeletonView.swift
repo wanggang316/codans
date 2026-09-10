@@ -112,8 +112,8 @@ private struct LaunchToolbarSkeleton: ToolbarContent {
         .accessibilityHidden(true)
     }
     ToolbarItemGroup(placement: .primaryAction) {
-      SkeletonActionChipView(labelText: "Run")
-      SkeletonActionChipView(labelText: "Open")
+      SkeletonActionChipView()
+      SkeletonActionChipView()
     }
   }
 }

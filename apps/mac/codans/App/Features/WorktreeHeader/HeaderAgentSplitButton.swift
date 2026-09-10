@@ -43,18 +43,17 @@ struct HeaderAgentSplitButton: View {
     Menu {
       caretMenu(profiles: profiles)
     } label: {
-      // Manual HStack for the same reason as the Run button: the toolbar's
-      // default LabelStyle collapses `Label(_:systemImage:)` in ways that
-      // fight a custom leading glyph.
-      HStack(spacing: 6) {
-        if let primary {
-          AgentLogoView(icon: primary.icon, size: 16, tint: .primary)
-        } else {
-          Image(systemName: "sparkles")
-            .frame(width: 16, height: 16)
-            .accessibilityHidden(true)
-        }
-        Text(primaryName).lineLimit(1)
+      // Glyph only, no `Label(_:systemImage:)`, for the same reason as the
+      // Run button: the toolbar's default LabelStyle collapses a Label in
+      // ways that fight a custom leading glyph. The agent's name lives in
+      // the tooltip and accessibility label so the three header capsules
+      // stay the same compact icon + chevron shape.
+      if let primary {
+        AgentLogoView(icon: primary.icon, size: 16, tint: .primary)
+      } else {
+        Image(systemName: "sparkles")
+          .frame(width: 16, height: 16)
+          .accessibilityHidden(true)
       }
     } primaryAction: {
       if let primary {

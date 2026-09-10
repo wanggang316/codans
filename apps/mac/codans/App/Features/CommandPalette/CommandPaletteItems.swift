@@ -591,14 +591,14 @@ enum CommandPaletteItems {
         id: "pane.split.right",
         title: "Split Right",
         searchText: "pane split right",
-        icon: "rectangle.split.2x1",
+        icon: "rectangle.righthalf.inset.filled",
         kind: .paneAction(.newSplit(direction: .right))
       ),
       CommandPaletteItem(
         id: "pane.split.down",
         title: "Split Down",
         searchText: "pane split down",
-        icon: "rectangle.split.1x2",
+        icon: "rectangle.bottomhalf.inset.filled",
         kind: .paneAction(.newSplit(direction: .down))
       ),
       CommandPaletteItem(

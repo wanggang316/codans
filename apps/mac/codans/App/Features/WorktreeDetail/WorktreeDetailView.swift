@@ -433,7 +433,7 @@ struct WorktreeDetailView: View {
   private func agentSlot(_ mode: DetailMode) -> some View {
     switch mode {
     case .creating:
-      SkeletonActionChipView(labelText: "Agents")
+      SkeletonActionChipView()
     case .worktree(_, let info):
       if info != nil {
         HeaderAgentSplitButton(store: headerStore)
@@ -445,7 +445,7 @@ struct WorktreeDetailView: View {
   private func runSlot(_ mode: DetailMode) -> some View {
     switch mode {
     case .creating:
-      SkeletonActionChipView(labelText: "Run")
+      SkeletonActionChipView()
     case .worktree(let address, let info):
       if info != nil {
         HeaderRunScriptSplitButton(
@@ -461,7 +461,7 @@ struct WorktreeDetailView: View {
   private func openSlot(_ mode: DetailMode) -> some View {
     switch mode {
     case .creating:
-      SkeletonActionChipView(labelText: "Finder")
+      SkeletonActionChipView()
     case .worktree(let address, let info):
       if let info {
         HeaderOpenSplitButton(

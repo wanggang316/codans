@@ -93,30 +93,28 @@ struct HeaderRunScriptSplitButton: View {
     Menu {
       caretMenu(scripts: scripts, globalScripts: globalScripts)
     } label: {
-      // Manual HStack — `Label(_:systemImage:)` collapses to a
-      // single-colour template via the toolbar's default LabelStyle,
-      // killing the script's tint colour. Driving the icon as a
-      // standalone Image lets `.foregroundStyle(primaryTint)` survive
-      // toolbar reduction. `.symbolRenderingMode(.palette)` defends
-      // against SwiftUI fallbacks that would otherwise re-monochrome
-      // the glyph at render time.
-      HStack(spacing: 6) {
-        Image(systemName: primaryIcon)
-          .symbolRenderingMode(.palette)
-          .foregroundStyle(primaryTint)
-          // play.fill (triangle) and stop.fill (square) have different glyph
-          // widths, so a bare swap made the button reflow on every toggle.
-          // A fixed square footprint keeps the icon column constant and the
-          // `.replace` transition cross-fades the swap instead of popping.
-          .contentTransition(.symbolEffect(.replace))
-          .frame(width: 16, height: 16)
-          .accessibilityHidden(true)
-          // Chord rides right after the icon (left of the chevron), matching
-          // the sibling Open button — anchoring on the trailing edge would let
-          // it merge with the system menu indicator.
-          .commandKeyHint(chord: primaryChord)
-        Text(isRunning ? "Stop" : primaryName).lineLimit(1)
-      }
+      // Standalone Image, not `Label(_:systemImage:)` — the toolbar's
+      // default LabelStyle collapses a Label to a single-colour template,
+      // killing the script's tint colour. A bare Image lets
+      // `.foregroundStyle(primaryTint)` survive toolbar reduction, and
+      // `.symbolRenderingMode(.palette)` defends against SwiftUI fallbacks
+      // that would otherwise re-monochrome the glyph at render time. The
+      // script name (and Run/Stop verb) lives in the tooltip and
+      // accessibility label; the red stop square is the visible state.
+      Image(systemName: primaryIcon)
+        .symbolRenderingMode(.palette)
+        .foregroundStyle(primaryTint)
+        // play.fill (triangle) and stop.fill (square) have different glyph
+        // widths, so a bare swap made the button reflow on every toggle.
+        // A fixed square footprint keeps the icon column constant and the
+        // `.replace` transition cross-fades the swap instead of popping.
+        .contentTransition(.symbolEffect(.replace))
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
+        // Chord rides right after the icon (left of the chevron), matching
+        // the sibling Open button — anchoring on the trailing edge would let
+        // it merge with the system menu indicator.
+        .commandKeyHint(chord: primaryChord)
     } primaryAction: {
       if let script = primary {
         if isRunning {

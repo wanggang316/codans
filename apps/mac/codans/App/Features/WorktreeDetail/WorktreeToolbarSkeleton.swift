@@ -12,8 +12,8 @@ import SwiftUI
 /// Geometry sources — keep in sync when the mirrored views change:
 ///   - `SkeletonBranchClusterView` ← `WorktreeHeaderInfoLabel`
 ///   - `SkeletonStatusPillView`    ← `StatusBarView` (motivational form)
-///   - `SkeletonActionChipView`    ← `HeaderRunScriptSplitButton` /
-///     `HeaderOpenSplitButton`
+///   - `SkeletonActionChipView`    ← `HeaderAgentSplitButton` /
+///     `HeaderRunScriptSplitButton` / `HeaderOpenSplitButton`
 
 /// Leading branch-identity placeholder. Mirrors `WorktreeHeaderInfoLabel`:
 /// a 14pt leading glyph, then a two-row stack — row 1 is the branch
@@ -85,23 +85,16 @@ struct SkeletonStatusPillView: View {
   }
 }
 
-/// Ghost stand-in for one trailing split button (Run / Open). Mirrors the
-/// buttons' label anatomy — 16pt icon slot, text label, system menu
-/// chevron — inside the toolbar item's own glass capsule. Not actionable;
-/// its job is to hold the real buttons' footprint so the trailing flexible
-/// spacer resolves the same as the settled toolbar and the centered status
-/// slot doesn't drift when the real buttons appear.
+/// Ghost stand-in for one trailing split button (Agent / Run / Open).
+/// Mirrors the buttons' label anatomy — a 16pt icon slot and the system
+/// menu chevron, no text — inside the toolbar item's own glass capsule.
+/// Not actionable; its job is to hold the real buttons' footprint so the
+/// trailing flexible spacer resolves the same as the settled toolbar and
+/// the centered status slot doesn't drift when the real buttons appear.
 struct SkeletonActionChipView: View {
-  /// Representative label for the button this chip stands in for. The
-  /// real labels are user-configured (primary script name, default-editor
-  /// name), so the stand-in only needs a typical width, not the live
-  /// string.
-  let labelText: String
-
   var body: some View {
     HStack(spacing: 6) {
       SkeletonBlock(width: 16, height: 16)
-      SkeletonTextBar(text: labelText, font: .body, barHeight: 8)
       SkeletonBlock(width: 8, height: 8)
     }
     .accessibilityHidden(true)
@@ -116,8 +109,8 @@ struct SkeletonActionChipView: View {
     )
     SkeletonStatusPillView()
     HStack(spacing: 8) {
-      SkeletonActionChipView(labelText: "Run")
-      SkeletonActionChipView(labelText: "Finder")
+      SkeletonActionChipView()
+      SkeletonActionChipView()
     }
   }
   .padding(24)

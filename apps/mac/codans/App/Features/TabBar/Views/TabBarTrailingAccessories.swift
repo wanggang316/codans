@@ -24,7 +24,11 @@ struct TabBarTrailingAccessories: View {
   let onSplitDown: () -> Void
 
   var body: some View {
-    HStack(spacing: 4) {
+    // 6pt rather than 4: while ⌘ is held each button grows a chord on its
+    // trailing side, and the wider gap keeps that chord from crowding the
+    // next button. The tight `commandKeyHint(spacing:)` on each accessory
+    // is the other half of the same grouping.
+    HStack(spacing: 6) {
       NewTabAccessoryButton(action: onNewTab)
 
       if let worktreePath {
@@ -36,7 +40,7 @@ struct TabBarTrailingAccessories: View {
       }
 
       SplitAccessoryButton(
-        systemImage: "rectangle.split.2x1",
+        systemImage: "rectangle.righthalf.inset.filled",
         accessibilityLabel: "Split Right",
         chordCommandID: .splitRight,
         splitTree: activeTabSplitTree,
@@ -44,7 +48,7 @@ struct TabBarTrailingAccessories: View {
       )
 
       SplitAccessoryButton(
-        systemImage: "rectangle.split.1x2",
+        systemImage: "rectangle.bottomhalf.inset.filled",
         accessibilityLabel: "Split Down",
         chordCommandID: .splitDown,
         splitTree: activeTabSplitTree,
@@ -85,7 +89,9 @@ private struct NewTabAccessoryButton: View {
       Image(systemName: "plus")
         .accessibilityLabel("New Tab")
         .modifier(AccessoryIconChrome(isHovering: isHovering))
-        .commandKeyHint(.newTab)
+        // The 22pt chrome already pads the glyph; a tight gap keeps the
+        // chord attached to this icon instead of drifting toward the next.
+        .commandKeyHint(.newTab, spacing: 2)
     }
     .buttonStyle(.plain)
     .onHover { isHovering = $0 }
@@ -110,7 +116,7 @@ private struct SplitAccessoryButton: View {
       Image(systemName: systemImage)
         .accessibilityLabel(accessibilityLabel)
         .modifier(AccessoryIconChrome(isHovering: isHovering))
-        .commandKeyHint(chordCommandID)
+        .commandKeyHint(chordCommandID, spacing: 2)
     }
     .buttonStyle(.plain)
     .disabled(splitTree?.root == nil)

@@ -39,18 +39,12 @@ struct HeaderOpenSplitButton: View {
     Menu {
       openInMenu
     } label: {
-      // Chord hint rides on the primary half (icon + label) only — applying it on the
-      // outer HStack used to push the chord text to the trailing edge of the label
-      // group, where it visually merged with the system-rendered chevron and read as
-      // "the dropdown button's chord". Anchoring on `primaryIcon` keeps the chord
-      // tight against the icon, well left of the chevron, so it clearly belongs to
-      // the primary "Open in <Editor>" action.
-      HStack(spacing: 4) {
-        primaryIcon
-          .commandKeyHint(.openInEditor)
-        Text(primaryLabel)
-          .lineLimit(1)
-      }
+      // Icon only; the editor name lives in the tooltip and accessibility
+      // label. The chord hint hangs off the icon itself so it sits right
+      // after the glyph, well left of the system chevron, and reads as the
+      // primary "Open in <Editor>" action's chord rather than the dropdown's.
+      primaryIcon
+        .commandKeyHint(.openInEditor)
     } primaryAction: {
       store.send(
         .openDefaultEditorTapped(
@@ -81,15 +75,11 @@ struct HeaderOpenSplitButton: View {
     Menu {
       remoteOpenInMenu(host: host)
     } label: {
-      HStack(spacing: 4) {
-        AppIconImage(
-          bundleIdentifier: primary.bundleIdentifier,
-          fallbackSystemName: "arrow.up.right.square"
-        )
-        .commandKeyHint(.openInEditor)
-        Text(primary.displayName)
-          .lineLimit(1)
-      }
+      AppIconImage(
+        bundleIdentifier: primary.bundleIdentifier,
+        fallbackSystemName: "arrow.up.right.square"
+      )
+      .commandKeyHint(.openInEditor)
     } primaryAction: {
       store.send(
         .openDefaultEditorTapped(
@@ -140,17 +130,9 @@ struct HeaderOpenSplitButton: View {
     }
   }
 
-  /// Visible button label. Drops the "Open in " prefix so the trailing
-  /// toolbar capsules stay compact; the icon already conveys intent.
-  private var primaryLabel: String {
-    switch resolvedDefault {
-    case .editor(let descriptor): return descriptor.displayName
-    case .finder: return "Finder"
-    }
-  }
-
-  /// Verbose form used for accessibility + help tooltip — VoiceOver and
-  /// the hover tooltip still benefit from the explicit verb.
+  /// Accessibility + help tooltip text. The button itself is icon-only, so
+  /// this is where VoiceOver and the hover tooltip learn the verb and the
+  /// editor's name.
   private var primaryDescription: String {
     switch resolvedDefault {
     case .editor(let descriptor): return "Open in \(descriptor.displayName)"
