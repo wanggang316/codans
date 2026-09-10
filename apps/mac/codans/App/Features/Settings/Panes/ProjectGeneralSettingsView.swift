@@ -56,6 +56,11 @@ struct ProjectGeneralSettingsView: View {
     switch kind {
     case .dir:
       return [.general, .editor, .environment]
+    case .workspace:
+      // A workspace root has no repository of its own: the worktree, GitHub,
+      // and lifecycle sections all read `Project.gitRoot`, which is nil by
+      // construction. Per-child settings are a later milestone.
+      return [.general, .editor, .environment]
     case .gitRepo, .server:
       // Server projects manage worktrees over SSH just like a local git repo,
       // so they surface the full section set — keeping remote management

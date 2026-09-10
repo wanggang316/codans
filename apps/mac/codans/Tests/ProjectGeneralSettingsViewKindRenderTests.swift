@@ -22,6 +22,14 @@ struct ProjectGeneralSettingsViewKindRenderTests {
   }
 
   @Test
+  func workspaceHidesRepositoryScopedSections() {
+    // A workspace root has no repository of its own; the git-only sections
+    // read `Project.gitRoot`, which is nil by construction.
+    let visible = ProjectGeneralSettingsView.visibleSections(for: .workspace)
+    #expect(visible == [.general, .editor, .environment])
+  }
+
+  @Test
   func gitRepoShowsAllSections() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .gitRepo)
     #expect(visible == Set(ProjectGeneralSettingsView.SectionID.allCases))
