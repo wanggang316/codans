@@ -10,6 +10,18 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Workspaces — one Project for a task that spans several repositories.**
+  A folder carrying `.codans/workspace.json` now opens as a workspace: the
+  folder itself is the main row (the directory an agent runs in), and every
+  repository the manifest names appears as a child row with its live branch,
+  so tabs, panes, notifications, and agent status work per checkout exactly
+  as they do for worktrees. Add one through **Open Project…** or
+  `codans project add`; `codans tree --json` reports it as
+  `"kind": "workspace"`. The workspace root is never probed for a git
+  repository, so a workspace nested inside a repo stays a workspace.
+  Creating workspaces from the app and CLI, and removing them with cleanup,
+  follow in later releases.
+
 ### Changed
 
 ### Deprecated

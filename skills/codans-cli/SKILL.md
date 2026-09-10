@@ -67,11 +67,18 @@ Three outcomes:
 ## Hierarchy in 60 seconds
 
 ```
-Project       a tracked git repo (one Project per repo)
+Project       a tracked git repo (one Project per repo) — or a workspace
  └── Worktree a git worktree of that repo (own dir + branch + tab layout)
       └── Tab one named grouping of panes in a worktree (one Tab visible)
            └── Pane a single libghostty terminal session
 ```
+
+A **workspace** Project (`"kind": "workspace"` in `codans tree --json`) is a
+plain folder holding checkouts of *several* repositories for one task, listed
+in `<root>/.codans/workspace.json`. Its first Worktree row is the folder
+itself; every other row is one member checkout, whose repository is reported
+as `sourceGitRoot`. Treat those rows as independent repos: `git -C <path>`
+per row, never `git worktree` commands against the workspace root.
 
 `codans` is on `PATH` automatically inside every codans Pane, and the app
 auto-detects which Project / Worktree / Tab / Pane that Pane belongs to —
