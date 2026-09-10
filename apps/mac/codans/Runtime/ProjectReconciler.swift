@@ -84,6 +84,22 @@ actor ProjectReconciler {
         )
         return
       }
+      // A workspace whose manifest is gone or unreadable stays a workspace
+      // (the flag is sticky — demoting it would re-open the folder-project
+      // git probe) and reports the problem on its row instead. The reconcile
+      // closure re-reads the manifest for its contents; this pass only
+      // decides whether the row is healthy.
+      if project.isWorkspace {
+        do {
+          _ = try WorkspaceManifestStore.load(rootPath: project.rootPath)
+        } catch {
+          await client.setProjectLoadState(
+            projectID,
+            .failed(reason: String(describing: error))
+          )
+          return
+        }
+      }
     }
 
     // The injected closure handles git-vs-non-git routing, `GitWorktreeCLI`

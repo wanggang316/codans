@@ -57,6 +57,38 @@ actor GitWorktreeCLI {
     }
   }
 
+  /// Short name of the branch checked out at `path`; nil on a detached HEAD
+  /// or when `path` is not inside a repository (both are non-zero exits).
+  func currentBranch(path: String) throws -> String? {
+    do {
+      let output = try run(arguments: ["symbolic-ref", "--short", "HEAD"], cwd: path)
+      let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    } catch GitCLIError.exitCode {
+      return nil
+    }
+  }
+
+  /// Root of the repository the checkout at `path` belongs to — for a linked
+  /// worktree that is the *source* repository, not the checkout itself, which
+  /// is what `--show-toplevel` would report. Read from the common git dir:
+  /// `<source>/.git` for a normal repository, the directory itself for a bare
+  /// one. Nil when `path` is not inside a repository.
+  func repositoryRoot(forCheckoutAt path: String) throws -> String? {
+    do {
+      let output = try run(
+        arguments: ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd: path)
+      let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else { return nil }
+      let url = URL(fileURLWithPath: trimmed, isDirectory: true)
+      return url.lastPathComponent == ".git"
+        ? url.deletingLastPathComponent().path(percentEncoded: false)
+        : url.path(percentEncoded: false)
+    } catch GitCLIError.exitCode {
+      return nil
+    }
+  }
+
   /// Clones `remoteURL` into `destinationPath`. The destination's parent
   /// directory is created if missing (git itself won't make intermediate
   /// parents) and used as the working directory; git creates the final
