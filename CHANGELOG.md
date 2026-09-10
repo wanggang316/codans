@@ -19,8 +19,22 @@ and the project does not yet follow semantic versioning — every release until
   `codans project add`; `codans tree --json` reports it as
   `"kind": "workspace"`. The workspace root is never probed for a git
   repository, so a workspace nested inside a repo stays a workspace.
-  Creating workspaces from the app and CLI, and removing them with cleanup,
-  follow in later releases.
+- **Create workspaces from the app or the CLI.** **New Workspace…** in the
+  sidebar's Add menu (and the command palette) takes a title, a folder, two
+  or more repositories — open projects or any local repository — and one
+  branch, then checks every member out into the folder with `git worktree
+  add` and registers the result. `codans workspace create "Checkout Flow"
+  --project app --project api` does the same from a terminal; `codans
+  workspace add` extends an existing workspace, `codans workspace show`
+  describes one. A failure midway removes everything the call created. A
+  workspace's `+` adds a repository. Panes inside a workspace carry
+  `CODANS_WORKSPACE_ROOT`.
+- **Workspace members stay visible in their source project.** A repository
+  checked out for a workspace also appears under its own project, marked
+  with the workspace's name (click to jump there). Archive, Remove, the
+  merged-worktree batches, and the auto-delete sweep leave those rows alone:
+  the checkout belongs to the workspace.
+  Removing workspaces with cleanup follows in a later release.
 
 ### Changed
 

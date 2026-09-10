@@ -1,6 +1,6 @@
 # 设计文档：Workspace
 
-**状态：** 分阶段上线（M1 已上线：打开已有 workspace；M2 创建 / M3 移除与 GitHub 聚合 `已设计未实现`）
+**状态：** 分阶段上线（打开已有 workspace、创建与添加成员、源 Project 标记已上线；移除与 GitHub 聚合 `已设计未实现`）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -129,15 +129,23 @@ App/Clients/HierarchyClient reconcileWorkspace、addWorkspaceProject、workspace
 
 依赖方向不变：app → Runtime → CodansCore；`CodansCore` 不 import AppKit，不 spawn 进程。
 
-### M2：创建（已设计未实现）
+### 创建与添加成员
 
-- `CodansCore/Workspace/WorkspacePlan`：title、rootPath、members[{name, sourceGitRoot, checkout: newBranch(branch, baseRef) | existingBranch(branch)}]；纯校验：成员 ≥ 2、name 唯一、分支合法、根未注册且不在仓库内、目标路径不与任何已注册 root / worktree 冲突、来源为本地。
-- `WorkspaceMaterializationLedger`：记录创建的目录与 `git worktree remove` 清理命令，失败 / 取消逆序回滚；回滚在 `Task.detached` 中执行（父任务取消不能 SIGTERM 清理用的 git 子进程）。
-- `GitWorktreeClient.addWorktreeAt(repoRoot:destination:checkout:)`：`git -C <root> worktree add [-b <branch>] <dest> [<baseRef>]`。不能用 `wt sw`（它按分支名命名目录）。
-- `App/Clients/WorkspaceClient`（TCA dependency）：validate → mkdir → 逐成员 materialize → 写 manifest → `addWorkspaceProject` + 每成员 `createWorktree` → 触发 workspace 与各源 Project 的 reconcile。GUI sheet 与 IPC handler 共用。
-- IPC `workspace.create` / `workspace.add` / `workspace.describe`，`WorkspaceHandlers` 走类型化 `throws` 风格；CLI `codans workspace create <title> --project a --project b [--repo <path>] [--branch] [--base] [--existing] [--path]`、`codans workspace add`、`codans workspace show`。
-- 源 Project 镜像行守卫（D10）：行尾徽标「⧉ in <workspace>」；上下文菜单隐藏 Archive / Remove 且 reducer 再查；`mergedWorktreeIDs`（侧栏与 `RootFeature`）过滤；`sweepExpiredArchivedWorktrees` 与 `hierarchy.removeWorktree` 跳过并返回 `conflict`；HEAD watcher 双挂载接受。
-- `CodansEnvironment.Key.workspaceRoot` + `BuiltinEnvVar.workspaceRoot`。
+```
+CreateWorkspaceFeature (sheet)  ─┐
+                                 ├─▶ WorkspaceClient.create / add ─▶ git worktree add ×N ─▶ manifest ─▶ catalog ─▶ reconcile
+WorkspaceHandlers (workspace.*) ─┘        │ 失败 / 取消
+                                          └─▶ WorkspaceMaterializationLedger.rollbackSteps（Task.detached）
+```
+
+- `CodansCore/Workspace/WorkspacePlan`：title、rootPath、members[{name, sourceGitRoot, role, checkout: newBranch(branch, baseRef) | existingBranch(branch)}]。`validate()` 只做无 I/O 的结构检查（title / root 非空、成员 ≥ 2、name 是根下单段、name 唯一、来源与分支非空）；`WorkspacePlan.validate(members:)` 供单成员 `add` 复用。
+- I/O 前置检查在 `WorkspaceClient`：根未注册、不是文件、未带 manifest、**不在任何 git 仓库内**（对根或其最近存在的祖先跑 `discoverGitRoot`，D12）；每个来源必须是仓库根；目标 `<root>/<name>` 不存在；分支名经 `git check-ref-format`；`newBranch` 未指定 base 时取仓库默认远端分支。
+- 落盘顺序：建根目录（仅在不存在时，并记账）→ 逐成员 `GitWorktreeClient.addWorktreeAt`（`git -C <src> worktree add [-b <branch>] <dest> [<base>]`；不能用 `wt sw`，它按分支名命名目录）→ 写 manifest → `addWorkspaceProject` → reconcile workspace（子行从 git 取分支与 sourceGitRoot）→ reconcile 每个来源 Project（镜像行即时出现）。
+- `WorkspaceMaterializationLedger` 记录 createdDirectory / createdBranch / addedWorktree，逆序回滚：先 `removeWorktree`（relocate-then-prune）再 `deleteBranchIfExists` 再删目录。回滚在 `Task.detached` 中执行并等待完成——父任务取消不能 SIGTERM 清理用的 git 子进程。
+- IPC `workspace.create` / `workspace.add` / `workspace.describe`：`WorkspaceHandlers` 走类型化 `throws` 风格，只做 wire → plan 翻译与错误映射（cli.md D21–D23）。CLI `codans workspace create|add|show`。
+- GUI：`CreateWorkspaceFeature` + `CreateWorkspaceSheet`（Add 菜单「New Workspace…」、palette `app.new-workspace`、`CommandID.newWorkspace` 默认无绑定）；Folder 与 Branch 跟随 Title 直到手改；候选成员 = 本地 git Project，另可从磁盘添加仓库。workspace 根行的 `+` = 「Add Repository…」：选目录 → `discoverGitRoot` → 以 workspace 名 slug 为分支 `add`，失败走 `lifecycleErrorToast`。
+- 源 Project 镜像行守卫（D10）：行尾徽标「⧉ <workspace>」点击跳到 workspace 子行；上下文菜单隐藏 Archive / Remove 且 `HierarchySidebarFeature.isWorkspaceMember` 在 reducer 再守一次；`mergedWorktreeIDs`（侧栏 header 与 `RootFeature`）过滤；`sweepExpiredArchivedWorktrees` 跳过；`hierarchy.removeWorktree` 对子行与镜像行都返回 `conflict`；HEAD watcher 双挂载接受。
+- `CodansEnvironment.Key.workspaceRoot` / `BuiltinEnvVar.workspaceRoot`：`injectingBuiltins(workspaceRoot:)` 只在 workspace Project 的 pane 写入，非 workspace 主动移除同名 key。
 
 ### M3：移除、生命周期、GitHub（已设计未实现）
 
