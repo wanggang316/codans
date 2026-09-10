@@ -123,13 +123,14 @@ public final class TerminalHandlers {
       ]))
   }
 
+  /// Whitespace separates tokens and each token may carry its own `0x`,
+  /// so `"0x15 0x0d"` and `"150d"` decode alike.
   static func decodeHex(_ raw: String) -> [UInt8]? {
-    var cleaned = raw.unicodeScalars.filter { !$0.properties.isWhitespace }
-      .map(Character.init)
-    if cleaned.count >= 2, cleaned[0] == "0", cleaned[1] == "x" || cleaned[1] == "X" {
-      cleaned.removeFirst(2)
-    }
-    let str = String(cleaned)
+    let str = raw.split(whereSeparator: \.isWhitespace)
+      .map { token -> Substring in
+        token.hasPrefix("0x") || token.hasPrefix("0X") ? token.dropFirst(2) : token
+      }
+      .joined()
     guard !str.isEmpty, str.count.isMultiple(of: 2) else { return nil }
     var bytes: [UInt8] = []
     bytes.reserveCapacity(str.count / 2)

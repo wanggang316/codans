@@ -174,6 +174,20 @@ extension Catalog {
     return nil
   }
 
+  /// Resolve a `PaneID` to the Tab that currently hosts it, if any.
+  /// Walks `projects → worktrees → tabs → panes` and returns the first
+  /// match. Linear in the total pane count.
+  public func tabID(forPane paneID: PaneID) -> TabID? {
+    for project in projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
+          return tab.id
+        }
+      }
+    }
+    return nil
+  }
+
   /// All `PaneID`s currently living under the given Worktree, flat across
   /// every tab. Returns an empty set if the Worktree is not in the catalog.
   public func paneIDs(inWorktree worktreeID: WorktreeID) -> Set<PaneID> {
