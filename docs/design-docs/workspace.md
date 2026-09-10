@@ -1,6 +1,6 @@
 # 设计文档：Workspace
 
-**状态：** 分阶段上线（打开已有 workspace、创建与添加成员、源 Project 标记已上线；移除与 GitHub 聚合 `已设计未实现`）
+**状态：** 已上线（打开已有 workspace、创建与添加成员、源 Project 标记、成员与整体移除、按成员仓库取 PR 并在根行聚合）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -147,12 +147,23 @@ WorkspaceHandlers (workspace.*) ─┘        │ 失败 / 取消
 - 源 Project 镜像行守卫（D10）：行尾徽标「⧉ <workspace>」点击跳到 workspace 子行；上下文菜单隐藏 Archive / Remove 且 `HierarchySidebarFeature.isWorkspaceMember` 在 reducer 再守一次；`mergedWorktreeIDs`（侧栏 header 与 `RootFeature`）过滤；`sweepExpiredArchivedWorktrees` 跳过；`hierarchy.removeWorktree` 对子行与镜像行都返回 `conflict`；HEAD watcher 双挂载接受。
 - `CodansEnvironment.Key.workspaceRoot` / `BuiltinEnvVar.workspaceRoot`：`injectingBuiltins(workspaceRoot:)` 只在 workspace Project 的 pane 写入，非 workspace 主动移除同名 key。
 
-### M3：移除、生命周期、GitHub（已设计未实现）
+### 移除
 
-- 成员移除：`git worktree remove`（复用 relocate-then-prune，`repoRoot = sourceGitRoot`）→ 可选删分支 → manifest 更新 → 删 catalog 行 → 删源 Project 镜像行。
-- 整体移除：默认只删条目；显式选择才逐成员 `git worktree remove`（任一失败则不删根目录，避免悬空注册）与删分支。
-- `HierarchyClient.removeWorktreeWithGit` / `sweepExpiredArchivedWorktrees` / Prune 改走 `Project.repoRoot(for:)`。
-- GitHub：取数分组键 `(ProjectID, gitRoot)`，`snapshots[worktreeID]` 不变；根行聚合「N PRs · M merged」。
+- **成员移除**（子行「Remove from Workspace…」/ `codans workspace drop`）：`WorkspaceClient.drop` 先 `tearDownWorktreeSurfaces`，再 `GitWorktreeClient.removeWorktree(repoRoot: sourceGitRoot, path)`（relocate-then-prune），默认删分支（git 拒绝时把原因作为 note 回带，与 Delete Worktree 一致），从 manifest 删 entry，删本行，再删源 Project 里指向同一目录的镜像行。根行不是成员，`cannotDropRoot`。
+- **整体移除**（⋯ 菜单「Remove Workspace…」/ `codans workspace remove`）：`WorkspaceCleanup.entryOnly` 只 `removeProject`，磁盘不动；`deleteFiles` 逐成员注销（失败记入 `failures`，继续处理其余成员），条目一律删除，**根目录只在全部注销成功时删除**——否则源仓库会留下指向已删目录的 worktree 注册。GUI 对话框给「Remove from Sidebar」与「Remove and Delete Checkouts」（分支保留）；`--delete-branches` 仅 CLI 提供。
+- 子行的 Archive 仍不开放（归档一个别的仓库的 checkout 没有意义）；`sweepExpiredArchivedWorktrees` 与 Prune 对 workspace 不运行。
+
+### GitHub：按成员仓库取数
+
+`GitHubFeature` 的所有按 Project 键控的状态（`snapshotsByProject`、in-flight / queued 集合、`projectGitRoots`、`projectWorktreePairs`、cancel id、磁盘缓存）**原封不动**。变化只在 `RootFeature` 的派发侧：
+
+- `RootFeature.gitHubFetchUnits(in:)` 把一个 Project 拆成若干「取数单元」`(projectID, gitRoot, pairs)`：git Project 一个单元、键为自身 id；workspace 按 `Project.repoRoot(for:)` 分组，每个成员仓库一个单元，键为 `workspaceFetchGroupID(workspace:gitRoot:)`——对 `"<workspaceID>|<canonical gitRoot>"` 取 SHA-256 前 16 字节做成 `ProjectID`，跨启动稳定，磁盘缓存能按同一键回填。
+- 激活 Project 时对每个单元各发一次 `projectActivated`；`pruneToCatalog` 的存活集合 = 全部 Project id ∪ 全部单元 id；`seedFromCache` 同样按单元回填。
+- 心跳 poll 只有一个槽位：workspace 里跟随**选中成员**所属仓库（`gitHubFetchUnit(in:worktreeID:fallback:)`），其余仓库靠激活 / 焦点 / pane 内 git 命令后的刷新。
+- pane 内 `git` / `gh` 命令结束后的刷新只打该 pane 所在行的单元；「Open Project on GitHub」在 workspace 里打开选中成员的仓库。
+- 根行聚合徽标：`ProjectHeaderRow.workspacePullRequestSummary` 汇总子行 `snapshots[worktreeID]`，显示「N PRs · M merged」。
+
+取舍：把 `GitHubFeature` 改为复合键会同时改动 reducer、动作签名、磁盘缓存形状与约 160 处测试引用；派生 id 让 reducer 与其测试零改动，代价是 Settings → GitHub 的 per-Project 错误横幅对 workspace 显示的是单元 id 而非名字（当前无消费者读该字段）。
 
 ## 备选方案
 

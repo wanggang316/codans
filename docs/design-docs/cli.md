@@ -159,6 +159,8 @@
 |---|---|---|---|
 | `codans workspace create TITLE` | `workspace.create` | `WorkspaceHandlers.create` → `WorkspaceClient.create` | `TITLE`，`--project P`（可重复）/ `--repo PATH`（可重复），合计 ≥ 2；`[--branch B] [--base REF] [--existing] [--path ROOT] [--description D]` |
 | `codans workspace add WS` | `workspace.add` | `WorkspaceHandlers.add` → `WorkspaceClient.add` | `WS`（别名/名字/`current`），`--project P` 或 `--repo PATH` 二选一；`[--name N] [--branch B] [--base REF] [--existing] [--role R]` |
+| `codans workspace drop WS MEMBER` | `workspace.drop` | `WorkspaceHandlers.drop` → `WorkspaceClient.drop` | `MEMBER` 为成员目录名；`[--keep-branch]`。移走 checkout（relocate-then-prune）、删分支（git 拒绝时回带 note）、改 manifest、删本行与源 Project 的镜像行 |
+| `codans workspace remove WS` | `workspace.remove` | `WorkspaceHandlers.remove` → `WorkspaceClient.remove` | 缺省只删条目；`--delete-files` 逐成员注销并删根目录（任一失败则根目录保留并回带 `failures`）；`--delete-branches` 需配合 `--delete-files` |
 | `codans workspace show [WS]` | `workspace.describe` | `WorkspaceHandlers.describe` | `WS` 缺省 `current` |
 
 成员来源：`--project` 先经 `hierarchy.resolveAlias` 解析为 id，服务端读其 `gitRoot`；`--repo` 发绝对路径，服务端 `git rev-parse --show-toplevel` 求仓库根。缺省值：成员目录名 = 仓库目录名，分支 = 标题 slug（`add` 用 workspace 名 slug），base = 仓库默认远端分支，根目录 = `~/.codans/workspaces/<slug>`（被占用则 `-2`、`-3`）。`--json` 输出经 `WorkspaceSummaryRenderable`，nil 字段编码为 `null`。见 [Workspace](workspace.md)。

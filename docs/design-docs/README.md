@@ -35,5 +35,5 @@ Use [_template.md](_template.md) as a starting point.
 - [Remote SSH Projects](remote-ssh-projects.md) — `.server` 项目：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；worktree 创建/删除待接线
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、宽容解码、v1/v2→v3 迁移、四正交通知开关）
 - [Update Channel & Release Pipeline](updates-channel-pipeline.md) — Sparkle 更新通道：单一 feed + 客户端 channel 过滤；含 Developer-ID 签名/公证/CI 发布管线不变量
-- [Workspace](workspace.md) — 跨多仓库的 Project：根目录为 main 行、子仓库 checkout 为真正的 Worktree 行；`.codans/workspace.json` 定成员、git 定活体事实；reconcile 在 git 探测前短路；M1 打开已有 workspace 已上线，创建 / 移除 / GitHub 聚合已设计未实现
+- [Workspace](workspace.md) — 跨多仓库的 Project：根目录为 main 行、子仓库 checkout 为真正的 Worktree 行；`.codans/workspace.json` 定成员、git 定活体事实；reconcile 在 git 探测前短路；创建 / 添加 / 移除经 `WorkspaceClient`（GUI 与 `codans workspace` 共用，记账回滚）；PR 按成员仓库取数、根行聚合
 - [Worktree](worktree.md) — Worktree 全生命周期（`git-wt` 创建/发现/archive/remove/prune）+ 四段侧边栏排序 + titlebar 状态栏 + header 分支切换器

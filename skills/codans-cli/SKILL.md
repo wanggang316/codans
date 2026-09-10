@@ -288,6 +288,8 @@ codans workspace create "Checkout Flow" --project app --project api   # ≥ 2 me
 codans workspace create "Checkout Flow" --project app --repo ~/dev/shared-lib \
   --branch feat/checkout --base origin/main --path ~/tmp/checkout-flow
 codans workspace add <workspace> --repo ~/dev/other --existing --branch main
+codans workspace drop <workspace> <member> [--keep-branch]   # unregister one checkout
+codans workspace remove <workspace> [--delete-files [--delete-branches]]
 codans workspace show [<workspace>]                    # manifest + live rows
 ```
 
@@ -299,7 +301,11 @@ folder as a workspace Project. Members come from registered projects
 (`--project`, repeatable) or any local repository (`--repo`, repeatable).
 The root defaults to `~/.codans/workspaces/<slug>` and must not sit inside a
 git repository. Both verbs really write to disk — a failure midway removes
-everything the call created.
+everything the call created. `drop` moves one member's checkout out of the
+workspace and deletes its branch (unless `--keep-branch`); `remove` alone
+only de-registers, while `--delete-files` unregisters every member and
+deletes the folder — but keeps the folder if any member could not be
+unregistered, so a repository is never left pointing at a missing worktree.
 
 ### `codans tab` — manage tabs inside a worktree
 

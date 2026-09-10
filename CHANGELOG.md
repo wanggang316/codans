@@ -34,7 +34,18 @@ and the project does not yet follow semantic versioning — every release until
   with the workspace's name (click to jump there). Archive, Remove, the
   merged-worktree batches, and the auto-delete sweep leave those rows alone:
   the checkout belongs to the workspace.
-  Removing workspaces with cleanup follows in a later release.
+- **Remove a repository from a workspace, or the whole workspace.** A
+  member row's context menu offers **Remove from Workspace…**, which
+  unregisters the checkout from its repository, deletes its branch, and
+  updates the manifest. The workspace's ⋯ menu offers **Remove
+  Workspace…** with two answers: remove from the sidebar only, or also
+  unregister every checkout and delete the folder (the folder is kept if
+  any member could not be unregistered). `codans workspace drop` and
+  `codans workspace remove [--delete-files [--delete-branches]]` do the
+  same from a terminal.
+- **Pull requests per member repository.** Rows inside a workspace show
+  their own repository's PR badge, and the workspace header rolls them up
+  ("3 PRs · 1 merged").
 
 ### Changed
 
