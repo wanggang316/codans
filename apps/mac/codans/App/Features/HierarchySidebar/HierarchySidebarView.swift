@@ -387,6 +387,7 @@ struct HierarchySidebarView: View {
       }
     }
     .modifier(RemoteConnectionSheetPresenter(store: store))
+    .modifier(CreateWorkspaceSheetPresenter(store: store))
     .confirmationDialog(
       worktreeRemovalTitle,
       isPresented: Binding(
@@ -584,6 +585,11 @@ struct HierarchySidebarView: View {
       store.send(.connectServerTapped)
     } label: {
       Label("Connect to Server…", systemImage: "tv.badge.wifi")
+    }
+    Button {
+      store.send(.newWorkspaceTapped)
+    } label: {
+      Label("New Workspace…", systemImage: "square.stack.3d.up")
     }
   }
 
@@ -995,6 +1001,7 @@ struct HierarchySidebarView: View {
         isSelected: isSelected
       )
       newBadgePill(for: worktree)
+      workspaceMembershipBadge(for: worktree, in: project)
       diffStatsChip(for: worktree, in: project, snapshot: snapshot)
       gitHubBadge(for: worktree, in: project)
       runScriptPingAccessory(for: worktree, in: project)
@@ -1271,7 +1278,11 @@ struct HierarchySidebarView: View {
         )
       }
     }
-    if !isMainCheckout, !project.isWorkspace {
+    // A source Project's row that a workspace lists as a child is likewise
+    // the workspace's to archive or remove.
+    let isWorkspaceMember =
+      !project.isWorkspace && hierarchyManager.workspaceMembership(forPath: worktree.path) != nil
+    if !isMainCheckout, !project.isWorkspace, !isWorkspaceMember {
       if worktree.archived {
         Button {
           store.send(
@@ -1582,6 +1593,40 @@ struct HierarchySidebarView: View {
     }
   }
 
+  /// On a source Project's row whose checkout a workspace lists as a child:
+  /// names the workspace and jumps to its row. Never shown inside the
+  /// workspace itself, where every child row would carry it.
+  @ViewBuilder
+  fileprivate func workspaceMembershipBadge(for worktree: Worktree, in project: Project) -> some View {
+    if !project.isWorkspace,
+      let membership = hierarchyManager.workspaceMembership(forPath: worktree.path)
+    {
+      Button {
+        store.send(.workspaceMembershipBadgeTapped(membership))
+      } label: {
+        HStack(spacing: 2) {
+          Image(systemName: "square.stack.3d.up")
+            .font(.system(size: 9, weight: .semibold))
+            .accessibilityHidden(true)
+          Text(membership.workspaceName)
+            .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+        .background(
+          RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .stroke(Color.secondary.opacity(0.6), lineWidth: 0.75)
+        )
+      }
+      .buttonStyle(.plain)
+      .padding(.leading, 6)
+      .help("Checked out for workspace \(membership.workspaceName) — click to show it there")
+      .accessibilityLabel("In workspace \(membership.workspaceName)")
+    }
+  }
+
   private var archiveAllMergedTitle: String {
     let count = store.pendingArchiveAllMerged?.worktreeIDs.count ?? 0
     return count == 1
@@ -1843,6 +1888,7 @@ private struct ProjectHeaderRow: View {
   var gitHubStore: StoreOf<GitHubFeature>?
   @Environment(RollupIndexProvider.self) private var rollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore
+  @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @State private var isHovering = false
   @State private var isPlusHovering = false
@@ -1853,11 +1899,13 @@ private struct ProjectHeaderRow: View {
   /// Worktrees" items (count + enablement). Empty when the GitHub store is
   /// absent or nothing is merged. "Merged" is the PR's GitHub state, matching
   /// `scripts/clean-merged-branches.sh` — squash-merge friendly, unlike
-  /// `git branch --merged`.
+  /// `git branch --merged`. A checkout a workspace still lists as a child is
+  /// left out: it is the workspace's to remove.
   private var mergedWorktreeIDs: [WorktreeID] {
     guard let gitHubStore else { return [] }
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
+      .filter { hierarchyManager.workspaceMembership(forPath: $0.path) == nil }
       .filter { gitHubStore.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }
@@ -1937,6 +1985,18 @@ private struct ProjectHeaderRow: View {
           }
           .buttonStyle(.plain)
           .onHover { isPlusHovering = $0 }
+        } else if project.isWorkspace {
+          // A workspace's `+` adds a repository, not a worktree: the new row
+          // is a checkout of another repository, named after it.
+          Button {
+            store.send(.workspaceAddRepositoryTapped(projectID: project.id))
+          } label: {
+            iconLabel(systemName: "plus", isHovering: isPlusHovering)
+              .accessibilityLabel("Add Repository to this Workspace")
+          }
+          .buttonStyle(.plain)
+          .onHover { isPlusHovering = $0 }
+          .help("Add Repository…")
         }
         Menu {
           Button {

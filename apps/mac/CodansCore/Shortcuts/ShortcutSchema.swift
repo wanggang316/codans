@@ -116,6 +116,15 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_N), modifiers: .command)
     ),
+    // Unbound by default: creating a workspace is rare enough that no chord
+    // is worth reserving; the palette and the Add menu are the entry points.
+    .init(
+      id: .newWorkspace,
+      title: "New Workspace…",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: nil
+    ),
     .init(
       id: .toggleDiffInspector,
       title: "Toggle Git Viewer",

@@ -114,6 +114,10 @@ struct HierarchySidebarFeature {
     /// a `git clone` and, on success, routes the destination back through
     /// the same registration path as a picked local folder.
     var cloneRepoSheet: CloneRepoFeature.State?
+    /// "New Workspace" sheet reached from the Add Project menu and the
+    /// palette. `WorkspaceClient` registers and reconciles the result, so
+    /// the parent only selects it on success.
+    var createWorkspaceSheet: CreateWorkspaceFeature.State?
     /// "Connect to Server" sheet reached from the Add Project menu. Validates
     /// an SSH connection and, on success, routes the destination back through
     /// `addServerProject` + reconcile.
@@ -379,6 +383,19 @@ struct HierarchySidebarFeature {
     case createWorktreeSheet(CreateWorktreeFeature.Action)
     /// Child-feature actions for the Clone Repository sheet.
     case cloneRepoSheet(CloneRepoFeature.Action)
+    /// Child-feature actions for the New Workspace sheet.
+    case createWorkspaceSheet(CreateWorkspaceFeature.Action)
+    /// Add menu / palette: open the New Workspace sheet seeded with the
+    /// local git Projects as candidate members.
+    case newWorkspaceTapped
+    /// Badge on a source Project's mirror row: jump to the workspace child
+    /// row that owns the same checkout.
+    case workspaceMembershipBadgeTapped(WorkspaceMembership)
+    /// Workspace header `+`: pick a local repository and check it out into
+    /// the workspace on a branch named after the workspace.
+    case workspaceAddRepositoryTapped(projectID: ProjectID)
+    case workspaceAddRepositoryPicked(projectID: ProjectID, URL?)
+    case workspaceAddRepositoryFailed(String)
     /// Child-feature actions for the Connect to Server sheet.
     case remoteConnectionSheet(RemoteConnectionFeature.Action)
 
@@ -424,6 +441,7 @@ struct HierarchySidebarFeature {
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
   @Dependency(FolderPickerClient.self) private var folderPickerClient
   @Dependency(GitWorktreeCLI.self) private var gitCLI
+  @Dependency(WorkspaceClient.self) private var workspaceClient
   @Dependency(GitEnvironmentProbe.self) private var gitEnvironmentProbe
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
 
@@ -470,6 +488,16 @@ struct HierarchySidebarFeature {
         return .send(.addProjectFolderPicked(URL(fileURLWithPath: localPath)))
       case .cloneRepoSheet:
         return .none
+      case .createWorkspaceSheet(.delegate(.dismissed)):
+        state.createWorkspaceSheet = nil
+        return .none
+      case .createWorkspaceSheet(.delegate(.created(let projectID))):
+        // The client registered and reconciled the workspace; just land on it.
+        state.createWorkspaceSheet = nil
+        hierarchyClient.selectProject(projectID)
+        return .none
+      case .createWorkspaceSheet:
+        return .none
       case .remoteConnectionSheet(.delegate(.dismissed)):
         state.remoteConnectionSheet = nil
         return .none
@@ -507,6 +535,9 @@ struct HierarchySidebarFeature {
     }
     .ifLet(\.cloneRepoSheet, action: \.cloneRepoSheet) {
       CloneRepoFeature()
+    }
+    .ifLet(\.createWorkspaceSheet, action: \.createWorkspaceSheet) {
+      CreateWorkspaceFeature()
     }
     .ifLet(\.remoteConnectionSheet, action: \.remoteConnectionSheet) {
       RemoteConnectionFeature()
@@ -590,6 +621,61 @@ struct HierarchySidebarFeature {
 
     case .cloneRepoTapped:
       state.cloneRepoSheet = CloneRepoFeature.State()
+      return .none
+
+    case .newWorkspaceTapped:
+      // Only local git repositories can be members: a workspace checks
+      // members out with `git worktree add`, which needs a local repository
+      // root, and a workspace inside a workspace is not a thing.
+      let candidates = hierarchyClient.snapshot().projects.compactMap { project -> CreateWorkspaceFeature.Candidate? in
+        guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else {
+          return nil
+        }
+        return CreateWorkspaceFeature.Candidate(id: project.id, name: project.name, gitRoot: gitRoot)
+      }
+      state.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: candidates)
+      return .none
+
+    case .workspaceMembershipBadgeTapped(let membership):
+      hierarchyClient.setProjectExpanded(membership.projectID, true)
+      hierarchyClient.selectProject(membership.projectID)
+      try? hierarchyClient.selectWorktree(membership.worktreeID, membership.projectID)
+      return .none
+
+    case .workspaceAddRepositoryTapped(let projectID):
+      return .run { [picker = folderPickerClient] send in
+        let url = await picker.pick("Add Repository to Workspace")
+        await send(.workspaceAddRepositoryPicked(projectID: projectID, url))
+      }
+
+    case .workspaceAddRepositoryPicked(let projectID, let url):
+      guard let url,
+        let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+        project.isWorkspace
+      else { return .none }
+      let picked = url.path(percentEncoded: false)
+      // The branch follows the workspace name, matching what `workspace
+      // create` chose for the existing members; a clash surfaces as a toast.
+      let branch = WorkspaceLayout.folderName(forTitle: project.name)
+      return .run { [cli = gitCLI, client = workspaceClient] send in
+        guard let gitRoot = try? await cli.discoverGitRoot(candidatePath: picked), !gitRoot.isEmpty
+        else {
+          await send(.workspaceAddRepositoryFailed("\(picked) is not inside a git repository."))
+          return
+        }
+        let member = WorkspacePlan.Member(
+          name: (gitRoot as NSString).lastPathComponent,
+          sourceGitRoot: gitRoot,
+          checkout: .newBranch(branch: branch, baseRef: nil))
+        do {
+          _ = try await client.add(projectID, member)
+        } catch {
+          await send(.workspaceAddRepositoryFailed(error.localizedDescription))
+        }
+      }
+
+    case .workspaceAddRepositoryFailed(let message):
+      state.lifecycleErrorToast = message
       return .none
 
     case .connectServerTapped:
@@ -812,6 +898,7 @@ struct HierarchySidebarFeature {
       // is covered by a single check.
       if isMainCheckout(worktreeID: worktreeID, projectID: projectID)
         || isWorkspaceChild(worktreeID: worktreeID, projectID: projectID)
+        || isWorkspaceMember(worktreeID: worktreeID, projectID: projectID)
       {
         return .none
       }
@@ -842,6 +929,7 @@ struct HierarchySidebarFeature {
       // short of editing the catalog file by hand.
       if isMainCheckout(worktreeID: wid, projectID: pid)
         || isWorkspaceChild(worktreeID: wid, projectID: pid)
+        || isWorkspaceMember(worktreeID: wid, projectID: pid)
       {
         return .none
       }
@@ -1174,7 +1262,7 @@ struct HierarchySidebarFeature {
       // Routed through the top-level Reducer; unreachable here.
       return .none
 
-    case .cloneRepoSheet:
+    case .cloneRepoSheet, .createWorkspaceSheet:
       // Routed through the top-level Reducer; unreachable here.
       return .none
 
@@ -1302,6 +1390,25 @@ struct HierarchySidebarFeature {
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return false }
     return worktree.path != project.rootPath
+  }
+
+  /// `true` when a source Project's row is the same checkout a workspace
+  /// lists as a child. The folder is the workspace's to archive or remove;
+  /// the source Project only shows it. The view trims the menu items; this
+  /// guard covers the chords.
+  private func isWorkspaceMember(worktreeID: WorktreeID, projectID: ProjectID) -> Bool {
+    let snapshot = hierarchyClient.snapshot()
+    guard
+      let project = snapshot.projects.first(where: { $0.id == projectID }),
+      !project.isWorkspace,
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+    else { return false }
+    // Answered from the snapshot the reducer already holds, so every
+    // sidebar test's stubbed client covers it without a second closure.
+    return snapshot.workspaceMembership(
+      forCanonicalPath: HierarchyManager.canonicalPath(worktree.path),
+      canonicalize: HierarchyManager.canonicalPath
+    ) != nil
   }
 
   /// Archive button → archive-script flow, sequenced here (script →

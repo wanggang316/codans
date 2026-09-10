@@ -134,6 +134,14 @@ enum CommandPaletteItems {
         kind: .cloneRepository
       ),
       CommandPaletteItem(
+        id: "app.new-workspace",
+        title: "New Workspace…",
+        searchText: "app workspace new create multi repository",
+        icon: "square.stack.3d.up",
+        commandID: .newWorkspace,
+        kind: .newWorkspace
+      ),
+      CommandPaletteItem(
         id: "app.open-settings",
         title: "Open Settings",
         searchText: "app",

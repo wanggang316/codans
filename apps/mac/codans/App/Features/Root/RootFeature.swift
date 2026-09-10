@@ -2366,6 +2366,8 @@ struct RootFeature {
       return .send(.sidebar(.toolbarAddProjectTapped))
     case .cloneRepository:
       return .send(.sidebar(.cloneRepoTapped))
+    case .newWorkspace:
+      return .send(.sidebar(.newWorkspaceTapped))
     case .showUnreadNotifications:
       return .send(.showUnreadRequested)
     case .toggleSidebar:
@@ -2579,6 +2581,13 @@ struct RootFeature {
     guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
+      // A checkout a workspace still names is that workspace's to remove.
+      .filter {
+        catalog.workspaceMembership(
+          forCanonicalPath: HierarchyManager.canonicalPath($0.path),
+          canonicalize: HierarchyManager.canonicalPath
+        ) == nil
+      }
       .filter { gitHub.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }
