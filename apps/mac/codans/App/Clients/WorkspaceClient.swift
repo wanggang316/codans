@@ -20,6 +20,11 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
   case notWorkspace(ProjectID)
   case memberExists(name: String)
   case memberNotRegistered(name: String)
+  case memberNotFound(name: String)
+  /// The row is a hand-written manifest entry with no recorded source
+  /// repository, so there is nothing to unregister it from.
+  case memberWithoutSource(name: String)
+  case cannotDropRoot
   case cancelled
 
   var errorDescription: String? {
@@ -46,6 +51,12 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
       return "the workspace already has a repository named \"\(name)\""
     case .memberNotRegistered(let name):
       return "\"\(name)\" was checked out but did not appear in the catalog"
+    case .memberNotFound(let name):
+      return "the workspace has no repository named \"\(name)\""
+    case .memberWithoutSource(let name):
+      return "\"\(name)\" records no source repository, so its checkout cannot be unregistered"
+    case .cannotDropRoot:
+      return "the workspace root is not a member; remove the workspace instead"
     case .cancelled:
       return "workspace creation was cancelled; everything it created has been removed"
     }
@@ -68,12 +79,28 @@ struct WorkspaceClient: Sendable {
   var add:
     @MainActor @Sendable (_ projectID: ProjectID, _ member: WorkspacePlan.Member) async throws
       -> WorktreeID
+  /// Remove one member: unregister its checkout from the source repository
+  /// (relocate-then-prune), optionally delete its branch, drop it from the
+  /// manifest, and remove its row plus any mirror row under the source
+  /// Project. Returns a note when the branch was kept (checked out elsewhere).
+  var drop:
+    @MainActor @Sendable (_ projectID: ProjectID, _ worktreeID: WorktreeID, _ deleteBranch: Bool)
+      async throws -> String?
+  /// Remove the workspace. With the default cleanup only the catalog entry
+  /// goes; with `deleteFiles` every member is unregistered first and the
+  /// folder is deleted only when all of them were.
+  var remove:
+    @MainActor @Sendable (_ projectID: ProjectID, _ cleanup: WorkspaceCleanup) async throws
+      -> WorkspaceRemovalOutcome
 }
 
 extension WorkspaceClient: TestDependencyKey {
   static let testValue = WorkspaceClient(
     create: unimplemented("WorkspaceClient.create", placeholder: ProjectID()),
-    add: unimplemented("WorkspaceClient.add", placeholder: WorktreeID())
+    add: unimplemented("WorkspaceClient.add", placeholder: WorktreeID()),
+    drop: unimplemented("WorkspaceClient.drop", placeholder: nil),
+    remove: unimplemented(
+      "WorkspaceClient.remove", placeholder: WorkspaceRemovalOutcome(deletedFolder: false))
   )
 }
 
@@ -104,8 +131,148 @@ extension WorkspaceClient {
         try await Self.add(
           projectID: projectID, member: member,
           hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient, gitCLI: gitCLI)
+      },
+      drop: { projectID, worktreeID, deleteBranch in
+        try await Self.drop(
+          projectID: projectID, worktreeID: worktreeID, deleteBranch: deleteBranch,
+          hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient)
+      },
+      remove: { projectID, cleanup in
+        try await Self.remove(
+          projectID: projectID, cleanup: cleanup,
+          hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient)
       }
     )
+  }
+
+  // MARK: Drop / remove
+
+  @MainActor
+  private static func drop(
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    deleteBranch: Bool,
+    hierarchy: HierarchyClient,
+    gitWorktreeClient: GitWorktreeClient
+  ) async throws -> String? {
+    guard let project = hierarchy.snapshot().projects.first(where: { $0.id == projectID }),
+      project.isWorkspace
+    else { throw WorkspaceError.notWorkspace(projectID) }
+    guard let row = project.worktrees.first(where: { $0.id == worktreeID }) else {
+      throw WorkspaceError.memberNotFound(name: worktreeID.description)
+    }
+    guard row.path != project.rootPath else { throw WorkspaceError.cannotDropRoot }
+    let rootPath = project.rootPath
+    var manifest = try WorkspaceManifestStore.load(rootPath: rootPath)
+    let canonicalRow = HierarchyManager.canonicalPath(row.path)
+    let entryIndex = manifest.repositories.firstIndex {
+      HierarchyManager.canonicalPath($0.resolvedPath(rootPath: rootPath)) == canonicalRow
+    }
+
+    let warning = try await unregister(
+      row, sourceGitRoot: row.sourceGitRoot ?? entryIndex.flatMap { manifest.repositories[$0].sourceGitRoot },
+      deleteBranch: deleteBranch, hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient)
+
+    if let entryIndex {
+      manifest.repositories.remove(at: entryIndex)
+      try WorkspaceManifestStore.save(manifest, rootPath: rootPath)
+    }
+    try hierarchy.removeWorktree(worktreeID, projectID)
+    removeMirrorRows(forCanonicalPath: canonicalRow, hierarchy: hierarchy)
+    return warning
+  }
+
+  @MainActor
+  private static func remove(
+    projectID: ProjectID,
+    cleanup: WorkspaceCleanup,
+    hierarchy: HierarchyClient,
+    gitWorktreeClient: GitWorktreeClient
+  ) async throws -> WorkspaceRemovalOutcome {
+    guard let project = hierarchy.snapshot().projects.first(where: { $0.id == projectID }),
+      project.isWorkspace
+    else { throw WorkspaceError.notWorkspace(projectID) }
+    guard cleanup.deleteFiles else {
+      try hierarchy.removeProject(projectID)
+      return WorkspaceRemovalOutcome(deletedFolder: false)
+    }
+    let rootPath = project.rootPath
+    let manifest = try? WorkspaceManifestStore.load(rootPath: rootPath)
+    var failures: [String] = []
+    var keptBranches: [String] = []
+    for row in project.worktrees where row.path != project.rootPath {
+      let canonicalRow = HierarchyManager.canonicalPath(row.path)
+      let entry = manifest?.repositories.first {
+        HierarchyManager.canonicalPath($0.resolvedPath(rootPath: rootPath)) == canonicalRow
+      }
+      do {
+        if let warning = try await unregister(
+          row, sourceGitRoot: row.sourceGitRoot ?? entry?.sourceGitRoot,
+          deleteBranch: cleanup.deleteBranches, hierarchy: hierarchy,
+          gitWorktreeClient: gitWorktreeClient)
+        {
+          keptBranches.append("\(row.name): \(warning)")
+        }
+        removeMirrorRows(forCanonicalPath: canonicalRow, hierarchy: hierarchy)
+      } catch {
+        logger.warning("could not unregister workspace member \(row.name, privacy: .public): \(error)")
+        failures.append(row.name)
+      }
+    }
+    // The entry goes regardless; the folder only when every checkout is
+    // gone, since deleting it under a live registration strands the source
+    // repository's `git worktree list`.
+    try hierarchy.removeProject(projectID)
+    var deletedFolder = false
+    if failures.isEmpty {
+      do {
+        try FileManager.default.removeItem(atPath: rootPath)
+        deletedFolder = true
+      } catch {
+        logger.warning("could not delete workspace folder \(rootPath, privacy: .private): \(error)")
+        failures.append("folder")
+      }
+    }
+    return WorkspaceRemovalOutcome(
+      deletedFolder: deletedFolder, failures: failures, keptBranches: keptBranches)
+  }
+
+  /// Tear down the row's terminals, move its checkout out from under the
+  /// source repository, and optionally delete the branch. Returns the
+  /// kept-branch note when git refused the deletion.
+  @MainActor
+  private static func unregister(
+    _ row: Worktree,
+    sourceGitRoot: String?,
+    deleteBranch: Bool,
+    hierarchy: HierarchyClient,
+    gitWorktreeClient: GitWorktreeClient
+  ) async throws -> String? {
+    guard let sourceGitRoot else { throw WorkspaceError.memberWithoutSource(name: row.name) }
+    hierarchy.tearDownWorktreeSurfaces(row.id)
+    let sourceURL = URL(fileURLWithPath: sourceGitRoot, isDirectory: true)
+    try await gitWorktreeClient.removeWorktree(
+      sourceURL, URL(fileURLWithPath: row.path, isDirectory: true))
+    guard deleteBranch, let branch = row.branch, !branch.isEmpty else { return nil }
+    switch await gitWorktreeClient.deleteBranchIfExists(sourceURL, branch) {
+    case .deleted, .absent:
+      return nil
+    case .kept(let reason):
+      return "branch \"\(branch)\" was kept: \(reason)"
+    }
+  }
+
+  /// A member checkout also lists under its source Project once that
+  /// Project reconciles; drop that row too, or it lingers pointing at a
+  /// folder that is gone until the next stale sweep archives it.
+  @MainActor
+  private static func removeMirrorRows(forCanonicalPath path: String, hierarchy: HierarchyClient) {
+    for project in hierarchy.snapshot().projects where !project.isWorkspace {
+      for worktree in project.worktrees
+      where HierarchyManager.canonicalPath(worktree.path) == path && worktree.path != project.rootPath {
+        try? hierarchy.removeWorktree(worktree.id, project.id)
+      }
+    }
   }
 
   /// A member after preflight: canonical source root, absolute destination,

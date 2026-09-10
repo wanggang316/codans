@@ -93,6 +93,10 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ path: String
     ) -> WorkspaceMembership?
+  /// Close every surface of the Worktree without touching the catalog —
+  /// the step before a directory is moved out from under its terminals.
+  /// Forwards to `HierarchyManager.tearDownWorktreeSurfaces`.
+  var tearDownWorktreeSurfaces: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Void
   var removeProject: @MainActor @Sendable (_ projectID: ProjectID) throws -> Void
   var renameProject:
     @MainActor @Sendable (
@@ -771,6 +775,9 @@ extension HierarchyClient {
         manager.addProject(name: name, rootPath: rootPath, gitRoot: nil, isWorkspace: true)
       },
       workspaceMembership: { path in manager.workspaceMembership(forPath: path) },
+      tearDownWorktreeSurfaces: { worktreeID in
+        manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
+      },
       removeProject: { projectID in try manager.removeProject(projectID) },
       renameProject: { projectID, name in
         try manager.renameProject(projectID, name: name)
@@ -2219,6 +2226,7 @@ extension HierarchyClient: DependencyKey {
     updateServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     addWorkspaceProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     workspaceMembership: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    tearDownWorktreeSurfaces: { _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectColor: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2321,6 +2329,7 @@ extension HierarchyClient: DependencyKey {
     updateServerProject: unimplemented("HierarchyClient.updateServerProject"),
     addWorkspaceProject: unimplemented("HierarchyClient.addWorkspaceProject", placeholder: ProjectID()),
     workspaceMembership: unimplemented("HierarchyClient.workspaceMembership", placeholder: nil),
+    tearDownWorktreeSurfaces: unimplemented("HierarchyClient.tearDownWorktreeSurfaces"),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),
     setProjectColor: unimplemented("HierarchyClient.setProjectColor"),

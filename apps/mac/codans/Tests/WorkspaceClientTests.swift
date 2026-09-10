@@ -180,6 +180,79 @@ struct WorkspaceClientTests {
   }
 
   @Test
+  func dropUnregistersTheCheckoutAndCleansManifestAndMirrorRows() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let app = try makeRepo(named: "app", under: fx.base)
+    let api = try makeRepo(named: "api", under: fx.base)
+    let appProjectID = fx.hierarchy.addProject("app", app, app)
+    let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+    let projectID = try await fx.client.create(
+      WorkspacePlan(
+        title: "T", rootPath: root,
+        members: [
+          WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "t", baseRef: nil)),
+          WorkspacePlan.Member(name: "api", sourceGitRoot: api, checkout: .newBranch(branch: "t", baseRef: nil)),
+        ]))
+    let canonicalRoot = HierarchyManager.canonicalPath(root)
+    let appRow = try #require(
+      fx.manager.catalog.projects.first { $0.id == projectID }?.worktrees.first { $0.name == "app" })
+    #expect(fx.manager.catalog.projects.first { $0.id == appProjectID }?.worktrees.count == 2)
+
+    let warning = try await fx.client.drop(projectID, appRow.id, true)
+    #expect(warning == nil)
+    #expect(!exists("\(canonicalRoot)/app"))
+    #expect(!(try git(["branch", "--list", "t"], cwd: URL(fileURLWithPath: app))).contains("t"))
+    let manifest = try WorkspaceManifestStore.load(rootPath: canonicalRoot)
+    #expect(manifest.repositories.map(\.name) == ["api"])
+    let workspace = try #require(fx.manager.catalog.projects.first { $0.id == projectID })
+    #expect(workspace.worktrees.map(\.name).contains("app") == false)
+    #expect(workspace.worktrees.count == 2)
+    // The source Project's mirror row went with it.
+    #expect(fx.manager.catalog.projects.first { $0.id == appProjectID }?.worktrees.count == 1)
+
+    // The root row is never a member.
+    let rootID = workspace.worktrees[0].id
+    await #expect(throws: WorkspaceError.self) { try await fx.client.drop(projectID, rootID, false) }
+  }
+
+  @Test
+  func removeEntryOnlyKeepsDiskAndCleanupDeletesCheckoutsAndFolder() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let app = try makeRepo(named: "app", under: fx.base)
+    let api = try makeRepo(named: "api", under: fx.base)
+    let members = [
+      WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "t", baseRef: nil)),
+      WorkspacePlan.Member(name: "api", sourceGitRoot: api, checkout: .newBranch(branch: "t", baseRef: nil)),
+    ]
+
+    let keep = fx.base.appendingPathComponent("keep").path(percentEncoded: false)
+    let keepID = try await fx.client.create(WorkspacePlan(title: "Keep", rootPath: keep, members: members))
+    let kept = try await fx.client.remove(keepID, .entryOnly)
+    #expect(!kept.deletedFolder)
+    #expect(exists("\(HierarchyManager.canonicalPath(keep))/app/.git"))
+    #expect(fx.manager.catalog.projects.contains { $0.id == keepID } == false)
+    // Its worktrees still exist, so the same branch cannot be reused; drop them
+    // through git before the second workspace takes the branch name again.
+    try git(["worktree", "remove", "--force", "\(keep)/app"], cwd: URL(fileURLWithPath: app))
+    try git(["worktree", "remove", "--force", "\(keep)/api"], cwd: URL(fileURLWithPath: api))
+    try git(["branch", "-D", "t"], cwd: URL(fileURLWithPath: app))
+    try git(["branch", "-D", "t"], cwd: URL(fileURLWithPath: api))
+
+    let wipe = fx.base.appendingPathComponent("wipe").path(percentEncoded: false)
+    let wipeID = try await fx.client.create(WorkspacePlan(title: "Wipe", rootPath: wipe, members: members))
+    let outcome = try await fx.client.remove(
+      wipeID, WorkspaceCleanup(deleteFiles: true, deleteBranches: true))
+    #expect(outcome.deletedFolder)
+    #expect(outcome.failures.isEmpty)
+    #expect(!exists(wipe))
+    #expect(!(try git(["worktree", "list"], cwd: URL(fileURLWithPath: app))).contains("wipe/app"))
+    #expect(!(try git(["branch", "--list", "t"], cwd: URL(fileURLWithPath: app))).contains("t"))
+    #expect(fx.manager.catalog.projects.contains { $0.id == wipeID } == false)
+  }
+
+  @Test
   func addAppendsAMemberAndRefusesDuplicates() async throws {
     let fx = try makeFixture()
     defer { try? FileManager.default.removeItem(at: fx.base) }

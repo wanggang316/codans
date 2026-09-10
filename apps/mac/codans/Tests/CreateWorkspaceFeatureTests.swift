@@ -60,7 +60,9 @@ struct CreateWorkspaceFeatureTests {
           #expect(plan.members[0].checkout == .newBranch(branch: "feat/t", baseRef: "main"))
           return created
         },
-        add: { _, _ in WorktreeID() }
+        add: { _, _ in WorktreeID() },
+        drop: { _, _, _ in nil },
+        remove: { _, _ in WorkspaceRemovalOutcome(deletedFolder: false) }
       )
     }
     #expect(store.state.canCreate)
@@ -88,7 +90,9 @@ struct CreateWorkspaceFeatureTests {
           Issue.record("client must not be called for an invalid plan")
           return ProjectID()
         },
-        add: { _, _ in WorktreeID() }
+        add: { _, _ in WorktreeID() },
+        drop: { _, _, _ in nil },
+        remove: { _, _ in WorkspaceRemovalOutcome(deletedFolder: false) }
       )
     }
     #expect(!store.state.canCreate)
@@ -111,7 +115,9 @@ struct CreateWorkspaceFeatureTests {
     } withDependencies: {
       $0[WorkspaceClient.self] = WorkspaceClient(
         create: { _ in throw WorkspaceError.rootAlreadyWorkspace(path: "/tmp/ws") },
-        add: { _, _ in WorktreeID() }
+        add: { _, _ in WorktreeID() },
+        drop: { _, _, _ in nil },
+        remove: { _, _ in WorkspaceRemovalOutcome(deletedFolder: false) }
       )
     }
     await store.send(.createButtonTapped) {

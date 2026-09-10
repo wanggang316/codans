@@ -43,7 +43,9 @@ struct WorkspaceHandlersTests {
       add: { projectID, member in
         recorder.added.append((projectID, member))
         return WorktreeID()
-      }
+      },
+      drop: { _, _, _ in nil },
+      remove: { _, _ in WorkspaceRemovalOutcome(deletedFolder: false) }
     )
     let handlers = WorkspaceHandlers(hierarchy: hierarchy, workspace: client, gitCLI: GitWorktreeCLI())
     return Fixture(handlers: handlers, manager: manager, recorder: recorder)
@@ -74,7 +76,9 @@ struct WorkspaceHandlersTests {
           fx2.recorder.plans.append(plan)
           return workspaceID
         },
-        add: { _, _ in WorktreeID() }),
+        add: { _, _ in WorktreeID() },
+        drop: { _, _, _ in nil },
+        remove: { _, _ in WorkspaceRemovalOutcome(deletedFolder: false) }),
       gitCLI: GitWorktreeCLI())
 
     let summary = try await handlers.create(
@@ -157,6 +161,10 @@ struct WorkspaceHandlersTests {
       WorkspaceHandlers.ipcError(for: WorkspaceError.notWorkspace(ProjectID())).code == "notFound")
     #expect(
       WorkspaceHandlers.ipcError(for: GitWorktreeError.branchExists("x")).code == "conflict")
+    #expect(
+      WorkspaceHandlers.ipcError(for: WorkspaceError.memberNotFound(name: "x")).code == "notFound")
+    #expect(
+      WorkspaceHandlers.ipcError(for: WorkspaceError.cannotDropRoot).code == "conflict")
     #expect(
       WorkspaceHandlers.ipcError(for: IPCError.overloaded) == .overloaded)
   }
