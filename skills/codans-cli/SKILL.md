@@ -95,12 +95,22 @@ Most subcommands accept identifiers in any of these forms:
   not-found instead of hitting the wrong target.
 - **`@label`** (panes only) — server-side lookup against pane labels
   applied with `codans pane label`.
-- **Anything else** — sent to the server's alias resolver (e.g. a project
-  name or a worktree alias the app knows about).
+- **Names** — a project's name, a worktree's name or branch, a tab's title
+  (case-insensitive). Inside a pane, worktree names are looked up within
+  that pane's project and tab titles within its worktree, so
+  `--worktree main` means "this project's main". An ambiguous name fails
+  with a conflict (exit 3) — pass the id instead. Panes have no name: a
+  bare word where a pane is expected is a usage error, which is usually
+  unquoted text (`codans pane send echo hi` — quote it).
 
-If you run `codans` from a shell that is *not* inside a codans Pane,
-`current` has no meaning and you'll get a `noContext` error — pass an
-explicit UUID, or use `codans tree` to discover one.
+`current` for a project / worktree / tab is derived from the pane the
+command runs in, so it works from any subshell or wrapper inside a pane.
+If you run `codans` from a shell that is *not* inside a codans Pane there
+is no current pane: the command fails with `no current <kind>: this shell
+is not inside a Codans pane` (exit 2) — pass an explicit id or name, or
+use `codans tree` to discover one. Verbs whose target already determines
+its containers (`tab close t3`, `pane new --tab t3`, `worktree rm <id>`)
+never need `--project` / `--worktree` at all.
 
 ## Development builds
 
@@ -140,9 +150,18 @@ These work on every subcommand (mounted via `@OptionGroup`):
 - `--json` — machine-readable output instead of text.
 - `--socket <path>` — talk to a non-default socket (rarely needed; the
   default points at the running app automatically).
-- `--timeout <seconds>` — RPC client timeout (default 10s).
+- `--timeout <seconds>` — RPC client timeout (default 10s), applied to every
+  call the command makes.
 
 Use `codans <subcommand> --help` for the exact flag list of any command.
+`codans help-json` prints the whole subcommand tree as JSON.
+
+Exit codes: `0` ok · `1` usage / user error · `2` not found · `3` conflict
+· `4` unsupported · `5` overloaded · `6` version mismatch · `10` app not
+running · `11` request timeout · `12` launch timeout · `13` socket
+permission denied · `14` socket unusable · `15` wrong build channel ·
+`20` internal · `64` the argument parser rejected the command line (unknown
+subcommand or option, missing argument, bad enum value).
 
 ## Quick start
 
@@ -178,7 +197,7 @@ Always run `codans tree` first when you don't know what's around. The text
 form marks the selected worktree/tab with `*`, prints pane labels as
 `@label`, and prints each tab/pane's short handle (`Tab t3:` / `Pane p7:`)
 — pass those handles anywhere a tab/pane id is accepted. JSON output
-carries full UUIDs.
+carries full UUIDs plus the same handles as `handle` (`"t3"` / `"p7"`).
 
 ### `codans project` — manage projects
 
@@ -189,23 +208,36 @@ codans project add --name "API" ~/code/api   # custom display name
 codans project rm <project>                  # remove (id, name, or 'current')
 ```
 
-Adding a project just registers it with codans; it does not move
-files. Removing only de-registers — no files are deleted.
+Adding a project registers an existing directory (it must exist and not
+be registered already); its git root is detected so a repository gets its
+worktrees listed, a plain folder becomes a folder project. Removing only
+de-registers — no files are deleted.
 
 ### `codans worktree` — manage git worktrees
 
 ```bash
 codans worktree list                                   # for current project
 codans worktree list --project <project>
-codans worktree new <branch>                           # path defaults to ./<branch>
+codans worktree new <branch>                           # git worktree add + register
+codans worktree new <branch> --base origin/main        # new branch starts from --base
 codans worktree new --path /abs/path --name "Hotfix" <branch>
 codans worktree switch <worktree>                      # activate it in the GUI
-codans worktree rm <worktree>                          # de-register
+codans worktree rm <worktree>                          # forget the entry (files stay)
+codans worktree rm <worktree> --delete                 # git worktree remove + branch cleanup
 ```
 
-`<branch>` is required for `new`. `--path` accepts a relative path
-(resolved against `$PWD`) or an absolute one. `--name` overrides the
-display label (defaults to the branch).
+`new` runs the same pipeline as the New Worktree sheet: the branch is
+created from `--base` (default: the repo's default remote branch, else
+`HEAD`) or checked out if it already exists, and the project's copy /
+fetch / setup settings apply. The directory defaults to the project's
+worktrees directory (Settings ▸ Worktree; `~/.codans/repos/<project>/<branch>`
+out of the box), not `$PWD`. `--path` accepts a relative path (resolved
+against `$PWD`) or an absolute one; a path that already exists on disk is
+registered as-is. `--name` overrides the display label (defaults to the
+branch). `--json` reports `path` and whether the worktree was `created`
+or merely registered. `rm` only forgets the entry, and a real git worktree
+is re-adopted on the next reconcile; pass `--delete` to run the sidebar's
+Remove Worktree (directory removed, branch deleted per Settings).
 
 ### `codans tab` — manage tabs inside a worktree
 
@@ -257,25 +289,31 @@ codans pane send-key <pane> ctrl_c
 # Send raw bytes (e.g. CSI sequences) — exclusive of text/--stdin/--no-enter
 codans pane send --raw 1b5b41        # ESC [ A (cursor up)
 
-# Read what's on the pane
-codans pane read                     # visible viewport (default)
-codans pane read --screen            # whole active screen buffer
-codans pane read --selection         # current text selection
+# Capture what's rendered (libghostty text; the usual choice)
+codans pane capture                  # visible viewport (default)
+codans pane capture <pane> --lines 50   # keep only the last 50 non-empty lines
+codans pane capture --scope screen   # the whole active screen buffer
+codans pane capture --wait-stable    # poll until the output stops changing
 
-# Capture rendered text (same data as read, plus trimming)
-codans pane capture --lines 50       # keep only the last 50 non-empty lines
-codans pane capture --scope screen   # capture the full screen, not just viewport
+# Read the terminal's serialized state from its zmx daemon (scrollback too)
+codans pane read                     # plain-text dump
+codans pane read --tail 40           # last 40 lines
+codans pane read --raw               # vt format: ANSI escapes, cursor, modes kept
 ```
+
+`read`, `capture`, `info`, and `reset` take the pane as a positional
+argument (`codans pane capture @worker`); only `send` / `send-key` have a
+`-p/--pane` flag.
 
 Notes:
 
-- `codans pane send` appends `\n` by default. Use `--no-enter` to leave the
-  shell prompt waiting for more input.
-- `--raw` ships hex bytes directly (e.g. `1b` = ESC); control bytes ride a
-  key-event path, printable bytes ride the text channel.
-- Pane I/O is rendered-text only — codans does not expose the raw PTY
-  byte stream, so OSC / CSI / APC sequences are not visible via `read` or
-  `capture`. Track app-level state via `codans tree` instead.
+- `codans pane send` appends Enter by default. Use `--no-enter` to leave
+  the shell prompt waiting for more input.
+- `--raw` ships hex bytes directly (`1b5b41`, or `0x1b 0x5b 0x41`);
+  control bytes ride a key-event path, printable bytes ride the text
+  channel.
+- `capture` is rendered text only; `read --raw` is the daemon's vt dump
+  with escapes preserved. Track app-level state via `codans tree`.
 
 ### `codans broadcast` — fan out input
 
@@ -381,6 +419,17 @@ Rules:
 - Handoff only reads git (`status`, branch, shortstat); it never commits or
   pushes. `.codans/handoff/` ignores itself.
 
+### `codans open` — open a directory in an editor
+
+```bash
+codans open                          # $PWD in the project's / global default editor
+codans open ~/code/api --in cursor   # a specific editor id: cursor, zed, vscode, xcode, finder, ghostty, …
+```
+
+`--in` is strict (an uninstalled editor is an error); without it codans
+walks the per-project default, the global default, then the installed
+editors in priority order, ending at Finder.
+
 ## Common patterns
 
 ### Read a sibling pane (agent A inspecting agent B)
@@ -400,17 +449,15 @@ and refer to it as `@agent` thereafter.
 codans pane new --label repl -- python3
 codans pane send -p @repl 'import math'
 codans pane send -p @repl 'print(math.pi)'
-codans pane capture -p @repl --lines 3
+codans pane capture @repl --lines 3
 ```
 
 ### Spin up a worktree and a tab for it
 
 ```bash
-codans worktree new exp/feature-x
-# Switch to the new worktree (its UUID is in the create output, or use jq):
-codans worktree switch "$(codans tree --json | jq -r '.projects[0].worktrees[-1].id')"
-codans tab new "dev"
-codans pane new -- npm run dev
+WT=$(codans worktree new exp/feature-x --json | jq -r '.id')   # git worktree add + register
+TAB=$(codans tab new "dev" --worktree "$WT" --json | jq -r '.id')
+codans pane new --tab "$TAB" --cwd "$(codans worktree list --json | jq -r ".worktrees[]|select(.id==\"$WT\")|.path")" -- npm run dev
 ```
 
 ### Take over a task from the previous agent
@@ -446,8 +493,7 @@ back after sending:
 
 ```bash
 codans pane send -p @worker 'run-task'
-sleep 1
-codans pane read -p @worker | tail -20
+codans pane capture @worker --wait-stable --lines 20
 ```
 
 (This mirrors the project memory note "prowl send 后 read-back 验证" — the
@@ -458,11 +504,12 @@ same idea applies to `codans`.)
 | Symptom                                             | Likely cause / fix                                                        |
 |-----------------------------------------------------|---------------------------------------------------------------------------|
 | `socket /tmp/codans-*.sock did not become reachable` | App isn't running. Run `codans launch` or open codans from the GUI.       |
-| `noContext(kind: .pane)` (or project/worktree/tab)  | You used `current` / `.` outside a codans Pane. Pass an explicit ID.  |
+| `no current pane: this shell is not inside a Codans pane` (or project/worktree/tab) | You used `current` / `.` outside a codans Pane. Pass an explicit ID or name. |
 | `pane <uuid> not found`                             | The pane was closed, or the UUID came from a different app instance.     |
 | `unknown key "..."`                                 | `codans pane send-key` only knows the keys listed above. Use `--raw` for the rest. |
 | `--raw is exclusive of ...`                         | `codans pane send --raw` cannot combine with positional text, `--stdin`, or `--no-enter`. |
-| Help shows fewer commands than expected             | Some legacy docs reference unimplemented commands (e.g. `codans open`, `codans skill`, `codans agent`). Trust `codans --help` over external docs. |
+| `unknown pane "echo"; pass a pane id, ...`           | The first word of an unquoted `pane send` was taken as the target. Quote the text. |
+| Help shows fewer commands than expected             | Some legacy docs reference unimplemented commands (e.g. `codans skill`). Trust `codans --help` over external docs. |
 
 ## What this CLI does *not* do (yet)
 
@@ -470,9 +517,8 @@ To prevent suggesting commands that don't exist:
 
 - No `codans send` / `codans read` / `codans send-key` / `codans capture` at top level —
   they live under `codans pane`.
-- No `codans open` (external editor handoff).
 - No `codans skill ...` (skill installation lives outside the CLI).
-- No `codans agent ...` (agent hook installation lives outside the CLI).
+- No `codans tag ...`, `codans worktree rename`, `codans tab rename` yet.
 - No `codans space ...` — codans does not expose a Space concept via `codans`
   today; the hierarchy is rooted at Project.
 

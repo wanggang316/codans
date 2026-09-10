@@ -10,13 +10,72 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **CLI — every list verb, `open`, and `help-json` are now real commands.**
+  `codans project list`, `worktree list`, `tab list`, and `pane list` print
+  one level of the hierarchy (with `--json`), `codans open [path] [--in
+  editor]` opens a directory in an external editor through the app's editor
+  resolution, and the hidden `codans help-json` prints the whole subcommand
+  tree for tooling.
+- **CLI — `worktree new` creates the worktree.** The command now runs the
+  same pipeline as the New Worktree sheet: the branch is created from
+  `--base` (default: the repo's default remote branch, else `HEAD`) or
+  checked out if it already exists, the project's copy / fetch / setup
+  settings apply, and only then is the row added. A path that already
+  exists on disk is registered as-is. `--json` reports whether it was
+  `created`.
+- **CLI — names as targets.** `--project`, `--worktree`, and `--tab` (and
+  the positional forms) accept a project name, a worktree name or branch,
+  and a tab title, scoped to the calling pane's project / worktree; an
+  ambiguous name is a conflict rather than a guess.
+- **CLI — `tree --json` carries the `t<n>` / `p<n>` handles** the text
+  form prints, as `handle` on each tab and pane.
+- **CLI — `worktree rm --delete`** removes the git worktree from disk (and
+  its branch, per Settings) through the sidebar's own removal; without the
+  flag only the entry is forgotten, which the next reconcile undoes for a
+  real git worktree.
+
 ### Changed
+
+- **CLI — `current` works for projects, worktrees, and tabs inside a
+  pane.** A pane only exports its own id, so `--project current` and
+  friends used to fail with "no current project context" in every pane;
+  the app now derives them from the calling pane. Outside a pane the error
+  says so and suggests passing an id. Verbs whose target already fixes its
+  containers (`tab close t3`, `pane new --tab t3`, `worktree rm <id>`) no
+  longer need `--project` / `--worktree`.
+- **CLI — `project add` validates and detects git.** The directory must
+  exist and must not be registered already; its git root is discovered so
+  the project lists real worktrees instead of a branchless placeholder.
+- **CLI — `launch` forwards `CODANS_SOCKET_PATH` and `CODANS_CONFIG_DIR`**
+  to the app it starts, so the socket it waits on is the one the app binds.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **Panes opened by the CLI started with the bare app environment.**
+  `codans pane new` skipped the project env resolution the sidebar runs,
+  so such a pane had no `CODANS_CLI`, no `CODANS_SOCKET_PATH`, none of
+  the project's `envVars`, and `TERM_PROGRAM` read `ghostty`; inside a
+  development build the pane could not even find `codans-dev`. They now
+  get the same environment as a pane opened from the UI.
+- **CLI — `--timeout` was ignored** by every command except `project
+  commands`; it now bounds every call a command makes.
+- **CLI — `pane send --raw '0x15 0x0d'`** was rejected although the help
+  promised `0x` and whitespace; each token may now carry its own prefix.
+- **CLI — unquoted text as a pane target** (`pane send echo hi`) now fails
+  as a usage error naming the stray word instead of "alias form not yet
+  supported".
+- **Create Worktree errors showed an empty reason.** The `wt sw` stderr
+  was consumed line by line and only its trailing fragment reached the
+  error, so a bad base ref surfaced as `wt … :` with nothing after the
+  colon; the full stderr is kept now, and `invalid --from ref` maps to a
+  user error.
+- **Skill / docs** described `pane list`, `pane read --screen`, `capture
+  -p`, and a `./<branch>` default worktree path that the CLI never had;
+  they now match the shipped commands.
 
 ### Security
 
