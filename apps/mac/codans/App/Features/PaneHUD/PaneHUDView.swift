@@ -1,15 +1,22 @@
 import CodansCore
+import ComposableArchitecture
 import SwiftUI
 
 /// Per-pane actions menu, anchored to the pane's top-right corner.
 ///
 /// Collapsed it is a single button, with a queue button beneath it while the
 /// pane holds queued commands. Expanded it lists the actions that are a property
-/// of *this* pane — handing its agent's task off to another agent, opening
-/// its command queue — so the pane is where they live. It shows no workspace
-/// facts on purpose: the worktree's path, branch and uncommitted counts are
-/// already in the header and sidebar, and the agent in the Agents view, so
-/// repeating them here only duplicated what the eye had just passed.
+/// of *this* pane — handing its agent's task off to another agent, opening its
+/// command queue, muting its notifications, closing it — so the pane is where
+/// they live. The last two are also what `PaneContextMenu` offers on
+/// right-click, and both go through the same `HierarchyClient` calls: the
+/// corner button is the way the actions are found, the right-click menu the
+/// way they are reached quickly once known.
+///
+/// It shows no workspace facts on purpose: the worktree's path, branch and
+/// uncommitted counts are already in the header and sidebar, and the agent in
+/// the Agents view, so repeating them here only duplicated what the eye had
+/// just passed.
 ///
 /// The button holds its position across both states, so expanding reads as
 /// the card growing out from under it rather than as a separate surface
@@ -22,6 +29,13 @@ struct PaneHUDView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
   @Environment(\.paneHUDActions) private var actions
+  /// Mute and close need no root-store routing — they are plain catalog
+  /// mutations — so they go straight to the client the way `PaneContextMenu`
+  /// does, rather than through `PaneHUDActions`. Resolved inside the row
+  /// actions only: the live client is installed process-wide by
+  /// `CodansApp`'s `prepareDependencies`, and a render-only host (the HUD
+  /// render tests) never taps a row.
+  @Dependency(HierarchyClient.self) private var hierarchy
 
   @State private var isExpanded: Bool
   @State private var isButtonHovered = false
@@ -214,6 +228,15 @@ struct PaneHUDView: View {
     VStack(alignment: .leading, spacing: 0) {
       handOffButton(model)
       commandQueueButton(model)
+      muteButton(model)
+      // Groups the teardown away from the rows that only open something,
+      // the same way `PaneContextMenu` fences its own Close item. The
+      // negative inset undoes the VStack's row inset so the rule spans the
+      // card's content width instead of starting at the glyph column.
+      Divider()
+        .padding(.leading, -Self.rowLeadingInset)
+        .padding(.vertical, 4)
+      closeButton()
     }
     .padding(.leading, Self.rowLeadingInset)
     .frame(width: Self.cardWidth, alignment: .leading)
@@ -272,5 +295,80 @@ struct PaneHUDView: View {
     .buttonStyle(.plain)
     .help("Queue commands to send to this pane")
     .accessibilityIdentifier("pane_hud.command_queue")
+  }
+
+  /// Per-pane notification mute — the `InboxLabels.muted` label the
+  /// notification detector checks before raising anything for this pane.
+  ///
+  /// Alone among the rows this one leaves the card open: it is a toggle, and
+  /// the checkmark flipping under the cursor is the only confirmation the
+  /// action gets. `hierarchyManager.catalog` is observed by `resolveModel`,
+  /// so the write lands back here as a re-render without an explicit
+  /// refresh.
+  private func muteButton(_ model: PaneHUDModel) -> some View {
+    Button {
+      hierarchy.setPaneLabel(paneID, InboxLabels.muted, !model.isMuted)
+    } label: {
+      HStack(spacing: 7) {
+        Image(systemName: "bell.slash")
+          .font(.system(size: 11))
+          .frame(width: 14, height: 14, alignment: .center)
+          .accessibilityHidden(true)
+        Text("Mute Notifications")
+        Spacer(minLength: 0)
+        if model.isMuted {
+          // Same trailing slot as the queue count. A checkmark rather than a
+          // switch because the row is a menu item, and because the collapsed
+          // card has no room to explain a control.
+          Image(systemName: "checkmark")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+        }
+      }
+      .font(.system(size: 12))
+      .frame(minHeight: Self.buttonSize)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .help(
+      model.isMuted
+        ? "This pane raises no notifications"
+        : "Stop this pane from raising notifications"
+    )
+    .accessibilityIdentifier("pane_hud.mute")
+    .accessibilityLabel("Mute notifications")
+    .accessibilityValue(model.isMuted ? "On" : "Off")
+  }
+
+  /// Tears the pane down through the same plain `HierarchyClient.closePane`
+  /// path as the right-click menu and ⌘W — no confirmation, and closing a
+  /// tab's last pane leaves the empty tab `SplitViewportView` renders as its
+  /// "No panes" placeholder. The address is resolved at tap time rather than
+  /// threaded in, because the HUD is mounted four levels below the store
+  /// that knows it and the pane may be gone by the time the row is clicked.
+  private func closeButton() -> some View {
+    Button {
+      setExpanded(false)
+      guard let address = hierarchy.addressOf(paneID) else { return }
+      try? hierarchy.closePane(
+        address.paneID, address.tabID, address.worktreeID, address.projectID
+      )
+    } label: {
+      HStack(spacing: 7) {
+        Image(systemName: "xmark")
+          .font(.system(size: 11))
+          .frame(width: 14, height: 14, alignment: .center)
+          .accessibilityHidden(true)
+        Text("Close Pane")
+        Spacer(minLength: 0)
+      }
+      .font(.system(size: 12))
+      .frame(minHeight: Self.buttonSize)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .help("Close this pane")
+    .accessibilityIdentifier("pane_hud.close")
   }
 }

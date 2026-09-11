@@ -276,7 +276,7 @@ public final class NotificationDetector {
           let projectLabel = project.name.isEmpty ? nil : project.name
           return Resolved(
             source: source,
-            muted: pane.labels.contains(InboxLabels.muted),
+            muted: pane.isNotificationsMuted,
             worktreeLabel: worktreeLabel,
             projectLabel: projectLabel
           )

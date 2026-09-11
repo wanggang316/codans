@@ -16,7 +16,7 @@ struct PaneContextMenuModel {
   var closePane: () -> Void = {}
 
   var isMuted: Bool {
-    snapshot().pane(paneID)?.labels.contains(InboxLabels.muted) ?? false
+    snapshot().pane(paneID)?.isNotificationsMuted ?? false
   }
 
   func toggleMute() {
