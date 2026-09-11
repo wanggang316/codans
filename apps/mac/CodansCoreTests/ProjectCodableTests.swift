@@ -73,6 +73,44 @@ struct ProjectCodableTests {
   }
 
   @Test
+  func iconlessProjectEncodesNoIconKey() throws {
+    // Same contract every optional Project field carries: a Project the user
+    // never re-iconed must round-trip byte-identical, so pre-HAN-144 catalogs
+    // gain no key and need no migration.
+    let project = Project(name: "repo", rootPath: "/tmp/repo", gitRoot: "/tmp/repo")
+    let data = try JSONEncoder().encode(project)
+    let object = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+    #expect(object?["icon"] == nil)
+  }
+
+  @Test
+  func iconRoundTrips() throws {
+    let project = Project(
+      name: "repo",
+      rootPath: "/tmp/repo",
+      gitRoot: "/tmp/repo",
+      icon: .symbol("shippingbox")
+    )
+    let data = try JSONEncoder().encode(project)
+    let decoded = try JSONDecoder().decode(Project.self, from: data)
+    #expect(decoded.icon == .symbol("shippingbox"))
+  }
+
+  /// A malformed `icon` must degrade to the default folder glyph rather than
+  /// throwing: `Project.init(from:)` runs inside the `catalog.json` decode, so
+  /// a throw over a cosmetic value would take the user's whole catalog with it.
+  @Test
+  func malformedIconDecodesToNilInsteadOfThrowing() throws {
+    let json = """
+      {"id":{"raw":"\(UUID().uuidString)"},"name":"repo","rootPath":"/tmp/repo",\
+      "worktrees":[],"icon":"bogus"}
+      """
+    let decoded = try JSONDecoder().decode(Project.self, from: Data(json.utf8))
+    #expect(decoded.icon == nil)
+    #expect(decoded.name == "repo")
+  }
+
+  @Test
   func localProjectEncodesNoRemoteHostKey() throws {
     // A local project must round-trip byte-identical: the new `remoteHost` key is
     // absent so pre-Server catalogs are untouched.
