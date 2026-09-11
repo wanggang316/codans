@@ -10,6 +10,12 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **The pane's corner menu now carries every pane action.** Mute Notifications
+  and Close Pane join Hand Off and Command Queue there, so the actions that
+  used to be reachable only by right-clicking the terminal are visible from the
+  button in the pane's top-right corner. Right-click still opens the same two
+  items for anyone who already knows the gesture.
+
 ### Changed
 
 ### Deprecated
