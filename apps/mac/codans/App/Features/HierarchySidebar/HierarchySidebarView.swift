@@ -798,6 +798,10 @@ struct HierarchySidebarView: View {
         .font(.system(size: 12, weight: .regular))
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
+      // The reorder sheet strips the row to a handle and a name; the icon
+      // earns its place here because scanning a drag list is exactly when
+      // recognizing a Project at a glance matters.
+      ProjectIconView(icon: project.icon, color: project.color, isExpanded: true)
       Text(project.name)
         .font(.body)
         .lineLimit(1)
@@ -1866,24 +1870,32 @@ private struct ProjectHeaderRow: View {
     HStack(spacing: 6) {
       // L4 unread indicator. When the project is in `unreadProjects`
       // (rollup rule = project collapsed + unread inside), the leading
-      // disclosure chevron swaps for a red bell glyph — same pattern as
+      // project icon swaps for a red bell glyph — same pattern as
       // the worktree row icon. Click target / disclosure semantics are
       // unchanged: the parent Button still owns the tap.
-      if hasUnread {
-        Image(systemName: "bell.fill")
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(width: 10, height: 10, alignment: .center)
-          .foregroundStyle(Color.orange)
-          .accessibilityLabel("Has unread notifications")
-      } else {
-        Image(systemName: "chevron.right")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .rotationEffect(.degrees(isExpanded ? 90 : 0))
-          .frame(width: 10, alignment: .center)
-          .accessibilityHidden(true)
+      //
+      // The icon occupies the slot the disclosure chevron used to hold
+      // (HAN-144). With the default folder glyph the open/closed pair carries
+      // the disclosure reading on its own; a Project the user has re-iconed
+      // trades that cue for the identity it chose.
+      Group {
+        if hasUnread {
+          Image(systemName: "bell.fill")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 11, height: 11)
+            .foregroundStyle(Color.orange)
+            .accessibilityLabel("Has unread notifications")
+        } else {
+          ProjectIconView(
+            icon: project.icon,
+            color: project.color,
+            isExpanded: isExpanded,
+            size: 13
+          )
+        }
       }
+      .frame(width: 14, alignment: .center)
       Text(project.name)
         .font(.subheadline)
         .foregroundStyle(projectNameColor)

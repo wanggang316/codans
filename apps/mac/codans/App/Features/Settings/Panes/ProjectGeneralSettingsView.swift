@@ -213,6 +213,10 @@ struct ProjectGeneralSettingsView: View {
         .frame(maxWidth: .infinity, minHeight: 22)
       }
 
+      LabeledContent("Icon") {
+        ProjectIconPicker(selection: projectIconBinding, color: projectColor)
+      }
+
       LabeledContent("Color") {
         ProjectColorSwatchRow(selection: projectColorBinding)
       }
@@ -258,6 +262,23 @@ struct ProjectGeneralSettingsView: View {
   /// Settings on a customized project sees their override, not the placeholder.
   private var projectDisplayOverride: String? {
     hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.displayName
+  }
+
+  /// The Project's color, read live so the Icon picker's preview repaints the
+  /// moment the Color row below it changes.
+  private var projectColor: ProjectColor? {
+    hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.color
+  }
+
+  private var projectIconBinding: Binding<ProjectIcon?> {
+    Binding(
+      get: {
+        hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.icon
+      },
+      set: { newValue in
+        try? hierarchyClient.setProjectIcon(projectID, newValue)
+      }
+    )
   }
 
   private var projectColorBinding: Binding<ProjectColor?> {

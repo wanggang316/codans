@@ -90,16 +90,26 @@ struct SettingsSidebarView: View {
       // currently collapsed (and expand it to reveal the sub-rows). `simultaneousGesture`
       // runs alongside DisclosureGroup's built-in label tap so the expansion toggle still
       // happens — we only add the selection write.
-      Label(project.name, systemImage: "folder")
-        .contentShape(Rectangle())
-        .accessibilityAddTraits(.isButton)
-        .simultaneousGesture(
-          TapGesture().onEnded {
-            if !(expandedProjects[project.id] ?? false) {
-              selection = .projectGeneral(project.id)
-            }
+      // Icon comes from the Project itself rather than a hardcoded `folder`,
+      // so a re-iconed Project is recognizable in the Settings sidebar too.
+      // `isExpanded: true` is a fixed reading: this row's disclosure reveals
+      // settings sub-panes, not the Project's worktrees, so tying the folder
+      // glyph to it would mean the same Project shows a different icon here
+      // than in the main sidebar.
+      Label {
+        Text(project.name)
+      } icon: {
+        ProjectIconView(icon: project.icon, color: project.color, isExpanded: true)
+      }
+      .contentShape(Rectangle())
+      .accessibilityAddTraits(.isButton)
+      .simultaneousGesture(
+        TapGesture().onEnded {
+          if !(expandedProjects[project.id] ?? false) {
+            selection = .projectGeneral(project.id)
           }
-        )
+        }
+      )
     }
   }
 
