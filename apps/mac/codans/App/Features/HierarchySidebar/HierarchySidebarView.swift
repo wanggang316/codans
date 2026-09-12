@@ -1857,10 +1857,12 @@ private struct ProjectHeaderRow: View {
       .map(\.id)
   }
 
-  /// Project name tint. Uses the project's configured color when set;
-  /// otherwise keeps the prior hover-driven primary/secondary behavior.
+  /// Project name tint — hover-driven only. The Project color deliberately
+  /// does *not* reach the name: the icon to its left already carries it, and
+  /// tinting both painted the same signal twice and cost the name the
+  /// primary/secondary hover contrast every other sidebar row keeps.
   private var projectNameColor: Color {
-    project.color?.swiftUIColor ?? (isHovering ? .primary : .secondary)
+    isHovering ? .primary : .secondary
   }
 
   var body: some View {
