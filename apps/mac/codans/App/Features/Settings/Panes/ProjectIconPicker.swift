@@ -26,7 +26,9 @@ struct ProjectIconPicker: View {
   @State private var importError: String?
 
   /// Project-flavoured grid: repository / stack / domain glyphs rather than
-  /// the run-and-build vocabulary `SFSymbolPicker.presets` carries.
+  /// the run-and-build vocabulary `SFSymbolPicker.presets` carries. Sized to
+  /// a whole number of rows at the column count the popover uses, so the grid
+  /// never ends in a ragged half-row.
   static let symbols: [String] = [
     "folder", "folder.fill", "shippingbox", "shippingbox.fill",
     "cube", "cube.fill", "square.stack.3d.up", "building.2",
@@ -39,25 +41,41 @@ struct ProjectIconPicker: View {
     "paintbrush", "camera", "music.note", "gamecontroller",
     "cart", "creditcard", "chart.bar", "heart",
     "star", "flag", "tag", "bookmark",
+    "leaf", "cloud", "lock", "puzzlepiece",
   ]
 
-  /// One chip, flush right, in the same visual language as the Color row
-  /// directly below: a 24pt hit area with a hover ring, sized to its glyph
-  /// rather than to a fixed width. The earlier bordered pop-up button sat
-  /// left of a `Spacer` while every neighbouring row's control is trailing-
-  /// aligned, and its capsule outweighed the bare swatches underneath it.
+  /// Grid geometry. `width` has to clear `columns` cells plus their gutters
+  /// and the picker's own inset, or the last column clips.
+  private static let gridColumns = 8
+  private static let gridCellSize: CGFloat = 34
+  private static let popoverWidth: CGFloat = 400
+
+  /// A borderless dropdown — glyph, name, disclosure chevron — trailing
+  /// aligned, matching the Editor and Worktree pickers elsewhere in this pane
+  /// rather than carrying a box of its own. The chevron is self-drawn because
+  /// the stock borderless menu glyph disappears in some popover / window-focus
+  /// combinations.
   var body: some View {
-    ColorChip(
-      isSelected: isPresented,
-      action: {
-        symbolDraft = currentSymbolName
-        isPresented = true
-      },
-      accessibilityName: "Icon: \(summary)",
-      content: { ProjectIconView(icon: selection, color: color, isExpanded: true, size: 16) }
-    )
-    // Popover before the expanding frame so it anchors on the 24pt chip
-    // rather than on the full-width row.
+    Button {
+      symbolDraft = currentSymbolName
+      isPresented = true
+    } label: {
+      HStack(spacing: 6) {
+        ProjectIconView(icon: selection, color: color, isExpanded: true, size: 18)
+        Text(summary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+        Image(systemName: "chevron.up.chevron.down")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Icon: \(summary)")
+    // Popover before the expanding frame so it anchors on the control rather
+    // than on the full-width row.
     .popover(isPresented: $isPresented, arrowEdge: .bottom) { popoverBody }
     .frame(maxWidth: .infinity, alignment: .trailing)
   }
@@ -66,19 +84,34 @@ struct ProjectIconPicker: View {
 
   private var popoverBody: some View {
     VStack(alignment: .leading, spacing: 12) {
-      // The chip itself is only a glyph, so the popover is where the current
-      // choice gets named.
+      // The current choice gets named here; the dropdown label is too tight to
+      // carry a custom file's details.
       HStack(spacing: 8) {
-        ProjectIconView(icon: selection, color: color, isExpanded: true, size: 15)
+        ProjectIconView(icon: selection, color: color, isExpanded: true, size: 18)
         Text(summary)
           .font(.callout.weight(.medium))
           .lineLimit(1)
           .truncationMode(.middle)
         Spacer(minLength: 0)
-        Button("Use Folder") { commit(nil) }
-          .disabled(selection == nil)
-        Button("Choose File…") { chooseFile() }
       }
+
+      SFSymbolPicker(
+        selection: symbolBinding,
+        highlight: color?.swiftUIColor ?? .accentColor,
+        symbols: Self.symbols,
+        cellSize: Self.gridCellSize,
+        glyphPointSize: 20,
+        columns: Self.gridColumns,
+        maxGridHeight: 260
+      )
+
+      Text(
+        "Vector artwork (SVG, PDF) is tinted with the project color. "
+          + "Bitmaps (PNG, JPEG, HEIC, TIFF, GIF, ICNS) keep their own colors."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
 
       if let importError {
         Text(importError)
@@ -89,22 +122,17 @@ struct ProjectIconPicker: View {
 
       Divider()
 
-      SFSymbolPicker(
-        selection: symbolBinding,
-        highlight: color?.swiftUIColor ?? .accentColor,
-        symbols: Self.symbols
-      )
-
-      Text(
-        "Vector artwork (SVG, PDF) is tinted with the project color. "
-          + "Bitmaps (PNG, JPEG, HEIC, TIFF, GIF, ICNS) keep their own colors."
-      )
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .fixedSize(horizontal: false, vertical: true)
+      // Both escape hatches sit below the grid: the grid is the common path,
+      // and reset / import are the exceptions to it.
+      HStack(spacing: 8) {
+        Button("Reset to Default") { commit(nil) }
+          .disabled(selection == nil)
+        Spacer(minLength: 0)
+        Button("Choose Image…") { chooseFile() }
+      }
     }
     .padding(16)
-    .frame(width: 380)
+    .frame(width: Self.popoverWidth)
   }
 
   /// Bridges `SFSymbolPicker`'s plain `String` binding onto the enum. Writes
