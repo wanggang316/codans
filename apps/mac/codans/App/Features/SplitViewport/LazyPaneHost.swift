@@ -61,10 +61,12 @@ struct LazyPaneHost: View {
             PaneSurfaceProgressOverlay(surface: surface)
           }
           // Top-right actions menu: collapsed to a single button, expanded
-          // to the actions scoped to this pane (hand off). Layered above the
-          // progress strip so the card is never clipped by it.
+          // to the actions scoped to this pane — the pane's own (hand off,
+          // command queue, mute) plus everything its surface offers on
+          // right-click, which is why the surface is handed in. Layered
+          // above the progress strip so the card is never clipped by it.
           .overlay(alignment: .topTrailing) {
-            PaneHUDView(paneID: store.paneID)
+            PaneHUDView(paneID: store.paneID, surface: surface)
           }
           // Right-click menu. Attached only on `.ready` so loading / failure
           // placeholders do not get a stale menu; placed before `.animation`

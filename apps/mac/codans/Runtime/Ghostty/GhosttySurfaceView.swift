@@ -827,29 +827,62 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     guard event.type == .rightMouseDown else { return nil }
     guard let surface, !ghostty_surface_mouse_captured(surface) else { return nil }
 
+    // Built from `PaneSurfaceAction.groups` rather than spelled out here, so
+    // this menu and the pane HUD card offer exactly the same actions in the
+    // same order. See `PaneSurfaceAction`.
     let menu = NSMenu()
-    if ghostty_surface_has_selection(surface) {
-      menu.addItem(NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: ""))
+    for group in PaneSurfaceAction.groups {
+      let offered = group.filter { !$0.needsSelection || hasSelection }
+      guard !offered.isEmpty else { continue }
+      if menu.numberOfItems > 0 { menu.addItem(.separator()) }
+      for action in offered { menu.addItem(menuItem(action)) }
     }
-    menu.addItem(NSMenuItem(title: "Paste", action: #selector(paste(_:)), keyEquivalent: ""))
-    menu.addItem(.separator())
-    menu.addItem(menuItem("Split Right", #selector(splitRight(_:)), symbol: "rectangle.righthalf.inset.filled"))
-    menu.addItem(menuItem("Split Down", #selector(splitDown(_:)), symbol: "rectangle.bottomhalf.inset.filled"))
-    menu.addItem(menuItem("Split Left", #selector(splitLeft(_:)), symbol: "rectangle.leadinghalf.inset.filled"))
-    menu.addItem(menuItem("Split Up", #selector(splitUp(_:)), symbol: "rectangle.tophalf.inset.filled"))
-    menu.addItem(.separator())
-    menu.addItem(menuItem("Reset Terminal", #selector(resetTerminal(_:)), symbol: "arrow.trianglehead.2.clockwise"))
-    menu.addItem(.separator())
-    menu.addItem(NSMenuItem(title: "Copy Pane ID", action: #selector(copyPaneID(_:)), keyEquivalent: ""))
-    menu.addItem(.separator())
-    menu.addItem(menuItem("Close", #selector(closePane(_:)), symbol: "xmark"))
     return menu
   }
 
-  private func menuItem(_ title: String, _ action: Selector, symbol: String) -> NSMenuItem {
-    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-    item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+  private func menuItem(_ action: PaneSurfaceAction) -> NSMenuItem {
+    let item = NSMenuItem(
+      title: action.title,
+      action: #selector(paneSurfaceMenuItemSelected(_:)),
+      keyEquivalent: ""
+    )
+    // Explicit target: without it AppKit sends the one shared selector down
+    // the responder chain, where nothing implements it.
+    item.target = self
+    item.representedObject = action
+    item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
     return item
+  }
+
+  @objc private func paneSurfaceMenuItemSelected(_ sender: NSMenuItem) {
+    guard let action = sender.representedObject as? PaneSurfaceAction else { return }
+    perform(action)
+  }
+
+  /// Whether the surface currently holds a selection. Gates the Copy item in
+  /// both menus; read at menu-build time, which is when the user asked.
+  var hasSelection: Bool {
+    guard let surface else { return false }
+    return ghostty_surface_has_selection(surface)
+  }
+
+  /// Runs one pane action against this surface. The single entry point for
+  /// both menus and for the responder-chain `@IBAction`s below, so an action
+  /// behaves identically however it was invoked.
+  func perform(_ action: PaneSurfaceAction) {
+    switch action {
+    case .copy: performBindingAction("copy_to_clipboard")
+    case .paste: performBindingAction("paste_from_clipboard")
+    case .resetTerminal: performBindingAction("reset")
+    case .copyPaneID:
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(paneID.description, forType: .string)
+    case .close: onPaneAction?(.closePane)
+    case .splitRight: onPaneAction?(.newSplit(direction: .right))
+    case .splitLeft: onPaneAction?(.newSplit(direction: .left))
+    case .splitDown: onPaneAction?(.newSplit(direction: .down))
+    case .splitUp: onPaneAction?(.newSplit(direction: .up))
+    }
   }
 
   /// Route a binding action string (the same syntax used in Ghostty's
@@ -863,18 +896,18 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     }
   }
 
-  @IBAction func copy(_ sender: Any?) { performBindingAction("copy_to_clipboard") }
-  @IBAction func paste(_ sender: Any?) { performBindingAction("paste_from_clipboard") }
-  @IBAction func resetTerminal(_ sender: Any?) { performBindingAction("reset") }
-  @IBAction func copyPaneID(_ sender: Any?) {
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(paneID.description, forType: .string)
-  }
-  @IBAction func closePane(_ sender: Any?) { onPaneAction?(.closePane) }
-  @IBAction func splitRight(_ sender: Any?) { onPaneAction?(.newSplit(direction: .right)) }
-  @IBAction func splitLeft(_ sender: Any?) { onPaneAction?(.newSplit(direction: .left)) }
-  @IBAction func splitDown(_ sender: Any?) { onPaneAction?(.newSplit(direction: .down)) }
-  @IBAction func splitUp(_ sender: Any?) { onPaneAction?(.newSplit(direction: .up)) }
+  // Responder-chain entry points. `copy:` / `paste:` are the standard
+  // selectors AppKit's Edit menu sends to the first responder, so they stay
+  // as methods however the menus are built; each one defers to `perform`.
+  @IBAction func copy(_ sender: Any?) { perform(.copy) }
+  @IBAction func paste(_ sender: Any?) { perform(.paste) }
+  @IBAction func resetTerminal(_ sender: Any?) { perform(.resetTerminal) }
+  @IBAction func copyPaneID(_ sender: Any?) { perform(.copyPaneID) }
+  @IBAction func closePane(_ sender: Any?) { perform(.close) }
+  @IBAction func splitRight(_ sender: Any?) { perform(.splitRight) }
+  @IBAction func splitLeft(_ sender: Any?) { perform(.splitLeft) }
+  @IBAction func splitDown(_ sender: Any?) { perform(.splitDown) }
+  @IBAction func splitUp(_ sender: Any?) { perform(.splitUp) }
 
   // MARK: - NSTextInputClient
 

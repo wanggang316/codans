@@ -46,6 +46,15 @@ public nonisolated struct Pane: Equatable, Sendable, Identifiable {
   }
 }
 
+extension Pane {
+  /// Per-pane notification mute — membership of `InboxLabels.muted` in
+  /// `labels`. Spelled once here because three sites ask it: the detector's
+  /// drop check and both pane menus (right-click and the top-right HUD).
+  public var isNotificationsMuted: Bool {
+    labels.contains(InboxLabels.muted)
+  }
+}
+
 extension Pane: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, workingDirectory, labels, agentKind, agentSessionID, runScriptID

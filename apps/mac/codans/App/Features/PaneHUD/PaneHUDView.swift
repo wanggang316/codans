@@ -5,11 +5,19 @@ import SwiftUI
 ///
 /// Collapsed it is a single button, with a queue button beneath it while the
 /// pane holds queued commands. Expanded it lists the actions that are a property
-/// of *this* pane — handing its agent's task off to another agent, opening
-/// its command queue — so the pane is where they live. It shows no workspace
-/// facts on purpose: the worktree's path, branch and uncommitted counts are
-/// already in the header and sidebar, and the agent in the Agents view, so
-/// repeating them here only duplicated what the eye had just passed.
+/// of *this* pane. The first two are the pane's own affairs: handing its
+/// agent's task off and opening its command queue. Under them sits every
+/// action the terminal surface offers — copy, paste,
+/// the four splits, reset, the pane id, close — rendered from the same
+/// `PaneSurfaceAction.groups` the surface's right-click menu is built from,
+/// so neither menu can quietly offer less than the other. The corner button
+/// is how the actions are found; right-click is how they are reached quickly
+/// once known.
+///
+/// It shows no workspace facts on purpose: the worktree's path, branch and
+/// uncommitted counts are already in the header and sidebar, and the agent in
+/// the Agents view, so repeating them here only duplicated what the eye had
+/// just passed.
 ///
 /// The button holds its position across both states, so expanding reads as
 /// the card growing out from under it rather than as a separate surface
@@ -18,6 +26,12 @@ import SwiftUI
 /// — and this card will grow rows as actions are added.
 struct PaneHUDView: View {
   let paneID: PaneID
+  /// The pane's live terminal surface, which services every
+  /// `PaneSurfaceAction` row. Optional only for hosts that render the card
+  /// without a running pane (the HUD render tests, previews); `LazyPaneHost`
+  /// mounts the HUD alongside the surface, so in the app it is always there.
+  /// Without one those rows render disabled rather than vanishing.
+  let surface: PaneSurface?
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
@@ -29,8 +43,9 @@ struct PaneHUDView: View {
 
   /// `expanded` seeds the card's state. The app always starts collapsed;
   /// the seed exists so a rendering test can lay out the open card.
-  init(paneID: PaneID, expanded: Bool = false) {
+  init(paneID: PaneID, surface: PaneSurface? = nil, expanded: Bool = false) {
     self.paneID = paneID
+    self.surface = surface
     _isExpanded = State(initialValue: expanded)
   }
 
@@ -212,11 +227,31 @@ struct PaneHUDView: View {
 
   private func expandedBody(_ model: PaneHUDModel) -> some View {
     VStack(alignment: .leading, spacing: 0) {
+      // The pane's own affairs first: what its agent is doing and what is
+      // queued for it.
       handOffButton(model)
       commandQueueButton(model)
+      // Then everything the terminal surface offers, in the same order and
+      // grouping as its right-click menu — the two are one list, so an
+      // action is never in one menu and missing from the other.
+      ForEach(Array(PaneSurfaceAction.groups.enumerated()), id: \.offset) { _, group in
+        separator
+        ForEach(group, id: \.self) { action in
+          surfaceActionButton(action)
+        }
+      }
     }
     .padding(.leading, Self.rowLeadingInset)
     .frame(width: Self.cardWidth, alignment: .leading)
+  }
+
+  /// Group divider. The negative inset undoes the VStack's row inset so the
+  /// rule spans the card's content width instead of starting at the glyph
+  /// column.
+  private var separator: some View {
+    Divider()
+      .padding(.leading, -Self.rowLeadingInset)
+      .padding(.vertical, 4)
   }
 
   // MARK: - Actions
@@ -272,5 +307,36 @@ struct PaneHUDView: View {
     .buttonStyle(.plain)
     .help("Queue commands to send to this pane")
     .accessibilityIdentifier("pane_hud.command_queue")
+  }
+
+  /// One row per `PaneSurfaceAction`, driven straight at the pane's surface
+  /// — the same entry point the right-click menu items use, so a split from
+  /// here lands in `PaneActionRouterFeature` exactly as one from there does
+  /// and inherits its policy (closing a tab's last pane retires the tab, a
+  /// sibling reclaims focus).
+  private func surfaceActionButton(_ action: PaneSurfaceAction) -> some View {
+    // Copy needs a selection to copy. Shown disabled rather than dropped, so
+    // the card still answers "can this pane copy?" for someone who opened it
+    // to find out what is here.
+    let isEnabled = surface != nil && (!action.needsSelection || surface?.view.hasSelection == true)
+    return Button {
+      setExpanded(false)
+      surface?.view.perform(action)
+    } label: {
+      HStack(spacing: 7) {
+        Image(systemName: action.symbol)
+          .font(.system(size: 11))
+          .frame(width: 14, height: 14, alignment: .center)
+          .accessibilityHidden(true)
+        Text(action.title)
+        Spacer(minLength: 0)
+      }
+      .font(.system(size: 12))
+      .frame(minHeight: Self.buttonSize)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(!isEnabled)
+    .accessibilityIdentifier("pane_hud.\(action.accessibilityID)")
   }
 }
