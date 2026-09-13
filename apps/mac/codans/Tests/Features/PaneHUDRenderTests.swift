@@ -34,6 +34,9 @@ struct PaneHUDRenderTests {
   }
 
   /// The HUD as `LazyPaneHost` mounts it: top-trailing over a dark surface.
+  /// No `PaneSurface` here — libghostty is not up in a unit test — so the
+  /// `PaneSurfaceAction` rows render in their disabled state. The frame is
+  /// tall enough for the full card, which is what these renders are for.
   private static func render(
     manager: HierarchyManager, paneID: PaneID, expanded: Bool
   ) -> CGImage? {
@@ -43,7 +46,7 @@ struct PaneHUDRenderTests {
         .padding(.top, 4)
         .padding(.trailing, 4)
     }
-    .frame(width: 320, height: 240)
+    .frame(width: 320, height: 540)
     .environment(manager)
     .environment(\.colorScheme, .dark)
     let renderer = ImageRenderer(content: content)

@@ -10,11 +10,12 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **The pane's corner menu now carries every pane action.** Mute Notifications
-  and Close Pane join Hand Off and Command Queue there, so the actions that
-  used to be reachable only by right-clicking the terminal are visible from the
-  button in the pane's top-right corner. Right-click still opens the same two
-  items for anyone who already knows the gesture.
+- **The pane's corner menu now carries every pane action.** Everything the
+  terminal offered only on right-click is in the button at the pane's top-right
+  corner too: Copy, Paste, the four splits, Reset Terminal, Copy Pane ID and
+  Close Pane, under Hand Off, Command Queue and a new Mute Notifications
+  toggle. Both menus are built from one list, so neither can fall behind the
+  other. Right-click still works for anyone who already knows the gesture.
 
 ### Changed
 
