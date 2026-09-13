@@ -49,6 +49,10 @@ struct ProjectIconPicker: View {
   private static let gridColumns = 8
   private static let gridCellSize: CGFloat = 34
   private static let popoverWidth: CGFloat = 400
+  /// Preview of the current icon at the head of the popover. Deliberately well
+  /// clear of a grid glyph so it reads as "this is what you picked" rather than
+  /// as another option.
+  private static let previewSize: CGFloat = 32
 
   /// A borderless dropdown — glyph, name, disclosure chevron — trailing
   /// aligned, matching the Editor and Worktree pickers elsewhere in this pane
@@ -84,10 +88,13 @@ struct ProjectIconPicker: View {
 
   private var popoverBody: some View {
     VStack(alignment: .leading, spacing: 12) {
-      // The current choice gets named here; the dropdown label is too tight to
-      // carry a custom file's details.
-      HStack(spacing: 8) {
-        ProjectIconView(icon: selection, color: color, isExpanded: true, size: 18)
+      // The current choice, previewed at a size worth looking at — this is the
+      // only place the picked artwork is shown large enough to judge, and the
+      // dropdown label is too tight to carry a custom file's details.
+      HStack(spacing: 10) {
+        ProjectIconView(
+          icon: selection, color: color, isExpanded: true, size: Self.previewSize
+        )
         Text(summary)
           .font(.callout.weight(.medium))
           .lineLimit(1)
