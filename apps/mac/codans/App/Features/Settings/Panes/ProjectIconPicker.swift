@@ -1,7 +1,7 @@
 import AppKit
+import CodansCore
 import SwiftUI
 import UniformTypeIdentifiers
-import CodansCore
 
 /// Settings → Projects → General → Icon.
 ///
@@ -41,42 +41,43 @@ struct ProjectIconPicker: View {
     "star", "flag", "tag", "bookmark",
   ]
 
+  /// One chip, flush right, in the same visual language as the Color row
+  /// directly below: a 24pt hit area with a hover ring, sized to its glyph
+  /// rather than to a fixed width. The earlier bordered pop-up button sat
+  /// left of a `Spacer` while every neighbouring row's control is trailing-
+  /// aligned, and its capsule outweighed the bare swatches underneath it.
   var body: some View {
-    HStack(spacing: 8) {
-      Button {
+    ColorChip(
+      isSelected: isPresented,
+      action: {
         symbolDraft = currentSymbolName
         isPresented = true
-      } label: {
-        HStack(spacing: 6) {
-          ProjectIconView(icon: selection, color: color, isExpanded: true, size: 14)
-          Text(summary)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-          Image(systemName: "chevron.up.chevron.down")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-        .frame(minWidth: 140, alignment: .leading)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(.bordered)
-      .accessibilityLabel("Project icon: \(summary)")
-      .popover(isPresented: $isPresented, arrowEdge: .bottom) { popoverBody }
-      Spacer(minLength: 0)
-    }
+      },
+      accessibilityName: "Icon: \(summary)",
+      content: { ProjectIconView(icon: selection, color: color, isExpanded: true, size: 16) }
+    )
+    // Popover before the expanding frame so it anchors on the 24pt chip
+    // rather than on the full-width row.
+    .popover(isPresented: $isPresented, arrowEdge: .bottom) { popoverBody }
+    .frame(maxWidth: .infinity, alignment: .trailing)
   }
 
   // MARK: - Popover
 
   private var popoverBody: some View {
     VStack(alignment: .leading, spacing: 12) {
+      // The chip itself is only a glyph, so the popover is where the current
+      // choice gets named.
       HStack(spacing: 8) {
+        ProjectIconView(icon: selection, color: color, isExpanded: true, size: 15)
+        Text(summary)
+          .font(.callout.weight(.medium))
+          .lineLimit(1)
+          .truncationMode(.middle)
+        Spacer(minLength: 0)
         Button("Use Folder") { commit(nil) }
           .disabled(selection == nil)
         Button("Choose File…") { chooseFile() }
-        Spacer(minLength: 0)
       }
 
       if let importError {
@@ -141,7 +142,8 @@ struct ProjectIconPicker: View {
     } catch let error as ProjectIconStore.ImportError {
       switch error {
       case .unsupportedFormat(let ext):
-        importError = ext.isEmpty
+        importError =
+          ext.isEmpty
           ? "That file has no recognizable image extension."
           : "Icons can't be made from .\(ext) files."
       }
