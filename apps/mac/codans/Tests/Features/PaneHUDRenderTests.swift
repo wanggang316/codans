@@ -11,12 +11,11 @@ import Testing
 /// the render still has to succeed, which is the assertion.
 @MainActor
 struct PaneHUDRenderTests {
-  private static func makeManager(queued: Int, muted: Bool = false) -> (HierarchyManager, PaneID) {
+  private static func makeManager(queued: Int) -> (HierarchyManager, PaneID) {
     let paneID = PaneID()
     let pane = Pane(
       id: paneID,
       workingDirectory: "/tmp/w",
-      labels: muted ? [InboxLabels.muted] : [],
       agentKind: .claudeCode,
       commandQueue: (0..<queued).map { QueuedCommand(text: "cmd \($0)", timing: .afterCurrentTask) }
     )
@@ -69,17 +68,6 @@ struct PaneHUDRenderTests {
     try Self.write(collapsed, name: "hud-collapsed.png")
     try Self.write(expanded, name: "hud-expanded.png")
     #expect(collapsed.width == 640)
-    #expect(expanded.width == 640)
-  }
-
-  /// The muted variant, where the Mute row carries its checkmark. Same
-  /// assertion as above — the point is the PNG, for checking that the
-  /// checkmark shares the trailing column with the queue count cleanly.
-  @Test
-  func rendersExpandedWithNotificationsMuted() throws {
-    let (manager, paneID) = Self.makeManager(queued: 2, muted: true)
-    let expanded = try #require(Self.render(manager: manager, paneID: paneID, expanded: true))
-    try Self.write(expanded, name: "hud-expanded-muted.png")
     #expect(expanded.width == 640)
   }
 }

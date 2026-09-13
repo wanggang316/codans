@@ -1,14 +1,13 @@
 import CodansCore
-import ComposableArchitecture
 import SwiftUI
 
 /// Per-pane actions menu, anchored to the pane's top-right corner.
 ///
 /// Collapsed it is a single button, with a queue button beneath it while the
 /// pane holds queued commands. Expanded it lists the actions that are a property
-/// of *this* pane. The first three are the pane's own affairs: handing its
-/// agent's task off, opening its command queue, muting its notifications.
-/// Under them sits every action the terminal surface offers — copy, paste,
+/// of *this* pane. The first two are the pane's own affairs: handing its
+/// agent's task off and opening its command queue. Under them sits every
+/// action the terminal surface offers — copy, paste,
 /// the four splits, reset, the pane id, close — rendered from the same
 /// `PaneSurfaceAction.groups` the surface's right-click menu is built from,
 /// so neither menu can quietly offer less than the other. The corner button
@@ -37,12 +36,6 @@ struct PaneHUDView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
   @Environment(\.paneHUDActions) private var actions
-  /// The mute toggle needs no root-store routing — it is a plain catalog
-  /// mutation — so it goes straight to the client the way `PaneContextMenu`
-  /// does, rather than through `PaneHUDActions`. Resolved inside the row
-  /// action only: the live client is installed process-wide by `CodansApp`'s
-  /// `prepareDependencies`, and a render-only host never taps a row.
-  @Dependency(HierarchyClient.self) private var hierarchy
 
   @State private var isExpanded: Bool
   @State private var isButtonHovered = false
@@ -234,11 +227,10 @@ struct PaneHUDView: View {
 
   private func expandedBody(_ model: PaneHUDModel) -> some View {
     VStack(alignment: .leading, spacing: 0) {
-      // The pane's own affairs first: what its agent is doing, what is
-      // queued for it, whether it is allowed to interrupt you.
+      // The pane's own affairs first: what its agent is doing and what is
+      // queued for it.
       handOffButton(model)
       commandQueueButton(model)
-      muteButton(model)
       // Then everything the terminal surface offers, in the same order and
       // grouping as its right-click menu — the two are one list, so an
       // action is never in one menu and missing from the other.
@@ -315,50 +307,6 @@ struct PaneHUDView: View {
     .buttonStyle(.plain)
     .help("Queue commands to send to this pane")
     .accessibilityIdentifier("pane_hud.command_queue")
-  }
-
-  /// Per-pane notification mute — the `InboxLabels.muted` label the
-  /// notification detector checks before raising anything for this pane.
-  ///
-  /// Alone among the rows this one leaves the card open: it is a toggle, and
-  /// the checkmark flipping under the cursor is the only confirmation the
-  /// action gets. `hierarchyManager.catalog` is observed by `resolveModel`,
-  /// so the write lands back here as a re-render without an explicit
-  /// refresh.
-  private func muteButton(_ model: PaneHUDModel) -> some View {
-    Button {
-      hierarchy.setPaneLabel(paneID, InboxLabels.muted, !model.isMuted)
-    } label: {
-      HStack(spacing: 7) {
-        Image(systemName: "bell.slash")
-          .font(.system(size: 11))
-          .frame(width: 14, height: 14, alignment: .center)
-          .accessibilityHidden(true)
-        Text("Mute Notifications")
-        Spacer(minLength: 0)
-        if model.isMuted {
-          // Same trailing slot as the queue count. A checkmark rather than a
-          // switch because the row is a menu item, and because the collapsed
-          // card has no room to explain a control.
-          Image(systemName: "checkmark")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .accessibilityHidden(true)
-        }
-      }
-      .font(.system(size: 12))
-      .frame(minHeight: Self.buttonSize)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .help(
-      model.isMuted
-        ? "This pane raises no notifications"
-        : "Stop this pane from raising notifications"
-    )
-    .accessibilityIdentifier("pane_hud.mute")
-    .accessibilityLabel("Mute notifications")
-    .accessibilityValue(model.isMuted ? "On" : "Off")
   }
 
   /// One row per `PaneSurfaceAction`, driven straight at the pane's surface

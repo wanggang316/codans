@@ -2,9 +2,8 @@ import CodansCore
 import Foundation
 
 /// What the pane HUD has to decide, resolved from the catalog and the live
-/// agent store in one pass: which agent this pane carries, whether hand off
-/// can be offered here, and the toggle state of the pane-scoped actions the
-/// right-click menu also carries. Kept out of the view body so the rules are
+/// agent store in one pass: which agent this pane carries, and whether hand
+/// off can be offered here. Kept out of the view body so the rules are
 /// testable without a view tree and the "why is this unavailable" answers
 /// are spelled once.
 nonisolated struct PaneHUDModel: Equatable, Sendable {
@@ -17,11 +16,6 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
   /// Commands parked on this pane. Shows the queue button under the actions
   /// button and the count on the Command Queue row; zero renders neither.
   let queuedCommandCount: Int
-  /// Per-pane notification mute, i.e. whether the Mute row renders its
-  /// checkmark. Read from the catalog like everything else here, so a mute
-  /// flipped from the right-click menu (or the CLI) is reflected the next
-  /// time the card opens.
-  let isMuted: Bool
 
   var canHandOff: Bool { handOffBlockedReason == nil }
 
@@ -48,8 +42,7 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
     return PaneHUDModel(
       agent: resolvedAgent,
       handOffBlockedReason: handOffBlockedReason(project: project, agent: resolvedAgent),
-      queuedCommandCount: pane?.commandQueue.count ?? 0,
-      isMuted: pane?.isNotificationsMuted ?? false
+      queuedCommandCount: pane?.commandQueue.count ?? 0
     )
   }
 

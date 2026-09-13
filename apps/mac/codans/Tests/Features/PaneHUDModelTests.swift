@@ -6,21 +6,18 @@ import Testing
 
 /// The HUD resolves its decisions from one catalog walk, so these cover what
 /// the view cannot re-derive: whether the pane is still known, which agent it
-/// carries, whether hand off is offered there, and whether its notifications
-/// are muted.
+/// carries, and whether hand off is offered there.
 @MainActor
 struct PaneHUDModelTests {
   private static func catalog(
     remoteHost: RemoteHost? = nil,
     agentKind: AgentKind? = nil,
     commandQueue: [QueuedCommand] = [],
-    labels: Set<String> = [],
     paneID: PaneID
   ) -> Catalog {
     let pane = Pane(
       id: paneID,
       workingDirectory: "/Users/tester/dev/app",
-      labels: labels,
       agentKind: agentKind,
       commandQueue: commandQueue
     )
@@ -76,32 +73,6 @@ struct PaneHUDModelTests {
       agent: nil
     )
     #expect(model?.queuedCommandCount == 0)
-  }
-
-  /// The Mute row's checkmark: absent on a freshly-spawned pane, which
-  /// carries no labels at all.
-  @Test
-  func reportsAPaneWithoutTheMuteLabelAsUnmuted() {
-    let paneID = PaneID()
-    let model = PaneHUDModel.resolve(
-      paneID: paneID,
-      in: Self.catalog(paneID: paneID),
-      agent: nil
-    )
-    #expect(model?.isMuted == false)
-  }
-
-  /// A mute flipped anywhere — this menu, the right-click menu, a restored
-  /// catalog — is the same label, so the HUD reads it back off the pane.
-  @Test
-  func reportsAPaneCarryingTheMuteLabelAsMuted() {
-    let paneID = PaneID()
-    let model = PaneHUDModel.resolve(
-      paneID: paneID,
-      in: Self.catalog(labels: [InboxLabels.muted], paneID: paneID),
-      agent: nil
-    )
-    #expect(model?.isMuted == true)
   }
 
   @Test
