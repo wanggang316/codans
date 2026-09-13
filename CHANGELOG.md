@@ -10,13 +10,6 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **The pane's corner menu now carries every pane action.** Everything the
-  terminal offered only on right-click is in the button at the pane's top-right
-  corner too: Copy, Paste, the four splits, Reset Terminal, Copy Pane ID and
-  Close Pane, under the Hand Off and Command Queue rows that were already
-  there. Both menus are built from one list, so neither can fall behind the
-  other. Right-click still works for anyone who already knows the gesture.
-
 ### Changed
 
 ### Deprecated
@@ -26,6 +19,17 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 ### Security
+
+## [0.6.2] - 2026-09-13
+
+### Added
+
+- **The pane's corner menu now carries every pane action.** Everything the
+  terminal offered only on right-click is in the button at the pane's top-right
+  corner too: Copy, Paste, the four splits, Reset Terminal, Copy Pane ID and
+  Close Pane, under the Hand Off and Command Queue rows that were already
+  there. Both menus are built from one list, so neither can fall behind the
+  other. Right-click still works for anyone who already knows the gesture.
 
 ## [0.6.1] - 2026-09-10
 
