@@ -1,10 +1,15 @@
 import SwiftUI
 
 /// Shared swatch wrapper for inline colour pickers. Centralises the visual
-/// rules — fixed 24pt hit area, 1pt subdued ring on hover, 1.5pt accent ring
+/// rules — fixed 24pt hit area, 1pt subdued ring on hover, 2pt accent ring
 /// when selected — so every chip stays pixel-aligned regardless of its inner
 /// fill (named colour, glyph, conic rainbow, or solid custom hex). Used by the
 /// Project colour swatch row and the command tint swatch row.
+///
+/// The selected ring is the system accent, matching how every other macOS
+/// control marks a selection. It used to be near-black, which read as a
+/// border drawn around the swatch rather than as selection, and collided with
+/// the dark swatches in the palette.
 struct ColorChip<Content: View>: View {
   let isSelected: Bool
   let action: () -> Void
@@ -18,8 +23,8 @@ struct ColorChip<Content: View>: View {
       ZStack {
         if isSelected {
           Circle()
-            .strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
-            .frame(width: 22, height: 22)
+            .strokeBorder(Color.accentColor, lineWidth: 2)
+            .frame(width: 23, height: 23)
         } else if isHovering {
           Circle()
             .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1)
