@@ -1318,8 +1318,13 @@ final class AppState {
       }
     }
     surface.sendInput(prompt)
-    let marker = String(prompt.prefix(19))
-    for _ in 0..<12 {
+    // Match the tail of the prompt, not its head: the active region is only
+    // the live rows, and in a short pane the start of a long prompt has
+    // already scrolled into history by the time the echo finishes. The
+    // cursor sits after the last character, so the tail is always on screen
+    // (an input box that truncates shows the end, too).
+    let marker = String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).suffix(19))
+    for _ in 0..<20 {
       try? await Task.sleep(for: .milliseconds(250))
       guard let screen = surface.readText(.active) else { continue }
       if screen.contains(marker) || screen.contains("Pasted") {

@@ -55,6 +55,15 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- **Hand-off kickoff was never submitted in a short pane.** For a receiver
+  that takes no prompt argument the app types the kickoff and presses Enter
+  once the text shows on screen; it looked for the start of the prompt in
+  the live rows, which a long prompt had already scrolled into history when
+  the pane was only a few rows tall. It now looks for the end of the prompt,
+  which sits at the cursor.
+- **`codans handoff to --json` printed ids as `{"raw": …}` objects** in
+  `launchedPane`; they are plain strings now, like every other verb's
+  output.
 - **Panes opened by the CLI started with the bare app environment.**
   `codans pane new` skipped the project env resolution the sidebar runs,
   so such a pane had no `CODANS_CLI`, no `CODANS_SOCKET_PATH`, none of

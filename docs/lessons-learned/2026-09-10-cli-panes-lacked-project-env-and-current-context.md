@@ -65,3 +65,23 @@ the CLI was only ever tried by hand from a pane the GUI had created.
 - Keep `skills/codans-cli/SKILL.md` in step with `codans --help`; the harness
   exercises the exact flags the skill documents (`-p` only on `send`, no
   `--screen` on `read`, list verbs present).
+
+## Follow-up (2026-09-14): the two hand-off cases that "never came up"
+
+The harness's `handoff to … --split` cases (H11/H12) failed on every run
+while the same steps passed by hand. Two separate causes:
+
+- **Harness:** `codans handoff to --json` printed `launchedPane` ids as
+  `{"raw": "…"}` objects (the wire shape), so `jq -r .launchedPane.paneID`
+  yielded a JSON blob and every readback targeted a pane that did not
+  exist. Fixed by re-shaping the CLI output to plain strings like every
+  other verb; the harness now asserts the type. When a readback fails,
+  print the extracted id before suspecting the product.
+- **Product:** the kickoff typer looked for the *start* of the prompt in the
+  pane's active rows. The harness's receiver pane was a few rows tall
+  (sixth split in the tab), so the 380-character prompt's head had scrolled
+  into history by the time its echo finished; Enter was never sent. It now
+  matches the *end* of the prompt, which sits at the cursor whatever the
+  pane size. Manual tests used a tall pane and never hit it — size the
+  receiver pane down when testing typed kickoffs.
+
