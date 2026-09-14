@@ -3,9 +3,9 @@ import CodansCore
 import SwiftUI
 
 /// The one place a `Project.icon` turns into pixels. Shared by the main
-/// sidebar's Project header row, the manual-reorder sheet, and the Icon
-/// picker's own preview, so every surface agrees on the default glyph, the
-/// sizing, and the tint rule.
+/// sidebar's Project header row, the Settings sidebar, the manual-reorder
+/// sheet, and the Icon picker's own preview, so every surface agrees on the
+/// default glyph, the sizing, and the tint rule.
 ///
 /// Tint rule (HAN-144): SF Symbols always take the Project color; custom
 /// artwork only does so for vector formats, which are single-color line work

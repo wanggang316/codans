@@ -90,21 +90,23 @@ struct SettingsSidebarView: View {
       // currently collapsed (and expand it to reveal the sub-rows). `simultaneousGesture`
       // runs alongside DisclosureGroup's built-in label tap so the expansion toggle still
       // happens — we only add the selection write.
-      // No leading glyph: this list is a settings table of contents, not a
-      // second project browser. The rows above it already carry one glyph
-      // each, and a column of project icons on top of that reads as noise —
-      // the disclosure triangle plus the "Projects" header is enough to place
-      // these rows. Project identity is the main window sidebar's job.
-      Text(project.name)
-        .contentShape(Rectangle())
-        .accessibilityAddTraits(.isButton)
-        .simultaneousGesture(
-          TapGesture().onEnded {
-            if !(expandedProjects[project.id] ?? false) {
-              selection = .projectGeneral(project.id)
-            }
+      // The Project's own icon, not a hardcoded `folder`, so a re-iconed
+      // Project is recognizable here too and the row lines up with the
+      // glyph-bearing global rows above it.
+      Label {
+        Text(project.name)
+      } icon: {
+        ProjectIconView(icon: project.icon, color: project.color)
+      }
+      .contentShape(Rectangle())
+      .accessibilityAddTraits(.isButton)
+      .simultaneousGesture(
+        TapGesture().onEnded {
+          if !(expandedProjects[project.id] ?? false) {
+            selection = .projectGeneral(project.id)
           }
-        )
+        }
+      )
     }
   }
 
