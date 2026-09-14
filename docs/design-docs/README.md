@@ -15,7 +15,7 @@ Use [_template.md](_template.md) as a starting point.
 
 ## Index
 
-<!-- One entry per doc, alphabetical: [Title](file) — one-line summary. Each doc carries a `**状态：**` field. -->
+<!-- One entry per doc, alphabetical: [Title](file) — one-line summary. Feature availability belongs in each doc; see ../README.md for metadata conventions. -->
 
 - [Agent Profiles 与 Handoff](agent-handoff.md) — 命名 agent 启动预设（Settings → Agents / toolbar / palette / `codans agent`）+ agent 到 agent 的任务交接：worktree 内 `.codans/handoff/` 工件、archive-first 迁移、源 agent 自写 briefing 的 `codans handoff`、应用内 Hand Off 面板
 - [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 派生运行态（idle/working/blocked/finished），独立于通知系统
@@ -32,7 +32,7 @@ Use [_template.md](_template.md) as a starting point.
 - [Master Terminal](master-terminal.md) — 系统级热键唤起的 slide-in NSPanel，承载跑 `claude remote-control` 的 Ghostty surface，app 级、在 Catalog/RPC 之外
 - [Notifications](notifications.md) — 运行时事件 → 持久 inbox + 四级上卷徽标 + 状态栏铃铛；策略闸 `NotificationCoordinator` 统一门控设置与授权
 - [Project Tags + Single-Window](project-tags.md) — 单窗口强制（已上线）+ Project `Tag` 分类模型（已实现，但过滤 UI 当前隐藏）
-- [Remote SSH Projects](remote-ssh-projects.md) — `.server` 项目：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；worktree 创建/删除待接线
+- [Remote SSH Projects](remote-ssh-projects.md) — `.server` 项目：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；已接线远程 worktree 创建/删除与连接编辑
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、宽容解码、v1/v2→v3 迁移、四正交通知开关）
 - [Update Channel & Release Pipeline](updates-channel-pipeline.md) — Sparkle 更新通道：单一 feed + 客户端 channel 过滤；含 Developer-ID 签名/公证/CI 发布管线不变量
 - [Workspace](workspace.md) — 跨多仓库的 Project：根目录即侧栏上的 workspace 行、子仓库 checkout 为真正的 Worktree 行；`.codans/workspace.json` 定成员、git 定活体事实；reconcile 在 git 探测前短路；创建 / 添加 / 移除经 `WorkspaceClient`（GUI 与 `codans workspace` 共用，记账回滚）；PR 按成员仓库取数、workspace 行聚合
