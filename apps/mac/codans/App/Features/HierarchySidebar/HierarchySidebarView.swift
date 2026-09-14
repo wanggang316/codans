@@ -1872,9 +1872,9 @@ private struct ProjectHeaderRow: View {
       // the worktree row icon. Click target / disclosure semantics are
       // unchanged: the parent Button still owns the tap.
       //
-      // The icon occupies the slot the disclosure chevron used to hold
-      // (HAN-144), and does not change with expansion — the row carries the
-      // Project's identity, not its disclosure state.
+      // The icon occupies the slot the disclosure chevron used to hold, and
+      // does not change with expansion — the row carries the Project's
+      // identity, not its disclosure state.
       Group {
         if hasUnread {
           Image(systemName: "bell.fill")

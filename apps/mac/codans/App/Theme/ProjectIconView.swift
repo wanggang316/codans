@@ -7,7 +7,7 @@ import SwiftUI
 /// sheet, and the Icon picker's own preview, so every surface agrees on the
 /// default glyph, the sizing, and the tint rule.
 ///
-/// Tint rule (HAN-144): SF Symbols always take the Project color; custom
+/// Tint rule: SF Symbols always take the Project color; custom
 /// artwork only does so for vector formats, which are single-color line work
 /// that template rendering repaints cleanly. Raster artwork carries its own
 /// palette and is drawn as-is — flattening a multi-color PNG to a silhouette

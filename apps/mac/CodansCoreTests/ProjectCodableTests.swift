@@ -75,8 +75,8 @@ struct ProjectCodableTests {
   @Test
   func iconlessProjectEncodesNoIconKey() throws {
     // Same contract every optional Project field carries: a Project the user
-    // never re-iconed must round-trip byte-identical, so pre-HAN-144 catalogs
-    // gain no key and need no migration.
+    // never re-iconed must round-trip byte-identical, so catalogs written
+    // before the icon field gain no key and need no migration.
     let project = Project(name: "repo", rootPath: "/tmp/repo", gitRoot: "/tmp/repo")
     let data = try JSONEncoder().encode(project)
     let object = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
