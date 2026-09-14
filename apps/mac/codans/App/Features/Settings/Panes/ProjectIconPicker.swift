@@ -26,9 +26,7 @@ struct ProjectIconPicker: View {
   @State private var importError: String?
 
   /// Project-flavoured grid: repository / stack / domain glyphs rather than
-  /// the run-and-build vocabulary `SFSymbolPicker.presets` carries. Sized to
-  /// a whole number of rows at the column count the popover uses, so the grid
-  /// never ends in a ragged half-row.
+  /// the run-and-build vocabulary `SFSymbolPicker.presets` carries.
   static let symbols: [String] = [
     "folder", "folder.fill", "shippingbox", "shippingbox.fill",
     "cube", "cube.fill", "square.stack.3d.up", "building.2",
@@ -41,14 +39,9 @@ struct ProjectIconPicker: View {
     "paintbrush", "camera", "music.note", "gamecontroller",
     "cart", "creditcard", "chart.bar", "heart",
     "star", "flag", "tag", "bookmark",
-    "leaf", "cloud", "lock", "puzzlepiece",
   ]
 
-  /// Grid geometry. `width` has to clear `columns` cells plus their gutters
-  /// and the picker's own inset, or the last column clips.
-  private static let gridColumns = 8
-  private static let gridCellSize: CGFloat = 34
-  private static let popoverWidth: CGFloat = 400
+  private static let popoverWidth: CGFloat = 380
   /// Preview of the current icon at the head of the popover. Deliberately well
   /// clear of a grid glyph so it reads as "this is what you picked" rather than
   /// as another option.
@@ -105,11 +98,7 @@ struct ProjectIconPicker: View {
       SFSymbolPicker(
         selection: symbolBinding,
         highlight: color?.swiftUIColor ?? .accentColor,
-        symbols: Self.symbols,
-        cellSize: Self.gridCellSize,
-        glyphPointSize: 20,
-        columns: Self.gridColumns,
-        maxGridHeight: 260
+        symbols: Self.symbols
       )
 
       Text(

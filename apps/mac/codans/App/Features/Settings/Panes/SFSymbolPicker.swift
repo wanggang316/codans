@@ -20,18 +20,6 @@ struct SFSymbolPicker: View {
   /// whose vocabulary is different (Project icons) pass their own so the
   /// text field, the SF Symbols shortcut, and the layout stay shared.
   var symbols: [String] = SFSymbolPicker.presets
-  /// Edge of each grid cell. Widening it gives the glyphs more room without
-  /// touching their point size.
-  var cellSize: CGFloat = 24
-  /// Point size of each glyph. `nil` inherits the ambient font, which is what
-  /// the command and agent pickers have always rendered at — only callers that
-  /// want larger artwork (Project icons) set it.
-  var glyphPointSize: CGFloat?
-  /// Grid columns. Paired with `cellSize` so a caller widening the cells can
-  /// keep the grid inside its popover.
-  var columns: Int = 10
-  /// Ceiling on the scrolling grid's height.
-  var maxGridHeight: CGFloat = 124
 
   /// Presets, ordered roughly run → build → status → file-transfer so the
   /// grid reads in bands rather than as an alphabetical dump.
@@ -57,7 +45,7 @@ struct SFSymbolPicker: View {
 
       ScrollView {
         LazyVGrid(
-          columns: Array(repeating: GridItem(.fixed(cellSize), spacing: 8), count: columns),
+          columns: Array(repeating: GridItem(.fixed(24), spacing: 8), count: 10),
           spacing: 8
         ) {
           ForEach(symbols, id: \.self) { name in
@@ -65,9 +53,8 @@ struct SFSymbolPicker: View {
               selection = name
             } label: {
               Image(systemName: name)
-                .font(glyphPointSize.map { Font.system(size: $0) })
                 .foregroundStyle(name == selection ? highlight : .primary)
-                .frame(width: cellSize, height: cellSize)
+                .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
             }
             .buttonStyle(.plain)
@@ -76,7 +63,7 @@ struct SFSymbolPicker: View {
         }
         .padding(12)
       }
-      .frame(maxHeight: maxGridHeight)
+      .frame(maxHeight: 124)
     }
   }
 
