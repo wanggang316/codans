@@ -19,7 +19,7 @@ struct ProjectShow: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
@@ -55,7 +55,7 @@ struct WorktreeShow: AsyncParsableCommand {
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
@@ -92,7 +92,7 @@ struct TabShow: AsyncParsableCommand {
   var tab: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(tab, kind: .tab, client: client)
@@ -133,7 +133,7 @@ struct PaneShow: AsyncParsableCommand {
   var pane: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)

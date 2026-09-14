@@ -1,11 +1,18 @@
-import Foundation
 import CodansIPC
+import Foundation
 
 /// Shared output rendering — every `codans` subcommand funnels through here
 /// so text-mode and JSON-mode stay byte-stable across commands.
 public enum Renderer {
+  /// The command being rendered, set by the command runner for the
+  /// duration of a command body. JSON output is wrapped in an
+  /// `OutputEnvelope` stamped with it; without one the schema version
+  /// names the command `unknown`, which the contract test treats as a bug.
+  @TaskLocal public static var context: RenderContext?
+
   /// Render a value in the chosen mode and write to stdout (or an
-  /// injected sink for tests).
+  /// injected sink for tests). JSON mode emits the envelope with the value
+  /// as `data`.
   public static func emit<T: Encodable & CustomStringConvertible>(
     _ value: T,
     mode: RenderMode,
@@ -13,10 +20,42 @@ public enum Renderer {
   ) throws {
     switch mode {
     case .json:
-      sink(try jsonString(value))
+      sink(try jsonString(Envelope(schemaVersion: currentSchemaVersion, data: value, error: nil)))
     case .text:
       sink(value.description)
     }
+  }
+
+  /// Render a failure. JSON mode prints the envelope with `error` on
+  /// stdout so a consumer parses one shape for both outcomes; text mode
+  /// prints the `error:` / `hint:` lines callers write to stderr.
+  public static func emitError(
+    _ error: CLIErrorPayload,
+    mode: RenderMode,
+    sink: (String) -> Void = { print($0) }
+  ) throws {
+    switch mode {
+    case .json:
+      sink(try jsonString(Envelope<Never>(schemaVersion: currentSchemaVersion, data: nil, error: error)))
+    case .text:
+      var rendered = "error: \(error.message)"
+      if let hint = error.hint {
+        rendered += "\n  hint: \(hint)"
+      }
+      sink(rendered)
+    }
+  }
+
+  public static var currentSchemaVersion: String {
+    OutputEnvelope.schemaVersion(command: context?.command ?? "unknown")
+  }
+
+  /// `Never` is `Encodable`-less; a failure envelope carries no `data`, so
+  /// the generic parameter only has to be nameable.
+  private struct Envelope<Data: Encodable>: Encodable {
+    let schemaVersion: String
+    let data: Data?
+    let error: CLIErrorPayload?
   }
 
   /// Render a simple object (no typed struct). Convenience for one-off
@@ -37,7 +76,7 @@ public enum Renderer {
     switch mode {
     case .json:
       let json = JSONValue.object(object.mapValues(Self.jsonValue(for:)))
-      sink(try jsonString(json))
+      sink(try jsonString(Envelope(schemaVersion: currentSchemaVersion, data: json, error: nil)))
     case .text:
       if let textRender {
         sink(textRender(object))

@@ -239,6 +239,20 @@ let project = Project(
           name: "Verify git-wt",
           basedOnDependencyAnalysis: false
         ),
+        // Published agent skills (`skills/<id>/SKILL.md` at the repo root)
+        // ride along under Resources/skills so `codans skill install` can
+        // link the copy that matches this app.
+        .post(
+          script: "\"${SRCROOT}/scripts/embed-skills.sh\"",
+          name: "Embed skills",
+          inputPaths: [
+            "$(SRCROOT)/../../skills/codans-cli/SKILL.md",
+          ],
+          outputPaths: [
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/skills/codans-cli/SKILL.md",
+          ],
+          basedOnDependencyAnalysis: false
+        ),
         .post(
           script: "\"${SRCROOT}/scripts/embed-git-wt.sh\"",
           name: "Embed git-wt",

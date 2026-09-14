@@ -92,7 +92,7 @@ struct HandoffTo: AsyncParsableCommand {
   var split: AgentLaunch.Split?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       if tab, split != nil {
         throw CLIError(code: .userError, message: "--tab and --split are mutually exclusive")
       }
@@ -141,7 +141,7 @@ struct HandoffSave: AsyncParsableCommand {
   var note: String?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }

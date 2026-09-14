@@ -20,7 +20,7 @@ struct TreeCommand: AsyncParsableCommand {
   var project: String?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let tree = try await HierarchyTree.load(client: client, timeout: globals.rpcTimeout)

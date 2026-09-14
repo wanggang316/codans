@@ -13,7 +13,7 @@ struct ProjectList: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       struct Result: Codable { let projects: [Project] }
@@ -59,7 +59,7 @@ struct ProjectRename: AsyncParsableCommand {
   var name: String
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
@@ -115,7 +115,7 @@ struct ProjectCommandsList: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
@@ -164,7 +164,7 @@ struct ProjectCommandsAdd: AsyncParsableCommand {
   var focus: Bool = true
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       // D17: an empty command is useless — reject before dialing the server.
       guard !command.isEmpty else {
         throw CLIError(
@@ -226,7 +226,7 @@ struct ProjectCommandsEdit: AsyncParsableCommand {
   var focus: Bool?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       // D22: validate id format client-side so a malformed id is a usage error
       // (exit 1), distinct from a well-formed-but-unknown id (exit 2).
       guard let scriptID = UUID(uuidString: id) else {
@@ -298,7 +298,7 @@ struct ProjectCommandsRemove: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       // D22: a malformed id is a usage error (exit 1), not a not-found (exit 2).
       guard let scriptID = UUID(uuidString: id) else {
         throw CLIError(
@@ -342,7 +342,7 @@ struct ProjectAdd: AsyncParsableCommand {
   var name: String?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let resolvedPath = PathResolver.absolute(path)
       let displayName = name ?? URL(fileURLWithPath: resolvedPath).lastPathComponent
       let client = CLISession.connect(globals: globals)
@@ -388,7 +388,7 @@ struct ProjectRemove: AsyncParsableCommand {
   var project: String
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)

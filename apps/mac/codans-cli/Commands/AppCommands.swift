@@ -14,7 +14,7 @@ struct StatusCommand: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       struct Status: Codable {
@@ -48,18 +48,15 @@ struct LaunchCommand: AsyncParsableCommand {
     abstract: "Start Codans and wait for its command socket."
   )
 
-  @Flag(name: .long, help: "Emit JSON on stdout instead of human-readable text.")
-  var json: Bool = false
+  @OptionGroup var globals: GlobalOptions
   @Option(name: .long, help: "Seconds to wait for the socket after launching.")
   var wait: Double = 10
 
-  private var renderMode: RenderMode {
-    json ? .json : .text(useColor: true)
-  }
+  private var renderMode: RenderMode { globals.renderMode }
 
   func run() async throws {
-    await CommandRunner.run {
-      let path = try SocketDiscovery.resolve()
+    await CommandRunner.run(self, globals: globals) {
+      let path = try globals.resolveSocketPath()
       let probe = SocketDiscovery.probe(path: path)
       if probe.isReachable {
         try Renderer.emitObject(

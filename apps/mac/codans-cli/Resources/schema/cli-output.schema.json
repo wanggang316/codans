@@ -1,0 +1,2066 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codans.dev/schemas/cli-output.v1.json",
+  "title": "codans CLI --json output",
+  "description": "Every `codans <verb> --json` prints one object: `schemaVersion` (`codans.cli.<command path>.v1`, the same on every build channel) plus exactly one of `data` (success) or `error` (failure). Commands not bound below still use the envelope; their `data` is any object. `codans help-json` is the one exception and prints its tree bare. Nullable properties may be omitted entirely (the CLI omits nil fields).",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^codans\\.cli\\.[a-z][a-z0-9.-]*\\.v1$"
+    },
+    "data": {
+      "type": "object"
+    },
+    "error": {
+      "$ref": "#/$defs/error"
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "required": [
+        "data"
+      ],
+      "not": {
+        "required": [
+          "error"
+        ]
+      }
+    },
+    {
+      "required": [
+        "error"
+      ],
+      "not": {
+        "required": [
+          "data"
+        ]
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tree.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tree"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.status.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/status"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.doctor.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/doctor"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.project.show.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/projectShow"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.worktree.show.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/worktreeShow"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.show.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabShow"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.show.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneShow"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.list.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneList"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.new.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneCreated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.split.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneSplit"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.send.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneSend"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.capture.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneCapture"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.read.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneRead"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.info.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/paneInfo"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.focus.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.close.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.reset.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.resize.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.switch.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.close.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.worktree.switch.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.project.rm.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/idMessage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.agent.list.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/agentList"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.agent.launch.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/agentLaunch"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.agent.status.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/agentStatus"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.agent.wait.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/agentWait"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.worktree.new.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/worktreeNew"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.project.add.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/projectAdd"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.project.rename.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/rename"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.worktree.rename.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/rename"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.rename.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/rename"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.worktree.prune.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/worktreePrune"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.broadcast.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/broadcast"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.handoff.to.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/handoff"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.handoff.save.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/handoff"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.skill.list.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/skillList"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.skill.install.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/skillChange"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.skill.uninstall.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/skillChange"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.skill.path.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/skillPath"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "INVALID_ARGUMENT",
+            "NOT_FOUND",
+            "CONFLICT",
+            "UNSUPPORTED",
+            "OVERLOADED",
+            "VERSION_MISMATCH",
+            "APP_NOT_RUNNING",
+            "REQUEST_TIMEOUT",
+            "LAUNCH_TIMEOUT",
+            "SOCKET_PERMISSION_DENIED",
+            "SOCKET_UNUSABLE",
+            "WRONG_CHANNEL",
+            "INTERNAL",
+            "NO_CURRENT_CONTEXT",
+            "EMPTY_INPUT",
+            "WAIT_TIMEOUT",
+            "CAPTURE_UNSUPPORTED"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "details": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "idMessage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "treePane": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workingDirectory": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "workingDirectory",
+        "labels"
+      ],
+      "additionalProperties": false
+    },
+    "treeTab": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cachedDisplayTitle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "panes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/treePane"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "panes"
+      ],
+      "additionalProperties": false
+    },
+    "treeWorktree": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedTabID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/treeTab"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "path",
+        "tabs"
+      ],
+      "additionalProperties": false
+    },
+    "treeProject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rootPath": {
+          "type": "string"
+        },
+        "gitRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedWorktreeID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktrees": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/treeWorktree"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "rootPath",
+        "worktrees"
+      ],
+      "additionalProperties": false
+    },
+    "tree": {
+      "type": "object",
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/treeProject"
+          }
+        }
+      },
+      "required": [
+        "projects"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string"
+        },
+        "uptimeSeconds": {
+          "type": "number"
+        },
+        "connectedClients": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "server",
+        "uptimeSeconds",
+        "connectedClients"
+      ],
+      "additionalProperties": false
+    },
+    "doctor": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "client": {
+          "type": "string"
+        },
+        "clientVersion": {
+          "type": "string"
+        },
+        "socketStatus": {
+          "type": "string"
+        },
+        "socketPath": {
+          "type": "string"
+        },
+        "socketFromEnvironment": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "channel",
+        "client",
+        "socketStatus"
+      ],
+      "additionalProperties": true
+    },
+    "projectShow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "canonicalName": {
+          "type": "string"
+        },
+        "rootPath": {
+          "type": "string"
+        },
+        "gitRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remoteHost": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isSelected": {
+          "type": "boolean"
+        },
+        "selectedWorktreeID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktreeCount": {
+          "type": "integer"
+        },
+        "archivedWorktreeCount": {
+          "type": "integer"
+        },
+        "tagIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "canonicalName",
+        "rootPath",
+        "isSelected",
+        "worktreeCount",
+        "archivedWorktreeCount",
+        "tagIDs"
+      ],
+      "additionalProperties": false
+    },
+    "worktreeShow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "projectID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isArchived": {
+          "type": "boolean"
+        },
+        "isPinned": {
+          "type": "boolean"
+        },
+        "isSelected": {
+          "type": "boolean"
+        },
+        "selectedTabID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tabCount": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "projectID",
+        "projectName",
+        "name",
+        "path",
+        "isArchived",
+        "isPinned",
+        "isSelected",
+        "tabCount"
+      ],
+      "additionalProperties": false
+    },
+    "tabShow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "worktreeID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isSelected": {
+          "type": "boolean"
+        },
+        "focusedPaneID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paneIDs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "projectID",
+        "worktreeID",
+        "isSelected",
+        "paneIDs"
+      ],
+      "additionalProperties": false
+    },
+    "paneShow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "worktreeID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workingDirectory": {
+          "type": "string"
+        },
+        "initialCommand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agentSessionID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isLive": {
+          "type": "boolean"
+        },
+        "isFocused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "projectID",
+        "worktreeID",
+        "tabID",
+        "workingDirectory",
+        "labels",
+        "isLive",
+        "isFocused"
+      ],
+      "additionalProperties": false
+    },
+    "paneList": {
+      "type": "object",
+      "properties": {
+        "panes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/uuid"
+              },
+              "workingDirectory": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "workingDirectory",
+              "labels"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "panes"
+      ],
+      "additionalProperties": false
+    },
+    "paneCreated": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "paneSplit": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "anchor": {
+          "$ref": "#/$defs/uuid"
+        },
+        "direction": {
+          "enum": [
+            "right",
+            "left",
+            "up",
+            "down"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "anchor",
+        "direction"
+      ],
+      "additionalProperties": false
+    },
+    "paneSend": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "waitedMs": {
+          "type": "integer"
+        },
+        "busyObserved": {
+          "type": "boolean"
+        },
+        "output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "paneID",
+        "bytes"
+      ],
+      "additionalProperties": false
+    },
+    "paneCapture": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "scope": {
+          "enum": [
+            "viewport",
+            "screen"
+          ]
+        },
+        "lines": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "stabilized": {
+          "type": "boolean"
+        },
+        "waitedMs": {
+          "type": "integer"
+        },
+        "samples": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "paneID",
+        "scope",
+        "lines",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "paneRead": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "format": {
+          "type": "string"
+        },
+        "range": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "paneID",
+        "format",
+        "range",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "paneInfo": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "shellPid": {
+          "type": "integer"
+        },
+        "pwd": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "modes": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "paneID",
+        "shellPid",
+        "pwd"
+      ],
+      "additionalProperties": false
+    },
+    "agentList": {
+      "type": "object",
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "agentName": {
+                "type": "string"
+              },
+              "isEnabled": {
+                "type": "boolean"
+              },
+              "isInstalled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "supportsPrompt": {
+                "type": "boolean"
+              },
+              "command": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "agent",
+              "agentName",
+              "isEnabled",
+              "supportsPrompt",
+              "command"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "profiles"
+      ],
+      "additionalProperties": false
+    },
+    "agentLaunch": {
+      "type": "object",
+      "properties": {
+        "profileID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "profileName": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "tabID": {
+          "type": "string"
+        },
+        "paneID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profileID",
+        "profileName",
+        "agent",
+        "command",
+        "tabID",
+        "paneID"
+      ],
+      "additionalProperties": false
+    },
+    "agentStatusEntry": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agent": {
+          "type": "string"
+        },
+        "agentName": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "idle",
+            "working",
+            "blocked",
+            "finished"
+          ]
+        },
+        "since": {
+          "type": "string"
+        },
+        "sessionID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "worktreeID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "worktreeName": {
+          "type": "string"
+        },
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "tabTitle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isFocused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paneID",
+        "agent",
+        "agentName",
+        "state",
+        "since",
+        "projectID",
+        "projectName",
+        "worktreeID",
+        "worktreeName",
+        "tabID",
+        "isFocused"
+      ],
+      "additionalProperties": false
+    },
+    "agentStatus": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/agentStatusEntry"
+          }
+        }
+      },
+      "required": [
+        "count",
+        "agents"
+      ],
+      "additionalProperties": false
+    },
+    "agentWait": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "until": {
+          "type": "string"
+        },
+        "satisfied": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previousState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "waitedMs": {
+          "type": "integer"
+        },
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "paneID",
+        "until",
+        "satisfied",
+        "waitedMs"
+      ],
+      "additionalProperties": false
+    },
+    "worktreeNew": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "created": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "path",
+        "created"
+      ],
+      "additionalProperties": false
+    },
+    "projectAdd": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "gitRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "rename": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "worktreePrune": {
+      "type": "object",
+      "properties": {
+        "projectID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "pruned": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "projectID",
+        "pruned"
+      ],
+      "additionalProperties": false
+    },
+    "broadcast": {
+      "type": "object",
+      "properties": {
+        "delivered": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "delivered",
+        "bytes"
+      ],
+      "additionalProperties": false
+    },
+    "handoff": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "enum": [
+            "save",
+            "to"
+          ]
+        },
+        "artifactPath": {
+          "type": "string"
+        },
+        "outgoingAgent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receiver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "changedFileCount": {
+          "type": "integer"
+        },
+        "archivedPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionExcerptPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "briefing": {
+          "type": "string"
+        },
+        "hasBriefing": {
+          "type": "boolean"
+        },
+        "launchedPane": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "projectID": {
+              "$ref": "#/$defs/uuid"
+            },
+            "worktreeID": {
+              "$ref": "#/$defs/uuid"
+            },
+            "tabID": {
+              "$ref": "#/$defs/uuid"
+            },
+            "paneID": {
+              "$ref": "#/$defs/uuid"
+            },
+            "profileName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "projectID",
+            "worktreeID",
+            "tabID",
+            "paneID",
+            "profileName"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "artifactPath",
+        "changedFileCount",
+        "briefing",
+        "hasBriefing"
+      ],
+      "additionalProperties": false
+    },
+    "skillList": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "targets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "target": {
+                      "type": "string"
+                    },
+                    "directory": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "installed",
+                        "missing",
+                        "conflict",
+                        "other-version"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "target",
+                    "directory",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "targets"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "skills"
+      ],
+      "additionalProperties": false
+    },
+    "skillChange": {
+      "type": "object",
+      "properties": {
+        "installed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "installed",
+        "removed",
+        "skipped"
+      ],
+      "additionalProperties": true
+    },
+    "skillPath": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,8 +1,8 @@
 import ArgumentParser
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Foundation
 
 struct PaneList: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -19,7 +19,7 @@ struct PaneList: AsyncParsableCommand {
   var tab: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
@@ -81,7 +81,7 @@ struct PaneNew: AsyncParsableCommand {
   var label: [String] = []
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
@@ -123,7 +123,9 @@ struct PaneSplit: AsyncParsableCommand {
     discussion: """
       The new pane appears beside the anchor pane in the given direction,
       like the keyboard split. Its working directory defaults to the anchor's
-      live directory, not $PWD; pass --cwd to choose another.
+      live directory, not $PWD; pass --cwd to choose another. The one
+      positional is the anchor; a command goes in --command so the two
+      never compete for the same slot.
       """
   )
 
@@ -134,8 +136,8 @@ struct PaneSplit: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Anchor pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
-  @Argument(parsing: .remaining, help: "Initial command. Omit for the default shell.")
-  var command: [String] = []
+  @Option(name: .long, help: "Initial command for the new pane. Omit for the default shell.")
+  var command: String?
   @Option(name: .long, help: "Side of the anchor the new pane takes: right (default), left, up, down.")
   var direction: Direction = .right
   @Option(name: .long, help: "Working directory. Defaults to the anchor pane's directory.")
@@ -144,7 +146,7 @@ struct PaneSplit: AsyncParsableCommand {
   var label: [String] = []
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let paneUUID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
@@ -170,7 +172,7 @@ struct PaneSplit: AsyncParsableCommand {
           projectID: path.projectID,
           direction: direction.rawValue,
           workingDirectory: cwd.map { PathResolver.absolute($0) },
-          initialCommand: command.isEmpty ? nil : command.joined(separator: " "),
+          initialCommand: command.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 },
           labels: label
         )
       )
@@ -205,7 +207,7 @@ struct PaneResize: AsyncParsableCommand {
   var amount: Double = 40
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       guard amount > 0 else {
         throw CLIError(code: .userError, message: "--amount must be positive")
       }
@@ -251,6 +253,7 @@ struct PaneFocus: AsyncParsableCommand {
 
   func run() async throws {
     await PaneLocatorFlow.run(
+      self,
       globals: globals,
       args: args,
       method: .hierarchyFocusPane,
@@ -278,7 +281,7 @@ struct PaneClose: AsyncParsableCommand {
   @OptionGroup var args: PaneLocatorArgs
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let paneUUID = try await AliasResolver.resolve(args.pane, kind: .pane, client: client)
@@ -314,7 +317,8 @@ struct PaneClose: AsyncParsableCommand {
       } else {
         throw CLIError(
           code: .notFound,
-          message: "no pane found for \(paneUUID.uuidString)"
+          message: "no pane found for \(paneUUID.uuidString)",
+          details: ["kind": "pane", "id": paneUUID.uuidString]
         )
       }
     }
@@ -337,7 +341,7 @@ struct PaneReset: AsyncParsableCommand {
   var pane: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
@@ -371,7 +375,7 @@ struct PaneLabel: AsyncParsableCommand {
   var replace: Bool = false
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       guard !labels.isEmpty else {
         throw CLIError(code: .userError, message: "specify at least one label")
       }
@@ -406,12 +410,13 @@ struct PaneLocatorBody: Codable, Sendable {
 
 enum PaneLocatorFlow {
   static func run(
+    _ command: some ParsableCommand,
     globals: GlobalOptions,
     args: PaneLocatorArgs,
     method: IPC.Method,
     verbLabel: String
   ) async {
-    await CommandRunner.run {
+    await CommandRunner.run(command, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let paneUUID = try await AliasResolver.resolve(args.pane, kind: .pane, client: client)
@@ -472,7 +477,9 @@ enum PaneLocatorFlow {
     let paneID = PaneID(raw: paneUUID)
     let tree = try await HierarchyTree.load(client: client)
     guard let path = tree.locatePane(paneID) else {
-      throw CLIError(code: .notFound, message: "pane \(paneUUID.uuidString) not found")
+      throw CLIError(
+        code: .notFound, message: "pane \(paneUUID.uuidString) not found",
+        details: ["kind": "pane", "id": paneUUID.uuidString])
     }
     return path
   }
@@ -497,7 +504,7 @@ struct PaneInfo: AsyncParsableCommand {
   var pane: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
@@ -573,7 +580,7 @@ struct PaneRead: AsyncParsableCommand {
   var range: Range = .all
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       if let tail, tail <= 0 {
         throw CLIError(code: .userError, message: "--tail must be a positive integer")
       }

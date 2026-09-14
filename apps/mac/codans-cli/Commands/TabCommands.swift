@@ -17,7 +17,7 @@ struct TabList: AsyncParsableCommand {
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
@@ -71,7 +71,7 @@ struct TabRename: AsyncParsableCommand {
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
@@ -111,7 +111,7 @@ struct TabNew: AsyncParsableCommand {
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
@@ -146,7 +146,7 @@ struct TabSwitch: AsyncParsableCommand {
   var tab: String
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(tab, kind: .tab, client: client)
@@ -173,7 +173,7 @@ struct TabClose: AsyncParsableCommand {
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)

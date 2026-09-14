@@ -15,7 +15,7 @@ struct WorktreeList: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
@@ -63,7 +63,7 @@ struct WorktreeRename: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
@@ -100,7 +100,7 @@ struct WorktreePrune: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
@@ -155,7 +155,7 @@ struct WorktreeNew: AsyncParsableCommand {
   var reuseExisting: Bool = false
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
@@ -210,7 +210,7 @@ struct WorktreeSwitch: AsyncParsableCommand {
   var worktree: String
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
@@ -255,7 +255,7 @@ struct WorktreeRemove: AsyncParsableCommand {
   var delete: Bool = false
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
 
