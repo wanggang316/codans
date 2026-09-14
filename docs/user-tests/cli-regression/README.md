@@ -3,9 +3,13 @@
 `harness.sh` drives an isolated Debug instance of Codans through every
 `codans` verb and asserts exit codes (and, where it matters, output): app
 diagnostics, `tree`, project / worktree / tab / pane lifecycle (including
-`show`, `rename`, `worktree prune`, `pane split`, `pane resize`), terminal
-I/O (`send`, `send-key`, `read`, `capture`, `broadcast`), in-pane `current`
-resolution, agent profiles, and hand-off. It is the runtime check for the
+`show`, `rename`, `worktree prune`, `pane split`, `pane resize`, path
+targets), terminal I/O (`send` with `--wait` / `--capture`, `send-key`,
+`read`, `capture`, `broadcast`), in-pane `current` resolution, agent
+profiles, `agent status` / `agent wait`, hand-off, and `skill`
+install / uninstall against a scratch `$HOME`. A final case validates
+every `--json` output of the run against the CLI output schema
+(`validate-json.py`, dependency-free). It is the runtime check for the
 `codans` CLI and the published skill; unit tests cover the handlers in
 isolation and cannot see drift between the two.
 
@@ -42,7 +46,8 @@ Per-case stdout / stderr are under `logs/<id>.out` / `.err`.
 
 Parser-rejected command lines (unknown option, missing argument) exit 64;
 user errors 1; not-found 2; conflict 3; unsupported 4; app unreachable 10;
-request timeout 11.
+request / wait timeout 11. `--json` output is an envelope: read fields
+under `.data` (the `jf` helper does), and expect `.error.code` on failures.
 
 ## Traps
 

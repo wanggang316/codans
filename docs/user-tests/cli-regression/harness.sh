@@ -49,7 +49,7 @@ t() {
   fi
 }
 # grab a JSON field from a test's stdout
-jf() { jq -r "$2" "$LOGS/$1.out"; }
+jf() { jq -r ".data | $2" "$LOGS/$1.out"; }
 # note a finding (not a pass/fail)
 note() { printf 'NOTE\t%s\n' "$*" >>"$RESULTS"; echo "  note: $*"; }
 
@@ -100,11 +100,11 @@ launch_app() {
   APP_PID=$!
   echo "launched test app pid=$APP_PID"
   for _ in $(seq 1 100); do
-    if cli doctor --json 2>/dev/null | jq -e '.socketStatus == "ok"' >/dev/null 2>&1; then break; fi
+    if cli doctor --json 2>/dev/null | jq -e '.data | .socketStatus == "ok"' >/dev/null 2>&1; then break; fi
     sleep 0.2
   done
   cli status
-  local up; up=$(cli status --json | jq -r .uptimeSeconds)
+  local up; up=$(cli status --json | jq -r '.data | .uptimeSeconds')
   awk -v u="$up" 'BEGIN{ if (u+0 > 30) { print "uptime too high: " u; exit 1 } }' || { echo "REFUSING: socket answered by an older instance"; exit 1; }
   # sanity: the socket is held by our pid
   lsof -p "$APP_PID" 2>/dev/null | grep -q "$SOCK" || echo "warning: could not confirm socket ownership via lsof"
@@ -133,18 +133,35 @@ phase_app() {
   t A01 0 "status" -- cli status
   t A02 0 "status --json" -- cli status --json
   t A03 0 "doctor" -- cli doctor
-  t A04 0 "doctor --json has socketStatus ok" -- bash -c "$CLI doctor --json | jq -e '.socketStatus==\"ok\" and .client==\"codans-dev\"'"
+  t A04 0 "doctor --json has socketStatus ok" -- bash -c "$CLI doctor --json | jq -e '.data | .socketStatus==\"ok\" and .client==\"codans-dev\"'"
   t A05 0 "--version" -- cli --version
   t A06 0 "--help" -- cli --help
   t A07 0 "launch while running (idempotent)" -- cli launch --wait 2
   t A08 10 "status --socket /nonexistent -> 10" -- cli status --socket /tmp/codans-nope-$$.sock
-  t A09 0 "doctor --socket nonexistent reports socket-missing" -- bash -c "$CLI doctor --socket /tmp/codans-nope-$$.sock --json | jq -e '.socketStatus==\"socket-missing\"'"
+  t A09 0 "doctor --socket nonexistent reports socket-missing" -- bash -c "$CLI doctor --socket /tmp/codans-nope-$$.sock --json | jq -e '.data | .socketStatus==\"socket-missing\"'"
   t A10 14 "status --socket <regular file> -> 14" -- cli status --socket "$RESULTS"
   t A11 0 "help-json prints the subcommand tree" -- bash -c "$CLI help-json | jq -e '.subcommands|map(.name)|index(\"open\")'"
   t A12 0 "open --help" -- cli open --help
   t A16 "*" "open --in no-such-editor (strict, must fail, no side effect)" -- bash -c "$CLI open --in no-such-editor '$RUN'; test \$? -ne 0"
   t A13 64 "unknown subcommand -> 64 (EX_USAGE)" -- cli frobnicate
   t A15 0 "completion script zsh" -- cli --generate-completion-script zsh
+  t A17 0 "status --json is an envelope with schemaVersion + data" -- bash -c "$CLI status --json | jq -e '.schemaVersion==\"codans.cli.status.v1\" and (.data.server|length>0) and (.error==null)'"
+  t A18 0 "--json error is an envelope on stdout with a stable code (exit 2)" -- bash -c "out=\$($CLI pane focus \$(uuidgen) --json); rc=\$?; test \$rc -eq 2 && jq -e '.error.code==\"NOT_FOUND\" and .error.details.kind==\"pane\" and (.data==null)' <<<\"\$out\""
+  t A18b 0 "--json NO_CURRENT_CONTEXT outside a pane" -- bash -c "$CLI tree --project current --json | jq -e '.error.code==\"NO_CURRENT_CONTEXT\"'"
+  echo "== skill"
+  mkdir -p "$RUN/home/.claude" "$RUN/home/.codex"
+  t K01 0 "skill path codans-cli points into the bundle" -- bash -c "p=\$($CLI skill path codans-cli) && test -f \"\$p/SKILL.md\""
+  t K02 0 "skill list --json lists codans-cli with detected targets" -- bash -c "HOME='$RUN/home' $CLI skill list --json | jq -e '.data.skills|map(select(.id==\"codans-cli\"))|.[0].targets|map(.target)==[\"claude\",\"codex\"] and all(.status==\"missing\")'"
+  t K03 0 "skill install --target claude links the skill" -- bash -c "HOME='$RUN/home' $CLI skill install codans-cli --target claude --json | jq -e '.data.installed|length==1' && test -L '$RUN/home/.claude/skills/codans-cli' && test -f '$RUN/home/.claude/skills/codans-cli/SKILL.md'"
+  t K03b 0 "skill list reports installed / missing per target" -- bash -c "HOME='$RUN/home' $CLI skill list --json | jq -e '[.data.skills[]|select(.id==\"codans-cli\")|.targets[]|.status]==[\"installed\",\"missing\"]'"
+  t K04 0 "skill install again is a no-op" -- bash -c "HOME='$RUN/home' $CLI skill install codans-cli --target claude --json | jq -e '.data.installed==[] and (.data.skipped|length==1)'"
+  t K05 2 "skill install unknown id -> 2" -- env HOME="$RUN/home" "$CLI" skill install no-such-skill --target claude
+  mkdir -p "$RUN/home/.codex/skills/codans-cli"
+  t K06 3 "skill install over a foreign directory -> 3 conflict" -- env HOME="$RUN/home" "$CLI" skill install codans-cli --target codex
+  t K06b 0 "skill install --force replaces it" -- bash -c "HOME='$RUN/home' $CLI skill install codans-cli --target codex --force >/dev/null && test -L '$RUN/home/.codex/skills/codans-cli'"
+  t K07 0 "skill uninstall removes the links" -- bash -c "HOME='$RUN/home' $CLI skill uninstall codans-cli --json | jq -e '.data.removed|length==2' && ! test -e '$RUN/home/.claude/skills/codans-cli'"
+  mkdir -p "$RUN/proj/.git" "$RUN/proj/.claude"
+  t K08 0 "skill install --scope project links under the repo" -- bash -c "cd '$RUN/proj' && HOME='$RUN/home' $CLI skill install --scope project --target claude >/dev/null && test -L '$RUN/proj/.claude/skills/codans-cli'"
   rm -f /tmp/codans-dead-$$.sock; (nc -lU /tmp/codans-dead-$$.sock >/dev/null 2>&1 &); sleep 0.3
   t A14 11 "--timeout against a socket that never answers -> 11" -- cli status --socket /tmp/codans-dead-$$.sock --timeout 0.3
   pkill -f "nc -lU /tmp/codans-dead-$$.sock"; rm -f /tmp/codans-dead-$$.sock
@@ -159,7 +176,7 @@ phase_project() {
   t P04 0 "tree --project <id>" -- cli tree --project "$PID"
   t P05 2 "tree --project <random uuid> -> 2" -- cli tree --project "$(uuidgen)"
   t P06 0 "tree --project <name> resolves by name" -- cli tree --project FIXTURE
-  t P06b 0 "project add detected the git root" -- bash -c "jq -e '.gitRoot==\"$FIX\"' '$LOGS/P01.out'"
+  t P06b 0 "project add detected the git root" -- bash -c "jq -e '.data | .gitRoot==\"$FIX\"' '$LOGS/P01.out'"
   t P06c 0 "tree shows the real branch, not (no branch)" -- bash -c "$CLI tree --project $PID | grep -q '\[feat/header-redesign\]'"
   t P07 2 "tree --project current outside a pane -> 2 with hint" -- cli tree --project current
   t P08 3 "project add same path again -> 3 conflict" -- cli project add "$FIX"
@@ -171,20 +188,20 @@ phase_project() {
   NPID=$(jf P12 .id 2>/dev/null || true)
   [[ -n "$NPID" && "$NPID" != null ]] && cli project rm "$NPID" >/dev/null 2>&1
   t P13 0 "project list" -- cli project list
-  t P14 0 "project list --json has 1 project" -- bash -c "$CLI project list --json | jq -e '.projects|length==1'"
+  t P14 0 "project list --json has 1 project" -- bash -c "$CLI project list --json | jq -e '.data | .projects|length==1'"
   t P15 2 "tree --project unknown-name -> 2" -- cli tree --project no-such-project
   t P16 0 "project show <id>" -- cli project show "$PID"
-  t P16b 0 "project show --json carries gitRoot + worktreeCount" -- bash -c "$CLI project show $PID --json | jq -e '.gitRoot==\"$FIX\" and .worktreeCount>=1 and (.id|type==\"string\")'"
+  t P16b 0 "project show --json carries gitRoot + worktreeCount" -- bash -c "$CLI project show $PID --json | jq -e '.data | .gitRoot==\"$FIX\" and .worktreeCount>=1 and (.id|type==\"string\")'"
   t P16c 2 "project show random uuid -> 2" -- cli project show "$(uuidgen)"
   t P17 0 "project rename <id> Renamed" -- cli project rename "$PID" Renamed --json
   t P17b 0 "tree --project Renamed resolves the new name" -- cli tree --project Renamed
-  t P17c 0 "project rename '' clears the override" -- bash -c "$CLI project rename $PID '' --json | jq -e '.name==\"fixture\"'"
+  t P17c 0 "project rename '' clears the override" -- bash -c "$CLI project rename $PID '' --json | jq -e '.data | .name==\"fixture\"'"
   echo "== project commands"
   t C01 0 "commands list (empty)" -- cli project commands list --project "$PID"
   t C02 0 "commands add" -- cli project commands add --project "$PID" --command 'echo hello' --name Hello --json
   CID=$(jf C02 .id)
   t C03 1 "commands add empty command -> 1" -- cli project commands add --project "$PID" --command ''
-  t C04 0 "commands list shows one" -- bash -c "$CLI project commands list --project $PID --json | jq -e '.scripts|length==1'"
+  t C04 0 "commands list shows one" -- bash -c "$CLI project commands list --project $PID --json | jq -e '.data | .scripts|length==1'"
   t C05 0 "commands edit --kind test" -- cli project commands edit "$CID" --project "$PID" --kind test --json
   t C06 1 "commands edit nothing -> 1" -- cli project commands edit "$CID" --project "$PID"
   t C07 1 "commands edit bad id -> 1" -- cli project commands edit not-a-uuid --project "$PID" --name x
@@ -203,24 +220,24 @@ phase_worktree() {
   t W02 0 "default path lands under scratch wts" -- bash -c "[[ '${WT1PATH#/private}' == '${WTS#/private}'/* ]]"
   t W02b 0 "worktree new materialised the directory" -- test -d "$WT1PATH"
   t W02c 0 "git knows the worktree" -- bash -c "git -C '$FIX' worktree list | grep -q 'bugfix/menu'"
-  t W02d 0 "--json reports created=true" -- bash -c "jq -e '.created==true' '$LOGS/W01.out'"
+  t W02d 0 "--json reports created=true" -- bash -c "jq -e '.data | .created==true' '$LOGS/W01.out'"
   t W03 0 "worktree new main --path explicit --name" -- cli worktree new main --project "$PID" --path "$RUN/wt-main" --name MainWT --json
   WT2=$(jf W03 .id)
   t W04 3 "worktree new same branch/path again -> 3 conflict" -- cli worktree new bugfix/menu --project "$PID"
-  t W05 0 "worktree new --reuse-existing returns same id" -- bash -c "$CLI worktree new bugfix/menu --project $PID --reuse-existing --name reuse2 --json | jq -e '.id==\"$WT1\"'"
+  t W05 0 "worktree new --reuse-existing returns same id" -- bash -c "$CLI worktree new bugfix/menu --project $PID --reuse-existing --name reuse2 --json | jq -e '.data | .id==\"$WT1\"'"
   t W06 0 "worktree switch <id>" -- cli worktree switch "$WT1"
   t W07 2 "worktree switch random uuid -> 2" -- cli worktree switch "$(uuidgen)"
   t W08 2 "worktree switch current outside pane -> 2" -- cli worktree switch current
   t W08b 0 "worktree switch by branch name" -- cli worktree switch main
   t W08c 0 "worktree switch by display name" -- cli worktree switch MainWT
-  t W09 0 "tree shows 3 worktrees" -- bash -c "$CLI tree --project $PID --json | jq -e '.projects[0].worktrees|length==3'"
+  t W09 0 "tree shows 3 worktrees" -- bash -c "$CLI tree --project $PID --json | jq -e '.data | .projects[0].worktrees|length==3'"
   t W10 1 "worktree rm both id and --by-path -> 1" -- cli worktree rm "$WT2" --by-path "$RUN/wt-main" --project "$PID"
   t W11 1 "worktree rm no args -> 1" -- cli worktree rm --project "$PID"
   t W12 2 "worktree rm --by-path nonexistent -> 2" -- cli worktree rm --by-path "$RUN/nope" --project "$PID"
   t W13 0 "worktree rm --by-path --delete (git worktree removed)" -- cli worktree rm --by-path "$RUN/wt-main" --project "$PID" --delete --json
   t W13a 1 "wt-main directory is gone" -- test -d "$RUN/wt-main"
   mkdir -p "$RUN/adopt-me"
-  t W13b 0 "worktree new --path adopts an existing dir (created=false)" -- bash -c "$CLI worktree new adopt --project $PID --path '$RUN/adopt-me' --json | jq -e '.created==false'"
+  t W13b 0 "worktree new --path adopts an existing dir (created=false)" -- bash -c "$CLI worktree new adopt --project $PID --path '$RUN/adopt-me' --json | jq -e '.data | .created==false'"
   t W13c 0 "worktree rm --by-path (register-only entry)" -- cli worktree rm --by-path "$RUN/adopt-me" --project "$PID"
   # `main` itself was deleted with wt-main above (branch cleanup per Settings); base on the remote ref.
   t W14 0 "worktree new brand-new branch --base origin/main" -- cli worktree new test/brand-new --base origin/main --project "$PID" --json
@@ -230,20 +247,24 @@ phase_worktree() {
   t W16b 3 "worktree new same branch again -> 3" -- cli worktree new test/brand-new --project "$PID"
   t W16c 1 "worktree new bad --base -> 1" -- cli worktree new test/bad-base --base no/such/ref --project "$PID"
   t W17 0 "worktree list --project <id>" -- cli worktree list --project "$PID"
-  t W17b 0 "worktree list --json has 3" -- bash -c "$CLI worktree list --project $PID --json | jq -e '.worktrees|length==3'"
+  t W17b 0 "worktree list --json has 3" -- bash -c "$CLI worktree list --project $PID --json | jq -e '.data | .worktrees|length==3'"
   t W18 0 "worktree rm <id> --delete without --project (inferred)" -- cli worktree rm "$WT3" --delete
   t W19 1 "dir gone after rm --delete" -- test -d "$WT3PATH"
   t W19b 128 "branch gone after rm --delete (git exits 128)" -- git -C "$FIX" rev-parse --verify test/brand-new
-  t W20 0 "worktree show <id> --json has branch + projectName" -- bash -c "$CLI worktree show $WT1 --json | jq -e '.branch==\"bugfix/menu\" and .projectName==\"fixture\" and (.projectID|type==\"string\")'"
+  t W20 0 "worktree show <id> --json has branch + projectName" -- bash -c "$CLI worktree show $WT1 --json | jq -e '.data | .branch==\"bugfix/menu\" and .projectName==\"fixture\" and (.projectID|type==\"string\")'"
   t W20b 0 "worktree show by branch (text)" -- cli worktree show bugfix/menu
   t W21 0 "worktree rename <id> Menu (project inferred)" -- cli worktree rename "$WT1" Menu --json
   t W21b 0 "worktree switch by the new name" -- cli worktree switch Menu
-  t W21c 0 "worktree show reports the new name, same path" -- bash -c "$CLI worktree show $WT1 --json | jq -e '.name==\"Menu\" and .path==\"$WT1PATH\"'"
+  t W21c 0 "worktree show reports the new name, same path" -- bash -c "$CLI worktree show $WT1 --json | jq -e '.data | .name==\"Menu\" and .path==\"$WT1PATH\"'"
   t W22 1 "worktree rename blank -> 1" -- cli worktree rename "$WT1" '   '
   git -C "$FIX" worktree add -q "$RUN/stale" -b test/stale 2>/dev/null; rm -rf "$RUN/stale"
-  t W23 0 "worktree prune reports the stale registration" -- bash -c "$CLI worktree prune --project $PID --json | jq -e '.pruned==1'"
+  t W23 0 "worktree prune reports the stale registration" -- bash -c "$CLI worktree prune --project $PID --json | jq -e '.data | .pruned==1'"
   t W23b 0 "git no longer lists the stale worktree" -- bash -c "! git -C '$FIX' worktree list | grep -q '$RUN/stale'"
   t W24 2 "worktree prune --project current outside pane -> 2" -- cli worktree prune
+  t W25 0 "worktree switch by absolute path" -- cli worktree switch "$WT1PATH"
+  t W25b 0 "worktree show by a subdirectory path" -- bash -c "mkdir -p '$WT1PATH/sub' && $CLI worktree show '$WT1PATH/sub' --json | jq -e '.data.id==\"$WT1\"'"
+  t W25c 0 "worktree show by a relative path (resolved against \$PWD)" -- bash -c "cd '$WT1PATH/..' && $CLI worktree show ./menu --json | jq -e '.data.id==\"$WT1\"'"
+  t W25d 2 "worktree show unregistered path -> 2" -- cli worktree show /tmp
 }
 
 phase_tab_pane() {
@@ -263,19 +284,19 @@ phase_tab_pane() {
   t T08b 0 "tab new --worktree <branch name> (project inferred)" -- cli tab new byname --worktree bugfix/menu --json
   cli tab close "$(jf T08b .id)" >/dev/null
   t T09 0 "tab list" -- cli tab list --project "$PID" --worktree "$WT1"
-  t T09b 0 "tab list --worktree <id> only (project inferred)" -- bash -c "$CLI tab list --worktree $WT1 --json | jq -e '.tabs|length>=2'"
+  t T09b 0 "tab list --worktree <id> only (project inferred)" -- bash -c "$CLI tab list --worktree $WT1 --json | jq -e '.data | .tabs|length>=2'"
   t T10 0 "tab close <id> with explicit locator" -- cli tab close "$TAB2" --project "$PID" --worktree "$WT1"
   t T11 2 "tab close again -> 2" -- cli tab close "$TAB2" --project "$PID" --worktree "$WT1"
   t T12 0 "tab close <id> without --project/--worktree (inferred)" -- cli tab close "$TAB1"
   t T13 0 "tab new again for the pane phase" -- cli tab new "dev server" --worktree "$WT1" --json
   TAB1=$(jf T13 .id)
   t T14 0 "tab switch by title" -- cli tab switch "dev server"
-  t T15 0 "tab show <id> --json has handle + title + worktree" -- bash -c "$CLI tab show $TAB1 --json | jq -e '(.handle|startswith(\"t\")) and .title==\"dev server\" and .worktreeID==\"$WT1\"'"
+  t T15 0 "tab show <id> --json has handle + title + worktree" -- bash -c "$CLI tab show $TAB1 --json | jq -e '.data | (.handle|startswith(\"t\")) and .title==\"dev server\" and .worktreeID==\"$WT1\"'"
   t T15b 0 "tab show by title (text)" -- cli tab show "dev server"
   t T16 0 "tab rename <id> renamed-tab (containers inferred)" -- cli tab rename "$TAB1" renamed-tab --json
   t T16b 0 "tab switch by the new title" -- cli tab switch renamed-tab
-  t T17 0 "tab rename <id> (no name) clears the title" -- bash -c "$CLI tab rename $TAB1 --json | jq -e '.name==null'"
-  t T17b 0 "tab show after clear has name null" -- bash -c "$CLI tab show $TAB1 --json | jq -e '.name==null'"
+  t T17 0 "tab rename <id> (no name) clears the title" -- bash -c "$CLI tab rename $TAB1 --json | jq -e '.data | .name==null'"
+  t T17b 0 "tab show after clear has name null" -- bash -c "$CLI tab show $TAB1 --json | jq -e '.data | .name==null'"
   cli tab rename "$TAB1" "dev server" >/dev/null
 
   echo "== pane"
@@ -289,8 +310,8 @@ phase_tab_pane() {
   t N04 0 "pane new --tab by handle (containers inferred)" -- cli pane new --tab "$TAB1H" --cwd "$FIX" --json
   PANE4=$(jf N04 .id)
   t N05 0 "pane list" -- cli pane list --project "$PID" --worktree "$WT1" --tab "$TAB1"
-  t N05b 0 "pane list --tab <handle> only has 4 panes" -- bash -c "$CLI pane list --tab $TAB1H --json | jq -e '.panes|length==4'"
-  t N05c 0 "tree --json carries handles" -- bash -c "$CLI tree --project $PID --json | jq -e '[.projects[0].worktrees[].tabs[].panes[].handle]|all(startswith(\"p\"))'"
+  t N05b 0 "pane list --tab <handle> only has 4 panes" -- bash -c "$CLI pane list --tab $TAB1H --json | jq -e '.data | .panes|length==4'"
+  t N05c 0 "tree --json carries handles" -- bash -c "$CLI tree --project $PID --json | jq -e '.data | [.projects[0].worktrees[].tabs[].panes[].handle]|all(startswith(\"p\"))'"
   t N06 0 "tree shows labels @agent,@worker + p<n>" -- bash -c "$CLI tree --project $PID | grep -E 'Pane p[0-9]+: .*@agent,@worker'"
   PH=$($CLI tree --project "$PID" | grep -E "Pane p[0-9]+: .*$PANE1" | sed -E 's/.*Pane (p[0-9]+):.*/\1/'); echo "  pane1 handle: $PH"
   sleep 2
@@ -301,20 +322,20 @@ phase_tab_pane() {
   t N11 2 "pane focus @nolabel -> 2" -- cli pane focus @nolabel
   t N12 0 "pane label add" -- cli pane label "$PANE1" alpha beta
   t N13 0 "pane label --replace" -- cli pane label "$PANE1" solo --replace
-  t N14 0 "labels after replace == [solo]" -- bash -c "$CLI tree --project $PID --json | jq -e '[.projects[0].worktrees[].tabs[].panes[]|select(.id==\"$PANE1\")|.labels]==[[\"solo\"]]'"
+  t N14 0 "labels after replace == [solo]" -- bash -c "$CLI tree --project $PID --json | jq -e '.data | [.projects[0].worktrees[].tabs[].panes[]|select(.id==\"$PANE1\")|.labels]==[[\"solo\"]]'"
   t N15 64 "pane label no labels -> 64" -- cli pane label "$PANE1"
   t N16 0 "pane label second pane 'agent' (dup label)" -- cli pane label "$PANE3" agent
   t N17 3 "pane focus @agent ambiguous -> 3" -- cli pane focus @agent
   cli pane label "$PANE3" x --replace >/dev/null
   t N18 0 "pane info" -- cli pane info "$PANE1"
-  t N19 0 "pane info --json has shellPid+pwd" -- bash -c "$CLI pane info $PANE1 --json | jq -e '.shellPid>0 and (.pwd|length>0)'"
+  t N19 0 "pane info --json has shellPid+pwd" -- bash -c "$CLI pane info $PANE1 --json | jq -e '.data | .shellPid>0 and (.pwd|length>0)'"
   t N20 0 "pane reset" -- cli pane reset "$PANE1"
   t N21 "*" "pane info on closed/unknown pane" -- cli pane info "$(uuidgen)"
   t N22 0 "pane split <id> --direction down" -- cli pane split "$PANE1" --direction down --json
   SPLITPANE=$(jf N22 .id); echo "  split pane=$SPLITPANE"
   # zsh discards input queued before it finishes starting, so re-send until the shell answers.
   t N22b 0 "split pane runs a shell with the project env" -- bash -c "for n in 1 2 3 4 5; do sleep 2; $CLI pane send $SPLITPANE 'echo MARK-SPLIT-\$CODANS_CLI' >/dev/null; for i in \$(seq 1 15); do $CLI pane capture $SPLITPANE --scope screen | grep -q 'MARK-SPLIT-.*/codans-dev' && exit 0; sleep 0.2; done; done; exit 1"
-  t N23 0 "pane show <split> --json sits in tab1 with the anchor's cwd" -- bash -c "$CLI pane show $SPLITPANE --json | jq -e '.tabID==\"$TAB1\" and .worktreeID==\"$WT1\" and (.handle|startswith(\"p\")) and .isLive==true' && cwd=\$($CLI pane show $SPLITPANE --json | jq -r .workingDirectory) && [[ \"\${cwd#/private}\" == \"${FIX#/private}\" ]]"
+  t N23 0 "pane show <split> --json sits in tab1 with the anchor's cwd" -- bash -c "$CLI pane show $SPLITPANE --json | jq -e '.data | .tabID==\"$TAB1\" and .worktreeID==\"$WT1\" and (.handle|startswith(\"p\")) and .isLive==true' && cwd=\$($CLI pane show $SPLITPANE --json | jq -r '.data | .workingDirectory') && [[ \"\${cwd#/private}\" == \"${FIX#/private}\" ]]"
   t N24 0 "pane show <id> text" -- cli pane show "$PANE1"
   t N24b 0 "pane show by handle" -- cli pane show "$PH"
   t N25 0 "pane resize <id> down" -- cli pane resize "$PANE1" down
@@ -323,6 +344,10 @@ phase_tab_pane() {
   t N27 1 "pane resize --amount 0 -> 1" -- cli pane resize "$PANE1" right --amount 0
   t N28 2 "pane split random uuid -> 2" -- cli pane split "$(uuidgen)"
   t N29 0 "pane close the split pane" -- cli pane close "$SPLITPANE"
+  t N30 0 "pane split --command runs it" -- cli pane split "$PANE1" --command 'echo SPLIT-CMD-MARK' --json
+  SPLITPANE2=$(jf N30 .id)
+  t N30b 0 "split command output appears" -- wait_text "$SPLITPANE2" SPLIT-CMD-MARK 15
+  cli pane close "$SPLITPANE2" >/dev/null 2>&1
 }
 
 phase_terminal() {
@@ -350,7 +375,7 @@ phase_terminal() {
   t S19 0 "pane send --raw with 0x and spaces" -- cli pane send "$PANE1" --raw '0x15 0x0d'
   t S20 0 "pane send --focus" -- cli pane send --focus "$PANE1" 'echo MARK-S20'
   # ctrl_d ends the shell, so the key sweep gets a throwaway pane.
-  KEYPANE=$($CLI pane new --tab "$TAB1" --cwd "$FIX" --json | jq -r .id); sleep 1
+  KEYPANE=$($CLI pane new --tab "$TAB1" --cwd "$FIX" --json | jq -r '.data | .id'); sleep 1
   t S21 0 "send-key all named keys (throwaway pane)" -- bash -c "for k in escape up down left right tab enter backspace delete home end pgup pgdn f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 ctrl_c ctrl_l ctrl_z ctrl_d; do $CLI pane send-key $KEYPANE \$k >/dev/null || exit 1; done"
   t S22 0 "send-key ctrl-c dashed form" -- cli pane send-key "$PANE1" ctrl-c
   t S23 0 "send-key -p" -- cli pane send-key -p "$PANE1" ctrl_l
@@ -365,23 +390,29 @@ phase_terminal() {
   t S29 1 "pane read --tail 0 -> 1" -- cli pane read "$PANE1" --tail 0
   t S30 0 "pane read --raw has ESC" -- bash -c "$CLI pane read $PANE1 --raw | grep -q \$'\\x1b'"
   t S31 0 "pane read --range visible" -- cli pane read "$PANE1" --range visible
-  t S32 0 "pane read --json" -- bash -c "$CLI pane read $PANE1 --json | jq -e '.format==\"plain\"'"
+  t S32 0 "pane send --wait returns once the command finished" -- bash -c "$CLI pane send $PANE1 'sleep 2; echo MARK-WAIT' --wait --json | jq -e '.data.completed==true and .data.waitedMs>=1500'"
+  t S33 0 "pane send --capture returns the command's output" -- bash -c "$CLI pane send $PANE1 'echo CAP-A; echo CAP-B' --capture --json | jq -e '.data.output|contains(\"CAP-B\")'"
+  t S33b 0 "pane send --capture text mode prints the output only" -- bash -c "$CLI pane send $PANE1 'echo CAP-TEXT-ONLY' --capture | grep -qx 'CAP-TEXT-ONLY'"
+  t S34 11 "pane send --wait past --wait-timeout -> 11 WAIT_TIMEOUT" -- bash -c "out=\$($CLI pane send $PANE1 'sleep 4' --wait --wait-timeout 1 --json); rc=\$?; jq -e '.error.code==\"WAIT_TIMEOUT\"' <<<\"\$out\" >/dev/null && exit \$rc; exit 99"
+  sleep 4
+  t S35 1 "pane send --raw with --wait -> 1" -- cli pane send "$PANE1" --raw 1b --wait
+  t S32 0 "pane read --json" -- bash -c "$CLI pane read $PANE1 --json | jq -e '.data | .format==\"plain\"'"
   t S33 64 "pane read --screen is not an option -> 64" -- cli pane read "$PANE1" --screen
   t S34 0 "pane capture" -- cli pane capture "$PANE1"
-  t S35 0 "pane capture --lines 5 -> 5 lines" -- bash -c "$CLI pane capture $PANE1 --lines 5 --json | jq -e '.lines==5'"
+  t S35 0 "pane capture --lines 5 -> 5 lines" -- bash -c "$CLI pane capture $PANE1 --lines 5 --json | jq -e '.data | .lines==5'"
   t S36 0 "pane capture --scope screen" -- cli pane capture "$PANE1" --scope screen
   t S37 1 "pane capture --lines 0 -> 1" -- cli pane capture "$PANE1" --lines 0
-  t S38 0 "pane capture --wait-stable --json" -- bash -c "$CLI pane capture $PANE1 --wait-stable --json | jq -e '.stabilized==true'"
+  t S38 0 "pane capture --wait-stable --json" -- bash -c "$CLI pane capture $PANE1 --wait-stable --json | jq -e '.data | .stabilized==true'"
   t S39 1 "pane capture --wait-stable --timeout-ms >= --timeout -> 1" -- cli pane capture "$PANE1" --wait-stable --timeout-ms 20000
   t S40 64 "pane capture -p is not an option -> 64" -- cli pane capture -p "$PANE1"
   t S41 0 "pane capture --scope bogus -> usage(1)?" -- bash -c "$CLI pane capture $PANE1 --scope bogus; test \$? -ne 0"
   echo "== broadcast"
   t B01 0 "broadcast --tab" -- cli broadcast --tab "$TAB1" 'echo MARK-B01'
   t B02 0 "readback in pane1" -- wait_text "$PANE1" MARK-B01
-  t B03 0 "broadcast --tab delivered==4" -- bash -c "$CLI broadcast --tab $TAB1 --json 'echo MARK-B03' | jq -e '.delivered==4'"
+  t B03 0 "broadcast --tab delivered==4" -- bash -c "$CLI broadcast --tab $TAB1 --json 'echo MARK-B03' | jq -e '.data | .delivered==4'"
   t B04 0 "broadcast --worktree" -- cli broadcast --worktree "$WT1" 'echo MARK-B04'
   t B05 0 "broadcast --label" -- cli broadcast --label agent 'echo MARK-B05'
-  t B06 0 "broadcast --label unknown delivered==0" -- bash -c "$CLI broadcast --label nolabel --json 'x' | jq -e '.delivered==0'"
+  t B06 0 "broadcast --label unknown delivered==0" -- bash -c "$CLI broadcast --label nolabel --json 'x' | jq -e '.data | .delivered==0'"
   t B07 1 "broadcast no scope -> 1" -- cli broadcast 'x'
   t B08 1 "broadcast two scopes -> 1" -- cli broadcast --tab "$TAB1" --label a 'x'
   t B09 0 "broadcast --stdin --no-enter" -- bash -c "printf 'echo MARK-B09' | $CLI broadcast --tab $TAB1 --stdin --no-enter"
@@ -434,14 +465,14 @@ phase_incontext() {
   ctx X20 'env | grep -E "^CODANS_" | cut -d= -f1 | sort | tr "\n" " "' >/dev/null
   note "pane env CODANS_* keys: $(cat /tmp/codans-ctx-X20.out)"
   # cleanup ctx worktree if created
-  local ctxwt; ctxwt=$(jq -r .id "$LOGS/X10.out" 2>/dev/null || true)
+  local ctxwt; ctxwt=$(jq -r '.data | .id' "$LOGS/X10.out" 2>/dev/null || true)
   [[ -n "$ctxwt" && "$ctxwt" != null ]] && cli worktree rm "$ctxwt" --project "$PID" >/dev/null 2>&1
 }
 
 phase_agent_handoff() {
   echo "== agent"
   t G01 0 "agent list" -- cli agent list
-  t G02 0 "agent list --json has 3 profiles" -- bash -c "$CLI agent list --json | jq -e '.profiles|length==3'"
+  t G02 0 "agent list --json has 3 profiles" -- bash -c "$CLI agent list --json | jq -e '.data | .profiles|length==3'"
   t G03 1 "agent launch no args -> 1" -- cli agent launch --project "$PID" --worktree "$WT1"
   t G04 1 "agent launch --tab --split -> 1" -- cli agent launch 'Fake Amp' --tab --split right --project "$PID" --worktree "$WT1"
   t G05 2 "agent launch unknown profile -> 2" -- cli agent launch 'No Such Profile' --project "$PID" --worktree "$WT1"
@@ -457,6 +488,15 @@ phase_agent_handoff() {
   t G13 2 "agent launch --worktree current outside pane -> 2" -- cli agent launch --agent claude --project "$PID"
   t G14 0 "agent launch --worktree <branch> --background" -- cli agent launch 'Fake Amp' --background --worktree bugfix/menu --json
   AGPANE3=$(jf G14 .paneID)
+  echo "== agent status / wait"
+  t G15 0 "agent status" -- cli agent status
+  t G15b 0 "agent status --json lists the launched fake amp pane (classifier may take a while)" -- bash -c "for i in \$(seq 1 150); do $CLI agent status --json | jq -e '.data.agents[]|select(.paneID==\"$AGPANE\" and .agent==\"amp\")' >/dev/null 2>&1 && exit 0; sleep 0.2; done; $CLI agent status --json; exit 1"
+  t G15c 0 "agent status entries carry handle + containers" -- bash -c "$CLI agent status --json | jq -e '.data.count>=1 and (.data.agents[0].handle|startswith(\"p\")) and (.data.agents[0].worktreeID|length==36)'"
+  t G16 0 "agent wait --until exit on a plain shell pane resolves at once" -- bash -c "$CLI agent wait $PANE1 --until exit --wait-timeout 5 --json | jq -e '.data.satisfied==true and .data.waitedMs<1000'"
+  t G17 11 "agent wait --until working on a plain shell pane -> 11 WAIT_TIMEOUT" -- bash -c "out=\$($CLI agent wait $PANE1 --until working --wait-timeout 1 --json); rc=\$?; jq -e '.error.code==\"WAIT_TIMEOUT\" and .error.details.until==\"working\"' <<<\"\$out\" >/dev/null && exit \$rc; exit 99"
+  t G18 2 "agent wait random uuid -> 2" -- cli agent wait "$(uuidgen)" --until idle --wait-timeout 1
+  t G19 1 "agent wait --timeout 0 -> 1" -- cli agent wait "$PANE1" --until idle --wait-timeout 0
+  t G20 64 "agent wait --until bogus -> 64" -- cli agent wait "$PANE1" --until bogus
   echo "== handoff"
   t H01 1 "handoff to bogus agent -> 1" -- cli handoff to bogus --pane "$PANE1" --no-brief
   t H02 1 "handoff to amp neither brief nor no-brief -> 1" -- cli handoff to amp --pane "$PANE1"
@@ -478,7 +518,7 @@ EOF"
   # A split receiver's surface comes up with its tab; make the source pane's tab the visible one first.
   cli pane focus "$PANE1" >/dev/null; sleep 1
   t H10 0 "handoff to amp --profile 'Fake Amp' --split down --no-brief (launches fake)" -- cli handoff to amp --pane "$PANE1" --profile 'Fake Amp' --split down --no-brief --json
-  t H10b 0 "handoff --json prints launchedPane ids as strings" -- bash -c "jq -e '.launchedPane.paneID|type==\"string\"' '$LOGS/H10.out'"
+  t H10b 0 "handoff --json prints launchedPane ids as strings" -- bash -c "jq -e '.data | .launchedPane.paneID|type==\"string\"' '$LOGS/H10.out'"
   HOPANE=$(jf H10 .launchedPane.paneID)
   t H11 0 "receiver fake amp came up" -- wait_text "$HOPANE" 'FAKE-AGENT amp' 15
   if [[ -n "$HOPANE" && "$HOPANE" != null ]]; then
@@ -504,13 +544,13 @@ phase_close() {
   t Z05 0 "pane close by handle" -- cli pane close "$PH"
   t Z06 0 "tab close <id> explicit" -- cli tab close "$TAB1" --project "$PID" --worktree "$WT1"
   # any leftovers
-  for p in $($CLI tree --project "$PID" --json | jq -r '.projects[].worktrees[].tabs[].panes[].id'); do cli pane close "$p" >/dev/null 2>&1; done
+  for p in $($CLI tree --project "$PID" --json | jq -r '.data | .projects[].worktrees[].tabs[].panes[].id'); do cli pane close "$p" >/dev/null 2>&1; done
   t Z07 0 "worktree rm wt1 --delete (project inferred)" -- cli worktree rm "$WT1" --delete
   t Z08 0 "project rm by name" -- cli project rm fixture
-  t Z09 0 "tree empty" -- bash -c "$CLI tree --json | jq -e '.projects|length==0'"
+  t Z09 0 "tree empty" -- bash -c "$CLI tree --json | jq -e '.data | .projects|length==0'"
   quit_app
   t Z10 10 "status after quit -> 10" -- cli status
-  t Z11 0 "doctor after quit reports app-not-running/socket-missing" -- bash -c "$CLI doctor --json | jq -e '.socketStatus==\"app-not-running\" or .socketStatus==\"socket-missing\"'"
+  t Z11 0 "doctor after quit reports app-not-running/socket-missing" -- bash -c "$CLI doctor --json | jq -e '.data | .socketStatus==\"app-not-running\" or .socketStatus==\"socket-missing\"'"
 }
 
 case "$PHASE" in
@@ -522,4 +562,8 @@ case "$PHASE" in
   quit) quit_app ;;
   *) echo "unknown phase $PHASE"; exit 2 ;;
 esac
+if [[ "$PHASE" == all ]]; then
+  echo "== json contract"
+  t J01 0 "every --json output matches the CLI output schema" -- python3 "$REPO_ROOT/docs/user-tests/cli-regression/validate-json.py" "$REPO_ROOT/apps/mac/codans-cli/Resources/schema/cli-output.schema.json" "$LOGS"/*.out
+fi
 echo "PASS=$PASS FAIL=$FAIL  (results: $RESULTS)"

@@ -1,6 +1,6 @@
 ---
 name: codans
-description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, send keystrokes or text to a pane, read back its rendered output, broadcast input across panes, launch agent profiles, hand a task off to another agent, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
+description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, run a command in a pane and capture its output, send keystrokes or text, read back rendered output, broadcast input across panes, see which panes run agents and wait for their state, launch agent profiles, hand a task off to another agent, install this skill for agents, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
 ---
 
 # codans CLI (`codans`)
@@ -80,37 +80,42 @@ to pass IDs.
 
 ## Targeting model
 
-Most subcommands accept identifiers in any of these forms:
+One grammar everywhere. A verb that acts on one thing takes that thing as
+its **single positional target**; the containers above it are
+`--project` / `--worktree` / `--tab` options that default to `current`.
+Text, commands, and names of new things never share the positional slot
+with a target: `pane send` is the one exception (one argument is text for
+the current pane, two are `<pane> <text>`), and `pane split` takes its
+command as `--command`.
 
-- **`current` or `.`** — the ambient Project / Worktree / Tab / Pane of
-  the shell you're running `codans` from. This is the default for nearly every
-  `--project`, `--worktree`, `--tab`, and `--pane` flag, so you usually
-  don't have to type anything.
-- **Literal UUID** — passed through unchanged; fast path for scripts.
-- **`t<n>` / `p<n>` short handles** (tabs / panes) — the stable integers
-  `codans tree` prints as `Tab t3:` / `Pane p7:`. A handle keeps pointing
-  at the same tab/pane across CLI calls for as long as it lives (unlike
-  positional indices, which shift), is released when the target closes,
-  and is never reused within one app session — a stale handle fails with
-  not-found instead of hitting the wrong target.
-- **`@label`** (panes only) — server-side lookup against pane labels
-  applied with `codans pane label`.
-- **Names** — a project's name, a worktree's name or branch, a tab's title
-  (case-insensitive). Inside a pane, worktree names are looked up within
-  that pane's project and tab titles within its worktree, so
-  `--worktree main` means "this project's main". An ambiguous name fails
-  with a conflict (exit 3) — pass the id instead. Panes have no name: a
-  bare word where a pane is expected is a usage error, which is usually
-  unquoted text (`codans pane send echo hi` — quote it).
+Every target accepts the same forms, whichever level it is:
+
+| Form | Applies to | Example |
+|---|---|---|
+| `current` / `.` | project, worktree, tab, pane | the containers of the pane you run from |
+| UUID | all | `codans tab close 5CBC66C9-…` |
+| `t<n>` / `p<n>` handle | tab, pane | the numbers `codans tree` prints as `Tab t3:` / `Pane p7:` |
+| `@label` | pane | labels set with `codans pane label` |
+| name | project (name), worktree (name **or branch**), tab (title) | `--worktree bugfix/menu`, `tab switch "dev server"` |
+| path | worktree (`/abs`, `~/x`, `./x`, `../x`; a directory inside the worktree also matches) | `worktree switch ~/code/api-hotfix`, `--worktree "$PWD"` |
+
+Handles stay stable for as long as the tab / pane lives, are released
+when it closes, and are never reused within one app session, so a stale
+handle fails with not-found instead of hitting the wrong target. Names
+are case-insensitive and scoped to the calling pane's containers when
+there is one (`--worktree main` means "this project's main"); an
+ambiguous name is a conflict (exit 3, `CONFLICT`) — pass the id. Panes
+have no name: a bare word where a pane is expected is a usage error,
+which is usually unquoted text (`codans pane send echo hi` — quote it).
 
 `current` for a project / worktree / tab is derived from the pane the
 command runs in, so it works from any subshell or wrapper inside a pane.
-If you run `codans` from a shell that is *not* inside a codans Pane there
-is no current pane: the command fails with `no current <kind>: this shell
-is not inside a Codans pane` (exit 2) — pass an explicit id or name, or
-use `codans tree` to discover one. Verbs whose target already determines
-its containers (`tab close t3`, `pane new --tab t3`, `worktree rm <id>`)
-never need `--project` / `--worktree` at all.
+Outside a codans Pane there is no current pane: the command fails with
+`no current <kind>: this shell is not inside a Codans pane` (exit 2,
+`NO_CURRENT_CONTEXT`) — pass an explicit id, name, or path, or run
+`codans tree` to discover one. Verbs whose target already determines its
+containers (`tab close t3`, `pane new --tab t3`, `worktree rm <id>`) never
+need `--project` / `--worktree` at all.
 
 ## Development builds
 
@@ -156,6 +161,30 @@ These work on every subcommand (mounted via `@OptionGroup`):
 Use `codans <subcommand> --help` for the exact flag list of any command.
 `codans help-json` prints the whole subcommand tree as JSON.
 
+### JSON output contract
+
+`--json` prints exactly one object per command, always on stdout:
+
+```json
+{ "schemaVersion": "codans.cli.pane.send.v1", "data": { "paneID": "…", "bytes": 12 } }
+{ "schemaVersion": "codans.cli.pane.focus.v1",
+  "error": { "code": "NOT_FOUND", "message": "pane not found: p9",
+             "hint": "…", "details": { "kind": "pane", "id": "p9" } } }
+```
+
+- `schemaVersion` is `codans.cli.<command path>.v1` and identical for
+  `codans` and `codans-dev`; read fields under `.data`.
+- On failure the exit code is still set and `error.code` is a stable
+  string: `INVALID_ARGUMENT`, `NOT_FOUND`, `CONFLICT`, `UNSUPPORTED`,
+  `APP_NOT_RUNNING`, `REQUEST_TIMEOUT`, `WRONG_CHANNEL`, `INTERNAL`, plus
+  the specific `NO_CURRENT_CONTEXT` (`current` outside a pane),
+  `EMPTY_INPUT`, and `WAIT_TIMEOUT` (`agent wait` / `send --wait` deadline).
+  `details` carries structured context such as `kind` / `id`.
+- The shapes are described by the JSON Schema shipped in the repository
+  (`apps/mac/codans-cli/Resources/schema/cli-output.schema.json`).
+- Only `codans help-json` prints its tree bare, and command lines the
+  argument parser rejects (exit 64) print the parser's own text.
+
 Exit codes: `0` ok · `1` usage / user error · `2` not found · `3` conflict
 · `4` unsupported · `5` overloaded · `6` version mismatch · `10` app not
 running · `11` request timeout · `12` launch timeout · `13` socket
@@ -166,10 +195,11 @@ subcommand or option, missing argument, bad enum value).
 ## Quick start
 
 ```bash
-codans doctor                # confirm the app is reachable
-codans tree                  # see every Project / Worktree / Tab / Pane
-codans pane send 'pwd'       # type 'pwd\n' into the current pane
-codans pane read             # read back what's on screen
+codans doctor                              # confirm the app is reachable
+codans tree                                # see every Project / Worktree / Tab / Pane
+codans agent status                        # which panes run an agent, and what it is doing
+codans pane send 'pwd' --capture           # run a command in the current pane, get its output
+codans pane capture                        # read back what's on screen
 ```
 
 ## Command reference
@@ -269,7 +299,7 @@ codans pane list                                     # panes in current tab
 codans pane new                                      # default shell
 codans pane new --label agent --label claude -- claude   # initial command + labels
 codans pane new --cwd /tmp -- htop                   # explicit cwd
-codans pane split <pane> --direction down -- htop    # new pane beside <pane>; cwd = the anchor's
+codans pane split <pane> --direction down --command htop   # new pane beside <pane>; cwd = the anchor's
 codans pane show <pane>                              # catalog view: containers, labels, agent, focus
 codans pane focus <pane>                             # bring to front
 codans pane resize <pane> right --amount 80          # move the divider next to it (pixels)
@@ -290,6 +320,13 @@ codans pane send -p @agent 'status'        # target by label
 codans pane send --stdin <<<'long blob'    # read text from stdin
 codans pane send --no-enter 'partial '     # type without submitting
 codans pane send --focus <pane> 'cmd'      # focus the pane after sending
+
+# Run a command and wait for it: --wait returns when the shell is idle again
+# and the screen has held still; --capture (implies --wait) also returns the
+# lines it printed. --wait-timeout (default 30 s) → exit 11 / WAIT_TIMEOUT.
+codans pane send <pane> 'npm test' --wait --wait-timeout 300
+codans pane send <pane> 'git status --short' --capture
+codans pane send <pane> 'git status --short' --capture --json | jq -r .data.output
 
 # Send a named key (no text channel)
 codans pane send-key escape
@@ -339,7 +376,27 @@ codans broadcast --label deploy --stdin <<<'rolling restart'
 Exactly one of `--tab`, `--worktree`, or `--label` must be given. The
 returned `delivered` count tells you how many panes received the input.
 
-### `codans agent` — launch agent profiles
+### `codans agent` — see, wait on, and launch agents
+
+`agent status` is the Agents View from the shell: every pane the app
+recognises as running an agent, with the derived state it shows there.
+
+```bash
+codans agent status                                  # p7  claude-code  working  3m12s  api/main  "dev server"
+codans agent status --json | jq '.data.agents[] | select(.state=="blocked") | .paneID'
+codans agent wait p7 --until idle --wait-timeout 300      # block until the agent is waiting for input
+codans agent wait p7 --until changed                 # …or until anything about it changes
+codans agent wait p7 --until exit --wait-timeout 600      # …or until no agent is bound to the pane
+```
+
+States: `working` (producing output), `blocked` (asking the user
+something), `idle` (at its prompt), `finished` (went idle while in the
+background). The state is derived from the pane's screen and foreground
+process, so it can lag a moment behind the agent; `wait` resolves
+server-side, so no polling loop is needed. Past `--wait-timeout` (1–600 s,
+default 60) it fails with exit 11 and `WAIT_TIMEOUT`; the JSON error's
+`details.state` is the last state seen. `pane show` reports the bound
+agent without the state.
 
 Profiles are the launch presets from Settings > Agents (agent, model, effort,
 execution mode, placement, extra args, env). Launching one opens a fresh tab
@@ -441,14 +498,36 @@ codans open ~/code/api --in cursor   # a specific editor id: cursor, zed, vscode
 walks the per-project default, the global default, then the installed
 editors in priority order, ending at Finder.
 
+### `codans skill` — install this skill for your agents
+
+The app bundles its agent skills; these commands link them into the
+folders agents read skills from, so each agent learns the CLI from the
+version that matches the installed app. Local file-system work — the app
+need not be running.
+
+```bash
+codans skill list                            # bundled skills × targets, with install status
+codans skill install                         # link every skill into every detected target
+codans skill install codans-cli --target claude --target codex
+codans skill install --scope project         # into <git root>/.claude/skills (etc.)
+codans skill uninstall                       # remove the links (only ones that point at a bundle)
+codans skill path codans-cli                 # where the bundled copy lives
+```
+
+Targets: `claude` (`~/.claude/skills`), `codex` (`~/.codex/skills`),
+`agents` (`~/.agents/skills`); a target is detected when its agent folder
+exists. A link to another install's copy is replaced; a directory or
+foreign link under the skill's name is a conflict unless `--force`.
+
 ## Common patterns
 
 ### Read a sibling pane (agent A inspecting agent B)
 
 ```bash
-codans pane list --json | jq -r '.panes[].id'           # find the pane uuid
-codans pane read <uuid>                                  # read its viewport
-codans pane capture <uuid> --lines 200 > /tmp/log.txt    # snapshot trailing output
+codans agent status                                      # which panes run an agent, and their state
+codans pane list --json | jq -r '.data.panes[].id'      # find a pane uuid
+codans pane capture <uuid> --lines 200 > /tmp/log.txt    # snapshot trailing rendered output
+codans pane read <uuid>                                  # the daemon's dump (scrollback too)
 ```
 
 If both panes share a tab, label the target once (`codans pane label <uuid> agent`)
@@ -458,17 +537,16 @@ and refer to it as `@agent` thereafter.
 
 ```bash
 codans pane new --label repl -- python3
-codans pane send -p @repl 'import math'
-codans pane send -p @repl 'print(math.pi)'
-codans pane capture @repl --lines 3
+codans pane send -p @repl 'import math' --wait
+codans pane send -p @repl 'print(math.pi)' --capture
 ```
 
 ### Spin up a worktree and a tab for it
 
 ```bash
-WT=$(codans worktree new exp/feature-x --json | jq -r '.id')   # git worktree add + register
-TAB=$(codans tab new "dev" --worktree "$WT" --json | jq -r '.id')
-codans pane new --tab "$TAB" --cwd "$(codans worktree list --json | jq -r ".worktrees[]|select(.id==\"$WT\")|.path")" -- npm run dev
+WT=$(codans worktree new exp/feature-x --json | jq -r '.data.id')   # git worktree add + register
+TAB=$(codans tab new "dev" --worktree "$WT" --json | jq -r '.data.id')
+codans pane new --tab "$TAB" --cwd "$(codans worktree show "$WT" --json | jq -r '.data.path')" -- npm run dev
 ```
 
 ### Take over a task from the previous agent
@@ -488,27 +566,32 @@ Been Done**. When you are done or blocked, hand off again with
 
 ### JSON-driven scripting
 
-Every command supports `--json`. Pipe through `jq` to extract IDs without
-parsing the human format:
+Every command supports `--json` and prints the envelope described under
+[JSON output contract](#json-output-contract). Read fields under `.data`
+and branch on `.error.code`:
 
 ```bash
-PANE=$(codans pane list --json | jq -r '.panes[0].id')
-codans pane send "$PANE" 'echo hello from script'
+PANE=$(codans pane list --json | jq -r '.data.panes[0].id')
+out=$(codans pane send "$PANE" 'make test' --capture --wait-timeout 600 --json)
+if jq -e '.error' <<<"$out" >/dev/null; then
+  echo "failed: $(jq -r '.error.code + ": " + .error.message' <<<"$out")" >&2
+else
+  jq -r '.data.output' <<<"$out"
+fi
 ```
 
 ### Verify before you act
 
-`codans pane send` is fire-and-forget — the RPC reports bytes shipped, not the
-receiving program's reaction. When coordinating agents across panes, read
-back after sending:
+Without `--wait`, `codans pane send` is fire-and-forget — the RPC reports
+bytes shipped, not the receiving program's reaction. For a shell command
+use `--wait` / `--capture`; for an agent pane, wait on its state and then
+read the screen:
 
 ```bash
-codans pane send -p @worker 'run-task'
-codans pane capture @worker --wait-stable --lines 20
+codans pane send -p @worker 'run the tests and fix what fails'
+codans agent wait @worker --until idle --wait-timeout 600
+codans pane capture @worker --wait-stable --lines 40
 ```
-
-(This mirrors the project memory note "prowl send 后 read-back 验证" — the
-same idea applies to `codans`.)
 
 ## Troubleshooting
 
@@ -520,7 +603,9 @@ same idea applies to `codans`.)
 | `unknown key "..."`                                 | `codans pane send-key` only knows the keys listed above. Use `--raw` for the rest. |
 | `--raw is exclusive of ...`                         | `codans pane send --raw` cannot combine with positional text, `--stdin`, or `--no-enter`. |
 | `unknown pane "echo"; pass a pane id, ...`           | The first word of an unquoted `pane send` was taken as the target. Quote the text. |
-| Help shows fewer commands than expected             | Some legacy docs reference unimplemented commands (e.g. `codans skill`). Trust `codans --help` over external docs. |
+| `pane p7 did not reach idle within 60s`             | `agent wait` hit its deadline (exit 11, `WAIT_TIMEOUT`). Raise `--wait-timeout`, or check `codans agent status` for what the agent is doing. |
+| `command in pane … still running after 30s`        | `pane send --wait` hit its deadline. Raise `--wait-timeout`, or read the pane later with `codans pane capture`. |
+| Help shows fewer commands than expected             | Trust `codans --help` over external docs; `codans help-json` prints the whole tree. |
 
 ## What this CLI does *not* do (yet)
 
@@ -528,7 +613,6 @@ To prevent suggesting commands that don't exist:
 
 - No `codans send` / `codans read` / `codans send-key` / `codans capture` at top level —
   they live under `codans pane`.
-- No `codans skill ...` (skill installation lives outside the CLI).
 - No `codans tag ...` yet (tags are managed in the sidebar).
 - No pane zoom / unzoom: the app has no zoomed-pane rendering to drive.
 - No `codans space ...` — codans does not expose a Space concept via `codans`

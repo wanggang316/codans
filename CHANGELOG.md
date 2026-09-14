@@ -33,6 +33,32 @@ and the project does not yet follow semantic versioning — every release until
   its branch, per Settings) through the sidebar's own removal; without the
   flag only the entry is forgotten, which the next reconcile undoes for a
   real git worktree.
+- **CLI — `agent status` and `agent wait`.** `agent status` lists every
+  pane the app recognises as running an agent with the Agents View's
+  derived state (idle / working / blocked / finished), when it last
+  changed, and where the pane lives; `agent wait <pane> --until <state>`
+  blocks server-side until the agent reaches a state (or `changed` /
+  `exit`) and fails with `WAIT_TIMEOUT` past `--wait-timeout`.
+- **CLI — `pane send --wait` / `--capture`.** `--wait` returns once the
+  command the text started has finished (the shell is no longer running a
+  foreground job and the screen has held still); `--capture` also returns
+  the lines the command printed, so a script no longer needs a sleep and a
+  second read.
+- **CLI — `codans skill list | install | uninstall | path`.** The app
+  bundles its agent skills; `skill install` links them into the skill
+  folders of every detected agent (`~/.claude/skills`, `~/.codex/skills`,
+  `~/.agents/skills`, or a repository's with `--scope project`) so agents
+  learn the CLI from the version that matches the installed app.
+- **CLI — `--json` prints one envelope for every command.** Output is
+  `{schemaVersion, data}` on success and `{schemaVersion, error}` on
+  failure, where `schemaVersion` is `codans.cli.<command>.v1` and
+  `error.code` is a stable string (`NOT_FOUND`, `WAIT_TIMEOUT`, …) next to
+  `message`, `hint`, and `details`. The shapes are described by
+  `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`, which the
+  regression harness validates every JSON output against.
+- **CLI — worktrees resolve by path** wherever a worktree is accepted
+  (`worktree switch ~/code/api-hotfix`, `--worktree .`), alongside id, name,
+  and branch.
 - **CLI — `show`, `rename`, `worktree prune`, `pane split`, `pane resize`.**
   Every level has a `show` verb (`project` / `worktree` / `tab` / `pane
   show`) that describes one entity — containers, handle, selection / focus,
@@ -45,6 +71,13 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **CLI — `--json` output is wrapped in an envelope** (see Added); scripts
+  that read fields off the top level now read them under `.data`, and
+  errors in JSON mode arrive on stdout as `{schemaVersion, error}` instead
+  of a text line on stderr. `codans help-json` keeps printing its tree
+  bare.
+- **CLI — `pane split` takes its command as `--command`**, leaving the
+  single positional for the anchor pane.
 - **CLI — `current` works for projects, worktrees, and tabs inside a
   pane.** A pane only exports its own id, so `--project current` and
   friends used to fail with "no current project context" in every pane;
