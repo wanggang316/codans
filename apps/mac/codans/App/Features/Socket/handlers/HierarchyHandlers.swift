@@ -38,8 +38,10 @@ final class ZmxControlProbe: PaneRuntimeProbe {
 /// `hierarchy.listProjects`.
 @MainActor
 final class HierarchyHandlers {
-  private let manager: HierarchyManager
-  private let envProvider: @MainActor (ProjectID) -> [String: String]
+  // Dependencies the `+Describe` / `+Layout` extensions share; kept
+  // internal rather than private for that reason only.
+  let manager: HierarchyManager
+  let envProvider: @MainActor (ProjectID) -> [String: String]
   private let settingsProvider: @MainActor () -> Settings
   /// Closure that sends `.kill` to the zmx daemon backing `paneID` and
   /// waits for its control socket to disappear. Returns once the daemon
@@ -52,7 +54,7 @@ final class HierarchyHandlers {
   /// `nil` when no surface is bound (no live daemon to talk to). Kept
   /// behind a protocol so tests can inject a fake without dragging
   /// `GhosttyRuntime` into the test target.
-  private let runtimeProbe: @MainActor (PaneID) -> PaneRuntimeProbe?
+  let runtimeProbe: @MainActor (PaneID) -> PaneRuntimeProbe?
   /// Persistent zmx-session catalog accessor. The `pane.close` handler
   /// drops the closed pane's row synchronously through the coordinator
   /// so the on-disk state reflects the kill before the RPC returns.
@@ -62,7 +64,7 @@ final class HierarchyHandlers {
   /// Short-handle sugar (`t<n>` / `p<n>`) for tabs and panes. Lives with
   /// the handlers so it spans CLI connections: handles stay stable until
   /// the entity closes, and are never reused within one app session.
-  private let handleRegistry = TargetHandleRegistry()
+  let handleRegistry = TargetHandleRegistry()
   /// Resolve the pane a connecting process belongs to from its kernel
   /// peer PID (ancestry walk against live pane shell PIDs). Injected so
   /// the handler stays independent of the libghostty surface registry;
@@ -74,10 +76,11 @@ final class HierarchyHandlers {
   /// the same probe the sidebar's Add Project runs. Default finds nothing
   /// (folder project), matching transports without git access (tests).
   private let gitRootDiscovery: @MainActor (String) async -> String?
-  /// Fired after `hierarchy.addProject` lands a row, with the new id. The
-  /// app kicks the project reconciler here so the worktree list fills in
-  /// the way it does after the sidebar adds a project.
-  private let projectAdded: @MainActor (ProjectID) async -> Void
+  /// Re-reads `git worktree list` for a project and settles its rows —
+  /// fired after `hierarchy.addProject` lands a row (so the worktree list
+  /// fills in the way it does after the sidebar adds a project) and after
+  /// `hierarchy.pruneWorktrees` drops stale registrations.
+  let reconcileWorktrees: @MainActor (ProjectID) async -> Void
   /// Materialises a worktree on disk (`wt sw`, the New Worktree sheet's
   /// pipeline) and returns its final path. `nil` keeps
   /// `hierarchy.createWorktree` catalog-only, which is what tests and the
@@ -92,6 +95,10 @@ final class HierarchyHandlers {
   /// dropped — for `deleteFromDisk`. Returns the client's non-fatal
   /// warning. `nil` makes `deleteFromDisk` unsupported (tests, harness).
   private let worktreeRemover: (@MainActor @Sendable (WorktreeID, ProjectID) async throws -> String?)?
+  /// `git worktree prune` for a repository root, returning how many stale
+  /// registrations went away — the sidebar's Prune Worktrees. `nil` makes
+  /// `hierarchy.pruneWorktrees` unsupported (tests, harness).
+  let worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "hierarchy")
 
   init(
@@ -103,10 +110,11 @@ final class HierarchyHandlers {
     sessionCoordinator: SessionCoordinator? = nil,
     callerPaneResolver: @escaping @MainActor (pid_t) -> PaneID? = { _ in nil },
     gitRootDiscovery: @escaping @MainActor (String) async -> String? = { _ in nil },
-    projectAdded: @escaping @MainActor (ProjectID) async -> Void = { _ in },
+    reconcileWorktrees: @escaping @MainActor (ProjectID) async -> Void = { _ in },
     worktreeCreator: (@MainActor @Sendable (CreateWorktreeSpec) async throws -> URL)? = nil,
     defaultBaseRef: @escaping @MainActor (URL) async -> String? = { _ in nil },
-    worktreeRemover: (@MainActor @Sendable (WorktreeID, ProjectID) async throws -> String?)? = nil
+    worktreeRemover: (@MainActor @Sendable (WorktreeID, ProjectID) async throws -> String?)? = nil,
+    worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)? = nil
   ) {
     self.manager = manager
     self.envProvider = envProvider
@@ -116,10 +124,11 @@ final class HierarchyHandlers {
     self.sessionCoordinator = sessionCoordinator
     self.callerPaneResolver = callerPaneResolver
     self.gitRootDiscovery = gitRootDiscovery
-    self.projectAdded = projectAdded
+    self.reconcileWorktrees = reconcileWorktrees
     self.worktreeCreator = worktreeCreator
     self.defaultBaseRef = defaultBaseRef
     self.worktreeRemover = worktreeRemover
+    self.worktreePruner = worktreePruner
   }
 
   // MARK: - Error mapping
@@ -127,7 +136,7 @@ final class HierarchyHandlers {
   /// Funnel every mutation catch through here so `HierarchyError` maps to
   /// the right `IPCError` variant (and therefore the right `CLIExitCode`):
   /// a blanket `.notFound` would mask conflict / invariant-violation cases.
-  private func failure(for error: Error, fallbackKind: String, fallbackID: String) -> RouterOutcome {
+  func failure(for error: Error, fallbackKind: String, fallbackID: String) -> RouterOutcome {
     if let h = error as? HierarchyError {
       switch h {
       case .notFound(let message):
@@ -392,7 +401,7 @@ final class HierarchyHandlers {
       gitRoot = await gitRootDiscovery(canonical)
     }
     let id = manager.addProject(name: req.name, rootPath: canonical, gitRoot: gitRoot)
-    await projectAdded(id)
+    await reconcileWorktrees(id)
     do {
       return .unary(
         try JSONValue.encoded(AddProjectResult(id: id, rootPath: canonical, gitRoot: gitRoot)))
@@ -553,7 +562,7 @@ final class HierarchyHandlers {
   /// Git failures by what the caller should do: fix the request
   /// (invalid branch / unknown ref → user error), pick another branch or
   /// clean up (conflict), or read the underlying command's stderr.
-  private static func ipcError(for error: GitWorktreeError) -> IPCError {
+  static func ipcError(for error: GitWorktreeError) -> IPCError {
     switch error {
     case .invalidBranchName(let name):
       return .invalidParams(message: "invalid branch name: \(name)", path: ["branch"])
@@ -623,17 +632,8 @@ final class HierarchyHandlers {
     // the host) or fall back to `$HOME`. Accept the supplied cwd only when it
     // targets the worktree (or a subpath of it) on the host; otherwise land in
     // the worktree root, matching what the UI's tab/pane creation does.
-    var workingDirectory = req.workingDirectory
-    if let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
-      project.isRemote,
-      let worktree = project.worktrees.first(where: { $0.id == req.worktreeID })
-    {
-      let requested = HierarchyManager.normalizeRemotePath(req.workingDirectory)
-      let root = HierarchyManager.normalizeRemotePath(worktree.path)
-      if requested != root, !requested.hasPrefix(root + "/") {
-        workingDirectory = worktree.path
-      }
-    }
+    let workingDirectory = effectiveWorkingDirectory(
+      req.workingDirectory, projectID: req.projectID, worktreeID: req.worktreeID)
     do {
       // Same env the sidebar's new-pane paths resolve: the project's own
       // `envVars` plus the always-on keys (socket, `CODANS_CLI`, the
@@ -663,6 +663,25 @@ final class HierarchyHandlers {
     } catch {
       return failure(for: error, fallbackKind: "tab", fallbackID: req.tabID.description)
     }
+  }
+
+  /// The cwd a new pane in (`projectID`, `worktreeID`) starts in. Local
+  /// projects take `requested` as-is; a remote project accepts it only when
+  /// it targets the worktree (or a subpath) on the host, else the worktree
+  /// root — see `openPane` for why.
+  func effectiveWorkingDirectory(
+    _ requested: String, projectID: ProjectID, worktreeID: WorktreeID
+  ) -> String {
+    guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
+      project.isRemote,
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+    else { return requested }
+    let normalized = HierarchyManager.normalizeRemotePath(requested)
+    let root = HierarchyManager.normalizeRemotePath(worktree.path)
+    if normalized != root, !normalized.hasPrefix(root + "/") {
+      return worktree.path
+    }
+    return requested
   }
 
   public struct SetPaneLabelsParams: Codable, Sendable {
@@ -1317,7 +1336,7 @@ final class HierarchyHandlers {
     }
   }
 
-  private func overlayLivePaneDirectories(in panes: [Pane]) -> [Pane] {
+  func overlayLivePaneDirectories(in panes: [Pane]) -> [Pane] {
     panes.map { pane in
       guard let cwd = manager.currentWorkingDirectory(for: pane.id) else {
         return pane

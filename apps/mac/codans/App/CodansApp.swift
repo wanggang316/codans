@@ -1115,7 +1115,7 @@ final class AppState {
       gitRootDiscovery: { path in
         try? await GitWorktreeCLI().discoverGitRoot(candidatePath: path)
       },
-      projectAdded: { projectID in
+      reconcileWorktrees: { projectID in
         // Same follow-up the sidebar's Add Project triggers: populate the
         // worktree list from `git worktree list` and settle the load state.
         await hierarchyClient.reconcileDiscoveredWorktrees(projectID)
@@ -1134,6 +1134,9 @@ final class AppState {
       },
       worktreeRemover: { worktreeID, projectID in
         try await hierarchyClient.removeWorktreeWithGit(worktreeID, projectID)
+      },
+      worktreePruner: { repoRoot in
+        try await gitWorktreeClient.pruneWorktrees(repoRoot)
       }
     )
   }

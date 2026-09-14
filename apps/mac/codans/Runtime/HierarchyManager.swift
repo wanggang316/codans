@@ -1524,6 +1524,22 @@ final class HierarchyManager {
   /// Renames a Tab in place. `nil` clears the custom name so the UI falls
   /// back to the default "Tab" label. Unchanged value is a silent no-op
   /// (no save scheduled) so repeated calls are free.
+  /// Relabels a worktree in the sidebar. The name is display-only (the
+  /// path and branch stay), so this is a plain catalog write.
+  func renameWorktree(_ id: WorktreeID, in projectID: ProjectID, name: String) throws {
+    guard
+      let (projectIndex, worktreeIndex) = findWorktreeIndices(
+        worktreeID: id,
+        projectID: projectID
+      )
+    else {
+      throw HierarchyError.notFound("Worktree \(id)")
+    }
+    guard catalog.projects[projectIndex].worktrees[worktreeIndex].name != name else { return }
+    catalog.projects[projectIndex].worktrees[worktreeIndex].name = name
+    store.scheduleSave(catalog)
+  }
+
   func renameTab(
     _ id: TabID,
     in worktreeID: WorktreeID,

@@ -16,7 +16,7 @@ struct HierarchyHandlersAddProjectTests {
     var reconciled: [ProjectID] = []
     let fixture = Fixture(
       gitRootDiscovery: { path in path == HierarchyManager.canonicalPath(directory.path) ? "/discovered" : nil },
-      projectAdded: { reconciled.append($0) }
+      reconcileWorktrees: { reconciled.append($0) }
     )
     let params = try JSONValue.encoded(
       AddProjectRequest(name: "repo", rootPath: directory.path, gitRoot: nil))
@@ -106,7 +106,7 @@ struct HierarchyHandlersAddProjectTests {
 
     init(
       gitRootDiscovery: @escaping @MainActor (String) async -> String? = { _ in nil },
-      projectAdded: @escaping @MainActor (ProjectID) async -> Void = { _ in }
+      reconcileWorktrees: @escaping @MainActor (ProjectID) async -> Void = { _ in }
     ) {
       let manager = HierarchyManager(
         catalog: Catalog(projects: []),
@@ -120,7 +120,7 @@ struct HierarchyHandlersAddProjectTests {
       self.handlers = HierarchyHandlers(
         manager: manager,
         gitRootDiscovery: gitRootDiscovery,
-        projectAdded: projectAdded
+        reconcileWorktrees: reconcileWorktrees
       )
     }
   }
