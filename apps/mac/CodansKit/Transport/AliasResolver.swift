@@ -53,12 +53,14 @@ public enum AliasResolver {
       return uuid
     }
 
-    // 3. Everything else → server resolver.
+    // 3. Everything else → server resolver. A worktree path is made
+    // absolute here (the server has no idea what the CLI's cwd is); only
+    // path-shaped values qualify, since branch names contain slashes too.
     let rpc = try client()
     let contextPaneID: PaneID? = env[Self.envKey(for: .pane)].flatMap(UUID.init(uuidString:)).map(PaneID.init(raw:))
     let request = IPC.AliasResolveRequest(
       kind: kind,
-      value: value,
+      value: kind == .worktree ? Self.absolutePathIfPathShaped(value) : value,
       contextPaneID: contextPaneID
     )
     do {
@@ -70,6 +72,25 @@ public enum AliasResolver {
     } catch let rpcError as RPCClient.RPCError {
       throw Error.rpc(rpcError)
     }
+  }
+
+  /// `/abs`, `~/x`, `./x`, `../x`, and `..` are paths; anything else
+  /// (including `bugfix/menu`) is a name. Paths come back absolute and
+  /// standardized so the server can compare them to worktree roots.
+  static func absolutePathIfPathShaped(
+    _ value: String, cwd: String = FileManager.default.currentDirectoryPath
+  ) -> String {
+    let isPath =
+      value.hasPrefix("/") || value.hasPrefix("~/") || value == "~" || value.hasPrefix("./")
+      || value.hasPrefix("../") || value == ".."
+    guard isPath else { return value }
+    let expanded = (value as NSString).expandingTildeInPath
+    let url =
+      expanded.hasPrefix("/")
+      ? URL(fileURLWithPath: expanded)
+      : URL(fileURLWithPath: cwd).appendingPathComponent(expanded)
+    let path = url.standardizedFileURL.path(percentEncoded: false)
+    return path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
   }
 
   /// Only `.pane` is ever injected by the app; the others resolve a

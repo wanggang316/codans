@@ -37,6 +37,11 @@ extension IPC {
     // kickoff prompt.
     case agentListProfiles = "agent.listProfiles"
     case agentLaunch = "agent.launch"
+    // `listStates` reads the Agents View's per-pane runtime state; `wait`
+    // blocks server-side until a pane's agent reaches a condition or the
+    // request's deadline passes.
+    case agentListStates = "agent.listStates"
+    case agentWait = "agent.wait"
 
     // handoff — agent-to-agent transition over `.codans/handoff/`. The
     // source pane is resolved by the CLI (`current` → caller pane);

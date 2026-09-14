@@ -252,6 +252,12 @@ public final class MethodRouter {
       return await Self.asyncOutcome {
         try await h.launch(request.params.decoded(as: IPC.AgentLaunchRequest.self))
       }
+    case .agentListStates:
+      return Self.projectOutcome { try h.listStates() }
+    case .agentWait:
+      return await Self.asyncOutcome {
+        try await h.wait(request.params.decoded(as: IPC.AgentWaitRequest.self))
+      }
     default: return nil
     }
   }

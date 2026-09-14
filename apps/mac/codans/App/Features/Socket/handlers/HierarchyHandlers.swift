@@ -64,7 +64,7 @@ final class HierarchyHandlers {
   /// Short-handle sugar (`t<n>` / `p<n>`) for tabs and panes. Lives with
   /// the handlers so it spans CLI connections: handles stay stable until
   /// the entity closes, and are never reused within one app session.
-  let handleRegistry = TargetHandleRegistry()
+  let handleRegistry: TargetHandleRegistry
   /// Resolve the pane a connecting process belongs to from its kernel
   /// peer PID (ancestry walk against live pane shell PIDs). Injected so
   /// the handler stays independent of the libghostty surface registry;
@@ -103,6 +103,7 @@ final class HierarchyHandlers {
 
   init(
     manager: HierarchyManager,
+    handleRegistry: TargetHandleRegistry = TargetHandleRegistry(),
     envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] },
     settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
     daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
@@ -117,6 +118,7 @@ final class HierarchyHandlers {
     worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)? = nil
   ) {
     self.manager = manager
+    self.handleRegistry = handleRegistry
     self.envProvider = envProvider
     self.settingsProvider = settingsProvider
     self.daemonKiller = daemonKiller
@@ -267,6 +269,13 @@ final class HierarchyHandlers {
         .filter { $0.name.lowercased() == needle || $0.canonicalName.lowercased() == needle }
         .map(\.id.raw)
     case .worktree:
+      // A path (absolute; the CLI resolves relative ones against its cwd
+      // before calling) matches project-wide; names and branches stay
+      // scoped to the caller's project.
+      if request.value.hasPrefix("/") {
+        matches = Self.worktreesMatchingPath(request.value, in: catalog)
+        break
+      }
       let scope = pane.flatMap { catalog.projectID(forPane: $0) }
       for project in catalog.projects where scope == nil || project.id == scope {
         for worktree in project.worktrees where !worktree.archived {
@@ -299,6 +308,12 @@ final class HierarchyHandlers {
         .filter { $0.name.lowercased() == needle }
         .map(\.id.raw)
     }
+    return outcome(for: matches, request: request)
+  }
+
+  /// One match resolves; none is not-found; several is a conflict the
+  /// caller settles by passing an id.
+  private func outcome(for matches: [UUID], request: IPC.AliasResolveRequest) -> RouterOutcome {
     switch matches.count {
     case 1:
       return resolved(request.kind, matches[0])
@@ -310,6 +325,23 @@ final class HierarchyHandlers {
           reason:
             "\(request.kind.rawValue) \"\(request.value)\" matches \(matches.count) entries; pass an id"))
     }
+  }
+
+  /// Non-archived worktrees whose directory is `path` or contains it; when
+  /// one nests under another, only the deepest is returned.
+  static func worktreesMatchingPath(_ path: String, in catalog: Catalog) -> [UUID] {
+    let canonical = HierarchyManager.canonicalPath(path)
+    var deepest: Worktree?
+    for project in catalog.projects {
+      for worktree in project.worktrees where !worktree.archived {
+        let root = HierarchyManager.canonicalPath(worktree.path)
+        guard canonical == root || canonical.hasPrefix(root + "/") else { continue }
+        if deepest.map({ root.count > HierarchyManager.canonicalPath($0.path).count }) ?? true {
+          deepest = worktree
+        }
+      }
+    }
+    return deepest.map { [$0.id.raw] } ?? []
   }
 
   private static func panesMatchingLabel(label: String, catalog: Catalog) -> [UUID] {

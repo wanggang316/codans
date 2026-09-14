@@ -1066,6 +1066,7 @@ final class AppState {
   /// sidebar. Split out of `startIPC` so each wiring reads on its own.
   private func makeHierarchyHandlers(
     hierarchy: HierarchyManager,
+    handleRegistry: TargetHandleRegistry,
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
     terminalEngine: TerminalEngine,
@@ -1074,6 +1075,7 @@ final class AppState {
   ) -> HierarchyHandlers {
     HierarchyHandlers(
       manager: hierarchy,
+      handleRegistry: handleRegistry,
       envProvider: { projectID in
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
@@ -1172,8 +1174,12 @@ final class AppState {
     // truth; nil falls back to the handler's "no persistent catalog to
     // reap" path (second-instance no-resume mode).
     let sessionCoordinator = self.sessionCoordinator
+    // One handle registry for every handler that prints or resolves
+    // `t<n>` / `p<n>`, so `agent status` and `tree` agree.
+    let targetHandles = TargetHandleRegistry()
     let hierarchyHandlers = makeHierarchyHandlers(
       hierarchy: hierarchy,
+      handleRegistry: targetHandles,
       hierarchyClient: hierarchyClient,
       settingsStore: settingsStore,
       terminalEngine: terminalEngine,
@@ -1194,7 +1200,8 @@ final class AppState {
       )
     let terminalHandlers = TerminalHandlers(
       sink: inputSink,
-      catalog: { hierarchy.catalog }
+      catalog: { hierarchy.catalog },
+      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false }
     )
     let editorHandlers = EditorHandlers(
       editor: editor,
@@ -1214,7 +1221,16 @@ final class AppState {
       agentHandlers: AgentHandlers(
         settings: settingsStore,
         hierarchy: hierarchyClient,
-        installation: agentInstallation
+        installation: agentInstallation,
+        stateStore: { [weak self] in self?.agentStateStore },
+        handleRegistry: targetHandles,
+        focusedPane: { [weak hierarchy] in
+          guard let hierarchy else { return nil }
+          return Self.currentlyFocusedPane(
+            catalog: hierarchy.catalog,
+            lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
+          )
+        }
       ),
       handoffHandlers: handoffHandlers
     )

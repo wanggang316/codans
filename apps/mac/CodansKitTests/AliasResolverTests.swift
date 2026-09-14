@@ -1,7 +1,7 @@
-import Foundation
-import Testing
 import CodansCore
 import CodansIPC
+import Foundation
+import Testing
 
 @testable import CodansKit
 
@@ -153,5 +153,24 @@ struct AliasResolverTests {
   /// resolver actually dials.
   private static func failingClient() throws -> RPCClient {
     throw ResolverShouldNotDialClient()
+  }
+}
+
+struct AliasResolverPathShapeTests {
+  @Test
+  func pathShapedWorktreeValuesBecomeAbsolute() {
+    #expect(AliasResolver.absolutePathIfPathShaped("/a/b", cwd: "/cwd") == "/a/b")
+    #expect(AliasResolver.absolutePathIfPathShaped("./x", cwd: "/cwd") == "/cwd/x")
+    #expect(AliasResolver.absolutePathIfPathShaped("../x", cwd: "/cwd/sub") == "/cwd/x")
+    #expect(AliasResolver.absolutePathIfPathShaped("..", cwd: "/cwd/sub") == "/cwd")
+    #expect(AliasResolver.absolutePathIfPathShaped("~/x", cwd: "/cwd").hasSuffix("/x"))
+    #expect(!AliasResolver.absolutePathIfPathShaped("~/x", cwd: "/cwd").hasPrefix("~"))
+  }
+
+  @Test
+  func namesAndBranchesAreLeftAlone() {
+    for value in ["main", "bugfix/menu", "feature/a/b", "current", ".", "MainWT"] {
+      #expect(AliasResolver.absolutePathIfPathShaped(value, cwd: "/cwd") == value)
+    }
   }
 }

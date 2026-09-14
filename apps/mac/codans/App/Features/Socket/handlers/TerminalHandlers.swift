@@ -30,24 +30,76 @@ public final class TerminalHandlers {
 
   private let sink: InputSink?
   private let catalog: @MainActor () -> Catalog
-  /// Time source for `readText`'s wait-stable poll loop. Injectable so
-  /// tests drive the loop with a virtual clock; production uses the real one.
+  /// Time source for the wait loops (`readText` wait-stable, `sendInput`
+  /// wait). Injectable so tests drive them with a virtual clock.
   private let clock: StabilityClock
+  /// Whether the pane's shell is running a foreground command — the
+  /// foreground-job poller's view, the same bit the tab spinner reads.
+  /// `sendInput`'s wait uses it to tell "the command is still running"
+  /// from "the screen just stopped changing".
+  private let paneIsBusy: @MainActor (PaneID) -> Bool
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "terminal")
 
   public init(
     sink: InputSink?,
     catalog: @escaping @MainActor () -> Catalog,
-    clock: StabilityClock = SystemStabilityClock()
+    clock: StabilityClock = SystemStabilityClock(),
+    paneIsBusy: @escaping @MainActor (PaneID) -> Bool = { _ in false }
   ) {
     self.sink = sink
     self.catalog = catalog
     self.clock = clock
+    self.paneIsBusy = paneIsBusy
   }
 
+  /// Optional completion wait on `sendInput`: poll until the pane is not
+  /// busy and its screen has held still for `stableMillis`, or
+  /// `timeoutMillis` passes. A command too quick for the busy poller to
+  /// notice completes after `graceMillis` of quiet instead.
+  public struct SendWaitParams: Codable, Sendable {
+    public let timeoutMillis: Int
+    public let stableMillis: Int?
+    public let graceMillis: Int?
+
+    public init(timeoutMillis: Int, stableMillis: Int? = nil, graceMillis: Int? = nil) {
+      self.timeoutMillis = timeoutMillis
+      self.stableMillis = stableMillis
+      self.graceMillis = graceMillis
+    }
+  }
   public struct SendInputParams: Codable, Sendable {
     public let paneID: PaneID
     public let text: String
+    public let wait: SendWaitParams?
+    /// With `wait`, also return the screen lines the command produced.
+    public let capture: Bool?
+
+    public init(paneID: PaneID, text: String, wait: SendWaitParams? = nil, capture: Bool? = nil) {
+      self.paneID = paneID
+      self.text = text
+      self.wait = wait
+      self.capture = capture
+    }
+  }
+  /// `delivered` is always true on success; the rest is present only when
+  /// the request asked to wait.
+  public struct SendInputResult: Codable, Sendable {
+    public let delivered: Bool
+    public let completed: Bool?
+    public let waitedMillis: Int?
+    public let busyObserved: Bool?
+    public let output: String?
+
+    public init(
+      delivered: Bool, completed: Bool? = nil, waitedMillis: Int? = nil, busyObserved: Bool? = nil,
+      output: String? = nil
+    ) {
+      self.delivered = delivered
+      self.completed = completed
+      self.waitedMillis = waitedMillis
+      self.busyObserved = busyObserved
+      self.output = output
+    }
   }
   public func sendInput(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
@@ -61,11 +113,101 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
     }
+    let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
       return .failed(.notFound(kind: "pane", id: req.paneID.description))
     }
-    return .unary(.object(["delivered": .bool(true)]))
+    var result = SendInputResult(delivered: true)
+    if let wait = req.wait {
+      let outcome = await waitForCompletion(paneID: req.paneID, wait: wait, sink: sink)
+      let output = req.capture == true
+        ? Self.capturedOutput(before: before ?? "", after: outcome.text, sent: req.text) : nil
+      result = SendInputResult(
+        delivered: true, completed: outcome.completed, waitedMillis: outcome.waitedMillis,
+        busyObserved: outcome.busyObserved, output: output)
+    }
+    do {
+      return .unary(try JSONValue.encoded(result))
+    } catch {
+      return .failed(.internal("encode sendInput result: \(error)"))
+    }
+  }
+
+  struct CompletionOutcome {
+    let completed: Bool
+    let waitedMillis: Int
+    let busyObserved: Bool
+    let text: String
+  }
+
+  private func waitForCompletion(
+    paneID: PaneID, wait: SendWaitParams, sink: InputSink
+  ) async -> CompletionOutcome {
+    let timeout = max(wait.timeoutMillis, 1)
+    let stable = max(wait.stableMillis ?? 500, 1)
+    let grace = max(wait.graceMillis ?? 1500, 1)
+    let interval = 100
+    let start = clock.nowMillis()
+    var busyObserved = false
+    var lastText = sink.readText(paneID: paneID, extent: .screen) ?? ""
+    var stableSince = start
+    while true {
+      let now = clock.nowMillis()
+      let busy = paneIsBusy(paneID)
+      if busy { busyObserved = true }
+      let text = sink.readText(paneID: paneID, extent: .screen) ?? ""
+      if text != lastText {
+        lastText = text
+        stableSince = now
+      }
+      let elapsed = now - start
+      let quiet = now - stableSince
+      if !busy, quiet >= stable, busyObserved || elapsed >= grace {
+        return CompletionOutcome(completed: true, waitedMillis: elapsed, busyObserved: busyObserved, text: text)
+      }
+      if elapsed >= timeout {
+        return CompletionOutcome(completed: false, waitedMillis: elapsed, busyObserved: busyObserved, text: text)
+      }
+      do {
+        try await clock.sleep(millis: min(interval, timeout - elapsed))
+      } catch {
+        return CompletionOutcome(completed: false, waitedMillis: elapsed, busyObserved: busyObserved, text: text)
+      }
+    }
+  }
+
+  /// The screen lines that appeared after the send: everything past the
+  /// longest common line prefix of the before / after screens, minus the
+  /// echoed command line, the redrawn prompt (a last line equal to the
+  /// screen's last line before the send), and trailing blank rows. A
+  /// command that clears the screen leaves no common prefix, so the whole
+  /// screen comes back. Best effort: the terminal exposes rendered text,
+  /// not command boundaries.
+  static func capturedOutput(before: String, after: String, sent: String) -> String {
+    let beforeLines = before.split(separator: "\n", omittingEmptySubsequences: false)
+    var afterLines = after.split(separator: "\n", omittingEmptySubsequences: false)
+    while let last = afterLines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+      afterLines.removeLast()
+    }
+    let promptLine = beforeLines.last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+    if let promptLine, afterLines.count > 1, afterLines.last == promptLine {
+      afterLines.removeLast()
+    }
+    var common = 0
+    while common < beforeLines.count, common < afterLines.count, beforeLines[common] == afterLines[common] {
+      common += 1
+    }
+    afterLines.removeFirst(common)
+    let firstSentLine = sent.split(separator: "\n").first.map(String.init)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if let first = afterLines.first, !firstSentLine.isEmpty, first.contains(firstSentLine) {
+      afterLines.removeFirst()
+    }
+    while let last = afterLines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+      afterLines.removeLast()
+    }
+    return afterLines.joined(separator: "\n")
   }
 
   public struct SendKeyParams: Codable, Sendable {

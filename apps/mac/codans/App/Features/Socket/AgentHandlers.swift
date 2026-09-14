@@ -14,11 +14,32 @@ final class AgentHandlers {
   private let settings: SettingsStore
   private let hierarchy: HierarchyClient
   private let installation: AgentInstallationStore?
+  /// The Agents View's per-pane runtime state. `nil` (tests, headless
+  /// harness) makes `listStates` / `wait` unsupported.
+  private let stateStore: @MainActor () -> AgentStateStore?
+  /// Shared with `HierarchyHandlers` so `agent.listStates` prints the same
+  /// `p<n>` handles `tree` does.
+  private let handleRegistry: TargetHandleRegistry
+  private let focusedPane: @MainActor () -> PaneID?
+  /// Poll cadence of `wait`; injected so tests can shorten it.
+  private let waitPollMillis: Int
 
-  init(settings: SettingsStore, hierarchy: HierarchyClient, installation: AgentInstallationStore?) {
+  init(
+    settings: SettingsStore,
+    hierarchy: HierarchyClient,
+    installation: AgentInstallationStore?,
+    stateStore: @escaping @MainActor () -> AgentStateStore? = { nil },
+    handleRegistry: TargetHandleRegistry = TargetHandleRegistry(),
+    focusedPane: @escaping @MainActor () -> PaneID? = { nil },
+    waitPollMillis: Int = 200
+  ) {
     self.settings = settings
     self.hierarchy = hierarchy
     self.installation = installation
+    self.stateStore = stateStore
+    self.handleRegistry = handleRegistry
+    self.focusedPane = focusedPane
+    self.waitPollMillis = waitPollMillis
   }
 
   // MARK: - listProfiles
@@ -103,6 +124,96 @@ final class AgentHandlers {
 
   static var agentTokens: String {
     AgentKind.allCases.map(\.rawValue).joined(separator: ", ")
+  }
+
+  // MARK: - listStates
+
+  /// `agent.listStates` — every agent-bearing pane with its derived runtime
+  /// state, in hierarchy order: what the Agents View lists, for scripts.
+  func listStates() throws -> IPC.AgentStateListResponse {
+    guard let stateStore = stateStore() else {
+      throw IPCError.unsupported(reason: "agent state is not available in this build")
+    }
+    let catalog = hierarchy.snapshot()
+    handleRegistry.sync(with: catalog)
+    let handles = handleRegistry.snapshot()
+    let focused = focusedPane()
+    let formatter = ISO8601DateFormatter()
+    var rows: [IPC.AgentStateEntry] = []
+    for project in catalog.projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs {
+          for pane in tab.panes {
+            guard let entry = stateStore.entries[pane.id] else { continue }
+            rows.append(
+              IPC.AgentStateEntry(
+                paneID: pane.id.description,
+                handle: handles.panes[pane.id.description].map { "p\($0)" },
+                agent: entry.kind.rawValue,
+                agentName: entry.kind.displayName,
+                state: entry.state.rawValue,
+                since: formatter.string(from: entry.lastTransitionAt),
+                sessionID: entry.sessionID ?? pane.agentSessionID,
+                title: stateStore.title(for: pane.id),
+                projectID: project.id.description,
+                projectName: project.name,
+                worktreeID: worktree.id.description,
+                worktreeName: worktree.name,
+                tabID: tab.id.description,
+                tabTitle: tab.name ?? tab.cachedDisplayTitle,
+                isFocused: focused == pane.id
+              ))
+          }
+        }
+      }
+    }
+    return IPC.AgentStateListResponse(agents: rows)
+  }
+
+  // MARK: - wait
+
+  static let maxWaitMillis = 600_000
+
+  /// `agent.wait` — poll the state store until the pane's agent satisfies
+  /// `until` or the deadline passes. Resolves on the server so the caller
+  /// needs no loop of its own; the response says whether it was satisfied.
+  func wait(_ request: IPC.AgentWaitRequest) async throws -> IPC.AgentWaitResponse {
+    guard let stateStore = stateStore() else {
+      throw IPCError.unsupported(reason: "agent state is not available in this build")
+    }
+    guard hierarchy.snapshot().pane(request.paneID) != nil else {
+      throw IPCError.notFound(kind: "pane", id: request.paneID.description)
+    }
+    let timeout = min(max(request.timeoutMillis, 1), Self.maxWaitMillis)
+    let start = ContinuousClock.now
+    let baseline = stateStore.entries[request.paneID]
+    while true {
+      let entry = stateStore.entries[request.paneID]
+      let paneExists = hierarchy.snapshot().pane(request.paneID) != nil
+      let satisfied: Bool
+      switch request.until {
+      case .idle: satisfied = entry?.state == .idle
+      case .working: satisfied = entry?.state == .working
+      case .blocked: satisfied = entry?.state == .blocked
+      case .finished: satisfied = entry?.state == .finished
+      case .changed: satisfied = entry?.state != baseline?.state || entry?.kind != baseline?.kind
+      case .exit: satisfied = entry == nil || !paneExists
+      }
+      let elapsed = ContinuousClock.now - start
+      let waitedMs = Int(elapsed / .milliseconds(1))
+      if satisfied || waitedMs >= timeout {
+        return IPC.AgentWaitResponse(
+          paneID: request.paneID.description,
+          until: request.until.rawValue,
+          satisfied: satisfied,
+          state: entry?.state.rawValue,
+          previousState: baseline?.state.rawValue,
+          agent: (entry ?? baseline)?.kind.rawValue,
+          waitedMs: waitedMs
+        )
+      }
+      try? await Task.sleep(for: .milliseconds(min(waitPollMillis, timeout - waitedMs)))
+    }
   }
 
   static func map(_ error: RunScriptError) -> IPCError {
