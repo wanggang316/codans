@@ -66,6 +66,11 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Edited via Settings → Projects → General. Encoded only when set so
   /// catalogs without a color stay byte-identical on round-trip.
   public var color: ProjectColor?
+  /// User-picked Project glyph. `nil` = the built-in folder pair (see
+  /// `ProjectIcon`). Edited via Settings → Projects → General → Icon.
+  /// Encoded only when set so catalogs without an icon stay byte-identical
+  /// on round-trip.
+  public var icon: ProjectIcon?
   /// Transient. See `ProjectLoadState` doc-comment.
   public var loadState: ProjectLoadState
 
@@ -83,6 +88,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     lastActiveAt: Date? = nil,
     manualOrder: Int = 0,
     color: ProjectColor? = nil,
+    icon: ProjectIcon? = nil,
     loadState: ProjectLoadState = .loading
   ) {
     self.id = id
@@ -103,6 +109,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     self.lastActiveAt = lastActiveAt
     self.manualOrder = manualOrder
     self.color = color
+    self.icon = icon
     self.loadState = loadState
   }
 
@@ -134,7 +141,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, name, displayName, rootPath, gitRoot, remoteHost, worktrees, selectedWorktreeID,
-      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color
+      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon
   }
 
   public init(from decoder: Decoder) throws {
@@ -167,6 +174,12 @@ extension Project: Codable {
     self.lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
     self.manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
     self.color = try container.decodeIfPresent(ProjectColor.self, forKey: .color)
+    // Deliberately lenient, unlike every sibling field: a malformed `icon`
+    // degrades to the default folder glyph instead of throwing, because a
+    // throw here fails the whole `catalog.json` decode and leaves the user
+    // staring at an empty app over a cosmetic value. Hand-edited catalogs and
+    // a future icon case written by a newer build both land in this branch.
+    self.icon = try? container.decodeIfPresent(ProjectIcon.self, forKey: .icon)
     self.loadState = .loading
   }
 
@@ -210,6 +223,7 @@ extension Project: Codable {
       try container.encode(manualOrder, forKey: .manualOrder)
     }
     try container.encodeIfPresent(color, forKey: .color)
+    try container.encodeIfPresent(icon, forKey: .icon)
     // `loadState` intentionally not encoded (transient).
   }
 }

@@ -16,6 +16,10 @@ struct SFSymbolPicker: View {
   /// Colour applied to the currently-selected preset. Callers that carry a
   /// tint (script commands) pass theirs; the rest get the accent colour.
   var highlight: Color = .accentColor
+  /// Grid contents. Defaults to the command-flavoured `presets`; surfaces
+  /// whose vocabulary is different (Project icons) pass their own so the
+  /// text field, the SF Symbols shortcut, and the layout stay shared.
+  var symbols: [String] = SFSymbolPicker.presets
 
   /// Presets, ordered roughly run → build → status → file-transfer so the
   /// grid reads in bands rather than as an alphabetical dump.
@@ -44,7 +48,7 @@ struct SFSymbolPicker: View {
           columns: Array(repeating: GridItem(.fixed(24), spacing: 8), count: 10),
           spacing: 8
         ) {
-          ForEach(Self.presets, id: \.self) { name in
+          ForEach(symbols, id: \.self) { name in
             Button {
               selection = name
             } label: {

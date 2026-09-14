@@ -1,0 +1,207 @@
+import AppKit
+import CodansCore
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// Settings → Projects → General → Icon.
+///
+/// A preview button that opens a popover offering the three states
+/// `Project.icon` can hold: the built-in folder default (`nil`), an SF Symbol,
+/// or imported artwork. The picker owns no persisted state — every choice
+/// writes straight through `selection`, matching `ProjectColorSwatchRow` right
+/// below it.
+struct ProjectIconPicker: View {
+  @Binding var selection: ProjectIcon?
+  /// The Project's color, so the preview and the grid show the icon in the
+  /// tint it will actually render with in the sidebar.
+  let color: ProjectColor?
+
+  @State private var isPresented = false
+  /// Live text of the "SF Symbol name" field. Held locally rather than
+  /// derived from `selection` because a half-typed name doesn't resolve to a
+  /// symbol, and writing those through would blank the sidebar glyph on every
+  /// keystroke. Only resolvable names reach the catalog.
+  @State private var symbolDraft: String = ""
+  /// Set when an import is rejected or fails, cleared on the next attempt.
+  @State private var importError: String?
+
+  /// Project-flavoured grid: repository / stack / domain glyphs rather than
+  /// the run-and-build vocabulary `SFSymbolPicker.presets` carries.
+  static let symbols: [String] = [
+    "folder", "folder.fill", "shippingbox", "shippingbox.fill",
+    "cube", "cube.fill", "square.stack.3d.up", "building.2",
+    "hammer", "wrench.and.screwdriver", "gearshape", "cpu",
+    "chevron.left.forwardslash.chevron.right", "terminal", "command", "curlybraces",
+    "arrow.triangle.branch", "server.rack", "externaldrive", "cylinder.split.1x2",
+    "globe", "network", "antenna.radiowaves.left.and.right", "bolt",
+    "sparkles", "wand.and.stars", "brain", "ladybug",
+    "doc.text", "book", "graduationcap", "flask",
+    "paintbrush", "camera", "music.note", "gamecontroller",
+    "cart", "creditcard", "chart.bar", "heart",
+    "star", "flag", "tag", "bookmark",
+  ]
+
+  private static let popoverWidth: CGFloat = 380
+  /// Preview of the current icon at the head of the popover. Deliberately well
+  /// clear of a grid glyph so it reads as "this is what you picked" rather than
+  /// as another option.
+  private static let previewSize: CGFloat = 32
+
+  /// A borderless dropdown — glyph, name, disclosure chevron — trailing
+  /// aligned, matching the Editor and Worktree pickers elsewhere in this pane
+  /// rather than carrying a box of its own. The chevron is self-drawn because
+  /// the stock borderless menu glyph disappears in some popover / window-focus
+  /// combinations.
+  var body: some View {
+    Button {
+      symbolDraft = currentSymbolName
+      isPresented = true
+    } label: {
+      HStack(spacing: 6) {
+        ProjectIconView(icon: selection, color: color, size: 18)
+        Text(summary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+        Image(systemName: "chevron.up.chevron.down")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Icon: \(summary)")
+    // Popover before the expanding frame so it anchors on the control rather
+    // than on the full-width row.
+    .popover(isPresented: $isPresented, arrowEdge: .bottom) { popoverBody }
+    .frame(maxWidth: .infinity, alignment: .trailing)
+  }
+
+  // MARK: - Popover
+
+  private var popoverBody: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      // The current choice, previewed at a size worth looking at — this is the
+      // only place the picked artwork is shown large enough to judge, and the
+      // dropdown label is too tight to carry a custom file's details.
+      HStack(spacing: 10) {
+        ProjectIconView(
+          icon: selection, color: color, size: Self.previewSize
+        )
+        Text(summary)
+          .font(.callout.weight(.medium))
+          .lineLimit(1)
+          .truncationMode(.middle)
+        Spacer(minLength: 0)
+      }
+
+      SFSymbolPicker(
+        selection: symbolBinding,
+        highlight: color?.swiftUIColor ?? .accentColor,
+        symbols: Self.symbols
+      )
+
+      Text(
+        "Vector artwork (SVG, PDF) is tinted with the project color. "
+          + "Bitmaps (PNG, JPEG, HEIC, TIFF, GIF, ICNS) keep their own colors."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+
+      if let importError {
+        Text(importError)
+          .font(.caption)
+          .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Divider()
+
+      // Both escape hatches sit below the grid: the grid is the common path,
+      // and reset / import are the exceptions to it.
+      HStack(spacing: 8) {
+        Button("Reset to Default") { commit(nil) }
+          .disabled(selection == nil)
+        Spacer(minLength: 0)
+        Button("Choose Image…") { chooseFile() }
+      }
+    }
+    .padding(16)
+    .frame(width: Self.popoverWidth)
+  }
+
+  /// Bridges `SFSymbolPicker`'s plain `String` binding onto the enum. Writes
+  /// are filtered to names the system can actually resolve, so typing toward
+  /// `"terminal"` never persists `"ter"` as the Project's icon.
+  private var symbolBinding: Binding<String> {
+    Binding(
+      get: { symbolDraft },
+      set: { newValue in
+        symbolDraft = newValue
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+          NSImage(systemSymbolName: trimmed, accessibilityDescription: nil) != nil
+        else { return }
+        commit(.symbol(trimmed))
+      }
+    )
+  }
+
+  // MARK: - Actions
+
+  private func chooseFile() {
+    importError = nil
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.message = "Choose an image to use as this project's icon."
+    panel.allowedContentTypes = Self.allowedContentTypes
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      let fileName = try ProjectIconStore.importIcon(from: url)
+      ProjectIconImageCache.invalidate(fileName: fileName)
+      commit(.custom(fileName: fileName))
+    } catch let error as ProjectIconStore.ImportError {
+      switch error {
+      case .unsupportedFormat(let ext):
+        importError =
+          ext.isEmpty
+          ? "That file has no recognizable image extension."
+          : "Icons can't be made from .\(ext) files."
+      }
+    } catch {
+      importError = "Couldn't copy that image: \(error.localizedDescription)"
+    }
+  }
+
+  private func commit(_ icon: ProjectIcon?) {
+    selection = icon
+    if icon == nil { symbolDraft = "" }
+  }
+
+  // MARK: - Derived
+
+  /// Content types the open panel offers, derived from the same extension
+  /// set `ProjectIconStore` validates against so the panel can never hand
+  /// back a file the import step then rejects.
+  private static let allowedContentTypes: [UTType] = ProjectIcon.supportedExtensions
+    .sorted()
+    .compactMap { UTType(filenameExtension: $0) }
+
+  /// SF Symbol name behind the current selection, or the default folder glyph
+  /// so opening the popover pre-fills the field with something meaningful.
+  private var currentSymbolName: String {
+    if case .symbol(let name) = selection { return name }
+    return ""
+  }
+
+  private var summary: String {
+    switch selection {
+    case .none: "Folder (default)"
+    case .symbol(let name): name
+    case .custom(let fileName): "Custom — .\(ProjectIcon.normalizedExtension(of: fileName))"
+    }
+  }
+}

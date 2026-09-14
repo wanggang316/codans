@@ -471,6 +471,27 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Re-icons the Project. `nil` clears the assignment so the UI falls back
+  /// to the built-in folder pair. Unchanged value is a silent no-op, matching
+  /// `setProjectColor`.
+  ///
+  /// Replacing a custom icon deletes the file the old icon referenced —
+  /// nothing else can reference it (import stamps a fresh UUID name per pick),
+  /// so leaving it behind would accumulate dead artwork in the config
+  /// directory for the lifetime of the install.
+  func setProjectIcon(_ id: ProjectID, icon: ProjectIcon?) throws {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
+      throw HierarchyError.notFound("Project \(id)")
+    }
+    let previous = catalog.projects[projectIndex].icon
+    guard previous != icon else { return }
+    catalog.projects[projectIndex].icon = icon
+    if let orphaned = previous?.customFileName {
+      ProjectIconStore.removeIcon(named: orphaned)
+    }
+    store.scheduleSave(catalog)
+  }
+
   /// Drops the runtime-only bookkeeping every Pane / Tab in `tabs` owns:
   /// the two busy sets and the tab's remembered focus.
   ///
@@ -519,6 +540,11 @@ final class HierarchyManager {
       runtime.suspendSurface(for: pane.id)
     }
     purgeRuntimeState(forTabs: tabs)
+    // The Project is the only referent of its custom icon file, so drop the
+    // artwork with it rather than leaving it orphaned in the config directory.
+    if let iconFileName = catalog.projects[projectIndex].icon?.customFileName {
+      ProjectIconStore.removeIcon(named: iconFileName)
+    }
     catalog.projects.remove(at: projectIndex)
     if catalog.selectedProjectID == id {
       catalog.selectedProjectID = nil

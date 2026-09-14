@@ -798,6 +798,10 @@ struct HierarchySidebarView: View {
         .font(.system(size: 12, weight: .regular))
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
+      // The reorder sheet strips the row to a handle and a name; the icon
+      // earns its place here because scanning a drag list is exactly when
+      // recognizing a Project at a glance matters.
+      ProjectIconView(icon: project.icon, color: project.color)
       Text(project.name)
         .font(.body)
         .lineLimit(1)
@@ -859,7 +863,6 @@ struct HierarchySidebarView: View {
         } label: {
           ProjectHeaderRow(
             project: project,
-            isExpanded: isExpanded,
             store: store,
             gitHubStore: gitHubStore
           )
@@ -1824,9 +1827,6 @@ struct HierarchySidebarView: View {
 /// view-local concern — not worth promoting to reducer state.
 private struct ProjectHeaderRow: View {
   let project: Project
-  /// Drives the leading disclosure chevron (`chevron.right` collapsed, `chevron.down`
-  /// expanded). The parent Button still owns the tap, so this is display-only.
-  var isExpanded: Bool = false
   @Bindable var store: StoreOf<HierarchySidebarFeature>
   /// Read-only access to per-Worktree PR snapshots so the ⋯ menu can resolve
   /// the project's merged Worktrees for the "… All Merged Worktrees" items.
@@ -1853,10 +1853,12 @@ private struct ProjectHeaderRow: View {
       .map(\.id)
   }
 
-  /// Project name tint. Uses the project's configured color when set;
-  /// otherwise keeps the prior hover-driven primary/secondary behavior.
+  /// Project name tint — hover-driven only. The Project color deliberately
+  /// does *not* reach the name: the icon to its left already carries it, and
+  /// tinting both painted the same signal twice and cost the name the
+  /// primary/secondary hover contrast every other sidebar row keeps.
   private var projectNameColor: Color {
-    project.color?.swiftUIColor ?? (isHovering ? .primary : .secondary)
+    isHovering ? .primary : .secondary
   }
 
   var body: some View {
@@ -1866,24 +1868,26 @@ private struct ProjectHeaderRow: View {
     HStack(spacing: 6) {
       // L4 unread indicator. When the project is in `unreadProjects`
       // (rollup rule = project collapsed + unread inside), the leading
-      // disclosure chevron swaps for a red bell glyph — same pattern as
+      // project icon swaps for a red bell glyph — same pattern as
       // the worktree row icon. Click target / disclosure semantics are
       // unchanged: the parent Button still owns the tap.
-      if hasUnread {
-        Image(systemName: "bell.fill")
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(width: 10, height: 10, alignment: .center)
-          .foregroundStyle(Color.orange)
-          .accessibilityLabel("Has unread notifications")
-      } else {
-        Image(systemName: "chevron.right")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .rotationEffect(.degrees(isExpanded ? 90 : 0))
-          .frame(width: 10, alignment: .center)
-          .accessibilityHidden(true)
+      //
+      // The icon occupies the slot the disclosure chevron used to hold, and
+      // does not change with expansion — the row carries the Project's
+      // identity, not its disclosure state.
+      Group {
+        if hasUnread {
+          Image(systemName: "bell.fill")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 11, height: 11)
+            .foregroundStyle(Color.orange)
+            .accessibilityLabel("Has unread notifications")
+        } else {
+          ProjectIconView(icon: project.icon, color: project.color, size: 13)
+        }
       }
+      .frame(width: 14, alignment: .center)
       Text(project.name)
         .font(.subheadline)
         .foregroundStyle(projectNameColor)
