@@ -4,9 +4,9 @@ import Foundation
 /// Project header row, the Settings sidebar, the manual-reorder sheet.
 ///
 /// `nil` on `Project.icon` means "no choice made" and renders the built-in
-/// folder pair: `folder` while the Project is collapsed, `folder.fill` while
-/// it is expanded. SF Symbols ships no open-folder glyph, so the filled
-/// variant is what carries the "open" reading.
+/// folder pair — closed while the Project is collapsed, open while it is
+/// expanded. Which glyphs those are is the renderer's business; see
+/// `ProjectIconView`.
 ///
 /// Codable shape is a single prefix-tagged string so the catalog stays
 /// diff-friendly and a future case can be added without colliding with an
@@ -22,11 +22,6 @@ public nonisolated enum ProjectIcon: Equatable, Hashable, Sendable {
   case symbol(String)
   /// File name (not a path) inside `ProjectIconStore.directory`.
   case custom(fileName: String)
-
-  /// Glyph used when `Project.icon` is `nil` and the Project is collapsed.
-  public static let defaultCollapsedSymbol = "folder"
-  /// Glyph used when `Project.icon` is `nil` and the Project is expanded.
-  public static let defaultExpandedSymbol = "folder.fill"
 
   /// Image formats a custom icon may be imported from. Vector entries are
   /// the recolorable ones — see `tintableExtensions`.

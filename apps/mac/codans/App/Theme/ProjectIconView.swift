@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// The one place a `Project.icon` turns into pixels. Shared by the main
 /// sidebar's Project header row, the Settings sidebar, the manual-reorder
@@ -29,15 +29,29 @@ struct ProjectIconView: View {
       .accessibilityHidden(true)
   }
 
+  /// Closed half of the default pair. An SF Symbol, so it tracks the system's
+  /// own folder drawing.
+  private static let defaultClosedSymbol = "folder"
+  /// Open half of the default pair, drawn to match `folder`'s proportions,
+  /// stroke weight and left-hand tab. It is a bundled asset because SF Symbols
+  /// has no open-folder glyph at all — `folder.fill` stood in for it at first,
+  /// but a solid folder reads as "selected", not as "open".
+  private static let defaultOpenAsset = "folder-open"
+
   @ViewBuilder
   private var content: some View {
     switch icon {
     case .none:
-      symbolImage(
-        named: isExpanded
-          ? ProjectIcon.defaultExpandedSymbol
-          : ProjectIcon.defaultCollapsedSymbol
-      )
+      if isExpanded {
+        Image(Self.defaultOpenAsset)
+          .renderingMode(.template)
+          .resizable()
+          .aspectRatio(contentMode: .fit)
+          .foregroundStyle(tint)
+          .accessibilityHidden(true)
+      } else {
+        symbolImage(named: Self.defaultClosedSymbol)
+      }
     case .symbol(let name):
       symbolImage(named: name)
     case .custom(let fileName):
@@ -53,7 +67,7 @@ struct ProjectIconView: View {
         // The file is gone (hand-deleted config directory, a half-restored
         // backup). Show the default glyph rather than an empty slot so the
         // row keeps its shape and stays clickable.
-        symbolImage(named: ProjectIcon.defaultCollapsedSymbol)
+        symbolImage(named: Self.defaultClosedSymbol)
       }
     }
   }
