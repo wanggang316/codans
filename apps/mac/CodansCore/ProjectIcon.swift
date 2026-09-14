@@ -4,8 +4,7 @@ import Foundation
 /// Project header row, the Settings sidebar, the manual-reorder sheet.
 ///
 /// `nil` on `Project.icon` means "no choice made" and renders the built-in
-/// folder pair — closed while the Project is collapsed, open while it is
-/// expanded. Which glyphs those are is the renderer's business; see
+/// folder glyph. Which glyph that is is the renderer's business; see
 /// `ProjectIconView`.
 ///
 /// Codable shape is a single prefix-tagged string so the catalog stays

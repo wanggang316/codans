@@ -3,9 +3,9 @@ import CodansCore
 import SwiftUI
 
 /// The one place a `Project.icon` turns into pixels. Shared by the main
-/// sidebar's Project header row, the Settings sidebar, the manual-reorder
-/// sheet, and the Icon picker's own preview, so every surface agrees on the
-/// default glyph, the sizing, and the tint rule.
+/// sidebar's Project header row, the manual-reorder sheet, and the Icon
+/// picker's own preview, so every surface agrees on the default glyph, the
+/// sizing, and the tint rule.
 ///
 /// Tint rule (HAN-144): SF Symbols always take the Project color; custom
 /// artwork only does so for vector formats, which are single-color line work
@@ -15,10 +15,6 @@ import SwiftUI
 struct ProjectIconView: View {
   let icon: ProjectIcon?
   let color: ProjectColor?
-  /// Drives the default folder glyph's open/closed state. Surfaces with no
-  /// disclosure of their own (Settings sidebar, reorder sheet) pass a fixed
-  /// value rather than inventing an expansion concept.
-  var isExpanded: Bool = false
   var size: CGFloat = 13
   /// Tint used when the Project carries no color of its own.
   var fallbackTint: Color = .secondary
@@ -29,29 +25,17 @@ struct ProjectIconView: View {
       .accessibilityHidden(true)
   }
 
-  /// Closed half of the default pair. An SF Symbol, so it tracks the system's
-  /// own folder drawing.
-  private static let defaultClosedSymbol = "folder"
-  /// Open half of the default pair, drawn to match `folder`'s proportions,
-  /// stroke weight and left-hand tab. It is a bundled asset because SF Symbols
-  /// has no open-folder glyph at all — `folder.fill` stood in for it at first,
-  /// but a solid folder reads as "selected", not as "open".
-  private static let defaultOpenAsset = "folder-open"
+  /// Glyph for a Project that has picked no icon of its own. Fixed, not a
+  /// pair: SF Symbols has no open-folder glyph, `folder.fill` reads as
+  /// "selected" rather than "open", and a hand-drawn substitute is not worth
+  /// maintaining against the system set.
+  private static let defaultSymbol = "folder"
 
   @ViewBuilder
   private var content: some View {
     switch icon {
     case .none:
-      if isExpanded {
-        Image(Self.defaultOpenAsset)
-          .renderingMode(.template)
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .foregroundStyle(tint)
-          .accessibilityHidden(true)
-      } else {
-        symbolImage(named: Self.defaultClosedSymbol)
-      }
+      symbolImage(named: Self.defaultSymbol)
     case .symbol(let name):
       symbolImage(named: name)
     case .custom(let fileName):
@@ -67,7 +51,7 @@ struct ProjectIconView: View {
         // The file is gone (hand-deleted config directory, a half-restored
         // backup). Show the default glyph rather than an empty slot so the
         // row keeps its shape and stays clickable.
-        symbolImage(named: Self.defaultClosedSymbol)
+        symbolImage(named: Self.defaultSymbol)
       }
     }
   }

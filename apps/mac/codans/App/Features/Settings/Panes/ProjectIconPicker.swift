@@ -58,7 +58,7 @@ struct ProjectIconPicker: View {
       isPresented = true
     } label: {
       HStack(spacing: 6) {
-        ProjectIconView(icon: selection, color: color, isExpanded: true, size: 18)
+        ProjectIconView(icon: selection, color: color, size: 18)
         Text(summary)
           .lineLimit(1)
           .truncationMode(.middle)
@@ -86,7 +86,7 @@ struct ProjectIconPicker: View {
       // dropdown label is too tight to carry a custom file's details.
       HStack(spacing: 10) {
         ProjectIconView(
-          icon: selection, color: color, isExpanded: true, size: Self.previewSize
+          icon: selection, color: color, size: Self.previewSize
         )
         Text(summary)
           .font(.callout.weight(.medium))

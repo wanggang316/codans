@@ -801,7 +801,7 @@ struct HierarchySidebarView: View {
       // The reorder sheet strips the row to a handle and a name; the icon
       // earns its place here because scanning a drag list is exactly when
       // recognizing a Project at a glance matters.
-      ProjectIconView(icon: project.icon, color: project.color, isExpanded: true)
+      ProjectIconView(icon: project.icon, color: project.color)
       Text(project.name)
         .font(.body)
         .lineLimit(1)
@@ -863,7 +863,6 @@ struct HierarchySidebarView: View {
         } label: {
           ProjectHeaderRow(
             project: project,
-            isExpanded: isExpanded,
             store: store,
             gitHubStore: gitHubStore
           )
@@ -1828,9 +1827,6 @@ struct HierarchySidebarView: View {
 /// view-local concern — not worth promoting to reducer state.
 private struct ProjectHeaderRow: View {
   let project: Project
-  /// Drives the leading disclosure chevron (`chevron.right` collapsed, `chevron.down`
-  /// expanded). The parent Button still owns the tap, so this is display-only.
-  var isExpanded: Bool = false
   @Bindable var store: StoreOf<HierarchySidebarFeature>
   /// Read-only access to per-Worktree PR snapshots so the ⋯ menu can resolve
   /// the project's merged Worktrees for the "… All Merged Worktrees" items.
@@ -1877,9 +1873,8 @@ private struct ProjectHeaderRow: View {
       // unchanged: the parent Button still owns the tap.
       //
       // The icon occupies the slot the disclosure chevron used to hold
-      // (HAN-144). With the default folder glyph the open/closed pair carries
-      // the disclosure reading on its own; a Project the user has re-iconed
-      // trades that cue for the identity it chose.
+      // (HAN-144), and does not change with expansion — the row carries the
+      // Project's identity, not its disclosure state.
       Group {
         if hasUnread {
           Image(systemName: "bell.fill")
@@ -1889,12 +1884,7 @@ private struct ProjectHeaderRow: View {
             .foregroundStyle(Color.orange)
             .accessibilityLabel("Has unread notifications")
         } else {
-          ProjectIconView(
-            icon: project.icon,
-            color: project.color,
-            isExpanded: isExpanded,
-            size: 13
-          )
+          ProjectIconView(icon: project.icon, color: project.color, size: 13)
         }
       }
       .frame(width: 14, alignment: .center)
