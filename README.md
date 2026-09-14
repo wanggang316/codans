@@ -39,12 +39,25 @@ brew install --cask wanggang316/tap/codans
 
 The cask installs `Codans.app` into `/Applications` and symlinks the embedded `codans` CLI into Homebrew's `bin`. Subsequent updates flow through the in-app Sparkle updater; `brew upgrade --cask codans` also picks up new stable releases.
 
-## Requirements
+## Running Codans
 
-- macOS with Xcode **26.0+** (pinned via `apps/mac/Tuist.swift`)
+Requires macOS **14 (Sonoma) or later**. Xcode and mise are only needed to build
+from source.
+
+1. Open Codans and add a project directory from the sidebar.
+2. Select its root worktree, or create a worktree for a separate line of work.
+3. Run a coding agent in the terminal; use tabs and split panes for parallel tasks.
+
+For CLI usage, see the [Agent Skill](skills/codans-cli/SKILL.md).
+
+## Build from Source
+
+### Development requirements
+
+- Xcode **26.0+** (pinned via `apps/mac/Tuist.swift`)
 - [`mise`](https://mise.jdx.dev/) for tool version pinning (`tuist`, `zig`, `swiftlint`, `xcbeautify`, `xcsift`)
 
-## Quick Start
+### Generate, build, and run
 
 ```bash
 # One-time per worktree
@@ -60,7 +73,7 @@ make mac-run-app          # build + open the app
 > First-time Ghostty build is ~3.9 GB / ~20 min. In additional worktrees, symlink the cache:
 > `ln -s <main>/apps/mac/.build/ghostty apps/mac/.build/ghostty`
 
-## Commands
+### Development commands
 
 | Command | Description |
 |---|---|
@@ -70,7 +83,7 @@ make mac-run-app          # build + open the app
 | `make mac-run-app` | Build and launch `Codans.app` |
 | `make mac-lint` | Run `swiftlint --quiet` |
 | `make mac-check` | `swift-format` in-place + lint |
-| `make mac-test` | Run test bundles (placeholder) |
+| `make mac-test` | Run the Codans, CodansCore, and CodansKit test schemes |
 | `make mac-release` | Archive → notarize → DMG → staple |
 | `make help` | Full target list |
 

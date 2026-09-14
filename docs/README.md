@@ -33,18 +33,28 @@ used to". A reader wants today's truth, not the changelog. If a transition's
 record it in a dedicated `## 技术决策 / Decisions` section as a decision entry —
 never woven into the descriptive prose.
 
-### Every doc declares a liveness status
+### Feature availability and document review
 
-A symbol existing in code does **not** mean the feature is live — it may be
-hidden, unwired, or only a stub. Before describing a feature, verify it is
-reachable in the current build, then put a status field at the top:
+A symbol existing in code does **not** mean the feature is live: it may be
+hidden, unwired, or a stub. Feature documents must distinguish availability
+from document approval. Use the document's language:
 
-| `**状态：**` value | Meaning |
+| Availability / 状态 | Meaning |
 |---|---|
-| `已上线（可见）` | Shipped and reachable by the user today |
-| `已实现但隐藏` | Code exists but the UI/entry point is intentionally hidden/dormant |
-| `已设计未实现` | Design only; no working implementation (a command-id or stub ≠ a feature) |
+| Available / 已上线（可见） | Implemented with a reachable user entry point |
+| Hidden / 已实现但隐藏 | Implemented, but its entry point is hidden or unwired |
+| Planned / 已设计未实现 | No working implementation |
 
-A **removed** feature gets **no doc** — delete it (git keeps the history). Never
-describe a removed feature as current. When a doc is `已实现但隐藏` or
-`已设计未实现`, say so in the prose too, so no reader mistakes intent for reality.
+For a mixed subsystem, state which operations are available, hidden, or planned.
+An existing `Status: Implemented` field must describe that scope explicitly.
+`Document Status: Draft / Approved` is optional and never proves availability.
+
+When changing a feature's status, add a `Last Reviewed` date (or `最近核验`)
+and link to its implementation entry points. State whether the review checked
+source wiring, runtime behavior, or both; a source review is not a runtime test.
+Keep index summaries focused on responsibilities and link to the owning document
+for detailed capability limits.
+
+Removed behavior must not remain in current feature descriptions or acceptance
+cases. Git history retains superseded designs. Dated test results and incident
+reports describe their recorded run or incident, not current feature availability.

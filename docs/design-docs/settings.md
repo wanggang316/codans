@@ -17,11 +17,13 @@ the durable invariants and the non-obvious *why* behind the persistence model,
 the v3 per-Project schema, and the notification-gating semantics — not the
 SwiftUI layout, which is free to change.
 
-The design has three persisted documents under `~/.config/codans/`, each a
-single-writer file with a top-level `version` and atomic-rename writes:
-`settings.json` (this doc), `catalog.json` (the Project→Worktree→Tab→Pane tree),
-and `hooks.json` (event subscriptions). Keeping them as **three single-writer
-files** is the load-bearing decision — see "The single-writer invariant".
+The implemented settings and catalog stores use separate versioned documents
+under `~/.config/codans/`: `settings.json` (this doc) and `catalog.json` (the
+Project→Worktree→Tab→Pane tree), each with atomic-rename writes. A separate
+`hooks.json` for event subscriptions is **planned, not implemented**; see
+[lifecycle-hooks.md](./lifecycle-hooks.md). This is not an exhaustive inventory
+of persisted files — see [architecture.md](../architecture.md). Keeping each
+file owned by one writer is the load-bearing decision below.
 
 ## Goals and Non-Goals
 
@@ -58,9 +60,10 @@ class of bug.
 
 The invariant generalizes: **"different writers must not clobber one file" is a
 writer-overlap rule, not a centralization mandate.** The correct split is
-three single-writer files —
+separate single-writer files —
 `settings.json` ↔ `SettingsStore`, `catalog.json` ↔ `HierarchyManager` (via its
-store), `hooks.json` ↔ the hook config store. Hoisting catalog or hook data
+store), and, if lifecycle hooks are implemented, `hooks.json` ↔ its planned
+hook config store. Hoisting catalog or hook data
 into `settings.json` to satisfy a literal "one file for everything" reading was
 rejected (Alternatives A1): it conflates *user preferences* (settings) with
 *structural layout* (catalog) and *event subscriptions* (hooks), and forces a
@@ -316,8 +319,10 @@ shell commands on `GitProjectSettings`) run **inline and blocking** around the
 matching catalog action and can **abort** it: a non-zero `setupScript` blocks
 `createWorktree` (the on-disk dir is left, the catalog row is not added);
 `archive` / `delete` are fail-warn (the action proceeds, the failure is logged).
-This is deliberately distinct from `worktree.*` **hook subscriptions**, which
-are async fire-and-forget and cannot block. The two are kept separate rather
+This is deliberately distinct from the planned `worktree.*` **hook
+subscriptions**, designed to be async fire-and-forget and unable to block.
+Hook subscriptions and their dispatcher are not implemented; see
+[lifecycle-hooks.md](./lifecycle-hooks.md). The two designs are kept separate rather
 than overloading the hook dispatcher with a "block-and-fail-the-event" mode —
 the semantics (blocking-and-abortive vs fire-and-forget) are fundamentally
 different. Lifecycle scripts run headless via a direct `Process` (cwd = worktree
