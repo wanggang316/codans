@@ -173,6 +173,12 @@ phase_project() {
   t P13 0 "project list" -- cli project list
   t P14 0 "project list --json has 1 project" -- bash -c "$CLI project list --json | jq -e '.projects|length==1'"
   t P15 2 "tree --project unknown-name -> 2" -- cli tree --project no-such-project
+  t P16 0 "project show <id>" -- cli project show "$PID"
+  t P16b 0 "project show --json carries gitRoot + worktreeCount" -- bash -c "$CLI project show $PID --json | jq -e '.gitRoot==\"$FIX\" and .worktreeCount>=1 and (.id|type==\"string\")'"
+  t P16c 2 "project show random uuid -> 2" -- cli project show "$(uuidgen)"
+  t P17 0 "project rename <id> Renamed" -- cli project rename "$PID" Renamed --json
+  t P17b 0 "tree --project Renamed resolves the new name" -- cli tree --project Renamed
+  t P17c 0 "project rename '' clears the override" -- bash -c "$CLI project rename $PID '' --json | jq -e '.name==\"fixture\"'"
   echo "== project commands"
   t C01 0 "commands list (empty)" -- cli project commands list --project "$PID"
   t C02 0 "commands add" -- cli project commands add --project "$PID" --command 'echo hello' --name Hello --json
@@ -228,6 +234,16 @@ phase_worktree() {
   t W18 0 "worktree rm <id> --delete without --project (inferred)" -- cli worktree rm "$WT3" --delete
   t W19 1 "dir gone after rm --delete" -- test -d "$WT3PATH"
   t W19b 128 "branch gone after rm --delete (git exits 128)" -- git -C "$FIX" rev-parse --verify test/brand-new
+  t W20 0 "worktree show <id> --json has branch + projectName" -- bash -c "$CLI worktree show $WT1 --json | jq -e '.branch==\"bugfix/menu\" and .projectName==\"fixture\" and (.projectID|type==\"string\")'"
+  t W20b 0 "worktree show by branch (text)" -- cli worktree show bugfix/menu
+  t W21 0 "worktree rename <id> Menu (project inferred)" -- cli worktree rename "$WT1" Menu --json
+  t W21b 0 "worktree switch by the new name" -- cli worktree switch Menu
+  t W21c 0 "worktree show reports the new name, same path" -- bash -c "$CLI worktree show $WT1 --json | jq -e '.name==\"Menu\" and .path==\"$WT1PATH\"'"
+  t W22 1 "worktree rename blank -> 1" -- cli worktree rename "$WT1" '   '
+  git -C "$FIX" worktree add -q "$RUN/stale" -b test/stale 2>/dev/null; rm -rf "$RUN/stale"
+  t W23 0 "worktree prune reports the stale registration" -- bash -c "$CLI worktree prune --project $PID --json | jq -e '.pruned==1'"
+  t W23b 0 "git no longer lists the stale worktree" -- bash -c "! git -C '$FIX' worktree list | grep -q '$RUN/stale'"
+  t W24 2 "worktree prune --project current outside pane -> 2" -- cli worktree prune
 }
 
 phase_tab_pane() {
@@ -254,6 +270,13 @@ phase_tab_pane() {
   t T13 0 "tab new again for the pane phase" -- cli tab new "dev server" --worktree "$WT1" --json
   TAB1=$(jf T13 .id)
   t T14 0 "tab switch by title" -- cli tab switch "dev server"
+  t T15 0 "tab show <id> --json has handle + title + worktree" -- bash -c "$CLI tab show $TAB1 --json | jq -e '(.handle|startswith(\"t\")) and .title==\"dev server\" and .worktreeID==\"$WT1\"'"
+  t T15b 0 "tab show by title (text)" -- cli tab show "dev server"
+  t T16 0 "tab rename <id> renamed-tab (containers inferred)" -- cli tab rename "$TAB1" renamed-tab --json
+  t T16b 0 "tab switch by the new title" -- cli tab switch renamed-tab
+  t T17 0 "tab rename <id> (no name) clears the title" -- bash -c "$CLI tab rename $TAB1 --json | jq -e '.name==null'"
+  t T17b 0 "tab show after clear has name null" -- bash -c "$CLI tab show $TAB1 --json | jq -e '.name==null'"
+  cli tab rename "$TAB1" "dev server" >/dev/null
 
   echo "== pane"
   t N01 0 "pane new default shell" -- cli pane new --project "$PID" --worktree "$WT1" --tab "$TAB1" --cwd "$FIX" --json
@@ -287,6 +310,19 @@ phase_tab_pane() {
   t N19 0 "pane info --json has shellPid+pwd" -- bash -c "$CLI pane info $PANE1 --json | jq -e '.shellPid>0 and (.pwd|length>0)'"
   t N20 0 "pane reset" -- cli pane reset "$PANE1"
   t N21 "*" "pane info on closed/unknown pane" -- cli pane info "$(uuidgen)"
+  t N22 0 "pane split <id> --direction down" -- cli pane split "$PANE1" --direction down --json
+  SPLITPANE=$(jf N22 .id); echo "  split pane=$SPLITPANE"
+  # zsh discards input queued before it finishes starting, so re-send until the shell answers.
+  t N22b 0 "split pane runs a shell with the project env" -- bash -c "for n in 1 2 3 4 5; do sleep 2; $CLI pane send $SPLITPANE 'echo MARK-SPLIT-\$CODANS_CLI' >/dev/null; for i in \$(seq 1 15); do $CLI pane capture $SPLITPANE --scope screen | grep -q 'MARK-SPLIT-.*/codans-dev' && exit 0; sleep 0.2; done; done; exit 1"
+  t N23 0 "pane show <split> --json sits in tab1 with the anchor's cwd" -- bash -c "$CLI pane show $SPLITPANE --json | jq -e '.tabID==\"$TAB1\" and .worktreeID==\"$WT1\" and (.handle|startswith(\"p\")) and .isLive==true' && cwd=\$($CLI pane show $SPLITPANE --json | jq -r .workingDirectory) && [[ \"\${cwd#/private}\" == \"${FIX#/private}\" ]]"
+  t N24 0 "pane show <id> text" -- cli pane show "$PANE1"
+  t N24b 0 "pane show by handle" -- cli pane show "$PH"
+  t N25 0 "pane resize <id> down" -- cli pane resize "$PANE1" down
+  t N25b 0 "pane resize --amount 80 left" -- cli pane resize "$PANE1" left --amount 80
+  t N26 2 "pane resize random uuid -> 2" -- cli pane resize "$(uuidgen)" right
+  t N27 1 "pane resize --amount 0 -> 1" -- cli pane resize "$PANE1" right --amount 0
+  t N28 2 "pane split random uuid -> 2" -- cli pane split "$(uuidgen)"
+  t N29 0 "pane close the split pane" -- cli pane close "$SPLITPANE"
 }
 
 phase_terminal() {
@@ -305,7 +341,8 @@ phase_terminal() {
   t S12 1 "pane send echo hi (unquoted) -> 1" -- cli pane send echo hi
   t S12b 0 "S12 error names the stray word" -- grep -q 'unknown pane "echo"' "$LOGS/S12.err"
   t S13 1 "pane send no text -> 1" -- cli pane send
-  t S14 1 "pane send --stdin with tty stdin -> 1" -- cli pane send --stdin "$PANE1"
+  # stdin is closed explicitly: on an interactive stdin the CLI would block reading it.
+  t S14 1 "pane send --stdin with empty stdin -> 1" -- bash -c "$CLI pane send --stdin $PANE1 </dev/null"
   t S15 0 "pane send --raw hex (ESC [ A)" -- cli pane send "$PANE1" --raw 1b5b41
   t S16 1 "pane send --raw + --no-enter -> 1" -- cli pane send "$PANE1" --raw 1b --no-enter
   t S17 1 "pane send --raw + text -> 1" -- cli pane send "$PANE1" --raw 1b hello
@@ -359,7 +396,9 @@ phase_incontext() {
   ctx() { # ctx <id> <cmdline>
     local id="$1"; shift
     cli pane send "$PANE1" "clear; $* >/tmp/codans-ctx-$id.out 2>&1; echo CTX-$id=\$?" >/dev/null
-    wait_text "$PANE1" "CTX-$id=" 10
+    # Wait for the marker *with* an exit code: the echoed command line itself
+    # shows `CTX-<id>=$?` until `clear` runs, and would satisfy a bare prefix.
+    wait_text "$PANE1" "CTX-$id=[0-9]" 10
     local line; line=$(cli pane capture "$PANE1" --scope screen | grep -o "CTX-$id=[0-9]*" | tail -1)
     echo "${line#*=}"
   }
@@ -439,12 +478,18 @@ EOF"
   # A split receiver's surface comes up with its tab; make the source pane's tab the visible one first.
   cli pane focus "$PANE1" >/dev/null; sleep 1
   t H10 0 "handoff to amp --profile 'Fake Amp' --split down --no-brief (launches fake)" -- cli handoff to amp --pane "$PANE1" --profile 'Fake Amp' --split down --no-brief --json
+  t H10b 0 "handoff --json prints launchedPane ids as strings" -- bash -c "jq -e '.launchedPane.paneID|type==\"string\"' '$LOGS/H10.out'"
   HOPANE=$(jf H10 .launchedPane.paneID)
   t H11 0 "receiver fake amp came up" -- wait_text "$HOPANE" 'FAKE-AGENT amp' 15
   if [[ -n "$HOPANE" && "$HOPANE" != null ]]; then
     { cli tree --project "$PID"; cli pane info "$HOPANE"; cli pane read "$HOPANE" --tail 20; cli pane capture "$HOPANE" --scope screen; } > "$LOGS/H11.diag" 2>&1
   fi
-  t H12 0 "typed kickoff reached fake amp (RECEIVED:)" -- wait_text "$HOPANE" 'RECEIVED:' 20
+  # The kickoff is typed once the foreground-job classifier has seen the agent; that poll
+  # can take tens of seconds for a fresh pane, so this is the run's longest wait.
+  t H12 0 "typed kickoff reached fake amp (RECEIVED:)" -- wait_text "$HOPANE" 'RECEIVED:' 75
+  if [[ -n "$HOPANE" && "$HOPANE" != null ]]; then
+    { cli pane capture "$HOPANE" --scope screen; log show --process Codans --last 3m --style compact 2>/dev/null | grep -i "kickoff"; } > "$LOGS/H12.diag" 2>&1
+  fi
   t H13 1 "handoff to amp --tab --split -> 1" -- cli handoff to amp --pane "$PANE1" --tab --split up --no-brief
   t H14 2 "handoff to claude --pane current outside pane -> 2" -- cli handoff to claude --no-brief --no-launch
   for p in "$AGPANE" "$AGPANE2" "$AGPANE3" "$HOPANE"; do [[ -n "$p" && "$p" != null ]] && cli pane close "$p" >/dev/null 2>&1; done

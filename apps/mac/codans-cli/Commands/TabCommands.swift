@@ -37,14 +37,63 @@ struct TabList: AsyncParsableCommand {
 struct TabCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "tab",
-    abstract: "List, create, switch, and close tabs.",
+    abstract: "List, create, describe, switch, rename, and close tabs.",
     subcommands: [
       TabList.self,
       TabNew.self,
+      TabShow.self,
       TabSwitch.self,
+      TabRename.self,
       TabClose.self,
     ]
   )
+}
+
+struct TabRename: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "rename",
+    abstract: "Set a tab's title, or clear it to follow the shell again.",
+    discussion: """
+      With a name the tab keeps that title; without one (or with an empty
+      string) the user title is cleared and the tab shows the live title the
+      shell reports, as a new tab does.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Tab id, t<n> handle, title, or 'current'.")
+  var tab: String
+  @Argument(help: "New title; omit or pass '' to clear.")
+  var name: String?
+  @Option(name: .long, help: "Project id, name, or 'current'. Usually inferred from the tab.")
+  var project: String = "current"
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'. Usually inferred from the tab.")
+  var worktree: String = "current"
+
+  func run() async throws {
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
+      struct Params: Codable {
+        let id: TabID
+        let worktreeID: WorktreeID
+        let projectID: ProjectID
+        let name: String?
+      }
+      let result: RenameResult = try await client.call(
+        .hierarchyRenameTab,
+        params: Params(
+          id: scope.tabID, worktreeID: scope.worktreeID, projectID: scope.projectID, name: name)
+      )
+      try Renderer.emitObject(
+        ["id": result.id, "name": result.name.map { $0 as Any } ?? NSNull()],
+        mode: globals.renderMode
+      ) { _ in
+        result.name.map { "renamed tab \(result.id) to \($0)" } ?? "cleared title of tab \(result.id)"
+      }
+    }
+  }
 }
 
 struct TabNew: AsyncParsableCommand {

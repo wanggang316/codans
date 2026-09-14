@@ -29,14 +29,61 @@ struct ProjectList: AsyncParsableCommand {
 struct ProjectCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "project",
-    abstract: "List, create, and remove projects.",
+    abstract: "List, create, describe, rename, and remove projects.",
     subcommands: [
       ProjectList.self,
       ProjectAdd.self,
+      ProjectShow.self,
+      ProjectRename.self,
       ProjectRemove.self,
       ProjectScriptsCommand.self,
     ]
   )
+}
+
+struct ProjectRename: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "rename",
+    abstract: "Set a project's sidebar name.",
+    discussion: """
+      The folder name stays the canonical name; this sets the display
+      override the sidebar's rename field sets. An empty name (or the folder
+      name itself) clears the override.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Project id, name, or 'current'.")
+  var project: String
+  @Argument(help: "New display name; empty clears the override.")
+  var name: String
+
+  func run() async throws {
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      struct Params: Codable {
+        let id: ProjectID
+        let name: String
+      }
+      let result: RenameResult = try await client.call(
+        .hierarchyRenameProject,
+        params: Params(id: ProjectID(raw: uuid), name: name)
+      )
+      try Renderer.emitObject(
+        ["id": result.id, "name": result.name ?? ""],
+        mode: globals.renderMode
+      ) { _ in "renamed project \(result.id) to \(result.name ?? "")" }
+    }
+  }
+}
+
+/// `{id, name}` as `hierarchy.rename*` answer it; `name` is the label now
+/// in effect (nil when a tab went back to its live title).
+struct RenameResult: Decodable {
+  let id: String
+  let name: String?
 }
 
 /// `codans project commands` — read/manage a Project's saved Commands

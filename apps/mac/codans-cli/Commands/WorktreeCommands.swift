@@ -35,14 +35,89 @@ struct WorktreeList: AsyncParsableCommand {
 struct WorktreeCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "worktree",
-    abstract: "List, create, switch, and remove worktrees.",
+    abstract: "List, create, describe, switch, rename, prune, and remove worktrees.",
     subcommands: [
       WorktreeList.self,
       WorktreeNew.self,
+      WorktreeShow.self,
       WorktreeSwitch.self,
+      WorktreeRename.self,
+      WorktreePrune.self,
       WorktreeRemove.self,
     ]
   )
+}
+
+struct WorktreeRename: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "rename",
+    abstract: "Set a worktree's sidebar name (path and branch stay)."
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Worktree id, name, branch, or 'current'.")
+  var worktree: String
+  @Argument(help: "New display name.")
+  var name: String
+  @Option(name: .long, help: "Project id, name, or 'current'. Usually inferred from the worktree.")
+  var project: String = "current"
+
+  func run() async throws {
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      struct Params: Codable {
+        let id: WorktreeID
+        let projectID: ProjectID
+        let name: String
+      }
+      let result: RenameResult = try await client.call(
+        .hierarchyRenameWorktree,
+        params: Params(id: scope.worktreeID, projectID: scope.projectID, name: name)
+      )
+      try Renderer.emitObject(
+        ["id": result.id, "name": result.name ?? ""],
+        mode: globals.renderMode
+      ) { _ in "renamed worktree \(result.id) to \(result.name ?? "")" }
+    }
+  }
+}
+
+struct WorktreePrune: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "prune",
+    abstract: "Run `git worktree prune` for a project and drop the stale rows.",
+    discussion: """
+      The sidebar's Prune Worktrees: registrations whose directories are gone
+      leave git's worktree list, then the project is reconciled so the
+      catalog matches. Nothing on disk is deleted.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Option(name: .long, help: "Project id, name, or 'current'.")
+  var project: String = "current"
+
+  func run() async throws {
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      struct Params: Codable { let projectID: ProjectID }
+      struct Result: Decodable { let pruned: Int }
+      let result: Result = try await client.call(
+        .hierarchyPruneWorktrees,
+        params: Params(projectID: ProjectID(raw: uuid))
+      )
+      try Renderer.emitObject(
+        ["projectID": uuid.uuidString, "pruned": result.pruned],
+        mode: globals.renderMode
+      ) { _ in
+        result.pruned == 1 ? "pruned 1 stale worktree" : "pruned \(result.pruned) stale worktrees"
+      }
+    }
+  }
 }
 
 struct WorktreeNew: AsyncParsableCommand {

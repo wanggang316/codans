@@ -40,11 +40,14 @@ struct PaneList: AsyncParsableCommand {
 struct PaneCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "pane",
-    abstract: "List, create, focus, close, label, read, reset, and send panes.",
+    abstract: "List, create, split, resize, focus, close, label, read, reset, and send panes.",
     subcommands: [
       PaneList.self,
       PaneNew.self,
+      PaneSplit.self,
+      PaneShow.self,
       PaneFocus.self,
+      PaneResize.self,
       PaneClose.self,
       PaneLabel.self,
       PaneReset.self,
@@ -109,6 +112,119 @@ struct PaneNew: AsyncParsableCommand {
       ) { _ in
         "created pane \(result.id.description)"
       }
+    }
+  }
+}
+
+struct PaneSplit: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "split",
+    abstract: "Split a pane and start a shell (or a command) in the new half.",
+    discussion: """
+      The new pane appears beside the anchor pane in the given direction,
+      like the keyboard split. Its working directory defaults to the anchor's
+      live directory, not $PWD; pass --cwd to choose another.
+      """
+  )
+
+  enum Direction: String, ExpressibleByArgument, CaseIterable {
+    case right, left, up, down
+  }
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Anchor pane id, p<n> handle, @label, or 'current'.")
+  var pane: String = "current"
+  @Argument(parsing: .remaining, help: "Initial command. Omit for the default shell.")
+  var command: [String] = []
+  @Option(name: .long, help: "Side of the anchor the new pane takes: right (default), left, up, down.")
+  var direction: Direction = .right
+  @Option(name: .long, help: "Working directory. Defaults to the anchor pane's directory.")
+  var cwd: String?
+  @Option(name: .long, parsing: .upToNextOption, help: "Initial labels.")
+  var label: [String] = []
+
+  func run() async throws {
+    await CommandRunner.run {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let paneUUID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let path = try await PaneLocatorFlow.resolvePanePath(
+        paneUUID: paneUUID, project: "current", worktree: "current", tab: "current", client: client)
+      struct Params: Codable {
+        let paneID: PaneID
+        let tabID: TabID
+        let worktreeID: WorktreeID
+        let projectID: ProjectID
+        let direction: String
+        let workingDirectory: String?
+        let initialCommand: String?
+        let labels: [String]
+      }
+      struct Result: Codable { let id: PaneID }
+      let result: Result = try await client.call(
+        .hierarchySplitPane,
+        params: Params(
+          paneID: path.paneID,
+          tabID: path.tabID,
+          worktreeID: path.worktreeID,
+          projectID: path.projectID,
+          direction: direction.rawValue,
+          workingDirectory: cwd.map { PathResolver.absolute($0) },
+          initialCommand: command.isEmpty ? nil : command.joined(separator: " "),
+          labels: label
+        )
+      )
+      try Renderer.emitObject(
+        ["id": result.id.description, "anchor": paneUUID.uuidString, "direction": direction.rawValue],
+        mode: globals.renderMode
+      ) { _ in
+        "created pane \(result.id.description) \(direction.rawValue) of \(paneUUID.uuidString)"
+      }
+    }
+  }
+}
+
+struct PaneResize: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "resize",
+    abstract: "Move the divider next to a pane.",
+    discussion: """
+      `left` / `right` move the nearest vertical divider, `up` / `down` the
+      nearest horizontal one, growing the pane toward that side. A pane with
+      no divider in that orientation is left alone. --amount is in pixels,
+      as the keyboard resize sends them (default 40).
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
+  var pane: String
+  @Argument(help: "Direction to grow: left, right, up, or down.")
+  var direction: PaneSplit.Direction
+  @Option(name: .long, help: "Pixels to move the divider (default 40).")
+  var amount: Double = 40
+
+  func run() async throws {
+    await CommandRunner.run {
+      guard amount > 0 else {
+        throw CLIError(code: .userError, message: "--amount must be positive")
+      }
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      struct Params: Codable {
+        let paneID: PaneID
+        let direction: String
+        let amount: Double
+      }
+      _ = try await client.callRaw(
+        .hierarchyResizePane,
+        params: Params(paneID: PaneID(raw: uuid), direction: direction.rawValue, amount: amount)
+      )
+      try Renderer.emit(
+        IDMessage(id: uuid.uuidString, message: "resized pane \(uuid.uuidString) \(direction.rawValue)"),
+        mode: globals.renderMode
+      )
     }
   }
 }

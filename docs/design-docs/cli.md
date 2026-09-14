@@ -3,7 +3,7 @@
 **状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
-> **现状（读前须知）。** 动词集已全部接线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群（含各级 `list`）、`pane send` / `broadcast`、`agent` / `handoff` 各群、顶层 `open` 与隐藏的 `help-json`。**完全未实现**：`skill.*` 与 `hook.*` 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`）；`IPC.Method` 里已声明但 `MethodRouter` 未路由的 `hierarchy.describe*` / `rename*` / `pruneWorktrees` / `splitPane` / `resizePane` / `zoomPane` 亦同。
+> **现状（读前须知）。** 动词集已全部接线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群（含各级 `list`）、`pane send` / `broadcast`、`agent` / `handoff` 各群、顶层 `open` 与隐藏的 `help-json`。**完全未实现**：`skill.*` 与 `hook.*` 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`）；`IPC.Method` 里已声明但 `MethodRouter` 未路由的只剩 `hierarchy.zoomPane` / `unzoomPane`（应用没有 zoomed-pane 渲染，`SplitTree.zoomed` 仅被 `focusPane` 写入）与 `hierarchy.setProjectEditor`（被 `editor.setProjectDefault` 取代）。
 
 ## 背景与范围
 
@@ -123,23 +123,28 @@
 
 #### `codans project …`
 
-`ProjectCommand.subcommands`：`list`、`add`、`rm`。
+`ProjectCommand.subcommands`：`list`、`add`、`show`、`rename`、`rm`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans project list` | `hierarchy.listProjects` | `HierarchyHandlers.listProjects` | 无 |
 | `codans project add PATH` | `hierarchy.addProject` | `HierarchyHandlers.addProject` → `HierarchyManager.addProject` | `PATH`，`[--name NAME]` |
+| `codans project show [ID]` | `hierarchy.describeProject` | `HierarchyHandlers.describeProject` | `[ID]`；回带 `{id, name, canonicalName, rootPath, gitRoot, remoteHost, isSelected, selectedWorktreeID, worktreeCount, archivedWorktreeCount, tagIDs}` |
+| `codans project rename ID NAME` | `hierarchy.renameProject` | `HierarchyManager.renameProject` | `ID`，`NAME`（空串或等于文件夹名 → 清除覆盖） |
 | `codans project rm ID` | `hierarchy.removeProject` | `HierarchyManager.removeProject` | `ID`（id/名字/`current`） |
 
 `add` 在边界校验：目录必须存在（否则 `invalidParams`，exit 1）、规范化路径未注册（否则 `conflict` 并回带已有 id）；未传 `gitRoot` 时服务端用 `git rev-parse --show-toplevel` 探测，落库后触发与侧栏 Add Project 相同的 reconcile，使仓库项目立刻列出真实 worktree 而非一行无分支的合成 worktree。响应 `{id, rootPath, gitRoot}`。
 
 #### `codans worktree …`
 
-`WorktreeCommand.subcommands`：`list`、`new`、`switch`、`rm`。
+`WorktreeCommand.subcommands`：`list`、`new`、`show`、`switch`、`rename`、`prune`、`rm`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans worktree list` | `hierarchy.listWorktrees` | `HierarchyHandlers.listWorktrees` | `[--project P]` |
+| `codans worktree show [ID]` | `hierarchy.describeWorktree` | `HierarchyHandlers.describeWorktree` | `[ID]`；回带 `{id, projectID, projectName, name, path, branch, isArchived, isPinned, isSelected, selectedTabID, tabCount}` |
+| `codans worktree rename ID NAME` | `hierarchy.renameWorktree` | `HierarchyManager.renameWorktree` | `ID`，`NAME`（仅侧栏标签，路径/分支不变；空白拒绝），`[--project P]` |
+| `codans worktree prune` | `hierarchy.pruneWorktrees` | `GitWorktreeClient.pruneWorktrees` → `HierarchyClient.reconcileDiscoveredWorktrees` | `[--project P]`；回带 `{projectID, pruned}`。文件夹项目 → `invalidParams`，远端项目 → `unsupported` |
 | `codans worktree new BRANCH` | `hierarchy.createWorktree` | `HierarchyHandlers.createWorktree` → `GitWorktreeClient.createWorktreeStream` + `HierarchyManager.createWorktree` | `BRANCH`，`[--project P] [--path PATH] [--name NAME] [--base REF] [--reuse-existing]` |
 | `codans worktree switch ID` | `hierarchy.activateWorktree` | `HierarchyManager.selectWorktree` | `ID` |
 | `codans worktree rm [ID]` | `hierarchy.removeWorktree` | `HierarchyManager.removeWorktree`；`--delete` → `HierarchyClient.removeWorktreeWithGit` | `ID`，或 `--by-path PATH [--all]`（按规范化路径删一/多行），`[--project P] [--delete]`。不带 `--delete` 只删 catalog 行（真实 git worktree 会被下一次 reconcile 收回）；`--delete` 走侧栏 Remove Worktree 同一条路径（拆 surface → relocate-then-prune → 按 Settings 删分支），响应 `{id, deleted, warning?}` |
@@ -148,26 +153,31 @@
 
 #### `codans tab …`
 
-`TabCommand.subcommands`：`list`、`new`、`switch`、`close`。
+`TabCommand.subcommands`：`list`、`new`、`show`、`switch`、`rename`、`close`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans tab list` | `hierarchy.listTabs` | `HierarchyHandlers.listTabs` | `[--project P] [--worktree W]` |
 | `codans tab new [NAME]` | `hierarchy.createTab` | `HierarchyManager.createTab` | `[NAME]`，`[--project P] [--worktree W]` |
+| `codans tab show [ID]` | `hierarchy.describeTab` | `HierarchyHandlers.describeTab` | `[ID]`；回带 `{id, handle, projectID, worktreeID, title, name, icon, isSelected, focusedPaneID, paneIDs}`（`title` = 用户名或最近的 live 标题） |
 | `codans tab switch ID` | `hierarchy.activateTab` | `HierarchyManager.selectTab` | `ID` |
+| `codans tab rename ID [NAME]` | `hierarchy.renameTab` | `HierarchyManager.renameTab` | `ID`，`[NAME]`（缺省或空串 → 清除用户标题，回到 shell 的 live 标题），`[--project P] [--worktree W]` |
 | `codans tab close ID` | `hierarchy.closeTab` | `HierarchyManager.closeTab` | `ID`，`[--project P] [--worktree W]` |
 
 容器推断（`ScopeResolver`，`CommonCommandSupport.swift`）：显式给出 tab（或 worktree）而 `--project` / `--worktree` 留在 `current` 时，容器从 `codans tree` 一次往返里定位，不依赖调用方所在 pane——`codans tab close t3` 在任何 shell 都可用。
 
 #### `codans pane …`
 
-`PaneCommand.subcommands`：`list`、`new`、`focus`、`close`、`label`、`reset`、`send`、`send-key`、`read`、`info`、`capture`。
+`PaneCommand.subcommands`：`list`、`new`、`split`、`show`、`focus`、`resize`、`close`、`label`、`reset`、`send`、`send-key`、`read`、`info`、`capture`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans pane list` | `hierarchy.listPanes` | `HierarchyHandlers.listPanes` | `[--project P] [--worktree W] [--tab T]` |
 | `codans pane new [CMD…]` | `hierarchy.openPane` | `HierarchyManager.openPane` | `[CMD…]`（省略则默认登录 shell），`[--project P] [--worktree W] [--tab T] [--cwd PATH] [--label TAG…]` |
+| `codans pane split [PANE] [CMD…]` | `hierarchy.splitPane` | `HierarchyManager.splitPane` | `[PANE]`（锚点，默认 `current`），`[--direction right\|left\|up\|down]`（默认 right），`[--cwd PATH]`（默认锚点 pane 的 live 目录，不是 `$PWD`），`[--label TAG…]`，`[CMD…]`。与键盘分屏同一条路径，新 pane 带项目环境；回带 `{id, anchor, direction}` |
+| `codans pane show [PANE]` | `hierarchy.describePane` | `HierarchyHandlers.describePane` | `[PANE]`；回带 `{id, handle, projectID, worktreeID, tabID, workingDirectory（live 优先）, initialCommand, labels, agent, agentSessionID, isLive, isFocused}`。读 catalog；`pane info` 才是问守护 |
 | `codans pane focus PANE` | `hierarchy.focusPane` | `HierarchyManager.focusPane` | `PANE`（UUID/`@label`/`current`） |
+| `codans pane resize PANE DIR` | `hierarchy.resizePane` | `HierarchyManager.resizePane` | `PANE`，`DIR`（`left`/`right` 动最近的竖分隔线，`up`/`down` 动横的），`[--amount PX]`（像素，默认 40，manager 按 400px/ratio 换算）。该方向没有分隔线则无操作 |
 | `codans pane close PANE` | `pane.close` | zmx 守护 `.kill` + sessions 收割 | `PANE`；杀掉 pane 的 zmx 守护并丢弃持久 session 项。与 UI 的 X 按钮（detach 以便日后 attach 复活）不同 |
 | `codans pane label PANE TAG…` | `hierarchy.setPaneLabels` | `HierarchyManager.setPaneLabels` | `PANE`，`TAG…`，`[--replace]` |
 | `codans pane reset PANE` | `terminal.resetPane` | libghostty reset 绑定动作 | `PANE`；清 scrollback 并重初始化终端，不打扰子进程 |

@@ -2,8 +2,9 @@
 
 `harness.sh` drives an isolated Debug instance of Codans through every
 `codans` verb and asserts exit codes (and, where it matters, output): app
-diagnostics, `tree`, project / worktree / tab / pane lifecycle, terminal I/O
-(`send`, `send-key`, `read`, `capture`, `broadcast`), in-pane `current`
+diagnostics, `tree`, project / worktree / tab / pane lifecycle (including
+`show`, `rename`, `worktree prune`, `pane split`, `pane resize`), terminal
+I/O (`send`, `send-key`, `read`, `capture`, `broadcast`), in-pane `current`
 resolution, agent profiles, and hand-off. It is the runtime check for the
 `codans` CLI and the published skill; unit tests cover the handlers in
 isolation and cannot see drift between the two.

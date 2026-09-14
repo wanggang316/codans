@@ -205,6 +205,8 @@ carries full UUIDs plus the same handles as `handle` (`"t3"` / `"p7"`).
 codans project list                          # all projects
 codans project add ~/code/api                # register an existing directory
 codans project add --name "API" ~/code/api   # custom display name
+codans project show <project>                # paths, git root, selection, worktree counts
+codans project rename <project> "API v2"     # sidebar name ('' clears the override)
 codans project rm <project>                  # remove (id, name, or 'current')
 ```
 
@@ -221,7 +223,10 @@ codans worktree list --project <project>
 codans worktree new <branch>                           # git worktree add + register
 codans worktree new <branch> --base origin/main        # new branch starts from --base
 codans worktree new --path /abs/path --name "Hotfix" <branch>
+codans worktree show <worktree>                        # path, branch, project, selection, tab count
 codans worktree switch <worktree>                      # activate it in the GUI
+codans worktree rename <worktree> "Hotfix"             # sidebar label only (path/branch stay)
+codans worktree prune                                  # git worktree prune + reconcile (current project)
 codans worktree rm <worktree>                          # forget the entry (files stay)
 codans worktree rm <worktree> --delete                 # git worktree remove + branch cleanup
 ```
@@ -245,7 +250,10 @@ Remove Worktree (directory removed, branch deleted per Settings).
 codans tab list                              # tabs in current worktree
 codans tab new                               # untitled tab
 codans tab new "dev server"                  # named tab
+codans tab show <tab>                        # title, handle, focused pane, pane ids
 codans tab switch <tab>                      # activate
+codans tab rename <tab> "dev server"         # set the title
+codans tab rename <tab>                      # clear it: follow the shell's title again
 codans tab close <tab>                       # close
 ```
 
@@ -261,7 +269,10 @@ codans pane list                                     # panes in current tab
 codans pane new                                      # default shell
 codans pane new --label agent --label claude -- claude   # initial command + labels
 codans pane new --cwd /tmp -- htop                   # explicit cwd
+codans pane split <pane> --direction down -- htop    # new pane beside <pane>; cwd = the anchor's
+codans pane show <pane>                              # catalog view: containers, labels, agent, focus
 codans pane focus <pane>                             # bring to front
+codans pane resize <pane> right --amount 80          # move the divider next to it (pixels)
 codans pane close <pane>
 codans pane reset <pane>                             # clear scrollback + reinit terminal
 codans pane label <pane> agent debug                 # add labels
@@ -518,7 +529,8 @@ To prevent suggesting commands that don't exist:
 - No `codans send` / `codans read` / `codans send-key` / `codans capture` at top level —
   they live under `codans pane`.
 - No `codans skill ...` (skill installation lives outside the CLI).
-- No `codans tag ...`, `codans worktree rename`, `codans tab rename` yet.
+- No `codans tag ...` yet (tags are managed in the sidebar).
+- No pane zoom / unzoom: the app has no zoomed-pane rendering to drive.
 - No `codans space ...` — codans does not expose a Space concept via `codans`
   today; the hierarchy is rooted at Project.
 

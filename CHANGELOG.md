@@ -33,6 +33,15 @@ and the project does not yet follow semantic versioning — every release until
   its branch, per Settings) through the sidebar's own removal; without the
   flag only the entry is forgotten, which the next reconcile undoes for a
   real git worktree.
+- **CLI — `show`, `rename`, `worktree prune`, `pane split`, `pane resize`.**
+  Every level has a `show` verb (`project` / `worktree` / `tab` / `pane
+  show`) that describes one entity — containers, handle, selection / focus,
+  the live directory — and a `rename`; `worktree prune` runs the sidebar's
+  Prune Worktrees; `pane split` opens a pane beside another the way the
+  keyboard split does (cwd defaults to the anchor's), and `pane resize`
+  moves the divider next to a pane. These wire the `hierarchy.describe*`,
+  `rename*`, `pruneWorktrees`, `splitPane`, and `resizePane` methods that
+  were declared but never routed.
 
 ### Changed
 
