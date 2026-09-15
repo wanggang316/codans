@@ -35,13 +35,9 @@ struct CLIInstallStatusCard: View {
   // MARK: - Header
 
   private var header: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text("`codans` command-line tool")
-        .font(.headline)
-      Text("Install the `codans` command-line tool to control Codans from your terminal.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
+    Text("Install the `codans` command-line tool to control Codans from your terminal.")
+      .font(.caption)
+      .foregroundStyle(.secondary)
   }
 
   private var commandName: String {

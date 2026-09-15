@@ -14,15 +14,11 @@ struct SkillInstallSection: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Teach your agents the `codans` CLI")
-          .font(.headline)
-        Text(
-          "Codans ships its agent skill inside the app. Install it into an agent's skill folder and that agent learns the CLI from the version matching this app; updating the app updates the skill."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      }
+      Text(
+        "Install the bundled skill into an agent's skill folder so it learns the `codans` CLI; updating the app updates the skill."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
       VStack(alignment: .leading, spacing: 8) {
         ForEach(model.rows) { row in
           SkillTargetRow(
