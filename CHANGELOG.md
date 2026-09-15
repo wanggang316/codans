@@ -50,8 +50,8 @@ and the project does not yet follow semantic versioning — every release until
   as one row each — the agent's mark, the folder, a status dot, and an
   Install / Uninstall button — so linking it is the user's choice per
   agent. A link to another build is offered Install again; a directory
-  that is not a Codans link is left alone. The CLI card above it now uses
-  the same row.
+  that is not a Codans link is left alone. The CLI card above it uses the
+  same row (no mark, no Reinstall).
 - **CLI — `codans skill list | install | uninstall | path`.** The same
   links from the shell, for every detected agent by default or
   `--target`, and into a repository's folders with `--scope project`.

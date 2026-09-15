@@ -2,8 +2,8 @@ import CodansCore
 import SwiftUI
 
 /// `codans` CLI install status card, laid out like the Agent skills rows
-/// below it: one `InstallTargetRow` for the symlink with Install /
-/// Uninstall / Reinstall, and a Reveal in Finder footer once it exists.
+/// below it: one `InstallTargetRow` for the symlink with an Install /
+/// Uninstall button. No mark: the row is the command itself.
 /// Hosts its own state because the view owns transient install/uninstall
 /// progress; persisted bookkeeping (`lastInstallAttemptAt`) flows through
 /// `SettingsStore.mutateDeveloper` on every attempt.
@@ -11,7 +11,6 @@ struct CLIInstallStatusCard: View {
   let installer: CLIInstallerClient
   let settingsStore: SettingsStore
 
-  @Environment(DeveloperPaneDependencies.self) private var deps
   @State private var status: CLIInstallerClient.InstallStatus = .unknown
   @State private var lastError: CLIInstallerClient.CLIInstallError?
 
@@ -23,22 +22,11 @@ struct CLIInstallStatusCard: View {
         subtitle: installer.paths.tcSymlink.path,
         tint: tint,
         statusText: statusText,
-        icon: {
-          AgentLogoView(
-            icon: .symbol("terminal"),
-            size: InstallTargetRow<EmptyView, EmptyView>.iconSize,
-            tint: .primary)
-        },
+        icon: { EmptyView() },
         actions: { actionButtons }
       )
       if let error = lastError {
         ErrorRow(error: error)
-      }
-      if case .installed = status {
-        RevealInFinderButton {
-          deps.revealInFinder(installer.paths.tcSymlink)
-        }
-        .help("Show the `\(commandName)` symlink in /usr/local/bin.")
       }
     }
     .task { refreshStatus() }
@@ -50,11 +38,9 @@ struct CLIInstallStatusCard: View {
     VStack(alignment: .leading, spacing: 4) {
       Text("`codans` command-line tool")
         .font(.headline)
-      Text(
-        "Links `\(commandName)` into /usr/local/bin so every shell can reach it. Installing and uninstalling ask for an admin password."
-      )
-      .font(.caption)
-      .foregroundStyle(.secondary)
+      Text("Drive Codans from any shell or script: projects, worktrees, tabs, panes, and agents.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -74,11 +60,11 @@ struct CLIInstallStatusCard: View {
       Button("Uninstall", action: performUninstall)
         .buttonStyle(.bordered)
     case .installed(_, false):
-      Button("Reinstall", action: performInstall)
+      // A link to another build is simply installed again; it lands on
+      // this app's binary the same way a fresh install does.
+      Button("Install", action: performInstall)
         .buttonStyle(.borderedProminent)
-        .help("The link points at another build of Codans; Reinstall points it at this app.")
-      Button("Uninstall", action: performUninstall)
-        .buttonStyle(.bordered)
+        .help("The link points at another build of Codans; Install points it at this app.")
     case .collision:
       Button("Install", action: performInstall)
         .buttonStyle(.borderedProminent)

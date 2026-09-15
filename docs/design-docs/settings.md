@@ -289,10 +289,12 @@ dropped; the About pane carries the version.
 
 Both sections render through `InstallTargetRow`: the target's mark (24pt,
 `AgentLogoView` — brand SVG for Claude Code / Codex, an SF Symbol for the
-shared folder and the CLI), its name, the path it lands at, a status dot
-(green linked, grey absent, orange needs attention, no text), and the
-action button; each ends with a Reveal in Finder button. The CLI card's
-status wording lives in button tooltips rather than a caption.
+shared folder; the CLI row has none), its name, the path it lands at, a
+status dot (green linked, grey absent, orange needs attention, no text),
+and an Install / Uninstall button. A link to another build is offered
+Install again in both sections; there is no separate Reinstall. Agent
+skills ends with a Reveal in Finder button for the bundled skill; the CLI
+card's status wording lives in button tooltips rather than a caption.
 
 Agent skills is opt-in per agent. `SkillInstallModel` wraps the same
 `SkillInstaller` (`CodansKit/Skills`) that `codans skill` uses, over the
