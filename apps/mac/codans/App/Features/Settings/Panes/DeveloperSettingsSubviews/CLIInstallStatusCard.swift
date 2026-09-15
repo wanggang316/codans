@@ -38,7 +38,7 @@ struct CLIInstallStatusCard: View {
     VStack(alignment: .leading, spacing: 4) {
       Text("`codans` command-line tool")
         .font(.headline)
-      Text("Control Codans from the terminal.")
+      Text("Install the `codans` command-line tool to control Codans from your terminal.")
         .font(.caption)
         .foregroundStyle(.secondary)
     }
