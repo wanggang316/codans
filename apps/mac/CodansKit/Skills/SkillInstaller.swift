@@ -17,7 +17,7 @@ public struct SkillInstaller {
       switch self {
       case .claude: return "Claude Code"
       case .codex: return "Codex"
-      case .agents: return "Any agent"
+      case .agents: return "Shared"
       }
     }
 

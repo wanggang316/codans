@@ -2,9 +2,9 @@ import CodansCore
 import CodansKit
 import SwiftUI
 
-/// "Agent skills" section of the Developer pane: one row per agent target
-/// with a status dot, the agent's mark, and an Install / Uninstall button.
-/// Installing is the user's call per agent; nothing is linked
+/// "Agent skills" section of the Developer pane: one `InstallTargetRow`
+/// per agent target with the agent's mark and an Install / Uninstall
+/// button. Installing is the user's call per agent; nothing is linked
 /// automatically. Mirrors `codans skill install --target <agent>`. The
 /// footer reveals the bundled skill for anyone who prefers to copy it by
 /// hand.
@@ -23,12 +23,14 @@ struct SkillInstallSection: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       }
-      ForEach(model.rows) { row in
-        SkillTargetRow(
-          row: row,
-          install: { model.install(row) },
-          uninstall: { model.uninstall(row) }
-        )
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(model.rows) { row in
+          SkillTargetRow(
+            row: row,
+            install: { model.install(row) },
+            uninstall: { model.uninstall(row) }
+          )
+        }
       }
       if model.rows.isEmpty, model.lastError == nil {
         Text("No skills are bundled with this build.")
@@ -48,12 +50,9 @@ struct SkillInstallSection: View {
         .background(Color.red.opacity(0.08), in: .rect(cornerRadius: 6))
       }
       if let bundled = model.rows.first?.skill.path {
-        Button {
+        RevealInFinderButton {
           deps.revealInFinder(URL(fileURLWithPath: bundled, isDirectory: true))
-        } label: {
-          Label("Reveal in Finder", systemImage: "folder")
         }
-        .buttonStyle(.bordered)
         .help("Show the bundled skill folder, for installing it by hand.")
       }
     }
@@ -67,39 +66,28 @@ private struct SkillTargetRow: View {
   let uninstall: () -> Void
 
   var body: some View {
-    HStack(spacing: 12) {
-      logo
-      VStack(alignment: .leading, spacing: 2) {
-        Text(row.target.displayName)
-          .font(.body)
-        Text(row.directory)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-      }
-      Spacer(minLength: 0)
-      Circle()
-        .fill(tint)
-        .frame(width: 8, height: 8)
-        .accessibilityHidden(true)
-      actionButton
-    }
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(row.target.displayName): \(statusText)")
+    InstallTargetRow(
+      title: row.target.displayName,
+      subtitle: row.directory,
+      tint: tint,
+      statusText: statusText,
+      icon: { logo },
+      actions: { actionButton }
+    )
   }
 
-  /// Brand mark for the agents that have one; the generic folder gets the
+  /// Brand mark for the agents that have one; the shared folder gets the
   /// same sparkles glyph the Agents View uses for "an agent".
   @ViewBuilder
   private var logo: some View {
+    let size = InstallTargetRow<EmptyView, EmptyView>.iconSize
     switch row.target {
     case .claude:
-      AgentLogoView(kind: .claudeCode, size: 28, tint: .primary)
+      AgentLogoView(kind: .claudeCode, size: size, tint: .primary)
     case .codex:
-      AgentLogoView(kind: .codex, size: 28, tint: .primary)
+      AgentLogoView(kind: .codex, size: size, tint: .primary)
     case .agents:
-      AgentLogoView(icon: .symbol("sparkles"), size: 28, tint: .primary)
+      AgentLogoView(icon: .symbol("sparkles"), size: size, tint: .primary)
     }
   }
 

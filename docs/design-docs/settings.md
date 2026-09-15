@@ -287,18 +287,25 @@ the T1-frozen detail switch never changes: the `codans` CLI symlink
 Diagnostics section (reveal `settings.json`, copy the app version) was
 dropped; the About pane carries the version.
 
+Both sections render through `InstallTargetRow`: the target's mark (24pt,
+`AgentLogoView` — brand SVG for Claude Code / Codex, an SF Symbol for the
+shared folder and the CLI), its name, the path it lands at, a status dot
+(green linked, grey absent, orange needs attention, no text), and the
+action button; each ends with a Reveal in Finder button. The CLI card's
+status wording lives in button tooltips rather than a caption.
+
 Agent skills is opt-in per agent. `SkillInstallModel` wraps the same
 `SkillInstaller` (`CodansKit/Skills`) that `codans skill` uses, over the
 bundle's `Resources/skills` (embedded from the repo's `skills/` at build
 time); it offers every bundled skill × every target (Claude Code
-`~/.claude/skills`, Codex `~/.codex/skills`, any agent `~/.agents/skills`)
+`~/.claude/skills`, Codex `~/.codex/skills`, Shared `~/.agents/skills`)
 whether or not the agent's folder exists, and each row is a symlink the
-user creates or removes. A link to another build reads "Other build" with
-Reinstall; anything that is not a Codans skill link reads "In the way"
-with Reveal — the pane never replaces it (the CLI's `--force` is the only
-way, deliberately). Nothing is linked automatically, on launch or on
-update: an existing link keeps pointing at the bundle path, so an app
-update updates the skill without the app doing anything.
+user creates (Install) or removes (Uninstall). A link to another build is
+offered Install again; anything that is not a Codans skill link keeps a
+disabled Install with a tooltip — the pane never replaces it (the CLI's
+`--force` is the only way, deliberately). Nothing is linked automatically,
+on launch or on update: an existing link keeps pointing at the bundle
+path, so an app update updates the skill without the app doing anything.
 
 ## Lifecycle scripts vs hook subscriptions
 
