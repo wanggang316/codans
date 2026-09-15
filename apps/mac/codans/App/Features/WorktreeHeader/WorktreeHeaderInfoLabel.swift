@@ -30,7 +30,7 @@ struct WorktreeHeaderInfoLabel: View {
     }()
     let isSynthetic = isMainCheckout && project.gitRoot == nil
     let glyph: WorktreeRowIcon.LeadingGlyph =
-      isSynthetic ? .folder : (project.isWorkspace ? .repository : .gitAnchor)
+      isMainCheckout && project.isWorkspace ? .workspaceRoot : (isSynthetic ? .folder : .gitAnchor)
     let hasUnread = notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
 
     HStack(spacing: 8) {

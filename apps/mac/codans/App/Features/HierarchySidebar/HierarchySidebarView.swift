@@ -1083,9 +1083,9 @@ struct HierarchySidebarView: View {
     // a "handos" header read as one more repository. The path takes the
     // caption slot the branch would have used.
     let isWorkspaceRoot = isMainCheckout && project.isWorkspace
-    let rowTitle = isWorkspaceRoot ? "Workspace" : worktree.name
+    let rowTitle = isWorkspaceRoot ? "Root" : worktree.name
     let leadingGlyph: WorktreeRowIcon.LeadingGlyph =
-      isSyntheticWorktree ? .folder : (project.isWorkspace ? .repository : .gitAnchor)
+      isWorkspaceRoot ? .workspaceRoot : (isSyntheticWorktree ? .folder : .gitAnchor)
     // Plain content (no Button wrapping). With native `List(selection:)`,
     // the row's tap is owned by AppKit's NSTableView so the click also
     // promotes the table to first responder — that's what flips the

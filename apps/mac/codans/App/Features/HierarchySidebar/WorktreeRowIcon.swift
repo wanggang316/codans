@@ -4,11 +4,10 @@ import CodansCore
 /// Leading-edge icon for a Sidebar Worktree row. Replaces the old `circle.fill`/`circle`
 /// selection dot with a GitHub-style glyph that doubles as the row's PR-state signal:
 ///
-/// - Dir-kind synthetic worktree and the workspace root → `folder` SF Symbol. Both
-///   rows stand for a filesystem directory rather than a git anchor.
-/// - Workspace member checkout (no PR) → `shippingbox` SF Symbol. The row is a whole
-///   repository, not a branch of the Project it sits under, so the git-branch glyph
-///   would misstate what the sibling rows are to each other.
+/// - Dir-kind synthetic worktree → `folder` SF Symbol. The synthetic worktree under a
+///   dir-kind Project reads as a filesystem directory rather than a git anchor.
+/// - Workspace root → `star.fill`, the same anchor mark the default-branch checkout
+///   carries: it is the row the Project is centred on, not one of the checkouts.
 /// - Default-branch checkout (no PR) → `star.fill` SF Symbol, tinted by `roleTint`.
 ///   Carries the "this is the project's default checkout" signal that previously sat
 ///   inline next to the worktree name. PR snapshot still wins — when a PR exists on
@@ -29,8 +28,8 @@ struct WorktreeRowIcon: View {
     case gitAnchor
     /// A plain directory: git semantics (branch, PR state) don't apply.
     case folder
-    /// A checkout of another repository, listed under a workspace.
-    case repository
+    /// The root folder of a workspace; anchors its member checkouts.
+    case workspaceRoot
   }
 
   let snapshot: PullRequestSnapshot?
@@ -42,8 +41,8 @@ struct WorktreeRowIcon: View {
   var roleTint: Color = .secondary
   /// What the row stands for when no PR snapshot claims the icon slot.
   /// `.folder` is the placeholder worktree under a dir-kind Project
-  /// (`Project.gitRoot == nil` + `worktree.path == project.rootPath`) and
-  /// the workspace root; `.repository` is a workspace member checkout.
+  /// (`Project.gitRoot == nil` + `worktree.path == project.rootPath`);
+  /// `.workspaceRoot` is the root folder row of a workspace.
   var glyph: LeadingGlyph = .gitAnchor
   /// L3 unread override. When `true`, the row icon swaps to a bell glyph
   /// regardless of PR / branch state, and the role tint is replaced by
@@ -85,10 +84,10 @@ struct WorktreeRowIcon: View {
           .frame(width: 12, height: 12)
           .foregroundStyle(tint)
           .frame(width: 14, height: 14)
-      } else if glyph == .repository && snapshot == nil {
-        // A PR on the member's branch still wins the slot below; without
-        // one the row says "repository", not "branch".
-        Image(systemName: "shippingbox")
+      } else if glyph == .workspaceRoot {
+        // The root has no branch and no PR, so nothing ever outranks the
+        // anchor mark here.
+        Image(systemName: "star.fill")
           .resizable()
           .aspectRatio(contentMode: .fit)
           .frame(width: 12, height: 12)
@@ -190,10 +189,10 @@ struct WorktreeRowIcon: View {
     if glyph == .folder {
       return Text(isSelected ? "Active project folder" : "Project folder")
     }
+    if glyph == .workspaceRoot {
+      return Text(isSelected ? "Active workspace root" : "Workspace root")
+    }
     guard let snapshot else {
-      if glyph == .repository {
-        return Text(isSelected ? "Active repository checkout" : "Repository checkout")
-      }
       if isDefaultBranch {
         return Text(isSelected ? "Active default branch" : "Default branch")
       }
