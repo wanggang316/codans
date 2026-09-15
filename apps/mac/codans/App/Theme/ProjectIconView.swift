@@ -39,8 +39,8 @@ struct ProjectIconView: View {
   /// their own default glyph; a user-picked icon still wins.
   static let workspaceSymbol = "square.stack.3d.up"
 
-  static func defaultSymbol(for project: Project) -> String {
-    project.isWorkspace ? workspaceSymbol : folderSymbol
+  static func defaultSymbol(for kind: ProjectKind) -> String {
+    kind == .workspace ? workspaceSymbol : folderSymbol
   }
 
   @ViewBuilder

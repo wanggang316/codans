@@ -219,7 +219,10 @@ struct ProjectGeneralSettingsView: View {
       }
 
       LabeledContent("Icon") {
-        ProjectIconPicker(selection: projectIconBinding, color: projectColor)
+        ProjectIconPicker(
+          selection: projectIconBinding, color: projectColor,
+          defaultSymbol: ProjectIconView.defaultSymbol(for: store.state.kind)
+        )
       }
 
       LabeledContent("Color") {

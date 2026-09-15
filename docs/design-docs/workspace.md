@@ -101,7 +101,7 @@ ProjectReconciler.reconcile
 
 | 位置 | 规则 |
 |---|---|
-| 侧栏 Project 行 | `isWorkspace` 显示 `square.stack.3d.up` 图标；`+`（Add Worktree）沿用 `supportsWorktrees` 隐藏；`⋯` 菜单隐藏 Prune / Archive-Remove All Merged |
+| 侧栏 Project 行 | 未设置自定义图标时默认显示 `square.stack.3d.up`（`ProjectIconView.defaultSymbol(for:)`，Settings 侧栏同源）；`+`（Add Worktree）沿用 `supportsWorktrees` 隐藏；`⋯` 菜单隐藏 Prune / Archive-Remove All Merged |
 | 子行上下文菜单 | 保留 Pin，隐藏 Archive / Remove；`HierarchySidebarFeature` 的 `worktreeArchiveTapped` / `worktreeRemoveTapped` 以 `isWorkspaceChild` 再守一次（快捷键不能绕过） |
 | Header | 根行标题「Workspace」，不是分支 popover 目标 |
 | 分支切换器 | `blockedBranches` 按 `repoRoot(for:)` 分组，只统计同仓库的兄弟行 |

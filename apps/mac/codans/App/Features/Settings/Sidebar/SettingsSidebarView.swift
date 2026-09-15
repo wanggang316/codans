@@ -98,7 +98,7 @@ struct SettingsSidebarView: View {
       } icon: {
         ProjectIconView(
           icon: project.icon, color: project.color,
-          defaultSymbol: ProjectIconView.defaultSymbol(for: project)
+          defaultSymbol: ProjectIconView.defaultSymbol(for: project.kind)
         )
       }
       .contentShape(Rectangle())

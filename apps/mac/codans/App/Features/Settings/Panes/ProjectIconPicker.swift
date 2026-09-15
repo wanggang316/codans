@@ -15,6 +15,9 @@ struct ProjectIconPicker: View {
   /// The Project's color, so the preview and the grid show the icon in the
   /// tint it will actually render with in the sidebar.
   let color: ProjectColor?
+  /// Glyph the "no icon" state previews as — the same kind-aware default the
+  /// sidebar draws, so the picker never promises a folder for a workspace.
+  var defaultSymbol: String = ProjectIconView.folderSymbol
 
   @State private var isPresented = false
   /// Live text of the "SF Symbol name" field. Held locally rather than
@@ -58,7 +61,7 @@ struct ProjectIconPicker: View {
       isPresented = true
     } label: {
       HStack(spacing: 6) {
-        ProjectIconView(icon: selection, color: color, size: 18)
+        ProjectIconView(icon: selection, color: color, size: 18, defaultSymbol: defaultSymbol)
         Text(summary)
           .lineLimit(1)
           .truncationMode(.middle)
@@ -86,7 +89,7 @@ struct ProjectIconPicker: View {
       // dropdown label is too tight to carry a custom file's details.
       HStack(spacing: 10) {
         ProjectIconView(
-          icon: selection, color: color, size: Self.previewSize
+          icon: selection, color: color, size: Self.previewSize, defaultSymbol: defaultSymbol
         )
         Text(summary)
           .font(.callout.weight(.medium))

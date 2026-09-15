@@ -1970,7 +1970,10 @@ private struct ProjectHeaderRow: View {
             .foregroundStyle(Color.orange)
             .accessibilityLabel("Has unread notifications")
         } else {
-          ProjectIconView(icon: project.icon, color: project.color, size: 13)
+          ProjectIconView(
+            icon: project.icon, color: project.color, size: 13,
+            defaultSymbol: ProjectIconView.defaultSymbol(for: project.kind)
+          )
         }
       }
       .frame(width: 14, alignment: .center)
@@ -1988,16 +1991,11 @@ private struct ProjectHeaderRow: View {
           .help(host.displayAuthority)
           .accessibilityLabel("Remote server \(host.displayAuthority)")
       }
-      // Workspaces carry a stack glyph: the rows below are checkouts of
-      // several repositories, not worktrees of one.
+      // A workspace is told apart by its default icon (the leading glyph
+      // above), so the header adds only the roll-up: pull requests across
+      // every member repository, so the task reads as one unit:
+      // "3 PRs · 1 merged".
       if project.isWorkspace {
-        Image(systemName: "square.stack.3d.up")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .help("Workspace")
-          .accessibilityLabel("Workspace")
-        // Pull requests across every member repository, rolled up on the
-        // header so the task reads as one unit: "3 PRs · 1 merged".
         if let summary = workspacePullRequestSummary {
           Text(summary)
             .font(.caption2)
