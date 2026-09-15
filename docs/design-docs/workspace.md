@@ -106,6 +106,7 @@ ProjectReconciler.reconcile
 | Header | 根行标题「Workspace」，不是分支 popover 目标 |
 | 分支切换器 | `blockedBranches` 按 `repoRoot(for:)` 分组，只统计同仓库的兄弟行 |
 | 命令面板 | workspace 隐藏 `worktree.new`（并对 `.dir` 一并隐藏）、`worktree.archive` / `worktree.close` / `worktree.open-project-on-github`、`project.prune-stale` 与 merged 批量 |
+| 侧栏根行 / 子行 | 根行标题固定为 "Workspace"，副标题为 `~` 缩写的根路径（header 已经写了文件夹名，再写一次会被读成又一个仓库）；子行无 PR 时用 `shippingbox` 仓库图标而非 git-branch（`WorktreeRowIcon.LeadingGlyph.repository`），有 PR 仍由 PR 状态图标占位；header 信息标签同源 |
 | Settings | `visibleSections(.workspace) = [general, editor, environment]`；侧栏图标区分 |
 | IPC | `hierarchy.createWorktree` 对 workspace 返回 `invalidParams`；`hierarchy.addProject` 见 manifest 即注册为 workspace；`hierarchy.removeWorktree` 拒绝根行（`conflict`） |
 | CLI | `codans tree` 的 Project 行带 `[workspace]`，`--json` 增加 `kind` 与 worktree 的 `sourceGitRoot` |

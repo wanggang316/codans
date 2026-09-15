@@ -29,6 +29,8 @@ struct WorktreeHeaderInfoLabel: View {
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
     }()
     let isSynthetic = isMainCheckout && project.gitRoot == nil
+    let glyph: WorktreeRowIcon.LeadingGlyph =
+      isSynthetic ? .folder : (project.isWorkspace ? .repository : .gitAnchor)
     let hasUnread = notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
 
     HStack(spacing: 8) {
@@ -39,7 +41,7 @@ struct WorktreeHeaderInfoLabel: View {
         // its role tint rather than swap to the selected-text colour
         // the sidebar uses on the active row.
         isSelected: false,
-        isSynthetic: isSynthetic,
+        glyph: glyph,
         hasUnreadNotification: hasUnread,
         isDefaultBranch: isMainCheckout && !isSynthetic
       )

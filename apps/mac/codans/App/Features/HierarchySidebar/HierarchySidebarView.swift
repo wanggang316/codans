@@ -1078,6 +1078,14 @@ struct HierarchySidebarView: View {
     // shared computed property — `gitRoot == nil` + path match is the same
     // pair already used to suppress git affordances elsewhere in this view.
     let isSyntheticWorktree = isMainCheckout && project.gitRoot == nil
+    // The workspace root row names its kind, not the folder: the Project
+    // header already carries the folder's name, and a second "handos" under
+    // a "handos" header read as one more repository. The path takes the
+    // caption slot the branch would have used.
+    let isWorkspaceRoot = isMainCheckout && project.isWorkspace
+    let rowTitle = isWorkspaceRoot ? "Workspace" : worktree.name
+    let leadingGlyph: WorktreeRowIcon.LeadingGlyph =
+      isSyntheticWorktree ? .folder : (project.isWorkspace ? .repository : .gitAnchor)
     // Plain content (no Button wrapping). With native `List(selection:)`,
     // the row's tap is owned by AppKit's NSTableView so the click also
     // promotes the table to first responder — that's what flips the
@@ -1115,7 +1123,7 @@ struct HierarchySidebarView: View {
         } else {
           WorktreeRowIcon(
             snapshot: snapshot, rollup: rollup, isSelected: isSelected,
-            isSynthetic: isSyntheticWorktree,
+            glyph: leadingGlyph,
             hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id)
               == true
               && settingsStore.settings.notifications.worktreeBellEnabled,
@@ -1125,7 +1133,7 @@ struct HierarchySidebarView: View {
       }
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {
-          Text(worktree.name)
+          Text(rowTitle)
             // Decorative light-sweep while an archive / delete lifecycle
             // runs — the same in-progress affordance the pending-creation
             // row uses. The phase line's stage value below is the
@@ -1151,6 +1159,12 @@ struct HierarchySidebarView: View {
           // so the whole row reads as one in-progress unit.
           LifecyclePhaseLineView(progress: lifecycle)
             .shimmer(isActive: !reduceMotion)
+        } else if isWorkspaceRoot {
+          Text((project.rootPath as NSString).abbreviatingWithTildeInPath)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
         } else if let branch = worktree.branch, branch != worktree.name {
           // Suppress the secondary branch line when it restates the worktree name —
           // the common case (main/main, test0003/test0003) otherwise doubles every
