@@ -67,11 +67,7 @@ private struct SkillTargetRow: View {
   let uninstall: () -> Void
 
   var body: some View {
-    HStack(spacing: 10) {
-      Circle()
-        .fill(tint)
-        .frame(width: 8, height: 8)
-        .accessibilityHidden(true)
+    HStack(spacing: 12) {
       logo
       VStack(alignment: .leading, spacing: 2) {
         Text(row.target.displayName)
@@ -83,6 +79,10 @@ private struct SkillTargetRow: View {
           .truncationMode(.middle)
       }
       Spacer(minLength: 0)
+      Circle()
+        .fill(tint)
+        .frame(width: 8, height: 8)
+        .accessibilityHidden(true)
       actionButton
     }
     .accessibilityElement(children: .combine)
@@ -95,11 +95,11 @@ private struct SkillTargetRow: View {
   private var logo: some View {
     switch row.target {
     case .claude:
-      AgentLogoView(kind: .claudeCode, size: 16, tint: .primary)
+      AgentLogoView(kind: .claudeCode, size: 28, tint: .primary)
     case .codex:
-      AgentLogoView(kind: .codex, size: 16, tint: .primary)
+      AgentLogoView(kind: .codex, size: 28, tint: .primary)
     case .agents:
-      AgentLogoView(icon: .symbol("sparkles"), size: 16, tint: .primary)
+      AgentLogoView(icon: .symbol("sparkles"), size: 28, tint: .primary)
     }
   }
 
