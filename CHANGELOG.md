@@ -99,6 +99,9 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Removed
 
+- **Settings ▸ Developer ▸ Diagnostics** (reveal `settings.json`, copy the
+  app version); the About pane shows the version.
+
 ### Fixed
 
 - **Hand-off kickoff was never submitted in a short pane.** For a receiver

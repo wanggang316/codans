@@ -281,9 +281,11 @@ Durable shell decisions:
 
 ## Developer pane
 
-Three sections, all fed by `DeveloperPaneDependencies` (`@Environment`) so
+Two sections, both fed by `DeveloperPaneDependencies` (`@Environment`) so
 the T1-frozen detail switch never changes: the `codans` CLI symlink
-(`CLIInstallerClient`, privileged), **Agent skills**, and Diagnostics.
+(`CLIInstallerClient`, privileged) and **Agent skills**. The former
+Diagnostics section (reveal `settings.json`, copy the app version) was
+dropped; the About pane carries the version.
 
 Agent skills is opt-in per agent. `SkillInstallModel` wraps the same
 `SkillInstaller` (`CodansKit/Skills`) that `codans skill` uses, over the
