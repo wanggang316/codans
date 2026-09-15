@@ -155,16 +155,187 @@ struct HierarchyHandlersCreateWorktreeTests {
     }
   }
 
+  @Test
+  func missingPathOnAGitProjectIsMaterialisedThroughTheCreator() async throws {
+    let spy = CreatorSpy()
+    let base = Self.tempDirectory()
+    let fixture = Self.makeFixture(globalWorktreesDirectory: base.path, creator: spy)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID,
+        name: "feat/login",
+        path: nil,
+        branch: "feat/login",
+        reuseExisting: nil,
+        baseRef: "origin/main"
+      )
+    )
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    let spec = try #require(spy.specs.first)
+    #expect(spec.repoRoot.path == "/repo")
+    #expect(spec.name == "feat/login")
+    #expect(spec.baseRef == "origin/main")
+    #expect(spec.pathOverride?.path == base.appending(path: "repo/feat/login").path)
+    #expect(spec.baseDirectory.path == base.appending(path: "repo/feat").path)
+    #expect(result.created)
+    #expect(result.path == HierarchyManager.canonicalPath(base.appending(path: "repo/feat/login").path))
+  }
+
+  @Test
+  func existingPathIsRegisteredWithoutTouchingGit() async throws {
+    let spy = CreatorSpy()
+    let existing = Self.tempDirectory()
+    let fixture = Self.makeFixture(creator: spy)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID,
+        name: "adopted",
+        path: existing.path,
+        branch: "adopted",
+        reuseExisting: nil
+      )
+    )
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    #expect(spy.specs.isEmpty)
+    #expect(!result.created)
+  }
+
+  @Test
+  func folderProjectStaysCatalogOnly() async throws {
+    let spy = CreatorSpy()
+    let fixture = Self.makeFixture(gitRoot: nil, creator: spy)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID,
+        name: "notes",
+        path: "/nowhere/notes",
+        branch: "notes",
+        reuseExisting: nil
+      )
+    )
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    #expect(spy.specs.isEmpty)
+    #expect(!result.created)
+  }
+
+  @Test
+  func baseRefFallsBackToTheRepoDefault() async throws {
+    let spy = CreatorSpy()
+    let fixture = Self.makeFixture(
+      globalWorktreesDirectory: Self.tempDirectory().path,
+      creator: spy,
+      defaultBaseRef: "origin/develop"
+    )
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID,
+        name: "x",
+        path: nil,
+        branch: "x",
+        reuseExisting: nil
+      )
+    )
+
+    _ = await fixture.handlers.createWorktree(params)
+
+    #expect(spy.specs.first?.baseRef == "origin/develop")
+  }
+
+  @Test
+  func gitFailureMapsToTheMatchingIPCError() async throws {
+    let spy = CreatorSpy(failure: .branchExists("x"))
+    let fixture = Self.makeFixture(globalWorktreesDirectory: Self.tempDirectory().path, creator: spy)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: nil, branch: "x", reuseExisting: nil))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+
+    guard case .failed(.conflict) = outcome else {
+      Issue.record("expected .conflict, got \(outcome)")
+      return
+    }
+  }
+
+  @Test
+  func removeWorktreeDeleteFromDiskRoutesThroughTheRemover() async throws {
+    let fixture = Self.makeFixture(removerWarning: "branch kept")
+    let created = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: "/x", branch: "x", reuseExisting: nil))
+    let row: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(
+      await fixture.handlers.createWorktree(created))
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.RemoveWorktreeParams(
+        id: row.id, projectID: fixture.projectID, deleteFromDisk: true))
+
+    let outcome = await fixture.handlers.removeWorktree(params)
+    let result: HierarchyHandlers.RemoveWorktreeResult = try Self.decodeUnary(outcome)
+
+    #expect(result.deleted)
+    #expect(result.warning == "branch kept")
+    #expect(fixture.removed == [row.id])
+  }
+
+  @Test
+  func removeWorktreeDeleteFromDiskIsUnsupportedWithoutARemover() async throws {
+    let fixture = Self.makeFixture()
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.RemoveWorktreeParams(
+        id: WorktreeID(), projectID: fixture.projectID, deleteFromDisk: true))
+
+    let outcome = await fixture.handlers.removeWorktree(params)
+
+    guard case .failed(.unsupported) = outcome else {
+      Issue.record("expected .unsupported, got \(outcome)")
+      return
+    }
+  }
+
+  /// Records every spec the handler hands to the creator and answers with
+  /// the requested path (or throws the configured failure).
+  @MainActor
+  private final class CreatorSpy {
+    var specs: [CreateWorktreeSpec] = []
+    let failure: GitWorktreeError?
+    init(failure: GitWorktreeError? = nil) { self.failure = failure }
+    func create(_ spec: CreateWorktreeSpec) throws -> URL {
+      specs.append(spec)
+      if let failure { throw failure }
+      return spec.pathOverride ?? spec.baseDirectory.appending(path: spec.name)
+    }
+  }
+
+  private static func tempDirectory() -> URL {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("codans-create-worktree-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+  }
+
   private static func makeFixture(
     globalWorktreesDirectory: String? = nil,
-    worktreesDirectoryOverride: String? = nil
+    worktreesDirectoryOverride: String? = nil,
+    gitRoot: String? = "/repo",
+    creator: CreatorSpy? = nil,
+    defaultBaseRef: String? = nil,
+    removerWarning: String? = nil
   ) -> Fixture {
     let projectID = ProjectID()
     let project = Project(
       id: projectID,
       name: "repo",
       rootPath: "/repo",
-      gitRoot: "/repo",
+      gitRoot: gitRoot,
       worktrees: [],
       selectedWorktreeID: nil
     )
@@ -178,11 +349,21 @@ struct HierarchyHandlersCreateWorktreeTests {
     if let override = worktreesDirectoryOverride {
       settings.projects[projectID] = ProjectSettings(worktreesDirectory: override)
     }
+    let removed = RemovedBox()
     let handlers = HierarchyHandlers(
       manager: manager,
-      settingsProvider: { settings }
+      settingsProvider: { settings },
+      worktreeCreator: creator.map { spy in { @MainActor @Sendable spec in try spy.create(spec) } },
+      defaultBaseRef: { _ in defaultBaseRef },
+      worktreeRemover: removerWarning.map { warning in
+        { @MainActor @Sendable worktreeID, projectID in
+          removed.ids.append(worktreeID)
+          try manager.removeWorktree(worktreeID, from: projectID)
+          return warning
+        }
+      }
     )
-    return Fixture(handlers: handlers, projectID: projectID)
+    return Fixture(handlers: handlers, projectID: projectID, removedBox: removed)
   }
 
   private static func decodeUnary<T: Decodable>(_ outcome: RouterOutcome) throws -> T {
@@ -198,9 +379,17 @@ struct HierarchyHandlersCreateWorktreeTests {
       .appendingPathComponent("codans-create-worktree-tests-\(UUID().uuidString).json")
   }
 
+  @MainActor
+  private final class RemovedBox {
+    var ids: [WorktreeID] = []
+  }
+
+  @MainActor
   private struct Fixture {
     let handlers: HierarchyHandlers
     let projectID: ProjectID
+    var removedBox: RemovedBox?
+    var removed: [WorktreeID] { removedBox?.ids ?? [] }
   }
 
   private enum TestError: Error {

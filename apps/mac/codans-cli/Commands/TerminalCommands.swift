@@ -18,6 +18,12 @@ struct SendCommand: AsyncParsableCommand {
       Tab, BS, CR/LF, Ctrl-A..Z) are dispatched as key events so the PTY
       actually receives them; printable bytes ride the text channel.
       Cannot combine with positional text, --stdin, or --no-enter.
+
+      --wait returns once the command the text started has finished: the
+      pane's shell is no longer running a foreground job and the screen
+      has held still for --stable-ms. --capture (implies --wait) also
+      returns the lines the command printed. A command that is still
+      running at --wait-timeout fails with WAIT_TIMEOUT (exit 11).
       """
   )
 
@@ -34,12 +40,32 @@ struct SendCommand: AsyncParsableCommand {
   var raw: String?
   @Flag(name: .long, help: "Focus the target pane after sending.")
   var focus: Bool = false
+  @Flag(name: .long, help: "Wait until the command the text started has finished.")
+  var wait: Bool = false
+  @Flag(name: .long, help: "Wait, and return the output the command produced (implies --wait).")
+  var capture: Bool = false
+  @Option(name: .long, help: "Seconds to wait for completion with --wait / --capture (1 through 600, default 30).")
+  var waitTimeout: Double = 30
+  @Option(name: .long, help: "With --wait: the screen must hold still this long, in ms (default 500).")
+  var stableMs: Int = 500
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       if let raw {
+        if wait || capture {
+          throw CLIError(code: .userError, message: "--raw cannot be combined with --wait / --capture")
+        }
         try await runRaw(hex: raw)
         return
+      }
+      let waiting = wait || capture
+      if waiting {
+        guard waitTimeout >= 1, waitTimeout <= 600 else {
+          throw CLIError(code: .userError, message: "--wait-timeout must be between 1 and 600 seconds")
+        }
+        guard stableMs > 0 else {
+          throw CLIError(code: .userError, message: "--stable-ms must be positive")
+        }
       }
       let input = try CLISendInput.resolve(
         arguments: arguments,
@@ -54,19 +80,56 @@ struct SendCommand: AsyncParsableCommand {
       if focus {
         try await activatePane(uuid, client: client)
       }
+      struct WaitParams: Codable {
+        let timeoutMillis: Int
+        let stableMillis: Int
+      }
       struct Params: Codable {
         let paneID: PaneID
         let text: String
+        let wait: WaitParams?
+        let capture: Bool
       }
-      _ = try await client.callRaw(
+      struct Result: Codable {
+        let delivered: Bool
+        let completed: Bool?
+        let waitedMillis: Int?
+        let busyObserved: Bool?
+        let output: String?
+      }
+      let result: Result = try await client.call(
         .terminalSendInput,
-        params: Params(paneID: PaneID(raw: uuid), text: input.text)
+        params: Params(
+          paneID: PaneID(raw: uuid),
+          text: input.text,
+          wait: waiting ? WaitParams(timeoutMillis: Int(waitTimeout * 1000), stableMillis: stableMs) : nil,
+          capture: capture
+        ),
+        timeout: waiting ? .seconds(waitTimeout + 5) : nil
       )
-      try Renderer.emitObject(
-        ["paneID": uuid.uuidString, "bytes": input.text.utf8.count],
-        mode: globals.renderMode
-      ) { obj in
-        "sent \(obj["bytes"] ?? 0) bytes to \(obj["paneID"] ?? "?")"
+      if waiting, result.completed != true {
+        throw CLIError(
+          code: .requestTimeout,
+          message: "command in pane \(uuid.uuidString) still running after \(Int(waitTimeout))s",
+          hint: "raise --wait-timeout, or read the pane with `pane capture` later",
+          errorCode: .waitTimeout,
+          details: ["paneID": uuid.uuidString, "waitedMs": String(result.waitedMillis ?? 0)])
+      }
+      var object: [String: Any] = ["paneID": uuid.uuidString, "bytes": input.text.utf8.count]
+      if waiting {
+        object["completed"] = result.completed ?? false
+        object["waitedMs"] = result.waitedMillis ?? 0
+        object["busyObserved"] = result.busyObserved ?? false
+      }
+      if capture {
+        object["output"] = result.output ?? ""
+      }
+      try Renderer.emitObject(object, mode: globals.renderMode) { obj in
+        if capture { return obj["output"] as? String ?? "" }
+        if waiting {
+          return "sent \(obj["bytes"] ?? 0) bytes to \(obj["paneID"] ?? "?"); completed after \(obj["waitedMs"] ?? 0)ms"
+        }
+        return "sent \(obj["bytes"] ?? 0) bytes to \(obj["paneID"] ?? "?")"
       }
     }
   }
@@ -148,7 +211,7 @@ struct SendKeyCommand: AsyncParsableCommand {
   var focus: Bool = false
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let (target, keyName) = try Self.resolveTargetAndKey(arguments: arguments, explicitPane: pane)
       let normalised = keyName.lowercased().replacingOccurrences(of: "-", with: "_")
       guard let named = IPC.TerminalNamedKey(rawValue: normalised) else {
@@ -210,62 +273,6 @@ struct SendKeyCommand: AsyncParsableCommand {
   }
 }
 
-struct ReadCommand: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "read",
-    abstract: "Read text from a pane.",
-    discussion: """
-      Reads the visible viewport by default. Use --screen for the active screen
-      buffer, or --selection for the current selection.
-      """
-  )
-
-  enum Extent: String, ExpressibleByArgument {
-    case viewport
-    case screen
-    case selection
-  }
-
-  @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
-  var pane: String = "current"
-  @Option(name: .long, help: "Text extent to read: viewport, screen, or selection.")
-  var extent: Extent = .viewport
-  @Flag(name: .long, help: "Shortcut for --extent screen.")
-  var screen: Bool = false
-  @Flag(name: .long, help: "Shortcut for --extent selection.")
-  var selection: Bool = false
-
-  func run() async throws {
-    await CommandRunner.run {
-      if screen && selection {
-        throw CLIError(code: .userError, message: "pass at most one of --screen or --selection")
-      }
-      let resolvedExtent: Extent = selection ? .selection : (screen ? .screen : extent)
-      let client = CLISession.connect(globals: globals)
-      defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      struct Params: Codable {
-        let paneID: PaneID
-        let extent: String
-      }
-      struct Result: Codable {
-        let text: String
-      }
-      let result: Result = try await client.call(
-        .terminalReadText,
-        params: Params(paneID: PaneID(raw: uuid), extent: resolvedExtent.rawValue)
-      )
-      try Renderer.emitObject(
-        ["paneID": uuid.uuidString, "extent": resolvedExtent.rawValue, "text": result.text],
-        mode: globals.renderMode
-      ) { obj in
-        obj["text"] as? String ?? ""
-      }
-    }
-  }
-}
-
 struct CaptureCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "capture",
@@ -313,7 +320,7 @@ struct CaptureCommand: AsyncParsableCommand {
   var timeoutMs: Int = 5000
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       struct WaitStablePayload: Codable {
         let stableMillis: Int
         let intervalMillis: Int
@@ -419,9 +426,9 @@ struct BroadcastCommand: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Option(name: .long, help: "Tab id, t<n> handle, or 'current'.")
+  @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'.")
   var tab: String?
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String?
   @Option(name: .long, help: "Pane label.")
   var label: String?
@@ -433,7 +440,7 @@ struct BroadcastCommand: AsyncParsableCommand {
   var noEnter: Bool = false
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       if stdin && !text.isEmpty {
         throw CLIArgumentError.conflictingTextSources
       }

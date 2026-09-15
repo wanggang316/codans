@@ -20,7 +20,7 @@ struct TreeCommand: AsyncParsableCommand {
   var project: String?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let tree = try await HierarchyTree.load(client: client, timeout: globals.rpcTimeout)
@@ -55,6 +55,22 @@ struct HierarchyTree: Codable, Sendable {
     return HierarchyTree(projects: payload.projects, handles: payload.handles)
   }
 
+  func locateWorktree(_ worktreeID: WorktreeID) -> WorktreePath? {
+    for project in projects where project.worktrees.contains(where: { $0.id == worktreeID }) {
+      return WorktreePath(projectID: project.id, worktreeID: worktreeID)
+    }
+    return nil
+  }
+
+  func locateTab(_ tabID: TabID) -> TabPath? {
+    for project in projects {
+      for worktree in project.worktrees where worktree.tabs.contains(where: { $0.id == tabID }) {
+        return TabPath(projectID: project.id, worktreeID: worktree.id, tabID: tabID)
+      }
+    }
+    return nil
+  }
+
   func locatePane(_ paneID: PaneID) -> PanePath? {
     for project in projects {
       for worktree in project.worktrees {
@@ -65,6 +81,17 @@ struct HierarchyTree: Codable, Sendable {
     }
     return nil
   }
+}
+
+struct WorktreePath: Sendable {
+  let projectID: ProjectID
+  let worktreeID: WorktreeID
+}
+
+struct TabPath: Sendable {
+  let projectID: ProjectID
+  let worktreeID: WorktreeID
+  let tabID: TabID
 }
 
 struct PanePath: Sendable {
@@ -79,14 +106,16 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
   /// Stable short handles from the app. Text mode prints them in place of
   /// the positional index (`Tab t3:` / `Pane p7:`) so agents can copy a
   /// selector that survives reordering; nil (older app) falls back to the
-  /// positional numbering. JSON mode stays UUID-only either way.
+  /// positional numbering. JSON mode carries them as `handle` next to the
+  /// UUID (null from an older app).
   let handles: IPC.TargetHandles?
 
   private enum Key: String, CodingKey { case projects }
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: Key.self)
-    try container.encode(projects.map(HierarchyProjectDTO.init(project:)), forKey: .projects)
+    try container.encode(
+      projects.map { HierarchyProjectDTO(project: $0, handles: handles) }, forKey: .projects)
   }
 
   var description: String {
@@ -140,13 +169,14 @@ struct HierarchyProjectDTO: Encodable {
   let selectedWorktreeID: String?
   let worktrees: [HierarchyWorktreeDTO]
 
-  init(project: Project) {
+  init(project: Project, handles: IPC.TargetHandles?) {
     self.id = project.id.description
     self.name = project.name
     self.rootPath = project.rootPath
     self.gitRoot = project.gitRoot
     self.selectedWorktreeID = project.selectedWorktreeID?.description
-    self.worktrees = project.worktrees.filter { !$0.archived }.map(HierarchyWorktreeDTO.init(worktree:))
+    self.worktrees = project.worktrees.filter { !$0.archived }
+      .map { HierarchyWorktreeDTO(worktree: $0, handles: handles) }
   }
 }
 
@@ -158,37 +188,43 @@ struct HierarchyWorktreeDTO: Encodable {
   let selectedTabID: String?
   let tabs: [HierarchyTabDTO]
 
-  init(worktree: Worktree) {
+  init(worktree: Worktree, handles: IPC.TargetHandles?) {
     self.id = worktree.id.description
     self.name = worktree.name
     self.path = worktree.path
     self.branch = worktree.branch
     self.selectedTabID = worktree.selectedTabID?.description
-    self.tabs = worktree.tabs.map(HierarchyTabDTO.init(tab:))
+    self.tabs = worktree.tabs.map { HierarchyTabDTO(tab: $0, handles: handles) }
   }
 }
 
 struct HierarchyTabDTO: Encodable {
   let id: String
+  /// `t<n>` selector, the same one the text tree prints.
+  let handle: String?
   let name: String?
   let cachedDisplayTitle: String?
   let panes: [HierarchyPaneDTO]
 
-  init(tab: Tab) {
+  init(tab: Tab, handles: IPC.TargetHandles?) {
     self.id = tab.id.description
+    self.handle = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" }
     self.name = tab.name
     self.cachedDisplayTitle = tab.cachedDisplayTitle
-    self.panes = tab.panes.map(HierarchyPaneDTO.init(pane:))
+    self.panes = tab.panes.map { HierarchyPaneDTO(pane: $0, handles: handles) }
   }
 }
 
 struct HierarchyPaneDTO: Encodable {
   let id: String
+  /// `p<n>` selector, the same one the text tree prints.
+  let handle: String?
   let workingDirectory: String
   let labels: [String]
 
-  init(pane: Pane) {
+  init(pane: Pane, handles: IPC.TargetHandles?) {
     self.id = pane.id.description
+    self.handle = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" }
     self.workingDirectory = pane.workingDirectory
     self.labels = pane.labels.sorted()
   }

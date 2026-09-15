@@ -92,7 +92,7 @@ struct HandoffTo: AsyncParsableCommand {
   var split: AgentLaunch.Split?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       if tab, split != nil {
         throw CLIError(code: .userError, message: "--tab and --split are mutually exclusive")
       }
@@ -141,7 +141,7 @@ struct HandoffSave: AsyncParsableCommand {
   var note: String?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
@@ -165,8 +165,43 @@ struct HandoffSave: AsyncParsableCommand {
 struct HandoffRenderable: Encodable, CustomStringConvertible {
   let response: IPC.HandoffResponse
 
+  private enum Key: String, CodingKey {
+    case action, artifactPath, outgoingAgent, receiver, branch, changedFileCount
+    case archivedPath, sessionExcerptPath, briefing, hasBriefing, launchedPane
+  }
+
+  /// Ids ride the wire as `{raw: uuid}` objects; every other verb's `--json`
+  /// prints them as plain strings, so the launched pane is re-shaped here
+  /// instead of passing the response through as-is.
+  private struct LaunchedPane: Encodable {
+    let projectID: String
+    let worktreeID: String
+    let tabID: String
+    let paneID: String
+    let profileName: String
+
+    init(_ pane: IPC.HandoffLaunchedPane) {
+      projectID = pane.projectID.description
+      worktreeID = pane.worktreeID.description
+      tabID = pane.tabID.description
+      paneID = pane.paneID.description
+      profileName = pane.profileName
+    }
+  }
+
   func encode(to encoder: Encoder) throws {
-    try response.encode(to: encoder)
+    var container = encoder.container(keyedBy: Key.self)
+    try container.encode(response.action, forKey: .action)
+    try container.encode(response.artifactPath, forKey: .artifactPath)
+    try container.encode(response.outgoingAgent, forKey: .outgoingAgent)
+    try container.encode(response.receiver, forKey: .receiver)
+    try container.encode(response.branch, forKey: .branch)
+    try container.encode(response.changedFileCount, forKey: .changedFileCount)
+    try container.encode(response.archivedPath, forKey: .archivedPath)
+    try container.encode(response.sessionExcerptPath, forKey: .sessionExcerptPath)
+    try container.encode(response.briefing, forKey: .briefing)
+    try container.encode(response.hasBriefing, forKey: .hasBriefing)
+    try container.encode(response.launchedPane.map(LaunchedPane.init), forKey: .launchedPane)
   }
 
   var description: String {

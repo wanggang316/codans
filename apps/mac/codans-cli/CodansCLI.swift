@@ -26,6 +26,11 @@ struct CodansCLI: AsyncParsableCommand {
         \(commandName) pane new --label agent codex
         \(commandName) agent launch --agent claude
         \(commandName) handoff to codex --brief - <<'EOF' … EOF
+        \(commandName) open --in cursor
+
+      Inside a pane, --project / --worktree / --tab / --pane default to the
+      pane's own containers ('current'); elsewhere pass an id, a t<n> / p<n>
+      handle from `\(commandName) tree`, an @label, or a name.
       """,
     version: "Codans \(CodansCLI.version)",
     subcommands: [
@@ -40,6 +45,9 @@ struct CodansCLI: AsyncParsableCommand {
       BroadcastCommand.self,
       AgentCommand.self,
       HandoffCommand.self,
+      OpenCommand.self,
+      SkillCommand.self,
+      HelpJSONCommand.self,
     ]
   )
 

@@ -13,25 +13,21 @@ struct TabList: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
         let worktreeID: WorktreeID
         let projectID: ProjectID
       }
       let result: TabListPayload = try await client.call(
         .hierarchyListTabs,
-        params: Params(
-          worktreeID: WorktreeID(raw: worktreeUUID),
-          projectID: ProjectID(raw: projectUUID)
-        )
+        params: Params(worktreeID: scope.worktreeID, projectID: scope.projectID)
       )
       try Renderer.emit(TabListRenderable(tabs: result.tabs), mode: globals.renderMode)
     }
@@ -41,13 +37,63 @@ struct TabList: AsyncParsableCommand {
 struct TabCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "tab",
-    abstract: "Create, switch, and close tabs.",
+    abstract: "List, create, describe, switch, rename, and close tabs.",
     subcommands: [
+      TabList.self,
       TabNew.self,
+      TabShow.self,
       TabSwitch.self,
+      TabRename.self,
       TabClose.self,
     ]
   )
+}
+
+struct TabRename: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "rename",
+    abstract: "Set a tab's title, or clear it to follow the shell again.",
+    discussion: """
+      With a name the tab keeps that title; without one (or with an empty
+      string) the user title is cleared and the tab shows the live title the
+      shell reports, as a new tab does.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Tab id, t<n> handle, title, or 'current'.")
+  var tab: String
+  @Argument(help: "New title; omit or pass '' to clear.")
+  var name: String?
+  @Option(name: .long, help: "Project id, name, or 'current'. Usually inferred from the tab.")
+  var project: String = "current"
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'. Usually inferred from the tab.")
+  var worktree: String = "current"
+
+  func run() async throws {
+    await CommandRunner.run(self, globals: globals) {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
+      struct Params: Codable {
+        let id: TabID
+        let worktreeID: WorktreeID
+        let projectID: ProjectID
+        let name: String?
+      }
+      let result: RenameResult = try await client.call(
+        .hierarchyRenameTab,
+        params: Params(
+          id: scope.tabID, worktreeID: scope.worktreeID, projectID: scope.projectID, name: name)
+      )
+      try Renderer.emitObject(
+        ["id": result.id, "name": result.name.map { $0 as Any } ?? NSNull()],
+        mode: globals.renderMode
+      ) { _ in
+        result.name.map { "renamed tab \(result.id) to \($0)" } ?? "cleared title of tab \(result.id)"
+      }
+    }
+  }
 }
 
 struct TabNew: AsyncParsableCommand {
@@ -61,15 +107,14 @@ struct TabNew: AsyncParsableCommand {
   var name: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
         let projectID: ProjectID
         let worktreeID: WorktreeID
@@ -78,11 +123,7 @@ struct TabNew: AsyncParsableCommand {
       struct Result: Codable { let id: TabID }
       let result: Result = try await client.call(
         .hierarchyCreateTab,
-        params: Params(
-          projectID: ProjectID(raw: projectUUID),
-          worktreeID: WorktreeID(raw: worktreeUUID),
-          name: name
-        )
+        params: Params(projectID: scope.projectID, worktreeID: scope.worktreeID, name: name)
       )
       try Renderer.emitObject(
         ["id": result.id.description, "name": name ?? ""],
@@ -101,11 +142,11 @@ struct TabSwitch: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Tab id, t<n> handle, or 'current'.")
+  @Argument(help: "Tab id, t<n> handle, title, or 'current'.")
   var tab: String
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(tab, kind: .tab, client: client)
@@ -124,20 +165,18 @@ struct TabClose: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Tab id, t<n> handle, or 'current'.")
+  @Argument(help: "Tab id, t<n> handle, title, or 'current'.")
   var tab: String
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
-      let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
+      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
       struct Params: Codable {
         let id: TabID
         let worktreeID: WorktreeID
@@ -145,14 +184,11 @@ struct TabClose: AsyncParsableCommand {
       }
       _ = try await client.callRaw(
         .hierarchyCloseTab,
-        params: Params(
-          id: TabID(raw: tabUUID),
-          worktreeID: WorktreeID(raw: worktreeUUID),
-          projectID: ProjectID(raw: projectUUID)
-        )
+        params: Params(id: scope.tabID, worktreeID: scope.worktreeID, projectID: scope.projectID)
       )
       try Renderer.emit(
-        IDMessage(id: tabUUID.uuidString, message: "closed tab \(tabUUID.uuidString)"), mode: globals.renderMode)
+        IDMessage(id: scope.tabID.description, message: "closed tab \(scope.tabID)"),
+        mode: globals.renderMode)
     }
   }
 }
@@ -171,8 +207,10 @@ struct TabListRenderable: Encodable, CustomStringConvertible {
   var description: String {
     tabs.isEmpty
       ? "(no tabs)"
-      : tabs.map { "\($0.id)  \($0.name ?? "(untitled)")  (\($0.panes.count) panes)" }
-        .joined(separator: "\n")
+      : tabs.map {
+        "\($0.id)  \($0.name ?? $0.cachedDisplayTitle ?? "(untitled)")  (\($0.panes.count) panes)"
+      }
+      .joined(separator: "\n")
   }
 }
 

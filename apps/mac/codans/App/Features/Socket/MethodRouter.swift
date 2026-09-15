@@ -85,6 +85,7 @@ public final class MethodRouter {
       return outcome
     }
     if let outcome = await routeHierarchyMutations(request, handlers: h) { return outcome }
+    if let outcome = await routeHierarchyLayout(request, handlers: h) { return outcome }
     if let outcome = await routeHierarchyTags(request, handlers: h) { return outcome }
     return nil
   }
@@ -100,6 +101,10 @@ public final class MethodRouter {
     case .hierarchyListTabs: return await h.listTabs(request.params)
     case .hierarchyListPanes: return await h.listPanes(request.params)
     case .hierarchyListTags: return await h.listTags(request.params)
+    case .hierarchyDescribeProject: return await h.describeProject(request.params)
+    case .hierarchyDescribeWorktree: return await h.describeWorktree(request.params)
+    case .hierarchyDescribeTab: return await h.describeTab(request.params)
+    case .hierarchyDescribePane: return await h.describePane(request.params)
     case .hierarchyResolveAlias: return await h.resolveAlias(request.params, peerPID: peerPID)
     default: return nil
     }
@@ -122,6 +127,24 @@ public final class MethodRouter {
     case .hierarchyClosePane: return await h.closePane(request.params)
     case .hierarchyFocusPane: return await h.focusPane(request.params)
     case .hierarchySetPaneLabels: return await h.setPaneLabels(request.params)
+    default: return nil
+    }
+  }
+
+  /// Renames, prune, and split-tree verbs — the sidebar / context-menu
+  /// actions, kept out of `routeHierarchyMutations` for the same reason
+  /// the tag verbs are.
+  private func routeHierarchyLayout(
+    _ request: IPC.Request,
+    handlers h: HierarchyHandlers
+  ) async -> RouterOutcome? {
+    switch request.method {
+    case .hierarchyRenameProject: return await h.renameProject(request.params)
+    case .hierarchyRenameWorktree: return await h.renameWorktree(request.params)
+    case .hierarchyRenameTab: return await h.renameTab(request.params)
+    case .hierarchyPruneWorktrees: return await h.pruneWorktrees(request.params)
+    case .hierarchySplitPane: return await h.splitPane(request.params)
+    case .hierarchyResizePane: return await h.resizePane(request.params)
     default: return nil
     }
   }
@@ -228,6 +251,12 @@ public final class MethodRouter {
     case .agentLaunch:
       return await Self.asyncOutcome {
         try await h.launch(request.params.decoded(as: IPC.AgentLaunchRequest.self))
+      }
+    case .agentListStates:
+      return Self.projectOutcome { try h.listStates() }
+    case .agentWait:
+      return await Self.asyncOutcome {
+        try await h.wait(request.params.decoded(as: IPC.AgentWaitRequest.self))
       }
     default: return nil
     }

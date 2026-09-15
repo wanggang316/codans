@@ -10,13 +10,132 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **CLI — every list verb, `open`, and `help-json` are now real commands.**
+  `codans project list`, `worktree list`, `tab list`, and `pane list` print
+  one level of the hierarchy (with `--json`), `codans open [path] [--in
+  editor]` opens a directory in an external editor through the app's editor
+  resolution, and the hidden `codans help-json` prints the whole subcommand
+  tree for tooling.
+- **CLI — `worktree new` creates the worktree.** The command now runs the
+  same pipeline as the New Worktree sheet: the branch is created from
+  `--base` (default: the repo's default remote branch, else `HEAD`) or
+  checked out if it already exists, the project's copy / fetch / setup
+  settings apply, and only then is the row added. A path that already
+  exists on disk is registered as-is. `--json` reports whether it was
+  `created`.
+- **CLI — names as targets.** `--project`, `--worktree`, and `--tab` (and
+  the positional forms) accept a project name, a worktree name or branch,
+  and a tab title, scoped to the calling pane's project / worktree; an
+  ambiguous name is a conflict rather than a guess.
+- **CLI — `tree --json` carries the `t<n>` / `p<n>` handles** the text
+  form prints, as `handle` on each tab and pane.
+- **CLI — `worktree rm --delete`** removes the git worktree from disk (and
+  its branch, per Settings) through the sidebar's own removal; without the
+  flag only the entry is forgotten, which the next reconcile undoes for a
+  real git worktree.
+- **CLI — `agent status` and `agent wait`.** `agent status` lists every
+  pane the app recognises as running an agent with the Agents View's
+  derived state (idle / working / blocked / finished), when it last
+  changed, and where the pane lives; `agent wait <pane> --until <state>`
+  blocks server-side until the agent reaches a state (or `changed` /
+  `exit`) and fails with `WAIT_TIMEOUT` past `--wait-timeout`.
+- **CLI — `pane send --wait` / `--capture`.** `--wait` returns once the
+  command the text started has finished (the shell is no longer running a
+  foreground job and the screen has held still); `--capture` also returns
+  the lines the command printed, so a script no longer needs a sleep and a
+  second read.
+- **Settings ▸ Developer ▸ Agent skills.** The app bundles its agent
+  skill; the Developer pane lists it per agent target (Claude Code
+  `~/.claude/skills`, Codex `~/.codex/skills`, Shared `~/.agents/skills`)
+  as one row each — the agent's mark, the folder, a status dot, and an
+  Install / Uninstall button — so linking it is the user's choice per
+  agent. A link to another build is offered Install again; a directory
+  that is not a Codans link is left alone. The CLI card above it uses the
+  same row (no mark, no Reinstall).
+- **CLI — `codans skill list | install | uninstall | path`.** The same
+  links from the shell, for every detected agent by default or
+  `--target`, and into a repository's folders with `--scope project`.
+- **CLI — `--json` prints one envelope for every command.** Output is
+  `{schemaVersion, data}` on success and `{schemaVersion, error}` on
+  failure, where `schemaVersion` is `codans.cli.<command>.v1` and
+  `error.code` is a stable string (`NOT_FOUND`, `WAIT_TIMEOUT`, …) next to
+  `message`, `hint`, and `details`. The shapes are described by
+  `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`, which the
+  regression harness validates every JSON output against.
+- **CLI — worktrees resolve by path** wherever a worktree is accepted
+  (`worktree switch ~/code/api-hotfix`, `--worktree .`), alongside id, name,
+  and branch.
+- **CLI — `show`, `rename`, `worktree prune`, `pane split`, `pane resize`.**
+  Every level has a `show` verb (`project` / `worktree` / `tab` / `pane
+  show`) that describes one entity — containers, handle, selection / focus,
+  the live directory — and a `rename`; `worktree prune` runs the sidebar's
+  Prune Worktrees; `pane split` opens a pane beside another the way the
+  keyboard split does (cwd defaults to the anchor's), and `pane resize`
+  moves the divider next to a pane. These wire the `hierarchy.describe*`,
+  `rename*`, `pruneWorktrees`, `splitPane`, and `resizePane` methods that
+  were declared but never routed.
+
 ### Changed
+
+- **CLI — `--json` output is wrapped in an envelope** (see Added); scripts
+  that read fields off the top level now read them under `.data`, and
+  errors in JSON mode arrive on stdout as `{schemaVersion, error}` instead
+  of a text line on stderr. `codans help-json` keeps printing its tree
+  bare.
+- **CLI — `pane split` takes its command as `--command`**, leaving the
+  single positional for the anchor pane.
+- **CLI — `current` works for projects, worktrees, and tabs inside a
+  pane.** A pane only exports its own id, so `--project current` and
+  friends used to fail with "no current project context" in every pane;
+  the app now derives them from the calling pane. Outside a pane the error
+  says so and suggests passing an id. Verbs whose target already fixes its
+  containers (`tab close t3`, `pane new --tab t3`, `worktree rm <id>`) no
+  longer need `--project` / `--worktree`.
+- **CLI — `project add` validates and detects git.** The directory must
+  exist and must not be registered already; its git root is discovered so
+  the project lists real worktrees instead of a branchless placeholder.
+- **CLI — `launch` forwards `CODANS_SOCKET_PATH` and `CODANS_CONFIG_DIR`**
+  to the app it starts, so the socket it waits on is the one the app binds.
 
 ### Deprecated
 
 ### Removed
 
+- **Settings ▸ Developer ▸ Diagnostics** (reveal `settings.json`, copy the
+  app version); the About pane shows the version.
+
 ### Fixed
+
+- **Hand-off kickoff was never submitted in a short pane.** For a receiver
+  that takes no prompt argument the app types the kickoff and presses Enter
+  once the text shows on screen; it looked for the start of the prompt in
+  the live rows, which a long prompt had already scrolled into history when
+  the pane was only a few rows tall. It now looks for the end of the prompt,
+  which sits at the cursor.
+- **`codans handoff to --json` printed ids as `{"raw": …}` objects** in
+  `launchedPane`; they are plain strings now, like every other verb's
+  output.
+- **Panes opened by the CLI started with the bare app environment.**
+  `codans pane new` skipped the project env resolution the sidebar runs,
+  so such a pane had no `CODANS_CLI`, no `CODANS_SOCKET_PATH`, none of
+  the project's `envVars`, and `TERM_PROGRAM` read `ghostty`; inside a
+  development build the pane could not even find `codans-dev`. They now
+  get the same environment as a pane opened from the UI.
+- **CLI — `--timeout` was ignored** by every command except `project
+  commands`; it now bounds every call a command makes.
+- **CLI — `pane send --raw '0x15 0x0d'`** was rejected although the help
+  promised `0x` and whitespace; each token may now carry its own prefix.
+- **CLI — unquoted text as a pane target** (`pane send echo hi`) now fails
+  as a usage error naming the stray word instead of "alias form not yet
+  supported".
+- **Create Worktree errors showed an empty reason.** The `wt sw` stderr
+  was consumed line by line and only its trailing fragment reached the
+  error, so a bad base ref surfaced as `wt … :` with nothing after the
+  colon; the full stderr is kept now, and `invalid --from ref` maps to a
+  user error.
+- **Skill / docs** described `pane list`, `pane read --screen`, `capture
+  -p`, and a `./<branch>` default worktree path that the CLI never had;
+  they now match the shipped commands.
 
 ### Security
 

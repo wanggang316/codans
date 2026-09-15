@@ -50,6 +50,27 @@ nonisolated struct CreateWorktreeSpec: Equatable, Sendable {
   /// A non-zero exit is best-effort: it never throws or rolls back the
   /// created worktree.
   var setupCommand: String?
+  /// Exact directory for the new worktree, bypassing `<baseDirectory>/<name>`.
+  /// Lets `name` stay the real branch name (slashes and all) while the
+  /// directory takes a sanitised form, and lets `wt` check out a branch
+  /// that already exists locally, which it refuses without a path.
+  var pathOverride: URL?
+
+  init(
+    repoRoot: URL, baseDirectory: URL, name: String, baseRef: String,
+    fetchOrigin: Bool, copyIgnored: Bool, copyUntracked: Bool,
+    setupCommand: String? = nil, pathOverride: URL? = nil
+  ) {
+    self.repoRoot = repoRoot
+    self.baseDirectory = baseDirectory
+    self.name = name
+    self.baseRef = baseRef
+    self.fetchOrigin = fetchOrigin
+    self.copyIgnored = copyIgnored
+    self.copyUntracked = copyUntracked
+    self.setupCommand = setupCommand
+    self.pathOverride = pathOverride
+  }
 }
 
 /// Phases a `createWorktreeStream` run moves through. `creatingWorktree`
@@ -212,6 +233,10 @@ nonisolated extension GitWorktreeClient {
     if spec.copyIgnored || spec.copyUntracked {
       arguments.append("--verbose")
     }
+    if let path = spec.pathOverride {
+      arguments.append("--path")
+      arguments.append(path.path(percentEncoded: false))
+    }
     arguments.append(spec.name)
     return arguments
   }
@@ -237,6 +262,10 @@ nonisolated extension GitWorktreeClient {
     }
     if lower.contains("unknown revision") || lower.contains("bad revision") {
       return .refNotFound(stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    // `wt sw --from <ref>` verifies the ref itself before calling git.
+    if let match = stderr.firstMatch(of: /(?i)invalid --from ref '([^']+)'/) {
+      return .refNotFound(String(match.1))
     }
     if lower.contains("is locked") {
       return .worktreeLocked(stderr.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -456,6 +485,7 @@ nonisolated enum GitWorktreeShell {
       final class LineBuffer: @unchecked Sendable {
         var buffer = ""
         var lastNonEmpty = ""
+        var collected = ""
       }
       let stdoutState = LineBuffer()
       let stderrState = LineBuffer()
@@ -485,6 +515,10 @@ nonisolated enum GitWorktreeShell {
         guard !chunk.isEmpty, let str = String(data: chunk, encoding: .utf8) else { return }
         stderrLock.lock()
         stderrState.buffer += str
+        // Keep every byte for the error report: the line loop below
+        // consumes `buffer`, which used to leave `stderrCollected` with
+        // only the trailing partial line.
+        stderrState.collected += str
         var lines: [String] = []
         while let nl = stderrState.buffer.firstIndex(of: "\n") {
           let line = String(stderrState.buffer[..<nl])
@@ -512,7 +546,7 @@ nonisolated enum GitWorktreeShell {
         let tailErr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         if !tailErr.isEmpty, let str = String(data: tailErr, encoding: .utf8) {
           stderrLock.lock()
-          stderrState.buffer += str
+          stderrState.collected += str
           stderrLock.unlock()
           onStderr(str)
         }
@@ -520,7 +554,7 @@ nonisolated enum GitWorktreeShell {
         let finalLastNonEmpty = stdoutState.lastNonEmpty
         stdoutLock.unlock()
         stderrLock.lock()
-        let finalStderr = stderrState.buffer
+        let finalStderr = stderrState.collected
         stderrLock.unlock()
         cont.resume(
           returning: (

@@ -3,7 +3,7 @@
 **状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
-> **现状 vs 未接线（读前须知）。** 核心动词集已上线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群、`pane send` / `broadcast`、`agent` / `handoff` 各群。**已定义但未接线**（源码中存在，但未挂进 `CodansCLI.subcommands` 或对应 `*Command.subcommands`，故 `codans <cmd>` 报 unknown subcommand）：各级 `list` 子命令、顶层 `open`、`help-json`。**完全未实现**：`skill.*` 与 `hook.*` 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`）。下文逐处标注，勿把未接线 / 未实现当现状能力。
+> **现状（读前须知）。** 动词集已全部接线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群（含各级 `list`）、`pane send` / `broadcast`、`agent` / `handoff` 各群（含 `agent status` / `agent wait`）、顶层 `open`、本地的 `skill` 群与隐藏的 `help-json`；`--json` 一律是 `{schemaVersion, data | error}` 信封。**完全未实现**：`skill.*` 与 `hook.*` IPC 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`；`codans skill` 是纯本地文件操作，不经 IPC）；`IPC.Method` 里已声明但 `MethodRouter` 未路由的只剩 `hierarchy.zoomPane` / `unzoomPane`（应用没有 zoomed-pane 渲染，`SplitTree.zoomed` 仅被 `focusPane` 写入）与 `hierarchy.setProjectEditor`（被 `editor.setProjectDefault` 取代）。
 
 ## 背景与范围
 
@@ -109,61 +109,75 @@
 
 #### 顶层命令
 
-`CodansCLI.configuration.subcommands` 显式挂载：`status`、`launch`、`doctor`、`tree`、`project`、`worktree`、`tab`、`pane`、`broadcast`、`agent`、`handoff`。
+`CodansCLI.configuration.subcommands` 显式挂载：`status`、`launch`、`doctor`、`tree`、`project`、`worktree`、`tab`、`pane`、`broadcast`、`agent`、`handoff`、`open`、`skill`、`help-json`（隐藏）。
 
 | Subcommand | IPC method | 说明 |
 |---|---|---|
 | `codans status` | `system.status` | server 标识、uptime、connected-clients 数 |
-| `codans launch [--wait N]` | *(本地)* | 若未运行则 `open -g Codans.app` 并最多等 N 秒（默认 10）等 socket 出现；唯一会拉起应用的命令 |
+| `codans launch [--wait N]` | *(本地)* | 若未运行则 `open -g Codans.app` 并最多等 N 秒（默认 10）等 socket 出现；唯一会拉起应用的命令。CLI 自己环境里的 `CODANS_SOCKET_PATH` / `CODANS_CONFIG_DIR` 经 `open --env` 转交给应用，等待的 socket 与应用绑定的是同一个 |
 | `codans doctor` | *(本地)* | 检查 socket 路径、可达性、是否来自环境变量、CLI 版本；不做应用往返 |
-| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级 |
+| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级；`--json` 在 tab / pane 上附 `handle`（`t<n>` / `p<n>`） |
 | `codans broadcast` | `terminal.broadcastInput` | 见 [send / broadcast](#codans-pane-send--codans-broadcast) |
 
 > `codans --version` 印 `Codans <version>`（ArgumentParser 内建）。
 
 #### `codans project …`
 
-`ProjectCommand.subcommands`：`add`、`rm`。
+`ProjectCommand.subcommands`：`list`、`add`、`show`、`rename`、`rm`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
-| `codans project add PATH` | `hierarchy.addProject` | `HierarchyManager.addProject` | `PATH`，`[--name NAME]` |
-| `codans project rm ID` | `hierarchy.removeProject` | `HierarchyManager.removeProject` | `ID`（别名/名字/`current`） |
+| `codans project list` | `hierarchy.listProjects` | `HierarchyHandlers.listProjects` | 无 |
+| `codans project add PATH` | `hierarchy.addProject` | `HierarchyHandlers.addProject` → `HierarchyManager.addProject` | `PATH`，`[--name NAME]` |
+| `codans project show [ID]` | `hierarchy.describeProject` | `HierarchyHandlers.describeProject` | `[ID]`；回带 `{id, name, canonicalName, rootPath, gitRoot, remoteHost, isSelected, selectedWorktreeID, worktreeCount, archivedWorktreeCount, tagIDs}` |
+| `codans project rename ID NAME` | `hierarchy.renameProject` | `HierarchyManager.renameProject` | `ID`，`NAME`（空串或等于文件夹名 → 清除覆盖） |
+| `codans project rm ID` | `hierarchy.removeProject` | `HierarchyManager.removeProject` | `ID`（id/名字/`current`） |
 
-> `ProjectList`（`codans project list`，走 `hierarchy.listProjects`）在源码中存在，但**未挂进** `ProjectCommand.subcommands`，因此当前不可经 `codans project list` 调用——用 `codans tree` 看 Project。其底层 `hierarchy.listProjects` 方法本身已在 `MethodRouter` 接线（`codans tree` 正用它），故未接线的只是 CLI 子命令，非服务端方法。Worktree / Tab / Pane 的 `list` 子命令同理（`hierarchy.listWorktrees` / `listTabs` / `listPanes` 均已路由，仅各 `*Command.subcommands` 未挂；见各节脚注）。
+`add` 在边界校验：目录必须存在（否则 `invalidParams`，exit 1）、规范化路径未注册（否则 `conflict` 并回带已有 id）；未传 `gitRoot` 时服务端用 `git rev-parse --show-toplevel` 探测，落库后触发与侧栏 Add Project 相同的 reconcile，使仓库项目立刻列出真实 worktree 而非一行无分支的合成 worktree。响应 `{id, rootPath, gitRoot}`。
 
 #### `codans worktree …`
 
-`WorktreeCommand.subcommands`：`new`、`switch`、`rm`。
+`WorktreeCommand.subcommands`：`list`、`new`、`show`、`switch`、`rename`、`prune`、`rm`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
-| `codans worktree new BRANCH` | `hierarchy.createWorktree` | `HierarchyManager.createWorktree` | `BRANCH`，`[--project P] [--path PATH] [--name NAME] [--reuse-existing]` |
+| `codans worktree list` | `hierarchy.listWorktrees` | `HierarchyHandlers.listWorktrees` | `[--project P]` |
+| `codans worktree show [ID]` | `hierarchy.describeWorktree` | `HierarchyHandlers.describeWorktree` | `[ID]`；回带 `{id, projectID, projectName, name, path, branch, isArchived, isPinned, isSelected, selectedTabID, tabCount}` |
+| `codans worktree rename ID NAME` | `hierarchy.renameWorktree` | `HierarchyManager.renameWorktree` | `ID`，`NAME`（仅侧栏标签，路径/分支不变；空白拒绝），`[--project P]` |
+| `codans worktree prune` | `hierarchy.pruneWorktrees` | `GitWorktreeClient.pruneWorktrees` → `HierarchyClient.reconcileDiscoveredWorktrees` | `[--project P]`；回带 `{projectID, pruned}`。文件夹项目 → `invalidParams`，远端项目 → `unsupported` |
+| `codans worktree new BRANCH` | `hierarchy.createWorktree` | `HierarchyHandlers.createWorktree` → `GitWorktreeClient.createWorktreeStream` + `HierarchyManager.createWorktree` | `BRANCH`，`[--project P] [--path PATH] [--name NAME] [--base REF] [--reuse-existing]` |
 | `codans worktree switch ID` | `hierarchy.activateWorktree` | `HierarchyManager.selectWorktree` | `ID` |
-| `codans worktree rm [ID]` | `hierarchy.removeWorktree` | `HierarchyManager.removeWorktree` | `ID`，或 `--by-path PATH [--all]`（按规范化路径删一/多行），`[--project P]` |
+| `codans worktree rm [ID]` | `hierarchy.removeWorktree` | `HierarchyManager.removeWorktree`；`--delete` → `HierarchyClient.removeWorktreeWithGit` | `ID`，或 `--by-path PATH [--all]`（按规范化路径删一/多行），`[--project P] [--delete]`。不带 `--delete` 只删 catalog 行（真实 git worktree 会被下一次 reconcile 收回）；`--delete` 走侧栏 Remove Worktree 同一条路径（拆 surface → relocate-then-prune → 按 Settings 删分支），响应 `{id, deleted, warning?}` |
 
-`--path` 缺省由服务端解析：展开 project 配置的 worktrees 目录并附加分支名；响应回带解析后的绝对路径。`--reuse-existing`：若同规范化路径的 worktree 已存在，返回其 id 而非以 conflict 失败（名字冲突仍失败）。`WorktreeList`（`codans worktree list`）在源码中存在但未挂载。
+`--path` 缺省由服务端解析：展开 project 配置的 worktrees 目录并附加分支名；响应回带解析后的绝对路径。目标路径**不存在**且项目是本地 git 项目时，服务端先经 New Worktree sheet 同一条 `wt sw` 流水线把 worktree 造出来（分支不存在则从 `--base` / 项目 pinned base ref / 默认远程分支 / `HEAD` 新建，存在则直接 checkout；项目的 copy / fetch / setup 设置生效；`wt sw --path` 让分支名与目录名解耦），再入 catalog；路径已存在则原样登记（收编外部创建的 worktree）；远端项目与无 git root 的文件夹项目保持只写 catalog。响应回带 `created`。`--reuse-existing`：若同规范化路径的 worktree 已存在，返回其 id 而非以 conflict 失败（名字冲突仍失败）。git 失败按"调用方该怎么办"映射：非法分支名 / 未知 ref → `invalidParams`，分支已存在 / 未提交改动 / 锁 → `conflict`，其它 → `internal` 附 stderr。
 
 #### `codans tab …`
 
-`TabCommand.subcommands`：`new`、`switch`、`close`。
+`TabCommand.subcommands`：`list`、`new`、`show`、`switch`、`rename`、`close`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
+| `codans tab list` | `hierarchy.listTabs` | `HierarchyHandlers.listTabs` | `[--project P] [--worktree W]` |
 | `codans tab new [NAME]` | `hierarchy.createTab` | `HierarchyManager.createTab` | `[NAME]`，`[--project P] [--worktree W]` |
+| `codans tab show [ID]` | `hierarchy.describeTab` | `HierarchyHandlers.describeTab` | `[ID]`；回带 `{id, handle, projectID, worktreeID, title, name, icon, isSelected, focusedPaneID, paneIDs}`（`title` = 用户名或最近的 live 标题） |
 | `codans tab switch ID` | `hierarchy.activateTab` | `HierarchyManager.selectTab` | `ID` |
+| `codans tab rename ID [NAME]` | `hierarchy.renameTab` | `HierarchyManager.renameTab` | `ID`，`[NAME]`（缺省或空串 → 清除用户标题，回到 shell 的 live 标题），`[--project P] [--worktree W]` |
 | `codans tab close ID` | `hierarchy.closeTab` | `HierarchyManager.closeTab` | `ID`，`[--project P] [--worktree W]` |
 
-`TabList`（`codans tab list`）在源码中存在但未挂载。
+容器推断（`ScopeResolver`，`CommonCommandSupport.swift`）：显式给出 tab（或 worktree）而 `--project` / `--worktree` 留在 `current` 时，容器从 `codans tree` 一次往返里定位，不依赖调用方所在 pane——`codans tab close t3` 在任何 shell 都可用。
 
 #### `codans pane …`
 
-`PaneCommand.subcommands`：`new`、`focus`、`close`、`label`、`reset`、`send`、`send-key`、`read`、`info`、`capture`。
+`PaneCommand.subcommands`：`list`、`new`、`split`、`show`、`focus`、`resize`、`close`、`label`、`reset`、`send`、`send-key`、`read`、`info`、`capture`。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
+| `codans pane list` | `hierarchy.listPanes` | `HierarchyHandlers.listPanes` | `[--project P] [--worktree W] [--tab T]` |
 | `codans pane new [CMD…]` | `hierarchy.openPane` | `HierarchyManager.openPane` | `[CMD…]`（省略则默认登录 shell），`[--project P] [--worktree W] [--tab T] [--cwd PATH] [--label TAG…]` |
+| `codans pane split [PANE]` | `hierarchy.splitPane` | `HierarchyManager.splitPane` | `[PANE]`（锚点，唯一的位置参数，默认 `current`），`[--direction right\|left\|up\|down]`（默认 right），`[--cwd PATH]`（默认锚点 pane 的 live 目录，不是 `$PWD`），`[--label TAG…]`，`[--command CMD]`。与键盘分屏同一条路径，新 pane 带项目环境；回带 `{id, anchor, direction}` |
+| `codans pane show [PANE]` | `hierarchy.describePane` | `HierarchyHandlers.describePane` | `[PANE]`；回带 `{id, handle, projectID, worktreeID, tabID, workingDirectory（live 优先）, initialCommand, labels, agent, agentSessionID, isLive, isFocused}`。读 catalog；`pane info` 才是问守护 |
 | `codans pane focus PANE` | `hierarchy.focusPane` | `HierarchyManager.focusPane` | `PANE`（UUID/`@label`/`current`） |
+| `codans pane resize PANE DIR` | `hierarchy.resizePane` | `HierarchyManager.resizePane` | `PANE`，`DIR`（`left`/`right` 动最近的竖分隔线，`up`/`down` 动横的），`[--amount PX]`（像素，默认 40，manager 按 400px/ratio 换算）。该方向没有分隔线则无操作 |
 | `codans pane close PANE` | `pane.close` | zmx 守护 `.kill` + sessions 收割 | `PANE`；杀掉 pane 的 zmx 守护并丢弃持久 session 项。与 UI 的 X 按钮（detach 以便日后 attach 复活）不同 |
 | `codans pane label PANE TAG…` | `hierarchy.setPaneLabels` | `HierarchyManager.setPaneLabels` | `PANE`，`TAG…`，`[--replace]` |
 | `codans pane reset PANE` | `terminal.resetPane` | libghostty reset 绑定动作 | `PANE`；清 scrollback 并重初始化终端，不打扰子进程 |
@@ -173,8 +187,6 @@
 | `codans pane info [PANE]` | `pane.info` | 探测 zmx 守护 | 回带 shell pid + pwd（cursor/modes 在未来 tag 前为 null）；走守护而非 catalog，故陈旧 catalog 行不会冒充 live 真相 |
 | `codans pane capture [PANE]` | `terminal.readText` | libghostty 渲染文本 | 纯文本快照；`[--scope viewport\|screen] [--lines N]`。原始 ANSI 字节流捕获**当前不支持**（libghostty 只暴露解析后文本，非原始 PTY 字节流），是 follow-up |
 
-`PaneList`（`codans pane list`，走 `hierarchy.listPanes`）在源码中存在但未挂进 `PaneCommand.subcommands`。
-
 **`codans pane new`** 默认：`--cwd` 回退 `$PWD`；`CMD` 回退登录 shell；`--label` 用 `--label foo bar` 形式接收多个初始标签。
 
 **`codans pane send`** —— 这是最常用命令：
@@ -182,8 +194,9 @@
 - 一个位置参数 → 发给当前 pane；两个 → 第一是目标 pane，第二是文本。
 - 文本默认以 Enter 提交；`--no-enter` 只键入不回车。（wire 层把 Enter 实现为 CR `\r` 而非 `\n`；`\n` 只换行不执行。）
 - `--stdin` 从标准输入读到 EOF。
-- `--raw <hex>` 发原始字节（如 CSI 序列）——文本路径会丢弃这些；hex 可含 `0x` 与空白。控制字节（ESC/Tab/BS/CR/LF/Ctrl-A..Z）作为 key event 派发以确保 PTY 真正收到，可打印字节走文本通道。`--raw` 与位置文本 / `--stdin` / `--no-enter` 互斥。
+- `--raw <hex>` 发原始字节（如 CSI 序列）——文本路径会丢弃这些；hex 以空白分词，每个词可各自带 `0x`（`"0x15 0x0d"` 与 `"150d"` 等价，`TerminalHandlers.decodeHex`）。控制字节（ESC/Tab/BS/CR/LF/Ctrl-A..Z）作为 key event 派发以确保 PTY 真正收到，可打印字节走文本通道。`--raw` 与位置文本 / `--stdin` / `--no-enter` 互斥。
 - `--focus` 发送后聚焦目标 pane。
+- `--wait`：发送后在服务端轮询，直到 pane 的前台任务结束（`HierarchyManager.paneIsBusy`，即前台进程组轮询器的 busy 位）且屏幕在 `--stable-ms`（默认 500）内无变化；轮询器最快 500 ms 才看得到 busy，所以短命令在 1.5 s 的 grace 静默后也算完成。`--capture` 蕴含 `--wait`，并回带命令新增的屏幕行（`TerminalHandlers.capturedOutput`：去掉发送前后屏幕的公共前缀、回显的命令行、重绘的提示行；终端只暴露渲染文本而非命令边界，故为 best effort）。超过 `--wait-timeout`（默认 30 s，上限 600）→ exit 11 / `WAIT_TIMEOUT`。响应多出 `completed`、`waitedMs`、`busyObserved`、`output`。
 
 #### `codans pane send` / `codans broadcast`
 
@@ -204,6 +217,8 @@
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans agent list` | `agent.listProfiles` | `AgentHandlers.listProfiles` | 无；每行回带 id、名字、agent、enabled、PATH 探测结果（未探测完为 null）、是否支持 prompt、完整启动命令 |
+| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/finished）、`since`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。运行态是纯内存派生态，不持久化 |
+| `codans agent wait PANE --until COND` | `agent.wait` | `AgentHandlers.wait`（服务端每 200 ms 轮询 store） | `PANE`，`--until idle\|working\|blocked\|finished\|changed\|exit`，`[--wait-timeout 1..600]`（默认 60；全局 `--timeout` 是 RPC 客户端上限，会被抬高以覆盖它）。`changed` = 相对 arm 时的状态有任何变化；`exit` = pane 上不再绑定 agent。服务端在 deadline 返回 `satisfied=false`，CLI 转成 exit 11 / `WAIT_TIMEOUT` 并在 `details` 里带最后状态 |
 | `codans agent launch [PROFILE]` | `agent.launch` | `HierarchyClient.launchAgent` | `[PROFILE]`（名字或 id）或 `--agent TOKEN`（该 agent 第一个启用的 profile，缺则临时裸预设），`[--project P] [--worktree W] [--prompt TEXT\|-] [--tab \| --split right\|left\|up\|down] [--background]` |
 
 `launch` 走与 toolbar 相同的管线（渲染 profile → 合成 `ScriptDefinition` → 新 tab / 分屏 / 当前 pane），永不复用 run pane。禁用的 profile 以 `conflict` 拒绝；不支持初始 prompt 的 agent 带 `--prompt` 以 `unsupported` 拒绝；重名 profile 以 `conflict` 要求传 id。
@@ -230,27 +245,54 @@
 |---|---|---|---|
 | `codans open [<path>] [--in EDITOR]` | `editor.open` | `EditorService` | `[<path>]`（默认 `$PWD`，相对路径相对 `$PWD` 解析），`[--in EDITOR]` |
 
-> `OpenCommand` 在源码中存在（`apps/mac/codans-cli/Commands/OpenCommand.swift`），但当前**未挂进** `CodansCLI.subcommands`，故 `codans open` 与 `list` 命令同属"已实现但未接线"状态。服务端 `editor.open` 方法本身已在 `MethodRouter.routeEditor` 接线，未接线的只是 CLI 子命令。其契约仍是耐久的，故在此记录。
-
 `EDITOR` 是编辑器 id（`cursor`/`zed`/`vscode`/`xcode`/`finder`/`ghostty`/…）。`path` 在 C8a Phase 4c 后是单一位置参数（早先的 `<worktree>` / `--path` 二分已合并）。编辑器优先级在服务端 `EditorService` 处理：(1) 显式 `--in`（strict，未安装即报错）→ (2) `Settings.projects[pid].defaultEditor`（路径落在已注册 Project 内时，lenient）→ (3) 全局 `Settings.defaultEditorID`（lenient）→ (4) 内建注册表优先级遍历 → (5) Finder 回退（永远可用）。
 
 > editor 的 IPC 面是 `editor.*`（`editor.describe`/`editor.open`/`editor.setGlobalDefault`/`editor.setProjectDefault`），不是更早设想的 `system.openInEditor` / `hierarchy.setProjectEditor`。C8a Phase 4c 把 `editor.setDefault` 改名为 `editor.setGlobalDefault` 并新增 `editor.setProjectDefault`。
 
+#### `codans skill …`
+
+`SkillCommand.subcommands`：`list`、`install`、`uninstall`、`path`。纯本地文件操作，不走 socket，app 不必运行。
+
+| Subcommand | Anchors to | Args |
+|---|---|---|
+| `codans skill list` | `SkillInstaller.report` | `[--target claude\|codex\|agents…] [--scope user\|project] [--project-root DIR]`；每个 bundled skill × target 的状态：`installed` / `missing` / `other-version`（指向别的 bundle 的链接）/ `conflict` |
+| `codans skill install [ID…]` | `SkillInstaller.install` | 同上 + `[--force]`；把 `Contents/Resources/skills/<id>` 软链到 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`（`--scope project` 则是 `<git root>/.claude/skills` 等）。`other-version` 直接替换，`conflict` 需 `--force` |
+| `codans skill uninstall [ID…]` | `SkillInstaller.uninstall` | 只移除指向某个 bundle 的链接，其它占位一律不动 |
+| `codans skill path [ID]` | `SkillLocator` | 打印 bundled 目录 |
+
+bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` 拷入 `Resources/skills`；CLI 通过自身二进制位置（`Resources/bin/<cli>` 上溯两级）或 `CODANS_SKILLS_DIR` 找到它。默认 target 为"已检测到"的 agent（其 `~/.claude` 等目录存在）。Settings ▸ Developer ▸ Agent skills 是同一 `SkillInstaller` 的 GUI 入口（每个 target 一行 Install / Remove，见 [settings.md](settings.md#developer-pane)）；安装与否始终是用户的选择，app 不会自动链接。
+
 #### `codans help-json`
 
-`HelpJSONCommand`（`apps/mac/codans-cli/HelpJSONCommand.swift`）发出整棵 `codans` 子命令树的 JSON（`{name, abstract, subcommands}`），供外部工具推断 CLI 形状而不必解析 `--help` 文本。它配置为 `shouldDisplay: false`（默认 `--help` 隐藏）。**注意：** 它在源码中存在并能 `walk(CodansCLI.self)`，但**未挂进** `CodansCLI.subcommands`，因此当前不可经 `codans help-json` 调用——其 walk 逻辑可达而命令本身不可达。
+`HelpJSONCommand`（`apps/mac/codans-cli/HelpJSONCommand.swift`）发出整棵 `codans` 子命令树的 JSON（`{name, abstract, subcommands}`），供外部工具推断 CLI 形状而不必解析 `--help` 文本。它配置为 `shouldDisplay: false`（默认 `--help` 隐藏），已挂进 `CodansCLI.subcommands`。
 
 ### 寻址与别名解析
 
-`PANE` / `TARGET` 参数由 `AliasResolver`（`CodansKit/Transport/AliasResolver.swift`）解析，对每种 kind（`project`/`worktree`/`tab`/`pane`）：
+`PANE` / `TARGET` 参数由 `AliasResolver`（`CodansKit/Transport/AliasResolver.swift`）与服务端 `HierarchyHandlers.resolveAlias` 共同解析，对每种 kind（`project`/`worktree`/`tab`/`pane`）依次尝试：
 
 1. **UUID** —— 任何合法 UUID 串假定为规范 ID，本地校验，无往返。
-2. **`current`** —— 经对应的 `CODANS_{PROJECT,WORKTREE,TAB,PANE}_ID` 环境变量解析（pane 级命令多从 pane id 反推 project/worktree/tab）。
-3. **index** —— 当前父容器内 1-based 位置（CLI 侧 1-based 贴合人类，内部 0-based）。
-4. **`@label`** —— 仅 Pane：经 `hierarchy.resolvePaneLabel` 解析；多于一个匹配则报 conflict。
-5. **path glob** —— 仅 Worktree：经 `hierarchy.resolveWorktreeGlob`。
+2. **`current` / `.`** —— 若对应的 `CODANS_{PROJECT,WORKTREE,TAB,PANE}_ID` 环境变量存在则本地解析；否则交给服务端：先把调用方归属到 pane（连接的内核 peer PID 沿祖先链匹配 live pane 的 shell PID，退而取请求里的 `contextPaneID`），pane 级直接返回，project / worktree / tab 级从 catalog 中持有该 pane 的行读出。pane 只导出自己的 id，所以 `--project current` 等全靠这一步；不在 pane 里 → `notFound(kind, "current")`，CLI 渲染为"no current <kind>: this shell is not inside a Codans pane"（exit 2）。
+3. **`@label`** —— 仅 Pane：匹配 `Pane.labels`；多于一个匹配则报 conflict。
+4. **`t<n>` / `p<n>`** —— `TargetHandleRegistry` 的稳定短句柄。
+5. **名字** —— project 按 name / canonicalName；worktree 按 name 或 branch，调用方在 pane 里时限定在该 pane 的 project 内；tab 按 title，限定在该 pane 的 worktree 内；均不区分大小写。唯一命中即返回，多个命中 → `conflict`（请传 id），零命中 → `notFound`。pane 没有名字：裸词按 `invalidParams` 拒绝并提示引号（常见于未加引号的 `pane send echo hi`）。
+6. **路径**（仅 worktree）—— `/abs`、`~/x`、`./x`、`../x`、`..` 视为路径（分支名也含 `/`，故只认这些前缀）：CLI 先相对 `$PWD` 变成绝对路径（`AliasResolver.absolutePathIfPathShaped`），服务端按规范化路径匹配"等于 worktree 根或位于其下"的 worktree，跨 project；嵌套时取最深的一个。
 
-所有非 UUID 解析是一次到 `hierarchy.resolveAlias` 的往返，先于真正的方法调用。结果只在单次 `codans` 调用内缓存，绝不跨调用。
+**位置参数只承载目标**：每个动词最多一个位置目标，容器用 `--project/--worktree/--tab`；文本、命令、新对象的名字不与目标争位（`pane send` 的一参/二参形式是唯一例外，`pane split` 的命令走 `--command`）。早先设想的 index 与 path glob 形式未实现。所有非 UUID 解析是一次到 `hierarchy.resolveAlias` 的往返，先于真正的方法调用。结果只在单次 `codans` 调用内缓存，绝不跨调用。
+
+### 输出契约（`--json`）
+
+每条命令的 `--json` 在 stdout 打印**一个**对象（`Renderer` 统一包装，`CodansKit/Render/Envelope.swift`）：
+
+```json
+{ "schemaVersion": "codans.cli.pane.send.v1", "data": { … } }
+{ "schemaVersion": "codans.cli.pane.focus.v1",
+  "error": { "code": "NOT_FOUND", "message": "pane not found: p9", "hint": "…", "details": { "kind": "pane", "id": "p9" } } }
+```
+
+- `schemaVersion` = `codans.cli.<命令路径>.v1`，命令路径由 `CommandPaths` 从根 `CommandConfiguration` 树推出（不含可执行名，`codans` / `codans-dev` 相同），经 task-local `Renderer.context` 传给每次渲染；`CommandRunner.run(self, globals:)` 负责设置它并把失败也渲染成信封（JSON 模式下错误走 stdout，文本模式仍是 stderr 的 `error:` / `hint:` 行）。
+- `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED` 这类退出码分不清的情形；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
+- 形状由 `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`（JSON Schema 2020-12）描述：信封 + `error` 严格，`data` 按 `schemaVersion` 绑定到各命令的定义；回归 harness 末尾用 `docs/user-tests/cli-regression/validate-json.py`（无依赖的子集校验器）校验本轮每一份 JSON 输出。单测 `RendererEnvelopeTests` 钉住信封与退出码 → 错误码表。
+- 例外：`codans help-json` 裸打印命令树；ArgumentParser 拒绝的命令行（exit 64）打印解析器自己的文本。
 
 ### Wire 协议
 
@@ -266,7 +308,8 @@
 
 ### 错误处理模型
 
-- **退出码** 跨版本稳定（`CodansKit/ExitCode.swift`）：`0` 成功 · `1` 用户错误 · `2` not-found · `3` conflict · `4` unsupported · `5` overloaded · `6` versionMismatch · `10` socket 不可达（应用未运行）· `11` 请求超时 · `12` launch 超时 · `13` socket 权限拒绝 · `14` socket 不可用（路径不是 socket / 过长 / socket(2) 失败）· `15` wrong-channel（pane 属于另一构建通道，CLI 拒绝跨越）· `20` 内部错误。
+- **退出码** 跨版本稳定（`CodansKit/ExitCode.swift`）：`0` 成功 · `1` 用户错误 · `2` not-found · `3` conflict · `4` unsupported · `5` overloaded · `6` versionMismatch · `10` socket 不可达（应用未运行）· `11` 请求超时 · `12` launch 超时 · `13` socket 权限拒绝 · `14` socket 不可用（路径不是 socket / 过长 / socket(2) 失败）· `15` wrong-channel（pane 属于另一构建通道，CLI 拒绝跨越）· `20` 内部错误。ArgumentParser 自己拒绝的命令行（未知子命令 / 选项、缺参数、枚举值非法）按其惯例退出 `64`（`EX_USAGE`）。
+- **`--timeout`** 在 `CLISession.connect` 设为 `RPCClient` 的默认期限，命令内每次调用（含别名解析）都受它约束，不需要各调用点逐一透传。
 - **socket 连接失败分类。** connect(2) 的 errno 在 `CodansKit/Transport/SocketConnectionFailure.swift` 收敛成一组 `SocketFailureKind`：`socket-missing`（ENOENT）· `app-not-running`（ECONNREFUSED，陈旧 socket 文件）· `permission-denied`（EACCES/EPERM）· `not-a-socket`（ENOTSOCK）· `path-too-long` · `server-busy`（EAGAIN，accept backlog 满）· `timed-out` · `connection-lost`（已连接后 EPIPE/ECONNRESET）· `socket-create-failed` · `unknown`。分类按**调用方该怎么办**映射退出码：起应用后重试（10）、原样重试（5 / 11）、需要人介入（13 / 14）。未映射的 errno 保持 `unknown` 而非并入相邻类别——错误的类别比诚实的"未知"对分支脚本更有害。
 - **分类的可脚本化出口。** 除退出码外，`codans doctor` 输出 `socketStatus`（上述 raw 值、`wrong-channel`，或 `ok`）与可选 `socketHint`，使脚本无须 grep stderr 即可分支。`codans launch` 对起应用无法修复的类别（权限 / 路径）立即失败，不再空转 `--wait` 秒轮询。
 - **stderr 文本模式：** 首行 `error: <message>`，后续 `  hint: <suggestion>`（若适用）；无 backtrace、无 "please file a bug" 样板（贴合 git / Ghostty 风格）。
@@ -278,17 +321,17 @@
 ```
 apps/mac/codans-cli/                  (the CLI binary)
 ├── CodansCLI.swift                   ArgumentParser root + GlobalOptions
-├── HelpJSONCommand.swift             codans help-json (defined; not yet wired)
+├── HelpJSONCommand.swift             codans help-json (hidden)
 └── Commands/
     ├── AppCommands.swift             status / launch / doctor
     ├── TreeCommand.swift             tree (+ HierarchyTree / PanePath helpers)
-    ├── ProjectCommands.swift         project add / rm
-    ├── WorktreeCommands.swift        worktree new / switch / rm
-    ├── TabCommands.swift             tab new / switch / close
-    ├── PaneCommands.swift            pane new / focus / close / label / reset / info / read
-    ├── TerminalCommands.swift        pane send / send-key / read(capture) ; broadcast
-    ├── OpenCommand.swift             open (defined; not yet wired)
-    └── CommonCommandSupport.swift    CLISession / CommandRunner / shared input plumbing
+    ├── ProjectCommands.swift         project list / add / rm / commands …
+    ├── WorktreeCommands.swift        worktree list / new / switch / rm
+    ├── TabCommands.swift             tab list / new / switch / close
+    ├── PaneCommands.swift            pane list / new / focus / close / label / reset / info / read
+    ├── TerminalCommands.swift        pane send / send-key / capture ; broadcast
+    ├── OpenCommand.swift             open
+    └── CommonCommandSupport.swift    CLISession / CommandRunner / ScopeResolver / shared input plumbing
 
 apps/mac/CodansKit/                   (CLI-side shared library)
 ├── Transport/{RPCClient, SocketDiscovery, AliasResolver, UnixSocketTransport, Transport}.swift

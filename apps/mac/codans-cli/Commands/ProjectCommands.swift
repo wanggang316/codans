@@ -13,7 +13,7 @@ struct ProjectList: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       struct Result: Codable { let projects: [Project] }
@@ -29,13 +29,61 @@ struct ProjectList: AsyncParsableCommand {
 struct ProjectCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "project",
-    abstract: "Create and remove projects.",
+    abstract: "List, create, describe, rename, and remove projects.",
     subcommands: [
+      ProjectList.self,
       ProjectAdd.self,
+      ProjectShow.self,
+      ProjectRename.self,
       ProjectRemove.self,
       ProjectScriptsCommand.self,
     ]
   )
+}
+
+struct ProjectRename: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "rename",
+    abstract: "Set a project's sidebar name.",
+    discussion: """
+      The folder name stays the canonical name; this sets the display
+      override the sidebar's rename field sets. An empty name (or the folder
+      name itself) clears the override.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Project id, name, or 'current'.")
+  var project: String
+  @Argument(help: "New display name; empty clears the override.")
+  var name: String
+
+  func run() async throws {
+    await CommandRunner.run(self, globals: globals) {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      struct Params: Codable {
+        let id: ProjectID
+        let name: String
+      }
+      let result: RenameResult = try await client.call(
+        .hierarchyRenameProject,
+        params: Params(id: ProjectID(raw: uuid), name: name)
+      )
+      try Renderer.emitObject(
+        ["id": result.id, "name": result.name ?? ""],
+        mode: globals.renderMode
+      ) { _ in "renamed project \(result.id) to \(result.name ?? "")" }
+    }
+  }
+}
+
+/// `{id, name}` as `hierarchy.rename*` answer it; `name` is the label now
+/// in effect (nil when a tab went back to its live title).
+struct RenameResult: Decodable {
+  let id: String
+  let name: String?
 }
 
 /// `codans project commands` — read/manage a Project's saved Commands
@@ -67,7 +115,7 @@ struct ProjectCommandsList: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
@@ -116,7 +164,7 @@ struct ProjectCommandsAdd: AsyncParsableCommand {
   var focus: Bool = true
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       // D17: an empty command is useless — reject before dialing the server.
       guard !command.isEmpty else {
         throw CLIError(
@@ -178,7 +226,7 @@ struct ProjectCommandsEdit: AsyncParsableCommand {
   var focus: Bool?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       // D22: validate id format client-side so a malformed id is a usage error
       // (exit 1), distinct from a well-formed-but-unknown id (exit 2).
       guard let scriptID = UUID(uuidString: id) else {
@@ -250,7 +298,7 @@ struct ProjectCommandsRemove: AsyncParsableCommand {
   var project: String = "current"
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       // D22: a malformed id is a usage error (exit 1), not a not-found (exit 2).
       guard let scriptID = UUID(uuidString: id) else {
         throw CLIError(
@@ -279,7 +327,12 @@ struct ProjectCommandsRemove: AsyncParsableCommand {
 struct ProjectAdd: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "add",
-    abstract: "Add an existing directory as a project."
+    abstract: "Add an existing directory as a project.",
+    discussion: """
+      The directory must exist and not be registered already. Its git root is
+      detected, so a repository gets its worktrees listed like one added from
+      the sidebar; a plain folder becomes a folder project.
+      """
   )
 
   @OptionGroup var globals: GlobalOptions
@@ -289,7 +342,7 @@ struct ProjectAdd: AsyncParsableCommand {
   var name: String?
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let resolvedPath = PathResolver.absolute(path)
       let displayName = name ?? URL(fileURLWithPath: resolvedPath).lastPathComponent
       let client = CLISession.connect(globals: globals)
@@ -299,16 +352,26 @@ struct ProjectAdd: AsyncParsableCommand {
         let rootPath: String
         let gitRoot: String?
       }
-      struct Result: Codable { let id: ProjectID }
+      struct Result: Codable {
+        let id: ProjectID
+        let rootPath: String?
+        let gitRoot: String?
+      }
       let result: Result = try await client.call(
         .hierarchyAddProject,
         params: Params(name: displayName, rootPath: resolvedPath, gitRoot: nil)
       )
       try Renderer.emitObject(
-        ["id": result.id.description, "name": displayName, "path": resolvedPath],
+        [
+          "id": result.id.description,
+          "name": displayName,
+          "path": result.rootPath ?? resolvedPath,
+          "gitRoot": result.gitRoot.map { JSONValue.string($0) } ?? JSONValue.null,
+        ],
         mode: globals.renderMode
       ) { obj in
-        "added project \(obj["id"] ?? "?")  \(displayName)"
+        let kind = (obj["gitRoot"] as? JSONValue) == .null ? "folder project" : "project"
+        return "added \(kind) \(obj["id"] ?? "?")  \(displayName)"
       }
     }
   }
@@ -325,7 +388,7 @@ struct ProjectRemove: AsyncParsableCommand {
   var project: String
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)

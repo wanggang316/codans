@@ -143,7 +143,9 @@ struct HierarchyHandlersHandleTests {
   func resolveAliasKeepsHandleNamespacePerKind() async throws {
     let fixture = Self.makeFixture()
 
-    // A tab-shaped handle under a non-tab kind must not resolve.
+    // A tab-shaped handle under a non-tab kind must not resolve as a
+    // handle; it falls through to the name lookup, which finds no
+    // project called "t1".
     let outcome = await fixture.handlers.resolveAlias(
       try JSONValue.encoded(IPC.AliasResolveRequest(kind: .project, value: "t1"))
     )
@@ -151,7 +153,7 @@ struct HierarchyHandlersHandleTests {
       Issue.record("expected failure, got \(outcome)")
       return
     }
-    #expect(error.code == "unsupported")
+    #expect(error == .notFound(kind: "project", id: "t1"))
   }
 
   @Test

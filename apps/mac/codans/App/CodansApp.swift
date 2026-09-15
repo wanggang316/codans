@@ -890,7 +890,8 @@ final class AppState {
 
     startIPC(
       hierarchy: manager, editor: editor, hierarchyClient: hierarchy,
-      settingsStore: settings, terminalEngine: engine, handoffHandlers: handoffHandlers
+      settingsStore: settings, terminalEngine: engine, handoffHandlers: handoffHandlers,
+      gitWorktreeClient: worktreeClient
     )
 
     self.developerPaneDependencies = DeveloperPaneDependencies.live(
@@ -1059,38 +1060,22 @@ final class AppState {
   /// forwards `.open()` through this closure.
   @ObservationIgnored var openSettingsWindowAction: (@MainActor () -> Void)?
 
-  /// Wires the SocketServer so `codans` CLI can talk to the running app.
-  /// Skipped under XCTest — tests build their own in-memory harnesses and
-  /// binding a shared Unix socket racing parallel runs makes the runner
-  /// hang.
-  private func startIPC(
+  /// The `hierarchy.*` / `pane.*` handler with every app-side seam it
+  /// needs: settings, the zmx daemon controls, caller attribution, and the
+  /// git seams the CLI's `project add` / `worktree new` share with the
+  /// sidebar. Split out of `startIPC` so each wiring reads on its own.
+  private func makeHierarchyHandlers(
     hierarchy: HierarchyManager,
-    editor: EditorClient,
+    handleRegistry: TargetHandleRegistry,
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
     terminalEngine: TerminalEngine,
-    handoffHandlers: HandoffHandlers
-  ) {
-    if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
-      || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-    {
-      return
-    }
-
-    let systemHandlers = SystemHandlers(
-      versions: .init(
-        server: Self.bundleVersion(),
-        appBundle: Self.bundleVersion()
-      )
-    )
-    // SessionCoordinator backs the `pane.close` reap step. We reuse the
-    // shared instance built in `bringUp` so the IPC handlers and the
-    // quit-time `SessionLifecycle` flush write through one in-memory
-    // truth; nil falls back to the handler's "no persistent catalog to
-    // reap" path (second-instance no-resume mode).
-    let sessionCoordinator = self.sessionCoordinator
-    let hierarchyHandlers = HierarchyHandlers(
+    sessionCoordinator: SessionCoordinator?,
+    gitWorktreeClient: GitWorktreeClient
+  ) -> HierarchyHandlers {
+    HierarchyHandlers(
       manager: hierarchy,
+      handleRegistry: handleRegistry,
       envProvider: { projectID in
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
@@ -1128,7 +1113,78 @@ final class AppState {
           paneByShellPID[shellPID] = surface.paneID
         }
         return CallerPaneResolver.resolve(callerPID: callerPID, paneByShellPID: paneByShellPID)
+      },
+      gitRootDiscovery: { path in
+        try? await GitWorktreeCLI().discoverGitRoot(candidatePath: path)
+      },
+      reconcileWorktrees: { projectID in
+        // Same follow-up the sidebar's Add Project triggers: populate the
+        // worktree list from `git worktree list` and settle the load state.
+        await hierarchyClient.reconcileDiscoveredWorktrees(projectID)
+      },
+      worktreeCreator: { spec in
+        // Drive the sheet's streaming pipeline to completion; progress lines
+        // have no reader on the RPC path, only the final location matters.
+        for try await event in gitWorktreeClient.createWorktreeStream(spec) {
+          if case .finished(let path) = event { return path }
+        }
+        throw GitWorktreeError.commandFailed(
+          command: "wt sw", stderr: "stream ended without finishing")
+      },
+      defaultBaseRef: { repoRoot in
+        (try? await gitWorktreeClient.defaultRemoteBranchRef(repoRoot)) ?? nil
+      },
+      worktreeRemover: { worktreeID, projectID in
+        try await hierarchyClient.removeWorktreeWithGit(worktreeID, projectID)
+      },
+      worktreePruner: { repoRoot in
+        try await gitWorktreeClient.pruneWorktrees(repoRoot)
       }
+    )
+  }
+
+  /// Wires the SocketServer so `codans` CLI can talk to the running app.
+  /// Skipped under XCTest — tests build their own in-memory harnesses and
+  /// binding a shared Unix socket racing parallel runs makes the runner
+  /// hang.
+  private func startIPC(
+    hierarchy: HierarchyManager,
+    editor: EditorClient,
+    hierarchyClient: HierarchyClient,
+    settingsStore: SettingsStore,
+    terminalEngine: TerminalEngine,
+    handoffHandlers: HandoffHandlers,
+    gitWorktreeClient: GitWorktreeClient
+  ) {
+    if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
+      || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    {
+      return
+    }
+
+    let systemHandlers = SystemHandlers(
+      versions: .init(
+        server: Self.bundleVersion(),
+        appBundle: Self.bundleVersion()
+      )
+    )
+    // SessionCoordinator backs the `pane.close` reap step. We reuse the
+    // shared instance built in `bringUp` so the IPC handlers and the
+    // quit-time `SessionLifecycle` flush write through one in-memory
+    // truth; nil falls back to the handler's "no persistent catalog to
+    // reap" path (second-instance no-resume mode).
+    let sessionCoordinator = self.sessionCoordinator
+    // One handle registry for every handler that prints or resolves
+    // `t<n>` / `p<n>`, so `agent status` and `tree` agree.
+    let targetHandles = TargetHandleRegistry()
+    let hierarchyHandlers = makeHierarchyHandlers(
+      hierarchy: hierarchy,
+      handleRegistry: targetHandles,
+      hierarchyClient: hierarchyClient,
+      settingsStore: settingsStore,
+      terminalEngine: terminalEngine,
+      sessionCoordinator: sessionCoordinator,
+      gitWorktreeClient: gitWorktreeClient
     )
     let inputSink: TerminalInputSink? =
       terminalEngine.ghosttyRuntime == nil
@@ -1144,7 +1200,8 @@ final class AppState {
       )
     let terminalHandlers = TerminalHandlers(
       sink: inputSink,
-      catalog: { hierarchy.catalog }
+      catalog: { hierarchy.catalog },
+      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false }
     )
     let editorHandlers = EditorHandlers(
       editor: editor,
@@ -1164,7 +1221,16 @@ final class AppState {
       agentHandlers: AgentHandlers(
         settings: settingsStore,
         hierarchy: hierarchyClient,
-        installation: agentInstallation
+        installation: agentInstallation,
+        stateStore: { [weak self] in self?.agentStateStore },
+        handleRegistry: targetHandles,
+        focusedPane: { [weak hierarchy] in
+          guard let hierarchy else { return nil }
+          return Self.currentlyFocusedPane(
+            catalog: hierarchy.catalog,
+            lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
+          )
+        }
       ),
       handoffHandlers: handoffHandlers
     )
@@ -1271,8 +1337,13 @@ final class AppState {
       }
     }
     surface.sendInput(prompt)
-    let marker = String(prompt.prefix(19))
-    for _ in 0..<12 {
+    // Match the tail of the prompt, not its head: the active region is only
+    // the live rows, and in a short pane the start of a long prompt has
+    // already scrolled into history by the time the echo finishes. The
+    // cursor sits after the last character, so the tail is always on screen
+    // (an input box that truncates shows the end, too).
+    let marker = String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).suffix(19))
+    for _ in 0..<20 {
       try? await Task.sleep(for: .milliseconds(250))
       guard let screen = surface.readText(.active) else { continue }
       if screen.contains(marker) || screen.contains("Pasted") {
@@ -1282,7 +1353,8 @@ final class AppState {
       }
     }
     logger.error(
-      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted")
+      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted"
+    )
     return false
   }
 

@@ -41,27 +41,26 @@ public enum AliasResolver {
       return uuid
     }
 
-    // 2. `current` / `.` pronoun via env vars.
-    if value == "current" || value == "." {
-      if let envValue = env[envKey(for: kind)], let uuid = UUID(uuidString: envValue) {
-        return uuid
-      }
-      // Panes have a server-side fallback: the app attributes the calling
-      // process to its pane from the connection's kernel peer PID plus an
-      // ancestor walk, so a subshell or wrapper that dropped
-      // `CODANS_PANE_ID` still resolves. Other kinds have no equivalent
-      // ground truth — keep failing fast.
-      guard kind == .pane else {
-        throw Error.noContext(kind: kind)
-      }
+    // 2. `current` / `.` pronoun via env vars. A pane only exports its own
+    // id, so for every other kind this is a hand-exported override; the
+    // server derives project / worktree / tab from the calling pane
+    // (kernel peer PID plus an ancestor walk, or `contextPaneID`) when the
+    // variable is absent, which also covers a subshell or wrapper that
+    // dropped `CODANS_PANE_ID`.
+    if value == "current" || value == ".",
+      let envValue = env[envKey(for: kind)], let uuid = UUID(uuidString: envValue)
+    {
+      return uuid
     }
 
-    // 3. Everything else → server resolver.
+    // 3. Everything else → server resolver. A worktree path is made
+    // absolute here (the server has no idea what the CLI's cwd is); only
+    // path-shaped values qualify, since branch names contain slashes too.
     let rpc = try client()
     let contextPaneID: PaneID? = env[Self.envKey(for: .pane)].flatMap(UUID.init(uuidString:)).map(PaneID.init(raw:))
     let request = IPC.AliasResolveRequest(
       kind: kind,
-      value: value,
+      value: kind == .worktree ? Self.absolutePathIfPathShaped(value) : value,
       contextPaneID: contextPaneID
     )
     do {
@@ -73,6 +72,25 @@ public enum AliasResolver {
     } catch let rpcError as RPCClient.RPCError {
       throw Error.rpc(rpcError)
     }
+  }
+
+  /// `/abs`, `~/x`, `./x`, `../x`, and `..` are paths; anything else
+  /// (including `bugfix/menu`) is a name. Paths come back absolute and
+  /// standardized so the server can compare them to worktree roots.
+  static func absolutePathIfPathShaped(
+    _ value: String, cwd: String = FileManager.default.currentDirectoryPath
+  ) -> String {
+    let isPath =
+      value.hasPrefix("/") || value.hasPrefix("~/") || value == "~" || value.hasPrefix("./")
+      || value.hasPrefix("../") || value == ".."
+    guard isPath else { return value }
+    let expanded = (value as NSString).expandingTildeInPath
+    let url =
+      expanded.hasPrefix("/")
+      ? URL(fileURLWithPath: expanded)
+      : URL(fileURLWithPath: cwd).appendingPathComponent(expanded)
+    let path = url.standardizedFileURL.path(percentEncoded: false)
+    return path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
   }
 
   /// Only `.pane` is ever injected by the app; the others resolve a

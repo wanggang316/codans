@@ -1,7 +1,7 @@
-import Foundation
-import Testing
 import CodansCore
 import CodansIPC
+import Foundation
+import Testing
 
 @testable import CodansKit
 
@@ -51,18 +51,37 @@ struct AliasResolverTests {
   }
 
   @Test
-  func missingContextThrows() async throws {
-    do {
-      _ = try await AliasResolver.resolve(
-        "current",
-        kind: .worktree,
-        env: [:],
-        client: Self.failingClient()
+  func currentNonPaneWithoutEnvRoutesToServer() async throws {
+    // No CODANS_WORKTREE_ID in the env: the worktree pronoun must fall
+    // through to the server, which derives it from the calling pane.
+    let targetID = UUID()
+    let transport = InMemoryTransport()
+    transport.script = { frames in
+      let hello = try JSONDecoder().decode(IPC.Request.self, from: frames[0])
+      let real = try JSONDecoder().decode(IPC.Request.self, from: frames[1])
+      #expect(real.method == .hierarchyResolveAlias)
+      let request = try real.params.decoded(as: IPC.AliasResolveRequest.self)
+      #expect(request.kind == .worktree)
+      #expect(request.value == "current")
+      let body = try JSONEncoder().encode(
+        IPC.AliasResolveResult(kind: .worktree, id: targetID)
       )
-      Issue.record("expected .noContext")
-    } catch AliasResolver.Error.noContext(let kind) {
-      #expect(kind == .worktree)
+      let resultJSON = try JSONDecoder().decode(JSONValue.self, from: body)
+      return [
+        .success(id: hello.id, result: .object([:])),
+        .success(id: real.id, result: resultJSON),
+      ]
     }
+    let client = RPCClient(transport: transport, versions: .init(clientVersion: "0.3.0"))
+    defer { Task { await client.shutdown() } }
+
+    let resolved = try await AliasResolver.resolve(
+      "current",
+      kind: .worktree,
+      env: [:],
+      client: client
+    )
+    #expect(resolved == targetID)
   }
 
   @Test
@@ -134,5 +153,24 @@ struct AliasResolverTests {
   /// resolver actually dials.
   private static func failingClient() throws -> RPCClient {
     throw ResolverShouldNotDialClient()
+  }
+}
+
+struct AliasResolverPathShapeTests {
+  @Test
+  func pathShapedWorktreeValuesBecomeAbsolute() {
+    #expect(AliasResolver.absolutePathIfPathShaped("/a/b", cwd: "/cwd") == "/a/b")
+    #expect(AliasResolver.absolutePathIfPathShaped("./x", cwd: "/cwd") == "/cwd/x")
+    #expect(AliasResolver.absolutePathIfPathShaped("../x", cwd: "/cwd/sub") == "/cwd/x")
+    #expect(AliasResolver.absolutePathIfPathShaped("..", cwd: "/cwd/sub") == "/cwd")
+    #expect(AliasResolver.absolutePathIfPathShaped("~/x", cwd: "/cwd").hasSuffix("/x"))
+    #expect(!AliasResolver.absolutePathIfPathShaped("~/x", cwd: "/cwd").hasPrefix("~"))
+  }
+
+  @Test
+  func namesAndBranchesAreLeftAlone() {
+    for value in ["main", "bugfix/menu", "feature/a/b", "current", ".", "MainWT"] {
+      #expect(AliasResolver.absolutePathIfPathShaped(value, cwd: "/cwd") == value)
+    }
   }
 }

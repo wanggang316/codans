@@ -285,6 +285,20 @@ struct TerminalHandlersTests {
     }
   }
 
+  // MARK: - Raw hex decoding
+
+  @Test
+  func decodeHexAcceptsPerTokenPrefixesAndWhitespace() {
+    #expect(TerminalHandlers.decodeHex("1b5b41") == [0x1b, 0x5b, 0x41])
+    #expect(TerminalHandlers.decodeHex("0x1b 5b 0X41") == [0x1b, 0x5b, 0x41])
+    #expect(TerminalHandlers.decodeHex("0x15 0x0d") == [0x15, 0x0d])
+    #expect(TerminalHandlers.decodeHex(" 0d\n0a ") == [0x0d, 0x0a])
+    #expect(TerminalHandlers.decodeHex("") == nil)
+    #expect(TerminalHandlers.decodeHex("0x") == nil)
+    #expect(TerminalHandlers.decodeHex("abc") == nil)
+    #expect(TerminalHandlers.decodeHex("zz") == nil)
+  }
+
   // MARK: - Harness
 
   static func makeHarness(

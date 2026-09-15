@@ -54,20 +54,22 @@ _codans() {
             'launch:Start Codans and wait for its command socket.'
             'doctor:Check local CLI configuration and app reachability.'
             'tree:List projects, worktrees, tabs, and panes.'
-            'project:Create and remove projects.'
-            'worktree:Create, switch, and remove worktrees.'
-            'tab:Create, switch, and close tabs.'
-            'pane:Create, focus, close, label, read, reset, and send panes.'
+            'project:List, create, describe, rename, and remove projects.'
+            'worktree:List, create, describe, switch, rename, prune, and remove worktrees.'
+            'tab:List, create, describe, switch, rename, and close tabs.'
+            'pane:List, create, split, resize, focus, close, label, read, reset, and send panes.'
             'broadcast:Send text to a tab, worktree, or label scope.'
             'agent:List and launch coding-agent profiles.'
             'handoff:Hand a task off between coding agents: archive, brief, and launch the receiver.'
+            'open:Open a directory in an external editor (or terminal / git client / Finder).'
+            'skill:Install the bundled agent skills into your agents'\'' skill folders.'
             'help:Show subcommand help information.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|help)
+        status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|open|skill|help)
             "_codans_${words[1]}" && ret=0
             ;;
         esac
@@ -95,6 +97,8 @@ _codans_launch() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         '--wait[Seconds to wait for the socket after launching.]:wait:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
@@ -145,7 +149,10 @@ _codans_project() {
     case "${state}" in
     command)
         local -ar subcommands=(
+            'list:List projects.'
             'add:Add an existing directory as a project.'
+            'show:Describe a project: paths, git root, selection, worktree counts.'
+            'rename:Set a project'\''s sidebar name.'
             'rm:Remove a project from Codans.'
             'commands:Inspect and manage a project'\''s saved commands.'
         )
@@ -153,12 +160,26 @@ _codans_project() {
         ;;
     arg)
         case "${words[1]}" in
-        add|rm|commands)
+        list|add|show|rename|rm|commands)
             "_codans_project_${words[1]}" && ret=0
             ;;
         esac
         ;;
     esac
+
+    return "${ret}"
+}
+
+_codans_project_list() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
 
     return "${ret}"
 }
@@ -171,6 +192,37 @@ _codans_project_add() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':path:'
         '--name[Display name. Defaults to the directory name.]:name:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_project_show() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':project:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_project_rename() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':project:'
+        ':name:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -323,20 +375,39 @@ _codans_worktree() {
     case "${state}" in
     command)
         local -ar subcommands=(
-            'new:Create a worktree entry.'
+            'list:List worktrees for a project.'
+            'new:Create a git worktree for a branch and add it to the project.'
+            'show:Describe a worktree: path, branch, project, selection, tab count.'
             'switch:Activate a worktree.'
+            'rename:Set a worktree'\''s sidebar name (path and branch stay).'
+            'prune:Run `git worktree prune` for a project and drop the stale rows.'
             'rm:Remove a worktree entry.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        new|switch|rm)
+        list|new|show|switch|rename|prune|rm)
             "_codans_worktree_${words[1]}" && ret=0
             ;;
         esac
         ;;
     esac
+
+    return "${ret}"
+}
+
+_codans_worktree_list() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--project[Project id, name, or '\''current'\''.]:project:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
 
     return "${ret}"
 }
@@ -348,10 +419,26 @@ _codans_worktree_new() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':branch:'
+        '--base[Committish a new branch starts from (e.g. origin/main).]:base:'
         '--project[Project id, name, or '\''current'\''.]:project:'
         '--path[Path for the worktree. Defaults to the project'\''s configured worktrees directory.]:path:'
         '--name[Display name. Defaults to the branch name.]:name:'
         '--reuse-existing[If a worktree with the same canonical path already exists, return its id instead of failing with a conflict. Name collisions still fail.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_worktree_show() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':worktree:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -375,6 +462,38 @@ _codans_worktree_switch() {
     return "${ret}"
 }
 
+_codans_worktree_rename() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':worktree:'
+        ':name:'
+        '--project[Project id, name, or '\''current'\''. Usually inferred from the worktree.]:project:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_worktree_prune() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--project[Project id, name, or '\''current'\''.]:project:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
 _codans_worktree_rm() {
     local -i ret=1
     local -ar arg_specs=(
@@ -385,6 +504,7 @@ _codans_worktree_rm() {
         '--project[Project id, name, or '\''current'\''.]:project:'
         '--by-path[Remove every worktree row in the project whose canonical path equals this path. Mutually exclusive with the positional worktree argument.]:by-path:'
         '--all[With --by-path, allow removing more than one matching row. Without --all, --by-path requires exactly one match.]'
+        '--delete[Also remove the git worktree from disk (and its branch, per Settings), like the sidebar'\''s Remove Worktree. Without it only the entry is forgotten, and a real git worktree comes back on the next reconcile.]'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -405,20 +525,39 @@ _codans_tab() {
     case "${state}" in
     command)
         local -ar subcommands=(
+            'list:List tabs for a worktree.'
             'new:Create a tab.'
+            'show:Describe a tab: title, handle, containers, focused pane, pane ids.'
             'switch:Activate a tab.'
+            'rename:Set a tab'\''s title, or clear it to follow the shell again.'
             'close:Close a tab.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        new|switch|close)
+        list|new|show|switch|rename|close)
             "_codans_tab_${words[1]}" && ret=0
             ;;
         esac
         ;;
     esac
+
+    return "${ret}"
+}
+
+_codans_tab_list() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--project[Project id, name, or '\''current'\''.]:project:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
 
     return "${ret}"
 }
@@ -431,7 +570,22 @@ _codans_tab_new() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':name:'
         '--project[Project id, name, or '\''current'\''.]:project:'
-        '--worktree[Worktree id or '\''current'\''.]:worktree:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_show() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':tab:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -455,6 +609,24 @@ _codans_tab_switch() {
     return "${ret}"
 }
 
+_codans_tab_rename() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':tab:'
+        ':name:'
+        '--project[Project id, name, or '\''current'\''. Usually inferred from the tab.]:project:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''. Usually inferred from the tab.]:worktree:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
 _codans_tab_close() {
     local -i ret=1
     local -ar arg_specs=(
@@ -463,7 +635,7 @@ _codans_tab_close() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':tab:'
         '--project[Project id, name, or '\''current'\''.]:project:'
-        '--worktree[Worktree id or '\''current'\''.]:worktree:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -484,8 +656,12 @@ _codans_pane() {
     case "${state}" in
     command)
         local -ar subcommands=(
+            'list:List panes for a tab.'
             'new:Create a pane, optionally with an initial command.'
+            'split:Split a pane and start a shell (or a command) in the new half.'
+            'show:Describe a pane from the catalog: containers, cwd, labels, agent, focus.'
             'focus:Focus a pane.'
+            'resize:Move the divider next to a pane.'
             'close:Close a pane and kill its zmx daemon.'
             'label:Add labels to a pane.'
             'reset:Reset a pane'\''s terminal state.'
@@ -499,12 +675,29 @@ _codans_pane() {
         ;;
     arg)
         case "${words[1]}" in
-        new|focus|close|label|reset|send|send-key|read|info|capture)
+        list|new|split|show|focus|resize|close|label|reset|send|send-key|read|info|capture)
             "_codans_pane_${words[1]}" && ret=0
             ;;
         esac
         ;;
     esac
+
+    return "${ret}"
+}
+
+_codans_pane_list() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--project[Project id, name, or '\''current'\''.]:project:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
+        '--tab[Tab id, t<n> handle, title, or '\''current'\''.]:tab:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
 
     return "${ret}"
 }
@@ -517,10 +710,45 @@ _codans_pane_new() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         '*:command:'
         '--project[Project id, name, or '\''current'\''.]:project:'
-        '--worktree[Worktree id or '\''current'\''.]:worktree:'
-        '--tab[Tab id, t<n> handle, or '\''current'\''.]:tab:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
+        '--tab[Tab id, t<n> handle, title, or '\''current'\''.]:tab:'
         '--cwd[Working directory. Defaults to $PWD.]:cwd:'
         '--label[Initial labels.]:label:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_pane_split() {
+    local -i ret=1
+    local -ar ___direction=('right' 'left' 'up' 'down')
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':pane:'
+        '--command[Initial command for the new pane. Omit for the default shell.]:command:'
+        '--direction[Side of the anchor the new pane takes\: right (default), left, up, down.]:direction:{__codans_complete "${___direction[@]}"}'
+        '--cwd[Working directory. Defaults to the anchor pane'\''s directory.]:cwd:'
+        '--label[Initial labels.]:label:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_pane_show() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':pane:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -537,8 +765,26 @@ _codans_pane_focus() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':pane:'
         '--project[Project id, name, or '\''current'\''. Usually inferred from the pane id.]:project:'
-        '--worktree[Worktree id or '\''current'\''. Usually inferred from the pane id.]:worktree:'
-        '--tab[Tab id, t<n> handle, or '\''current'\''. Usually inferred from the pane id.]:tab:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''. Usually inferred from the pane id.]:worktree:'
+        '--tab[Tab id, t<n> handle, title, or '\''current'\''. Usually inferred from the pane id.]:tab:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_pane_resize() {
+    local -i ret=1
+    local -ar _direction=('right' 'left' 'up' 'down')
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':pane:'
+        ':direction:{__codans_complete "${_direction[@]}"}'
+        '--amount[Pixels to move the divider (default 40).]:amount:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -555,8 +801,8 @@ _codans_pane_close() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':pane:'
         '--project[Project id, name, or '\''current'\''. Usually inferred from the pane id.]:project:'
-        '--worktree[Worktree id or '\''current'\''. Usually inferred from the pane id.]:worktree:'
-        '--tab[Tab id, t<n> handle, or '\''current'\''. Usually inferred from the pane id.]:tab:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''. Usually inferred from the pane id.]:worktree:'
+        '--tab[Tab id, t<n> handle, title, or '\''current'\''. Usually inferred from the pane id.]:tab:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -609,6 +855,10 @@ _codans_pane_send() {
         '--no-enter[Do not send trailing Enter after text.]'
         '--raw[Send raw bytes as a hex string (e.g. 1b5b41 for ESC \[ A).]:raw:'
         '--focus[Focus the target pane after sending.]'
+        '--wait[Wait until the command the text started has finished.]'
+        '--capture[Wait, and return the output the command produced (implies --wait).]'
+        '--wait-timeout[Seconds to wait for completion with --wait / --capture (1 through 600, default 30).]:wait-timeout:'
+        '--stable-ms[With --wait\: the screen must hold still this long, in ms (default 500).]:stable-ms:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -695,8 +945,8 @@ _codans_broadcast() {
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        '--tab[Tab id, t<n> handle, or '\''current'\''.]:tab:'
-        '--worktree[Worktree id or '\''current'\''.]:worktree:'
+        '--tab[Tab id, t<n> handle, title, or '\''current'\''.]:tab:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
         '--label[Pane label.]:label:'
         '*:text:'
         '--stdin[Read text from stdin.]'
@@ -722,13 +972,15 @@ _codans_agent() {
     command)
         local -ar subcommands=(
             'list:List agent profiles with their agent, enabled state, and launch command.'
+            'status:List every pane running an agent with its runtime state.'
+            'wait:Block until a pane'\''s agent reaches a state.'
             'launch:Start an agent profile in a worktree.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        list|launch)
+        list|status|wait|launch)
             "_codans_agent_${words[1]}" && ret=0
             ;;
         esac
@@ -752,6 +1004,38 @@ _codans_agent_list() {
     return "${ret}"
 }
 
+_codans_agent_status() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_agent_wait() {
+    local -i ret=1
+    local -ar ___until=('idle' 'working' 'blocked' 'finished' 'changed' 'exit')
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':pane:'
+        '--until[Condition\: idle, working, blocked, finished, changed, or exit.]:until:{__codans_complete "${___until[@]}"}'
+        '--wait-timeout[Seconds to wait before giving up (1 through 600, default 60).]:wait-timeout:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
 _codans_agent_launch() {
     local -i ret=1
     local -ar ___split=('right' 'left' 'up' 'down')
@@ -762,7 +1046,7 @@ _codans_agent_launch() {
         ':profile:'
         '--agent[Agent token (claude, codex, gemini, …) when no profile is named.]:agent:'
         '--project[Project id, name, or '\''current'\''.]:project:'
-        '--worktree[Worktree id or '\''current'\''.]:worktree:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
         '--prompt[Kickoff prompt; pass '\''-'\'' to read it from stdin.]:prompt:'
         '--tab[Open in a new tab (overrides the profile'\''s placement).]'
         '--split[Split the focused pane\: right, left, up, or down.]:split:{__codans_complete "${___split[@]}"}'
@@ -806,6 +1090,7 @@ _codans_handoff() {
 
 _codans_handoff_to() {
     local -i ret=1
+    local -ar ___split=('right' 'left' 'up' 'down')
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
@@ -817,6 +1102,8 @@ _codans_handoff_to() {
         '--no-brief[Context-only\: skip the briefing entirely.]'
         '--note[Note appended to the handoff log.]:note:'
         '--no-launch[Archive and save only; do not start the receiver.]'
+        '--tab[Open the receiver in a new tab (the default).]'
+        '--split[Split the source pane for the receiver\: right, left, up, or down.]:split:{__codans_complete "${___split[@]}"}'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -835,6 +1122,128 @@ _codans_handoff_save() {
         '--brief[Inline briefing; pass '\''-'\'' to read it from stdin (heredoc).]:brief:'
         '--no-brief[Context-only\: skip the briefing entirely.]'
         '--note[Note appended to the handoff log.]:note:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_open() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--in[Editor id (e.g. cursor, zed, vscode, xcode, finder, ghostty). Omit to use per-Project / Settings defaults.]:in:'
+        ':path:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_skill() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+        '(-): :->command'
+        '(-)*:: :->arg'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+    case "${state}" in
+    command)
+        local -ar subcommands=(
+            'list:List the bundled skills with their install status per target.'
+            'install:Link bundled skills into agent skill folders.'
+            'uninstall:Remove bundled skill links from agent skill folders.'
+            'path:Print the bundled directory of a skill.'
+        )
+        _describe -V subcommand subcommands && ret=0
+        ;;
+    arg)
+        case "${words[1]}" in
+        list|install|uninstall|path)
+            "_codans_skill_${words[1]}" && ret=0
+            ;;
+        esac
+        ;;
+    esac
+
+    return "${ret}"
+}
+
+_codans_skill_list() {
+    local -i ret=1
+    local -ar ___target=('claude' 'codex' 'agents')
+    local -ar ___scope=('user' 'project')
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--target[Target (repeatable)\: claude, codex, or agents. Defaults to every detected target.]:target:{__codans_complete "${___target[@]}"}'
+        '--scope[Scope\: user (default) or project.]:scope:{__codans_complete "${___scope[@]}"}'
+        '--project-root[Repository root for --scope project. Defaults to the git root of $PWD.]:project-root:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_skill_install() {
+    local -i ret=1
+    local -ar ___target=('claude' 'codex' 'agents')
+    local -ar ___scope=('user' 'project')
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '*:skills:'
+        '--target[Target (repeatable)\: claude, codex, or agents. Defaults to every detected target.]:target:{__codans_complete "${___target[@]}"}'
+        '--scope[Scope\: user (default) or project.]:scope:{__codans_complete "${___scope[@]}"}'
+        '--project-root[Repository root for --scope project. Defaults to the git root of $PWD.]:project-root:'
+        '--force[Replace a directory or foreign link that occupies the skill'\''s name.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_skill_uninstall() {
+    local -i ret=1
+    local -ar ___target=('claude' 'codex' 'agents')
+    local -ar ___scope=('user' 'project')
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '*:skills:'
+        '--target[Target (repeatable)\: claude, codex, or agents. Defaults to every detected target.]:target:{__codans_complete "${___target[@]}"}'
+        '--scope[Scope\: user (default) or project.]:scope:{__codans_complete "${___scope[@]}"}'
+        '--project-root[Repository root for --scope project. Defaults to the git root of $PWD.]:project-root:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_skill_path() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':skill:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )

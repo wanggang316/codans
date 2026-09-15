@@ -1,9 +1,9 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// Developer detail pane. Two stacked sections:
 /// 1. `codans` CLI status + install/uninstall via `CLIInstallStatusCard`.
-/// 2. Diagnostics via `DiagnosticsSection`.
+/// 2. Bundled agent skills, linked per agent via `SkillInstallSection`.
 ///
 /// Dependencies arrive through `@Environment` so the T1-frozen detail switch
 /// in `SettingsWindowView` does not need to be touched.
@@ -16,8 +16,10 @@ struct DeveloperSettingsView: View {
       Section("CLI") {
         CLIInstallStatusCard(installer: deps.installer, settingsStore: settingsStore)
       }
-      Section("Diagnostics") {
-        DiagnosticsSection()
+      if let skillInstaller = deps.skillInstaller {
+        Section("Agent skills") {
+          SkillInstallSection(model: SkillInstallModel(installer: skillInstaller))
+        }
       }
     }
     .formStyle(.grouped)

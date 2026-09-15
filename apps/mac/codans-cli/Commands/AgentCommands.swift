@@ -21,10 +21,137 @@ struct AgentCommand: AsyncParsableCommand {
       """,
     subcommands: [
       AgentList.self,
+      AgentStatus.self,
+      AgentWait.self,
       AgentLaunch.self,
     ]
   )
 }
+
+struct AgentStatus: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "status",
+    abstract: "List every pane running an agent with its runtime state.",
+    discussion: """
+      What the sidebar's Agents View shows: for each pane the app recognises
+      as running an agent, the agent, its derived state (idle, working,
+      blocked, finished), when it last changed, and where the pane lives.
+      The state is derived from the pane's screen and foreground process, so
+      it can lag a moment behind the agent; `agent wait` blocks on it.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+
+  func run() async throws {
+    await CommandRunner.run(self, globals: globals) {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let response: IPC.AgentStateListResponse = try await client.call(
+        .agentListStates, params: EmptyParams())
+      try Renderer.emit(AgentStatusRenderable(response: response), mode: globals.renderMode)
+    }
+  }
+}
+
+struct AgentStatusRenderable: Encodable, CustomStringConvertible {
+  let response: IPC.AgentStateListResponse
+
+  func encode(to encoder: Encoder) throws {
+    try response.encode(to: encoder)
+  }
+
+  var description: String {
+    guard !response.agents.isEmpty else { return "(no agents running)" }
+    let now = Date()
+    let formatter = ISO8601DateFormatter()
+    return response.agents.map { row in
+      let since = formatter.date(from: row.since).map { Self.age(from: $0, to: now) } ?? "-"
+      let focus = row.isFocused ? "*" : " "
+      let tab = row.tabTitle.map { "  \"\($0)\"" } ?? ""
+      return
+        "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(row.state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
+    }.joined(separator: "\n")
+  }
+
+  static func age(from: Date, to: Date) -> String {
+    let seconds = max(Int(to.timeIntervalSince(from)), 0)
+    if seconds < 60 { return "\(seconds)s" }
+    if seconds < 3600 { return "\(seconds / 60)m\(seconds % 60)s" }
+    return "\(seconds / 3600)h\(seconds % 3600 / 60)m"
+  }
+}
+
+struct AgentWait: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "wait",
+    abstract: "Block until a pane's agent reaches a state.",
+    discussion: """
+      Waits server-side, so no polling loop is needed. Conditions: idle,
+      working, blocked, finished (the states `agent status` reports),
+      changed (any transition from the state seen when the wait started,
+      including the agent appearing or leaving), and exit (no agent bound to
+      the pane any more). A wait that does not resolve before --wait-timeout
+      fails with WAIT_TIMEOUT (exit 11); the JSON error carries the last
+      observed state. --wait-timeout bounds the wait; the global --timeout
+      is the RPC client's own limit and is raised to cover it.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
+  var pane: String = "current"
+  @Option(name: .long, help: "Condition: idle, working, blocked, finished, changed, or exit.")
+  var until: IPC.AgentWaitCondition
+  @Option(name: .long, help: "Seconds to wait before giving up (1 through 600, default 60).")
+  var waitTimeout: Double = 60
+
+  func run() async throws {
+    await CommandRunner.run(self, globals: globals) {
+      guard waitTimeout >= 1, waitTimeout <= 600 else {
+        throw CLIError(code: .userError, message: "--wait-timeout must be between 1 and 600 seconds")
+      }
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let response: IPC.AgentWaitResponse = try await client.call(
+        .agentWait,
+        params: IPC.AgentWaitRequest(
+          paneID: PaneID(raw: uuid), until: until, timeoutMillis: Int(waitTimeout * 1000)),
+        // The server holds the request for the whole wait; give the client
+        // side headroom beyond it.
+        timeout: .seconds(waitTimeout + 5)
+      )
+      guard response.satisfied else {
+        throw CLIError(
+          code: .requestTimeout,
+          message: "pane \(response.paneID) did not reach \(response.until) within \(Int(waitTimeout))s"
+            + (response.state.map { " (last state: \($0))" } ?? " (no agent bound)"),
+          errorCode: .waitTimeout,
+          details: [
+            "paneID": response.paneID, "until": response.until, "state": response.state ?? "",
+            "waitedMs": String(response.waitedMs),
+          ])
+      }
+      try Renderer.emit(AgentWaitRenderable(response: response), mode: globals.renderMode)
+    }
+  }
+}
+
+struct AgentWaitRenderable: Encodable, CustomStringConvertible {
+  let response: IPC.AgentWaitResponse
+
+  func encode(to encoder: Encoder) throws {
+    try response.encode(to: encoder)
+  }
+
+  var description: String {
+    "pane \(response.paneID) reached \(response.until) after \(response.waitedMs)ms"
+      + (response.state.map { " (state: \($0))" } ?? "")
+  }
+}
+
+extension IPC.AgentWaitCondition: @retroactive ExpressibleByArgument {}
 
 struct AgentList: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -35,7 +162,7 @@ struct AgentList: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let response: IPC.AgentProfileListResponse = try await client.call(
@@ -77,7 +204,7 @@ struct AgentLaunch: AsyncParsableCommand {
   var agent: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
   @Option(name: .long, help: "Kickoff prompt; pass '-' to read it from stdin.")
   var prompt: String?
@@ -89,7 +216,7 @@ struct AgentLaunch: AsyncParsableCommand {
   var background: Bool = false
 
   func run() async throws {
-    await CommandRunner.run {
+    await CommandRunner.run(self, globals: globals) {
       if profile == nil, agent == nil {
         throw CLIError(code: .userError, message: "pass a profile name/id or --agent <agent>")
       }
@@ -99,13 +226,12 @@ struct AgentLaunch: AsyncParsableCommand {
       let resolvedPrompt = try Self.resolvePrompt(prompt)
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       let response: IPC.AgentLaunchResponse = try await client.call(
         .agentLaunch,
         params: IPC.AgentLaunchRequest(
-          projectID: ProjectID(raw: projectUUID),
-          worktreeID: WorktreeID(raw: worktreeUUID),
+          projectID: scope.projectID,
+          worktreeID: scope.worktreeID,
           profile: profile,
           agent: agent,
           prompt: resolvedPrompt,

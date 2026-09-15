@@ -1,23 +1,30 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
-/// `codans` CLI install status card. Hosts its own state because the view
-/// owns transient install/uninstall progress; persisted bookkeeping
-/// (`lastInstallAttemptAt`) flows through `SettingsStore.mutateDeveloper` on
-/// every attempt.
+/// `codans` CLI install status card, laid out like the Agent skills rows
+/// below it: one `InstallTargetRow` for the symlink with an Install /
+/// Uninstall button. No mark: the row is the command itself.
+/// Hosts its own state because the view owns transient install/uninstall
+/// progress; persisted bookkeeping (`lastInstallAttemptAt`) flows through
+/// `SettingsStore.mutateDeveloper` on every attempt.
 struct CLIInstallStatusCard: View {
   let installer: CLIInstallerClient
   let settingsStore: SettingsStore
 
-  @Environment(DeveloperPaneDependencies.self) private var deps
   @State private var status: CLIInstallerClient.InstallStatus = .unknown
   @State private var lastError: CLIInstallerClient.CLIInstallError?
-  @State private var isBusy = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
-      actionRow
+      InstallTargetRow(
+        title: commandName,
+        subtitle: installer.paths.tcSymlink.path,
+        tint: tint,
+        statusText: statusText,
+        icon: { EmptyView() },
+        actions: { actionButtons }
+      )
       if let error = lastError {
         ErrorRow(error: error)
       }
@@ -28,87 +35,60 @@ struct CLIInstallStatusCard: View {
   // MARK: - Header
 
   private var header: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text("`codans` command-line tool")
-        .font(.headline)
-      Text(statusDetail)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-  }
-
-  private var statusDetail: String {
-    switch status {
-    case .unknown:
-      return "Checking install status…"
-    case .notInstalled:
-      return
-        "Not installed. Click Install to symlink `\(commandName)` into /usr/local/bin (requires admin password)."
-    case .installed(let url, true):
-      return "Installed at \(url.path). `\(commandName)` is reachable from any shell."
-    case .installed(let url, false):
-      return
-        "\(url.path) points at another build of Codans. Click Reinstall to point `\(commandName)` at this app."
-    case .collision(let owner):
-      return
-        "Another file is at \(owner.path). Codans will not overwrite a tool it did not install."
-    case .failed:
-      return "Last attempt failed. Click Retry to try again."
-    }
+    Text("Install the `codans` command-line tool to control Codans from your terminal.")
+      .font(.caption)
+      .foregroundStyle(.secondary)
   }
 
   private var commandName: String {
     installer.paths.primaryCommandName
   }
 
-  // MARK: - Action row
+  // MARK: - Row
 
   @ViewBuilder
-  private var actionRow: some View {
-    HStack(spacing: 12) {
-      primaryButton
-      if case .installed = status {
-        Button {
-          deps.revealInFinder(installer.paths.tcSymlink)
-        } label: {
-          Label("Reveal in Finder", systemImage: "folder")
-        }
-        .buttonStyle(.bordered)
-      }
-      if isBusy {
-        ProgressView().controlSize(.small)
-      }
-      Spacer(minLength: 0)
-      StatusPill(status: status)
-    }
-  }
-
-  @ViewBuilder
-  private var primaryButton: some View {
+  private var actionButtons: some View {
     switch status {
     case .notInstalled, .unknown:
       Button("Install", action: performInstall)
         .buttonStyle(.borderedProminent)
-        .disabled(isBusy)
     case .installed(_, true):
       Button("Uninstall", action: performUninstall)
         .buttonStyle(.bordered)
-        .disabled(isBusy)
     case .installed(_, false):
-      Button("Reinstall", action: performInstall)
+      // A link to another build is simply installed again; it lands on
+      // this app's binary the same way a fresh install does.
+      Button("Install", action: performInstall)
         .buttonStyle(.borderedProminent)
-        .disabled(isBusy)
-      Button("Uninstall", action: performUninstall)
-        .buttonStyle(.bordered)
-        .disabled(isBusy)
+        .help("The link points at another build of Codans; Install points it at this app.")
     case .collision:
-      Button("Retry", action: performInstall)
-        .buttonStyle(.bordered)
-        .disabled(isBusy)
+      Button("Install", action: performInstall)
+        .buttonStyle(.borderedProminent)
+        .disabled(true)
+        .help("Another file is at this path; Codans will not overwrite a tool it did not install.")
     case .failed:
       Button("Retry", action: performInstall)
         .buttonStyle(.borderedProminent)
-        .disabled(isBusy)
+    }
+  }
+
+  private var statusText: String {
+    switch status {
+    case .unknown: return "checking"
+    case .notInstalled: return "not installed"
+    case .installed(_, true): return "installed"
+    case .installed(_, false): return "installed from another build"
+    case .collision: return "path occupied by something else"
+    case .failed: return "last attempt failed"
+    }
+  }
+
+  private var tint: Color {
+    switch status {
+    case .unknown, .notInstalled: return .secondary
+    case .installed(_, true): return .green
+    case .installed(_, false), .collision: return .orange
+    case .failed: return .red
     }
   }
 
@@ -124,8 +104,6 @@ struct CLIInstallStatusCard: View {
   }
 
   private func performInstall() {
-    isBusy = true
-    defer { isBusy = false }
     recordAttempt()
     switch installer.install() {
     case .success(let new):
@@ -138,8 +116,6 @@ struct CLIInstallStatusCard: View {
   }
 
   private func performUninstall() {
-    isBusy = true
-    defer { isBusy = false }
     recordAttempt()
     switch installer.uninstall() {
     case .success(let new):
@@ -154,49 +130,6 @@ struct CLIInstallStatusCard: View {
   private func recordAttempt() {
     settingsStore.mutateDeveloper { dev in
       dev.cli.lastInstallAttemptAt = Date()
-    }
-  }
-}
-
-// MARK: - Status pill
-
-private struct StatusPill: View {
-  let status: CLIInstallerClient.InstallStatus
-
-  var body: some View {
-    HStack(spacing: 4) {
-      Circle()
-        .fill(tint)
-        .frame(width: 8, height: 8)
-      Text(label)
-        .font(.caption)
-    }
-    .padding(.horizontal, 8)
-    .padding(.vertical, 3)
-    .background(tint.opacity(0.12), in: .capsule)
-    .foregroundStyle(.secondary)
-    .accessibilityLabel("codans status: \(label)")
-  }
-
-  private var label: String {
-    switch status {
-    case .unknown: return "Checking"
-    case .notInstalled: return "Not installed"
-    case .installed(_, true): return "Installed"
-    case .installed(_, false): return "Stale"
-    case .collision: return "Collision"
-    case .failed: return "Failed"
-    }
-  }
-
-  private var tint: Color {
-    switch status {
-    case .unknown: return .secondary
-    case .notInstalled: return .secondary
-    case .installed(_, true): return .green
-    case .installed(_, false): return .orange
-    case .collision: return .orange
-    case .failed: return .red
     }
   }
 }
