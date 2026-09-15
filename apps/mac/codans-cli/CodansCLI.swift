@@ -7,7 +7,7 @@ import Foundation
 
 @main
 struct CodansCLI: AsyncParsableCommand {
-  static let version = "0.6.2"
+  static let version = "0.6.3"
 
   /// The CLI answers to its build channel's name — `codans-dev` in Debug —
   /// so help text, error hints, and the completion scripts generated from

@@ -10,6 +10,20 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.6.3] - 2026-09-16
+
+### Added
+
 - **CLI — every list verb, `open`, and `help-json` are now real commands.**
   `codans project list`, `worktree list`, `tab list`, and `pane list` print
   one level of the hierarchy (with `--json`), `codans open [path] [--in
@@ -74,6 +88,12 @@ and the project does not yet follow semantic versioning — every release until
   moves the divider next to a pane. These wire the `hierarchy.describe*`,
   `rename*`, `pruneWorktrees`, `splitPane`, and `resizePane` methods that
   were declared but never routed.
+- **Projects can carry their own icon.** Settings ▸ Projects gains an Icon row
+  beside the color: pick an SF Symbol, or your own artwork, which is copied
+  into codans so it keeps working when the original file moves. The icon shows
+  in the sidebar, the Settings sidebar, and the reorder sheet, taking the slot
+  the disclosure arrow used to hold. Symbols and single-color vector art follow
+  the project's color; a full-color picture is drawn as it is.
 
 ### Changed
 
@@ -96,8 +116,11 @@ and the project does not yet follow semantic versioning — every release until
   the project lists real worktrees instead of a branchless placeholder.
 - **CLI — `launch` forwards `CODANS_SOCKET_PATH` and `CODANS_CONFIG_DIR`**
   to the app it starts, so the socket it waits on is the one the app binds.
-
-### Deprecated
+- **The project palette is repainted, and Pink joins it.** Eight designed
+  colors replace the system ones, which were too saturated to read at icon
+  size. Existing projects keep their color and simply render in the new hue.
+- **The sidebar no longer tints a project's name with its color.** The icon
+  carries the color now, so the name brightens on hover like every other row.
 
 ### Removed
 
@@ -136,8 +159,6 @@ and the project does not yet follow semantic versioning — every release until
 - **Skill / docs** described `pane list`, `pane read --screen`, `capture
   -p`, and a `./<branch>` default worktree path that the CLI never had;
   they now match the shipped commands.
-
-### Security
 
 ## [0.6.2] - 2026-09-13
 
