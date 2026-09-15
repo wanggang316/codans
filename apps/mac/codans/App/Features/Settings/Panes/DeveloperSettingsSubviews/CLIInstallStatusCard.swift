@@ -38,7 +38,7 @@ struct CLIInstallStatusCard: View {
     VStack(alignment: .leading, spacing: 4) {
       Text("`codans` command-line tool")
         .font(.headline)
-      Text("Drive Codans from any shell or script: projects, worktrees, tabs, panes, and agents.")
+      Text("Control Codans from the terminal.")
         .font(.caption)
         .foregroundStyle(.secondary)
     }
