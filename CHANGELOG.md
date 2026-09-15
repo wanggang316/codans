@@ -44,11 +44,15 @@ and the project does not yet follow semantic versioning — every release until
   foreground job and the screen has held still); `--capture` also returns
   the lines the command printed, so a script no longer needs a sleep and a
   second read.
-- **CLI — `codans skill list | install | uninstall | path`.** The app
-  bundles its agent skills; `skill install` links them into the skill
-  folders of every detected agent (`~/.claude/skills`, `~/.codex/skills`,
-  `~/.agents/skills`, or a repository's with `--scope project`) so agents
-  learn the CLI from the version that matches the installed app.
+- **Settings ▸ Developer ▸ Agent skills.** The app bundles its agent
+  skill; the Developer pane lists it per agent target (Claude Code
+  `~/.claude/skills`, Codex `~/.codex/skills`, any agent
+  `~/.agents/skills`) with an Install / Remove button each, so linking it
+  is the user's choice per agent. A link to another build is offered
+  "Reinstall"; a directory that is not a Codans link is left alone.
+- **CLI — `codans skill list | install | uninstall | path`.** The same
+  links from the shell, for every detected agent by default or
+  `--target`, and into a repository's folders with `--scope project`.
 - **CLI — `--json` prints one envelope for every command.** Output is
   `{schemaVersion, data}` on success and `{schemaVersion, error}` on
   failure, where `schemaVersion` is `codans.cli.<command>.v1` and

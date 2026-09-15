@@ -279,6 +279,25 @@ Durable shell decisions:
   General pane renders editor/git-viewer/worktree/GitHub/environment as
   kind-conditional *Sections* internally rather than as separate sidebar rows.
 
+## Developer pane
+
+Three sections, all fed by `DeveloperPaneDependencies` (`@Environment`) so
+the T1-frozen detail switch never changes: the `codans` CLI symlink
+(`CLIInstallerClient`, privileged), **Agent skills**, and Diagnostics.
+
+Agent skills is opt-in per agent. `SkillInstallModel` wraps the same
+`SkillInstaller` (`CodansKit/Skills`) that `codans skill` uses, over the
+bundle's `Resources/skills` (embedded from the repo's `skills/` at build
+time); it offers every bundled skill × every target (Claude Code
+`~/.claude/skills`, Codex `~/.codex/skills`, any agent `~/.agents/skills`)
+whether or not the agent's folder exists, and each row is a symlink the
+user creates or removes. A link to another build reads "Other build" with
+Reinstall; anything that is not a Codans skill link reads "In the way"
+with Reveal — the pane never replaces it (the CLI's `--force` is the only
+way, deliberately). Nothing is linked automatically, on launch or on
+update: an existing link keeps pointing at the bundle path, so an app
+update updates the skill without the app doing anything.
+
 ## Lifecycle scripts vs hook subscriptions
 
 Per-Project worktree **lifecycle scripts** (`setup` / `archive` / `delete`

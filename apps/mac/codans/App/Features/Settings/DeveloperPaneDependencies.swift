@@ -1,7 +1,8 @@
 import AppKit
+import CodansCore
+import CodansKit
 import Foundation
 import Observation
-import CodansCore
 
 /// Short-and-build pair rendered by the About pane and copied to the pasteboard
 /// by the Diagnostics section. Kept separate from `AppState.bundleVersion()` so
@@ -26,17 +27,23 @@ struct BundleVersion: Equatable, Sendable {
 @Observable
 final class DeveloperPaneDependencies {
   let installer: CLIInstallerClient
+  /// Links the bundled agent skills into agent skill folders. `nil` when
+  /// the bundle carries no `Resources/skills` (previews, stripped builds);
+  /// the pane then hides the section.
+  let skillInstaller: SkillInstaller?
   let revealInFinder: @MainActor (URL) -> Void
   let copyToPasteboard: @MainActor (String) -> Void
   let bundleVersion: @MainActor () -> BundleVersion
 
   init(
     installer: CLIInstallerClient,
+    skillInstaller: SkillInstaller? = nil,
     revealInFinder: @escaping @MainActor (URL) -> Void,
     copyToPasteboard: @escaping @MainActor (String) -> Void,
     bundleVersion: @escaping @MainActor () -> BundleVersion
   ) {
     self.installer = installer
+    self.skillInstaller = skillInstaller
     self.revealInFinder = revealInFinder
     self.copyToPasteboard = copyToPasteboard
     self.bundleVersion = bundleVersion
@@ -52,6 +59,7 @@ extension DeveloperPaneDependencies {
   ) -> DeveloperPaneDependencies {
     DeveloperPaneDependencies(
       installer: CLIInstallerClient(),
+      skillInstaller: Self.bundledSkillInstaller(),
       revealInFinder: { url in
         Self.revealInFinderEnsuringExists(url, settingsURL: settingsURL)
       },
@@ -67,6 +75,18 @@ extension DeveloperPaneDependencies {
         return BundleVersion(short: short, build: build)
       }
     )
+  }
+
+  /// The installer over this bundle's `Resources/skills`, or `nil` when the
+  /// folder is absent. Same location `codans skill` resolves from the CLI's
+  /// own path, so the pane and the CLI always link the same copy.
+  private static func bundledSkillInstaller() -> SkillInstaller? {
+    guard let resources = Bundle.main.resourceURL else { return nil }
+    let skills = resources.appendingPathComponent("skills", isDirectory: true)
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: skills.path, isDirectory: &isDirectory), isDirectory.boolValue
+    else { return nil }
+    return SkillInstaller(bundledDirectory: skills, homeDirectory: FileManager.default.homeDirectoryForCurrentUser)
   }
 
   /// Reveals `url` in Finder. If `url` is the canonical settings file and does

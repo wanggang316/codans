@@ -12,6 +12,15 @@ public struct SkillInstaller {
     case codex
     case agents
 
+    /// How the Settings pane names the target.
+    public var displayName: String {
+      switch self {
+      case .claude: return "Claude Code"
+      case .codex: return "Codex"
+      case .agents: return "Any agent"
+      }
+    }
+
     /// The agent-owned directory the skills folder lives under.
     public var homeFolder: String {
       switch self {

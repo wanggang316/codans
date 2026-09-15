@@ -503,7 +503,8 @@ editors in priority order, ending at Finder.
 The app bundles its agent skills; these commands link them into the
 folders agents read skills from, so each agent learns the CLI from the
 version that matches the installed app. Local file-system work — the app
-need not be running.
+need not be running. The same switches live in Settings ▸ Developer ▸
+Agent skills; installing is always the user's choice per agent.
 
 ```bash
 codans skill list                            # bundled skills × targets, with install status

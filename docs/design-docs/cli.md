@@ -260,7 +260,7 @@
 | `codans skill uninstall [ID…]` | `SkillInstaller.uninstall` | 只移除指向某个 bundle 的链接，其它占位一律不动 |
 | `codans skill path [ID]` | `SkillLocator` | 打印 bundled 目录 |
 
-bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` 拷入 `Resources/skills`；CLI 通过自身二进制位置（`Resources/bin/<cli>` 上溯两级）或 `CODANS_SKILLS_DIR` 找到它。默认 target 为"已检测到"的 agent（其 `~/.claude` 等目录存在）。
+bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` 拷入 `Resources/skills`；CLI 通过自身二进制位置（`Resources/bin/<cli>` 上溯两级）或 `CODANS_SKILLS_DIR` 找到它。默认 target 为"已检测到"的 agent（其 `~/.claude` 等目录存在）。Settings ▸ Developer ▸ Agent skills 是同一 `SkillInstaller` 的 GUI 入口（每个 target 一行 Install / Remove，见 [settings.md](settings.md#developer-pane)）；安装与否始终是用户的选择，app 不会自动链接。
 
 #### `codans help-json`
 
