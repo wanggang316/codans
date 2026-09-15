@@ -1,10 +1,13 @@
+import CodansCore
 import CodansKit
 import SwiftUI
 
-/// "Agent skills" section of the Developer pane: one row per bundled skill
-/// and agent target, each with its link status and an Install / Remove
-/// button. Installing is the user's call per agent; nothing is linked
-/// automatically. Mirrors `codans skill install --target <agent>`.
+/// "Agent skills" section of the Developer pane: one row per agent target
+/// with a status dot, the agent's mark, and an Install / Uninstall button.
+/// Installing is the user's call per agent; nothing is linked
+/// automatically. Mirrors `codans skill install --target <agent>`. The
+/// footer reveals the bundled skill for anyone who prefers to copy it by
+/// hand.
 struct SkillInstallSection: View {
   @State var model: SkillInstallModel
   @Environment(DeveloperPaneDependencies.self) private var deps
@@ -15,7 +18,7 @@ struct SkillInstallSection: View {
         Text("Teach your agents the `codans` CLI")
           .font(.headline)
         Text(
-          "Codans ships its agent skill inside the app. Link it into an agent's skill folder and that agent learns the CLI from the version matching this app; updating the app updates the skill."
+          "Codans ships its agent skill inside the app. Install it into an agent's skill folder and that agent learns the CLI from the version matching this app; updating the app updates the skill."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -24,8 +27,7 @@ struct SkillInstallSection: View {
         SkillTargetRow(
           row: row,
           install: { model.install(row) },
-          uninstall: { model.uninstall(row) },
-          reveal: { deps.revealInFinder(URL(fileURLWithPath: row.directory, isDirectory: true)) }
+          uninstall: { model.uninstall(row) }
         )
       }
       if model.rows.isEmpty, model.lastError == nil {
@@ -45,6 +47,15 @@ struct SkillInstallSection: View {
         .padding(8)
         .background(Color.red.opacity(0.08), in: .rect(cornerRadius: 6))
       }
+      if let bundled = model.rows.first?.skill.path {
+        Button {
+          deps.revealInFinder(URL(fileURLWithPath: bundled, isDirectory: true))
+        } label: {
+          Label("Reveal in Finder", systemImage: "folder")
+        }
+        .buttonStyle(.bordered)
+        .help("Show the bundled skill folder, for installing it by hand.")
+      }
     }
     .task { model.refresh() }
   }
@@ -54,12 +65,16 @@ private struct SkillTargetRow: View {
   let row: SkillInstallModel.Row
   let install: () -> Void
   let uninstall: () -> Void
-  let reveal: () -> Void
 
   var body: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 10) {
+      Circle()
+        .fill(tint)
+        .frame(width: 8, height: 8)
+        .accessibilityHidden(true)
+      logo
       VStack(alignment: .leading, spacing: 2) {
-        Text("\(row.skill.id) → \(row.target.displayName)")
+        Text(row.target.displayName)
           .font(.body)
         Text(row.directory)
           .font(.caption)
@@ -68,51 +83,49 @@ private struct SkillTargetRow: View {
           .truncationMode(.middle)
       }
       Spacer(minLength: 0)
-      statusLabel
       actionButton
     }
     .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(row.target.displayName): \(statusText)")
   }
 
-  private var statusLabel: some View {
-    HStack(spacing: 4) {
-      Circle()
-        .fill(tint)
-        .frame(width: 8, height: 8)
-      Text(statusText)
-        .font(.caption)
+  /// Brand mark for the agents that have one; the generic folder gets the
+  /// same sparkles glyph the Agents View uses for "an agent".
+  @ViewBuilder
+  private var logo: some View {
+    switch row.target {
+    case .claude:
+      AgentLogoView(kind: .claudeCode, size: 16, tint: .primary)
+    case .codex:
+      AgentLogoView(kind: .codex, size: 16, tint: .primary)
+    case .agents:
+      AgentLogoView(icon: .symbol("sparkles"), size: 16, tint: .primary)
     }
-    .padding(.horizontal, 8)
-    .padding(.vertical, 3)
-    .background(tint.opacity(0.12), in: .capsule)
-    .foregroundStyle(.secondary)
   }
 
   @ViewBuilder
   private var actionButton: some View {
     switch row.status {
-    case .missing:
+    case .missing, .otherVersion:
       Button("Install", action: install)
         .buttonStyle(.borderedProminent)
     case .installed:
-      Button("Remove", action: uninstall)
+      Button("Uninstall", action: uninstall)
         .buttonStyle(.bordered)
-    case .otherVersion:
-      Button("Reinstall", action: install)
-        .buttonStyle(.borderedProminent)
     case .conflict:
-      Button("Reveal", action: reveal)
-        .buttonStyle(.bordered)
-        .help("Something that is not a Codans skill link is at this path; Codans will not replace it.")
+      Button("Install", action: install)
+        .buttonStyle(.borderedProminent)
+        .disabled(true)
+        .help("Something that is not a Codans skill is already at this path; remove it first.")
     }
   }
 
   private var statusText: String {
     switch row.status {
-    case .installed: return "Installed"
-    case .missing: return "Not installed"
-    case .otherVersion: return "Other build"
-    case .conflict: return "In the way"
+    case .installed: return "installed"
+    case .missing: return "not installed"
+    case .otherVersion: return "installed from another build"
+    case .conflict: return "path occupied by something else"
     }
   }
 
