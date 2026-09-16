@@ -399,8 +399,6 @@ struct HierarchySidebarFeature {
     /// Workspace header `+`: pick a local repository and check it out into
     /// the workspace on a branch named after the workspace.
     case workspaceAddRepositoryTapped(projectID: ProjectID)
-    case workspaceAddRepositoryPicked(projectID: ProjectID, URL?)
-    case workspaceAddRepositoryFailed(String)
     /// Child-row context menu: unregister the member's checkout and drop it
     /// from the manifest (its branch goes too, like Delete Worktree).
     case workspaceMemberRemoveTapped(worktreeID: WorktreeID, inProject: ProjectID, name: String)
@@ -512,6 +510,12 @@ struct HierarchySidebarFeature {
         // The client registered and reconciled the workspace; just land on it.
         state.createWorkspaceSheet = nil
         hierarchyClient.selectProject(projectID)
+        return .none
+      case .createWorkspaceSheet(.delegate(.added(let projectID, let worktreeID))):
+        state.createWorkspaceSheet = nil
+        hierarchyClient.setProjectExpanded(projectID, true)
+        hierarchyClient.selectProject(projectID)
+        try? hierarchyClient.selectWorktree(worktreeID, projectID)
         return .none
       case .createWorkspaceSheet:
         return .none
@@ -643,14 +647,12 @@ struct HierarchySidebarFeature {
     case .newWorkspaceTapped:
       // Only local git repositories can be members: a workspace checks
       // members out with `git worktree add`, which needs a local repository
-      // root, and a workspace inside a workspace is not a thing.
-      let candidates = hierarchyClient.snapshot().projects.compactMap { project -> CreateWorkspaceFeature.Candidate? in
-        guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else {
-          return nil
-        }
-        return CreateWorkspaceFeature.Candidate(id: project.id, name: project.name, gitRoot: gitRoot)
-      }
-      state.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: candidates)
+      // root, and a workspace inside a workspace is not a thing. The
+      // selected project, when eligible, is the first row.
+      let snapshot = hierarchyClient.snapshot()
+      let candidates = Self.workspaceCandidates(in: snapshot)
+      let preselected = snapshot.selectedProjectID.flatMap { id in candidates.contains { $0.id == id } ? id : nil }
+      state.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: candidates, preselected: preselected)
       return .none
 
     case .workspaceMembershipBadgeTapped(let membership):
@@ -660,41 +662,18 @@ struct HierarchySidebarFeature {
       return .none
 
     case .workspaceAddRepositoryTapped(let projectID):
-      return .run { [picker = folderPickerClient] send in
-        let url = await picker.pick("Add Repository to Workspace")
-        await send(.workspaceAddRepositoryPicked(projectID: projectID, url))
+      // Same sheet as New Workspace, with the workspace fixed and one member
+      // enough; names already in the manifest are refused up front.
+      let snapshot = hierarchyClient.snapshot()
+      guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
+        return .none
       }
-
-    case .workspaceAddRepositoryPicked(let projectID, let url):
-      guard let url,
-        let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
-        project.isWorkspace
-      else { return .none }
-      let picked = url.path(percentEncoded: false)
-      // The branch follows the workspace name, matching what `workspace
-      // create` chose for the existing members; a clash surfaces as a toast.
-      let branch = WorkspaceLayout.folderName(forTitle: project.name)
-      return .run { [cli = gitCLI, client = workspaceClient] send in
-        // Bare-aware: a bare repository has no toplevel to discover but is a
-        // valid source for a worktree.
-        guard let probe = try? await cli.inspectRepository(at: picked) else {
-          await send(.workspaceAddRepositoryFailed("\(picked) is not a git repository."))
-          return
-        }
-        let gitRoot = probe.root
-        let member = WorkspacePlan.Member(
-          name: (gitRoot as NSString).lastPathComponent,
-          sourceGitRoot: gitRoot,
-          checkout: .newBranch(branch: branch, baseRef: nil))
-        do {
-          _ = try await client.add(projectID, member)
-        } catch {
-          await send(.workspaceAddRepositoryFailed(error.localizedDescription))
-        }
-      }
-
-    case .workspaceAddRepositoryFailed(let message):
-      state.lifecycleErrorToast = message
+      let existingNames = Set(
+        project.worktrees.filter { $0.path != project.rootPath }.map(\.name)
+          + (project.workspace?.repositories.map(\.name) ?? []))
+      state.createWorkspaceSheet = CreateWorkspaceFeature.State(
+        candidates: Self.workspaceCandidates(in: snapshot),
+        mode: .add(projectID: projectID, title: project.name, rootPath: project.rootPath, existingNames: existingNames))
       return .none
 
     case .workspaceMemberRemoveTapped(let worktreeID, let projectID, let name):
@@ -1439,6 +1418,16 @@ struct HierarchySidebarFeature {
       }
     }
     .cancellable(id: CancelID.pending(id), cancelInFlight: true)
+  }
+
+  /// Local git Projects a workspace can check out from.
+  private static func workspaceCandidates(in snapshot: Catalog) -> [CreateWorkspaceFeature.Candidate] {
+    snapshot.projects.compactMap { project -> CreateWorkspaceFeature.Candidate? in
+      guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else {
+        return nil
+      }
+      return CreateWorkspaceFeature.Candidate(id: project.id, name: project.name, gitRoot: gitRoot)
+    }
   }
 
   /// `true` when the given Worktree is the project's main checkout (its
