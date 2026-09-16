@@ -131,3 +131,34 @@ window, independently of the application process.
   displayed the preserved context and `readiness: ready`.
 - Committee `077AC63F-84BF-4604-B69D-4BCBA094E84F` is running with two separately
   launched analysts and an existing independent foreground synthesizer.
+
+### Completed acceptance cases
+
+All five bundled definitions have completed through the real GUI. Agent output
+was delivered by the actual agents through the CLI; the test driver did not
+supply synthetic deliveries.
+
+| Definition | Accepted run | Verified behavior |
+| --- | --- | --- |
+| Decision Only | `54224675-405D-4A49-94D4-7A49695F09FE` | Agent-free launch, explicit decision and reason, frozen YAML |
+| Advisor | `83C3A9BE-22CB-4F82-8788-905CF8BFE935` | Existing Agent delivery followed by GUI human decision |
+| Handoff from Briefing | `6D45A442-386E-42E3-BFED-75002DC8CC56` | Immutable packet, independent receiver, accepted receipt and digest verification |
+| Handoff | `9AC7AC68-7F4D-4057-A814-C19D0B6F149A` | Existing conversation briefing, independent receiver, five completed nodes |
+| Committee | `077AC63F-84BF-4604-B69D-4BCBA094E84F` | Two independent analyses, same-role session reuse for two reviews, final synthesis |
+
+Committee completed all seven nodes and five real deliveries. Its final GUI
+report contains Consensus, Disagreements and Recommendation, retaining the
+unresolved choice between a reminder/escalation and automatic retry. Analyst A
+used pane B423B014 for both analysis and review; analyst B used 1219EB48; the
+synthesizer used 5C2A28FE. Foreground process identities matched these bindings.
+
+Settings definition creation, YAML edit/save, pushed detail navigation and main
+window execution history are GUI-verified. Restart preserved completed runs,
+inputs, outputs, decisions and event history. Failed attempts remain visible.
+These acceptance runs use the installed Claude version; they do not establish
+compatibility with every other Agent profile or future TUI changes.
+
+Final incremental Debug build 11 succeeded with both bundled CLI and zmx
+executable. A final GUI restart restored the terminals and all five accepted
+runs; Committee still showed all seven nodes succeeded. The history sheet is
+left open on that result for inspection.
