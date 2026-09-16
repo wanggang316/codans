@@ -93,3 +93,23 @@ window, independently of the application process.
   retest grouped definition details/YAML/new-definition navigation, and inspect
   persisted history after restart once active runs have ended. Do not restart
   the app while Committee remains active merely to test the definition layout.
+
+### Follow-up GUI verification
+
+- The grouped definition Overview is GUI-verified. Created personal definition
+  `user.aad87055-db19-4176-865d-5f2a91703dd3` in Settings, edited its YAML,
+  saved it, and verified its updated description in Overview. Navigation stayed
+  within the existing Settings window.
+- Inputs & Results now uses native Form/Section layout. Its inputs, outputs and
+  participant controls were inspected through the GUI without an accessibility
+  parser failure.
+- The earlier Briefing Handoff success is not an accepted isolation result:
+  Claude Agent View dispatched through a shared background host with another
+  role's inherited pane ID. Committee was cancelled to prevent further dispatch.
+- Workflow-launched Claude profiles now copy the selected profile and disable
+  Agent View only for that launch. Saved profiles and their permission settings
+  are unchanged. Debug build 9 passed.
+- GUI run `3DD18724-0AB6-4166-B37F-0E7C6D5ADE09` opened an independent foreground
+  Claude receiver, but its initial request was not submitted. History records
+  the uncertain submission as failed without retrying. First-request readiness
+  remains under investigation; this run is not an accepted case.

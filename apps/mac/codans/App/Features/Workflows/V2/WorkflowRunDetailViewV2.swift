@@ -31,62 +31,70 @@ struct WorkflowRunDetailViewV2: View {
         Text("History").tag("History")
         Text("Frozen YAML").tag("Source")
       }.pickerStyle(.segmented)
-      ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          switch section {
-          case "Steps":
-            ForEach(run.definition.nodeIDs, id: \.self) { id in
-              if let definition = run.definition.nodes[id], let node = run.nodes[id] {
-                WorkflowNodeDetailViewV2(
-                  runID: run.id, nodeID: id, definition: definition, node: node,
-                  service: service, onOpenPane: onOpenPane)
+      if section == "Results" {
+        resultsForm
+      } else {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 16) {
+            switch section {
+            case "Steps":
+              ForEach(run.definition.nodeIDs, id: \.self) { id in
+                if let definition = run.definition.nodes[id], let node = run.nodes[id] {
+                  WorkflowNodeDetailViewV2(
+                    runID: run.id, nodeID: id, definition: definition, node: node,
+                    service: service, onOpenPane: onOpenPane)
+                }
               }
-            }
-          case "Results":
-            jsonGroup("Run Inputs", value: .object(run.inputs))
-            jsonGroup("Run Outputs", value: .object(run.outputs))
-            GroupBox("Participants") {
-              VStack(alignment: .leading, spacing: 12) {
-                ForEach(run.bindings.keys.sorted(), id: \.self) { key in
-                  if let binding = run.bindings[key] {
-                    HStack {
-                      Text(run.definition.roles[key]?.label ?? key)
-                      Text(binding.profile?.displayName ?? binding.source).foregroundStyle(.secondary)
-                      Spacer()
-                      if let pane = binding.paneID {
-                        Button("Open Agent") { onOpenPane(pane.raw.uuidString) }
-                      }
-                    }
+            case "History":
+              ForEach(run.events, id: \.id) { event in
+                VStack(alignment: .leading, spacing: 4) {
+                  HStack {
+                    Text("#\(event.sequence) · \(event.type)").font(.headline)
+                    Spacer()
+                    Text(event.date, format: .dateTime.hour().minute().second()).font(.caption)
                   }
+                  if let node = event.nodeID { Text(node).font(.caption).foregroundStyle(.secondary) }
+                  Text(event.message).textSelection(.enabled)
                 }
-              }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
-            }
-          case "History":
-            ForEach(run.events, id: \.id) { event in
-              VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                  Text("#\(event.sequence) · \(event.type)").font(.headline)
-                  Spacer()
-                  Text(event.date, format: .dateTime.hour().minute().second()).font(.caption)
-                }
-                if let node = event.nodeID { Text(node).font(.caption).foregroundStyle(.secondary) }
-                Text(event.message).textSelection(.enabled)
+                Divider()
               }
-              Divider()
+            default:
+              Button("Copy Frozen YAML") { WorkflowUIFormatV2.copy(run.source) }
+              Text("This exact definition was saved when the run started.").foregroundStyle(.secondary)
+              Text(run.source).font(.system(.body, design: .monospaced)).textSelection(.enabled)
             }
-          default:
-            Button("Copy Frozen YAML") { WorkflowUIFormatV2.copy(run.source) }
-            Text("This exact definition was saved when the run started.").foregroundStyle(.secondary)
-            Text(run.source).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-          }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }
       }
       Text(run.id.uuidString).font(.caption2).foregroundStyle(.tertiary).textSelection(.enabled)
     }.padding(20)
   }
 
-  private func jsonGroup(_ title: String, value: JSONValue) -> some View {
-    GroupBox(title) {
+  private var resultsForm: some View {
+    Form {
+      jsonSection("Run Inputs", value: .object(run.inputs))
+      jsonSection("Run Outputs", value: .object(run.outputs))
+      Section("Participants") {
+        VStack(alignment: .leading, spacing: 12) {
+          ForEach(run.bindings.keys.sorted(), id: \.self) { key in
+            if let binding = run.bindings[key] {
+              HStack {
+                Text(run.definition.roles[key]?.label ?? key)
+                Text(binding.profile?.displayName ?? binding.source).foregroundStyle(.secondary)
+                Spacer()
+                if let pane = binding.paneID {
+                  Button("Open Agent") { onOpenPane(pane.raw.uuidString) }
+                }
+              }
+            }
+          }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+      }
+    }.formStyle(.grouped)
+  }
+
+  private func jsonSection(_ title: String, value: JSONValue) -> some View {
+    Section(title) {
       Text(WorkflowUIFormatV2.json(value)).font(.system(.body, design: .monospaced)).textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading).padding(8)
     }

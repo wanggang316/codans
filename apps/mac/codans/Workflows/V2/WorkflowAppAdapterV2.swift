@@ -64,9 +64,10 @@ extension AppState {
       self?.workflowBindingIsValidV2(binding) == true
     }
     workflowServiceV2.launch = { [weak self] binding, title in
-      guard let self, let profile = binding.profile, let projectID = binding.projectID,
+      guard let self, let selectedProfile = binding.profile, let projectID = binding.projectID,
         let worktreeID = binding.worktreeID
       else { throw WorkflowAdapterErrorV2.message("The launch binding is incomplete.") }
+      let profile = WorkflowLaunchProfileV2.isolated(selectedProfile)
       let outcome = try await hierarchy.launchAgent(
         AgentLaunchSpec(
           profile: profile, projectID: projectID, worktreeID: worktreeID,
@@ -125,5 +126,16 @@ nonisolated enum WorkflowAdapterErrorV2: LocalizedError {
     switch self {
     case .message(let value): value
     }
+  }
+}
+
+nonisolated enum WorkflowLaunchProfileV2 {
+  static func isolated(_ selected: AgentProfile) -> AgentProfile {
+    guard selected.kind == .claudeCode else { return selected }
+    var effective = selected
+    // Agent View dispatches into a shared background pool whose inherited pane
+    // identity can belong to another role. Workflow roles need foreground sessions.
+    effective.envVars["CLAUDE_CODE_DISABLE_AGENT_VIEW"] = "1"
+    return effective
   }
 }
