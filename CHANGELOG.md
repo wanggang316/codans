@@ -28,12 +28,16 @@ and the project does not yet follow semantic versioning — every release until
   into the folder with `git worktree add` and registers the result. A
   member can also check out an existing remote branch; when a local branch
   of that name already exists you choose whether to keep it or reset it to
-  the remote, and nothing is reset unless you say so. `codans workspace create "Checkout Flow"
-  --project app --project api` does the same from a terminal; `codans
-  workspace add` extends an existing workspace, `codans workspace show`
-  describes one. A failure midway removes everything the call created. A
-  workspace's `+` adds a repository. Panes inside a workspace carry
-  `CODANS_WORKSPACE_ROOT`.
+  the remote, and nothing is reset unless you say so.
+  `codans workspace create "Checkout Flow" --project app --project api`
+  does the same from a terminal, with `--repo` for local (or bare)
+  repositories, `--remote` for URLs, `--track` for remote-tracking
+  branches, and `--reset-local` to opt into resetting a same-named local
+  branch; `codans workspace add` extends an existing workspace
+  (`--ref origin/feature` picks any remote branch), `codans workspace show`
+  describes one and names each member's source. A failure midway removes
+  everything the call created, including a clone it made. A workspace's `+`
+  adds a repository. Panes inside a workspace carry `CODANS_WORKSPACE_ROOT`.
 - **Workspace members stay visible in their source project.** A repository
   checked out for a workspace also appears under its own project, marked
   with the workspace's name (click to jump there). Archive, Remove, the

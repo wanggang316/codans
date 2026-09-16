@@ -157,13 +157,13 @@
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
-| `codans workspace create TITLE` | `workspace.create` | `WorkspaceHandlers.create` → `WorkspaceClient.create` | `TITLE`，`--project P`（可重复）/ `--repo PATH`（可重复），合计 ≥ 2；`[--branch B] [--base REF] [--existing] [--path ROOT] [--description D]` |
-| `codans workspace add WS` | `workspace.add` | `WorkspaceHandlers.add` → `WorkspaceClient.add` | `WS`（别名/名字/`current`），`--project P` 或 `--repo PATH` 二选一；`[--name N] [--branch B] [--base REF] [--existing] [--role R]` |
+| `codans workspace create TITLE` | `workspace.create` | `WorkspaceHandlers.create` → `WorkspaceClient.create` | `TITLE`，`--project P` / `--repo PATH`（普通或裸仓库）/ `--remote URL`（各可重复），合计 ≥ 2；`[--branch B] [--base REF] [--existing \| --track] [--reset-local] [--clone-into DIR] [--path ROOT] [--description D]` |
+| `codans workspace add WS` | `workspace.add` | `WorkspaceHandlers.add` → `WorkspaceClient.add` | `WS`（别名/名字/`current`），`--project P` / `--repo PATH` / `--remote URL` 三选一；`[--name N] [--branch B] [--base REF] [--existing \| --track \| --ref REMOTE/BRANCH] [--reset-local] [--clone-into DIR] [--role R]` |
 | `codans workspace drop WS MEMBER` | `workspace.drop` | `WorkspaceHandlers.drop` → `WorkspaceClient.drop` | `MEMBER` 为成员目录名；`[--keep-branch]`。移走 checkout（relocate-then-prune）、删分支（git 拒绝时回带 note）、改 manifest、删本行与源 Project 的镜像行 |
 | `codans workspace remove WS` | `workspace.remove` | `WorkspaceHandlers.remove` → `WorkspaceClient.remove` | 缺省只删条目；`--delete-files` 逐成员注销并删根目录（任一失败则根目录保留并回带 `failures`）；`--delete-branches` 需配合 `--delete-files` |
 | `codans workspace show [WS]` | `workspace.describe` | `WorkspaceHandlers.describe` | `WS` 缺省 `current` |
 
-成员来源：`--project` 先经 `hierarchy.resolveAlias` 解析为 id，服务端读其 `gitRoot`；`--repo` 发绝对路径，服务端 `git rev-parse --show-toplevel` 求仓库根。缺省值：成员目录名 = 仓库目录名，分支 = 标题 slug（`add` 用 workspace 名 slug），base = 仓库默认远端分支，根目录 = `~/.codans/workspaces/<slug>`（被占用则 `-2`、`-3`）。`--json` 输出经 `WorkspaceSummaryRenderable`，nil 字段编码为 `null`。见 [Workspace](workspace.md)。
+成员来源：`--project` 先经 `hierarchy.resolveAlias` 解析为 id，服务端读其 `gitRoot`；`--repo` 发绝对路径，服务端 `git rev-parse --git-common-dir` + `--is-bare-repository` 求仓库根（裸仓库、仓库子目录、linked worktree 都归一到根）；`--remote` 发 URL，服务端定 clone 目标（`--clone-into`，缺省 `~/.codans/sources/<repoName>`；该处已是同一远程的 clone 则复用，否则取空闲的 `-N` 兄弟），clone 后与本地来源一致。检出模式：缺省新建分支；`--existing` 用已有本地分支；`--track` 用远程跟踪分支 `origin/<branch>`（`add` 上可用 `--ref <remote>/<branch>` 指定任意远程 ref，分支名缺省取 ref 的分支部分）；`--reset-local` 只与 `--track` / `--ref` 搭配，把已存在的同名本地分支重置到远程 tip，缺省保留本地分支原样。缺省值：成员目录名 = 仓库目录名（裸仓库去掉 `.git`），分支 = 标题 slug（`add` 用 workspace 名 slug），base = 仓库默认远端分支，根目录 = `~/.codans/workspaces/<slug>`（被占用则 `-2`、`-3`）。`--json` 输出经 `WorkspaceSummaryRenderable`，nil 字段编码为 `null`；成员带 `sourceKind`（`local` / `bare` / `remote`）与 `remoteURL`。见 [Workspace](workspace.md)。
 
 #### `codans tab …`
 
@@ -449,6 +449,7 @@ CLIFilesystem (probe only; real impl + test fakes)
 - **D21 — `workspace create` / `add` 是 CLI 里第一组在服务端产生磁盘副作用的动词，编排放在 app 层 `WorkspaceClient`，不放 handler。** `hierarchy.createWorktree` 只登记 catalog 行；workspace 成员必须真的落盘（`git worktree add`、写 manifest），否则行指向空目录。GUI sheet 与 IPC handler 共用同一个 `WorkspaceClient`，失败或取消按记账逆序回滚；handler 只做 wire → `WorkspacePlan` 的翻译与错误映射（校验类 → `invalidParams`，已存在类 → `conflict`，git 分支已存在 → `conflict`）。见 [workspace.md](workspace.md)。
 - **D22 — 成员来源在客户端只区分「已注册 Project」与「本地路径」，仓库根一律由服务端求。** `--project` 走 D4 的别名解析拿到 id；`--repo` 发绝对路径。这样 CLI 不需要本地 git，也不会把 CLI 机器上的路径解析结果与 app 的 catalog 对不上。
 - **D23 — workspace 成员数量校验放 `CodansKit`（`CLIWorkspaceMemberSource.resolve`），在拨号前抛 `userError`。** 与 `CLIBroadcastScopeSelection` 同型：纯参数逻辑放 kit 才能被 `CodansKitTests` 覆盖，且区分于服务端的 `notFound` / `conflict`。
+- **D24 — 检出模式三选一（`--existing` / `--track` / `--ref`）与 `--reset-local` 的搭配约束同样放 kit（`CLIWorkspaceCheckoutFlags.resolve`），服务端 `WorkspaceHandlers.checkout` 再守一次。** wire 上 `useExistingBranch` / `remoteRef` / `trackRemote` 是三个独立字段而非一个枚举：第三方客户端漏传其一时缺省仍是「新建分支」，永不落到会改写本地分支的 `-B` 路径；`resetLocalBranch` 缺省 nil，只有显式 `true` 才生效。
 - **D18 — `broadcast` 在顶层命名空间，而 `send` 在 `codans pane` 下。** `broadcast` 是显式的扇出动作、置于顶层减少键入；`send`/`send-key`/`read`/`capture` 作为 pane 级操作归在 `pane` 子命令树下（与 `codans pane send` 的 discussion 示例一致）。
 
 ## Cross-Cutting

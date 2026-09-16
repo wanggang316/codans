@@ -287,7 +287,11 @@ Remove Worktree (directory removed, branch deleted per Settings).
 codans workspace create "Checkout Flow" --project app --project api   # ≥ 2 members
 codans workspace create "Checkout Flow" --project app --repo ~/dev/shared-lib \
   --branch feat/checkout --base origin/main --path ~/tmp/checkout-flow
+codans workspace create "Release" --project app --remote git@github.com:org/lib.git \
+  --branch release/1.2 --track                          # remote-tracking origin/release/1.2
 codans workspace add <workspace> --repo ~/dev/other --existing --branch main
+codans workspace add <workspace> --repo ~/mirrors/tool.git --ref origin/main   # bare source
+codans workspace add <workspace> --remote https://host/team/svc --clone-into ~/src
 codans workspace drop <workspace> <member> [--keep-branch]   # unregister one checkout
 codans workspace remove <workspace> [--delete-files [--delete-branches]]
 codans workspace show [<workspace>]                    # manifest + live rows
@@ -296,12 +300,18 @@ codans workspace show [<workspace>]                    # manifest + live rows
 `create` makes `<root>/<name>` for every member with `git worktree add`
 (new branch `--branch`, default: a slug of the title, from `--base`, default:
 the repository's default remote branch; `--existing` checks out an existing
-branch instead), writes `<root>/.codans/workspace.json`, and registers the
+local branch instead; `--track` checks out the remote-tracking
+`origin/<branch>`), writes `<root>/.codans/workspace.json`, and registers the
 folder as a workspace Project. Members come from registered projects
-(`--project`, repeatable) or any local repository (`--repo`, repeatable).
-The root defaults to `~/.codans/workspaces/<slug>` and must not sit inside a
-git repository. Both verbs really write to disk — a failure midway removes
-everything the call created. `drop` moves one member's checkout out of the
+(`--project`), any local repository including a bare one (`--repo`), or a
+remote URL (`--remote`) — all repeatable. A remote is cloned once into
+`--clone-into` (default `~/.codans/sources/<name>`; an existing clone of the
+same remote there is reused) and then behaves like a local repository. With
+`--track` or `add --ref <remote>/<branch>`, a local branch of the same name is
+checked out as is; `--reset-local` points it at the remote tip instead and is
+never implied. The root defaults to `~/.codans/workspaces/<slug>` and must
+not sit inside a git repository. Both verbs really write to disk — a failure
+midway removes everything the call created, including a clone it made. `drop` moves one member's checkout out of the
 workspace and deletes its branch (unless `--keep-branch`); `remove` alone
 only de-registers, while `--delete-files` unregisters every member and
 deletes the folder — but keeps the folder if any member could not be
