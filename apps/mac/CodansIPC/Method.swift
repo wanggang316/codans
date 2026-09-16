@@ -44,6 +44,14 @@ extension IPC {
     case handoffSave = "handoff.save"
     case handoffTo = "handoff.to"
 
+    // workflow — explicit assignments and correlated deliveries.
+    case workflowCreate = "workflow.create"
+    case workflowList = "workflow.list"
+    case workflowStatus = "workflow.status"
+    case workflowClaim = "workflow.claim"
+    case workflowDeliver = "workflow.deliver"
+    case workflowCancel = "workflow.cancel"
+
     // hierarchy — reads
     case hierarchyListProjects = "hierarchy.listProjects"
     case hierarchyListWorktrees = "hierarchy.listWorktrees"

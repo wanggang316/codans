@@ -42,7 +42,10 @@ final class HandoffHandlers {
   typealias ScreenReader = @MainActor (PaneID) -> String?
   typealias RepoStateCollector = @Sendable (URL) async -> HandoffRepoState
   typealias Launcher = @MainActor (AgentLaunchSpec) async throws -> AgentLaunchOutcome
-  typealias KickoffTyper = @MainActor (_ paneID: PaneID, _ agent: AgentKind, _ prompt: String) async -> Bool
+  typealias KickoffTyper = @MainActor (
+    _ paneID: PaneID, _ agent: AgentKind, _ prompt: String,
+    _ canDispatch: @escaping @MainActor () -> Bool
+  ) async -> Bool
 
   private let settings: SettingsStore
   private let resolveSource: SourceResolver
@@ -51,6 +54,7 @@ final class HandoffHandlers {
   private let launch: Launcher
   private let typeKickoff: KickoffTyper
   private let registry: HandoffRequestRegistry
+  private let workflowStore: AgentWorkflowStore?
   /// How this build spells its own CLI. The `--brief` guidance below is a
   /// command the agent will re-run, so it has to name the binary that
   /// answers on *this* app's socket.
@@ -61,16 +65,18 @@ final class HandoffHandlers {
   init(
     settings: SettingsStore,
     registry: HandoffRequestRegistry,
+    workflowStore: AgentWorkflowStore? = nil,
     resolveSource: @escaping SourceResolver,
     readScreen: @escaping ScreenReader = { _ in nil },
     collectRepoState: @escaping RepoStateCollector = { _ in .notGit },
     launch: @escaping Launcher,
-    typeKickoff: @escaping KickoffTyper = { _, _, _ in false },
+    typeKickoff: @escaping KickoffTyper = { _, _, _, _ in false },
     cli: String = CLIInvocation.commandName,
     now: @escaping @Sendable () -> Date = { Date() }
   ) {
     self.settings = settings
     self.registry = registry
+    self.workflowStore = workflowStore
     self.resolveSource = resolveSource
     self.readScreen = readScreen
     self.collectRepoState = collectRepoState
@@ -104,6 +110,8 @@ final class HandoffHandlers {
     try? coordinator.store.ensureLayout()
     let repo = await collectRepoState(coordinator.store.rootURL)
     let timestamp = now()
+    let workflow = try prepareWorkflow(
+      request: request, source: source, briefing: briefing, repo: repo)
     let note = request.note
     let checkpoint: HandoffCoordinator.Checkpoint
     do {
@@ -114,7 +122,12 @@ final class HandoffHandlers {
         )
       }.value
     } catch {
+      try? workflowStore?.recordEvent(
+        workflow?.id ?? UUID(), type: "export.failed", message: String(describing: error))
       throw IPCError.internal("failed to save handoff: \(error)")
+    }
+    if let workflow {
+      try workflowStore?.finishExport(workflow.id, sourcePaneID: source.paneID.description)
     }
     registry.publish(
       HandoffCompletion(
@@ -133,7 +146,8 @@ final class HandoffHandlers {
       sessionExcerptPath: checkpoint.session?.excerptPath,
       briefing: checkpoint.briefing.rawValue,
       hasBriefing: checkpoint.briefing.wroteBriefing,
-      launchedPane: nil
+      launchedPane: nil,
+      workflowRunID: workflow?.id
     )
   }
 
@@ -148,7 +162,8 @@ final class HandoffHandlers {
         message: "handoff to requires an agent; receivers: \(Self.receiverTokens)",
         path: ["receiver"])
     }
-    guard let placement = HandoffPlacement(target: request.target, direction: request.direction) else {
+    guard let placement = HandoffPlacement(target: request.target, direction: request.direction)
+    else {
       throw IPCError.invalidParams(
         message: "handoff cannot target the focused pane; use a new tab (default) or --split",
         path: ["target"])
@@ -171,6 +186,8 @@ final class HandoffHandlers {
     try? coordinator.store.ensureLayout()
     let repo = await collectRepoState(coordinator.store.rootURL)
     let timestamp = now()
+    let workflow = try prepareWorkflow(
+      request: request, source: source, briefing: briefing, repo: repo)
     let transition: HandoffCoordinator.Transition
     do {
       transition = try await Task.detached {
@@ -180,13 +197,23 @@ final class HandoffHandlers {
         )
       }.value
     } catch {
+      try? workflowStore?.recordEvent(
+        workflow?.id ?? UUID(), type: "export.failed", message: String(describing: error))
       throw IPCError.internal("failed to prepare handoff: \(error)")
     }
 
+    if let workflow {
+      try workflowStore?.finishExport(workflow.id, sourcePaneID: source.paneID.description)
+    }
     var launched: IPC.HandoffLaunchedPane?
     if request.launch {
+      if let workflow {
+        try workflowStore?.recordEvent(
+          workflow.id, type: "launch.intent", message: "Preparing receiver launch")
+      }
       launched = await launchReceiver(
-        profile: profile, source: source, transition: transition, placement: placement)
+        profile: profile, source: source, transition: transition, placement: placement,
+        workflow: workflow)
       guard launched != nil else {
         // The artifact is already written and the outgoing round archived, so
         // record the failed launch before throwing — the log has to show that
@@ -194,7 +221,21 @@ final class HandoffHandlers {
         try? await log(
           coordinator, from: source.agentKind, to: receiver, disposition: .failed,
           transition: transition, note: request.note, now: timestamp)
-        throw IPCError.internal("failed to launch \(profile.displayName)")
+        if let workflow {
+          try workflowStore?.recordEvent(
+            workflow.id, type: "launch.unknown",
+            message: "Receiver launch was not confirmed; inspect panes before retrying")
+        }
+        throw IPCError.internal(
+          "failed to launch \(profile.displayName); workflow \(workflow?.id.uuidString ?? "unavailable")"
+        )
+      }
+      if let workflow, let launched {
+        try workflowStore?.bindReceiver(workflow.id, paneID: launched.paneID.description)
+      }
+      if let launched, !profile.descriptor.supportsInitialPrompt {
+        scheduleKickoff(
+          profile: profile, launched: launched, transition: transition, workflow: workflow)
       }
     }
     try? await log(
@@ -219,8 +260,56 @@ final class HandoffHandlers {
       sessionExcerptPath: transition.session?.excerptPath,
       briefing: transition.briefing.rawValue,
       hasBriefing: transition.hasBriefing,
-      launchedPane: launched
+      launchedPane: launched,
+      workflowRunID: workflow?.id
     )
+  }
+
+  private struct WorkflowPacket {
+    let id: UUID
+    let digest: String
+  }
+
+  private func prepareWorkflow(
+    request: IPC.HandoffRequest, source: HandoffSource,
+    briefing: HandoffPreparedBriefing, repo: HandoffRepoState
+  ) throws -> WorkflowPacket? {
+    guard let workflowStore else { return nil }
+    let id = request.requestID ?? UUID()
+    let content = """
+      \(briefing.artifact ?? "No agent-authored briefing was supplied. Clarify the task before writing.")
+
+      ## Captured workspace
+      Path: \(source.worktreePath)
+      Branch: \(repo.branch ?? "unknown")
+      Source pane: \(source.paneID)
+      Changed files:
+      \(repo.changedFiles.joined(separator: "\n"))
+      """
+    let template: AgentWorkflowTemplate =
+      request.action == .to && request.launch ? .handoff : .handoffSave
+    _ = try workflowStore.create(id: id, template: template, title: "Handoff", input: content)
+    let digest = try workflowStore.installPacket(
+      id, content: content, sourcePaneID: source.paneID.description)
+    try workflowStore.recordEvent(
+      id, type: "export.intent", message: "Writing compatibility handoff files")
+    return WorkflowPacket(id: id, digest: digest)
+  }
+
+  private func receiverPrompt(_ packet: WorkflowPacket) -> String {
+    """
+    This is a tracked handoff. Read the immutable packet with:
+    \(cli) workflow status \(packet.id.uuidString) --json
+    The accepted packet step contains the authoritative material; shared current.md may have changed.
+    Claim the receive step from your own pane:
+    \(cli) workflow claim \(packet.id.uuidString) --step receive --pane current --json
+    If the receiver binding is not yet available, retry the claim after inspecting status; do not create another run.
+    Use the returned attempt ID to submit a receipt with workflow deliver, a fresh --delivery-id UUID,
+    --pane current and --content -. The JSON content must contain packetDigest "\(packet.digest)"
+    and a nonempty nextAction, plus any questions. Report unresolved constraints accurately.
+    This receipt only acknowledges the packet. Do not modify the worktree until the old writer has
+    been released and you have explicit authorization to continue. Do not repeat completed work.
+    """
   }
 
   // MARK: - Steps
@@ -231,7 +320,8 @@ final class HandoffHandlers {
     }
     guard !source.isRemote else {
       throw IPCError.unsupported(
-        reason: "handoff writes .codans/handoff/ under the worktree, which lives on a remote host for Server projects"
+        reason:
+          "handoff writes .codans/handoff/ under the worktree, which lives on a remote host for Server projects"
       )
     }
     return source
@@ -252,7 +342,8 @@ final class HandoffHandlers {
       do {
         return try HandoffPreparedBriefing(source: .inline(brief))
       } catch {
-        throw IPCError.invalidParams(message: HandoffKickoff.invalidBriefingMessage(), path: ["brief"])
+        throw IPCError.invalidParams(
+          message: HandoffKickoff.invalidBriefingMessage(), path: ["brief"])
       }
     }
     if request.contextOnly {
@@ -286,9 +377,12 @@ final class HandoffHandlers {
     profile: AgentProfile,
     source: HandoffSource,
     transition: HandoffCoordinator.Transition,
-    placement: HandoffPlacement
+    placement: HandoffPlacement,
+    workflow: WorkflowPacket?
   ) async -> IPC.HandoffLaunchedPane? {
-    let prompt = HandoffKickoff.receiverPrompt(hasBriefing: transition.hasBriefing)
+    let prompt =
+      workflow.map { receiverPrompt($0) }
+      ?? HandoffKickoff.receiverPrompt(hasBriefing: transition.hasBriefing)
     let spec = AgentLaunchSpec(
       profile: profile,
       projectID: source.projectID,
@@ -307,20 +401,6 @@ final class HandoffHandlers {
     do {
       let outcome = try await launch(spec)
       guard let tabID = outcome.tabID, let paneID = outcome.paneID else { return nil }
-      if !profile.descriptor.supportsInitialPrompt {
-        // The command line carried no prompt for this agent, so type it once
-        // the agent is up. Detached: the response must not wait on a TUI's
-        // startup, and the CLI's request timeout is far shorter than that.
-        let typeKickoff = self.typeKickoff
-        let logger = self.logger
-        let kind = profile.kind
-        Task { @MainActor in
-          if await typeKickoff(paneID, kind, prompt) { return }
-          logger.error(
-            "kickoff not delivered: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public), or its input box never showed the text"
-          )
-        }
-      }
       return IPC.HandoffLaunchedPane(
         projectID: source.projectID,
         worktreeID: source.worktreeID,
@@ -331,6 +411,32 @@ final class HandoffHandlers {
     } catch {
       logger.error("receiver launch failed: \(String(describing: error), privacy: .public)")
       return nil
+    }
+  }
+
+  private func scheduleKickoff(
+    profile: AgentProfile, launched: IPC.HandoffLaunchedPane,
+    transition: HandoffCoordinator.Transition, workflow: WorkflowPacket?
+  ) {
+    let prompt =
+      workflow.map { receiverPrompt($0) }
+      ?? HandoffKickoff.receiverPrompt(hasBriefing: transition.hasBriefing)
+    let typeKickoff = self.typeKickoff
+    let store = workflowStore
+    Task { @MainActor in
+      let canDispatch: @MainActor () -> Bool = {
+        guard let workflow else { return true }
+        return store?.canDispatch(workflow.id) == true
+      }
+      guard canDispatch() else { return }
+      let sent = await typeKickoff(launched.paneID, profile.kind, prompt, canDispatch)
+      if let workflow, canDispatch() {
+        try? store?.recordEvent(
+          workflow.id, type: sent ? "dispatch.submitted" : "dispatch.unknown",
+          message: sent
+            ? "Kickoff submitted; waiting for explicit receipt"
+            : "Kickoff was not confirmed; inspect receiver")
+      }
     }
   }
 

@@ -224,6 +224,7 @@ let project = Project(
         "codans/App/Features/MasterTerminal",
         "codans/App/Features/MasterTerminal/Resources",
         "codans/Runtime",
+        "codans/Workflows",
         "codans/Process",
         "codans/Git",
         "codans/GitHub",

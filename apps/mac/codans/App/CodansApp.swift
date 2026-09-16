@@ -171,6 +171,9 @@ struct CodansApp: App {
         settingsStore: appState.settingsStore,
         hierarchyManager: appState.hierarchyManager
       )
+      CommandMenu("Workflows") {
+        Button("Show Workflows…") { openWindow(id: "workflows") }
+      }
       CommandGroup(replacing: .appSettings) {
         // Chord routes through the registry so a user override in Settings → Shortcuts
         // rebinds the menu item without restart. Default remains the AppKit-conventional ⌘,.
@@ -179,6 +182,11 @@ struct CodansApp: App {
         }
         .appKeyboardShortcut(.openSettings, in: appState.shortcutsStore.resolved)
       }
+    }
+
+    Window("Workflows", id: "workflows") {
+      WorkflowRunsView(store: appState.workflowStore)
+        .frame(minWidth: 760, minHeight: 500)
     }
 
     Window("Settings", id: CodansApp.settingsWindowID) {
@@ -484,6 +492,7 @@ final class AppState {
   /// requests. Shared by the `handoff.*` IPC handler (claims / publishes)
   /// and the in-app Hand Off panel (registers / observes).
   let handoffRegistry = HandoffRequestRegistry()
+  let workflowStore = AgentWorkflowStore.live()
   /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.config/codans/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
@@ -1166,7 +1175,8 @@ final class AppState {
         hierarchy: hierarchyClient,
         installation: agentInstallation
       ),
-      handoffHandlers: handoffHandlers
+      handoffHandlers: handoffHandlers,
+      workflowStore: workflowStore
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
@@ -1198,6 +1208,7 @@ final class AppState {
     HandoffHandlers(
       settings: settingsStore,
       registry: handoffRegistry,
+      workflowStore: workflowStore,
       resolveSource: { [weak hierarchy, weak self] paneID in
         guard let manager = hierarchy else { return nil }
         return Self.handoffSource(
@@ -1210,10 +1221,10 @@ final class AppState {
         await Self.handoffRepoState(at: root, git: gitClient)
       },
       launch: { spec in try await hierarchyClient.launchAgent(spec) },
-      typeKickoff: { [weak self, weak engine] paneID, kind, prompt in
+      typeKickoff: { [weak self, weak engine] paneID, kind, prompt, canDispatch in
         guard let engine, let agentState = self?.agentStateStore else { return false }
         return await Self.typeKickoffOnceAgentIsUp(
-          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine)
+          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine, canDispatch: canDispatch)
       },
       cli: Self.cliInvocation()
     )
@@ -1238,12 +1249,14 @@ final class AppState {
     prompt: String,
     agentState: AgentStateStore,
     engine: TerminalEngine,
+    canDispatch: @escaping @MainActor () -> Bool = { true },
     timeout: Duration = .seconds(30),
     settle: Duration = .milliseconds(1500)
   ) async -> Bool {
     let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "handoff")
     let deadline = ContinuousClock.now + timeout
     while agentState.entries[paneID]?.kind != kind {
+      guard canDispatch(), !Task.isCancelled else { return false }
       guard ContinuousClock.now < deadline else {
         logger.error(
           "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)")
@@ -1261,6 +1274,7 @@ final class AppState {
     var stillSince = ContinuousClock.now
     let readyDeadline = ContinuousClock.now + .seconds(10)
     while ContinuousClock.now < readyDeadline {
+      guard canDispatch(), !Task.isCancelled else { return false }
       try? await Task.sleep(for: .milliseconds(250))
       let current = surface.readText(.active) ?? ""
       if current != previous {
@@ -1270,10 +1284,14 @@ final class AppState {
         break
       }
     }
+    guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
+      engine.ghosttyRuntime?.surface(for: paneID) === surface else { return false }
     surface.sendInput(prompt)
     let marker = String(prompt.prefix(19))
     for _ in 0..<12 {
       try? await Task.sleep(for: .milliseconds(250))
+      guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
+        engine.ghosttyRuntime?.surface(for: paneID) === surface else { return false }
       guard let screen = surface.readText(.active) else { continue }
       if screen.contains(marker) || screen.contains("Pasted") {
         // CR is what TUIs read as Enter; LF only breaks the line.

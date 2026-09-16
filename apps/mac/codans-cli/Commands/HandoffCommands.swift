@@ -63,7 +63,9 @@ struct HandoffBriefOptions: ParsableArguments {
 /// the handler can prove the transition is the one a panel is waiting on.
 /// Interactive use never sets it.
 enum HandoffRequestContext {
-  static func requestID(in environment: [String: String] = ProcessInfo.processInfo.environment) -> UUID? {
+  static func requestID(in environment: [String: String] = ProcessInfo.processInfo.environment)
+    -> UUID?
+  {
     environment[HandoffKickoff.requestIDEnvironmentKey].flatMap(UUID.init(uuidString:))
   }
 }
@@ -77,7 +79,8 @@ struct HandoffTo: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Receiving agent token: claude, codex, gemini, omp, cursor-agent, …")
   var agent: String
-  @Option(name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
+  @Option(
+    name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
   var pane: String = "current"
   @Option(name: .long, help: "Profile (name or id) to launch the receiver with.")
   var profile: String?
@@ -130,11 +133,13 @@ struct HandoffTo: AsyncParsableCommand {
 struct HandoffSave: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "save",
-    abstract: "Checkpoint: install a fresh briefing and refresh generated context, without launching."
+    abstract:
+      "Checkpoint: install a fresh briefing and refresh generated context, without launching."
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Option(name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
+  @Option(
+    name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
   var pane: String = "current"
   @OptionGroup var briefOptions: HandoffBriefOptions
   @Option(name: .long, help: "Note appended to the handoff log.")
@@ -180,7 +185,7 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
     case .to:
       let from = response.outgoingAgent ?? "agent"
       let to = response.receiver ?? "agent"
-      lines.append("handed off \(from) -> \(to)")
+      lines.append("handoff prepared \(from) -> \(to)")
       lines.append(
         response.hasBriefing
           ? "  briefing: \(response.artifactPath)"
@@ -193,6 +198,9 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
       } else {
         lines.append("  receiver not launched")
       }
+    }
+    if let runID = response.workflowRunID {
+      lines.append("  workflow: \(runID.uuidString) — inspect status for receiver confirmation")
     }
     if let branch = response.branch {
       lines.append("  branch: \(branch), changed files: \(response.changedFileCount)")

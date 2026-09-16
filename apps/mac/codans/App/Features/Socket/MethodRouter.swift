@@ -24,6 +24,7 @@ public final class MethodRouter {
   private let projectHandlers: ProjectHandlers?
   private let agentHandlers: AgentHandlers?
   private let handoffHandlers: HandoffHandlers?
+  private let workflowStore: AgentWorkflowStore?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -33,7 +34,8 @@ public final class MethodRouter {
     editorHandlers: EditorHandlers? = nil,
     projectHandlers: ProjectHandlers? = nil,
     agentHandlers: AgentHandlers? = nil,
-    handoffHandlers: HandoffHandlers? = nil
+    handoffHandlers: HandoffHandlers? = nil,
+    workflowStore: AgentWorkflowStore? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -42,6 +44,7 @@ public final class MethodRouter {
     self.projectHandlers = projectHandlers
     self.agentHandlers = agentHandlers
     self.handoffHandlers = handoffHandlers
+    self.workflowStore = workflowStore
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -52,7 +55,8 @@ public final class MethodRouter {
   /// transports without one); only `hierarchy.resolveAlias` consumes it,
   /// for caller-pane attribution.
   public func route(_ request: IPC.Request, peerPID: pid_t? = nil) async -> RouterOutcome {
-    logger.debug("route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
+    logger.debug(
+      "route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
     if let outcome = await routeSystem(request) { return outcome }
     if let outcome = await routeHierarchy(request, peerPID: peerPID) { return outcome }
     if let outcome = await routePane(request) { return outcome }
@@ -61,6 +65,7 @@ public final class MethodRouter {
     if let outcome = await routeProject(request) { return outcome }
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
+    if let outcome = routeWorkflow(request) { return outcome }
     return notWired(request.method)
   }
 
@@ -250,6 +255,50 @@ public final class MethodRouter {
     }
   }
 
+  private func routeWorkflow(_ request: IPC.Request) -> RouterOutcome? {
+    guard request.method.rawValue.hasPrefix("workflow."), let store = workflowStore else {
+      return nil
+    }
+    return Self.projectOutcome {
+      switch request.method {
+      case .workflowCreate:
+        let input = try request.params.decoded(as: IPC.WorkflowCreateRequest.self)
+        guard let template = AgentWorkflowTemplate(rawValue: input.template) else {
+          throw IPCError.invalidParams(message: "Unknown workflow template", path: ["template"])
+        }
+        return try JSONValue.encoded(
+          store.create(
+            id: input.commandID, template: template, title: input.title, input: input.input))
+      case .workflowList:
+        guard store.issues.isEmpty else {
+          throw IPCError.internal("Workflow storage needs attention. Open Workflows to inspect errors; known runs remain available through status.")
+        }
+        return try JSONValue.encoded(Array(store.runs.prefix(50)))
+      case .workflowStatus:
+        return try JSONValue.encoded(
+          store.status(request.params.decoded(as: IPC.WorkflowRunRequest.self).runID))
+      case .workflowClaim:
+        let input = try request.params.decoded(as: IPC.WorkflowClaimRequest.self)
+        guard UUID(uuidString: input.paneID) != nil else {
+          throw IPCError.invalidParams(message: "Expected pane UUID", path: ["paneID"])
+        }
+        return try JSONValue.encoded(
+          store.claim(input.runID, stepID: input.stepID, paneID: input.paneID))
+      case .workflowDeliver:
+        let input = try request.params.decoded(as: IPC.WorkflowDeliverRequest.self)
+        return try JSONValue.encoded(
+          store.deliver(
+            input.runID, attemptID: input.attemptID, deliveryID: input.deliveryID,
+            paneID: input.paneID, content: input.content))
+      case .workflowCancel:
+        return try JSONValue.encoded(
+          store.cancel(request.params.decoded(as: IPC.WorkflowRunRequest.self).runID))
+      default:
+        throw IPCError.unsupported(reason: "Not a workflow method")
+      }
+    }
+  }
+
   /// Shared adapter for the `project.*` methods: encode the typed response,
   /// passing a handler `IPCError` straight through, mapping a `DecodingError`
   /// to `invalidParams`, and any other throw to a programmer-error `internal`.
@@ -258,6 +307,8 @@ public final class MethodRouter {
       return encodeUnary(try body())
     } catch let error as IPCError {
       return .failed(error)
+    } catch let error as AgentWorkflowError {
+      return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as DecodingError {
       return .failed(.invalidParams(message: String(describing: error), path: nil))
     } catch {
@@ -271,6 +322,8 @@ public final class MethodRouter {
       return encodeUnary(try await body())
     } catch let error as IPCError {
       return .failed(error)
+    } catch let error as AgentWorkflowError {
+      return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as DecodingError {
       return .failed(.invalidParams(message: String(describing: error), path: nil))
     } catch {

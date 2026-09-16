@@ -102,6 +102,7 @@ extension IPC {
     /// A fresh `current.md` exists for the receiver.
     public let hasBriefing: Bool
     public let launchedPane: HandoffLaunchedPane?
+    public let workflowRunID: UUID?
 
     public init(
       action: HandoffAction,
@@ -114,7 +115,8 @@ extension IPC {
       sessionExcerptPath: String?,
       briefing: String,
       hasBriefing: Bool,
-      launchedPane: HandoffLaunchedPane?
+      launchedPane: HandoffLaunchedPane?,
+      workflowRunID: UUID? = nil
     ) {
       self.action = action
       self.artifactPath = artifactPath
@@ -127,6 +129,7 @@ extension IPC {
       self.briefing = briefing
       self.hasBriefing = hasBriefing
       self.launchedPane = launchedPane
+      self.workflowRunID = workflowRunID
     }
   }
 }

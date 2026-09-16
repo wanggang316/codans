@@ -1737,11 +1737,11 @@ struct RootFeature {
           // same focus walk an AgentState row tap performs. The transition
           // itself never focuses anything.
           guard let launched = completion.launched else {
-            return .send(.statusBar(.push(.success("Handed off to \(title)"))))
+            return .send(.statusBar(.push(.success("Handoff prepared for \(title)"))))
           }
           return .merge(
             .send(.agentState(.rowTapped(launched.paneID))),
-            .send(.statusBar(.push(.success("Handed off to \(title)"))))
+            .send(.statusBar(.push(.success("Handoff prepared for \(title)"))))
           )
         }
 

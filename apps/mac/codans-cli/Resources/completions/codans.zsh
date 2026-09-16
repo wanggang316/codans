@@ -61,13 +61,14 @@ _codans() {
             'broadcast:Send text to a tab, worktree, or label scope.'
             'agent:List and launch coding-agent profiles.'
             'handoff:Hand a task off between coding agents: archive, brief, and launch the receiver.'
+            'workflow:Create workflows and explicitly claim and deliver their assignments.'
             'help:Show subcommand help information.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|help)
+        status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|workflow|help)
             "_codans_${words[1]}" && ret=0
             ;;
         esac
@@ -806,6 +807,7 @@ _codans_handoff() {
 
 _codans_handoff_to() {
     local -i ret=1
+    local -ar ___split=('right' 'left' 'up' 'down')
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
@@ -817,6 +819,8 @@ _codans_handoff_to() {
         '--no-brief[Context-only\: skip the briefing entirely.]'
         '--note[Note appended to the handoff log.]:note:'
         '--no-launch[Archive and save only; do not start the receiver.]'
+        '--tab[Open the receiver in a new tab (the default).]'
+        '--split[Split the source pane for the receiver\: right, left, up, or down.]:split:{__codans_complete "${___split[@]}"}'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -835,6 +839,137 @@ _codans_handoff_save() {
         '--brief[Inline briefing; pass '\''-'\'' to read it from stdin (heredoc).]:brief:'
         '--no-brief[Context-only\: skip the briefing entirely.]'
         '--note[Note appended to the handoff log.]:note:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workflow() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+        '(-): :->command'
+        '(-)*:: :->arg'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+    case "${state}" in
+    command)
+        local -ar subcommands=(
+            'create:Create a workflow run.'
+            'list:List workflow runs.'
+            'status:Inspect a workflow run.'
+            'claim:Claim a ready assignment.'
+            'deliver:Deliver an assignment result.'
+            'cancel:Cancel workflow scheduling.'
+        )
+        _describe -V subcommand subcommands && ret=0
+        ;;
+    arg)
+        case "${words[1]}" in
+        create|list|status|claim|deliver|cancel)
+            "_codans_workflow_${words[1]}" && ret=0
+            ;;
+        esac
+        ;;
+    esac
+
+    return "${ret}"
+}
+
+_codans_workflow_create() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--template[Workflow template identifier.]:template:'
+        '--title[Run title.]:title:'
+        '--input[Task input; '\''-'\'' reads stdin.]:input:'
+        '--command-id[Stable command UUID for an idempotent create retry.]:command-id:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workflow_list() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workflow_status() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':run-id:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workflow_claim() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':run-id:'
+        '--step[Step identifier.]:step:'
+        '--pane[Pane UUID, handle, label, or '\''current'\''.]:pane:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workflow_deliver() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':run-id:'
+        '--attempt[Claimed attempt UUID.]:attempt:'
+        '--delivery-id[Stable delivery UUID; reuse it when retrying the same submission.]:delivery-id:'
+        '--pane[Pane UUID, handle, label, or '\''current'\''.]:pane:'
+        '--content[Result content; '\''-'\'' reads stdin.]:content:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workflow_cancel() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':run-id:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
