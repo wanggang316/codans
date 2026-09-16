@@ -143,10 +143,16 @@ struct WorkspaceCreate: AsyncParsableCommand {
     abstract: "Create a workspace from two or more repositories.",
     discussion: """
       Each --project names a registered project (id, name, or 'current'); each
-      --repo names any local git repository. Every member is checked out into
-      <root>/<name> on --branch (default: a slug of the title), created from
-      --base (default: the repository's default remote branch) unless
-      --existing selects a branch that already exists.
+      --repo names any local git repository, bare ones included; each --remote
+      names a URL that is cloned once into --clone-into (default:
+      ~/.codans/sources/<name>; an existing clone of the same remote there is
+      reused) and then used like a local repository. Every member is checked
+      out into <root>/<name> on --branch (default: a slug of the title),
+      created from --base (default: the repository's default remote branch)
+      unless --existing selects a local branch that already exists or --track
+      checks out the remote-tracking origin/<branch>. With --track, a local
+      branch of the same name is checked out as is; --reset-local points it at
+      the remote tip instead, discarding local-only commits.
       """
   )
 
@@ -155,14 +161,22 @@ struct WorkspaceCreate: AsyncParsableCommand {
   var title: String
   @Option(name: .long, help: "Registered project to include (repeatable).")
   var project: [String] = []
-  @Option(name: .long, help: "Local repository path to include (repeatable).")
+  @Option(name: .long, help: "Local repository path to include, bare or not (repeatable).")
   var repo: [String] = []
+  @Option(name: .long, help: "Remote URL to clone and include (repeatable).")
+  var remote: [String] = []
   @Option(name: .long, help: "Branch every member checks out. Default: slug of the title.")
   var branch: String?
   @Option(name: .long, help: "Base ref for new branches. Default: each repository's default remote branch.")
   var base: String?
-  @Flag(name: .long, help: "Check out an existing branch instead of creating one.")
+  @Flag(name: .long, help: "Check out an existing local branch instead of creating one.")
   var existing: Bool = false
+  @Flag(name: .long, help: "Check out the remote-tracking origin/<branch> instead of creating one.")
+  var track: Bool = false
+  @Flag(name: .long, help: "With --track: reset a same-named local branch to the remote tip.")
+  var resetLocal: Bool = false
+  @Option(name: .long, help: "Folder remote members are cloned into. Default: ~/.codans/sources.")
+  var cloneInto: String?
   @Option(name: .long, help: "Workspace folder. Default: ~/.codans/workspaces/<slug>.")
   var path: String?
   @Option(name: .long, help: "Task summary stored in the manifest.")
@@ -171,12 +185,20 @@ struct WorkspaceCreate: AsyncParsableCommand {
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
       let sources = try CLIWorkspaceMemberSource.resolve(
-        projects: project, repos: repo, minimum: WorkspacePlan.minimumMembers)
+        projects: project, repos: repo, remotes: remote, minimum: WorkspacePlan.minimumMembers)
+      let flags = try CLIWorkspaceCheckoutFlags.resolve(
+        existing: existing, track: track, ref: nil, resetLocal: resetLocal)
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       var members: [IPC.WorkspaceMemberRequest] = []
       for source in sources {
-        members.append(try await WorkspaceCommandSupport.member(for: source, client: client))
+        var member = try await WorkspaceCommandSupport.member(for: source, client: client)
+        if flags.resetLocalBranch == true {
+          member = IPC.WorkspaceMemberRequest(
+            projectID: member.projectID, path: member.path, remoteURL: member.remoteURL,
+            resetLocalBranch: true)
+        }
+        members.append(member)
       }
       let request = IPC.WorkspaceCreateRequest(
         title: title,
@@ -184,7 +206,9 @@ struct WorkspaceCreate: AsyncParsableCommand {
         description: description,
         branch: branch,
         baseRef: base,
-        useExistingBranch: existing ? true : nil,
+        useExistingBranch: flags.useExistingBranch,
+        trackRemote: flags.trackRemote,
+        cloneBaseDirectory: cloneInto.map { PathResolver.absolute($0) },
         members: members
       )
       let summary: IPC.WorkspaceSummary = try await client.call(
@@ -205,33 +229,56 @@ struct WorkspaceAdd: AsyncParsableCommand {
   var workspace: String
   @Option(name: .long, help: "Registered project to add.")
   var project: [String] = []
-  @Option(name: .long, help: "Local repository path to add.")
+  @Option(name: .long, help: "Local repository path to add, bare or not.")
   var repo: [String] = []
+  @Option(name: .long, help: "Remote URL to clone and add.")
+  var remote: [String] = []
   @Option(name: .long, help: "Folder name under the workspace root. Default: the repository's folder name.")
   var name: String?
-  @Option(name: .long, help: "Branch to check out. Default: slug of the workspace title.")
+  @Option(name: .long, help: "Branch to check out. Default: slug of the workspace title, or the --ref branch.")
   var branch: String?
   @Option(name: .long, help: "Base ref for a new branch.")
   var base: String?
-  @Flag(name: .long, help: "Check out an existing branch instead of creating one.")
+  @Flag(name: .long, help: "Check out an existing local branch instead of creating one.")
   var existing: Bool = false
+  @Flag(name: .long, help: "Check out the remote-tracking origin/<branch> instead of creating one.")
+  var track: Bool = false
+  @Option(name: .long, help: "Remote-tracking ref to check out, e.g. origin/feature.")
+  var ref: String?
+  @Flag(name: .long, help: "With --track or --ref: reset a same-named local branch to the remote tip.")
+  var resetLocal: Bool = false
+  @Option(name: .long, help: "Folder a remote member is cloned into. Default: ~/.codans/sources.")
+  var cloneInto: String?
   @Option(name: .long, help: "Short role recorded in the manifest, e.g. backend.")
   var role: String?
 
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
       let source = try CLIWorkspaceMemberSource.resolve(
-        projects: project, repos: repo, minimum: 1, maximum: 1)[0]
+        projects: project, repos: repo, remotes: remote, minimum: 1, maximum: 1)[0]
+      let flags = try CLIWorkspaceCheckoutFlags.resolve(
+        existing: existing, track: track, ref: ref, resetLocal: resetLocal)
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
       var member = try await WorkspaceCommandSupport.member(for: source, client: client)
+      // `--track` on a single member is `--ref origin/<branch>`, which needs
+      // the branch name the server would otherwise default.
+      let remoteRef = flags.remoteRef ?? (flags.trackRemote == true ? branch.map { "origin/\($0)" } : nil)
+      if flags.trackRemote == true, remoteRef == nil {
+        throw CLIError(
+          code: .userError, message: "--track needs --branch",
+          hint: "pass --branch <name> or --ref <remote>/<branch>")
+      }
       member = IPC.WorkspaceMemberRequest(
-        name: name, projectID: member.projectID, path: member.path,
-        branch: branch, baseRef: base, useExistingBranch: existing ? true : nil, role: role)
+        name: name, projectID: member.projectID, path: member.path, remoteURL: member.remoteURL,
+        branch: branch, baseRef: base, useExistingBranch: flags.useExistingBranch,
+        remoteRef: remoteRef, resetLocalBranch: flags.resetLocalBranch, role: role)
       let added: IPC.WorkspaceMemberSummary = try await client.call(
         .workspaceAdd,
-        params: IPC.WorkspaceAddRequest(projectID: ProjectID(raw: workspaceUUID), member: member),
+        params: IPC.WorkspaceAddRequest(
+          projectID: ProjectID(raw: workspaceUUID), member: member,
+          cloneBaseDirectory: cloneInto.map { PathResolver.absolute($0) }),
         timeout: globals.rpcTimeout)
       try Renderer.emit(WorkspaceMemberRenderable(member: added), mode: globals.renderMode)
     }
@@ -267,7 +314,8 @@ struct WorkspaceShow: AsyncParsableCommand {
 enum WorkspaceCommandSupport {
   /// A registered project resolves to its id here (the server reads its git
   /// root); a repository path is sent absolute and the server discovers the
-  /// root.
+  /// root; a remote URL is sent as given and the server picks the clone
+  /// destination.
   static func member(
     for source: CLIWorkspaceMemberSource,
     client: RPCClient
@@ -278,6 +326,8 @@ enum WorkspaceCommandSupport {
       return IPC.WorkspaceMemberRequest(projectID: ProjectID(raw: uuid))
     case .repo(let path):
       return IPC.WorkspaceMemberRequest(path: PathResolver.absolute(path))
+    case .remote(let url):
+      return IPC.WorkspaceMemberRequest(remoteURL: url)
     }
   }
 }
@@ -332,7 +382,13 @@ struct WorkspaceMemberRenderable: Encodable, CustomStringConvertible {
     let branch = member.branch ?? "no branch"
     let role = member.role.map { "  (\($0))" } ?? ""
     let id = member.worktreeID.map { "  \($0)" } ?? ""
-    return "\(member.name)  [\(branch)]\(role)  \(member.path)\(id)"
+    let source: String
+    switch member.sourceKind {
+    case .remote: source = "  <- \(member.remoteURL ?? "remote")"
+    case .bare: source = "  <- bare \(member.sourceGitRoot ?? "")"
+    case .local, nil: source = ""
+    }
+    return "\(member.name)  [\(branch)]\(role)  \(member.path)\(id)\(source)"
   }
 }
 
@@ -340,7 +396,7 @@ struct WorkspaceMemberDTO: Encodable {
   let member: IPC.WorkspaceMemberSummary
 
   private enum Key: String, CodingKey {
-    case name, path, role, branch, sourceGitRoot, worktreeID
+    case name, path, role, branch, sourceGitRoot, sourceKind, remoteURL, worktreeID
   }
 
   func encode(to encoder: Encoder) throws {
@@ -350,6 +406,8 @@ struct WorkspaceMemberDTO: Encodable {
     try container.encode(member.role, forKey: .role)
     try container.encode(member.branch, forKey: .branch)
     try container.encode(member.sourceGitRoot, forKey: .sourceGitRoot)
+    try container.encode(member.sourceKind?.rawValue, forKey: .sourceKind)
+    try container.encode(member.remoteURL, forKey: .remoteURL)
     try container.encode(member.worktreeID?.description, forKey: .worktreeID)
   }
 }
