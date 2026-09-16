@@ -193,19 +193,26 @@ struct WorktreeDetailView: View {
         // banner reads as a "drop-down notification strip" regardless
         // of which tab / pane is foreground.
         BranchSwitcherErrorBannerView(store: branchSwitcherStore)
-        HSplitView {
-          VStack(spacing: 0) {
-            tabBarRow(address: address)
-            terminalRegion(address: address)
+        GeometryReader { geometry in
+          let terminalWidth = diffStore.isVisible ? max(220, geometry.size.width - 700) : geometry.size.width
+          HSplitView {
+            VStack(spacing: 0) {
+              tabBarRow(address: address)
+              terminalRegion(address: address)
+            }
+            .frame(
+              minWidth: diffStore.isExpanded ? 0 : min(220, terminalWidth),
+              maxWidth: diffStore.isExpanded ? 0 : terminalWidth
+            )
+            .clipped()
+            .allowsHitTesting(!diffStore.isExpanded)
+            .accessibilityHidden(diffStore.isExpanded)
+            if diffStore.isVisible {
+              DiffPanelView(store: diffStore)
+                .frame(minWidth: min(440, max(0, geometry.size.width - 220)), idealWidth: 700, maxWidth: .infinity)
+            }
           }
-          .frame(minWidth: diffStore.isExpanded ? 0 : 220, maxWidth: diffStore.isExpanded ? 0 : .infinity)
-          .clipped()
-          .allowsHitTesting(!diffStore.isExpanded)
-          .accessibilityHidden(diffStore.isExpanded)
-          if diffStore.isVisible {
-            DiffPanelView(store: diffStore)
-              .frame(minWidth: 440, idealWidth: 700, maxWidth: .infinity)
-          }
+          .frame(width: geometry.size.width, height: geometry.size.height)
         }
       }
       .onChange(of: address.activeTab) { _, _ in

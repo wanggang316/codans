@@ -2234,6 +2234,10 @@ struct RootFeature {
         }
 
       case .toggleSidebarRequested:
+        if state.diff.isExpanded {
+          state.sidebarVisible = true
+          return .send(.diff(.expand))
+        }
         state.sidebarVisible.toggle()
         return .none
 

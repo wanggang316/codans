@@ -29,6 +29,7 @@ public struct DiffView: NSViewRepresentable {
         context.coordinator.webView = webView
         if let indexURL = Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "Web") {
             context.coordinator.indexURL = indexURL
+            context.coordinator.startReadyWatchdog()
             webView.loadFileURL(indexURL, allowingReadAccessTo: indexURL.deletingLastPathComponent())
         } else {
             Task { context.coordinator.fail("Missing bundled web assets. Run npm run build before swift build.") }
@@ -43,6 +44,7 @@ public struct DiffView: NSViewRepresentable {
 
     public static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
         coordinator.disposed = true
+        coordinator.readinessTask?.cancel()
         nsView.stopLoading()
         nsView.navigationDelegate = nil
         nsView.configuration.userContentController.removeScriptMessageHandler(forName: "diffView")
@@ -60,6 +62,7 @@ public struct DiffView: NSViewRepresentable {
         var ready = false
         var disposed = false
         var revision = 0
+        var readinessTask: Task<Void, Never>?
 
         init(document: DiffDocument, options: DiffOptions, onEvent: @escaping @MainActor (DiffEvent) -> Void) {
             self.document = document
@@ -102,7 +105,18 @@ public struct DiffView: NSViewRepresentable {
 
         func fail(_ message: String) {
             guard !disposed else { return }
+            readinessTask?.cancel()
             onEvent(.init(type: "error", documentID: document.id, message: message))
+        }
+
+        func startReadyWatchdog(timeout: Duration = .seconds(10)) {
+            readinessTask?.cancel()
+            readinessTask = Task { [weak self] in
+                do { try await Task.sleep(for: timeout) }
+                catch { return }
+                guard let self, !self.disposed, !self.ready else { return }
+                self.fail("The bundled renderer did not become ready within 10 seconds.")
+            }
         }
 
         public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -115,6 +129,7 @@ public struct DiffView: NSViewRepresentable {
             if event.type == "ready" {
                 guard !ready else { return }
                 ready = true
+                readinessTask?.cancel()
                 onEvent(event)
                 render()
             } else { onEvent(event) }
@@ -129,14 +144,6 @@ public struct DiffView: NSViewRepresentable {
 
         public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             fail(error.localizedDescription)
-        }
-
-        public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(10))
-                guard let self, !self.disposed, !self.ready else { return }
-                self.fail("The bundled renderer did not become ready.")
-            }
         }
 
         public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

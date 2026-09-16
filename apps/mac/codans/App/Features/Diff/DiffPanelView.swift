@@ -19,20 +19,22 @@ struct DiffPanelView: View {
       header
       Divider()
       controls
-      if let error = store.error {
-        message(error, symbol: "exclamationmark.triangle")
-      } else if let snapshot = store.snapshot, snapshot.files.isEmpty {
-        message(
-          outgoing ? "No committed changes against this base." : "No changes in this scope.", symbol: "checkmark.circle"
-        )
-      } else if store.snapshot == nil {
-        Spacer()
-        ProgressView("Loading changes…")
-        Spacer()
-      } else {
+      ZStack {
         HSplitView {
           fileList.frame(minWidth: 150, idealWidth: 200, maxWidth: 330)
-          content.frame(minWidth: 250, maxWidth: .infinity, maxHeight: .infinity)
+          content.frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .opacity(hasFiles ? 1 : 0)
+        .allowsHitTesting(hasFiles)
+        .accessibilityHidden(!hasFiles)
+        if let error = store.error {
+          message(error, symbol: "exclamationmark.triangle")
+        } else if let snapshot = store.snapshot, snapshot.files.isEmpty {
+          message(
+            outgoing ? "No committed changes against this base." : "No changes in this scope.",
+            symbol: "checkmark.circle")
+        } else if store.snapshot == nil {
+          ProgressView("Loading changes…")
         }
       }
       if let message = store.editorMessage {
@@ -40,6 +42,7 @@ struct DiffPanelView: View {
           .frame(maxWidth: .infinity, alignment: .leading).padding(8)
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(.background)
     .accessibilityIdentifier("diff-panel")
   }
@@ -57,9 +60,10 @@ struct DiffPanelView: View {
         Text("Outgoing").tag(true)
       }
       .pickerStyle(.segmented)
+      .labelsHidden()
       .frame(maxWidth: 220)
       Spacer(minLength: 0)
-      if store.loading { ProgressView().controlSize(.small) }
+      if store.loading && store.snapshot == nil { ProgressView().controlSize(.small) }
       Button {
         store.send(.refresh)
       } label: {
@@ -103,6 +107,7 @@ struct DiffPanelView: View {
           Text("Unstaged").tag(GitComparisonScope.unstaged)
         }
         .pickerStyle(.segmented)
+        .labelsHidden()
       }
       HStack {
         Button("Open Selected File") { store.send(.openFile("new", nil)) }
@@ -145,21 +150,33 @@ struct DiffPanelView: View {
     }
   }
 
-  @ViewBuilder
+  private var hasFiles: Bool { store.error == nil && store.snapshot?.files.isEmpty == false }
+
   private var content: some View {
-    if let document = store.document {
-      DiffView(document: document, options: DiffOptions(theme: colorScheme == .dark ? "dark" : "light")) { event in
+    ZStack {
+      // Keep the Web process and user-selected presentation alive while Git
+      // snapshots reload or the selected file changes.
+      DiffView(
+        document: store.document ?? DiffDocument(id: "empty", path: "empty.txt", oldText: "", newText: ""),
+        options: DiffOptions(theme: colorScheme == .dark ? "dark" : "light")
+      ) { event in
         guard event.documentID == nil || event.documentID == store.document?.id else { return }
         if event.type == "openFile", let side = event.side { store.send(.openFile(side, event.line)) }
         if event.type == "error", let message = event.message { store.send(.rendererFailed(message)) }
       }
       .id(store.rendererGeneration)
-    } else if let notice = store.notice {
-      message(notice, symbol: "doc.text.magnifyingglass")
-    } else if store.contentLoading {
-      ProgressView("Loading file…").frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else {
-      message("Select a file to view its changes.", symbol: "doc.text")
+      .opacity(store.document == nil ? 0 : 1)
+      .allowsHitTesting(store.document != nil)
+      .accessibilityHidden(store.document == nil)
+      if store.document == nil {
+        if let notice = store.notice {
+          message(notice, symbol: "doc.text.magnifyingglass")
+        } else if store.contentLoading {
+          ProgressView("Loading file…")
+        } else {
+          message("Select a file to view its changes.", symbol: "doc.text")
+        }
+      }
     }
   }
 

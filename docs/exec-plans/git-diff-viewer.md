@@ -33,4 +33,4 @@ Integrate the independent DiffViewKit WKWebView component into Codans for read-o
 
 ## Status
 
-Implementation in progress. GUI verification pending.
+Completed: independent component exported, Codans integration built, 26 focused app tests and 6 Core tests passed, and local GUI fixture cases including narrow/wide layouts and editor line navigation passed. The verification record explicitly excludes actual SSH, live PR discovery, and forced Web-content process termination. Full-repository lint has 61 pre-existing errors; scoped new/final UI files pass. Changes are committed without pushing.

@@ -45,9 +45,13 @@ struct ContentView: View {
   /// chevron, and the bound state stay in lockstep.
   private var columnVisibilityBinding: Binding<NavigationSplitViewVisibility> {
     Binding(
-      get: { store.sidebarVisible ? .all : .detailOnly },
+      get: { store.diff.isExpanded ? .detailOnly : (store.sidebarVisible ? .all : .detailOnly) },
       set: { newValue in
         let visible = (newValue != .detailOnly)
+        if store.diff.isExpanded {
+          if visible { store.send(.toggleSidebarRequested) }
+          return
+        }
         if visible != store.sidebarVisible {
           // Wrap the store dispatch in withAnimation so the sidebar
           // slides instead of snapping. The native `.sidebarToggle`
