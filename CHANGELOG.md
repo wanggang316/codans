@@ -20,15 +20,23 @@ and the project does not yet follow semantic versioning — every release until
   `"kind": "workspace"`. The workspace root is never probed for a git
   repository, so a workspace nested inside a repo stays a workspace.
 - **Create workspaces from the app or the CLI.** **New Workspace…** in the
-  sidebar's Add menu (and the command palette) takes a title, a folder, two
-  or more repositories — open projects, any local repository including a
-  bare one, or a remote URL, which is cloned once into
-  `~/.codans/sources/<name>` (or a folder you choose) and used like a local
-  repository from then on — and one branch, then checks every member out
-  into the folder with `git worktree add` and registers the result. A
-  member can also check out an existing remote branch; when a local branch
-  of that name already exists you choose whether to keep it or reset it to
-  the remote, and nothing is reset unless you say so.
+  sidebar's Add menu (and the command palette) opens a single page built
+  around the member list. One field adds members from whatever you paste
+  or type: a URL is recognised and its branches read before anything is
+  cloned, a path is probed (bare repositories included), anything else
+  searches your open projects. Each row shows its source and checkout on
+  one line and expands to its own settings — a new branch from a chosen
+  base, an existing branch, or a remote branch, with a searchable branch
+  picker that greys out branches another worktree holds. When a remote
+  branch meets a local branch of the same name you choose to keep it or
+  reset it to the remote; nothing is reset unless you say so. A shared
+  branch and base reach the rows you have not overridden. Problems appear
+  under the field they concern as you type, a preview shows the folder
+  tree and the git commands, Create says how many checkouts it will make,
+  each row streams its progress, Cancel rolls back and reports anything it
+  could not undo, and a failure marks its row and offers Retry. Remote
+  repositories are cloned once into `~/.codans/sources/<name>` (or a
+  folder you choose) and used like local ones from then on.
   `codans workspace create "Checkout Flow" --project app --project api`
   does the same from a terminal, with `--repo` for local (or bare)
   repositories, `--remote` for URLs, `--track` for remote-tracking
