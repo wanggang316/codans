@@ -14,7 +14,10 @@ struct WorkflowRunDetailViewV2: View {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           Text(run.title).font(.title2)
-          Text("\(run.definition.name) · \(WorkflowRunPresentationV2.status(run.status))").foregroundStyle(.secondary)
+          HStack {
+            Text(run.definition.name).foregroundStyle(.secondary)
+            WorkflowStatusViewV2(status: run.status)
+          }
           Text(run.createdAt, format: .dateTime.year().month().day().hour().minute()).font(.caption)
         }
         Spacer()
@@ -53,14 +56,17 @@ struct WorkflowRunDetailViewV2: View {
                     Spacer()
                     Text(event.date, format: .dateTime.hour().minute().second()).font(.caption)
                   }
-                  if let node = event.nodeID { Text(node).font(.caption).foregroundStyle(.secondary) }
+                  if let node = event.nodeID {
+                    Text(node).font(.caption).foregroundStyle(.secondary)
+                  }
                   Text(event.message).textSelection(.enabled)
                 }
                 Divider()
               }
             default:
               Button("Copy Frozen YAML") { WorkflowUIFormatV2.copy(run.source) }
-              Text("This exact definition was saved when the run started.").foregroundStyle(.secondary)
+              Text("This exact definition was saved when the run started.").foregroundStyle(
+                .secondary)
               Text(run.source).font(.system(.body, design: .monospaced)).textSelection(.enabled)
             }
           }.frame(maxWidth: .infinity, alignment: .leading)
@@ -95,8 +101,10 @@ struct WorkflowRunDetailViewV2: View {
 
   private func jsonSection(_ title: String, value: JSONValue) -> some View {
     Section(title) {
-      Text(WorkflowUIFormatV2.json(value)).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+      Text(WorkflowUIFormatV2.json(value)).font(.system(.body, design: .monospaced)).textSelection(
+        .enabled
+      )
+      .frame(maxWidth: .infinity, alignment: .leading).padding(8)
     }
   }
 }
@@ -129,7 +137,9 @@ private struct WorkflowNodeDetailViewV2: View {
           if let pane = node.paneID {
             Button("Open Agent") { onOpenPane(pane) }.accessibilityLabel("Open Agent for \(nodeID)")
           }
-          if let error = error ?? node.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
+          if let error = error ?? node.error {
+            Text(error).foregroundStyle(.orange).textSelection(.enabled)
+          }
           if definition.uses == "codans/human.decide@v1", node.status == "waiting" {
             decisionForm
           }
@@ -148,7 +158,7 @@ private struct WorkflowNodeDetailViewV2: View {
         HStack {
           Text(definition.title ?? nodeID).font(.headline)
           Spacer()
-          Text(WorkflowRunPresentationV2.status(node.status)).font(.caption).foregroundStyle(.secondary)
+          WorkflowStatusViewV2(status: node.status)
         }
       }
     }
@@ -171,7 +181,9 @@ private struct WorkflowNodeDetailViewV2: View {
       TextField("Reason (required)", text: $reason, axis: .vertical).lineLimit(2...6)
         .accessibilityLabel("Decision Reason for \(nodeID)")
       Button("Submit Decision") {
-        do { try service.decide(id: runID, nodeID: nodeID, decision: decision, reason: reason) } catch {
+        do {
+          try service.decide(id: runID, nodeID: nodeID, decision: decision, reason: reason)
+        } catch {
           self.error = error.localizedDescription
         }
       }.disabled(decision.isEmpty || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -180,7 +192,9 @@ private struct WorkflowNodeDetailViewV2: View {
   }
 
   private func json(_ value: JSONValue) -> some View {
-    Text(WorkflowUIFormatV2.json(value)).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-      .frame(maxWidth: .infinity, alignment: .leading)
+    Text(WorkflowUIFormatV2.json(value)).font(.system(.body, design: .monospaced)).textSelection(
+      .enabled
+    )
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }

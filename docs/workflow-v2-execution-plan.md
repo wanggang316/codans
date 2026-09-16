@@ -243,3 +243,38 @@ Validation completed for legacy removal:
 - Build, lint and test logs are under `/tmp/codans-workflow-v2-build/remove-legacy-*.log`;
   app and Core test result bundles are `remove-legacy-app-tests.xcresult` and
   `remove-legacy-core-tests.xcresult` in the same directory.
+
+### Pi collapsed paste submission
+
+Reproduce Pi 0.85.1's lowercase `[paste #N +M lines]` composer. Recognize the
+new paste only inside the editor borders after an empty pre-send composer, and
+reject existing drafts or history-only markers. Add regression fixtures for
+Pi and retain OMP/Claude detection. Verify a real Pi receiver through GUI, then
+commit the fix without submitting the user's uncertain existing assignment.
+
+### Terminal-first launch and split history
+
+Starting a run closes the parameter form and keeps the terminal visible, without
+automatically opening history or current-run details. History keeps the run list
+and selected detail side by side. Run and node statuses include a spinner while
+running and colored symbols for waiting, completion, failure and interruption.
+Verify launch without an automatic panel, persistent left selection, and actual
+Pi submission/completion through the GUI.
+
+- Pi receiver case `8B13B9BA-EAF1-412A-8FB5-111F4DD5CA8E` completed all four
+  Handoff-from-Briefing nodes through GUI launch. Pi 0.85.1 on the configured
+  DeepSeek profile read the packet, claimed its allocated attempt and submitted
+  an accepted receipt without manual Return or synthetic test-driver delivery.
+- Decision case `B4D69690-719F-4AF9-9C4B-92FBF3F12029` stayed in the terminal on
+  launch; manual history opening showed the orange waiting indicator, and GUI
+  submission changed it to green Completed. The list remained visible while
+  switching between the Pi and OMP runs.
+- Build and focused lint passed. 18 tests in AgentKickoffEcho, WorkflowServiceV2,
+  WorkflowRouterV2 and WorkflowLaunchProfileV2 passed (`pi-history-tests.xcresult`
+  under `/tmp/codans-workflow-v2-build`). The user's existing Pi paste was left
+  untouched; the failed assignment was not silently resubmitted.
+- Final regression (`pi-history-final-tests.xcresult`) passed the same 18 tests,
+  including a non-first Pi paste marker. Final `pi-history-opaque-build.log`
+  reports BUILD SUCCEEDED. GUI restart confirmed both cases remain Completed;
+  the two-column popover opens to the left with an opaque system background so
+  terminal text cannot wash out state indicators or cover the detail content.

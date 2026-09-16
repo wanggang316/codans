@@ -5,8 +5,6 @@ import SwiftUI
 struct WorkflowToolbarViewV2: View {
   let appState: AppState
   @State private var startingEntry: WorkflowCatalogV2.Entry?
-  @State private var showingExecution = false
-  @State private var startedFromForm = false
   @State private var showingHistory = false
   @State private var historyPinned = false
   @State private var hoveringButton = false
@@ -28,7 +26,9 @@ struct WorkflowToolbarViewV2: View {
         if let id = appState.workflowPresentedRunID, let run = appState.workflowServiceV2.run(id) {
           Divider()
           Button("\(WorkflowRunPresentationV2.status(run.status)): \(run.title)") {
-            showingExecution = true
+            selectedHistoryID = id
+            historyPinned = true
+            showingHistory = true
           }
         }
         Divider()
@@ -38,9 +38,6 @@ struct WorkflowToolbarViewV2: View {
       }
       .accessibilityLabel("Run Workflow")
       .help("Run a workflow")
-      .popover(isPresented: $showingExecution) {
-        executionPanel
-      }
       Button {
         historyPinned.toggle()
         showingHistory = historyPinned
@@ -53,7 +50,7 @@ struct WorkflowToolbarViewV2: View {
         hoveringButton = $0
         updateHistoryHover()
       }
-      .popover(isPresented: $showingHistory) {
+      .popover(isPresented: $showingHistory, arrowEdge: .trailing) {
         historyPanel.onHover {
           hoveringHistory = $0
           updateHistoryHover()
@@ -70,16 +67,10 @@ struct WorkflowToolbarViewV2: View {
       }
     }
     .onChange(of: appState.workflowPresentedRunID) { _, id in
-      if id != nil && startingEntry == nil { showingExecution = true }
+      selectedHistoryID = id
     }
     .sheet(
       item: $startingEntry,
-      onDismiss: {
-        if startedFromForm {
-          showingExecution = true
-          startedFromForm = false
-        }
-      },
       content: { entry in
         if let definition = entry.definition {
           WorkflowRunFormViewV2(
@@ -91,7 +82,10 @@ struct WorkflowToolbarViewV2: View {
                 definition: $0, source: $1, title: $2, inputs: $3, selections: $4)
             }, onCancel: { startingEntry = nil },
             onStarted: { id in
-              startedFromForm = true
+              showingHistory = false
+              historyPinned = false
+              hoveringButton = false
+              hoveringHistory = false
               appState.workflowPresentedRunID = id
               startingEntry = nil
             })
@@ -99,79 +93,66 @@ struct WorkflowToolbarViewV2: View {
       })
   }
 
-  private var executionPanel: some View {
-    VStack(spacing: 0) {
-      HStack {
-        Text("Current Workflow").font(.headline)
-        Spacer()
-        Button("Return to Terminal") { showingExecution = false }
-      }.padding(12)
-      Divider()
-      if let id = appState.workflowPresentedRunID, let run = appState.workflowServiceV2.run(id) {
-        WorkflowRunDetailViewV2(run: run, service: appState.workflowServiceV2, onOpenPane: openPane)
-          .id(id)
-      }
-    }.frame(width: 620, height: 560)
-  }
-
   private var historyPanel: some View {
     VStack(spacing: 0) {
       HStack {
-        if selectedHistoryID != nil {
-          Button("Back", systemImage: "chevron.left") {
-            selectedHistoryID = nil
-            historyPinned = true
-          }
-        }
         Text("Workflow History").font(.headline)
         Spacer()
         Button("Close") { showingHistory = false }
       }.padding(12)
       Divider()
-      if let id = selectedHistoryID, let run = appState.workflowServiceV2.run(id) {
-        WorkflowRunDetailViewV2(run: run, service: appState.workflowServiceV2, onOpenPane: openPane)
-          .id(id)
-      } else {
-        ScrollView {
-          LazyVStack(spacing: 0) {
-            ForEach(appState.workflowServiceV2.runs) { run in
-              Button {
-                historyPinned = true
-                selectedHistoryID = run.id
-              } label: {
-                HStack(spacing: 12) {
-                  VStack(alignment: .leading, spacing: 4) {
-                    Text(run.title).font(.headline)
-                    Text(WorkflowRunPresentationV2.status(run.status)).font(.caption)
-                      .foregroundStyle(.secondary)
-                    Text(run.createdAt, style: .relative).font(.caption2).foregroundStyle(
-                      .secondary)
-                  }
-                  Spacer(minLength: 12)
-                  Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                }
-                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Open workflow run \(run.title)")
-              .accessibilityValue(WorkflowRunPresentationV2.status(run.status))
-              Divider().padding(.horizontal, 16)
-            }
-          }.frame(maxWidth: .infinity, alignment: .leading)
-        }.accessibilityLabel("Workflow Run History")
-        if appState.workflowServiceV2.runs.isEmpty {
-          Text("No workflow runs yet.").foregroundStyle(.secondary).padding()
+      HStack(spacing: 0) {
+        historyList.frame(width: 250)
+        Divider()
+        if let run = appState.workflowServiceV2.runs.first(where: { $0.id == selectedHistoryID })
+          ?? appState.workflowServiceV2.runs.first
+        {
+          WorkflowRunDetailViewV2(
+            run: run, service: appState.workflowServiceV2, onOpenPane: openPane
+          )
+          .id(run.id)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+          Text("No workflow runs yet.").foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
-    }.frame(width: 620, height: 560)
+    }.frame(width: 900, height: 580)
+      .background(Color(nsColor: .windowBackgroundColor))
+  }
+
+  private var historyList: some View {
+    ScrollView {
+      LazyVStack(spacing: 0) {
+        ForEach(appState.workflowServiceV2.runs) { run in
+          let selected = run.id == (selectedHistoryID ?? appState.workflowServiceV2.runs.first?.id)
+          Button {
+            historyPinned = true
+            selectedHistoryID = run.id
+          } label: {
+            VStack(alignment: .leading, spacing: 6) {
+              Text(run.title).font(.headline).lineLimit(2)
+              WorkflowStatusViewV2(status: run.status)
+              Text(run.createdAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .padding(12)
+            .background(selected ? Color.accentColor.opacity(0.12) : Color.clear)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Open workflow run \(run.title)")
+          .accessibilityValue(WorkflowRunPresentationV2.status(run.status))
+          .accessibilityAddTraits(selected ? .isSelected : [])
+          Divider()
+        }
+      }
+    }.accessibilityLabel("Workflow Run History")
   }
 
   private func updateHistoryHover() {
     closeTask?.cancel()
+    if startingEntry != nil { return }
     if hoveringButton || hoveringHistory {
       showingHistory = true
     } else if !historyPinned {
@@ -184,7 +165,6 @@ struct WorkflowToolbarViewV2: View {
 
   private func openPane(_ value: String) {
     guard let id = UUID(uuidString: value) else { return }
-    showingExecution = false
     showingHistory = false
     appState.store?.send(.agentState(.rowTapped(PaneID(raw: id))))
   }
@@ -201,5 +181,45 @@ enum WorkflowRunPresentationV2 {
     case "interrupted": "Interrupted"
     default: status.capitalized
     }
+  }
+}
+
+struct WorkflowStatusViewV2: View {
+  let status: String
+
+  private var color: Color {
+    switch status {
+    case "running": .accentColor
+    case "succeeded": .green
+    case "waiting", "interrupted": .orange
+    case "failed": .red
+    default: .secondary
+    }
+  }
+
+  private var symbol: String {
+    switch status {
+    case "succeeded": "checkmark.circle.fill"
+    case "failed": "xmark.circle.fill"
+    case "interrupted": "pause.circle.fill"
+    case "cancelled": "minus.circle.fill"
+    default: "circle.fill"
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 6) {
+      if status == "running" {
+        ProgressView().controlSize(.small).scaleEffect(0.75)
+          .frame(width: 12, height: 12).accessibilityHidden(true)
+      } else {
+        Image(systemName: symbol).font(.system(size: 10))
+          .frame(width: 12, height: 12).accessibilityHidden(true)
+      }
+      Text(WorkflowRunPresentationV2.status(status))
+    }
+    .font(.caption)
+    .foregroundStyle(color)
+    .accessibilityElement(children: .combine)
   }
 }

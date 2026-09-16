@@ -1036,7 +1036,8 @@ final class AppState {
 
     self.focusReadMarkerTask = Task { @MainActor in
       await Self.observeFocusedPaneForRead(
-        catalog: { manager.catalog }, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }, store: inbox)
+        catalog: { manager.catalog },
+        lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }, store: inbox)
     }
     self.orphanSweepTask = Task { @MainActor in
       await Self.observeOrphanUnreadsSweep(catalog: { manager.catalog }, store: inbox)
@@ -1045,7 +1046,8 @@ final class AppState {
       store: inbox,
       focus: { [weak manager] in
         guard let manager else { return RollupFocusState() }
-        return Self.focusState(from: manager.catalog, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) })
+        return Self.focusState(
+          from: manager.catalog, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) })
       },
       observe: { [weak manager] in
         guard let manager else { return }
@@ -1196,7 +1198,8 @@ final class AppState {
   var workflowWorkspaces: [WorkflowWorkspaceChoice] {
     hierarchyManager.catalog.projects.filter { !$0.isRemote }.flatMap { project in
       project.worktrees.filter { !$0.archived }.map {
-        WorkflowWorkspaceChoice(id: $0.id, projectID: project.id, title: "\(project.name) · \($0.name)")
+        WorkflowWorkspaceChoice(
+          id: $0.id, projectID: project.id, title: "\(project.name) · \($0.name)")
       }
     }
   }
@@ -1213,7 +1216,8 @@ final class AppState {
           tab.panes.map { pane in
             WorkflowPaneChoice(
               id: pane.id,
-              title: "\(tab.cachedDisplayTitle ?? tab.name ?? "Terminal") · \(pane.id.description.prefix(8))",
+              title:
+                "\(tab.cachedDisplayTitle ?? tab.name ?? "Terminal") · \(pane.id.description.prefix(8))",
               worktreeID: worktree.id)
           }
         }
@@ -1250,7 +1254,8 @@ final class AppState {
       typeKickoff: { [weak self, weak engine] paneID, kind, prompt, canDispatch in
         guard let engine, let agentState = self?.agentStateStore else { return false }
         return await Self.typeKickoffOnceAgentIsUp(
-          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine, canDispatch: canDispatch)
+          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine,
+          canDispatch: canDispatch)
       },
       cli: Self.cliInvocation()
     )
@@ -1285,13 +1290,15 @@ final class AppState {
       guard canDispatch(), !Task.isCancelled else { return false }
       guard ContinuousClock.now < deadline else {
         logger.error(
-          "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)")
+          "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)"
+        )
         return false
       }
       try? await Task.sleep(for: .milliseconds(250))
     }
     guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else {
-      logger.error("kickoff: pane \(paneID.description, privacy: .public) has no surface to type into")
+      logger.error(
+        "kickoff: pane \(paneID.description, privacy: .public) has no surface to type into")
       return false
     }
     // Ready = the screen held still for `settle` (at least one full read
@@ -1304,9 +1311,7 @@ final class AppState {
       guard canDispatch(), !Task.isCancelled else { return false }
       try? await Task.sleep(for: .milliseconds(250))
       let current = surface.readText(.active) ?? ""
-      if (kind == .claudeCode && !PaneAttentionInterpreter.hasEmptyClaudePrompt(viewportText: current))
-        || current != previous
-      {
+      if !AgentKickoffEcho.composerReady(kind: kind, screen: current) || current != previous {
         previous = current
         stillSince = ContinuousClock.now
       } else if ContinuousClock.now - stillSince >= settle, !current.isEmpty {
@@ -1324,7 +1329,7 @@ final class AppState {
     // Keep the assignment intact; sendInput turns every newline into Return.
     let beforePaste = surface.readText(.active) ?? ""
     if !AgentKickoffEcho.canAcceptPaste(kind: kind, screen: beforePaste) {
-      logger.error("kickoff: OMP has an unsent attachment; existing input was preserved")
+      logger.error("kickoff: Agent composer is not empty or ready; existing input was preserved")
       return false
     }
     surface.sendText(prompt)
@@ -1334,7 +1339,9 @@ final class AppState {
         engine.ghosttyRuntime?.surface(for: paneID) === surface
       else { return false }
       guard let screen = surface.readText(.active) else { continue }
-      if AgentKickoffEcho.containsPaste(kind: kind, prompt: prompt, before: beforePaste, after: screen) {
+      if AgentKickoffEcho.containsPaste(
+        kind: kind, prompt: prompt, before: beforePaste, after: screen)
+      {
         // CR is what TUIs read as Enter; LF only breaks the line.
         surface.sendInput("\r")
         return true
@@ -1386,7 +1393,9 @@ final class AppState {
   /// Git facts for `context.md`. Read-only (`status`, branch, shortstat);
   /// any failure — not a repository, git missing — degrades to "not git"
   /// rather than blocking the handoff.
-  nonisolated static func handoffRepoState(at root: URL, git: GitServiceClient) async -> HandoffRepoState {
+  nonisolated static func handoffRepoState(at root: URL, git: GitServiceClient) async
+    -> HandoffRepoState
+  {
     guard let status = try? await git.status(root) else { return .notGit }
     let branch = try? await git.currentBranch(root)
     let stats = (try? await git.localDiffStats(root)) ?? nil
@@ -1454,7 +1463,8 @@ final class AppState {
       initialCatalog = try sessionStore.load()
     } catch {
       Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session")
-        .error("SessionStore.load failed at bootstrap: \(String(describing: error), privacy: .public)")
+        .error(
+          "SessionStore.load failed at bootstrap: \(String(describing: error), privacy: .public)")
       initialCatalog = .empty
     }
     let coordinator = SessionCoordinator(store: sessionStore, initial: initialCatalog)
@@ -1604,7 +1614,9 @@ final class AppState {
     lastFocusedPane: @MainActor (TabID) -> PaneID?
   ) -> RollupFocusState {
     let activeProject = catalog.projects.first(where: { $0.id == catalog.selectedProjectID })
-    let activeWorktree = activeProject?.worktrees.first(where: { $0.id == activeProject?.selectedWorktreeID })
+    let activeWorktree = activeProject?.worktrees.first(where: {
+      $0.id == activeProject?.selectedWorktreeID
+    })
     let activeTab = activeWorktree?.tabs.first(where: { $0.id == activeWorktree?.selectedTabID })
     let focusedPane = activeTab.map { lastFocusedPane($0.id) } ?? nil
     let expanded = Set(catalog.projects.filter(\.isExpanded).map(\.id))

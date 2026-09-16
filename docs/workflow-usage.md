@@ -9,11 +9,15 @@ when starting a run.
 
 The main window places Run Workflow and Workflow History together before Agents
 on the right toolbar. Choose a definition, fill its inputs and role bindings, and
-start. The parameter form closes and Current Workflow shows execution progress.
-Open Agent returns to the associated terminal. Human decision nodes display the
+start. The parameter form closes and leaves the terminal visible; it does not
+open history or execution details automatically. Open Workflow History to inspect
+progress or act on a human decision. Open Agent focuses the associated terminal.
+Human decision nodes display the
 proposal and require an explicit decision and reason.
 
-Workflow History is a separate popover with a run list and detail navigation.
+Workflow History is a two-column popover: the run list stays on the left while
+the selected run details stay on the right. Status text is accompanied by a
+spinner for running work and colored indicators for other states.
 Details include steps, inputs and results, events, and the frozen YAML used by
 that run. Settings contains no run history. There is no separate Workflow window
 or menu-bar menu.
