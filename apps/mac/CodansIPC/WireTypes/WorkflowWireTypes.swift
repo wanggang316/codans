@@ -1,20 +1,6 @@
 import Foundation
 
 extension IPC {
-  public struct WorkflowCreateRequest: Codable, Equatable, Sendable {
-    public let commandID: UUID
-    public let template: String
-    public let title: String
-    public let input: String
-
-    public init(commandID: UUID, template: String, title: String, input: String) {
-      self.commandID = commandID
-      self.template = template
-      self.title = title
-      self.input = input
-    }
-  }
-
   public struct WorkflowRunRequest: Codable, Equatable, Sendable {
     public let runID: UUID
 

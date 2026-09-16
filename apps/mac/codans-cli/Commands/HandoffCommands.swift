@@ -199,9 +199,6 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
         lines.append("  receiver not launched")
       }
     }
-    if let runID = response.workflowRunID {
-      lines.append("  workflow: \(runID.uuidString) — inspect status for receiver confirmation")
-    }
     if let branch = response.branch {
       lines.append("  branch: \(branch), changed files: \(response.changedFileCount)")
     }

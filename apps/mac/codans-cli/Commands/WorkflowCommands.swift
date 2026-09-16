@@ -7,34 +7,12 @@ import Foundation
 struct WorkflowCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "workflow",
-    abstract: "Create workflows and explicitly claim and deliver their assignments.",
+    abstract: "Inspect workflow runs and explicitly claim and deliver their assignments.",
     subcommands: [
-      WorkflowCreate.self, WorkflowList.self, WorkflowStatus.self,
+      WorkflowList.self, WorkflowStatus.self,
       WorkflowClaim.self, WorkflowDeliver.self, WorkflowCancel.self,
     ]
   )
-}
-
-struct WorkflowCreate: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(commandName: "create", abstract: "Create a workflow run.")
-  @OptionGroup var globals: GlobalOptions
-  @Option(name: .long, help: "Workflow template identifier.") var template: String
-  @Option(name: .long, help: "Run title.") var title: String
-  @Option(name: .long, help: "Task input; '-' reads stdin.") var input: String
-  @Option(name: .long, help: "Stable command UUID for an idempotent create retry.") var commandID: String?
-
-  func run() async throws {
-    await CommandRunner.run {
-      let id = try commandID.map { try WorkflowCLI.uuid($0, name: "command-id") } ?? UUID()
-      let request = IPC.WorkflowCreateRequest(
-        commandID: id, template: template, title: title, input: try WorkflowCLI.content(input))
-      let client = CLISession.connect(globals: globals)
-      defer { Task { await client.shutdown() } }
-      let response: JSONValue = try await client.call(
-        .workflowCreate, params: request, timeout: globals.rpcTimeout)
-      try WorkflowCLI.emit(response, globals: globals)
-    }
-  }
 }
 
 struct WorkflowList: AsyncParsableCommand {

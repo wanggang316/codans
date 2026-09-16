@@ -24,7 +24,6 @@ public final class MethodRouter {
   private let projectHandlers: ProjectHandlers?
   private let agentHandlers: AgentHandlers?
   private let handoffHandlers: HandoffHandlers?
-  private let workflowStore: AgentWorkflowStore?
   private let workflowServiceV2: WorkflowServiceV2?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
@@ -36,7 +35,6 @@ public final class MethodRouter {
     projectHandlers: ProjectHandlers? = nil,
     agentHandlers: AgentHandlers? = nil,
     handoffHandlers: HandoffHandlers? = nil,
-    workflowStore: AgentWorkflowStore? = nil,
     workflowServiceV2: WorkflowServiceV2? = nil
   ) {
     self.systemHandlers = systemHandlers
@@ -46,7 +44,6 @@ public final class MethodRouter {
     self.projectHandlers = projectHandlers
     self.agentHandlers = agentHandlers
     self.handoffHandlers = handoffHandlers
-    self.workflowStore = workflowStore
     self.workflowServiceV2 = workflowServiceV2
   }
 
@@ -65,7 +62,7 @@ public final class MethodRouter {
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
-    if let outcome = await routeProject(request) { return outcome }
+    if let outcome = routeProject(request) { return outcome }
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
     if let outcome = routeWorkflow(request) { return outcome }
@@ -203,7 +200,7 @@ public final class MethodRouter {
   /// the only wire-error type these methods produce), so the catch chain is
   /// flatter than `routeEditor`'s — no app-tier error translation, just a
   /// `DecodingError` → `invalidParams` rescue and a programmer-error backstop.
-  private func routeProject(_ request: IPC.Request) async -> RouterOutcome? {
+  private func routeProject(_ request: IPC.Request) -> RouterOutcome? {
     guard let h = projectHandlers else { return nil }
     switch request.method {
     case .projectListScripts:
@@ -259,68 +256,20 @@ public final class MethodRouter {
   }
 
   private func routeWorkflow(_ request: IPC.Request) -> RouterOutcome? {
-    if let outcome = routeWorkflowV2(request) { return outcome }
-    guard request.method.rawValue.hasPrefix("workflow."), let store = workflowStore else {
-      return nil
-    }
-    return Self.projectOutcome {
-      switch request.method {
-      case .workflowCreate:
-        let input = try request.params.decoded(as: IPC.WorkflowCreateRequest.self)
-        guard let template = AgentWorkflowTemplate(rawValue: input.template) else {
-          throw IPCError.invalidParams(message: "Unknown workflow template", path: ["template"])
-        }
-        return try JSONValue.encoded(
-          store.create(
-            id: input.commandID, template: template, title: input.title, input: input.input))
-      case .workflowList:
-        guard store.issues.isEmpty else {
-          throw IPCError.internal(
-            "Workflow storage needs attention. Open Workflows to inspect errors; known runs remain available through status."
-          )
-        }
-        return try JSONValue.encoded(Array(store.runs.prefix(50)))
-      case .workflowStatus:
-        return try JSONValue.encoded(
-          store.status(request.params.decoded(as: IPC.WorkflowRunRequest.self).runID))
-      case .workflowClaim:
-        let input = try request.params.decoded(as: IPC.WorkflowClaimRequest.self)
-        guard UUID(uuidString: input.paneID) != nil else {
-          throw IPCError.invalidParams(message: "Expected pane UUID", path: ["paneID"])
-        }
-        return try JSONValue.encoded(
-          store.claim(input.runID, stepID: input.stepID, paneID: input.paneID))
-      case .workflowDeliver:
-        let input = try request.params.decoded(as: IPC.WorkflowDeliverRequest.self)
-        return try JSONValue.encoded(
-          store.deliver(
-            input.runID, attemptID: input.attemptID, deliveryID: input.deliveryID,
-            paneID: input.paneID, content: input.content))
-      case .workflowCancel:
-        return try JSONValue.encoded(
-          store.cancel(request.params.decoded(as: IPC.WorkflowRunRequest.self).runID))
-      default:
-        throw IPCError.unsupported(reason: "Not a workflow method")
-      }
-    }
-  }
-
-  private func routeWorkflowV2(_ request: IPC.Request) -> RouterOutcome? {
     guard request.method.rawValue.hasPrefix("workflow."), let service = workflowServiceV2 else {
       return nil
     }
     if request.method == .workflowList {
       return Self.projectOutcome {
         let current = try service.runs.map { try JSONValue.encoded($0) }
-        let legacy = try (workflowStore?.runs ?? []).map { try JSONValue.encoded($0) }
-        return JSONValue.array(Array((current + legacy).prefix(100)))
+        return JSONValue.array(Array(current.prefix(100)))
       }
     }
-    guard case .object(let params) = request.params,
-      case .string(let rawID) = params["runID"], let id = UUID(uuidString: rawID),
-      service.run(id) != nil
-    else { return nil }
     return Self.projectOutcome {
+      let id = try request.params.decoded(as: IPC.WorkflowRunRequest.self).runID
+      guard service.run(id) != nil else {
+        throw IPCError.notFound(kind: "workflow", id: id.uuidString)
+      }
       switch request.method {
       case .workflowStatus:
         return try JSONValue.encoded(service.run(id))
@@ -353,8 +302,6 @@ public final class MethodRouter {
       return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as WorkflowDefinitionErrorV2 {
       return .failed(.invalidParams(message: error.localizedDescription, path: nil))
-    } catch let error as AgentWorkflowError {
-      return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as DecodingError {
       return .failed(.invalidParams(message: String(describing: error), path: nil))
     } catch {
@@ -372,8 +319,6 @@ public final class MethodRouter {
       return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as WorkflowDefinitionErrorV2 {
       return .failed(.invalidParams(message: error.localizedDescription, path: nil))
-    } catch let error as AgentWorkflowError {
-      return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as DecodingError {
       return .failed(.invalidParams(message: String(describing: error), path: nil))
     } catch {

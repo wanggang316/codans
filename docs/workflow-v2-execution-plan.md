@@ -205,3 +205,41 @@ were insufficient to validate real launch behavior and navigation.
   WorkflowLaunchProfileV2, WorkflowDefinitionV2 and WorkflowRouterV2 passed.
   Focused SwiftLint passed for the changed Swift files. Logs and xcresult:
   `/tmp/codans-workflow-v2-build/navigation-correction-final-tests.*`.
+
+### Remove unreleased legacy runs
+
+Keep one run model and store: remove template-run UI, model, runner, storage and
+IPC fallback rather than migrate them. Remove obsolete template-based CLI create
+and standalone Handoff's duplicate old-run recording. Preserve current DSL
+Handoff behavior and the standalone Handoff artifact/launch operations. Validate
+current routing, missing-run errors, delivery and Handoff regression tests before
+committing; existing old files need no migration or destructive cleanup.
+
+Validation completed for legacy removal:
+
+- Focused `swift-format` and `swiftlint lint --use-script-input-files` passed
+  for all 11 changed or new Swift files that remain on disk. The router's
+  synchronous project dispatch no longer declares an unused `async` boundary.
+- From `apps/mac`, `xcodebuild -workspace codans.xcworkspace -scheme Codans
+  -configuration Debug build` and the equivalent `-scheme codans-cli` build
+  both succeeded. The subsequent app test build includes the final lint fix.
+- `xcodebuild test -workspace codans.xcworkspace -scheme Codans -configuration
+  Debug` with `-only-testing:CodansTests/<suite>` for AgentKickoffEchoTests,
+  WorkflowDefinitionV2Tests, WorkflowServiceV2Tests, WorkflowRouterV2Tests,
+  WorkflowLaunchProfileV2Tests, WorkflowEndpointIdentityV2Tests,
+  HandoffHandlersTests and HandoffFeatureTests passed: 49 tests in 8 suites.
+- The same test command with `-scheme CodansCore` and
+  `-only-testing:CodansCoreTests/<suite>` for IPCEnvelopeCodableTests,
+  WireTypeCodableTests, IPCErrorCodableTests, FramingTests, HandoffBriefingTests,
+  HandoffCoordinatorTests, HandoffKickoffTests, HandoffLayoutTests,
+  HandoffPlacementTests, HandoffStoreTests and MarkdownDocumentNormalizerTests
+  passed: 58 tests in 11 suites. IPC tests belong to CodansCoreTests;
+  the CodansIPC scheme has no test target.
+- The primary agent restarted the final Debug app and verified that Legacy Runs
+  is absent and the existing OMP workflow history still opens with all five
+  nodes Completed. It also checked the bundled CLI's `workflow --help`: only
+  `list`, `status`, `claim`, `deliver` and `cancel` remain, with updated overview
+  text and no template-based create command.
+- Build, lint and test logs are under `/tmp/codans-workflow-v2-build/remove-legacy-*.log`;
+  app and Core test result bundles are `remove-legacy-app-tests.xcresult` and
+  `remove-legacy-core-tests.xcresult` in the same directory.

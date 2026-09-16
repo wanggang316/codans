@@ -28,7 +28,6 @@ struct HandoffHandlersTests {
     let source: HandoffSource
     let registry: HandoffRequestRegistry
     let launches: LaunchRecorder
-    let workflows: AgentWorkflowStore?
   }
 
   /// Records launch specs and answers with a fixed pane, or throws.
@@ -53,8 +52,7 @@ struct HandoffHandlersTests {
     agent: AgentKind? = .claudeCode,
     isRemote: Bool = false,
     profiles: [AgentProfile]? = nil,
-    screen: String? = "last screen",
-    tracked: Bool = false
+    screen: String? = "last screen"
   ) throws -> Harness {
     let root = FileManager.default.temporaryDirectory
       .appending(path: "HandoffHandlersTests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -78,12 +76,9 @@ struct HandoffHandlersTests {
     )
     let registry = HandoffRequestRegistry()
     let launches = LaunchRecorder()
-    let workflows =
-      tracked ? AgentWorkflowStore(root: root.appendingPathComponent("workflow-records")) : nil
     let handlers = HandoffHandlers(
       settings: settings,
       registry: registry,
-      workflowStore: workflows,
       resolveSource: { paneID in paneID == source.paneID ? source : nil },
       readScreen: { _ in screen },
       collectRepoState: { _ in
@@ -108,45 +103,7 @@ struct HandoffHandlersTests {
     )
     return Harness(
       handlers: handlers, store: HandoffStore(rootURL: root), source: source,
-      registry: registry, launches: launches, workflows: workflows)
-  }
-
-  @Test
-  func trackedLaunchWaitsForExplicitReceipt() async throws {
-    let harness = try Self.makeHarness(tracked: true)
-    let response = try await harness.handlers.to(
-      Self.request(
-        .to, harness, receiver: "codex", brief: Self.briefing))
-    let id = try #require(response.workflowRunID)
-    let store = try #require(harness.workflows)
-    let run = try store.status(id)
-    #expect(run.status == .running)
-    #expect(run.steps.first(where: { $0.id == "export" })?.status == .accepted)
-    #expect(run.steps.first(where: { $0.id == "receive" })?.status == .pending)
-    #expect(harness.launches.specs.first?.prompt?.contains(id.uuidString) == true)
-    let content = try #require(run.attempts.first(where: { $0.stepID == "packet" })?.content)
-    try "Replaced".write(to: harness.store.currentURL, atomically: true, encoding: .utf8)
-    #expect(
-      try store.status(id).attempts.first(where: { $0.stepID == "packet" })?.content == content)
-    let attempt = try store.claim(
-      id, stepID: "receive", paneID: harness.launches.paneID.description)
-    let digest = try #require(store.records[id]?.packetDigest)
-    let receipt = "{\"packetDigest\":\"\(digest)\",\"nextAction\":\"Wait for authorization\"}"
-    let finished = try store.deliver(
-      id, attemptID: attempt.id, deliveryID: UUID(), paneID: harness.launches.paneID.description,
-      content: receipt)
-    #expect(finished.status == .succeeded)
-  }
-
-  @Test
-  func trackedSaveCompletesWithoutLaunchingReceiver() async throws {
-    let harness = try Self.makeHarness(tracked: true)
-    let response = try await harness.handlers.save(
-      Self.request(.save, harness, brief: Self.briefing), workflowTitle: "GUI checkpoint")
-    let id = try #require(response.workflowRunID)
-    #expect(try harness.workflows?.status(id).status == .succeeded)
-    #expect(try harness.workflows?.status(id).title == "GUI checkpoint")
-    #expect(harness.launches.specs.isEmpty)
+      registry: registry, launches: launches)
   }
 
   private static func request(

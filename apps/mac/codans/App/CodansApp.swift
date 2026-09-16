@@ -487,13 +487,10 @@ final class AppState {
   /// requests. Shared by the `handoff.*` IPC handler (claims / publishes)
   /// and the in-app Hand Off panel (registers / observes).
   let handoffRegistry = HandoffRequestRegistry()
-  let workflowStore = AgentWorkflowStore.live()
   let workflowCatalogV2 = WorkflowCatalogV2()
   let workflowServiceV2 = WorkflowServiceV2()
   var workflowCreationRequest: UUID?
   var workflowPresentedRunID: UUID?
-  @ObservationIgnored private var workflowRunner: AgentWorkflowRunner?
-  @ObservationIgnored private var workflowHandoffHandlers: HandoffHandlers?
   /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.config/codans/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
@@ -836,19 +833,6 @@ final class AppState {
       hierarchy: manager, hierarchyClient: hierarchy,
       settingsStore: settings, engine: engine, gitClient: routedGitClient
     )
-    workflowHandoffHandlers = handoffHandlers
-    let runner = AgentWorkflowRunner(
-      store: workflowStore,
-      launch: { try await hierarchy.launchAgent($0) },
-      sendPrompt: { [weak self, weak engine] paneID, kind, prompt, canDispatch in
-        guard let engine, let agentState = self?.agentStateStore else { return false }
-        return await Self.typeKickoffOnceAgentIsUp(
-          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState,
-          engine: engine, canDispatch: canDispatch)
-      },
-      cli: Self.cliInvocation())
-    workflowRunner = runner
-    workflowStore.didChange = { [weak runner] id in runner?.advance(id) }
     configureWorkflowV2(hierarchy: hierarchy, engine: engine)
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
@@ -1191,7 +1175,6 @@ final class AppState {
         installation: agentInstallation
       ),
       handoffHandlers: handoffHandlers,
-      workflowStore: workflowStore,
       workflowServiceV2: workflowServiceV2
     )
     let resolvedSocketPath = SocketPaths.resolve()
@@ -1238,58 +1221,6 @@ final class AppState {
     }
   }
 
-  func createWorkflow(_ draft: WorkflowCreateDraft) async throws -> UUID {
-    guard let workspace = workflowWorkspaces.first(where: { $0.id == draft.workspaceID }) else {
-      throw IPCError.invalidParams(message: "The selected local workspace is no longer available.", path: nil)
-    }
-    let profiles = settingsStore.settings.agents.enabledProfiles
-    let primary = profiles.first { $0.id == draft.primaryProfileID }
-    let secondary = profiles.first { $0.id == draft.secondaryProfileID }
-    if draft.template == .advisor || draft.template == .committee {
-      guard let runner = workflowRunner, let primary else { throw WorkflowCreationError.unavailable }
-      return try runner.start(
-        id: draft.commandID, template: draft.template, title: draft.title, input: draft.input,
-        projectID: workspace.projectID, worktreeID: workspace.id, primary: primary, secondary: secondary)
-    }
-    // Retrying a completed or uncertain handoff must never launch another receiver.
-    if workflowStore.records[draft.commandID] != nil { return draft.commandID }
-    guard let handlers = workflowHandoffHandlers, let paneID = draft.sourcePaneID,
-      workflowPanes.contains(where: { $0.id == paneID && $0.worktreeID == workspace.id })
-    else { throw IPCError.invalidParams(message: "Choose an available source pane in this workspace.", path: nil) }
-    if draft.template == .handoff && primary == nil { throw WorkflowCreationError.unavailable }
-    let brief = """
-      # Handoff
-
-      ## Objective
-      \(draft.title)
-
-      ## Current State
-      \(draft.input)
-
-      ## Next Steps
-      Read the briefing, verify the current workspace state, and acknowledge the next concrete action.
-      """
-    handoffRegistry.register(draft.commandID)
-    let request = IPC.HandoffRequest(
-      action: draft.template == .handoffSave ? .save : .to, paneID: paneID,
-      receiver: primary?.kind.rawValue, profile: primary?.id.uuidString,
-      brief: brief, requestID: draft.commandID, target: .newTab)
-    do {
-      let response =
-        try await
-        (draft.template == .handoffSave
-        ? handlers.save(request, workflowTitle: draft.title) : handlers.to(request, workflowTitle: draft.title))
-      guard let id = response.workflowRunID else { throw WorkflowCreationError.unavailable }
-      return id
-    } catch {
-      if workflowStore.records[draft.commandID] != nil {
-        try? workflowStore.recordEvent(draft.commandID, type: "creation.failed", message: error.localizedDescription)
-        return draft.commandID
-      }
-      throw error
-    }
-  }
-
   /// Handoff transition core wired to the live runtime: pane → source
   /// through the catalog + `AgentStateStore`, screen text straight off the
   /// pane's surface, git facts through the SSH-routed git client, and the
@@ -1304,7 +1235,6 @@ final class AppState {
     HandoffHandlers(
       settings: settingsStore,
       registry: handoffRegistry,
-      workflowStore: workflowStore,
       resolveSource: { [weak hierarchy, weak self] paneID in
         guard let manager = hierarchy else { return nil }
         return Self.handoffSource(
