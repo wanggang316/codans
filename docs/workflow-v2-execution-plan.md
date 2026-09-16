@@ -113,3 +113,21 @@ window, independently of the application process.
   Claude receiver, but its initial request was not submitted. History records
   the uncertain submission as failed without retrying. First-request readiness
   remains under investigation; this run is not an accepted case.
+
+- Claude requests now require a stable empty bordered composer before the first
+  write. Startup screens, existing drafts, working and blocked screens cannot
+  satisfy readiness. No uncertain submission is automatically resent.
+- Debug build 10 passed; 43 readiness/attention tests and 18 V2 regression tests
+  passed. Segmented navigation labels no longer consume visible header width.
+- Fixed incremental CLI embedding deleting its sibling `zmx` binary. Each embed
+  script now replaces only its declared output; two consecutive fixture updates
+  preserve zmx content and execution permissions.
+- Briefing Handoff `6D45A442-386E-42E3-BFED-75002DC8CC56` is GUI-accepted: all four
+  nodes succeeded without manual prompt submission. Receiver D8D2B074 matched the
+  actual foreground Claude process environment and its accepted delivery.
+- Full Handoff `9AC7AC68-7F4D-4057-A814-C19D0B6F149A` is GUI-accepted: the previous
+  receiver authored a briefing from its actual conversation, a new receiver read
+  and acknowledged the immutable packet, all five nodes succeeded, and the GUI
+  displayed the preserved context and `readiness: ready`.
+- Committee `077AC63F-84BF-4604-B69D-4BCBA094E84F` is running with two separately
+  launched analysts and an existing independent foreground synthesizer.

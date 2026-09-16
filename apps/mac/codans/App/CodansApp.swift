@@ -1378,17 +1378,26 @@ final class AppState {
     // apart), capped so a TUI with a spinner still gets its prompt.
     var previous = surface.readText(.active) ?? ""
     var stillSince = ContinuousClock.now
+    var composerReady = false
     let readyDeadline = ContinuousClock.now + .seconds(10)
     while ContinuousClock.now < readyDeadline {
       guard canDispatch(), !Task.isCancelled else { return false }
       try? await Task.sleep(for: .milliseconds(250))
       let current = surface.readText(.active) ?? ""
-      if current != previous {
+      if kind == .claudeCode && !PaneAttentionInterpreter.hasEmptyClaudePrompt(viewportText: current) {
+        previous = current
+        stillSince = ContinuousClock.now
+      } else if current != previous {
         previous = current
         stillSince = ContinuousClock.now
       } else if ContinuousClock.now - stillSince >= settle, !current.isEmpty {
+        composerReady = true
         break
       }
+    }
+    if kind == .claudeCode && !composerReady {
+      logger.error("kickoff: Claude's empty input prompt was not ready; no text sent")
+      return false
     }
     guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
       engine.ghosttyRuntime?.surface(for: paneID) === surface

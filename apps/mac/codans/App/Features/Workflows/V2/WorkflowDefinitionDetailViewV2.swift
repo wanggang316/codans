@@ -49,7 +49,7 @@ struct WorkflowDefinitionDetailViewV2: View {
         Text("Overview").tag("Overview")
         Text("YAML Source").tag("Source")
         Text("Runs (\(runs.count))").tag("Runs")
-      }.pickerStyle(.segmented)
+      }.pickerStyle(.segmented).labelsHidden()
       if section == "Source" || entry.definition == nil {
         sourceEditor
       } else if section == "Runs" {

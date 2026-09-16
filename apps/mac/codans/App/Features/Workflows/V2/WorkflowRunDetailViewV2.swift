@@ -30,7 +30,7 @@ struct WorkflowRunDetailViewV2: View {
         Text("Inputs & Results").tag("Results")
         Text("History").tag("History")
         Text("Frozen YAML").tag("Source")
-      }.pickerStyle(.segmented)
+      }.pickerStyle(.segmented).labelsHidden()
       if section == "Results" {
         resultsForm
       } else {

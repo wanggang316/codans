@@ -84,7 +84,7 @@ struct WorkflowToolbarViewV2: ToolbarContent {
         Picker("Workflow History Version", selection: $historySection) {
           Text("Runs").tag("Runs")
           Text("Legacy Runs").tag("Legacy")
-        }.pickerStyle(.segmented).frame(width: 220)
+        }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
         Button("Done") { presentation = nil }.keyboardShortcut(.cancelAction)
       }.padding(16)
       Divider()

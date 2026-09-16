@@ -19,6 +19,24 @@ extension PaneAttentionInterpreter {
   /// agent kind by `stabilizeAgentActivity`.
   public static let agentWorkingHold: TimeInterval = 1.2
 
+  /// A quiet startup screen or an idle badge does not prove that Claude can accept input.
+  /// Require its empty composer between borders so existing drafts are never overwritten.
+  public static func hasEmptyClaudePrompt(viewportText: String) -> Bool {
+    guard classifyAgentActivity(kind: .claudeCode, viewportText: viewportText) == .idle,
+      !viewportText.contains("⌕ Search…"),
+      !viewportText.lowercased().contains("ctrl+r to toggle")
+    else { return false }
+    let lines = viewportText.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    guard let promptIndex = claudePromptIndex(in: lines),
+      let top = lines[..<promptIndex].lastIndex(where: isBoxBorderLine),
+      let bottom = lines[(promptIndex + 1)...].firstIndex(where: isBoxBorderLine)
+    else { return false }
+    let composer = lines[(top + 1)..<bottom]
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty }
+    return composer == ["❯"]
+  }
+
   public static func classifyAgentActivity(
     kind: AgentKind,
     viewportText: String
@@ -357,7 +375,7 @@ extension PaneAttentionInterpreter {
 
   private static func contentAbovePromptBox(_ content: String) -> String {
     let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    guard let promptIndex = lines.lastIndex(where: { $0.contains("❯") }) else {
+    guard let promptIndex = claudePromptIndex(in: lines) else {
       return content
     }
     let borderIndex = lines[..<promptIndex].lastIndex(where: isBoxBorderLine)
@@ -371,9 +389,13 @@ extension PaneAttentionInterpreter {
     return trimmed.allSatisfy { $0 == "─" || $0 == "-" }
   }
 
+  private static func claudePromptIndex(in lines: [String]) -> Int? {
+    lines.lastIndex(where: { $0.contains("❯") })
+  }
+
   private static func claudeCurrentInteractionRegion(_ content: String) -> String {
     let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    guard let promptIndex = lines.lastIndex(where: { $0.contains("❯") }) else {
+    guard let promptIndex = claudePromptIndex(in: lines) else {
       return lines.suffix(agentActivityRecentLineLimit).joined(separator: "\n")
     }
     let lowerBound = max(lines.startIndex, promptIndex - 10)

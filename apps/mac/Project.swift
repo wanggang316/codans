@@ -256,7 +256,8 @@ let project = Project(
         // target into Resources/bin/$(CODANS_CLI_NAME) so the app can ship a
         // single self-contained .app, the installer has a stable inside-bundle
         // path to symlink from /usr/local/bin, and every pane can reach its
-        // own app's CLI by that name through PATH.
+        // own app's CLI by that name through PATH. Only the declared CLI output
+        // is replaced; sibling tools must survive independently skipped phases.
         .post(
           script: "\"${SRCROOT}/scripts/embed-codans.sh\"",
           name: "Embed codans",
@@ -273,8 +274,8 @@ let project = Project(
         // since it's a vendored Zig build) and lives at
         // .build/zmx/bin/zmx. This script copies it alongside codans under
         // Resources/bin so the running app can spawn it from a stable
-        // inside-bundle path. Must run after "Embed codans" because that
-        // script wipes Resources/bin before copying codans.
+        // inside-bundle path. Both embed phases preserve sibling tools, so
+        // incremental dependency analysis can skip either independently.
         .post(
           script: "\"${SRCROOT}/scripts/embed-zmx.sh\"",
           name: "Embed zmx",
