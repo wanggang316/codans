@@ -25,6 +25,7 @@ public final class MethodRouter {
   private let agentHandlers: AgentHandlers?
   private let handoffHandlers: HandoffHandlers?
   private let workflowStore: AgentWorkflowStore?
+  private let workflowServiceV2: WorkflowServiceV2?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -35,7 +36,8 @@ public final class MethodRouter {
     projectHandlers: ProjectHandlers? = nil,
     agentHandlers: AgentHandlers? = nil,
     handoffHandlers: HandoffHandlers? = nil,
-    workflowStore: AgentWorkflowStore? = nil
+    workflowStore: AgentWorkflowStore? = nil,
+    workflowServiceV2: WorkflowServiceV2? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -45,6 +47,7 @@ public final class MethodRouter {
     self.agentHandlers = agentHandlers
     self.handoffHandlers = handoffHandlers
     self.workflowStore = workflowStore
+    self.workflowServiceV2 = workflowServiceV2
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -256,6 +259,7 @@ public final class MethodRouter {
   }
 
   private func routeWorkflow(_ request: IPC.Request) -> RouterOutcome? {
+    if let outcome = routeWorkflowV2(request) { return outcome }
     guard request.method.rawValue.hasPrefix("workflow."), let store = workflowStore else {
       return nil
     }
@@ -271,7 +275,9 @@ public final class MethodRouter {
             id: input.commandID, template: template, title: input.title, input: input.input))
       case .workflowList:
         guard store.issues.isEmpty else {
-          throw IPCError.internal("Workflow storage needs attention. Open Workflows to inspect errors; known runs remain available through status.")
+          throw IPCError.internal(
+            "Workflow storage needs attention. Open Workflows to inspect errors; known runs remain available through status."
+          )
         }
         return try JSONValue.encoded(Array(store.runs.prefix(50)))
       case .workflowStatus:
@@ -299,6 +305,42 @@ public final class MethodRouter {
     }
   }
 
+  private func routeWorkflowV2(_ request: IPC.Request) -> RouterOutcome? {
+    guard request.method.rawValue.hasPrefix("workflow."), let service = workflowServiceV2 else {
+      return nil
+    }
+    if request.method == .workflowList {
+      return Self.projectOutcome {
+        let current = try service.runs.map { try JSONValue.encoded($0) }
+        let legacy = try (workflowStore?.runs ?? []).map { try JSONValue.encoded($0) }
+        return JSONValue.array(Array((current + legacy).prefix(100)))
+      }
+    }
+    guard case .object(let params) = request.params,
+      case .string(let rawID) = params["runID"], let id = UUID(uuidString: rawID),
+      service.run(id) != nil
+    else { return nil }
+    return Self.projectOutcome {
+      switch request.method {
+      case .workflowStatus:
+        return try JSONValue.encoded(service.run(id))
+      case .workflowClaim:
+        let input = try request.params.decoded(as: IPC.WorkflowClaimRequest.self)
+        return try service.claim(id: id, nodeID: input.stepID, paneID: input.paneID)
+      case .workflowDeliver:
+        let input = try request.params.decoded(as: IPC.WorkflowDeliverRequest.self)
+        return try service.deliver(
+          id: id, attemptID: input.attemptID, deliveryID: input.deliveryID,
+          paneID: input.paneID, content: input.content)
+      case .workflowCancel:
+        try service.cancel(id)
+        return try JSONValue.encoded(service.run(id))
+      default:
+        throw IPCError.unsupported(reason: "Unsupported workflow operation")
+      }
+    }
+  }
+
   /// Shared adapter for the `project.*` methods: encode the typed response,
   /// passing a handler `IPCError` straight through, mapping a `DecodingError`
   /// to `invalidParams`, and any other throw to a programmer-error `internal`.
@@ -307,6 +349,10 @@ public final class MethodRouter {
       return encodeUnary(try body())
     } catch let error as IPCError {
       return .failed(error)
+    } catch let error as WorkflowRuntimeErrorV2 {
+      return .failed(.conflict(reason: error.localizedDescription))
+    } catch let error as WorkflowDefinitionErrorV2 {
+      return .failed(.invalidParams(message: error.localizedDescription, path: nil))
     } catch let error as AgentWorkflowError {
       return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as DecodingError {
@@ -322,6 +368,10 @@ public final class MethodRouter {
       return encodeUnary(try await body())
     } catch let error as IPCError {
       return .failed(error)
+    } catch let error as WorkflowRuntimeErrorV2 {
+      return .failed(.conflict(reason: error.localizedDescription))
+    } catch let error as WorkflowDefinitionErrorV2 {
+      return .failed(.invalidParams(message: error.localizedDescription, path: nil))
     } catch let error as AgentWorkflowError {
       return .failed(.conflict(reason: error.localizedDescription))
     } catch let error as DecodingError {

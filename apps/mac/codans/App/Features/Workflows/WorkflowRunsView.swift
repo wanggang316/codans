@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct WorkflowRunsView: View {
   let store: AgentWorkflowStore
+  var allowsCreation = true
   var workspaces: [WorkflowWorkspaceChoice] = []
   var profiles: [AgentProfile] = []
   var panes: [WorkflowPaneChoice] = []
@@ -72,8 +73,10 @@ struct WorkflowRunsView: View {
           } description: {
             Text("Ask an advisor, compare independent reviews, or hand a task to another agent.")
           } actions: {
-            Button("New Workflow") { composing = true }
-              .buttonStyle(.borderedProminent)
+            if allowsCreation {
+              Button("New Workflow") { composing = true }
+                .buttonStyle(.borderedProminent)
+            }
           }
         } else {
           ContentUnavailableView("Select a Workflow", systemImage: "list.bullet.rectangle")
@@ -82,10 +85,12 @@ struct WorkflowRunsView: View {
     }
     .frame(minWidth: 760, minHeight: 480)
     .toolbar {
-      Button {
-        composing = true
-      } label: {
-        Label("New Workflow", systemImage: "plus")
+      if allowsCreation {
+        Button {
+          composing = true
+        } label: {
+          Label("New Workflow", systemImage: "plus")
+        }
       }
     }
     .onChange(of: creationRequest) { _, request in if request != nil { composing = true } }

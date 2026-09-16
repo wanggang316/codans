@@ -177,6 +177,7 @@ struct CodansApp: App {
           openWindow(id: "workflows")
         }
         Button("Show Workflows…") { openWindow(id: "workflows") }
+        Button("Show Legacy Runs…") { openWindow(id: "legacy-workflows") }
       }
       CommandGroup(replacing: .appSettings) {
         // Chord routes through the registry so a user override in Settings → Shortcuts
@@ -189,23 +190,26 @@ struct CodansApp: App {
     }
 
     Window("Workflows", id: "workflows") {
-      WorkflowRunsView(
-        store: appState.workflowStore,
-        workspaces: appState.workflowWorkspaces,
+      WorkflowLibraryViewV2(
+        catalog: appState.workflowCatalogV2,
+        service: appState.workflowServiceV2,
         profiles: appState.settingsStore.settings.agents.enabledProfiles,
-        panes: appState.workflowPanes,
-        defaultWorkspaceID: appState.workflowDefaultWorkspace,
+        panes: appState.workflowAgentPanesV2,
+        workspaces: appState.workflowWorkspaces,
         creationRequest: appState.workflowCreationRequest,
-        onCreate: { try await appState.createWorkflow($0) },
+        onStart: { try appState.startWorkflowV2(definition: $0, source: $1, title: $2, inputs: $3, selections: $4) },
         onOpenPane: { value in
           guard let uuid = UUID(uuidString: value) else { return }
           openWindow(id: Self.mainWindowID)
           appState.store?.send(.agentState(.rowTapped(PaneID(raw: uuid))))
-        },
-        onDisposition: { try appState.workflowStore.decide($0, content: $1) },
-        onRecordResult: { try appState.workflowStore.recordResult(id: $0, stepID: $1, content: $2) }
+        }
       )
-      .frame(minWidth: 760, minHeight: 500)
+      .frame(minWidth: 1000, minHeight: 700)
+    }
+
+    Window("Legacy Workflow Runs", id: "legacy-workflows") {
+      WorkflowRunsView(store: appState.workflowStore, allowsCreation: false)
+        .frame(minWidth: 760, minHeight: 500)
     }
 
     Window("Settings", id: CodansApp.settingsWindowID) {
@@ -512,6 +516,8 @@ final class AppState {
   /// and the in-app Hand Off panel (registers / observes).
   let handoffRegistry = HandoffRequestRegistry()
   let workflowStore = AgentWorkflowStore.live()
+  let workflowCatalogV2 = WorkflowCatalogV2()
+  let workflowServiceV2 = WorkflowServiceV2()
   var workflowCreationRequest: UUID?
   @ObservationIgnored private var workflowRunner: AgentWorkflowRunner?
   @ObservationIgnored private var workflowHandoffHandlers: HandoffHandlers?
@@ -870,6 +876,7 @@ final class AppState {
       cli: Self.cliInvocation())
     workflowRunner = runner
     workflowStore.didChange = { [weak runner] id in runner?.advance(id) }
+    configureWorkflowV2(hierarchy: hierarchy, engine: engine)
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
@@ -1211,7 +1218,8 @@ final class AppState {
         installation: agentInstallation
       ),
       handoffHandlers: handoffHandlers,
-      workflowStore: workflowStore
+      workflowStore: workflowStore,
+      workflowServiceV2: workflowServiceV2
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)

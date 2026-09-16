@@ -1,0 +1,51 @@
+schema: codans.workflow/v1
+id: examples.advisor
+name: Advisor
+description: Request advice from an existing agent and record a human decision.
+
+inputs:
+  question:
+    type: string
+    required: true
+
+roles:
+  advisor:
+    label: Advisor
+    source: pick
+
+nodes:
+  advice:
+    title: Request advice
+    uses: codans/agent.request@v1
+    role: advisor
+    with:
+      instruction:
+        value: >-
+          Assess the question and identify concrete tradeoffs and risks.
+          Return findings and an actionable recommendation. Do not modify files.
+      context:
+        question:
+          ref: inputs.question
+    expect:
+      format: markdown
+      sections: [Findings, Recommendation]
+
+  decision:
+    title: Decide on the recommendation
+    uses: codans/human.decide@v1
+    needs: [advice]
+    with:
+      question:
+        value: Should this recommendation be adopted?
+      options:
+        value: [adopt, request_changes, reject]
+      evidence:
+        ref: nodes.advice.outputs.result
+
+outputs:
+  advice:
+    ref: nodes.advice.outputs.result
+  decision:
+    ref: nodes.decision.outputs.decision
+  reason:
+    ref: nodes.decision.outputs.reason

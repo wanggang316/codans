@@ -214,6 +214,7 @@ let project = Project(
       bundleId: "com.gumpw.codans",
       deploymentTargets: .macOS("14.0"),
       infoPlist: .file(path: "Configurations/mac-Info.plist"),
+      resources: [.folderReference(path: "codans/Resources/WorkflowDefinitions")],
       buildableFolders: [
         "codans/App",
         "codans/App/Features/Socket",
@@ -322,6 +323,7 @@ let project = Project(
         .external(name: "ComposableArchitecture"),
         .external(name: "Sparkle"),
         .external(name: "Sentry"),
+        .external(name: "Yams"),
       ],
       settings: .settings(
         base: [

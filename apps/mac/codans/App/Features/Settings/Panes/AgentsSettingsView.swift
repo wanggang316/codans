@@ -14,6 +14,7 @@ import SwiftUI
 /// detail screen reflects in the list without a manual refresh; writes go
 /// through `mutateAgents`, the single writer for the `agents` subtree.
 struct AgentsSettingsView: View {
+  @Environment(\.openWindow) private var openWindow
   @Environment(SettingsStore.self) private var settingsStore
   /// Which agent CLIs are actually on disk. App-scoped so this pane and the
   /// worktree toolbar's Agents menu never disagree about what is runnable.
@@ -48,6 +49,13 @@ struct AgentsSettingsView: View {
 
   private var list: some View {
     Form {
+      Section("Workflows") {
+        Button("Manage Workflow Definitions") { openWindow(id: "workflows") }
+          .accessibilityLabel("Open Workflow Definitions")
+        Text("Create reusable workflows, bind their roles to agents, and inspect runs.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
       Section {
         ForEach(profiles) { profile in
           row(for: profile)

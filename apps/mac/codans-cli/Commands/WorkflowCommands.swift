@@ -30,7 +30,7 @@ struct WorkflowCreate: AsyncParsableCommand {
         commandID: id, template: template, title: title, input: try WorkflowCLI.content(input))
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let response: AgentWorkflowRun = try await client.call(
+      let response: JSONValue = try await client.call(
         .workflowCreate, params: request, timeout: globals.rpcTimeout)
       try WorkflowCLI.emit(response, globals: globals)
     }
@@ -45,7 +45,7 @@ struct WorkflowList: AsyncParsableCommand {
     await CommandRunner.run {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let response: [AgentWorkflowRun] = try await client.call(
+      let response: JSONValue = try await client.call(
         .workflowList, params: EmptyParams(), timeout: globals.rpcTimeout)
       try WorkflowCLI.emit(response, globals: globals)
     }
@@ -77,7 +77,7 @@ struct WorkflowClaim: AsyncParsableCommand {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let paneID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      let response: AgentWorkflowAttempt = try await client.call(
+      let response: JSONValue = try await client.call(
         .workflowClaim,
         params: IPC.WorkflowClaimRequest(runID: id, stepID: step, paneID: paneID.uuidString),
         timeout: globals.rpcTimeout)
@@ -104,7 +104,7 @@ struct WorkflowDeliver: AsyncParsableCommand {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let paneID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      let response: AgentWorkflowRun = try await client.call(
+      let response: JSONValue = try await client.call(
         .workflowDeliver,
         params: IPC.WorkflowDeliverRequest(
           runID: id, attemptID: attemptID, deliveryID: submissionID, paneID: paneID.uuidString, content: body),
@@ -142,7 +142,7 @@ private enum WorkflowCLI {
     let request = IPC.WorkflowRunRequest(runID: try uuid(runID, name: "run"))
     let client = CLISession.connect(globals: globals)
     defer { Task { await client.shutdown() } }
-    let response: AgentWorkflowRun = try await client.call(method, params: request, timeout: globals.rpcTimeout)
+    let response: JSONValue = try await client.call(method, params: request, timeout: globals.rpcTimeout)
     try emit(response, globals: globals)
   }
 

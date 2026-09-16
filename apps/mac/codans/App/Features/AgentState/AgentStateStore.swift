@@ -70,6 +70,8 @@ final class AgentStateStore {
   /// dictionary subscript writes so SwiftUI consumers re-render on
   /// every state transition.
   private(set) var entries: [PaneID: AgentEntry] = [:]
+  /// Retained after unbind so a replacement Agent cannot inherit an active workflow assignment.
+  private(set) var bindingGenerations: [PaneID: Int] = [:]
 
   /// Per-pane derivation scratch. Kept around for all panes the
   /// store has heard about (bound or not) so signals that arrive
@@ -265,6 +267,12 @@ final class AgentStateStore {
     sessionID: String?,
     assumeUserInputSeen: Bool = false
   ) {
+    let previous = entries[paneID]
+    if bindingGenerations[paneID] == nil || previous == nil || previous?.kind != kind
+      || (previous?.sessionID != nil && previous?.sessionID != sessionID)
+    {
+      bindingGenerations[paneID, default: 0] += 1
+    }
     let viewportImpliesActive: Bool = {
       guard let text = scratch[paneID]?.lastViewportText else { return false }
       let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
