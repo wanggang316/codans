@@ -1393,7 +1393,8 @@ final class AppState {
     guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
       engine.ghosttyRuntime?.surface(for: paneID) === surface
     else { return false }
-    surface.sendInput(prompt)
+    // Keep the assignment intact; sendInput turns every newline into Return.
+    surface.sendText(prompt)
     let marker = String(prompt.prefix(19))
     for _ in 0..<12 {
       try? await Task.sleep(for: .milliseconds(250))

@@ -15,7 +15,8 @@ struct WorkflowDefinitionDetailViewV2: View {
   @State private var hasExternalConflict = false
 
   init(
-    entry: WorkflowCatalogV2.Entry, catalog: WorkflowCatalogV2, runs: [WorkflowRunV2], onRun: @escaping () -> Void,
+    entry: WorkflowCatalogV2.Entry, catalog: WorkflowCatalogV2, runs: [WorkflowRunV2],
+    onRun: @escaping () -> Void,
     onDuplicate: @escaping () -> Void, onSelectRun: @escaping (UUID) -> Void
   ) {
     self.entry = entry
@@ -32,7 +33,8 @@ struct WorkflowDefinitionDetailViewV2: View {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           Text(entry.name).font(.title2)
-          Text(entry.isBuiltin ? "Built-in · duplicate to edit" : "Personal definition").foregroundStyle(.secondary)
+          Text(entry.isBuiltin ? "Built-in · duplicate to edit" : "Personal definition")
+            .foregroundStyle(.secondary)
         }
         Spacer()
         Button("Duplicate", action: onDuplicate)
@@ -108,7 +110,8 @@ struct WorkflowDefinitionDetailViewV2: View {
               try catalog.save(entry, source: source)
               error = nil
             } catch { self.error = error.localizedDescription }
-          }.disabled(source == entry.source || hasExternalConflict).accessibilityLabel("Save Workflow Definition")
+          }.disabled(source == entry.source || hasExternalConflict).accessibilityLabel(
+            "Save Workflow Definition")
         }
       }
       if entry.isBuiltin {
@@ -121,58 +124,56 @@ struct WorkflowDefinitionDetailViewV2: View {
           .accessibilityLabel("Workflow YAML Editor")
       }
       if source != entry.source {
-        Text("Unsaved changes. Save before starting a run.").font(.caption).foregroundStyle(.secondary)
+        Text("Unsaved changes. Save before starting a run.").font(.caption).foregroundStyle(
+          .secondary)
       }
     }.frame(maxHeight: .infinity)
   }
 
   private var overview: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 20) {
-        if let definition = entry.definition {
+    Form {
+      if let definition = entry.definition {
+        Section {
           Text(definition.description ?? "Reusable workflow definition").textSelection(.enabled)
           LabeledContent("Definition ID", value: definition.id)
-          GroupBox("Inputs") {
-            VStack(alignment: .leading, spacing: 10) {
-              if definition.inputs.isEmpty { Text("No inputs").foregroundStyle(.secondary) }
-              ForEach(definition.inputs.keys.sorted(), id: \.self) { key in
-                if let input = definition.inputs[key] {
-                  Text("\(key) · \(input.type)\(input.required == true ? " · required" : "")")
-                }
-              }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
-          }
-          GroupBox("Roles") {
-            VStack(alignment: .leading, spacing: 10) {
-              if definition.roles.isEmpty { Text("No agents required").foregroundStyle(.secondary) }
-              ForEach(definition.roles.keys.sorted(), id: \.self) { key in
-                if let role = definition.roles[key] {
-                  VStack(alignment: .leading, spacing: 3) {
-                    Text("\(role.label) · \(role.source)").font(.headline)
-                    if let description = role.description { Text(description).foregroundStyle(.secondary) }
-                  }
-                }
-              }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
-          }
-          GroupBox("Steps") {
-            VStack(alignment: .leading, spacing: 14) {
-              ForEach(definition.nodeIDs, id: \.self) { id in
-                if let node = definition.nodes[id] {
-                  VStack(alignment: .leading, spacing: 3) {
-                    Text(node.title ?? id).font(.headline)
-                    Text(node.uses).font(.caption).foregroundStyle(.secondary)
-                    if let role = node.role { Text("Role: \(role)").font(.caption) }
-                    if let needs = node.needs, !needs.isEmpty {
-                      Text("After: \(needs.joined(separator: ", "))").font(.caption)
-                    }
-                  }
-                }
-              }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+        }
+        Section("Inputs") {
+          if definition.inputs.isEmpty { Text("No inputs").foregroundStyle(.secondary) }
+          ForEach(definition.inputs.keys.sorted(), id: \.self) { key in
+            if let input = definition.inputs[key] {
+              Text("\(key) · \(input.type)\(input.required == true ? " · required" : "")")
+            }
           }
         }
-      }.frame(maxWidth: .infinity, alignment: .leading)
+        Section("Roles") {
+          if definition.roles.isEmpty { Text("No agents required").foregroundStyle(.secondary) }
+          ForEach(definition.roles.keys.sorted(), id: \.self) { key in
+            if let role = definition.roles[key] {
+              VStack(alignment: .leading, spacing: 3) {
+                Text("\(role.label) · \(role.source)").font(.headline)
+                if let description = role.description {
+                  Text(description).foregroundStyle(.secondary)
+                }
+              }
+            }
+          }
+        }
+        Section("Steps") {
+          ForEach(definition.nodeIDs, id: \.self) { id in
+            if let node = definition.nodes[id] {
+              VStack(alignment: .leading, spacing: 3) {
+                Text(node.title ?? id).font(.headline)
+                Text(node.uses).font(.caption).foregroundStyle(.secondary)
+                if let role = node.role { Text("Role: \(role)").font(.caption) }
+                if let needs = node.needs, !needs.isEmpty {
+                  Text("After: \(needs.joined(separator: ", "))").font(.caption)
+                }
+              }
+            }
+          }
+        }
+      }
     }
+    .formStyle(.grouped)
   }
 }

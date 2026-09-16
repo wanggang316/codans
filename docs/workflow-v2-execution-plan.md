@@ -71,3 +71,10 @@ window, independently of the application process.
   fields, decision and reason recorded, full Frozen YAML inspected.
 - Definition-detail navigation still triggers a crash in SkyComputerUseService
   (`Array.remove(at:)`), so that path is not GUI-accepted yet.
+- Advisor GUI exposed a real prompt transport bug: `sendInput` emits Return for
+  each newline. Kickoff now uses the existing bracketed-paste `sendText` path.
+  Failed run `2890598F-6257-4BCA-9CD2-E3A2F638C9B0` remains in history.
+  New run `83C3A9BE-22CB-4F82-8788-905CF8BFE935` reused the same Claude pane,
+  accepted its real delivery, and succeeded after a GUI human decision.
+- Definition overview now follows Prowl's grouped Form/Section layout; built
+  successfully, awaiting a fresh-process GUI retest.
