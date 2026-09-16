@@ -3,40 +3,62 @@ import Foundation
 
 extension IPC {
   /// One repository to check out into a workspace. Exactly one of
-  /// `projectID` (a registered local Project) or `path` (any local
-  /// repository) names the source; the server resolves either to the
-  /// repository root. Every other field falls back to a request-level or
-  /// server default.
+  /// `projectID` (a registered local Project), `path` (any local
+  /// repository, bare or not), or `remoteURL` (cloned first) names the
+  /// source; the server resolves each to a repository root. Every other
+  /// field falls back to a request-level or server default.
   public struct WorkspaceMemberRequest: Codable, Equatable, Sendable {
     /// Folder name under the workspace root; defaults to the repository's
     /// folder name.
     public let name: String?
     public let projectID: ProjectID?
     public let path: String?
+    /// A remote to clone before checking out. The clone lands in
+    /// `cloneDestination`, or under the request's clone base directory
+    /// (default `~/.codans/sources/<name>`); an existing clone of the same
+    /// remote there is reused.
+    public let remoteURL: String?
+    public let cloneDestination: String?
     /// Defaults to the request-level branch, then to a slug of the title.
+    /// With `remoteRef`, defaults to the ref's branch part.
     public let branch: String?
     /// Base ref for a new branch; defaults to the repository's default
     /// remote branch.
     public let baseRef: String?
     /// Check out an existing local branch instead of creating one.
     public let useExistingBranch: Bool?
+    /// Check out this remote-tracking ref (`origin/feature`) as `branch`.
+    /// Exclusive with `useExistingBranch`.
+    public let remoteRef: String?
+    /// With a remote-tracking ref: when a local branch of that name already
+    /// exists, point it at the remote tip instead of checking it out as is.
+    /// Never implied.
+    public let resetLocalBranch: Bool?
     public let role: String?
 
     public init(
       name: String? = nil,
       projectID: ProjectID? = nil,
       path: String? = nil,
+      remoteURL: String? = nil,
+      cloneDestination: String? = nil,
       branch: String? = nil,
       baseRef: String? = nil,
       useExistingBranch: Bool? = nil,
+      remoteRef: String? = nil,
+      resetLocalBranch: Bool? = nil,
       role: String? = nil
     ) {
       self.name = name
       self.projectID = projectID
       self.path = path
+      self.remoteURL = remoteURL
+      self.cloneDestination = cloneDestination
       self.branch = branch
       self.baseRef = baseRef
       self.useExistingBranch = useExistingBranch
+      self.remoteRef = remoteRef
+      self.resetLocalBranch = resetLocalBranch
       self.role = role
     }
   }
@@ -52,6 +74,11 @@ extension IPC {
     public let branch: String?
     public let baseRef: String?
     public let useExistingBranch: Bool?
+    /// Every member without its own ref checks out `origin/<branch>` as a
+    /// remote-tracking ref. Exclusive with `useExistingBranch`.
+    public let trackRemote: Bool?
+    /// Where remote members are cloned when they name no destination.
+    public let cloneBaseDirectory: String?
     public let members: [WorkspaceMemberRequest]
 
     public init(
@@ -62,6 +89,8 @@ extension IPC {
       branch: String? = nil,
       baseRef: String? = nil,
       useExistingBranch: Bool? = nil,
+      trackRemote: Bool? = nil,
+      cloneBaseDirectory: String? = nil,
       members: [WorkspaceMemberRequest]
     ) {
       self.title = title
@@ -71,6 +100,8 @@ extension IPC {
       self.branch = branch
       self.baseRef = baseRef
       self.useExistingBranch = useExistingBranch
+      self.trackRemote = trackRemote
+      self.cloneBaseDirectory = cloneBaseDirectory
       self.members = members
     }
   }
@@ -79,11 +110,24 @@ extension IPC {
   public struct WorkspaceAddRequest: Codable, Equatable, Sendable {
     public let projectID: ProjectID
     public let member: WorkspaceMemberRequest
+    /// Where a remote member is cloned when it names no destination.
+    public let cloneBaseDirectory: String?
 
-    public init(projectID: ProjectID, member: WorkspaceMemberRequest) {
+    public init(projectID: ProjectID, member: WorkspaceMemberRequest, cloneBaseDirectory: String? = nil) {
       self.projectID = projectID
       self.member = member
+      self.cloneBaseDirectory = cloneBaseDirectory
     }
+  }
+
+  /// Where a member's source repository came from.
+  public enum WorkspaceMemberSourceKind: String, Codable, Equatable, Sendable {
+    /// A local repository with a working tree.
+    case local
+    /// A local bare repository.
+    case bare
+    /// Cloned from `remoteURL`.
+    case remote
   }
 
   /// Params for `workspace.drop` — remove one member by its folder name.
@@ -155,6 +199,8 @@ extension IPC {
     public let role: String?
     public let branch: String?
     public let sourceGitRoot: String?
+    public let sourceKind: WorkspaceMemberSourceKind?
+    public let remoteURL: String?
     public let worktreeID: WorktreeID?
 
     public init(
@@ -163,6 +209,8 @@ extension IPC {
       role: String? = nil,
       branch: String? = nil,
       sourceGitRoot: String? = nil,
+      sourceKind: WorkspaceMemberSourceKind? = nil,
+      remoteURL: String? = nil,
       worktreeID: WorktreeID? = nil
     ) {
       self.name = name
@@ -170,6 +218,8 @@ extension IPC {
       self.role = role
       self.branch = branch
       self.sourceGitRoot = sourceGitRoot
+      self.sourceKind = sourceKind
+      self.remoteURL = remoteURL
       self.worktreeID = worktreeID
     }
   }

@@ -115,6 +115,18 @@ actor GitWorktreeCLI {
     }
   }
 
+  /// Fetch URL of `remote` in the repository at `repoPath`; nil when the
+  /// remote is not configured or `repoPath` is not a repository.
+  func remoteURL(repoPath: String, remote: String = "origin") throws -> String? {
+    do {
+      let output = try run(arguments: ["remote", "get-url", remote], cwd: repoPath)
+      let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    } catch GitCLIError.exitCode {
+      return nil
+    }
+  }
+
   /// Clones `remoteURL` into `destinationPath`. The destination's parent
   /// directory is created if missing (git itself won't make intermediate
   /// parents) and used as the working directory; git creates the final

@@ -168,4 +168,141 @@ struct WorkspaceHandlersTests {
     #expect(
       WorkspaceHandlers.ipcError(for: IPCError.overloaded) == .overloaded)
   }
+
+  // MARK: - Remote, bare, and remote-tracking members
+
+  @Test
+  func createResolvesRemoteAndBareSources() async throws {
+    let fx = makeFixture()
+    let base = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-ws-handlers-src-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    // A bare repository, reached through a path inside it.
+    let bare = base.appendingPathComponent("lib.git", isDirectory: true).path(percentEncoded: false)
+    try run(["init", "-q", "--bare", bare], cwd: base)
+    let sources = base.appendingPathComponent("sources", isDirectory: true).path(percentEncoded: false)
+
+    // The stub returns an unregistered id, so the trailing `describe` fails;
+    // the recorded plan is what this test is about.
+    _ = try? await fx.handlers.create(
+      IPC.WorkspaceCreateRequest(
+        title: "Mixed",
+        cloneBaseDirectory: sources,
+        members: [
+          IPC.WorkspaceMemberRequest(path: "\(bare)/refs"),
+          IPC.WorkspaceMemberRequest(remoteURL: "git@github.com:org/svc.git", remoteRef: "origin/release"),
+          IPC.WorkspaceMemberRequest(
+            name: "pinned", remoteURL: "https://example.com/team/tool", cloneDestination: "~/src/tool",
+            branch: "mine", remoteRef: "origin/main", resetLocalBranch: true),
+        ]))
+    let plan = try #require(fx.recorder.plans.first)
+    #expect(plan.members.count == 3)
+    // Bare: resolved to the bare root, folder name without `.git`.
+    #expect(plan.members[0].name == "lib")
+    #expect(plan.members[0].source == .local(gitRoot: HierarchyManager.canonicalPath(bare)))
+    #expect(plan.members[0].checkout == .newBranch(branch: "mixed", baseRef: nil))
+    // Remote with a default destination under the request's clone base.
+    #expect(plan.members[1].name == "svc")
+    #expect(
+      plan.members[1].source
+        == .remote(
+          url: "git@github.com:org/svc.git",
+          cloneDestination: (sources as NSString).appendingPathComponent("svc")))
+    // A remote ref defaults the branch to its branch part.
+    #expect(
+      plan.members[1].checkout
+        == .remoteTrackingRef(remoteRef: "origin/release", branch: "release", resetLocal: false))
+    // Named destination is tilde-expanded; explicit branch and reset kept.
+    #expect(plan.members[2].name == "pinned")
+    #expect(
+      plan.members[2].source
+        == .remote(
+          url: "https://example.com/team/tool",
+          cloneDestination: ("~/src/tool" as NSString).expandingTildeInPath))
+    #expect(
+      plan.members[2].checkout
+        == .remoteTrackingRef(remoteRef: "origin/main", branch: "mine", resetLocal: true))
+  }
+
+  @Test
+  func createRejectsConflictingCheckoutFlags() async throws {
+    let fx = makeFixture()
+    let appID = fx.manager.addProject(name: "app", rootPath: "/src/app", gitRoot: "/src/app")
+    // Reset without a tracking ref.
+    await #expect(throws: IPCError.self) {
+      try await fx.handlers.create(
+        IPC.WorkspaceCreateRequest(
+          title: "T", members: [IPC.WorkspaceMemberRequest(projectID: appID, resetLocalBranch: true)]))
+    }
+    // Existing branch and a remote ref on one member.
+    await #expect(throws: IPCError.self) {
+      try await fx.handlers.create(
+        IPC.WorkspaceCreateRequest(
+          title: "T",
+          members: [
+            IPC.WorkspaceMemberRequest(projectID: appID, useExistingBranch: true, remoteRef: "origin/x")
+          ]))
+    }
+    // Request-level exclusivity.
+    await #expect(throws: IPCError.self) {
+      try await fx.handlers.create(
+        IPC.WorkspaceCreateRequest(
+          title: "T", useExistingBranch: true, trackRemote: true,
+          members: [IPC.WorkspaceMemberRequest(projectID: appID)]))
+    }
+    // Two sources on one member.
+    await #expect(throws: IPCError.self) {
+      try await fx.handlers.create(
+        IPC.WorkspaceCreateRequest(
+          title: "T", members: [IPC.WorkspaceMemberRequest(path: "/x", remoteURL: "https://h/r")]))
+    }
+    // A malformed remote ref.
+    await #expect(throws: IPCError.self) {
+      try await fx.handlers.create(
+        IPC.WorkspaceCreateRequest(
+          title: "T", members: [IPC.WorkspaceMemberRequest(projectID: appID, remoteRef: "nobranch")]))
+    }
+    #expect(fx.recorder.plans.isEmpty)
+
+    // Request-level trackRemote applies origin/<branch> to every member.
+    _ = try? await fx.handlers.create(
+      IPC.WorkspaceCreateRequest(
+        title: "Track", branch: "feat", trackRemote: true,
+        members: [
+          IPC.WorkspaceMemberRequest(projectID: appID), IPC.WorkspaceMemberRequest(name: "b", projectID: appID),
+        ]))
+    let plan = try #require(fx.recorder.plans.first)
+    #expect(
+      plan.members.map(\.checkout)
+        == [
+          .remoteTrackingRef(remoteRef: "origin/feat", branch: "feat", resetLocal: false),
+          .remoteTrackingRef(remoteRef: "origin/feat", branch: "feat", resetLocal: false),
+        ])
+  }
+
+  @Test
+  func sourceKindTellsLocalBareAndRemoteApart() throws {
+    let base = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-ws-handlers-kind-\(UUID().uuidString)", isDirectory: true)
+    let local = base.appendingPathComponent("local", isDirectory: true)
+    let bare = base.appendingPathComponent("bare.git", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: local.appendingPathComponent(".git"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: bare, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: local.path(percentEncoded: false), remoteURL: nil) == .local)
+    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: bare.path(percentEncoded: false), remoteURL: nil) == .bare)
+    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: local.path(percentEncoded: false), remoteURL: "x") == .remote)
+    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: "/nope", remoteURL: nil) == nil)
+  }
+
+  private func run(_ arguments: [String], cwd: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = cwd
+    try process.run()
+    process.waitUntilExit()
+  }
 }
