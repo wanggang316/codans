@@ -1,7 +1,7 @@
 import AppKit
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Main-window menu commands, organised into standard macOS menus instead of
 /// piling everything into File:
@@ -167,6 +167,11 @@ struct MainWindowCommands: Commands {
 
       // Git Viewer moved here from View — it operates on the current Worktree's
       // diff and reads naturally alongside the GitHub items.
+      Button("View Changes and Outgoing") {
+        store()?.send(.diff(.toggle))
+      }
+      .disabled(!hasActiveWorktree)
+
       Button("Toggle Git Viewer") {
         store()?.send(.diffInspectorToggledForCurrentWorktree)
       }

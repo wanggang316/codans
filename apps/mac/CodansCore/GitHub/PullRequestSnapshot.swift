@@ -29,6 +29,10 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
   public var state: PullRequestState
   public var isDraft: Bool
   public var headRefName: String
+  /// PR destination. Both values are needed before mapping a base branch to a
+  /// local remote-tracking ref, especially when the PR originates from a fork.
+  public var baseRefName: String?
+  public var baseRepositoryURL: URL?
   public var author: String
   public var additions: Int
   public var deletions: Int
@@ -65,13 +69,17 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
     checkRollup: [CheckResult] = [],
     mergeStateStatus: MergeStateStatus = .unknown,
     reviewDecision: ReviewDecision? = nil,
-    headRepositoryOwner: String = ""
+    headRepositoryOwner: String = "",
+    baseRefName: String? = nil,
+    baseRepositoryURL: URL? = nil
   ) {
     self.number = number
     self.title = title
     self.state = state
     self.isDraft = isDraft
     self.headRefName = headRefName
+    self.baseRefName = baseRefName
+    self.baseRepositoryURL = baseRepositoryURL
     self.author = author
     self.additions = additions
     self.deletions = deletions
@@ -89,6 +97,7 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
     case number, title, state, isDraft, headRefName, author
     case additions, deletions, commitCount, mergeable, url, updatedAt
     case checkRollup, mergeStateStatus, reviewDecision, headRepositoryOwner
+    case baseRefName, baseRepositoryURL
   }
 
   public init(from decoder: Decoder) throws {
@@ -98,6 +107,8 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
     self.state = try c.decode(PullRequestState.self, forKey: .state)
     self.isDraft = try c.decode(Bool.self, forKey: .isDraft)
     self.headRefName = try c.decode(String.self, forKey: .headRefName)
+    self.baseRefName = try c.decodeIfPresent(String.self, forKey: .baseRefName)
+    self.baseRepositoryURL = try c.decodeIfPresent(URL.self, forKey: .baseRepositoryURL)
     self.author = try c.decode(String.self, forKey: .author)
     self.additions = try c.decode(Int.self, forKey: .additions)
     self.deletions = try c.decode(Int.self, forKey: .deletions)
@@ -126,6 +137,8 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
     try c.encode(state, forKey: .state)
     try c.encode(isDraft, forKey: .isDraft)
     try c.encode(headRefName, forKey: .headRefName)
+    try c.encodeIfPresent(baseRefName, forKey: .baseRefName)
+    try c.encodeIfPresent(baseRepositoryURL, forKey: .baseRepositoryURL)
     try c.encode(author, forKey: .author)
     try c.encode(additions, forKey: .additions)
     try c.encode(deletions, forKey: .deletions)

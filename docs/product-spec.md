@@ -1,6 +1,6 @@
 # Product Spec: codans
 
-**Last Updated:** 2026-06-22
+**Last Updated:** 2026-09-17
 
 ## Product Overview
 
@@ -10,7 +10,7 @@ Developers who already live inside CLI coding agents (Claude Code, Codex CLI, ai
 
 ### Solution
 
-A native macOS application, built on libghostty, that treats **terminals as the primary surface** and orchestrates them into a four-level hierarchy: Project → Worktree → Tab → Pane (with cross-cutting Tag classification on Projects). It exposes terminal lifecycle hooks and a CLI so coding agents become first-class citizens — their output can be aggregated, their completion can trigger cross-pane actions, and their worktree-per-feature workflow takes zero ceremony. **codans is deliberately not an IDE** — for reading or editing code it opens the user's preferred external editor (VSCode, Cursor, Zed, Xcode, Sublime Text, Finder, etc.), and for inspecting diffs and history it opens the current Worktree in the user's external git client (Fork, Sourcetree, GitHub Desktop, etc.) — both via one command or click, through the same delegation mechanism.
+A native macOS application, built on libghostty, that treats **terminals as the primary surface** and orchestrates them into a four-level hierarchy: Project → Worktree → Tab → Pane (with cross-cutting Tag classification on Projects). It exposes terminal lifecycle hooks and a CLI so coding agents become first-class citizens — their output can be aggregated, their completion can trigger cross-pane actions, and their worktree-per-feature workflow takes zero ceremony. **codans is deliberately not an IDE** — a built-in read-only panel reviews current and outgoing code changes beside the terminal. Editing opens the user's preferred external editor; broader Git and history workflows remain available through the external Git Viewer command.
 
 ## Target Users
 
@@ -33,9 +33,10 @@ A native macOS application, built on libghostty, that treats **terminals as the 
 | C4 | CLI (`codans`) | A command-line interface for controlling Projects, Worktrees, Tabs, and Panes from inside any Pane — including cross-pane messaging. Core verbs ship and are callable; the `skill.*` and `hook.*` namespaces track their (not-yet-shipped) subsystems | Shipped (core verbs) | Beta |
 | C5 | Published Agent Skill | A standard-format Agent Skill (Claude Code / Codex / pi compatible — `SKILL.md` + `references/` + optional `agents/`) that teaches coding agents how to drive codans via its CLI and concepts. Distributed as an independent package; consumed by the coding agent, not by the app. Zero runtime coupling with the app. The app ships installation helpers (e.g. `codans skill install --claude-code`) that copy or symlink the bundled skill into the agent's skill directory | Planned | — |
 | C6 | Agent notification aggregation | Detect agent completion / blocking-on-input states; surface as OS notifications, badge counts, and an in-app active-agents inbox | Shipped | Beta |
-| C7 | Git viewer delegation (open in external git client) | Open the current Worktree in the user's external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge, etc.) via the "Toggle Git Viewer" command (⌘⌥G chord / menu / command palette); default git client configurable globally (`general.defaultGitViewerID`). Shares the same registry, launcher, and open path as C8 — a separate global default pointed at the registry's git-client category. There is no built-in in-app diff/history viewer | Shipped | Beta |
+| C7 | Git viewer delegation (open in external git client) | Open the current Worktree in the user's external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge, etc.) via the "Toggle Git Viewer" command (⌘⌥G chord / menu / command palette); default git client configurable globally (`general.defaultGitViewerID`). Shares the same registry, launcher, and open path as C8 — a separate global default pointed at the registry's git-client category. The external command is separate from the built-in read-only diff panel | Shipped | Beta |
 | C9 | Agent profiles & handoff | Named launch presets per coding agent (Settings → Agents; toolbar Agents button, Command Palette, `codans agent launch`) and agent-to-agent task handoff over a worktree-local `.codans/handoff/` artifact: the live source agent writes its own briefing via `codans handoff`, the receiver starts in a background tab with a kickoff prompt; an in-app Hand Off panel triggers and observes that same transition | Shipped | Beta |
-| C8 | External editor integration | Open the current Worktree directory in an external editor or file manager (VSCode / Cursor / Zed / Xcode / Sublime Text / Finder, etc.) via CLI (`codans open`) or a button on the Worktree header; default editor configurable globally and per-Project. Worktree-level only — no file-level or diff-level open in v1 | Shipped | Beta |
+| C8 | External editor integration | Open the current Worktree directory in an external editor or file manager (VSCode / Cursor / Zed / Xcode / Sublime Text / Finder, etc.) via CLI (`codans open`) or a button on the Worktree header; default editor configurable globally and per-Project. The read-only diff panel also opens current files, with line navigation where supported | Shipped (directory); implemented (diff file navigation) | Beta |
+| C10 | Read-only diff viewer | Changes shows All / Staged / Unstaged; All and Unstaged include untracked files; Outgoing compares the merge base of the selected or PR target branch to HEAD. Includes unified / split rendering, syntax highlighting, file filtering, and current-file editor handoff. See [Git diff viewer](design-docs/git-diff-viewer.md) | Implemented | Experimental |
 
 ### Capability Dependencies
 
@@ -44,6 +45,7 @@ C1 Terminal engine (libghostty)
  ├── C2 Project / Worktree / Tab / Pane hierarchy with Tag classification
  │    ├── C7 Git viewer delegation        (opens the Worktree C2 selects in an external git client)
  │    ├── C8 External editor integration  (opens the current Worktree directory in an external editor)
+ │    ├── C10 Read-only diff viewer       (reviews current and outgoing changes in the selected Worktree)
  │    └── C9 Agent profiles & handoff     (launches agents into C2 panes; handoff rides C4's `codans handoff`)
  └── C3 Lifecycle hooks
       ├── C4 CLI (`codans`)                   (invokes hooks, dispatches across Panes; also exposes `codans open`)
@@ -54,7 +56,7 @@ C5 Published Agent Skill   (standalone package; consumed by coding agents, not b
                             CLI / concept stability, not for runtime loading)
 ```
 
-**Reading the graph:** C1 is the foundation. C2 and C3 sit directly on it and are independent of each other — the hierarchy model doesn't need hooks, and hooks don't need the hierarchy. C4 is the programmable surface layer on top of C3, and C6 is the first built-in consumer of C3 (and validates the hook design) — these are design-level dependencies, not delivery order: C4's core verbs and C6 both ship today, while C3's hook surface remains designed but not yet implemented (C6 detects agent state without depending on the hook runtime landing first). C7 and C8 are two facets of the same Worktree-level handoff to an external tool: C8 opens the Worktree in an external editor or file manager, C7 opens it in an external git client for diff/history inspection. Both resolve through one shared registry and launcher (two separate global defaults); neither is a built-in surface inside codans. **C5 is deliberately orthogonal to the app runtime** — it is a documentation/skill package that lives outside the app's process boundary, versioned against C4's CLI surface; the app can ship a helper command to install it into an agent's skill directory but does not load or invoke it.
+**Reading the graph:** C1 is the foundation. C2 and C3 sit directly on it and are independent of each other — the hierarchy model doesn't need hooks, and hooks don't need the hierarchy. C4 is the programmable surface layer on top of C3, and C6 is the first built-in consumer of C3 (and validates the hook design) — these are design-level dependencies, not delivery order: C4's core verbs and C6 both ship today, while C3's hook surface remains designed but not yet implemented (C6 detects agent state without depending on the hook runtime landing first). C7 and C8 are two facets of the same Worktree-level handoff to an external tool: C8 opens the Worktree in an external editor or file manager, C7 opens it in an external git client for diff/history inspection. Both resolve through one shared registry and launcher (two separate global defaults). C10 provides the built-in read-only comparison surface and uses C8 for current-file editor handoff. **C5 is deliberately orthogonal to the app runtime** — it is a documentation/skill package that lives outside the app's process boundary, versioned against C4's CLI surface; the app can ship a helper command to install it into an agent's skill directory but does not load or invoke it.
 
 ## Product Boundaries
 
@@ -72,17 +74,19 @@ C5 Published Agent Skill   (standalone package; consumed by coding agents, not b
 - Skill installation helpers: `codans skill install --claude-code | --codex | --pi` copies or symlinks the bundled skill into the corresponding agent's skill directory (e.g. `~/.claude/skills/codans/`)
 - OS notifications for agent completion / attention-required
 - In-app notification inbox with per-Pane provenance
-- Git viewer delegation at the Worktree level: open the current Worktree in an external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge and similar) for diff/history inspection; configurable default git client (`general.defaultGitViewerID`); "Toggle Git Viewer" command (⌘⌥G chord / menu / command palette). Shares the editor-integration registry and launcher; no built-in in-app diff/history viewer
-- External editor / file manager integration at the Worktree level: open the current Worktree directory in VSCode / Cursor / Zed / Xcode / Sublime Text / Finder and similar; configurable default editor (global and per-Project); CLI entry point (`codans open [--in <editor>]`); UI button on the Worktree header. File-level and diff-level open are explicitly out of scope for v1
+- Git viewer delegation at the Worktree level: open the current Worktree in an external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge and similar) for diff/history inspection; configurable default git client (`general.defaultGitViewerID`); "Toggle Git Viewer" command (⌘⌥G chord / menu / command palette). Shares the editor-integration registry and launcher; the external command remains separate from the built-in diff panel
+- External editor / file manager integration at the Worktree level: open the current Worktree directory in VSCode / Cursor / Zed / Xcode / Sublime Text / Finder and similar; configurable default editor (global and per-Project); CLI entry point (`codans open [--in <editor>]`); UI button on the Worktree header. The diff panel can open the current file; supported editors also receive a current-side line number
+
+- Built-in read-only Changes / Outgoing panel, opened from the toolbar, menu, or command palette. It retains per-worktree scope, base, and file selection for the app session and refreshes local Git state every two seconds while visible; it does not fetch remote refs automatically
 
 ### Out of Scope
 
-**codans is deliberately not an IDE.** It does not read or edit source code as an IDE does. Every code-reading or code-editing need is handled by delegating to an external tool — code to an editor via C8, diffs and history to a git client via C7 — not by growing an editor or viewer surface inside codans. The exclusions below reinforce this boundary.
+**codans is deliberately not an IDE.** Its embedded code surface is a read-only comparison viewer. Code editing, language-server workflows, and general source browsing belong to external editors; history exploration remains available in external Git clients.
 
 | Exclusion | Reason |
 |---|---|
-| Text editor / LSP / syntax-aware editing / in-app code reading | Vim, Neovim, Helix, VSCode, Cursor, Zed, Xcode, Sublime Text already solve this. C8 integrates with them; we do not reimplement them |
-| In-app diff / history viewer | Fork, Sourcetree, GitHub Desktop, `git` CLI, `lazygit` already solve this. C7 delegates to them; codans does not host its own diff/history surface |
+| Text editor / LSP / syntax-aware editing / general source browser | Vim, Neovim, Helix, VSCode, Cursor, Zed, Xcode, Sublime Text already solve this. C8 integrates with them; we do not reimplement them |
+| In-app history browser or merge editor | The built-in viewer covers current and outgoing diffs only; C7 delegates broader Git workflows to external clients |
 | Self-built coding agent | Users already have Claude Code / Codex CLI / aider; we build the **environment** they run in, not another agent |
 | Git write operations (commit, merge, rebase, stash UI) | Terminal-first product; `git` CLI and `lazygit` already cover this; adding write UI dilutes focus |
 | Team collaboration / shared sessions / co-editing | Individual power-user tool; collaboration is a different product with different architectural constraints |

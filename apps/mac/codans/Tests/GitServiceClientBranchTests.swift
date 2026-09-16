@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -111,6 +111,14 @@ private final class FakeGitService: GitService, @unchecked Sendable {
   }
 
   // === Unused protocol surface — trap if accidentally called. ===
+  func comparison(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot {
+    fatalError()
+  }
+  func comparisonContent(
+    at path: URL, snapshot: GitComparisonSnapshot, file: GitComparisonFile
+  ) async throws -> GitComparisonContent {
+    fatalError()
+  }
   func log(at path: URL, page: LogPage.Cursor) async throws -> LogPage { fatalError() }
   func workingTreeDiff(at path: URL, ignoreWhitespace: Bool) async throws -> UnifiedDiff {
     fatalError()

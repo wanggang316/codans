@@ -112,6 +112,7 @@ struct ContentView: View {
         statusBarStore: store.scope(state: \.statusBar, action: \.statusBar),
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
+        diffStore: store.scope(state: \.diff, action: \.diff),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,

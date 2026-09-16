@@ -20,7 +20,7 @@ nonisolated enum RemoteEditorOpen {
 
   /// The bundled CLI binary name (under `Contents/Resources/app/bin/`) for
   /// the VS Code family, or nil for any other editor.
-  private static let vscodeFamilyCLIName: [EditorID: String] = [
+  static let vscodeFamilyCLIName: [EditorID: String] = [
     "vscode": "code",
     "vscodeInsiders": "code-insiders",
     "vscodium": "codium",

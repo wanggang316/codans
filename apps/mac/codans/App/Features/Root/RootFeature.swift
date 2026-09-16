@@ -40,6 +40,7 @@ struct RootFeature {
     /// can both forward into it from a single dispatch site, matching the
     /// per-worktree-aware peer features around it.
     var branchSwitcher: BranchSwitcherFeature.State = .init()
+    var diff: DiffFeature.State = .init()
     /// Editor preferences + per-Project override state.
     var editor: EditorFeature.State = .init()
     /// Header feature (bell + Open-in split button + GV toggle).
@@ -402,6 +403,7 @@ struct RootFeature {
     case sidebar(HierarchySidebarFeature.Action)
     case detail(WorktreeDetailFeature.Action)
     case branchSwitcher(BranchSwitcherFeature.Action)
+    case diff(DiffFeature.Action)
     case editor(EditorFeature.Action)
     case worktreeHeader(WorktreeHeaderFeature.Action)
     case gitHub(GitHubFeature.Action)
@@ -474,6 +476,7 @@ struct RootFeature {
     Scope(state: \.sidebar, action: \.sidebar) { HierarchySidebarFeature() }
     Scope(state: \.detail, action: \.detail) { WorktreeDetailFeature() }
     Scope(state: \.branchSwitcher, action: \.branchSwitcher) { BranchSwitcherFeature() }
+    Scope(state: \.diff, action: \.diff) { DiffFeature() }
   }
 
   @ReducerBuilder<State, Action>
@@ -497,7 +500,39 @@ struct RootFeature {
     sidebarAndDetailScopes
     headerAndEditorScopes
     routerScopes
+    diffBindings
     coreReducer
+  }
+
+  private var diffBindings: some Reducer<State, Action> {
+    Reduce { state, action in
+      switch action {
+      case .selectionChanged(let selection):
+        // Selection shortcuts can focus a terminal directly; reveal it before
+        // that newly selected surface receives subsequent keyboard input.
+        guard state.diff.isExpanded, selection != state.selection else { return .none }
+        return .send(.diff(.expand))
+      case .diff(.toggle):
+        guard let worktree = state.selection.worktreeID, let snapshot = state.gitHub.snapshots[worktree] else {
+          return .none
+        }
+        return .send(.diff(.prBaseChanged(worktree, snapshot.baseRefName, snapshot.baseRepositoryURL)))
+      case .diff(.expand):
+        guard state.diff.isExpanded else { return .none }
+        return .run { _ in
+          await MainActor.run { _ = NSApp.keyWindow?.makeFirstResponder(nil) }
+        }
+      case .diff(.close):
+        guard let paneID = focusedPaneID(state: state) else { return .none }
+        return .run { [hierarchyClient] _ in
+          await Task.yield()
+          await hierarchyClient.focusSurfaceView(paneID)
+        }
+      default:
+        return .none
+
+      }
+    }
   }
 
   /// The large `Reduce { state, action in switch action { ... } }` block that wires root
@@ -867,6 +902,7 @@ struct RootFeature {
                 blockedBranches: blockedBranches
               )))
         )
+        effects.append(.send(.diff(.contextChanged(selection.projectID, selection.worktreeID, resolvedWorktreePath))))
         // When the active Project changes, ask GitHubFeature to batch-fetch PR
         // data for every branch in that Project. The reducer runs one
         // `gh api graphql` for the whole repo instead of N per-Worktree calls.
@@ -1567,6 +1603,9 @@ struct RootFeature {
         return .none
 
       case .windowActionRouter:
+        return .none
+
+      case .diff:
         return .none
 
       case .branchSwitcher:
@@ -2349,6 +2388,8 @@ struct RootFeature {
           await send(.gitHub(action))
         }
       }
+    case .toggleChanges:
+      return .send(.diff(.toggle))
     case .toggleDiffInspector:
       return .send(.diffInspectorToggledForCurrentWorktree)
     case .newWorktree:

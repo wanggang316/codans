@@ -202,6 +202,14 @@ enum CommandPaletteItems {
   ) -> [CommandPaletteItem] {
     [
       CommandPaletteItem(
+        id: "git.changes",
+        title: "View Changes and Outgoing",
+        subtitle: worktreeName,
+        searchText: "worktree git diff changes outgoing review",
+        icon: "square.split.2x1",
+        kind: .toggleChanges
+      ),
+      CommandPaletteItem(
         id: "git.toggle-viewer",
         title: "Toggle Git Viewer",
         subtitle: worktreeName,

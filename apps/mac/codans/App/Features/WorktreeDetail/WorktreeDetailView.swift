@@ -36,6 +36,7 @@ struct WorktreeDetailView: View {
   /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
+  @Bindable var diffStore: StoreOf<DiffFeature>
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just
   /// to fire `toolbarAddProjectTapped` — same pattern as the editor toast
@@ -192,8 +193,29 @@ struct WorktreeDetailView: View {
         // banner reads as a "drop-down notification strip" regardless
         // of which tab / pane is foreground.
         BranchSwitcherErrorBannerView(store: branchSwitcherStore)
-        tabBarRow(address: address)
-        terminalRegion(address: address)
+        HSplitView {
+          VStack(spacing: 0) {
+            tabBarRow(address: address)
+            terminalRegion(address: address)
+          }
+          .frame(minWidth: diffStore.isExpanded ? 0 : 220, maxWidth: diffStore.isExpanded ? 0 : .infinity)
+          .clipped()
+          .allowsHitTesting(!diffStore.isExpanded)
+          .accessibilityHidden(diffStore.isExpanded)
+          if diffStore.isVisible {
+            DiffPanelView(store: diffStore)
+              .frame(minWidth: 440, idealWidth: 700, maxWidth: .infinity)
+          }
+        }
+      }
+      .onChange(of: address.activeTab) { _, _ in
+        if diffStore.isExpanded { diffStore.send(.expand) }
+      }
+      .onChange(of: address.activeTab.flatMap { hierarchyManager.lastFocusedPane(in: $0) }) { _, _ in
+        if diffStore.isExpanded { diffStore.send(.expand) }
+      }
+      .onChange(of: gitHubStore.snapshots[address.worktree], initial: true) { _, snapshot in
+        diffStore.send(.prBaseChanged(address.worktree, snapshot?.baseRefName, snapshot?.baseRepositoryURL))
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -326,11 +348,7 @@ struct WorktreeDetailView: View {
         // native glass capsule + hover state. Order: Agents, RunScript,
         // Open — agents first because starting one is the more frequent
         // entry point for this app's audience.
-        ToolbarItem { agentSlot(mode) }
-        ToolbarSpacer(.fixed)
-        ToolbarItem { runSlot(mode) }
-        ToolbarSpacer(.fixed)
-        ToolbarItem { openSlot(mode) }
+        trailingToolbarItems(mode)
       } else {
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
         ToolbarItem(placement: .principal) { statusSlot(mode) }
@@ -341,10 +359,33 @@ struct WorktreeDetailView: View {
           // children leading-to-trailing in declaration order.
           agentSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
+          diffButton
           openSlot(mode).buttonStyle(.plain)
         }
       }
     }
+  }
+
+  @available(macOS 26.0, *)
+  @ToolbarContentBuilder
+  private func trailingToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
+    ToolbarItem { agentSlot(mode) }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { runSlot(mode) }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { diffButton }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { openSlot(mode) }
+  }
+
+  private var diffButton: some View {
+    Button {
+      diffStore.send(.toggle)
+    } label: {
+      Label("View Changes", systemImage: "square.split.2x1")
+    }
+    .help("View Changes and Outgoing")
+    .accessibilityIdentifier("show-diff")
   }
 
   @available(macOS 26.0, *)
