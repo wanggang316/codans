@@ -78,3 +78,18 @@ window, independently of the application process.
   accepted its real delivery, and succeeded after a GUI human decision.
 - Definition overview now follows Prowl's grouped Form/Section layout; built
   successfully, awaiting a fresh-process GUI retest.
+- Handoff from Briefing was started through the GUI as run
+  `9E8C6C92-65A9-4482-9D3C-3161F0B3AF53`. The receiver opened on Claude's
+  session dashboard with pending text; GUI focus plus Return was required to
+  submit it. The real receiver retrieved the packet and delivered its receipt;
+  CLI snapshot confirms all four nodes succeeded. Final GUI result inspection
+  and unattended first-request submission remain unverified.
+- Committee run `34FABFC7-8DE2-447E-8D3A-25230AE89B5C` was configured and started
+  through the GUI. Both analyst sessions launched; analyst A is awaiting a
+  delivery, later analysis/review/synthesis nodes remain pending. It is not an
+  accepted case yet.
+- GUI work paused when computer-use reported the Mac locked again. Remaining:
+  resume Committee, verify Handoff from Briefing's final GUI state, run Handoff,
+  retest grouped definition details/YAML/new-definition navigation, and inspect
+  persisted history after restart once active runs have ended. Do not restart
+  the app while Committee remains active merely to test the definition layout.
