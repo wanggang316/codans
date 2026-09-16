@@ -13,7 +13,10 @@ final class AgentWorkflowStore {
     var run: AgentWorkflowRun
     var receiverPaneID: String?
     var packetDigest: String?
+    var execution: AgentWorkflowExecution?
   }
+
+  @ObservationIgnored var didChange: (@MainActor (UUID) -> Void)?
 
   private(set) var records: [UUID: Record] = [:]
   private(set) var issues: [String] = []
@@ -79,12 +82,34 @@ final class AgentWorkflowStore {
   func claim(_ id: UUID, stepID: String, paneID: String) throws -> AgentWorkflowAttempt {
     try checkFence(id)
     var value = try record(id)
+    guard value.run.status == .running else { throw AgentWorkflowError.terminalRun }
+    if let execution = value.execution {
+      guard let dispatch = execution.dispatches[stepID] else {
+        throw IPCError.conflict(reason: "This step has not been dispatched")
+      }
+      if dispatch.status == .launching {
+        throw IPCError.conflict(reason: "Agent binding is pending; retry claim shortly")
+      }
+      guard dispatch.status == .submitted || (dispatch.status == .attention && dispatch.paneID != nil) else {
+        throw IPCError.conflict(reason: "Dispatch needs attention; do not retry claim automatically")
+      }
+      guard dispatch.paneID == paneID else {
+        throw IPCError.conflict(reason: "This assignment belongs to another pane")
+      }
+    }
     if stepID == "receive", value.packetDigest != nil,
       let expected = value.receiverPaneID, expected != paneID
     {
       throw IPCError.conflict(reason: "Only the handoff receiver can claim this step")
     }
+    if let attempt = value.run.currentAttempt, attempt.stepID == stepID, attempt.paneID == paneID {
+      return attempt
+    }
     let attempt = try value.run.claim(stepID: stepID, paneID: paneID, now: now())
+    if value.execution?.dispatches[stepID]?.status == .attention {
+      value.execution?.dispatches[stepID]?.status = .submitted
+      value.execution?.dispatches[stepID]?.message = nil
+    }
     try commit(value)
     return attempt
   }
@@ -179,6 +204,115 @@ final class AgentWorkflowStore {
     try commit(value)
   }
 
+  func configureExecution(_ id: UUID, configuration: AgentWorkflowExecution) throws {
+    try checkFence(id)
+    var value = try record(id)
+    if let existing = value.execution {
+      guard existing.projectID == configuration.projectID,
+        existing.worktreeID == configuration.worktreeID, existing.primary == configuration.primary,
+        existing.secondary == configuration.secondary
+      else { throw IPCError.conflict(reason: "Workflow launch settings are already fixed") }
+      return
+    }
+    guard value.run.status == .running, value.run.attempts.isEmpty else {
+      throw IPCError.conflict(reason: "Only a new workflow can be configured for automatic execution")
+    }
+    value.execution = configuration
+    value.run.record(type: "execution.configured", message: "Agents and workspace selected", now: now())
+    try commit(value)
+  }
+
+  func beginDispatch(_ id: UUID, stepID: String) throws -> Bool {
+    try checkFence(id)
+    var value = try record(id)
+    guard value.run.status == .running, var execution = value.execution else { return false }
+    guard execution.dispatches[stepID] == nil else { return false }
+    guard
+      !execution.dispatches.keys.contains(where: { dispatched in
+        value.run.steps.first(where: { $0.id == dispatched })?.status != .accepted
+      })
+    else { return false }
+    guard value.run.readySteps.contains(where: { $0.id == stepID }) else { return false }
+    execution.dispatches[stepID] = AgentWorkflowDispatch(status: .launching, startedAt: now())
+    value.execution = execution
+    value.run.record(type: "dispatch.intent", message: "Preparing agent for \(stepID)", now: now())
+    try commit(value)
+    return true
+  }
+
+  func bindDispatch(_ id: UUID, stepID: String, paneID: String) throws {
+    try checkFence(id)
+    guard !paneID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw AgentWorkflowError.invalidPane
+    }
+    var value = try record(id)
+    guard value.run.status == .running, var execution = value.execution,
+      var dispatch = execution.dispatches[stepID], dispatch.status == .launching
+    else { throw IPCError.conflict(reason: "Dispatch was cancelled or is no longer pending") }
+    dispatch.status = .submitted
+    dispatch.paneID = paneID
+    execution.dispatches[stepID] = dispatch
+    value.execution = execution
+    value.run.record(type: "dispatch.bound", message: "\(stepID) assigned to pane \(paneID)", now: now())
+    try commit(value)
+  }
+
+  func dispatchIssue(_ id: UUID, stepID: String, message: String) throws {
+    try checkFence(id)
+    var value = try record(id)
+    guard value.run.status == .running, var execution = value.execution,
+      var dispatch = execution.dispatches[stepID]
+    else { return }
+    dispatch.status = .attention
+    dispatch.message = message
+    execution.dispatches[stepID] = dispatch
+    value.execution = execution
+    value.run.record(type: "dispatch.unknown", message: message, now: now())
+    try commit(value)
+  }
+
+  func decide(_ id: UUID, content: String) throws {
+    try checkFence(id)
+    guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      content.utf8.count <= 32_768
+    else { throw IPCError.invalidParams(message: "Provide a decision and its reason", path: nil) }
+    var value = try record(id)
+    guard value.run.template == .advisor else {
+      throw IPCError.conflict(reason: "This workflow does not have an advice decision")
+    }
+    let attempt = try value.run.claim(stepID: "disposition", paneID: "user", now: now())
+    try value.run.deliver(
+      attemptID: attempt.id, deliveryID: UUID(), paneID: "user", content: content, now: now())
+    value.run.record(type: "decision.recorded", message: "User recorded how to use the advice", now: now())
+    try commit(value)
+  }
+
+  /// Records a user-provided result without impersonating an agent's delivery provenance.
+  func recordResult(id: UUID, stepID: String, content: String) throws {
+    try checkFence(id)
+    guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      content.utf8.count <= 32_768
+    else { throw IPCError.invalidParams(message: "Provide a result of at most 32 KiB", path: nil) }
+    var value = try record(id)
+    guard value.run.status == .running else { throw AgentWorkflowError.terminalRun }
+    guard value.run.template == .committee || (value.run.template == .advisor && stepID == "advice") else {
+      throw IPCError.conflict(reason: "This step does not allow a manually recorded result")
+    }
+    let attempt: AgentWorkflowAttempt
+    if let active = value.run.currentAttempt {
+      guard active.stepID == stepID else { throw AgentWorkflowError.runBusy }
+      attempt = active
+    } else {
+      let pane = value.execution?.dispatches[stepID]?.paneID ?? "user"
+      attempt = try value.run.claim(stepID: stepID, paneID: pane, now: now())
+    }
+    try value.run.deliver(
+      attemptID: attempt.id, deliveryID: UUID(), paneID: attempt.paneID, content: content, now: now())
+    value.run.record(
+      type: "human.result.recorded", message: "User supplied the result for \(stepID)", now: now())
+    try commit(value)
+  }
+
   private static func digest(_ content: String) -> String {
     SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()
   }
@@ -205,6 +339,7 @@ final class AgentWorkflowStore {
     do {
       try write(value, url(value.run.id))
       records[value.run.id] = value
+      didChange?(value.run.id)
     } catch {
       fenced.insert(value.run.id)
       issues.append("\(value.run.id): storage unavailable: \(error)")

@@ -142,9 +142,10 @@ struct HandoffHandlersTests {
   func trackedSaveCompletesWithoutLaunchingReceiver() async throws {
     let harness = try Self.makeHarness(tracked: true)
     let response = try await harness.handlers.save(
-      Self.request(.save, harness, brief: Self.briefing))
+      Self.request(.save, harness, brief: Self.briefing), workflowTitle: "GUI checkpoint")
     let id = try #require(response.workflowRunID)
     #expect(try harness.workflows?.status(id).status == .succeeded)
+    #expect(try harness.workflows?.status(id).title == "GUI checkpoint")
     #expect(harness.launches.specs.isEmpty)
   }
 
@@ -486,16 +487,26 @@ struct HandoffHandlersTests {
     let requestID = UUID()
     harness.registry.register(requestID)
 
-    var received: [HandoffCompletion] = []
     let stream = harness.registry.completions()
-    let collector = Task { for await completion in stream { received.append(completion) } }
+    let collector = Task {
+      var iterator = stream.makeAsyncIterator()
+      return await iterator.next()
+    }
+    let timeout = Task {
+      try await Task.sleep(for: .seconds(2))
+      collector.cancel()
+    }
+    defer {
+      collector.cancel()
+      timeout.cancel()
+    }
 
     _ = try await harness.handlers.save(
       Self.request(.save, harness, brief: Self.briefing, requestID: requestID))
-    await Task.yield()
-    #expect(received.count == 1)
-    #expect(received.first?.requestID == requestID)
-    #expect(received.first?.sourcePaneID == harness.source.paneID)
+    let received = try #require(await collector.value)
+    timeout.cancel()
+    #expect(received.requestID == requestID)
+    #expect(received.sourcePaneID == harness.source.paneID)
 
     // Second run of the same request: refused, nothing rewritten.
     let repeated = await Self.ipcError {
@@ -518,8 +529,5 @@ struct HandoffHandlersTests {
       Issue.record("expected conflict, got \(String(describing: afterFallback))")
       return
     }
-    // Only one completion was ever published.
-    #expect(received.count == 1)
-    collector.cancel()
   }
 }

@@ -42,10 +42,11 @@ final class HandoffHandlers {
   typealias ScreenReader = @MainActor (PaneID) -> String?
   typealias RepoStateCollector = @Sendable (URL) async -> HandoffRepoState
   typealias Launcher = @MainActor (AgentLaunchSpec) async throws -> AgentLaunchOutcome
-  typealias KickoffTyper = @MainActor (
-    _ paneID: PaneID, _ agent: AgentKind, _ prompt: String,
-    _ canDispatch: @escaping @MainActor () -> Bool
-  ) async -> Bool
+  typealias KickoffTyper =
+    @MainActor (
+      _ paneID: PaneID, _ agent: AgentKind, _ prompt: String,
+      _ canDispatch: @escaping @MainActor () -> Bool
+    ) async -> Bool
 
   private let settings: SettingsStore
   private let resolveSource: SourceResolver
@@ -96,7 +97,7 @@ final class HandoffHandlers {
 
   /// `handoff.save` — a checkpoint: install the briefing (archiving the one
   /// it replaces) and refresh generated context. No receiver, no launch.
-  func save(_ request: IPC.HandoffRequest) async throws -> IPC.HandoffResponse {
+  func save(_ request: IPC.HandoffRequest, workflowTitle: String = "Handoff") async throws -> IPC.HandoffResponse {
     let source = try resolvedSource(request)
     let briefing = try preparedBriefing(request, command: "\(cli) handoff save --brief -")
     try authorize(request)
@@ -111,7 +112,7 @@ final class HandoffHandlers {
     let repo = await collectRepoState(coordinator.store.rootURL)
     let timestamp = now()
     let workflow = try prepareWorkflow(
-      request: request, source: source, briefing: briefing, repo: repo)
+      request: request, source: source, briefing: briefing, repo: repo, title: workflowTitle)
     let note = request.note
     let checkpoint: HandoffCoordinator.Checkpoint
     do {
@@ -156,7 +157,7 @@ final class HandoffHandlers {
   /// `handoff.to` — archive the outgoing round, install the briefing (or
   /// remove the stale one), refresh context, then launch the receiver in a
   /// background tab of the same worktree. The launch never focuses anything.
-  func to(_ request: IPC.HandoffRequest) async throws -> IPC.HandoffResponse {
+  func to(_ request: IPC.HandoffRequest, workflowTitle: String = "Handoff") async throws -> IPC.HandoffResponse {
     guard let token = request.receiver, let receiver = AgentKind(token: token) else {
       throw IPCError.invalidParams(
         message: "handoff to requires an agent; receivers: \(Self.receiverTokens)",
@@ -187,7 +188,7 @@ final class HandoffHandlers {
     let repo = await collectRepoState(coordinator.store.rootURL)
     let timestamp = now()
     let workflow = try prepareWorkflow(
-      request: request, source: source, briefing: briefing, repo: repo)
+      request: request, source: source, briefing: briefing, repo: repo, title: workflowTitle)
     let transition: HandoffCoordinator.Transition
     do {
       transition = try await Task.detached {
@@ -272,7 +273,7 @@ final class HandoffHandlers {
 
   private func prepareWorkflow(
     request: IPC.HandoffRequest, source: HandoffSource,
-    briefing: HandoffPreparedBriefing, repo: HandoffRepoState
+    briefing: HandoffPreparedBriefing, repo: HandoffRepoState, title: String
   ) throws -> WorkflowPacket? {
     guard let workflowStore else { return nil }
     let id = request.requestID ?? UUID()
@@ -288,7 +289,7 @@ final class HandoffHandlers {
       """
     let template: AgentWorkflowTemplate =
       request.action == .to && request.launch ? .handoff : .handoffSave
-    _ = try workflowStore.create(id: id, template: template, title: "Handoff", input: content)
+    _ = try workflowStore.create(id: id, template: template, title: title, input: content)
     let digest = try workflowStore.installPacket(
       id, content: content, sourcePaneID: source.paneID.description)
     try workflowStore.recordEvent(

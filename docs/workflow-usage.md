@@ -1,59 +1,87 @@
-# Workflow execution preview
+# Workflows
 
-Status: Initial implementation. Fixed serial templates and explicit delivery are available; the broader design remains in progress.
+Status: Initial implementation. The GUI can create and run fixed serial workflows. The broader dynamic workflow design remains in progress.
 
-Open **Workflows → Show Workflows** to inspect runs, steps, accepted results, storage errors, and the event history. CLI and UI use the same app-owned store. The running app must include this implementation; an older installed app does not expose these methods.
+## Create and inspect a workflow
 
-## Templates
+Open **Workflows → New Workflow…**, or choose **New Workflow** in the workflow window. **Workflows → Show Workflows…** opens existing runs. The running app must include this implementation; an older installed app does not provide these controls.
+
+1. Choose Advisor, Committee, Handoff, or Save Handoff.
+2. Enter a title and a question or handoff briefing.
+3. Select the workspace where the agents should work.
+4. For Advisor, choose one enabled profile. For Committee, choose the first and second reviewer profiles. Both selections may use the same profile; each assignment opens a separate tab.
+5. For Handoff, choose a source pane in the selected workspace and a receiving profile. Save Handoff requires a source pane and briefing but no receiving profile.
+6. Select **Start Workflow**. The form retains its content and creation identity on failure. After creation, the window selects the run.
+
+A bound assignment that is not claimed within ten minutes is marked as needing attention, without launching another Agent. Its original pane may still claim it later. The detail view shows the report or advice, dispatch status, steps, and event history. **Open Agent** locates the assigned pane. Storage and dispatch errors remain visible. A started agent, an idle terminal, and an accepted result are different facts.
+
+## Templates and results
 
 | Template | Steps | Result means |
 |---|---|---|
 | `handoff-save` | packet → export | Materials and compatibility files were saved |
 | `handoff` | packet → export → receive | The receiver acknowledged the immutable packet |
-| `advisor` | advice → disposition | Advice and the coordinator's decision were delivered |
-| `committee` | analysis-a / analysis-b → review-a / review-b → synthesis | Both reports, cross-reviews and synthesis were delivered |
+| `advisor` | advice → disposition | Advice was delivered and a decision was recorded |
+| `committee` | analysis-a / analysis-b → review-a / review-b → synthesis | Independent analyses, one cross-review per member, and synthesis were delivered |
 
-All templates run serially. Committee analysis order is flexible, but neither review is eligible until both analyses are accepted. There is exactly one cross-review per member. This version does not enforce semantic report schemas for Advisor/Committee; accepting a nonempty report records a delivery, not its correctness or consensus. Independent contexts and read-only execution must be arranged by the coordinator and underlying Agent runtime.
+### Advisor
 
-## Advisor example
+The GUI starts the advisor in a new background tab with the question and claim/delivery instructions. Its accepted advice appears directly in the detail view. Select **Adopt**, **Need more evidence**, or **Reject**, enter a reason, and choose **Record Decision**. This records the user's disposition without launching another agent. “Need more evidence” records that decision; it does not automatically create a follow-up investigation.
 
-Use `codans-dev` for a Debug build and `codans` for Release. The examples use the Release name. Run the commands from a Codans pane, or supply an explicit pane address.
+### Committee
+
+The runner executes the five steps serially, opening a new background tab for each assignment. Both initial analyses receive the same question without the other member's report. Cross-reviews receive both accepted analyses; synthesis receives the accepted reports and reviews. The second profile handles analysis-b and review-b; the primary profile handles the other steps.
+
+Separate tabs and prompts provide separate launched contexts. Read-only instructions remain an agent/runtime contract, not a filesystem sandbox. Nonempty accepted reports do not prove correctness or agreement; the synthesis is instructed to preserve unresolved disagreements.
+
+### Record an agent result manually
+
+If an agent answers in its pane but does not use the delivery protocol, open the eligible step and expand **Record Result Manually**. Review and paste the result, then choose **Record Result**. The app records a manual submission and can advance the workflow; this does not stop the external agent.
+
+This recovery is available only for Advisor's advice and eligible Committee steps. It cannot bypass handoff export, receiver acknowledgement, or Advisor's separate decision control. Errors preserve the entered text.
+
+## Handoff entry points
+
+The GUI uses the same Handoff handlers as `handoff save` and `handoff to`. Existing CLI entry points also create tracked runs and return `workflowRunID`; `--no-launch` uses `handoff-save`. They retain `.codans/handoff/` compatibility files while storing an immutable packet in the run. Later changes to shared `current.md` do not change that accepted packet.
+
+The briefing should preserve the objective, current state, completed work, constraints, failed attempts, evidence, and next steps. The receiver prompt contains the run ID, packet digest, and claim/delivery instructions. Its JSON receipt must contain the matching `packetDigest` and a nonempty `nextAction`. Only the bound receiver pane can claim this receipt in a handler-created handoff. Launch and kickoff submission alone do not complete the run.
+
+Acknowledging a packet does not authorize new worktree writes or complete the underlying task. The old writer must be handled and continuation authorized separately; writer reservations and ownership transfer are not implemented.
+
+## CLI and explicit assignments
+
+Use `codans-dev` for Debug and `codans` for Release. The CLI remains available for inspection and explicit claim/delivery. A plain CLI `workflow create` registers a template; unlike GUI creation with profiles, it does not configure automatic launching.
 
 ```bash
 codans workflow create --template advisor --title 'Review cancellation' \
-  --input 'Review the cancellation path. Do not modify source files. Return evidence, risks and unknowns.' --json
+  --input 'Review cancellation without modifying files. Return evidence, risks and unknowns.' --json
 codans workflow list --json
 ```
-
-Use the returned run ID with `workflow status`. An advisor claims `advice` from its own pane, does the work, and submits a result. Claiming records ownership; it does not launch an Agent or send instructions to another pane.
 
 ```text
 codans workflow status RUN_ID --json
 codans workflow claim RUN_ID --step advice --pane current --json
 codans workflow deliver RUN_ID --attempt ATTEMPT_ID --delivery-id DELIVERY_UUID --pane current --content -
+codans workflow cancel RUN_ID
 ```
 
-The final command reads the report from stdin. Keep the delivery UUID and exact content if retrying a lost acknowledgement. Reusing a delivery UUID with changed content is rejected. The coordinator then claims `disposition` and delivers what it adopted, rejected, or still needs to verify. `workflow cancel RUN_ID` prevents new work from being accepted; it does not kill an external Agent or roll back edits.
+`--content -` reads stdin. Retry a lost delivery acknowledgement using the same delivery UUID and identical content; changed content under the same UUID is rejected. Claiming a CLI-created step records its assignment; it does not itself launch an agent.
 
-## Existing Handoff entry points
+## Cancellation, persistence, and limits
 
-`handoff save` and `handoff to` now create tracked runs in the live app. They preserve the existing `.codans/handoff/` compatibility files and return `workflowRunID`. `--no-launch` uses `handoff-save`. The workflow stores an immutable packet so later changes to `current.md` cannot change its accepted input.
+**Cancel Workflow** stops subsequent dispatch and acceptance. It does not kill agent processes, close their tabs, or undo edits. Inspect any still-running agents before assigning replacement work.
 
-The receiver prompt contains the run ID, packet digest, and claim/delivery instructions. A receiver receipt is JSON containing `packetDigest` and a nonempty `nextAction`. The app only allows the bound receiver pane to claim the receipt step. Receiver creation and kickoff submission do not complete the run.
+Runs are atomic JSON snapshots under the channel-specific settings directory's `workflows/runs/`. They embed bounded input, deliveries, execution configuration, and events.
 
-A receipt does not grant permission to modify the worktree. The old writer must be handled and continuation authorized separately. This preview does not implement writer reservations or ownership transfer. Starting a receiver whose runtime cannot preserve the no-write instruction is outside this guarantee.
+- Title: 512 UTF-8 bytes; initial input: 64 KiB; each delivery/packet: 32 KiB; encoded snapshot: 256 KiB.
+- CLI list returns the newest 50 snapshots; status reads a known run.
+- Acceptance is acknowledged after persistence. Write failure fences further execution and surfaces a storage issue.
+- Restart marks unfinished runs `interrupted`; it does not replay assignments. External agent processes may remain active.
+- Accepted material survives cancellation/interruption. There is no automatic retry or restart-resume.
+- Unreadable records remain visible as storage issues rather than becoming empty runs; CLI list also reports storage issues.
 
-## Persistence and limits
+## Remaining scope and verification
 
-Each run is an atomic JSON snapshot under the channel-specific settings directory's `workflows/runs/`. The snapshot currently embeds bounded input, delivery text and events. Separate artifact storage, WorkItem records and dynamic plan revisions are not implemented in this slice.
+Dynamic plan transactions, structured semantic report validation, follow-up stages, scoped worker credentials, writer admission, general Human decision nodes, partial-result completion, parallel scheduling, separate immutable artifact storage, and independent WorkItem acceptance remain future work. The existing Advisor decision form is a concrete supported operation, not a general Human-node engine.
 
-- Title: at most 512 UTF-8 bytes; initial input: 64 KiB; individual delivery/packet: 32 KiB.
-- Encoded run snapshot: 256 KiB. `workflow list` returns the newest 50 complete snapshots; `status` reads a known run.
-- A delivery is acknowledged only after the updated snapshot is saved. A failed write fences further execution in the current process and displays a storage issue.
-- Restart changes running records to `interrupted`; no work is automatically replayed. Existing external processes may still be active.
-- Cancel and interruption preserve accepted material. There is no retry/resume command in this preview.
-- UI exposes unreadable records as storage issues; it does not replace them with empty runs. CLI list reports storage issues instead of silently presenting a complete-looking list.
-
-## Remaining design work
-
-Dynamic plan transactions, structured Advisor/Committee report contracts, follow-up stages, automatic Agent dispatch, capabilities and attempt credentials, independent-context enforcement, writer admission, Human decisions, partial-result completion, parallelism, separate immutable artifacts, and WorkItem acceptance remain unimplemented. See [implementation plan](workflow-implementation-plan.md) and [scenario contracts](design-docs/workflow-use-cases.md).
+GUI creation, automatic dispatch, manual result recovery, and the updated Handoff path still require this iteration's build, targeted tests, and interactive acceptance. See [implementation plan](workflow-implementation-plan.md) and [scenario contracts](design-docs/workflow-use-cases.md).

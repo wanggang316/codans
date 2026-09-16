@@ -1,51 +1,40 @@
 # Workflow implementation plan
 
-Status: First executable slice implemented and tested; broader design in progress. Authorized on 2026-09-16. No commits or publication requested.
+Status: Initial implementation with GUI creation and fixed serial dispatch. Build, targeted regression tests, and a real Advisor dispatch/delivery smoke test have passed. Authorized on 2026-09-16; commit verified assistant changes without pushing.
 
-## First executable slice
+## Implemented scope
 
-Build the common serial execution protocol against Handoff, Advisor, and Committee. Use fixed, versioned built-in plans before exposing dynamic plan mutation. Keep the existing Handoff CLI/UI entry points. A receiver launch is not an accepted delivery.
+The current slice builds a shared execution protocol for Handoff, Advisor, and Committee using fixed built-in templates. It does not implement the full dynamic-plan architecture.
 
-1. Core: typed runs, dependencies, attempts, idempotent deliveries, cancellation, interruption, and deterministic scenario tests. Use `AgentWorkflowRun` to avoid the existing GitHub Actions `WorkflowRun` name.
-2. Persistence: single app-owned store, atomic per-run snapshots, bounded content, durable acceptance before response, restart interruption, visible load/write errors.
-3. IPC/CLI: create/list/status/claim/deliver/cancel, shared wire types, validated identifiers and standard output conventions.
-4. Handoff: persist an execution intent before material writes/launch, retain immutable packet content, expose run identity, require explicit receiver receipt. Preserve existing exports as compatibility outputs.
-5. UI: run list, steps, accepted outputs and event timeline, visible errors and cancellation, shared with CLI state.
-6. Verification: Core scenario tests, store fault/restart tests, IPC integration checks, existing Handoff regressions, app/CLI build and changed-file lint.
+1. **Core:** typed runs, step dependencies, attempts, idempotent deliveries, cancellation, and interruption. `AgentWorkflowRun` avoids the existing GitHub Actions `WorkflowRun` name.
+2. **Persistence:** app-owned store, bounded atomic snapshots, persistence before acknowledgement, execution configuration and dispatch records, visible load/write errors, and interruption on restart.
+3. **IPC/CLI:** create/list/status/claim/deliver/cancel with shared wire types. Plain CLI creation remains explicit pull/claim; GUI-created Advisor/Committee runs additionally configure the runner.
+4. **GUI creation:** Workflows → New Workflow and Show Workflows; title, multiline question/briefing, workspace selection, enabled agent profiles, Committee's second profile, and Handoff's source pane. Creation retains its command identity on failure and selects the resulting run on success.
+5. **Advisor/Committee dispatch:** automatically launch each eligible agent step in a new background tab, serially. Prompts include explicit claim/delivery instructions. Initial Committee analyses do not include each other's report; cross-review and synthesis receive the accepted dependencies. Dispatch uncertainty is recorded rather than automatically retried.
+6. **User decisions and recovery:** Advisor's Adopt / Need more evidence / Reject controls record a reason without launching another agent. Eligible Advisor advice and Committee steps also support explicitly manual result recording. Export, receive, and disposition are excluded from that recovery route.
+7. **Handoff:** GUI and existing CLI/UI entry points share handlers. Packet persistence precedes export; export acceptance follows the actual compatibility-file write. Receiver acknowledgement uses the immutable packet digest and bound pane. Handoff launch does not imply receiver acceptance or permission to edit.
+8. **Run UI:** reports, advice, dispatch/waiting state, agent navigation, step details, events, visible errors, and cancellation share the same store as CLI operations.
 
 ## Deliberate boundaries
 
-This slice uses pull/claim for generic Agent steps and fixed serial plans. Dynamic revisions, automated heterogeneous terminal dispatch, coordinator transfer, retries, parallel scheduling, separate WorkItem acceptance, and writer ownership transfer remain follow-up work. No terminal-idle completion inference or automatic replay. Handoff receipt confirms materials only, and does not authorize new writes.
+All templates are serial, including Committee. Each automatic agent step starts a fresh tab; profile selection may be shared across roles. Read-only prompts are not a filesystem sandbox and nonempty reports are not semantic verification.
 
-Do not label the full architecture or all WF/HC/AC/CC acceptance criteria complete on the strength of this slice. Record actual commands, results, and remaining integration limits before delivery.
+The Advisor decision form is implemented; a general Human-node system is not. Recording “Need more evidence” does not schedule additional work. Manual result entry records the user's submission and can advance dependencies, but does not stop the original agent.
+
+Cancellation stops scheduling and further acceptance, not processes or file changes. Unfinished runs become interrupted after restart, without automatic replay; existing agents may still run. Dynamic plan edits, scoped attempt credentials, automatic retry/resume, coordinator transfer, parallel scheduling, separate WorkItem acceptance, and writer ownership transfer remain future work.
+
+Do not label the full architecture or all WF/HC/AC/CC acceptance criteria complete based on this slice.
 
 ## Verification on 2026-09-16
 
-First executable slice implemented; the full architecture remains in progress. Production Handoff entry points use the shared store; Advisor/Committee currently use explicit CLI claim/delivery. Snapshot text is bounded and embedded rather than stored in a separate ArtifactStore.
+- App Debug and CLI Debug builds passed with Xcode 26.0.1.
+- 48 tests passed across AgentWorkflowStoreTests, AgentWorkflowRunnerTests, WorkflowRouterTests, HandoffHandlersTests, and HandoffFeatureTests. This covers the five-stage Committee sequence with injected launchers, input isolation, cancellation, failed writes, manual results, idempotent claims, and unclaimed-dispatch timeout.
+- Interactive New Workflow menu and form verified: workspace/profile selection, disabled empty submission, creation, run selection, dispatch history, and Open Agent navigation.
+- A real Claude Code Advisor launched from the GUI in an empty temporary workspace, claimed its bound step, and submitted an accepted report through the bundled CLI. The run correctly waited for the human disposition. The run ID is `865074D9-BA7E-4804-BD4F-0D6F5BED22C9`.
+- The computer-use bridge then returned `native pipe closed before response`; completing the disposition form interactively could not be verified. Its store transition is covered by tests. Full live Committee and Handoff GUI runs have not been exercised in this update; do not equate injected-launch tests with third-party Agent compliance.
+- `make mac-check` ran. It reported existing repository-wide lint failures; unrelated formatter changes were reverted after byte-for-byte checks. Changed-file lint and `git diff --check` passed. The final 18-test Handoff regression suite also passed after preserving GUI titles and replacing a scheduler-dependent test wait with a bounded receipt wait.
+- Logs and snapshots: `/tmp/codans-workflow-build` on the development machine. The previous slice's Core and Release CLI checks are historical evidence, not reruns of this update.
 
-Executed from `apps/mac` with Xcode 26.0.1:
+## Follow-up sequence
 
-```bash
-xcodebuild -workspace codans.xcworkspace -scheme Codans -configuration Debug CODE_SIGNING_ALLOWED=NO build
-xcodebuild -workspace codans.xcworkspace -scheme codans-cli -configuration Debug CODE_SIGNING_ALLOWED=NO build
-xcodebuild -workspace codans.xcworkspace -scheme codans-cli -configuration Release CODE_SIGNING_ALLOWED=NO build
-xcodebuild test -workspace codans.xcworkspace -scheme CodansCore -configuration Debug \
-  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
-  -only-testing:CodansCoreTests/AgentWorkflowRunTests
-xcodebuild test -workspace codans.xcworkspace -scheme Codans -configuration Debug \
-  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
-  -only-testing:CodansTests/AgentWorkflowStoreTests \
-  -only-testing:CodansTests/WorkflowRouterTests \
-  -only-testing:CodansTests/HandoffHandlersTests \
-  -only-testing:CodansTests/HandoffFeatureTests
-```
-
-- App and both CLI builds passed.
-- Workflow Core: 7 tests passed; App targeted tests: 33 tests in 4 suites passed.
-- CLI help for the root, workflow group and six subcommands passed. Release shell completions regenerated.
-- Changed-file lint reports two findings in unchanged functions: RootFeature shortcut grouping complexity and MethodRouter's existing async project router without await. No new-file findings remain.
-- Full Core run: 622 tests, 4 issues in ShortcutSchemaAuditTests and TabIconTests. Those files were not changed by this work; the full suite is not green.
-- Documentation links and `git diff --check` passed.
-- Logs are under `/tmp/codans-workflow-build` on the development machine. No live external Agent handoff or interactive UI acceptance was performed; fake launchers and the actual app test host exercised the integration.
-
-Next slice: formal report schemas and read contracts, dynamic plan revision/attempt credentials, writer admission and continuation authorization. Parallel scheduling remains after the serial contracts are complete. Do not mark all design acceptance criteria complete based on the checks above.
+First complete acceptance of the GUI-driven serial scenarios. Then add formal report/read contracts and better recovery based on observed failures. Dynamic plan revisions and scoped credentials require a separate execution contract. Writer admission and continuation authorization must precede automatic editing workflows. Add parallel scheduling only after serial cancellation, persistence, and delivery boundaries are verified.

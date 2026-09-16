@@ -172,6 +172,10 @@ struct CodansApp: App {
         hierarchyManager: appState.hierarchyManager
       )
       CommandMenu("Workflows") {
+        Button("New Workflow…") {
+          appState.workflowCreationRequest = UUID()
+          openWindow(id: "workflows")
+        }
         Button("Show Workflows…") { openWindow(id: "workflows") }
       }
       CommandGroup(replacing: .appSettings) {
@@ -185,8 +189,23 @@ struct CodansApp: App {
     }
 
     Window("Workflows", id: "workflows") {
-      WorkflowRunsView(store: appState.workflowStore)
-        .frame(minWidth: 760, minHeight: 500)
+      WorkflowRunsView(
+        store: appState.workflowStore,
+        workspaces: appState.workflowWorkspaces,
+        profiles: appState.settingsStore.settings.agents.enabledProfiles,
+        panes: appState.workflowPanes,
+        defaultWorkspaceID: appState.workflowDefaultWorkspace,
+        creationRequest: appState.workflowCreationRequest,
+        onCreate: { try await appState.createWorkflow($0) },
+        onOpenPane: { value in
+          guard let uuid = UUID(uuidString: value) else { return }
+          openWindow(id: Self.mainWindowID)
+          appState.store?.send(.agentState(.rowTapped(PaneID(raw: uuid))))
+        },
+        onDisposition: { try appState.workflowStore.decide($0, content: $1) },
+        onRecordResult: { try appState.workflowStore.recordResult(id: $0, stepID: $1, content: $2) }
+      )
+      .frame(minWidth: 760, minHeight: 500)
     }
 
     Window("Settings", id: CodansApp.settingsWindowID) {
@@ -493,6 +512,9 @@ final class AppState {
   /// and the in-app Hand Off panel (registers / observes).
   let handoffRegistry = HandoffRequestRegistry()
   let workflowStore = AgentWorkflowStore.live()
+  var workflowCreationRequest: UUID?
+  @ObservationIgnored private var workflowRunner: AgentWorkflowRunner?
+  @ObservationIgnored private var workflowHandoffHandlers: HandoffHandlers?
   /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.config/codans/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
@@ -835,6 +857,19 @@ final class AppState {
       hierarchy: manager, hierarchyClient: hierarchy,
       settingsStore: settings, engine: engine, gitClient: routedGitClient
     )
+    workflowHandoffHandlers = handoffHandlers
+    let runner = AgentWorkflowRunner(
+      store: workflowStore,
+      launch: { try await hierarchy.launchAgent($0) },
+      sendPrompt: { [weak self, weak engine] paneID, kind, prompt, canDispatch in
+        guard let engine, let agentState = self?.agentStateStore else { return false }
+        return await Self.typeKickoffOnceAgentIsUp(
+          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState,
+          engine: engine, canDispatch: canDispatch)
+      },
+      cli: Self.cliInvocation())
+    workflowRunner = runner
+    workflowStore.didChange = { [weak runner] id in runner?.advance(id) }
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
@@ -1194,6 +1229,86 @@ final class AppState {
     }
   }
 
+  var workflowWorkspaces: [WorkflowWorkspaceChoice] {
+    hierarchyManager.catalog.projects.filter { !$0.isRemote }.flatMap { project in
+      project.worktrees.filter { !$0.archived }.map {
+        WorkflowWorkspaceChoice(id: $0.id, projectID: project.id, title: "\(project.name) · \($0.name)")
+      }
+    }
+  }
+
+  var workflowDefaultWorkspace: WorktreeID? {
+    let catalog = hierarchyManager.catalog
+    return catalog.projects.first { $0.id == catalog.selectedProjectID }?.selectedWorktreeID
+  }
+
+  var workflowPanes: [WorkflowPaneChoice] {
+    hierarchyManager.catalog.projects.filter { !$0.isRemote }.flatMap { project in
+      project.worktrees.filter { !$0.archived }.flatMap { worktree in
+        worktree.tabs.flatMap { tab in
+          tab.panes.map { pane in
+            WorkflowPaneChoice(
+              id: pane.id,
+              title: "\(tab.cachedDisplayTitle ?? tab.name ?? "Terminal") · \(pane.id.description.prefix(8))",
+              worktreeID: worktree.id)
+          }
+        }
+      }
+    }
+  }
+
+  func createWorkflow(_ draft: WorkflowCreateDraft) async throws -> UUID {
+    guard let workspace = workflowWorkspaces.first(where: { $0.id == draft.workspaceID }) else {
+      throw IPCError.invalidParams(message: "The selected local workspace is no longer available.", path: nil)
+    }
+    let profiles = settingsStore.settings.agents.enabledProfiles
+    let primary = profiles.first { $0.id == draft.primaryProfileID }
+    let secondary = profiles.first { $0.id == draft.secondaryProfileID }
+    if draft.template == .advisor || draft.template == .committee {
+      guard let runner = workflowRunner, let primary else { throw WorkflowCreationError.unavailable }
+      return try runner.start(
+        id: draft.commandID, template: draft.template, title: draft.title, input: draft.input,
+        projectID: workspace.projectID, worktreeID: workspace.id, primary: primary, secondary: secondary)
+    }
+    // Retrying a completed or uncertain handoff must never launch another receiver.
+    if workflowStore.records[draft.commandID] != nil { return draft.commandID }
+    guard let handlers = workflowHandoffHandlers, let paneID = draft.sourcePaneID,
+      workflowPanes.contains(where: { $0.id == paneID && $0.worktreeID == workspace.id })
+    else { throw IPCError.invalidParams(message: "Choose an available source pane in this workspace.", path: nil) }
+    if draft.template == .handoff && primary == nil { throw WorkflowCreationError.unavailable }
+    let brief = """
+      # Handoff
+
+      ## Objective
+      \(draft.title)
+
+      ## Current State
+      \(draft.input)
+
+      ## Next Steps
+      Read the briefing, verify the current workspace state, and acknowledge the next concrete action.
+      """
+    handoffRegistry.register(draft.commandID)
+    let request = IPC.HandoffRequest(
+      action: draft.template == .handoffSave ? .save : .to, paneID: paneID,
+      receiver: primary?.kind.rawValue, profile: primary?.id.uuidString,
+      brief: brief, requestID: draft.commandID, target: .newTab)
+    do {
+      let response =
+        try await
+        (draft.template == .handoffSave
+        ? handlers.save(request, workflowTitle: draft.title) : handlers.to(request, workflowTitle: draft.title))
+      guard let id = response.workflowRunID else { throw WorkflowCreationError.unavailable }
+      return id
+    } catch {
+      if workflowStore.records[draft.commandID] != nil {
+        try? workflowStore.recordEvent(draft.commandID, type: "creation.failed", message: error.localizedDescription)
+        return draft.commandID
+      }
+      throw error
+    }
+  }
+
   /// Handoff transition core wired to the live runtime: pane → source
   /// through the catalog + `AgentStateStore`, screen text straight off the
   /// pane's surface, git facts through the SSH-routed git client, and the
@@ -1285,13 +1400,15 @@ final class AppState {
       }
     }
     guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
-      engine.ghosttyRuntime?.surface(for: paneID) === surface else { return false }
+      engine.ghosttyRuntime?.surface(for: paneID) === surface
+    else { return false }
     surface.sendInput(prompt)
     let marker = String(prompt.prefix(19))
     for _ in 0..<12 {
       try? await Task.sleep(for: .milliseconds(250))
       guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
-        engine.ghosttyRuntime?.surface(for: paneID) === surface else { return false }
+        engine.ghosttyRuntime?.surface(for: paneID) === surface
+      else { return false }
       guard let screen = surface.readText(.active) else { continue }
       if screen.contains(marker) || screen.contains("Pasted") {
         // CR is what TUIs read as Enter; LF only breaks the line.
@@ -1300,7 +1417,8 @@ final class AppState {
       }
     }
     logger.error(
-      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted")
+      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted"
+    )
     return false
   }
 
