@@ -6,106 +6,108 @@ struct WorkflowRunDetailViewV2: View {
   let run: WorkflowRunV2
   let service: WorkflowServiceV2
   let onOpenPane: (String) -> Void
-  @State private var section = "Steps"
   @State private var error: String?
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          Text(run.title).font(.title2)
-          HStack {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 7) {
+          Text(run.title).font(.system(size: 15, weight: .semibold)).textSelection(.enabled)
+          HStack(spacing: 8) {
             Text(run.definition.name).foregroundStyle(.secondary)
             WorkflowStatusViewV2(status: run.status)
-          }
-          Text(run.createdAt, format: .dateTime.year().month().day().hour().minute()).font(.caption)
+          }.font(.system(size: 11))
+          Text(run.createdAt, format: .dateTime.month().day().hour().minute())
+            .font(.system(size: 10)).foregroundStyle(.tertiary)
         }
-        Spacer()
-        if run.status == "running" || run.status == "waiting" {
-          Button("Cancel Run", role: .destructive) {
-            do { try service.cancel(run.id) } catch { self.error = error.localizedDescription }
-          }.accessibilityLabel("Cancel Workflow Run")
-        }
-      }
-      if let error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
-      Picker("Run detail", selection: $section) {
-        Text("Steps").tag("Steps")
-        Text("Inputs & Results").tag("Results")
-        Text("History").tag("History")
-        Text("Frozen YAML").tag("Source")
-      }.pickerStyle(.segmented).labelsHidden()
-      if section == "Results" {
-        resultsForm
-      } else {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 16) {
-            switch section {
-            case "Steps":
-              ForEach(run.definition.nodeIDs, id: \.self) { id in
-                if let definition = run.definition.nodes[id], let node = run.nodes[id] {
-                  WorkflowNodeDetailViewV2(
-                    runID: run.id, nodeID: id, definition: definition, node: node,
-                    service: service, onOpenPane: onOpenPane)
-                }
-              }
-            case "History":
-              ForEach(run.events, id: \.id) { event in
-                VStack(alignment: .leading, spacing: 4) {
-                  HStack {
-                    Text("#\(event.sequence) · \(event.type)").font(.headline)
-                    Spacer()
-                    Text(event.date, format: .dateTime.hour().minute().second()).font(.caption)
-                  }
-                  if let node = event.nodeID {
-                    Text(node).font(.caption).foregroundStyle(.secondary)
-                  }
-                  Text(event.message).textSelection(.enabled)
-                }
-                Divider()
-              }
-            default:
-              Button("Copy Frozen YAML") { WorkflowUIFormatV2.copy(run.source) }
-              Text("This exact definition was saved when the run started.").foregroundStyle(
-                .secondary)
-              Text(run.source).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+        Spacer(minLength: 0)
+        Menu {
+          Button("Copy Run ID") { WorkflowUIFormatV2.copy(run.id.uuidString) }
+          Button("Copy Frozen YAML") { WorkflowUIFormatV2.copy(run.source) }
+          if run.status == "running" || run.status == "waiting" {
+            Divider()
+            Button("Cancel Run", role: .destructive) {
+              do { try service.cancel(run.id) } catch { self.error = error.localizedDescription }
             }
-          }.frame(maxWidth: .infinity, alignment: .leading)
+          }
+        } label: {
+          Image(systemName: "ellipsis")
         }
-      }
-      Text(run.id.uuidString).font(.caption2).foregroundStyle(.tertiary).textSelection(.enabled)
-    }.padding(20)
-  }
-
-  private var resultsForm: some View {
-    Form {
-      jsonSection("Run Inputs", value: .object(run.inputs))
-      jsonSection("Run Outputs", value: .object(run.outputs))
-      Section("Participants") {
-        VStack(alignment: .leading, spacing: 12) {
-          ForEach(run.bindings.keys.sorted(), id: \.self) { key in
-            if let binding = run.bindings[key] {
-              HStack {
-                Text(run.definition.roles[key]?.label ?? key)
-                Text(binding.profile?.displayName ?? binding.source).foregroundStyle(.secondary)
-                Spacer()
-                if let pane = binding.paneID {
-                  Button("Open Agent") { onOpenPane(pane.raw.uuidString) }
-                }
+        .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Run Actions")
+      }.padding(20)
+      Divider()
+      ScrollView {
+        VStack(alignment: .leading, spacing: 18) {
+          if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+          VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("Execution")
+            ForEach(run.definition.nodeIDs, id: \.self) { id in
+              if let definition = run.definition.nodes[id], let node = run.nodes[id] {
+                WorkflowNodeDetailViewV2(
+                  runID: run.id, nodeID: id, definition: definition, node: node,
+                  service: service, onOpenPane: onOpenPane)
               }
             }
           }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+          Divider()
+          VStack(alignment: .leading, spacing: 14) {
+            if !run.outputs.isEmpty {
+              DisclosureGroup("Results") { WorkflowValuesViewV2(values: run.outputs) }
+            }
+            if !run.inputs.isEmpty {
+              DisclosureGroup("Inputs") { WorkflowValuesViewV2(values: run.inputs) }
+            }
+            if !run.bindings.isEmpty {
+              DisclosureGroup("Participants") {
+                VStack(spacing: 10) {
+                  ForEach(run.bindings.keys.sorted(), id: \.self) { key in
+                    if let binding = run.bindings[key] {
+                      HStack {
+                        Text(run.definition.roles[key]?.label ?? key)
+                        Text(binding.profile?.displayName ?? binding.source).foregroundStyle(.secondary)
+                        Spacer()
+                        if let pane = binding.paneID {
+                          Button("Open Agent") { onOpenPane(pane.raw.uuidString) }
+                        }
+                      }
+                    }
+                  }
+                }.padding(.top, 8)
+              }
+            }
+            DisclosureGroup("Activity · \(run.events.count)") {
+              VStack(alignment: .leading, spacing: 12) {
+                ForEach(run.events, id: \.id) { event in
+                  HStack(alignment: .top, spacing: 12) {
+                    Text(event.date, format: .dateTime.hour().minute().second())
+                      .monospacedDigit().foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 3) {
+                      Text(event.type).foregroundStyle(.secondary)
+                      Text(event.message).textSelection(.enabled)
+                    }
+                  }.font(.system(size: 11))
+                }
+              }.padding(.top, 8)
+            }
+            DisclosureGroup("Workflow YAML") {
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Text("Definition saved when this run started.").foregroundStyle(.secondary)
+                  Spacer()
+                  Button("Copy") { WorkflowUIFormatV2.copy(run.source) }
+                }
+                Text(run.source).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+              }.padding(.top, 8)
+            }
+          }.font(.system(size: 11)).tint(.secondary)
+        }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
       }
-    }.formStyle(.grouped)
+    }.font(.system(size: 12)).controlSize(.small)
   }
 
-  private func jsonSection(_ title: String, value: JSONValue) -> some View {
-    Section(title) {
-      Text(WorkflowUIFormatV2.json(value)).font(.system(.body, design: .monospaced)).textSelection(
-        .enabled
-      )
-      .frame(maxWidth: .infinity, alignment: .leading).padding(8)
-    }
+  private func sectionLabel(_ title: String) -> some View {
+    Text(title).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+      .padding(.bottom, 4)
   }
 }
 
@@ -117,10 +119,14 @@ private struct WorkflowNodeDetailViewV2: View {
   let node: WorkflowNodeRunV2
   let service: WorkflowServiceV2
   let onOpenPane: (String) -> Void
-  @State private var expanded = true
+  @State private var expanded = false
   @State private var decision = ""
   @State private var reason = ""
   @State private var error: String?
+
+  private var needsDecision: Bool {
+    definition.uses == "codans/human.decide@v1" && node.status == "waiting"
+  }
 
   private var options: [String] {
     guard case .array(let values) = node.inputs["options"] else { return [] }
@@ -131,70 +137,98 @@ private struct WorkflowNodeDetailViewV2: View {
   }
 
   var body: some View {
-    GroupBox {
-      DisclosureGroup(isExpanded: $expanded) {
-        VStack(alignment: .leading, spacing: 12) {
-          if let pane = node.paneID {
-            Button("Open Agent") { onOpenPane(pane) }.accessibilityLabel("Open Agent for \(nodeID)")
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 8) {
+        WorkflowStatusViewV2(status: node.status, showLabel: false)
+        Button {
+          expanded.toggle()
+        } label: {
+          HStack {
+            Text(definition.title ?? nodeID).font(.system(size: 12, weight: .medium))
+            Spacer(minLength: 8)
+            Text(WorkflowRunPresentationV2.status(node.status))
+              .font(.system(size: 10)).foregroundStyle(.secondary)
+            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+              .font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
+          }.contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel("Details for \(nodeID)")
+          .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+        if let pane = node.paneID {
+          Button {
+            onOpenPane(pane)
+          } label: {
+            Image(systemName: "terminal")
           }
-          if let error = error ?? node.error {
-            Text(error).foregroundStyle(.orange).textSelection(.enabled)
-          }
-          if definition.uses == "codans/human.decide@v1", node.status == "waiting" {
-            decisionForm
-          }
-          if !node.outputs.isEmpty {
-            DisclosureGroup("Result") { json(.object(node.outputs)) }
-          }
-          DisclosureGroup("Technical Details") {
-            Text(definition.uses).font(.caption).textSelection(.enabled)
-            if !node.inputs.isEmpty { json(.object(node.inputs)) }
-            if let attempt = node.attemptID {
-              Text("Attempt: \(attempt.uuidString)").font(.caption2).textSelection(.enabled)
-            }
-          }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 10)
-      } label: {
-        HStack {
-          Text(definition.title ?? nodeID).font(.headline)
-          Spacer()
-          WorkflowStatusViewV2(status: node.status)
+          .buttonStyle(.plain).foregroundStyle(.secondary)
+          .help("Open Agent").accessibilityLabel("Open Agent for \(nodeID)")
         }
+      }.padding(.vertical, 10)
+      if let error = error ?? node.error {
+        Text(error).font(.system(size: 11)).foregroundStyle(.red).textSelection(.enabled)
+          .padding(.leading, 20).padding(.bottom, 10)
       }
+      if needsDecision {
+        decisionForm.padding(.leading, 20).padding(.bottom, 12)
+      }
+      if expanded {
+        VStack(alignment: .leading, spacing: 10) {
+          Text(definition.uses).font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(.secondary).textSelection(.enabled)
+          if !node.outputs.isEmpty {
+            Text("Result").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            WorkflowValuesViewV2(values: node.outputs)
+          }
+          if !node.inputs.isEmpty {
+            Text("Inputs").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            WorkflowValuesViewV2(values: node.inputs)
+          }
+          if let attempt = node.attemptID {
+            Text("Attempt: \(attempt.uuidString)").font(.system(size: 9, design: .monospaced))
+              .foregroundStyle(.tertiary).textSelection(.enabled)
+          }
+        }.padding(.leading, 20).padding(.bottom, 12)
+      }
+      Divider().opacity(0.5)
     }
   }
 
   private var decisionForm: some View {
     VStack(alignment: .leading, spacing: 10) {
-      if case .string(let question) = node.inputs["question"] { Text(question).font(.headline) }
+      if case .string(let question) = node.inputs["question"] {
+        Text(question).font(.system(size: 12, weight: .medium))
+      }
       if let evidence = node.inputs["evidence"] {
-        if case .string(let text) = evidence {
-          Text(text).textSelection(.enabled)
-        } else {
-          json(evidence)
-        }
+        Text(evidence.v2Text).font(.system(size: 11)).textSelection(.enabled)
       }
       Picker("Decision", selection: $decision) {
         Text("Choose a decision").tag("")
         ForEach(options, id: \.self) { Text($0).tag($0) }
       }.accessibilityLabel("Decision for \(nodeID)")
       TextField("Reason (required)", text: $reason, axis: .vertical).lineLimit(2...6)
-        .accessibilityLabel("Decision Reason for \(nodeID)")
+        .textFieldStyle(.roundedBorder).accessibilityLabel("Decision Reason for \(nodeID)")
       Button("Submit Decision") {
         do {
           try service.decide(id: runID, nodeID: nodeID, decision: decision, reason: reason)
-        } catch {
-          self.error = error.localizedDescription
-        }
+        } catch { self.error = error.localizedDescription }
       }.disabled(decision.isEmpty || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         .accessibilityLabel("Submit Decision for \(nodeID)")
     }
   }
+}
 
-  private func json(_ value: JSONValue) -> some View {
-    Text(WorkflowUIFormatV2.json(value)).font(.system(.body, design: .monospaced)).textSelection(
-      .enabled
-    )
-    .frame(maxWidth: .infinity, alignment: .leading)
+private struct WorkflowValuesViewV2: View {
+  let values: [String: JSONValue]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      ForEach(values.keys.sorted(), id: \.self) { key in
+        if let value = values[key] {
+          VStack(alignment: .leading, spacing: 4) {
+            Text(key).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(value.v2Text).font(.system(size: 11)).textSelection(.enabled)
+          }
+        }
+      }
+    }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
   }
 }

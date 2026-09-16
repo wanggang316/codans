@@ -278,3 +278,31 @@ Pi submission/completion through the GUI.
   reports BUILD SUCCEEDED. GUI restart confirmed both cases remain Completed;
   the two-column popover opens to the left with an opaque system background so
   terminal text cannot wash out state indicators or cover the detail content.
+
+## Compact history inspector
+
+Replace the four detail tabs and oversized node cards with one reading order:
+run identity, execution steps, then optional results, inputs, participants,
+activity and frozen YAML. Preserve the two-column list/detail layout and keep
+launch separate from inspection. Completed node details are collapsed; human
+decision forms and failures remain visible without expansion. Use system fonts
+at 10–15 points, restrained selection, and status-only color. Dismiss through
+the native popover or Escape; run actions live in a small menu.
+
+Acceptance: build and focused lint; inspect completed and failed real runs;
+expand a node, activity and YAML; complete a new human-decision run through GUI
+and verify launch does not open history.
+
+Verified in the rebuilt development app:
+
+- `GUI Compact History Decision` launched without a history popover. Opening
+  history showed the inline decision form; selecting adopt and submitting a
+  reason changed the row and detail to Completed.
+- Existing `GUI Pi Paste Submission` displayed four compact nodes. Expanding
+  verification exposed its accepted output and resolved inputs. Activity and
+  frozen YAML expanded in place with the left list still visible.
+- The existing failed Handoff displayed its submission error without expansion.
+  Escape dismissed the popover. No existing Agent draft was submitted.
+- `refined-history.log` reports BUILD SUCCEEDED; focused SwiftLint and
+  `git diff --check` passed. This change modifies presentation only; verification
+  exercised real stored runs and a new GUI decision instead of synthetic tests.

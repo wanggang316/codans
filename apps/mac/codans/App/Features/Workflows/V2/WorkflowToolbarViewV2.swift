@@ -95,14 +95,8 @@ struct WorkflowToolbarViewV2: View {
 
   private var historyPanel: some View {
     VStack(spacing: 0) {
-      HStack {
-        Text("Workflow History").font(.headline)
-        Spacer()
-        Button("Close") { showingHistory = false }
-      }.padding(12)
-      Divider()
       HStack(spacing: 0) {
-        historyList.frame(width: 250)
+        historyList.frame(width: 220)
         Divider()
         if let run = appState.workflowServiceV2.runs.first(where: { $0.id == selectedHistoryID })
           ?? appState.workflowServiceV2.runs.first
@@ -117,37 +111,53 @@ struct WorkflowToolbarViewV2: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
-    }.frame(width: 900, height: 580)
+    }.frame(width: 860, height: 560)
+      .font(.system(size: 12))
+      .controlSize(.small)
+      .onExitCommand { showingHistory = false }
       .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private var historyList: some View {
-    ScrollView {
-      LazyVStack(spacing: 0) {
-        ForEach(appState.workflowServiceV2.runs) { run in
-          let selected = run.id == (selectedHistoryID ?? appState.workflowServiceV2.runs.first?.id)
-          Button {
-            historyPinned = true
-            selectedHistoryID = run.id
-          } label: {
-            VStack(alignment: .leading, spacing: 6) {
-              Text(run.title).font(.headline).lineLimit(2)
-              WorkflowStatusViewV2(status: run.status)
-              Text(run.createdAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 0) {
+      HStack {
+        Text("Workflow History").font(.system(size: 12, weight: .semibold))
+        Spacer()
+        Text("\(appState.workflowServiceV2.runs.count)").foregroundStyle(.tertiary)
+      }.padding(14)
+      ScrollView {
+        LazyVStack(spacing: 3) {
+          ForEach(appState.workflowServiceV2.runs) { run in
+            let selected = run.id == (selectedHistoryID ?? appState.workflowServiceV2.runs.first?.id)
+            Button {
+              historyPinned = true
+              selectedHistoryID = run.id
+            } label: {
+              HStack(alignment: .top, spacing: 8) {
+                WorkflowStatusViewV2(status: run.status, showLabel: false).padding(.top, 2)
+                VStack(alignment: .leading, spacing: 5) {
+                  Text(run.title).font(.system(size: 12, weight: .medium)).lineLimit(2)
+                  Text(run.createdAt, format: .dateTime.month().day().hour().minute())
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+              }
+              .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+              .padding(10)
+              .background(
+                selected ? Color.accentColor.opacity(0.12) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6)
+              )
+              .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-            .padding(12)
-            .background(selected ? Color.accentColor.opacity(0.12) : Color.clear)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open workflow run \(run.title)")
+            .accessibilityValue(WorkflowRunPresentationV2.status(run.status))
+            .accessibilityAddTraits(selected ? .isSelected : [])
           }
-          .buttonStyle(.plain)
-          .accessibilityLabel("Open workflow run \(run.title)")
-          .accessibilityValue(WorkflowRunPresentationV2.status(run.status))
-          .accessibilityAddTraits(selected ? .isSelected : [])
-          Divider()
-        }
-      }
-    }.accessibilityLabel("Workflow Run History")
+        }.padding(.horizontal, 6).padding(.bottom, 6)
+      }.accessibilityLabel("Workflow Run History")
+    }
   }
 
   private func updateHistoryHover() {
@@ -186,6 +196,7 @@ enum WorkflowRunPresentationV2 {
 
 struct WorkflowStatusViewV2: View {
   let status: String
+  var showLabel = true
 
   private var color: Color {
     switch status {
@@ -216,10 +227,11 @@ struct WorkflowStatusViewV2: View {
         Image(systemName: symbol).font(.system(size: 10))
           .frame(width: 12, height: 12).accessibilityHidden(true)
       }
-      Text(WorkflowRunPresentationV2.status(status))
+      if showLabel { Text(WorkflowRunPresentationV2.status(status)) }
     }
     .font(.caption)
     .foregroundStyle(color)
     .accessibilityElement(children: .combine)
+    .accessibilityLabel(WorkflowRunPresentationV2.status(status))
   }
 }

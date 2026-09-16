@@ -18,8 +18,11 @@ proposal and require an explicit decision and reason.
 Workflow History is a two-column popover: the run list stays on the left while
 the selected run details stay on the right. Status text is accompanied by a
 spinner for running work and colored indicators for other states.
-Details include steps, inputs and results, events, and the frozen YAML used by
-that run. Settings contains no run history. There is no separate Workflow window
+The detail pane shows compact execution rows without tabs. Expand a row for
+its inputs and result; pending decisions and failures are visible immediately.
+Results, run inputs, participants, activity and frozen YAML are available below
+the execution list. The run actions menu provides copying and cancellation.
+Click outside the popover or press Escape to dismiss it. Settings contains no run history. There is no separate Workflow window
 or menu-bar menu.
 
 ## Built-in cases
