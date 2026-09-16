@@ -626,6 +626,71 @@ struct PaneAttentionInterpreterTests {
         == .blocked)
   }
 
+  @Test
+  func ompLongTurnChromeClassifiesWorking() {
+    // Live screens from 2026-09-16 (post-v18 omp): a turn that streams no
+    // transcript output for minutes leaves only the collapsed input box,
+    // the esc hint line, and the status bar's spinner + elapsed-turn
+    // timer. These classified `.idle`, graying the Agents View out over a
+    // visibly running agent (seen on a resumed 13-minute turn after an
+    // app upgrade + relaunch; fresh panes misread the same way).
+    let resumedTurn = """
+      ╭──────────────────────────────────────────────╮
+      │ $ …                                          │
+      ╰──────────────────────────────────────────────╯
+        ⎋ Waiting for deploy completion
+       ⠙ 13m  > ◉ GLM-5.3 > 🌳 inboxlm/producthunt > ⑂ feat/producthunt
+      """
+    #expect(activity(.omp, resumedTurn) == .working)
+    #expect(
+      activity(.omp, " ⠸ 9m > ◉ GLM-5.3 > 🌳 harness-stack/main > ⑂ fix/x ▶──8%──1M─")
+        == .working)
+    #expect(activity(.omp, "⠋ 45s > ◉ GLM-5.3") == .working)
+    #expect(activity(.omp, "⠹ 1h 5m > ◉ GLM-5.3") == .working)
+    // omp themes may separate the spinner / timer / chain with
+    // non-breaking spaces (U+00A0), which CharacterSet.whitespaces does
+    // not trim — pinned explicitly so the matcher cannot regress to
+    // ASCII-space-only.
+    #expect(activity(.omp, "⠸\u{00A0}9m\u{00A0}>\u{00A0}◉ GLM-5.3") == .working)
+  }
+
+  @Test
+  func ompActivityGlyphLinesClassifyWorking() {
+    // Glyph-first activity lines omp renders under the collapsed input
+    // box while a turn runs: the hourglass tool line (current build) and
+    // the sparkle phase line (the build before it).
+    #expect(activity(.omp, " ⏳ Grep: loader in /repo/tests\n ⠼ 2m > ◉ GLM-5.3") == .working)
+    #expect(activity(.omp, "❖ Exploring codans commands") == .working)
+  }
+
+  @Test
+  func ompTranscriptNoiseStaysIdle() {
+    // Guards for the long-turn cues: a braille-led line without an
+    // elapsed timer + `>` chain right behind the spinner, glyph mentions
+    // mid-line, and the idle composer's own header all stay idle.
+    #expect(activity(.omp, "⠿⠿⠿ 100% downloaded\n❯ ") == .idle)
+    #expect(activity(.omp, "spinning ⠸ for 9m now\n❯ ") == .idle)
+    #expect(activity(.omp, "use the ❖ glyph in prose\n❯ ") == .idle)
+    #expect(
+      activity(.omp, "╭── π  > ⬢ GLM-5.3 · ◒ high > 🗑 omp-probe > ⑂ main\n❯ ")
+        == .idle)
+  }
+
+  @Test
+  func ompTranscriptQuotingApprovalCueStaysIdle() {
+    // Guard the reverse of the title cue: a transcript that scrolls omp's
+    // own classifier source or test fixtures — or any prose quoting the
+    // cue mid-line — must not badge the pane blocked. Observed live: a
+    // working omp pane displaying `Allow tool: bash` inside a code quote
+    // went orange.
+    #expect(
+      activity(.omp, "  #expect(activity(.omp, \"Allow tool: bash\") == .blocked)\n❯ ")
+        == .idle)
+    #expect(activity(.omp, "grep matched: allow tool: bash\n❯ ") == .idle)
+    // The dialog itself still wins: the title leads its line.
+    #expect(activity(.omp, "Allow tool: bash\nReason: destructive") == .blocked)
+  }
+
   private func activity(
     _ kind: AgentKind,
     _ viewportText: String
