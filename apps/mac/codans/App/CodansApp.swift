@@ -830,7 +830,8 @@ final class AppState {
     // and the `workspace.*` IPC handlers so both materialize and register
     // identically. Local-only: it never routes through the SSH seam.
     let workspaceClient = WorkspaceClient.live(
-      hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI())
+      hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI(),
+      fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate })
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {

@@ -675,11 +675,13 @@ struct HierarchySidebarFeature {
       // create` chose for the existing members; a clash surfaces as a toast.
       let branch = WorkspaceLayout.folderName(forTitle: project.name)
       return .run { [cli = gitCLI, client = workspaceClient] send in
-        guard let gitRoot = try? await cli.discoverGitRoot(candidatePath: picked), !gitRoot.isEmpty
-        else {
-          await send(.workspaceAddRepositoryFailed("\(picked) is not inside a git repository."))
+        // Bare-aware: a bare repository has no toplevel to discover but is a
+        // valid source for a worktree.
+        guard let probe = try? await cli.inspectRepository(at: picked) else {
+          await send(.workspaceAddRepositoryFailed("\(picked) is not a git repository."))
           return
         }
+        let gitRoot = probe.root
         let member = WorkspacePlan.Member(
           name: (gitRoot as NSString).lastPathComponent,
           sourceGitRoot: gitRoot,

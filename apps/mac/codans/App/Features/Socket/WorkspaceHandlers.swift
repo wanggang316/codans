@@ -40,7 +40,8 @@ final class WorkspaceHandlers {
           defaultUseExisting: request.useExistingBranch ?? false
         ))
     }
-    let rootPath = request.rootPath.map { ($0 as NSString).expandingTildeInPath }
+    let rootPath =
+      request.rootPath.map { ($0 as NSString).expandingTildeInPath }
       ?? Self.uniqueDefaultRootPath(forTitle: title)
     let plan = WorkspacePlan(
       title: title,
@@ -209,7 +210,8 @@ final class WorkspaceHandlers {
       throw IPCError.invalidParams(
         message: "each member names exactly one of projectID or path", path: ["members"])
     }
-    let name = member.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    let name =
+      member.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
       ?? (sourceGitRoot as NSString).lastPathComponent
     let branch = member.branch ?? defaultBranch
     let checkout: WorkspaceCheckout =
@@ -226,14 +228,7 @@ final class WorkspaceHandlers {
     base: URL = WorkspaceLayout.defaultWorkspacesDirectory(),
     exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
   ) -> String {
-    let folder = WorkspaceLayout.folderName(forTitle: title)
-    var suffix = 1
-    while true {
-      let candidate = suffix == 1 ? folder : "\(folder)-\(suffix)"
-      let path = base.appending(path: candidate, directoryHint: .isDirectory).path
-      if !exists(path) { return path }
-      suffix += 1
-    }
+    WorkspaceLayout.uniquePath(base: base, folder: WorkspaceLayout.folderName(forTitle: title), exists: exists)
   }
 
   // MARK: - Error mapping
@@ -245,8 +240,8 @@ final class WorkspaceHandlers {
       case .invalidPlan, .rootIsFile, .rootInsideRepository, .sourceNotRepository,
         .invalidBranchName:
         return .invalidParams(message: workspace.localizedDescription, path: nil)
-      case .rootAlreadyRegistered, .rootAlreadyWorkspace, .destinationExists, .memberExists,
-        .memberWithoutSource, .cannotDropRoot:
+      case .rootAlreadyRegistered, .rootAlreadyWorkspace, .destinationExists, .cloneDestinationTaken,
+        .memberExists, .memberWithoutSource, .cannotDropRoot:
         return .conflict(reason: workspace.localizedDescription)
       case .notWorkspace(let id):
         return .notFound(kind: "workspace", id: id.description)

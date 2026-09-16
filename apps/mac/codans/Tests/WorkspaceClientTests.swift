@@ -19,7 +19,7 @@ struct WorkspaceClientTests {
     var basePath: String { base.path(percentEncoded: false) }
   }
 
-  private func makeFixture() throws -> Fixture {
+  private func makeFixture(gitWorktreeClient: GitWorktreeClient = .makeLive()) throws -> Fixture {
     let base = FileManager.default.temporaryDirectory
       .appendingPathComponent("codans-ws-client-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
@@ -31,7 +31,7 @@ struct WorkspaceClientTests {
     )
     let hierarchy = HierarchyClient.live(manager: manager)
     let client = WorkspaceClient.live(
-      hierarchy: hierarchy, gitWorktreeClient: .makeLive(), gitCLI: GitWorktreeCLI())
+      hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient, gitCLI: GitWorktreeCLI())
     return Fixture(base: base, client: client, hierarchy: hierarchy, manager: manager)
   }
 
@@ -71,6 +71,47 @@ struct WorkspaceClientTests {
 
   private func exists(_ path: String) -> Bool {
     FileManager.default.fileExists(atPath: path)
+  }
+
+  private func isDirectory(_ path: String) -> Bool {
+    var flag = ObjCBool(false)
+    return FileManager.default.fileExists(atPath: path, isDirectory: &flag) && flag.boolValue
+  }
+
+  private func commit(_ message: String, in repo: String) throws {
+    try git(
+      ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", message],
+      cwd: URL(fileURLWithPath: repo))
+  }
+
+  private func tip(_ ref: String, in repo: String) throws -> String {
+    try git(["rev-parse", ref], cwd: URL(fileURLWithPath: repo)).trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// A bare repository holding `source`'s history, wired up as `source`'s
+  /// `origin` and fetched, so `origin/<branch>` refs exist locally.
+  private func makeOrigin(for source: String, named name: String, under base: URL) throws -> String {
+    let bare = base.appendingPathComponent(name, isDirectory: true).path(percentEncoded: false)
+    try git(["clone", "-q", "--bare", source, bare], cwd: base)
+    try git(["remote", "add", "origin", bare], cwd: URL(fileURLWithPath: source))
+    try git(["fetch", "-q", "origin"], cwd: URL(fileURLWithPath: source))
+    return HierarchyManager.canonicalPath(bare)
+  }
+
+  private func collect(
+    _ stream: AsyncThrowingStream<WorkspaceCreationEvent, Error>,
+    onEvent: (WorkspaceCreationEvent) async -> Void = { _ in }
+  ) async -> (events: [WorkspaceCreationEvent], error: Error?) {
+    var events: [WorkspaceCreationEvent] = []
+    do {
+      for try await event in stream {
+        events.append(event)
+        await onEvent(event)
+      }
+      return (events, nil)
+    } catch {
+      return (events, error)
+    }
   }
 
   @Test
@@ -289,5 +330,312 @@ struct WorkspaceClientTests {
         WorkspacePlan.Member(name: "lib", sourceGitRoot: lib, checkout: .existingBranch("lib-feat")))
     }
     #expect(try WorkspaceManifestStore.load(rootPath: canonicalRoot).repositories.count == 3)
+  }
+
+  // MARK: - Remote and bare sources
+
+  @Test
+  func remoteSourceIsClonedOnceAndCheckedOutAsAWorktree() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let app = try makeRepo(named: "app", under: fx.base)
+    let upstream = try makeRepo(named: "upstream", under: fx.base)
+    let remote = try makeOrigin(for: upstream, named: "lib-remote.git", under: fx.base)
+    let remoteURL = "file://\(remote)"
+    let sources = fx.base.appendingPathComponent("sources", isDirectory: true)
+    let cloneDestination = sources.appendingPathComponent("lib").path(percentEncoded: false)
+    let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+
+    let plan = WorkspacePlan(
+      title: "Remote",
+      rootPath: root,
+      members: [
+        WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "feat/r", baseRef: nil)),
+        WorkspacePlan.Member(
+          name: "lib", source: .remote(url: remoteURL, cloneDestination: cloneDestination),
+          checkout: .newBranch(branch: "feat/r", baseRef: nil)),
+      ])
+    let token = UUID()
+    let run = await collect(fx.client.createStream(plan, token))
+    #expect(run.error == nil, "\(String(describing: run.error))")
+
+    // The clone is a full repository; the member is a linked worktree of it.
+    let canonicalClone = HierarchyManager.canonicalPath(cloneDestination)
+    let canonicalRoot = HierarchyManager.canonicalPath(root)
+    #expect(isDirectory("\(canonicalClone)/.git"))
+    #expect(exists("\(canonicalRoot)/lib/.git") && !isDirectory("\(canonicalRoot)/lib/.git"))
+    #expect(try git(["remote", "get-url", "origin"], cwd: URL(fileURLWithPath: canonicalClone)).contains(remote))
+    // A new branch in a fresh clone starts from the remote's default branch.
+    #expect(try tip("feat/r", in: canonicalClone) == tip("origin/main", in: canonicalClone))
+    let manifest = try WorkspaceManifestStore.load(rootPath: canonicalRoot)
+    let lib = try #require(manifest.repositories.first { $0.name == "lib" })
+    #expect(lib.remoteURL == remoteURL)
+    #expect(lib.sourceGitRoot == canonicalClone)
+    #expect(lib.checkoutMode == .newBranch)
+    #expect(lib.baseRef == "origin/main")
+    let project = try #require(fx.manager.catalog.projects.first { $0.isWorkspace })
+    #expect(project.worktrees.first { $0.name == "lib" }?.sourceGitRoot == canonicalClone)
+
+    // Event order: app straight to checkout, lib cloned first, then the tail.
+    let phases = run.events.compactMap { event -> String? in
+      switch event {
+      case .memberStarted(let name, let phase): return "\(name):\(phase)"
+      case .memberFinished(let name): return "\(name):done"
+      case .manifestWritten: return "manifest"
+      case .registered: return "registered"
+      case .progressLine, .memberFailed, .rollingBack, .rolledBack: return nil
+      }
+    }
+    #expect(
+      phases == [
+        "app:checkingOut", "app:done", "lib:cloning", "lib:checkingOut", "lib:done", "manifest", "registered",
+      ])
+
+    // A second workspace naming the same remote and destination reuses the
+    // clone instead of cloning again.
+    let root2 = fx.base.appendingPathComponent("ws2").path(percentEncoded: false)
+    _ = try await fx.client.create(
+      WorkspacePlan(
+        title: "Remote 2", rootPath: root2,
+        members: [
+          WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "feat/r2", baseRef: nil)),
+          WorkspacePlan.Member(
+            name: "lib", source: .remote(url: remoteURL, cloneDestination: cloneDestination),
+            checkout: .newBranch(branch: "feat/r2", baseRef: nil)),
+        ]))
+    let worktrees = try git(["worktree", "list"], cwd: URL(fileURLWithPath: canonicalClone))
+    #expect(worktrees.contains("ws/lib") && worktrees.contains("ws2/lib"))
+
+    // A destination holding some other repository is refused, not overwritten.
+    let root3 = fx.base.appendingPathComponent("ws3").path(percentEncoded: false)
+    await #expect(throws: WorkspaceError.cloneDestinationTaken(path: app, remoteURL: remoteURL)) {
+      try await fx.client.create(
+        WorkspacePlan(
+          title: "Remote 3", rootPath: root3,
+          members: [
+            WorkspacePlan.Member(name: "up", sourceGitRoot: upstream, checkout: .newBranch(branch: "x", baseRef: nil)),
+            WorkspacePlan.Member(
+              name: "lib", source: .remote(url: remoteURL, cloneDestination: app),
+              checkout: .newBranch(branch: "x", baseRef: nil)),
+          ]))
+    }
+    #expect(!exists(root3))
+  }
+
+  @Test
+  func bareRepositoryIsAValidSource() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let app = try makeRepo(named: "app", under: fx.base)
+    let seed = try makeRepo(named: "seed", under: fx.base)
+    let bare = fx.base.appendingPathComponent("lib.git", isDirectory: true).path(percentEncoded: false)
+    try git(["clone", "-q", "--bare", seed, bare], cwd: fx.base)
+    let canonicalBare = HierarchyManager.canonicalPath(bare)
+    let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+
+    let projectID = try await fx.client.create(
+      WorkspacePlan(
+        title: "Bare", rootPath: root,
+        members: [
+          WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "b", baseRef: nil)),
+          // The source is named through a path inside the bare directory;
+          // it resolves to the bare root.
+          WorkspacePlan.Member(
+            name: "lib", sourceGitRoot: "\(bare)/refs", checkout: .newBranch(branch: "b", baseRef: nil)),
+        ]))
+    let canonicalRoot = HierarchyManager.canonicalPath(root)
+    #expect(exists("\(canonicalRoot)/lib/.git"))
+    #expect(try git(["worktree", "list"], cwd: URL(fileURLWithPath: canonicalBare)).contains("ws/lib"))
+    let project = try #require(fx.manager.catalog.projects.first { $0.id == projectID })
+    let row = try #require(project.worktrees.first { $0.name == "lib" })
+    #expect(row.branch == "b")
+    #expect(row.sourceGitRoot == canonicalBare)
+    #expect(try WorkspaceManifestStore.load(rootPath: canonicalRoot).repositories[1].sourceGitRoot == canonicalBare)
+  }
+
+  // MARK: - Remote-tracking refs
+
+  @Test
+  func remoteTrackingRefCreatesKeepsOrResetsTheLocalBranch() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let src = try makeRepo(named: "src", under: fx.base)
+    try git(["branch", "fresh"], cwd: URL(fileURLWithPath: src))
+    try git(["branch", "keep"], cwd: URL(fileURLWithPath: src))
+    try git(["branch", "reset"], cwd: URL(fileURLWithPath: src))
+    let origin = try makeOrigin(for: src, named: "src-origin.git", under: fx.base)
+    // The remote has all three; locally `fresh` is gone and the other two
+    // are ahead by one commit.
+    try git(["branch", "-D", "fresh"], cwd: URL(fileURLWithPath: src))
+    for branch in ["keep", "reset"] {
+      try git(["switch", "-q", branch], cwd: URL(fileURLWithPath: src))
+      try commit("local-only \(branch)", in: src)
+    }
+    try git(["switch", "-q", "main"], cwd: URL(fileURLWithPath: src))
+    let keepTip = try tip("keep", in: src)
+    let resetTip = try tip("reset", in: src)
+    let remoteResetTip = try tip("origin/reset", in: src)
+    #expect(resetTip != remoteResetTip)
+    _ = origin
+
+    let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+    let projectID = try await fx.client.create(
+      WorkspacePlan(
+        title: "Tracking", rootPath: root,
+        members: [
+          WorkspacePlan.Member(
+            name: "fresh", sourceGitRoot: src,
+            checkout: .remoteTrackingRef(remoteRef: "origin/fresh", branch: "fresh", resetLocal: false)),
+          WorkspacePlan.Member(
+            name: "keep", sourceGitRoot: src,
+            checkout: .remoteTrackingRef(remoteRef: "origin/keep", branch: "keep", resetLocal: false)),
+          WorkspacePlan.Member(
+            name: "reset", sourceGitRoot: src,
+            checkout: .remoteTrackingRef(remoteRef: "origin/reset", branch: "reset", resetLocal: true)),
+        ]))
+
+    // fresh: created from the remote and tracking it.
+    #expect(try tip("fresh", in: src) == tip("origin/fresh", in: src))
+    #expect(
+      try git(["rev-parse", "--abbrev-ref", "fresh@{upstream}"], cwd: URL(fileURLWithPath: src)).contains(
+        "origin/fresh"))
+    // keep: the local branch is checked out untouched.
+    #expect(try tip("keep", in: src) == keepTip)
+    // reset: the local branch now points at the remote tip.
+    #expect(try tip("reset", in: src) == remoteResetTip)
+
+    let canonicalRoot = HierarchyManager.canonicalPath(root)
+    let manifest = try WorkspaceManifestStore.load(rootPath: canonicalRoot)
+    #expect(manifest.repositories.map(\.checkoutMode) == [.remoteTrackingRef, .existingBranch, .remoteTrackingRef])
+    #expect(manifest.repositories[0].baseRef == "origin/fresh")
+    #expect(manifest.repositories[1].baseRef == nil)
+    let project = try #require(fx.manager.catalog.projects.first { $0.id == projectID })
+    #expect(project.worktrees.filter { $0.path != project.rootPath }.map(\.branch) == ["fresh", "keep", "reset"])
+  }
+
+  @Test
+  func rollbackRestoresAResetBranchAndDeletesACreatedOne() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let src = try makeRepo(named: "src", under: fx.base)
+    try git(["branch", "reset"], cwd: URL(fileURLWithPath: src))
+    try git(["branch", "fresh"], cwd: URL(fileURLWithPath: src))
+    _ = try makeOrigin(for: src, named: "src-origin.git", under: fx.base)
+    try git(["branch", "-D", "fresh"], cwd: URL(fileURLWithPath: src))
+    try git(["switch", "-q", "reset"], cwd: URL(fileURLWithPath: src))
+    try commit("local-only", in: src)
+    try git(["switch", "-q", "main"], cwd: URL(fileURLWithPath: src))
+    let resetTip = try tip("reset", in: src)
+    let other = try makeRepo(named: "other", under: fx.base)
+    let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+
+    let run = await collect(
+      fx.client.createStream(
+        WorkspacePlan(
+          title: "Broken", rootPath: root,
+          members: [
+            WorkspacePlan.Member(
+              name: "fresh", sourceGitRoot: src,
+              checkout: .remoteTrackingRef(remoteRef: "origin/fresh", branch: "fresh", resetLocal: false)),
+            WorkspacePlan.Member(
+              name: "reset", sourceGitRoot: src,
+              checkout: .remoteTrackingRef(remoteRef: "origin/reset", branch: "reset", resetLocal: true)),
+            WorkspacePlan.Member(name: "other", sourceGitRoot: other, checkout: .existingBranch("does-not-exist")),
+          ]), UUID()))
+    #expect(run.error != nil)
+    #expect(run.events.contains { if case .memberFailed("other", _) = $0 { return true } else { return false } })
+    #expect(run.events.contains(.rollingBack))
+    #expect(run.events.contains(.rolledBack(failures: [])))
+
+    #expect(!exists(root))
+    #expect(try tip("reset", in: src) == resetTip)
+    #expect(!(try git(["branch", "--list", "fresh"], cwd: URL(fileURLWithPath: src))).contains("fresh"))
+    #expect(!(try git(["worktree", "list"], cwd: URL(fileURLWithPath: src))).contains("ws/"))
+    #expect(fx.manager.catalog.projects.isEmpty)
+  }
+
+  @Test
+  func fetchFailureRollsBackTheWholeCreation() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let app = try makeRepo(named: "app", under: fx.base)
+    let src = try makeRepo(named: "src", under: fx.base)
+    let missing = fx.base.appendingPathComponent("gone.git").path(percentEncoded: false)
+    try git(["remote", "add", "origin", missing], cwd: URL(fileURLWithPath: src))
+    let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+
+    await #expect(throws: GitWorktreeError.self) {
+      try await fx.client.create(
+        WorkspacePlan(
+          title: "Fetch", rootPath: root,
+          members: [
+            WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "f", baseRef: nil)),
+            WorkspacePlan.Member(
+              name: "src", sourceGitRoot: src, checkout: .newBranch(branch: "f", baseRef: "origin/main")),
+          ]))
+    }
+    #expect(!exists(root))
+    #expect(!(try git(["branch", "--list", "f"], cwd: URL(fileURLWithPath: app))).contains("f"))
+    #expect(fx.manager.catalog.projects.isEmpty)
+  }
+
+  // MARK: - Cancellation
+
+  @Test
+  func cancelDuringCloneRollsBackAndLeavesNothing() async throws {
+    // The live clone of a local remote is too quick to interrupt, so hold
+    // the clone stream open until the run is cancelled.
+    var slow = GitWorktreeClient.makeLive()
+    let liveClone = slow.cloneStream
+    slow.cloneStream = { url, destination in
+      AsyncThrowingStream { continuation in
+        let task = Task {
+          do {
+            try await Task.sleep(for: .seconds(30))
+            for try await line in liveClone(url, destination) { continuation.yield(line) }
+            continuation.finish()
+          } catch {
+            continuation.finish(throwing: error)
+          }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+      }
+    }
+    let fx = try makeFixture(gitWorktreeClient: slow)
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let app = try makeRepo(named: "app", under: fx.base)
+    let upstream = try makeRepo(named: "upstream", under: fx.base)
+    let remote = try makeOrigin(for: upstream, named: "lib-remote.git", under: fx.base)
+    let cloneDestination = fx.base.appendingPathComponent("sources/lib").path(percentEncoded: false)
+    let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+    let token = UUID()
+    let client = fx.client
+
+    let run = await collect(
+      client.createStream(
+        WorkspacePlan(
+          title: "Cancel", rootPath: root,
+          members: [
+            WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "c", baseRef: nil)),
+            WorkspacePlan.Member(
+              name: "lib", source: .remote(url: "file://\(remote)", cloneDestination: cloneDestination),
+              checkout: .newBranch(branch: "c", baseRef: nil)),
+          ]), token)
+    ) { event in
+      if case .memberStarted("lib", .cloning) = event {
+        await client.cancelCreation(token)
+      }
+    }
+    #expect(run.error as? WorkspaceError == .cancelled)
+    #expect(run.events.contains(.memberFinished(name: "app")))
+    #expect(run.events.contains(.rollingBack))
+    #expect(run.events.contains(.rolledBack(failures: [])))
+    #expect(!run.events.contains(.manifestWritten))
+
+    #expect(!exists(cloneDestination))
+    #expect(!exists(root))
+    #expect(!(try git(["worktree", "list"], cwd: URL(fileURLWithPath: app))).contains("ws/app"))
+    #expect(!(try git(["branch", "--list", "c"], cwd: URL(fileURLWithPath: app))).contains("c"))
+    #expect(fx.manager.catalog.projects.isEmpty)
   }
 }
