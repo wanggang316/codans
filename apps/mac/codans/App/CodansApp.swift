@@ -172,13 +172,7 @@ struct CodansApp: App {
         settingsStore: appState.settingsStore,
         hierarchyManager: appState.hierarchyManager
       )
-      CommandMenu("Workflows") {
-        Button("New Workflow…") {
-          appState.workflowCreationRequest = UUID()
-          showWorkflowSettings()
-        }
-        Button("Manage Workflows…") { showWorkflowSettings() }
-      }
+
       CommandGroup(replacing: .appSettings) {
         // Chord routes through the registry so a user override in Settings → Shortcuts
         // rebinds the menu item without restart. Default remains the AppKit-conventional ⌘,.
@@ -222,11 +216,6 @@ struct CodansApp: App {
     }
     .defaultSize(width: 750, height: 500)
     .windowResizability(.contentMinSize)
-  }
-
-  private func showWorkflowSettings() {
-    appState.settingsWindowStore?.send(.selectionChanged(.workflows))
-    openWindow(id: Self.settingsWindowID)
   }
 
   /// Scene id for the Settings `Window`. Referenced from the app-menu Settings… command and
@@ -502,6 +491,7 @@ final class AppState {
   let workflowCatalogV2 = WorkflowCatalogV2()
   let workflowServiceV2 = WorkflowServiceV2()
   var workflowCreationRequest: UUID?
+  var workflowPresentedRunID: UUID?
   @ObservationIgnored private var workflowRunner: AgentWorkflowRunner?
   @ObservationIgnored private var workflowHandoffHandlers: HandoffHandlers?
   /// Notifications inbox owner; survives the full app lifetime so the
@@ -1384,10 +1374,9 @@ final class AppState {
       guard canDispatch(), !Task.isCancelled else { return false }
       try? await Task.sleep(for: .milliseconds(250))
       let current = surface.readText(.active) ?? ""
-      if kind == .claudeCode && !PaneAttentionInterpreter.hasEmptyClaudePrompt(viewportText: current) {
-        previous = current
-        stillSince = ContinuousClock.now
-      } else if current != previous {
+      if (kind == .claudeCode && !PaneAttentionInterpreter.hasEmptyClaudePrompt(viewportText: current))
+        || current != previous
+      {
         previous = current
         stillSince = ContinuousClock.now
       } else if ContinuousClock.now - stillSince >= settle, !current.isEmpty {
@@ -1403,15 +1392,19 @@ final class AppState {
       engine.ghosttyRuntime?.surface(for: paneID) === surface
     else { return false }
     // Keep the assignment intact; sendInput turns every newline into Return.
+    let beforePaste = surface.readText(.active) ?? ""
+    if !AgentKickoffEcho.canAcceptPaste(kind: kind, screen: beforePaste) {
+      logger.error("kickoff: OMP has an unsent attachment; existing input was preserved")
+      return false
+    }
     surface.sendText(prompt)
-    let marker = String(prompt.prefix(19))
     for _ in 0..<12 {
       try? await Task.sleep(for: .milliseconds(250))
       guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
         engine.ghosttyRuntime?.surface(for: paneID) === surface
       else { return false }
       guard let screen = surface.readText(.active) else { continue }
-      if screen.contains(marker) || screen.contains("Pasted") {
+      if AgentKickoffEcho.containsPaste(kind: kind, prompt: prompt, before: beforePaste, after: screen) {
         // CR is what TUIs read as Enter; LF only breaks the line.
         surface.sendInput("\r")
         return true

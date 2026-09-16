@@ -59,6 +59,7 @@ struct WorktreeDetailView: View {
   /// transitions itself. Failure mode keeps the row in the array with
   /// `.failed` status and is surfaced as the `failed(message:)` kind.
   let activePendingWorktree: PendingWorktreeBinding?
+  var workflowAppState: AppState?
   @Environment(HierarchyManager.self) private var hierarchyManager
 
   /// Window-toolbar chrome is hidden window-wide (see the
@@ -318,19 +319,7 @@ struct WorktreeDetailView: View {
         // the trailing button cluster instead of a hand-rolled chip.
         centerToolbarItems(mode)
         ToolbarSpacer(.flexible)
-        // Each trailing chip lives in its own `ToolbarItem` so the system
-        // wraps it in a separate glass capsule — two discrete chips instead
-        // of one shared cluster background. `ToolbarSpacer(.fixed)` keeps
-        // them visually distinct without collapsing the gap. No
-        // `.buttonStyle` / no manual padding: each item gets the toolbar's
-        // native glass capsule + hover state. Order: Agents, RunScript,
-        // Open — agents first because starting one is the more frequent
-        // entry point for this app's audience.
-        ToolbarItem { agentSlot(mode) }
-        ToolbarSpacer(.fixed)
-        ToolbarItem { runSlot(mode) }
-        ToolbarSpacer(.fixed)
-        ToolbarItem { openSlot(mode) }
+        trailingToolbarItems(mode)
       } else {
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
         ToolbarItem(placement: .principal) { statusSlot(mode) }
@@ -339,11 +328,30 @@ struct WorktreeDetailView: View {
         ToolbarItemGroup(placement: .primaryAction) {
           // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
           // children leading-to-trailing in declaration order.
+          workflowControls
           agentSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
           openSlot(mode).buttonStyle(.plain)
         }
       }
+    }
+  }
+
+  @available(macOS 26.0, *)
+  @ToolbarContentBuilder
+  private func trailingToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
+    ToolbarItem(id: "workflow-controls") { workflowControls }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { agentSlot(mode) }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { runSlot(mode) }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { openSlot(mode) }
+  }
+
+  @ViewBuilder private var workflowControls: some View {
+    if let workflowAppState {
+      WorkflowToolbarViewV2(appState: workflowAppState)
     }
   }
 

@@ -115,7 +115,7 @@ struct SettingsWindowView: View {
         store: store.scope(state: \.globalCommands, action: \.globalCommands)
       )
     case .agents:
-      AgentsSettingsView(onManageWorkflows: { store.send(.selectionChanged(.workflows)) })
+      AgentsSettingsView()
     case .workflows:
       WorkflowSettingsHostViewV2(appState: workflowAppState)
     case .github:

@@ -14,7 +14,7 @@ struct WorkflowRunDetailViewV2: View {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           Text(run.title).font(.title2)
-          Text("\(run.definition.name) · \(run.status)").foregroundStyle(.secondary)
+          Text("\(run.definition.name) · \(WorkflowRunPresentationV2.status(run.status))").foregroundStyle(.secondary)
           Text(run.createdAt, format: .dateTime.year().month().day().hour().minute()).font(.caption)
         }
         Spacer()
@@ -126,7 +126,6 @@ private struct WorkflowNodeDetailViewV2: View {
     GroupBox {
       DisclosureGroup(isExpanded: $expanded) {
         VStack(alignment: .leading, spacing: 12) {
-          Text(definition.uses).font(.caption).foregroundStyle(.secondary)
           if let pane = node.paneID {
             Button("Open Agent") { onOpenPane(pane) }.accessibilityLabel("Open Agent for \(nodeID)")
           }
@@ -134,21 +133,22 @@ private struct WorkflowNodeDetailViewV2: View {
           if definition.uses == "codans/human.decide@v1", node.status == "waiting" {
             decisionForm
           }
-          if !node.inputs.isEmpty {
-            DisclosureGroup("Resolved Inputs") { json(.object(node.inputs)) }
-          }
           if !node.outputs.isEmpty {
             DisclosureGroup("Result") { json(.object(node.outputs)) }
           }
-          if let attempt = node.attemptID {
-            Text("Attempt: \(attempt.uuidString)").font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+          DisclosureGroup("Technical Details") {
+            Text(definition.uses).font(.caption).textSelection(.enabled)
+            if !node.inputs.isEmpty { json(.object(node.inputs)) }
+            if let attempt = node.attemptID {
+              Text("Attempt: \(attempt.uuidString)").font(.caption2).textSelection(.enabled)
+            }
           }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 10)
       } label: {
         HStack {
           Text(definition.title ?? nodeID).font(.headline)
           Spacer()
-          Text(node.status).font(.caption).foregroundStyle(.secondary)
+          Text(WorkflowRunPresentationV2.status(node.status)).font(.caption).foregroundStyle(.secondary)
         }
       }
     }
@@ -158,7 +158,11 @@ private struct WorkflowNodeDetailViewV2: View {
     VStack(alignment: .leading, spacing: 10) {
       if case .string(let question) = node.inputs["question"] { Text(question).font(.headline) }
       if let evidence = node.inputs["evidence"] {
-        DisclosureGroup("Evidence") { json(evidence) }
+        if case .string(let text) = evidence {
+          Text(text).textSelection(.enabled)
+        } else {
+          json(evidence)
+        }
       }
       Picker("Decision", selection: $decision) {
         Text("Choose a decision").tag("")

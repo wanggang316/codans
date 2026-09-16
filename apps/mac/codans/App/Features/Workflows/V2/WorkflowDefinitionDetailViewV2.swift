@@ -5,26 +5,22 @@ import SwiftUI
 struct WorkflowDefinitionDetailViewV2: View {
   let entry: WorkflowCatalogV2.Entry
   let catalog: WorkflowCatalogV2
-  let runs: [WorkflowRunV2]
   let onRun: () -> Void
   let onDuplicate: () -> Void
-  let onSelectRun: (UUID) -> Void
   @State private var section = "Overview"
   @State private var source: String
   @State private var error: String?
   @State private var hasExternalConflict = false
 
   init(
-    entry: WorkflowCatalogV2.Entry, catalog: WorkflowCatalogV2, runs: [WorkflowRunV2],
+    entry: WorkflowCatalogV2.Entry, catalog: WorkflowCatalogV2,
     onRun: @escaping () -> Void,
-    onDuplicate: @escaping () -> Void, onSelectRun: @escaping (UUID) -> Void
+    onDuplicate: @escaping () -> Void
   ) {
     self.entry = entry
     self.catalog = catalog
-    self.runs = runs
     self.onRun = onRun
     self.onDuplicate = onDuplicate
-    self.onSelectRun = onSelectRun
     _source = State(initialValue: entry.source)
   }
 
@@ -48,22 +44,9 @@ struct WorkflowDefinitionDetailViewV2: View {
       Picker("Definition detail", selection: $section) {
         Text("Overview").tag("Overview")
         Text("YAML Source").tag("Source")
-        Text("Runs (\(runs.count))").tag("Runs")
       }.pickerStyle(.segmented).labelsHidden()
       if section == "Source" || entry.definition == nil {
         sourceEditor
-      } else if section == "Runs" {
-        List(runs) { run in
-          Button {
-            onSelectRun(run.id)
-          } label: {
-            HStack {
-              Text(run.title)
-              Spacer()
-              Text(run.status).foregroundStyle(.secondary)
-            }
-          }.buttonStyle(.plain)
-        }
       } else {
         overview
       }

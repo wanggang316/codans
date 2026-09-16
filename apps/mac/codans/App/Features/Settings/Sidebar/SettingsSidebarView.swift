@@ -28,12 +28,7 @@ struct SettingsSidebarView: View {
             globalRow(for: section)
               .tag(Optional(section))
               .id(section)
-            if section == .agents {
-              Label("Workflows", systemImage: "arrow.triangle.branch")
-                .padding(.leading, 16)
-                .tag(Optional(SettingsSection.workflows))
-                .id(SettingsSection.workflows)
-            }
+
           }
         }
 

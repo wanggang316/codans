@@ -13,7 +13,6 @@ struct WorkflowRoleSelectionV2 {
 @MainActor
 struct WorkflowLibraryViewV2: View {
   let catalog: WorkflowCatalogV2
-  let service: WorkflowServiceV2
   let profiles: [AgentProfile]
   let panes: [WorkflowPaneChoice]
   let workspaces: [WorkflowWorkspaceChoice]
@@ -21,13 +20,11 @@ struct WorkflowLibraryViewV2: View {
   let onStart:
     (WorkflowDefinitionV2, String, String, [String: JSONValue], [String: WorkflowRoleSelectionV2])
       throws -> UUID
-  let onOpenPane: (String) -> Void
+  var onRunStarted: (UUID) -> Void = { _ in }
   var onCreationRequestHandled: () -> Void = {}
 
   private enum Destination: Hashable {
     case definition(String)
-    case history
-    case run(UUID)
   }
 
   @State private var path: [Destination] = []
@@ -62,21 +59,10 @@ struct WorkflowLibraryViewV2: View {
               .accessibilityLabel("Refresh Workflow Definitions")
           }
         }
-        Section("Execution History") {
-          NavigationLink(value: Destination.history) {
-            HStack {
-              Label("Workflow History", systemImage: "clock")
-              Spacer()
-              Text("\(service.runs.count)").foregroundStyle(.secondary)
-            }
-          }
-          Text("Review the participants, results, and events recorded for each run.")
-            .font(.callout).foregroundStyle(.secondary)
-        }
-        if !(catalog.issues + service.issues).isEmpty {
+        if !catalog.issues.isEmpty {
           Section {
-            DisclosureGroup("Diagnostics (\(catalog.issues.count + service.issues.count))") {
-              Text((catalog.issues + service.issues).joined(separator: "\n"))
+            DisclosureGroup("Diagnostics (\(catalog.issues.count))") {
+              Text(catalog.issues.joined(separator: "\n"))
                 .font(.callout).foregroundStyle(.orange).textSelection(.enabled)
             }
           }
@@ -96,7 +82,7 @@ struct WorkflowLibraryViewV2: View {
           onStart: onStart, onCancel: { startingEntry = nil },
           onStarted: { id in
             startingEntry = nil
-            path = [.history, .run(id)]
+            onRunStarted(id)
           })
       }
     }
@@ -143,54 +129,14 @@ struct WorkflowLibraryViewV2: View {
       if let entry = catalog.entries.first(where: { $0.id == id }) {
         WorkflowDefinitionDetailViewV2(
           entry: entry, catalog: catalog,
-          runs: service.runs.filter { $0.definition.id == entry.definition?.id },
-          onRun: { startingEntry = entry }, onDuplicate: { duplicate(entry) },
-          onSelectRun: { path.append(.run($0)) }
+          onRun: { startingEntry = entry }, onDuplicate: { duplicate(entry) }
         )
         .id(entry.id)
         .navigationTitle(entry.name)
       } else {
         ContentUnavailableView("Definition Unavailable", systemImage: "doc.text")
       }
-    case .history:
-      history
-    case .run(let id):
-      if let run = service.run(id) {
-        WorkflowRunDetailViewV2(run: run, service: service, onOpenPane: onOpenPane)
-          .id(run.id)
-          .navigationTitle(run.title)
-      } else {
-        ContentUnavailableView("Run Unavailable", systemImage: "clock")
-      }
     }
-  }
-
-  private var history: some View {
-    Form {
-      Section("Runs") {
-        if service.runs.isEmpty {
-          Text("Run a workflow to record its inputs, participants, and results here.")
-            .foregroundStyle(.secondary)
-        }
-        ForEach(service.runs) { run in
-          NavigationLink(value: Destination.run(run.id)) {
-            VStack(alignment: .leading, spacing: 4) {
-              HStack {
-                Text(run.title)
-                Spacer()
-                Text(run.status).font(.caption).foregroundStyle(.secondary)
-              }
-              Text(run.definition.name).font(.caption).foregroundStyle(.secondary)
-              Text(run.createdAt, format: .dateTime.month().day().hour().minute())
-                .font(.caption2).foregroundStyle(.secondary)
-            }
-          }
-        }
-      }
-    }
-    .formStyle(.grouped)
-    .navigationTitle("Execution History")
-    .accessibilityLabel("Workflow runs")
   }
 
   private var newDefinitionForm: some View {

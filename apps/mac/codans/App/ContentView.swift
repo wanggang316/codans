@@ -121,12 +121,10 @@ struct ContentView: View {
         // leaves `pendingWorktrees` (cancel / discard), this resolves to nil
         // and the detail pane falls back to the regular selection-driven
         // render without a dedicated reducer transition.
-        activePendingWorktree: resolveActivePendingWorktree()
+        activePendingWorktree: resolveActivePendingWorktree(),
+        workflowAppState: workflowAppState
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .toolbar {
-        WorkflowToolbarViewV2(appState: workflowAppState)
-      }
       .overlay(alignment: .bottom) { editorToastOverlay }
       .sheet(
         item: $store.scope(state: \.tagManagerSheet, action: \.tagManagerSheet)

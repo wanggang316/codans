@@ -162,3 +162,46 @@ Final incremental Debug build 11 succeeded with both bundled CLI and zmx
 executable. A final GUI restart restored the terminals and all five accepted
 runs; Committee still showed all seven nodes succeeded. The history sheet is
 left open on that result for inspection.
+
+### Execution and navigation correction
+
+User acceptance supersedes the previous GUI acceptance: successful fixture runs
+were insufficient to validate real launch behavior and navigation.
+
+- Make Workflows a peer Settings item; remove every run/history route there.
+- Put a grouped Run/History control immediately before Agents on the trailing toolbar.
+- Remove the menu-bar Workflows menu.
+- Start closes parameter entry and presents the current execution, never the historical list.
+- History uses Prowl's hover preview, click-to-pin and list-to-detail popover pattern.
+- Reproduce the user's OMP Handoff failure, fix collapsed-paste detection with
+  before/after evidence, and verify through the main GUI with that Agent kind.
+- Verify settings, toolbar order, absence of menu, launch feedback, human action,
+  history drill-down and terminal continuation; commit only owned changes.
+
+#### Verified correction cases
+
+- Settings now presents Workflows alongside Agents, with Overview and YAML Source
+  for definitions and no execution history section. The main toolbar groups Run
+  and History before Agents, and the menu bar has no Workflows menu (GUI checked).
+- Decision Only `CE05309F-729C-49C9-9347-4E37FE1D8962` started from the parameter
+  form into Current Workflow, displayed the proposal inline and “Waiting for your
+  decision”, and completed after a real GUI decision.
+- OMP-to-OMP Handoff `70714A6E-9D2C-4BB5-93B7-EE853ED4680B` started through the GUI
+  using existing OMP pane `CC9B7109` and a new OMP receiver. The author claimed and
+  delivered its briefing; the receiver independently hashed the immutable packet,
+  claimed its own attempt, and delivered an accepted receipt. The GUI showed
+  Completed. No test-driver delivery or manual prompt submission was used. This
+  workflow ends at acknowledgement; execution of the handed-off task is separate.
+- The prior user OMP failure was an unrecognized folded multiline attachment.
+  Submission now requires before/after evidence of a new matching attachment. An
+  existing unsent attachment is preserved and rejected with an actionable error.
+  The user's existing failed-run draft was not submitted or cleared.
+- Final Debug build 5 succeeded. After restarting that build, GUI history click
+  opened the OMP run with all five nodes Completed; Back returned to the list,
+  Close returned to the terminal. Explicit full-width buttons replaced native
+  List rows whose click did not activate the detail. Settings hierarchy and the
+  absence of history were rechecked on this final build.
+- Final regression: 20 tests across AgentKickoffEcho, WorkflowServiceV2,
+  WorkflowLaunchProfileV2, WorkflowDefinitionV2 and WorkflowRouterV2 passed.
+  Focused SwiftLint passed for the changed Swift files. Logs and xcresult:
+  `/tmp/codans-workflow-v2-build/navigation-correction-final-tests.*`.

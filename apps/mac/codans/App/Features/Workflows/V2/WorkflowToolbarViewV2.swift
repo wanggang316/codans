@@ -2,37 +2,33 @@ import CodansCore
 import SwiftUI
 
 @MainActor
-struct WorkflowToolbarViewV2: ToolbarContent {
+struct WorkflowToolbarViewV2: View {
   let appState: AppState
-  private enum Presentation: Identifiable {
-    case start(WorkflowCatalogV2.Entry)
-    case history(UUID?)
-
-    var id: String {
-      switch self {
-      case .start(let entry): "start:\(entry.id)"
-      case .history: "history"
-      }
-    }
-  }
-
-  @State private var presentation: Presentation?
-  @State private var selectedRunID: UUID?
-  @State private var historySection = "Runs"
+  @State private var startingEntry: WorkflowCatalogV2.Entry?
+  @State private var showingExecution = false
+  @State private var startedFromForm = false
+  @State private var showingHistory = false
+  @State private var historyPinned = false
+  @State private var hoveringButton = false
+  @State private var hoveringHistory = false
+  @State private var closeTask: Task<Void, Never>?
+  @State private var selectedHistoryID: UUID?
 
   private var runnableEntries: [WorkflowCatalogV2.Entry] {
     appState.workflowCatalogV2.entries.filter { $0.definition != nil && $0.error == nil }
   }
 
-  var body: some ToolbarContent {
-    ToolbarItem(id: "workflow-run", placement: .primaryAction) {
+  var body: some View {
+    HStack(spacing: 8) {
       Menu {
-        if runnableEntries.isEmpty {
-          Text("No valid workflow definitions")
-        }
+        if runnableEntries.isEmpty { Text("No valid workflow definitions") }
         ForEach(runnableEntries) { entry in
-          Button(entry.name) {
-            presentation = .start(entry)
+          Button(entry.name) { startingEntry = entry }
+        }
+        if let id = appState.workflowPresentedRunID, let run = appState.workflowServiceV2.run(id) {
+          Divider()
+          Button("\(WorkflowRunPresentationV2.status(run.status)): \(run.title)") {
+            showingExecution = true
           }
         }
         Divider()
@@ -41,95 +37,169 @@ struct WorkflowToolbarViewV2: ToolbarContent {
         Label("Run Workflow", systemImage: "point.3.connected.trianglepath.dotted")
       }
       .accessibilityLabel("Run Workflow")
-      .help("Choose a workflow and configure its inputs and participants")
-      .onAppear { appState.workflowCatalogV2.reload() }
-      .sheet(item: $presentation) { item in
-        switch item {
-        case .start(let entry):
-          if let definition = entry.definition {
-            WorkflowRunFormViewV2(
-              definition: definition, source: entry.source,
-              profiles: appState.settingsStore.settings.agents.enabledProfiles,
-              panes: appState.workflowAgentPanesV2, workspaces: appState.workflowWorkspaces,
-              onStart: {
-                try appState.startWorkflowV2(definition: $0, source: $1, title: $2, inputs: $3, selections: $4)
-              },
-              onCancel: { presentation = nil },
-              onStarted: { id in presentation = .history(id) })
-          }
-        case .history(let initialRunID):
-          history.onAppear {
-            if let initialRunID { selectedRunID = initialRunID }
-            historySection = "Runs"
-          }
-        }
+      .help("Run a workflow")
+      .popover(isPresented: $showingExecution) {
+        executionPanel
       }
-    }
-    ToolbarItem(id: "workflow-history", placement: .primaryAction) {
       Button {
-        presentation = .history(selectedRunID)
+        historyPinned.toggle()
+        showingHistory = historyPinned
       } label: {
         Label("Workflow History", systemImage: "clock.arrow.circlepath")
       }
       .accessibilityLabel("Workflow History")
-      .help("Inspect workflow runs, results, and decisions")
-    }
-  }
-
-  private var history: some View {
-    VStack(spacing: 0) {
-      HStack {
-        Text("Workflow History").font(.title2)
-        Spacer()
-        Picker("Workflow History Version", selection: $historySection) {
-          Text("Runs").tag("Runs")
-          Text("Legacy Runs").tag("Legacy")
-        }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
-        Button("Done") { presentation = nil }.keyboardShortcut(.cancelAction)
-      }.padding(16)
-      Divider()
-      if historySection == "Legacy" {
-        WorkflowRunsView(store: appState.workflowStore, allowsCreation: false, onOpenPane: openPane)
-      } else {
-        HSplitView {
-          List(appState.workflowServiceV2.runs, selection: $selectedRunID) { run in
-            VStack(alignment: .leading, spacing: 4) {
-              Text(run.title).font(.headline)
-              Text("\(run.definition.name) · \(run.status)")
-                .font(.caption).foregroundStyle(.secondary)
-              Text(run.createdAt, format: .dateTime.month().day().hour().minute())
-                .font(.caption2).foregroundStyle(.secondary)
-            }.padding(.vertical, 3).tag(run.id)
-          }
-          .accessibilityLabel("Workflow Run History")
-          .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
-          Group {
-            if let id = selectedRunID, let run = appState.workflowServiceV2.run(id) {
-              WorkflowRunDetailViewV2(run: run, service: appState.workflowServiceV2, onOpenPane: openPane)
-                .id(id)
-            } else {
-              ContentUnavailableView(
-                appState.workflowServiceV2.runs.isEmpty ? "No Workflow Runs" : "Select a Run",
-                systemImage: "clock.arrow.circlepath",
-                description: Text("Review steps, results, and decisions without leaving your workspace."))
-            }
-          }.frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
-        }
-        if !appState.workflowServiceV2.issues.isEmpty {
-          DisclosureGroup("Workflow Diagnostics") {
-            ScrollView {
-              Text(appState.workflowServiceV2.issues.joined(separator: "\n"))
-                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxHeight: 100)
-          }.foregroundStyle(.orange).padding(12)
+      .help("Workflow History. Hover to preview or click to keep open.")
+      .onHover {
+        hoveringButton = $0
+        updateHistoryHover()
+      }
+      .popover(isPresented: $showingHistory) {
+        historyPanel.onHover {
+          hoveringHistory = $0
+          updateHistoryHover()
         }
       }
-    }.frame(width: 900, height: 650)
+    }
+    .accessibilityElement(children: .contain)
+    .onAppear { appState.workflowCatalogV2.reload() }
+    .onDisappear { closeTask?.cancel() }
+    .onChange(of: showingHistory) { _, visible in
+      if !visible {
+        historyPinned = false
+        hoveringHistory = false
+      }
+    }
+    .onChange(of: appState.workflowPresentedRunID) { _, id in
+      if id != nil && startingEntry == nil { showingExecution = true }
+    }
+    .sheet(
+      item: $startingEntry,
+      onDismiss: {
+        if startedFromForm {
+          showingExecution = true
+          startedFromForm = false
+        }
+      },
+      content: { entry in
+        if let definition = entry.definition {
+          WorkflowRunFormViewV2(
+            definition: definition, source: entry.source,
+            profiles: appState.settingsStore.settings.agents.enabledProfiles,
+            panes: appState.workflowAgentPanesV2, workspaces: appState.workflowWorkspaces,
+            onStart: {
+              try appState.startWorkflowV2(
+                definition: $0, source: $1, title: $2, inputs: $3, selections: $4)
+            }, onCancel: { startingEntry = nil },
+            onStarted: { id in
+              startedFromForm = true
+              appState.workflowPresentedRunID = id
+              startingEntry = nil
+            })
+        }
+      })
+  }
+
+  private var executionPanel: some View {
+    VStack(spacing: 0) {
+      HStack {
+        Text("Current Workflow").font(.headline)
+        Spacer()
+        Button("Return to Terminal") { showingExecution = false }
+      }.padding(12)
+      Divider()
+      if let id = appState.workflowPresentedRunID, let run = appState.workflowServiceV2.run(id) {
+        WorkflowRunDetailViewV2(run: run, service: appState.workflowServiceV2, onOpenPane: openPane)
+          .id(id)
+      }
+    }.frame(width: 620, height: 560)
+  }
+
+  private var historyPanel: some View {
+    VStack(spacing: 0) {
+      HStack {
+        if selectedHistoryID != nil {
+          Button("Back", systemImage: "chevron.left") {
+            selectedHistoryID = nil
+            historyPinned = true
+          }
+        }
+        Text("Workflow History").font(.headline)
+        Spacer()
+        Button("Close") { showingHistory = false }
+      }.padding(12)
+      Divider()
+      if let id = selectedHistoryID, let run = appState.workflowServiceV2.run(id) {
+        WorkflowRunDetailViewV2(run: run, service: appState.workflowServiceV2, onOpenPane: openPane)
+          .id(id)
+      } else {
+        ScrollView {
+          LazyVStack(spacing: 0) {
+            ForEach(appState.workflowServiceV2.runs) { run in
+              Button {
+                historyPinned = true
+                selectedHistoryID = run.id
+              } label: {
+                HStack(spacing: 12) {
+                  VStack(alignment: .leading, spacing: 4) {
+                    Text(run.title).font(.headline)
+                    Text(WorkflowRunPresentationV2.status(run.status)).font(.caption)
+                      .foregroundStyle(.secondary)
+                    Text(run.createdAt, style: .relative).font(.caption2).foregroundStyle(
+                      .secondary)
+                  }
+                  Spacer(minLength: 12)
+                  Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Open workflow run \(run.title)")
+              .accessibilityValue(WorkflowRunPresentationV2.status(run.status))
+              Divider().padding(.horizontal, 16)
+            }
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityLabel("Workflow Run History")
+        if appState.workflowServiceV2.runs.isEmpty {
+          Text("No workflow runs yet.").foregroundStyle(.secondary).padding()
+        }
+      }
+    }.frame(width: 620, height: 560)
+  }
+
+  private func updateHistoryHover() {
+    closeTask?.cancel()
+    if hoveringButton || hoveringHistory {
+      showingHistory = true
+    } else if !historyPinned {
+      closeTask = Task { @MainActor in
+        try? await Task.sleep(for: .milliseconds(180))
+        if !Task.isCancelled && !historyPinned { showingHistory = false }
+      }
+    }
   }
 
   private func openPane(_ value: String) {
     guard let id = UUID(uuidString: value) else { return }
-    presentation = nil
+    showingExecution = false
+    showingHistory = false
     appState.store?.send(.agentState(.rowTapped(PaneID(raw: id))))
+  }
+}
+
+enum WorkflowRunPresentationV2 {
+  static func status(_ status: String) -> String {
+    switch status {
+    case "waiting": "Waiting for your decision"
+    case "running": "Running"
+    case "succeeded": "Completed"
+    case "failed": "Failed"
+    case "cancelled": "Cancelled"
+    case "interrupted": "Interrupted"
+    default: status.capitalized
+    }
   }
 }

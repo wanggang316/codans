@@ -107,6 +107,13 @@ extension AppState {
         try await Task.sleep(for: .milliseconds(500))
       }
       guard self.workflowBindingIsValidV2(binding), canDispatch() else { throw CancellationError() }
+      if kind == .omp,
+        let screen = engine.ghosttyRuntime?.surface(for: paneID)?.readText(.active),
+        AgentKickoffEcho.hasPendingOmpAttachment(screen)
+      {
+        throw WorkflowAdapterErrorV2.message(
+          "The selected OMP Agent has unsent input. Clear or submit that draft before starting another workflow.")
+      }
       let sent = await Self.typeKickoffOnceAgentIsUp(
         paneID: paneID, kind: kind, prompt: prompt, agentState: state, engine: engine,
         canDispatch: { [weak self] in
