@@ -49,52 +49,61 @@ struct WorkflowLibraryViewV2: View {
       }
       .pickerStyle(.segmented).frame(maxWidth: 320).padding(12)
       Divider()
-      NavigationSplitView {
-        if section == "Definitions" {
-          List(entries, selection: $definitionID) { entry in
-            VStack(alignment: .leading, spacing: 3) {
-              Text(entry.name).font(.headline)
-              Label(
-                entry.error == nil ? (entry.isBuiltin ? "Built-in" : "Personal") : "Invalid definition",
-                systemImage: entry.error == nil ? "doc.text" : "exclamationmark.triangle"
-              )
-              .font(.caption).foregroundStyle(entry.error == nil ? Color.secondary : Color.orange)
-            }.padding(.vertical, 3).tag(entry.id)
-          }
-          .searchable(text: $search, prompt: "Find definitions")
-          .accessibilityLabel("Workflow definitions")
-        } else {
-          List(service.runs, selection: $runID) { run in
-            VStack(alignment: .leading, spacing: 3) {
-              Text(run.title).font(.headline)
-              Text("\(run.definition.name) · \(run.status)").font(.caption).foregroundStyle(.secondary)
-              Text(run.createdAt, format: .dateTime.month().day().hour().minute()).font(.caption2)
-            }.padding(.vertical, 3).tag(run.id)
-          }.accessibilityLabel("Workflow runs")
-        }
-      } detail: {
-        if section == "Definitions", let entry = catalog.entries.first(where: { $0.id == definitionID }) {
-          WorkflowDefinitionDetailViewV2(
-            entry: entry, catalog: catalog, runs: service.runs.filter { $0.definition.id == entry.definition?.id },
-            onRun: { startingEntry = entry }, onDuplicate: { duplicate(entry) },
-            onSelectRun: {
-              runID = $0
-              section = "Runs"
+      HSplitView {
+        VStack(spacing: 0) {
+          if section == "Definitions" {
+            TextField("Find definitions", text: $search)
+              .textFieldStyle(.roundedBorder)
+              .padding(10)
+              .accessibilityLabel("Find Workflow Definitions")
+            List(entries, selection: $definitionID) { entry in
+              VStack(alignment: .leading, spacing: 3) {
+                Text(entry.name).font(.headline)
+                Label(
+                  entry.error == nil ? (entry.isBuiltin ? "Built-in" : "Personal") : "Invalid definition",
+                  systemImage: entry.error == nil ? "doc.text" : "exclamationmark.triangle"
+                )
+                .font(.caption).foregroundStyle(entry.error == nil ? Color.secondary : Color.orange)
+              }.padding(.vertical, 3).tag(entry.id)
             }
-          )
-          .id(entry.id)
-        } else if section == "Runs", let id = runID, let run = service.run(id) {
-          WorkflowRunDetailViewV2(run: run, service: service, onOpenPane: onOpenPane)
-            .id(run.id)
-        } else {
-          ContentUnavailableView(
-            section == "Definitions" ? "Select a Definition" : "Select a Run",
-            systemImage: section == "Definitions" ? "doc.text" : "list.bullet.rectangle",
-            description: Text(
-              section == "Definitions"
-                ? "Create a reusable workflow or choose a built-in definition to inspect its roles and YAML."
-                : "Runs preserve the inputs, participants, results, and definition used for each execution."))
+            .accessibilityLabel("Workflow definitions")
+          } else {
+            List(service.runs, selection: $runID) { run in
+              VStack(alignment: .leading, spacing: 3) {
+                Text(run.title).font(.headline)
+                Text("\(run.definition.name) · \(run.status)").font(.caption).foregroundStyle(.secondary)
+                Text(run.createdAt, format: .dateTime.month().day().hour().minute()).font(.caption2)
+              }.padding(.vertical, 3).tag(run.id)
+            }.accessibilityLabel("Workflow runs")
+          }
         }
+        .frame(minWidth: 240, idealWidth: 270, maxWidth: 340, maxHeight: .infinity)
+        Group {
+
+          if section == "Definitions", let entry = catalog.entries.first(where: { $0.id == definitionID }) {
+            WorkflowDefinitionDetailViewV2(
+              entry: entry, catalog: catalog, runs: service.runs.filter { $0.definition.id == entry.definition?.id },
+              onRun: { startingEntry = entry }, onDuplicate: { duplicate(entry) },
+              onSelectRun: {
+                runID = $0
+                section = "Runs"
+              }
+            )
+            .id(entry.id)
+          } else if section == "Runs", let id = runID, let run = service.run(id) {
+            WorkflowRunDetailViewV2(run: run, service: service, onOpenPane: onOpenPane)
+              .id(run.id)
+          } else {
+            ContentUnavailableView(
+              section == "Definitions" ? "Select a Definition" : "Select a Run",
+              systemImage: section == "Definitions" ? "doc.text" : "list.bullet.rectangle",
+              description: Text(
+                section == "Definitions"
+                  ? "Create a reusable workflow or choose a built-in definition to inspect its roles and YAML."
+                  : "Runs preserve the inputs, participants, results, and definition used for each execution."))
+          }
+        }
+        .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
       }
       if !(catalog.issues + service.issues).isEmpty {
         Divider()
@@ -107,7 +116,6 @@ struct WorkflowLibraryViewV2: View {
       }
     }
     .frame(minWidth: 800, minHeight: 540)
-    .navigationTitle("Workflows")
     .toolbar {
       Button("New Workflow", systemImage: "plus") {
         newName = ""
