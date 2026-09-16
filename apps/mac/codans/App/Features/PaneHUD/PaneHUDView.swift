@@ -141,8 +141,11 @@ struct PaneHUDView: View {
   /// removed, so the handover between them crossfades under the size
   /// animation instead of one popping out as the other appears.
   private var cardBackground: some View {
-    chrome(cornerRadius: Self.cardCornerRadius)
-      .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
+    Color.clear
+      // The popup chrome itself (`FloatingCard`) rather than a local twin:
+      // one recipe means the card can never drift from the Command Palette
+      // / Hand Off surfaces — same glass, hairline (0.12), and shadow.
+      .floatingCard(cornerRadius: Self.cardCornerRadius)
       .opacity(isExpanded ? 1 : 0)
       // Hit testing follows visibility, which `opacity` alone does not do: a
       // fully transparent shape still takes clicks. Collapsed, this shape is
@@ -152,16 +155,18 @@ struct PaneHUDView: View {
       .allowsHitTesting(isExpanded)
   }
 
-  /// Frosted fill plus a hairline edge. Terminal output sits directly behind
-  /// this, so the fill is what stops glyphs reading through the control; the
-  /// edge is what separates it from output of a similar tone.
+  /// Bare glass chip for the corner buttons — no shadow, because they are
+  /// controls rather than cards. Same `.popover` material as the popup
+  /// surfaces (`FloatingCard`), and the same 0.12 hairline, so button and
+  /// card edges read identical; terminal output sits directly behind this,
+  /// so the blur is what stops glyphs reading through the control.
+  /// `.withinWindow` samples the terminal beneath the overlay, matching how
+  /// the Command Palette card sees the split view.
   private func chrome(cornerRadius: CGFloat) -> some View {
-    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-      .fill(.regularMaterial)
-      .overlay(
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-          .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
-      )
+    let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    return VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
+      .clipShape(shape)
+      .overlay(shape.strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
   }
 
   private func menuButton(_ model: PaneHUDModel) -> some View {
