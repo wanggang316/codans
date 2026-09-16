@@ -18,6 +18,18 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- **Agents View — omp long turns badge as working.** A turn that streams
+  no transcript output for minutes renders only the status bar's spinner +
+  elapsed-turn timer and glyph-first tool/phase lines; neither matched the
+  omp cues, so a visibly running agent badged idle (most obvious on a
+  resumed turn after an app relaunch). The timer matcher also skips
+  Unicode (non-breaking) whitespace, which plain `CharacterSet` trimming
+  leaves behind.
+- **Agents View — a transcript quoting omp's approval cue no longer badges
+  blocked.** `Allow tool: …` is now matched only where the dialog renders
+  it, at the start of a line; a pane that scrolls the classifier's own
+  source or test fixtures stays on its live state.
+
 ### Security
 
 ## [0.6.3] - 2026-09-16
