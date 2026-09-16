@@ -1,0 +1,149 @@
+schema: codans.workflow/v1
+id: codans.committee
+name: Committee
+description: Collect independent analyses, cross-review them and preserve disagreement in a synthesis.
+
+inputs:
+  question:
+    type: string
+    required: true
+
+roles:
+  analyst_a:
+    label: Analyst A
+    source: launch
+  analyst_b:
+    label: Analyst B
+    source: launch
+  synthesizer:
+    label: Synthesizer
+    source: pick
+
+nodes:
+  launch_a:
+    title: Start analyst A
+    uses: codans/session.launch@v1
+    role: analyst_a
+
+  launch_b:
+    title: Start analyst B
+    uses: codans/session.launch@v1
+    role: analyst_b
+
+  analysis_a:
+    title: Analyze independently as analyst A
+    uses: codans/agent.request@v1
+    role: analyst_a
+    needs: [launch_a]
+    with:
+      instruction:
+        value: >-
+          Analyze the question independently using only the supplied question.
+          State assumptions, tradeoffs and a recommendation. No peer analysis is
+          supplied at this stage. Do not inspect files, modify files or implement
+          the recommendation. Submit your report through delivery.
+      context:
+        question:
+          ref: inputs.question
+    expect:
+      format: markdown
+      sections: [Findings, Recommendation]
+
+  analysis_b:
+    title: Analyze independently as analyst B
+    uses: codans/agent.request@v1
+    role: analyst_b
+    needs: [launch_b]
+    with:
+      instruction:
+        value: >-
+          Analyze the question independently using only the supplied question.
+          State assumptions, tradeoffs and a recommendation. No peer analysis is
+          supplied at this stage. Do not inspect files, modify files or implement
+          the recommendation. Submit your report through delivery.
+      context:
+        question:
+          ref: inputs.question
+    expect:
+      format: markdown
+      sections: [Findings, Recommendation]
+
+  review_a:
+    title: Cross-review as analyst A
+    uses: codans/agent.request@v1
+    role: analyst_a
+    needs: [analysis_a, analysis_b]
+    with:
+      instruction:
+        value: >-
+          Review both initial analyses in your existing session. Identify
+          agreements and disagreements, test assumptions and explain whether
+          the peer analysis changes your recommendation. Preserve unresolved
+          disagreement. Do not inspect files, modify files or implement changes.
+          Submit your review through delivery.
+      context:
+        question:
+          ref: inputs.question
+        analysis_a:
+          ref: nodes.analysis_a.outputs.result
+        analysis_b:
+          ref: nodes.analysis_b.outputs.result
+    expect:
+      format: markdown
+      sections: [Agreements, Disagreements]
+
+  review_b:
+    title: Cross-review as analyst B
+    uses: codans/agent.request@v1
+    role: analyst_b
+    needs: [analysis_a, analysis_b]
+    with:
+      instruction:
+        value: >-
+          Review both initial analyses in your existing session. Identify
+          agreements and disagreements, test assumptions and explain whether
+          the peer analysis changes your recommendation. Preserve unresolved
+          disagreement. Do not inspect files, modify files or implement changes.
+          Submit your review through delivery.
+      context:
+        question:
+          ref: inputs.question
+        analysis_a:
+          ref: nodes.analysis_a.outputs.result
+        analysis_b:
+          ref: nodes.analysis_b.outputs.result
+    expect:
+      format: markdown
+      sections: [Agreements, Disagreements]
+
+  synthesis:
+    title: Synthesize with explicit disagreement
+    uses: codans/agent.request@v1
+    role: synthesizer
+    needs: [review_a, review_b]
+    with:
+      instruction:
+        value: >-
+          Synthesize the two analyses and two reviews. Separate actual consensus
+          from unresolved disagreement. State a recommendation and the evidence
+          that would change it. Do not invent agreement or treat majority opinion
+          as validation. Do not inspect files, modify files or implement changes.
+          Submit the final report through delivery.
+      context:
+        question:
+          ref: inputs.question
+        analysis_a:
+          ref: nodes.analysis_a.outputs.result
+        analysis_b:
+          ref: nodes.analysis_b.outputs.result
+        review_a:
+          ref: nodes.review_a.outputs.result
+        review_b:
+          ref: nodes.review_b.outputs.result
+    expect:
+      format: markdown
+      sections: [Consensus, Disagreements, Recommendation]
+
+outputs:
+  report:
+    ref: nodes.synthesis.outputs.result

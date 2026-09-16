@@ -1,0 +1,109 @@
+schema: codans.workflow/v1
+id: codans.handoff
+name: Handoff
+description: Prepare a packet and confirm that a receiver has understood it.
+inputs:
+  objective:
+    type: string
+    required: true
+roles:
+  author:
+    label: Author
+    source: current
+  receiver:
+    label: Receiver
+    source: launch
+nodes:
+  briefing:
+    title: Prepare briefing
+    uses: codans/agent.request@v1
+    role: author
+    with:
+      context:
+        objective:
+          ref: inputs.objective
+      instruction:
+        value: Summarize this conversation for handoff. Preserve user constraints, completed
+          work, verification evidence and unresolved questions. Do not perform new task work.
+          Submit the briefing through delivery.
+    expect:
+      format: markdown
+      sections:
+      - Objective
+      - Current State
+      - Completed Work
+      - Next Steps
+  packet:
+    title: Save immutable packet
+    uses: codans/handoff.packet.create@v1
+    needs:
+    - briefing
+    with:
+      briefing:
+        ref: nodes.briefing.outputs.result
+  launch_receiver:
+    title: Start receiver
+    uses: codans/session.launch@v1
+    role: receiver
+    needs:
+    - packet
+  receive:
+    title: Read and acknowledge
+    uses: codans/agent.request@v1
+    role: receiver
+    needs:
+    - packet
+    - launch_receiver
+    with:
+      context:
+        packet:
+          ref: nodes.packet.outputs.packet
+      instruction:
+        value: Read the complete packet. Return its ID and digest, your understanding, a concrete
+          next action and blockers. Do not execute the task yet.
+    expect:
+      format: json
+      schema:
+        type: object
+        required:
+        - packetId
+        - packetDigest
+        - understanding
+        - nextAction
+        - blockers
+        additionalProperties: false
+        properties:
+          packetId:
+            type: string
+            minLength: 1
+          packetDigest:
+            type: string
+            minLength: 1
+          understanding:
+            type: string
+            minLength: 1
+          nextAction:
+            type: string
+            minLength: 1
+          blockers:
+            type: array
+            items:
+              type: string
+  verify:
+    title: Verify acknowledgement
+    uses: codans/handoff.ack.verify@v1
+    needs:
+    - packet
+    - receive
+    with:
+      packet:
+        ref: nodes.packet.outputs.packet
+      acknowledgement:
+        ref: nodes.receive.outputs.result
+outputs:
+  packet:
+    ref: nodes.packet.outputs.packet
+  acknowledgement:
+    ref: nodes.receive.outputs.result
+  readiness:
+    ref: nodes.verify.outputs.readiness

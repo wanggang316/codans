@@ -1,6 +1,6 @@
 # Workflow 用例与构建顺序
 
-**状态：** 初始切片实施中；以下是完整实现合同，不是全部已通过的测试。当前实现范围与限制见 [使用说明](../workflow-usage.md)。
+**状态：** 旧版场景需求与验收依据。模型及构建方式以 [v2 设计](agent-workflows-v2.md) 和 [实际 YAML case](../examples/workflows-v2/README.md) 为准；下文固定计划构造器、YAML 非目标及场景特定预算不是 v2 实现要求。当前实现范围与限制仍见 [使用说明](../workflow-usage.md)。
 
 本文约束 [Agent Workflows](agent-workflows.md) 的实现范围：以现有 Handoff、Advisor、Committee 三个真实场景驱动公共引擎，不先建设通用脚本平台。
 

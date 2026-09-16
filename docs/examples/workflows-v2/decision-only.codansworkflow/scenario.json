@@ -1,0 +1,19 @@
+{
+  "name": "Synthetic fixture: roleless proposal decision, not an actual human decision",
+  "request": {
+    "inputs": {
+      "proposal": "Separate workflow definition management from run creation. The definition page must expose the full YAML source and validate its inputs, roles and nodes. Collect concrete participants and any required launch directory only when starting a run."
+    },
+    "roles": {}
+  },
+  "actionResults": {
+    "decision": {
+      "decision": "adopt",
+      "reason": "Adopt the separation because creating a definition must be possible without launching an agent or choosing an execution environment."
+    }
+  },
+  "expectedOutputs": {
+    "decision": "adopt",
+    "reason": "Adopt the separation because creating a definition must be possible without launching an agent or choosing an execution environment."
+  }
+}

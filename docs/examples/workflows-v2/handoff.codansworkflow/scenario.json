@@ -1,0 +1,83 @@
+{
+  "name": "Synthetic handoff from the current agent; no live execution",
+  "request": {
+    "inputs": {
+      "objective": "Review the invalid-YAML editor experience without implementing changes."
+    },
+    "roles": {
+      "author": {
+        "source": "current",
+        "endpoint": {
+          "paneId": "00000000-0000-4000-8000-000000000001",
+          "endpointGeneration": 1
+        }
+      },
+      "receiver": {
+        "source": "launch",
+        "profileId": "fixture-profile-receiver",
+        "environment": {
+          "host": "local",
+          "cwd": "/tmp/codans-workflow-fixture",
+          "placement": "tab"
+        }
+      }
+    }
+  },
+  "actionResults": {
+    "briefing": {
+      "result": "## Objective\nFinish the workflow definition editor design.\n\n## Current State\nDefinitions and runs are separate. No application changes have been made.\n\n## Completed Work\nRole sources and the Handoff node contract have been reviewed. This is synthetic test evidence.\n\n## Next Steps\nCheck how an invalid YAML file remains visible in the definition list.\n",
+      "delivery": {
+        "id": "delivery-fixture-briefing"
+      }
+    },
+    "packet": {
+      "packet": {
+        "id": "packet-fixture-handoff",
+        "digest": "51d08df845aebda84e3c96f540beb5636a999a9ed54a3c0c6dc9a7b75d38404f",
+        "artifact": {
+          "id": "artifact-fixture-briefing",
+          "mediaType": "text/markdown"
+        }
+      }
+    },
+    "launch_receiver": {
+      "session": {
+        "paneId": "00000000-0000-4000-8000-000000000002",
+        "endpointGeneration": 1
+      }
+    },
+    "receive": {
+      "result": {
+        "packetId": "packet-fixture-handoff",
+        "packetDigest": "51d08df845aebda84e3c96f540beb5636a999a9ed54a3c0c6dc9a7b75d38404f",
+        "understanding": "Review the definition editor design; do not implement changes.",
+        "nextAction": "Inspect the invalid-definition presentation requirements.",
+        "blockers": []
+      },
+      "delivery": {
+        "id": "delivery-fixture-receive"
+      }
+    },
+    "verify": {
+      "readiness": "ready"
+    }
+  },
+  "expectedOutputs": {
+    "packet": {
+      "id": "packet-fixture-handoff",
+      "digest": "51d08df845aebda84e3c96f540beb5636a999a9ed54a3c0c6dc9a7b75d38404f",
+      "artifact": {
+        "id": "artifact-fixture-briefing",
+        "mediaType": "text/markdown"
+      }
+    },
+    "acknowledgement": {
+      "packetId": "packet-fixture-handoff",
+      "packetDigest": "51d08df845aebda84e3c96f540beb5636a999a9ed54a3c0c6dc9a7b75d38404f",
+      "understanding": "Review the definition editor design; do not implement changes.",
+      "nextAction": "Inspect the invalid-definition presentation requirements.",
+      "blockers": []
+    },
+    "readiness": "ready"
+  }
+}

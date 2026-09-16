@@ -1,0 +1,27 @@
+schema: codans.workflow/v1
+id: examples.decision-only
+name: Decision Only
+description: Record a decision on supplied text without an agent or workspace.
+
+inputs:
+  proposal:
+    type: string
+    required: true
+
+nodes:
+  decision:
+    title: Review the proposal
+    uses: codans/human.decide@v1
+    with:
+      question:
+        value: Should this proposal be adopted?
+      options:
+        value: [adopt, request_changes, reject]
+      evidence:
+        ref: inputs.proposal
+
+outputs:
+  decision:
+    ref: nodes.decision.outputs.decision
+  reason:
+    ref: nodes.decision.outputs.reason

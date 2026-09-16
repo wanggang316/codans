@@ -1,0 +1,34 @@
+{
+  "name": "Synthetic fixture: explicit delivery advice, not an actual agent result or human decision",
+  "request": {
+    "inputs": {
+      "question": "Should Codans mark an agent workflow node complete after an explicitly validated delivery, or infer completion from terminal idleness?"
+    },
+    "roles": {
+      "advisor": {
+        "source": "pick",
+        "endpoint": {
+          "paneId": "00000000-0000-4000-8000-000000000101",
+          "endpointGeneration": 1
+        }
+      }
+    }
+  },
+  "actionResults": {
+    "advice": {
+      "result": "# Findings\n\nThe proposed delivery protocol correlates each result with a run, node and attempt. Persisting the accepted delivery before advancing the node gives the history a stable completion record. Terminal idleness does not establish that a response belongs to the current attempt or that its output passed validation.\n\nDuplicate submissions must return the original acceptance when their identity and content match. A conflicting duplicate, an old attempt or an obsolete endpoint generation must be rejected. A timeout after message dispatch leaves the external result uncertain and must not trigger an automatic resend.\n\n# Recommendation\n\nAdopt explicit delivery as the completion boundary. Commit the accepted delivery, node output and completion event in one transaction. Use terminal idleness only as a signal for presenting status or deciding when a message can be sent. Before enabling recovery, verify duplicate delivery, late delivery after cancellation and a crash between dispatch and acknowledgement with fault injection.\n",
+      "delivery": {
+        "id": "delivery-advice"
+      }
+    },
+    "decision": {
+      "decision": "adopt",
+      "reason": "Adopt the explicit delivery boundary; require duplicate, cancellation and crash-window checks before enabling automatic recovery."
+    }
+  },
+  "expectedOutputs": {
+    "advice": "# Findings\n\nThe proposed delivery protocol correlates each result with a run, node and attempt. Persisting the accepted delivery before advancing the node gives the history a stable completion record. Terminal idleness does not establish that a response belongs to the current attempt or that its output passed validation.\n\nDuplicate submissions must return the original acceptance when their identity and content match. A conflicting duplicate, an old attempt or an obsolete endpoint generation must be rejected. A timeout after message dispatch leaves the external result uncertain and must not trigger an automatic resend.\n\n# Recommendation\n\nAdopt explicit delivery as the completion boundary. Commit the accepted delivery, node output and completion event in one transaction. Use terminal idleness only as a signal for presenting status or deciding when a message can be sent. Before enabling recovery, verify duplicate delivery, late delivery after cancellation and a crash between dispatch and acknowledgement with fault injection.\n",
+    "decision": "adopt",
+    "reason": "Adopt the explicit delivery boundary; require duplicate, cancellation and crash-window checks before enabling automatic recovery."
+  }
+}

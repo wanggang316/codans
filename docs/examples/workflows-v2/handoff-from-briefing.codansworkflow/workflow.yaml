@@ -1,0 +1,85 @@
+schema: codans.workflow/v1
+id: codans.handoff-from-briefing
+name: Handoff from Briefing
+description: Save a supplied briefing and obtain a receiver acknowledgement.
+inputs:
+  briefing:
+    type: string
+    required: true
+roles:
+  receiver:
+    label: Receiver
+    source: launch
+nodes:
+  packet:
+    title: Save immutable packet
+    uses: codans/handoff.packet.create@v1
+    with:
+      briefing:
+        ref: inputs.briefing
+  launch_receiver:
+    title: Start receiver
+    uses: codans/session.launch@v1
+    role: receiver
+    needs:
+    - packet
+  receive:
+    title: Read and acknowledge
+    uses: codans/agent.request@v1
+    role: receiver
+    needs:
+    - packet
+    - launch_receiver
+    with:
+      context:
+        packet:
+          ref: nodes.packet.outputs.packet
+      instruction:
+        value: Read the complete packet. Return its ID and digest, your understanding, a concrete
+          next action and blockers. Do not execute the task yet.
+    expect:
+      format: json
+      schema:
+        type: object
+        required:
+        - packetId
+        - packetDigest
+        - understanding
+        - nextAction
+        - blockers
+        additionalProperties: false
+        properties:
+          packetId:
+            type: string
+            minLength: 1
+          packetDigest:
+            type: string
+            minLength: 1
+          understanding:
+            type: string
+            minLength: 1
+          nextAction:
+            type: string
+            minLength: 1
+          blockers:
+            type: array
+            items:
+              type: string
+  verify:
+    title: Verify acknowledgement
+    uses: codans/handoff.ack.verify@v1
+    needs:
+    - packet
+    - receive
+    with:
+      packet:
+        ref: nodes.packet.outputs.packet
+      acknowledgement:
+        ref: nodes.receive.outputs.result
+outputs:
+  packet:
+    ref: nodes.packet.outputs.packet
+  acknowledgement:
+    ref: nodes.receive.outputs.result
+  readiness:
+    ref: nodes.verify.outputs.readiness

@@ -1,0 +1,82 @@
+{
+  "name": "Synthetic committee fixture: SQLite versus per-Run JSON; no real agents were run",
+  "request": {
+    "inputs": {
+      "question": "For a local Codans workflow engine, compare SQLite metadata with per-Run JSON snapshots. Requirements include explicit accepted deliveries, durable attempts and event history, cross-Run endpoint leases and immutable artifact bodies. Recommend a first-release approach, state assumptions and preserve unresolved tradeoffs. No workload measurements are available. This is a synthetic discussion fixture; inspect and modify no files."
+    },
+    "roles": {
+      "analyst_a": {
+        "source": "launch",
+        "profileId": "fixture-profile-a",
+        "environment": {
+          "host": "local",
+          "cwd": "/tmp/codans-workflow-fixture",
+          "placement": "tab"
+        }
+      },
+      "analyst_b": {
+        "source": "launch",
+        "profileId": "fixture-profile-b",
+        "environment": {
+          "host": "local",
+          "cwd": "/tmp/codans-workflow-fixture",
+          "placement": "tab"
+        }
+      },
+      "synthesizer": {
+        "source": "pick",
+        "endpoint": {
+          "paneId": "00000000-0000-4000-8000-000000000003",
+          "endpointGeneration": 1
+        }
+      }
+    }
+  },
+  "actionResults": {
+    "launch_a": {
+      "session": {
+        "paneId": "00000000-0000-4000-8000-000000000001",
+        "endpointGeneration": 1
+      }
+    },
+    "launch_b": {
+      "session": {
+        "paneId": "00000000-0000-4000-8000-000000000002",
+        "endpointGeneration": 1
+      }
+    },
+    "analysis_a": {
+      "result": "# Findings\nThe scenario requires Run state, Attempt state, accepted Delivery indices and Event sequence to change consistently. SQLite can express this metadata boundary as one transaction. Artifact bodies remain separate immutable files, so filesystem durability still needs its own protocol.\n\n# Recommendation\nUse SQLite for metadata and immutable files for bodies. Validate crash windows before promising durable acceptance; do not infer safety from SQLite alone.\n",
+      "delivery": {
+        "id": "delivery-analysis-a"
+      }
+    },
+    "analysis_b": {
+      "result": "# Findings\nA single bounded JSON snapshot per Run can atomically replace the complete Run aggregate and simplify inspection. A single writer can serialize updates. Separate global indexes must be rebuildable, and growing histories can make whole-file rewrites expensive.\n\n# Recommendation\nStart with per-Run JSON snapshots for a constrained first release. Measure snapshot size and write latency before adopting SQLite; keep global indexes derived rather than independently authoritative.\n",
+      "delivery": {
+        "id": "delivery-analysis-b"
+      }
+    },
+    "review_a": {
+      "result": "# Agreements\nBoth proposals need explicit delivery acceptance, one writer and a verified artifact persistence protocol. The JSON proposal can preserve consistency within one bounded Run aggregate.\n\n# Disagreements\nI still favor SQLite because event history and cross-Run endpoint leases expand beyond one aggregate. JSON remains reasonable only if those constraints are demonstrably bounded. No benchmark in this scenario proves either option faster.\n",
+      "delivery": {
+        "id": "delivery-review-a"
+      }
+    },
+    "review_b": {
+      "result": "# Agreements\nSQLite reduces the burden of maintaining transactional metadata across Runs. I accept that endpoint leases and a growing event history weaken the simplicity argument for JSON.\n\n# Disagreements\nI still prefer a constrained JSON first release if leases can be safely reconstructed after restart and history remains bounded. SQLite migration and operational tooling have costs; this scenario does not quantify them. This is a conditional preference, not agreement with immediate SQLite adoption.\n",
+      "delivery": {
+        "id": "delivery-review-b"
+      }
+    },
+    "synthesis": {
+      "result": "# Consensus\nBoth analysts require a single writer, explicit accepted deliveries, immutable artifact bodies and crash-window validation. Neither storage format alone guarantees durable handoff. No performance measurements were supplied.\n\n# Disagreements\nAnalyst A recommends SQLite now for transactional metadata, event growth and cross-Run leases. Analyst B prefers bounded per-Run JSON initially, conditional on safe lease reconstruction and bounded history. The disagreement concerns the first-release scope and migration cost, not the need for consistency.\n\n# Recommendation\nPrefer SQLite metadata for the proposed persistent workflow engine because its stated scope includes growing history and cross-Run coordination. Before implementation, validate crash behavior and compare representative write and query workloads. Reconsider bounded JSON if the accepted scope removes those cross-Run requirements and measurements justify the simpler storage. This report authorizes no implementation.\n",
+      "delivery": {
+        "id": "delivery-synthesis"
+      }
+    }
+  },
+  "expectedOutputs": {
+    "report": "# Consensus\nBoth analysts require a single writer, explicit accepted deliveries, immutable artifact bodies and crash-window validation. Neither storage format alone guarantees durable handoff. No performance measurements were supplied.\n\n# Disagreements\nAnalyst A recommends SQLite now for transactional metadata, event growth and cross-Run leases. Analyst B prefers bounded per-Run JSON initially, conditional on safe lease reconstruction and bounded history. The disagreement concerns the first-release scope and migration cost, not the need for consistency.\n\n# Recommendation\nPrefer SQLite metadata for the proposed persistent workflow engine because its stated scope includes growing history and cross-Run coordination. Before implementation, validate crash behavior and compare representative write and query workloads. Reconsider bounded JSON if the accepted scope removes those cross-Run requirements and measurements justify the simpler storage. This report authorizes no implementation.\n"
+  }
+}

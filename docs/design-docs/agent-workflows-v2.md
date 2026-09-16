@@ -345,6 +345,8 @@ workflows/
 
 ## 10. 构建顺序与验收
 
+具体定义与合成运行材料见 [五个 Workflow v2 case](../examples/workflows-v2/README.md)：Handoff、已有 briefing 的 Handoff、Advisor、Committee、无 Role 的人工决策。每份包含 YAML 和独立 scenario.json；可执行检查器验证限定的契约与数据流，不代表应用已支持该 DSL 或真实 Agent 已执行。
+
 1. **定义与 Role 契约**：解析、诊断、schema、Action registry 和 Handoff bundle。验证不包含本机 UUID、Role source 约束、重复 ID、未知 Action、循环依赖、非法引用与输出契约。
 2. **定义管理**：新增、导入、复制、完整 Source 预览和外部编辑刷新；完全不启动 Agent 即可完成一次定义创建。
 3. **运行基础**：RunRequest、绑定快照、事务存储、通用调度、显式 Delivery；验证 generation fencing、重复/迟到交付、崩溃窗口与取消期间投递。
