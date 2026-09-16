@@ -1,11 +1,11 @@
 # 设计文档：Agent Workflows
 
-**状态：** 初始切片已实现，完整设计实施中
+**状态：** 历史设计；当前目标由 [Agent Workflows v2](agent-workflows-v2.md) 替代
 **评审状态：** Draft
 **作者：** Gump / Codex
 **日期：** 2026-09-15
 
-本文描述完整目标设计。当前固定串行模板、显式 claim/deliver、运行快照、CLI/UI 与 Handoff 接入的范围见 [使用说明](../workflow-usage.md)；动态计划、独立 WorkItem、完整权限与恢复协议尚未实现。下文未标明落地的契约仍属于设计目标。
+本文保留旧版方案与设计依据，不再作为后续实现目标。固定模板、创建运行表单、全局 Workspace 约束和 YAML 非目标已被 v2 修订。当前实现范围仍见 [使用说明](../workflow-usage.md)；v2 的定义、Role、文件管理和运行界面尚未实现。
 
 ## 背景与范围
 

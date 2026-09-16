@@ -2,6 +2,8 @@
 
 Status: Initial implementation with GUI creation and fixed serial dispatch. Build, targeted regression tests, and a real Advisor dispatch/delivery smoke test have passed. Authorized on 2026-09-16; commit verified assistant changes without pushing.
 
+Design status: The fixed-template product model was rejected after review. The replacement proposal is [Agent Workflows v2](design-docs/agent-workflows-v2.md), which separates YAML definitions, roles, run bindings, and management surfaces. The implementation inventory below remains historical evidence of the current slice; it does not mean v2 is implemented.
+
 ## Implemented scope
 
 The current slice builds a shared execution protocol for Handoff, Advisor, and Committee using fixed built-in templates. It does not implement the full dynamic-plan architecture.
@@ -37,4 +39,4 @@ Do not label the full architecture or all WF/HC/AC/CC acceptance criteria comple
 
 ## Follow-up sequence
 
-First complete acceptance of the GUI-driven serial scenarios. Then add formal report/read contracts and better recovery based on observed failures. Dynamic plan revisions and scoped credentials require a separate execution contract. Writer admission and continuation authorization must precede automatic editing workflows. Add parallel scheduling only after serial cancellation, persistence, and delivery boundaries are verified.
+Use the replacement design's implementation sequence after model review. Do not extend the fixed-template composer or make Workspace a required field of every workflow. Preserve historical run records and explicit delivery invariants while replacing definition loading, role binding, dispatch, and the management UI. Writer admission and continuation authorization must precede automatic editing workflows.

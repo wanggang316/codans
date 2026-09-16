@@ -18,7 +18,7 @@ Use [_template.md](_template.md) as a starting point.
 <!-- One entry per doc, alphabetical: [Title](file) — one-line summary. Each doc carries a `**状态：**` field. -->
 
 - [Agent Profiles 与 Handoff](agent-handoff.md) — 命名 agent 启动预设（Settings → Agents / toolbar / palette / `codans agent`）+ agent 到 agent 的任务交接：worktree 内 `.codans/handoff/` 工件、archive-first 迁移、源 agent 自写 briefing 的 `codans handoff`、应用内 Hand Off 面板
-- [Agent Workflows](agent-workflows.md) — **初始切片已实现，完整设计实施中**：Skill 驱动的动态计划、轻量执行引擎、显式委派与交付、运行历史和人工接管
+- [Agent Workflows v2](agent-workflows-v2.md) — **设计提案，未实现**：YAML 定义、Role 与运行绑定、定义管理、通用 Action、Handoff 与运行历史；[旧版设计](agent-workflows.md) 保留作历史依据
 - [Workflow 用例与构建顺序](workflow-use-cases.md) — **实施中**：以 Handoff、Advisor、Committee 驱动公共引擎，定义场景合同、验收与迁移顺序
 - [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 派生运行态（idle/working/blocked/finished），独立于通知系统
 - [App Appearance & Terminal Theme](app-appearance.md) — Light/Dark/System 外观（单写者 `NSApp.appearance`）+ Ghostty 配置 managed-keys（theme/font/cursor）写入
