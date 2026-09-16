@@ -28,6 +28,12 @@ struct SettingsSidebarView: View {
             globalRow(for: section)
               .tag(Optional(section))
               .id(section)
+            if section == .agents {
+              Label("Workflows", systemImage: "arrow.triangle.branch")
+                .padding(.leading, 16)
+                .tag(Optional(SettingsSection.workflows))
+                .id(SettingsSection.workflows)
+            }
           }
         }
 
@@ -185,6 +191,7 @@ struct SettingsSidebarView: View {
     case .general: return "gearshape"
     case .globalCommands: return "terminal"
     case .agents: return "sparkles"
+    case .workflows: return "arrow.triangle.branch"
     case .github: return "arrow.triangle.pull"
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"

@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 
 /// One row in the Settings window sidebar. The global cases are fixed-order; the
 /// Project-scoped cases carry the `ProjectID` they bind to and are surfaced under the
@@ -8,6 +8,7 @@ public enum SettingsSection: Hashable, Sendable {
   case general
   case globalCommands
   case agents
+  case workflows
   case github
   case worktree
   case terminal
@@ -40,6 +41,7 @@ public enum SettingsSection: Hashable, Sendable {
     case .general: return "General"
     case .globalCommands: return "Global Commands"
     case .agents: return "Agents"
+    case .workflows: return "Workflows"
     case .github: return "GitHub"
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"

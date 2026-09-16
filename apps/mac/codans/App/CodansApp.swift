@@ -78,6 +78,7 @@ struct CodansApp: App {
             store: store,
             hierarchyManager: appState.hierarchyManager,
             settingsStore: appState.settingsStore,
+            workflowAppState: appState,
             worktreeStatusMonitor: appState.worktreeStatusMonitor,
             worktreeLocalDiffMonitor: appState.worktreeLocalDiffMonitor,
             notificationRollup: appState.notificationRollup,
@@ -174,10 +175,9 @@ struct CodansApp: App {
       CommandMenu("Workflows") {
         Button("New Workflow…") {
           appState.workflowCreationRequest = UUID()
-          openWindow(id: "workflows")
+          showWorkflowSettings()
         }
-        Button("Show Workflows…") { openWindow(id: "workflows") }
-        Button("Show Legacy Runs…") { openWindow(id: "legacy-workflows") }
+        Button("Manage Workflows…") { showWorkflowSettings() }
       }
       CommandGroup(replacing: .appSettings) {
         // Chord routes through the registry so a user override in Settings → Shortcuts
@@ -189,29 +189,6 @@ struct CodansApp: App {
       }
     }
 
-    Window("Workflows", id: "workflows") {
-      WorkflowLibraryViewV2(
-        catalog: appState.workflowCatalogV2,
-        service: appState.workflowServiceV2,
-        profiles: appState.settingsStore.settings.agents.enabledProfiles,
-        panes: appState.workflowAgentPanesV2,
-        workspaces: appState.workflowWorkspaces,
-        creationRequest: appState.workflowCreationRequest,
-        onStart: { try appState.startWorkflowV2(definition: $0, source: $1, title: $2, inputs: $3, selections: $4) },
-        onOpenPane: { value in
-          guard let uuid = UUID(uuidString: value) else { return }
-          openWindow(id: Self.mainWindowID)
-          appState.store?.send(.agentState(.rowTapped(PaneID(raw: uuid))))
-        }
-      )
-      .frame(minWidth: 1000, minHeight: 700)
-    }
-
-    Window("Legacy Workflow Runs", id: "legacy-workflows") {
-      WorkflowRunsView(store: appState.workflowStore, allowsCreation: false)
-        .frame(minWidth: 760, minHeight: 500)
-    }
-
     Window("Settings", id: CodansApp.settingsWindowID) {
       AppAppearanceView(settingsStore: appState.settingsStore) {
         if let store = appState.settingsWindowStore {
@@ -219,6 +196,7 @@ struct CodansApp: App {
             store: store,
             settingsStore: appState.settingsStore,
             shortcutsStore: appState.shortcutsStore,
+            workflowAppState: appState,
             sessionCoordinator: appState.sessionCoordinator,
             onForgetAllSessions: {
               appState.forgetAllPersistedSessions()
@@ -244,6 +222,11 @@ struct CodansApp: App {
     }
     .defaultSize(width: 750, height: 500)
     .windowResizability(.contentMinSize)
+  }
+
+  private func showWorkflowSettings() {
+    appState.settingsWindowStore?.send(.selectionChanged(.workflows))
+    openWindow(id: Self.settingsWindowID)
   }
 
   /// Scene id for the Settings `Window`. Referenced from the app-menu Settings… command and

@@ -11,6 +11,7 @@ struct ContentView: View {
   @Bindable var store: StoreOf<RootFeature>
   let hierarchyManager: HierarchyManager
   let settingsStore: SettingsStore
+  let workflowAppState: AppState
   /// Per-Worktree dirty-tree cache threaded into the sidebar so each row can decide
   /// whether to paint a pending-work dot without owning its own `git status` fetch.
   let worktreeStatusMonitor: WorktreeStatusMonitor
@@ -123,6 +124,9 @@ struct ContentView: View {
         activePendingWorktree: resolveActivePendingWorktree()
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .toolbar {
+        WorkflowToolbarViewV2(appState: workflowAppState)
+      }
       .overlay(alignment: .bottom) { editorToastOverlay }
       .sheet(
         item: $store.scope(state: \.tagManagerSheet, action: \.tagManagerSheet)

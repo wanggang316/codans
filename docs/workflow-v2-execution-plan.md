@@ -42,3 +42,32 @@ be replaced by manually supplying its result while claiming an automated pass.
 - App Debug build passed.
 - 48 tests across parser/catalog, service, endpoint identity, new/legacy routing and Agent state passed.
 - Full `make mac-check` ran; unrelated formatter-only changes were restored. New v2 files pass focused lint. Existing MethodRouter routeProject async and AgentStateStore refresh complexity findings remain outside this change.
+
+## Prowl-aligned navigation correction
+
+Workflow does not own a separate window. Definition management lives in the
+existing Settings window under Agents → Workflows: a compact Built-in / Your
+Workflows index pushes definition details, YAML source and execution history.
+Main-window workflow controls start a run and inspect history in a sheet without
+leaving the terminal workspace. Role launch locations remain per-run bindings.
+
+Reference: Prowl `WorkflowsSettingsView`, `WorkflowSettingsDetailView`,
+`AgentsToolbarButton`, and `WorkflowStepHistoryView` in the local source checkout.
+The prior separate-window arrangement is superseded. GUI acceptance remains
+pending; the computer-use service crashed reading the previous standalone
+window, independently of the application process.
+
+### Navigation verification (2026-09-16)
+
+- Debug build and 13 selected parser/catalog, service and router regression tests passed.
+- All changed Swift files passed focused SwiftLint; `git diff --check` passed.
+- GUI verified the existing Settings window (`id: settings`) renders Built-in,
+  Your Workflows, creation/import/refresh actions and execution history.
+- GUI found and fixed first-use run-sheet state capture: one typed presentation
+  value now carries either a definition or a history destination. Run and History
+  use distinct toolbar items and accessibility labels.
+- Decision Only completed entirely through the main-window GUI: run
+  `54224675-405D-4A49-94D4-7A49695F09FE`, status `succeeded`; no agent/workspace
+  fields, decision and reason recorded, full Frozen YAML inspected.
+- Definition-detail navigation still triggers a crash in SkyComputerUseService
+  (`Array.remove(at:)`), so that path is not GUI-accepted yet.

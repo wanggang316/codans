@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Root view for the Settings window scene. Two-column `NavigationSplitView` with the
 /// sidebar (global sections + Repositories disclosure) on the left and a per-section detail
@@ -13,6 +13,7 @@ struct SettingsWindowView: View {
   let settingsStore: SettingsStore
   /// Strong reference to the shortcuts store so the Shortcuts pane can mutate overrides.
   let shortcutsStore: ShortcutsStore
+  let workflowAppState: AppState
   /// Persisted-session catalog accessor, threaded into the General pane so
   /// the user can see and clear what would be resumed on the next launch.
   /// `nil` when the launch is running in no-resume mode.
@@ -114,7 +115,9 @@ struct SettingsWindowView: View {
         store: store.scope(state: \.globalCommands, action: \.globalCommands)
       )
     case .agents:
-      AgentsSettingsView()
+      AgentsSettingsView(onManageWorkflows: { store.send(.selectionChanged(.workflows)) })
+    case .workflows:
+      WorkflowSettingsHostViewV2(appState: workflowAppState)
     case .github:
       GitHubSettingsView(settingsStore: settingsStore)
     case .worktree:
@@ -132,30 +135,40 @@ struct SettingsWindowView: View {
     case .about:
       AboutSettingsView()
     case .projectGeneral(let projectID):
-      if let paneStore = store.scope(
-        state: \.projectPanes[id: projectID],
-        action: \.projectPanes[id: projectID]
-      ) {
-        ProjectGeneralSettingsView(
-          projectID: projectID,
-          store: paneStore,
-          descriptors: store.state.general.descriptors
-        )
-      } else {
-        // State entry is lazily instantiated in `selectionChanged`; this arm is a
-        // belt-and-suspenders placeholder for the single frame between a user click
-        // landing and the reducer run finishing.
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-      }
+      projectGeneralView(projectID)
     case .projectScripts(let projectID):
-      if let paneStore = store.scope(
-        state: \.projectPanes[id: projectID],
-        action: \.projectPanes[id: projectID]
-      ) {
-        ProjectScriptsSettingsView(projectID: projectID, store: paneStore)
-      } else {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-      }
+      projectScriptsView(projectID)
+    }
+  }
+
+  @ViewBuilder
+  private func projectGeneralView(_ projectID: ProjectID) -> some View {
+    if let paneStore = store.scope(
+      state: \.projectPanes[id: projectID],
+      action: \.projectPanes[id: projectID]
+    ) {
+      ProjectGeneralSettingsView(
+        projectID: projectID,
+        store: paneStore,
+        descriptors: store.state.general.descriptors
+      )
+    } else {
+      // State entry is lazily instantiated in `selectionChanged`; this arm is a
+      // belt-and-suspenders placeholder for the single frame between a user click
+      // landing and the reducer run finishing.
+      ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+
+  @ViewBuilder
+  private func projectScriptsView(_ projectID: ProjectID) -> some View {
+    if let paneStore = store.scope(
+      state: \.projectPanes[id: projectID],
+      action: \.projectPanes[id: projectID]
+    ) {
+      ProjectScriptsSettingsView(projectID: projectID, store: paneStore)
+    } else {
+      ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
     }
   }
 }
