@@ -35,6 +35,30 @@ struct WorkspaceManifestTests {
     let directory = WorkspaceLayout.defaultWorkspacesDirectory(home: home)
     #expect(directory.hasDirectoryPath)
     #expect(directory.path == "/Users/me/.codans/workspaces")
+    #expect(WorkspaceLayout.defaultSourcesDirectory(home: home).path == "/Users/me/.codans/sources")
+  }
+
+  @Test
+  func uniquePathSuffixesTakenFolders() {
+    let base = URL(fileURLWithPath: "/Users/me/.codans/sources", isDirectory: true)
+    let taken: Set<String> = [
+      "/Users/me/.codans/sources/lib", "/Users/me/.codans/sources/lib-2",
+    ]
+    #expect(
+      WorkspaceLayout.uniquePath(base: base, folder: "app") { taken.contains($0) } == "/Users/me/.codans/sources/app")
+    #expect(
+      WorkspaceLayout.uniquePath(base: base, folder: "lib") { taken.contains($0) } == "/Users/me/.codans/sources/lib-3")
+  }
+
+  @Test
+  func repositoryNameComesFromTheLastURLComponent() {
+    #expect(WorkspaceLayout.repositoryName(fromRemoteURL: "https://github.com/org/lib.git") == "lib")
+    #expect(WorkspaceLayout.repositoryName(fromRemoteURL: "git@github.com:org/lib.git") == "lib")
+    #expect(WorkspaceLayout.repositoryName(fromRemoteURL: "git@github.com:lib") == "lib")
+    #expect(WorkspaceLayout.repositoryName(fromRemoteURL: "ssh://git@host/team/Repo/") == "Repo")
+    #expect(WorkspaceLayout.repositoryName(fromRemoteURL: "file:///tmp/bare.git") == "bare")
+    #expect(WorkspaceLayout.repositoryName(fromRemoteURL: "  ") == nil)
+    #expect(WorkspaceLayout.repositoryName(fromRemoteURL: ".git") == nil)
   }
 
   // MARK: - Codable
@@ -53,6 +77,7 @@ struct WorkspaceManifestTests {
       """
     let manifest = try JSONDecoder().decode(WorkspaceManifest.self, from: Data(json.utf8))
     #expect(manifest.schemaVersion == WorkspaceManifest.currentSchemaVersion)
+    #expect(manifest.repositories[0].remoteURL == nil)
     #expect(manifest.title == "Checkout Flow")
     #expect(manifest.taskLinks.isEmpty)
     #expect(manifest.repositories.count == 2)
@@ -73,11 +98,18 @@ struct WorkspaceManifestTests {
       repositories: [
         WorkspaceManifest.Entry(
           name: "app", role: "macOS app", sourceGitRoot: "/src/app",
-          checkoutMode: .newBranch, branch: "feat/x", baseRef: "origin/main")
+          checkoutMode: .newBranch, branch: "feat/x", baseRef: "origin/main"),
+        WorkspaceManifest.Entry(
+          name: "lib", sourceGitRoot: "/src/lib", remoteURL: "git@github.com:org/lib.git",
+          checkoutMode: .remoteTrackingRef, branch: "main", baseRef: "origin/main"),
       ]
     )
     let data = try JSONEncoder().encode(manifest)
     let decoded = try JSONDecoder().decode(WorkspaceManifest.self, from: data)
+    #expect(decoded.repositories[1].remoteURL == "git@github.com:org/lib.git")
+    #expect(decoded.repositories[1].checkoutMode == .remoteTrackingRef)
+    let localEntry = String(bytes: try JSONEncoder().encode(manifest.repositories[0]), encoding: .utf8) ?? ""
+    #expect(!localEntry.contains("remoteURL"))
     #expect(decoded == manifest)
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
     #expect(object?["schemaVersion"] as? Int == 1)

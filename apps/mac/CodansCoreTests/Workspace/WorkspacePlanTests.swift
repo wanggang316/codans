@@ -97,13 +97,71 @@ struct WorkspacePlanTests {
     var ledger = WorkspaceMaterializationLedger()
     #expect(ledger.isEmpty)
     ledger.record(.createdDirectory(path: "/tmp/ws"))
+    ledger.record(.clonedRepository(path: "/src/lib"))
     ledger.record(.createdBranch(repoRoot: "/src/app", branch: "feat/x"))
     ledger.record(.addedWorktree(repoRoot: "/src/app", path: "/tmp/ws/app"))
+    ledger.record(.resetBranch(repoRoot: "/src/lib", branch: "main", previousTip: "abc"))
+    ledger.record(.addedWorktree(repoRoot: "/src/lib", path: "/tmp/ws/lib"))
     #expect(
       ledger.rollbackSteps == [
+        .addedWorktree(repoRoot: "/src/lib", path: "/tmp/ws/lib"),
+        .resetBranch(repoRoot: "/src/lib", branch: "main", previousTip: "abc"),
         .addedWorktree(repoRoot: "/src/app", path: "/tmp/ws/app"),
         .createdBranch(repoRoot: "/src/app", branch: "feat/x"),
+        .clonedRepository(path: "/src/lib"),
         .createdDirectory(path: "/tmp/ws"),
       ])
+  }
+
+  // MARK: - Sources and remote-tracking checkouts
+
+  @Test
+  func remoteSourceResolvesToItsCloneDestination() {
+    var member = WorkspacePlan.Member(
+      name: "lib",
+      source: .remote(url: "git@github.com:org/lib.git", cloneDestination: "/src/lib"),
+      checkout: .newBranch(branch: "feat/x", baseRef: nil))
+    #expect(member.sourceGitRoot == "/src/lib")
+    #expect(member.source.remoteURL == "git@github.com:org/lib.git")
+    member.sourceGitRoot = "/elsewhere/lib"
+    #expect(member.source == .remote(url: "git@github.com:org/lib.git", cloneDestination: "/elsewhere/lib"))
+    let entry = member.manifestEntry
+    #expect(entry.sourceGitRoot == "/elsewhere/lib")
+    #expect(entry.remoteURL == "git@github.com:org/lib.git")
+
+    let local = WorkspacePlan.Member(name: "app", sourceGitRoot: "/src/app", checkout: .existingBranch("main"))
+    #expect(local.source == .local(gitRoot: "/src/app"))
+    #expect(local.manifestEntry.remoteURL == nil)
+  }
+
+  @Test
+  func remoteTrackingCheckoutExposesItsRefAndMode() throws {
+    let tracking = WorkspaceCheckout.remoteTrackingRef(remoteRef: "origin/feat/x", branch: "feat/x", resetLocal: true)
+    #expect(tracking.branch == "feat/x")
+    #expect(tracking.baseRef == "origin/feat/x")
+    #expect(tracking.manifestMode == .remoteTrackingRef)
+    let split = try #require(WorkspaceCheckout.splitRemoteRef("origin/feat/x"))
+    #expect(split.remote == "origin")
+    #expect(split.branch == "feat/x")
+    #expect(WorkspaceCheckout.splitRemoteRef("main") == nil)
+    #expect(WorkspaceCheckout.splitRemoteRef("/x") == nil)
+    #expect(WorkspaceCheckout.splitRemoteRef("origin/") == nil)
+  }
+
+  @Test
+  func validateChecksRemoteSourcesAndRemoteRefs() {
+    let issues = WorkspacePlan.validate(members: [
+      WorkspacePlan.Member(
+        name: "a", source: .remote(url: " ", cloneDestination: ""),
+        checkout: .remoteTrackingRef(remoteRef: "nobranch", branch: "x", resetLocal: false)),
+      WorkspacePlan.Member(
+        name: "b", source: .remote(url: "https://example.com/b.git", cloneDestination: "/src/b"),
+        checkout: .remoteTrackingRef(remoteRef: "origin/main", branch: "main", resetLocal: false)),
+    ])
+    #expect(issues.contains(.emptyRemoteURL(member: "a")))
+    #expect(issues.contains(.emptyCloneDestination(member: "a")))
+    #expect(issues.contains(.invalidRemoteRef(member: "a", ref: "nobranch")))
+    #expect(!issues.contains { if case .emptyRemoteURL("b") = $0 { return true } else { return false } })
+    #expect(!issues.contains { if case .invalidRemoteRef("b", _) = $0 { return true } else { return false } })
   }
 }

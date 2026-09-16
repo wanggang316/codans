@@ -52,6 +52,9 @@ public nonisolated struct WorkspaceManifest: Equatable, Sendable {
     case newBranch
     /// `git worktree add <path> <branch>`
     case existingBranch
+    /// `git worktree add --track -b|-B <branch> <path> <remote>/<branch>`;
+    /// `baseRef` records the remote-tracking ref.
+    case remoteTrackingRef
   }
 
   public struct Entry: Equatable, Sendable, Identifiable {
@@ -69,6 +72,9 @@ public nonisolated struct WorkspaceManifest: Equatable, Sendable {
     /// for hand-written entries; the reconcile fills the catalog row's
     /// `sourceGitRoot` from git regardless.
     public var sourceGitRoot: String?
+    /// URL the source repository was cloned from when the workspace added
+    /// it as a remote; provenance only. Nil for local sources.
+    public var remoteURL: String?
     public var checkoutMode: CheckoutMode?
     /// Branch the checkout was created on. Informational — the live branch
     /// is read from git.
@@ -81,6 +87,7 @@ public nonisolated struct WorkspaceManifest: Equatable, Sendable {
       role: String? = nil,
       path: String? = nil,
       sourceGitRoot: String? = nil,
+      remoteURL: String? = nil,
       checkoutMode: CheckoutMode? = nil,
       branch: String? = nil,
       baseRef: String? = nil
@@ -89,6 +96,7 @@ public nonisolated struct WorkspaceManifest: Equatable, Sendable {
       self.role = role
       self.path = path ?? name
       self.sourceGitRoot = sourceGitRoot
+      self.remoteURL = remoteURL
       self.checkoutMode = checkoutMode
       self.branch = branch
       self.baseRef = baseRef
@@ -111,7 +119,8 @@ public nonisolated struct WorkspaceManifest: Equatable, Sendable {
     public var description: String {
       switch self {
       case .invalidPath(let name, let path):
-        return "repository \"\(name)\" has an invalid path \"\(path)\" — expected a folder name under the workspace root"
+        return
+          "repository \"\(name)\" has an invalid path \"\(path)\" — expected a folder name under the workspace root"
       case .duplicateName(let name):
         return "repository name \"\(name)\" appears more than once"
       case .duplicatePath(let path):
@@ -175,6 +184,7 @@ public nonisolated struct WorkspaceManifest: Equatable, Sendable {
       guard !entry.name.isEmpty else { return nil }
       entry.role = entry.role?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
       entry.sourceGitRoot = entry.sourceGitRoot?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+      entry.remoteURL = entry.remoteURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
       entry.branch = entry.branch?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
       entry.baseRef = entry.baseRef?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
       return entry
@@ -218,7 +228,7 @@ extension WorkspaceManifest: Codable {
 
 extension WorkspaceManifest.Entry: Codable {
   private enum CodingKeys: String, CodingKey {
-    case name, role, path, sourceGitRoot, checkoutMode, branch, baseRef
+    case name, role, path, sourceGitRoot, remoteURL, checkoutMode, branch, baseRef
   }
 
   public init(from decoder: Decoder) throws {
@@ -229,6 +239,7 @@ extension WorkspaceManifest.Entry: Codable {
     self.path = path ?? name
     self.role = try container.decodeIfPresent(String.self, forKey: .role)
     self.sourceGitRoot = try container.decodeIfPresent(String.self, forKey: .sourceGitRoot)
+    self.remoteURL = try container.decodeIfPresent(String.self, forKey: .remoteURL)
     // An unknown mode written by a newer build reads as "not recorded"
     // rather than failing the whole manifest.
     self.checkoutMode = try container.decodeIfPresent(String.self, forKey: .checkoutMode)
@@ -243,6 +254,7 @@ extension WorkspaceManifest.Entry: Codable {
     try container.encodeIfPresent(role, forKey: .role)
     try container.encode(path, forKey: .path)
     try container.encodeIfPresent(sourceGitRoot, forKey: .sourceGitRoot)
+    try container.encodeIfPresent(remoteURL, forKey: .remoteURL)
     try container.encodeIfPresent(checkoutMode, forKey: .checkoutMode)
     try container.encodeIfPresent(branch, forKey: .branch)
     try container.encodeIfPresent(baseRef, forKey: .baseRef)
