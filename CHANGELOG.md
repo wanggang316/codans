@@ -21,9 +21,14 @@ and the project does not yet follow semantic versioning — every release until
   repository, so a workspace nested inside a repo stays a workspace.
 - **Create workspaces from the app or the CLI.** **New Workspace…** in the
   sidebar's Add menu (and the command palette) takes a title, a folder, two
-  or more repositories — open projects or any local repository — and one
-  branch, then checks every member out into the folder with `git worktree
-  add` and registers the result. `codans workspace create "Checkout Flow"
+  or more repositories — open projects, any local repository including a
+  bare one, or a remote URL, which is cloned once into
+  `~/.codans/sources/<name>` (or a folder you choose) and used like a local
+  repository from then on — and one branch, then checks every member out
+  into the folder with `git worktree add` and registers the result. A
+  member can also check out an existing remote branch; when a local branch
+  of that name already exists you choose whether to keep it or reset it to
+  the remote, and nothing is reset unless you say so. `codans workspace create "Checkout Flow"
   --project app --project api` does the same from a terminal; `codans
   workspace add` extends an existing workspace, `codans workspace show`
   describes one. A failure midway removes everything the call created. A
