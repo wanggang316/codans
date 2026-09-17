@@ -1,11 +1,11 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Top Header row above the terminal Tab bar. Left: read-only branch label.
 /// Right: Open-in split button. The Git Viewer is no longer a header chip —
 /// it lives behind the ⌘⌥G chord / menu and routes through the user's
-/// `settings.general.defaultGitViewerID` choice.
+/// `settings.general.defaultGitViewerID` choice, defaulting to the built-in diff window.
 struct WorktreeHeaderView: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
   let editorStore: StoreOf<EditorFeature>

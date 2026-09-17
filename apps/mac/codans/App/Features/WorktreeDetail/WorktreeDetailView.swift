@@ -192,8 +192,10 @@ struct WorktreeDetailView: View {
         // banner reads as a "drop-down notification strip" regardless
         // of which tab / pane is foreground.
         BranchSwitcherErrorBannerView(store: branchSwitcherStore)
-        tabBarRow(address: address)
-        terminalRegion(address: address)
+        VStack(spacing: 0) {
+          tabBarRow(address: address)
+          terminalRegion(address: address)
+        }
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -326,11 +328,7 @@ struct WorktreeDetailView: View {
         // native glass capsule + hover state. Order: Agents, RunScript,
         // Open — agents first because starting one is the more frequent
         // entry point for this app's audience.
-        ToolbarItem { agentSlot(mode) }
-        ToolbarSpacer(.fixed)
-        ToolbarItem { runSlot(mode) }
-        ToolbarSpacer(.fixed)
-        ToolbarItem { openSlot(mode) }
+        trailingToolbarItems(mode)
       } else {
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
         ToolbarItem(placement: .principal) { statusSlot(mode) }
@@ -345,6 +343,16 @@ struct WorktreeDetailView: View {
         }
       }
     }
+  }
+
+  @available(macOS 26.0, *)
+  @ToolbarContentBuilder
+  private func trailingToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
+    ToolbarItem { agentSlot(mode) }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { runSlot(mode) }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { openSlot(mode) }
   }
 
   @available(macOS 26.0, *)

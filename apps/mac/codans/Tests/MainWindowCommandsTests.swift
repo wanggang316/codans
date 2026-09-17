@@ -1,8 +1,8 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import SwiftUI
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -154,11 +154,8 @@ struct MainWindowCommandsTests {
   // MARK: - ⌘⇧G (Git Viewer)
 
   @Test
-  func commandShiftGIsNoOpWhenNoGitViewerConfigured() async {
-    // Mirrors the ⌘⇧G button body:
-    // `store.send(.diffInspectorToggledForCurrentWorktree)`. With the global
-    // `defaultGitViewerID` unset (Default Git Viewer = None) the chord is a
-    // no-op — the built-in overlay no longer exists, so nothing is dispatched.
+  func gitViewerCommandIsNoOpWhenConfiguredExternalClientIsUnavailable() async {
+    // An unavailable explicitly configured external client never falls through to another app.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let worktree = Worktree(id: worktreeID, name: "w", path: "/repo")
@@ -177,8 +174,10 @@ struct MainWindowCommandsTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      // No git viewer configured — chord is a no-op.
-      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      // The chosen client is absent from the installed descriptors.
+      $0[SettingsWriter.self].readSnapshotSync = {
+        Settings(general: GeneralSettings(defaultGitViewerID: "fork"))
+      }
     }
 
     await store.send(.diffInspectorToggledForCurrentWorktree)

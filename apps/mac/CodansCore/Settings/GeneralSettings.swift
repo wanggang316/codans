@@ -36,11 +36,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// Global default editor. `nil` means "no global default set" — resolution falls back to
   /// the `EditorRegistry.defaultPriority` walk (which always terminates at Finder).
   public var defaultEditorID: EditorID?
-  /// Global default Git viewer. `nil` means "not selected" — the Git Viewer chord /
-  /// menu item is a no-op. Any other value names an installed git client from
-  /// `EditorRegistry.gitClientPriority` (GitHub Desktop, Sourcetree, …) that the
-  /// chord opens the current worktree in. A stored id that is no longer installed is
-  /// treated as `nil` at resolve time and cleaned up by `garbageCollectEditors`.
+  /// The app-owned viewer is independent of the installed external-editor registry.
+  public static let builtInGitViewerID: EditorID = "built-in"
+  /// Missing and legacy null values resolve to the built-in diff window.
   public var defaultGitViewerID: EditorID?
   /// Global default merge strategy used by the GitHub popover's Merge split-button when no
   /// per-Project `RepositorySettings.defaultMergeStrategy` is set. `nil` means "no global
@@ -130,7 +128,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   ) {
     self.appearance = appearance
     self.defaultEditorID = defaultEditorID
-    self.defaultGitViewerID = defaultGitViewerID
+    self.defaultGitViewerID = defaultGitViewerID ?? Self.builtInGitViewerID
     self.defaultMergeStrategy = defaultMergeStrategy
     self.postMergeAction = postMergeAction
     self.updateChannel = updateChannel
@@ -178,7 +176,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.appearance = try container.decodeIfPresent(AppearancePreference.self, forKey: .appearance) ?? .system
     self.defaultEditorID = try container.decodeIfPresent(EditorID.self, forKey: .defaultEditorID)
-    self.defaultGitViewerID = try container.decodeIfPresent(EditorID.self, forKey: .defaultGitViewerID)
+    self.defaultGitViewerID =
+      try container.decodeIfPresent(EditorID.self, forKey: .defaultGitViewerID)
+      ?? Self.builtInGitViewerID
     self.defaultMergeStrategy = try container.decodeIfPresent(MergeStrategy.self, forKey: .defaultMergeStrategy)
     self.postMergeAction = try container.decodeIfPresent(MergedWorktreeAction.self, forKey: .postMergeAction)
     self.updateChannel =

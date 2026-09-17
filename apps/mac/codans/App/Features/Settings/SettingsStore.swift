@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Observation
-import CodansCore
 import os.log
 
 /// `@MainActor @Observable` owner of `~/.config/codans/settings.json` (v3). Single writer
@@ -193,7 +193,7 @@ final class SettingsStore {
   }
 
   func setDefaultGitViewerID(_ id: EditorID?) {
-    settings.general.defaultGitViewerID = id
+    settings.general.defaultGitViewerID = id ?? GeneralSettings.builtInGitViewerID
     scheduleSave()
   }
 

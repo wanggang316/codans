@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 
 /// Decoders that translate raw `gh` stdout bytes into CodansCore DTOs. Each function is
 /// a pure mapping from `Data` → (DTO | `nil` | throw `GitHubError.other`).
@@ -249,7 +249,9 @@ nonisolated enum JSONOutputParsers {
       checkRollup: checks,
       mergeStateStatus: MergeStateStatus.decodeOrUnknown(node.mergeStateStatus),
       reviewDecision: ReviewDecision.decodeOrNil(node.reviewDecision),
-      headRepositoryOwner: node.headRepository?.owner?.login ?? ""
+      headRepositoryOwner: node.headRepository?.owner?.login ?? "",
+      baseRefName: node.baseRefName,
+      baseRepositoryURL: node.baseRepository?.url.flatMap(URL.init(string:))
     )
   }
 
@@ -352,6 +354,7 @@ nonisolated enum JSONOutputParsers {
     var updatedAt: Date?
     var headRefName: String?
     var baseRefName: String?
+    var baseRepository: GraphQLRepositoryURL?
     var commits: GraphQLTotalCount?
     var author: GraphQLAuthor?
     var headRepository: GraphQLRepositoryOwnerShort?
@@ -359,6 +362,7 @@ nonisolated enum JSONOutputParsers {
   }
 
   private struct GraphQLTotalCount: Decodable { var totalCount: Int? }
+  private struct GraphQLRepositoryURL: Decodable { var url: String? }
   private struct GraphQLAuthor: Decodable { var login: String? }
   private struct GraphQLRepositoryOwnerShort: Decodable {
     var name: String?

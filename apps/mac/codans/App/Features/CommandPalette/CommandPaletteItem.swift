@@ -73,6 +73,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case closeCurrentWorktree
     case refreshCurrentWorktree
     case toggleDiffInspector
+    case toggleChanges
     // Worktree actions that operate on the current selection. They carry no
     // payload — `RootFeature.route` resolves `state.selection` (and the
     // catalog where a parameter like the pin state is needed) at activation,

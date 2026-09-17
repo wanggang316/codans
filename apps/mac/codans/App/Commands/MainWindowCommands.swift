@@ -1,7 +1,7 @@
 import AppKit
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Main-window menu commands, organised into standard macOS menus instead of
 /// piling everything into File:
@@ -113,6 +113,7 @@ struct MainWindowCommands: Commands {
     // MARK: View — show / hide chrome + Command Palette
     CommandGroup(after: .sidebar) {
       Button("Toggle Sidebar") {
+        if DiffWindowManager.shared.toggleSidebar(in: NSApp.keyWindow) { return }
         guard let s = store() else { return }
         withAnimation(.easeOut(duration: 0.2)) {
           _ = s.send(.toggleSidebarRequested)
@@ -167,6 +168,11 @@ struct MainWindowCommands: Commands {
 
       // Git Viewer moved here from View — it operates on the current Worktree's
       // diff and reads naturally alongside the GitHub items.
+      Button("Show Changes") {
+        store()?.send(.openDiffRequested)
+      }
+      .disabled(!hasActiveWorktree)
+
       Button("Toggle Git Viewer") {
         store()?.send(.diffInspectorToggledForCurrentWorktree)
       }
@@ -254,11 +260,13 @@ struct MainWindowCommands: Commands {
       Button("Close Tab") {
         // ⌘W is a global menu chord; SwiftUI Commands aren't scene-scoped, so the
         // same accelerator fires regardless of which window is key. Route on the
-        // current key window: Settings (or any future SwiftUI utility window
+        // current key window: Diff, Settings (or any future SwiftUI utility window
         // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
         // window forwards to TabFeature. Without this dispatch the chord pressed
         // inside Settings would close the foreground worktree's tab.
-        if let key = NSApp.keyWindow, SettingsWindowTagger.matches(key) {
+        if let key = NSApp.keyWindow,
+          SettingsWindowTagger.matches(key) || key.identifier?.rawValue.hasPrefix("diff-") == true
+        {
           key.performClose(nil)
         } else {
           store()?.send(.closeActiveTabForCurrentWorktree)

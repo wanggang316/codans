@@ -127,6 +127,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 | 变量 | 作用 | 典型用法 |
 |---|---|---|
 | `CODANS_CONFIG_DIR` | 整体搬走配置根，所有 JSON store 跟着走 | 冒烟 / 集成测试，或给某个 worktree 的 dev 构建单独一套数据 |
+| `CODANS_CACHE_DIR` | 独立的终端缓存根目录，包含 zmx socket、快照与日志 | 配合配置目录和 RPC socket 隔离 GUI / 集成测试 |
 | `CODANS_SOCKET_PATH` | 指定 IPC socket | pane 内由 app 注入；手动指定实例 |
 | `CODANS_CLI` | 生成该 pane 的 app 自带 CLI 的绝对路径 | pane 内由 app 注入；`PATH` 被 rc 重建时用 `"$CODANS_CLI"` |
 | `CODANS_CLI_BINARY` | 安装器指向 `.app` 外新编的 CLI | dev |

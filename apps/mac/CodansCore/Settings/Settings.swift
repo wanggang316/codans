@@ -79,6 +79,8 @@ public nonisolated struct Settings: Equatable, Sendable {
   /// linger in `settings.json` forever (the resolver is lenient and would silently fall
   /// back, but the stored value stays dead).
   ///
+  /// The Git viewer falls back to Built-in, which is exempt from the external registry.
+  ///
   /// `knownIDs` is passed in rather than imported so this helper stays in `CodansCore`
   /// without taking a dependency on the app-tier `EditorRegistry`. Idempotent — a second
   /// call on an already-cleaned `Settings` is a no-op and returns `false`.
@@ -91,8 +93,10 @@ public nonisolated struct Settings: Equatable, Sendable {
       general.defaultEditorID = nil
       mutated = true
     }
-    if let id = general.defaultGitViewerID, !knownIDs.contains(id) {
-      general.defaultGitViewerID = nil
+    if general.defaultGitViewerID != GeneralSettings.builtInGitViewerID,
+      general.defaultGitViewerID.map({ !knownIDs.contains($0) }) ?? true
+    {
+      general.defaultGitViewerID = GeneralSettings.builtInGitViewerID
       mutated = true
     }
     for (pid, var entry) in projects {

@@ -95,6 +95,40 @@ struct EditorMigrationTests {
     #expect(settings.projects[validPID]?.defaultEditor == "cursor")
   }
 
+  @Test func gitViewerDefaultsAndLegacyNullDecodeAsBuiltIn() throws {
+    #expect(GeneralSettings().defaultGitViewerID == GeneralSettings.builtInGitViewerID)
+    #expect(GeneralSettings(defaultGitViewerID: nil).defaultGitViewerID == GeneralSettings.builtInGitViewerID)
+    for json in ["{}", #"{"defaultGitViewerID":null}"#] {
+      let decoded = try JSONDecoder().decode(GeneralSettings.self, from: Data(json.utf8))
+      #expect(decoded.defaultGitViewerID == GeneralSettings.builtInGitViewerID)
+      let encoded = try JSONEncoder().encode(decoded)
+      #expect(try JSONDecoder().decode(GeneralSettings.self, from: encoded) == decoded)
+    }
+  }
+
+  @Test func gitViewerNormalizationPreservesBuiltInOutsideRegistry() {
+    var settings = Settings()
+    let initialMutated = settings.garbageCollectEditors(knownIDs: [])
+    #expect(!initialMutated)
+    #expect(settings.general.defaultGitViewerID == GeneralSettings.builtInGitViewerID)
+    settings.general.defaultGitViewerID = nil
+    let legacyMutated = settings.garbageCollectEditors(knownIDs: [])
+    #expect(legacyMutated)
+    #expect(settings.general.defaultGitViewerID == GeneralSettings.builtInGitViewerID)
+    let repeatedMutated = settings.garbageCollectEditors(knownIDs: [])
+    #expect(!repeatedMutated)
+  }
+
+  @Test func gitViewerNormalizationPreservesKnownExternalAndReplacesStaleID() {
+    var settings = Settings(general: GeneralSettings(defaultGitViewerID: "fork"))
+    let knownMutated = settings.garbageCollectEditors(knownIDs: ["fork"])
+    #expect(!knownMutated)
+    #expect(settings.general.defaultGitViewerID == "fork")
+    let staleMutated = settings.garbageCollectEditors(knownIDs: [])
+    #expect(staleMutated)
+    #expect(settings.general.defaultGitViewerID == GeneralSettings.builtInGitViewerID)
+  }
+
   // MARK: - Legacy tolerance
 
   @Test

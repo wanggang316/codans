@@ -334,6 +334,7 @@ let project = Project(
         .target(name: "CodansKit"),
         .target(name: "GhosttyKit"),
         .external(name: "ComposableArchitecture"),
+        .external(name: "DiffViewKit"),
         .external(name: "Sparkle"),
         .external(name: "Sentry"),
       ],

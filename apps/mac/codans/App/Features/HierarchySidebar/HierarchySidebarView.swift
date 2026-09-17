@@ -1229,6 +1229,13 @@ struct HierarchySidebarView: View {
       .appKeyboardShortcut(.revealCurrentWorktreeInFinder, in: resolvedShortcuts)
     }
 
+    Divider()
+    Button {
+      store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id)))
+    } label: {
+      Label("Show Changes", systemImage: "doc.text.magnifyingglass")
+    }
+
     // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
     // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
     // worktrees, detached HEAD) so the menu never offers an empty copy.

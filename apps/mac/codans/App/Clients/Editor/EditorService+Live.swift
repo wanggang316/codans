@@ -161,6 +161,62 @@ final actor LiveEditorService: EditorService {
 
   // MARK: - openRemote
 
+  /// Opens a validated current file. Editors without a line-addressing CLI open
+  /// the file normally; callers must describe line navigation as best effort.
+  func openFile(
+    worktree: URL, relativePath: String, line: Int?, preferred: EditorID?, host: RemoteHost?
+  ) async throws {
+    let file = try EditorFileOpen.target(
+      worktree: worktree, relativePath: relativePath, local: host == nil
+    )
+    let descriptor: EditorDescriptor
+    if let host {
+      descriptor = try await resolveRemote(host: host, preferred: preferred)
+    } else {
+      descriptor = try await resolve(preferred: preferred)
+    }
+    guard
+      EditorRegistry.editorPriority.contains(descriptor.id) || descriptor.id == "xcode"
+        || descriptor.id == EditorRegistry.finderID
+    else {
+      throw EditorError.launchFailed(
+        reason:
+          "\(descriptor.displayName) does not support diff file navigation. Choose an application editor in Settings."
+      )
+    }
+    guard let appURL = descriptor.appURL else {
+      throw EditorError.launchFailed(
+        reason: "$EDITOR file navigation requires a terminal context. Choose an application editor in Settings."
+      )
+    }
+    if let invocation = EditorFileOpen.invocation(
+      editorID: descriptor.id, filePath: file.path, line: line, host: host
+    ) {
+      let outcome = await runner.run(
+        executable: appURL.appendingPathComponent(invocation.executableRelativePath),
+        arguments: invocation.arguments,
+        env: ProcessInfo.processInfo.environment,
+        cwd: host == nil ? worktree : URL(fileURLWithPath: NSHomeDirectory()),
+        timeout: .seconds(30), maxOutputBytes: 64 * 1024
+      )
+      guard case .exited(let code, _, _, _) = outcome, code == 0 else {
+        throw EditorError.launchFailed(reason: "\(descriptor.displayName)'s file-opening CLI failed.")
+      }
+      return
+    }
+    guard host == nil else {
+      throw EditorError.launchFailed(reason: "\(descriptor.displayName) cannot open files over SSH.")
+    }
+    let config = NSWorkspace.OpenConfiguration()
+    if descriptor.launchMode == .applicationWithArguments {
+      config.arguments = (line.flatMap { $0 > 0 ? ["--line", String($0)] : nil } ?? []) + [file.path]
+      config.createsNewApplicationInstance = true
+      try await launcher.openApplication(at: appURL, configuration: config)
+    } else {
+      try await launcher.open(urls: [file], withApplicationAt: appURL, configuration: config)
+    }
+  }
+
   @discardableResult
   func openRemote(
     host: RemoteHost, remotePath: String, preferred: EditorID?

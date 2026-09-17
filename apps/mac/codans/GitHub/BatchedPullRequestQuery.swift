@@ -117,6 +117,7 @@ nonisolated enum BatchedPullRequestQuery {
         updatedAt
         headRefName
         baseRefName
+        baseRepository { url }
         commits { totalCount }
         author { login }
         headRepository { name owner { login } }

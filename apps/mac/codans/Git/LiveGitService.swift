@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 
 /// Process-backed `GitService`. Builds argv via `GitCommand`, runs through the pluggable
 /// `CommandRunner` seam (live implementation wraps `Foundation.Process`), applies
@@ -50,7 +50,7 @@ nonisolated final class LiveGitService: GitService {
   /// `cd`'d into the remote repo path; the local process env is passed whole
   /// because ssh itself needs `SSH_AUTH_SOCK` / `HOME` / `PATH`, and the
   /// remote git's env is the login shell's own, not this one.
-  private func invoke(
+  func invoke(
     arguments: [String],
     cwd: URL,
     maxOutputBytes: Int = LiveGitService.maxOutputBytes
@@ -308,7 +308,7 @@ nonisolated final class LiveGitService: GitService {
   /// code alone is insufficient for the latter cases — a bare-repo cwd exits 0 but the diff/
   /// log code paths would still fail downstream with opaque errors. Parse stdout to get a
   /// clear `.notARepo` at the edge instead.
-  private func ensureIsRepo(at path: URL) async throws {
+  func ensureIsRepo(at path: URL) async throws {
     let outcome = await invoke(
       arguments: GitCommand.revParseIsInsideWorkTree(),
       cwd: path,
@@ -333,7 +333,7 @@ nonisolated final class LiveGitService: GitService {
   /// Runs git with `arguments` (via `invoke`, so remote repos route over SSH),
   /// translating `CommandOutcome` to domain error or success. Applies the
   /// 16 MiB cap and the transport's timeout.
-  private func run(arguments: [String], cwd: URL) async throws -> Data {
+  func run(arguments: [String], cwd: URL) async throws -> Data {
     let outcome = await invoke(arguments: arguments, cwd: cwd)
     switch outcome {
     case .exited(let code, let stdout, let stderr, let overflow):

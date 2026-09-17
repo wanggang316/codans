@@ -383,6 +383,7 @@ struct HierarchySidebarFeature {
     case delegate(Delegate)
     @CasePathable
     enum Delegate: Equatable {
+      case showChanges(projectID: ProjectID, worktreeID: WorktreeID)
       case openInDefaultEditor(worktreePath: String, projectID: ProjectID?)
       /// Sidebar's "Open in <Editor>" submenu — RootFeature dispatches
       /// `.editor(.openRequested)` directly with the explicit editor ID

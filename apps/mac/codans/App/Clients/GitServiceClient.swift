@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// TCA dependency-injection bridge over the `GitService` protocol from
 /// `codans/Git/`. Each closure mirrors one protocol method. Mirrors
@@ -10,6 +10,8 @@ import CodansCore
 /// Not `@MainActor`: `GitService` is nonisolated and conforms to `Sendable`.
 /// Closures are `@Sendable` async — safe to call from any reducer effect.
 nonisolated struct GitServiceClient: Sendable {
+  var comparison: @Sendable (URL, GitComparisonScope, String?) async throws -> GitComparisonSnapshot
+  var comparisonContent: @Sendable (URL, GitComparisonSnapshot, GitComparisonFile) async throws -> GitComparisonContent
   /// `(repoURL, cursor) -> LogPage`.
   var log: @Sendable (URL, LogPage.Cursor) async throws -> LogPage
   /// `(repoURL, ignoreWhitespace) -> UnifiedDiff`. `ignoreWhitespace=true` passes `-w`.
@@ -59,6 +61,10 @@ extension GitServiceClient {
   /// Constructs a client that forwards to a concrete `GitService`.
   static func live(service: any GitService = Git.makeService()) -> GitServiceClient {
     GitServiceClient(
+      comparison: { url, scope, base in try await service.comparison(at: url, scope: scope, base: base) },
+      comparisonContent: { url, snapshot, file in
+        try await service.comparisonContent(at: url, snapshot: snapshot, file: file)
+      },
       log: { url, cursor in try await service.log(at: url, page: cursor) },
       workingTreeDiff: { url, ignoreWhitespace in
         try await service.workingTreeDiff(at: url, ignoreWhitespace: ignoreWhitespace)
@@ -98,6 +104,9 @@ extension GitServiceClient: DependencyKey {
   static let liveValue: GitServiceClient = .live()
 
   static let testValue: GitServiceClient = GitServiceClient(
+    comparison: unimplemented(
+      "GitServiceClient.comparison", placeholder: .init(scope: .all, baseLabel: "HEAD", files: [])),
+    comparisonContent: unimplemented("GitServiceClient.comparisonContent", placeholder: .init()),
     log: unimplemented(
       "GitServiceClient.log",
       placeholder: LogPage(cursor: .init(offset: 0, limit: 0), commits: [], hasMore: false)
