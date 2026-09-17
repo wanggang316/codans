@@ -45,13 +45,9 @@ struct ContentView: View {
   /// chevron, and the bound state stay in lockstep.
   private var columnVisibilityBinding: Binding<NavigationSplitViewVisibility> {
     Binding(
-      get: { store.diff.isExpanded ? .detailOnly : (store.sidebarVisible ? .all : .detailOnly) },
+      get: { store.sidebarVisible ? .all : .detailOnly },
       set: { newValue in
         let visible = (newValue != .detailOnly)
-        if store.diff.isExpanded {
-          if visible { store.send(.toggleSidebarRequested) }
-          return
-        }
         if visible != store.sidebarVisible {
           // Wrap the store dispatch in withAnimation so the sidebar
           // slides instead of snapping. The native `.sidebarToggle`
@@ -116,7 +112,7 @@ struct ContentView: View {
         statusBarStore: store.scope(state: \.statusBar, action: \.statusBar),
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
-        diffStore: store.scope(state: \.diff, action: \.diff),
+        onOpenDiff: { store.send(.openDiffRequested) },
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,

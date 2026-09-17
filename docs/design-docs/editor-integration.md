@@ -5,7 +5,7 @@
 
 ## 背景与范围
 
-codans 刻意不是 IDE。通用源码浏览与改码交给外部编辑器或文件管理器；内置只读 Diff 面板可发起当前文件跳转。目录打开的可选目标包括 Cursor、Zed、VSCode、Xcode、Sublime、Finder，以及一众终端 / git 客户端。本文档描述那次交接：检测哪些应用已安装、把目录或当前文件在选定目标里打开、以及解析"用哪个"的默认值。落地代码在 `apps/mac/codans/App/Clients/Editor/`。
+codans 刻意不是 IDE。通用源码浏览与改码交给外部编辑器或文件管理器；内置只读 Diff 窗口可发起当前文件跳转。目录打开的可选目标包括 Cursor、Zed、VSCode、Xcode、Sublime、Finder，以及一众终端 / git 客户端。本文档描述那次交接：检测哪些应用已安装、把目录或当前文件在选定目标里打开、以及解析"用哪个"的默认值。落地代码在 `apps/mac/codans/App/Clients/Editor/`。
 
 安装检测经 `NSWorkspace` / Launch Services 按 bundle identifier 走，不依赖 `$PATH`。目录打开使用 `NSWorkspace`；支持行定位的文件打开和 SSH 打开可通过应用 bundle 内的 CLI，经共享 `CommandRunner` 执行。macOS GUI 应用继承的是 `launchd` 的最小 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`），凡是装进 `/usr/local/bin` 或 `/opt/homebrew/bin` 的编辑器 CLI shim（`code`/`cursor`/`subl`/…）——也就是每一个 Homebrew 风格安装、每一个跑过 "Install 'code' command in PATH" 的用户——都会被 `$PATH` 探测误报为**未安装**，哪怕 `.app` bundle 就躺在 `/Applications`。macOS 的应用发现走 Launch Services 而非调用方的 `PATH`，因此 bundle-id 检测无视那个可选 CLI shim 装没装，都能正确工作（承重理由见 `## 技术决策`）。
 
@@ -25,7 +25,7 @@ codans 刻意不是 IDE。通用源码浏览与改码交给外部编辑器或文
 
 **非目标**
 
-- 在 Codans 内编辑文件、打开历史侧临时文件或提供 merge editor。Diff 面板仅打开当前文件。
+- 在 Codans 内编辑文件、打开历史侧临时文件或提供 merge editor。Diff 窗口仅打开当前文件。
 - 用户自定义命令模板（"Custom editors"）。新增条目是一次代码改动。若日后证明判断错了，再行修订。
 - 安装 / 下载 / quarantine 帮助。条目没装就不出现，这就是全部 UX。
 - 同一应用多版本（如 Xcode stable vs Xcode-beta）的消歧。Launch Services 的选择即结果，作为已知限制记录。
@@ -61,7 +61,7 @@ codans 刻意不是 IDE。通用源码浏览与改码交给外部编辑器或文
 
 ### Diff 当前文件跳转
 
-[内置 Diff 面板](git-diff-viewer.md) 通过 `DiffEditorClient.openFile` 传递目录 URL、相对路径、可选行号和 Project ID。Client 读取 Project override / 全局默认，并复用编辑器注册表、安装检测和启动服务；组件本身不访问 Git 或启动编辑器。
+[内置 Diff 窗口](git-diff-viewer.md) 通过 `DiffEditorClient.openFile` 传递目录 URL、相对路径、可选行号和 Project ID。Client 读取 Project override / 全局默认，并复用编辑器注册表、安装检测和启动服务；组件本身不访问 Git 或启动编辑器。
 
 本地路径必须位于 Worktree 内，拒绝路径穿越、缺失文件和指向目录外的符号链接。历史侧和已删除文件不作为当前文件打开；Staged / Outgoing 打开当前文件时不沿用历史行号。当前侧行号在内容复核后才交给编辑器。
 

@@ -36,7 +36,7 @@ struct WorktreeDetailView: View {
   /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
-  @Bindable var diffStore: StoreOf<DiffFeature>
+  var onOpenDiff: () -> Void
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just
   /// to fire `toolbarAddProjectTapped` — same pattern as the editor toast
@@ -193,36 +193,10 @@ struct WorktreeDetailView: View {
         // banner reads as a "drop-down notification strip" regardless
         // of which tab / pane is foreground.
         BranchSwitcherErrorBannerView(store: branchSwitcherStore)
-        GeometryReader { geometry in
-          let terminalWidth = diffStore.isVisible ? max(220, geometry.size.width - 700) : geometry.size.width
-          HSplitView {
-            VStack(spacing: 0) {
-              tabBarRow(address: address)
-              terminalRegion(address: address)
-            }
-            .frame(
-              minWidth: diffStore.isExpanded ? 0 : min(220, terminalWidth),
-              maxWidth: diffStore.isExpanded ? 0 : terminalWidth
-            )
-            .clipped()
-            .allowsHitTesting(!diffStore.isExpanded)
-            .accessibilityHidden(diffStore.isExpanded)
-            if diffStore.isVisible {
-              DiffPanelView(store: diffStore)
-                .frame(minWidth: min(440, max(0, geometry.size.width - 220)), idealWidth: 700, maxWidth: .infinity)
-            }
-          }
-          .frame(width: geometry.size.width, height: geometry.size.height)
+        VStack(spacing: 0) {
+          tabBarRow(address: address)
+          terminalRegion(address: address)
         }
-      }
-      .onChange(of: address.activeTab) { _, _ in
-        if diffStore.isExpanded { diffStore.send(.expand) }
-      }
-      .onChange(of: address.activeTab.flatMap { hierarchyManager.lastFocusedPane(in: $0) }) { _, _ in
-        if diffStore.isExpanded { diffStore.send(.expand) }
-      }
-      .onChange(of: gitHubStore.snapshots[address.worktree], initial: true) { _, snapshot in
-        diffStore.send(.prBaseChanged(address.worktree, snapshot?.baseRefName, snapshot?.baseRepositoryURL))
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -387,9 +361,9 @@ struct WorktreeDetailView: View {
 
   private var diffButton: some View {
     Button {
-      diffStore.send(.toggle)
+      onOpenDiff()
     } label: {
-      Label("View Changes", systemImage: "square.split.2x1")
+      Label("View Changes", systemImage: "macwindow")
     }
     .help("View Changes and Outgoing")
     .accessibilityIdentifier("show-diff")

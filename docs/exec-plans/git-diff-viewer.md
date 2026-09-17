@@ -34,3 +34,9 @@ Integrate the independent DiffViewKit WKWebView component into Codans for read-o
 ## Status
 
 Completed: independent component exported, Codans integration built, 26 focused app tests and 6 Core tests passed, and local GUI fixture cases including narrow/wide layouts and editor line navigation passed. The verification record explicitly excludes actual SSH, live PR discovery, and forced Web-content process termination. Full-repository lint has 61 pre-existing errors; scoped new/final UI files pass. Changes are committed without pushing.
+
+## Independent window revision
+
+Approved: replace the terminal split with one normal NSWindow per worktree. Reopening focuses the existing window; changing the main selection does not retarget open windows. Closing cancels work and releases the renderer while preserving scope/base/file preferences and frame. The terminal hierarchy and geometry remain untouched.
+
+Validation completed: build-for-testing succeeded; 27 focused tests passed. GUI verified repeated open/close, multiple worktrees, zoom/restore, selection isolation, and unchanged terminal dimensions (37 × 78 with zero WINCH events). Command-W and red close affect only the Diff window. Multi-display and exhaustive Agent CLI visual matrices are not claimed.

@@ -9,20 +9,9 @@ import Testing
 @MainActor
 struct RootFeatureTests {
   @Test
-  func showingSidebarExitsExpandedDiff() async {
-    var state = RootFeature.State()
-    state.sidebarVisible = false
-    state.diff.isVisible = true
-    state.diff.isExpanded = true
-    let store = TestStore(initialState: state) { RootFeature() }
-
-    await store.send(.toggleSidebarRequested) {
-      $0.sidebarVisible = true
-    }
-    await store.receive(.diff(.expand)) {
-      $0.diff.isExpanded = false
-    }
-    #expect(store.state.diff.isVisible)
+  func openingDiffWithoutSelectionDoesNotChangeMainWindow() async {
+    let store = TestStore(initialState: RootFeature.State()) { RootFeature() }
+    await store.send(.openDiffRequested)
   }
 
   @Test

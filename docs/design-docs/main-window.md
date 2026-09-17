@@ -64,13 +64,13 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 ### Git diff 入口与状态
 
-`RootFeature` scope 的 `DiffFeature` 持有内置面板状态。`WorktreeDetailView` 把终端区域和 `DiffPanelView` 放入可调整宽度的 split view；面板可展开，终端会话保持存活。面板关闭后恢复当前 Pane 焦点。
+`RootFeature` 将打开请求交给 `DiffWindowManager`，每个 Worktree 复用一个独立的普通 `NSWindow` 和 `DiffFeature` store。主窗口切换 Worktree 不改变已打开的 Diff 窗口。开关 Diff 不改变终端布局；关闭窗口停止刷新并释放 WebView，重开恢复比较范围、文件选择和窗口位置。
 
-“View Changes and Outgoing” 是内置面板的菜单 / 命令面板入口，工具栏按钮为 “View Changes”。Changes 提供 All / Staged / Unstaged；Outgoing 比较目标分支与 HEAD 的共同祖先到 HEAD 的已提交改动。比较范围、基准和文件选择按 Worktree 在当前应用会话中保留；可见期间每两秒刷新本地 Git 状态，不自动 fetch。
+“View Changes and Outgoing” 是独立窗口的菜单 / 命令面板入口，工具栏按钮为 “View Changes”。Changes 提供 All / Staged / Unstaged；Outgoing 比较目标分支与 HEAD 的共同祖先到 HEAD 的已提交改动。比较范围、基准和文件选择按 Worktree 在当前应用会话中保留；可见期间每两秒刷新本地 Git 状态，不自动 fetch。
 
 代码通过独立的 `DiffViewKit`（WKWebView + Web Diff 组件）渲染。该组件只收发文档和事件；Git 查询、路径校验和编辑器打开由 Codans 拥有。面板只读，不提供暂存、丢弃、提交或编辑操作。接口和边界见 [git-diff-viewer.md](git-diff-viewer.md)。
 
-外部入口 “Toggle Git Viewer” 保留 `CommandID.toggleDiffInspector` 及 JSON raw value `toggleGitViewer`，继续调用 `RootFeature.diffInspectorToggledForCurrentWorktree` 打开配置的外部客户端，不控制内置面板。见 [editor-integration.md](editor-integration.md) 和 [keyboard-shortcuts.md](keyboard-shortcuts.md)。
+外部入口 “Toggle Git Viewer” 保留 `CommandID.toggleDiffInspector` 及 JSON raw value `toggleGitViewer`，继续调用 `RootFeature.diffInspectorToggledForCurrentWorktree` 打开配置的外部客户端，不控制独立窗口。见 [editor-integration.md](editor-integration.md) 和 [keyboard-shortcuts.md](keyboard-shortcuts.md)。
 
 ## Tab Bar
 
@@ -107,8 +107,8 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 |---|---|---|
 | `HierarchySidebarFeature` | 展开集合、filter/popover/sheet 瞬态状态、上下文菜单派发、选择/filter 编排、delegate 上抛 | 编辑器打开副作用（delegate 给 EditorFeature）、Finder 揭示（经 FinderClient）、catalog 变更（经 HierarchyClient） |
 | `HierarchySidebarView` | 视觉树、hover chrome、行点、底部 footer（排序/刷新；Tag 过滤已实现但当前隐藏） | 选择逻辑、catalog 状态（直读 `hierarchyManager.catalog`）、inbox 状态（直读 `inboxStore`） |
-| Header feature | 分支标签 + Open-in split button 的 UI 状态、editor-open delegate 上抛 | 默认编辑器解析（`EditorFeature.resolveDefault` 单一来源）、通知（状态栏）、Git diff（内置面板由 DiffFeature 拥有；⌘⌥G 走外部客户端） |
-| `DiffFeature` / `DiffPanelView` | 只读比较范围、文件选择、请求生命周期、可见期刷新及内置面板 | Git 命令执行（GitServiceClient）、编辑器启动（DiffEditorClient）、终端会话所有权 |
+| Header feature | 分支标签 + Open-in split button 的 UI 状态、editor-open delegate 上抛 | 默认编辑器解析（`EditorFeature.resolveDefault` 单一来源）、通知（状态栏）、Git diff（独立窗口由 DiffFeature 拥有；⌘⌥G 走外部客户端） |
+| `DiffFeature` / `DiffPanelView` | 只读比较范围、文件选择、请求生命周期、可见期刷新及独立窗口 | Git 命令执行（GitServiceClient）、编辑器启动（DiffEditorClient）、终端会话所有权 |
 | `TabBarFeature` | 把每个 tab 操作一行转发经 client；无状态 reducer | catalog 状态、运行态/焦点 map（在 HierarchyManager 上） |
 | `HierarchyManager` | catalog 变更、`paneRunning` / `lastFocusedPaneByTab` runtime-only map、Tag CRUD | 各 feature 的 UI 状态 |
 | `FinderClient` | `reveal(path:)` 经 NSWorkspace | 编辑器打开（不同 client） |
@@ -120,7 +120,7 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 本节仅记录改变了当前形态的承重转变，正文已按现状陈述、不再复述被取代或删除的中间态：
 
 - **Space → Tag / 单窗口**（[project-tags.md](project-tags.md)，Approved）：`Space` / `SpaceID` / `CatalogWindow` 从域模型整体移除，层级 5→4 级。**已删除字段**：`Space.lastActiveWorktreeID`、`Space.selectedProjectID`、`CatalogWindow.selectedSpaceID`——切勿当现状。横切分类改由 `Tag` 承载；侧栏底部不再有 Space switcher（Tag 过滤已实现但当前隐藏，见上文 §Tag filter）；⌘1–⌘9 / ⌘K 解绑。
-- **Git 查看入口分离**：旧 `GitViewer` overlay 的层级持久字段不参与内置面板。内置 Changes / Outgoing 使用 `DiffFeature` 的会话状态；“Toggle Git Viewer” 继续打开外部客户端。
+- **Git 查看入口分离**：旧 `GitViewer` overlay 的层级持久字段不参与独立窗口。内置 Changes / Outgoing 使用 `DiffFeature` 的会话状态；“Toggle Git Viewer” 继续打开外部客户端。
 - **通知铃铛不在 Header**（[notifications.md](notifications.md)）：未读以按层级上卷的徽标呈现，唯一 popover 入口是状态栏铃铛。
 
 ## References

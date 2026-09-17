@@ -168,7 +168,7 @@ struct MainWindowCommands: Commands {
       // Git Viewer moved here from View — it operates on the current Worktree's
       // diff and reads naturally alongside the GitHub items.
       Button("View Changes and Outgoing") {
-        store()?.send(.diff(.toggle))
+        store()?.send(.openDiffRequested)
       }
       .disabled(!hasActiveWorktree)
 
@@ -259,11 +259,13 @@ struct MainWindowCommands: Commands {
       Button("Close Tab") {
         // ⌘W is a global menu chord; SwiftUI Commands aren't scene-scoped, so the
         // same accelerator fires regardless of which window is key. Route on the
-        // current key window: Settings (or any future SwiftUI utility window
+        // current key window: Diff, Settings (or any future SwiftUI utility window
         // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
         // window forwards to TabFeature. Without this dispatch the chord pressed
         // inside Settings would close the foreground worktree's tab.
-        if let key = NSApp.keyWindow, SettingsWindowTagger.matches(key) {
+        if let key = NSApp.keyWindow,
+          SettingsWindowTagger.matches(key) || key.identifier?.rawValue.hasPrefix("diff-") == true
+        {
           key.performClose(nil)
         } else {
           store()?.send(.closeActiveTabForCurrentWorktree)

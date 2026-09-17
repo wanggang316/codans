@@ -40,7 +40,6 @@ struct RootFeature {
     /// can both forward into it from a single dispatch site, matching the
     /// per-worktree-aware peer features around it.
     var branchSwitcher: BranchSwitcherFeature.State = .init()
-    var diff: DiffFeature.State = .init()
     /// Editor preferences + per-Project override state.
     var editor: EditorFeature.State = .init()
     /// Header feature (bell + Open-in split button + GV toggle).
@@ -403,7 +402,7 @@ struct RootFeature {
     case sidebar(HierarchySidebarFeature.Action)
     case detail(WorktreeDetailFeature.Action)
     case branchSwitcher(BranchSwitcherFeature.Action)
-    case diff(DiffFeature.Action)
+    case openDiffRequested
     case editor(EditorFeature.Action)
     case worktreeHeader(WorktreeHeaderFeature.Action)
     case gitHub(GitHubFeature.Action)
@@ -476,7 +475,6 @@ struct RootFeature {
     Scope(state: \.sidebar, action: \.sidebar) { HierarchySidebarFeature() }
     Scope(state: \.detail, action: \.detail) { WorktreeDetailFeature() }
     Scope(state: \.branchSwitcher, action: \.branchSwitcher) { BranchSwitcherFeature() }
-    Scope(state: \.diff, action: \.diff) { DiffFeature() }
   }
 
   @ReducerBuilder<State, Action>
@@ -507,26 +505,28 @@ struct RootFeature {
   private var diffBindings: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .selectionChanged(let selection):
-        // Selection shortcuts can focus a terminal directly; reveal it before
-        // that newly selected surface receives subsequent keyboard input.
-        guard state.diff.isExpanded, selection != state.selection else { return .none }
-        return .send(.diff(.expand))
-      case .diff(.toggle):
-        guard let worktree = state.selection.worktreeID, let snapshot = state.gitHub.snapshots[worktree] else {
-          return .none
-        }
-        return .send(.diff(.prBaseChanged(worktree, snapshot.baseRefName, snapshot.baseRepositoryURL)))
-      case .diff(.expand):
-        guard state.diff.isExpanded else { return .none }
+      case .gitHub(.projectBatchLoaded), .gitHub(.seedFromCache):
+        let snapshots = state.gitHub.snapshots
         return .run { _ in
-          await MainActor.run { _ = NSApp.keyWindow?.makeFirstResponder(nil) }
+          await MainActor.run {
+            for (worktreeID, snapshot) in snapshots {
+              DiffWindowManager.shared.updatePR(
+                worktreeID: worktreeID, base: snapshot.baseRefName, repository: snapshot.baseRepositoryURL)
+            }
+          }
         }
-      case .diff(.close):
-        guard let paneID = focusedPaneID(state: state) else { return .none }
-        return .run { [hierarchyClient] _ in
-          await Task.yield()
-          await hierarchyClient.focusSurfaceView(paneID)
+      case .openDiffRequested:
+        guard let projectID = state.selection.projectID,
+          let worktreeID = state.selection.worktreeID,
+          let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+          let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+        else { return .none }
+        let snapshot = state.gitHub.snapshots[worktreeID]
+        return .run { _ in
+          await DiffWindowManager.shared.open(
+            projectID: projectID, worktreeID: worktreeID, path: worktree.path,
+            title: "\(project.name) — \(worktree.branch ?? worktree.name)",
+            prBase: snapshot?.baseRefName, prRepository: snapshot?.baseRepositoryURL)
         }
       default:
         return .none
@@ -902,7 +902,6 @@ struct RootFeature {
                 blockedBranches: blockedBranches
               )))
         )
-        effects.append(.send(.diff(.contextChanged(selection.projectID, selection.worktreeID, resolvedWorktreePath))))
         // When the active Project changes, ask GitHubFeature to batch-fetch PR
         // data for every branch in that Project. The reducer runs one
         // `gh api graphql` for the whole repo instead of N per-Worktree calls.
@@ -1605,7 +1604,7 @@ struct RootFeature {
       case .windowActionRouter:
         return .none
 
-      case .diff:
+      case .openDiffRequested:
         return .none
 
       case .branchSwitcher:
@@ -2234,10 +2233,6 @@ struct RootFeature {
         }
 
       case .toggleSidebarRequested:
-        if state.diff.isExpanded {
-          state.sidebarVisible = true
-          return .send(.diff(.expand))
-        }
         state.sidebarVisible.toggle()
         return .none
 
@@ -2393,7 +2388,7 @@ struct RootFeature {
         }
       }
     case .toggleChanges:
-      return .send(.diff(.toggle))
+      return .send(.openDiffRequested)
     case .toggleDiffInspector:
       return .send(.diffInspectorToggledForCurrentWorktree)
     case .newWorktree:

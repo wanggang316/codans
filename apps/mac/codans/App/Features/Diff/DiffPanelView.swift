@@ -70,19 +70,7 @@ struct DiffPanelView: View {
         Image(systemName: "arrow.clockwise").accessibilityLabel("Refresh Changes")
       }
       .help("Refresh local Git state")
-      Button {
-        store.send(.expand)
-      } label: {
-        Image(
-          systemName: store.isExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
-        )
-        .accessibilityLabel(store.isExpanded ? "Collapse Diff" : "Expand Diff")
-      }
-      Button {
-        store.send(.close)
-      } label: {
-        Image(systemName: "xmark").accessibilityLabel("Close Diff")
-      }
+
     }
     .buttonStyle(.borderless)
     .padding(10)

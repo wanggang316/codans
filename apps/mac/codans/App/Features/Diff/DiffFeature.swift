@@ -11,7 +11,6 @@ struct DiffFeature {
     var worktreeID: WorktreeID?
     var path: String?
     var isVisible = false
-    var isExpanded = false
     var scope: GitComparisonScope = .all
     var base = ""
     var appliedBase = ""
@@ -44,7 +43,6 @@ struct DiffFeature {
     case prBaseChanged(WorktreeID, String?, URL?)
     case toggle
     case close
-    case expand
     case scopeChanged(GitComparisonScope)
     case baseChanged(String)
     case filterChanged(String)
@@ -106,15 +104,13 @@ struct DiffFeature {
           }.cancellable(id: CancelID.timer, cancelInFlight: true))
       case .close:
         state.isVisible = false
-        state.isExpanded = false
         state.loading = false
         state.contentLoading = false
         state.request += 1
         state.contentRequest += 1
-        return .merge(.cancel(id: CancelID.timer), .cancel(id: CancelID.refresh), .cancel(id: CancelID.content))
-      case .expand:
-        state.isExpanded.toggle()
-        return .none
+        return .merge(
+          .cancel(id: CancelID.timer), .cancel(id: CancelID.refresh), .cancel(id: CancelID.content),
+          .cancel(id: CancelID.editor))
       case .scopeChanged(let scope):
         state.scope = scope
         clear(&state)
