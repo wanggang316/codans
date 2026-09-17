@@ -29,15 +29,10 @@ struct DiffFileSidebar: View {
           Text("Changed Files \(store.snapshot?.files.count ?? 0)")
             .font(.system(size: 11, weight: .semibold))
           let allFiles = store.snapshot?.files ?? []
-          HStack(spacing: 4) {
-            DiffLineCounts(
-              additions: allFiles.compactMap(\.additions).reduce(0, +),
-              deletions: allFiles.compactMap(\.deletions).reduce(0, +)
-            )
-            if allFiles.contains(where: { !$0.isBinary && ($0.additions == nil || $0.deletions == nil) }) {
-              Text("partial").font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-          }
+          DiffLineCounts(
+            additions: allFiles.compactMap(\.additions).reduce(0, +),
+            deletions: allFiles.compactMap(\.deletions).reduce(0, +)
+          )
           .help(
             "Total text changes across all files, including files hidden by the filter. Files without line counts are excluded."
           )
