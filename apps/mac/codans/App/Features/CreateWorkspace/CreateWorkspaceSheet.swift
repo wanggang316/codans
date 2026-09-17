@@ -2,174 +2,161 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Sheet for `CreateWorkspaceFeature`: title and folder, one field to add
-/// members, the member rows with their expandable detail, the shared branch,
-/// a preview of the result, and the footer. In add mode the workspace
-/// fields are fixed and the same list adds one repository to an existing
-/// workspace.
+/// Sheet for `CreateWorkspaceFeature`, laid out as a grouped form like the
+/// Settings panes: the workspace (title, location, branch), one section per
+/// repository, a section to add more, and Cancel / Create in the bottom bar.
+/// In add mode the workspace is fixed and one repository is added to it.
 struct CreateWorkspaceSheet: View {
   @Bindable var store: StoreOf<CreateWorkspaceFeature>
+  @FocusState private var isTitleFocused: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      header
-      if !store.isAddMode {
-        workspaceFields
-      }
-      WorkspaceAddField(store: store)
-      memberList
-      if !store.isAddMode || !store.members.isEmpty {
-        sharedBranchRow
-      }
-      Divider()
-      WorkspacePreviewPanel(
-        plan: store.draftPlan,
-        showCommands: store.showCommands,
-        onShowCommandsChanged: { store.send(.showCommandsChanged($0)) })
-      WorkspaceCreationFooter(store: store)
+    // The bar sits below the form rather than over it, so rows never
+    // scroll behind the buttons.
+    VStack(spacing: 0) {
+      form
+      WorkspaceCreationBar(store: store)
     }
-    .padding(20)
-    .frame(width: 680)
-    .onAppear { store.send(.onAppear) }
-  }
-
-  private var header: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(store.isAddMode ? "Add Repository" : "New Workspace").font(.headline)
-      Text(
-        store.isAddMode
-          ? "Check out one more repository into \(store.titleDraft)."
-          : "One folder holding checkouts of several repositories, for a task that spans them."
-      )
-      .font(.caption)
-      .foregroundStyle(.secondary)
+    .frame(width: 560)
+    .frame(maxHeight: 760)
+    .onAppear {
+      store.send(.onAppear)
+      if !store.isAddMode { isTitleFocused = true }
     }
   }
 
-  private var workspaceFields: some View {
-    HStack(alignment: .top, spacing: 12) {
-      field("Title") {
-        TextField(
-          "Checkout Flow",
-          text: Binding(get: { store.titleDraft }, set: { store.send(.titleChanged($0)) })
-        )
-        .textFieldStyle(.roundedBorder)
-      }
-      field("Folder") {
-        HStack(spacing: 8) {
-          TextField(
-            "~/.codans/workspaces/checkout-flow",
-            text: Binding(get: { store.rootPathDraft }, set: { store.send(.rootPathChanged($0)) })
-          )
-          .textFieldStyle(.roundedBorder)
-          .font(.callout.monospaced())
-          Button("Choose…") { store.send(.browseRootTapped) }
+  private static let addSectionID = "add-repository"
+
+  private var form: some View {
+    ScrollViewReader { proxy in
+      Form {
+        workspaceSection
+        ForEach(store.members) { member in
+          WorkspaceMemberSection(store: store, member: member)
+            .id(member.id)
         }
-        ForEach(Array(store.rootIssues.enumerated()), id: \.offset) { _, issue in
+        if store.canAddMembers {
+          WorkspaceAddSection(store: store)
+            .id(Self.addSectionID)
+        }
+      }
+      .formStyle(.grouped)
+      .scrollBounceBehavior(.basedOnSize)
+      .disabled(store.creation.isBusy)
+      .onChange(of: store.members.count) { oldCount, newCount in
+        guard newCount > oldCount, let last = store.members.last else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+          proxy.scrollTo(store.canAddMembers ? AnyHashable(Self.addSectionID) : AnyHashable(last.id), anchor: .bottom)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var workspaceSection: some View {
+    switch store.mode {
+    case .create:
+      Section {
+        TextField(
+          "Title",
+          text: Binding(get: { store.titleDraft }, set: { store.send(.titleChanged($0)) }),
+          prompt: Text("Checkout Flow")
+        )
+        .focused($isTitleFocused)
+        locationRow
+        LabeledContent {
+          TextField(
+            "Branch",
+            text: Binding(get: { store.sharedBranch }, set: { store.send(.sharedBranchChanged($0)) }),
+            prompt: Text("branch-name")
+          )
+          .labelsHidden()
+        } label: {
+          Text("Branch")
+          Text("Used for every new branch.")
+        }
+      } header: {
+        Text("New Workspace")
+        Text("A folder with a checkout of each repository, for work that spans them.")
+      } footer: {
+        IssueList(issues: store.rootIssues)
+      }
+      .headerProminence(.increased)
+    case .add(_, let title, let rootPath, _):
+      Section {
+        LabeledContent("Workspace", value: title)
+        LabeledContent("Location") {
+          PathText(path: rootPath)
+        }
+      } header: {
+        Text("Add Repository")
+        Text("Check out one more repository into this workspace.")
+      }
+      .headerProminence(.increased)
+    }
+  }
+
+  private var locationRow: some View {
+    LabeledContent {
+      HStack(spacing: 6) {
+        PathText(path: store.rootPath.isEmpty ? store.locationPath : store.rootPath)
+        Button {
+          store.send(.chooseLocationTapped)
+        } label: {
+          Image(systemName: "folder")
+            .accessibilityLabel("Choose Location")
+        }
+        .buttonStyle(.borderless)
+        .help("Choose the folder to create the workspace in")
+      }
+    } label: {
+      Text("Location")
+    }
+  }
+}
+
+/// A path shown the way Settings shows one: home-relative, truncated in the
+/// middle, selectable.
+struct PathText: View {
+  let path: String
+
+  var body: some View {
+    Text((path as NSString).abbreviatingWithTildeInPath)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      .truncationMode(.middle)
+      .textSelection(.enabled)
+      .help(path)
+      .frame(maxWidth: .infinity, alignment: .trailing)
+  }
+}
+
+/// Issues as a section footer shows them: one line each, coloured by
+/// severity. Incomplete fields are not listed; the bottom bar names the
+/// first of them.
+struct IssueList: View {
+  let issues: [MemberIssue]
+
+  var body: some View {
+    let shown = issues.filter { $0.severity != .incomplete }
+    if !shown.isEmpty {
+      VStack(alignment: .leading, spacing: 2) {
+        ForEach(Array(shown.enumerated()), id: \.offset) { _, issue in
           Text(issue.message)
-            .font(.caption)
-            .foregroundStyle(issue.severity == .blocking ? .red : .secondary)
+            .foregroundStyle(color(for: issue.severity))
             .fixedSize(horizontal: false, vertical: true)
         }
       }
-    }
-    .disabled(store.creation != .idle)
-  }
-
-  private var memberList: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 2) {
-        if store.members.isEmpty {
-          Text(
-            store.isAddMode ? "Add the repository above." : "Add at least \(WorkspacePlan.minimumMembers) repositories."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .padding(8)
-        }
-        ForEach(store.members) { member in
-          let issues = store.state.issues(for: member)
-          let isExpanded = store.expandedMemberID == member.id
-          VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-              WorkspaceMemberRow(
-                member: member,
-                issues: issues,
-                isExpanded: isExpanded,
-                isCreating: store.creation != .idle,
-                send: { store.send(.member(member.id, $0)) })
-              if store.creation == .idle {
-                Button {
-                  store.send(.member(member.id, .remove))
-                } label: {
-                  Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Remove \(member.name)")
-                }
-                .buttonStyle(.plain)
-              }
-            }
-            if isExpanded {
-              WorkspaceMemberDetail(
-                member: member,
-                issues: issues,
-                sharedBranch: store.sharedBranch,
-                isDisabled: store.creation != .idle,
-                send: { store.send(.member(member.id, $0)) })
-            }
-          }
-          .background(
-            isExpanded ? Color.accentColor.opacity(0.06) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 6))
-        }
-      }
-    }
-    .frame(maxHeight: 300)
-    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
-  }
-
-  private var sharedBranchRow: some View {
-    HStack(alignment: .top, spacing: 12) {
-      field("Branch for all") {
-        TextField(
-          "feat/checkout-flow",
-          text: Binding(get: { store.sharedBranch }, set: { store.send(.sharedBranchChanged($0)) })
-        )
-        .textFieldStyle(.roundedBorder)
-        .font(.callout.monospaced())
-      }
-      field("From") {
-        RefPickerButton(
-          selection: store.sharedBaseRef,
-          options: sharedBaseRefOptions,
-          allowsDefault: true,
-          onSelect: { store.send(.sharedBaseRefChanged($0)) })
-        Text("Rows with their own branch or base keep them.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-    }
-    .disabled(store.creation != .idle)
-  }
-
-  /// Refs every loaded repository has, so the shared pick applies everywhere.
-  private var sharedBaseRefOptions: [BranchRefOption] {
-    let inventories = store.members.compactMap { $0.refs.inventory }
-    guard let first = inventories.first else { return [] }
-    let common = inventories.dropFirst().reduce(Set(first.local + first.remote)) { acc, inventory in
-      acc.intersection(inventory.local + inventory.remote)
-    }
-    return common.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { ref in
-      BranchRefOption(shortName: ref, isRemote: ref.contains("/") && first.remote.contains(ref))
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
-  private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(label).font(.callout)
-      content()
+  private func color(for severity: MemberIssue.Severity) -> Color {
+    switch severity {
+    case .blocking: return .red
+    case .warning: return .orange
+    case .info, .incomplete: return .secondary
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 

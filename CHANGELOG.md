@@ -20,28 +20,27 @@ and the project does not yet follow semantic versioning — every release until
   `"kind": "workspace"`. The workspace root is never probed for a git
   repository, so a workspace nested inside a repo stays a workspace.
 - **Create workspaces from the app or the CLI.** **New Workspace…** in the
-  sidebar's Add menu (and the command palette) opens a single page built
-  around the member list. One field adds members from whatever you paste
-  or type: a URL is recognised and its branches read before anything is
-  cloned, a path is probed (bare repositories included), anything else
-  searches your open projects. Each row shows its source and checkout on
-  one line and expands to its own settings — a new branch from a chosen
-  base, an existing branch, or a remote branch, with a searchable branch
-  picker that greys out branches another worktree holds. When a remote
-  branch meets a local branch of the same name you choose to keep it or
-  reset it to the remote; nothing is reset unless you say so. A shared
-  branch and base reach the rows you have not overridden. Problems appear
-  under the field they concern as you type, a preview shows the folder
-  tree and the git commands, Create says how many checkouts it will make,
-  each row streams its progress, Cancel rolls back and reports anything it
-  could not undo, and a failure marks its row and offers Retry. Remote
+  sidebar's Add menu (and the command palette) opens a form laid out like
+  Settings: a title, where the folder goes, and the branch new checkouts
+  use, then one section per repository and a section to add more — an open
+  project, a folder on disk, or a remote URL whose branches are read before
+  anything is cloned. The project selected in the sidebar is already in the
+  list. Each repository can start a new branch (its own name, or the
+  workspace's; from its default branch or one you pick), check out an
+  existing branch, or track a remote branch. When a remote branch meets a
+  local branch of the same name you choose to keep it or reset it to the
+  remote; nothing is reset unless you say so. Real problems show in red
+  under the repository they concern, and what is still missing is named
+  next to the disabled Create button. Each repository shows its progress
+  while the workspace is created, Cancel rolls back and reports anything it
+  could not undo, and after a failure Create tries again. Remote
   repositories are cloned once into `~/.codans/sources/<name>` (or a
-  folder you choose) and used like local ones from then on.
+  folder you choose) and used like local ones from then on. Bare
+  repositories are not accepted as members.
   `codans workspace create "Checkout Flow" --project app --project api`
-  does the same from a terminal, with `--repo` for local (or bare)
-  repositories, `--remote` for URLs, `--track` for remote-tracking
-  branches, and `--reset-local` to opt into resetting a same-named local
-  branch; `codans workspace add` extends an existing workspace
+  does the same from a terminal, with `--repo` for local repositories,
+  `--remote` for URLs, `--track` for remote-tracking branches, and
+  `--reset-local` to opt into resetting a same-named local branch; `codans workspace add` extends an existing workspace
   (`--ref origin/feature` picks any remote branch), `codans workspace show`
   describes one and names each member's source. A failure midway removes
   everything the call created, including a clone it made. A workspace's `+`

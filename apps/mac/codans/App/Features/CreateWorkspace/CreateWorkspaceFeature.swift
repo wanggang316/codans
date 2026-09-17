@@ -2,15 +2,13 @@ import CodansCore
 import ComposableArchitecture
 import Foundation
 
-/// Reducer behind the New Workspace sheet (and, in add mode, the workspace's
-/// Add Repository sheet). Collects the workspace's title and folder, a list
-/// of member repositories from open projects, local paths, bare
-/// repositories, or remote URLs, and per member how it is checked out; keeps
-/// every problem it can find anchored to the field it concerns; then hands
-/// a `WorkspacePlan` to `WorkspaceClient`'s streaming creation and renders
-/// its progress per row. Its responsibility ends at `delegate(.created)` /
-/// `delegate(.added)`; the client has already registered and reconciled by
-/// then.
+/// Reducer behind the New Workspace sheet and, in add mode, a workspace's
+/// Add Repository sheet. Collects a title, where the folder goes, a branch
+/// for the new checkouts, and the member repositories (open projects,
+/// folders on disk, remote URLs) with how each is checked out; then hands a
+/// `WorkspacePlan` to `WorkspaceClient`'s streaming creation and shows its
+/// progress per member. Its responsibility ends at `delegate(.created)` /
+/// `delegate(.added)`; the client has registered and reconciled by then.
 @Reducer
 struct CreateWorkspaceFeature {
   /// A registered local git Project offered as a member.
@@ -23,7 +21,7 @@ struct CreateWorkspaceFeature {
   enum Mode: Equatable, Sendable {
     case create
     /// Adding to an existing workspace: title and folder are fixed, one
-    /// member is enough, and the plan goes through `addStream`.
+    /// member is the whole plan, and it goes through `addStream`.
     case add(projectID: ProjectID, title: String, rootPath: String, existingNames: Set<String>)
   }
 
@@ -34,7 +32,7 @@ struct CreateWorkspaceFeature {
     case rollingBack
     /// Rolled back after a cancel; `failures` names what needs a hand.
     case rolledBack(failures: [String])
-    /// Rolled back after an error; the failing row carries the detail.
+    /// Rolled back after an error; the failing member carries the detail.
     case failed(message: String)
 
     var isBusy: Bool {
@@ -44,7 +42,8 @@ struct CreateWorkspaceFeature {
       }
     }
 
-    /// The form re-enables here; Create becomes Retry / Done.
+    /// A finished attempt whose outcome is still on screen; the next edit
+    /// or Create clears it.
     var isSettled: Bool {
       switch self {
       case .rolledBack, .failed: return true
@@ -58,56 +57,44 @@ struct CreateWorkspaceFeature {
     var mode: Mode
     var candidates: IdentifiedArrayOf<Candidate>
 
-    // Workspace
     var titleDraft = ""
-    var rootPathDraft = ""
-    /// Set once the user edits the folder by hand so title edits stop
-    /// re-deriving it out from under them.
-    var rootPathEditedManually = false
-    /// Findings from preflight about the folder.
+    /// The folder the workspace folder is created in; the workspace folder
+    /// itself is named after the title.
+    var locationPath: String
+    /// Preflight findings about the workspace folder.
     var rootIssues: [MemberIssue] = []
 
-    // Branch for all
+    /// Branch for new checkouts. Follows the title until edited.
     var sharedBranch = ""
     var sharedBranchEditedManually = false
-    /// Nil = each repository's default branch.
-    var sharedBaseRef: String?
 
-    // Members
     var members: IdentifiedArrayOf<MemberDraft> = []
-    var expandedMemberID: MemberDraft.ID?
 
-    // Add field
-    var addDraft = ""
-    var addKind: AddEntryKind = .empty
-    var addSuggestions: [Candidate] = []
-    var addHighlightedIndex: Int?
+    var remoteURLDraft = ""
     var addIssue: String?
     var isResolvingAdd = false
 
-    // Preview
-    var showCommands = false
-
-    // Creation
     var creation: CreationState = .idle
     var creationToken: UUID?
 
-    init(candidates: [Candidate], preselected: ProjectID? = nil, mode: Mode = .create) {
+    /// Added by `onAppear`, so its refs load through the normal path.
+    var preselected: ProjectID?
+
+    init(
+      candidates: [Candidate],
+      preselected: ProjectID? = nil,
+      mode: Mode = .create,
+      locationPath: String = WorkspaceLayout.defaultWorkspacesDirectory().path(percentEncoded: false)
+    ) {
       self.mode = mode
       self.candidates = IdentifiedArray(uniqueElements: candidates)
-      if case .add(_, let title, let rootPath, _) = mode {
+      self.preselected = preselected
+      self.locationPath = locationPath
+      if case .add(_, let title, _, _) = mode {
         titleDraft = title
-        rootPathDraft = rootPath
-        rootPathEditedManually = true
         sharedBranch = WorkspaceLayout.folderName(forTitle: title)
       }
-      // `preselected` is seeded by the reducer's `onAppear` so the row's refs
-      // load through the normal path; remembered here.
-      self.preselected = preselected
     }
-
-    /// Consumed by `onAppear`.
-    var preselected: ProjectID?
 
     var isAddMode: Bool {
       if case .add = mode { return true }
@@ -118,13 +105,38 @@ struct CreateWorkspaceFeature {
       isAddMode ? 1 : WorkspacePlan.minimumMembers
     }
 
-    // MARK: Derived
+    /// Add mode takes exactly one repository.
+    var canAddMembers: Bool {
+      !isAddMode || members.isEmpty
+    }
 
-    /// The plan as it stands, blocking issues or not — the preview shows it.
+    var rootPath: String {
+      switch mode {
+      case .add(_, _, let rootPath, _):
+        return rootPath
+      case .create:
+        guard !titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+        return (locationPath as NSString).appendingPathComponent(WorkspaceLayout.folderName(forTitle: titleDraft))
+      }
+    }
+
+    /// Open projects not in the list yet.
+    var availableCandidates: [Candidate] {
+      let used = Set(
+        members.compactMap { member -> ProjectID? in
+          if case .project(let id, _, _) = member.source { return id }
+          return nil
+        })
+      return candidates.filter { !used.contains($0.id) }
+    }
+
+    // MARK: Plan
+
+    /// The plan as it stands; preflight checks it before it is complete.
     var draftPlan: WorkspacePlan {
       WorkspacePlan(
         title: titleDraft.trimmingCharacters(in: .whitespacesAndNewlines),
-        rootPath: rootPathDraft.trimmingCharacters(in: .whitespacesAndNewlines),
+        rootPath: rootPath,
         members: members.map { member in
           WorkspacePlan.Member(
             name: member.name.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -135,11 +147,15 @@ struct CreateWorkspaceFeature {
 
     /// The plan when nothing blocks it.
     var plan: WorkspacePlan? {
-      blockingCount == 0 && members.count >= minimumMembers ? draftPlan : nil
+      hasBlockingIssues ? nil : draftPlan
+    }
+
+    func branch(for member: MemberDraft) -> String {
+      member.branch(sharedBranch: sharedBranch)
     }
 
     func checkout(for member: MemberDraft) -> WorkspaceCheckout {
-      let branch = member.branch.trimmingCharacters(in: .whitespacesAndNewlines)
+      let branch = branch(for: member)
       switch member.mode {
       case .newBranch:
         return .newBranch(branch: branch, baseRef: member.baseRef)
@@ -147,145 +163,126 @@ struct CreateWorkspaceFeature {
         return .existingBranch(branch)
       case .existingRemote:
         return .remoteTrackingRef(
-          remoteRef: member.remoteRef ?? "",
-          branch: branch,
-          resetLocal: member.localConflict == .resetToRemote)
+          remoteRef: member.remoteRef ?? "", branch: branch, resetLocal: member.localConflict == .resetToRemote)
       }
     }
 
-    /// Problems the reducer can see without I/O, per row, plus the
-    /// preflight findings the client reported for it.
+    // MARK: Issues
+
+    /// What the reducer can tell about a member without I/O, then what the
+    /// client's preflight reported for it.
     func issues(for member: MemberDraft) -> [MemberIssue] {
       var issues: [MemberIssue] = []
       let name = member.name.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !WorkspaceManifest.isValidChildPath(name) {
-        issues.append(.blocking(.name, "Folder name must be a single path component."))
+      if name.isEmpty {
+        issues.append(.blocking("Enter a folder name."))
+      } else if !WorkspaceManifest.isValidChildPath(name) {
+        issues.append(
+          .blocking("The folder name can't contain \u{201C}/\u{201D} or be \u{201C}.\u{201D} or \u{201C}..\u{201D}."))
       } else if members.contains(where: {
         $0.id != member.id && $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == name
       }) {
-        issues.append(.blocking(.name, "Another repository already uses this folder name."))
+        issues.append(.blocking("Another repository already uses the folder name \u{201C}\(name)\u{201D}."))
       } else if case .add(_, _, _, let existing) = mode, existing.contains(name) {
-        issues.append(.blocking(.name, "The workspace already has a repository named \"\(name)\"."))
+        issues.append(.blocking("The workspace already has a folder named \u{201C}\(name)\u{201D}."))
       }
-      if case .remote(_, let destination, _) = member.source,
-        destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      {
-        issues.append(.blocking(.cloneDestination, "Choose a folder to clone into."))
-      }
-
+      // A folder-name problem already covers "that folder exists".
+      let hasNameIssue = !issues.isEmpty
       issues.append(contentsOf: checkoutIssues(for: member))
       if case .failed(let message) = member.refs {
-        let severity: MemberIssue.Severity = member.mode == .existingRemote ? .blocking : .warning
-        issues.append(MemberIssue(severity: severity, field: .refs, message: message))
+        issues.append(member.mode == .existingRemote ? .blocking(message) : .warning(message))
       }
-      issues.append(contentsOf: member.asyncIssues)
+      issues.append(
+        contentsOf: member.preflightIssues
+          .filter { !(hasNameIssue && $0.kind == .destinationExists) }
+          .map(MemberIssue.init(preflight:)))
       return issues
     }
 
-    /// Problems with how the row is checked out, given what its refs say.
     private func checkoutIssues(for member: MemberDraft) -> [MemberIssue] {
-      var issues: [MemberIssue] = []
-      let branch = member.branch.trimmingCharacters(in: .whitespacesAndNewlines)
+      let branch = branch(for: member)
       let inventory = member.refs.inventory
+      let label = member.source.title
       switch member.mode {
       case .newBranch:
-        issues.append(contentsOf: branchSyntaxIssues(branch))
+        if branch.isEmpty { return [.incomplete("Enter a branch name for \(label).")] }
+        if BranchNameSyntax.quickCheck(branch) != nil {
+          return [.blocking("\u{201C}\(branch)\u{201D} is not a valid branch name.")]
+        }
         if let inventory, inventory.local.contains(branch) {
-          issues.append(.blocking(.branch, "Branch exists here. Choose Existing branch or rename."))
+          return [
+            .blocking(
+              "A branch named \u{201C}\(branch)\u{201D} already exists here. Choose Existing branch to check it out.")
+          ]
         }
-        if let shared = sharedBaseRef, member.baseRef == nil, !member.baseRefEditedManually, let inventory,
-          !inventory.contains(shared)
-        {
-          issues.append(.warning(.baseRef, "\(shared) isn't in this repository; its default branch will be used."))
-        }
+        return []
       case .existingLocal:
-        issues.append(contentsOf: branchSyntaxIssues(branch))
-        if let inventory {
-          if !inventory.local.contains(branch) {
-            issues.append(.blocking(.branch, "No local branch named \(branch)."))
-          } else if let path = inventory.checkedOut[branch] {
-            issues.append(
-              .blocking(
-                .branch,
-                "\(branch) is checked out at \((path as NSString).abbreviatingWithTildeInPath); git allows one checkout per branch."
-              ))
-          }
+        if member.refs.isLoading { return [.incomplete("Loading branches for \(label)…")] }
+        guard !branch.isEmpty else { return [.incomplete("Choose a branch for \(label).")] }
+        guard let inventory else { return [] }
+        if !inventory.local.contains(branch) {
+          return [.blocking("There is no local branch named \u{201C}\(branch)\u{201D}.")]
         }
+        return checkedOutIssue(branch: branch, inventory: inventory)
       case .existingRemote:
-        if let remoteRef = member.remoteRef, !remoteRef.isEmpty {
-          if let inventory, !inventory.remote.contains(remoteRef) {
-            issues.append(.blocking(.remoteRef, "\(remoteRef) isn't a remote branch of this repository."))
-          }
-          issues.append(contentsOf: branchSyntaxIssues(branch))
-          if member.hasLocalConflict {
-            if member.localConflict == .keepLocal, let path = inventory?.checkedOut[branch] {
-              issues.append(
-                .blocking(
-                  .branch,
-                  "\(branch) is checked out at \((path as NSString).abbreviatingWithTildeInPath); git allows one checkout per branch."
-                ))
-            }
-            issues.append(
-              .info(
-                .remoteRef,
-                "A local branch \(branch) already exists. Keep local checks it out as is (default). Reset to remote points it at \(remoteRef)."
-              ))
-          }
-        } else {
-          issues.append(.blocking(.remoteRef, "Pick a remote branch."))
+        if member.refs.isLoading { return [.incomplete("Loading branches for \(label)…")] }
+        guard let remoteRef = member.remoteRef, !remoteRef.isEmpty else {
+          return [.incomplete("Choose a remote branch for \(label).")]
         }
-        if member.refs.isLoading {
-          issues.append(.blocking(.refs, "Loading branches…"))
+        guard let inventory else { return [] }
+        if !inventory.remote.contains(remoteRef) {
+          return [.blocking("\u{201C}\(remoteRef)\u{201D} is not a remote branch of this repository.")]
         }
+        // Keep checks the local branch out; reset moves it with `-B`. Git
+        // refuses both while another worktree has it.
+        return member.hasLocalConflict ? checkedOutIssue(branch: branch, inventory: inventory) : []
       }
-      return issues
     }
 
-    private func branchSyntaxIssues(_ branch: String) -> [MemberIssue] {
-      if branch.isEmpty { return [.blocking(.branch, "Branch name required.")] }
-      return BranchNameSyntax.quickCheck(branch) == nil ? [] : [.blocking(.branch, "Not a valid branch name.")]
+    private func checkedOutIssue(branch: String, inventory: RefInventory) -> [MemberIssue] {
+      guard let path = inventory.checkedOut[branch] else { return [] }
+      return [
+        .blocking(
+          "\u{201C}\(branch)\u{201D} is checked out at \((path as NSString).abbreviatingWithTildeInPath). "
+            + "A branch can be checked out in only one place.")
+      ]
     }
 
-    /// Workspace-level problems, pure plus preflight.
+    /// Workspace-level issues: what is still missing, then preflight.
     var workspaceIssues: [MemberIssue] {
       var issues: [MemberIssue] = []
       if !isAddMode, titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        issues.append(.blocking(.row, "Give the workspace a title."))
-      }
-      if rootPathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        issues.append(.blocking(.row, "Choose a folder."))
+        issues.append(.incomplete("Enter a title."))
       }
       if members.count < minimumMembers {
-        let word = minimumMembers == 1 ? "repository" : "repositories"
-        issues.append(.blocking(.row, "Add at least \(minimumMembers) \(word)."))
+        issues.append(.incomplete(isAddMode ? "Choose a repository to add." : "Add at least two repositories."))
       }
       issues.append(contentsOf: rootIssues)
       return issues
     }
 
-    var blockingCount: Int {
-      workspaceIssues.filter { $0.severity == .blocking }.count
-        + members.reduce(0) { $0 + issues(for: $1).filter { $0.severity == .blocking }.count }
-    }
-
-    var warningCount: Int {
-      workspaceIssues.filter { $0.severity == .warning }.count
-        + members.reduce(0) { $0 + issues(for: $1).filter { $0.severity == .warning }.count }
-    }
-
-    /// The first row with a blocking issue, for the footer's summary tap.
-    var firstOffendingMemberID: MemberDraft.ID? {
-      members.first { issues(for: $0).contains { $0.severity == .blocking } }?.id
+    var hasBlockingIssues: Bool {
+      workspaceIssues.contains(where: \.blocksCreation)
+        || members.contains { issues(for: $0).contains(where: \.blocksCreation) }
     }
 
     var canCreate: Bool {
-      plan != nil && creation == .idle && !isResolvingAdd
+      plan != nil && !creation.isBusy && !isResolvingAdd
     }
 
     var createButtonTitle: String {
-      if isAddMode { return "Add Repository" }
-      let count = members.count
-      return count == 1 ? "Create 1 checkout" : "Create \(count) checkouts"
+      isAddMode ? "Add" : "Create"
+    }
+
+    /// Why Create is disabled, for the bottom bar: the first thing still
+    /// missing, or a pointer to the problems shown in the form.
+    var createHint: String? {
+      guard creation == .idle, !canCreate else { return nil }
+      if isResolvingAdd { return "Checking the folder…" }
+      let all = workspaceIssues + members.flatMap { issues(for: $0) }
+      if let missing = all.first(where: { $0.severity == .incomplete }) { return missing.message }
+      if all.contains(where: { $0.severity == .blocking }) { return "Fix the problems above to continue." }
+      return nil
     }
   }
 
@@ -293,54 +290,40 @@ struct CreateWorkspaceFeature {
     case onAppear
     // Workspace
     case titleChanged(String)
-    case rootPathChanged(String)
-    case browseRootTapped
-    case browseRootPicked(URL?)
-    // Add field
-    case addDraftChanged(String)
-    case addMoveHighlight(by: Int)
-    case addSubmitted
-    case addCleared
-    case addFieldLostFocus
-    case addSuggestionTapped(ProjectID)
-    case addFolderTapped
-    case addBareTapped
-    case addPathPicked(URL?)
-    case addPathResolved(path: String, probe: RepositoryProbe?)
-    // Branch for all
+    case chooseLocationTapped
+    case locationPicked(URL?)
     case sharedBranchChanged(String)
-    case sharedBaseRefChanged(String?)
+    // Adding members
+    case addProjectTapped(ProjectID)
+    case addFolderTapped
+    case addFolderPicked(URL?)
+    case addPathResolved(path: String, probe: RepositoryProbe?)
+    case remoteURLDraftChanged(String)
+    case addRemoteURLSubmitted
     // Members
     case member(MemberDraft.ID, MemberAction)
     // Validation
     case preflightTick
     case preflightFinished(WorkspacePreflight)
-    // Preview
-    case showCommandsChanged(Bool)
     // Creation
     case createButtonTapped
     case creationEvent(WorkspaceCreationEvent)
     case creationFailed(message: String, cancelled: Bool)
     case cancelButtonTapped
-    case retryTapped
-    case editAgainTapped
-    case doneTapped
     case delegate(Delegate)
 
     enum MemberAction: Equatable {
-      case toggleExpanded
       case remove
       case nameChanged(String)
       case modeChanged(MemberDraft.CheckoutMode)
-      case branchChanged(String)
-      case useSharedBranchTapped
+      case branchOverrideChanged(String)
       case baseRefChanged(String?)
+      case localBranchChanged(String?)
       case remoteRefChanged(String?)
       case localConflictChanged(MemberDraft.LocalConflictResolution)
-      case cloneDestinationChanged(String)
-      case browseCloneDestinationTapped
+      case chooseCloneDestinationTapped
       case cloneDestinationPicked(URL?)
-      case loadRefsTapped
+      case retryRefsTapped
       case refsLoaded(RefInventory)
       case refsFailed(String)
     }
@@ -362,8 +345,8 @@ struct CreateWorkspaceFeature {
     case creation
   }
 
-  private static let remoteRefsTimeout: Duration = .seconds(20)
-  private static let preflightDebounce: Duration = .milliseconds(300)
+  private nonisolated static let remoteRefsTimeout: Duration = .seconds(20)
+  private nonisolated static let preflightDebounce: Duration = .milliseconds(300)
 
   @Dependency(WorkspaceClient.self) private var workspaceClient
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
@@ -381,143 +364,65 @@ struct CreateWorkspaceFeature {
           return .none
         }
         state.preselected = nil
-        return appendMember(source: .project(candidate.id, gitRoot: candidate.gitRoot), to: &state)
+        return appendMember(source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
 
       // MARK: Workspace
 
       case .titleChanged(let title):
         state.titleDraft = title
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let slug = WorkspaceLayout.folderName(forTitle: title)
-        if !state.rootPathEditedManually {
-          state.rootPathDraft =
-            trimmed.isEmpty
-            ? ""
-            : (WorkspaceLayout.defaultWorkspacesDirectory().path(percentEncoded: false) as NSString)
-              .appendingPathComponent(slug)
-        }
         if !state.sharedBranchEditedManually {
-          state.sharedBranch = trimmed.isEmpty ? "" : slug
-          propagateSharedBranch(&state)
+          let isBlank = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          state.sharedBranch = isBlank ? "" : WorkspaceLayout.folderName(forTitle: title)
         }
-        return preflightDebounced(&state)
+        return edited(&state)
 
-      case .rootPathChanged(let path):
-        state.rootPathDraft = path
-        state.rootPathEditedManually = true
-        return preflightDebounced(&state)
-
-      case .browseRootTapped:
+      case .chooseLocationTapped:
         return .run { [picker = folderPicker] send in
-          let url = await picker.pick("Choose Workspace Folder")
-          await send(.browseRootPicked(url))
+          await send(.locationPicked(await picker.pick("Choose Location")))
         }
 
-      case .browseRootPicked(let url):
+      case .locationPicked(let url):
         guard let url else { return .none }
-        // The picker returns a PARENT folder; append the slug so the user
-        // lands on a ready-to-confirm destination.
-        let slug = WorkspaceLayout.folderName(forTitle: state.titleDraft)
-        state.rootPathDraft = url.appending(path: slug).path(percentEncoded: false)
-        state.rootPathEditedManually = true
-        return preflightDebounced(&state)
+        state.locationPath = (url.path(percentEncoded: false) as NSString).standardizingPath
+        return edited(&state)
 
-      // MARK: Add field
+      case .sharedBranchChanged(let branch):
+        state.sharedBranch = branch
+        state.sharedBranchEditedManually = true
+        return edited(&state)
 
-      case .addDraftChanged(let draft):
-        let previous = state.addDraft
-        state.addDraft = draft
+      // MARK: Adding members
+
+      case .addProjectTapped(let id):
+        guard state.canAddMembers, let candidate = state.candidates[id: id] else { return .none }
         state.addIssue = nil
-        state.addKind = AddEntryClassifier.classify(draft, fileExists: fileExists)
-        refreshSuggestions(&state)
-        // A paste of a URL is meant to be added; do not make the user press
-        // Return on top of it.
-        if case .url = state.addKind, draft.count - previous.count >= 8 {
-          return submitAddEntry(&state)
-        }
-        return .none
-
-      case .addMoveHighlight(let delta):
-        guard !state.addSuggestions.isEmpty else { return .none }
-        let current = state.addHighlightedIndex ?? 0
-        state.addHighlightedIndex = min(max(current + delta, 0), state.addSuggestions.count - 1)
-        return .none
-
-      case .addSubmitted:
-        return submitAddEntry(&state)
-
-      case .addCleared:
-        clearAddField(&state)
-        return .none
-
-      case .addFieldLostFocus:
-        if case .url = state.addKind { return submitAddEntry(&state) }
-        return .none
-
-      case .addSuggestionTapped(let id):
-        guard let candidate = state.candidates[id: id] else { return .none }
-        clearAddField(&state)
-        return appendMember(source: .project(candidate.id, gitRoot: candidate.gitRoot), to: &state)
+        return appendMember(source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
 
       case .addFolderTapped:
         return .run { [picker = folderPicker] send in
-          let url = await picker.pick("Add Repository")
-          await send(.addPathPicked(url))
+          await send(.addFolderPicked(await picker.pick("Add Repository")))
         }
 
-      case .addBareTapped:
-        return .run { [picker = folderPicker] send in
-          let url = await picker.pick("Add Bare Repository")
-          await send(.addPathPicked(url))
-        }
-
-      case .addPathPicked(let url):
+      case .addFolderPicked(let url):
         guard let url else { return .none }
         return resolvePath(url.path(percentEncoded: false), &state)
 
       case .addPathResolved(let path, let probe):
         state.isResolvingAdd = false
-        guard let probe else {
-          state.addIssue = "\((path as NSString).abbreviatingWithTildeInPath) is not a git repository."
-          return .none
-        }
-        let root = HierarchyManager.canonicalPath(probe.root)
-        if state.members.contains(where: {
-          !$0.source.isRemote && HierarchyManager.canonicalPath($0.source.gitRoot) == root
-        }) {
-          state.addIssue = "Already in the list."
-          return .none
-        }
-        clearAddField(&state)
-        let source: MemberDraft.Source
-        if let candidate = state.candidates.first(where: { HierarchyManager.canonicalPath($0.gitRoot) == root }) {
-          source = .project(candidate.id, gitRoot: candidate.gitRoot)
-        } else if probe.isBare {
-          source = .bareRepo(gitRoot: root)
-        } else {
-          source = .localRepo(gitRoot: root)
-        }
-        return appendMember(source: source, to: &state)
+        return addResolvedPath(path, probe: probe, &state)
 
-      // MARK: Branch for all
-
-      case .sharedBranchChanged(let branch):
-        state.sharedBranch = branch
-        state.sharedBranchEditedManually = true
-        propagateSharedBranch(&state)
-        return preflightDebounced(&state)
-
-      case .sharedBaseRefChanged(let ref):
-        state.sharedBaseRef = ref
-        for member in state.members where member.mode == .newBranch && !member.baseRefEditedManually {
-          let applies = sharedBaseRefApplicable(ref, to: member)
-          state.members[id: member.id]?.baseRef = applies ? ref : nil
-        }
+      case .remoteURLDraftChanged(let draft):
+        state.remoteURLDraft = draft
+        state.addIssue = nil
         return .none
+
+      case .addRemoteURLSubmitted:
+        return submitRemoteURL(&state)
 
       // MARK: Members
 
       case .member(let id, let memberAction):
+        guard state.members[id: id] != nil else { return .none }
         return reduceMember(id: id, action: memberAction, state: &state)
 
       // MARK: Validation
@@ -534,52 +439,22 @@ struct CreateWorkspaceFeature {
         state.rootIssues = result.rootIssues.map(MemberIssue.init(preflight:))
         for id in state.members.ids {
           let name = state.members[id: id]?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-          state.members[id: id]?.asyncIssues = (result.memberIssues[name] ?? []).map(MemberIssue.init(preflight:))
+          state.members[id: id]?.preflightIssues = result.memberIssues[name] ?? []
         }
-        return .none
-
-      // MARK: Preview
-
-      case .showCommandsChanged(let value):
-        state.showCommands = value
         return .none
 
       // MARK: Creation
 
       case .createButtonTapped:
-        guard let plan = state.plan, state.creation == .idle else { return .none }
-        let token = uuid()
-        state.creationToken = token
-        for id in state.members.ids { state.members[id: id]?.progress = .pending }
-        state.creation = .running(current: nil)
-        let stream: AsyncThrowingStream<WorkspaceCreationEvent, Error>
-        switch state.mode {
-        case .create:
-          stream = workspaceClient.createStream(plan, token)
-        case .add(let projectID, _, _, _):
-          guard let member = plan.members.first else { return .none }
-          stream = workspaceClient.addStream(projectID, member, token)
-        }
-        return .run { send in
-          do {
-            for try await event in stream {
-              await send(.creationEvent(event))
-            }
-          } catch {
-            await send(
-              .creationFailed(
-                message: WorkspaceClient.describe(error),
-                cancelled: (error as? WorkspaceError) == .cancelled))
-          }
-        }
-        .cancellable(id: CancelID.creation, cancelInFlight: true)
+        guard let plan = state.plan, !state.creation.isBusy, !state.isResolvingAdd else { return .none }
+        return startCreation(plan, &state)
 
       case .creationEvent(let event):
         return reduceCreationEvent(event, state: &state)
 
       case .creationFailed(let message, let cancelled):
         if cancelled {
-          if case .rolledBack = state.creation {} else { state.creation = .rolledBack(failures: []) }
+          if !state.creation.isSettled { state.creation = .rolledBack(failures: []) }
         } else {
           state.creation = .failed(message: message)
         }
@@ -597,20 +472,6 @@ struct CreateWorkspaceFeature {
           return .none
         }
 
-      case .retryTapped:
-        guard state.creation.isSettled else { return .none }
-        state.creation = .idle
-        return .send(.createButtonTapped)
-
-      case .editAgainTapped:
-        guard state.creation.isSettled else { return .none }
-        state.creation = .idle
-        for id in state.members.ids { state.members[id: id]?.progress = .pending }
-        return preflightDebounced(&state)
-
-      case .doneTapped:
-        return .send(.delegate(.dismissed))
-
       case .delegate:
         return .none
       }
@@ -619,123 +480,236 @@ struct CreateWorkspaceFeature {
 
   // MARK: - Members
 
-  // swiftlint:disable:next cyclomatic_complexity
   private func reduceMember(id: MemberDraft.ID, action: Action.MemberAction, state: inout State) -> Effect<Action> {
-    guard state.members[id: id] != nil else { return .none }
     switch action {
-    case .toggleExpanded:
-      state.expandedMemberID = state.expandedMemberID == id ? nil : id
-      return .none
-
     case .remove:
       state.members.remove(id: id)
-      if state.expandedMemberID == id { state.expandedMemberID = nil }
-      refreshSuggestions(&state)
-      return .merge(.cancel(id: CancelID.refs(id)), preflightDebounced(&state))
+      return .merge(.cancel(id: CancelID.refs(id)), edited(&state))
 
     case .nameChanged(let name):
       state.members[id: id]?.name = name
-      state.members[id: id]?.nameEditedManually = true
-      return preflightDebounced(&state)
+      return edited(&state)
 
     case .modeChanged(let mode):
+      // No remote branch is picked for the user: the default branch's local
+      // twin is usually checked out in the source repository already.
       state.members[id: id]?.mode = mode
-      if mode == .existingRemote {
-        // Seed the ref with the repository's default and follow it for the
-        // branch name unless the user already typed one.
-        if state.members[id: id]?.remoteRef == nil {
-          let defaultRef = state.members[id: id]?.refs.inventory?.defaultBaseRef
-          state.members[id: id]?.remoteRef = defaultRef
-        }
-        if state.members[id: id]?.branchEditedManually == false, let branch = state.members[id: id]?.remoteRefBranch {
-          state.members[id: id]?.branch = branch
-        }
-      } else if state.members[id: id]?.branchEditedManually == false {
-        let shared = state.sharedBranch
-        state.members[id: id]?.branch = shared
-      }
-      return preflightDebounced(&state)
+      return edited(&state)
 
-    case .branchChanged(let branch):
-      state.members[id: id]?.branch = branch
-      state.members[id: id]?.branchEditedManually = true
-      return preflightDebounced(&state)
-
-    case .useSharedBranchTapped:
-      state.members[id: id]?.branchEditedManually = false
-      state.members[id: id]?.baseRefEditedManually = false
-      let shared = state.sharedBranch
-      let sharedBase = state.sharedBaseRef
-      let applies = sharedBaseRefApplicable(sharedBase, to: state.members[id: id])
-      state.members[id: id]?.branch = shared
-      state.members[id: id]?.baseRef = applies ? sharedBase : nil
-      return preflightDebounced(&state)
+    case .branchOverrideChanged(let branch):
+      state.members[id: id]?.branchOverride = branch
+      return edited(&state)
 
     case .baseRefChanged(let ref):
       state.members[id: id]?.baseRef = ref
-      state.members[id: id]?.baseRefEditedManually = true
-      return .none
+      return edited(&state)
+
+    case .localBranchChanged(let branch):
+      state.members[id: id]?.localBranch = branch
+      return edited(&state)
 
     case .remoteRefChanged(let ref):
       state.members[id: id]?.remoteRef = ref
-      // A different ref means a different local branch; the reset choice
-      // belonged to the old one.
+      // Another ref means another local branch; the reset choice belonged to
+      // the old one.
       state.members[id: id]?.localConflict = .keepLocal
-      if state.members[id: id]?.branchEditedManually == false, let branch = state.members[id: id]?.remoteRefBranch {
-        state.members[id: id]?.branch = branch
-      }
-      return preflightDebounced(&state)
+      return edited(&state)
 
     case .localConflictChanged(let choice):
       state.members[id: id]?.localConflict = choice
-      return .none
+      return edited(&state)
 
-    case .cloneDestinationChanged(let path):
-      guard case .remote(let url, _, _) = state.members[id: id]?.source else { return .none }
-      state.members[id: id]?.source = .remote(url: url, cloneDestination: path, destinationEditedManually: true)
-      return preflightDebounced(&state)
-
-    case .browseCloneDestinationTapped:
+    case .chooseCloneDestinationTapped:
       return .run { [picker = folderPicker] send in
-        let url = await picker.pick("Clone Into")
-        await send(.member(id, .cloneDestinationPicked(url)))
+        await send(.member(id, .cloneDestinationPicked(await picker.pick("Clone Into"))))
       }
 
     case .cloneDestinationPicked(let url):
-      guard let url, case .remote(let remoteURL, _, _) = state.members[id: id]?.source,
-        let member = state.members[id: id]
-      else { return .none }
+      guard let url, let member = state.members[id: id], case .remote(let remoteURL, _) = member.source else {
+        return .none
+      }
       // The picker returns a parent; the clone gets the repository's name.
-      let destination = url.appending(path: member.source.suggestedName).path(percentEncoded: false)
-      state.members[id: id]?.source = .remote(
-        url: remoteURL, cloneDestination: destination, destinationEditedManually: true)
-      return preflightDebounced(&state)
+      let destination = url.appending(path: member.source.title).path(percentEncoded: false)
+      state.members[id: id]?.source = .remote(url: remoteURL, cloneDestination: destination)
+      return edited(&state)
 
-    case .loadRefsTapped:
+    case .retryRefsTapped:
       guard let member = state.members[id: id] else { return .none }
       state.members[id: id]?.refs = .loading
       return loadRefs(for: member)
 
     case .refsLoaded(let inventory):
       state.members[id: id]?.refs = .loaded(inventory)
-      guard let member = state.members[id: id] else { return .none }
-      if member.mode == .newBranch, !member.baseRefEditedManually {
-        let sharedBase = state.sharedBaseRef
-        let applies = sharedBaseRefApplicable(sharedBase, to: member)
-        state.members[id: id]?.baseRef = applies ? sharedBase : nil
-      }
-      if member.mode == .existingRemote, member.remoteRef == nil {
-        state.members[id: id]?.remoteRef = inventory.defaultBaseRef
-        if !member.branchEditedManually, let branch = state.members[id: id]?.remoteRefBranch {
-          state.members[id: id]?.branch = branch
-        }
-      }
       return .none
 
     case .refsFailed(let message):
       state.members[id: id]?.refs = .failed(message)
       return .none
     }
+  }
+
+  private func appendMember(source: MemberDraft.Source, _ state: inout State) -> Effect<Action> {
+    let taken = Set(state.members.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) })
+    let base = source.suggestedName
+    var name = base
+    var suffix = 2
+    while taken.contains(name) {
+      name = "\(base)-\(suffix)"
+      suffix += 1
+    }
+    var member = MemberDraft(id: uuid(), source: source, name: name)
+    member.refs = .loading
+    state.members.append(member)
+    return .merge(loadRefs(for: member), edited(&state))
+  }
+
+  private func loadRefs(for member: MemberDraft) -> Effect<Action> {
+    let id = member.id
+    let client = gitWorktreeClient
+    switch member.source {
+    case .project(_, _, let gitRoot), .localRepo(let gitRoot):
+      let repoRoot = URL(fileURLWithPath: gitRoot, isDirectory: true)
+      return .run { send in
+        async let refs = (try? client.branchRefs(repoRoot)) ?? []
+        async let locals = (try? client.localBranchNames(repoRoot)) ?? []
+        async let worktrees = (try? client.lsWorktrees(repoRoot)) ?? []
+        async let auto = (try? client.defaultRemoteBranchRef(repoRoot)) ?? nil
+        let inventory = RefInventory(
+          branchRefs: await refs, localBranchNames: await locals, worktrees: await worktrees,
+          defaultRemoteBranchRef: await auto)
+        await send(.member(id, .refsLoaded(inventory)))
+      }
+      .cancellable(id: CancelID.refs(id), cancelInFlight: true)
+    case .remote(let url, _):
+      let clock = clock
+      return .run { send in
+        do {
+          let heads = try await withThrowingTaskGroup(of: RemoteHeads.self) { group in
+            group.addTask { try await client.lsRemoteHeads(url) }
+            group.addTask {
+              try await clock.sleep(for: Self.remoteRefsTimeout)
+              throw RemoteRefsTimeout()
+            }
+            let first = try await group.next()
+            group.cancelAll()
+            return first ?? RemoteHeads()
+          }
+          await send(.member(id, .refsLoaded(RefInventory(remoteHeads: heads))))
+        } catch is RemoteRefsTimeout {
+          let seconds = Int(Self.remoteRefsTimeout.components.seconds)
+          await send(.member(id, .refsFailed("The remote did not answer within \(seconds) seconds.")))
+        } catch {
+          await send(
+            .member(id, .refsFailed("Couldn't list the remote's branches: \(WorkspaceClient.describe(error))")))
+        }
+      }
+      .cancellable(id: CancelID.refs(id), cancelInFlight: true)
+    }
+  }
+
+  private nonisolated struct RemoteRefsTimeout: Error {}
+
+  // MARK: - Adding
+
+  private func resolvePath(_ path: String, _ state: inout State) -> Effect<Action> {
+    guard state.canAddMembers else { return .none }
+    state.isResolvingAdd = true
+    state.addIssue = nil
+    return .run { [cli = gitCLI] send in
+      let probe = try? await cli.inspectRepository(at: path)
+      await send(.addPathResolved(path: path, probe: probe))
+    }
+    .cancellable(id: CancelID.addResolve, cancelInFlight: true)
+  }
+
+  private func addResolvedPath(_ path: String, probe: RepositoryProbe?, _ state: inout State) -> Effect<Action> {
+    let shown = (path as NSString).abbreviatingWithTildeInPath
+    guard let probe else {
+      state.addIssue = "\(shown) is not a git repository."
+      return .none
+    }
+    guard !probe.isBare else {
+      state.addIssue = "\(shown) is a bare repository, which workspaces do not support."
+      return .none
+    }
+    let root = HierarchyManager.canonicalPath(probe.root)
+    if state.members.contains(where: {
+      !$0.source.isRemote && HierarchyManager.canonicalPath($0.source.gitRoot) == root
+    }) {
+      state.addIssue = "\((root as NSString).abbreviatingWithTildeInPath) is already in the list."
+      return .none
+    }
+    state.addIssue = nil
+    state.remoteURLDraft = ""
+    if let candidate = state.candidates.first(where: { HierarchyManager.canonicalPath($0.gitRoot) == root }) {
+      return appendMember(source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
+    }
+    return appendMember(source: .localRepo(gitRoot: root), &state)
+  }
+
+  private func submitRemoteURL(_ state: inout State) -> Effect<Action> {
+    guard state.canAddMembers else { return .none }
+    switch AddEntryClassifier.classify(state.remoteURLDraft, fileExists: fileExists) {
+    case .empty:
+      return .none
+    case .url(let url):
+      let key = AddEntryClassifier.normalizedRemoteKey(url)
+      let isListed = state.members.contains {
+        guard case .remote(let existing, _) = $0.source else { return false }
+        return AddEntryClassifier.normalizedRemoteKey(existing) == key
+      }
+      guard !isListed else {
+        state.addIssue = "This remote is already in the list."
+        return .none
+      }
+      let name = WorkspaceLayout.repositoryName(fromRemoteURL: url) ?? "repository"
+      let destination = (WorkspaceLayout.defaultSourcesDirectory().path(percentEncoded: false) as NSString)
+        .appendingPathComponent(name)
+      state.remoteURLDraft = ""
+      state.addIssue = nil
+      return appendMember(source: .remote(url: url, cloneDestination: destination), &state)
+    case .path(let path, let exists):
+      guard exists else {
+        state.addIssue = "There is no folder at \((path as NSString).abbreviatingWithTildeInPath)."
+        return .none
+      }
+      return resolvePath(path, &state)
+    case .unrecognized:
+      state.addIssue = "Enter a git URL, such as git@github.com:org/repo.git."
+      return .none
+    }
+  }
+
+  // MARK: - Creation
+
+  private func startCreation(_ plan: WorkspacePlan, _ state: inout State) -> Effect<Action> {
+    let stream: AsyncThrowingStream<WorkspaceCreationEvent, Error>
+    let token = uuid()
+    switch state.mode {
+    case .create:
+      stream = workspaceClient.createStream(plan, token)
+    case .add(let projectID, _, _, _):
+      guard let member = plan.members.first else { return .none }
+      stream = workspaceClient.addStream(projectID, member, token)
+    }
+    state.creationToken = token
+    for id in state.members.ids { state.members[id: id]?.progress = .pending }
+    state.creation = .running(current: nil)
+    return .merge(
+      .cancel(id: CancelID.preflight),
+      .run { send in
+        do {
+          for try await event in stream {
+            await send(.creationEvent(event))
+          }
+        } catch {
+          await send(
+            .creationFailed(
+              message: WorkspaceClient.describe(error), cancelled: (error as? WorkspaceError) == .cancelled))
+        }
+      }
+      .cancellable(id: CancelID.creation, cancelInFlight: true)
+    )
   }
 
   private func reduceCreationEvent(_ event: WorkspaceCreationEvent, state: inout State) -> Effect<Action> {
@@ -758,9 +732,8 @@ struct CreateWorkspaceFeature {
     case .memberFailed(let name, let message):
       guard let id = memberID(named: name) else { return .none }
       state.members[id: id]?.progress = .failed(message)
-      state.expandedMemberID = id
     case .manifestWritten:
-      state.creation = .finalizing("Registering…")
+      state.creation = .finalizing("Adding to the sidebar…")
     case .registered(let projectID, let worktreeID):
       state.creation = .idle
       if let worktreeID {
@@ -781,171 +754,13 @@ struct CreateWorkspaceFeature {
 
   // MARK: - Helpers
 
-  private func appendMember(source: MemberDraft.Source, to state: inout State) -> Effect<Action> {
-    var name = source.suggestedName
-    let taken = Set(state.members.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) })
-    var suffix = 2
-    let base = name
-    while taken.contains(name) {
-      name = "\(base)-\(suffix)"
-      suffix += 1
+  /// Every edit: clear a finished attempt's outcome, then re-check the plan
+  /// once typing pauses.
+  private func edited(_ state: inout State) -> Effect<Action> {
+    if state.creation.isSettled {
+      state.creation = .idle
+      for id in state.members.ids { state.members[id: id]?.progress = .pending }
     }
-    var member = MemberDraft(id: uuid(), source: source, name: name, branch: state.sharedBranch)
-    member.refs = .loading
-    state.members.append(member)
-    refreshSuggestions(&state)
-    return .merge(loadRefs(for: member), preflightDebounced(&state))
-  }
-
-  private func loadRefs(for member: MemberDraft) -> Effect<Action> {
-    let id = member.id
-    let client = gitWorktreeClient
-    switch member.source {
-    case .project(_, let gitRoot), .localRepo(let gitRoot), .bareRepo(let gitRoot):
-      let repoRoot = URL(fileURLWithPath: gitRoot, isDirectory: true)
-      return .run { send in
-        async let refs = (try? client.branchRefs(repoRoot)) ?? []
-        async let locals = (try? client.localBranchNames(repoRoot)) ?? []
-        async let worktrees = (try? client.lsWorktrees(repoRoot)) ?? []
-        async let auto = (try? client.defaultRemoteBranchRef(repoRoot)) ?? nil
-        let inventory = RefInventory(
-          branchRefs: await refs, localBranchNames: await locals, worktrees: await worktrees,
-          defaultRemoteBranchRef: await auto)
-        await send(.member(id, .refsLoaded(inventory)))
-      }
-      .cancellable(id: CancelID.refs(id), cancelInFlight: true)
-    case .remote(let url, _, _):
-      let clock = clock
-      return .run { send in
-        do {
-          let heads = try await withThrowingTaskGroup(of: RemoteHeads.self) { group in
-            group.addTask { try await client.lsRemoteHeads(url) }
-            group.addTask {
-              try await clock.sleep(for: Self.remoteRefsTimeout)
-              throw RemoteRefsTimeout()
-            }
-            let first = try await group.next()
-            group.cancelAll()
-            return first ?? RemoteHeads()
-          }
-          await send(.member(id, .refsLoaded(RefInventory(remoteHeads: heads))))
-        } catch is RemoteRefsTimeout {
-          await send(
-            .member(
-              id,
-              .refsFailed("Timed out after \(Int(Self.remoteRefsTimeout.components.seconds)) s reaching the remote.")))
-        } catch {
-          await send(
-            .member(id, .refsFailed("Couldn't read the remote's branches: \(WorkspaceClient.describe(error))")))
-        }
-      }
-      .cancellable(id: CancelID.refs(id), cancelInFlight: true)
-    }
-  }
-
-  private nonisolated struct RemoteRefsTimeout: Error {}
-
-  private func resolvePath(_ path: String, _ state: inout State) -> Effect<Action> {
-    state.isResolvingAdd = true
-    state.addIssue = nil
-    return .run { [cli = gitCLI] send in
-      let probe = try? await cli.inspectRepository(at: path)
-      await send(.addPathResolved(path: path, probe: probe))
-    }
-    .cancellable(id: CancelID.addResolve, cancelInFlight: true)
-  }
-
-  private func submitAddEntry(_ state: inout State) -> Effect<Action> {
-    switch state.addKind {
-    case .empty:
-      return .none
-    case .url(let url):
-      let key = AddEntryClassifier.normalizedRemoteKey(url)
-      if state.members.contains(where: {
-        if case .remote(let existing, _, _) = $0.source {
-          return AddEntryClassifier.normalizedRemoteKey(existing) == key
-        }
-        return false
-      }) {
-        state.addIssue = "Already in the list."
-        return .none
-      }
-      let name = WorkspaceLayout.repositoryName(fromRemoteURL: url) ?? "repository"
-      let destination = (WorkspaceLayout.defaultSourcesDirectory().path(percentEncoded: false) as NSString)
-        .appendingPathComponent(name)
-      clearAddField(&state)
-      return appendMember(
-        source: .remote(url: url, cloneDestination: destination, destinationEditedManually: false), to: &state)
-    case .path(let path, let exists):
-      guard exists else {
-        state.addIssue = "No folder at \((path as NSString).abbreviatingWithTildeInPath)."
-        return .none
-      }
-      return resolvePath(path, &state)
-    case .search(let query):
-      guard !state.addSuggestions.isEmpty else {
-        state.addIssue = "No open project matches \"\(query)\"."
-        return .none
-      }
-      let index = min(state.addHighlightedIndex ?? 0, state.addSuggestions.count - 1)
-      return .send(.addSuggestionTapped(state.addSuggestions[index].id))
-    }
-  }
-
-  private func clearAddField(_ state: inout State) {
-    state.addDraft = ""
-    state.addKind = .empty
-    state.addIssue = nil
-    state.addHighlightedIndex = nil
-    refreshSuggestions(&state)
-  }
-
-  /// Candidates not yet in the list, ranked against the search text; empty
-  /// unless the field holds a search.
-  private func refreshSuggestions(_ state: inout State) {
-    let used = Set(
-      state.members.compactMap { member -> ProjectID? in
-        if case .project(let id, _) = member.source { return id }
-        return nil
-      })
-    let available = state.candidates.filter { !used.contains($0.id) }
-    switch state.addKind {
-    case .search(let query):
-      state.addSuggestions = AddEntryClassifier.rank(available, query: query, name: \.name) {
-        ($0.gitRoot as NSString).lastPathComponent
-      }
-    case .empty:
-      state.addSuggestions = Array(available.prefix(6))
-    case .url, .path:
-      state.addSuggestions = []
-    }
-    if state.addSuggestions.isEmpty {
-      state.addHighlightedIndex = nil
-    } else if let index = state.addHighlightedIndex {
-      state.addHighlightedIndex = min(index, state.addSuggestions.count - 1)
-    } else {
-      state.addHighlightedIndex = 0
-    }
-  }
-
-  /// Rows on a new branch that have not been overridden follow the shared
-  /// branch.
-  private func propagateSharedBranch(_ state: inout State) {
-    let shared = state.sharedBranch
-    for member in state.members where member.mode == .newBranch && !member.branchEditedManually {
-      state.members[id: member.id]?.branch = shared
-    }
-  }
-
-  /// A shared base ref applies to a row only when its repository has it;
-  /// before refs load it is taken on trust and re-checked in `refsLoaded`.
-  private func sharedBaseRefApplicable(_ ref: String?, to member: MemberDraft?) -> Bool {
-    guard let ref, let member else { return false }
-    guard let inventory = member.refs.inventory else { return true }
-    return inventory.contains(ref)
-  }
-
-  private func preflightDebounced(_ state: inout State) -> Effect<Action> {
     guard state.creation == .idle else { return .none }
     return .run { [clock] send in
       try await clock.sleep(for: Self.preflightDebounce)
@@ -957,8 +772,8 @@ struct CreateWorkspaceFeature {
 
 // MARK: - File existence dependency
 
-/// `FileManager.fileExists` behind a dependency so the add field's path
-/// detection is deterministic in tests.
+/// `FileManager.fileExists` behind a dependency so path detection in the URL
+/// field is deterministic in tests.
 nonisolated enum FileExistsDependencyKey: DependencyKey {
   static let liveValue: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
   static let testValue: @Sendable (String) -> Bool = { _ in false }

@@ -1,23 +1,24 @@
 import CodansCore
 import Foundation
 
-/// One row of the New Workspace sheet: a repository the workspace will
-/// check out, with everything the user can decide about it. Pure state —
-/// the reducer derives issues and the `WorkspacePlan.Member` from it.
+/// One repository in the New Workspace sheet and everything the user can
+/// decide about it. Pure state: the reducer derives issues and the
+/// `WorkspacePlan.Member` from it.
 nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
-  /// Where the repository comes from. The sheet keeps the four flavours
-  /// apart for display; the plan only knows local roots and remotes.
+  /// Where the repository comes from. The sheet tells a registered project
+  /// from a folder picked on disk for display; the plan only knows local
+  /// roots and remotes.
   enum Source: Equatable, Sendable {
-    case project(ProjectID, gitRoot: String)
+    case project(ProjectID, name: String, gitRoot: String)
     case localRepo(gitRoot: String)
-    case bareRepo(gitRoot: String)
-    case remote(url: String, cloneDestination: String, destinationEditedManually: Bool)
+    /// Cloned into `cloneDestination` first, then used like a local source.
+    case remote(url: String, cloneDestination: String)
 
     var planSource: WorkspacePlan.Member.Source {
       switch self {
-      case .project(_, let gitRoot), .localRepo(let gitRoot), .bareRepo(let gitRoot):
+      case .project(_, _, let gitRoot), .localRepo(let gitRoot):
         return .local(gitRoot: gitRoot)
-      case .remote(let url, let cloneDestination, _):
+      case .remote(let url, let cloneDestination):
         return .remote(url: url, cloneDestination: cloneDestination)
       }
     }
@@ -30,28 +31,33 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
       return false
     }
 
-    /// Path or host shown next to the name.
-    var displayLocation: String {
+    /// The name the section is headed with.
+    var title: String {
       switch self {
-      case .project(_, let gitRoot), .localRepo(let gitRoot), .bareRepo(let gitRoot):
+      case .project(_, let name, _): return name
+      case .localRepo(let gitRoot): return (gitRoot as NSString).lastPathComponent
+      case .remote(let url, let cloneDestination):
+        return WorkspaceLayout.repositoryName(fromRemoteURL: url) ?? (cloneDestination as NSString).lastPathComponent
+      }
+    }
+
+    /// Where it comes from, as shown under the title.
+    var location: String {
+      switch self {
+      case .project(_, _, let gitRoot), .localRepo(let gitRoot):
         return (gitRoot as NSString).abbreviatingWithTildeInPath
-      case .remote(let url, _, _):
+      case .remote(let url, _):
         return url
       }
     }
 
-    /// A folder name the source suggests: the repository folder, the bare
-    /// directory without `.git`, or the remote's repository name.
+    /// The checkout folder a new member gets: the repository's folder name.
     var suggestedName: String {
       switch self {
-      case .project(_, let gitRoot), .localRepo(let gitRoot):
+      case .project(_, _, let gitRoot), .localRepo(let gitRoot):
         return (gitRoot as NSString).lastPathComponent
-      case .bareRepo(let gitRoot):
-        let last = (gitRoot as NSString).lastPathComponent
-        return last.lowercased().hasSuffix(".git") && last.count > 4 ? String(last.dropLast(4)) : last
-      case .remote(let url, let cloneDestination, _):
-        return WorkspaceLayout.repositoryName(fromRemoteURL: url)
-          ?? (cloneDestination as NSString).lastPathComponent
+      case .remote:
+        return title
       }
     }
   }
@@ -97,52 +103,64 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
     case done
     case failed(String)
     case rolledBack
-
-    var isRunning: Bool {
-      if case .running = self { return true }
-      return false
-    }
   }
 
   let id: UUID
   var source: Source
-  /// Folder under the workspace root; also the row's display name.
+  /// Folder under the workspace root.
   var name: String
-  var nameEditedManually = false
   var mode: CheckoutMode = .newBranch
-  /// Branch to create or check out. In remote mode it follows the ref's
-  /// branch part until edited.
-  var branch: String
-  var branchEditedManually = false
-  /// Base for a new branch; nil means the repository's default.
+  /// New branch: a name of this member's own. Empty follows the workspace's
+  /// branch.
+  var branchOverride = ""
+  /// New branch: where it starts. Nil is the repository's default branch.
   var baseRef: String?
-  var baseRefEditedManually = false
-  /// `origin/feature`, remote mode only.
+  /// Existing branch: the local branch to check out.
+  var localBranch: String?
+  /// Remote branch: `origin/feature`. The local branch takes its name.
   var remoteRef: String?
   var localConflict: LocalConflictResolution = .keepLocal
   var refs: RefsState = .idle
-  /// Findings from the client's preflight, keyed off this row.
-  var asyncIssues: [MemberIssue] = []
+  /// Findings from the client's preflight for this member.
+  var preflightIssues: [WorkspacePreflight.Issue] = []
   var progress: Progress = .pending
 
-  init(id: UUID, source: Source, name: String, branch: String, baseRef: String? = nil) {
+  init(id: UUID, source: Source, name: String) {
     self.id = id
     self.source = source
     self.name = name
-    self.branch = branch
-    self.baseRef = baseRef
   }
 
-  /// The branch name a remote ref implies, when one is chosen.
+  /// The branch the checkout ends up on.
+  func branch(sharedBranch: String) -> String {
+    switch mode {
+    case .newBranch:
+      let own = branchOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+      return own.isEmpty ? sharedBranch.trimmingCharacters(in: .whitespacesAndNewlines) : own
+    case .existingLocal:
+      return localBranch ?? ""
+    case .existingRemote:
+      return remoteRefBranch ?? ""
+    }
+  }
+
+  /// The branch part of the chosen remote ref.
   var remoteRefBranch: String? {
     remoteRef.flatMap(WorkspaceCheckout.splitRemoteRef)?.branch
   }
 
-  /// True when the chosen remote ref's branch already exists locally, so the
-  /// Keep / Reset choice applies.
+  /// True when the chosen remote branch already exists locally, so the Keep
+  /// / Reset choice applies.
   var hasLocalConflict: Bool {
-    guard mode == .existingRemote, let inventory = refs.inventory else { return false }
+    guard mode == .existingRemote, let branch = remoteRefBranch, let inventory = refs.inventory else {
+      return false
+    }
     return inventory.local.contains(branch)
+  }
+
+  /// A remote that is not cloned yet has no local branches to offer.
+  var availableModes: [CheckoutMode] {
+    source.isRemote ? [.newBranch, .existingRemote] : CheckoutMode.allCases
   }
 }
 
@@ -192,83 +210,37 @@ nonisolated struct RefInventory: Equatable, Sendable {
   func contains(_ ref: String) -> Bool {
     local.contains(ref) || remote.contains(ref)
   }
-
-  func options(includeLocal: Bool, includeRemote: Bool) -> [BranchRefOption] {
-    var result: [BranchRefOption] = []
-    if includeLocal {
-      result += local.map { BranchRefOption(shortName: $0, isRemote: false, checkedOutAt: checkedOut[$0]) }
-    }
-    if includeRemote {
-      result += remote.map { BranchRefOption(shortName: $0, isRemote: true, isDefault: $0 == defaultBaseRef) }
-    }
-    return result
-  }
 }
 
-/// One choice in a ref picker.
-nonisolated struct BranchRefOption: Identifiable, Equatable, Sendable {
-  var id: String { shortName }
-  let shortName: String
-  let isRemote: Bool
-  var isDefault = false
-  /// Set when another worktree holds the branch; the row is offered but
-  /// disabled, with the path as the reason.
-  var checkedOutAt: String?
-}
-
-/// Something the sheet has to say about a row or the workspace as a whole,
-/// anchored to the field it concerns.
+/// Something the sheet has to say about a member or the workspace.
 nonisolated struct MemberIssue: Equatable, Sendable {
   enum Severity: Equatable, Sendable {
-    /// Disables Create.
+    /// A real problem; shown and blocks Create.
     case blocking
+    /// Something not filled in yet; blocks Create without being shown as an
+    /// error, since an empty form is not a mistake.
+    case incomplete
     case warning
     case info
   }
 
-  enum Field: Equatable, Sendable {
-    case name
-    case branch
-    case baseRef
-    case remoteRef
-    case cloneDestination
-    case refs
-    case row
-  }
-
   var severity: Severity
-  var field: Field
   var message: String
 
-  static func blocking(_ field: Field, _ message: String) -> MemberIssue {
-    MemberIssue(severity: .blocking, field: field, message: message)
-  }
+  static func blocking(_ message: String) -> MemberIssue { MemberIssue(severity: .blocking, message: message) }
+  static func incomplete(_ message: String) -> MemberIssue { MemberIssue(severity: .incomplete, message: message) }
+  static func warning(_ message: String) -> MemberIssue { MemberIssue(severity: .warning, message: message) }
+  static func info(_ message: String) -> MemberIssue { MemberIssue(severity: .info, message: message) }
 
-  static func warning(_ field: Field, _ message: String) -> MemberIssue {
-    MemberIssue(severity: .warning, field: field, message: message)
-  }
-
-  static func info(_ field: Field, _ message: String) -> MemberIssue {
-    MemberIssue(severity: .info, field: field, message: message)
-  }
-
-  init(severity: Severity, field: Field, message: String) {
+  init(severity: Severity, message: String) {
     self.severity = severity
-    self.field = field
     self.message = message
   }
 
-  /// A preflight finding, placed on the field its kind concerns.
+  /// A preflight finding: informational ones only describe what will happen.
   init(preflight issue: WorkspacePreflight.Issue) {
-    let field: Field
-    switch issue.kind {
-    case .destinationExists: field = .name
-    case .cloneDestinationTaken, .cloneDestinationReused: field = .cloneDestination
-    case .invalidBranchName: field = .branch
-    case .rootAlreadyRegistered, .rootIsFile, .rootAlreadyWorkspace, .rootInsideRepository, .rootExists,
-      .sourceNotRepository:
-      field = .row
-    }
-    self.init(severity: issue.isInformational ? .info : .blocking, field: field, message: issue.message)
+    self.init(severity: issue.isInformational ? .info : .blocking, message: issue.message)
   }
+
+  var blocksCreation: Bool { severity == .blocking || severity == .incomplete }
 }

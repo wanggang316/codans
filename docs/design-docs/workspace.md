@@ -26,12 +26,13 @@
 - 成员可增删；移除 workspace 默认只删条目，显式选择才动磁盘与分支。（M2/M3）
 - 子仓库在其源 Project 中仍可见、带「in workspace X」标记，但所有破坏性批量操作绕开它。（M2）
 - 子仓库 PR 状态按仓库取数，根行聚合显示。（M3）
-- 成员来源补齐：远程 URL（先 clone 到用户选定的本地位置，之后与本地仓库一致）、裸仓库；检出模式补「使用已有远程跟踪分支」（本地同名分支存在时显式选 Keep / Reset，默认 Keep）。（M4）
+- 成员来源补齐：远程 URL（先 clone 到用户选定的本地位置，之后与本地仓库一致）；检出模式补「使用已有远程跟踪分支」（本地同名分支存在时显式选 Keep / Reset，默认 Keep）。（M4）
 
 ### 非目标
 
 - symlink「link」模式：`HierarchyManager.canonicalPath` 会把 symlink 子目录解析成源 checkout 的路径，与源 Project 的 main 行落在同一 canonical path，无法成为独立行。用 `existingBranch` 建一个新 worktree 覆盖同一诉求。
 - workspace 整体归档（Project 级 archive 尚不存在）。
+- 裸仓库作为成员来源：暂不支持，探测到即以 `WorkspaceError.bareRepository` 拒绝（D17），CLI 与 sheet 给出同一原因。
 
 ## 设计
 
@@ -55,7 +56,7 @@
 | D14 | `WorkspacePlan.Member.source: Source = .local(gitRoot) \| .remote(url, cloneDestination)`；`sourceGitRoot` 是派生属性（远程 = clone 目标） | 远程只是「先 clone」的本地源；成员统一是 linked worktree，`sourceGitRoot` 永不等于成员自身路径，drop / remove / reconcile / PR 取数零特判 |
 | D15 | `WorkspaceCheckout.remoteTrackingRef(remoteRef, branch, resetLocal)`：本地无同名分支 → `worktree add --track -b`；有且 `resetLocal == false` → 降级为 `existingBranch`；有且 `resetLocal == true` → 先记 `resetBranch(previousTip)` 再 `--track -B` | `-B` 只在用户显式要求重置时出现；账本能把被重置的分支恢复到原 tip |
 | D16 | manifest `checkoutMode` 加 `remoteTrackingRef`（`baseRef` 存远程 ref）；`Entry.remoteURL` 只记 provenance | 最小 schema 变化；老构建重存会剥掉 `remoteURL`，只丢信息不改行为 |
-| D17 | 来源探测统一走 `GitWorktreeCLI.inspectRepository(at:)`（`--git-common-dir` + `--is-bare-repository`），替代四处 `discoverGitRoot`；根目录的祖先探测同样换用 | `--show-toplevel` 在裸仓库失败是唯一阻塞点；顺带让根不能建在裸仓库目录内 |
+| D17 | 来源探测统一走 `GitWorktreeCLI.inspectRepository(at:)`（`--git-common-dir` + `--is-bare-repository`），替代 `discoverGitRoot`；裸仓库来源以 `bareRepository` 拒绝（远程 clone 目标若是裸仓库也不复用）；根目录的祖先探测同样换用 | 子目录与 linked worktree 能归一到仓库根；裸仓库给出明确原因，而不是笼统的「不是 git 仓库」；根不能建在裸仓库目录内 |
 | D18 | 来源为仓库子目录或 linked worktree 时接受并归一到仓库根 | 与 `--repo` 的服务端行为一致，少一个拒绝理由 |
 | D19 | 远程 clone 默认目标 `~/.codans/sources/<repoName>`（`WorkspaceLayout.defaultSourcesDirectory` / `uniquePath` / `repositoryName(fromRemoteURL:)`），用户可改；目标已存在且 `remote get-url origin` 与 URL 等价（忽略尾部 `/` 与 `.git`）→ 复用不 clone，否则 `cloneDestinationTaken` | 让用户选择 clone 到哪里；复用避免重复 clone；不覆盖别的仓库 |
 | D20 | clone 走 `GitWorktreeClient.cloneStream`（`git clone --progress`，`runStream` 按 `\r` 也切行，进程盒可终止，`GIT_TERMINAL_PROMPT=0`）；账本新步 `clonedRepository`，复用的仓库不记账 | 数分钟的 clone 必须可取消、有进度；回滚不能删用户已有仓库 |
@@ -154,11 +155,11 @@ Git/GitWorktreeClient       addWorktreeAt、cloneStream、lsRemoteHeads、branch
 App/Clients/HierarchyClient reconcileWorkspace、addWorkspaceProject、workspaceMembership
 App/Clients/WorkspaceClient create / add（及 stream 变体）、preflight、drop、remove
 App/Features/CreateWorkspace/
-  CreateWorkspaceFeature    sheet reducer（create / add 两种模式）
-  CreateWorkspaceMemberDraft  MemberDraft、RefInventory、BranchRefOption、MemberIssue
-  CreateWorkspaceAddEntry   统一添加入口的分类与候选排序
-  WorkspaceCommandPreview   目录树 + 命令预览
-  CreateWorkspaceSheet / WorkspaceAddField / WorkspaceMemberRow / WorkspaceMemberDetail / RefPickerButton / WorkspacePreviewPanel / WorkspaceCreationFooter
+  CreateWorkspaceFeature      sheet reducer（create / add 两种模式）
+  CreateWorkspaceMemberDraft  MemberDraft、RefInventory、MemberIssue
+  CreateWorkspaceAddEntry     Remote URL 输入的分类（URL / 路径）与远程去重键
+  CreateWorkspaceSheet        分组 Form 外壳 + presenter
+  WorkspaceMemberSection / WorkspaceAddSection / WorkspaceRefPicker / WorkspaceCreationBar
 ```
 
 依赖方向不变：app → Runtime → CodansCore；`CodansCore` 不 import AppKit，不 spawn 进程。
@@ -179,7 +180,7 @@ WorkspaceHandlers (workspace.*) ─┘        │ 失败 / 取消
 | 来源 | 落盘 | `sourceGitRoot` |
 |---|---|---|
 | 已注册本地 Project | `worktree add` | Project 的 `gitRoot` |
-| 本地仓库路径（普通或裸；子目录、linked worktree 归一到仓库根，D17/D18） | `worktree add` | 仓库根 / 裸目录 |
+| 本地仓库路径（子目录、linked worktree 归一到仓库根；裸仓库拒绝，D17/D18） | `worktree add` | 仓库根 |
 | 远程 URL | `git clone --progress` 到 clone 目标（默认 `~/.codans/sources/<name>`，已是同一远程的 clone 则复用，D19/D20）→ `worktree add` | clone 目标 |
 
 | 模式 | 命令 | 账本 |
@@ -194,14 +195,13 @@ WorkspaceHandlers (workspace.*) ─┘        │ 失败 / 取消
 - 落盘顺序：建根目录（仅在不存在时，并记账）→ 逐成员 [clone（记 `clonedRepository`）→ fetch（D21）→ 定稿 checkout（默认 base、Keep / Reset 判定）→ `GitWorktreeClient.addWorktreeAt`（不能用 `wt sw`，它按分支名命名目录）] → 写 manifest → `addWorkspaceProject` → reconcile workspace（子行从 git 取分支与 sourceGitRoot）→ reconcile 每个来源 Project（镜像行即时出现）。每步经 `WorkspaceCreationEvent` 上报（D22）。
 - `WorkspaceMaterializationLedger` 记录 createdDirectory / clonedRepository / createdBranch / resetBranch / addedWorktree，逆序回滚：先 `removeWorktree`（relocate-then-prune），再 `branch -f <branch> <previousTip>` 或 `deleteBranchIfExists`，再删 clone 目录与根目录。回滚在 `Task.detached` 中执行并等待完成——父任务取消不能 SIGTERM 清理用的 git 子进程；无法撤销的项经 `rolledBack(failures:)` 报给调用方。
 - IPC `workspace.create` / `workspace.add` / `workspace.describe`：`WorkspaceHandlers` 走类型化 `throws` 风格，只做 wire → plan 翻译与错误映射（cli.md D21–D23）。CLI `codans workspace create|add|show`。
-- GUI（`App/Features/CreateWorkspace/`）：`CreateWorkspaceFeature` + `CreateWorkspaceSheet`（Add 菜单「New Workspace…」、palette `app.new-workspace`、`CommandID.newWorkspace` 默认无绑定；workspace 根行的 `+`「Add Repository…」打开同一 sheet 的 add 模式：Title / Folder 固定、成员下限 1、提交走 `addStream`）。单页布局：
-  - Title → 派生 Folder（`~/.codans/workspaces/<slug>`）与 Branch for all（slug），各自手改后不再跟随；当前选中的 Project 打开即为第一行。
-  - 统一「添加」入口（`AddEntryClassifier`）：`scheme://`、`user@host:path`、`host.tld/path` 归为 URL（一次粘贴 ≥ 8 字符即自动添加，失焦也提交，按 host/path 去重）；`/`、`~`、`./`、`../` 开头为路径（不存在直接报错，存在则 `inspectRepository`，命中已注册 Project 的根记为 Project、裸仓库记为 bare、其余为本地仓库，按 canonical 根去重）；其余在候选 Project 中按 name / 目录名做前缀 > 子串 > 子序列排序（↓↑ 高亮、⏎ 添加、Esc 清空）。旁有「Add Folder…」「Bare…」两个拾取按钮。
-  - 成员行（`MemberDraft`）一行摘要（来源图标 · 名 · 来源 · `new b ← base` / `existing b` / `remote origin/x [as b] [(reset local)]` · 状态徽标），点击展开：Folder name、Checkout 分段（New branch / Existing branch / Remote branch）、Branch（被覆盖时给「Use shared」）、`RefPickerButton`（可搜索，Local / Remote 分节，「Repository default (origin/main)」项，被其他 worktree 检出的分支置灰并注明路径）、仅当远程 ref 的分支在本地已存在时出现 Keep local / Reset to remote 单选（默认 Keep）、远程源的 Clone into + Choose…、refs 加载失败的 Retry。
-  - refs 加载：本地源四并发（`branchRefs` / `localBranchNames` / `lsWorktrees` / `defaultRemoteBranchRef`）；远程源 `lsRemoteHeads` 与 20 s 竞速。`sharedBaseRef` 只写入拥有该 ref 的行，否则留空并给 warning。
-  - 校验：纯规则（名字单段且唯一、分支语法 `BranchNameSyntax.quickCheck`、新分支已存在、已有分支不存在、分支被其他 worktree 检出、远程模式未选 ref、add 模式名字与现有成员冲突）即时派生；I/O 规则由 300 ms debounce 后的 `WorkspaceClient.preflight` 回填到对应行与字段（`WorkspacePreflight`）。阻塞项禁用 Create，页脚汇总「N issues」可点击展开第一处；warning / info 不阻塞。
-  - 预览（`WorkspaceCommandPreview`）：目录树 + 可选命令列表，随草稿实时更新。
-  - 创建：`createStream(plan, token)` 事件驱动行状态（Cloning… / Fetching… / Checking out… / 进度行 / ✓ / ✗），页脚「Cancel and roll back」调 `cancelCreation(token)`，流继续到 `rolledBack(failures)` 并显示需手工清理的项；失败行自动展开，页脚给 Retry / Edit。`registered` → `delegate(.created)` / `.added(projectID, worktreeID)`，侧栏选中新建的 workspace 或新行。
+- GUI（`App/Features/CreateWorkspace/`）：`CreateWorkspaceFeature` + `CreateWorkspaceSheet`（Add 菜单「New Workspace…」、palette `app.new-workspace`、`CommandID.newWorkspace` 默认无绑定；workspace 根行的 `+`「Add Repository…」打开同一 sheet 的 add 模式：Workspace / Location 只读、恰好一个成员、提交走 `addStream`）。样式与 Settings 面板一致：`Form` + `.formStyle(.grouped)`，行用 `TextField` / `LabeledContent` / `Picker`（原生弹出菜单），不自绘控件；Cancel / Create 放在表单下方的按钮栏（不叠在表单上，避免行滚到按钮后面）；宽 560，高度随内容，最高 760 后滚动。
+  - 第一节「New Workspace」：Title；Location（父目录 + 文件夹按钮，显示 `<location>/<slug>`，文件夹名始终跟随标题）；Branch（默认跟随标题 slug，手改后不再跟随）。当前侧栏显示为选中的 Project（`Catalog.displayedSelectedProjectID`，与选中流同一回退规则）打开即为第一个成员。
+  - 每个成员一节：节头是来源名、来源路径或 URL 与 Remove；行依次为 Checkout（New branch / Existing branch / Remote branch，未 clone 的远程源不提供 Existing branch）、该模式的分支行、远程源的 Clone to（父目录选择，clone 保留仓库名）、Folder name。New branch 的 Branch 留空即沿用工作区分支（占位符显示它），Based on 首项为「Default (origin/main)」；Existing branch 只列本地分支，被其他 worktree 检出的标注 checked out；Remote branch 不预选（默认分支的本地同名分支通常正被源仓库检出），选中的远程分支在本地已存在时出现 Local branch 选择（Keep local branch 默认 / Reset to <ref>）。节脚显示该成员的问题、分支加载状态与 Retry，创建中显示阶段与最后一行进度。
+  - 最后一节「Add Repository」：Open project（未加入的已注册 Project 菜单）、Folder on disk（Choose…，`inspectRepository` 后命中已注册 Project 记为 Project，裸仓库与非仓库给出原因，按 canonical 根去重）、Remote URL（⏎ 或 Add 提交；`AddEntryClassifier` 识别 URL 与路径，远程按 host/path 去重，默认 clone 目标 `~/.codans/sources/<name>`）。
+  - refs 加载：本地源四并发（`branchRefs` / `localBranchNames` / `lsWorktrees` / `defaultRemoteBranchRef`）；远程源 `lsRemoteHeads` 与 20 s 竞速。
+  - 校验分三级（`MemberIssue.Severity`）：`incomplete`（没填完：标题、成员数、分支、未选分支、分支加载中）只禁用 Create，不标红，按钮栏左侧提示第一项；`blocking`（名字非法或重复、分支语法 `BranchNameSyntax.quickCheck`、新分支已存在、已有分支不存在、分支被其他 worktree 检出——Keep 与 Reset 都查、远程分支不存在、add 模式名字冲突，以及 300 ms debounce 后 `WorkspaceClient.preflight` 回填的 I/O 结果）红字列在所在节脚；`warning` / `info` 不阻塞。preflight 文案面向表单（路径用 `~`，空分支不报），名字已有问题时不再重复「目录已存在」。
+  - 创建：`createStream(plan, token)` 事件驱动各节状态（Cloning… / Fetching… / Checking out… + 进度行 / Checked out / 失败原因 / Rolled back），按钮栏左侧显示当前阶段；运行中 Cancel 调 `cancelCreation(token)`，流继续到 `rolledBack(failures)`；结束后按钮栏显示结果（已取消、需手工清理的项、失败原因），Create 可直接重试，任何编辑清除结果。`registered` → `delegate(.created)` / `.added(projectID, worktreeID)`，侧栏选中新建的 workspace 或新行。
 - 源 Project 镜像行守卫（D10）：行尾徽标「⧉ <workspace>」点击跳到 workspace 子行；上下文菜单隐藏 Archive / Remove 且 `HierarchySidebarFeature.isWorkspaceMember` 在 reducer 再守一次；`mergedWorktreeIDs`（侧栏 header 与 `RootFeature`）过滤；`sweepExpiredArchivedWorktrees` 跳过；`hierarchy.removeWorktree` 对子行与镜像行都返回 `conflict`；HEAD watcher 双挂载接受。
 - `CodansEnvironment.Key.workspaceRoot` / `BuiltinEnvVar.workspaceRoot`：`injectingBuiltins(workspaceRoot:)` 只在 workspace Project 的 pane 写入，非 workspace 主动移除同名 key。
 
@@ -225,13 +225,13 @@ WorkspaceHandlers (workspace.*) ─┘        │ 失败 / 取消
 
 ## 备选方案
 
-- **子仓库作为元数据行而非 Worktree**（Prowl 的做法）：状态刷新要单开通道、diff / 通知 / agent 状态各需一层抽象、没有 tab 计数。放弃。
+- **子仓库作为元数据行而非 Worktree**：状态刷新要单开通道、diff / 通知 / agent 状态各需一层抽象、没有 tab 计数。放弃。
 - **manifest 为唯一真相、不持久化标记**：kind 在加载时需要 stat，根目录不可达时会读成 `.dir`，目录回来后下一脉冲即触发 discoverGitRoot + sweep。放弃。
 - **源 Project 中隐藏镜像行**（在 `reconcileDiscoveredWorktrees` 里按 workspace 根前缀跳过）：一条规则解决所有破坏性路径，但源 Project 看不到该分支已被 checkout。Gump 选择显示并打标记，代价是逐处守卫；本文 M2 列全。
 - **symlink link 模式**：见非目标。
 
 ## 横切关注点
 
-- **已知限制**：旧构建对 workspace 根仍会跑 `discoverGitRoot`；D12 要求根不在仓库内，D3 修复清掉误写的 gitRoot。老构建重存 manifest 会剥掉 `remoteURL`（D16）。裸仓库目录内不能建 workspace 根（D17）。远程来源的 clone 只在回滚时删除；drop / remove 成员不删 clone，它是普通本地仓库。
+- **已知限制**：旧构建对 workspace 根仍会跑 `discoverGitRoot`；D12 要求根不在仓库内，D3 修复清掉误写的 gitRoot。老构建重存 manifest 会剥掉 `remoteURL`（D16）。裸仓库既不能作为成员来源，其目录内也不能建 workspace 根（D17）。远程来源的 clone 只在回滚时删除；drop / remove 成员不删 clone，它是普通本地仓库。
 - **日志**：`com.gumpw.codans.hierarchy/reconcile` 记录追加 / 归档 / 「manifest 不再点名的行」/ 「子仓库所属仓库与 manifest 声明不符」。
-- **测试**：`WorkspaceManifestTests` / `WorkspaceCatalogTests`（CodansCoreTests，host-free）；`HierarchyManagerWorkspaceTests`、`CatalogStoreWorkspaceRepairTests`、`HierarchyHandlersWorkspaceTests`、`HierarchyClientWorkspaceReconcileTests`（后者用真实 git：嵌套在外层仓库内的根不获得 gitRoot、子行取到分支与源仓库）；`WorkspacePlanTests` / `RemoteHeadsTests`（来源、检出、账本、ls-remote 解析）；`WorkspaceClientTests`（真实 git：远程 clone 与复用、裸源、remoteTrackingRef 三种情形、回滚恢复被重置分支、fetch 失败、clone 中取消）；`CreateWorkspaceFeatureTests`（TestStore：预置行、派生与传播、添加入口三类输入与键盘、ls-remote 超时、纯校验矩阵、debounce preflight、创建事件流、失败 Retry、取消回滚、add 模式、纯函数）；`BranchNameSyntaxTests`。
+- **测试**：`WorkspaceManifestTests` / `WorkspaceCatalogTests`（CodansCoreTests，host-free）；`HierarchyManagerWorkspaceTests`、`CatalogStoreWorkspaceRepairTests`、`HierarchyHandlersWorkspaceTests`、`HierarchyClientWorkspaceReconcileTests`（后者用真实 git：嵌套在外层仓库内的根不获得 gitRoot、子行取到分支与源仓库）；`WorkspacePlanTests` / `RemoteHeadsTests`（来源、检出、账本、ls-remote 解析）；`WorkspaceClientTests`（真实 git：远程 clone 与复用、裸源被拒、preflight 文案与空分支、remoteTrackingRef 三种情形、回滚恢复被重置分支、fetch 失败、clone 中取消）；`CreateWorkspaceFeatureTests`（TestStore：预选成员、标题派生目录与分支、成员分支跟随与覆盖、项目 / 文件夹 / URL 三种添加、ls-remote 超时、未填完与问题的分级、各检出模式的校验、debounce preflight、创建事件流、失败后重试与编辑清除、取消回滚、add 模式、URL 分类）；`CatalogResolutionTests`（显示中的选中 Project 回退）；`BranchNameSyntaxTests`。
