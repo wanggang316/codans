@@ -35,7 +35,27 @@ struct PaneHostFeature {
     enum Phase: Equatable {
       case loading
       case ready
-      case failed(String)
+      case failed(Failure)
+    }
+  }
+
+  /// What the failure placeholder shows: a sentence the user can act on,
+  /// plus the raw error kept for bug reports.
+  nonisolated struct Failure: Equatable {
+    let reason: String
+    /// `String(describing:)` of the underlying error; nil when it would only
+    /// repeat `reason`.
+    let detail: String?
+
+    init(reason: String, detail: String? = nil) {
+      self.reason = reason
+      self.detail = detail
+    }
+
+    init(error: any Error) {
+      let detail = String(describing: error)
+      let reason = (error as? LocalizedError)?.errorDescription ?? detail
+      self.init(reason: reason, detail: reason == detail ? nil : detail)
     }
   }
 
@@ -48,9 +68,9 @@ struct PaneHostFeature {
     /// Internal: the async `ensureSurface` call returned successfully and
     /// the registry now holds a surface for this pane.
     case resolveCompleted(SurfaceBox)
-    /// Internal: bring-up failed (zmx spawn, control-socket connect, or
-    /// `ghostty_surface_new`). `reason` is the error's debug description.
-    case resolveFailed(String)
+    /// Internal: bring-up failed (missing zmx binary, unresolvable pane, or
+    /// `ghostty_surface_new`).
+    case resolveFailed(Failure)
   }
 
   @Dependency(TerminalClient.self) private var terminalClient
@@ -68,12 +88,13 @@ struct PaneHostFeature {
         state.phase = .ready
         state.surface = box
         return .none
-      case .resolveFailed(let message):
+      case .resolveFailed(let failure):
         let paneIDDescription = state.paneID.description
+        let message = failure.detail ?? failure.reason
         paneHostLogger.error(
           "ensureSurface failed for \(paneIDDescription, privacy: .public): \(message, privacy: .public)"
         )
-        state.phase = .failed(message)
+        state.phase = .failed(failure)
         state.surface = nil
         return .none
       }
@@ -96,13 +117,13 @@ struct PaneHostFeature {
       do {
         try await client.ensureSurface(paneID, tabID, worktreeID, projectID)
       } catch {
-        await send(.resolveFailed(String(describing: error)))
+        await send(.resolveFailed(Failure(error: error)))
         return
       }
       if let surface = await client.surface(paneID) {
         await send(.resolveCompleted(SurfaceBox(surface: surface)))
       } else {
-        await send(.resolveFailed("Surface not registered after creation."))
+        await send(.resolveFailed(Failure(reason: "Surface not registered after creation.")))
       }
     }
   }

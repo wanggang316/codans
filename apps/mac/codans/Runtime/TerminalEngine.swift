@@ -151,9 +151,18 @@ final class TerminalEngine {
 
   // MARK: - Pane surface lifecycle
 
-  enum SurfaceError: Error, Sendable {
+  nonisolated enum SurfaceError: LocalizedError, Sendable {
     case runtimeUnavailable
     case paneHasNoTab
+
+    var errorDescription: String? {
+      switch self {
+      case .runtimeUnavailable:
+        return "The terminal engine is not running."
+      case .paneHasNoTab:
+        return "This pane is not attached to a tab."
+      }
+    }
   }
 
   // swiftlint:disable async_without_await

@@ -26,6 +26,7 @@ struct LazyPaneHost: View {
   /// False until `loadingChromeDelay` has elapsed on the current
   /// `loadingPlaceholder` — see there for why the chrome waits.
   @State private var showsLoadingChrome = false
+  @Environment(\.colorScheme) private var colorScheme
 
   /// How long a spawn runs before the placeholder admits to being one.
   /// A warm pane reaches `.ready` in ~350ms, well inside this, so the
@@ -92,8 +93,8 @@ struct LazyPaneHost: View {
       }
     case .loading:
       loadingPlaceholder
-    case .failed(let message):
-      failurePlaceholder(message: message)
+    case .failed(let failure):
+      failurePlaceholder(failure)
     }
   }
 
@@ -106,8 +107,7 @@ struct LazyPaneHost: View {
     // window before settling onto the terminal's theme tone. The chrome
     // fades in rather than cutting in, so a spawn that crosses the delay
     // by a hair still doesn't register as a blink.
-    let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
-    return VStack(spacing: 8) {
+    VStack(spacing: 8) {
       Image(systemName: "apple.terminal.on.rectangle")
         .font(.title2)
         .foregroundStyle(.secondary)
@@ -121,8 +121,7 @@ struct LazyPaneHost: View {
     }
     .opacity(showsLoadingChrome ? 1 : 0)
     .animation(.easeIn(duration: 0.2), value: showsLoadingChrome)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(nsColor: terminalBackground))
+    .modifier(terminalBackdrop)
     .task {
       try? await Task.sleep(for: Self.loadingChromeDelay)
       guard !Task.isCancelled else { return }
@@ -130,23 +129,50 @@ struct LazyPaneHost: View {
     }
   }
 
-  private func failurePlaceholder(message: String) -> some View {
-    VStack(spacing: 8) {
-      Text("Pane failed to start")
-        .font(.headline)
-        .foregroundStyle(.red)
-      Text(message)
-        .font(.caption.monospaced())
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
-        .multilineTextAlignment(.center)
-      Button("Retry") {
-        store.send(.retryButtonTapped)
+  private func failurePlaceholder(_ failure: PaneHostFeature.Failure) -> some View {
+    ContentUnavailableView {
+      Label("Pane Failed to Start", systemImage: "exclamationmark.triangle")
+    } description: {
+      Text(failure.reason)
+    } actions: {
+      VStack(spacing: 12) {
+        Button("Retry") {
+          store.send(.retryButtonTapped)
+        }
+        // Raw error for bug reports; selectable so it can be copied.
+        if let detail = failure.detail {
+          Text(detail)
+            .font(.caption.monospaced())
+            .foregroundStyle(.tertiary)
+            .textSelection(.enabled)
+            .multilineTextAlignment(.center)
+        }
       }
-      .buttonStyle(.bordered)
     }
-    .padding()
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(nsColor: .underPageBackgroundColor))
+    .modifier(terminalBackdrop)
+  }
+
+  /// Placeholders sit on the terminal's theme background so they read as
+  /// part of the split (and the hand-off to a live surface doesn't flash).
+  /// System text colours follow the app appearance, not the terminal theme,
+  /// so the backdrop also pins the colour scheme its luminance implies —
+  /// otherwise a dark theme under a light app renders dark-on-dark copy.
+  private var terminalBackdrop: TerminalBackdrop {
+    let background = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
+    let perceived = background.perceivedAppearance?.bestMatch(from: [.darkAqua, .aqua])
+    let scheme: ColorScheme = perceived.map { $0 == .darkAqua ? .dark : .light } ?? colorScheme
+    return TerminalBackdrop(background: background, colorScheme: scheme)
+  }
+}
+
+private struct TerminalBackdrop: ViewModifier {
+  let background: NSColor
+  let colorScheme: ColorScheme
+
+  func body(content: Content) -> some View {
+    content
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(nsColor: background))
+      .environment(\.colorScheme, colorScheme)
   }
 }

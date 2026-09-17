@@ -13,7 +13,7 @@ private let reconcileLogger = Logger(
   category: "reconcile"
 )
 
-enum HierarchyError: Error, Equatable, Sendable {
+nonisolated enum HierarchyError: LocalizedError, Equatable, Sendable {
   case notFound(String)
   case invariantViolation(String)
   /// `zmx serve <paneID>` exited successfully but printed no socket
@@ -24,6 +24,19 @@ enum HierarchyError: Error, Equatable, Sendable {
   case zmxServeFailed(detail: String)
   /// The shipped app bundle is missing the embedded `bin/zmx` resource.
   case zmxBinaryMissing
+
+  var errorDescription: String? {
+    switch self {
+    case .notFound(let message), .invariantViolation(let message):
+      return message
+    case .zmxServeNoSocketPath:
+      return "The zmx session daemon did not report a socket path."
+    case .zmxServeFailed(let detail):
+      return "The zmx session daemon failed to start: \(detail)"
+    case .zmxBinaryMissing:
+      return "This Codans build is missing its bundled zmx helper. Rebuild or reinstall the app."
+    }
+  }
 }
 
 /// Identifies a reorderable sidebar section under a Project. The full sidebar

@@ -29,11 +29,17 @@ struct PaneHostFeatureTests {
   }
 
   /// Deterministic failure so the state mutation closure can assert the
-  /// exact `.failed` message.
+  /// exact `.failed` payload.
   private static let fixedErrorWorktreeID = WorktreeID()
-  private static var failureMessageForFixedError: String {
-    String(describing: TerminalClient.Error.worktreeNotFound(fixedErrorWorktreeID))
+  private static var failureForFixedError: PaneHostFeature.Failure {
+    PaneHostFeature.Failure(
+      reason: "This pane no longer exists in the workspace.",
+      detail: String(describing: TerminalClient.Error.worktreeNotFound(fixedErrorWorktreeID))
+    )
   }
+  private static let surfaceNotRegistered = PaneHostFeature.Failure(
+    reason: "Surface not registered after creation."
+  )
 
   @Test
   func taskWithEnsureThrowLandsInFailed() async {
@@ -48,8 +54,9 @@ struct PaneHostFeatureTests {
       }
     }
 
-    await store.send(.task) {
-      $0.phase = .failed(Self.failureMessageForFixedError)
+    await store.send(.task)
+    await store.receive(.resolveFailed(Self.failureForFixedError)) {
+      $0.phase = .failed(Self.failureForFixedError)
     }
     #expect(ensureCalls.value == 1)
   }
@@ -66,8 +73,9 @@ struct PaneHostFeatureTests {
       }
     }
 
-    await store.send(.task) {
-      $0.phase = .failed("Surface not registered after creation.")
+    await store.send(.task)
+    await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
+      $0.phase = .failed(Self.surfaceNotRegistered)
     }
     #expect(ensureCalls.value == 1)
   }
@@ -76,7 +84,7 @@ struct PaneHostFeatureTests {
   func retryFromFailedResetsThenReRunsResolve() async {
     let ensureCalls = LockIsolated<Int>(0)
     var initial = Self.makeState()
-    initial.phase = .failed("prior")
+    initial.phase = .failed(.init(reason: "prior"))
     let store = TestStore(initialState: initial) {
       PaneHostFeature()
     } withDependencies: {
@@ -88,9 +96,12 @@ struct PaneHostFeatureTests {
     }
 
     // Retry wipes to .loading, then the resolve path runs and throws,
-    // settling on .failed. TestStore asserts the final coalesced state.
+    // settling back on .failed.
     await store.send(.retryButtonTapped) {
-      $0.phase = .failed(Self.failureMessageForFixedError)
+      $0.phase = .loading
+    }
+    await store.receive(.resolveFailed(Self.failureForFixedError)) {
+      $0.phase = .failed(Self.failureForFixedError)
     }
     #expect(ensureCalls.value == 1)
   }
@@ -113,9 +124,30 @@ struct PaneHostFeatureTests {
       }
     }
 
-    await store.send(.task) {
-      $0.phase = .failed("Surface not registered after creation.")
+    await store.send(.task)
+    await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
+      $0.phase = .failed(Self.surfaceNotRegistered)
     }
     #expect(ensureCalls.value == 1)
+  }
+
+  @Test
+  func failureFromLocalizedErrorKeepsRawErrorAsDetail() {
+    let failure = PaneHostFeature.Failure(error: HierarchyError.zmxBinaryMissing)
+    #expect(
+      failure.reason
+        == "This Codans build is missing its bundled zmx helper. Rebuild or reinstall the app."
+    )
+    #expect(failure.detail == "zmxBinaryMissing")
+  }
+
+  @Test
+  func failureFromPlainErrorUsesDescriptionWithoutDuplicateDetail() {
+    struct Plain: Error, CustomStringConvertible {
+      var description: String { "plain failure" }
+    }
+    let failure = PaneHostFeature.Failure(error: Plain())
+    #expect(failure.reason == "plain failure")
+    #expect(failure.detail == nil)
   }
 }
