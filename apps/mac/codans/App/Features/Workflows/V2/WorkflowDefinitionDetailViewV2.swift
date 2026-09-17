@@ -173,6 +173,10 @@ struct WorkflowDefinitionDetailViewV2: View {
                     Spacer()
                     Text(role.source.capitalized).foregroundStyle(.secondary)
                   }
+                  if let profile = role.profile {
+                    Text("Profile: \(profile)").font(.system(size: 11)).foregroundStyle(.secondary)
+                      .textSelection(.enabled)
+                  }
                   if let description = role.description {
                     Text(description).font(.system(size: 11)).foregroundStyle(.secondary)
                       .fixedSize(horizontal: false, vertical: true)

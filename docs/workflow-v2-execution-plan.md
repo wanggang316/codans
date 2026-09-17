@@ -306,3 +306,43 @@ Verified in the rebuilt development app:
 - `refined-history.log` reports BUILD SUCCEEDED; focused SwiftLint and
   `git diff --check` passed. This change modifies presentation only; verification
   exercised real stored runs and a new GUI decision instead of synthetic tests.
+
+## Contextual launch and native workflow management
+
+- Keep Run Workflow before Agents; group Workflow History with notifications in
+  the center toolbar and use a list-of-runs symbol.
+- Default history scope to the current pane; match persisted launch origin and
+  participating panes/worktrees. Runs with no roles still retain launch context.
+- Use native blue selection, full-row disclosure buttons, code backgrounds,
+  and an ellipsis menu without a redundant indicator. Reveal in Finder exports
+  the current run snapshot and frozen YAML beside the existing artifacts.
+- Resolve current/launch defaults from actual focus and catalog location; allow
+  launch roles to specify a saved Profile. Reject unavailable configured profiles.
+- Simplify definition settings, remove launch and path clutter, and keep scrolling
+  at the detail edge.
+
+Acceptance: focused domain tests for scope/origin, snapshot export and Profile
+resolution; build/lint; GUI exercise of default bindings, history scopes,
+full-row expansion, Finder reveal and Settings layout.
+
+Verified in the final development build:
+
+- `GUI Contextual Handoff` (`1FD9EEC0-A6B9-4378-8FB2-49DCE441CA9F`)
+  completed all five nodes through GUI launch. The form populated the current Pi
+  Agent, current terminal location and YAML-configured Pi Profile without manual
+  selection. Both Agents submitted their own outputs; no manual Return or
+  synthetic delivery was used. Launch left the terminal visible.
+- `GUI Pane Scope Decision` (`3337CC94-4E5A-4921-89B7-9A347734A09B`)
+  appeared in Pane scope despite having no roles, and completed via the inline
+  decision form. Both records persisted the source pane/worktree/project origin.
+- Before these runs, scope controls showed 1 current-pane run, 11 current-worktree
+  runs and 18 total runs. The source pane subsequently showed the two new runs.
+  The restored single-pane context worked immediately after restarting the app.
+- GUI inspection confirmed native blue selection, structured JSON background,
+  full-width expansion controls, independent notification/history accessibility
+  names and a run menu without a dropdown indicator. Reveal in Finder opened the
+  selected run folder containing the packet, run.json and workflow.yaml.
+- Settings Overview and YAML screenshots confirmed compact edge-aligned content,
+  no displayed path, no Run/Duplicate buttons, and an ellipsis action menu.
+- `contextual-history-final-tests.xcresult` passed 20 tests in 3 suites. The final
+  build log reports BUILD SUCCEEDED; focused lint and diff checks passed.

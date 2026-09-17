@@ -53,6 +53,50 @@ import Testing
     #expect(restored.run(id) == service.run(id))
   }
 
+  @Test func historyScopesMatchOriginAndParticipants() throws {
+    let sourcePane = PaneID(raw: UUID())
+    let receiverPane = PaneID(raw: UUID())
+    let worktree = WorktreeID(raw: UUID())
+    var run = WorkflowRunV2(
+      title: "Scoped", source: decisionSource,
+      definition: try WorkflowDefinitionParserV2.parse(decisionSource), inputs: [:], bindings: [:],
+      origin: .init(worktreeID: worktree, paneID: sourcePane), nodes: [:])
+    #expect(run.matches(.pane, paneID: sourcePane, worktreeID: nil))
+    #expect(!run.matches(.pane, paneID: receiverPane, worktreeID: worktree))
+    #expect(run.matches(.worktree, paneID: nil, worktreeID: worktree))
+    #expect(!run.matches(.worktree, paneID: sourcePane, worktreeID: WorktreeID(raw: UUID())))
+    #expect(!run.matches(.pane, paneID: nil, worktreeID: nil))
+    #expect(run.matches(.all, paneID: nil, worktreeID: nil))
+    run.bindings["receiver"] = .init(source: "launch", worktreeID: worktree, paneID: receiverPane)
+    #expect(run.matches(.pane, paneID: receiverPane, worktreeID: nil))
+    run.origin = nil
+    #expect(!run.matches(.pane, paneID: sourcePane, worktreeID: nil))
+    #expect(run.matches(.worktree, paneID: nil, worktreeID: worktree))
+  }
+
+  @Test func inspectionSnapshotContainsFrozenSourceAndCurrentRun() async throws {
+    let directory = root()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let service = WorkflowServiceV2(root: directory)
+    let origin = WorkflowRunOriginV2(worktreeID: WorktreeID(raw: UUID()), paneID: PaneID(raw: UUID()))
+    let id = try service.start(
+      definition: WorkflowDefinitionParserV2.parse(decisionSource), source: decisionSource,
+      title: "Inspect", inputs: [:], bindings: [:], origin: origin)
+    await settle { service.run(id)?.status == "waiting" }
+    let folder = try service.inspectionDirectory(for: id)
+    #expect(try String(contentsOf: folder.appendingPathComponent("workflow.yaml"), encoding: .utf8) == decisionSource)
+    let snapshot = try JSONDecoder().decode(
+      WorkflowRunV2.self, from: Data(contentsOf: folder.appendingPathComponent("run.json")))
+    #expect(snapshot == service.run(id))
+    try service.decide(id: id, nodeID: "decision", decision: "accept", reason: "Reviewed")
+    await settle { service.run(id)?.status == "succeeded" }
+    _ = try service.inspectionDirectory(for: id)
+    let updated = try JSONDecoder().decode(
+      WorkflowRunV2.self, from: Data(contentsOf: folder.appendingPathComponent("run.json")))
+    #expect(updated.status == "succeeded")
+    #expect(WorkflowServiceV2(root: directory).run(id)?.origin == origin)
+  }
+
   @Test func restartInterruptsAndNeverResubmitsWaitingWork() async throws {
     let directory = root()
     defer { try? FileManager.default.removeItem(at: directory) }

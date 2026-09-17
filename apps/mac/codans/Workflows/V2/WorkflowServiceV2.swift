@@ -47,9 +47,22 @@ import Observation
 
   func run(_ id: UUID) -> WorkflowRunV2? { runs.first { $0.id == id } }
 
+  /// Materialize an inspection snapshot beside the run's artifacts on explicit request.
+  func inspectionDirectory(for id: UUID) throws -> URL {
+    guard let database, let run = run(id) else { throw invalid("Run is unavailable") }
+    let directory = database.root.appendingPathComponent("artifacts/\(id.uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    try encoder.encode(run).write(to: directory.appendingPathComponent("run.json"), options: .atomic)
+    try run.source.write(to: directory.appendingPathComponent("workflow.yaml"), atomically: true, encoding: .utf8)
+    return directory
+  }
+
   func start(
     definition: WorkflowDefinitionV2, source: String, title: String,
-    inputs: [String: JSONValue], bindings: [String: WorkflowBindingV2]
+    inputs: [String: JSONValue], bindings: [String: WorkflowBindingV2],
+    origin: WorkflowRunOriginV2? = nil
   ) throws -> UUID {
     guard try WorkflowDefinitionParserV2.parse(source) == definition else {
       throw invalid("Source differs from definition")
@@ -98,7 +111,7 @@ import Observation
     }
     var record = WorkflowRunV2(
       title: title.isEmpty ? definition.name : title, source: source,
-      definition: definition, inputs: resolved, bindings: bindings,
+      definition: definition, inputs: resolved, bindings: bindings, origin: origin,
       nodes: definition.nodes.mapValues { _ in WorkflowNodeRunV2() })
     record.event("created", "Run created with frozen definition and role bindings.")
     try persist(record)

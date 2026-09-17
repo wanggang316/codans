@@ -5,13 +5,6 @@ import SwiftUI
 struct WorkflowToolbarViewV2: View {
   let appState: AppState
   @State private var startingEntry: WorkflowCatalogV2.Entry?
-  @State private var showingHistory = false
-  @State private var historyPinned = false
-  @State private var hoveringButton = false
-  @State private var hoveringHistory = false
-  @State private var closeTask: Task<Void, Never>?
-  @State private var selectedHistoryID: UUID?
-
   private var runnableEntries: [WorkflowCatalogV2.Entry] {
     appState.workflowCatalogV2.entries.filter { $0.definition != nil && $0.error == nil }
   }
@@ -23,14 +16,6 @@ struct WorkflowToolbarViewV2: View {
         ForEach(runnableEntries) { entry in
           Button(entry.name) { startingEntry = entry }
         }
-        if let id = appState.workflowPresentedRunID, let run = appState.workflowServiceV2.run(id) {
-          Divider()
-          Button("\(WorkflowRunPresentationV2.status(run.status)): \(run.title)") {
-            selectedHistoryID = id
-            historyPinned = true
-            showingHistory = true
-          }
-        }
         Divider()
         Button("Refresh Definitions") { appState.workflowCatalogV2.reload() }
       } label: {
@@ -38,54 +23,23 @@ struct WorkflowToolbarViewV2: View {
       }
       .accessibilityLabel("Run Workflow")
       .help("Run a workflow")
-      Button {
-        historyPinned.toggle()
-        showingHistory = historyPinned
-      } label: {
-        Label("Workflow History", systemImage: "clock.arrow.circlepath")
-      }
-      .accessibilityLabel("Workflow History")
-      .help("Workflow History. Hover to preview or click to keep open.")
-      .onHover {
-        hoveringButton = $0
-        updateHistoryHover()
-      }
-      .popover(isPresented: $showingHistory, arrowEdge: .trailing) {
-        historyPanel.onHover {
-          hoveringHistory = $0
-          updateHistoryHover()
-        }
-      }
     }
-    .accessibilityElement(children: .contain)
     .onAppear { appState.workflowCatalogV2.reload() }
-    .onDisappear { closeTask?.cancel() }
-    .onChange(of: showingHistory) { _, visible in
-      if !visible {
-        historyPinned = false
-        hoveringHistory = false
-      }
-    }
-    .onChange(of: appState.workflowPresentedRunID) { _, id in
-      selectedHistoryID = id
-    }
     .sheet(
       item: $startingEntry,
       content: { entry in
         if let definition = entry.definition {
           WorkflowRunFormViewV2(
             definition: definition, source: entry.source,
-            profiles: appState.settingsStore.settings.agents.enabledProfiles,
+            profiles: appState.settingsStore.settings.agents.profiles,
             panes: appState.workflowAgentPanesV2, workspaces: appState.workflowWorkspaces,
+            currentPaneID: appState.workflowCurrentPaneIDV2,
+            currentWorktreeID: appState.workflowDefaultWorkspace,
             onStart: {
               try appState.startWorkflowV2(
                 definition: $0, source: $1, title: $2, inputs: $3, selections: $4)
             }, onCancel: { startingEntry = nil },
             onStarted: { id in
-              showingHistory = false
-              historyPinned = false
-              hoveringButton = false
-              hoveringHistory = false
               appState.workflowPresentedRunID = id
               startingEntry = nil
             })
@@ -93,21 +47,74 @@ struct WorkflowToolbarViewV2: View {
       })
   }
 
+}
+
+@MainActor
+struct WorkflowHistoryToolbarViewV2: View {
+  let appState: AppState
+  @State private var showingHistory = false
+  @State private var historyPinned = false
+  @State private var hoveringButton = false
+  @State private var hoveringHistory = false
+  @State private var closeTask: Task<Void, Never>?
+  @State private var selectedHistoryID: UUID?
+
+  @State private var scope: WorkflowHistoryScopeV2 = .pane
+
+  private var filteredRuns: [WorkflowRunV2] {
+    appState.workflowServiceV2.runs.filter {
+      $0.matches(
+        scope, paneID: appState.workflowCurrentPaneIDV2,
+        worktreeID: appState.workflowDefaultWorkspace)
+    }
+  }
+
+  private var selectedRun: WorkflowRunV2? {
+    filteredRuns.first(where: { $0.id == selectedHistoryID }) ?? filteredRuns.first
+  }
+
+  var body: some View {
+    Button {
+      historyPinned.toggle()
+      showingHistory = historyPinned
+    } label: {
+      Label("Workflow History", systemImage: "list.bullet.rectangle")
+    }
+    .accessibilityLabel("Workflow History")
+    .help("Workflow History. Hover to preview or click to keep open.")
+    .onHover {
+      hoveringButton = $0
+      updateHistoryHover()
+    }
+    .popover(isPresented: $showingHistory, arrowEdge: .bottom) {
+      historyPanel.onHover {
+        hoveringHistory = $0
+        updateHistoryHover()
+      }
+    }
+    .onDisappear { closeTask?.cancel() }
+    .onChange(of: showingHistory) { _, visible in
+      if !visible {
+        historyPinned = false
+        hoveringHistory = false
+      }
+    }
+    .onChange(of: appState.workflowPresentedRunID) { _, id in selectedHistoryID = id }
+  }
+
   private var historyPanel: some View {
     VStack(spacing: 0) {
       HStack(spacing: 0) {
         historyList.frame(width: 220)
         Divider()
-        if let run = appState.workflowServiceV2.runs.first(where: { $0.id == selectedHistoryID })
-          ?? appState.workflowServiceV2.runs.first
-        {
+        if let run = selectedRun {
           WorkflowRunDetailViewV2(
             run: run, service: appState.workflowServiceV2, onOpenPane: openPane
           )
           .id(run.id)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-          Text("No workflow runs yet.").foregroundStyle(.secondary)
+          Text("No runs for this scope. Choose All to see every workflow run.").foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
@@ -123,12 +130,20 @@ struct WorkflowToolbarViewV2: View {
       HStack {
         Text("Workflow History").font(.system(size: 12, weight: .semibold))
         Spacer()
-        Text("\(appState.workflowServiceV2.runs.count)").foregroundStyle(.tertiary)
+        Text("\(filteredRuns.count)").foregroundStyle(.tertiary)
       }.padding(14)
+      Picker("History Scope", selection: $scope) {
+        Text("Pane").tag(WorkflowHistoryScopeV2.pane)
+        Text("Worktree").tag(WorkflowHistoryScopeV2.worktree)
+        Text("All").tag(WorkflowHistoryScopeV2.all)
+      }.pickerStyle(.segmented).labelsHidden()
+        .help("Current pane, current worktree, or all workflow runs")
+        .accessibilityLabel("Workflow History Scope")
+        .padding(.horizontal, 10).padding(.bottom, 10)
       ScrollView {
         LazyVStack(spacing: 3) {
-          ForEach(appState.workflowServiceV2.runs) { run in
-            let selected = run.id == (selectedHistoryID ?? appState.workflowServiceV2.runs.first?.id)
+          ForEach(filteredRuns) { run in
+            let selected = run.id == selectedRun?.id
             Button {
               historyPinned = true
               selectedHistoryID = run.id
@@ -138,16 +153,17 @@ struct WorkflowToolbarViewV2: View {
                 VStack(alignment: .leading, spacing: 5) {
                   Text(run.title).font(.system(size: 12, weight: .medium)).lineLimit(2)
                   Text(run.createdAt, format: .dateTime.month().day().hour().minute())
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .font(.system(size: 10)).foregroundStyle(selected ? Color.white.opacity(0.8) : .secondary)
                 }
                 Spacer(minLength: 0)
               }
               .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
               .padding(10)
               .background(
-                selected ? Color.accentColor.opacity(0.12) : Color.clear,
+                selected ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear,
                 in: RoundedRectangle(cornerRadius: 6)
               )
+              .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : Color.primary)
               .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -162,7 +178,6 @@ struct WorkflowToolbarViewV2: View {
 
   private func updateHistoryHover() {
     closeTask?.cancel()
-    if startingEntry != nil { return }
     if hoveringButton || hoveringHistory {
       showingHistory = true
     } else if !historyPinned {

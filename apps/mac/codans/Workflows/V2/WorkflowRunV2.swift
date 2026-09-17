@@ -34,6 +34,16 @@ nonisolated struct WorkflowEventV2: Codable, Equatable, Identifiable, Sendable {
   var nodeID: String?
 }
 
+nonisolated enum WorkflowHistoryScopeV2: String, CaseIterable {
+  case pane, worktree, all
+}
+
+nonisolated struct WorkflowRunOriginV2: Codable, Equatable, Sendable {
+  var projectID: ProjectID?
+  var worktreeID: WorktreeID?
+  var paneID: PaneID?
+}
+
 nonisolated struct WorkflowRunV2: Codable, Equatable, Identifiable, Sendable {
   var id = UUID()
   var title: String
@@ -41,12 +51,26 @@ nonisolated struct WorkflowRunV2: Codable, Equatable, Identifiable, Sendable {
   var definition: WorkflowDefinitionV2
   var inputs: [String: JSONValue]
   var bindings: [String: WorkflowBindingV2]
+  var origin: WorkflowRunOriginV2?
   var status = "running"
   var nodes: [String: WorkflowNodeRunV2]
   var events: [WorkflowEventV2] = []
   var outputs: [String: JSONValue] = [:]
   var createdAt = Date()
   var updatedAt = Date()
+
+  func matches(_ scope: WorkflowHistoryScopeV2, paneID: PaneID?, worktreeID: WorktreeID?) -> Bool {
+    switch scope {
+    case .all: return true
+    case .pane:
+      guard let paneID else { return false }
+      return origin?.paneID == paneID || bindings.values.contains { $0.paneID == paneID }
+        || nodes.values.contains { $0.paneID == paneID.raw.uuidString }
+    case .worktree:
+      guard let worktreeID else { return false }
+      return origin?.worktreeID == worktreeID || bindings.values.contains { $0.worktreeID == worktreeID }
+    }
+  }
 
   mutating func event(_ type: String, _ message: String, node: String? = nil) {
     updatedAt = Date()

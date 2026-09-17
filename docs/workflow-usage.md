@@ -7,23 +7,53 @@ Create or import a definition, inspect its roles and inputs, and edit its YAML
 Source. Definitions do not own sessions or workspaces; role bindings are chosen
 when starting a run.
 
-The main window places Run Workflow and Workflow History together before Agents
-on the right toolbar. Choose a definition, fill its inputs and role bindings, and
+The main window places Run Workflow before Agents on the right toolbar.
+Workflow History sits beside notifications in the center toolbar. Choose a definition, fill its inputs and role bindings, and
 start. The parameter form closes and leaves the terminal visible; it does not
 open history or execution details automatically. Open Workflow History to inspect
 progress or act on a human decision. Open Agent focuses the associated terminal.
-Human decision nodes display the
-proposal and require an explicit decision and reason.
+Human decision nodes display the proposal and require an explicit decision and reason.
 
 Workflow History is a two-column popover: the run list stays on the left while
-the selected run details stay on the right. Status text is accompanied by a
+the selected run details stay on the right. The Pane / Worktree / All filter
+defaults to the current pane and includes both the launch origin and participants.
+Runs started before origin tracking can still match their recorded participants.
+Status text is accompanied by a
 spinner for running work and colored indicators for other states.
 The detail pane shows compact execution rows without tabs. Expand a row for
 its inputs and result; pending decisions and failures are visible immediately.
 Results, run inputs, participants, activity and frozen YAML are available below
-the execution list. The run actions menu provides copying and cancellation.
+the execution list. The run actions menu provides copying, cancellation and Reveal in Finder.
+Reveal exports a current `run.json` inspection snapshot and the frozen
+`workflow.yaml` beside that run’s artifacts; the database remains authoritative.
 Click outside the popover or press Escape to dismiss it. Settings contains no run history. There is no separate Workflow window
 or menu-bar menu.
+
+## Role defaults
+
+A `current` role starts with the focused Agent selected. A `launch` role starts
+with the current worktree selected as its terminal location. These defaults
+remain visible and can be changed before launch. If no applicable Agent or
+location exists, choose one explicitly.
+
+A launch role can also configure its Profile:
+
+```yaml
+roles:
+  author:
+    label: Author
+    source: current
+  receiver:
+    label: Receiver
+    source: launch
+    profile: Receiver
+```
+
+`profile` accepts a saved Profile UUID or an exact, unique display name. A
+configured Profile is shown directly instead of asking again. Missing, disabled
+or ambiguous Profiles block launch with an error. Omit `profile` to let the user
+choose an enabled Profile. Existing-session roles use their live session and do
+not accept a launch Profile.
 
 ## Built-in cases
 

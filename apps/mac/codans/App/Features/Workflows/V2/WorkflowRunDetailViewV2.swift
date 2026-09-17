@@ -22,6 +22,13 @@ struct WorkflowRunDetailViewV2: View {
         }
         Spacer(minLength: 0)
         Menu {
+          Button("Reveal in Finder") {
+            do {
+              let directory = try service.inspectionDirectory(for: run.id)
+              NSWorkspace.shared.activateFileViewerSelecting([directory])
+            } catch { self.error = error.localizedDescription }
+          }
+          Divider()
           Button("Copy Run ID") { WorkflowUIFormatV2.copy(run.id.uuidString) }
           Button("Copy Frozen YAML") { WorkflowUIFormatV2.copy(run.source) }
           if run.status == "running" || run.status == "waiting" {
@@ -33,7 +40,7 @@ struct WorkflowRunDetailViewV2: View {
         } label: {
           Image(systemName: "ellipsis")
         }
-        .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Run Actions")
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Run Actions")
       }.padding(20)
       Divider()
       ScrollView {
@@ -96,13 +103,14 @@ struct WorkflowRunDetailViewV2: View {
                   Spacer()
                   Button("Copy") { WorkflowUIFormatV2.copy(run.source) }
                 }
-                Text(run.source).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+                WorkflowValueTextV2(value: .string(run.source), isCode: true)
               }.padding(.top, 8)
             }
           }.font(.system(size: 11)).tint(.secondary)
         }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
       }
     }.font(.system(size: 12)).controlSize(.small)
+      .disclosureGroupStyle(WorkflowDisclosureStyleV2())
   }
 
   private func sectionLabel(_ title: String) -> some View {
@@ -225,10 +233,65 @@ private struct WorkflowValuesViewV2: View {
         if let value = values[key] {
           VStack(alignment: .leading, spacing: 4) {
             Text(key).font(.system(size: 10)).foregroundStyle(.secondary)
-            Text(value.v2Text).font(.system(size: 11)).textSelection(.enabled)
+            WorkflowValueTextV2(value: value)
           }
         }
       }
     }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+  }
+}
+
+private struct WorkflowValueTextV2: View {
+  let value: JSONValue
+  var isCode = false
+
+  private var structured: Bool {
+    if isCode { return true }
+    switch value {
+    case .object, .array: return true
+    case .string(let text): return text.contains("\n") || text.hasPrefix("```")
+    default: return false
+    }
+  }
+
+  var body: some View {
+    Text(value.v2Text)
+      .font(.system(size: 11, design: structured ? .monospaced : .default))
+      .textSelection(.enabled)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(structured ? 10 : 0)
+      .background(
+        structured ? Color.primary.opacity(0.055) : .clear,
+        in: RoundedRectangle(cornerRadius: 5)
+      )
+      .overlay {
+        if structured {
+          RoundedRectangle(cornerRadius: 5).strokeBorder(.primary.opacity(0.06), lineWidth: 1)
+        }
+      }
+      .contextMenu { Button("Copy") { WorkflowUIFormatV2.copy(value.v2Text) } }
+  }
+}
+
+private struct WorkflowDisclosureStyleV2: DisclosureGroupStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Button {
+        configuration.isExpanded.toggle()
+      } label: {
+        HStack(spacing: 7) {
+          Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+            .font(.system(size: 9, weight: .semibold)).frame(width: 10)
+          configuration.label
+          Spacer(minLength: 0)
+        }
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+      if configuration.isExpanded { configuration.content.padding(.leading, 17) }
+    }
   }
 }

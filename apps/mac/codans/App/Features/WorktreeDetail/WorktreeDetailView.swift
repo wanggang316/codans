@@ -484,11 +484,14 @@ struct WorktreeDetailView: View {
 
   @ToolbarContentBuilder
   private func inboxBellToolbarItem() -> some ToolbarContent {
-    ToolbarItem {
+    ToolbarItemGroup {
       InboxBellView(
         onFocusHierarchyPath: onFocusHierarchyPath,
         popoverTrigger: inboxBellPopoverTrigger
       )
+      if let workflowAppState {
+        WorkflowHistoryToolbarViewV2(appState: workflowAppState)
+      }
     }
   }
 
