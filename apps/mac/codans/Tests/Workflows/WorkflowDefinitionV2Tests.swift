@@ -99,4 +99,17 @@ struct WorkflowDefinitionV2Tests {
     #expect(catalog.entries.first(where: { $0.id == entry.id })?.error != nil)
     #expect(catalog.entries.first(where: { $0.id == entry.id })?.source == "invalid: true")
   }
+
+  @Test func profileReferencesAreOnlyAcceptedForLaunchRoles() throws {
+    let handoff = try source("handoff")
+    let configured = handoff.replacingOccurrences(of: "source: launch", with: "source: launch\n    profile: Receiver")
+    let parsed = try WorkflowDefinitionParserV2.parse(configured)
+    #expect(parsed.roles.values.contains { $0.profile == "Receiver" })
+    let empty = handoff.replacingOccurrences(of: "source: launch", with: "source: launch\n    profile: ''")
+    #expect(throws: (any Error).self) { try WorkflowDefinitionParserV2.parse(empty) }
+    let current = handoff.replacingOccurrences(of: "source: current", with: "source: current\n    profile: Receiver")
+    #expect(current != handoff)
+    #expect(throws: (any Error).self) { try WorkflowDefinitionParserV2.parse(current) }
+  }
+
 }

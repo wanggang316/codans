@@ -9,6 +9,7 @@ struct WorkflowRunFormViewV2: View {
   let profiles: [AgentProfile]
   let panes: [WorkflowPaneChoice]
   let workspaces: [WorkflowWorkspaceChoice]
+  private let configurationError: String?
   let onStart:
     (WorkflowDefinitionV2, String, String, [String: JSONValue], [String: WorkflowRoleSelectionV2]) throws -> UUID
   let onCancel: () -> Void
@@ -21,7 +22,7 @@ struct WorkflowRunFormViewV2: View {
 
   init(
     definition: WorkflowDefinitionV2, source: String, profiles: [AgentProfile], panes: [WorkflowPaneChoice],
-    workspaces: [WorkflowWorkspaceChoice],
+    workspaces: [WorkflowWorkspaceChoice], currentPaneID: PaneID? = nil, currentWorktreeID: WorktreeID? = nil,
     onStart:
       @escaping (WorkflowDefinitionV2, String, String, [String: JSONValue], [String: WorkflowRoleSelectionV2]) throws ->
       UUID,
@@ -42,7 +43,21 @@ struct WorkflowRunFormViewV2: View {
         if case .string(let text) = value { return text }
         return WorkflowUIFormatV2.json(value)
       })
-    _roles = State(initialValue: definition.roles.mapValues { WorkflowRoleSelectionV2(source: $0.source) })
+    var initialRoles: [String: WorkflowRoleSelectionV2] = [:]
+    var configurationErrors: [String] = []
+    for key in definition.roles.keys.sorted() {
+      guard let role = definition.roles[key] else { continue }
+      do {
+        initialRoles[key] = try WorkflowRoleDefaultsV2.selection(
+          for: role, profiles: profiles, panes: panes, workspaces: workspaces,
+          currentPaneID: currentPaneID, currentWorktreeID: currentWorktreeID)
+      } catch {
+        initialRoles[key] = WorkflowRoleSelectionV2(source: role.source)
+        configurationErrors.append(error.localizedDescription)
+      }
+    }
+    configurationError = configurationErrors.isEmpty ? nil : configurationErrors.joined(separator: "\n")
+    _roles = State(initialValue: initialRoles)
   }
 
   var body: some View {
@@ -65,12 +80,16 @@ struct WorkflowRunFormViewV2: View {
           }
         }
       }.formStyle(.grouped)
-      if let error { Text(error).foregroundStyle(.orange).textSelection(.enabled).padding(.horizontal, 20) }
+      if let message = configurationError ?? error {
+        Text(message).foregroundStyle(.orange).textSelection(.enabled).padding(.horizontal, 20)
+      }
       HStack {
         Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
         Spacer()
-        Button("Start Run", action: start).keyboardShortcut(.defaultAction).disabled(starting)
-          .accessibilityLabel("Start Workflow Run")
+        Button("Start Run", action: start).keyboardShortcut(.defaultAction).disabled(
+          starting || configurationError != nil
+        )
+        .accessibilityLabel("Start Workflow Run")
       }.padding(20)
     }.frame(width: 640, height: 660)
   }
@@ -101,12 +120,19 @@ struct WorkflowRunFormViewV2: View {
   @ViewBuilder private func roleFields(_ key: String, role: WorkflowRoleV2) -> some View {
     if let description = role.description { Text(description).foregroundStyle(.secondary) }
     if role.source == "launch" {
-      Picker("Agent Profile", selection: roleBinding(key, \.profileID)) {
-        Text("Choose a profile").tag(UUID?.none)
-        ForEach(profiles.filter(\.isEnabled)) { profile in
-          Text(profile.displayName).tag(Optional(profile.id))
-        }
-      }.accessibilityLabel("\(role.label) Agent Profile")
+      if let reference = role.profile {
+        LabeledContent("Agent Profile") {
+          Text(profiles.first(where: { $0.id == roles[key]?.profileID })?.displayName ?? reference)
+            .foregroundStyle(.secondary)
+        }.accessibilityLabel("\(role.label) Agent Profile")
+      } else {
+        Picker("Agent Profile", selection: roleBinding(key, \.profileID)) {
+          Text("Choose a profile").tag(UUID?.none)
+          ForEach(profiles.filter(\.isEnabled)) { profile in
+            Text(profile.displayName).tag(Optional(profile.id))
+          }
+        }.accessibilityLabel("\(role.label) Agent Profile")
+      }
       Picker("Terminal Location", selection: roleBinding(key, \.worktreeID)) {
         Text("Choose a terminal location").tag(WorktreeID?.none)
         ForEach(workspaces) { workspace in Text(workspace.title).tag(Optional(workspace.id)) }

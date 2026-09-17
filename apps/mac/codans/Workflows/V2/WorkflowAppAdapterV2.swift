@@ -3,6 +3,16 @@ import CodansIPC
 import Foundation
 
 extension AppState {
+  var workflowCurrentPaneIDV2: PaneID? {
+    let catalog = hierarchyManager.catalog
+    guard let project = catalog.projects.first(where: { $0.id == catalog.selectedProjectID }),
+      let worktree = project.worktrees.first(where: { $0.id == project.selectedWorktreeID }),
+      let tab = worktree.tabs.first(where: { $0.id == worktree.selectedTabID })
+    else { return nil }
+    return WorkflowRoleDefaultsV2.currentPane(
+      in: tab, remembered: hierarchyManager.lastFocusedPane(in: tab.id))
+  }
+
   var workflowAgentPanesV2: [WorkflowPaneChoice] {
     workflowPanes.filter { agentStateStore?.entries[$0.id] != nil }
   }
@@ -17,10 +27,13 @@ extension AppState {
         throw WorkflowAdapterErrorV2.message("Choose a participant for \(role.label).")
       }
       if role.source == "launch" {
+        let configuredProfile = try WorkflowRoleDefaultsV2.profile(
+          for: role, profiles: settingsStore.settings.agents.profiles)
         guard
-          let profile = settingsStore.settings.agents.enabledProfiles.first(where: {
-            $0.id == selection.profileID
-          }),
+          let profile = configuredProfile
+            ?? settingsStore.settings.agents.enabledProfiles.first(where: {
+              $0.id == selection.profileID
+            }),
           let workspace = workflowWorkspaces.first(where: { $0.id == selection.worktreeID })
         else {
           throw WorkflowAdapterErrorV2.message(
@@ -37,7 +50,10 @@ extension AppState {
       }
     }
     return try workflowServiceV2.start(
-      definition: definition, source: source, title: title, inputs: inputs, bindings: bindings)
+      definition: definition, source: source, title: title, inputs: inputs, bindings: bindings,
+      origin: WorkflowRunOriginV2(
+        projectID: hierarchyManager.catalog.selectedProjectID,
+        worktreeID: workflowDefaultWorkspace, paneID: workflowCurrentPaneIDV2))
   }
 
   func workflowBindingV2(paneID: PaneID, source: String) throws -> WorkflowBindingV2 {
@@ -144,5 +160,50 @@ nonisolated enum WorkflowLaunchProfileV2 {
     // identity can belong to another role. Workflow roles need foreground sessions.
     effective.envVars["CLAUDE_CODE_DISABLE_AGENT_VIEW"] = "1"
     return effective
+  }
+}
+
+@MainActor
+enum WorkflowRoleDefaultsV2 {
+  static func currentPane(in tab: Tab, remembered: PaneID?) -> PaneID? {
+    if let remembered, tab.panes.contains(where: { $0.id == remembered }) { return remembered }
+    // Restored single-pane tabs have an unambiguous context before the first focus event.
+    return tab.panes.count == 1 ? tab.panes.first?.id : nil
+  }
+
+  static func profile(for role: WorkflowRoleV2, profiles: [AgentProfile]) throws -> AgentProfile? {
+    guard let reference = role.profile else { return nil }
+    let matches: [AgentProfile]
+    if let id = UUID(uuidString: reference) {
+      matches = profiles.filter { $0.id == id }
+    } else {
+      matches = profiles.filter { $0.displayName == reference }
+    }
+    guard matches.count == 1, let profile = matches.first else {
+      throw WorkflowDefinitionErrorV2(
+        message:
+          "\(role.label): profile ‘\(reference)’ \(matches.isEmpty ? "was not found" : "is ambiguous; use its UUID").")
+    }
+    guard profile.isEnabled else {
+      throw WorkflowDefinitionErrorV2(message: "\(role.label): profile ‘\(reference)’ is disabled.")
+    }
+    return profile
+  }
+
+  static func selection(
+    for role: WorkflowRoleV2, profiles: [AgentProfile], panes: [WorkflowPaneChoice],
+    workspaces: [WorkflowWorkspaceChoice], currentPaneID: PaneID?, currentWorktreeID: WorktreeID?
+  ) throws -> WorkflowRoleSelectionV2 {
+    var selection = WorkflowRoleSelectionV2(source: role.source)
+    if role.source == "current", panes.contains(where: { $0.id == currentPaneID }) {
+      selection.paneID = currentPaneID
+    }
+    if role.source == "launch" {
+      selection.profileID = try profile(for: role, profiles: profiles)?.id
+      if workspaces.contains(where: { $0.id == currentWorktreeID }) {
+        selection.worktreeID = currentWorktreeID
+      }
+    }
+    return selection
   }
 }

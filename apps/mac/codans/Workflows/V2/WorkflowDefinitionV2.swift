@@ -40,6 +40,7 @@ nonisolated struct WorkflowRoleV2: Codable, Equatable, Sendable {
   var label: String
   var source: String
   var description: String?
+  var profile: String?
 }
 
 nonisolated struct WorkflowNodeV2: Codable, Equatable, Sendable {

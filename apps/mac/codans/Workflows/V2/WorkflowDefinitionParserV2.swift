@@ -27,7 +27,7 @@ nonisolated enum WorkflowDefinitionParserV2 {
     }
     for (id, value) in try object(raw["roles"], at: "roles") {
       try keys(
-        object(value, at: "roles.\(id)"), allowed: ["label", "source", "description"],
+        object(value, at: "roles.\(id)"), allowed: ["label", "source", "description", "profile"],
         at: "roles.\(id)")
     }
     for (id, value) in try object(raw["nodes"], at: "nodes") {
@@ -68,11 +68,7 @@ nonisolated enum WorkflowDefinitionParserV2 {
           value, schema: .object(["type": .string(input.type)]), path: "inputs.\(id).default")
       }
     }
-    for (id, role) in definition.roles {
-      guard ["current", "pick", "launch"].contains(role.source), !role.label.isEmpty else {
-        throw failure("roles.\(id): invalid source or empty label")
-      }
-    }
+    try validateRoles(definition.roles)
     var completed = Set<String>()
     var ancestors: [String: Set<String>] = [:]
     for id in definition.nodeIDs {
@@ -98,6 +94,21 @@ nonisolated enum WorkflowDefinitionParserV2 {
     }
     for value in definition.outputs.values {
       try references(value, definition: definition, upstream: completed, path: "outputs")
+    }
+  }
+
+  private static func validateRoles(_ roles: [String: WorkflowRoleV2]) throws {
+    for (id, role) in roles {
+      guard ["current", "pick", "launch"].contains(role.source), !role.label.isEmpty else {
+        throw failure("roles.\(id): invalid source or empty label")
+      }
+    }
+    for (id, role) in roles {
+      if let profile = role.profile {
+        guard role.source == "launch", !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          throw failure("roles.\(id).profile: a nonempty profile reference requires source: launch")
+        }
+      }
     }
   }
 
