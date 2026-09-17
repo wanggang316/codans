@@ -423,6 +423,28 @@ struct WorkspaceClientTests {
   }
 
   @Test
+  func preflightSkipsAnUnfilledBranchAndWordsFindingsForTheForm() async throws {
+    let fx = try makeFixture()
+    defer { try? FileManager.default.removeItem(at: fx.base) }
+    let app = try makeRepo(named: "app", under: fx.base)
+    let lib = try makeRepo(named: "lib", under: fx.base)
+    let preflight = await fx.client.preflight(
+      WorkspacePlan(
+        title: "T", rootPath: "\(app)/inside",
+        members: [
+          WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "", baseRef: nil)),
+          WorkspacePlan.Member(name: "lib", sourceGitRoot: lib, checkout: .newBranch(branch: "a..b", baseRef: nil)),
+        ]))
+    #expect(preflight.memberIssues["app"] == nil)
+    #expect(
+      preflight.memberIssues["lib"] == [
+        .init(kind: .invalidBranchName, message: "\u{201C}a..b\u{201D} is not a valid branch name.")
+      ])
+    #expect(preflight.rootIssues.map(\.kind) == [.rootInsideRepository])
+    #expect(preflight.rootIssues.first?.message.hasPrefix("This location is inside the repository at ") == true)
+  }
+
+  @Test
   func bareRepositoryIsRefusedAsASource() async throws {
     let fx = try makeFixture()
     defer { try? FileManager.default.removeItem(at: fx.base) }

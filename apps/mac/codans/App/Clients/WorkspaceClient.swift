@@ -552,7 +552,7 @@ extension WorkspaceClient {
         var isDirectory = ObjCBool(false)
         if FileManager.default.fileExists(atPath: rootPath, isDirectory: &isDirectory), isDirectory.boolValue {
           result.rootIssues.append(
-            .init(kind: .rootExists, message: "Folder exists; checkouts are added inside it."))
+            .init(kind: .rootExists, message: "The folder already exists. Checkouts will be added inside it."))
         }
       } catch let error as WorkspaceError {
         if let issue = preflightIssue(for: error) { result.rootIssues.append(issue) }
@@ -568,10 +568,13 @@ extension WorkspaceClient {
           issues.append(
             .init(
               kind: .cloneDestinationReused,
-              message: "\(resolved.sourceGitRoot) already holds a clone of this remote; it will be reused."))
+              message: "\(tilde(resolved.sourceGitRoot)) already holds a clone of this remote. It will be reused."))
         }
       } catch let error as WorkspaceError {
-        if let issue = preflightIssue(for: error) { issues.append(issue) }
+        // An empty branch is a form still being filled in, not a finding.
+        if !isEmptyBranchName(error), let issue = preflightIssue(for: error) {
+          issues.append(issue)
+        }
       } catch {
         issues.append(.init(kind: .sourceNotRepository, message: describe(error)))
       }
@@ -582,21 +585,47 @@ extension WorkspaceClient {
     return result
   }
 
+  /// A finding worded for the form: short, with home-relative paths. The
+  /// CLI keeps `errorDescription`'s full wording.
   private static func preflightIssue(for error: WorkspaceError) -> WorkspacePreflight.Issue? {
-    let message = error.errorDescription ?? String(describing: error)
     switch error {
-    case .rootAlreadyRegistered: return .init(kind: .rootAlreadyRegistered, message: message)
-    case .rootIsFile: return .init(kind: .rootIsFile, message: message)
-    case .rootAlreadyWorkspace: return .init(kind: .rootAlreadyWorkspace, message: message)
-    case .rootInsideRepository: return .init(kind: .rootInsideRepository, message: message)
-    case .destinationExists: return .init(kind: .destinationExists, message: message)
-    case .sourceNotRepository, .bareRepository: return .init(kind: .sourceNotRepository, message: message)
-    case .cloneDestinationTaken: return .init(kind: .cloneDestinationTaken, message: message)
-    case .invalidBranchName: return .init(kind: .invalidBranchName, message: message)
+    case .rootAlreadyRegistered:
+      return .init(kind: .rootAlreadyRegistered, message: "This folder is already a project in codans.")
+    case .rootIsFile:
+      return .init(kind: .rootIsFile, message: "A file already exists at this location.")
+    case .rootAlreadyWorkspace:
+      return .init(kind: .rootAlreadyWorkspace, message: "This folder is already a workspace.")
+    case .rootInsideRepository(_, let gitRoot):
+      return .init(
+        kind: .rootInsideRepository,
+        message: "This location is inside the repository at \(tilde(gitRoot)). Choose a folder outside it.")
+    case .destinationExists(let path):
+      return .init(
+        kind: .destinationExists, message: "\(tilde(path)) already exists. Choose another folder name.")
+    case .sourceNotRepository(let path):
+      return .init(kind: .sourceNotRepository, message: "\(tilde(path)) is not a git repository.")
+    case .bareRepository(let path):
+      return .init(
+        kind: .sourceNotRepository, message: "\(tilde(path)) is a bare repository, which workspaces do not support.")
+    case .cloneDestinationTaken(let path, _):
+      return .init(
+        kind: .cloneDestinationTaken,
+        message: "\(tilde(path)) already exists and is not a clone of this remote. Choose another location.")
+    case .invalidBranchName(let branch, _):
+      return .init(kind: .invalidBranchName, message: "\u{201C}\(branch)\u{201D} is not a valid branch name.")
     case .invalidPlan, .notWorkspace, .memberExists, .memberNotRegistered, .memberNotFound,
       .memberWithoutSource, .cannotDropRoot, .cancelled:
       return nil
     }
+  }
+
+  private static func isEmptyBranchName(_ error: WorkspaceError) -> Bool {
+    if case .invalidBranchName(let branch, _) = error { return branch.isEmpty }
+    return false
+  }
+
+  private static func tilde(_ path: String) -> String {
+    (path as NSString).abbreviatingWithTildeInPath
   }
 
   @MainActor
