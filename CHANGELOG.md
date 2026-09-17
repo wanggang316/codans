@@ -20,6 +20,33 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.7.0] - 2026-09-18
+
+### Added
+
+- **Git diff viewer.** **Show Changes** — in the worktree's right-click
+  menu, the Worktree menu, and the Command Palette — opens a read-only diff
+  window for that worktree, leaving your terminal layout untouched.
+- **Diff viewer — Uncommitted and Outgoing.** Review working-tree changes,
+  or what your branch adds on top of a base branch you pick (the remote's
+  default branch unless you choose another; nothing is checked out or
+  fetched). Browse files as a tree or list with a filter and line counts,
+  switch between unified and split views, and open a line in your editor.
+
+### Changed
+
+- **Built-in is the default Git viewer.** If Settings → General → Default
+  Git Viewer was never set, Toggle Git Viewer now opens the built-in diff
+  window; an external Git client you already chose is kept.
+- **Grok Build shows the Grok mark** in the sidebar, tab chips, and Agents
+  menu instead of a placeholder glyph.
+
+### Fixed
+
+- **A pane that can't start now says why.** Instead of a raw error code in
+  red on a grey block, the pane shows a readable message on the terminal's
+  own background, with the technical detail underneath for bug reports.
+
 ## [0.6.4] - 2026-09-16
 
 ### Changed
