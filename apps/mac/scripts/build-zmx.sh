@@ -13,6 +13,9 @@ zmx_global_cache_dir="${zmx_build_root}/.zig-global-cache"
 zmx_fingerprint_path="${zmx_build_root}/.fingerprint"
 zmx_binary_path="${zmx_build_root}/bin/zmx"
 
+# shellcheck source=xcode-compat/activate.sh
+source "${script_dir}/xcode-compat/activate.sh"
+
 print_fingerprint() {
   (
     cd "${zmx_dir}"
@@ -21,6 +24,7 @@ print_fingerprint() {
       git diff --no-ext-diff --no-color HEAD -- . | shasum -a 256
       git ls-files --others --exclude-standard | LC_ALL=C sort | shasum -a 256
       shasum -a 256 "${script_path}" | awk '{print $1}'
+      xcode_compat_fingerprint
       shasum -a 256 "${repo_root}/mise.toml" | awk '{print $1}'
     } | shasum -a 256 | awk '{print $1}'
   )
@@ -68,6 +72,9 @@ ZIG_GLOBAL_CACHE_DIR="${zmx_global_cache_dir}" "${script_dir}/prime-zig-cache-zm
 # which would require a per-worktree `mise trust` to evaluate — bypass it
 # by resolving the binary at the repo root and invoking it directly.
 zig_bin="$(cd "${repo_root}" && mise which zig)"
+
+# Xcode 26.5+ toolchains break zig 0.15.2; see xcode-compat/activate.sh.
+xcode_compat_activate
 
 cd "${zmx_dir}"
 "${zig_bin}" build \

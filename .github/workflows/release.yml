@@ -108,8 +108,8 @@ jobs:
 
       # Most of an archive's wall time is rebuilding GhosttyKit (Zig
       # cross-compilation, ~5-10 min cold). Cache by submodule SHA +
-      # script + mise.toml — the same fingerprint scripts/build-ghostty.sh
-      # uses internally.
+      # script + xcode-compat wrappers + mise.toml — the same fingerprint
+      # scripts/build-ghostty.sh uses internally.
       # Read the Xcode version into env so cache keys vary across
       # runner-image upgrades (different Xcode → different SDK →
       # different XCFramework byte content).
@@ -124,7 +124,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: apps/mac/.build/ghostty
-          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ env.GHOSTTY_SHA }}-${{ hashFiles('apps/mac/scripts/build-ghostty.sh', 'mise.toml') }}
+          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ env.GHOSTTY_SHA }}-${{ hashFiles('apps/mac/scripts/build-ghostty.sh', 'apps/mac/scripts/xcode-compat/**', 'mise.toml') }}
 
       # Tuist resolves SPM dependencies into Tuist/.build; this is large
       # but deterministic across runs with unchanged Package.resolved.

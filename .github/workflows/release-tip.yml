@@ -126,7 +126,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: apps/mac/.build/ghostty
-          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ env.GHOSTTY_SHA }}-${{ hashFiles('apps/mac/scripts/build-ghostty.sh', 'mise.toml') }}
+          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ env.GHOSTTY_SHA }}-${{ hashFiles('apps/mac/scripts/build-ghostty.sh', 'apps/mac/scripts/xcode-compat/**', 'mise.toml') }}
 
       - name: Cache Tuist SPM checkouts
         uses: actions/cache@v4
