@@ -19,7 +19,7 @@ Uncommitted always shows the aggregate comparison; Staged and Unstaged remain Gi
 
 Outgoing includes all committed branch changes against the remote default branch or an explicit comparison base. Pushing does not clear it. Uncommitted content remains in Uncommitted. Target-only commits are not shown as reversed edits.
 
-An explicit base entered through the Outgoing sidebar popover takes priority. Otherwise resolve origin's symbolic remote default branch, then origin/main and origin/master, using fully qualified remote-tracking refs. PR metadata does not override this default. No remote default means an explicit error rather than a silent fallback to local main. The popover accepts local or remote refs and offers Use Remote Default to clear the override. The resolved base is always shown. Missing refs and unrelated histories surface errors.
+An explicit branch selected through the Outgoing sidebar popover takes priority. Otherwise resolve origin's symbolic remote default branch, then origin/main and origin/master, using fully qualified remote-tracking refs. PR metadata does not override this default. No remote default means an explicit error rather than a silent fallback to local main. The popover lists remote and local branches from the existing Git branch inventory and offers Remote Default Branch to clear the override. Selecting a row applies the comparison immediately; there is no free-form ref input or confirmation button. Loading failures provide Retry. The resolved base is always shown. Missing refs and unrelated histories surface errors.
 
 Refresh reads local state only. The window does not fetch, stage, discard, commit, push, or resolve conflicts. Fetching in a terminal updates local refs that subsequent refreshes observe.
 
@@ -47,7 +47,7 @@ The window uses the same `NavigationSplitView` container and 220/260/320 sidebar
 
 ## State and refresh
 
-`DiffFeature` owns worktree identity, mode, base draft/applied base, file filter, selection, loading/error state, and request generations. Preferences are remembered per worktree for the current app session. Base edits take effect on Compare/Return, not on background refresh.
+`DiffFeature` owns worktree identity, mode, base draft/applied base, file filter, selection, loading/error state, and request generations. Preferences are remembered per worktree for the current app session. Branch selection applies immediately; reopening the selector reloads branch inventory and stale responses are discarded.
 
 Each open window performs bounded, non-overlapping refreshes every two seconds. Closing cancels its timer/loads. Refresh re-reads the selected file but preserves the Web document when content is unchanged. Local index updates, HEAD movements and remote-ref changes are therefore observed even when no working-directory event fires. Remote requests use the same transport and timeout; no second SSH connection model is introduced.
 

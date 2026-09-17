@@ -58,3 +58,10 @@ Use the same NavigationSplitView and 220/260/320 column sizing as the main windo
 ## Uncommitted, remote base, and built-in viewer defaults
 
 Approved scope: align the compact 24-point text-only Uncommitted/Outgoing selector within the same 32-point header band as the code header; default Outgoing to remote default-branch merge-base comparison with explicit override and reset; move the main-toolbar entry to Worktree → Show Changes without changing main selection; add Built-in as the first/default Git Viewer and migrate absent/None values while preserving external choices. Verify remote/local divergence and missing-ref cases, preference decoding/normalization and command routing, then real GUI alignment/menu/settings/base switching. Completed: final build-for-testing succeeded, 51 app tests and 11 Core migration tests passed. GUI verified aligned dividers, text-only modes, the context-menu entry without changing main selection, Built-in first/default without None, command routing, and explicit-base/reset behavior. See the user-test record.
+
+
+## Selectable comparison branches
+
+Replace the free-form comparison field and Compare button with selectable remote/local branches and a Remote Default Branch option. Reuse the shared Git branch inventory, load on opening, expose retry, discard late results after context changes or closing, and apply selection immediately without checking out a branch. Verify reducer selection/loading races, native GUI groups, selected checkmarks, comparison results, and default reset.
+
+Completed: final build-for-testing and 26 tests in four relevant suites passed. Scoped lint passed. GUI verified remote/local selection, checked state, automatic reset, and a fully visible short branch list without a text field or Compare button.

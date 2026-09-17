@@ -110,10 +110,11 @@ struct DiffFileSidebar: View {
       Divider()
       Button {
         showingBase.toggle()
+        if showingBase { store.send(.loadBaseBranches) }
       } label: {
         HStack(spacing: 6) {
           Image(systemName: "arrow.triangle.branch").accessibilityHidden(true)
-          Text("Against \(store.snapshot?.baseLabel ?? "automatic")").lineLimit(1).truncationMode(.middle)
+          Text("Against \(baseLabel)").lineLimit(1).truncationMode(.middle)
           Spacer(minLength: 0)
           Image(systemName: "chevron.down").font(.system(size: 9)).accessibilityHidden(true)
         }
@@ -122,29 +123,72 @@ struct DiffFileSidebar: View {
       }
       .buttonStyle(.plain).help("Choose the comparison base")
       .popover(isPresented: $showingBase) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Compare Against").font(.headline)
-          TextField("Remote default branch", text: Binding(get: { store.base }, set: { store.send(.baseChanged($0)) }))
-            .textFieldStyle(.roundedBorder).accessibilityIdentifier("diff-base")
-            .onSubmit { applyBase() }
-          HStack {
-            Button("Use Remote Default") {
-              store.send(.baseChanged(""))
-              applyBase()
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Compare Against").font(.headline).padding(.horizontal, 8)
+          baseOption("Remote Default Branch", ref: "")
+          Divider()
+          if store.baseBranchesLoading {
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(12)
+          } else if let error = store.baseBranchesError {
+            Text(error).font(.caption).foregroundStyle(.secondary)
+            Button("Retry") { store.send(.loadBaseBranches) }
+          } else if let inventory = store.baseBranches {
+            if inventory.remote.isEmpty && inventory.local.isEmpty {
+              Text("No branches available").font(.caption).foregroundStyle(.secondary).padding(8)
+            } else {
+              ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                  branchSection("Remote Branches", branches: inventory.remote)
+                  branchSection("Local Branches", branches: inventory.local)
+                }
+              }
+              .frame(height: min(280, CGFloat(inventory.remote.count + inventory.local.count) * 30 + 52))
             }
-            .controlSize(.small)
-            Spacer()
-            Button("Compare") { applyBase() }.keyboardShortcut(.defaultAction)
           }
         }
-        .padding(16).frame(width: 280)
+        .padding(12).frame(width: 300)
       }
     }
   }
 
-  private func applyBase() {
-    store.send(.refresh)
-    showingBase = false
+  private var baseLabel: String {
+    let value = store.snapshot?.baseLabel ?? "automatic"
+    for prefix in ["refs/remotes/", "refs/heads/"] where value.hasPrefix(prefix) {
+      return String(value.dropFirst(prefix.count))
+    }
+    return value
+  }
+
+  @ViewBuilder
+  private func branchSection(_ title: String, branches: [BranchRef]) -> some View {
+    if !branches.isEmpty {
+      Text(title).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8).padding(.top, 6)
+      let sorted = branches.sorted { $0.shortName.localizedStandardCompare($1.shortName) == .orderedAscending }
+      ForEach(sorted, id: \.self) { branch in
+        baseOption(branch.shortName, ref: (branch.isRemote ? "refs/remotes/" : "refs/heads/") + branch.shortName)
+      }
+    }
+  }
+
+  private func baseOption(_ title: String, ref: String) -> some View {
+    let selected = store.appliedBase == ref || (!ref.isEmpty && store.appliedBase == title)
+    return Button {
+      store.send(.baseSelected(ref))
+      showingBase = false
+    } label: {
+      HStack(spacing: 8) {
+        Image(systemName: "checkmark").opacity(selected ? 1 : 0).accessibilityHidden(true)
+        Text(title).lineLimit(1).truncationMode(.middle)
+        Spacer(minLength: 0)
+      }
+      .font(.system(size: 12))
+      .padding(.horizontal, 8).padding(.vertical, 6)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .background(selected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    .help(title)
   }
 }
 

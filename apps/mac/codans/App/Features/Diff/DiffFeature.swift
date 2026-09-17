@@ -17,6 +17,10 @@ struct DiffFeature {
     var scope: GitComparisonScope = .all
     var base = ""
     var appliedBase = ""
+    var baseBranches: BranchInventory?
+    var baseBranchesLoading = false
+    var baseBranchesError: String?
+    var baseBranchesRequest = 0
     var prBase: String?
     var prRepository: URL?
     var filter = ""
@@ -55,6 +59,10 @@ struct DiffFeature {
     case layoutChanged(String)
     case scopeChanged(GitComparisonScope)
     case baseChanged(String)
+    case loadBaseBranches
+    case baseBranchesLoaded(Int, BranchInventory)
+    case baseBranchesFailed(Int, String)
+    case baseSelected(String)
     case filterChanged(String)
     case refresh
     case tick
@@ -68,7 +76,7 @@ struct DiffFeature {
     case rendererFailed(String)
   }
 
-  nonisolated enum CancelID: Hashable, Sendable { case refresh, content, timer, editor }
+  nonisolated enum CancelID: Hashable, Sendable { case refresh, content, timer, editor, baseBranches }
   @Dependency(GitServiceClient.self) var git
   @Dependency(DiffEditorClient.self) var editor
   @Dependency(\.continuousClock) var clock
@@ -97,7 +105,9 @@ struct DiffFeature {
         state.prRepository = nil
         state.filter = ""
         clear(&state)
+        clearBaseBranches(&state)
         return .merge(
+          .cancel(id: CancelID.baseBranches),
           .cancel(id: CancelID.content), .cancel(id: CancelID.refresh), state.isVisible ? .send(.refresh) : .none)
       case .prBaseChanged(let worktree, let base, let repository):
         guard worktree == state.worktreeID else { return .none }
@@ -117,13 +127,14 @@ struct DiffFeature {
           }.cancellable(id: CancelID.timer, cancelInFlight: true))
       case .close:
         state.isVisible = false
+        clearBaseBranches(&state)
         state.loading = false
         state.contentLoading = false
         state.request += 1
         state.contentRequest += 1
         return .merge(
           .cancel(id: CancelID.timer), .cancel(id: CancelID.refresh), .cancel(id: CancelID.content),
-          .cancel(id: CancelID.editor))
+          .cancel(id: CancelID.editor), .cancel(id: CancelID.baseBranches))
       case .toggleSidebar:
         state.sidebarVisible.toggle()
         return .none
@@ -141,6 +152,34 @@ struct DiffFeature {
       case .baseChanged(let value):
         state.base = value
         return .none
+      case .loadBaseBranches:
+        guard state.isVisible, let path = state.path else { return .none }
+        state.baseBranchesRequest += 1
+        let request = state.baseBranchesRequest
+        state.baseBranchesLoading = true
+        state.baseBranchesError = nil
+        return .run { [git] send in
+          do {
+            let inventory = try await git.listAllBranches(URL(fileURLWithPath: path))
+            await send(.baseBranchesLoaded(request, inventory))
+          } catch {
+            await send(.baseBranchesFailed(request, Self.errorMessage(error)))
+          }
+        }.cancellable(id: CancelID.baseBranches, cancelInFlight: true)
+      case .baseBranchesLoaded(let request, let inventory):
+        guard request == state.baseBranchesRequest else { return .none }
+        state.baseBranchesLoading = false
+        state.baseBranchesError = nil
+        state.baseBranches = inventory
+        return .none
+      case .baseBranchesFailed(let request, let message):
+        guard request == state.baseBranchesRequest else { return .none }
+        state.baseBranchesLoading = false
+        state.baseBranchesError = message
+        return .none
+      case .baseSelected(let value):
+        state.base = value
+        return .send(.refresh)
       case .filterChanged(let value):
         state.filter = value
         return .none
@@ -186,6 +225,13 @@ struct DiffFeature {
         return contentAction(&state, action)
       }
     }
+  }
+
+  private func clearBaseBranches(_ state: inout State) {
+    state.baseBranchesRequest += 1
+    state.baseBranches = nil
+    state.baseBranchesLoading = false
+    state.baseBranchesError = nil
   }
 
   private func clear(_ state: inout State) {

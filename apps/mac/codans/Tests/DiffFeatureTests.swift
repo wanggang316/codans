@@ -178,4 +178,118 @@ struct DiffFeatureTests {
     await store.send(.editorFinished(WorktreeID(), "Stale editor reply"))
   }
 
+  @Test func branchChoicesLoadOnDemand() async {
+    var state = DiffFeature.State()
+    state.isVisible = true
+    state.path = "/tmp/repository"
+    let inventory = BranchInventory(
+      current: "feature/review",
+      local: [.init(shortName: "main", isRemote: false, upstream: "origin/main")],
+      remote: [.init(shortName: "origin/main", isRemote: true, upstream: nil)])
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.listAllBranches = { path in
+        #expect(path.path == "/tmp/repository")
+        return inventory
+      }
+    }
+    await store.send(.loadBaseBranches) {
+      $0.baseBranchesLoading = true
+      $0.baseBranchesRequest = 1
+    }
+    await store.receive(.baseBranchesLoaded(1, inventory)) {
+      $0.baseBranchesLoading = false
+      $0.baseBranches = inventory
+    }
+  }
+
+  @Test func branchChoicesReportFailureAndCanRetry() async {
+    var state = DiffFeature.State()
+    state.isVisible = true
+    state.path = "/tmp/repository"
+    state.baseBranchesError = "Previous failure"
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.listAllBranches = { _ in throw GitError.timedOut }
+    }
+    await store.send(.loadBaseBranches) {
+      $0.baseBranchesLoading = true
+      $0.baseBranchesError = nil
+      $0.baseBranchesRequest = 1
+    }
+    await store.receive(.baseBranchesFailed(1, "Git timed out. Refresh to try again.")) {
+      $0.baseBranchesLoading = false
+      $0.baseBranchesError = "Git timed out. Refresh to try again."
+    }
+    store.dependencies.gitService.listAllBranches = { _ in
+      BranchInventory(current: "main", local: [], remote: [])
+    }
+    await store.send(.loadBaseBranches) {
+      $0.baseBranchesLoading = true
+      $0.baseBranchesError = nil
+      $0.baseBranchesRequest = 2
+    }
+    let inventory = BranchInventory(current: "main", local: [], remote: [])
+    await store.receive(.baseBranchesLoaded(2, inventory)) {
+      $0.baseBranchesLoading = false
+      $0.baseBranches = inventory
+    }
+  }
+
+  @Test(arguments: [false, true])
+  func branchChoicesAreInvalidatedOnCloseOrContextChange(close: Bool) async {
+    var state = DiffFeature.State()
+    state.path = "/tmp/repository"
+    state.baseBranchesRequest = 3
+    state.baseBranchesLoading = true
+    let inventory = BranchInventory(current: "main", local: [], remote: [])
+    state.baseBranches = inventory
+    state.baseBranchesError = "Previous failure"
+    let store = TestStore(initialState: state) { DiffFeature() }
+    await store.send(close ? .close : .contextChanged(nil, nil, "/tmp/another-repository")) {
+      if !close { $0.path = "/tmp/another-repository" }
+      $0.request = 1
+      $0.contentRequest = 1
+      $0.baseBranchesRequest = 4
+      $0.baseBranchesLoading = false
+      $0.baseBranches = nil
+      $0.baseBranchesError = nil
+    }
+    await store.send(.baseBranchesLoaded(3, inventory))
+    await store.send(.baseBranchesFailed(3, "Stale failure"))
+  }
+
+  @Test(arguments: ["refs/remotes/origin/main", "refs/heads/release", ""])
+  func selectingBaseImmediatelyRefreshesComparison(base: String) async {
+    var state = DiffFeature.State()
+    state.path = "/tmp/repository"
+    state.isVisible = true
+    state.scope = .outgoing
+    state.base = "refs/heads/previous"
+    state.appliedBase = state.base
+    let snapshot = GitComparisonSnapshot(scope: .outgoing, baseLabel: "selected", files: [])
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.comparison = { _, scope, selectedBase in
+        #expect(scope == .outgoing)
+        #expect(selectedBase == (base.isEmpty ? nil : base))
+        return snapshot
+      }
+    }
+    await store.send(.baseSelected(base)) { $0.base = base }
+    await store.receive(.refresh) {
+      $0.appliedBase = base
+      $0.request = 1
+      $0.loading = true
+    }
+    await store.receive(.loaded(1, snapshot)) {
+      $0.loading = false
+      $0.snapshot = snapshot
+      $0.contentRequest = 1
+    }
+  }
+
 }

@@ -152,3 +152,14 @@ Each tree/list file row displays added and deleted lines beside its status. The 
 Build-for-testing and 25 tests in GitComparisonTests, DiffFeatureTests, and DiffFileTreeTests passed. The new fixture test covers terminated and unterminated lines, empty files, binary data, oversized files, symlinks, and both working-directory scopes. Real GUI verified tree and flat rows, empty-file zeroes, binary/symlink dashes, aggregate +10/−2 with partial indication, unchanged totals while filtering to Demo.swift, and Outgoing switching to +1/−0. The default-width sidebar and dark appearance were visually checked; SSH GUI and additional width matrices were not rerun.
 
 Evidence: `/tmp/codans-line-counts-build.log`, `/tmp/codans-line-counts-tests.log`, `/tmp/codans-diff-qa-test/line-counts-result.xcresult`, and GUI observations in the task transcript. Full-repository `make mac-check` reports the same 61 existing violations; unrelated formatter edits were restored.
+
+
+## Selectable comparison branches (2026-09-18)
+
+The comparison popover contains Remote Default Branch followed by grouped remote and local branch buttons. Selection applies immediately, closes the popover, and is checked when reopened. Short lists receive content-based height; long lists scroll within 280 points. Manual ref entry and the Compare button are removed.
+
+Final build-for-testing and 26 tests across DiffFeatureTests, DiffWindowManagerTests, GitComparisonTests, and GitServiceClientBranchTests passed. Reducer coverage includes inventory success, failure/retry, stale results after closing/context changes, and immediate remote/local/default selection. Scoped SwiftLint passed. Full-repository checks retain 61 existing violations after fixing the new brace-format warning; unrelated formatter edits were restored.
+
+Real GUI verified the default checkmark, explicit origin/main selection and checked state, feature/review selection yielding zero files, and Remote Default Branch restoring origin/main and committed.txt. Final visual verification confirms both branch groups and all three fixture branches are visible without an input field or confirmation button. No network fetch or SSH GUI testing was performed.
+
+Evidence: `/tmp/codans-base-picker-sized-build.log`, `/tmp/codans-base-picker-tests.log`, `/tmp/codans-diff-qa-test/base-picker-result.xcresult`, `/tmp/codans-base-picker-scoped-lint.log`, and task GUI observations.
