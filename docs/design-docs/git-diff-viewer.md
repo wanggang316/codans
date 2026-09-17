@@ -12,14 +12,14 @@ The toolbar and Worktree menu expose **View Changes and Outgoing**; the command 
 
 | Mode | Left | Right |
 |---|---|---|
-| Changes / All | HEAD, or empty tree before the first commit | Working directory, including untracked |
-| Changes / Staged | HEAD, or empty tree | Index blobs |
-| Changes / Unstaged | Index blobs | Working directory, including untracked |
+| Changes | HEAD, or empty tree before the first commit | Working directory, including untracked |
 | Outgoing | Common ancestor of target and HEAD | HEAD |
+
+Changes always shows the aggregate comparison; Staged and Unstaged remain Git-service capabilities but are not exposed as viewer modes.
 
 Outgoing includes all committed branch changes against main or the PR target. Pushing does not clear it. Uncommitted content remains in Changes. Target-only commits are not shown as reversed edits.
 
-An explicit base entered in the window takes priority. Otherwise, a known PR target is used when its repository matches origin; an unmapped fork target requires manual selection. Without PR metadata, resolve origin's symbolic default branch, then local main/master if present. Always show the resolved base. Missing refs, unrelated histories, and repositories without a usable base surface errors.
+An explicit base entered through the Outgoing sidebar base popover takes priority. Otherwise, a known PR target is used when its repository matches origin; an unmapped fork target requires manual selection. Without PR metadata, resolve origin's symbolic default branch, then local main/master if present. Always show the resolved base. Missing refs, unrelated histories, and repositories without a usable base surface errors.
 
 Refresh reads local state only. The window does not fetch, stage, discard, commit, push, or resolve conflicts. Fetching in a terminal updates local refs that subsequent refreshes observe.
 
@@ -43,7 +43,7 @@ node scripts/export-swift-package.mjs /path/to/codans/apps/mac/ThirdParty/DiffVi
 
 The renderer accepts two text snapshots and emits validated file/line intents. Its jsdiff presentation can group hunks differently from Git. Git remains the authority for status, rename detection, and file statistics. Web limits are stricter than the transport limit: 1M UTF-16 units / 10,000 lines per side, 10,000 characters per line, 4,000 rendered lines, and a bounded diff calculation. Unavailable previews are never silently truncated.
 
-Unified/split presentation, syntax highlighting, light/dark themes and text selection live inside the Web component. The WebView stays mounted across loading, scope and file changes. Content updates preserve its presentation; closing the window or explicitly recovering a failed renderer restores host defaults. Search UI, context expansion and large-file virtualization are not implemented. Failed Web content can be recreated using Refresh.
+The unified window toolbar owns Changes/Outgoing, unified/split layout, and refresh. The native sidebar uses system text, file icons, compact rows, and status characters. A 32-point native file header shows the selected path and line statistics. DiffViewKit receives `chrome: "none"` and renders only code, edge-to-edge: no Web toolbar, duplicate path, instruction strip, footer, or open-file button. Appearance follows the window rather than a separate Web theme toggle. Syntax highlighting and text selection remain inside the component. The WebView stays mounted across loading, scope and file changes. Content updates preserve its presentation; closing the window or explicitly recovering a failed renderer restores host defaults. Search UI, context expansion and large-file virtualization are not implemented. Failed Web content can be recreated using Refresh.
 
 ## State and refresh
 
@@ -53,7 +53,7 @@ Each open window performs bounded, non-overlapping refreshes every two seconds. 
 
 `DiffWindowManager` owns one normal, resizable NSWindow and independent DiffFeature store per Worktree. Reopening focuses the same window without resetting its comparison. Main-window selection never retargets an existing window. Window titles identify the project and branch. Window frames persist through AppKit autosave; scope/base/file preferences survive close/reopen for the app session.
 
-Closing cancels refresh, content, and editor effects, detaches the hosting view, and releases WKWebView. Only lightweight preferences remain. The standard red close button and Command-W close this window; they do not close terminal tabs. Diff windows can be moved, minimized, resized, and placed on another display. They are neither modal sheets nor floating panels.
+Closing cancels refresh, content, and editor effects, detaches the hosting view, and releases WKWebView. Only lightweight scope/base/file/layout preferences remain. The standard red close button and Command-W close this window; they do not close terminal tabs. Diff windows can be moved, minimized, resized, and placed on another display. They are neither modal sheets nor floating panels.
 
 The main terminal view has no dependency on Diff visibility, width, or selection. Opening and closing Diff does not resize or remount it. Terminal sessions remain owned by TerminalEngine. Renderer layout/theme changes may reset the component's scroll/selection; restoration is not yet implemented.
 
@@ -61,7 +61,7 @@ The main terminal view has no dependency on Diff visibility, width, or selection
 
 The host validates the component's document ID and opens the selected current file through `DiffEditorClient`. Local/remote editor selection respects project/global preferences. Supported editors receive line arguments; others open the file without a guaranteed line position.
 
-Old-side/deleted targets are explicitly unavailable. Outgoing/Staged requests open the current file without a historical line. Changes requests re-read the selected content before forwarding a line; if content changed, open without a line. Binary/large-file notices retain an **Open Selected File** action. The component never starts an editor itself.
+Old-side/deleted targets are explicitly unavailable. Outgoing/Staged requests open the current file without a historical line. Changes requests re-read the selected content before forwarding a line; if content changed, open without a line. File rows provide an **Open in Editor** context-menu action, including binary/large-file notices. The header and footer do not expose open-file buttons. The component never starts an editor itself.
 
 ## Validation
 

@@ -69,3 +69,21 @@ The main terminal split was removed. The isolated native application used a regu
 The resize check targets the trigger behind CLI reflow. It does not establish a full visual matrix across every Agent CLI, multi-display configuration, or macOS version. Dedicated multi-display and post-relaunch frame restoration checks were not run.
 
 Current evidence: /tmp/codans-diff-window-build-final.log, /tmp/codans-diff-window-tests.log, and /tmp/codans-diff-qa-test/window-result.xcresult. Full `make mac-check` still reports the same 61 pre-existing lint errors; new window files and changed Diff UI have no reported violations. Unrelated formatting changes were restored.
+
+## Native presentation revision
+
+The window uses a native unified toolbar for Changes/Outgoing, Unified/Split, and Refresh. The All/Staged/Unstaged selector and both open-file buttons are removed. Changes uses the aggregate comparison. The native file list/header owns paths and statistics; embedded Web chrome is disabled. Outgoing base selection uses a sidebar popover, and editor navigation remains on line numbers and the file context menu.
+
+Component: 6 JavaScript tests, 5 WebKit browser tests, 6 Swift tests, and native WKWebView smoke passed. Host build-for-testing and 27 focused tests passed. The lifecycle test drives native toolbar comparison/layout actions and verifies layout persistence. Earlier GUI cases involving removed controls describe the previous revision only.
+
+| Native presentation GUI case | Observed result | Result |
+|---|---|---|
+| Removed controls | No All/Staged/Unstaged, Open Selected File, Web Open file, Web toolbar/context/footer, or READ ONLY badge | PASS |
+| Native toolbar | Changes/Outgoing and Unified/Split update real content; Refresh remains accessible | PASS |
+| Sidebar/file header | Compact system-font filenames, status characters, file icons, selected path and statistics | PASS |
+| Outgoing base popover | Explicit main applies and committed.txt remains correct | PASS |
+| Appearance | Application Dark and Auto update native controls and Web content together; Auto restored | PASS |
+| Half-screen / restore | All toolbar controls remain available; code and sidebar resize correctly | PASS |
+| Line navigation | New-side line 4 opens Demo.swift in Cursor at Ln 4, Col 1 | PASS |
+
+Evidence: /tmp/codans-diff-native-build.log, /tmp/codans-diff-native-tests.log, /tmp/codans-diff-qa-test/native-result.xcresult; GUI screenshots are in the task transcript. The exported component is pinned to 664e49a. `make mac-check` was run; the two newly introduced image-label violations were fixed and scoped lint passed. The 61 existing repository violations remain. Generated minified highlight.js contains significant trailing whitespace inside a string literal; it is retained from the reproducible component build rather than trimmed. Source diff checks exclude that generated asset.

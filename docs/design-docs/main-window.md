@@ -66,7 +66,7 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 `RootFeature` 将打开请求交给 `DiffWindowManager`，每个 Worktree 复用一个独立的普通 `NSWindow` 和 `DiffFeature` store。主窗口切换 Worktree 不改变已打开的 Diff 窗口。开关 Diff 不改变终端布局；关闭窗口停止刷新并释放 WebView，重开恢复比较范围、文件选择和窗口位置。
 
-“View Changes and Outgoing” 是独立窗口的菜单 / 命令面板入口，工具栏按钮为 “View Changes”。Changes 提供 All / Staged / Unstaged；Outgoing 比较目标分支与 HEAD 的共同祖先到 HEAD 的已提交改动。比较范围、基准和文件选择按 Worktree 在当前应用会话中保留；可见期间每两秒刷新本地 Git 状态，不自动 fetch。
+“View Changes and Outgoing” 是独立窗口的菜单 / 命令面板入口，工具栏按钮为 “View Changes”。Changes 默认展示全部当前变更（含未跟踪文件）；Outgoing 比较目标分支与 HEAD 的共同祖先到 HEAD 的已提交改动。比较范围、基准和文件选择按 Worktree 在当前应用会话中保留；可见期间每两秒刷新本地 Git 状态，不自动 fetch。
 
 代码通过独立的 `DiffViewKit`（WKWebView + Web Diff 组件）渲染。该组件只收发文档和事件；Git 查询、路径校验和编辑器打开由 Codans 拥有。面板只读，不提供暂存、丢弃、提交或编辑操作。接口和边界见 [git-diff-viewer.md](git-diff-viewer.md)。
 

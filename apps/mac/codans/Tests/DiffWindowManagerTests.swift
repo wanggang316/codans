@@ -58,7 +58,20 @@ struct DiffWindowManagerTests {
       #expect(firstWindow.styleMask.contains([.titled, .closable, .resizable, .miniaturizable]))
 
       firstStore.send(.baseChanged("release"))
-      firstStore.send(.scopeChanged(.outgoing))
+      let toolbar = try #require(firstWindow.toolbar)
+      #expect(firstWindow.toolbarStyle == .unifiedCompact)
+      let comparison = try #require(
+        toolbar.items.first { $0.itemIdentifier.rawValue == "diff.comparison" } as? NSToolbarItemGroup)
+      comparison.selectedIndex = 1
+      let compareAction = try #require(comparison.action)
+      #expect(NSApp.sendAction(compareAction, to: comparison.target, from: comparison))
+      let layout = try #require(
+        toolbar.items.first { $0.itemIdentifier.rawValue == "diff.layout" } as? NSToolbarItemGroup)
+      layout.selectedIndex = 1
+      let layoutAction = try #require(layout.action)
+      #expect(NSApp.sendAction(layoutAction, to: layout.target, from: layout))
+      #expect(firstStore.layout == "split")
+      #expect(secondStore.layout == "unified")
       try await waitUntil { firstStore.snapshot?.scope == .outgoing && !firstStore.contentLoading }
       firstStore.send(.selectFile(files[1].id))
       try await waitUntil { firstStore.selectedFileID == files[1].id && !firstStore.contentLoading }
@@ -80,6 +93,7 @@ struct DiffWindowManagerTests {
       #expect(reopenedWindow !== firstWindow)
       #expect(reopenedStore.state.scope == .outgoing)
       #expect(reopenedStore.base == "release")
+      #expect(reopenedStore.layout == "split")
       #expect(reopenedStore.selectedFileID == files[1].id)
       try await waitUntil { reopenedStore.snapshot != nil && !reopenedStore.contentLoading }
       #expect(reopenedStore.selectedFileID == files[1].id)

@@ -19,10 +19,12 @@ public struct DiffDocument: Codable, Sendable, Equatable {
 public struct DiffOptions: Codable, Sendable, Equatable {
     public var layout: String
     public var theme: String
+    public var chrome: String
 
-    public init(layout: String = "unified", theme: String = "dark") {
+    public init(layout: String = "unified", theme: String = "dark", chrome: String = "full") {
         self.layout = layout
         self.theme = theme
+        self.chrome = chrome
     }
 }
 

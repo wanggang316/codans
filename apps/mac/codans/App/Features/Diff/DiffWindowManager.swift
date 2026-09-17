@@ -11,6 +11,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
   private struct Session {
     let window: NSWindow
     let store: StoreOf<DiffFeature>
+    let toolbar: DiffWindowToolbar
   }
 
   private var sessions: [WorktreeID: Session] = [:]
@@ -46,6 +47,9 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
       defer: false
     )
     window.title = title
+    window.toolbarStyle = .unifiedCompact
+    let toolbar = DiffWindowToolbar(store: store)
+    window.toolbar = toolbar.makeToolbar()
     window.identifier = NSUserInterfaceItemIdentifier("diff-\(worktreeID)")
     window.contentMinSize = NSSize(width: 640, height: 420)
     window.isReleasedWhenClosed = false
@@ -55,7 +59,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     let frameName = "DiffWindow-\(worktreeID)"
     if !window.setFrameUsingName(frameName) { window.center() }
     window.setFrameAutosaveName(frameName)
-    sessions[worktreeID] = Session(window: window, store: store)
+    sessions[worktreeID] = Session(window: window, store: store, toolbar: toolbar)
     store.send(.toggle)
     present(window)
   }
@@ -71,7 +75,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
 
     let state = entry.value.store.state
     preferences[entry.key] = DiffFeature.Preference(
-      scope: state.scope, base: state.base, selectedFileID: state.selectedFileID)
+      scope: state.scope, base: state.base, selectedFileID: state.selectedFileID, layout: state.layout)
     entry.value.store.send(.close)
     // Releasing the hosting view tears down WKWebView; only small preferences survive.
     window.contentView = nil
