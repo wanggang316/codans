@@ -24,8 +24,12 @@ The detail pane shows compact execution rows without tabs. Expand a row for
 its inputs and result; pending decisions and failures are visible immediately.
 Results, run inputs, participants, activity and frozen YAML are available below
 the execution list. The run actions menu provides copying, cancellation and Reveal in Finder.
-Reveal exports a current `run.json` inspection snapshot and the frozen
-`workflow.yaml` beside that run’s artifacts; the database remains authoritative.
+Reveal opens the run's existing directory under `artifacts/<run-id>/`, containing
+the frozen `workflow.yaml`, execution details, requests and submissions.
+`run.json` is the sole authoritative record. Each state change atomically replaces
+that complete snapshot before updating the readable derived files. Startup loads
+`run.json` and repairs those derived files. Workflow runs use no database and no
+database compatibility layer; SQLite run files are neither read nor migrated.
 Click outside the popover or press Escape to dismiss it. Settings contains no run history. There is no separate Workflow window
 or menu-bar menu.
 

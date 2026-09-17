@@ -312,15 +312,24 @@ workflows/
       prompts/
       schemas/
   preferences.json
-  history.sqlite
-  runs/
-    <run-id>/
-      definition/
-      artifacts/
-      attempts/
+  v2/
+    artifacts/<run-id>/
+      run.json
+      workflow.yaml
+      events.jsonl
+      <packet-id>.md
+      nodes/<execution-id>/
+        execution.json
+        inputs.json
+        outputs.json
+        request.json
+        instruction.md
+        submissions/<submission-record-id>.json
 ```
 
-建议 Run 元数据采用 SQLite 单写者事务：Run 状态、Role 绑定、Attempt、accepted Delivery 索引和递增 Event sequence 一起提交。正文保存在不可变文件中，先写临时文件并原子落位，再在事务中引用；崩溃遗留无引用文件可回收，不能出现数据库已确认但正文未落盘的交付。承诺崩溃持久性前需验证 SQLite 同步策略与文件 fsync 顺序。
+运行存储采用纯文件方案，不使用数据库，不保留数据库兼容层，也不读取或迁移旧 SQLite 运行记录。`WorkflowRunStoreV2` 以存储根目录下 `artifacts/<run-id>/run.json` 为唯一权威记录；其中内联保存 Run 状态、Role 绑定、输入、节点执行、请求全文、每次提交正文与校验结果、输出及事件。
+
+每次更新先原子替换完整 `run.json`，提交成功后再刷新同目录下的 YAML、事件、节点执行和请求/提交等派生文件。正文已经包含在权威快照中，恢复不依赖派生文件是否存在；先提交快照也避免派生文件超前于已提交状态。单个文件原子替换不等于整个目录的事务，崩溃后派生文件可能落后，启动时从 `run.json` 读取并修复。派生文件用于检查，不作为独立恢复源。承诺断电持久性前仍需单独验证文件同步策略，不能把原子替换等同于断电持久性。
 
 每次副作用先记录 intent，执行后记录 outcome。UI 从事件驱动的投影读取，不把终端输出解析为执行事实。Agent 的内部工具调用只有显式上报后才能展示为结构化事件，不能把终端截图称为完整 Trace。
 
@@ -335,13 +344,13 @@ workflows/
 | `AgentWorkflowTemplate.swift` | 移除作为引擎核心的场景枚举；内置场景变成 YAML bundle |
 | `AgentWorkflowRun.swift` | 保留显式交付、Attempt、取消等不变量，迁移为定义驱动的节点执行模型 |
 | `AgentWorkflowRunner.swift` | 从场景分支调度改为依赖调度、Role binding 与 Action registry |
-| `AgentWorkflowStore.swift` | 保留单写者/先存储再确认原则；替换为统一事务模型与 Artifact 存储 |
+| `AgentWorkflowStore.swift` | 保留单写者/先存储再确认原则；替换为权威 JSON 快照与派生执行文件 |
 | `WorkflowComposerView.swift` | 拆为定义创建入口和 schema 驱动的 Run 设置，不保留固定场景表单 |
 | `WorkflowRunsView.swift` | 聚焦运行列表与详情；定义目录放入设置 |
 | `HandoffHandlers.swift` | 变为定义调用适配器，packet 等领域逻辑放入对应 Action |
-| IPC / CLI | 区分定义 list/show/validate/create 与 run/start/status/deliver/cancel；提供明确兼容策略 |
+| IPC / CLI | 区分定义 list/show/validate/create 与 run/start/status/deliver/cancel；不提供旧运行格式兼容路由 |
 
-旧 JSON 运行记录只读展示，保留原始格式与旧版本解释器；不把历史 Attempt 重新排入新引擎。启用新入口前需处理正在运行的旧 Run，不能热替换其执行契约。
+产品尚未上线，不实现旧运行格式展示、旧版本解释器或数据库兼容层。新的文件存储只加载当前 DSL 格式的 `run.json`；不扫描旧数据库，不自动迁移或重新调度旧运行。
 
 ## 10. 构建顺序与验收
 

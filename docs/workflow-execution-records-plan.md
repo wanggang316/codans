@@ -1,6 +1,6 @@
 # Workflow execution records
 
-Status: Implemented; focused tests and real GUI Handoff verified on 2026-09-17.
+Status: File-only store and execution records implemented and verified on 2026-09-17.
 
 ## Scope and decisions
 
@@ -11,10 +11,12 @@ add their exact instruction, target identity, dispatch state, and submission
 history. Local actions and human decisions keep their existing typed inputs and
 outputs; they do not acquire artificial agent lifecycle objects.
 
-Preserve the current SQLite transaction as the authoritative snapshot in this
-change. Maintain a readable, rebuildable run directory with frozen YAML, events,
-execution snapshots, instructions and submission records. This is not a storage
-migration or a cross-file transaction. Do not replay uncertain external effects.
+Use a file-only run store. `artifacts/<run-id>/run.json` is the sole authoritative
+record and includes inputs, executions, requests, submissions and events, with
+their full bodies. Commit this complete snapshot by atomic replacement before
+refreshing readable derived files. No database, SQLite reader/writer, database
+compatibility layer or database migration is provided. Do not replay uncertain
+external effects.
 
 ## Implementation
 
@@ -86,14 +88,20 @@ artifacts/<run-id>/
 
 Request and submission files exist only for Agent requests. UUID directory names
 avoid allowing definition node IDs to become filesystem paths. Every persisted
-transition refreshes these files; Reveal in Finder opens this same directory.
-SQLite remains authoritative. Mirrors are written after committing the snapshot
-and before dispatch; archive failure stops subsequent dispatch. A crash can leave
-a mirror behind the committed state, never ahead of it. Each file is replaced
-atomically, but the directory and SQLite do not form one atomic transaction.
-Startup reconstructs mirrors from committed snapshots. Files are intended for
-inspection, not an independent replay log. The complete run snapshot retains the
-existing 16 MiB limit and individual deliveries retain the 256 KiB limit.
+transition commits the complete `run.json` first, then refreshes the derived files;
+Reveal in Finder opens this same directory. `WorkflowRunStoreV2` loads only these
+authoritative snapshots. It does not read or write SQLite files.
+
+The snapshot inlines all request and submission content, so its commit never
+depends on a derived file already existing. Derived files are written after the
+snapshot and before dispatch; archive failure stops subsequent dispatch. A crash
+can leave a derived file behind the committed state, never ahead of it. Each file
+is replaced atomically; the directory is not a cross-file transaction. Startup
+reconstructs derived files from `run.json`. Events and per-execution files aid
+inspection; they are not independent replay or recovery authorities. The complete
+run snapshot retains the existing 16 MiB limit and individual deliveries retain
+the 256 KiB limit. Atomic replacement does not by itself promise power-loss
+durability without a separately verified filesystem synchronization policy.
 
 History shows request dispatch and submission acceptance independently, with
 expandable exact content and validation issues. Execution identifiers live under
@@ -101,7 +109,11 @@ Details. Multiple execution headers appear only when multiple records exist.
 Older stored nodes without execution records remain inspectable; missing request
 or submission evidence is never fabricated retroactively.
 
-## Verification
+## Execution-record verification before the file-only store
+
+These results cover the original execution-record implementation. Its SQLite
+storage has since been superseded; they do not validate the replacement file-only
+store or provide a reason to retain database compatibility.
 
 - Debug app build succeeded. The final test build passed 23 tests across
   WorkflowServiceV2Tests, WorkflowRouterV2Tests and WorkflowEndpointIdentityV2Tests.
@@ -121,7 +133,31 @@ or submission evidence is never fabricated retroactively.
   expanded correctly with Copy Request. Launch kept the terminal visible.
 - Reveal in Finder opened the run directory. Its 26 files include all five node
   execution snapshots, two exact requests, three submissions, frozen YAML and
-  events. The run and execution JSON files matched the authoritative database;
+  events. At that time, the run and execution JSON files matched the database;
   archived instruction text matched the recorded dispatched prompts.
 - Logs: `/tmp/codans-execution-verified.log`,
   `/tmp/codans-execution-build.log`, `/tmp/codans-execution-check.log`.
+
+## File-only store verification (2026-09-17)
+
+- Removed WorkflowDatabaseV2 and its SQLite import/queries. WorkflowRunStoreV2
+  loads only `artifacts/<run-id>/run.json`; it performs no database migration.
+- The app/test build completed. In an isolated host configuration, 26 tests in
+  WorkflowServiceV2Tests, WorkflowRouterV2Tests and WorkflowEndpointIdentityV2Tests
+  passed. Two earlier launches of the test host crashed in QuartzCore while
+  restoring existing terminals, before the tests began. The successful run used
+  `TEST_RUNNER_CODANS_CONFIG_DIR=/tmp/codans-file-store-test-host` and the matching
+  `CODANS_CONFIG_DIR`, with the same already-built binaries.
+- Coverage includes loading with an invalid unrelated database file, leaving it
+  untouched, creating no WAL/SHM files, preserving corrupt snapshots for diagnosis,
+  rejecting oversized writes without replacing committed state, and rebuilding
+  derived files from the authoritative run snapshot.
+- GUI run `CB809BB5-03F4-4878-89C1-556ABB9C174E` (`GUI File Store Verification`)
+  was created and completed through the app. After quitting and reopening the app,
+  history still showed Completed, decision `adopt` and the submitted reason.
+- The existing database-file sizes and modification times remained unchanged
+  throughout GUI creation, completion and restart. Open-file inspection showed
+  no workflow database open in the app. Pre-existing database files are left
+  untouched; they are not a fallback source.
+- Changed Swift files pass focused SwiftLint and swift-format. Test evidence:
+  `/tmp/codans-file-store-tests-isolated.log`.

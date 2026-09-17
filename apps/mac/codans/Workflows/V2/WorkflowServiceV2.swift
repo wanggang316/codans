@@ -11,7 +11,7 @@ import Observation
   var send: (@MainActor (WorkflowBindingV2, String, @escaping @MainActor () -> Bool) async throws -> Void)?
   var validateBinding: (@MainActor (WorkflowBindingV2) -> Bool)?
   var cli = "codans-dev"
-  @ObservationIgnored private var database: WorkflowDatabaseV2?
+  @ObservationIgnored private var runStore: WorkflowRunStoreV2?
   @ObservationIgnored private var dispatching: Set<UUID> = []
 
   init(root: URL? = nil) {
@@ -25,8 +25,8 @@ import Observation
           "workflow-v2-host-\(UUID())")
         : Settings.defaultURL().deletingLastPathComponent().appendingPathComponent("workflows/v2")
       let directory = root ?? defaultRoot
-      let store = try WorkflowDatabaseV2(root: directory)
-      database = store
+      let store = try WorkflowRunStoreV2(root: directory)
+      runStore = store
       var restored = try store.load()
       for index in restored.indices where ["running", "waiting"].contains(restored[index].status) {
         restored[index].status = "interrupted"
@@ -44,7 +44,7 @@ import Observation
       runs = restored.sorted { $0.createdAt > $1.createdAt }
     } catch {
       issues.append(error.localizedDescription)
-      database = nil
+      runStore = nil
     }
   }
 
@@ -52,8 +52,8 @@ import Observation
 
   /// Refresh and reveal the same readable archive maintained at every transition.
   func inspectionDirectory(for id: UUID) throws -> URL {
-    guard let database, let run = run(id) else { throw invalid("Run is unavailable") }
-    return try database.inspectionDirectory(for: run)
+    guard let runStore, let run = run(id) else { throw invalid("Run is unavailable") }
+    return try runStore.inspectionDirectory(for: run)
   }
 
   func start(
@@ -117,7 +117,7 @@ import Observation
   }
 
   func advance(_ id: UUID) {
-    guard database != nil, !dispatching.contains(id), let record = run(id), record.status == "running" else {
+    guard runStore != nil, !dispatching.contains(id), let record = run(id), record.status == "running" else {
       return
     }
     dispatching.insert(id)
@@ -125,7 +125,7 @@ import Observation
       guard let self else { return }
       defer {
         self.dispatching.remove(id)
-        if self.database != nil, let current = self.run(id), current.status == "running",
+        if self.runStore != nil, let current = self.run(id), current.status == "running",
           !current.nodes.values.contains(where: { $0.status == "running" })
         {
           self.advance(id)
@@ -136,7 +136,7 @@ import Observation
   }
 
   func claim(id: UUID, nodeID: String, paneID: String) throws -> JSONValue {
-    guard database != nil, let record = run(id), record.status == "running",
+    guard runStore != nil, let record = run(id), record.status == "running",
       let node = record.nodes[nodeID],
       node.status == "running", node.paneID?.lowercased() == paneID.lowercased(),
       let attempt = node.attemptID,
@@ -169,7 +169,7 @@ import Observation
     guard !record.nodes.values.contains(where: { $0.deliveryID == deliveryID }) else {
       throw invalid("Delivery ID is already used")
     }
-    guard database != nil, record.status == "running", node.status == "running",
+    guard runStore != nil, record.status == "running", node.status == "running",
       let definition = record.definition.nodes[nodeID], let role = definition.role,
       let binding = record.bindings[role], validateBinding?(binding) == true
     else { throw invalid("Attempt is no longer active") }
@@ -392,18 +392,18 @@ import Observation
   }
 
   private func isDispatchValid(_ id: UUID, nodeID: String, executionID: UUID, binding: WorkflowBindingV2) -> Bool {
-    database != nil && run(id)?.status == "running"
+    runStore != nil && run(id)?.status == "running"
       && run(id)?.nodes[nodeID]?.attemptID == executionID
       && run(id)?.nodes[nodeID]?.status == "running" && validateBinding?(binding) == true
   }
 
   private func createPacket(_ arguments: [String: JSONValue], runID: UUID) throws -> [String: JSONValue] {
-    guard let content = arguments["briefing"]?.v2String, !content.isEmpty, let database else {
+    guard let content = arguments["briefing"]?.v2String, !content.isEmpty, let runStore else {
       throw invalid("Missing briefing")
     }
     let packetID = UUID().uuidString
     let digest = SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()
-    let folder = database.root.appendingPathComponent("artifacts/\(runID.uuidString)")
+    let folder = runStore.root.appendingPathComponent("artifacts/\(runID.uuidString)")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let url = folder.appendingPathComponent(packetID + ".md")
     try Data(content.utf8).write(to: url, options: [.withoutOverwriting])
@@ -496,10 +496,10 @@ import Observation
   private func persist(_ snapshot: WorkflowRunV2) throws {
     var record = snapshot
     for nodeID in record.nodes.keys { record.nodes[nodeID]?.synchronizeExecution() }
-    guard let database else { throw invalid("Workflow database is unavailable") }
-    do { try database.save(record) } catch {
+    guard let runStore else { throw invalid("Workflow storage is unavailable") }
+    do { try runStore.save(record) } catch {
       issues.append(error.localizedDescription)
-      self.database = nil
+      self.runStore = nil
       throw error
     }
     if let index = runs.firstIndex(where: { $0.id == record.id }) {
@@ -520,7 +520,7 @@ import Observation
     record.event("failed", error.localizedDescription)
     do { try persist(record) } catch {
       issues.append(error.localizedDescription)
-      database = nil
+      runStore = nil
     }
   }
 

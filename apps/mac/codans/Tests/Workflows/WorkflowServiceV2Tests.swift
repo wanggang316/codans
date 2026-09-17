@@ -220,7 +220,7 @@ import Testing
     var inspected = false
     service.validateBinding = { _ in true }
     service.send = { _, prompt, canDispatch in
-      let persisted = try #require(try WorkflowDatabaseV2(root: directory).load().first)
+      let persisted = try #require(try WorkflowRunStoreV2(root: directory).load().first)
       let execution = try #require(persisted.nodes["review"]?.executions?.last)
       let request = try #require(execution.request)
       #expect(request.prompt == prompt)
@@ -434,13 +434,18 @@ import Testing
     }
     let events = try String(contentsOf: folder.appendingPathComponent("events.jsonl"), encoding: .utf8)
     #expect(events.split(separator: "\n").count == service.run(id)?.events.count)
-    // Inspection files are projections, repaired from the authoritative snapshot.
-    try Data("stale".utf8).write(to: folder.appendingPathComponent("run.json"))
+    // Detail files are projections; run.json is the authoritative snapshot.
+    try Data("stale".utf8).write(to: nodeFolder.appendingPathComponent("execution.json"))
     let restored = WorkflowServiceV2(root: directory)
     let snapshot = try JSONDecoder().decode(
       WorkflowRunV2.self,
       from: Data(contentsOf: folder.appendingPathComponent("run.json")))
     #expect(snapshot == restored.run(id))
+    let repaired = try JSONDecoder().decode(
+      WorkflowNodeExecutionV2.self,
+      from: Data(contentsOf: nodeFolder.appendingPathComponent("execution.json")))
+    #expect(repaired == restored.run(id)?.nodes["review"]?.execution)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("runs.sqlite").path))
   }
 
   @Test func unavailableArchivePreventsDispatch() throws {
@@ -479,6 +484,58 @@ import Testing
     service.advance(id)
     for _ in 0..<30 { await Task.yield() }
     #expect(service.issues.count == count)
+  }
+
+  @Test func fileStoreReadsSnapshotsWithoutOpeningDatabaseFiles() async throws {
+    let directory = root()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let service = WorkflowServiceV2(root: directory)
+    let id = try service.start(
+      definition: WorkflowDefinitionParserV2.parse(decisionSource), source: decisionSource,
+      title: "File-only run", inputs: [:], bindings: [:])
+    await settle { service.run(id)?.status == "waiting" }
+    try service.decide(id: id, nodeID: "decision", decision: "accept", reason: "Stored in files")
+    await settle { service.run(id)?.status == "succeeded" }
+    let unrelatedFile = directory.appendingPathComponent("runs.sqlite")
+    let marker = Data("not a database; must never be opened or modified".utf8)
+    try marker.write(to: unrelatedFile)
+    let restored = WorkflowServiceV2(root: directory)
+    #expect(restored.issues.isEmpty)
+    #expect(restored.run(id) == service.run(id))
+    #expect(try Data(contentsOf: unrelatedFile) == marker)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("runs.sqlite-wal").path))
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("runs.sqlite-shm").path))
+  }
+
+  @Test func invalidSnapshotIsReportedAndNeverOverwritten() async throws {
+    let directory = root()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let service = WorkflowServiceV2(root: directory)
+    let id = try service.start(
+      definition: WorkflowDefinitionParserV2.parse(decisionSource), source: decisionSource,
+      title: "Invalid snapshot", inputs: [:], bindings: [:])
+    await settle { service.run(id)?.status == "waiting" }
+    let snapshot = directory.appendingPathComponent("artifacts/\(id.uuidString)/run.json")
+    let corrupt = Data("incomplete JSON".utf8)
+    try corrupt.write(to: snapshot)
+    let restored = WorkflowServiceV2(root: directory)
+    #expect(restored.issues.contains { $0.contains("Cannot read workflow snapshot") })
+    #expect(try Data(contentsOf: snapshot) == corrupt)
+  }
+
+  @Test func failedSnapshotReplacementPreservesCommittedState() async throws {
+    let directory = root()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let service = WorkflowServiceV2(root: directory)
+    let id = try service.start(
+      definition: WorkflowDefinitionParserV2.parse(decisionSource), source: decisionSource,
+      title: "Committed", inputs: [:], bindings: [:])
+    await settle { service.run(id)?.status == "waiting" }
+    var oversized = try #require(service.run(id))
+    oversized.title = String(repeating: "x", count: 17 * 1024 * 1024)
+    let store = try WorkflowRunStoreV2(root: directory)
+    #expect(throws: (any Error).self) { try store.save(oversized) }
+    #expect(try store.load().first?.title == "Committed")
   }
 
   @Test func activeEndpointCannotBeAssignedToAnotherRun() throws {
