@@ -22,7 +22,11 @@ if [ ! -f "${tc_source}" ]; then
   exit 1
 fi
 
-rm -rf "${tc_destination_dir}"
+# Resources/bin is shared with "Embed zmx", which dependency analysis skips
+# when zmx is unchanged, so wiping the directory here would ship a bundle
+# with no zmx. Only clear the CLI names a previous build of this
+# configuration may have left behind (the dev/release rename).
 mkdir -p "${tc_destination_dir}"
+rm -f "${tc_destination_dir}/codans" "${tc_destination_dir}/codans-dev"
 /bin/cp -f "${tc_source}" "${tc_destination}"
 chmod +x "${tc_destination}"

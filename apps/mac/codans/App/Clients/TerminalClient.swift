@@ -57,9 +57,18 @@ nonisolated struct TerminalClient: Sendable {
   /// events drop under per-subscriber backpressure.
   var events: @MainActor @Sendable () -> AsyncStream<TerminalEvent>
 
-  enum Error: Swift.Error, Equatable, Sendable {
+  nonisolated enum Error: LocalizedError, Equatable, Sendable {
     case worktreeNotFound(WorktreeID)
     case paneNotFound(PaneID)
+
+    var errorDescription: String? {
+      switch self {
+      // The live bridge throws `worktreeNotFound` for any missing link in the
+      // project → worktree → tab → pane path, so name the pane, not the level.
+      case .worktreeNotFound, .paneNotFound:
+        return "This pane no longer exists in the workspace."
+      }
+    }
   }
 
   /// Gap between the typed text and the Return that submits it. Long enough

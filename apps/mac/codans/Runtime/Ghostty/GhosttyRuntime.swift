@@ -889,7 +889,7 @@ final class GhosttyRuntime {
   }
 }
 
-enum GhosttyError: Error, Equatable, Sendable, CustomStringConvertible {
+nonisolated enum GhosttyError: LocalizedError, Equatable, Sendable, CustomStringConvertible {
   case configInitFailed
   case appInitFailed(reason: String)
   /// `retryable == true` means the caller can re-attempt after a short
@@ -907,6 +907,17 @@ enum GhosttyError: Error, Equatable, Sendable, CustomStringConvertible {
     case .surfaceInitFailed(let reason, let retryable):
       let tail = retryable ? " (retryable)" : ""
       return "surface init failed\(tail): \(reason)"
+    }
+  }
+
+  var errorDescription: String? {
+    switch self {
+    case .configInitFailed:
+      return "The terminal configuration could not be loaded."
+    case .appInitFailed(let reason):
+      return "The terminal engine failed to start: \(reason)"
+    case .surfaceInitFailed(let reason, _):
+      return "The terminal could not be created: \(reason)"
     }
   }
 }
