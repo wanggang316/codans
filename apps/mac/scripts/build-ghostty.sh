@@ -17,6 +17,9 @@ xcframework_path="${ghostty_build_root}/GhosttyKit.xcframework"
 ghostty_resources_path="${ghostty_build_root}/share/ghostty"
 ghostty_terminfo_path="${ghostty_build_root}/share/terminfo"
 
+# shellcheck source=xcode-compat/activate.sh
+source "${script_dir}/xcode-compat/activate.sh"
+
 print_fingerprint() {
   (
     cd "${ghostty_dir}"
@@ -25,6 +28,7 @@ print_fingerprint() {
       git diff --no-ext-diff --no-color HEAD -- . | shasum -a 256
       git ls-files --others --exclude-standard | LC_ALL=C sort | shasum -a 256
       shasum -a 256 "${script_path}" | awk '{print $1}'
+      xcode_compat_fingerprint
       shasum -a 256 "${repo_root}/mise.toml" | awk '{print $1}'
     } | shasum -a 256 | awk '{print $1}'
   )
@@ -108,6 +112,9 @@ fi
 # prime script is idempotent (skips already-cached entries) so it's cheap
 # on rebuilds and mandatory on cold builds.
 ZIG_GLOBAL_CACHE_DIR="${ghostty_global_cache_dir}" "${script_dir}/prime-zig-cache.sh"
+
+# Xcode 26.5+ toolchains break zig 0.15.2; see xcode-compat/activate.sh.
+xcode_compat_activate
 
 cd "${ghostty_dir}"
 # -Dxcframework-target=native produces a single-arch slice matching the

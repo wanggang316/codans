@@ -1,0 +1,9 @@
+#!/bin/bash
+# Answers zig's SDK query with the SDK chosen by ../activate.sh; everything
+# else goes to the real xcrun.
+if [ -n "${CODANS_ZIG_MACOS_SDK:-}" ] && [ "$#" -eq 3 ] &&
+  [ "$1" = "--sdk" ] && [ "$2" = "macosx" ] && [ "$3" = "--show-sdk-path" ]; then
+  printf '%s\n' "${CODANS_ZIG_MACOS_SDK}"
+  exit 0
+fi
+exec /usr/bin/xcrun "$@"

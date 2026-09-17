@@ -3,6 +3,10 @@
 ## Quick Start
 
 ```bash
+# One-time per machine
+brew install mise                               # tool version manager; everything below runs through it
+xcodebuild -downloadComponent MetalToolchain    # Xcode 26 ships `metal` separately; Ghostty's shader build needs it
+
 # One-time per worktree (fresh clone or `git worktree add`)
 mise trust . apps/mac                           # trust mise config for this + apps/mac cwd
 make bootstrap                                  # init submodules (ghostty, git-wt) + mise install (tuist/zig/swiftlint/xcbeautify/xcsift)
@@ -20,6 +24,8 @@ make mac-check                                  # swift-format in-place + lint
 Multi-worktree tip: `ln -s <main>/apps/mac/.build/ghostty apps/mac/.build/ghostty` avoids re-compiling Ghostty (~3.9 GB, ~20 min first time) in every new worktree. `build-ghostty.sh` primes Zig's cache via curl automatically (Zig 0.15.2's TLS handshake is rejected by Cloudflare on `deps.files.ghostty.org`; the prime step is idempotent and a no-op on cache hits).
 
 Requires Xcode **26.0+** (pinned via `apps/mac/Tuist.swift: compatibleXcodeVersions: .upToNextMajor("26.0")`).
+
+On Xcode 26.5+, zig 0.15.2 cannot build with the stock toolchain; `build-ghostty.sh` / `build-zmx.sh` detect this and route zig through `apps/mac/scripts/xcode-compat/` automatically. That needs an installed macOS SDK whose `libSystem.tbd` still lists `arm64-macos` (e.g. the Command Line Tools' `MacOSX15.4.sdk`). Details: [lessons-learned](docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-5-and-26-6.md).
 
 ## Architecture Overview
 
