@@ -182,17 +182,28 @@ private struct WorkflowNodeDetailViewV2: View {
         VStack(alignment: .leading, spacing: 10) {
           Text(definition.uses).font(.system(size: 10, design: .monospaced))
             .foregroundStyle(.secondary).textSelection(.enabled)
-          if !node.outputs.isEmpty {
-            Text("Result").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-            WorkflowValuesViewV2(values: node.outputs)
-          }
-          if !node.inputs.isEmpty {
-            Text("Inputs").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-            WorkflowValuesViewV2(values: node.inputs)
-          }
-          if let attempt = node.attemptID {
-            Text("Attempt: \(attempt.uuidString)").font(.system(size: 9, design: .monospaced))
-              .foregroundStyle(.tertiary).textSelection(.enabled)
+          if let executions = node.executions, !executions.isEmpty {
+            ForEach(Array(executions.enumerated()), id: \.element.id) { index, execution in
+              if executions.count > 1 {
+                DisclosureGroup {
+                  WorkflowExecutionDetailViewV2(execution: execution)
+                } label: {
+                  HStack {
+                    Text("Execution \(index + 1)")
+                    WorkflowStatusViewV2(status: execution.status)
+                  }
+                }
+              } else {
+                WorkflowExecutionDetailViewV2(execution: execution)
+              }
+            }
+          } else {
+            if !node.outputs.isEmpty {
+              DisclosureGroup("Result") { WorkflowValuesViewV2(values: node.outputs) }
+            }
+            if !node.inputs.isEmpty {
+              DisclosureGroup("Inputs") { WorkflowValuesViewV2(values: node.inputs) }
+            }
           }
         }.padding(.leading, 20).padding(.bottom, 12)
       }
@@ -220,6 +231,136 @@ private struct WorkflowNodeDetailViewV2: View {
         } catch { self.error = error.localizedDescription }
       }.disabled(decision.isEmpty || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         .accessibilityLabel("Submit Decision for \(nodeID)")
+    }
+  }
+}
+
+private struct WorkflowExecutionDetailViewV2: View {
+  let execution: WorkflowNodeExecutionV2
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      if let request = execution.request {
+        WorkflowRequestDetailViewV2(request: request)
+      }
+      if !execution.submissions.isEmpty {
+        DisclosureGroup("Submissions · \(execution.submissions.count)") {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(execution.submissions.enumerated()), id: \.element.id) { index, submission in
+              WorkflowSubmissionDetailViewV2(submission: submission, number: index + 1)
+            }
+          }.padding(.top, 4)
+        }
+      }
+      if !execution.outputs.isEmpty {
+        DisclosureGroup("Result") { WorkflowValuesViewV2(values: execution.outputs) }
+      }
+      if !execution.inputs.isEmpty {
+        DisclosureGroup("Inputs") { WorkflowValuesViewV2(values: execution.inputs) }
+      }
+      if let error = execution.error {
+        Text(error).foregroundStyle(.red).textSelection(.enabled)
+      }
+      DisclosureGroup("Details") {
+        VStack(alignment: .leading, spacing: 5) {
+          Text(execution.id.uuidString).font(.system(size: 10, design: .monospaced))
+            .textSelection(.enabled)
+          if let startedAt = execution.startedAt {
+            timestamp("Started", date: startedAt)
+          }
+          if let finishedAt = execution.finishedAt {
+            timestamp("Finished", date: finishedAt)
+          }
+        }.foregroundStyle(.secondary).padding(.top, 4)
+      }
+    }.font(.system(size: 11)).padding(.top, 3)
+  }
+
+  private func timestamp(_ label: String, date: Date) -> some View {
+    HStack(spacing: 8) {
+      Text(label)
+      Text(date, format: .dateTime.month().day().hour().minute().second()).monospacedDigit()
+    }
+  }
+}
+
+private struct WorkflowRequestDetailViewV2: View {
+  let request: WorkflowAgentRequestV2
+
+  private var statusColor: Color {
+    switch request.status {
+    case "sent": .green
+    case "failed": .red
+    case "interrupted": .orange
+    case "sending": .accentColor
+    default: .secondary
+    }
+  }
+
+  private var statusLabel: String {
+    switch request.status {
+    case "prepared": "Prepared"
+    case "sending": "Sending"
+    case "sent": "Sent to terminal"
+    case "failed": "Send failed"
+    case "interrupted": "Interrupted"
+    case "cancelled": "Cancelled"
+    default: request.status.capitalized
+    }
+  }
+
+  var body: some View {
+    DisclosureGroup {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack {
+          Text(request.sentAt ?? request.preparedAt, format: .dateTime.hour().minute().second())
+            .monospacedDigit().foregroundStyle(.secondary)
+          Spacer()
+          Button("Copy Request") { WorkflowUIFormatV2.copy(request.prompt) }
+        }
+        if let error = request.error {
+          Text(error).foregroundStyle(.red).textSelection(.enabled)
+        }
+        WorkflowValueTextV2(value: .string(request.prompt), isCode: true)
+      }.padding(.top, 4)
+    } label: {
+      HStack(spacing: 8) {
+        Text("Request")
+        if request.status == "sending" {
+          ProgressView().controlSize(.mini)
+        } else {
+          Circle().fill(statusColor).frame(width: 5, height: 5)
+        }
+        Text(statusLabel).font(.system(size: 10)).foregroundStyle(statusColor)
+      }
+    }
+  }
+}
+
+private struct WorkflowSubmissionDetailViewV2: View {
+  let submission: WorkflowSubmissionV2
+  let number: Int
+
+  var body: some View {
+    DisclosureGroup {
+      VStack(alignment: .leading, spacing: 7) {
+        ForEach(Array(submission.issues.enumerated()), id: \.offset) { _, issue in
+          Text(issue).foregroundStyle(.red).textSelection(.enabled)
+        }
+        WorkflowValueTextV2(value: .string(submission.content), isCode: true)
+      }.padding(.top, 4)
+    } label: {
+      HStack(spacing: 6) {
+        Image(systemName: submission.accepted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+          .foregroundStyle(submission.accepted ? Color.green : Color.orange)
+          .accessibilityHidden(true)
+        Text("Submission \(number)")
+        Text(submission.accepted ? "Accepted" : "Rejected")
+          .foregroundStyle(.secondary)
+        Spacer(minLength: 4)
+        Text(submission.receivedAt, format: .dateTime.hour().minute().second())
+          .font(.system(size: 10)).monospacedDigit().foregroundStyle(.tertiary)
+      }
     }
   }
 }

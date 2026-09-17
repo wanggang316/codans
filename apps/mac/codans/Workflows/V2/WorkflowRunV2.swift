@@ -15,6 +15,7 @@ nonisolated struct WorkflowBindingV2: Codable, Equatable, Sendable {
 
 nonisolated struct WorkflowNodeRunV2: Codable, Equatable, Sendable {
   var status = "pending"
+  var executions: [WorkflowNodeExecutionV2]?
   var attemptID: UUID?
   var deliveryID: UUID?
   var paneID: String?
@@ -23,6 +24,70 @@ nonisolated struct WorkflowNodeRunV2: Codable, Equatable, Sendable {
   var error: String?
   var startedAt: Date?
   var finishedAt: Date?
+}
+
+/// One execution of a node; submissions are revisions within that execution.
+nonisolated struct WorkflowNodeExecutionV2: Codable, Equatable, Identifiable, Sendable {
+  var id: UUID
+  var action: String
+  var nodeID: String
+  var status: String
+  var inputs: [String: JSONValue]
+  var outputs: [String: JSONValue] = [:]
+  var error: String?
+  var startedAt: Date?
+  var finishedAt: Date?
+  var request: WorkflowAgentRequestV2?
+  var submissions: [WorkflowSubmissionV2] = []
+}
+
+nonisolated struct WorkflowAgentRequestV2: Codable, Equatable, Sendable {
+  var prompt: String
+  var deliveryID: UUID
+  var paneID: String
+  var sessionID: String?
+  var generation: Int
+  var status = "prepared"
+  var preparedAt = Date()
+  var sentAt: Date?
+  var error: String?
+}
+
+nonisolated struct WorkflowSubmissionV2: Codable, Equatable, Identifiable, Sendable {
+  var id = UUID()
+  var deliveryID: UUID
+  var content: String
+  var accepted: Bool
+  var issues: [String]
+  var receivedAt = Date()
+}
+
+extension WorkflowNodeRunV2 {
+  var execution: WorkflowNodeExecutionV2? {
+    get { executions?.last }
+    set {
+      guard let newValue, let count = executions?.count, count > 0,
+        executions?.last?.id == newValue.id
+      else { return }
+      executions?[count - 1] = newValue
+    }
+  }
+
+  mutating func synchronizeExecution() {
+    guard var current = execution else { return }
+    current.status = status
+    current.inputs = inputs
+    current.outputs = outputs
+    current.error = error
+    current.startedAt = startedAt
+    current.finishedAt = finishedAt
+    if ["cancelled", "interrupted"].contains(status),
+      ["prepared", "sending"].contains(current.request?.status)
+    {
+      current.request?.status = status
+    }
+    execution = current
+  }
 }
 
 nonisolated struct WorkflowEventV2: Codable, Equatable, Identifiable, Sendable {

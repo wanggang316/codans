@@ -66,6 +66,49 @@ import SQLite3
       try? execute("ROLLBACK")
       throw error
     }
+    // Mirrors may lag a committed snapshot, but must never assert an uncommitted
+    // result. Archival failure still prevents subsequent external dispatch.
+    _ = try inspectionDirectory(for: run)
+  }
+
+  func inspectionDirectory(for run: WorkflowRunV2) throws -> URL {
+    let directory = root.appendingPathComponent("artifacts/\(run.id.uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    try encoder.encode(run).write(to: directory.appendingPathComponent("run.json"), options: .atomic)
+    try run.source.write(to: directory.appendingPathComponent("workflow.yaml"), atomically: true, encoding: .utf8)
+    let lineEncoder = JSONEncoder()
+    lineEncoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    var events = Data()
+    for event in run.events {
+      events.append(try lineEncoder.encode(event))
+      events.append(0x0a)
+    }
+    try events.write(to: directory.appendingPathComponent("events.jsonl"), options: .atomic)
+    for node in run.nodes.values {
+      for execution in node.executions ?? [] {
+        let folder = directory.appendingPathComponent("nodes/\(execution.id.uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try encoder.encode(execution).write(to: folder.appendingPathComponent("execution.json"), options: .atomic)
+        try encoder.encode(execution.inputs).write(to: folder.appendingPathComponent("inputs.json"), options: .atomic)
+        try encoder.encode(execution.outputs).write(to: folder.appendingPathComponent("outputs.json"), options: .atomic)
+        if let request = execution.request {
+          try encoder.encode(request).write(to: folder.appendingPathComponent("request.json"), options: .atomic)
+          try request.prompt.write(
+            to: folder.appendingPathComponent("instruction.md"), atomically: true, encoding: .utf8)
+        }
+        if !execution.submissions.isEmpty {
+          let submissions = folder.appendingPathComponent("submissions", isDirectory: true)
+          try FileManager.default.createDirectory(at: submissions, withIntermediateDirectories: true)
+          for submission in execution.submissions {
+            try encoder.encode(submission).write(
+              to: submissions.appendingPathComponent("\(submission.id.uuidString).json"), options: .atomic)
+          }
+        }
+      }
+    }
+    return directory
   }
 
   private func execute(_ sql: String) throws {

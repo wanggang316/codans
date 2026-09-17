@@ -33,11 +33,14 @@ import Observation
         for nodeID in restored[index].nodes.keys
         where ["running", "waiting"].contains(restored[index].nodes[nodeID]?.status) {
           restored[index].nodes[nodeID]?.status = "interrupted"
+          restored[index].nodes[nodeID]?.finishedAt = Date()
+          restored[index].nodes[nodeID]?.synchronizeExecution()
         }
         restored[index].event(
           "interrupted", "Application restarted. External actions were not replayed.")
         try store.save(restored[index])
       }
+      for record in restored { _ = try store.inspectionDirectory(for: record) }
       runs = restored.sorted { $0.createdAt > $1.createdAt }
     } catch {
       issues.append(error.localizedDescription)
@@ -47,16 +50,10 @@ import Observation
 
   func run(_ id: UUID) -> WorkflowRunV2? { runs.first { $0.id == id } }
 
-  /// Materialize an inspection snapshot beside the run's artifacts on explicit request.
+  /// Refresh and reveal the same readable archive maintained at every transition.
   func inspectionDirectory(for id: UUID) throws -> URL {
     guard let database, let run = run(id) else { throw invalid("Run is unavailable") }
-    let directory = database.root.appendingPathComponent("artifacts/\(id.uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-    try encoder.encode(run).write(to: directory.appendingPathComponent("run.json"), options: .atomic)
-    try run.source.write(to: directory.appendingPathComponent("workflow.yaml"), atomically: true, encoding: .utf8)
-    return directory
+    return try database.inspectionDirectory(for: run)
   }
 
   func start(
@@ -120,7 +117,7 @@ import Observation
   }
 
   func advance(_ id: UUID) {
-    guard !dispatching.contains(id), let record = run(id), record.status == "running" else {
+    guard database != nil, !dispatching.contains(id), let record = run(id), record.status == "running" else {
       return
     }
     dispatching.insert(id)
@@ -128,7 +125,7 @@ import Observation
       guard let self else { return }
       defer {
         self.dispatching.remove(id)
-        if let current = self.run(id), current.status == "running",
+        if self.database != nil, let current = self.run(id), current.status == "running",
           !current.nodes.values.contains(where: { $0.status == "running" })
         {
           self.advance(id)
@@ -177,6 +174,11 @@ import Observation
       let binding = record.bindings[role], validateBinding?(binding) == true
     else { throw invalid("Attempt is no longer active") }
     guard content.utf8.count <= 256 * 1024 else { throw invalid("Delivery exceeds 256 KiB") }
+    if let previous = node.execution?.submissions.last(where: {
+      $0.deliveryID == deliveryID && $0.content == content
+    }), !previous.accepted {
+      throw invalid(previous.issues.joined(separator: "\n"))
+    }
     let result: JSONValue
     do {
       if definition.expect?.format == "json" {
@@ -189,11 +191,18 @@ import Observation
       }
     } catch {
       node.error = error.localizedDescription
+      node.execution?.submissions.append(
+        .init(
+          deliveryID: deliveryID, content: content, accepted: false,
+          issues: [error.localizedDescription]))
       record.nodes[nodeID] = node
       record.event("delivery_rejected", error.localizedDescription, node: nodeID)
       try persist(record)
       throw error
     }
+    node.execution?.submissions.append(
+      .init(
+        deliveryID: deliveryID, content: content, accepted: true, issues: []))
     node.deliveryID = deliveryID
     record.nodes[nodeID] = node
     finish(
@@ -262,6 +271,14 @@ import Observation
       record.nodes[nodeID]?.attemptID = UUID()
       record.nodes[nodeID]?.startedAt = Date()
       record.nodes[nodeID]?.status = "running"
+      if let node = record.nodes[nodeID], let executionID = node.attemptID {
+        record.nodes[nodeID]?.executions =
+          (node.executions ?? []) + [
+            WorkflowNodeExecutionV2(
+              id: executionID, action: definition.uses, nodeID: nodeID, status: "running",
+              inputs: arguments, startedAt: node.startedAt)
+          ]
+      }
       record.event("started", "Started \(definition.uses)", node: nodeID)
       try persist(record)
       if try await execute(definition, nodeID: nodeID, record: record) == false { return }
@@ -328,19 +345,55 @@ import Observation
     guard let role = definition.role, let binding = record.bindings[role], let pane = binding.paneID,
       validateBinding?(binding) == true, let send
     else { throw invalid("Agent endpoint is unavailable") }
+    guard let executionID = record.nodes[nodeID]?.attemptID else {
+      throw invalid("Missing node execution")
+    }
     var updated = record
+    let deliveryID = UUID()
+    let prompt = requestPrompt(record, nodeID: nodeID, deliveryID: deliveryID)
     updated.nodes[nodeID]?.paneID = pane.description
-    updated.event("dispatch", "Request assigned to \(role) at \(pane.description).", node: nodeID)
+    updated.nodes[nodeID]?.execution?.request = .init(
+      prompt: prompt, deliveryID: deliveryID, paneID: pane.description,
+      sessionID: binding.sessionID, generation: binding.generation)
+    updated.event("request_prepared", "Request prepared for \(role).", node: nodeID)
     try persist(updated)
-    try await send(
-      binding, requestPrompt(updated, nodeID: nodeID),
-      { [weak self] in
-        self?.isDispatchValid(record.id, nodeID: nodeID, binding: binding) == true
-      })
+    updated.nodes[nodeID]?.execution?.request?.status = "sending"
+    updated.event("request_sending", "Sending request to \(role).", node: nodeID)
+    try persist(updated)
+    do {
+      try await send(
+        binding, prompt,
+        { [weak self] in
+          self?.isDispatchValid(record.id, nodeID: nodeID, executionID: executionID, binding: binding) == true
+        })
+    } catch {
+      try recordDispatchCompletion(record.id, nodeID: nodeID, executionID: executionID, error: error)
+      if run(record.id)?.nodes[nodeID]?.status == "succeeded" { return }
+      throw error
+    }
+    try recordDispatchCompletion(record.id, nodeID: nodeID, executionID: executionID, error: nil)
   }
 
-  private func isDispatchValid(_ id: UUID, nodeID: String, binding: WorkflowBindingV2) -> Bool {
+  private func recordDispatchCompletion(_ id: UUID, nodeID: String, executionID: UUID, error: Error?) throws {
+    guard var current = run(id), current.nodes[nodeID]?.attemptID == executionID,
+      let status = current.nodes[nodeID]?.status,
+      ["running", "succeeded"].contains(status)
+    else { return }
+    // A delivery can arrive while the transport is still returning. Never replace
+    // that newer state with the snapshot captured before awaiting the send.
+    current.nodes[nodeID]?.execution?.request?.status = error == nil ? "sent" : "failed"
+    current.nodes[nodeID]?.execution?.request?.error = error?.localizedDescription
+    if error == nil { current.nodes[nodeID]?.execution?.request?.sentAt = Date() }
+    current.event(
+      error == nil ? "request_sent" : "request_failed",
+      error?.localizedDescription ?? "Terminal submission completed; agent acceptance requires a delivery.",
+      node: nodeID)
+    try persist(current)
+  }
+
+  private func isDispatchValid(_ id: UUID, nodeID: String, executionID: UUID, binding: WorkflowBindingV2) -> Bool {
     database != nil && run(id)?.status == "running"
+      && run(id)?.nodes[nodeID]?.attemptID == executionID
       && run(id)?.nodes[nodeID]?.status == "running" && validateBinding?(binding) == true
   }
 
@@ -372,11 +425,11 @@ import Observation
     return ["readiness": .string(blockers.isEmpty ? "ready" : "blocked")]
   }
 
-  private func requestPrompt(_ record: WorkflowRunV2, nodeID: String) -> String {
+  private func requestPrompt(_ record: WorkflowRunV2, nodeID: String, deliveryID: UUID) -> String {
     let node = record.nodes[nodeID]!
     let definition = record.definition.nodes[nodeID]!
     let attempt = node.attemptID!.uuidString
-    let delivery = UUID().uuidString
+    let delivery = deliveryID.uuidString
     let command = cli
     let expected = definition.expect.map { (try? JSONValue.encoded($0).v2Text) ?? "" } ?? "markdown"
     return """
@@ -391,9 +444,9 @@ import Observation
       \(expected)
 
       You must explicitly submit the result using the terminal CLI. A chat reply does not complete the node.
-      First confirm the allocated attempt (idempotent):
+      First confirm the allocated execution (idempotent):
       \(command) workflow claim \(record.id.uuidString) --step \(nodeID)
-      Your allocated attempt ID is \(attempt). Use this exact ID.
+      Your allocated execution ID is \(attempt). Use this exact ID.
       Then pipe the complete result (raw JSON for json format, Markdown for markdown format) to:
       \(command) workflow deliver \(record.id.uuidString) --attempt \(attempt) --delivery-id \(delivery) --content -
       Use a single-quoted heredoc delimiter so content is not shell-expanded. If validation rejects the result, correct it and submit again with the same IDs. Do not claim other nodes. Do not execute any continuation beyond this request.
@@ -440,7 +493,9 @@ import Observation
     record.event("completed", "Accepted node outputs.", node: nodeID)
   }
 
-  private func persist(_ record: WorkflowRunV2) throws {
+  private func persist(_ snapshot: WorkflowRunV2) throws {
+    var record = snapshot
+    for nodeID in record.nodes.keys { record.nodes[nodeID]?.synchronizeExecution() }
     guard let database else { throw invalid("Workflow database is unavailable") }
     do { try database.save(record) } catch {
       issues.append(error.localizedDescription)

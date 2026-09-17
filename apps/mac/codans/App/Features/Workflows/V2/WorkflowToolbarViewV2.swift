@@ -104,6 +104,17 @@ struct WorkflowHistoryToolbarViewV2: View {
 
   private var historyPanel: some View {
     VStack(spacing: 0) {
+      if let issue = appState.workflowServiceV2.issues.last {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Workflow storage unavailable").font(.system(size: 12, weight: .semibold))
+          Text("Execution is paused. \(issue)").font(.system(size: 11)).textSelection(.enabled)
+        }
+        .foregroundStyle(.red)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.06))
+        Divider()
+      }
       HStack(spacing: 0) {
         historyList.frame(width: 220)
         Divider()
