@@ -13,14 +13,7 @@ struct WorkflowRoleSelectionV2 {
 @MainActor
 struct WorkflowLibraryViewV2: View {
   let catalog: WorkflowCatalogV2
-  let profiles: [AgentProfile]
-  let panes: [WorkflowPaneChoice]
-  let workspaces: [WorkflowWorkspaceChoice]
   let creationRequest: UUID?
-  let onStart:
-    (WorkflowDefinitionV2, String, String, [String: JSONValue], [String: WorkflowRoleSelectionV2])
-      throws -> UUID
-  var onRunStarted: (UUID) -> Void = { _ in }
   var onCreationRequestHandled: () -> Void = {}
 
   private enum Destination: Hashable {
@@ -32,7 +25,6 @@ struct WorkflowLibraryViewV2: View {
   @State private var showingNew = false
   @State private var newName = ""
   @State private var errorMessage: String?
-  @State private var startingEntry: WorkflowCatalogV2.Entry?
 
   private var isShowingError: Binding<Bool> {
     Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
@@ -42,7 +34,7 @@ struct WorkflowLibraryViewV2: View {
     NavigationStack(path: $path) {
       Form {
         Section {
-          Text("Choose a workflow to review its roles, edit its YAML, or start a run.")
+          Text("Manage reusable workflow definitions, roles, and YAML.")
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -74,18 +66,6 @@ struct WorkflowLibraryViewV2: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .sheet(isPresented: $showingNew) { newDefinitionForm }
-    .sheet(item: $startingEntry) { entry in
-      if let definition = entry.definition {
-        WorkflowRunFormViewV2(
-          definition: definition, source: entry.source, profiles: profiles, panes: panes,
-          workspaces: workspaces,
-          onStart: onStart, onCancel: { startingEntry = nil },
-          onStarted: { id in
-            startingEntry = nil
-            onRunStarted(id)
-          })
-      }
-    }
     .alert("Workflow Error", isPresented: isShowingError) {
       Button("OK") { errorMessage = nil }
     } message: {
@@ -129,7 +109,7 @@ struct WorkflowLibraryViewV2: View {
       if let entry = catalog.entries.first(where: { $0.id == id }) {
         WorkflowDefinitionDetailViewV2(
           entry: entry, catalog: catalog,
-          onRun: { startingEntry = entry }, onDuplicate: { duplicate(entry) }
+          onDuplicate: { duplicate(entry) }
         )
         .id(entry.id)
         .navigationTitle(entry.name)
