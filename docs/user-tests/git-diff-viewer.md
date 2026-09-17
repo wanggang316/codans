@@ -87,3 +87,23 @@ Component: 6 JavaScript tests, 5 WebKit browser tests, 6 Swift tests, and native
 | Line navigation | New-side line 4 opens Demo.swift in Cursor at Ln 4, Col 1 | PASS |
 
 Evidence: /tmp/codans-diff-native-build.log, /tmp/codans-diff-native-tests.log, /tmp/codans-diff-qa-test/native-result.xcresult; GUI screenshots are in the task transcript. The exported component is pinned to 664e49a. `make mac-check` was run; the two newly introduced image-label violations were fixed and scoped lint passed. The 61 existing repository violations remain. Generated minified highlight.js contains significant trailing whitespace inside a string literal; it is retained from the reproducible component build rather than trimmed. Source diff checks exclude that generated asset.
+
+
+## Sidebar tree revision (2026-09-17)
+
+The sidebar now owns Changes/Outgoing, file filtering, and Tree/List presentation. Tree is the default; macOS content-type icons decorate file rows. The earlier toolbar-comparison cases above describe the previous revision.
+
+Host build-for-testing and 33 focused tests in 8 suites passed, including six tree-model cases and per-window presentation restoration. The tree cases cover nested paths, natural ordering, duplicate basenames, deleted/renamed files, Unicode/whitespace, file-to-directory transitions, and directory/file identity collisions. Component sources are unchanged from the previous verified revision.
+
+| GUI case | Observation | Result |
+|---|---|---|
+| Native tree | Expanded docs, Sources/App, Sources/Models, and Tests show nested files and macOS type icons | PASS |
+| Selection and refresh | Selecting Model.swift displays Sources/Models/Model.swift; collapsing Sources and refreshing preserves collapse and preview | PASS |
+| Search | main.swift reveals both Sources/App and Tests with their ancestors | PASS |
+| Tree/list switch | List shows parent paths for duplicate names; selecting Tests/main.swift and switching back retains the selection | PASS |
+| Sidebar modes/base | Outgoing shows only committed.txt against main; explicit main comparison works through the sidebar popover | PASS |
+| Window restoration | Closing Diff leaves the main window intact; reopening restores Outgoing, main, and List | PASS |
+| Appearance and sizing | Tree, mode controls, and code remain visible in half-screen and dark appearance; Auto and previous size restored | PASS |
+| Editor handoff | Tree-row Open in Editor opens Sources/Models/Model.swift in Cursor; URL and line 1 verified | PASS |
+
+Fixtures include Swift, Markdown, JSON, duplicate basenames, and nested directories. Evidence: `/tmp/codans-diff-tree-final-build.log`, `/tmp/codans-diff-tree-tests.log`, `/tmp/codans-diff-qa-test/tree-result.xcresult`, plus GUI observations in the task transcript. `make mac-check` reports the same 61 existing violations outside the changed files; unrelated formatter edits were restored. No remote-host GUI or additional Agent CLI matrix was rerun for this sidebar-only revision.

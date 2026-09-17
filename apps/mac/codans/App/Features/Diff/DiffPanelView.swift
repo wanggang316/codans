@@ -6,21 +6,14 @@ import SwiftUI
 struct DiffPanelView: View {
   @Bindable var store: StoreOf<DiffFeature>
   @Environment(\.colorScheme) private var colorScheme
-  @State private var showingBase = false
 
   private var outgoing: Bool { store.state.scope == .outgoing }
   private var selectedFile: GitComparisonFile? {
     store.snapshot?.files.first { $0.id == store.selectedFileID }
   }
-  private var files: [GitComparisonFile] {
-    (store.snapshot?.files ?? []).filter {
-      store.filter.isEmpty || $0.path.localizedCaseInsensitiveContains(store.filter)
-    }
-  }
-
   var body: some View {
     HSplitView {
-      fileList.frame(minWidth: 200, idealWidth: 240, maxWidth: 280)
+      DiffFileSidebar(store: store).frame(minWidth: 220, idealWidth: 260, maxWidth: 360)
       VStack(spacing: 0) {
         fileHeader
         Divider()
@@ -40,7 +33,7 @@ struct DiffPanelView: View {
 
   private var fileHeader: some View {
     HStack(spacing: 8) {
-      Image(systemName: "doc.text").foregroundStyle(.secondary).accessibilityHidden(true)
+      DiffFileIcon(path: selectedFile?.path ?? "")
       Text(selectedFile?.path ?? "Changes")
         .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
         .help(selectedFile?.path ?? "Select a file")
@@ -54,98 +47,6 @@ struct DiffPanelView: View {
     .padding(.horizontal, 12)
     .frame(height: 32)
     .background(Color(nsColor: .controlBackgroundColor))
-  }
-
-  private var fileList: some View {
-    VStack(spacing: 0) {
-      HStack {
-        Text("Changed Files").font(.system(size: 11, weight: .semibold))
-        Spacer()
-        Text("\(store.snapshot?.files.count ?? 0)").font(.system(size: 11).monospacedDigit())
-      }
-      .foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 32)
-      Divider()
-      HStack(spacing: 6) {
-        Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-        TextField("Filter files", text: Binding(get: { store.filter }, set: { store.send(.filterChanged($0)) }))
-          .textFieldStyle(.plain)
-          .accessibilityIdentifier("diff-file-filter")
-      }
-      .font(.system(size: 12))
-      .padding(.horizontal, 8).padding(.vertical, 5)
-      .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-      .padding(8)
-      List(selection: Binding(get: { store.selectedFileID }, set: { if let id = $0 { store.send(.selectFile(id)) } })) {
-        ForEach(files) { file in
-          HStack(spacing: 8) {
-            Image(systemName: "doc.text").foregroundStyle(.secondary).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-              Text((file.path as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle)
-              let directory = (file.path as NSString).deletingLastPathComponent
-              if !directory.isEmpty {
-                Text(directory).font(.system(size: 11)).foregroundStyle(.secondary)
-                  .lineLimit(1).truncationMode(.middle)
-              }
-            }
-            Spacer(minLength: 4)
-            Text(file.status).font(.system(size: 10, weight: .semibold))
-              .foregroundStyle(statusColor(file.status))
-          }
-          .font(.system(size: 13))
-          .tag(file.id)
-          .help(file.path)
-          .contextMenu {
-            Button("Open in Editor") {
-              store.send(.selectFile(file.id))
-              store.send(.openFile("new", nil))
-            }
-            .disabled(file.status == "D")
-          }
-        }
-      }
-      .listStyle(.sidebar)
-      .environment(\.defaultMinListRowHeight, 28)
-      .overlay {
-        if files.isEmpty, store.snapshot?.files.isEmpty == false {
-          Text("No matching files").font(.caption).foregroundStyle(.secondary)
-        }
-      }
-      if outgoing {
-        Divider()
-        Button {
-          showingBase.toggle()
-        } label: {
-          HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.branch").accessibilityHidden(true)
-            Text("Against \(store.snapshot?.baseLabel ?? "automatic")").lineLimit(1).truncationMode(.middle)
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.down").font(.system(size: 9)).accessibilityHidden(true)
-          }
-          .font(.system(size: 11)).foregroundStyle(.secondary)
-          .padding(.horizontal, 12).frame(height: 30)
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Choose the comparison base")
-        .popover(isPresented: $showingBase) {
-          VStack(alignment: .leading, spacing: 12) {
-            Text("Compare Against").font(.headline)
-            TextField(
-              "Automatic base branch", text: Binding(get: { store.base }, set: { store.send(.baseChanged($0)) })
-            )
-            .textFieldStyle(.roundedBorder).accessibilityIdentifier("diff-base")
-            .onSubmit { applyBase() }
-            HStack {
-              Text("Uses local Git refs").font(.caption).foregroundStyle(.secondary)
-              Spacer()
-              Button("Compare") { applyBase() }.keyboardShortcut(.defaultAction)
-            }
-          }
-          .padding(16).frame(width: 280)
-        }
-      }
-    }
-    .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private var content: some View {
@@ -178,21 +79,6 @@ struct DiffPanelView: View {
           message("Select a file to view its changes.", symbol: "doc.text")
         }
       }
-    }
-  }
-
-  private func applyBase() {
-    store.send(.refresh)
-    showingBase = false
-  }
-
-  private func statusColor(_ status: String) -> Color {
-    switch status {
-    case "A": ThemeGit.kindAdded
-    case "D": ThemeGit.kindDeleted
-    case "M": ThemeGit.kindModified
-    case "R": ThemeGit.kindRenamed
-    default: .secondary
     }
   }
 

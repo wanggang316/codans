@@ -18,6 +18,14 @@ s=(p/'Demo.swift').read_text().replace('"base"','"staged"');(p/'Demo.swift').wri
 git(p,'mv','rename.txt','renamed file.txt');(p/'delete.txt').unlink();(p/'mode.sh').chmod(0o755)
 (p/'new file.txt').write_text('untracked content\n');(p/'binary.dat').write_bytes(b'\0\x01\xff');(p/'large.txt').write_text('x'*1000001);(p/'link.txt').symlink_to('Demo.swift');(p/'empty.txt').write_text('')
 (p/'odd\tname.txt').write_text('<script>window.test=1</script>\n')
+for name, content in {
+ 'Sources/App/main.swift': 'import Foundation\nprint("App")\n',
+ 'Sources/Models/Model.swift': 'struct Model { let name: String }\n',
+ 'Tests/main.swift': 'import Testing\n',
+ 'docs/README.md': '# Review fixture\n',
+ 'config.json': '{"enabled":true}\n',
+}.items():
+ file=p/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text(content)
 q=init('clean-fixture');(q/'clean.txt').write_text('clean\n');git(q,'add','.');git(q,'commit','-m','clean baseline')
 u=init('unborn-fixture');(u/'first.txt').write_text('first file\n')
 b=init('no-base-fixture');git(b,'branch','-m','topic');(b/'one.txt').write_text('one\n');git(b,'add','.');git(b,'commit','-m','root')

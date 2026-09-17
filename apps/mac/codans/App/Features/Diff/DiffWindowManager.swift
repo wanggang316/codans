@@ -75,7 +75,8 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
 
     let state = entry.value.store.state
     preferences[entry.key] = DiffFeature.Preference(
-      scope: state.scope, base: state.base, selectedFileID: state.selectedFileID, layout: state.layout)
+      scope: state.scope, base: state.base, selectedFileID: state.selectedFileID,
+      filePresentation: state.filePresentation, layout: state.layout)
     entry.value.store.send(.close)
     // Releasing the hosting view tears down WKWebView; only small preferences survive.
     window.contentView = nil

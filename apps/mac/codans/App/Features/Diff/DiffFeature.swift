@@ -11,6 +11,7 @@ struct DiffFeature {
     var worktreeID: WorktreeID?
     var path: String?
     var isVisible = false
+    var filePresentation: FilePresentation = .tree
     var layout = "unified"
     var scope: GitComparisonScope = .all
     var base = ""
@@ -37,14 +38,18 @@ struct DiffFeature {
     var scope: GitComparisonScope
     var base: String
     var selectedFileID: String?
+    var filePresentation: FilePresentation = .tree
     var layout = "unified"
   }
+
+  enum FilePresentation: String, Equatable, Sendable { case tree, list }
 
   enum Action: Equatable {
     case contextChanged(ProjectID?, WorktreeID?, String?)
     case prBaseChanged(WorktreeID, String?, URL?)
     case toggle
     case close
+    case filePresentationChanged(FilePresentation)
     case layoutChanged(String)
     case scopeChanged(GitComparisonScope)
     case baseChanged(String)
@@ -73,7 +78,8 @@ struct DiffFeature {
         guard state.worktreeID != worktree || state.path != path else { return .none }
         if let id = state.worktreeID {
           state.preferences[id] = Preference(
-            scope: state.scope, base: state.base, selectedFileID: state.selectedFileID, layout: state.layout)
+            scope: state.scope, base: state.base, selectedFileID: state.selectedFileID,
+            filePresentation: state.filePresentation, layout: state.layout)
         }
         let preference = worktree.flatMap { state.preferences[$0] }
         state.projectID = project
@@ -81,6 +87,7 @@ struct DiffFeature {
         state.path = path
         state.scope = preference?.scope ?? .all
         state.layout = preference?.layout ?? "unified"
+        state.filePresentation = preference?.filePresentation ?? .tree
         state.base = preference?.base ?? ""
         state.appliedBase = state.base
         state.selectedFileID = preference?.selectedFileID
@@ -116,6 +123,9 @@ struct DiffFeature {
         return .merge(
           .cancel(id: CancelID.timer), .cancel(id: CancelID.refresh), .cancel(id: CancelID.content),
           .cancel(id: CancelID.editor))
+      case .filePresentationChanged(let presentation):
+        state.filePresentation = presentation
+        return .none
       case .layoutChanged(let layout):
         guard layout == "unified" || layout == "split" else { return .none }
         state.layout = layout

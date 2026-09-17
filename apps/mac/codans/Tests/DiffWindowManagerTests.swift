@@ -60,11 +60,11 @@ struct DiffWindowManagerTests {
       firstStore.send(.baseChanged("release"))
       let toolbar = try #require(firstWindow.toolbar)
       #expect(firstWindow.toolbarStyle == .unifiedCompact)
-      let comparison = try #require(
-        toolbar.items.first { $0.itemIdentifier.rawValue == "diff.comparison" } as? NSToolbarItemGroup)
-      comparison.selectedIndex = 1
-      let compareAction = try #require(comparison.action)
-      #expect(NSApp.sendAction(compareAction, to: comparison.target, from: comparison))
+      #expect(!toolbar.items.contains { $0.itemIdentifier.rawValue == "diff.comparison" })
+      firstStore.send(.scopeChanged(.outgoing))
+      #expect(firstStore.filePresentation == .tree)
+      firstStore.send(.filePresentationChanged(.list))
+      #expect(secondStore.filePresentation == .tree)
       let layout = try #require(
         toolbar.items.first { $0.itemIdentifier.rawValue == "diff.layout" } as? NSToolbarItemGroup)
       layout.selectedIndex = 1
@@ -94,6 +94,7 @@ struct DiffWindowManagerTests {
       #expect(reopenedStore.state.scope == .outgoing)
       #expect(reopenedStore.base == "release")
       #expect(reopenedStore.layout == "split")
+      #expect(reopenedStore.filePresentation == .list)
       #expect(reopenedStore.selectedFileID == files[1].id)
       try await waitUntil { reopenedStore.snapshot != nil && !reopenedStore.contentLoading }
       #expect(reopenedStore.selectedFileID == files[1].id)

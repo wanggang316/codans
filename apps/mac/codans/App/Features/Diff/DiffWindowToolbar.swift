@@ -6,10 +6,8 @@ import Observation
 @MainActor
 final class DiffWindowToolbar: NSObject, NSToolbarDelegate {
   private let store: StoreOf<DiffFeature>
-  private let comparisonID = NSToolbarItem.Identifier("diff.comparison")
   private let layoutID = NSToolbarItem.Identifier("diff.layout")
   private let refreshID = NSToolbarItem.Identifier("diff.refresh")
-  private var comparison: NSToolbarItemGroup?
   private var layout: NSToolbarItemGroup?
 
   init(store: StoreOf<DiffFeature>) {
@@ -27,7 +25,7 @@ final class DiffWindowToolbar: NSObject, NSToolbarDelegate {
   }
 
   func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-    [comparisonID, .flexibleSpace, layoutID, refreshID]
+    [.flexibleSpace, layoutID, refreshID]
   }
 
   func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -39,14 +37,6 @@ final class DiffWindowToolbar: NSObject, NSToolbarDelegate {
     willBeInsertedIntoToolbar flag: Bool
   ) -> NSToolbarItem? {
     switch identifier {
-    case comparisonID:
-      let item = NSToolbarItemGroup(
-        itemIdentifier: identifier, titles: ["Changes", "Outgoing"], selectionMode: .selectOne,
-        labels: ["Current changes", "Branch changes"], target: self, action: #selector(changeComparison(_:)))
-      item.label = "Comparison"
-      item.selectedIndex = store.state.scope == .outgoing ? 1 : 0
-      comparison = item
-      return item
     case layoutID:
       let item = NSToolbarItemGroup(
         itemIdentifier: identifier,
@@ -74,17 +64,11 @@ final class DiffWindowToolbar: NSObject, NSToolbarDelegate {
 
   private func synchronize() {
     withObservationTracking {
-      let selectedComparison = store.state.scope == .outgoing ? 1 : 0
       let selectedLayout = store.layout == "split" ? 1 : 0
-      comparison?.selectedIndex = selectedComparison
       layout?.selectedIndex = selectedLayout
     } onChange: { [weak self] in
       Task { @MainActor in self?.synchronize() }
     }
-  }
-
-  @objc private func changeComparison(_ sender: NSToolbarItemGroup) {
-    store.send(.scopeChanged(sender.selectedIndex == 1 ? .outgoing : .all))
   }
 
   @objc private func changeLayout(_ sender: NSToolbarItemGroup) {
