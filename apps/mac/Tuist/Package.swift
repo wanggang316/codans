@@ -21,7 +21,7 @@ let package = Package(
   name: "CodansDependencies",
   dependencies: [
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
-    .package(url: "https://github.com/pointfreeco/swift-composable-architecture", exact: "1.23.1"),
+    .package(url: "https://github.com/pointfreeco/swift-composable-architecture", exact: "1.26.2"),
     // Snapshot-testing harness used by view snapshot tests (e.g. TabChip).
     // Resolved eagerly so any future test target can depend on it without
     // re-triggering dependency resolution.
