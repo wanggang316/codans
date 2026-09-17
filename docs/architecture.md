@@ -234,7 +234,7 @@ User-observable accessibility values are a stable probe contract — validation 
 
 - `mise.toml` pins `tuist`, `zig`, `swiftlint`, `xcbeautify`
 - `scripts/build-ghostty.sh` runs Zig to build `GhosttyKit.xcframework` from the submodule; uses fingerprint-based caching (git HEAD + local diff + mise.toml hash)
-- `scripts/xcode-compat/` lets the pinned zig 0.15.2 build on Xcode 26.5+: `build-ghostty.sh` / `build-zmx.sh` source its `activate.sh`, which probes the SDK and libtool, puts `xcrun` / `libtool` wrappers on PATH only when needed, and clears the zig cache when that mode changes; regression test: `make mac-test-scripts` (see `docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-5-and-26-6.md`)
+- `scripts/xcode-compat/` lets the pinned zig 0.15.2 link on Xcode 26.4+: `build-ghostty.sh` / `build-zmx.sh` source its `activate.sh`, which checks the SDK's `libSystem.tbd` and, only when needed, puts an `xcrun` wrapper on PATH that points zig at an older installed SDK. The companion libtool fix lives in the ghostty fork (backport of upstream #11999). See `docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-4-and-later.md`
 - Top-level `Makefile` orchestrates: `make bootstrap` (submodules + mise), `make build-ghostty`, `make generate` (Tuist), `make build`, `make test`
 
 ### Build & concurrency invariants

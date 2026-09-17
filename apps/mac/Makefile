@@ -1,4 +1,4 @@
-.PHONY: help bootstrap build-ghostty build-zmx generate build run-app format lint check check-rename test test-scripts clean build-cli archive release bump-version regen-completions
+.PHONY: help bootstrap build-ghostty build-zmx generate build run-app format lint check check-rename test clean build-cli archive release bump-version regen-completions
 
 # Use full Xcode.app when xcode-select points at CLT only.
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
@@ -20,7 +20,6 @@ help:
 	@echo "  lint             - swiftlint"
 	@echo "  check            - format + lint"
 	@echo "  test             - Run Swift unit-test schemes (Codans/CodansCore/CodansKit)"
-	@echo "  test-scripts     - Run build-script regression tests (zig cache vs. xcode-compat)"
 	@echo "  clean            - Remove workspace + project + Package.resolved"
 
 bootstrap:
@@ -106,9 +105,6 @@ test: generate
 	  xcodebuild test -workspace codans.xcworkspace -scheme "$$scheme" -configuration Debug \
 	    | mise exec -- xcbeautify || exit $$?; \
 	done
-
-test-scripts:
-	./scripts/test-xcode-compat.sh
 
 clean:
 	rm -rf .build codans.xcworkspace codans.xcodeproj Tuist/Package.resolved

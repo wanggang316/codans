@@ -25,7 +25,7 @@ Multi-worktree tip: `ln -s <main>/apps/mac/.build/ghostty apps/mac/.build/ghostt
 
 Requires Xcode **26.0+** (pinned via `apps/mac/Tuist.swift: compatibleXcodeVersions: .upToNextMajor("26.0")`).
 
-On Xcode 26.5+, zig 0.15.2 cannot build with the stock toolchain; `build-ghostty.sh` / `build-zmx.sh` detect this and route zig through `apps/mac/scripts/xcode-compat/` automatically. That needs an installed macOS SDK whose `libSystem.tbd` still lists `arm64-macos` (e.g. the Command Line Tools' `MacOSX15.4.sdk`). Details: [lessons-learned](docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-5-and-26-6.md).
+On Xcode 26.4+, zig 0.15.2 cannot link against the stock macOS SDK; `build-ghostty.sh` / `build-zmx.sh` detect this and point zig at an older installed SDK via `apps/mac/scripts/xcode-compat/`. That needs an SDK whose `libSystem.tbd` still lists `arm64-macos` (e.g. the Command Line Tools' `MacOSX15.4.sdk`). Details: [lessons-learned](docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-4-and-later.md).
 
 ## Architecture Overview
 

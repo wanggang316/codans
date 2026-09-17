@@ -113,8 +113,8 @@ fi
 # on rebuilds and mandatory on cold builds.
 ZIG_GLOBAL_CACHE_DIR="${ghostty_global_cache_dir}" "${script_dir}/prime-zig-cache.sh"
 
-# Xcode 26.5+ toolchains break zig 0.15.2; see xcode-compat/activate.sh.
-xcode_compat_activate "${ghostty_local_cache_dir}"
+# Xcode 26.4+ SDKs break zig 0.15.2 links; see xcode-compat/activate.sh.
+xcode_compat_activate
 
 cd "${ghostty_dir}"
 # -Dxcframework-target=native produces a single-arch slice matching the
