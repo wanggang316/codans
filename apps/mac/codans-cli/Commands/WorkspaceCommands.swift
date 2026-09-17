@@ -143,7 +143,7 @@ struct WorkspaceCreate: AsyncParsableCommand {
     abstract: "Create a workspace from two or more repositories.",
     discussion: """
       Each --project names a registered project (id, name, or 'current'); each
-      --repo names any local git repository, bare ones included; each --remote
+      --repo names a local git repository (not a bare one); each --remote
       names a URL that is cloned once into --clone-into (default:
       ~/.codans/sources/<name>; an existing clone of the same remote there is
       reused) and then used like a local repository. Every member is checked
@@ -161,7 +161,7 @@ struct WorkspaceCreate: AsyncParsableCommand {
   var title: String
   @Option(name: .long, help: "Registered project to include (repeatable).")
   var project: [String] = []
-  @Option(name: .long, help: "Local repository path to include, bare or not (repeatable).")
+  @Option(name: .long, help: "Local repository path to include (repeatable).")
   var repo: [String] = []
   @Option(name: .long, help: "Remote URL to clone and include (repeatable).")
   var remote: [String] = []
@@ -229,7 +229,7 @@ struct WorkspaceAdd: AsyncParsableCommand {
   var workspace: String
   @Option(name: .long, help: "Registered project to add.")
   var project: [String] = []
-  @Option(name: .long, help: "Local repository path to add, bare or not.")
+  @Option(name: .long, help: "Local repository path to add.")
   var repo: [String] = []
   @Option(name: .long, help: "Remote URL to clone and add.")
   var remote: [String] = []
@@ -385,7 +385,6 @@ struct WorkspaceMemberRenderable: Encodable, CustomStringConvertible {
     let source: String
     switch member.sourceKind {
     case .remote: source = "  <- \(member.remoteURL ?? "remote")"
-    case .bare: source = "  <- bare \(member.sourceGitRoot ?? "")"
     case .local, nil: source = ""
     }
     return "\(member.name)  [\(branch)]\(role)  \(member.path)\(id)\(source)"

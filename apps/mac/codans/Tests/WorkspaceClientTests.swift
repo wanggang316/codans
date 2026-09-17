@@ -332,7 +332,7 @@ struct WorkspaceClientTests {
     #expect(try WorkspaceManifestStore.load(rootPath: canonicalRoot).repositories.count == 3)
   }
 
-  // MARK: - Remote and bare sources
+  // MARK: - Remote sources and refused sources
 
   @Test
   func remoteSourceIsClonedOnceAndCheckedOutAsAWorktree() async throws {
@@ -423,34 +423,30 @@ struct WorkspaceClientTests {
   }
 
   @Test
-  func bareRepositoryIsAValidSource() async throws {
+  func bareRepositoryIsRefusedAsASource() async throws {
     let fx = try makeFixture()
     defer { try? FileManager.default.removeItem(at: fx.base) }
     let app = try makeRepo(named: "app", under: fx.base)
     let seed = try makeRepo(named: "seed", under: fx.base)
     let bare = fx.base.appendingPathComponent("lib.git", isDirectory: true).path(percentEncoded: false)
     try git(["clone", "-q", "--bare", seed, bare], cwd: fx.base)
-    let canonicalBare = HierarchyManager.canonicalPath(bare)
     let root = fx.base.appendingPathComponent("ws").path(percentEncoded: false)
+    let plan = WorkspacePlan(
+      title: "Bare", rootPath: root,
+      members: [
+        WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "b", baseRef: nil)),
+        // Named through a path inside the bare directory, as a user might.
+        WorkspacePlan.Member(
+          name: "lib", sourceGitRoot: "\(bare)/refs", checkout: .newBranch(branch: "b", baseRef: nil)),
+      ])
 
-    let projectID = try await fx.client.create(
-      WorkspacePlan(
-        title: "Bare", rootPath: root,
-        members: [
-          WorkspacePlan.Member(name: "app", sourceGitRoot: app, checkout: .newBranch(branch: "b", baseRef: nil)),
-          // The source is named through a path inside the bare directory;
-          // it resolves to the bare root.
-          WorkspacePlan.Member(
-            name: "lib", sourceGitRoot: "\(bare)/refs", checkout: .newBranch(branch: "b", baseRef: nil)),
-        ]))
-    let canonicalRoot = HierarchyManager.canonicalPath(root)
-    #expect(exists("\(canonicalRoot)/lib/.git"))
-    #expect(try git(["worktree", "list"], cwd: URL(fileURLWithPath: canonicalBare)).contains("ws/lib"))
-    let project = try #require(fx.manager.catalog.projects.first { $0.id == projectID })
-    let row = try #require(project.worktrees.first { $0.name == "lib" })
-    #expect(row.branch == "b")
-    #expect(row.sourceGitRoot == canonicalBare)
-    #expect(try WorkspaceManifestStore.load(rootPath: canonicalRoot).repositories[1].sourceGitRoot == canonicalBare)
+    let preflight = await fx.client.preflight(plan)
+    #expect(preflight.memberIssues["lib"]?.map(\.kind) == [.sourceNotRepository])
+    await #expect(throws: WorkspaceError.bareRepository(path: HierarchyManager.canonicalPath(bare))) {
+      _ = try await fx.client.create(plan)
+    }
+    #expect(!exists(root))
+    #expect(fx.manager.catalog.projects.allSatisfy { !$0.isWorkspace })
   }
 
   // MARK: - Remote-tracking refs

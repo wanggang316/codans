@@ -230,11 +230,16 @@ final class WorkspaceHandlers {
       }
       return .local(gitRoot: gitRoot)
     case (nil, let path?, nil):
-      // Bare-aware: a bare repository has no toplevel but is a valid source.
+      // A subdirectory or linked worktree resolves to its repository root.
       let expanded = (path as NSString).expandingTildeInPath
       guard let probe = try? await gitCLI.inspectRepository(at: expanded) else {
         throw IPCError.invalidParams(
           message: "\(expanded) is not a git repository", path: ["members", "path"])
+      }
+      guard !probe.isBare else {
+        throw IPCError.invalidParams(
+          message: WorkspaceError.bareRepository(path: probe.root).localizedDescription,
+          path: ["members", "path"])
       }
       return .local(gitRoot: HierarchyManager.canonicalPath(probe.root))
     case (nil, nil, let url?):
@@ -285,10 +290,7 @@ final class WorkspaceHandlers {
   private static func defaultName(for source: WorkspacePlan.Member.Source) -> String {
     switch source {
     case .local(let gitRoot):
-      // A bare directory conventionally ends in `.git`; the checkout folder
-      // should not.
-      let last = (gitRoot as NSString).lastPathComponent
-      return last.lowercased().hasSuffix(".git") && last.count > 4 ? String(last.dropLast(4)) : last
+      return (gitRoot as NSString).lastPathComponent
     case .remote(let url, let cloneDestination):
       return WorkspaceLayout.repositoryName(fromRemoteURL: url)
         ?? (cloneDestination as NSString).lastPathComponent
@@ -358,19 +360,13 @@ final class WorkspaceHandlers {
         useExisting: defaults.useExisting, trackRemote: defaults.trackRemote))
   }
 
-  /// Cheap classification for `describe`: a remote URL marks a clone; a
-  /// source without a `.git` entry inside is bare.
+  /// Classification for `describe`: a recorded remote URL marks a clone;
+  /// any other recorded source is local. Nil for a row that records none.
   nonisolated static func sourceKind(
     sourceGitRoot: String?, remoteURL: String?
   ) -> IPC.WorkspaceMemberSourceKind? {
     if remoteURL != nil { return .remote }
-    guard let sourceGitRoot else { return nil }
-    var isDirectory = ObjCBool(false)
-    guard FileManager.default.fileExists(atPath: sourceGitRoot, isDirectory: &isDirectory),
-      isDirectory.boolValue
-    else { return nil }
-    let gitEntry = (sourceGitRoot as NSString).appendingPathComponent(".git")
-    return FileManager.default.fileExists(atPath: gitEntry) ? .local : .bare
+    return sourceGitRoot == nil ? nil : .local
   }
 
   /// `~/.codans/workspaces/<slug>`, suffixed `-2`, `-3`, … while taken.
@@ -388,7 +384,7 @@ final class WorkspaceHandlers {
     if let ipc = error as? IPCError { return ipc }
     if let workspace = error as? WorkspaceError {
       switch workspace {
-      case .invalidPlan, .rootIsFile, .rootInsideRepository, .sourceNotRepository,
+      case .invalidPlan, .rootIsFile, .rootInsideRepository, .sourceNotRepository, .bareRepository,
         .invalidBranchName:
         return .invalidParams(message: workspace.localizedDescription, path: nil)
       case .rootAlreadyRegistered, .rootAlreadyWorkspace, .destinationExists, .cloneDestinationTaken,

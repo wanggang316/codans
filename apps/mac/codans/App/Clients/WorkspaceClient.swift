@@ -16,6 +16,9 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
   case rootInsideRepository(path: String, gitRoot: String)
   case destinationExists(path: String)
   case sourceNotRepository(path: String)
+  /// Workspace members are linked worktrees of a repository with a working
+  /// tree; a bare repository is not accepted as a source.
+  case bareRepository(path: String)
   /// The folder a remote would be cloned into exists and is not a clone of
   /// that remote, so it can neither be reused nor overwritten.
   case cloneDestinationTaken(path: String, remoteURL: String)
@@ -46,6 +49,8 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
       return "\(path) already exists"
     case .sourceNotRepository(let path):
       return "\(path) is not a git repository"
+    case .bareRepository(let path):
+      return "\(path) is a bare repository, which workspaces do not support"
     case .cloneDestinationTaken(let path, let remoteURL):
       return "\(path) already exists and is not a clone of \(remoteURL)"
     case .invalidBranchName(let branch, let repository):
@@ -585,7 +590,7 @@ extension WorkspaceClient {
     case .rootAlreadyWorkspace: return .init(kind: .rootAlreadyWorkspace, message: message)
     case .rootInsideRepository: return .init(kind: .rootInsideRepository, message: message)
     case .destinationExists: return .init(kind: .destinationExists, message: message)
-    case .sourceNotRepository: return .init(kind: .sourceNotRepository, message: message)
+    case .sourceNotRepository, .bareRepository: return .init(kind: .sourceNotRepository, message: message)
     case .cloneDestinationTaken: return .init(kind: .cloneDestinationTaken, message: message)
     case .invalidBranchName: return .init(kind: .invalidBranchName, message: message)
     case .invalidPlan, .notWorkspace, .memberExists, .memberNotRegistered, .memberNotFound,
@@ -607,8 +612,8 @@ extension WorkspaceClient {
       }
     }
     // Probe the nearest folder that exists: the root itself, or the ancestor
-    // it will be created under. The bare-aware probe also catches a root
-    // placed inside a bare repository's directory.
+    // it will be created under. The probe also catches a root placed inside
+    // a bare repository's directory, which `--show-toplevel` would miss.
     var probe = rootPath
     while !FileManager.default.fileExists(atPath: probe), probe != "/" {
       probe = (probe as NSString).deletingLastPathComponent
@@ -638,6 +643,7 @@ extension WorkspaceClient {
       let expanded = canonical(path)
       guard isDirectory(expanded), let probe = try? await context.cli.inspectRepository(at: expanded)
       else { throw WorkspaceError.sourceNotRepository(path: expanded) }
+      guard !probe.isBare else { throw WorkspaceError.bareRepository(path: canonical(probe.root)) }
       sourceGitRoot = canonical(probe.root)
     case .remote(let url, let cloneDestination):
       let remoteURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -646,7 +652,7 @@ extension WorkspaceClient {
         // Reuse a clone of the same remote; refuse anything else at that path.
         guard isDirectory(expanded),
           let probe = try? await context.cli.inspectRepository(at: expanded),
-          canonical(probe.root) == expanded,
+          !probe.isBare, canonical(probe.root) == expanded,
           let origin = await context.git.remoteURL(URL(fileURLWithPath: expanded, isDirectory: true), "origin"),
           remoteURLsMatch(origin, remoteURL)
         else { throw WorkspaceError.cloneDestinationTaken(path: expanded, remoteURL: remoteURL) }
@@ -783,8 +789,7 @@ extension WorkspaceClient {
     case .newBranch(let branch, nil):
       // Start from the repository's default remote branch when the caller
       // named none; git's own default (HEAD) applies when that is unknown or
-      // not a ref this repository has — a bare clone reports `origin/main`
-      // from its remote config yet keeps no remote-tracking refs.
+      // names a ref this repository no longer has.
       guard let base = try? await git.defaultRemoteBranchRef(sourceURL),
         let refs = try? await git.branchRefs(sourceURL), refs.contains(base)
       else { return .newBranch(branch: branch, baseRef: nil) }

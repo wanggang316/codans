@@ -124,8 +124,6 @@ extension IPC {
   public enum WorkspaceMemberSourceKind: String, Codable, Equatable, Sendable {
     /// A local repository with a working tree.
     case local
-    /// A local bare repository.
-    case bare
     /// Cloned from `remoteURL`.
     case remote
   }

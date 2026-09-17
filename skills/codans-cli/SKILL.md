@@ -290,7 +290,7 @@ codans workspace create "Checkout Flow" --project app --repo ~/dev/shared-lib \
 codans workspace create "Release" --project app --remote git@github.com:org/lib.git \
   --branch release/1.2 --track                          # remote-tracking origin/release/1.2
 codans workspace add <workspace> --repo ~/dev/other --existing --branch main
-codans workspace add <workspace> --repo ~/mirrors/tool.git --ref origin/main   # bare source
+codans workspace add <workspace> --repo ~/dev/tool --ref origin/main   # remote-tracking ref
 codans workspace add <workspace> --remote https://host/team/svc --clone-into ~/src
 codans workspace drop <workspace> <member> [--keep-branch]   # unregister one checkout
 codans workspace remove <workspace> [--delete-files [--delete-branches]]
@@ -303,7 +303,7 @@ the repository's default remote branch; `--existing` checks out an existing
 local branch instead; `--track` checks out the remote-tracking
 `origin/<branch>`), writes `<root>/.codans/workspace.json`, and registers the
 folder as a workspace Project. Members come from registered projects
-(`--project`), any local repository including a bare one (`--repo`), or a
+(`--project`), any local repository that is not bare (`--repo`), or a
 remote URL (`--remote`) — all repeatable. A remote is cloned once into
 `--clone-into` (default `~/.codans/sources/<name>`; an existing clone of the
 same remote there is reused) and then behaves like a local repository. With

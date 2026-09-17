@@ -169,18 +169,19 @@ struct WorkspaceHandlersTests {
       WorkspaceHandlers.ipcError(for: IPCError.overloaded) == .overloaded)
   }
 
-  // MARK: - Remote, bare, and remote-tracking members
+  // MARK: - Remote and remote-tracking members
 
   @Test
-  func createResolvesRemoteAndBareSources() async throws {
+  func createResolvesSubdirectoryAndRemoteSources() async throws {
     let fx = makeFixture()
     let base = FileManager.default.temporaryDirectory
       .appendingPathComponent("codans-ws-handlers-src-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: base) }
-    // A bare repository, reached through a path inside it.
-    let bare = base.appendingPathComponent("lib.git", isDirectory: true).path(percentEncoded: false)
-    try run(["init", "-q", "--bare", bare], cwd: base)
+    // A repository reached through a folder inside it.
+    let lib = base.appendingPathComponent("lib", isDirectory: true).path(percentEncoded: false)
+    try run(["init", "-q", lib], cwd: base)
+    try FileManager.default.createDirectory(atPath: "\(lib)/docs", withIntermediateDirectories: true)
     let sources = base.appendingPathComponent("sources", isDirectory: true).path(percentEncoded: false)
 
     // The stub returns an unregistered id, so the trailing `describe` fails;
@@ -190,7 +191,7 @@ struct WorkspaceHandlersTests {
         title: "Mixed",
         cloneBaseDirectory: sources,
         members: [
-          IPC.WorkspaceMemberRequest(path: "\(bare)/refs"),
+          IPC.WorkspaceMemberRequest(path: "\(lib)/docs"),
           IPC.WorkspaceMemberRequest(remoteURL: "git@github.com:org/svc.git", remoteRef: "origin/release"),
           IPC.WorkspaceMemberRequest(
             name: "pinned", remoteURL: "https://example.com/team/tool", cloneDestination: "~/src/tool",
@@ -198,9 +199,9 @@ struct WorkspaceHandlersTests {
         ]))
     let plan = try #require(fx.recorder.plans.first)
     #expect(plan.members.count == 3)
-    // Bare: resolved to the bare root, folder name without `.git`.
+    // Resolved to the repository root.
     #expect(plan.members[0].name == "lib")
-    #expect(plan.members[0].source == .local(gitRoot: HierarchyManager.canonicalPath(bare)))
+    #expect(plan.members[0].source == .local(gitRoot: HierarchyManager.canonicalPath(lib)))
     #expect(plan.members[0].checkout == .newBranch(branch: "mixed", baseRef: nil))
     // Remote with a default destination under the request's clone base.
     #expect(plan.members[1].name == "svc")
@@ -223,6 +224,30 @@ struct WorkspaceHandlersTests {
     #expect(
       plan.members[2].checkout
         == .remoteTrackingRef(remoteRef: "origin/main", branch: "mine", resetLocal: true))
+  }
+
+  @Test
+  func createRefusesBareRepositories() async throws {
+    let fx = makeFixture()
+    let base = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-ws-handlers-bare-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let bare = base.appendingPathComponent("lib.git", isDirectory: true).path(percentEncoded: false)
+    try run(["init", "-q", "--bare", bare], cwd: base)
+    await #expect {
+      _ = try await fx.handlers.create(
+        IPC.WorkspaceCreateRequest(
+          title: "Bare",
+          members: [
+            IPC.WorkspaceMemberRequest(path: bare),
+            IPC.WorkspaceMemberRequest(path: "/src/app"),
+          ]))
+    } throws: { error in
+      guard case .invalidParams(let message, _) = error as? IPCError else { return false }
+      return message.contains("bare repository")
+    }
+    #expect(fx.recorder.plans.isEmpty)
   }
 
   @Test
@@ -282,19 +307,10 @@ struct WorkspaceHandlersTests {
   }
 
   @Test
-  func sourceKindTellsLocalBareAndRemoteApart() throws {
-    let base = FileManager.default.temporaryDirectory
-      .appendingPathComponent("codans-ws-handlers-kind-\(UUID().uuidString)", isDirectory: true)
-    let local = base.appendingPathComponent("local", isDirectory: true)
-    let bare = base.appendingPathComponent("bare.git", isDirectory: true)
-    try FileManager.default.createDirectory(
-      at: local.appendingPathComponent(".git"), withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: bare, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: local.path(percentEncoded: false), remoteURL: nil) == .local)
-    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: bare.path(percentEncoded: false), remoteURL: nil) == .bare)
-    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: local.path(percentEncoded: false), remoteURL: "x") == .remote)
-    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: "/nope", remoteURL: nil) == nil)
+  func sourceKindTellsLocalAndRemoteApart() {
+    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: "/src/app", remoteURL: nil) == .local)
+    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: "/src/app", remoteURL: "x") == .remote)
+    #expect(WorkspaceHandlers.sourceKind(sourceGitRoot: nil, remoteURL: nil) == nil)
   }
 
   private func run(_ arguments: [String], cwd: URL) throws {
