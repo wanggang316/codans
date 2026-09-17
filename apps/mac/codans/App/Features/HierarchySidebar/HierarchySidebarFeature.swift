@@ -1428,7 +1428,8 @@ struct HierarchySidebarFeature {
       guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else {
         return nil
       }
-      return CreateWorkspaceFeature.Candidate(id: project.id, name: project.name, gitRoot: gitRoot)
+      return CreateWorkspaceFeature.Candidate(
+        id: project.id, name: project.name, gitRoot: gitRoot, icon: project.icon, color: project.color)
     }
   }
 

@@ -5,10 +5,10 @@ import Testing
 
 @testable import Codans
 
-/// The New Workspace sheet's reducer: the folder and branch that follow the
-/// title, adding members from open projects, folders, and remote URLs,
-/// per-member refs and issues, the debounced preflight, and the creation
-/// stream's effect on members. Effects are stubbed closure by closure; git
+/// The New Workspace sheet's reducer: the folder and new branches that
+/// follow the title, the Add / Edit dialog for local and remote projects,
+/// per-project refs and issues, the debounced preflight, and the creation
+/// stream's effect on the list. Effects are stubbed closure by closure; git
 /// never runs.
 @MainActor
 struct CreateWorkspaceFeatureTests {
@@ -29,7 +29,12 @@ struct CreateWorkspaceFeatureTests {
     local: ["feat/x", "main", "wip"], remote: ["origin/main", "origin/feat/x", "origin/release"],
     defaultBaseRef: "origin/main", checkedOut: ["main": "/src/app"])
 
-  /// A git client answering every repository with `inventory`.
+  private nonisolated static let libHeads = RemoteHeads(defaultBranch: "main", branches: ["main", "release"])
+  private static let libRefs = RefInventory(
+    local: [], remote: ["origin/main", "origin/release"], defaultBaseRef: "origin/main")
+
+  /// A git client answering every repository with `inventory`, and every
+  /// remote with `libHeads`.
   private func gitClient(_ inventory: RefInventory) -> GitWorktreeClient {
     var client = GitWorktreeClient.testValue
     client.branchRefs = { _ in inventory.local + inventory.remote }
@@ -38,6 +43,7 @@ struct CreateWorkspaceFeatureTests {
       inventory.checkedOut.map { GitWtEntry(branch: $0.key, path: $0.value, head: "abc", isBare: false) }
     }
     client.defaultRemoteBranchRef = { _ in inventory.defaultBaseRef }
+    client.lsRemoteHeads = { _ in Self.libHeads }
     return client
   }
 
@@ -77,7 +83,7 @@ struct CreateWorkspaceFeatureTests {
   // MARK: - Workspace fields
 
   @Test
-  func preselectedProjectBecomesTheFirstMemberAndLoadsRefs() async {
+  func preselectedProjectBecomesTheFirstRowAndLoadsRefs() async {
     let store = makeStore(Feature.State(candidates: [app, api], preselected: app.id))
     store.exhaustivity = .off(showSkippedAssertions: false)
     await store.send(.onAppear)
@@ -87,131 +93,225 @@ struct CreateWorkspaceFeatureTests {
     #expect(store.state.members.map(\.source) == [appSource])
     #expect(store.state.members[0].name == "app")
     #expect(store.state.preselected == nil)
-    #expect(store.state.availableCandidates == [api])
+    #expect(store.state.editorCandidates == [api])
   }
 
   @Test
-  func titleNamesTheFolderAndTheBranchUntilTheBranchIsEdited() async {
-    let store = makeStore(Feature.State(candidates: [], locationPath: "/ws"))
+  func titleNamesTheFolderAndEveryUnnamedNewBranch() async {
+    var initial = Feature.State(candidates: [app, api], locationPath: "/ws")
+    initial.members = [member(1, appSource, name: "app"), member(2, apiSource, name: "api")]
+    let store = makeStore(initial)
     store.exhaustivity = .off(showSkippedAssertions: false)
     #expect(store.state.rootPath.isEmpty)
+    #expect(store.state.defaultBranch.isEmpty)
     await store.send(.titleChanged("Checkout Flow")) {
       $0.titleDraft = "Checkout Flow"
-      $0.sharedBranch = "checkout-flow"
     }
     #expect(store.state.rootPath == "/ws/checkout-flow")
     await store.send(.locationPicked(URL(fileURLWithPath: "/elsewhere", isDirectory: true))) {
       $0.locationPath = "/elsewhere"
     }
     #expect(store.state.rootPath == "/elsewhere/checkout-flow")
-    await store.send(.sharedBranchChanged("feat/x")) {
-      $0.sharedBranch = "feat/x"
-      $0.sharedBranchEditedManually = true
-    }
-    // The folder keeps following the title; the edited branch does not.
-    await store.send(.titleChanged("Other")) {
-      $0.titleDraft = "Other"
-    }
+    // A named branch keeps its name; a blank one follows the title.
+    await store.send(.member(UUID(2), .branchOverrideChanged("mine")))
+    await store.send(.titleChanged("Other"))
     #expect(store.state.rootPath == "/elsewhere/other")
+    #expect(store.state.checkout(for: store.state.members[0]) == .newBranch(branch: "other", baseRef: nil))
+    #expect(store.state.checkout(for: store.state.members[1]) == .newBranch(branch: "mine", baseRef: nil))
+    await store.send(.member(UUID(2), .branchOverrideChanged("  ")))
+    await store.send(.member(UUID(2), .baseRefChanged("origin/release")))
+    #expect(
+      store.state.checkout(for: store.state.members[1]) == .newBranch(branch: "other", baseRef: "origin/release"))
     // A cancelled picker changes nothing.
     await store.send(.locationPicked(nil))
   }
 
+  // MARK: - Dialog
+
   @Test
-  func newBranchMembersFollowTheWorkspaceBranchUnlessTheyNameTheirOwn() async {
+  func localDialogAddsAnOpenProjectOrAFolder() async {
+    let store = makeStore(Feature.State(candidates: [app, api]))
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.addLocalTapped) {
+      $0.editor = MemberEditor(id: UUID(0), kind: .local)
+    }
+    #expect(!store.state.canSaveEditor)
+    #expect(store.state.editorIssues == [.incomplete("Choose a repository.")])
+    await store.send(.editor(.projectPicked(app.id)))
+    #expect(store.state.editor?.draft?.source == appSource)
+    #expect(store.state.editor?.draft?.name == "app")
+    await store.receive(\.member) {
+      $0.editor?.draft?.refs = .loaded(appRefs)
+    }
+    // Nothing reaches the list before Add.
+    #expect(store.state.members.isEmpty)
+    #expect(store.state.canSaveEditor)
+    await store.send(.editor(.saveTapped)) {
+      $0.editor = nil
+    }
+    #expect(store.state.members.map(\.source) == [appSource])
+    #expect(store.state.editorCandidates == [api])
+
+    // A folder inside an open project is that project; another repository
+    // with the same folder name gets a suffix, and replaces the choice.
+    await store.send(.addLocalTapped)
+    await store.send(
+      .editor(.folderResolved(path: "/src/api/sub", probe: RepositoryProbe(root: "/src/api", isBare: false))))
+    #expect(store.state.editor?.draft?.source == apiSource)
+    await store.send(
+      .editor(.folderResolved(path: "/other/app", probe: RepositoryProbe(root: "/other/app", isBare: false))))
+    #expect(store.state.editor?.draft?.source == .localRepo(gitRoot: "/other/app"))
+    #expect(store.state.editor?.draft?.name == "app-2")
+    #expect(store.state.editor?.draft?.id == UUID(1))
+
+    // Duplicates, bare repositories, and plain folders are refused.
+    await store.send(
+      .editor(.folderResolved(path: "/src/app", probe: RepositoryProbe(root: "/src/app", isBare: false)))
+    ) {
+      $0.editor?.sourceIssue = "/src/app is already in the list."
+    }
+    #expect(!store.state.canSaveEditor)
+    await store.send(
+      .editor(.folderResolved(path: "/m/tool.git", probe: RepositoryProbe(root: "/m/tool.git", isBare: true)))
+    ) {
+      $0.editor?.sourceIssue = "/m/tool.git is a bare repository, which workspaces do not support."
+    }
+    await store.send(.editor(.folderResolved(path: "/tmp/notes", probe: nil))) {
+      $0.editor?.sourceIssue = "/tmp/notes is not a git repository."
+    }
+    // Cancel leaves the list alone.
+    await store.send(.editor(.cancelTapped)) {
+      $0.editor = nil
+    }
+    #expect(store.state.members.count == 1)
+  }
+
+  @Test
+  func remoteDialogFollowsTheURLOnceTypingPauses() async {
+    let clock = TestClock()
+    let store = makeStore(Feature.State(candidates: [app]), clock: clock)
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.addRemoteTapped) {
+      $0.editor = MemberEditor(id: UUID(0), kind: .remote)
+    }
+    #expect(store.state.editorIssues == [.incomplete("Enter the repository\u{2019}s URL.")])
+    await store.send(.editor(.urlChanged("git@github.com:org/lib.git")))
+    #expect(store.state.editor?.draft == nil)
+    await clock.advance(by: .milliseconds(600))
+    await store.receive(\.editor)
+    #expect(
+      store.state.editor?.draft?.source
+        == .remote(url: "git@github.com:org/lib.git", cloneDestination: Self.defaultSource("lib")))
+    #expect(store.state.editor?.draft?.name == "lib")
+    #expect(store.state.editor?.draft?.availableModes == [.newBranch, .existingRemote])
+    await store.receive(\.member) {
+      $0.editor?.draft?.refs = .loaded(Self.libRefs)
+    }
+
+    // A picked clone folder stays the parent when the URL changes; a URL
+    // still being typed can't be added.
+    await store.send(.member(UUID(0), .cloneDestinationPicked(URL(fileURLWithPath: "/code", isDirectory: true))))
+    #expect(
+      store.state.editor?.draft?.source == .remote(url: "git@github.com:org/lib.git", cloneDestination: "/code/lib"))
+    await store.send(.editor(.urlChanged("https://github.com/org/tool")))
+    #expect(!store.state.canSaveEditor)
+    await store.send(.editor(.urlSubmitted))
+    #expect(
+      store.state.editor?.draft?.source == .remote(url: "https://github.com/org/tool", cloneDestination: "/code/tool"))
+    #expect(store.state.editor?.draft?.name == "tool")
+    await store.receive(\.member)
+    #expect(store.state.canSaveEditor)
+    await store.send(.editor(.saveTapped))
+    #expect(store.state.members.map(\.name) == ["tool"])
+
+    // The same remote in another spelling is refused; paths and words are
+    // reported on Return only.
+    await store.send(.addRemoteTapped)
+    await store.send(.editor(.urlChanged("git@github.com:org/tool.git")))
+    await store.send(.editor(.urlSubmitted)) {
+      $0.editor?.sourceIssue = "This repository is already in the list."
+    }
+    await store.send(.editor(.urlChanged("/nowhere/repo"))) {
+      $0.editor?.urlText = "/nowhere/repo"
+      $0.editor?.sourceIssue = nil
+    }
+    await clock.advance(by: .milliseconds(600))
+    await store.receive(\.editor)
+    #expect(store.state.editor?.sourceIssue == nil)
+    await store.send(.editor(.urlSubmitted)) {
+      $0.editor?.sourceIssue = "Enter a URL. To use a folder on this Mac, add a local repository."
+    }
+    await store.send(.editor(.urlChanged("just words")))
+    await store.send(.editor(.urlSubmitted)) {
+      $0.editor?.sourceIssue = "Enter a git URL, such as git@github.com:org/repo.git."
+    }
+    #expect(store.state.editor?.draft == nil)
+    await store.send(.editor(.saveTapped))
+    #expect(store.state.members.count == 1)
+  }
+
+  @Test
+  func editingARowChangesItOnSaveOnly() async {
     var initial = Feature.State(candidates: [app, api])
-    initial.sharedBranch = "feat/a"
-    initial.members = [member(1, appSource, name: "app"), member(2, apiSource, name: "api")]
+    initial.titleDraft = "T"
+    initial.members = [member(1, appSource, name: "app", refs: appRefs), member(2, apiSource, name: "api")]
     let store = makeStore(initial)
     store.exhaustivity = .off(showSkippedAssertions: false)
 
-    await store.send(.member(UUID(2), .branchOverrideChanged("mine")))
-    await store.send(.sharedBranchChanged("feat/b"))
-    #expect(store.state.checkout(for: store.state.members[0]) == .newBranch(branch: "feat/b", baseRef: nil))
-    #expect(store.state.checkout(for: store.state.members[1]) == .newBranch(branch: "mine", baseRef: nil))
-    // Clearing the override follows the workspace branch again.
-    await store.send(.member(UUID(2), .branchOverrideChanged("  ")))
-    await store.send(.member(UUID(2), .baseRefChanged("origin/release")))
-    #expect(
-      store.state.checkout(for: store.state.members[1]) == .newBranch(branch: "feat/b", baseRef: "origin/release"))
-  }
-
-  // MARK: - Adding members
-
-  @Test
-  func openProjectsAndFoldersBecomeMembers() async {
-    let store = makeStore(Feature.State(candidates: [app, api]))
-    store.exhaustivity = .off(showSkippedAssertions: false)
-    await store.send(.addProjectTapped(app.id))
-    #expect(store.state.members.map(\.source) == [appSource])
-    #expect(store.state.availableCandidates == [api])
-
-    // A folder inside an open project resolves to that project; another
-    // repository with the same folder name gets a suffix.
-    await store.send(.addPathResolved(path: "/src/api/sub", probe: RepositoryProbe(root: "/src/api", isBare: false)))
-    #expect(store.state.members.last?.source == apiSource)
-    await store.send(.addPathResolved(path: "/other/app", probe: RepositoryProbe(root: "/other/app", isBare: false)))
-    #expect(store.state.members.last?.source == .localRepo(gitRoot: "/other/app"))
-    #expect(store.state.members.last?.name == "app-2")
-
-    // Duplicates, bare repositories, and plain folders are refused.
-    await store.send(.addPathResolved(path: "/other/app", probe: RepositoryProbe(root: "/other/app", isBare: false))) {
-      $0.addIssue = "/other/app is already in the list."
+    await store.send(.editTapped(UUID(1))) {
+      $0.editor = MemberEditor(id: UUID(1), kind: .edit, draft: $0.members[0])
     }
-    await store.send(.addPathResolved(path: "/m/tool.git", probe: RepositoryProbe(root: "/m/tool.git", isBare: true))) {
-      $0.addIssue = "/m/tool.git is a bare repository, which workspaces do not support."
+    // The dialog offers its own project back, not the other row's.
+    #expect(store.state.editorCandidates == [app])
+    await store.send(.member(UUID(1), .modeChanged(.existingLocal)))
+    await store.send(.member(UUID(1), .localBranchChanged("wip")))
+    await store.send(.member(UUID(1), .nameChanged("front")))
+    #expect(store.state.members[0].mode == .newBranch)
+    #expect(store.state.members[0].name == "app")
+    await store.send(.editor(.cancelTapped)) {
+      $0.editor = nil
     }
-    await store.send(.addPathResolved(path: "/tmp/notes", probe: nil)) {
-      $0.addIssue = "/tmp/notes is not a git repository."
+    #expect(store.state.members[0].mode == .newBranch)
+
+    await store.send(.editTapped(UUID(1)))
+    await store.send(.member(UUID(1), .modeChanged(.existingLocal)))
+    await store.send(.member(UUID(1), .localBranchChanged("wip")))
+    // Branches loaded meanwhile reach the row as well as the dialog.
+    await store.send(.member(UUID(1), .refsLoaded(RefInventory(local: ["wip"]))))
+    #expect(store.state.members[0].refs == .loaded(RefInventory(local: ["wip"])))
+    await store.send(.editor(.saveTapped)) {
+      $0.editor = nil
+      $0.members[0].mode = .existingLocal
+      $0.members[0].localBranch = "wip"
     }
-    #expect(store.state.members.count == 3)
+    #expect(store.state.checkoutSummary(for: store.state.members[0]) == "Branch wip")
+
+    // While the dialog is open, rows can't be edited or removed.
+    await store.send(.editTapped(UUID(1)))
+    await store.send(.editTapped(UUID(2)))
+    #expect(store.state.editor?.id == UUID(1))
+    await store.send(.member(UUID(1), .remove))
+    #expect(store.state.members.count == 2)
+    await store.send(.editor(.cancelTapped))
+    await store.send(.member(UUID(1), .remove))
+    #expect(store.state.members.map(\.id) == [UUID(2)])
   }
 
   @Test
-  func remoteURLsAreAddedOnceWithTheirBranches() async {
-    var git = gitClient(appRefs)
-    git.lsRemoteHeads = { _ in RemoteHeads(defaultBranch: "main", branches: ["main", "release"]) }
-    let store = makeStore(Feature.State(candidates: [app]), git: git)
+  func dialogAllowsABranchThatWillFollowTheTitle() async {
+    let store = makeStore(Feature.State(candidates: [app]))
     store.exhaustivity = .off(showSkippedAssertions: false)
-
-    await store.send(.remoteURLDraftChanged("git@github.com:org/lib.git"))
-    await store.send(.addRemoteURLSubmitted) {
-      $0.remoteURLDraft = ""
-    }
-    #expect(
-      store.state.members.map(\.source) == [
-        .remote(url: "git@github.com:org/lib.git", cloneDestination: Self.defaultSource("lib"))
-      ])
-    #expect(store.state.members[0].name == "lib")
-    #expect(store.state.members[0].availableModes == [.newBranch, .existingRemote])
-    await store.receive(\.member) {
-      $0.members[0].refs = .loaded(
-        RefInventory(local: [], remote: ["origin/main", "origin/release"], defaultBaseRef: "origin/main"))
-    }
-
-    // The same remote in another spelling is refused and the text kept.
-    await store.send(.remoteURLDraftChanged("https://github.com/org/lib"))
-    await store.send(.addRemoteURLSubmitted) {
-      $0.addIssue = "This remote is already in the list."
-    }
-    await store.send(.remoteURLDraftChanged("/nowhere/repo")) {
-      $0.remoteURLDraft = "/nowhere/repo"
-      $0.addIssue = nil
-    }
-    await store.send(.addRemoteURLSubmitted) {
-      $0.addIssue = "There is no folder at /nowhere/repo."
-    }
-    await store.send(.remoteURLDraftChanged("just words"))
-    await store.send(.addRemoteURLSubmitted) {
-      $0.addIssue = "Enter a git URL, such as git@github.com:org/repo.git."
-    }
-    #expect(store.state.members.count == 1)
-
-    // Clone destination: the picker gives a parent; the clone keeps its name.
-    await store.send(.member(UUID(0), .cloneDestinationPicked(URL(fileURLWithPath: "/code", isDirectory: true))))
-    #expect(
-      store.state.members[0].source
-        == .remote(url: "git@github.com:org/lib.git", cloneDestination: "/code/lib"))
+    await store.send(.addLocalTapped)
+    await store.send(.editor(.projectPicked(app.id)))
+    await store.receive(\.member)
+    #expect(store.state.defaultBranch.isEmpty)
+    #expect(store.state.canSaveEditor)
+    // Other missing pieces still hold the dialog back.
+    await store.send(.member(UUID(0), .modeChanged(.existingLocal)))
+    #expect(store.state.editorIssues == [.incomplete("Choose a branch for app.")])
+    #expect(!store.state.canSaveEditor)
   }
 
   @Test
@@ -224,7 +324,7 @@ struct CreateWorkspaceFeatureTests {
     }
     var initial = Feature.State(candidates: [])
     initial.members = [member(1, .remote(url: "https://h/r", cloneDestination: "/src/r"), name: "r")]
-    initial.sharedBranch = "x"
+    initial.titleDraft = "x"
     let store = makeStore(initial, git: git, clock: clock)
     store.exhaustivity = .off(showSkippedAssertions: false)
     await store.send(.member(UUID(1), .retryRefsTapped)) {
@@ -240,7 +340,7 @@ struct CreateWorkspaceFeatureTests {
     #expect(
       store.state.issues(for: store.state.members[0]).contains(
         .blocking("The remote did not answer within 20 seconds.")))
-    // Removing the member cancels an in-flight load.
+    // Removing the row cancels an in-flight load.
     await store.send(.member(UUID(1), .retryRefsTapped))
     await store.send(.member(UUID(1), .remove)) {
       $0.members = []
@@ -259,21 +359,23 @@ struct CreateWorkspaceFeatureTests {
     #expect(shown(state.issues(for: state.members[0])).isEmpty)
 
     state.titleDraft = "T"
-    state.sharedBranch = ""
-    #expect(state.createHint == "Add at least two repositories.")
+    #expect(state.createHint == "Add at least two projects.")
     state.members.append(member(2, apiSource, name: "api", refs: RefInventory(local: ["main"])))
-    #expect(state.createHint == "Enter a branch name for app.")
-    state.sharedBranch = "t"
     #expect(state.createHint == nil)
     #expect(state.canCreate)
     #expect(state.createButtonTitle == "Create")
+    // Without a title, a blank new branch has no name.
+    state.titleDraft = "   "
+    #expect(state.createHint == "Enter a title.")
+    state.members[0].branchOverride = "own"
+    #expect(state.issues(for: state.members[0]).isEmpty)
+    #expect(state.issues(for: state.members[1]) == [.incomplete("Enter a branch name for api.")])
   }
 
   @Test
   func checkoutIssuesCoverEachMode() async {
     var initial = Feature.State(candidates: [app])
-    initial.titleDraft = "T"
-    initial.sharedBranch = "wip"
+    initial.titleDraft = "wip"
     initial.members = [
       member(1, appSource, name: "app", refs: appRefs),
       member(2, .localRepo(gitRoot: "/src/lib"), name: "app", refs: RefInventory(local: ["main"])),
@@ -283,7 +385,7 @@ struct CreateWorkspaceFeatureTests {
 
     #expect(
       store.state.issues(for: store.state.members[0]) == [
-        .blocking("Another repository already uses the folder name \u{201C}app\u{201D}."),
+        .blocking("Another project already uses the folder name \u{201C}app\u{201D}."),
         .blocking("A branch named \u{201C}wip\u{201D} already exists here. Choose Existing branch to check it out."),
       ])
     await store.send(.member(UUID(2), .nameChanged("lib")))
@@ -345,16 +447,37 @@ struct CreateWorkspaceFeatureTests {
       ])
   }
 
+  @Test
+  func rowsSummarizeTheirCheckout() {
+    var state = Feature.State(candidates: [app])
+    var row = member(1, appSource, name: "app")
+    #expect(state.checkoutSummary(for: row) == "New branch from the default branch, named after the title")
+    state.titleDraft = "Checkout Flow"
+    row.refs = .loaded(appRefs)
+    #expect(state.checkoutSummary(for: row) == "New branch checkout-flow from origin/main")
+    row.baseRef = "origin/release"
+    row.branchOverride = "feat/y"
+    #expect(state.checkoutSummary(for: row) == "New branch feat/y from origin/release")
+    row.mode = .existingLocal
+    #expect(state.checkoutSummary(for: row) == "Existing branch")
+    row.mode = .existingRemote
+    row.remoteRef = "origin/release"
+    #expect(state.checkoutSummary(for: row) == "Branch release, tracking origin/release")
+    row.remoteRef = "origin/feat/x"
+    #expect(state.checkoutSummary(for: row) == "Local branch feat/x, tracking origin/feat/x")
+    row.localConflict = .resetToRemote
+    #expect(state.checkoutSummary(for: row) == "Branch feat/x, reset to origin/feat/x")
+  }
+
   // MARK: - Preflight
 
   @Test
-  func preflightIsDebouncedAndLandsOnMembers() async {
+  func preflightIsDebouncedAndLandsOnRowsAndTheDialog() async {
     let clock = TestClock()
-    let calls = LockIsolated(0)
+    let plans = LockIsolated<[WorkspacePlan]>([])
     var workspace = WorkspaceClient.testValue
     workspace.preflight = { plan in
-      calls.withValue { $0 += 1 }
-      #expect(plan.title == "abc")
+      plans.withValue { $0.append(plan) }
       return WorkspacePreflight(
         rootIssues: [.init(kind: .rootExists, message: "The folder already exists.")],
         memberIssues: [
@@ -376,15 +499,30 @@ struct CreateWorkspaceFeatureTests {
       $0.members[0].preflightIssues = [.init(kind: .destinationExists, message: "~/ws/app already exists.")]
       $0.members[1].preflightIssues = [.init(kind: .destinationExists, message: "~/ws/api already exists.")]
     }
-    #expect(calls.value == 1)
+    #expect(plans.value.map(\.title) == ["abc"])
     #expect(store.state.issues(for: store.state.members[0]) == [.blocking("~/ws/app already exists.")])
     #expect(store.state.plan == nil)
     // A folder-name problem already says it; the preflight line is dropped.
     await store.send(.member(UUID(2), .nameChanged("app")))
     #expect(
       store.state.issues(for: store.state.members[1]) == [
-        .blocking("Another repository already uses the folder name \u{201C}app\u{201D}.")
+        .blocking("Another project already uses the folder name \u{201C}app\u{201D}.")
       ])
+
+    // While a row is edited, the dialog's draft is what gets checked, and
+    // the row keeps its findings until Save.
+    await store.send(.member(UUID(2), .nameChanged("api")))
+    await store.send(.editTapped(UUID(2)))
+    await store.send(.member(UUID(2), .nameChanged("app")))
+    await clock.advance(by: .milliseconds(300))
+    await store.receive(\.preflightTick)
+    await store.receive(\.preflightFinished)
+    #expect(plans.value.last?.members.map(\.name) == ["app", "app"])
+    #expect(store.state.editor?.draft?.preflightIssues.map(\.message) == ["~/ws/app already exists."])
+    #expect(store.state.members[1].preflightIssues.map(\.message) == ["~/ws/api already exists."])
+    #expect(
+      store.state.editorIssues.first == .blocking("Another project already uses the folder name \u{201C}app\u{201D}."))
+    #expect(!store.state.canSaveEditor)
   }
 
   // MARK: - Creation
@@ -392,7 +530,6 @@ struct CreateWorkspaceFeatureTests {
   private func readyState() -> Feature.State {
     var initial = Feature.State(candidates: [app, api], locationPath: "/tmp")
     initial.titleDraft = "T"
-    initial.sharedBranch = "t"
     initial.members = [
       member(1, appSource, name: "app", refs: appRefs), member(2, apiSource, name: "api", refs: appRefs),
     ]
@@ -400,7 +537,7 @@ struct CreateWorkspaceFeatureTests {
   }
 
   @Test
-  func createStreamsProgressOntoMembersAndDelegatesOnRegistration() async {
+  func createStreamsProgressOntoRowsAndDelegatesOnRegistration() async {
     let created = ProjectID()
     var workspace = WorkspaceClient.testValue
     workspace.preflight = { _ in WorkspacePreflight() }
@@ -445,7 +582,7 @@ struct CreateWorkspaceFeatureTests {
   }
 
   @Test
-  func failureMarksTheMemberAndTheNextEditClearsIt() async {
+  func failureMarksTheRowAndTheNextEditClearsIt() async {
     let attempts = LockIsolated(0)
     var workspace = WorkspaceClient.testValue
     workspace.preflight = { _ in WorkspacePreflight() }
@@ -474,7 +611,9 @@ struct CreateWorkspaceFeatureTests {
     await store.send(.createButtonTapped)
     await store.receive(\.creationFailed)
     #expect(attempts.value == 2)
-    // Any edit puts the form back to its plain state.
+    // The failed row can be edited, and any edit puts the list back to its
+    // plain state.
+    await store.send(.editTapped(UUID(2)))
     await store.send(.member(UUID(2), .branchOverrideChanged("other"))) {
       $0.creation = .idle
       $0.members[0].progress = .pending
@@ -511,6 +650,10 @@ struct CreateWorkspaceFeatureTests {
       $0.creation = .running(current: nil)
     }
     await store.receive(\.creationEvent)
+    // Rows are locked while it runs.
+    await store.send(.editTapped(UUID(1)))
+    await store.send(.addLocalTapped)
+    #expect(store.state.editor == nil)
     await store.send(.cancelButtonTapped) {
       $0.creation = .rollingBack
     }
@@ -550,21 +693,24 @@ struct CreateWorkspaceFeatureTests {
       mode: .add(projectID: projectID, title: "handos", rootPath: "/ws/handos", existingNames: ["app"]))
     #expect(initial.titleDraft == "handos")
     #expect(initial.rootPath == "/ws/handos")
-    #expect(initial.sharedBranch == "handos")
-    #expect(initial.createHint == "Choose a repository to add.")
+    #expect(initial.defaultBranch == "handos")
+    #expect(initial.createHint == "Add a project.")
     #expect(initial.createButtonTitle == "Add")
     let store = makeStore(initial, workspace: workspace)
     store.exhaustivity = .off(showSkippedAssertions: false)
-    await store.send(.addProjectTapped(app.id))
-    #expect(!store.state.canAddMembers)
+    await store.send(.addLocalTapped)
+    await store.send(.editor(.projectPicked(app.id)))
+    // Names the workspace already has are skipped, and refused when typed.
+    #expect(store.state.editor?.draft?.name == "app-2")
+    await store.send(.member(UUID(0), .nameChanged("app")))
     #expect(
-      store.state.issues(for: store.state.members[0]).contains(
-        .blocking("The workspace already has a folder named \u{201C}app\u{201D}.")))
-    // One repository is the whole plan: further adds are ignored.
-    await store.send(.remoteURLDraftChanged("git@h:o/r.git"))
-    await store.send(.addRemoteURLSubmitted)
-    #expect(store.state.members.count == 1)
+      store.state.editorIssues.contains(.blocking("The workspace already has a folder named \u{201C}app\u{201D}.")))
     await store.send(.member(UUID(0), .nameChanged("lib")))
+    await store.send(.editor(.saveTapped))
+    #expect(!store.state.canAddMembers)
+    // One project is the whole plan: further adds are ignored.
+    await store.send(.addRemoteTapped)
+    #expect(store.state.editor == nil)
     #expect(store.state.plan != nil)
     await store.send(.createButtonTapped)
     await store.receive(\.creationEvent) { $0.creation = .idle }

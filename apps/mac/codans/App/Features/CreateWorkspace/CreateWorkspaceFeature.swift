@@ -3,12 +3,13 @@ import ComposableArchitecture
 import Foundation
 
 /// Reducer behind the New Workspace sheet and, in add mode, a workspace's
-/// Add Repository sheet. Collects a title, where the folder goes, a branch
-/// for the new checkouts, and the member repositories (open projects,
-/// folders on disk, remote URLs) with how each is checked out; then hands a
-/// `WorkspacePlan` to `WorkspaceClient`'s streaming creation and shows its
-/// progress per member. Its responsibility ends at `delegate(.created)` /
-/// `delegate(.added)`; the client has registered and reconciled by then.
+/// Add Repository sheet. Collects a title, where the folder goes, and the
+/// projects to check out: each is added or edited in a dialog (a local
+/// repository or a remote URL, and how it is checked out) and listed as one
+/// row. Then hands a `WorkspacePlan` to `WorkspaceClient`'s streaming
+/// creation and shows its progress per project. Its responsibility ends at
+/// `delegate(.created)` / `delegate(.added)`; the client has registered and
+/// reconciled by then.
 @Reducer
 struct CreateWorkspaceFeature {
   /// A registered local git Project offered as a member.
@@ -16,6 +17,16 @@ struct CreateWorkspaceFeature {
     let id: ProjectID
     let name: String
     let gitRoot: String
+    var icon: ProjectIcon?
+    var color: ProjectColor?
+
+    init(id: ProjectID, name: String, gitRoot: String, icon: ProjectIcon? = nil, color: ProjectColor? = nil) {
+      self.id = id
+      self.name = name
+      self.gitRoot = gitRoot
+      self.icon = icon
+      self.color = color
+    }
   }
 
   enum Mode: Equatable, Sendable {
@@ -64,15 +75,9 @@ struct CreateWorkspaceFeature {
     /// Preflight findings about the workspace folder.
     var rootIssues: [MemberIssue] = []
 
-    /// Branch for new checkouts. Follows the title until edited.
-    var sharedBranch = ""
-    var sharedBranchEditedManually = false
-
     var members: IdentifiedArrayOf<MemberDraft> = []
-
-    var remoteURLDraft = ""
-    var addIssue: String?
-    var isResolvingAdd = false
+    /// The Add / Edit dialog, while it is open.
+    var editor: MemberEditor?
 
     var creation: CreationState = .idle
     var creationToken: UUID?
@@ -92,7 +97,6 @@ struct CreateWorkspaceFeature {
       self.locationPath = locationPath
       if case .add(_, let title, _, _) = mode {
         titleDraft = title
-        sharedBranch = WorkspaceLayout.folderName(forTitle: title)
       }
     }
 
@@ -105,7 +109,7 @@ struct CreateWorkspaceFeature {
       isAddMode ? 1 : WorkspacePlan.minimumMembers
     }
 
-    /// Add mode takes exactly one repository.
+    /// Add mode takes exactly one project.
     var canAddMembers: Bool {
       !isAddMode || members.isEmpty
     }
@@ -120,24 +124,50 @@ struct CreateWorkspaceFeature {
       }
     }
 
-    /// Open projects not in the list yet.
-    var availableCandidates: [Candidate] {
+    /// The name a new branch gets when the user leaves it blank: the
+    /// workspace title as a folder name.
+    var defaultBranch: String {
+      let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+      return title.isEmpty ? "" : WorkspaceLayout.folderName(forTitle: title)
+    }
+
+    /// Open projects the editor can offer: those not listed by another row.
+    var editorCandidates: [Candidate] {
+      let editingID = editor?.id
       let used = Set(
         members.compactMap { member -> ProjectID? in
-          if case .project(let id, _, _) = member.source { return id }
-          return nil
+          guard member.id != editingID, case .project(let id, _, _) = member.source else { return nil }
+          return id
         })
       return candidates.filter { !used.contains($0.id) }
     }
 
     // MARK: Plan
 
-    /// The plan as it stands; preflight checks it before it is complete.
+    /// The plan as it stands; creation uses it once nothing blocks it.
     var draftPlan: WorkspacePlan {
+      plan(of: Array(members))
+    }
+
+    /// What preflight checks: the list with the dialog's draft in place, so
+    /// the dialog sees findings before its project is added.
+    var checkedPlan: WorkspacePlan {
+      var drafts = Array(members)
+      if let draft = editor?.draft {
+        if let index = drafts.firstIndex(where: { $0.id == draft.id }) {
+          drafts[index] = draft
+        } else {
+          drafts.append(draft)
+        }
+      }
+      return plan(of: drafts)
+    }
+
+    private func plan(of drafts: [MemberDraft]) -> WorkspacePlan {
       WorkspacePlan(
         title: titleDraft.trimmingCharacters(in: .whitespacesAndNewlines),
         rootPath: rootPath,
-        members: members.map { member in
+        members: drafts.map { member in
           WorkspacePlan.Member(
             name: member.name.trimmingCharacters(in: .whitespacesAndNewlines),
             source: member.source.planSource,
@@ -151,7 +181,7 @@ struct CreateWorkspaceFeature {
     }
 
     func branch(for member: MemberDraft) -> String {
-      member.branch(sharedBranch: sharedBranch)
+      member.branch(defaultBranch: defaultBranch)
     }
 
     func checkout(for member: MemberDraft) -> WorkspaceCheckout {
@@ -164,6 +194,24 @@ struct CreateWorkspaceFeature {
       case .existingRemote:
         return .remoteTrackingRef(
           remoteRef: member.remoteRef ?? "", branch: branch, resetLocal: member.localConflict == .resetToRemote)
+      }
+    }
+
+    /// How a row describes its checkout in one line.
+    func checkoutSummary(for member: MemberDraft) -> String {
+      let branch = branch(for: member)
+      switch member.mode {
+      case .newBranch:
+        let base = member.baseRef ?? member.refs.inventory?.defaultBaseRef ?? "the default branch"
+        return branch.isEmpty ? "New branch from \(base), named after the title" : "New branch \(branch) from \(base)"
+      case .existingLocal:
+        return branch.isEmpty ? "Existing branch" : "Branch \(branch)"
+      case .existingRemote:
+        guard let remoteRef = member.remoteRef, !branch.isEmpty else { return "Remote branch" }
+        guard member.hasLocalConflict else { return "Branch \(branch), tracking \(remoteRef)" }
+        return member.localConflict == .resetToRemote
+          ? "Branch \(branch), reset to \(remoteRef)"
+          : "Local branch \(branch), tracking \(remoteRef)"
       }
     }
 
@@ -182,7 +230,7 @@ struct CreateWorkspaceFeature {
       } else if members.contains(where: {
         $0.id != member.id && $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == name
       }) {
-        issues.append(.blocking("Another repository already uses the folder name \u{201C}\(name)\u{201D}."))
+        issues.append(.blocking("Another project already uses the folder name \u{201C}\(name)\u{201D}."))
       } else if case .add(_, _, _, let existing) = mode, existing.contains(name) {
         issues.append(.blocking("The workspace already has a folder named \u{201C}\(name)\u{201D}."))
       }
@@ -255,7 +303,7 @@ struct CreateWorkspaceFeature {
         issues.append(.incomplete("Enter a title."))
       }
       if members.count < minimumMembers {
-        issues.append(.incomplete(isAddMode ? "Choose a repository to add." : "Add at least two repositories."))
+        issues.append(.incomplete(isAddMode ? "Add a project." : "Add at least two projects."))
       }
       issues.append(contentsOf: rootIssues)
       return issues
@@ -267,7 +315,7 @@ struct CreateWorkspaceFeature {
     }
 
     var canCreate: Bool {
-      plan != nil && !creation.isBusy && !isResolvingAdd
+      plan != nil && !creation.isBusy
     }
 
     var createButtonTitle: String {
@@ -275,14 +323,61 @@ struct CreateWorkspaceFeature {
     }
 
     /// Why Create is disabled, for the bottom bar: the first thing still
-    /// missing, or a pointer to the problems shown in the form.
+    /// missing, or a pointer to the problems shown in the list.
     var createHint: String? {
       guard creation == .idle, !canCreate else { return nil }
-      if isResolvingAdd { return "Checking the folder…" }
       let all = workspaceIssues + members.flatMap { issues(for: $0) }
       if let missing = all.first(where: { $0.severity == .incomplete }) { return missing.message }
       if all.contains(where: { $0.severity == .blocking }) { return "Fix the problems above to continue." }
       return nil
+    }
+
+    // MARK: Editor
+
+    /// The dialog's findings: the source first, then the draft's own.
+    var editorIssues: [MemberIssue] {
+      guard let editor else { return [] }
+      var issues: [MemberIssue] = []
+      if let sourceIssue = editor.sourceIssue {
+        issues.append(.blocking(sourceIssue))
+      }
+      guard let draft = editor.draft else {
+        if editor.sourceIssue == nil {
+          issues.append(
+            .incomplete(editor.kind == .remote ? "Enter the repository\u{2019}s URL." : "Choose a repository."))
+        }
+        return issues
+      }
+      if !editor.isURLApplied, editor.sourceIssue == nil {
+        issues.append(.incomplete("Enter a git URL, such as git@github.com:org/repo.git."))
+      }
+      // A blank new branch is named after the title, which may still be
+      // blank; the main sheet asks for the title.
+      let followsTitle = draft.mode == .newBranch && branch(for: draft).isEmpty
+      issues.append(contentsOf: self.issues(for: draft).filter { !(followsTitle && $0.severity == .incomplete) })
+      return issues
+    }
+
+    var canSaveEditor: Bool {
+      guard let editor, editor.draft != nil, !editor.isResolvingSource else { return false }
+      return !editorIssues.contains(where: \.blocksCreation)
+    }
+
+    /// A folder name for `source` no other row uses.
+    func suggestedName(for source: MemberDraft.Source, excluding id: MemberDraft.ID?) -> String {
+      var taken = Set(
+        members.filter { $0.id != id }.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) })
+      if case .add(_, _, _, let existing) = mode {
+        taken.formUnion(existing)
+      }
+      let base = source.suggestedName
+      var name = base
+      var suffix = 2
+      while taken.contains(name) {
+        name = "\(base)-\(suffix)"
+        suffix += 1
+      }
+      return name
     }
   }
 
@@ -292,16 +387,13 @@ struct CreateWorkspaceFeature {
     case titleChanged(String)
     case chooseLocationTapped
     case locationPicked(URL?)
-    case sharedBranchChanged(String)
-    // Adding members
-    case addProjectTapped(ProjectID)
-    case addFolderTapped
-    case addFolderPicked(URL?)
-    case addPathResolved(path: String, probe: RepositoryProbe?)
-    case remoteURLDraftChanged(String)
-    case addRemoteURLSubmitted
-    // Members
+    // List
+    case addLocalTapped
+    case addRemoteTapped
+    case editTapped(MemberDraft.ID)
+    /// A row, or the dialog's draft when the id is its.
     case member(MemberDraft.ID, MemberAction)
+    case editor(EditorAction)
     // Validation
     case preflightTick
     case preflightFinished(WorkspacePreflight)
@@ -328,6 +420,19 @@ struct CreateWorkspaceFeature {
       case refsFailed(String)
     }
 
+    enum EditorAction: Equatable {
+      case projectPicked(ProjectID)
+      case chooseFolderTapped
+      case folderPicked(URL?)
+      case folderResolved(path: String, probe: RepositoryProbe?)
+      case urlChanged(String)
+      /// Typing paused; a URL is applied, anything else waits for Return.
+      case urlSettled
+      case urlSubmitted
+      case saveTapped
+      case cancelTapped
+    }
+
     @CasePathable
     enum Delegate: Equatable {
       case dismissed
@@ -340,13 +445,15 @@ struct CreateWorkspaceFeature {
 
   private nonisolated enum CancelID: Hashable, Sendable {
     case refs(MemberDraft.ID)
-    case addResolve
+    case folderResolve
+    case urlSettle
     case preflight
     case creation
   }
 
   private nonisolated static let remoteRefsTimeout: Duration = .seconds(20)
   private nonisolated static let preflightDebounce: Duration = .milliseconds(300)
+  private nonisolated static let urlSettleDelay: Duration = .milliseconds(600)
 
   @Dependency(WorkspaceClient.self) private var workspaceClient
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
@@ -364,16 +471,17 @@ struct CreateWorkspaceFeature {
           return .none
         }
         state.preselected = nil
-        return appendMember(source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
+        var member = MemberDraft(
+          id: uuid(), source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), name: "")
+        member.name = state.suggestedName(for: member.source, excluding: nil)
+        member.refs = .loading
+        state.members.append(member)
+        return .merge(loadRefs(for: member), edited(&state))
 
       // MARK: Workspace
 
       case .titleChanged(let title):
         state.titleDraft = title
-        if !state.sharedBranchEditedManually {
-          let isBlank = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-          state.sharedBranch = isBlank ? "" : WorkspaceLayout.folderName(forTitle: title)
-        }
         return edited(&state)
 
       case .chooseLocationTapped:
@@ -386,50 +494,32 @@ struct CreateWorkspaceFeature {
         state.locationPath = (url.path(percentEncoded: false) as NSString).standardizingPath
         return edited(&state)
 
-      case .sharedBranchChanged(let branch):
-        state.sharedBranch = branch
-        state.sharedBranchEditedManually = true
-        return edited(&state)
+      // MARK: List
 
-      // MARK: Adding members
-
-      case .addProjectTapped(let id):
-        guard state.canAddMembers, let candidate = state.candidates[id: id] else { return .none }
-        state.addIssue = nil
-        return appendMember(source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
-
-      case .addFolderTapped:
-        return .run { [picker = folderPicker] send in
-          await send(.addFolderPicked(await picker.pick("Add Repository")))
-        }
-
-      case .addFolderPicked(let url):
-        guard let url else { return .none }
-        return resolvePath(url.path(percentEncoded: false), &state)
-
-      case .addPathResolved(let path, let probe):
-        state.isResolvingAdd = false
-        return addResolvedPath(path, probe: probe, &state)
-
-      case .remoteURLDraftChanged(let draft):
-        state.remoteURLDraft = draft
-        state.addIssue = nil
+      case .addLocalTapped, .addRemoteTapped:
+        guard state.canAddMembers, state.editor == nil, !state.creation.isBusy else { return .none }
+        let kind: MemberEditor.Kind = action == .addLocalTapped ? .local : .remote
+        state.editor = MemberEditor(id: uuid(), kind: kind)
         return .none
 
-      case .addRemoteURLSubmitted:
-        return submitRemoteURL(&state)
-
-      // MARK: Members
+      case .editTapped(let id):
+        guard let member = state.members[id: id], state.editor == nil, !state.creation.isBusy else { return .none }
+        state.editor = MemberEditor(id: id, kind: .edit, draft: member)
+        return .none
 
       case .member(let id, let memberAction):
-        guard state.members[id: id] != nil else { return .none }
+        guard state.members[id: id] != nil || state.editor?.draft?.id == id else { return .none }
         return reduceMember(id: id, action: memberAction, state: &state)
+
+      case .editor(let editorAction):
+        guard state.editor != nil else { return .none }
+        return reduceEditor(editorAction, state: &state)
 
       // MARK: Validation
 
       case .preflightTick:
         guard state.creation == .idle else { return .none }
-        let plan = state.draftPlan
+        let plan = state.checkedPlan
         return .run { [client = workspaceClient] send in
           await send(.preflightFinished(await client.preflight(plan)))
         }
@@ -437,16 +527,25 @@ struct CreateWorkspaceFeature {
 
       case .preflightFinished(let result):
         state.rootIssues = result.rootIssues.map(MemberIssue.init(preflight:))
-        for id in state.members.ids {
-          let name = state.members[id: id]?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-          state.members[id: id]?.preflightIssues = result.memberIssues[name] ?? []
+        func issues(named name: String) -> [WorkspacePreflight.Issue] {
+          result.memberIssues[name.trimmingCharacters(in: .whitespacesAndNewlines)] ?? []
+        }
+        // The row being edited was checked as the dialog's draft; it takes
+        // those findings on Save.
+        let editingID = state.editor?.draft?.id
+        for id in state.members.ids where id != editingID {
+          let name = state.members[id: id]?.name ?? ""
+          state.members[id: id]?.preflightIssues = issues(named: name)
+        }
+        if let draft = state.editor?.draft {
+          state.editor?.draft?.preflightIssues = issues(named: draft.name)
         }
         return .none
 
       // MARK: Creation
 
       case .createButtonTapped:
-        guard let plan = state.plan, !state.creation.isBusy, !state.isResolvingAdd else { return .none }
+        guard let plan = state.plan, !state.creation.isBusy, state.editor == nil else { return .none }
         return startCreation(plan, &state)
 
       case .creationEvent(let event):
@@ -483,41 +582,9 @@ struct CreateWorkspaceFeature {
   private func reduceMember(id: MemberDraft.ID, action: Action.MemberAction, state: inout State) -> Effect<Action> {
     switch action {
     case .remove:
+      guard state.members[id: id] != nil, state.editor == nil, !state.creation.isBusy else { return .none }
       state.members.remove(id: id)
       return .merge(.cancel(id: CancelID.refs(id)), edited(&state))
-
-    case .nameChanged(let name):
-      state.members[id: id]?.name = name
-      return edited(&state)
-
-    case .modeChanged(let mode):
-      // No remote branch is picked for the user: the default branch's local
-      // twin is usually checked out in the source repository already.
-      state.members[id: id]?.mode = mode
-      return edited(&state)
-
-    case .branchOverrideChanged(let branch):
-      state.members[id: id]?.branchOverride = branch
-      return edited(&state)
-
-    case .baseRefChanged(let ref):
-      state.members[id: id]?.baseRef = ref
-      return edited(&state)
-
-    case .localBranchChanged(let branch):
-      state.members[id: id]?.localBranch = branch
-      return edited(&state)
-
-    case .remoteRefChanged(let ref):
-      state.members[id: id]?.remoteRef = ref
-      // Another ref means another local branch; the reset choice belonged to
-      // the old one.
-      state.members[id: id]?.localConflict = .keepLocal
-      return edited(&state)
-
-    case .localConflictChanged(let choice):
-      state.members[id: id]?.localConflict = choice
-      return edited(&state)
 
     case .chooseCloneDestinationTapped:
       return .run { [picker = folderPicker] send in
@@ -525,42 +592,89 @@ struct CreateWorkspaceFeature {
       }
 
     case .cloneDestinationPicked(let url):
-      guard let url, let member = state.members[id: id], case .remote(let remoteURL, _) = member.source else {
-        return .none
+      guard let url else { return .none }
+      update(id, &state) { draft in
+        guard case .remote(let remoteURL, _) = draft.source else { return }
+        // The picker returns a parent; the clone gets the repository's name.
+        let destination = url.appending(path: draft.source.title).path(percentEncoded: false)
+        draft.source = .remote(url: remoteURL, cloneDestination: destination)
       }
-      // The picker returns a parent; the clone gets the repository's name.
-      let destination = url.appending(path: member.source.title).path(percentEncoded: false)
-      state.members[id: id]?.source = .remote(url: remoteURL, cloneDestination: destination)
       return edited(&state)
 
     case .retryRefsTapped:
-      guard let member = state.members[id: id] else { return .none }
-      state.members[id: id]?.refs = .loading
-      return loadRefs(for: member)
+      guard let draft = state.editor?.draft?.id == id ? state.editor?.draft : state.members[id: id] else {
+        return .none
+      }
+      updateEverywhere(id, &state) { $0.refs = .loading }
+      return loadRefs(for: draft)
 
     case .refsLoaded(let inventory):
-      state.members[id: id]?.refs = .loaded(inventory)
+      updateEverywhere(id, &state) { $0.refs = .loaded(inventory) }
       return .none
 
     case .refsFailed(let message):
-      state.members[id: id]?.refs = .failed(message)
+      updateEverywhere(id, &state) { $0.refs = .failed(message) }
       return .none
+
+    case .nameChanged, .modeChanged, .branchOverrideChanged, .baseRefChanged, .localBranchChanged,
+      .remoteRefChanged, .localConflictChanged:
+      if case .nameChanged = action, state.editor?.draft?.id == id {
+        state.editor?.nameEditedManually = true
+      }
+      update(id, &state) { Self.apply(action, to: &$0) }
+      return edited(&state)
     }
   }
 
-  private func appendMember(source: MemberDraft.Source, _ state: inout State) -> Effect<Action> {
-    let taken = Set(state.members.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) })
-    let base = source.suggestedName
-    var name = base
-    var suffix = 2
-    while taken.contains(name) {
-      name = "\(base)-\(suffix)"
-      suffix += 1
+  /// The field edits, which differ only in what they set.
+  private static func apply(_ action: Action.MemberAction, to draft: inout MemberDraft) {
+    switch action {
+    case .nameChanged(let name):
+      draft.name = name
+    case .modeChanged(let mode):
+      // No remote branch is picked for the user: the default branch's local
+      // twin is usually checked out in the source repository already.
+      draft.mode = mode
+    case .branchOverrideChanged(let branch):
+      draft.branchOverride = branch
+    case .baseRefChanged(let ref):
+      draft.baseRef = ref
+    case .localBranchChanged(let branch):
+      draft.localBranch = branch
+    case .remoteRefChanged(let ref):
+      draft.remoteRef = ref
+      // Another ref means another local branch; the reset choice belonged to
+      // the old one.
+      draft.localConflict = .keepLocal
+    case .localConflictChanged(let choice):
+      draft.localConflict = choice
+    case .remove, .chooseCloneDestinationTapped, .cloneDestinationPicked, .retryRefsTapped, .refsLoaded,
+      .refsFailed:
+      break
     }
-    var member = MemberDraft(id: uuid(), source: source, name: name)
-    member.refs = .loading
-    state.members.append(member)
-    return .merge(loadRefs(for: member), edited(&state))
+  }
+
+  /// An edit goes to the dialog's draft when the id is its, else the row.
+  private func update(_ id: MemberDraft.ID, _ state: inout State, _ body: (inout MemberDraft) -> Void) {
+    if var draft = state.editor?.draft, draft.id == id {
+      body(&draft)
+      state.editor?.draft = draft
+    } else if var member = state.members[id: id] {
+      body(&member)
+      state.members[id: id] = member
+    }
+  }
+
+  /// Facts about the repository reach both copies of an edited row.
+  private func updateEverywhere(_ id: MemberDraft.ID, _ state: inout State, _ body: (inout MemberDraft) -> Void) {
+    if var draft = state.editor?.draft, draft.id == id {
+      body(&draft)
+      state.editor?.draft = draft
+    }
+    if var member = state.members[id: id] {
+      body(&member)
+      state.members[id: id] = member
+    }
   }
 
   private func loadRefs(for member: MemberDraft) -> Effect<Action> {
@@ -609,73 +723,162 @@ struct CreateWorkspaceFeature {
 
   private nonisolated struct RemoteRefsTimeout: Error {}
 
-  // MARK: - Adding
+  // MARK: - Editor
 
-  private func resolvePath(_ path: String, _ state: inout State) -> Effect<Action> {
-    guard state.canAddMembers else { return .none }
-    state.isResolvingAdd = true
-    state.addIssue = nil
-    return .run { [cli = gitCLI] send in
-      let probe = try? await cli.inspectRepository(at: path)
-      await send(.addPathResolved(path: path, probe: probe))
+  private func reduceEditor(_ action: Action.EditorAction, state: inout State) -> Effect<Action> {
+    switch action {
+    case .projectPicked(let projectID):
+      guard state.editor?.kind == .local, let candidate = state.candidates[id: projectID] else { return .none }
+      state.editor?.sourceIssue = nil
+      return setEditorSource(.project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
+
+    case .chooseFolderTapped:
+      state.editor?.isResolvingSource = true
+      return .run { [picker = folderPicker] send in
+        await send(.editor(.folderPicked(await picker.pick("Choose Repository"))))
+      }
+
+    case .folderPicked(let url):
+      guard let url else {
+        state.editor?.isResolvingSource = false
+        return .none
+      }
+      state.editor?.sourceIssue = nil
+      let path = url.path(percentEncoded: false)
+      return .run { [cli = gitCLI] send in
+        let probe = try? await cli.inspectRepository(at: path)
+        await send(.editor(.folderResolved(path: path, probe: probe)))
+      }
+      .cancellable(id: CancelID.folderResolve, cancelInFlight: true)
+
+    case .folderResolved(let path, let probe):
+      state.editor?.isResolvingSource = false
+      return useFolder(path, probe: probe, &state)
+
+    case .urlChanged(let text):
+      state.editor?.urlText = text
+      state.editor?.sourceIssue = nil
+      return .run { [clock] send in
+        try await clock.sleep(for: Self.urlSettleDelay)
+        await send(.editor(.urlSettled))
+      }
+      .cancellable(id: CancelID.urlSettle, cancelInFlight: true)
+
+    case .urlSettled:
+      return applyURL(&state, reportsProblems: false)
+
+    case .urlSubmitted:
+      return .merge(.cancel(id: CancelID.urlSettle), applyURL(&state, reportsProblems: true))
+
+    case .saveTapped:
+      guard state.canSaveEditor, let editor = state.editor, let draft = editor.draft else { return .none }
+      if editor.isNew {
+        state.members.append(draft)
+      } else {
+        state.members[id: draft.id] = draft
+      }
+      state.editor = nil
+      return .merge(.cancel(id: CancelID.urlSettle), .cancel(id: CancelID.folderResolve), edited(&state))
+
+    case .cancelTapped:
+      guard let editor = state.editor else { return .none }
+      state.editor = nil
+      var effects: [Effect<Action>] = [
+        .cancel(id: CancelID.urlSettle), .cancel(id: CancelID.folderResolve), schedulePreflight(state),
+      ]
+      // An edited row keeps its own load; a discarded draft does not.
+      if editor.isNew {
+        effects.append(.cancel(id: CancelID.refs(editor.id)))
+      }
+      return .merge(effects)
     }
-    .cancellable(id: CancelID.addResolve, cancelInFlight: true)
   }
 
-  private func addResolvedPath(_ path: String, probe: RepositoryProbe?, _ state: inout State) -> Effect<Action> {
+  /// A picked folder as the dialog's source: its repository, which may be
+  /// an open project, unless it can't be used.
+  private func useFolder(_ path: String, probe: RepositoryProbe?, _ state: inout State) -> Effect<Action> {
     let shown = (path as NSString).abbreviatingWithTildeInPath
     guard let probe else {
-      state.addIssue = "\(shown) is not a git repository."
+      state.editor?.sourceIssue = "\(shown) is not a git repository."
       return .none
     }
     guard !probe.isBare else {
-      state.addIssue = "\(shown) is a bare repository, which workspaces do not support."
+      state.editor?.sourceIssue = "\(shown) is a bare repository, which workspaces do not support."
       return .none
     }
     let root = HierarchyManager.canonicalPath(probe.root)
+    let editingID = state.editor?.id
     if state.members.contains(where: {
-      !$0.source.isRemote && HierarchyManager.canonicalPath($0.source.gitRoot) == root
+      $0.id != editingID && !$0.source.isRemote && HierarchyManager.canonicalPath($0.source.gitRoot) == root
     }) {
-      state.addIssue = "\((root as NSString).abbreviatingWithTildeInPath) is already in the list."
+      state.editor?.sourceIssue = "\((root as NSString).abbreviatingWithTildeInPath) is already in the list."
       return .none
     }
-    state.addIssue = nil
-    state.remoteURLDraft = ""
     if let candidate = state.candidates.first(where: { HierarchyManager.canonicalPath($0.gitRoot) == root }) {
-      return appendMember(source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
+      return setEditorSource(.project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
     }
-    return appendMember(source: .localRepo(gitRoot: root), &state)
+    return setEditorSource(.localRepo(gitRoot: root), &state)
   }
 
-  private func submitRemoteURL(_ state: inout State) -> Effect<Action> {
-    guard state.canAddMembers else { return .none }
-    switch AddEntryClassifier.classify(state.remoteURLDraft, fileExists: fileExists) {
+  /// Points the dialog's draft at `source`, creating the draft on first use.
+  /// Another repository has other branches, so branch choices reset and
+  /// its refs load.
+  private func setEditorSource(_ source: MemberDraft.Source, _ state: inout State) -> Effect<Action> {
+    guard let editor = state.editor, editor.draft?.source != source else { return .none }
+    var draft = editor.draft ?? MemberDraft(id: editor.id, source: source, name: "")
+    draft.source = source
+    if !editor.nameEditedManually {
+      draft.name = state.suggestedName(for: source, excluding: editor.id)
+    }
+    if !draft.availableModes.contains(draft.mode) {
+      draft.mode = .newBranch
+    }
+    draft.baseRef = nil
+    draft.localBranch = nil
+    draft.remoteRef = nil
+    draft.localConflict = .keepLocal
+    draft.preflightIssues = []
+    draft.refs = .loading
+    state.editor?.draft = draft
+    return .merge(loadRefs(for: draft), edited(&state))
+  }
+
+  private func applyURL(_ state: inout State, reportsProblems: Bool) -> Effect<Action> {
+    guard let editor = state.editor, editor.kind == .remote else { return .none }
+    switch AddEntryClassifier.classify(editor.urlText, fileExists: fileExists) {
     case .empty:
-      return .none
+      guard editor.draft != nil else { return .none }
+      state.editor?.draft = nil
+      return .cancel(id: CancelID.refs(editor.id))
     case .url(let url):
       let key = AddEntryClassifier.normalizedRemoteKey(url)
+      if case .remote(let current, _) = editor.draft?.source, AddEntryClassifier.normalizedRemoteKey(current) == key {
+        return .none
+      }
       let isListed = state.members.contains {
-        guard case .remote(let existing, _) = $0.source else { return false }
+        guard $0.id != editor.id, case .remote(let existing, _) = $0.source else { return false }
         return AddEntryClassifier.normalizedRemoteKey(existing) == key
       }
       guard !isListed else {
-        state.addIssue = "This remote is already in the list."
+        state.editor?.sourceIssue = "This repository is already in the list."
         return .none
       }
       let name = WorkspaceLayout.repositoryName(fromRemoteURL: url) ?? "repository"
-      let destination = (WorkspaceLayout.defaultSourcesDirectory().path(percentEncoded: false) as NSString)
-        .appendingPathComponent(name)
-      state.remoteURLDraft = ""
-      state.addIssue = nil
-      return appendMember(source: .remote(url: url, cloneDestination: destination), &state)
-    case .path(let path, let exists):
-      guard exists else {
-        state.addIssue = "There is no folder at \((path as NSString).abbreviatingWithTildeInPath)."
-        return .none
+      // A clone folder picked for an earlier URL stays the parent.
+      let parent =
+        editor.draft.map { ($0.source.gitRoot as NSString).deletingLastPathComponent }
+        ?? WorkspaceLayout.defaultSourcesDirectory().path(percentEncoded: false)
+      return setEditorSource(
+        .remote(url: url, cloneDestination: (parent as NSString).appendingPathComponent(name)), &state)
+    case .path:
+      if reportsProblems {
+        state.editor?.sourceIssue = "Enter a URL. To use a folder on this Mac, add a local repository."
       }
-      return resolvePath(path, &state)
+      return .none
     case .unrecognized:
-      state.addIssue = "Enter a git URL, such as git@github.com:org/repo.git."
+      if reportsProblems {
+        state.editor?.sourceIssue = "Enter a git URL, such as git@github.com:org/repo.git."
+      }
       return .none
     }
   }
@@ -761,6 +964,10 @@ struct CreateWorkspaceFeature {
       state.creation = .idle
       for id in state.members.ids { state.members[id: id]?.progress = .pending }
     }
+    return schedulePreflight(state)
+  }
+
+  private func schedulePreflight(_ state: State) -> Effect<Action> {
     guard state.creation == .idle else { return .none }
     return .run { [clock] send in
       try await clock.sleep(for: Self.preflightDebounce)

@@ -21,18 +21,20 @@ and the project does not yet follow semantic versioning — every release until
   repository, so a workspace nested inside a repo stays a workspace.
 - **Create workspaces from the app or the CLI.** **New Workspace…** in the
   sidebar's Add menu (and the command palette) opens a form laid out like
-  Settings: a title, where the folder goes, and the branch new checkouts
-  use, then one section per repository and a section to add more — an open
-  project, a folder on disk, or a remote URL whose branches are read before
-  anything is cloned. The project selected in the sidebar is already in the
-  list. Each repository can start a new branch (its own name, or the
-  workspace's; from its default branch or one you pick), check out an
-  existing branch, or track a remote branch. When a remote branch meets a
-  local branch of the same name you choose to keep it or reset it to the
+  Settings: a title, where the folder goes, and an **Add Project** menu
+  that adds a local repository (an open project or any folder) or a remote
+  one (a URL whose branches are read before anything is cloned), each in
+  its own dialog. Projects are listed one per row with an icon for where
+  they come from, how they will be checked out, and buttons to edit or
+  remove them. The project selected in the sidebar is already in the list.
+  Each project can start a new branch (named after the workspace title
+  unless you name it; from its default branch or one you pick), check out
+  an existing branch, or track a remote branch. When a remote branch meets
+  a local branch of the same name you choose to keep it or reset it to the
   remote; nothing is reset unless you say so. Real problems show in red
-  under the repository they concern, and what is still missing is named
-  next to the disabled Create button. Each repository shows its progress
-  while the workspace is created, Cancel rolls back and reports anything it
+  under the project they concern, and what is still missing is named next
+  to the disabled Create button. Each project shows its progress while the
+  workspace is created, Cancel rolls back and reports anything it
   could not undo, and after a failure Create tries again. Remote
   repositories are cloned once into `~/.codans/sources/<name>` (or a
   folder you choose) and used like local ones from then on. Bare

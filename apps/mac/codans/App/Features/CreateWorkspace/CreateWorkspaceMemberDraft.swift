@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// One repository in the New Workspace sheet and everything the user can
+/// One project in the New Workspace sheet and everything the user can
 /// decide about it. Pure state: the reducer derives issues and the
 /// `WorkspacePlan.Member` from it.
 nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
@@ -31,7 +31,7 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
       return false
     }
 
-    /// The name the section is headed with.
+    /// The repository's own name.
     var title: String {
       switch self {
       case .project(_, let name, _): return name
@@ -41,7 +41,7 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
       }
     }
 
-    /// Where it comes from, as shown under the title.
+    /// Where it comes from: a home-relative path, or the URL.
     var location: String {
       switch self {
       case .project(_, _, let gitRoot), .localRepo(let gitRoot):
@@ -110,8 +110,7 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
   /// Folder under the workspace root.
   var name: String
   var mode: CheckoutMode = .newBranch
-  /// New branch: a name of this member's own. Empty follows the workspace's
-  /// branch.
+  /// New branch: its name. Empty is named after the workspace title.
   var branchOverride = ""
   /// New branch: where it starts. Nil is the repository's default branch.
   var baseRef: String?
@@ -131,12 +130,13 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
     self.name = name
   }
 
-  /// The branch the checkout ends up on.
-  func branch(sharedBranch: String) -> String {
+  /// The branch the checkout ends up on. `defaultBranch` names a new branch
+  /// the user left blank.
+  func branch(defaultBranch: String) -> String {
     switch mode {
     case .newBranch:
       let own = branchOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-      return own.isEmpty ? sharedBranch.trimmingCharacters(in: .whitespacesAndNewlines) : own
+      return own.isEmpty ? defaultBranch : own
     case .existingLocal:
       return localBranch ?? ""
     case .existingRemote:
@@ -161,6 +161,48 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
   /// A remote that is not cloned yet has no local branches to offer.
   var availableModes: [CheckoutMode] {
     source.isRemote ? [.newBranch, .existingRemote] : CheckoutMode.allCases
+  }
+}
+
+/// The dialog that adds a project to the sheet's list or edits one in it.
+/// A new project's draft appears once a repository is chosen (local) or a
+/// URL entered (remote); the list only changes on Add / Save.
+nonisolated struct MemberEditor: Equatable, Identifiable, Sendable {
+  enum Kind: Equatable, Sendable {
+    case local
+    case remote
+    case edit
+  }
+
+  /// Also the draft's id, so a new draft keeps one refs load across source
+  /// changes and an edited one maps back to its row.
+  let id: UUID
+  let kind: Kind
+  var draft: MemberDraft?
+  /// Remote: the URL as typed. The draft follows it once it reads as a URL.
+  var urlText = ""
+  /// Why the chosen folder or the URL can't be used.
+  var sourceIssue: String?
+  var isResolvingSource = false
+  /// The folder name was typed; a new source no longer renames it.
+  var nameEditedManually = false
+
+  init(id: UUID, kind: Kind, draft: MemberDraft? = nil) {
+    self.id = id
+    self.kind = kind
+    self.draft = draft
+    if case .remote(let url, _) = draft?.source {
+      urlText = url
+    }
+  }
+
+  var isNew: Bool { kind != .edit }
+
+  /// Remote: the draft is for the URL in the field, not an earlier one.
+  var isURLApplied: Bool {
+    guard kind == .remote else { return true }
+    guard case .remote(let url, _) = draft?.source else { return false }
+    return AddEntryClassifier.normalizedRemoteKey(urlText) == AddEntryClassifier.normalizedRemoteKey(url)
   }
 }
 

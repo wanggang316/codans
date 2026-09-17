@@ -3,9 +3,11 @@ import ComposableArchitecture
 import SwiftUI
 
 /// Sheet for `CreateWorkspaceFeature`, laid out as a grouped form like the
-/// Settings panes: the workspace (title, location, branch), one section per
-/// repository, a section to add more, and Cancel / Create in the bottom bar.
-/// In add mode the workspace is fixed and one repository is added to it.
+/// Settings panes: the workspace (title, location, and the Add Project
+/// menu), the list of projects with an edit and a remove button each, and
+/// Cancel / Create in the bottom bar. Projects are added and edited in
+/// `WorkspaceMemberEditorSheet`. In add mode the workspace is fixed and one
+/// project is added to it.
 struct CreateWorkspaceSheet: View {
   @Bindable var store: StoreOf<CreateWorkspaceFeature>
   @FocusState private var isTitleFocused: Bool
@@ -23,22 +25,23 @@ struct CreateWorkspaceSheet: View {
       store.send(.onAppear)
       if !store.isAddMode { isTitleFocused = true }
     }
+    .sheet(
+      isPresented: Binding(
+        get: { store.editor != nil },
+        set: { isPresented in
+          if !isPresented { store.send(.editor(.cancelTapped)) }
+        }
+      )
+    ) {
+      WorkspaceMemberEditorSheet(store: store)
+    }
   }
-
-  private static let addSectionID = "add-repository"
 
   private var form: some View {
     ScrollViewReader { proxy in
       Form {
         workspaceSection
-        ForEach(store.members) { member in
-          WorkspaceMemberSection(store: store, member: member)
-            .id(member.id)
-        }
-        if store.canAddMembers {
-          WorkspaceAddSection(store: store)
-            .id(Self.addSectionID)
-        }
+        projectsSection
       }
       .formStyle(.grouped)
       .scrollBounceBehavior(.basedOnSize)
@@ -46,7 +49,7 @@ struct CreateWorkspaceSheet: View {
       .onChange(of: store.members.count) { oldCount, newCount in
         guard newCount > oldCount, let last = store.members.last else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
-          proxy.scrollTo(store.canAddMembers ? AnyHashable(Self.addSectionID) : AnyHashable(last.id), anchor: .bottom)
+          proxy.scrollTo(last.id, anchor: .bottom)
         }
       }
     }
@@ -64,20 +67,10 @@ struct CreateWorkspaceSheet: View {
         )
         .focused($isTitleFocused)
         locationRow
-        LabeledContent {
-          TextField(
-            "Branch",
-            text: Binding(get: { store.sharedBranch }, set: { store.send(.sharedBranchChanged($0)) }),
-            prompt: Text("branch-name")
-          )
-          .labelsHidden()
-        } label: {
-          Text("Branch")
-          Text("Used for every new branch.")
-        }
+        addProjectRow
       } header: {
         Text("New Workspace")
-        Text("A folder with a checkout of each repository, for work that spans them.")
+        Text("A folder with a checkout of each project, for work that spans them.")
       } footer: {
         IssueList(issues: store.rootIssues)
       }
@@ -88,9 +81,10 @@ struct CreateWorkspaceSheet: View {
         LabeledContent("Location") {
           PathText(path: rootPath)
         }
+        addProjectRow
       } header: {
         Text("Add Repository")
-        Text("Check out one more repository into this workspace.")
+        Text("Check out one more project into this workspace.")
       }
       .headerProminence(.increased)
     }
@@ -111,6 +105,48 @@ struct CreateWorkspaceSheet: View {
       }
     } label: {
       Text("Location")
+    }
+  }
+
+  /// The Settings panes' trailing "Add …" row, as a menu: a project comes
+  /// from this Mac or from a URL, and each opens its own dialog.
+  @ViewBuilder
+  private var addProjectRow: some View {
+    if store.canAddMembers {
+      HStack {
+        Menu {
+          Button {
+            store.send(.addLocalTapped)
+          } label: {
+            Label("Local Repository…", systemImage: "folder")
+          }
+          Button {
+            store.send(.addRemoteTapped)
+          } label: {
+            Label("Remote Repository…", systemImage: "globe")
+          }
+        } label: {
+          Label("Add Project", systemImage: "plus")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        Spacer()
+      }
+    }
+  }
+
+  private var projectsSection: some View {
+    Section {
+      if store.members.isEmpty {
+        Text(store.isAddMode ? "No project yet." : "No projects yet. A workspace needs at least two.")
+          .foregroundStyle(.secondary)
+      }
+      ForEach(store.members) { member in
+        WorkspaceMemberRow(store: store, member: member)
+          .id(member.id)
+      }
+    } header: {
+      Text(store.isAddMode ? "Project" : "Projects")
     }
   }
 }
