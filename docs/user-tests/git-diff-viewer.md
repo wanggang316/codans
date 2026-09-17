@@ -143,3 +143,12 @@ Final build-for-testing succeeded. The focused app run passed 51 tests in 10 sui
 The GUI used an isolated QA app/config and synthetic local remote-tracking refs; no network fetch, SSH, or live PR discovery is claimed. The QA bundle required copying the existing zmx runtime into its resources before terminal-backed checks. A final display-only correction makes an empty Outgoing header say Outgoing; that correction was build-verified after the GUI run.
 
 Evidence: `/tmp/codans-refinement-final-build.log`, `/tmp/codans-refinement-tests.log`, `/tmp/codans-diff-qa-test/refinement-result.xcresult`, `/tmp/codans-refinement-core-final-tests.log`, and `/tmp/codans-diff-qa-test/refinement-core-final-result.xcresult`, plus GUI observations in the task transcript. `make mac-check` still reports 61 existing repository violations; unrelated formatter edits were restored.
+
+
+## Sidebar line statistics (2026-09-17)
+
+Each tree/list file row displays added and deleted lines beside its status. The header totals the full comparison rather than filtered rows; incomplete non-binary statistics are marked partial. Untracked text uses bounded safe reads, with unknown values for symlinks, oversized/unreadable content, and binary files.
+
+Build-for-testing and 25 tests in GitComparisonTests, DiffFeatureTests, and DiffFileTreeTests passed. The new fixture test covers terminated and unterminated lines, empty files, binary data, oversized files, symlinks, and both working-directory scopes. Real GUI verified tree and flat rows, empty-file zeroes, binary/symlink dashes, aggregate +10/−2 with partial indication, unchanged totals while filtering to Demo.swift, and Outgoing switching to +1/−0. The default-width sidebar and dark appearance were visually checked; SSH GUI and additional width matrices were not rerun.
+
+Evidence: `/tmp/codans-line-counts-build.log`, `/tmp/codans-line-counts-tests.log`, `/tmp/codans-diff-qa-test/line-counts-result.xcresult`, and GUI observations in the task transcript. Full-repository `make mac-check` reports the same 61 existing violations; unrelated formatter edits were restored.

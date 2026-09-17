@@ -25,8 +25,24 @@ struct DiffFileSidebar: View {
       .padding(.horizontal, 10).padding(.vertical, 4)
       Divider()
       HStack {
-        Text("Changed Files").font(.system(size: 11, weight: .semibold))
-        Text("\(store.snapshot?.files.count ?? 0)").font(.system(size: 11).monospacedDigit())
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Changed Files \(store.snapshot?.files.count ?? 0)")
+            .font(.system(size: 11, weight: .semibold))
+          let allFiles = store.snapshot?.files ?? []
+          HStack(spacing: 4) {
+            DiffLineCounts(
+              additions: allFiles.compactMap(\.additions).reduce(0, +),
+              deletions: allFiles.compactMap(\.deletions).reduce(0, +)
+            )
+            if allFiles.contains(where: { !$0.isBinary && ($0.additions == nil || $0.deletions == nil) }) {
+              Text("partial").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+          }
+          .help(
+            "Total text changes across all files, including files hidden by the filter. Files without line counts are excluded."
+          )
+          .accessibilityIdentifier("diff-total-line-counts")
+        }
         Spacer(minLength: 8)
         Picker(
           "File presentation",
@@ -41,7 +57,7 @@ struct DiffFileSidebar: View {
         .help("Show files as a tree or a flat list")
         .accessibilityIdentifier("diff-file-presentation")
       }
-      .foregroundStyle(.secondary).padding(.horizontal, 10).frame(height: 32)
+      .foregroundStyle(.secondary).padding(.horizontal, 10).frame(height: 44)
       HStack(spacing: 6) {
         Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
         TextField("Filter files", text: Binding(get: { store.filter }, set: { store.send(.filterChanged($0)) }))
@@ -177,7 +193,10 @@ private struct DiffFileSidebarRow: View {
         }
       }
       Spacer(minLength: 4)
+      DiffLineCounts(additions: file.additions, deletions: file.deletions)
+        .help(file.isBinary ? "Binary file; line counts are not applicable" : "Added and deleted lines")
       Text(file.status).font(.system(size: 10, weight: .semibold)).foregroundStyle(statusColor)
+        .frame(width: 9)
     }
     .font(.system(size: 13)).tag(file.id).help(file.path)
     .contextMenu {
@@ -196,5 +215,25 @@ private struct DiffFileSidebarRow: View {
     case "R": ThemeGit.kindRenamed
     default: .secondary
     }
+  }
+}
+
+private struct DiffLineCounts: View {
+  let additions: Int?
+  let deletions: Int?
+
+  var body: some View {
+    HStack(spacing: 4) {
+      if let additions, let deletions {
+        Text("+\(additions)").foregroundStyle(ThemeGit.added)
+        Text("−\(deletions)").foregroundStyle(ThemeGit.removed)
+      } else {
+        Text("—").foregroundStyle(.secondary)
+          .accessibilityLabel("Line counts unavailable")
+      }
+    }
+    .font(.system(size: 10).monospacedDigit())
+    .fixedSize()
+    .accessibilityElement(children: .combine)
   }
 }

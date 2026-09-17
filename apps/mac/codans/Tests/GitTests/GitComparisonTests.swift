@@ -56,6 +56,38 @@ struct GitComparisonTests {
     #expect(unstagedText.newText == "working\n")
   }
 
+  @Test func untrackedLineCountsIncludeUnterminatedLinesAndEmptyFiles() async throws {
+    let url = try await repository()
+    defer { try? FileManager.default.removeItem(at: url) }
+    try write("first\nsecond\n", "terminated.txt", at: url)
+    try write("first\nsecond", "unterminated.txt", at: url)
+    try write("", "empty.txt", at: url)
+    try Data([0, 1, 10]).write(to: url.appendingPathComponent("binary"))
+    try Data(repeating: 65, count: LiveGitService.comparisonContentLimit + 1).write(
+      to: url.appendingPathComponent("large"))
+    try FileManager.default.createSymbolicLink(
+      atPath: url.appendingPathComponent("link").path, withDestinationPath: "terminated.txt")
+    let service = LiveGitService()
+    for scope in [GitComparisonScope.all, .unstaged] {
+      let snapshot = try await service.comparison(at: url, scope: scope, base: nil)
+      for (path, additions) in [("terminated.txt", 2), ("unterminated.txt", 2), ("empty.txt", 0)] {
+        let file = try #require(snapshot.files.first { $0.path == path })
+        #expect(file.additions == additions)
+        #expect(file.deletions == 0)
+        #expect(!file.isBinary)
+      }
+      let binary = try #require(snapshot.files.first { $0.path == "binary" })
+      #expect(binary.isBinary)
+      #expect(binary.additions == nil)
+      #expect(binary.deletions == nil)
+      for path in ["large", "link"] {
+        let file = try #require(snapshot.files.first { $0.path == path })
+        #expect(file.additions == nil)
+        #expect(file.deletions == nil)
+      }
+    }
+  }
+
   @Test func outgoingExcludesTargetOnlyChangesAndUncommittedWork() async throws {
     let url = try await repository()
     defer { try? FileManager.default.removeItem(at: url) }

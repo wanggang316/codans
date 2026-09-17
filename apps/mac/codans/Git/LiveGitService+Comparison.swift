@@ -60,7 +60,7 @@ extension LiveGitService {
         throw GitError.unparsable(context: "Unsupported filename encoding")
       }
       for name in text.split(separator: "\0") where !files.contains(where: { $0.path == name }) {
-        files.append(.init(path: String(name), status: "A"))
+        files.append(try await comparisonUntrackedFile(String(name), at: path))
       }
     }
     let fingerprint = SHA256.hash(
@@ -69,6 +69,25 @@ extension LiveGitService {
     return .init(
       id: fingerprint, scope: scope, baseLabel: label, files: files.sorted { $0.path < $1.path },
       repositoryPath: path.path)
+  }
+
+  private func comparisonUntrackedFile(_ name: String, at path: URL) async throws -> GitComparisonFile {
+    var file = GitComparisonFile(path: name, status: "A")
+    // Reuse the preview's bounded, symlink-safe read for both local and SSH worktrees.
+    // Unreadable or oversized files retain unknown statistics rather than reporting zero.
+    guard let bytes = try? await comparisonWorkingFile(name, at: path) else {
+      try Task.checkCancellation()
+      return file
+    }
+    if bytes.contains(0) {
+      file.isBinary = true
+      return file
+    }
+    file.additions =
+      bytes.reduce(0) { $0 + ($1 == 10 ? 1 : 0) }
+      + (bytes.isEmpty || bytes.last == 10 ? 0 : 1)
+    file.deletions = 0
+    return file
   }
 
   private func comparisonRevision(_ ref: String, at path: URL) async throws -> String {
