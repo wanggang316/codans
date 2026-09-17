@@ -237,8 +237,6 @@ private struct DiffFileSidebarRow: View {
         }
       }
       Spacer(minLength: 4)
-      DiffLineCounts(additions: file.additions, deletions: file.deletions)
-        .help(file.isBinary ? "Binary file; line counts are not applicable" : "Added and deleted lines")
       Text(file.status).font(.system(size: 10, weight: .semibold)).foregroundStyle(statusColor)
         .frame(width: 9)
     }

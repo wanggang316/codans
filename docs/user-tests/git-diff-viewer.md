@@ -163,3 +163,8 @@ Final build-for-testing and 26 tests across DiffFeatureTests, DiffWindowManagerT
 Real GUI verified the default checkmark, explicit origin/main selection and checked state, feature/review selection yielding zero files, and Remote Default Branch restoring origin/main and committed.txt. Final visual verification confirms both branch groups and all three fixture branches are visible without an input field or confirmation button. No network fetch or SSH GUI testing was performed.
 
 Evidence: `/tmp/codans-base-picker-sized-build.log`, `/tmp/codans-base-picker-tests.log`, `/tmp/codans-diff-qa-test/base-picker-result.xcresult`, `/tmp/codans-base-picker-scoped-lint.log`, and task GUI observations.
+
+
+## Quieter file rows and context-menu order (2026-09-18)
+
+Removed per-file line counts from the shared tree/list row while preserving header totals and selected-file statistics. Show Changes now has its own group after Open/Reveal and before Copy. Build-for-testing passed. GUI confirmed Reveal in Finder → Show Changes → Copy ordering, successful opening, rows without line counts, and retained +10/−2 header totals. The two menu dividers were checked in source. No reducer or Git behavior changed, so automated behavior suites were not rerun. Full-repository lint remains at 61 existing violations. Evidence: `/tmp/codans-sidebar-cleanup-build.log`, `/tmp/codans-sidebar-cleanup-check.log`, and task GUI observations.
