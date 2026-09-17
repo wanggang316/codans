@@ -118,3 +118,8 @@ Build-for-testing and 33 focused tests passed. Window tests cover sidebar routin
 Evidence: `/tmp/codans-native-sidebar-final-build.log`, `/tmp/codans-native-sidebar-final-tests.log`, `/tmp/codans-diff-qa-test/native-sidebar-final-result.xcresult`, and the task's GUI observations.
 
 The final sizing correction explicitly restores 1000×700 content size when no saved frame exists. The lifecycle test was rerun with minimum initial-frame assertions and passed (`/tmp/codans-native-sidebar-size-tests.log`); final GUI confirmed the full initial size and loaded tree/code surface.
+
+
+## Comparison selector styling (2026-09-17)
+
+Changes/Outgoing use full-width equal segments, icon-and-text labels, a capsule track, and an accent-colored capsule selection. The selector uses native SwiftUI buttons with accessible selected state. Build-for-testing passed; real GUI verified both appearances and switching between current changes and the outgoing committed-file comparison. Evidence: `/tmp/codans-diff-picker-capsule-build.log` and GUI observations in the task transcript.

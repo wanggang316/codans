@@ -16,18 +16,13 @@ struct DiffFileSidebar: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      Picker(
-        "Comparison",
-        selection: Binding(
+      DiffComparisonPicker(
+        outgoing: Binding(
           get: { outgoing }, set: { store.send(.scopeChanged($0 ? .outgoing : .all)) }
         )
-      ) {
-        Text("Changes").tag(false)
-        Text("Outgoing").tag(true)
-      }
-      .pickerStyle(.segmented).labelsHidden()
-      .padding(10)
-      .accessibilityIdentifier("diff-sidebar-mode")
+      )
+      .frame(maxWidth: .infinity).frame(height: 32)
+      .padding(.horizontal, 10).padding(.vertical, 8)
       Divider()
       HStack {
         Text("Changed Files").font(.system(size: 11, weight: .semibold))
