@@ -651,7 +651,9 @@ struct HierarchySidebarFeature {
       // selected project, when eligible, is the first row.
       let snapshot = hierarchyClient.snapshot()
       let candidates = Self.workspaceCandidates(in: snapshot)
-      let preselected = snapshot.selectedProjectID.flatMap { id in candidates.contains { $0.id == id } ? id : nil }
+      let preselected = snapshot.displayedSelectedProjectID.flatMap { id in
+        candidates.contains { $0.id == id } ? id : nil
+      }
       state.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: candidates, preselected: preselected)
       return .none
 

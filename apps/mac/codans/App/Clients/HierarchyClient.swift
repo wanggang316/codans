@@ -2195,17 +2195,10 @@ extension HierarchyClient {
   @MainActor
   private static func currentSelection(for manager: HierarchyManager) -> HierarchySelection {
     let catalog = manager.catalog
-    if let pid = catalog.selectedProjectID,
+    guard let pid = catalog.displayedSelectedProjectID,
       let project = catalog.projects.first(where: { $0.id == pid })
-    {
-      return HierarchySelection(projectID: project.id, worktreeID: project.selectedWorktreeID)
-    }
-    for project in catalog.projects {
-      if let worktreeID = project.selectedWorktreeID {
-        return HierarchySelection(projectID: project.id, worktreeID: worktreeID)
-      }
-    }
-    return .empty
+    else { return .empty }
+    return HierarchySelection(projectID: project.id, worktreeID: project.selectedWorktreeID)
   }
 }
 
