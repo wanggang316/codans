@@ -78,7 +78,6 @@ struct DiffFileSidebar: View {
       }
       if outgoing { baseControl }
     }
-    .background(Color(nsColor: .windowBackgroundColor))
     .onChange(of: store.filter) { _, query in
       if !query.isEmpty { collapsedFolders.removeAll() }
     }

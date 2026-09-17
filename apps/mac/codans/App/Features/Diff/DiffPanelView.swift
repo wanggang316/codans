@@ -12,8 +12,19 @@ struct DiffPanelView: View {
     store.snapshot?.files.first { $0.id == store.selectedFileID }
   }
   var body: some View {
-    HSplitView {
-      DiffFileSidebar(store: store).frame(minWidth: 220, idealWidth: 260, maxWidth: 360)
+    NavigationSplitView(
+      columnVisibility: Binding(
+        get: { store.sidebarVisible ? .all : .detailOnly },
+        set: { visibility in
+          if (visibility != .detailOnly) != store.sidebarVisible {
+            _ = withAnimation { store.send(.toggleSidebar) }
+          }
+        }
+      )
+    ) {
+      DiffFileSidebar(store: store)
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+    } detail: {
       VStack(spacing: 0) {
         fileHeader
         Divider()
@@ -27,7 +38,7 @@ struct DiffPanelView: View {
       .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(nsColor: .textBackgroundColor))
+    .toolbar { DiffWindowToolbar(store: store) }
     .accessibilityIdentifier("diff-panel")
   }
 

@@ -113,6 +113,7 @@ struct MainWindowCommands: Commands {
     // MARK: View — show / hide chrome + Command Palette
     CommandGroup(after: .sidebar) {
       Button("Toggle Sidebar") {
+        if DiffWindowManager.shared.toggleSidebar(in: NSApp.keyWindow) { return }
         guard let s = store() else { return }
         withAnimation(.easeOut(duration: 0.2)) {
           _ = s.send(.toggleSidebarRequested)

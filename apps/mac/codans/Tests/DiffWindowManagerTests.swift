@@ -53,23 +53,25 @@ struct DiffWindowManagerTests {
       #expect(secondWindow !== firstWindow)
       #expect(firstStore.worktreeID == first)
       #expect(secondStore.worktreeID == second)
+      #expect(manager.toggleSidebar(in: secondWindow))
+      #expect(!secondStore.sidebarVisible)
+      #expect(firstStore.sidebarVisible)
+      #expect(manager.toggleSidebar(in: secondWindow))
+      #expect(secondStore.sidebarVisible)
+      #expect(firstWindow.frame.width >= 1000)
+      #expect(firstWindow.frame.height >= 700)
       #expect(firstWindow.parent == nil)
       #expect(firstWindow.level == .normal)
       #expect(firstWindow.styleMask.contains([.titled, .closable, .resizable, .miniaturizable]))
 
       firstStore.send(.baseChanged("release"))
-      let toolbar = try #require(firstWindow.toolbar)
-      #expect(firstWindow.toolbarStyle == .unifiedCompact)
-      #expect(!toolbar.items.contains { $0.itemIdentifier.rawValue == "diff.comparison" })
+      #expect(firstWindow.toolbarStyle == .unified)
+      #expect(firstWindow.styleMask.contains(.fullSizeContentView))
       firstStore.send(.scopeChanged(.outgoing))
       #expect(firstStore.filePresentation == .tree)
       firstStore.send(.filePresentationChanged(.list))
       #expect(secondStore.filePresentation == .tree)
-      let layout = try #require(
-        toolbar.items.first { $0.itemIdentifier.rawValue == "diff.layout" } as? NSToolbarItemGroup)
-      layout.selectedIndex = 1
-      let layoutAction = try #require(layout.action)
-      #expect(NSApp.sendAction(layoutAction, to: layout.target, from: layout))
+      firstStore.send(.layoutChanged("split"))
       #expect(firstStore.layout == "split")
       #expect(secondStore.layout == "unified")
       try await waitUntil { firstStore.snapshot?.scope == .outgoing && !firstStore.contentLoading }
@@ -106,7 +108,7 @@ struct DiffWindowManagerTests {
   }
 
   private func store(in window: NSWindow) throws -> StoreOf<DiffFeature> {
-    try #require((window.contentView as? NSHostingView<DiffPanelView>)?.rootView.store)
+    try #require((window.contentViewController as? NSHostingController<DiffPanelView>)?.rootView.store)
   }
 
   private func waitUntil(_ condition: () -> Bool) async throws {

@@ -11,6 +11,7 @@ struct DiffFeature {
     var worktreeID: WorktreeID?
     var path: String?
     var isVisible = false
+    var sidebarVisible = true
     var filePresentation: FilePresentation = .tree
     var layout = "unified"
     var scope: GitComparisonScope = .all
@@ -49,6 +50,7 @@ struct DiffFeature {
     case prBaseChanged(WorktreeID, String?, URL?)
     case toggle
     case close
+    case toggleSidebar
     case filePresentationChanged(FilePresentation)
     case layoutChanged(String)
     case scopeChanged(GitComparisonScope)
@@ -123,6 +125,9 @@ struct DiffFeature {
         return .merge(
           .cancel(id: CancelID.timer), .cancel(id: CancelID.refresh), .cancel(id: CancelID.content),
           .cancel(id: CancelID.editor))
+      case .toggleSidebar:
+        state.sidebarVisible.toggle()
+        return .none
       case .filePresentationChanged(let presentation):
         state.filePresentation = presentation
         return .none

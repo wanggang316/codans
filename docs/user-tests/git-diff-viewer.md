@@ -107,3 +107,14 @@ Host build-for-testing and 33 focused tests in 8 suites passed, including six tr
 | Editor handoff | Tree-row Open in Editor opens Sources/Models/Model.swift in Cursor; URL and line 1 verified | PASS |
 
 Fixtures include Swift, Markdown, JSON, duplicate basenames, and nested directories. Evidence: `/tmp/codans-diff-tree-final-build.log`, `/tmp/codans-diff-tree-tests.log`, `/tmp/codans-diff-qa-test/tree-result.xcresult`, plus GUI observations in the task transcript. `make mac-check` reports the same 61 existing violations outside the changed files; unrelated formatter edits were restored. No remote-host GUI or additional Agent CLI matrix was rerun for this sidebar-only revision.
+
+
+## Native sidebar container correction (2026-09-17)
+
+The earlier tree revision used HSplitView and an opaque sidebar background, so its list style did not match the main window's native Sidebar. Diff now uses NavigationSplitView, the main window's column sizing, NSHostingController, and a SwiftUI-managed unified toolbar. The system supplies the sidebar material, titlebar partition, and collapse control.
+
+Build-for-testing and 33 focused tests passed. Window tests cover sidebar routing isolation, controller cleanup, and preference restoration. GUI confirmed the rounded native sidebar, system Hide/Show Sidebar button, View → Toggle Sidebar routing to Diff, Changes/Outgoing, and unified/split rendering. Full-repository lint still reports the same 61 pre-existing violations outside the changed files.
+
+Evidence: `/tmp/codans-native-sidebar-final-build.log`, `/tmp/codans-native-sidebar-final-tests.log`, `/tmp/codans-diff-qa-test/native-sidebar-final-result.xcresult`, and the task's GUI observations.
+
+The final sizing correction explicitly restores 1000×700 content size when no saved frame exists. The lifecycle test was rerun with minimum initial-frame assertions and passed (`/tmp/codans-native-sidebar-size-tests.log`); final GUI confirmed the full initial size and loaded tree/code surface.

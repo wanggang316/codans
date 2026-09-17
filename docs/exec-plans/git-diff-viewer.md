@@ -48,3 +48,8 @@ Approved: remove All/Staged/Unstaged, Open Selected File, and the large Web foot
 ## Sidebar tree revision
 
 Approved: move Changes/Outgoing to the top of the native left sidebar. Default to a directory tree, support a flat-list toggle, preserve selection and the session-local presentation preference, and use macOS file-type icons without reading the worktree filesystem. Directories start expanded and retain collapsed state during refresh; filtering reveals matching paths. Completed: host build and 33 focused tests passed, including tree identity collision regression and presentation restoration. Real GUI verified nested selection, refresh/collapse stability, duplicate-name search, tree/list selection retention, Outgoing/base selection, close/reopen persistence, dark/auto appearance, half-screen/restore, and nested-file Cursor handoff. See the user-test record.
+
+
+## Native sidebar container correction
+
+Use the same NavigationSplitView and 220/260/320 column sizing as the main window. Remove opaque sidebar and whole-split backgrounds. Let SwiftUI manage the unified window toolbar and system sidebar toggle. Preserve the existing tree/list navigation and independent-window lifecycle. Completed: real GUI confirmed native sidebar material, titlebar integration, collapse/restore, active-window menu routing, mode/layout controls, and the restored 1000×700 initial content size. Build and 33 focused tests passed; the lifecycle test was rerun after the sizing correction and passed.

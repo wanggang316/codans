@@ -11,7 +11,6 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
   private struct Session {
     let window: NSWindow
     let store: StoreOf<DiffFeature>
-    let toolbar: DiffWindowToolbar
   }
 
   private var sessions: [WorktreeID: Session] = [:]
@@ -42,26 +41,36 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
 
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
-      styleMask: [.titled, .closable, .miniaturizable, .resizable],
+      styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
       backing: .buffered,
       defer: false
     )
     window.title = title
-    window.toolbarStyle = .unifiedCompact
-    let toolbar = DiffWindowToolbar(store: store)
-    window.toolbar = toolbar.makeToolbar()
+    window.toolbarStyle = .unified
     window.identifier = NSUserInterfaceItemIdentifier("diff-\(worktreeID)")
     window.contentMinSize = NSSize(width: 640, height: 420)
     window.isReleasedWhenClosed = false
     window.tabbingMode = .disallowed
     window.delegate = self
-    window.contentView = NSHostingView(rootView: DiffPanelView(store: store))
+    let controller = NSHostingController(rootView: DiffPanelView(store: store))
+    // The window owns its initial and restored frame, not SwiftUI's fitting size.
+    controller.sizingOptions = []
+    window.contentViewController = controller
     let frameName = "DiffWindow-\(worktreeID)"
-    if !window.setFrameUsingName(frameName) { window.center() }
+    if !window.setFrameUsingName(frameName) {
+      window.setContentSize(NSSize(width: 1000, height: 700))
+      window.center()
+    }
     window.setFrameAutosaveName(frameName)
-    sessions[worktreeID] = Session(window: window, store: store, toolbar: toolbar)
+    sessions[worktreeID] = Session(window: window, store: store)
     store.send(.toggle)
     present(window)
+  }
+
+  func toggleSidebar(in window: NSWindow?) -> Bool {
+    guard let session = sessions.values.first(where: { $0.window === window }) else { return false }
+    _ = withAnimation { session.store.send(.toggleSidebar) }
+    return true
   }
 
   func updatePR(worktreeID: WorktreeID, base: String?, repository: URL?) {
@@ -79,6 +88,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
       filePresentation: state.filePresentation, layout: state.layout)
     entry.value.store.send(.close)
     // Releasing the hosting view tears down WKWebView; only small preferences survive.
+    window.contentViewController = nil
     window.contentView = nil
     window.delegate = nil
     sessions.removeValue(forKey: entry.key)
