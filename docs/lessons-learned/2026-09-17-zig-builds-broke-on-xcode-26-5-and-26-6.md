@@ -70,9 +70,19 @@ misses, and probes the active toolchain:
   inner `xcodebuild` inherits PATH but no other environment variables
   (`GhosttyXcodebuild.zig`), so it keeps the stock SDK and linker.
 
-On Xcode 26.0 (CI) both probes pass and the build is unchanged. The
-`xcode-compat/` directory is part of the ghostty and zmx fingerprints and of
-the CI ghostty cache key, so editing a wrapper triggers a rebuild.
+- **Zig cache sync.** Zig cannot tell which tool ran a step: a Run step's
+  cache key covers its argv (the literal string `libtool`) and its input
+  files, not PATH or the environment. Without help, turning the wrapper on
+  would re-run `zig build` but reuse the archive the stock libtool had
+  already truncated. `activate.sh` therefore records the toolchain mode
+  (`stock`, or SDK + libtool mode + a hash of `bin/`) in
+  `<zig-cache>/xcode-compat-mode` and clears that zig cache whenever the
+  mode differs. A cache without the stamp counts as `stock`.
+
+On Xcode 26.0 (CI) both probes pass, the mode stays `stock`, and the build is
+unchanged. The `xcode-compat/` directory is part of the ghostty and zmx
+fingerprints and of the CI ghostty cache key, so editing a wrapper triggers a
+rebuild.
 
 ## Verification
 
@@ -83,12 +93,21 @@ the CI ghostty cache key, so editing a wrapper triggers a rebuild.
   inputs are present in its output.
 - The libtool probe flags the crafted unaligned archive (member dropped) and
   passes an `ar`-built aligned one (member kept).
+- `make mac-test-scripts` (`scripts/test-xcode-compat.sh`) builds a zig 0.15.2
+  fixture that runs `libtool` like ghostty's LibtoolStep. A stand-in broken
+  libtool fills the cache. Zig alone then keeps the stale output after the
+  wrapper is switched on; with the cache sync the step re-runs. An unchanged
+  mode keeps the cache, and switching back clears it. With the clearing line
+  disabled, the test fails.
 - Cold build on Xcode 26.6 with empty `.build/ghostty` and `.build/zmx`
   (only the zig package cache kept) and no user-level workaround on PATH:
   `build-ghostty.sh` (4.5 min) and `build-zmx.sh` succeed, both probes fire,
   and `libghostty-fat.a` holds every exported symbol of its inputs.
   `make mac-build` then links the app and CLI, and the `Codans` test host
   launches. A second run hits the fingerprint in about 0.1 s without probing.
+- Warm cache on the same machine (left by that cold build, before the mode
+  stamp existed): the next `build-ghostty.sh` and `build-zmx.sh` each cleared
+  their zig cache once, rebuilt, and wrote the stamp; the app still links.
 
 ## Recurrence checks
 
@@ -98,7 +117,9 @@ the CI ghostty cache key, so editing a wrapper triggers a rebuild.
 - Undefined symbols from ghostty's C dependencies at the app link: search the
   zig build output for `not 8-byte aligned`, and compare
   `ar t libghostty-fat.a | wc -l` with the member count of its inputs.
-- The build prints `xcode-compat: …` lines whenever a wrapper is active.
+- The build prints `xcode-compat: …` lines whenever a wrapper is active or
+  the zig cache is cleared; `cat apps/mac/.build/ghostty/.zig-cache/xcode-compat-mode`
+  shows the mode the cache was built under.
 - When ghostty moves to a zig release that handles both issues, delete
   `scripts/xcode-compat/` and the `xcode_compat_*` calls.
 
@@ -110,6 +131,10 @@ the CI ghostty cache key, so editing a wrapper triggers a rebuild.
   workaround lived in `/tmp` and hardcoded `MacOSX15.4.sdk`.
 - **PATH wrappers reach every child process.** Gate them on a variable that
   the parent sets, so tools that clear the environment get the real binary.
+- **Zig's build cache does not see the toolchain.** A Run step that calls a
+  tool by name is cached on its arguments and inputs only. Swapping the tool
+  through PATH or the environment needs an explicit cache invalidation, and
+  an empty-cache build cannot catch the problem.
 - **Don't try another zig inside the ghostty submodule.** Zig 0.16 creates
   `zig-pkg/` there. The fingerprint counts untracked files, so the leftover
   forces a full rebuild. Delete it and re-run `build-ghostty.sh` to settle

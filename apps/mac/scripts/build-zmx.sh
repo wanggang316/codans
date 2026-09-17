@@ -74,7 +74,7 @@ ZIG_GLOBAL_CACHE_DIR="${zmx_global_cache_dir}" "${script_dir}/prime-zig-cache-zm
 zig_bin="$(cd "${repo_root}" && mise which zig)"
 
 # Xcode 26.5+ toolchains break zig 0.15.2; see xcode-compat/activate.sh.
-xcode_compat_activate
+xcode_compat_activate "${zmx_local_cache_dir}"
 
 cd "${zmx_dir}"
 "${zig_bin}" build \

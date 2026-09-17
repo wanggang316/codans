@@ -18,14 +18,53 @@
 # switches on the matching wrapper; bin/ is prepended to PATH only when at
 # least one is needed. Without their env var the wrappers forward to the
 # real tools, which keeps processes that inherit PATH alone (ghostty's
-# inner xcodebuild) on the stock toolchain.
+# inner xcodebuild) on the stock toolchain. It also clears the caller's zig
+# cache when this toolchain mode changes (see xcode_compat_sync_cache).
 
 xcode_compat_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+xcode_compat_hash_dir() {
+  find "$1" -type f ! -name '.*' -print0 | LC_ALL=C sort -z | xargs -0 cat |
+    shasum -a 256 | awk '{print $1}'
+}
+
 # Prints a hash of this directory's contents, for build fingerprints.
 xcode_compat_fingerprint() {
-  find "${xcode_compat_dir}" -type f ! -name '.*' -print0 | LC_ALL=C sort -z | xargs -0 cat |
-    shasum -a 256 | awk '{print $1}'
+  xcode_compat_hash_dir "${xcode_compat_dir}"
+}
+
+# Prints the toolchain mode zig steps run under: `stock`, or the chosen SDK,
+# the libtool mode and a hash of the wrappers those steps execute.
+xcode_compat_mode() {
+  if [ -z "${CODANS_ZIG_MACOS_SDK:-}" ] && [ -z "${CODANS_LIBTOOL_FLATTEN:-}" ]; then
+    echo stock
+    return
+  fi
+  printf 'sdk=%s flatten=%s wrappers=%s\n' "${CODANS_ZIG_MACOS_SDK:-}" \
+    "${CODANS_LIBTOOL_FLATTEN:-0}" "$(xcode_compat_hash_dir "${xcode_compat_dir}/bin")"
+}
+
+# Clears <zig-cache-dir> when the toolchain mode differs from the one its
+# contents were built under. Zig cannot notice this itself: a Run step's
+# cache key covers its argv and input files, not PATH or the environment,
+# so ghostty's `libtool` step would keep an archive the stock libtool had
+# truncated even after the flattening wrapper is switched on. A cache
+# without a mode stamp predates this check and was built with the stock
+# tools, or with a machine-local workaround that a non-stock mode clears.
+xcode_compat_sync_cache() {
+  local cache_dir="${1:?zig cache dir required}"
+  local stamp="${cache_dir}/xcode-compat-mode"
+  local mode previous=stock
+  mode="$(xcode_compat_mode)"
+  if [ -f "${stamp}" ]; then
+    previous="$(cat "${stamp}")"
+  fi
+  if [ "${mode}" != "${previous}" ] && [ -d "${cache_dir}" ]; then
+    echo "xcode-compat: toolchain mode changed; clearing ${cache_dir}" >&2
+    rm -rf "${cache_dir}"
+  fi
+  mkdir -p "${cache_dir}"
+  printf '%s\n' "${mode}" > "${stamp}"
 }
 
 # Succeeds when the SDK's libSystem.tbd lists `<arch>-macos` as a target.
@@ -76,7 +115,9 @@ xcode_compat_libtool_drops_unaligned() {
   [ "${status}" -ne 0 ]
 }
 
+# Usage: xcode_compat_activate <zig-cache-dir>
 xcode_compat_activate() {
+  local cache_dir="${1:?zig cache dir required}"
   local arch sdk fallback
   unset CODANS_ZIG_MACOS_SDK CODANS_LIBTOOL_FLATTEN
   arch="$(uname -m)"
@@ -102,4 +143,6 @@ xcode_compat_activate() {
   if [ -n "${CODANS_ZIG_MACOS_SDK:-}" ] || [ -n "${CODANS_LIBTOOL_FLATTEN:-}" ]; then
     export PATH="${xcode_compat_dir}/bin:${PATH}"
   fi
+
+  xcode_compat_sync_cache "${cache_dir}"
 }

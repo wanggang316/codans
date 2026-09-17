@@ -1,4 +1,4 @@
-.PHONY: help bootstrap mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-clean web-install web-dev web-build web-preview web-typecheck
+.PHONY: help bootstrap mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-bump-version mac-format mac-lint mac-check mac-test mac-test-scripts mac-clean web-install web-dev web-build web-preview web-typecheck
 
 MAC_APP_DIR := apps/mac
 WEB_DIR     := apps/website
@@ -19,6 +19,7 @@ help:
 	@echo "  mac-lint          - swiftlint"
 	@echo "  mac-check         - format + lint"
 	@echo "  mac-test          - Run Swift unit tests (xcodebuild test, non-zero on failure)"
+	@echo "  mac-test-scripts  - Run build-script regression tests"
 	@echo "  mac-clean         - Remove workspace + project + Package.resolved"
 	@echo ""
 	@echo "website ($(WEB_DIR)):"
@@ -32,7 +33,7 @@ bootstrap:
 	git submodule update --init --recursive
 	mise install
 
-mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-format mac-lint mac-check mac-test mac-clean:
+mac-bootstrap mac-build-ghostty mac-build-zmx mac-generate mac-build mac-build-cli mac-run-app mac-archive mac-release mac-format mac-lint mac-check mac-test mac-test-scripts mac-clean:
 	$(MAKE) -C $(MAC_APP_DIR) $(subst mac-,,$@)
 
 mac-bump-version:
