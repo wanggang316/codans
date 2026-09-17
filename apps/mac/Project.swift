@@ -285,8 +285,9 @@ let project = Project(
         // since it's a vendored Zig build) and lives at
         // .build/zmx/bin/zmx. This script copies it alongside codans under
         // Resources/bin so the running app can spawn it from a stable
-        // inside-bundle path. Must run after "Embed codans" because that
-        // script wipes Resources/bin before copying codans.
+        // inside-bundle path. Both embed scripts write into Resources/bin,
+        // so neither may wipe it: dependency analysis can skip this phase
+        // while "Embed codans" re-runs.
         .post(
           script: "\"${SRCROOT}/scripts/embed-zmx.sh\"",
           name: "Embed zmx",
