@@ -21,12 +21,12 @@ and the project does not yet follow semantic versioning — every release until
   repository, so a workspace nested inside a repo stays a workspace.
 - **Create workspaces from the app or the CLI.** **New Workspace…** in the
   sidebar's Add menu (and the command palette) opens a form laid out like
-  Settings: a title, where the folder goes, and an **Add Project** menu
-  that adds a local repository (an open project or any folder) or a remote
-  one (a URL whose branches are read before anything is cloned), each in
-  its own dialog. Projects are listed one per row with an icon for where
-  they come from, how they will be checked out, and buttons to edit or
-  remove them. The project selected in the sidebar is already in the list.
+  Settings: a title and where the folder goes, then **Add Project** (a
+  project already open in codans), **Add Folder…** (any repository on this
+  Mac), and **Add Remote…** (a URL whose branches are read before anything
+  is cloned), each opening a dialog to set up the checkout. Projects are
+  listed one per row, once there are any, with an icon for where they come
+  from, how they will be checked out, and buttons to edit or remove them. The project selected in the sidebar is already in the list.
   Each project can start a new branch (named after the workspace title
   unless you name it; from its default branch or one you pick), check out
   an existing branch, or track a remote branch. When a remote branch meets

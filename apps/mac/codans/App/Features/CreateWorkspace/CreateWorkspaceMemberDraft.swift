@@ -165,11 +165,15 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
 }
 
 /// The dialog that adds a project to the sheet's list or edits one in it.
-/// A new project's draft appears once a repository is chosen (local) or a
-/// URL entered (remote); the list only changes on Add / Save.
+/// Each kind sets its source one way: an open project is fixed when the
+/// dialog opens, a folder comes from the folder picker, a remote from the
+/// URL field. The list only changes on Add / Save.
 nonisolated struct MemberEditor: Equatable, Identifiable, Sendable {
   enum Kind: Equatable, Sendable {
-    case local
+    /// A project open in codans, picked from the sheet's menu.
+    case project
+    /// Any repository folder on this Mac.
+    case folder
     case remote
     case edit
   }

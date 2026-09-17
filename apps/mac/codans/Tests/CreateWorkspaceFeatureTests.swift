@@ -52,7 +52,8 @@ struct CreateWorkspaceFeatureTests {
     git: GitWorktreeClient? = nil,
     workspace: WorkspaceClient? = nil,
     clock: TestClock<Duration> = TestClock(),
-    fileExists: @escaping @Sendable (String) -> Bool = { _ in false }
+    fileExists: @escaping @Sendable (String) -> Bool = { _ in false },
+    pickFolder: @escaping @Sendable () -> URL? = { nil }
   ) -> TestStore<Feature.State, Feature.Action> {
     TestStore(initialState: initial) {
       Feature()
@@ -64,6 +65,7 @@ struct CreateWorkspaceFeatureTests {
       $0.continuousClock = clock
       $0.uuid = .incrementing
       $0.fileExists = fileExists
+      $0[FolderPickerClient.self] = FolderPickerClient(pick: { _ in pickFolder() })
       $0[GitWorktreeCLI.self] = GitWorktreeCLI()
     }
   }
@@ -93,7 +95,7 @@ struct CreateWorkspaceFeatureTests {
     #expect(store.state.members.map(\.source) == [appSource])
     #expect(store.state.members[0].name == "app")
     #expect(store.state.preselected == nil)
-    #expect(store.state.editorCandidates == [api])
+    #expect(store.state.availableCandidates == [api])
   }
 
   @Test
@@ -129,16 +131,13 @@ struct CreateWorkspaceFeatureTests {
   // MARK: - Dialog
 
   @Test
-  func localDialogAddsAnOpenProjectOrAFolder() async {
+  func projectMenuOpensTheDialogOnThatProject() async {
     let store = makeStore(Feature.State(candidates: [app, api]))
     store.exhaustivity = .off(showSkippedAssertions: false)
 
-    await store.send(.addLocalTapped) {
-      $0.editor = MemberEditor(id: UUID(0), kind: .local)
-    }
-    #expect(!store.state.canSaveEditor)
-    #expect(store.state.editorIssues == [.incomplete("Choose a repository.")])
-    await store.send(.editor(.projectPicked(app.id)))
+    await store.send(.addProjectTapped(app.id))
+    #expect(store.state.editor?.kind == .project)
+    #expect(store.state.editor?.draft?.id == UUID(0))
     #expect(store.state.editor?.draft?.source == appSource)
     #expect(store.state.editor?.draft?.name == "app")
     await store.receive(\.member) {
@@ -151,19 +150,44 @@ struct CreateWorkspaceFeatureTests {
       $0.editor = nil
     }
     #expect(store.state.members.map(\.source) == [appSource])
-    #expect(store.state.editorCandidates == [api])
+    #expect(store.state.availableCandidates == [api])
+    // A listed project is not offered again.
+    await store.send(.addProjectTapped(app.id))
+    #expect(store.state.editor == nil)
+  }
+
+  @Test
+  func folderDialogOpensOnThePickedFolderAndOffersAnother() async {
+    let picked = LockIsolated<URL?>(URL(fileURLWithPath: "/nonexistent-codans-test/notes"))
+    var initial = Feature.State(candidates: [app, api])
+    initial.members = [member(9, appSource, name: "app")]
+    let store = makeStore(initial, pickFolder: { picked.value })
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    // The dialog opens on the picked folder and says why it can't be used.
+    await store.send(.addFolderTapped)
+    await store.receive(\.addFolderPicked) {
+      $0.editor = MemberEditor(id: UUID(0), kind: .folder)
+      $0.editor?.isResolvingSource = true
+    }
+    await store.receive(\.editor) {
+      $0.editor?.isResolvingSource = false
+      $0.editor?.sourceIssue = "/nonexistent-codans-test/notes is not a git repository."
+    }
+    #expect(store.state.editorIssues == [.blocking("/nonexistent-codans-test/notes is not a git repository.")])
+    #expect(!store.state.canSaveEditor)
 
     // A folder inside an open project is that project; another repository
     // with the same folder name gets a suffix, and replaces the choice.
-    await store.send(.addLocalTapped)
     await store.send(
       .editor(.folderResolved(path: "/src/api/sub", probe: RepositoryProbe(root: "/src/api", isBare: false))))
+    #expect(store.state.editor?.sourceIssue == nil)
     #expect(store.state.editor?.draft?.source == apiSource)
     await store.send(
       .editor(.folderResolved(path: "/other/app", probe: RepositoryProbe(root: "/other/app", isBare: false))))
     #expect(store.state.editor?.draft?.source == .localRepo(gitRoot: "/other/app"))
     #expect(store.state.editor?.draft?.name == "app-2")
-    #expect(store.state.editor?.draft?.id == UUID(1))
+    #expect(store.state.editor?.draft?.id == UUID(0))
 
     // Duplicates, bare repositories, and plain folders are refused.
     await store.send(
@@ -177,14 +201,21 @@ struct CreateWorkspaceFeatureTests {
     ) {
       $0.editor?.sourceIssue = "/m/tool.git is a bare repository, which workspaces do not support."
     }
-    await store.send(.editor(.folderResolved(path: "/tmp/notes", probe: nil))) {
-      $0.editor?.sourceIssue = "/tmp/notes is not a git repository."
-    }
+    // Choose… again, then cancel the picker: nothing changes.
+    picked.setValue(nil)
+    await store.send(.editor(.chooseFolderTapped))
+    await store.receive(\.editor)
+    #expect(store.state.editor?.draft?.source == .localRepo(gitRoot: "/other/app"))
+    #expect(store.state.editor?.isResolvingSource == false)
     // Cancel leaves the list alone.
     await store.send(.editor(.cancelTapped)) {
       $0.editor = nil
     }
     #expect(store.state.members.count == 1)
+    // A cancelled picker opens no dialog.
+    await store.send(.addFolderTapped)
+    await store.receive(\.addFolderPicked)
+    #expect(store.state.editor == nil)
   }
 
   @Test
@@ -263,8 +294,8 @@ struct CreateWorkspaceFeatureTests {
     await store.send(.editTapped(UUID(1))) {
       $0.editor = MemberEditor(id: UUID(1), kind: .edit, draft: $0.members[0])
     }
-    // The dialog offers its own project back, not the other row's.
-    #expect(store.state.editorCandidates == [app])
+    // Its own project counts as available again; the other row's does not.
+    #expect(store.state.availableCandidates == [app])
     await store.send(.member(UUID(1), .modeChanged(.existingLocal)))
     await store.send(.member(UUID(1), .localBranchChanged("wip")))
     await store.send(.member(UUID(1), .nameChanged("front")))
@@ -303,8 +334,7 @@ struct CreateWorkspaceFeatureTests {
   func dialogAllowsABranchThatWillFollowTheTitle() async {
     let store = makeStore(Feature.State(candidates: [app]))
     store.exhaustivity = .off(showSkippedAssertions: false)
-    await store.send(.addLocalTapped)
-    await store.send(.editor(.projectPicked(app.id)))
+    await store.send(.addProjectTapped(app.id))
     await store.receive(\.member)
     #expect(store.state.defaultBranch.isEmpty)
     #expect(store.state.canSaveEditor)
@@ -652,7 +682,7 @@ struct CreateWorkspaceFeatureTests {
     await store.receive(\.creationEvent)
     // Rows are locked while it runs.
     await store.send(.editTapped(UUID(1)))
-    await store.send(.addLocalTapped)
+    await store.send(.addRemoteTapped)
     #expect(store.state.editor == nil)
     await store.send(.cancelButtonTapped) {
       $0.creation = .rollingBack
@@ -698,8 +728,7 @@ struct CreateWorkspaceFeatureTests {
     #expect(initial.createButtonTitle == "Add")
     let store = makeStore(initial, workspace: workspace)
     store.exhaustivity = .off(showSkippedAssertions: false)
-    await store.send(.addLocalTapped)
-    await store.send(.editor(.projectPicked(app.id)))
+    await store.send(.addProjectTapped(app.id))
     // Names the workspace already has are skipped, and refused when typed.
     #expect(store.state.editor?.draft?.name == "app-2")
     await store.send(.member(UUID(0), .nameChanged("app")))

@@ -2,11 +2,12 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// The dialog behind Add Project and a row's Edit button, as a grouped form
-/// like the sheet it opens from. The first section is where the project
-/// comes from: an open project or a folder on this Mac, or a URL and the
-/// folder it is cloned into. The second is how it is checked out and the
-/// folder it gets in the workspace. Add / Save puts it in the list.
+/// The dialog behind the sheet's Add buttons and a row's Edit button, as a
+/// grouped form like the sheet it opens from. The first section is where
+/// the project comes from: an open project (fixed), a folder on this Mac
+/// (with the picker to choose another), or a URL and the folder it is
+/// cloned into. The second is how it is checked out and the folder it gets
+/// in the workspace. Add / Save puts it in the list.
 struct WorkspaceMemberEditorSheet: View {
   let store: StoreOf<CreateWorkspaceFeature>
   @FocusState private var isURLFocused: Bool
@@ -37,14 +38,14 @@ struct WorkspaceMemberEditorSheet: View {
   private func sourceSection(_ editor: MemberEditor) -> some View {
     Section {
       switch editor.kind {
-      case .local:
-        repositoryPicker(editor)
+      case .folder:
+        folderRow(editor)
       case .remote:
         urlField(editor)
         if let draft = editor.draft, case .remote(_, let destination) = draft.source {
           cloneDestinationRow(draft, destination: destination)
         }
-      case .edit:
+      case .project, .edit:
         if let draft = editor.draft {
           LabeledContent {
             Text(draft.source.title)
@@ -75,66 +76,46 @@ struct WorkspaceMemberEditorSheet: View {
   }
 
   private func title(_ editor: MemberEditor) -> String {
+    let name = editor.draft?.source.title ?? "Project"
     switch editor.kind {
-    case .local: return "Add Local Repository"
+    case .project: return "Add \(name)"
+    case .folder: return "Add Folder"
     case .remote: return "Add Remote Repository"
-    case .edit: return "Edit \(editor.draft?.source.title ?? "Project")"
+    case .edit: return "Edit \(name)"
     }
   }
 
   private func subtitle(_ editor: MemberEditor) -> String {
     switch editor.kind {
-    case .local: return "An open project, or any repository folder on this Mac."
+    case .project, .edit: return "How this project is checked out in the workspace."
+    case .folder: return "A repository folder on this Mac."
     case .remote: return "Cloned to this Mac, then checked out like a local repository."
-    case .edit: return "How this project is checked out in the workspace."
     }
   }
 
-  private enum LocalChoice: Hashable {
-    case unchosen
-    case project(ProjectID)
-    case folder(String)
-    case chooseFolder
-  }
-
-  /// A pop-up of the open projects, the folder picked last, and an item
-  /// that opens the folder picker. Choosing that item leaves the selection
-  /// as it was.
-  private func repositoryPicker(_ editor: MemberEditor) -> some View {
-    let current: LocalChoice =
-      switch editor.draft?.source {
-      case .project(let id, _, _): .project(id)
-      case .localRepo(let gitRoot): .folder(gitRoot)
-      case .remote, nil: .unchosen
+  /// The picked folder, like the sheet's Location row, with the picker to
+  /// choose another. A folder of an open project becomes that project.
+  private func folderRow(_ editor: MemberEditor) -> some View {
+    LabeledContent {
+      HStack(spacing: 8) {
+        if editor.isResolvingSource {
+          ProgressView().controlSize(.small)
+        }
+        if let draft = editor.draft {
+          PathText(path: draft.source.gitRoot)
+        } else {
+          Text("None")
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        Button("Choose…") {
+          store.send(.editor(.chooseFolderTapped))
+        }
       }
-    return Picker(
-      selection: Binding(
-        get: { current },
-        set: { choice in
-          switch choice {
-          case .project(let id): store.send(.editor(.projectPicked(id)))
-          case .chooseFolder: store.send(.editor(.chooseFolderTapped))
-          case .unchosen, .folder: break
-          }
-        })
-    ) {
-      if current == .unchosen {
-        Text("Choose…").tag(LocalChoice.unchosen)
-      }
-      ForEach(store.state.editorCandidates) { candidate in
-        Text(candidate.name).tag(LocalChoice.project(candidate.id))
-      }
-      if case .folder(let gitRoot) = current {
-        Text((gitRoot as NSString).lastPathComponent).tag(current)
-      }
-      Divider()
-      Text("Other Folder…").tag(LocalChoice.chooseFolder)
     } label: {
-      Text("Repository")
-      if let draft = editor.draft {
-        Text(draft.source.location)
-          .lineLimit(1)
-          .truncationMode(.middle)
+      Text("Folder")
+      if let draft = editor.draft, case .project(_, let name, _) = draft.source {
+        Text("Open in codans as \(name).")
       }
     }
   }

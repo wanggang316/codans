@@ -4,9 +4,9 @@ import Foundation
 
 /// Reducer behind the New Workspace sheet and, in add mode, a workspace's
 /// Add Repository sheet. Collects a title, where the folder goes, and the
-/// projects to check out: each is added or edited in a dialog (a local
-/// repository or a remote URL, and how it is checked out) and listed as one
-/// row. Then hands a `WorkspacePlan` to `WorkspaceClient`'s streaming
+/// projects to check out: each is added or edited in a dialog (an open
+/// project, a folder, or a remote URL, and how it is checked out) and listed
+/// as one row. Then hands a `WorkspacePlan` to `WorkspaceClient`'s streaming
 /// creation and shows its progress per project. Its responsibility ends at
 /// `delegate(.created)` / `delegate(.added)`; the client has registered and
 /// reconciled by then.
@@ -131,8 +131,8 @@ struct CreateWorkspaceFeature {
       return title.isEmpty ? "" : WorkspaceLayout.folderName(forTitle: title)
     }
 
-    /// Open projects the editor can offer: those not listed by another row.
-    var editorCandidates: [Candidate] {
+    /// Open projects not in the list, apart from the row being edited.
+    var availableCandidates: [Candidate] {
       let editingID = editor?.id
       let used = Set(
         members.compactMap { member -> ProjectID? in
@@ -344,7 +344,7 @@ struct CreateWorkspaceFeature {
       guard let draft = editor.draft else {
         if editor.sourceIssue == nil {
           issues.append(
-            .incomplete(editor.kind == .remote ? "Enter the repository\u{2019}s URL." : "Choose a repository."))
+            .incomplete(editor.kind == .remote ? "Enter the repository\u{2019}s URL." : "Choose a repository folder."))
         }
         return issues
       }
@@ -356,6 +356,12 @@ struct CreateWorkspaceFeature {
       let followsTitle = draft.mode == .newBranch && branch(for: draft).isEmpty
       issues.append(contentsOf: self.issues(for: draft).filter { !(followsTitle && $0.severity == .incomplete) })
       return issues
+    }
+
+    /// A dialog opens only when there is room for another project, no other
+    /// dialog is open, and nothing is being created.
+    var canOpenEditor: Bool {
+      canAddMembers && editor == nil && !creation.isBusy
     }
 
     var canSaveEditor: Bool {
@@ -388,7 +394,9 @@ struct CreateWorkspaceFeature {
     case chooseLocationTapped
     case locationPicked(URL?)
     // List
-    case addLocalTapped
+    case addProjectTapped(ProjectID)
+    case addFolderTapped
+    case addFolderPicked(URL?)
     case addRemoteTapped
     case editTapped(MemberDraft.ID)
     /// A row, or the dialog's draft when the id is its.
@@ -421,7 +429,6 @@ struct CreateWorkspaceFeature {
     }
 
     enum EditorAction: Equatable {
-      case projectPicked(ProjectID)
       case chooseFolderTapped
       case folderPicked(URL?)
       case folderResolved(path: String, probe: RepositoryProbe?)
@@ -496,14 +503,34 @@ struct CreateWorkspaceFeature {
 
       // MARK: List
 
-      case .addLocalTapped, .addRemoteTapped:
-        guard state.canAddMembers, state.editor == nil, !state.creation.isBusy else { return .none }
-        let kind: MemberEditor.Kind = action == .addLocalTapped ? .local : .remote
-        state.editor = MemberEditor(id: uuid(), kind: kind)
+      case .addProjectTapped(let projectID):
+        guard state.canOpenEditor, let candidate = state.availableCandidates.first(where: { $0.id == projectID })
+        else { return .none }
+        state.editor = MemberEditor(id: uuid(), kind: .project)
+        return setEditorSource(.project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
+
+      case .addFolderTapped:
+        guard state.canOpenEditor else { return .none }
+        return .run { [picker = folderPicker] send in
+          await send(.addFolderPicked(await picker.pick("Add Folder")))
+        }
+
+      case .addFolderPicked(let url):
+        // The dialog opens on the picked folder, which may still turn out not
+        // to be a repository; it says so and offers the picker again.
+        guard let url, state.canOpenEditor else { return .none }
+        state.editor = MemberEditor(id: uuid(), kind: .folder)
+        return resolveFolder(url, &state)
+
+      case .addRemoteTapped:
+        guard state.canOpenEditor else { return .none }
+        state.editor = MemberEditor(id: uuid(), kind: .remote)
         return .none
 
       case .editTapped(let id):
-        guard let member = state.members[id: id], state.editor == nil, !state.creation.isBusy else { return .none }
+        guard let member = state.members[id: id], state.editor == nil, !state.creation.isBusy else {
+          return .none
+        }
         state.editor = MemberEditor(id: id, kind: .edit, draft: member)
         return .none
 
@@ -727,29 +754,15 @@ struct CreateWorkspaceFeature {
 
   private func reduceEditor(_ action: Action.EditorAction, state: inout State) -> Effect<Action> {
     switch action {
-    case .projectPicked(let projectID):
-      guard state.editor?.kind == .local, let candidate = state.candidates[id: projectID] else { return .none }
-      state.editor?.sourceIssue = nil
-      return setEditorSource(.project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), &state)
-
     case .chooseFolderTapped:
-      state.editor?.isResolvingSource = true
+      guard state.editor?.kind == .folder else { return .none }
       return .run { [picker = folderPicker] send in
-        await send(.editor(.folderPicked(await picker.pick("Choose Repository"))))
+        await send(.editor(.folderPicked(await picker.pick("Choose Folder"))))
       }
 
     case .folderPicked(let url):
-      guard let url else {
-        state.editor?.isResolvingSource = false
-        return .none
-      }
-      state.editor?.sourceIssue = nil
-      let path = url.path(percentEncoded: false)
-      return .run { [cli = gitCLI] send in
-        let probe = try? await cli.inspectRepository(at: path)
-        await send(.editor(.folderResolved(path: path, probe: probe)))
-      }
-      .cancellable(id: CancelID.folderResolve, cancelInFlight: true)
+      guard let url, state.editor?.kind == .folder else { return .none }
+      return resolveFolder(url, &state)
 
     case .folderResolved(let path, let probe):
       state.editor?.isResolvingSource = false
@@ -794,9 +807,21 @@ struct CreateWorkspaceFeature {
     }
   }
 
+  private func resolveFolder(_ url: URL, _ state: inout State) -> Effect<Action> {
+    state.editor?.sourceIssue = nil
+    state.editor?.isResolvingSource = true
+    let path = url.path(percentEncoded: false)
+    return .run { [cli = gitCLI] send in
+      let probe = try? await cli.inspectRepository(at: path)
+      await send(.editor(.folderResolved(path: path, probe: probe)))
+    }
+    .cancellable(id: CancelID.folderResolve, cancelInFlight: true)
+  }
+
   /// A picked folder as the dialog's source: its repository, which may be
   /// an open project, unless it can't be used.
   private func useFolder(_ path: String, probe: RepositoryProbe?, _ state: inout State) -> Effect<Action> {
+    state.editor?.sourceIssue = nil
     let shown = (path as NSString).abbreviatingWithTildeInPath
     guard let probe else {
       state.editor?.sourceIssue = "\(shown) is not a git repository."

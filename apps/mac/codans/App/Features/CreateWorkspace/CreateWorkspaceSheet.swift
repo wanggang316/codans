@@ -67,12 +67,16 @@ struct CreateWorkspaceSheet: View {
         )
         .focused($isTitleFocused)
         locationRow
-        addProjectRow
       } header: {
         Text("New Workspace")
         Text("A folder with a checkout of each project, for work that spans them.")
       } footer: {
-        IssueList(issues: store.rootIssues)
+        VStack(alignment: .leading, spacing: 10) {
+          IssueList(issues: store.rootIssues)
+          if store.members.isEmpty {
+            addButtons
+          }
+        }
       }
       .headerProminence(.increased)
     case .add(_, let title, let rootPath, _):
@@ -81,10 +85,13 @@ struct CreateWorkspaceSheet: View {
         LabeledContent("Location") {
           PathText(path: rootPath)
         }
-        addProjectRow
       } header: {
         Text("Add Repository")
         Text("Check out one more project into this workspace.")
+      } footer: {
+        if store.members.isEmpty {
+          addButtons
+        }
       }
       .headerProminence(.increased)
     }
@@ -108,45 +115,64 @@ struct CreateWorkspaceSheet: View {
     }
   }
 
-  /// The Settings panes' trailing "Add …" row, as a menu: a project comes
-  /// from this Mac or from a URL, and each opens its own dialog.
+  /// Below the list, or below the workspace section while the list is
+  /// empty, the way Settings puts "Add…" buttons under a list: a project
+  /// open in codans, any repository folder, or a remote to clone. Each
+  /// opens a dialog to set up the checkout before it is listed.
   @ViewBuilder
-  private var addProjectRow: some View {
+  private var addButtons: some View {
     if store.canAddMembers {
-      HStack {
+      HStack(spacing: 8) {
         Menu {
-          Button {
-            store.send(.addLocalTapped)
-          } label: {
-            Label("Local Repository…", systemImage: "folder")
-          }
-          Button {
-            store.send(.addRemoteTapped)
-          } label: {
-            Label("Remote Repository…", systemImage: "globe")
+          ForEach(store.availableCandidates) { candidate in
+            Button {
+              store.send(.addProjectTapped(candidate.id))
+            } label: {
+              Label(candidate.name, systemImage: Self.menuSymbol(for: candidate.icon))
+            }
           }
         } label: {
-          Label("Add Project", systemImage: "plus")
+          Text("Add Project")
         }
-        .menuStyle(.borderlessButton)
         .fixedSize()
-        Spacer()
+        .disabled(store.availableCandidates.isEmpty)
+        .help(
+          store.availableCandidates.isEmpty
+            ? "Every project open in codans is already in the list" : "Add a project that is open in codans")
+        Button("Add Folder…") {
+          store.send(.addFolderTapped)
+        }
+        .help("Add a repository folder from this Mac")
+        Button("Add Remote…") {
+          store.send(.addRemoteTapped)
+        }
+        .help("Add a repository to clone from a URL")
       }
+      .foregroundStyle(.primary)
+      .fixedSize(horizontal: false, vertical: true)
     }
   }
 
+  /// Menus draw SF Symbols only; a custom project image falls back to the
+  /// default glyph.
+  private static func menuSymbol(for icon: ProjectIcon?) -> String {
+    if case .symbol(let name) = icon { return name }
+    return ProjectIconView.folderSymbol
+  }
+
+  @ViewBuilder
   private var projectsSection: some View {
-    Section {
-      if store.members.isEmpty {
-        Text(store.isAddMode ? "No project yet." : "No projects yet. A workspace needs at least two.")
-          .foregroundStyle(.secondary)
+    if !store.members.isEmpty {
+      Section {
+        ForEach(store.members) { member in
+          WorkspaceMemberRow(store: store, member: member)
+            .id(member.id)
+        }
+      } header: {
+        Text(store.isAddMode ? "Project" : "Projects")
+      } footer: {
+        addButtons
       }
-      ForEach(store.members) { member in
-        WorkspaceMemberRow(store: store, member: member)
-          .id(member.id)
-      }
-    } header: {
-      Text(store.isAddMode ? "Project" : "Projects")
     }
   }
 }
