@@ -65,11 +65,15 @@ not accept a launch Profile.
 - Advisor requests advice from an existing Agent and then records a decision.
 - Committee collects independent analyses and reviews before synthesis.
 - Handoff obtains a briefing from an existing Agent, stores an immutable packet,
-  starts a receiver, and verifies its acknowledgement against the packet digest.
+  archives worktree/session context, starts a receiver, verifies its acknowledgement
+  against the packet digest, and submits the instruction to continue the task.
+  Its optional note supplements the current conversation; Objective is not a form input.
 - Handoff from Briefing starts from supplied text and verifies a receiver's receipt.
 
-Handoff completion means the receiver acknowledged the packet. The handed-off
-implementation task is not executed by the acknowledgement node.
+Handoff completion means the receiver acknowledged the packet and the continuation
+instruction was submitted to its terminal. It does not mean the transferred task
+is complete. A receiver reporting blockers does not receive continuation. The
+source is instructed to stop task work after delivering the briefing.
 
 ## CLI protocol
 
@@ -88,9 +92,20 @@ Agents receive the exact run, attempt and delivery identifiers in their assigned
 prompt. A chat reply or idle terminal does not complete a node; an accepted
 explicit delivery does. Unknown run IDs return not-found errors.
 
-The standalone `handoff save` and `handoff to` commands retain their briefing,
-archive and receiver-launch behavior; they do not create Workflow runs. Use the
-Handoff DSL definition for observable multi-node execution and verified receipts.
+The original Hand Off panel and `handoff save` / `handoff to` CLI commands now
+create runs through the same workflow engine. The panel uses the source session
+to write the briefing without an Objective form. It preserves the exact selected
+Profile, new-tab/source-anchored split placement, and Save Progress choice. It
+closes after starting and does not automatically open history.
+
+CLI callers still provide `--brief` or explicitly select `--no-brief`. The command
+returns a queued run ID and directory, not a claim that the receiver has launched.
+Inspect `workflow status RUN_ID` or Workflow History for completion/errors.
+`handoff save` creates a checkpoint; `handoff to --no-launch` prepares the
+transition and archives prior context without launching a receiver. Worktree `.codans/handoff/` briefing, context, session and archive files
+remain available; they are written by a workflow action. The immutable packet and
+execution evidence live in the workflow run directory. No separate Handoff
+orchestration engine or database is used.
 
 Only the current DSL run store is read and written. Old template runs, their
 compatibility routing and the template-based `workflow create` command are not

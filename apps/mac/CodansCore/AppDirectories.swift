@@ -46,8 +46,14 @@ public nonisolated enum AppDirectories {
   /// when the system cache directory can't be resolved, matching the prior
   /// inline logic in `PaneDaemonBringup` / `ZmxControlClient`.
   public static func cacheDirectory(
-    fileManager: FileManager = .default
+    fileManager: FileManager = .default,
+    override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.cacheDirectory.rawValue]
   ) -> URL {
+    // Isolated app instances must separate daemon sockets as well as config:
+    // a reaper sharing another instance's cache can terminate its terminals.
+    if let override, !override.isEmpty {
+      return URL(fileURLWithPath: override, isDirectory: true)
+    }
     let base =
       (try? fileManager.url(
         for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false

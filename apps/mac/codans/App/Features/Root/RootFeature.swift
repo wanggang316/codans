@@ -377,8 +377,7 @@ struct RootFeature {
     /// detected in that pane — a handoff needs an agent to ask.
     case handoffRequested(PaneID?)
     case handoff(PresentationAction<HandoffFeature.Action>)
-    /// A hand-off ordered from the panel finished; the panel is long gone.
-    case handoffFinished(HandoffCompletion, targetTitle: String)
+    /// A workflow could not be started from the Hand Off panel.
     case handoffFailed(message: String)
     /// Toggle the Command Queue panel. `nil` resolves the target pane the
     /// same way `commandPaletteToggle` does (the active tab's last-focused
@@ -446,9 +445,6 @@ struct RootFeature {
     /// the app sits frontmost for hours, so without this a long-lived window
     /// would never age out archived worktrees past their retention period.
     case periodicCleanup
-    /// Waits for the CLI completion of one panel-issued hand-off request.
-    /// Ends on its own when the completion lands; cancelled at quit.
-    case handoffCompletion(UUID)
   }
 
   @Dependency(TerminalClient.self) private var terminalClient
@@ -1722,28 +1718,12 @@ struct RootFeature {
       case .handoff(.presented(.delegate(.handOff(let source, let order, let placement)))):
         // The panel's job ends at the choice. Close it and do the work here,
         // where the effect outlives the presentation.
+        let profile = state.handoff?.selectedTarget?.profile
         state.handoff = nil
-        return startHandoff(source: source, order: order, placement: placement)
+        return startHandoff(source: source, order: order, placement: placement, profile: profile)
 
       case .handoff:
         return .none
-
-      case .handoffFinished(let completion, let title):
-        switch completion.action {
-        case .save:
-          return .send(.statusBar(.push(.success("Progress saved for a later hand-off"))))
-        case .to:
-          // The user asked for this hand-off — land on the receiver, with the
-          // same focus walk an AgentState row tap performs. The transition
-          // itself never focuses anything.
-          guard let launched = completion.launched else {
-            return .send(.statusBar(.push(.success("Handoff prepared for \(title)"))))
-          }
-          return .merge(
-            .send(.agentState(.rowTapped(launched.paneID))),
-            .send(.statusBar(.push(.success("Handoff prepared for \(title)"))))
-          )
-        }
 
       case .handoffFailed(let message):
         return .send(.statusBar(.push(.warning("Hand off failed: \(message)"))))
@@ -2739,68 +2719,19 @@ struct RootFeature {
 
   // MARK: - Hand-off orders
 
-  /// Carries out what the Hand Off panel chose. Brief: register a one-shot
-  /// request, type the instruction into the source pane, and wait for the
-  /// CLI completion carrying that id (the agent may take minutes — it writes
-  /// a briefing and may ask the user to approve the command). Context: run
-  /// the same transition in process right away, no agent involved. Either
-  /// way the panel is already closed; outcomes surface as toasts and a jump
-  /// to the receiver.
+  /// The chooser starts the bundled workflow and returns to the terminal.
   private func startHandoff(
     source: HandoffFeature.Source,
     order: HandoffFeature.Order,
-    placement: HandoffPlacement
+    placement: HandoffPlacement,
+    profile: AgentProfile?
   ) -> Effect<Action> {
     let client = handoffClient
-    let paneID = source.paneID
-    switch order {
-    case .brief(let request, let title):
-      let requestID = uuid()
-      client.register(requestID)
-      let instruction = HandoffKickoff.sourceInstruction(
-        for: request, requestID: requestID, cli: client.cli, placement: placement)
-      let agent = source.agentName
-      return .run { send in
-        // Subscribe before typing: the stream does not replay, and a fast
-        // agent could answer before a later subscription lands.
-        let stream = await client.completions()
-        guard await client.sendInstruction(paneID, instruction) else {
-          // The pane is gone or wedged. Retire the request the agent will
-          // never see; starting the receiver without a briefing is the
-          // user's call (Hand Off with Context), not a silent downgrade.
-          _ = await client.supersede(requestID)
-          await send(
-            .handoffFailed(
-              message:
-                "\(agent)'s pane could not take the request. Nothing was changed; "
-                + "Hand Off with Context starts \(title) without a briefing."))
-          return
-        }
-        for await completion in stream
-        where completion.requestID == requestID && completion.sourcePaneID == paneID {
-          await send(.handoffFinished(completion, targetTitle: title))
-          return
-        }
-      }
-      .cancellable(id: CancelID.handoffCompletion(requestID))
-
-    case .contextOnly(let profile, let title):
-      let request = IPC.HandoffRequest(
-        action: .to,
-        paneID: paneID,
-        receiver: profile.kind.rawValue,
-        profile: profile.id.uuidString,
-        contextOnly: true,
-        target: placement.target,
-        direction: placement.direction
-      )
-      return .run { send in
-        let completion = try await client.run(request)
-        await send(.handoffFinished(completion, targetTitle: title))
-      } catch: { error, send in
-        let message = (error as? IPCError)?.displayMessage ?? error.localizedDescription
-        await send(.handoffFailed(message: message))
-      }
+    return .run { send in
+      _ = try await client.startWorkflow(source.paneID, order, placement, profile)
+      await send(.statusBar(.push(.success("Handoff workflow started"))))
+    } catch: { error, send in
+      await send(.handoffFailed(message: error.localizedDescription))
     }
   }
 

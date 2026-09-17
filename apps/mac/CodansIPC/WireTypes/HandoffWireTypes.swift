@@ -88,7 +88,7 @@ extension IPC {
 
   public struct HandoffResponse: Codable, Equatable, Sendable {
     public let action: HandoffAction
-    /// Absolute path of `current.md`, whether or not it exists after this call.
+    /// Absolute path of the queued workflow run directory.
     public let artifactPath: String
     public let outgoingAgent: String?
     public let receiver: String?
@@ -99,9 +99,10 @@ extension IPC {
     public let sessionExcerptPath: String?
     /// `inline` or `none`.
     public let briefing: String
-    /// A fresh `current.md` exists for the receiver.
+    /// The queued run received an explicit briefing.
     public let hasBriefing: Bool
     public let launchedPane: HandoffLaunchedPane?
+    public let runID: UUID?
 
     public init(
       action: HandoffAction,
@@ -114,7 +115,8 @@ extension IPC {
       sessionExcerptPath: String?,
       briefing: String,
       hasBriefing: Bool,
-      launchedPane: HandoffLaunchedPane?
+      launchedPane: HandoffLaunchedPane?,
+      runID: UUID? = nil
     ) {
       self.action = action
       self.artifactPath = artifactPath
@@ -127,6 +129,7 @@ extension IPC {
       self.briefing = briefing
       self.hasBriefing = hasBriefing
       self.launchedPane = launchedPane
+      self.runID = runID
     }
   }
 }

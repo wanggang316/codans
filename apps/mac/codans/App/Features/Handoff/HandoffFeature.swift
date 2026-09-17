@@ -3,15 +3,8 @@ import CodansIPC
 import ComposableArchitecture
 import Foundation
 
-/// The Hand Off panel is a chooser and nothing more: pick a receiving profile
-/// (or "only save progress"), where it opens, and how the briefing is made —
-/// then hand the order to the parent and close. Hand Off with Brief asks the
-/// *live* source agent to run the CLI hand-off itself with its own briefing;
-/// Hand Off with Context starts the receiver right away from generated
-/// context. `RootFeature` runs whichever was chosen in the background and
-/// jumps to the receiver when it lands, so the panel has no waiting step and
-/// no way to switch paths once the agent has been asked. codans never starts
-/// a hidden model turn to author a briefing.
+/// Chooses a receiving profile and placement, or a save-only checkpoint.
+/// The parent starts the built-in workflow and returns to the terminal.
 @Reducer
 struct HandoffFeature {
   /// The outgoing side, captured once when the panel opens.
@@ -62,8 +55,7 @@ struct HandoffFeature {
   /// What the user asked for. The parent carries it out after the panel is
   /// gone, so it names everything the work needs.
   enum Order: Equatable, Sendable {
-    /// Ask the live agent to run the CLI hand-off (or a checkpoint) with its
-    /// own briefing.
+    /// Ask the workflow to obtain a briefing from the live source session.
     case brief(HandoffKickoff.Request, targetTitle: String)
     /// Start the receiver now from generated context; the agent is not asked.
     case contextOnly(profile: AgentProfile, targetTitle: String)
@@ -106,7 +98,8 @@ struct HandoffFeature {
       )
       .map { profile in
         // Where the session opens is the picker's business, not the row's.
-        var help = profile.name.isEmpty ? "New session" : "\(profile.kind.displayName) · new session"
+        var help =
+          profile.name.isEmpty ? "New session" : "\(profile.kind.displayName) · new session"
         if !profile.descriptor.supportsInitialPrompt {
           help += " · kickoff typed in once it starts"
         }

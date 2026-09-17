@@ -5,6 +5,8 @@ import Yams
 nonisolated enum WorkflowDefinitionParserV2 {
   static let actionOutputs: [String: Set<String>] = [
     "codans/agent.request@v1": ["result", "delivery"],
+    "codans/agent.resume@v1": ["dispatch"],
+    "codans/handoff.context.save@v1": ["briefing", "artifacts"],
     "codans/session.launch@v1": ["session"],
     "codans/handoff.packet.create@v1": ["packet"],
     "codans/handoff.ack.verify@v1": ["readiness"],
@@ -105,7 +107,9 @@ nonisolated enum WorkflowDefinitionParserV2 {
     }
     for (id, role) in roles {
       if let profile = role.profile {
-        guard role.source == "launch", !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard role.source == "launch",
+          !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
           throw failure("roles.\(id).profile: a nonempty profile reference requires source: launch")
         }
       }
@@ -121,7 +125,10 @@ nonisolated enum WorkflowDefinitionParserV2 {
     if let role = node.role, definition.roles[role] == nil {
       throw failure("nodes.\(id): unknown Role \(role)")
     }
-    let agentAction = ["codans/session.launch@v1", "codans/agent.request@v1"].contains(node.uses)
+    let agentAction = [
+      "codans/session.launch@v1", "codans/agent.request@v1", "codans/agent.resume@v1",
+    ].contains(
+      node.uses)
     guard agentAction == (node.role != nil) else {
       throw failure("nodes.\(id): Action Role requirement is not satisfied")
     }
@@ -156,22 +163,42 @@ nonisolated enum WorkflowDefinitionParserV2 {
     } else if node.expect != nil {
       throw failure("nodes.\(id): expect is supported only for agent requests")
     }
+    if node.uses == "codans/agent.resume@v1", definition.roles[node.role!]?.source == "launch" {
+      guard
+        upstream.contains(where: {
+          definition.nodes[$0]?.uses == "codans/session.launch@v1"
+            && definition.nodes[$0]?.role == node.role
+        })
+      else { throw failure("nodes.\(id): resume requires an upstream launch") }
+    }
   }
 
-  private static func validateArguments(
-    _ node: WorkflowNodeV2, id: String, definition: WorkflowDefinitionV2, upstream: Set<String>
-  ) throws {
+  private static func actionInputs(_ action: String) -> Set<String> {
     let allowed: Set<String>
-    switch node.uses {
+    switch action {
     case "codans/agent.request@v1": allowed = ["instruction", "context"]
+    case "codans/agent.resume@v1": allowed = ["instruction", "context", "readiness"]
+    case "codans/handoff.context.save@v1": allowed = ["briefing", "mode", "receiver"]
     case "codans/session.launch@v1": allowed = []
     case "codans/handoff.packet.create@v1": allowed = ["briefing"]
     case "codans/handoff.ack.verify@v1": allowed = ["packet", "acknowledgement"]
     default: allowed = ["question", "options", "evidence"]
     }
+    return allowed
+  }
+
+  private static func validateArguments(
+    _ node: WorkflowNodeV2, id: String, definition: WorkflowDefinitionV2, upstream: Set<String>
+  ) throws {
+    let allowed = actionInputs(node.uses)
     let arguments = node.arguments ?? [:]
     try keys(arguments, allowed: allowed, at: "nodes.\(id).with")
-    let required = node.uses == "codans/agent.request@v1" ? Set(["instruction"]) : allowed
+    let required: Set<String>
+    switch node.uses {
+    case "codans/agent.request@v1": required = ["instruction"]
+    case "codans/handoff.context.save@v1": required = ["briefing", "mode"]
+    default: required = allowed
+    }
     guard required.isSubset(of: Set(arguments.keys)) else {
       throw failure("nodes.\(id): missing Action input")
     }

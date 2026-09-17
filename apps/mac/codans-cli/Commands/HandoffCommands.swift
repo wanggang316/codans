@@ -7,14 +7,14 @@ import Foundation
 struct HandoffCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "handoff",
-    abstract: "Hand a task off between coding agents: archive, brief, and launch the receiver.",
+    abstract: "Start a built-in handoff workflow between coding agents.",
     discussion: """
       The source is the calling pane — an agent running `codans handoff` inside its
       pane hands off itself. Pass --pane to target another pane.
 
       A handoff needs a briefing from the source agent (--brief -, read from stdin
-      as a heredoc) or an explicit --no-brief. Artifacts live under the worktree's
-      .codans/handoff/ directory; the receiver starts in a new background tab, or
+      as a heredoc) or an explicit --no-brief. The command queues a workflow and
+      returns its run ID and directory; the receiver starts in a new background tab, or
       beside the source pane with --split <direction>.
 
         codans handoff to codex --brief - <<'EOF'
@@ -175,6 +175,13 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
   }
 
   var description: String {
+    if let runID = response.runID {
+      return """
+        handoff workflow queued: \(runID.uuidString)
+          run directory: \(response.artifactPath)
+          inspect: \(CLIInvocation.commandName) workflow status \(runID.uuidString)
+        """
+    }
     var lines: [String] = []
     switch response.action {
     case .save:

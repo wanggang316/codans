@@ -76,7 +76,24 @@ nodes:
         ref: nodes.packet.outputs.packet
       acknowledgement:
         ref: nodes.receive.outputs.result
+  resume:
+    title: Continue the task
+    uses: codans/agent.resume@v1
+    role: receiver
+    needs: [verify]
+    with:
+      readiness:
+        ref: nodes.verify.outputs.readiness
+      context:
+        packet:
+          ref: nodes.packet.outputs.packet
+        acknowledgement:
+          ref: nodes.receive.outputs.result
+      instruction:
+        value: The handoff receipt has been verified. Continue the transferred task from the packet's Next Steps now. Preserve all user constraints and existing authorization. Do not repeat completed work or run another handoff. Report progress and blockers to the user in this terminal.
 outputs:
+  continuation:
+    ref: nodes.resume.outputs.dispatch
   packet:
     ref: nodes.packet.outputs.packet
   acknowledgement:

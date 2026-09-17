@@ -64,6 +64,9 @@ public nonisolated enum CodansEnvironment {
     /// Relocates the whole config root — every JSON store — so a smoke or
     /// integration run never touches the user's real `~/.config/<slug>/`.
     case configDirectory = "CODANS_CONFIG_DIR"
+    /// Relocates daemon sockets, snapshots and logs. Pair with the config
+    /// override so test hosts and isolated apps never reap each other's panes.
+    case cacheDirectory = "CODANS_CACHE_DIR"
     /// Points the CLI installer at a freshly built `codans` outside the
     /// `.app`, for dev.
     case cliBinary = "CODANS_CLI_BINARY"

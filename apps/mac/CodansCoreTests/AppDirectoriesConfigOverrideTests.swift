@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 /// `$CODANS_CONFIG_DIR` isolation seam (`AppDirectories.configDirectory`).
 /// Relocating the config root is what lets an end-to-end smoke run drive a real
@@ -47,4 +47,24 @@ struct AppDirectoriesConfigOverrideTests {
     #expect(configRoot.appendingPathComponent("settings.json").path == "/tmp/codans-iso-xyz/settings.json")
     #expect(configRoot.appendingPathComponent("catalog.json").path == "/tmp/codans-iso-xyz/catalog.json")
   }
+
+  @Test
+  func overrideRelocatesCacheRootEntirely() {
+    let url = AppDirectories.cacheDirectory(override: "/tmp/codans-isolated-cache")
+    #expect(url.path == "/tmp/codans-isolated-cache")
+  }
+
+  @Test
+  func nilCacheOverrideUsesBuildSuffixedSystemCache() throws {
+    let systemCache = try FileManager.default.url(
+      for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+    let url = AppDirectories.cacheDirectory(override: nil)
+    #expect(url == systemCache.appendingPathComponent(AppDirectories.name, isDirectory: true))
+  }
+
+  @Test
+  func emptyCacheOverrideUsesDefaultInsteadOfCurrentDirectory() {
+    #expect(AppDirectories.cacheDirectory(override: "") == AppDirectories.cacheDirectory(override: nil))
+  }
+
 }

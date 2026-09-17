@@ -1845,137 +1845,105 @@ struct RootFeatureTests {
       agent: .claudeCode)
   }
 
-  /// A brief order closes the panel at once, registers a one-shot request,
-  /// types the instruction into the source pane, and reports the matching
-  /// CLI completion as a toast. Nothing waits on screen.
   @Test
-  func briefHandOffClosesThePanelAndFinishesOnTheMatchingCompletion() async {
+  func briefHandOffClosesPanelAndQueuesExactSelectedProfileWithoutNavigation() async {
     let paneID = PaneID()
-    let requestID = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
-    let (completions, continuation) = AsyncStream<HandoffCompletion>.makeStream()
-    let registered = LockIsolated<[UUID]>([])
-    let typed = LockIsolated<[(PaneID, String)]>([])
+    let first = AgentProfile(kind: .codex, name: "First")
+    let selected = AgentProfile(kind: .codex, name: "Selected", modelID: "gpt-5.1")
+    let calls = LockIsolated<[(PaneID, HandoffFeature.Order, HandoffPlacement, AgentProfile?)]>([])
     var initial = RootFeature.State()
     let source = Self.handoffSource(paneID: paneID)
-    initial.handoff = HandoffFeature.State.make(source: source, profiles: [AgentProfile(kind: .codex)])
-
+    initial.handoff = HandoffFeature.State.make(
+      source: source, profiles: [first, selected], placement: .split(.down))
+    initial.handoff?.selectedIndex = 1
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.uuid = .constant(requestID)
-      $0.handoffClient.cli = "codans"
-      $0.handoffClient.register = { id in registered.withValue { $0.append(id) } }
-      $0.handoffClient.completions = { completions }
-      $0.handoffClient.sendInstruction = { pane, text in
-        typed.withValue { $0.append((pane, text)) }
-        return true
+      $0.handoffClient.startWorkflow = { pane, order, placement, profile in
+        calls.withValue { $0.append((pane, order, placement, profile)) }
+        return UUID()
       }
-      // The toast the outcome pushes arms its own dismiss timer.
       $0.continuousClock = ImmediateClock()
     }
-    store.exhaustivity = .off
 
     await store.send(.handoff(.presented(.confirmSelection)))
-    await store.receive(\.handoff.presented.delegate.handOff) { state in
-      state.handoff = nil
+    await store.receive(\.handoff.presented.delegate.handOff) { $0.handoff = nil }
+    await store.receive(.statusBar(.push(.success("Handoff workflow started")))) {
+      $0.statusBar.toast = .success("Handoff workflow started")
+      $0.statusBar.sequence = 1
     }
-    #expect(registered.value == [requestID])
-    #expect(typed.value.first?.0 == paneID)
-    #expect(
-      typed.value.first?.1
-        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, cli: "codans")
-        || typed.value.first?.1
-          == HandoffKickoff.sourceInstruction(for: .handOff(to: .codex), requestID: requestID, cli: "codans")
-    )
-
-    // A completion for another request is not ours.
-    continuation.yield(
-      HandoffCompletion(
-        action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .inline, launched: nil,
-        requestID: UUID()))
-    // Ours, without a launched pane so no focus walk is needed here.
-    let mine = HandoffCompletion(
-      action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .inline, launched: nil,
-      requestID: requestID)
-    continuation.yield(mine)
-    await store.receive(.handoffFinished(mine, targetTitle: "Codex"))
-    await store.receive(.statusBar(.push(.success("Handed off to Codex"))))
-    continuation.finish()
+    await store.receive(.statusBar(.cleared(sequence: 1))) { $0.statusBar.toast = nil }
+    await store.finish()
+    #expect(calls.value.count == 1)
+    #expect(calls.value.first?.0 == paneID)
+    #expect(calls.value.first?.1 == .brief(.handOff(to: .codex), targetTitle: "Selected"))
+    #expect(calls.value.first?.2 == .split(.down))
+    #expect(calls.value.first?.3 == selected)
+    #expect(store.state.selection == initial.selection)
   }
 
-  /// An undeliverable instruction retires the request and surfaces a warning
-  /// instead of quietly downgrading to a context-only hand-off.
   @Test
-  func undeliverableBriefRequestWarnsAndSupersedes() async {
+  func failedHandoffWorkflowStartWarnsWithoutFallback() async {
     let paneID = PaneID()
-    let requestID = UUID()
-    let superseded = LockIsolated<[UUID]>([])
+    let calls = LockIsolated(0)
     var initial = RootFeature.State()
     initial.handoff = HandoffFeature.State.make(
       source: Self.handoffSource(paneID: paneID), profiles: [AgentProfile(kind: .codex)])
-
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.uuid = .constant(requestID)
-      $0.handoffClient.register = { _ in }
-      $0.handoffClient.completions = { AsyncStream { $0.finish() } }
-      $0.handoffClient.sendInstruction = { _, _ in false }
-      $0.handoffClient.supersede = { id in
-        superseded.withValue { $0.append(id) }
-        return true
+      $0.handoffClient.startWorkflow = { _, _, _, _ in
+        calls.withValue { $0 += 1 }
+        throw WorkflowAdapterErrorV2.message("Run store unavailable")
       }
-      // The toast the outcome pushes arms its own dismiss timer.
       $0.continuousClock = ImmediateClock()
     }
-    store.exhaustivity = .off
 
     await store.send(.handoff(.presented(.confirmSelection)))
-    await store.receive(\.handoff.presented.delegate.handOff) { state in
-      state.handoff = nil
+    await store.receive(\.handoff.presented.delegate.handOff) { $0.handoff = nil }
+    await store.receive(.handoffFailed(message: "Run store unavailable"))
+    await store.receive(.statusBar(.push(.warning("Hand off failed: Run store unavailable")))) {
+      $0.statusBar.toast = .warning("Hand off failed: Run store unavailable")
+      $0.statusBar.sequence = 1
     }
-    await store.receive(\.handoffFailed)
-    await store.receive(\.statusBar.push)
-    #expect(superseded.value == [requestID])
+    await store.receive(.statusBar(.cleared(sequence: 1))) { $0.statusBar.toast = nil }
+    await store.finish()
+    #expect(calls.value == 1)
+    #expect(store.state.selection == initial.selection)
   }
 
-  /// Hand Off with Context runs the in-process transition straight away and
-  /// lands on the receiver.
   @Test
-  func contextOnlyHandOffRunsAtOnceAndReportsTheOutcome() async {
+  func contextOnlyHandOffQueuesSelectedProfileAndPlacement() async {
     let paneID = PaneID()
-    let ran = LockIsolated<[IPC.HandoffRequest]>([])
+    let calls = LockIsolated<[(PaneID, HandoffFeature.Order, HandoffPlacement, AgentProfile?)]>([])
     let source = Self.handoffSource(paneID: paneID)
     let profile = AgentProfile(kind: .codex, name: "Build")
     var initial = RootFeature.State()
-    initial.handoff = HandoffFeature.State.make(source: source, profiles: [profile], placement: .split(.right))
-    let completion = HandoffCompletion(
-      action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .none, launched: nil, requestID: nil)
-
+    initial.handoff = HandoffFeature.State.make(
+      source: source, profiles: [profile], placement: .split(.right))
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.handoffClient.run = { request in
-        ran.withValue { $0.append(request) }
-        return completion
+      $0.handoffClient.startWorkflow = { pane, order, placement, profile in
+        calls.withValue { $0.append((pane, order, placement, profile)) }
+        return UUID()
       }
-      // The toast the outcome pushes arms its own dismiss timer.
       $0.continuousClock = ImmediateClock()
     }
-    store.exhaustivity = .off
 
     await store.send(.handoff(.presented(.confirmContextOnly)))
-    await store.receive(\.handoff.presented.delegate.handOff) { state in
-      state.handoff = nil
+    await store.receive(\.handoff.presented.delegate.handOff) { $0.handoff = nil }
+    await store.receive(.statusBar(.push(.success("Handoff workflow started")))) {
+      $0.statusBar.toast = .success("Handoff workflow started")
+      $0.statusBar.sequence = 1
     }
-    await store.receive(.handoffFinished(completion, targetTitle: "Build"))
-    await store.receive(.statusBar(.push(.success("Handed off to Build"))))
-    let request = ran.value.first
-    #expect(request?.contextOnly == true)
-    #expect(request?.receiver == "codex")
-    #expect(request?.profile == profile.id.uuidString)
-    #expect(request?.target == .split)
-    #expect(request?.direction == .right)
-    #expect(request?.requestID == nil)
+    await store.receive(.statusBar(.cleared(sequence: 1))) { $0.statusBar.toast = nil }
+    await store.finish()
+    #expect(calls.value.count == 1)
+    #expect(calls.value.first?.0 == paneID)
+    #expect(calls.value.first?.1 == .contextOnly(profile: profile, targetTitle: "Build"))
+    #expect(calls.value.first?.2 == .split(.right))
+    #expect(calls.value.first?.3 == profile)
+    #expect(store.state.selection == initial.selection)
   }
 }

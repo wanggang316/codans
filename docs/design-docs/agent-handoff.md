@@ -1,5 +1,13 @@
 # 设计文档：Agent Profiles 与 Handoff
 
+> 当前实现更新（2026-09-18）：原 Hand Off 面板和 CLI 已接入内置 workflow。
+> 面板不要求输入 Objective；CLI 返回排队的 run ID。上下文保存、不可变交接包、
+> 启动、接收校验和继续任务均由 workflow 调度。下文原有 registry/CLI 注入编排
+> 描述为迁移前设计，不再代表当前执行路径。当前行为见
+> [Workflow 使用说明](../workflow-usage.md) 与
+> [迁移计划](../handoff-workflow-migration-plan.md)。
+
+
 **状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 

@@ -827,23 +827,35 @@ final class AppState {
         self.settingsWindowStore?.send(.selectionChanged(section))
       }
     )
-    // Handoff transition core, shared by the `handoff.*` IPC handler and the
-    // in-app Hand Off panel's fallback so both run the exact same sequence.
+    // CLI and panel adapters both create runs in the same workflow engine.
     let handoffHandlers = makeHandoffHandlers(
-      hierarchy: manager, hierarchyClient: hierarchy,
-      settingsStore: settings, engine: engine, gitClient: routedGitClient
+      hierarchy: manager, settingsStore: settings
     )
     configureWorkflowV2(hierarchy: hierarchy, engine: engine)
+    configureHandoffWorkflowV2(engine: engine, git: routedGitClient)
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient = hierarchy
       $0.handoffClient = .live(
-        handlers: handoffHandlers,
-        registry: self.handoffRegistry,
-        engine: engine,
-        cli: Self.cliInvocation(),
         installation: self.agentInstallation,
+        startWorkflow: { [weak self, weak manager] paneID, order, placement, profile in
+          guard let self, let manager,
+            let source = Self.handoffSource(
+              for: paneID, manager: manager, agentState: self.agentStateStore)
+          else { throw WorkflowAdapterErrorV2.message("The Handoff source is unavailable.") }
+          switch order {
+          case .brief(let request, _):
+            let saveOnly = request == .checkpoint
+            return try self.startHandoffWorkflowV2(
+              source: source, profile: profile, placement: placement, saveOnly: saveOnly
+            ).0
+          case .contextOnly(let selected, _):
+            return try self.startHandoffWorkflowV2(
+              source: source, profile: selected, placement: placement, contextOnly: true
+            ).0
+          }
+        },
         source: { [weak self, weak manager] paneID in
           guard let manager else { return nil }
           return Self.handoffSource(
@@ -1205,8 +1217,7 @@ final class AppState {
   }
 
   var workflowDefaultWorkspace: WorktreeID? {
-    let catalog = hierarchyManager.catalog
-    return catalog.projects.first { $0.id == catalog.selectedProjectID }?.selectedWorktreeID
+    store?.state.selection.worktreeID
   }
 
   var workflowPanes: [WorkflowPaneChoice] {
@@ -1231,10 +1242,7 @@ final class AppState {
   /// receiver launch through the shared agent pipeline.
   private func makeHandoffHandlers(
     hierarchy: HierarchyManager,
-    hierarchyClient: HierarchyClient,
-    settingsStore: SettingsStore,
-    engine: TerminalEngine,
-    gitClient: GitServiceClient
+    settingsStore: SettingsStore
   ) -> HandoffHandlers {
     HandoffHandlers(
       settings: settingsStore,
@@ -1244,20 +1252,15 @@ final class AppState {
         return Self.handoffSource(
           for: paneID, manager: manager, agentState: self?.agentStateStore)
       },
-      readScreen: { [weak engine] paneID in
-        engine?.ghosttyRuntime?.surface(for: paneID)?.readText(.viewport)
-      },
-      collectRepoState: { root in
-        await Self.handoffRepoState(at: root, git: gitClient)
-      },
-      launch: { spec in try await hierarchyClient.launchAgent(spec) },
-      typeKickoff: { [weak self, weak engine] paneID, kind, prompt, canDispatch in
-        guard let engine, let agentState = self?.agentStateStore else { return false }
-        return await Self.typeKickoffOnceAgentIsUp(
-          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine,
-          canDispatch: canDispatch)
-      },
-      cli: Self.cliInvocation()
+      cli: Self.cliInvocation(),
+      startWorkflow: { [weak self] request, source, profile, placement in
+        guard let self else { throw WorkflowAdapterErrorV2.message("Handoff is unavailable.") }
+        return try self.startHandoffWorkflowV2(
+          source: source, profile: profile, placement: placement, briefing: request.brief,
+          contextOnly: request.contextOnly, saveOnly: request.action == .save,
+          transitionOnly: request.action == .to && !request.launch,
+          note: request.note ?? "")
+      }
     )
   }
 
@@ -1303,14 +1306,14 @@ final class AppState {
     }
     // Ready = the screen held still for `settle` (at least one full read
     // apart), capped so a TUI with a spinner still gets its prompt.
-    var previous = surface.readText(.active) ?? ""
+    var previous = surface.readText(.active, preservingRows: true) ?? ""
     var stillSince = ContinuousClock.now
     var composerReady = false
     let readyDeadline = ContinuousClock.now + .seconds(10)
     while ContinuousClock.now < readyDeadline {
       guard canDispatch(), !Task.isCancelled else { return false }
       try? await Task.sleep(for: .milliseconds(250))
-      let current = surface.readText(.active) ?? ""
+      let current = surface.readText(.active, preservingRows: true) ?? ""
       if !AgentKickoffEcho.composerReady(kind: kind, screen: current) || current != previous {
         previous = current
         stillSince = ContinuousClock.now
@@ -1327,7 +1330,7 @@ final class AppState {
       engine.ghosttyRuntime?.surface(for: paneID) === surface
     else { return false }
     // Keep the assignment intact; sendInput turns every newline into Return.
-    let beforePaste = surface.readText(.active) ?? ""
+    let beforePaste = surface.readText(.active, preservingRows: true) ?? ""
     if !AgentKickoffEcho.canAcceptPaste(kind: kind, screen: beforePaste) {
       logger.error("kickoff: Agent composer is not empty or ready; existing input was preserved")
       return false
@@ -1338,7 +1341,7 @@ final class AppState {
       guard canDispatch(), !Task.isCancelled, agentState.entries[paneID]?.kind == kind,
         engine.ghosttyRuntime?.surface(for: paneID) === surface
       else { return false }
-      guard let screen = surface.readText(.active) else { continue }
+      guard let screen = surface.readText(.active, preservingRows: true) else { continue }
       if AgentKickoffEcho.containsPaste(
         kind: kind, prompt: prompt, before: beforePaste, after: screen)
       {

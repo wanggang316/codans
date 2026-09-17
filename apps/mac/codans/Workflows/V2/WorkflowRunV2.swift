@@ -11,6 +11,9 @@ nonisolated struct WorkflowBindingV2: Codable, Equatable, Sendable {
   var agentKind: AgentKind?
   var sessionID: String?
   var generation: Int = 1
+  var target: ScriptTarget?
+  var direction: ScriptSplitDirection?
+  var anchorPaneID: PaneID?
 }
 
 nonisolated struct WorkflowNodeRunV2: Codable, Equatable, Sendable {

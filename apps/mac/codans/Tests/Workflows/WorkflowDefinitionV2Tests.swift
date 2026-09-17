@@ -25,7 +25,7 @@ struct WorkflowDefinitionV2Tests {
       #expect(definition.nodeIDs.count == definition.nodes.count)
       #expect(Set(definition.nodeIDs).count == definition.nodes.count)
     }
-    #expect(nodeCount == 19)
+    #expect(nodeCount == 22)
   }
 
   @Test func invalidDefinitionsFailBeforeExecution() throws {

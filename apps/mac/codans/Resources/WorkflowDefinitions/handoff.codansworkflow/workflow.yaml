@@ -3,9 +3,10 @@ id: codans.handoff
 name: Handoff
 description: Prepare a packet and confirm that a receiver has understood it.
 inputs:
-  objective:
+  note:
     type: string
-    required: true
+    default: ""
+    description: Optional additional handoff instructions. The task objective comes from the current conversation.
 roles:
   author:
     label: Author
@@ -20,12 +21,12 @@ nodes:
     role: author
     with:
       context:
-        objective:
-          ref: inputs.objective
+        note:
+          ref: inputs.note
       instruction:
-        value: Summarize this conversation for handoff. Preserve user constraints, completed
+        value: Summarize this conversation for handoff. Infer the objective from the current task; do not ask the user to repeat it. Preserve user constraints, completed
           work, verification evidence and unresolved questions. Do not perform new task work.
-          Submit the briefing through delivery.
+          Use level-two Markdown headings (##) for the required sections. Include concrete next steps and verification commands. Submit the briefing through delivery, then stop working on the transferred task.
     expect:
       format: markdown
       sections:
@@ -33,14 +34,22 @@ nodes:
       - Current State
       - Completed Work
       - Next Steps
-  packet:
-    title: Save immutable packet
-    uses: codans/handoff.packet.create@v1
-    needs:
-    - briefing
+  context:
+    title: Save briefing and session context
+    uses: codans/handoff.context.save@v1
+    needs: [briefing]
     with:
       briefing:
         ref: nodes.briefing.outputs.result
+      mode:
+        value: transition
+  packet:
+    title: Save immutable packet
+    uses: codans/handoff.packet.create@v1
+    needs: [context]
+    with:
+      briefing:
+        ref: nodes.context.outputs.briefing
   launch_receiver:
     title: Start receiver
     uses: codans/session.launch@v1
@@ -100,7 +109,24 @@ nodes:
         ref: nodes.packet.outputs.packet
       acknowledgement:
         ref: nodes.receive.outputs.result
+  resume:
+    title: Continue the task
+    uses: codans/agent.resume@v1
+    role: receiver
+    needs: [verify]
+    with:
+      readiness:
+        ref: nodes.verify.outputs.readiness
+      context:
+        packet:
+          ref: nodes.packet.outputs.packet
+        acknowledgement:
+          ref: nodes.receive.outputs.result
+      instruction:
+        value: The handoff receipt has been verified. Continue the transferred task from the packet's Next Steps now. Preserve all user constraints and existing authorization. Do not repeat completed work or run another handoff. Report progress and blockers to the user in this terminal.
 outputs:
+  continuation:
+    ref: nodes.resume.outputs.dispatch
   packet:
     ref: nodes.packet.outputs.packet
   acknowledgement:

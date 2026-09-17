@@ -1,8 +1,8 @@
 import AppKit
-import Foundation
-import GhosttyKit
 import CodansCore
 import CodansIPC
+import Foundation
+import GhosttyKit
 
 /// Owns one `ghostty_surface_t` and its hosting `GhosttySurfaceView`. One
 /// PaneSurface corresponds to one `Pane` while alive; when the surface
@@ -399,7 +399,7 @@ final class PaneSurface {
     case screen
   }
 
-  func readText(_ extent: ReadExtent) -> String? {
+  func readText(_ extent: ReadExtent, preservingRows: Bool = false) -> String? {
     guard let surface else { return nil }
     var text = ghostty_text_s()
     let tag: ghostty_point_tag_e =
@@ -421,7 +421,8 @@ final class PaneSurface {
         x: 0,
         y: 0
       ),
-      rectangle: false
+      // Composer boundaries depend on physical rows after a terminal resize.
+      rectangle: preservingRows
     )
     guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
     defer { ghostty_surface_free_text(surface, &text) }

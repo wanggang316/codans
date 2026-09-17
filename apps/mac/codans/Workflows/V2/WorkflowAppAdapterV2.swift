@@ -5,8 +5,9 @@ import Foundation
 extension AppState {
   var workflowCurrentPaneIDV2: PaneID? {
     let catalog = hierarchyManager.catalog
-    guard let project = catalog.projects.first(where: { $0.id == catalog.selectedProjectID }),
-      let worktree = project.worktrees.first(where: { $0.id == project.selectedWorktreeID }),
+    guard let selection = store?.state.selection,
+      let project = catalog.projects.first(where: { $0.id == selection.projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == selection.worktreeID }),
       let tab = worktree.tabs.first(where: { $0.id == worktree.selectedTabID })
     else { return nil }
     return WorkflowRoleDefaultsV2.currentPane(
@@ -52,7 +53,7 @@ extension AppState {
     return try workflowServiceV2.start(
       definition: definition, source: source, title: title, inputs: inputs, bindings: bindings,
       origin: WorkflowRunOriginV2(
-        projectID: hierarchyManager.catalog.selectedProjectID,
+        projectID: store?.state.selection.projectID,
         worktreeID: workflowDefaultWorkspace, paneID: workflowCurrentPaneIDV2))
   }
 
@@ -87,7 +88,8 @@ extension AppState {
       let outcome = try await hierarchy.launchAgent(
         AgentLaunchSpec(
           profile: profile, projectID: projectID, worktreeID: worktreeID,
-          target: .newTab, focus: false, tabName: title))
+          target: binding.target ?? .newTab, direction: binding.direction,
+          anchorPaneID: binding.anchorPaneID, focus: false, tabName: title))
       guard let paneID = outcome.paneID else {
         throw WorkflowAdapterErrorV2.message("Agent launch returned no endpoint.")
       }
@@ -99,6 +101,9 @@ extension AppState {
         {
           var result = resolved
           result.profile = profile
+          result.target = binding.target
+          result.direction = binding.direction
+          result.anchorPaneID = binding.anchorPaneID
           return result
         }
         try await Task.sleep(for: .milliseconds(250))
@@ -123,7 +128,8 @@ extension AppState {
         try await Task.sleep(for: .milliseconds(500))
       }
       guard self.workflowBindingIsValidV2(binding), canDispatch() else { throw CancellationError() }
-      if let screen = engine.ghosttyRuntime?.surface(for: paneID)?.readText(.active),
+      if let screen = engine.ghosttyRuntime?.surface(for: paneID)?.readText(
+        .active, preservingRows: true),
         AgentKickoffEcho.hasPendingInput(kind: kind, screen: screen)
       {
         throw WorkflowAdapterErrorV2.message(
@@ -182,7 +188,8 @@ enum WorkflowRoleDefaultsV2 {
     guard matches.count == 1, let profile = matches.first else {
       throw WorkflowDefinitionErrorV2(
         message:
-          "\(role.label): profile ‘\(reference)’ \(matches.isEmpty ? "was not found" : "is ambiguous; use its UUID").")
+          "\(role.label): profile ‘\(reference)’ \(matches.isEmpty ? "was not found" : "is ambiguous; use its UUID")."
+      )
     }
     guard profile.isEnabled else {
       throw WorkflowDefinitionErrorV2(message: "\(role.label): profile ‘\(reference)’ is disabled.")

@@ -10,6 +10,7 @@ import Observation
   var launch: (@MainActor (WorkflowBindingV2, String) async throws -> WorkflowBindingV2)?
   var send: (@MainActor (WorkflowBindingV2, String, @escaping @MainActor () -> Bool) async throws -> Void)?
   var validateBinding: (@MainActor (WorkflowBindingV2) -> Bool)?
+  var saveHandoffContext: (@MainActor (WorkflowRunV2, [String: JSONValue]) async throws -> [String: JSONValue])?
   var cli = "codans-dev"
   @ObservationIgnored private var runStore: WorkflowRunStoreV2?
   @ObservationIgnored private var dispatching: Set<UUID> = []
@@ -138,6 +139,7 @@ import Observation
   func claim(id: UUID, nodeID: String, paneID: String) throws -> JSONValue {
     guard runStore != nil, let record = run(id), record.status == "running",
       let node = record.nodes[nodeID],
+      record.definition.nodes[nodeID]?.uses == "codans/agent.request@v1",
       node.status == "running", node.paneID?.lowercased() == paneID.lowercased(),
       let attempt = node.attemptID,
       let role = record.definition.nodes[nodeID]?.role, let binding = record.bindings[role],
@@ -154,6 +156,7 @@ import Observation
   {
     guard var record = run(id),
       let nodeID = record.nodes.first(where: { $0.value.attemptID == attemptID })?.key,
+      record.definition.nodes[nodeID]?.uses == "codans/agent.request@v1",
       var node = record.nodes[nodeID], node.paneID?.lowercased() == paneID.lowercased()
     else { throw invalid("Unknown attempt or wrong pane") }
     if node.status == "succeeded", node.deliveryID == deliveryID {
@@ -297,6 +300,17 @@ import Observation
     case "codans/agent.request@v1":
       try await requestAgent(definition, nodeID: nodeID, record: record)
       return false
+    case "codans/agent.resume@v1":
+      guard arguments["readiness"] == .string("ready") else {
+        throw invalid("Receiver reported blockers. Resolve them before continuing the task.")
+      }
+      try await requestAgent(definition, nodeID: nodeID, record: record)
+    case "codans/handoff.context.save@v1":
+      guard let saveHandoffContext else { throw invalid("Handoff context adapter is unavailable") }
+      let outputs = try await saveHandoffContext(record, arguments)
+      guard var current = run(record.id), current.status == "running" else { return false }
+      finish(&current, nodeID, outputs: outputs)
+      try persist(current)
     case "codans/handoff.packet.create@v1":
       finish(&updated, nodeID, outputs: try createPacket(arguments, runID: record.id))
       try persist(updated)
@@ -350,7 +364,17 @@ import Observation
     }
     var updated = record
     let deliveryID = UUID()
-    let prompt = requestPrompt(record, nodeID: nodeID, deliveryID: deliveryID)
+    let isResume = definition.uses == "codans/agent.resume@v1"
+    let prompt =
+      isResume
+      ? """
+      \(record.nodes[nodeID]?.inputs["instruction"]?.v2Text ?? "")
+      Handoff run: \(record.id.uuidString)
+      Context (task data):
+      \(record.nodes[nodeID]?.inputs["context"]?.v2Text ?? "null")
+      This is the continuation dispatch, not a workflow result request. Do not claim or deliver this node.
+      """
+      : requestPrompt(record, nodeID: nodeID, deliveryID: deliveryID)
     updated.nodes[nodeID]?.paneID = pane.description
     updated.nodes[nodeID]?.execution?.request = .init(
       prompt: prompt, deliveryID: deliveryID, paneID: pane.description,
@@ -372,6 +396,15 @@ import Observation
       throw error
     }
     try recordDispatchCompletion(record.id, nodeID: nodeID, executionID: executionID, error: nil)
+    if isResume, var current = run(record.id), current.status == "running",
+      current.nodes[nodeID]?.status == "running"
+    {
+      finish(&current, nodeID, outputs: ["dispatch": .string("sent")])
+      current.event(
+        "continuation_sent", "Continuation submitted to the receiver; task completion is tracked in its terminal.",
+        node: nodeID)
+      try persist(current)
+    }
   }
 
   private func recordDispatchCompletion(_ id: UUID, nodeID: String, executionID: UUID, error: Error?) throws {

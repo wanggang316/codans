@@ -5,11 +5,6 @@ import Testing
 
 @testable import Codans
 
-/// `handoff.save` / `handoff.to` against a temporary worktree and stubbed
-/// runtime closures. Pins the contract the CLI and the in-app panel rely on:
-/// briefing is mandatory-or-explicit with zero side effects on rejection,
-/// the archive-first transition, receiver launch through the shared agent
-/// pipeline, and one-shot request authorization.
 @MainActor
 struct HandoffHandlersTests {
   private static let briefing = """
@@ -24,86 +19,48 @@ struct HandoffHandlersTests {
 
   private struct Harness {
     let handlers: HandoffHandlers
-    let store: HandoffStore
     let source: HandoffSource
     let registry: HandoffRequestRegistry
-    let launches: LaunchRecorder
+    let recorder: Recorder
   }
 
-  /// Records launch specs and answers with a fixed pane, or throws.
-  final class LaunchRecorder {
-    var specs: [AgentLaunchSpec] = []
-    var failure: Error?
-    let tabID = TabID()
-    let paneID = PaneID()
-    /// `(pane, agent, prompt)` handed to the kickoff typer, which the handler
-    /// runs detached; `awaitKickoff` yields until it lands.
-    var kickoffs: [(PaneID, AgentKind, String)] = []
-
-    func awaitKickoff() async -> (PaneID, AgentKind, String)? {
-      for _ in 0..<200 where kickoffs.isEmpty {
-        await Task.yield()
-      }
-      return kickoffs.first
+  private final class Recorder {
+    struct Call {
+      let request: IPC.HandoffRequest
+      let source: HandoffSource
+      let profile: AgentProfile?
+      let placement: HandoffPlacement
     }
+    var calls: [Call] = []
+    var failure: Error?
+    let runID = UUID()
+    let directory = "/tmp/handoff-workflow-run"
   }
 
   private static func makeHarness(
-    agent: AgentKind? = .claudeCode,
-    isRemote: Bool = false,
-    profiles: [AgentProfile]? = nil,
-    screen: String? = "last screen"
+    isRemote: Bool = false, profiles: [AgentProfile]? = nil
   ) throws -> Harness {
     let root = FileManager.default.temporaryDirectory
-      .appending(path: "HandoffHandlersTests-\(UUID().uuidString)", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    let settingsURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("HandoffHandlersTests-\(UUID().uuidString).json")
-    let settings = SettingsStore(fileURL: settingsURL)
-    if let profiles {
-      settings.mutateAgents { $0.profiles = profiles }
-    }
+      .appendingPathComponent("HandoffHandlersTests-\(UUID().uuidString)")
+    let settings = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+    if let profiles { settings.mutateAgents { $0.profiles = profiles } }
     let source = HandoffSource(
-      paneID: PaneID(),
-      projectID: ProjectID(raw: UUID()),
-      worktreeID: WorktreeID(raw: UUID()),
-      tabID: TabID(),
-      worktreePath: root.path(percentEncoded: false),
-      isRemote: isRemote,
-      agentKind: agent,
-      sessionID: agent == nil ? nil : "sess-1",
-      paneTitle: "source"
-    )
+      paneID: PaneID(), projectID: ProjectID(raw: UUID()), worktreeID: WorktreeID(raw: UUID()),
+      tabID: TabID(), worktreePath: root.path, isRemote: isRemote,
+      agentKind: .claudeCode, sessionID: "source-session", paneTitle: "source")
     let registry = HandoffRequestRegistry()
-    let launches = LaunchRecorder()
+    let recorder = Recorder()
     let handlers = HandoffHandlers(
-      settings: settings,
-      registry: registry,
-      resolveSource: { paneID in paneID == source.paneID ? source : nil },
-      readScreen: { _ in screen },
-      collectRepoState: { _ in
-        HandoffRepoState(
-          branch: "feat/x", isGit: true, changedFiles: ["a.swift"], additions: 2, deletions: 1)
-      },
-      launch: { spec in
-        launches.specs.append(spec)
-        if let failure = launches.failure { throw failure }
-        return AgentLaunchOutcome(
-          profile: spec.profile, command: "cmd", tabID: launches.tabID, paneID: launches.paneID)
-      },
-      typeKickoff: { paneID, agent, prompt, _ in
-        launches.kickoffs.append((paneID, agent, prompt))
-        return true
-      },
-      // Pinned rather than defaulted: the default follows the build channel
-      // (`codans-dev` in Debug), and the guidance assertions below are about
-      // the shape of the command, not which build wrote it.
+      settings: settings, registry: registry,
+      resolveSource: { $0 == source.paneID ? source : nil },
       cli: "codans",
-      now: { Date(timeIntervalSince1970: 1_700_000_000) }
-    )
-    return Harness(
-      handlers: handlers, store: HandoffStore(rootURL: root), source: source,
-      registry: registry, launches: launches)
+      startWorkflow: { request, source, profile, placement in
+        recorder.calls.append(
+          .init(request: request, source: source, profile: profile, placement: placement))
+        if let failure = recorder.failure { throw failure }
+        return (recorder.runID, recorder.directory)
+      })
+    return Harness(handlers: handlers, source: source, registry: registry, recorder: recorder)
   }
 
   private static func request(
@@ -146,345 +103,191 @@ struct HandoffHandlersTests {
     }
   }
 
-  // MARK: - Briefing gate
-
   @Test
-  func missingBriefingChoiceIsRejectedWithGuidanceAndNoSideEffects() async throws {
+  func briefingValidationPrecedesWorkflowCreation() async throws {
     let harness = try Self.makeHarness()
-    let error = await Self.ipcError {
+    let missing = await Self.ipcError {
       try await harness.handlers.to(Self.request(.to, harness, receiver: "codex"))
     }
-    guard case .invalidParams(let message, let path) = error else {
-      Issue.record("expected invalidParams, got \(String(describing: error))")
+    guard case .invalidParams(let message, let path) = missing else {
+      Issue.record("Expected missing briefing error")
       return
     }
     #expect(path == ["brief"])
-    #expect(message.contains("codans handoff to codex --brief - <<'EOF'"))
-    #expect(
-      !FileManager.default.fileExists(
-        atPath: harness.store.handoffDirectory.path(percentEncoded: false)))
-    #expect(harness.launches.specs.isEmpty)
-  }
-
-  @Test
-  func invalidBriefingIsRejectedBeforeAnyWrite() async throws {
-    let harness = try Self.makeHarness()
-    let error = await Self.ipcError {
+    #expect(message.contains("codans handoff to codex --brief -"))
+    let malformed = await Self.ipcError {
       try await harness.handlers.save(Self.request(.save, harness, brief: "just prose"))
     }
-    guard case .invalidParams(let message, _) = error else {
-      Issue.record("expected invalidParams, got \(String(describing: error))")
+    guard case .invalidParams = malformed else {
+      Issue.record("Expected invalid briefing error")
       return
     }
-    #expect(message.contains("missing required sections"))
-    #expect(
-      !FileManager.default.fileExists(
-        atPath: harness.store.handoffDirectory.path(percentEncoded: false)))
-  }
-
-  @Test
-  func briefAndNoBriefTogetherAreRejected() async throws {
-    let harness = try Self.makeHarness()
-    let error = await Self.ipcError {
+    let conflicting = await Self.ipcError {
       try await harness.handlers.save(
         Self.request(.save, harness, brief: Self.briefing, contextOnly: true))
     }
-    guard case .invalidParams = error else {
-      Issue.record("expected invalidParams, got \(String(describing: error))")
+    guard case .invalidParams = conflicting else {
+      Issue.record("Expected conflicting briefing options error")
       return
     }
+    #expect(harness.recorder.calls.isEmpty)
   }
 
-  // MARK: - save
-
   @Test
-  func saveInstallsTheBriefingAndRefreshesContext() async throws {
+  func saveReturnsQueuedRunWithoutClaimingCompletion() async throws {
     let harness = try Self.makeHarness()
     let response = try await harness.handlers.save(
       Self.request(.save, harness, brief: Self.briefing))
-
+    let call = try #require(harness.recorder.calls.first)
+    #expect(call.request.action == .save)
+    #expect(call.request.brief == Self.briefing)
+    #expect(call.source == harness.source)
+    #expect(call.profile == nil)
+    #expect(response.runID == harness.recorder.runID)
+    #expect(response.artifactPath == harness.recorder.directory)
     #expect(response.action == .save)
     #expect(response.hasBriefing)
-    #expect(response.outgoingAgent == "claude-code")
-    #expect(response.branch == "feat/x")
-    #expect(response.changedFileCount == 1)
-    // The session file is named after the pane id; the slug lowercases the
-    // UUID and keeps its dashes.
-    let paneSlug = harness.source.paneID.description.lowercased()
-    #expect(
-      response.sessionExcerptPath == ".codans/handoff/sessions/20231114-221320-\(paneSlug).md")
-    #expect(
-      try String(contentsOf: harness.store.currentURL, encoding: .utf8) == Self.briefing + "\n")
-    let context = try String(contentsOf: harness.store.contextURL, encoding: .utf8)
-    #expect(context.contains("- Agent: Claude Code"))
-    #expect(context.contains("- Reattach to the outgoing session: `claude --resume 'sess-1'`"))
-    let excerpt = try String(
-      contentsOf: harness.store.rootURL.appending(path: response.sessionExcerptPath!),
-      encoding: .utf8)
-    #expect(excerpt.contains("last screen"))
-    #expect(
-      try String(contentsOf: harness.store.logURL, encoding: .utf8).contains(
-        "save  agent=claude-code"))
-    #expect(harness.launches.specs.isEmpty)
-  }
-
-  // MARK: - to
-
-  @Test
-  func handoffToLaunchesTheReceiverInABackgroundTabWithTheKickoffPrompt() async throws {
-    let harness = try Self.makeHarness()
-    try harness.store.writeBriefing("# previous\n", archivingPrevious: false, now: Date())
-
-    let response = try await harness.handlers.to(
-      Self.request(.to, harness, receiver: "codex", brief: Self.briefing))
-
-    #expect(response.receiver == "codex")
-    #expect(response.hasBriefing)
-    #expect(
-      response.archivedPath == ".codans/handoff/archive/20231114-221320-claude-code-to-codex.md")
-    #expect(response.launchedPane?.paneID == harness.launches.paneID)
-    #expect(response.launchedPane?.tabID == harness.launches.tabID)
-    #expect(response.launchedPane?.profileName == "Codex")
-
-    let spec = try #require(harness.launches.specs.first)
-    #expect(spec.profile.kind == .codex)
-    #expect(spec.prompt == HandoffKickoff.receiverPrompt(hasBriefing: true))
-    #expect(spec.target == .newTab)
-    #expect(spec.direction == nil)
-    #expect(spec.anchorPaneID == harness.source.paneID)
-    #expect(spec.focus == false)
-    #expect(spec.tabName == "Hand off → Codex")
-    #expect(spec.projectID == harness.source.projectID)
-
-    let log = try String(contentsOf: harness.store.logURL, encoding: .utf8)
-    #expect(
-      log.contains(
-        "claude-code -> codex  pane=\(harness.launches.paneID)  briefing=inline  source=cli"))
-  }
-
-  /// `--split` opens the receiver beside the *source* pane, not beside
-  /// whatever pane happens to have focus, so the launch spec names the anchor.
-  @Test
-  func handoffToSplitsTheSourcePaneWhenAsked() async throws {
-    let harness = try Self.makeHarness()
-
-    _ = try await harness.handlers.to(
-      Self.request(
-        .to, harness, receiver: "codex", brief: Self.briefing, target: .split, direction: .down))
-
-    let spec = try #require(harness.launches.specs.first)
-    #expect(spec.target == .split)
-    #expect(spec.direction == .down)
-    #expect(spec.anchorPaneID == harness.source.paneID)
-    #expect(spec.focus == false)
-  }
-
-  /// A hand-off never types over the outgoing agent, so the one `ScriptTarget`
-  /// that would is refused before anything is written.
-  @Test
-  func handoffToRefusesTheFocusedTarget() async throws {
-    let harness = try Self.makeHarness()
-    let error = await Self.ipcError {
-      try await harness.handlers.to(
-        Self.request(.to, harness, receiver: "codex", brief: Self.briefing, target: .focused))
-    }
-    guard case .invalidParams(let message, let path) = error else {
-      Issue.record("expected invalidParams, got \(String(describing: error))")
-      return
-    }
-    #expect(message.contains("focused"))
-    #expect(path == ["target"])
-    #expect(harness.launches.specs.isEmpty)
-    #expect(
-      !FileManager.default.fileExists(
-        atPath: harness.store.handoffDirectory.path(percentEncoded: false)))
-  }
-
-  @Test
-  func handoffToUsesTheReceiversEnabledProfileOrAnExplicitOne() async throws {
-    let build = AgentProfile(kind: .codex, name: "Build", modelID: "gpt-5.1")
-    let plan = AgentProfile(kind: .codex, name: "Plan", isEnabled: false)
-    let harness = try Self.makeHarness(profiles: [plan, build])
-
-    _ = try await harness.handlers.to(
-      Self.request(.to, harness, receiver: "codex", contextOnly: true))
-    #expect(harness.launches.specs.last?.profile.id == build.id)
-
-    _ = try await harness.handlers.to(
-      Self.request(.to, harness, receiver: "codex", profile: "plan", contextOnly: true))
-    #expect(harness.launches.specs.last?.profile.id == plan.id)
-
-    let mismatch = await Self.ipcError {
-      try await harness.handlers.to(
-        Self.request(
-          .to, harness, receiver: "claude", profile: build.id.uuidString, contextOnly: true))
-    }
-    guard case .conflict = mismatch else {
-      Issue.record("expected conflict, got \(String(describing: mismatch))")
-      return
-    }
-  }
-
-  @Test
-  func contextOnlyHandoffRemovesTheStaleBriefingAndTellsTheReceiver() async throws {
-    let harness = try Self.makeHarness()
-    try harness.store.writeBriefing("# previous\n", archivingPrevious: false, now: Date())
-
-    let response = try await harness.handlers.to(
-      Self.request(.to, harness, receiver: "claude", contextOnly: true))
-    #expect(!response.hasBriefing)
-    #expect(!harness.store.hasCurrentBriefing)
-    #expect(
-      harness.launches.specs.first?.prompt == HandoffKickoff.receiverPrompt(hasBriefing: false))
-  }
-
-  @Test
-  func noLaunchArchivesAndSavesWithoutStartingAnything() async throws {
-    let harness = try Self.makeHarness()
-    let response = try await harness.handlers.to(
-      Self.request(.to, harness, receiver: "amp", brief: Self.briefing, launch: false))
     #expect(response.launchedPane == nil)
-    #expect(harness.launches.specs.isEmpty)
+    #expect(response.archivedPath == nil)
+    #expect(response.sessionExcerptPath == nil)
     #expect(
-      try String(contentsOf: harness.store.logURL, encoding: .utf8).contains(
-        "claude-code -> amp  (no launch)"))
+      !FileManager.default.fileExists(atPath: harness.source.worktreePath + "/.codans/handoff"))
+    let roundTrip = try JSONDecoder().decode(
+      IPC.HandoffResponse.self, from: JSONEncoder().encode(response))
+    #expect(roundTrip == response)
   }
 
-  /// An agent whose CLI takes no prompt argument is still a receiver: it is
-  /// launched like any other and the kickoff is typed into its pane once it
-  /// is up, without holding the response.
   @Test
-  func agentsWithoutAPromptArgumentGetTheKickoffTypedIn() async throws {
-    let harness = try Self.makeHarness()
-
+  func receiverProfileAndSourceAnchoredPlacementReachWorkflow() async throws {
+    let profile = AgentProfile(kind: .codex, name: "Build", modelID: "gpt-5.1")
+    let harness = try Self.makeHarness(profiles: [profile])
     let response = try await harness.handlers.to(
-      Self.request(.to, harness, receiver: "amp", brief: Self.briefing))
-
-    #expect(response.launchedPane?.paneID == harness.launches.paneID)
-    let spec = try #require(harness.launches.specs.first)
-    #expect(spec.profile.kind == .amp)
-    let kickoff = try #require(await harness.launches.awaitKickoff())
-    #expect(kickoff.0 == harness.launches.paneID)
-    #expect(kickoff.1 == .amp)
-    #expect(kickoff.2 == HandoffKickoff.receiverPrompt(hasBriefing: true))
-  }
-
-  /// Agents that take the prompt on their command line are never typed at.
-  @Test
-  func agentsWithAPromptArgumentAreNotTypedAt() async throws {
-    let harness = try Self.makeHarness()
-    _ = try await harness.handlers.to(
-      Self.request(.to, harness, receiver: "codex", brief: Self.briefing))
-    for _ in 0..<20 { await Task.yield() }
-    #expect(harness.launches.kickoffs.isEmpty)
+      Self.request(
+        .to, harness, receiver: "codex", profile: profile.id.uuidString,
+        brief: Self.briefing, target: .split, direction: .down))
+    let call = try #require(harness.recorder.calls.first)
+    #expect(call.profile == profile)
+    #expect(call.source.paneID == harness.source.paneID)
+    #expect(call.source.projectID == harness.source.projectID)
+    #expect(call.source.worktreeID == harness.source.worktreeID)
+    #expect(call.source.sessionID == "source-session")
+    #expect(call.placement.target == .split)
+    #expect(call.placement.direction == .down)
+    #expect(response.receiver == "codex")
+    #expect(response.runID == harness.recorder.runID)
+    #expect(response.launchedPane == nil)
   }
 
   @Test
-  func failedReceiverLaunchIsLoggedAndReported() async throws {
+  func explicitContextOnlyAndNoLaunchAreForwarded() async throws {
     let harness = try Self.makeHarness()
-    harness.launches.failure = RunScriptError.missingWorktree(harness.source.worktreeID)
-    let error = await Self.ipcError {
-      try await harness.handlers.to(
-        Self.request(.to, harness, receiver: "codex", brief: Self.briefing))
-    }
-    guard case .internal(let message) = error else {
-      Issue.record("expected internal, got \(String(describing: error))")
-      return
-    }
-    #expect(message.contains("failed to launch Codex"))
-    // The artifact work already happened and is kept: the receiver can
-    // still be started by hand from the briefing.
-    #expect(harness.store.hasCurrentBriefing)
-    #expect(try String(contentsOf: harness.store.logURL, encoding: .utf8).contains("launch=failed"))
+    let response = try await harness.handlers.to(
+      Self.request(.to, harness, receiver: "codex", contextOnly: true, launch: false))
+    let call = try #require(harness.recorder.calls.first)
+    #expect(call.request.contextOnly)
+    #expect(!call.request.launch)
+    #expect(call.request.brief == nil)
+    #expect(call.placement.target == .newTab)
+    #expect(!response.hasBriefing)
+    #expect(response.runID != nil)
+    _ = try await harness.handlers.save(Self.request(.save, harness, contextOnly: true))
+    #expect(harness.recorder.calls.last?.request.action == .save)
+    #expect(harness.recorder.calls.last?.profile == nil)
   }
 
-  // MARK: - Source resolution
-
   @Test
-  func unknownPaneAndRemoteWorktreeAreRejected() async throws {
-    let harness = try Self.makeHarness()
+  func invalidSourceReceiverProfileAndPlacementNeverStartWorkflow() async throws {
+    let profile = AgentProfile(kind: .codex, name: "Build")
+    let harness = try Self.makeHarness(profiles: [profile])
     let unknown = await Self.ipcError {
       try await harness.handlers.save(
         Self.request(.save, harness, contextOnly: true, paneID: PaneID()))
     }
-    guard case .notFound(let kind, _) = unknown, kind == "pane" else {
-      Issue.record("expected notFound(pane), got \(String(describing: unknown))")
+    guard case .notFound = unknown else {
+      Issue.record("Expected unknown source error")
       return
     }
-
+    let receiver = await Self.ipcError {
+      try await harness.handlers.to(
+        Self.request(.to, harness, receiver: "unknown-agent", contextOnly: true))
+    }
+    guard case .invalidParams = receiver else {
+      Issue.record("Expected unknown receiver error")
+      return
+    }
+    let mismatch = await Self.ipcError {
+      try await harness.handlers.to(
+        Self.request(
+          .to, harness, receiver: "claude", profile: profile.id.uuidString, contextOnly: true))
+    }
+    guard case .conflict = mismatch else {
+      Issue.record("Expected mismatched profile error")
+      return
+    }
+    let placement = await Self.ipcError {
+      try await harness.handlers.to(
+        Self.request(.to, harness, receiver: "codex", contextOnly: true, target: .focused))
+    }
+    guard case .invalidParams = placement else {
+      Issue.record("Expected focused placement rejection")
+      return
+    }
+    #expect(harness.recorder.calls.isEmpty)
     let remote = try Self.makeHarness(isRemote: true)
-    let error = await Self.ipcError {
+    let remoteError = await Self.ipcError {
       try await remote.handlers.save(Self.request(.save, remote, contextOnly: true))
     }
-    guard case .unsupported = error else {
-      Issue.record("expected unsupported, got \(String(describing: error))")
+    guard case .unsupported = remoteError else {
+      Issue.record("Expected remote source rejection")
       return
     }
+    #expect(remote.recorder.calls.isEmpty)
   }
 
   @Test
-  func unknownReceiverIsRejected() async throws {
+  func workflowCreationFailureIsReturnedWithoutFallback() async throws {
     let harness = try Self.makeHarness()
+    harness.recorder.failure = IPCError.internal("Run store unavailable")
     let error = await Self.ipcError {
-      try await harness.handlers.to(
-        Self.request(.to, harness, receiver: "aider", brief: Self.briefing))
+      try await harness.handlers.save(Self.request(.save, harness, brief: Self.briefing))
     }
-    guard case .invalidParams(_, let path) = error else {
-      Issue.record("expected invalidParams, got \(String(describing: error))")
+    guard case .internal(let message) = error else {
+      Issue.record("Expected workflow failure")
       return
     }
-    #expect(path == ["receiver"])
+    #expect(message == "Run store unavailable")
+    #expect(harness.recorder.calls.count == 1)
+    #expect(
+      !FileManager.default.fileExists(atPath: harness.source.worktreePath + "/.codans/handoff"))
   }
 
-  // MARK: - Request authorization
-
   @Test
-  func panelRequestRunsOnceAndNotAfterBeingSuperseded() async throws {
+  func authorizedRequestStartsOnceAndSupersededRequestNeverStarts() async throws {
     let harness = try Self.makeHarness()
     let requestID = UUID()
     harness.registry.register(requestID)
-
-    let stream = harness.registry.completions()
-    let collector = Task {
-      var iterator = stream.makeAsyncIterator()
-      return await iterator.next()
-    }
-    let timeout = Task {
-      try await Task.sleep(for: .seconds(2))
-      collector.cancel()
-    }
-    defer {
-      collector.cancel()
-      timeout.cancel()
-    }
-
     _ = try await harness.handlers.save(
       Self.request(.save, harness, brief: Self.briefing, requestID: requestID))
-    let received = try #require(await collector.value)
-    timeout.cancel()
-    #expect(received.requestID == requestID)
-    #expect(received.sourcePaneID == harness.source.paneID)
-
-    // Second run of the same request: refused, nothing rewritten.
     let repeated = await Self.ipcError {
       try await harness.handlers.save(
         Self.request(.save, harness, brief: Self.briefing, requestID: requestID))
     }
     guard case .conflict = repeated else {
-      Issue.record("expected conflict, got \(String(describing: repeated))")
+      Issue.record("Expected duplicate request rejection")
       return
     }
-
     let superseded = UUID()
     harness.registry.register(superseded)
     #expect(harness.registry.supersede(superseded))
-    let afterFallback = await Self.ipcError {
+    let retired = await Self.ipcError {
       try await harness.handlers.save(
         Self.request(.save, harness, brief: Self.briefing, requestID: superseded))
     }
-    guard case .conflict = afterFallback else {
-      Issue.record("expected conflict, got \(String(describing: afterFallback))")
+    guard case .conflict = retired else {
+      Issue.record("Expected superseded request rejection")
       return
     }
+    #expect(harness.recorder.calls.count == 1)
+    #expect(harness.recorder.calls.first?.request.requestID == requestID)
   }
 }
