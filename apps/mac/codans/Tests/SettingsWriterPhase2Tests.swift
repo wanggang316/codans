@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -14,6 +14,18 @@ struct SettingsWriterPhase2Tests {
       component: "settings-writer-phase2-\(UUID().uuidString).json"
     )
     return (SettingsStore(fileURL: url), url)
+  }
+
+  @Test func defaultGitViewerPersistsBuiltInAndPreservesExternalSelection() throws {
+    let (store, url) = makeStore()
+    defer { try? FileManager.default.removeItem(at: url) }
+    #expect(store.settings.general.defaultGitViewerID == GeneralSettings.builtInGitViewerID)
+    store.setDefaultGitViewerID("fork")
+    #expect(store.settings.general.defaultGitViewerID == "fork")
+    store.setDefaultGitViewerID(nil)
+    try store.saveNow()
+    let saved = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: url))
+    #expect(saved.general.defaultGitViewerID == GeneralSettings.builtInGitViewerID)
   }
 
   // MARK: - setProjectGitField

@@ -36,7 +36,6 @@ struct WorktreeDetailView: View {
   /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
-  var onOpenDiff: () -> Void
   /// Invoked from the empty-state Add Project button. Wired by `ContentView`
   /// so the detail view doesn't need to hold the sidebar's TCA scope just
   /// to fire `toolbarAddProjectTapped` — same pattern as the editor toast
@@ -340,7 +339,6 @@ struct WorktreeDetailView: View {
           // children leading-to-trailing in declaration order.
           agentSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
-          diffButton
           openSlot(mode).buttonStyle(.plain)
         }
       }
@@ -354,19 +352,7 @@ struct WorktreeDetailView: View {
     ToolbarSpacer(.fixed)
     ToolbarItem { runSlot(mode) }
     ToolbarSpacer(.fixed)
-    ToolbarItem { diffButton }
-    ToolbarSpacer(.fixed)
     ToolbarItem { openSlot(mode) }
-  }
-
-  private var diffButton: some View {
-    Button {
-      onOpenDiff()
-    } label: {
-      Label("View Changes", systemImage: "macwindow")
-    }
-    .help("View Changes and Outgoing")
-    .accessibilityIdentifier("show-diff")
   }
 
   @available(macOS 26.0, *)

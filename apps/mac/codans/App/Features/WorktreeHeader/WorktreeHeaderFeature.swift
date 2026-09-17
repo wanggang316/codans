@@ -12,7 +12,7 @@ import Foundation
 /// `EditorFeature.resolveDefault` first). The Git Viewer no longer has a
 /// dedicated header button — invocations land on the ⌘⌥G chord / menu /
 /// palette entry, which RootFeature dispatches against
-/// `settings.general.defaultGitViewerID`.
+/// `settings.general.defaultGitViewerID` (Built-in by default).
 @Reducer
 struct WorktreeHeaderFeature {
   @ObservableState

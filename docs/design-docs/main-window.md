@@ -13,7 +13,7 @@
 
 - 通知 / 未读上卷 / 状态栏铃铛：[notifications.md](notifications.md)。
 - Tag 模型 / 单窗口 / Tag 过滤：[project-tags.md](project-tags.md)。
-- 内置只读 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)。
+- 内置只读 Uncommitted / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)。
 - Git Viewer（在外部 git 客户端打开）：[editor-integration.md](editor-integration.md) 的「Git Viewer」一节。
 
 ## Sidebar
@@ -41,7 +41,7 @@
 
 Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只读 `⎇ branch` 标签、右侧 "Open in …" split button。它由一个 TCA feature（自 `RootFeature` scope）拥有，挂在 `WorktreeDetailView` 内 Header 原位，不改外层 split-view 结构。
 
-> **入口边界。** Header 不含通知铃铛；通知 popover 由状态栏铃铛承载（[notifications.md](notifications.md)）。Worktree detail 工具栏的 “View Changes” 打开内置只读 Changes / Outgoing 面板；菜单和命令面板提供 “View Changes and Outgoing”。⌘⌥G / “Toggle Git Viewer” 仍解析 `general.defaultGitViewerID` 并打开外部 Git 客户端，选 None 或目标未安装时为 no-op。
+> **入口边界。** Header 不含通知铃铛；通知 popover 由状态栏铃铛承载（[notifications.md](notifications.md)）。Worktree 右键菜单的 “Show Changes” 打开该 Worktree 的独立只读窗口，不切换主窗口选择；主窗口工具栏不再单独放置 Diff 入口。菜单和命令面板也提供 “Show Changes”。⌘⌥G / “Toggle Git Viewer” 解析 `general.defaultGitViewerID`：默认 Built-in 打开内置窗口，选择外部客户端则打开该客户端。缺省、旧 None 和未知 ID 回退 Built-in。
 
 ### 不变量
 
@@ -70,7 +70,7 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 代码通过独立的 `DiffViewKit`（WKWebView + Web Diff 组件）渲染。该组件只收发文档和事件；Git 查询、路径校验和编辑器打开由 Codans 拥有。面板只读，不提供暂存、丢弃、提交或编辑操作。接口和边界见 [git-diff-viewer.md](git-diff-viewer.md)。
 
-外部入口 “Toggle Git Viewer” 保留 `CommandID.toggleDiffInspector` 及 JSON raw value `toggleGitViewer`，继续调用 `RootFeature.diffInspectorToggledForCurrentWorktree` 打开配置的外部客户端，不控制独立窗口。见 [editor-integration.md](editor-integration.md) 和 [keyboard-shortcuts.md](keyboard-shortcuts.md)。
+外部入口 “Toggle Git Viewer” 保留 `CommandID.toggleDiffInspector` 及 JSON raw value `toggleGitViewer`，继续调用 `RootFeature.diffInspectorToggledForCurrentWorktree`，按设置打开 Built-in 独立窗口或外部客户端。见 [editor-integration.md](editor-integration.md) 和 [keyboard-shortcuts.md](keyboard-shortcuts.md)。
 
 ## Tab Bar
 
@@ -120,14 +120,14 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 本节仅记录改变了当前形态的承重转变，正文已按现状陈述、不再复述被取代或删除的中间态：
 
 - **Space → Tag / 单窗口**（[project-tags.md](project-tags.md)，Approved）：`Space` / `SpaceID` / `CatalogWindow` 从域模型整体移除，层级 5→4 级。**已删除字段**：`Space.lastActiveWorktreeID`、`Space.selectedProjectID`、`CatalogWindow.selectedSpaceID`——切勿当现状。横切分类改由 `Tag` 承载；侧栏底部不再有 Space switcher（Tag 过滤已实现但当前隐藏，见上文 §Tag filter）；⌘1–⌘9 / ⌘K 解绑。
-- **Git 查看入口分离**：旧 `GitViewer` overlay 的层级持久字段不参与独立窗口。内置 Changes / Outgoing 使用 `DiffFeature` 的会话状态；“Toggle Git Viewer” 继续打开外部客户端。
+- **Git 查看入口分离**：旧 `GitViewer` overlay 的层级持久字段不参与独立窗口。内置 Uncommitted / Outgoing 使用 `DiffFeature` 的会话状态；“Toggle Git Viewer” 默认打开 Built-in，也可配置为外部客户端。
 - **通知铃铛不在 Header**（[notifications.md](notifications.md)）：未读以按层级上卷的徽标呈现，唯一 popover 入口是状态栏铃铛。
 
 ## References
 
 - Tag / 单窗口：[project-tags.md](project-tags.md)
 - 通知 / 上卷 / 状态栏铃铛：[notifications.md](notifications.md)
-- 内置 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)
+- 内置 Uncommitted / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)
 - Git Viewer（外部 git 客户端）：[editor-integration.md](editor-integration.md)
 - 键盘快捷键统管：[keyboard-shortcuts.md](keyboard-shortcuts.md)
 - 层级 / catalog：`apps/mac/CodansCore/{Catalog,Project,Worktree,Tab,Pane,SplitTree}.swift`

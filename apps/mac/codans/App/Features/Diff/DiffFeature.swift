@@ -101,10 +101,9 @@ struct DiffFeature {
           .cancel(id: CancelID.content), .cancel(id: CancelID.refresh), state.isVisible ? .send(.refresh) : .none)
       case .prBaseChanged(let worktree, let base, let repository):
         guard worktree == state.worktreeID else { return .none }
-        let changed = state.prBase != base || state.prRepository != repository
         state.prBase = base
         state.prRepository = repository
-        return changed && state.isVisible && state.scope == .outgoing && state.base.isEmpty ? .send(.refresh) : .none
+        return .none
       case .toggle:
         if state.isVisible { return .send(.close) }
         state.isVisible = true
@@ -211,24 +210,10 @@ struct DiffFeature {
     state.loading = true
     if !silent { state.error = nil }
     let scope = state.scope
-    let prBase = state.prBase
-    let prRepository = state.prRepository
     let base = state.appliedBase.trimmingCharacters(in: .whitespacesAndNewlines)
     return .run { [git] send in
       do {
-        var selectedBase: String? = base.isEmpty ? nil : base
-        if selectedBase == nil, scope == .outgoing, let prBase, let prRepository {
-          let remote = try await git.remoteInfo(URL(fileURLWithPath: path))
-          let expectedPath = "\(remote.owner)/\(remote.repo)"
-          if prRepository.host?.lowercased() == remote.host.lowercased(),
-            prRepository.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
-              == expectedPath.lowercased()
-          {
-            selectedBase = "origin/\(prBase)"
-          } else {
-            throw GitError.invalidInput("Select a local ref for this PR's target repository.")
-          }
-        }
+        let selectedBase: String? = base.isEmpty ? nil : base
         let snapshot = try await git.comparison(URL(fileURLWithPath: path), scope, selectedBase)
         await send(.loaded(request, snapshot))
       } catch { await send(.failed(request, Self.errorMessage(error))) }

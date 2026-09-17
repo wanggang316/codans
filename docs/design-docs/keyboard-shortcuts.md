@@ -74,14 +74,17 @@ codans 的应用内快捷键由一个单一 registry 统一管理。它取代的
 **raw value 是 API——改 Swift 标识符可以，但必须钉死 raw value。** raw values 是 `shortcuts.json` 里 `ShortcutOverrideStore.overrides` 的持久 JSON 键，是磁盘格式的一部分，一旦发布就不能变——改它会**静默孤儿化**该命令的每一条既有用户覆盖。模式是：重命名 Swift 标识符以反映现实，但用显式 `= "..."` 把 raw value 钉在原字符串上。两个落地案例：
 
 ```swift
-// Swift 标识符在 Diff inspector 工作中改了名，但 raw value 钉死，
-// 否则会孤儿化每一条 ⌘⇧G 的用户覆盖。
+// Preserve the raw value so existing Git Viewer shortcut overrides remain valid.
 case toggleDiffInspector = "toggleGitViewer"
-// 标识符缩短，raw value 钉在原字符串。
+// Keep the persisted raw value when shortening the Swift identifier.
 case openInEditor = "openInDefaultEditor"
 ```
 
 编号 case（`switchToTab1`…、`selectWorktreeAt1`…）逐个拼出而非参数化，使它们成为一等 JSON 键、参与 `CaseIterable`、并在路由 switch 里保持编译期穷尽。
+
+「Toggle Git Viewer」的默认和弦为 **⌘⌥G**，继续使用 `CommandID.toggleDiffInspector` / `"toggleGitViewer"`。它通过 `RootFeature.diffInspectorToggledForCurrentWorktree` 读取 Settings → General 的 Default Git Viewer：默认首项 Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立 Changes / Outgoing 窗口；已安装的外部选择打开对应 git 客户端。下拉不提供 None；旧设置缺省或 `null` 归一为 Built-in，未知 ID 归一为 Built-in。既有注册表内的外部选择保留；已知但未安装的外部目标不执行打开。
+
+主窗口 `windowHeader` 不提供 View Changes 入口；Worktree 右键菜单的 **Show Changes** 直接打开所点击 Worktree 的内置 Diff 窗口，不读取 Default Git Viewer，也不改变此快捷键的持久化标识。
 
 ### `ShortcutBinding` 与三态模型
 

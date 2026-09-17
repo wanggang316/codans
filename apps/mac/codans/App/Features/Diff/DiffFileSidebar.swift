@@ -21,8 +21,8 @@ struct DiffFileSidebar: View {
           get: { outgoing }, set: { store.send(.scopeChanged($0 ? .outgoing : .all)) }
         )
       )
-      .frame(maxWidth: .infinity).frame(height: 32)
-      .padding(.horizontal, 10).padding(.vertical, 8)
+      .frame(maxWidth: .infinity).frame(height: 24)
+      .padding(.horizontal, 10).padding(.vertical, 4)
       Divider()
       HStack {
         Text("Changed Files").font(.system(size: 11, weight: .semibold))
@@ -108,11 +108,15 @@ struct DiffFileSidebar: View {
       .popover(isPresented: $showingBase) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Compare Against").font(.headline)
-          TextField("Automatic base branch", text: Binding(get: { store.base }, set: { store.send(.baseChanged($0)) }))
+          TextField("Remote default branch", text: Binding(get: { store.base }, set: { store.send(.baseChanged($0)) }))
             .textFieldStyle(.roundedBorder).accessibilityIdentifier("diff-base")
             .onSubmit { applyBase() }
           HStack {
-            Text("Uses local Git refs").font(.caption).foregroundStyle(.secondary)
+            Button("Use Remote Default") {
+              store.send(.baseChanged(""))
+              applyBase()
+            }
+            .controlSize(.small)
             Spacer()
             Button("Compare") { applyBase() }.keyboardShortcut(.defaultAction)
           }

@@ -203,7 +203,7 @@ enum CommandPaletteItems {
     [
       CommandPaletteItem(
         id: "git.changes",
-        title: "View Changes and Outgoing",
+        title: "Show Changes",
         subtitle: worktreeName,
         searchText: "worktree git diff changes outgoing review",
         icon: "square.split.2x1",

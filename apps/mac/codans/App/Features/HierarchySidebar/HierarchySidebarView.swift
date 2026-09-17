@@ -1206,6 +1206,13 @@ struct HierarchySidebarView: View {
   ) -> some View {
     let isMainCheckout = worktree.path == project.rootPath
 
+    Button {
+      store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id)))
+    } label: {
+      Label("Show Changes", systemImage: "doc.text.magnifyingglass")
+    }
+    Divider()
+
     // Group 1 — Open / Reveal. Top-level "Open in <Default>" surfaces
     // the resolved editor by name (project override → global default →
     // priority cascade); the "Open in" submenu lists every installed

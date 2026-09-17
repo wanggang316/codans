@@ -104,6 +104,45 @@ struct DiffFeatureTests {
     #expect(store.state.base == "release")
     #expect(store.state.document == nil)
   }
+
+  @Test(arguments: ["", "release", "  "])
+  func outgoingDefaultIgnoresPRAndHonorsAppliedBase(base: String) async {
+    var state = DiffFeature.State()
+    state.path = "/tmp/repository"
+    let worktree = WorktreeID()
+    state.worktreeID = worktree
+    state.isVisible = true
+    state.scope = .outgoing
+    state.base = base
+    let expectedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
+    let snapshot = GitComparisonSnapshot(scope: .outgoing, baseLabel: "origin/main", files: [])
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.comparison = { _, scope, resolvedBase in
+        #expect(scope == .outgoing)
+        #expect(resolvedBase == (expectedBase.isEmpty ? nil : expectedBase))
+        return snapshot
+      }
+    }
+    // PR updates neither refresh the comparison nor override its explicit or automatic base.
+    let repository = URL(string: "https://github.com/another/fork")
+    await store.send(.prBaseChanged(worktree, "release-pr", repository)) {
+      $0.prBase = "release-pr"
+      $0.prRepository = repository
+    }
+    await store.send(.refresh) {
+      $0.appliedBase = base
+      $0.request = 1
+      $0.loading = true
+    }
+    await store.receive(.loaded(1, snapshot)) {
+      $0.loading = false
+      $0.snapshot = snapshot
+      $0.contentRequest = 1
+    }
+  }
+
   @Test func emptySnapshotInvalidatesInFlightContent() async {
     var state = populatedState()
     state.contentLoading = true

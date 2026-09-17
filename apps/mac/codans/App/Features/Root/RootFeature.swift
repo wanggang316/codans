@@ -234,10 +234,8 @@ struct RootFeature {
     case worktreeWorkingTreeChanged(WorktreeID)
     /// Opens the current Worktree in the configured Git Viewer. Sources:
     /// the ⌘⌥G chord, the "Toggle Git Viewer" menu item, and the command
-    /// palette. Resolves `general.defaultGitViewerID` to an installed git
-    /// client and opens the worktree there; a no-op when nothing is selected
-    /// (Settings → General → Default Git Viewer = None) or the chosen client
-    /// is no longer installed.
+    /// palette. Resolves `general.defaultGitViewerID` to the built-in diff window
+    /// or an installed external Git client.
     case diffInspectorToggledForCurrentWorktree
     /// ⌘O entry point. Resolves the current Worktree's path from the
     /// catalog snapshot (via `hierarchyClient` — reducer-scoped dependency,
@@ -516,22 +514,28 @@ struct RootFeature {
           }
         }
       case .openDiffRequested:
-        guard let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID,
-          let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
-          let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+        guard let projectID = state.selection.projectID, let worktreeID = state.selection.worktreeID
         else { return .none }
-        let snapshot = state.gitHub.snapshots[worktreeID]
-        return .run { _ in
-          await DiffWindowManager.shared.open(
-            projectID: projectID, worktreeID: worktreeID, path: worktree.path,
-            title: "\(project.name) — \(worktree.branch ?? worktree.name)",
-            prBase: snapshot?.baseRefName, prRepository: snapshot?.baseRepositoryURL)
-        }
+        return openDiff(projectID: projectID, worktreeID: worktreeID, state: state)
+      case .sidebar(.delegate(.showChanges(let projectID, let worktreeID))):
+        return openDiff(projectID: projectID, worktreeID: worktreeID, state: state)
       default:
         return .none
 
       }
+    }
+  }
+
+  private func openDiff(projectID: ProjectID, worktreeID: WorktreeID, state: State) -> Effect<Action> {
+    guard let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+    else { return .none }
+    let snapshot = state.gitHub.snapshots[worktreeID]
+    return .run { _ in
+      await DiffWindowManager.shared.open(
+        projectID: projectID, worktreeID: worktreeID, path: worktree.path,
+        title: "\(project.name) — \(worktree.branch ?? worktree.name)",
+        prBase: snapshot?.baseRefName, prRepository: snapshot?.baseRepositoryURL)
     }
   }
 
@@ -1814,14 +1818,11 @@ struct RootFeature {
           let projectID = state.selection.projectID,
           let worktreeID = state.selection.worktreeID
         else { return .none }
-        // Git Viewer resolution for the ⌘⌥G chord / menu / palette: read the
-        // global `general.defaultGitViewerID`. `nil` (Default Git Viewer =
-        // None) or an id that no longer resolves to an installed descriptor
-        // makes the chord a no-op — the built-in overlay no longer exists.
         let snapshot = settingsWriter.readSnapshotSync()
-        let resolvedID = snapshot.general.defaultGitViewerID
+        let resolvedID = snapshot.general.defaultGitViewerID ?? GeneralSettings.builtInGitViewerID
+        if resolvedID == GeneralSettings.builtInGitViewerID { return .send(.openDiffRequested) }
+        let externalChoice = resolvedID
         guard
-          let externalChoice = resolvedID,
           state.editor.descriptors.contains(where: { $0.id == externalChoice })
         else { return .none }
         let catalog = hierarchyClient.snapshot()

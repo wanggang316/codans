@@ -79,6 +79,37 @@ struct GitComparisonTests {
     #expect(content.newText == "feature\n")
   }
 
+  @Test func outgoingDefaultsToRemoteRefsAndAllowsExplicitOverride() async throws {
+    let url = try await repository()
+    defer { try? FileManager.default.removeItem(at: url) }
+    try write("base\n", "file.txt", at: url)
+    try await git(["add", "."], at: url)
+    try await git(["commit", "-m", "base"], at: url)
+    try await git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: url)
+    try await git(["update-ref", "refs/remotes/origin/master", "HEAD"], at: url)
+    try write("feature\n", "file.txt", at: url)
+    try await git(["commit", "-am", "feature"], at: url)
+    let service = LiveGitService()
+    let defaultMain = try await service.comparison(at: url, scope: .outgoing, base: nil)
+    #expect(defaultMain.baseLabel == "origin/main")
+    #expect(defaultMain.files.map(\.path) == ["file.txt"])
+    let localOverride = try await service.comparison(at: url, scope: .outgoing, base: "main")
+    #expect(localOverride.baseLabel == "main")
+    #expect(localOverride.files.isEmpty)
+
+    try await git(["update-ref", "refs/remotes/origin/trunk", "HEAD"], at: url)
+    try await git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"], at: url)
+    let symbolicDefault = try await service.comparison(at: url, scope: .outgoing, base: nil)
+    #expect(symbolicDefault.baseLabel == "origin/trunk")
+    #expect(symbolicDefault.files.isEmpty)
+
+    try await git(["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"], at: url)
+    try await git(["update-ref", "-d", "refs/remotes/origin/main"], at: url)
+    let fallbackMaster = try await service.comparison(at: url, scope: .outgoing, base: nil)
+    #expect(fallbackMaster.baseLabel == "origin/master")
+    #expect(fallbackMaster.files.map(\.path) == ["file.txt"])
+  }
+
   @Test func unbornBinaryAndLimit() async throws {
     let url = try await repository()
     defer { try? FileManager.default.removeItem(at: url) }
@@ -158,13 +189,14 @@ struct GitComparisonTests {
     try write("base\n", "file", at: url)
     try await git(["add", "."], at: url)
     try await git(["commit", "-m", "base"], at: url)
-    try await git(["branch", "-m", "trunk"], at: url)
     let service = LiveGitService()
-    await #expect(throws: GitError.invalidInput("Choose a target branch for Outgoing")) {
+    await #expect(
+      throws: GitError.invalidInput("Remote default branch is unavailable. Fetch origin or choose a comparison base.")
+    ) {
       try await service.comparison(at: url, scope: .outgoing, base: nil)
     }
     try await git(["checkout", "--detach"], at: url)
-    let detached = try await service.comparison(at: url, scope: .outgoing, base: "trunk")
+    let detached = try await service.comparison(at: url, scope: .outgoing, base: "main")
     #expect(detached.files.isEmpty)
     // An unrelated directory, not a child of the repository (Git discovers parents).
     let unrelated = FileManager.default.temporaryDirectory.appendingPathComponent("codans-not-repo-\(UUID())")

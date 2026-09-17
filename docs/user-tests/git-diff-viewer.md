@@ -123,3 +123,23 @@ The final sizing correction explicitly restores 1000×700 content size when no s
 ## Comparison selector styling (2026-09-17)
 
 Changes/Outgoing use full-width equal segments, icon-and-text labels, a capsule track, and an accent-colored capsule selection. The selector uses native SwiftUI buttons with accessible selected state. Build-for-testing passed; real GUI verified both appearances and switching between current changes and the outgoing committed-file comparison. Evidence: `/tmp/codans-diff-picker-capsule-build.log` and GUI observations in the task transcript.
+
+
+## Uncommitted, remote base, and Built-in defaults (2026-09-17)
+
+Final build-for-testing succeeded. The focused app run passed 51 tests in 10 suites, covering comparison resolution, mode changes, external/Built-in routing, window lifecycle, and preference persistence. Core migration tests passed 11 tests after fixing assertions to evaluate mutations before passing their results to the expectation macro.
+
+| Case | Observed result | Status |
+|---|---|---|
+| Sidebar header | Text-only 12-point labels in a 24-point selector; its lower divider aligns with the 32-point code header | PASS |
+| Worktree context menu | Show Changes opens the clicked QA no-base worktree while main selection remains Diff QA feature/review | PASS |
+| Main toolbar | Dedicated Diff entry absent | PASS |
+| Default Git Viewer | Built-in selected and listed first; GitHub Desktop and Fork follow; None absent | PASS |
+| Viewer command | Worktree → Toggle Git Viewer opens the built-in Diff window | PASS |
+| Remote default | Against origin/main shows only committed.txt, excluding uncommitted files and target-only changes | PASS |
+| Explicit base and reset | HEAD yields zero files; Use Remote Default restores origin/main and committed.txt | PASS |
+| Missing remote | Explicit unavailable-base message shown for QA no-base | PASS |
+
+The GUI used an isolated QA app/config and synthetic local remote-tracking refs; no network fetch, SSH, or live PR discovery is claimed. The QA bundle required copying the existing zmx runtime into its resources before terminal-backed checks. A final display-only correction makes an empty Outgoing header say Outgoing; that correction was build-verified after the GUI run.
+
+Evidence: `/tmp/codans-refinement-final-build.log`, `/tmp/codans-refinement-tests.log`, `/tmp/codans-diff-qa-test/refinement-result.xcresult`, `/tmp/codans-refinement-core-final-tests.log`, and `/tmp/codans-diff-qa-test/refinement-core-final-result.xcresult`, plus GUI observations in the task transcript. `make mac-check` still reports 61 existing repository violations; unrelated formatter edits were restored.

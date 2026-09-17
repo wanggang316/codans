@@ -82,16 +82,21 @@ extension LiveGitService {
 
   private func comparisonBase(_ base: String?, at path: URL) async throws -> (label: String, sha: String) {
     if let base, !base.isEmpty { return (base, try await comparisonRevision(base, at: path)) }
-    var candidates = ["origin/HEAD", "main", "master"]
+    var candidates = ["origin/HEAD", "origin/main", "origin/master"]
     if case .exited(0, let bytes, _, false) = await invoke(
-      arguments: ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd: path, maxOutputBytes: 1024)
+      arguments: ["symbolic-ref", "refs/remotes/origin/HEAD"], cwd: path, maxOutputBytes: 1024)
     {
-      candidates[0] = (String(data: bytes, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      let target = (String(data: bytes, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      if target.hasPrefix("refs/remotes/origin/") {
+        candidates[0] = String(target.dropFirst("refs/remotes/".count))
+      }
     }
     for candidate in candidates {
-      do { return (candidate, try await comparisonRevision(candidate, at: path)) } catch GitError.exec { continue }
+      do {
+        return (candidate, try await comparisonRevision("refs/remotes/\(candidate)", at: path))
+      } catch GitError.exec { continue }
     }
-    throw GitError.invalidInput("Choose a target branch for Outgoing")
+    throw GitError.invalidInput("Remote default branch is unavailable. Fetch origin or choose a comparison base.")
   }
 
   static func parseComparison(_ bytes: Data) throws -> [GitComparisonFile] {

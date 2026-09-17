@@ -168,7 +168,7 @@ struct MainWindowCommands: Commands {
 
       // Git Viewer moved here from View — it operates on the current Worktree's
       // diff and reads naturally alongside the GitHub items.
-      Button("View Changes and Outgoing") {
+      Button("Show Changes") {
         store()?.send(.openDiffRequested)
       }
       .disabled(!hasActiveWorktree)

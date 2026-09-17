@@ -5,8 +5,8 @@ struct DiffComparisonPicker: View {
 
   var body: some View {
     HStack(spacing: 0) {
-      segment("Changes", symbol: "doc.text", isOutgoing: false)
-      segment("Outgoing", symbol: "arrow.up.right", isOutgoing: true)
+      segment("Uncommitted", isOutgoing: false)
+      segment("Outgoing", isOutgoing: true)
     }
     .background(.quaternary, in: Capsule())
     .accessibilityElement(children: .contain)
@@ -14,14 +14,13 @@ struct DiffComparisonPicker: View {
     .accessibilityIdentifier("diff-sidebar-mode")
   }
 
-  private func segment(_ title: String, symbol: String, isOutgoing: Bool) -> some View {
+  private func segment(_ title: String, isOutgoing: Bool) -> some View {
     let selected = outgoing == isOutgoing
     return Button {
       outgoing = isOutgoing
     } label: {
-      Label(title, systemImage: symbol)
-        .font(.system(size: 13, weight: .medium))
-        .labelStyle(.titleAndIcon)
+      Text(title)
+        .font(.system(size: 12, weight: .medium))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(selected ? Color.white : Color.primary)
         .background(selected ? Color.accentColor : Color.clear, in: Capsule())

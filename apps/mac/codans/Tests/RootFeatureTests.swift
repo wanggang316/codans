@@ -134,7 +134,7 @@ struct RootFeatureTests {
     }
   }
 
-  // MARK: - Git Viewer chord (opens external client)
+  // MARK: - Git Viewer routing
 
   /// Shared catalog fixture for Git Viewer tests. Two Worktrees under one
   /// Project so the selection delta is just the worktree leg.
@@ -207,31 +207,22 @@ struct RootFeatureTests {
     await store.finish()
   }
 
-  @Test
-  func gitViewerChordIsNoOpWhenNoneSelected() async {
-    // Default Git Viewer = None (defaultGitViewerID == nil): the chord opens
-    // nothing — the built-in overlay no longer exists.
-    let projectID = ProjectID()
-    let worktreeA = WorktreeID()
-    let worktreeB = WorktreeID()
-    let catalog = Self.gvFixtureCatalog(
-      projectID: projectID,
-      worktreeA: worktreeA, worktreeB: worktreeB
-    )
-
+  @Test(arguments: [false, true])
+  func gitViewerChordRoutesBuiltInAndLegacyNilToDiffWindow(legacyNil: Bool) async {
     var initial = RootFeature.State()
-    initial.selection = HierarchySelection(
-      projectID: projectID, worktreeID: worktreeA
-    )
-
+    initial.selection = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
+    var settings = Settings()
+    if legacyNil { settings.general.defaultGitViewerID = nil }
+    let snapshot = settings
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.hierarchyClient.snapshot = { catalog }
-      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      // Isolate routing from live AppKit window creation: this worktree is no longer in the catalog.
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0[SettingsWriter.self].readSnapshotSync = { snapshot }
     }
-
     await store.send(.diffInspectorToggledForCurrentWorktree)
+    await store.receive(.openDiffRequested)
     await store.finish()
   }
 

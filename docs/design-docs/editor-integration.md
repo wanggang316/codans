@@ -67,11 +67,13 @@ codans 刻意不是 IDE。通用源码浏览与改码交给外部编辑器或文
 
 VS Code 家族、Zed、Sublime Text 使用 bundle 内 CLI；JetBrains 使用 `NSWorkspace` 参数传递文件与行号。其他支持的应用按普通文件打开，不保证行定位。终端、Git 客户端和 `$EDITOR` 不支持该文件跳转入口，会显示错误。SSH 文件通过支持远程的编辑器启动，沿用远程目录打开的主机 / 端口能力约束；CLI 失败会返回明确错误。
 
-### Git Viewer（在外部 git 客户端打开）
+### Git Viewer（内置窗口或外部 git 客户端）
 
-「在 Git Viewer 中查看当前 Worktree」走的是同一条交接路径，**独立于内置只读 Changes / Outgoing 面板**。「Toggle Git Viewer」命令（⌘ chord / 菜单 / 命令面板，对应 `RootFeature.diffInspectorToggledForCurrentWorktree`）读全局 `general.defaultGitViewerID`（一个指向注册表 **git-client 类目**的 `EditorID?`），命中已安装项就派发 `.editor(.openRequested(editorID:, worktreePath:, projectID:))`，把当前 Worktree 在那个外部客户端（Fork、Sourcetree、GitHub Desktop、…）里打开。`nil`（Default Git Viewer = None）或解析不到已安装项时为 no-op。
+Settings → General 的「Default Git Viewer」首项及默认值为 **Built-in**，其后仅列已安装的外部 git 客户端，不提供 None。「Toggle Git Viewer」命令（⌘⌥G / 菜单 / 命令面板，对应 `RootFeature.diffInspectorToggledForCurrentWorktree`）读取全局 `general.defaultGitViewerID`：Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立只读 Changes / Outgoing 窗口；已安装的外部 git 客户端派发 `.editor(.openRequested(editorID:, worktreePath:, projectID:))`，在 Fork、Sourcetree、GitHub Desktop 等应用中打开当前 Worktree。未知默认 ID 归一为 Built-in；注册表中已知但未安装的外部选择保留，命令在该目标不可用时不执行打开。
 
-它与默认编辑器是**两个独立的全局默认**（`defaultEditorID` 与 `defaultGitViewerID`），各有 Settings → General 下拉，但共用同一注册表、同一 `AppLauncher`、同一 open 路径——git 查看只是「在外部工具里打开 Worktree 目录」的又一个目标，而非独立机制。
+它与默认编辑器是**两个独立的全局默认**（`defaultEditorID` 与 `defaultGitViewerID`），各有 Settings → General 下拉。外部目标复用编辑器注册表、`AppLauncher` 与目录 open 路径；Built-in 由 Diff 窗口路由处理，不进入外部应用启动服务。`CommandID.toggleDiffInspector` 的持久化 raw value 保持 `"toggleGitViewer"`，既有快捷键覆盖继续生效。
+
+主窗口 `windowHeader` 不提供 View Changes 入口。Worktree 右键菜单的 **Show Changes** 始终打开所点击 Worktree 的内置 Diff 窗口，不受 Default Git Viewer 选择影响，也不使用当前选中 Worktree 替代右键目标。
 
 ### System Context Diagram
 
@@ -82,7 +84,7 @@ VS Code 家族、Zed、Sublime Text 使用 bundle 内 CLI；JetBrains 使用 `NS
  │  Callers (resolve context → URL)     Settings · General pane       │
  │  ┌─────────────────────────┐         ┌──────────────────────┐      │
  │  │ Worktree header button  │         │ Default editor:      │      │
- │  │ Git client (⌘⌥G chord)  │◀── same │   🅲 Cursor      ▼   │      │
+ │  │ External Git client     │◀── same │   🅲 Cursor      ▼   │      │
  │  │ CLI `codans open [path]`│   list  │ (installed only)     │      │
  │  │ Future deeplink handler │         └──────────────────────┘      │
  │  └──────────┬──────────────┘                                       │
@@ -258,10 +260,12 @@ SwiftUI 里 `Image(nsImage:)` 配 `.resizable().frame(...)`。无需缓存——
 | Owner | Key | 形态 |
 |---|---|---|
 | `settings.json` | `general.defaultEditorID: EditorID?` | 全局默认编辑器，仅内建注册表 ID |
-| `settings.json` | `general.defaultGitViewerID: EditorID?` | 全局默认 git 客户端（供 `⌘⌥G` chord 在外部 git 客户端打开当前 Worktree），仅内建注册表 ID |
+| `settings.json` | `general.defaultGitViewerID: EditorID?` | 全局默认 Git Viewer；`"built-in"` 表示内置 Diff 窗口，外部目标使用 git-client 注册表 ID，供 `⌘⌥G` 路由 |
 | `settings.json` / catalog | `Project.defaultEditor: EditorID?` | per-Project override；不在注册表的 ID 加载时归一为 `nil` |
 
 `general.customEditors`（旧版 custom-editor 模板）不再写出；若旧 `settings.json` 里存在则宽容解码并忽略（迁移语义见下）。
+
+`general.defaultGitViewerID` 缺省或为 `null` 时归一为 `GeneralSettings.builtInGitViewerID`（`"built-in"`）；既有注册表内的外部选择保留，包括已卸载的应用。未知 ID 归一为 Built-in；已知但未安装的外部目标不执行打开。
 
 **迁移**（启动 decode 后跑一次）：忽略任何旧 `general.customEditors`（`.info` 记录，不告警用户）；`general.defaultEditorID` 若不在新内建注册表则置 `nil`（下次解析穿透到优先级自动挑选）；任何 `Project.defaultEditor` 若不在注册表则置 `nil`。不升 schema 版本（codans 的 settings/catalog 读取器对未知键宽容）。**两个方向回滚都安全**——容忍式迁移。
 

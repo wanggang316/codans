@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// General pane — Appearance + global "Default editor" picker.
 ///
@@ -78,13 +78,10 @@ struct SettingsGeneralView: View {
     )
   }
 
-  /// Settings → General → Default Git Viewer binding. `nil` means "None" — the
-  /// Git Viewer chord (⌘⌥G) / menu item does nothing. Any other id names an
-  /// installed git client from `EditorRegistry.gitClientPriority` that the chord
-  /// opens the current worktree in.
+  /// The built-in diff window precedes installed external Git clients.
   private var gitViewerBinding: Binding<EditorID?> {
     Binding(
-      get: { settingsStore.settings.general.defaultGitViewerID },
+      get: { settingsStore.settings.general.defaultGitViewerID ?? GeneralSettings.builtInGitViewerID },
       set: { settingsStore.setDefaultGitViewerID($0) }
     )
   }
@@ -186,8 +183,10 @@ struct SettingsGeneralView: View {
               + "their daemons and become unrestorable."
           )
         }
-        .alert("Forget \(count) saved session\(count == 1 ? "" : "s")?",
-               isPresented: $showForgetConfirmation) {
+        .alert(
+          "Forget \(count) saved session\(count == 1 ? "" : "s")?",
+          isPresented: $showForgetConfirmation
+        ) {
           Button("Forget", role: .destructive) {
             onForgetAllSessions?()
           }
@@ -215,9 +214,7 @@ struct SettingsGeneralView: View {
         .pickerStyle(.menu)
       } footer: {
         Text(
-          "Drives the Git Viewer chord (⌘⌥G). None leaves the chord inactive; "
-            + "any other choice opens the worktree in that git client. Resets to "
-            + "None if the chosen client is uninstalled later."
+          "Built-in opens the Codans diff window. External clients open the worktree in that app."
         )
       }
 
@@ -273,12 +270,12 @@ struct SettingsGeneralView: View {
     }
   }
 
-  /// Default Git Viewer picker body. Leads with the "None" sentinel (tag nil),
+  /// Default Git Viewer picker body. Leads with the built-in diff window,
   /// followed by every installed git client in priority order.
   @ViewBuilder
   private var gitViewerPickerContent: some View {
-    Text("None")
-      .tag(EditorID?(nil))
+    Text("Built-in")
+      .tag(EditorID?(GeneralSettings.builtInGitViewerID))
 
     if !installedGitClients.isEmpty {
       Section {

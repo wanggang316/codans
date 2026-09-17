@@ -53,3 +53,8 @@ Approved: move Changes/Outgoing to the top of the native left sidebar. Default t
 ## Native sidebar container correction
 
 Use the same NavigationSplitView and 220/260/320 column sizing as the main window. Remove opaque sidebar and whole-split backgrounds. Let SwiftUI manage the unified window toolbar and system sidebar toggle. Preserve the existing tree/list navigation and independent-window lifecycle. Completed: real GUI confirmed native sidebar material, titlebar integration, collapse/restore, active-window menu routing, mode/layout controls, and the restored 1000×700 initial content size. Build and 33 focused tests passed; the lifecycle test was rerun after the sizing correction and passed.
+
+
+## Uncommitted, remote base, and built-in viewer defaults
+
+Approved scope: align the compact 24-point text-only Uncommitted/Outgoing selector within the same 32-point header band as the code header; default Outgoing to remote default-branch merge-base comparison with explicit override and reset; move the main-toolbar entry to Worktree → Show Changes without changing main selection; add Built-in as the first/default Git Viewer and migrate absent/None values while preserving external choices. Verify remote/local divergence and missing-ref cases, preference decoding/normalization and command routing, then real GUI alignment/menu/settings/base switching. Completed: final build-for-testing succeeded, 51 app tests and 11 Core migration tests passed. GUI verified aligned dividers, text-only modes, the context-menu entry without changing main selection, Built-in first/default without None, command routing, and explicit-base/reset behavior. See the user-test record.
