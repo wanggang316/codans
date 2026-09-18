@@ -325,3 +325,33 @@ struct WorkflowRunListRenderable: Encodable, CustomStringConvertible {
     }.joined(separator: "\n")
   }
 }
+
+// MARK: - validate
+
+/// Offline diagnostics for one file. Same row shape as `list` so a reader
+/// learns one format.
+struct WorkflowValidateRenderable: Encodable, CustomStringConvertible {
+  let entry: WorkflowCatalogEntry
+
+  private enum CodingKeys: String, CodingKey {
+    case id, name, path, isValid, diagnostics
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(entry.id, forKey: .id)
+    try container.encode(entry.name, forKey: .name)
+    try container.encode(entry.path, forKey: .path)
+    try container.encode(entry.isValid, forKey: .isValid)
+    try container.encode(entry.diagnostics, forKey: .diagnostics)
+  }
+
+  var description: String {
+    var lines = ["\(entry.id)  \(entry.name)  \(entry.isValid ? "valid" : "invalid")"]
+    for diagnostic in entry.diagnostics {
+      let location = diagnostic.path.map { " (\($0))" } ?? ""
+      lines.append("    \(diagnostic.severity.rawValue) \(diagnostic.code): \(diagnostic.message)\(location)")
+    }
+    return lines.joined(separator: "\n")
+  }
+}

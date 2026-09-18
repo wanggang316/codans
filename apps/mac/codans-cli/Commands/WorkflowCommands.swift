@@ -243,15 +243,25 @@ struct WorkflowValidate: AsyncParsableCommand {
 
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
-      // workflow-integration: the parser lands separately. To wire this up,
-      // read `file`, derive the id from the file name, then
-      // `WorkflowDocumentParser.parse(yaml:id:)` followed by
-      // `WorkflowValidator.validate(_:)`; render the diagnostics and exit
-      // `.userError` when any is an error.
-      throw CLIError(
-        code: .unsupported,
-        message: "workflow validate is not available in this build",
-        details: ["file": PathResolver.absolute(file)])
+      let path = PathResolver.absolute(file)
+      let url = URL(fileURLWithPath: path, isDirectory: false)
+      guard let id = WorkflowDocumentParser.workflowID(fromFileName: url.lastPathComponent) else {
+        throw CLIError(
+          code: .userError,
+          message: "\(url.lastPathComponent) is not a workflow file: expected <id>\(WorkflowDocumentParser.fileSuffix)",
+          details: ["file": path])
+      }
+      guard let entry = WorkflowDiscovery.load(url: url, id: id, scope: .user) else {
+        throw CLIError(code: .notFound, message: "cannot read \(path)", details: ["file": path])
+      }
+      try Renderer.emit(WorkflowValidateRenderable(entry: entry), mode: globals.renderMode)
+      if !entry.isValid {
+        throw CLIError(
+          code: .userError,
+          message: "\(entry.diagnostics.filter(\.isError).count) error(s) in \(url.lastPathComponent)",
+          errorCode: .workflowInvalid,
+          details: ["file": path])
+      }
     }
   }
 }

@@ -767,6 +767,26 @@
       "if": {
         "properties": {
           "schemaVersion": {
+            "const": "codans.cli.workflow.validate.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflowValidate"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
             "const": "codans.cli.workflow.run.v1"
           }
         },
@@ -2893,6 +2913,37 @@
       "required": [
         "id",
         "path"
+      ],
+      "additionalProperties": false
+    },
+    "workflowValidate": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "isValid": {
+          "type": "boolean"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/workflowDiagnostic"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "path",
+        "isValid",
+        "diagnostics"
       ],
       "additionalProperties": false
     }
