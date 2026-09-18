@@ -3,6 +3,12 @@ import Foundation
 /// Errors carried in `IPC.Response.error`. The wire form is
 /// `{ "code": String, "message": String, "path": [String]? }` — enum
 /// discriminator is the `code` field.
+///
+/// `.domain` is the one open-ended case: a feature-defined, stable string
+/// (`WORKFLOW_NOT_FOUND`, `PANE_BUSY`, …) that the CLI passes straight
+/// through to its JSON envelope so scripts can branch on a situation the
+/// generic cases cannot name. Wire form adds `domainCode` and an optional
+/// `hint` next to `message`.
 public enum IPCError: Error, Equatable, Sendable {
   case unknownMethod(String)
   case invalidParams(message: String, path: [String]?)
@@ -13,6 +19,7 @@ public enum IPCError: Error, Equatable, Sendable {
   case overloaded
   case versionMismatch(client: String, server: String)
   case invalidFrame(reason: String)
+  case domain(code: String, message: String, hint: String?)
 
   public var code: String {
     switch self {
@@ -25,6 +32,7 @@ public enum IPCError: Error, Equatable, Sendable {
     case .overloaded: return "overloaded"
     case .versionMismatch: return "versionMismatch"
     case .invalidFrame: return "invalidFrame"
+    case .domain: return "domain"
     }
   }
 
@@ -48,6 +56,7 @@ public enum IPCError: Error, Equatable, Sendable {
     case .overloaded: return "overloaded"
     case .versionMismatch: return "version mismatch"
     case .invalidFrame(let r): return r
+    case .domain(_, let m, _): return m
     }
   }
 
@@ -64,12 +73,15 @@ public enum IPCError: Error, Equatable, Sendable {
     case .versionMismatch(let c, let s):
       return "client v\(c) incompatible with server v\(s)"
     case .invalidFrame(let r): return r
+    case .domain(_, let m, _): return m
     }
   }
 }
 
 extension IPCError: Codable {
-  private enum CodingKeys: String, CodingKey { case code, message, path, kind, id, client, server }
+  private enum CodingKeys: String, CodingKey {
+    case code, message, path, kind, id, client, server, domainCode, hint
+  }
 
   public enum DecodingIssue: Error, Equatable {
     case unknownCode(String)
@@ -103,6 +115,10 @@ extension IPCError: Codable {
       self = .versionMismatch(client: client, server: server)
     case "invalidFrame":
       self = .invalidFrame(reason: message)
+    case "domain":
+      let domainCode = try c.decodeIfPresent(String.self, forKey: .domainCode) ?? ""
+      let hint = try c.decodeIfPresent(String.self, forKey: .hint)
+      self = .domain(code: domainCode, message: message, hint: hint)
     default:
       throw DecodingIssue.unknownCode(code)
     }
@@ -121,6 +137,9 @@ extension IPCError: Codable {
     case .versionMismatch(let client, let server):
       try c.encode(client, forKey: .client)
       try c.encode(server, forKey: .server)
+    case .domain(let domainCode, _, let hint):
+      try c.encode(domainCode, forKey: .domainCode)
+      try c.encodeIfPresent(hint, forKey: .hint)
     default:
       break
     }
