@@ -1,4 +1,5 @@
 import CodansCore
+import CoreServices
 import Foundation
 import Testing
 
@@ -10,33 +11,42 @@ import Testing
 /// fseventsd (`register_with_server`), which on a busy machine blocks for
 /// seconds per stream — measured locally with 16 agents churning worktrees:
 /// 17 sequential starts ≈ 39 s. The watcher used to run that loop on the
-/// main actor at launch, freezing the UI for the whole window. These tests
-/// hold the two halves of the fix: `setWorktrees` returns immediately
-/// (dictionary work + a dispatch, never a daemon round-trip), and a
-/// started stream still delivers debounced events for its worktree.
+/// main actor at launch, freezing the UI for the whole window. The first
+/// test injects a start that blocks on a semaphore (an idle CI machine
+/// can't reproduce the real-world latency) and asserts `setWorktrees`
+/// returns while the registration is still parked, then confirms the
+/// stream delivers once it goes through. The second pins the claim
+/// bookkeeping under A → B re-pointing.
 @MainActor
 struct WorktreeWorkingTreeWatcherTests {
   @Test
-  func setWorktreesDoesNotBlockAndDeliversEventsForTheWatchedTree() async throws {
+  func setWorktreesReturnsWhileRegistrationIsStillBlocked() async throws {
     let dir = try Self.makeTempDir()
-    defer { try? FileManager.default.removeItem(at: dir) }
 
     let id = WorktreeID(raw: UUID())
-    let watcher = WorktreeWorkingTreeWatcher()
+    let gate = StartGate()
+    let watcher = WorktreeWorkingTreeWatcher(streamStarter: gate.start)
     let events = watcher.events()
     var iterator = events.makeAsyncIterator()
     let received = Handoff<WorktreeID>()
     let collector = Task { received.value = await iterator.next() }
-    defer { collector.cancel() }
+    defer {
+      collector.cancel()
+      watcher.stopAll()
+      try? FileManager.default.removeItem(at: dir)
+    }
 
     let t0 = Date()
     watcher.setWorktrees([(id: id, path: dir.path)])
     let callMS = Int(Date().timeIntervalSince(t0) * 1000)
     #expect(callMS < 500, "setWorktrees blocked the caller for \(callMS) ms")
 
-    // Registration + first delivery (FSEvents latency 0.2 s + debounce
-    // 0.5 s) can legitimately take seconds on a contended fseventsd, so
-    // keep nudging the tree until the event lands or the budget runs out.
+    // The registration must be running (and parked) off the caller, and
+    // the caller must have returned before it could possibly finish.
+    try await Self.waitUntil { gate.isEntered }
+    #expect(!gate.hasFinished, "start already finished — nothing was proven")
+
+    gate.open()
     let file = dir.appendingPathComponent("nudge.txt")
     var landed = false
     for _ in 0..<60 {
@@ -44,7 +54,7 @@ struct WorktreeWorkingTreeWatcherTests {
       if received.value != nil { landed = true; break }
       try? await Task.sleep(for: .milliseconds(250))
     }
-    #expect(landed, "no working-tree event within 15 s of watching \(dir.path)")
+    #expect(landed, "no working-tree event after the start was released")
     #expect(received.value == id)
   }
 
@@ -52,10 +62,6 @@ struct WorktreeWorkingTreeWatcherTests {
   func rePointingAWorktreeSupersedesTheInFlightStartForTheOldPath() async throws {
     let oldDir = try Self.makeTempDir()
     let newDir = try Self.makeTempDir()
-    defer {
-      try? FileManager.default.removeItem(at: oldDir)
-      try? FileManager.default.removeItem(at: newDir)
-    }
 
     let id = WorktreeID(raw: UUID())
     let watcher = WorktreeWorkingTreeWatcher()
@@ -63,10 +69,17 @@ struct WorktreeWorkingTreeWatcherTests {
     var iterator = events.makeAsyncIterator()
     let received = Handoff<WorktreeID>()
     let collector = Task { received.value = await iterator.next() }
-    defer { collector.cancel() }
+    defer {
+      collector.cancel()
+      watcher.stopAll()
+      try? FileManager.default.removeItem(at: oldDir)
+      try? FileManager.default.removeItem(at: newDir)
+    }
 
     // Back-to-back with no await between: the second claim must supersede
-    // the first whether or not the old start already completed on the queue.
+    // the first whether or not the old start already completed on the
+    // register queue. (With the old unconditional claim removal, BOTH
+    // starts tore themselves down here and the worktree went unwatched.)
     watcher.setWorktrees([(id: id, path: oldDir.path)])
     watcher.setWorktrees([(id: id, path: newDir.path)])
 
@@ -99,6 +112,54 @@ struct WorktreeWorkingTreeWatcherTests {
       .appendingPathComponent("wtw-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
+  }
+
+  private static func waitUntil(
+    _ condition: @autoclosure @Sendable () -> Bool,
+    timeout: Duration = .seconds(5)
+  ) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while !condition() {
+      if ContinuousClock.now > deadline {
+        Issue.record("condition not met within \(timeout)")
+        return
+      }
+      try await Task.sleep(for: .milliseconds(50))
+    }
+  }
+
+  /// Holds a registration open: `start` parks on a semaphore before the
+  /// real `FSEventStreamStart`, so a test can prove the caller of
+  /// `setWorktrees` is not waiting on it.
+  private final class StartGate: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+    private let state = NSLock()
+    private var enteredFlag = false
+    private var finishedFlag = false
+
+    var isEntered: Bool {
+      state.lock(); defer { state.unlock() }
+      return enteredFlag
+    }
+
+    var hasFinished: Bool {
+      state.lock(); defer { state.unlock() }
+      return finishedFlag
+    }
+
+    func open() {
+      semaphore.signal()
+    }
+
+    var start: @Sendable (FSEventStreamRef) -> Bool {
+      { stream in
+        state.lock(); enteredFlag = true; state.unlock()
+        semaphore.wait()
+        let ok = FSEventStreamStart(stream)
+        state.lock(); finishedFlag = true; state.unlock()
+        return ok
+      }
+    }
   }
 
   /// Mutable box shared with the collector task. `@unchecked Sendable`
