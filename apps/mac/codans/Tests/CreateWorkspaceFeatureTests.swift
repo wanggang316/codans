@@ -432,7 +432,8 @@ struct CreateWorkspaceFeatureTests {
     #expect(
       store.state.issues(for: store.state.members[0]) == [
         .blocking(
-          "\u{201C}main\u{201D} is checked out at /src/app. A branch can be checked out in only one place.")
+          "\u{201C}main\u{201D} is already checked out at /src/app, and git allows that in one place only. "
+            + "Choose New branch to start one from it, or pick another branch.")
       ])
     await store.send(.member(UUID(1), .existingRefChanged("gone")))
     #expect(
@@ -462,7 +463,7 @@ struct CreateWorkspaceFeatureTests {
     }
     #expect(store.state.issues(for: store.state.members[0]).count == 1)
     await store.send(.member(UUID(1), .localConflictChanged(.resetToRemote)))
-    #expect(store.state.issues(for: store.state.members[0]).first?.message.contains("checked out at") == true)
+    #expect(store.state.issues(for: store.state.members[0]).first?.message.contains("already checked out") == true)
     // No local twin: no choice to make.
     await store.send(.member(UUID(1), .existingRefChanged("origin/release")))
     #expect(!store.state.members[0].hasLocalConflict)

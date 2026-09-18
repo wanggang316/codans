@@ -283,12 +283,15 @@ struct CreateWorkspaceFeature {
       }
     }
 
+    /// Git keeps a branch in one worktree at a time, so a branch the source
+    /// repository (or another checkout) already holds cannot be checked out
+    /// here. The message says what to do about it instead of only refusing.
     private func checkedOutIssue(branch: String, inventory: RefInventory) -> [MemberIssue] {
       guard let path = inventory.checkedOut[branch] else { return [] }
       return [
         .blocking(
-          "\u{201C}\(branch)\u{201D} is checked out at \((path as NSString).abbreviatingWithTildeInPath). "
-            + "A branch can be checked out in only one place.")
+          "\u{201C}\(branch)\u{201D} is already checked out at \((path as NSString).abbreviatingWithTildeInPath), "
+            + "and git allows that in one place only. Choose New branch to start one from it, or pick another branch.")
       ]
     }
 
