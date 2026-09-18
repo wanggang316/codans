@@ -36,7 +36,7 @@ import CodansCore
 ///   current set and create / drop streams accordingly. Idempotent on no-op.
 @MainActor
 final class WorktreeWorkingTreeWatcher {
-  private struct Watcher {
+  private struct Watcher: @unchecked Sendable {
     let rootPath: String
     let stream: FSEventStreamRef
     /// Retained for the stream's lifetime; its opaque pointer is handed to
@@ -45,6 +45,11 @@ final class WorktreeWorkingTreeWatcher {
   }
 
   private var watchers: [WorktreeID: Watcher] = [:]
+  /// Paths whose stream creation is in flight on `queue`. Creation and start
+  /// run off the main actor (see `startWatcher`), so this map preserves the
+  /// old synchronous contract that a second `configureWatcher` call for the
+  /// same (id, path) is a no-op while the first stream is still being born.
+  private var pendingStarts: [WorktreeID: String] = [:]
   private var debounceTasks: [WorktreeID: Task<Void, Never>] = [:]
   private var eventContinuation: AsyncStream<WorktreeID>.Continuation?
 
@@ -94,51 +99,91 @@ final class WorktreeWorkingTreeWatcher {
   }
 
   private func configureWatcher(worktreeID: WorktreeID, rootPath: String) {
-    if let existing = watchers[worktreeID], existing.rootPath == rootPath {
-      return
-    }
+    if watchers[worktreeID]?.rootPath == rootPath { return }
+    if pendingStarts[worktreeID] == rootPath { return }
     stopWatcher(for: worktreeID)
+    pendingStarts[worktreeID] = rootPath
     startWatcher(worktreeID: worktreeID, rootPath: rootPath)
   }
 
+  /// Creates and starts the stream **off the main actor**.
+  ///
+  /// `FSEventStreamStart` performs a synchronous registration RPC against
+  /// fseventsd (`register_with_server` → `f2d_register_rpc`). On a machine
+  /// where fseventsd is busy — measured locally with 16 agents churning
+  /// worktrees: 17 sequential starts took ~39 s, single calls up to 7.7 s —
+  /// that RPC blocks. Called from the old MainActor path it froze the whole
+  /// UI for the duration, which was the entire "relaunch takes a minute"
+  /// window after the editor-icon fix landed (sampled: main thread parked in
+  /// `FSEventStreamStart` for ~50 s post-launch). The stream's delivery was
+  /// already bound to `queue`; creation/start/stop join it there so the main
+  /// actor only ever touches dictionaries.
   private func startWatcher(worktreeID: WorktreeID, rootPath: String) {
     let box = StreamBox(worktreeID: worktreeID) { [weak self] id in
       // Hops off the FSEvents serial queue back onto the main actor.
       Task { @MainActor in self?.scheduleChanged(worktreeID: id) }
     }
-    var context = FSEventStreamContext(
-      version: 0,
-      info: Unmanaged.passUnretained(box).toOpaque(),
-      retain: nil,
-      release: nil,
-      copyDescription: nil
-    )
-    let flags = UInt32(
-      kFSEventStreamCreateFlagUseCFTypes
-        | kFSEventStreamCreateFlagNoDefer
-        | kFSEventStreamCreateFlagWatchRoot
-        | kFSEventStreamCreateFlagIgnoreSelf
-    )
-    guard
-      let stream = FSEventStreamCreate(
-        kCFAllocatorDefault,
-        workingTreeEventCallback,
-        &context,
-        [rootPath] as CFArray,
-        FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-        latency,
-        flags
+    let deliveryQueue = queue
+    let latency = self.latency
+    deliveryQueue.async { [weak self] in
+      var context = FSEventStreamContext(
+        version: 0,
+        info: Unmanaged.passUnretained(box).toOpaque(),
+        retain: nil,
+        release: nil,
+        copyDescription: nil
       )
-    else {
+      let flags = UInt32(
+        kFSEventStreamCreateFlagUseCFTypes
+          | kFSEventStreamCreateFlagNoDefer
+          | kFSEventStreamCreateFlagWatchRoot
+          | kFSEventStreamCreateFlagIgnoreSelf
+      )
+      guard
+        let stream = FSEventStreamCreate(
+          kCFAllocatorDefault,
+          workingTreeEventCallback,
+          &context,
+          [rootPath] as CFArray,
+          FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+          latency,
+          flags
+        )
+      else {
+        Task { @MainActor in self?.startFailed(worktreeID: worktreeID) }
+        return
+      }
+      FSEventStreamSetDispatchQueue(stream, deliveryQueue)
+      guard FSEventStreamStart(stream) else {
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        Task { @MainActor in self?.startFailed(worktreeID: worktreeID) }
+        return
+      }
+      let watcher = Watcher(rootPath: rootPath, stream: stream, box: box)
+      Task { @MainActor [weak self] in
+        guard let self else {
+          // The watcher died mid-start; nobody would ever stop this stream.
+          Self.tearDown(stream)
+          return
+        }
+        self.startCompleted(watcher, for: worktreeID)
+      }
+    }
+  }
+
+  /// Installs a stream started on `queue`, or tears it straight back down if
+  /// its claim was superseded while the registration RPC was in flight.
+  private func startCompleted(_ watcher: Watcher, for worktreeID: WorktreeID) {
+    guard pendingStarts.removeValue(forKey: worktreeID) == watcher.rootPath else {
+      Self.tearDown(watcher.stream)
       return
     }
-    FSEventStreamSetDispatchQueue(stream, queue)
-    guard FSEventStreamStart(stream) else {
-      FSEventStreamInvalidate(stream)
-      FSEventStreamRelease(stream)
-      return
-    }
-    watchers[worktreeID] = Watcher(rootPath: rootPath, stream: stream, box: box)
+    watchers[worktreeID] = watcher
+  }
+
+  private func startFailed(worktreeID: WorktreeID) {
+    pendingStarts.removeValue(forKey: worktreeID)
   }
 
   private func scheduleChanged(worktreeID: WorktreeID) {
@@ -156,12 +201,22 @@ final class WorktreeWorkingTreeWatcher {
   }
 
   private func stopWatcher(for worktreeID: WorktreeID) {
+    // Dropping the pending claim makes an in-flight start tear itself down
+    // in `startCompleted` instead of installing a stream nobody wants.
+    pendingStarts.removeValue(forKey: worktreeID)
     if let watcher = watchers.removeValue(forKey: worktreeID) {
-      FSEventStreamStop(watcher.stream)
-      FSEventStreamInvalidate(watcher.stream)
-      FSEventStreamRelease(watcher.stream)
+      queue.async { Self.tearDown(watcher.stream) }
     }
     debounceTasks.removeValue(forKey: worktreeID)?.cancel()
+  }
+
+  /// Stop / invalidate / release must run as a trio, in order, off the main
+  /// actor — `Invalidate` can talk to fseventsd just like `Start` did.
+  /// Safe from any thread once the stream is bound to a dispatch queue.
+  private static func tearDown(_ stream: FSEventStreamRef) {
+    FSEventStreamStop(stream)
+    FSEventStreamInvalidate(stream)
+    FSEventStreamRelease(stream)
   }
 }
 
