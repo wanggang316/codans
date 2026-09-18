@@ -141,25 +141,30 @@ extension WorkflowMachine {
   /// The role is idle: type the pending reminder if there is one, else
   /// render the step's own line (materializing an instruction first).
   private mutating func inject(_ step: WorkflowStep, ordinal: Int, _ transition: inout Transition) {
+    // A reminder (ask-again, nudge) goes to the activation's own pane, so
+    // it works for a launched role too — a `launch` step has no text of
+    // its own to type.
+    if let activation = run.activations[ordinal], let pending = activation.pendingLine,
+      let paneID = activation.paneID ?? run.paneID(for: activation.role)
+    {
+      run.activations[ordinal]?.pendingLine = nil
+      run.phase = .injecting(ordinal: ordinal)
+      transition.effects.append(.inject(paneID: paneID, ordinal: ordinal, line: pending))
+      log("step \(step.id): reminding \(activation.role)", &transition)
+      return
+    }
     guard let target = injectionContent(of: step), let paneID = run.paneID(for: target.role) else {
       fail(step: step, reason: "step \(step.id) has nothing to type", &transition)
       return
     }
-    let line: String
-    if let pending = run.activations[ordinal]?.pendingLine {
-      run.activations[ordinal]?.pendingLine = nil
-      line = pending
-    } else {
-      guard let injection = renderInjection(for: step, content: target.content, ordinal: ordinal, &transition)
-      else { return }
-      if let instruction = injection.instruction {
-        transition.effects.append(
-          .materializeInstruction(ordinal: ordinal, stepID: step.id, text: instruction.text))
-      }
-      line = injection.line
+    guard let injection = renderInjection(for: step, content: target.content, ordinal: ordinal, &transition)
+    else { return }
+    if let instruction = injection.instruction {
+      transition.effects.append(
+        .materializeInstruction(ordinal: ordinal, stepID: step.id, text: instruction.text))
     }
     run.phase = .injecting(ordinal: ordinal)
-    transition.effects.append(.inject(paneID: paneID, ordinal: ordinal, line: line))
+    transition.effects.append(.inject(paneID: paneID, ordinal: ordinal, line: injection.line))
     log("step \(step.id): injecting into \(target.role)", &transition)
   }
 

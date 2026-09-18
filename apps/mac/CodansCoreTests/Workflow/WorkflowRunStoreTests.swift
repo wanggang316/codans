@@ -184,9 +184,7 @@ struct WorkflowRunStoreTests {
     let runsDirectory = WorkflowRunLayout.runsDirectory(worktreeRoot: root)
     try FileManager.default.createDirectory(at: runsDirectory, withIntermediateDirectories: true)
     let link = WorkflowRunLayout.runDirectory(worktreeRoot: root, runID: id)
-    try FileManager.default.createSymbolicLink(
-      atPath: link.path(percentEncoded: false).trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-      withDestinationPath: elsewhere.path(percentEncoded: false))
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: elsewhere)
     let store = WorkflowRunStore(worktreeRoot: root, runID: id)
     #expect(throws: WorkflowRunStore.Failure.self) {
       try store.ensureLayout()
@@ -257,9 +255,11 @@ struct WorkflowRunStoreTests {
     }
     let newest = Self.record(status: .completed, startedAt: Self.stamp.addingTimeInterval(10))
     try WorkflowRunStore(worktreeRoot: root, runID: newest.id).writeRecord(newest)
-    let removed = try WorkflowRunStore.index(newest, worktreeRoot: root, keepLast: 2)
-    #expect(removed.map { $0.standardizedFileURL } == [old[0], old[1]].map { $0.standardizedFileURL })
+    // Indexing the third old run already pruned the first; the newest
+    // record's index pass removes the second.
     #expect(!Self.exists(old[0]))
+    let removed = try WorkflowRunStore.index(newest, worktreeRoot: root, keepLast: 2)
+    #expect(removed.map { $0.standardizedFileURL } == [old[1].standardizedFileURL])
     #expect(!Self.exists(old[1]))
     #expect(Self.exists(old[2]))
     let index = try WorkflowRunIndex.load(worktreeRoot: root)

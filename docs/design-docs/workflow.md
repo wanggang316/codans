@@ -102,6 +102,8 @@ steps:
       sections: ["## Findings"]
       verdicts: [clean, issues]
 
+  - set: {verdict: "${{ deliveries.review.verdict }}"}
+
   - name: Fix and re-review
     while: state.verdict == 'issues' && state.round < inputs.max-rounds
     max-iterations: 10

@@ -53,6 +53,11 @@ struct WorkflowMachineTests {
             prompt: try template("Review the uncommitted changes in this worktree. ${{ inputs.focus }}"),
             expect: reviewExpectation)),
         WorkflowStep(
+          id: "seed", hasExplicitID: false,
+          verb: .set([
+            WorkflowAssignment(name: "verdict", value: try template("${{ deliveries.review.verdict }}"))
+          ])),
+        WorkflowStep(
           id: "fix-loop", name: "Fix and re-review",
           verb: .loop(
             condition: try expression("state.verdict == 'issues' && state.round < inputs.max-rounds"),
@@ -647,7 +652,7 @@ struct WorkflowMachineTests {
   func skipConsequenceNamesTheFirstDependentStep() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
     // Nothing delivered yet: the loop body's first message needs the review.
-    #expect(driver.machine.skipConsequence(forDelivery: "review") == "fix")
+    #expect(driver.machine.skipConsequence(forDelivery: "review") == "seed")
     #expect(driver.machine.skipConsequence(forDelivery: "unrelated") == nil)
   }
 

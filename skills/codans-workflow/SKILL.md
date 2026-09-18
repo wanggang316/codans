@@ -173,8 +173,9 @@ validation does not guarantee admission: profiles, panes, inputs and trust are c
 
 ### Patterns
 
-- **Review loop**: launch the reviewer once with `expect` + `verdicts`; `while state.verdict ==
-  'issues' && state.round < inputs.max-rounds`; inside, `message` the author with the review
+- **Review loop**: launch the reviewer once with `expect` + `verdicts`, `set` the state verdict
+  from that first delivery, then `while state.verdict == 'issues' && state.round <
+  inputs.max-rounds`; inside, `message` the author with the review
   path, `message` the reviewer for a fresh delivery, `set` the verdict from
   `deliveries.review.verdict`. Do not rely on an implicit "last delivery" — copy what the loop
   needs into `state`.

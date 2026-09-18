@@ -165,10 +165,15 @@ public nonisolated struct WorkflowRunStore: Sendable {
     guard ordinal > 0 else { throw Failure.invalidPathComponent(String(ordinal)) }
   }
 
+  /// `lstat` rather than `attributesOfItem`: a directory URL carries a
+  /// trailing slash, and with it the Foundation call follows the link
+  /// and reports the target instead of the link itself.
   private func refuseSymlink(_ url: URL) throws {
-    let path = url.path(percentEncoded: false)
-    guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return }
-    if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+    var path = url.path(percentEncoded: false)
+    while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+    var status = stat()
+    guard lstat(path, &status) == 0 else { return }
+    if (status.st_mode & S_IFMT) == S_IFLNK {
       throw Failure.symlinkRefused(path: path)
     }
   }
