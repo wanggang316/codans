@@ -23,6 +23,10 @@ enum EditorPickerRow {
   /// pre-resized NSImage is what AppKit hands to NSMenuItem when the row
   /// is hosted inside a `Menu`; without this, the source NSImage retains
   /// its native ~256pt size and the menu row is forced to that height.
+  /// The redraw goes through the `EditorAppIcons` process cache — menus
+  /// are built eagerly per row render, so an uncached LaunchServices
+  /// query here multiplied across every sidebar row stalled the main
+  /// thread on each catalog invalidation.
   @ViewBuilder
   static func icon(for descriptor: EditorDescriptor) -> some View {
     switch descriptor.launchMode {
@@ -32,7 +36,7 @@ enum EditorPickerRow {
         .accessibilityHidden(true)
     case .directory, .applicationWithArguments:
       if let appURL = descriptor.appURL {
-        Image(nsImage: resized(NSWorkspace.shared.icon(forFile: appURL.path), to: 16))
+        Image(nsImage: EditorAppIcons.resizedIcon(atPath: appURL.path, side: 16))
           .renderingMode(.original)
           .accessibilityHidden(true)
       } else {
@@ -41,24 +45,6 @@ enum EditorPickerRow {
           .accessibilityHidden(true)
       }
     }
-  }
-
-  /// Redraws an NSImage at the requested point-size square so its
-  /// intrinsic size matches the menu row's expected glyph slot.
-  /// SwiftUI's `.resizable()` only affects the SwiftUI rendering pass,
-  /// not what AppKit reads when bridging to NSMenuItem.
-  private static func resized(_ image: NSImage, to side: CGFloat) -> NSImage {
-    let size = NSSize(width: side, height: side)
-    let resized = NSImage(size: size)
-    resized.lockFocus()
-    image.draw(
-      in: NSRect(origin: .zero, size: size),
-      from: NSRect(origin: .zero, size: image.size),
-      operation: .sourceOver,
-      fraction: 1.0
-    )
-    resized.unlockFocus()
-    return resized
   }
 
   /// Standard row content for every editor dropdown — a SwiftUI `Label`

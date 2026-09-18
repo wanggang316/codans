@@ -21,8 +21,8 @@ struct AppIconImage: View {
   var size: CGFloat = 16
 
   var body: some View {
-    if let nsImage = Self.resolve(bundleIdentifier: bundleIdentifier) {
-      Image(nsImage: Self.resized(nsImage, to: size))
+    if let nsImage = resolve() {
+      Image(nsImage: nsImage)
         .renderingMode(.original)
         .accessibilityHidden(true)
     } else {
@@ -35,28 +35,13 @@ struct AppIconImage: View {
     }
   }
 
-  private static func resolve(bundleIdentifier: String) -> NSImage? {
-    guard !bundleIdentifier.isEmpty,
-      let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
-    else { return nil }
-    return NSWorkspace.shared.icon(forFile: url.path)
-  }
-
-  /// Redraws an NSImage at the requested point-size square so its
-  /// intrinsic size matches the slot the icon will live in. Mirrors
-  /// `EditorPickerRow.icon`'s pre-resize so menu rows + toolbar chips
-  /// stay compact regardless of the source icon's native dimensions.
-  private static func resized(_ image: NSImage, to side: CGFloat) -> NSImage {
-    let target = NSSize(width: side, height: side)
-    let resized = NSImage(size: target)
-    resized.lockFocus()
-    image.draw(
-      in: NSRect(origin: .zero, size: target),
-      from: NSRect(origin: .zero, size: image.size),
-      operation: .sourceOver,
-      fraction: 1.0
-    )
-    resized.unlockFocus()
-    return resized
+  /// Resolves the bundle's icon through the process-lifetime
+  /// `EditorAppIcons` cache — the LaunchServices lookup and the redraw
+  /// each happen at most once per (bundle, size) per launch.
+  private func resolve() -> NSImage? {
+    guard let url = EditorAppIcons.appURL(bundleIdentifier: bundleIdentifier) else {
+      return nil
+    }
+    return EditorAppIcons.resizedIcon(atPath: url.path, side: size)
   }
 }
