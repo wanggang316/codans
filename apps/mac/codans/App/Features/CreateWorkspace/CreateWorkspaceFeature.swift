@@ -333,9 +333,15 @@ struct CreateWorkspaceFeature {
 
     // MARK: Editor
 
-    /// The dialog's findings: the source first, then the draft's own.
+    /// The open dialog's findings.
     var editorIssues: [MemberIssue] {
-      guard let editor else { return [] }
+      editor.map(issues(inEditor:)) ?? []
+    }
+
+    /// A dialog's findings: the source first, then the draft's own. Takes
+    /// the dialog rather than reading `editor`, so a closing sheet can show
+    /// the copy it still holds.
+    func issues(inEditor editor: MemberEditor) -> [MemberIssue] {
       var issues: [MemberIssue] = []
       if let sourceIssue = editor.sourceIssue {
         issues.append(.blocking(sourceIssue))
@@ -364,8 +370,12 @@ struct CreateWorkspaceFeature {
     }
 
     var canSaveEditor: Bool {
-      guard let editor, editor.draft != nil, !editor.isResolvingSource else { return false }
-      return !editorIssues.contains(where: \.blocksCreation)
+      editor.map(canSave(inEditor:)) ?? false
+    }
+
+    func canSave(inEditor editor: MemberEditor) -> Bool {
+      guard editor.draft != nil, !editor.isResolvingSource else { return false }
+      return !issues(inEditor: editor).contains(where: \.blocksCreation)
     }
 
     /// A folder name for `source` no other row uses.

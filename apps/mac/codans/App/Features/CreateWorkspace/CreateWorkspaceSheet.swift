@@ -25,15 +25,19 @@ struct CreateWorkspaceSheet: View {
       store.send(.onAppear)
       if !store.isAddMode { isTitleFocused = true }
     }
+    // `item:`, not `isPresented:`: the dialog's state is gone the moment it
+    // closes, and a sheet whose content empties out mid-dismissal collapses
+    // into a blank card on screen. The item hands the closing view what it
+    // last held.
     .sheet(
-      isPresented: Binding(
-        get: { store.editor != nil },
-        set: { isPresented in
-          if !isPresented { store.send(.editor(.cancelTapped)) }
+      item: Binding(
+        get: { store.editor },
+        set: { editor in
+          if editor == nil { store.send(.editor(.cancelTapped)) }
         }
       )
-    ) {
-      WorkspaceMemberEditorSheet(store: store)
+    ) { editor in
+      WorkspaceMemberEditorSheet(store: store, opened: editor)
     }
   }
 

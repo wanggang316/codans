@@ -10,26 +10,36 @@ import SwiftUI
 /// in the workspace. Add / Save puts it in the list.
 struct WorkspaceMemberEditorSheet: View {
   let store: StoreOf<CreateWorkspaceFeature>
+  /// The dialog as the sheet was handed it. Only read while it closes, when
+  /// the store has already dropped it: the last live copy keeps the fading
+  /// sheet showing the dialog rather than an empty card.
+  let opened: MemberEditor
+  @State private var lastLive: MemberEditor?
   @FocusState private var isURLFocused: Bool
 
   var body: some View {
-    if let editor = store.editor {
-      VStack(spacing: 0) {
-        Form {
-          sourceSection(editor)
-          if let draft = editor.draft {
-            checkoutSection(draft)
-          }
+    content(store.editor ?? lastLive ?? opened)
+      .onChange(of: store.editor) { _, editor in
+        if let editor { lastLive = editor }
+      }
+  }
+
+  private func content(_ editor: MemberEditor) -> some View {
+    VStack(spacing: 0) {
+      Form {
+        sourceSection(editor)
+        if let draft = editor.draft {
+          checkoutSection(editor, draft)
         }
-        .formStyle(.grouped)
-        .scrollBounceBehavior(.basedOnSize)
-        bar(editor)
       }
-      .frame(width: 500)
-      .frame(maxHeight: 640)
-      .onAppear {
-        if editor.kind == .remote { isURLFocused = true }
-      }
+      .formStyle(.grouped)
+      .scrollBounceBehavior(.basedOnSize)
+      bar(editor)
+    }
+    .frame(width: 500)
+    .frame(maxHeight: 640)
+    .onAppear {
+      if editor.kind == .remote { isURLFocused = true }
     }
   }
 
@@ -157,7 +167,7 @@ struct WorkspaceMemberEditorSheet: View {
 
   // MARK: Checkout
 
-  private func checkoutSection(_ draft: MemberDraft) -> some View {
+  private func checkoutSection(_ editor: MemberEditor, _ draft: MemberDraft) -> some View {
     Section {
       Picker("Checkout", selection: binding(draft, \.mode, { .modeChanged($0) })) {
         ForEach(MemberDraft.CheckoutMode.allCases, id: \.self) { mode in
@@ -180,7 +190,7 @@ struct WorkspaceMemberEditorSheet: View {
     } footer: {
       VStack(alignment: .leading, spacing: 2) {
         refsStatus(draft)
-        IssueList(issues: listedIssues(draft))
+        IssueList(issues: listedIssues(editor, draft))
       }
     }
   }
@@ -239,9 +249,9 @@ struct WorkspaceMemberEditorSheet: View {
   /// The dialog's findings without the source's, which head the first
   /// section, and without a refs failure, which `refsStatus` shows with
   /// Retry.
-  private func listedIssues(_ draft: MemberDraft) -> [MemberIssue] {
-    var issues = store.state.editorIssues
-    if let sourceIssue = store.editor?.sourceIssue {
+  private func listedIssues(_ editor: MemberEditor, _ draft: MemberDraft) -> [MemberIssue] {
+    var issues = store.state.issues(inEditor: editor)
+    if let sourceIssue = editor.sourceIssue {
       issues.removeAll { $0.message == sourceIssue }
     }
     if case .failed(let message) = draft.refs {
@@ -279,7 +289,7 @@ struct WorkspaceMemberEditorSheet: View {
         ProgressView().controlSize(.small)
         Text("Checking the folder…")
           .foregroundStyle(.secondary)
-      } else if let hint = store.state.editorIssues.first(where: { $0.severity == .incomplete }) {
+      } else if let hint = store.state.issues(inEditor: editor).first(where: { $0.severity == .incomplete }) {
         Text(hint.message)
           .foregroundStyle(.secondary)
           .lineLimit(2)
@@ -293,7 +303,7 @@ struct WorkspaceMemberEditorSheet: View {
         store.send(.editor(.saveTapped))
       }
       .keyboardShortcut(.defaultAction)
-      .disabled(!store.state.canSaveEditor)
+      .disabled(!store.state.canSave(inEditor: editor))
     }
     .padding(.horizontal, 20)
     .padding(.top, 4)
