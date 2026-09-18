@@ -6,6 +6,11 @@ import Testing
 /// Relocating the config root is what lets an end-to-end smoke run drive a real
 /// Debug app + CLI without mutating the user's real `~/.config/codans[-dev]/`.
 struct AppDirectoriesConfigOverrideTests {
+  @Test func workflowsUseOneUserLevelRoot() {
+    let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+    #expect(AppDirectories.workflowDirectory(home: home).path == "/Users/example/.codans/workflows")
+  }
+
   @Test
   func overrideRelocatesConfigRootEntirely() {
     let url = AppDirectories.configDirectory(

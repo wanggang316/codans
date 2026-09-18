@@ -11,7 +11,7 @@ add their exact instruction, target identity, dispatch state, and submission
 history. Local actions and human decisions keep their existing typed inputs and
 outputs; they do not acquire artificial agent lifecycle objects.
 
-Use a file-only run store. `artifacts/<run-id>/run.json` is the sole authoritative
+Use a file-only run store. `~/.codans/workflows/runs/<run-id>/run.json` is the sole authoritative
 record and includes inputs, executions, requests, submissions and events, with
 their full bodies. Commit this complete snapshot by atomic replacement before
 refreshing readable derived files. No database, SQLite reader/writer, database
@@ -72,7 +72,7 @@ invent stdout/stderr or exit-code files for actions that never ran a subprocess.
 ## Readable run directory
 
 ```text
-artifacts/<run-id>/
+~/.codans/workflows/runs/<run-id>/
   workflow.yaml
   run.json
   events.jsonl
@@ -141,7 +141,7 @@ store or provide a reason to retain database compatibility.
 ## File-only store verification (2026-09-17)
 
 - Removed WorkflowDatabaseV2 and its SQLite import/queries. WorkflowRunStoreV2
-  loads only `artifacts/<run-id>/run.json`; it performs no database migration.
+  loads only `~/.codans/workflows/runs/<run-id>/run.json`; it performs no database migration.
 - The app/test build completed. In an isolated host configuration, 26 tests in
   WorkflowServiceV2Tests, WorkflowRouterV2Tests and WorkflowEndpointIdentityV2Tests
   passed. Two earlier launches of the test host crashed in QuartzCore while

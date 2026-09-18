@@ -419,7 +419,7 @@ import Testing
       id: id, attemptID: execution.id, deliveryID: request.deliveryID,
       paneID: pane.description, content: "# Findings\nComplete")
     await settle { service.run(id)?.status == "succeeded" }
-    let folder = directory.appendingPathComponent("artifacts/\(id.uuidString)")
+    let folder = directory.appendingPathComponent("runs/\(id.uuidString)")
     let nodeFolder = folder.appendingPathComponent("nodes/\(execution.id.uuidString)")
     #expect(
       try String(contentsOf: nodeFolder.appendingPathComponent("instruction.md"), encoding: .utf8) == request.prompt)
@@ -452,7 +452,7 @@ import Testing
     let directory = root()
     defer { try? FileManager.default.removeItem(at: directory) }
     let service = WorkflowServiceV2(root: directory)
-    try Data("blocked".utf8).write(to: directory.appendingPathComponent("artifacts"))
+    try Data("blocked".utf8).write(to: directory.appendingPathComponent("runs"))
     var sent = false
     service.validateBinding = { _ in true }
     service.send = { _, _, _ in sent = true }
@@ -474,7 +474,7 @@ import Testing
       definition: WorkflowDefinitionParserV2.parse(decisionSource), source: decisionSource,
       title: "Storage failure", inputs: [:], bindings: [:])
     // Block the next transition after the initial run was durably created.
-    let folder = directory.appendingPathComponent("artifacts/\(id.uuidString)/nodes")
+    let folder = directory.appendingPathComponent("runs/\(id.uuidString)/nodes")
     try Data("blocked".utf8).write(to: folder)
     await settle { !service.issues.isEmpty }
     let count = service.issues.count
@@ -515,7 +515,7 @@ import Testing
       definition: WorkflowDefinitionParserV2.parse(decisionSource), source: decisionSource,
       title: "Invalid snapshot", inputs: [:], bindings: [:])
     await settle { service.run(id)?.status == "waiting" }
-    let snapshot = directory.appendingPathComponent("artifacts/\(id.uuidString)/run.json")
+    let snapshot = directory.appendingPathComponent("runs/\(id.uuidString)/run.json")
     let corrupt = Data("incomplete JSON".utf8)
     try corrupt.write(to: snapshot)
     let restored = WorkflowServiceV2(root: directory)

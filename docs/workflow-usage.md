@@ -24,7 +24,7 @@ The detail pane shows compact execution rows without tabs. Expand a row for
 its inputs and result; pending decisions and failures are visible immediately.
 Results, run inputs, participants, activity and frozen YAML are available below
 the execution list. The run actions menu provides copying, cancellation and Reveal in Finder.
-Reveal opens the run's existing directory under `artifacts/<run-id>/`, containing
+Reveal opens the run's existing directory under `~/.codans/workflows/runs/<run-id>/`, containing
 the frozen `workflow.yaml`, execution details, requests and submissions.
 `run.json` is the sole authoritative record. Each state change atomically replaces
 that complete snapshot before updating the readable derived files. Startup loads
@@ -110,3 +110,13 @@ orchestration engine or database is used.
 Only the current DSL run store is read and written. Old template runs, their
 compatibility routing and the template-based `workflow create` command are not
 supported.
+
+## Storage
+
+User workflow definitions live in `~/.codans/workflows/definitions/`.
+Execution records live in `~/.codans/workflows/runs/<run-id>/`, including
+`run.json`, the frozen `workflow.yaml`, `events.jsonl`, immutable packets and
+per-node execution/request/submission files. Debug and Release use this same
+user-level root; `CODANS_CONFIG_DIR` does not relocate workflow data.
+There is no legacy directory fallback or migration. Built-in definitions remain
+bundled with the application. Test code can explicitly inject an isolated root.

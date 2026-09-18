@@ -22,8 +22,8 @@ final class WorkflowCatalogV2 {
   init(root: URL? = nil) {
     self.root =
       (root
-      ?? Settings.defaultURL().deletingLastPathComponent().appendingPathComponent(
-        "workflows/definitions", isDirectory: true)).resolvingSymlinksInPath().standardizedFileURL
+      ?? AppDirectories.workflowDirectory().appendingPathComponent(
+        "definitions", isDirectory: true)).resolvingSymlinksInPath().standardizedFileURL
     reload()
   }
 

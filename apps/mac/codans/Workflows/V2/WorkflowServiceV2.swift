@@ -22,9 +22,9 @@ import Observation
         environment["XCTestBundlePath"] != nil || environment["XCTestConfigurationFilePath"] != nil
       let defaultRoot =
         isTesting
-        ? FileManager.default.temporaryDirectory.appendingPathComponent(
-          "workflow-v2-host-\(UUID())")
-        : Settings.defaultURL().deletingLastPathComponent().appendingPathComponent("workflows/v2")
+        ? AppDirectories.workflowDirectory().appendingPathComponent(
+          ".tests/\(UUID())")
+        : AppDirectories.workflowDirectory()
       let directory = root ?? defaultRoot
       let store = try WorkflowRunStoreV2(root: directory)
       runStore = store
@@ -436,7 +436,7 @@ import Observation
     }
     let packetID = UUID().uuidString
     let digest = SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()
-    let folder = runStore.root.appendingPathComponent("artifacts/\(runID.uuidString)")
+    let folder = runStore.runDirectory(runID)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let url = folder.appendingPathComponent(packetID + ".md")
     try Data(content.utf8).write(to: url, options: [.withoutOverwriting])

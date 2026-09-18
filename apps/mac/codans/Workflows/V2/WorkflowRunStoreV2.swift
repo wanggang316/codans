@@ -11,7 +11,7 @@ import Foundation
   }
 
   func load() throws -> [WorkflowRunV2] {
-    let runsDirectory = root.appendingPathComponent("artifacts", isDirectory: true)
+    let runsDirectory = root.appendingPathComponent("runs", isDirectory: true)
     guard FileManager.default.fileExists(atPath: runsDirectory.path) else { return [] }
     let directories = try FileManager.default.contentsOfDirectory(
       at: runsDirectory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
@@ -56,8 +56,8 @@ import Foundation
     _ = try inspectionDirectory(for: run)
   }
 
-  private func runDirectory(_ id: UUID) -> URL {
-    root.appendingPathComponent("artifacts/\(id.uuidString)", isDirectory: true)
+  func runDirectory(_ id: UUID) -> URL {
+    root.appendingPathComponent("runs/\(id.uuidString)", isDirectory: true)
   }
 
   func inspectionDirectory(for run: WorkflowRunV2) throws -> URL {

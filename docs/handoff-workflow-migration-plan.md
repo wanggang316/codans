@@ -117,8 +117,9 @@ and logs as well. Test hosts use `/tmp/cdh-unit-cache`; GUI acceptance uses
   unrelated formatter edits were restored. Focused lint reports only unchanged
   existing findings in `RootFeature` (initializer complexity) and
   `RootFeatureTests` (force-try). `git diff --check` passed.
-- Acceptance artifacts are retained under
-  `/tmp/codans-handoff-acceptance-20260918/config/workflows/v2/artifacts`.
+- The original acceptance artifacts were stored in an isolated temporary directory
+  and subsequently deleted at the user's request. Current execution records use
+  `~/.codans/workflows/runs/`; definitions use `~/.codans/workflows/definitions/`.
   No SQLite files were created. Testing used a separate app/config/cache/socket;
   the user's installed app was not replaced.
 - Real Agent end-to-end acceptance used Pi. Other Agent kinds share the adapter

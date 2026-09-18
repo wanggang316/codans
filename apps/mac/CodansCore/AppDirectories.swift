@@ -41,6 +41,13 @@ public nonisolated enum AppDirectories {
       .appendingPathComponent(name, isDirectory: true)
   }
 
+  /// Workflow data is user-level, independent of build channel and config overrides.
+  public static func workflowDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+  ) -> URL {
+    home.appendingPathComponent(".codans/workflows", isDirectory: true)
+  }
+
   /// `~/Library/Caches/<name>` — the zmx `ZMX_DIR` (per-pane daemon control
   /// sockets, `snapshots/`, and `logs/`). Falls back to `~/Library/Caches`
   /// when the system cache directory can't be resolved, matching the prior
