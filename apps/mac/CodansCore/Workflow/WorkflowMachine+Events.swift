@@ -351,6 +351,9 @@ extension WorkflowMachine {
     activation.state = .delivered
     run.activations[ordinal] = activation
     run.status = .running
+    // A finished activation must leave the registry, or a later delivery
+    // from the same pane could be attributed to it.
+    transition.effects.append(.revokeActivation(ordinal: ordinal))
     log("delivery \(activation.delivery)#\(ordinal): recorded at \(path)", &transition)
     complete(step, outcome: .success, &transition)
   }

@@ -49,10 +49,12 @@ final class WorkflowActivationRegistry {
     }
   }
 
-  /// The single activation waiting on `paneID`, if any.
+  /// The activation waiting on `paneID`, if any. A pane has one open
+  /// activation at a time once finished ones are revoked; should two
+  /// overlap, the newest (highest ordinal) is the one a delivery means.
   func activation(forPane paneID: PaneID) -> Entry? {
     guard let runID = runByPane[paneID] else { return nil }
-    return activations[runID]?.values.first { $0.paneID == paneID }
+    return activations[runID]?.values.filter { $0.paneID == paneID }.max { $0.ordinal < $1.ordinal }
   }
 
   func activation(forToken token: String) -> Entry? {

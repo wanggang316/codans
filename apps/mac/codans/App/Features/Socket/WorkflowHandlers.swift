@@ -60,15 +60,17 @@ final class WorkflowHandlers {
 
   func run(_ request: IPC.WorkflowRunRequest, peerPID: pid_t?) async throws -> IPC.WorkflowRunResponse {
     try checkEnabled()
+    let caller = callerPane(request.callerPaneID, peerPID: peerPID)
     var sourcePaneID = request.sourcePaneID
     if sourcePaneID == nil, request.worktreeID == nil {
-      sourcePaneID = callerPane(nil, peerPID: peerPID)
+      sourcePaneID = caller
     }
     let admitted = try admission.admit(
       WorkflowAdmission.Request(
         workflow: request.workflow,
         sourcePaneID: sourcePaneID,
         worktreeID: request.worktreeID,
+        callerPaneID: caller,
         roles: request.roles,
         inputs: request.inputs,
         skip: request.skip))
@@ -165,6 +167,12 @@ final class WorkflowHandlers {
       }
       try checkRoleMatch(caller: caller, runID: runID, paneID: activation.paneID, force: request.force)
       return DeliveryTarget(runID: runID, ordinal: activation.ordinal, manual: true)
+    }
+    // A token names the activation exactly; the caller pane is the
+    // cross-check. Only without a token does the pane alone decide.
+    if let token = request.token, let entry = registry.activation(forToken: token) {
+      try checkRoleMatch(caller: caller, runID: entry.runID, paneID: entry.paneID, force: request.force)
+      return DeliveryTarget(runID: entry.runID, ordinal: entry.ordinal, manual: false)
     }
     if let caller, let entry = registry.activation(forPane: caller) {
       return DeliveryTarget(runID: entry.runID, ordinal: entry.ordinal, manual: false)

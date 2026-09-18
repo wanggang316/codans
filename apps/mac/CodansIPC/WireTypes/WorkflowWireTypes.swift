@@ -138,6 +138,11 @@ extension IPC {
     public let workflow: String
     public let sourcePaneID: PaneID?
     public let worktreeID: WorktreeID?
+    /// The pane the CLI ran in (`CODANS_PANE_ID`), independent of the
+    /// explicit source. Only a run started from the `current` role's own
+    /// pane is self-initiated; the server falls back to peer-PID
+    /// attribution when this is nil.
+    public let callerPaneID: PaneID?
     /// Role name → binding (`auto`, a profile name or id, or a pane
     /// reference for `pick` roles).
     public let roles: [String: String]
@@ -151,6 +156,7 @@ extension IPC {
       workflow: String,
       sourcePaneID: PaneID? = nil,
       worktreeID: WorktreeID? = nil,
+      callerPaneID: PaneID? = nil,
       roles: [String: String] = [:],
       inputs: [String: String] = [:],
       skip: [String] = [],
@@ -159,6 +165,7 @@ extension IPC {
       self.workflow = workflow
       self.sourcePaneID = sourcePaneID
       self.worktreeID = worktreeID
+      self.callerPaneID = callerPaneID
       self.roles = roles
       self.inputs = inputs
       self.skip = skip

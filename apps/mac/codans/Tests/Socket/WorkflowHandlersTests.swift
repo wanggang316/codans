@@ -284,10 +284,23 @@ struct WorkflowHandlersTests {
   // MARK: - Happy path
 
   @Test
+  func runStartedFromElsewhereTypesTheFirstMessage() async throws {
+    let harness = try Self.makeHarness()
+    // An explicit `[source]` pane from a shell that is not that pane: the
+    // author has to be told, so the line is typed and nothing is handed back.
+    let response = try await harness.handlers.run(
+      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+    #expect(response.selfInitiated == nil)
+    await Self.settle { !harness.world.lines.isEmpty }
+    #expect(harness.world.lines.first?.1.hasPrefix("Summarize the diff.") == true)
+  }
+
+  @Test
   func selfInitiatedRunDeliversAndAdvances() async throws {
     let harness = try Self.makeHarness()
     let response = try await harness.handlers.run(
-      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID, callerPaneID: harness.paneID),
+      peerPID: nil)
     let task = try #require(response.selfInitiated)
     #expect(task.stepID == "ask")
     #expect(task.line.hasPrefix("Summarize the diff."))

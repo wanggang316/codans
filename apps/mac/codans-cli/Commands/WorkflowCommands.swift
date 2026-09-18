@@ -216,6 +216,7 @@ struct WorkflowRun: AsyncParsableCommand {
           workflow: workflow,
           sourcePaneID: resolved.paneID,
           worktreeID: resolved.worktreeID,
+          callerPaneID: WorkflowCallerContext.paneID(),
           roles: roles,
           inputs: inputs,
           skip: skip,

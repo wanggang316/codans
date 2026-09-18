@@ -245,6 +245,7 @@ struct WorkflowMachineTests {
     #expect(
       effects == [
         .disarmWatchdog(ordinal: 1),
+        .revokeActivation(ordinal: 1),
         .openActivation(ordinal: 2, paneID: Self.authorPane, token: "tok-2"),
         .awaitRole(role: "author", paneID: Self.authorPane, until: .idle, timeoutMinutes: nil),
         .persistRecord,
@@ -291,6 +292,7 @@ struct WorkflowMachineTests {
     #expect(
       afterFixes == [
         .disarmWatchdog(ordinal: 2),
+        .revokeActivation(ordinal: 2),
         .openActivation(ordinal: 3, paneID: Self.reviewerPane, token: "tok-3"),
         .awaitRole(role: "reviewer", paneID: Self.reviewerPane, until: .idle, timeoutMinutes: nil),
         .persistRecord,
@@ -310,6 +312,7 @@ struct WorkflowMachineTests {
     #expect(
       final == [
         .disarmWatchdog(ordinal: 3),
+        .revokeActivation(ordinal: 3),
         .notify(title: "Workflow · Review Loop", body: "Review clean after 1 round(s)."),
         .persistRecord,
         .finished(.completed),

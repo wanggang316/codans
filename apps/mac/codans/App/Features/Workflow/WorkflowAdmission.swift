@@ -14,6 +14,11 @@ struct WorkflowAdmission {
     var workflow: String
     var sourcePaneID: PaneID?
     var worktreeID: WorktreeID?
+    /// The pane the request came from, when it came from one. Only this
+    /// pane can be the run's initiator: a run started from elsewhere
+    /// against a `[source]` pane must have its first message typed, not
+    /// handed back to a caller that is not the agent.
+    var callerPaneID: PaneID?
     var roles: [String: String] = [:]
     var inputs: [String: String] = [:]
     var skip: [String] = []
@@ -85,7 +90,7 @@ struct WorkflowAdmission {
         worktreeRoot: URL(fileURLWithPath: source.path, isDirectory: true), runID: runID
       ).path(percentEncoded: false),
       cliCommand: context.cliCommand,
-      initiatorPaneID: source.paneID,
+      initiatorPaneID: request.callerPaneID,
       startedAt: context.now()
     )
     return Admitted(configuration: configuration, entry: entry)

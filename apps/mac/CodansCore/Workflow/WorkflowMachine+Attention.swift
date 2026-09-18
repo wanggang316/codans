@@ -53,6 +53,7 @@ extension WorkflowMachine {
     run.activations[ordinal] = activation
     run.deliveries[activation.delivery]?.isProvisional = false
     run.status = .running
+    transition.effects.append(.revokeActivation(ordinal: ordinal))
     log("delivery \(activation.delivery)#\(ordinal): accepted by user", &transition)
     complete(step, outcome: .success, &transition)
   }
