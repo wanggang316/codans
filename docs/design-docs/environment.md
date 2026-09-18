@@ -65,7 +65,7 @@ CLI 名               codans-dev                          codans
 
 - `UserDefaults.standard`：`@AppStorage` 的面板状态、Command Palette 最近使用、遥测 install-id、Sparkle 的全部状态。
 - 系统通知按 bundle id 归属。`codans://focus` 深链**不是**注册的 URL scheme，它只在通知 payload 里由本进程解析，所以不经 LaunchServices。
-- Sparkle 在 Debug 里同样运行、同一个 feed。Sentry 在 Debug 里不启动（`CrashReporting` 提前返回）。
+- Sparkle 在 Debug 里不启动（`UpdatesEnvironment.isEnabled` 按 `BuildChannel` 判定），`UpdatesClient` 也不写它的偏好：Debug 包的版本与 appcast 无关，检查只会弹出把它"升级"成正式版的弹窗，且 Sparkle 状态在共享的 UserDefaults 里，Debug 写入会串到已安装的 app。Sentry 在 Debug 里同样不启动（`CrashReporting` 提前返回）。
 
 ### Socket 解析的两种语义
 

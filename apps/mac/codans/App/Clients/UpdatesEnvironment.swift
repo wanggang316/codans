@@ -16,10 +16,18 @@ import Observation
 /// `UpdatesClient.applyPreferences(...)`.
 @MainActor
 enum UpdatesEnvironment {
+  /// Only the release channel self-updates. A development build is a
+  /// separate app (own config root, socket and CLI name) whose version never
+  /// matches the appcast, so every check would offer to "update" it into the
+  /// shipped build. It also shares the release bundle id, so any Sparkle state
+  /// it wrote to `UserDefaults` would leak into the installed app's updater.
+  /// When `false` the updater is never started and `UpdatesClient` is inert.
+  static let isEnabled = BuildChannel.current == .release
+
   static let delegate: ChannelUpdaterDelegate = ChannelUpdaterDelegate()
 
   static let controller: SPUStandardUpdaterController = SPUStandardUpdaterController(
-    startingUpdater: true,
+    startingUpdater: isEnabled,
     updaterDelegate: delegate,
     userDriverDelegate: nil
   )

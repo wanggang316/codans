@@ -38,6 +38,12 @@ extension UpdatesClient: DependencyKey {
 
   static let liveValue = UpdatesClient(
     applyPreferences: { channel, interval, automaticallyChecks, automaticallyDownloads, triggerBackgroundCheck in
+      // Setting updater properties writes Sparkle's shared UserDefaults even
+      // on an unstarted updater, so skip the push entirely, not just the check.
+      guard UpdatesEnvironment.isEnabled else {
+        logger.info("applyPreferences skipped: updates are disabled for this build channel")
+        return
+      }
       let updater = UpdatesEnvironment.updater
       UpdatesEnvironment.delegate.setChannel(channel)
       updater.automaticallyChecksForUpdates = automaticallyChecks
@@ -51,6 +57,10 @@ extension UpdatesClient: DependencyKey {
       }
     },
     checkNow: {
+      guard UpdatesEnvironment.isEnabled else {
+        logger.info("checkForUpdates skipped: updates are disabled for this build channel")
+        return
+      }
       logger.info("checkForUpdates triggered")
       UpdatesEnvironment.updater.checkForUpdates()
     }
