@@ -120,6 +120,12 @@ struct WorkspaceMemberEditorSheet: View {
     }
   }
 
+  /// What checking out a remote branch will do, when it is not obvious.
+  private func trackingNote(_ draft: MemberDraft) -> String? {
+    guard draft.existingRefIsRemote, let branch = draft.remoteRefBranch else { return nil }
+    return "Creates a local branch \u{201C}\(branch)\u{201D} tracking it."
+  }
+
   private func urlField(_ editor: MemberEditor) -> some View {
     TextField(
       "URL",
@@ -154,24 +160,15 @@ struct WorkspaceMemberEditorSheet: View {
   private func checkoutSection(_ draft: MemberDraft) -> some View {
     Section {
       Picker("Checkout", selection: binding(draft, \.mode, { .modeChanged($0) })) {
-        ForEach(draft.availableModes, id: \.self) { mode in
+        ForEach(MemberDraft.CheckoutMode.allCases, id: \.self) { mode in
           Text(mode.title).tag(mode)
         }
       }
       switch draft.mode {
       case .newBranch:
         newBranchRows(draft)
-      case .existingLocal:
-        WorkspaceRefPicker(
-          title: "Branch",
-          refs: draft.refs,
-          selection: draft.localBranch,
-          placeholder: "Choose a branch",
-          includeLocal: true,
-          includeRemote: false,
-          onSelect: { send(draft, .localBranchChanged($0)) })
-      case .existingRemote:
-        remoteBranchRows(draft)
+      case .existing:
+        existingBranchRows(draft)
       }
       LabeledContent {
         TextField("Folder name", text: binding(draft, \.name, { .nameChanged($0) }))
@@ -214,20 +211,24 @@ struct WorkspaceMemberEditorSheet: View {
       onSelect: { send(draft, .baseRefChanged($0)) })
   }
 
+  /// One list of the repository's branches, local and remote. A remote one
+  /// is checked out as a local branch that tracks it, so the row says so,
+  /// and a local branch of that name brings up the Keep / Reset choice.
   @ViewBuilder
-  private func remoteBranchRows(_ draft: MemberDraft) -> some View {
+  private func existingBranchRows(_ draft: MemberDraft) -> some View {
     WorkspaceRefPicker(
-      title: "Remote branch",
+      title: "Branch",
       refs: draft.refs,
-      selection: draft.remoteRef,
-      placeholder: "Choose a remote branch",
-      includeLocal: false,
+      selection: draft.existingRef,
+      placeholder: "Choose a branch",
+      includeLocal: true,
       includeRemote: true,
-      onSelect: { send(draft, .remoteRefChanged($0)) })
+      subtitle: draft.hasLocalConflict ? nil : trackingNote(draft),
+      onSelect: { send(draft, .existingRefChanged($0)) })
     if draft.hasLocalConflict, let branch = draft.remoteRefBranch {
       Picker(selection: binding(draft, \.localConflict, { .localConflictChanged($0) })) {
         Text("Keep local branch").tag(MemberDraft.LocalConflictResolution.keepLocal)
-        Text("Reset to \(draft.remoteRef ?? "remote")").tag(MemberDraft.LocalConflictResolution.resetToRemote)
+        Text("Reset to \(draft.existingRef ?? "remote")").tag(MemberDraft.LocalConflictResolution.resetToRemote)
       } label: {
         Text("Local branch")
         Text("A local branch named \u{201C}\(branch)\u{201D} already exists.")
@@ -262,7 +263,7 @@ struct WorkspaceMemberEditorSheet: View {
     case .failed(let message):
       HStack(spacing: 6) {
         Text(message)
-          .foregroundStyle(draft.mode == .existingRemote ? .red : .orange)
+          .foregroundStyle(draft.mode == .existing ? .red : .orange)
           .fixedSize(horizontal: false, vertical: true)
         Button("Retry") { send(draft, .retryRefsTapped) }
           .buttonStyle(.link)

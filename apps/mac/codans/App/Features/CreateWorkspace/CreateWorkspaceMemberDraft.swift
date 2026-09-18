@@ -64,14 +64,14 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
 
   enum CheckoutMode: Equatable, Sendable, CaseIterable {
     case newBranch
-    case existingLocal
-    case existingRemote
+    /// One list of branches: a local one is checked out as it is, a remote
+    /// one gets a local branch that tracks it.
+    case existing
 
     var title: String {
       switch self {
       case .newBranch: return "New branch"
-      case .existingLocal: return "Existing branch"
-      case .existingRemote: return "Remote branch"
+      case .existing: return "Existing branch"
       }
     }
   }
@@ -114,10 +114,9 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
   var branchOverride = ""
   /// New branch: where it starts. Nil is the repository's default branch.
   var baseRef: String?
-  /// Existing branch: the local branch to check out.
-  var localBranch: String?
-  /// Remote branch: `origin/feature`. The local branch takes its name.
-  var remoteRef: String?
+  /// Existing branch: the branch to check out, local (`feature`) or
+  /// remote-tracking (`origin/feature`).
+  var existingRef: String?
   var localConflict: LocalConflictResolution = .keepLocal
   var refs: RefsState = .idle
   /// Findings from the client's preflight for this member.
@@ -137,30 +136,38 @@ nonisolated struct MemberDraft: Equatable, Identifiable, Sendable {
     case .newBranch:
       let own = branchOverride.trimmingCharacters(in: .whitespacesAndNewlines)
       return own.isEmpty ? defaultBranch : own
-    case .existingLocal:
-      return localBranch ?? ""
-    case .existingRemote:
-      return remoteRefBranch ?? ""
+    case .existing:
+      guard let existingRef else { return "" }
+      return existingRefIsRemote ? (remoteRefBranch ?? "") : existingRef
     }
+  }
+
+  /// Whether the chosen branch is a remote-tracking ref, which is checked
+  /// out as a local branch that tracks it. The repository's own lists
+  /// decide; before they load, only the `<remote>/<branch>` shape can, and
+  /// an unloaded repository blocks creation anyway.
+  var existingRefIsRemote: Bool {
+    guard let existingRef else { return false }
+    if let inventory = refs.inventory {
+      if inventory.local.contains(existingRef) { return false }
+      if inventory.remote.contains(existingRef) { return true }
+    }
+    return WorkspaceCheckout.splitRemoteRef(existingRef) != nil
   }
 
   /// The branch part of the chosen remote ref.
   var remoteRefBranch: String? {
-    remoteRef.flatMap(WorkspaceCheckout.splitRemoteRef)?.branch
+    guard existingRefIsRemote else { return nil }
+    return existingRef.flatMap(WorkspaceCheckout.splitRemoteRef)?.branch
   }
 
   /// True when the chosen remote branch already exists locally, so the Keep
   /// / Reset choice applies.
   var hasLocalConflict: Bool {
-    guard mode == .existingRemote, let branch = remoteRefBranch, let inventory = refs.inventory else {
+    guard mode == .existing, let branch = remoteRefBranch, let inventory = refs.inventory else {
       return false
     }
     return inventory.local.contains(branch)
-  }
-
-  /// A remote that is not cloned yet has no local branches to offer.
-  var availableModes: [CheckoutMode] {
-    source.isRemote ? [.newBranch, .existingRemote] : CheckoutMode.allCases
   }
 }
 

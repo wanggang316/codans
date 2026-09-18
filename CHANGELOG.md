@@ -28,10 +28,12 @@ and the project does not yet follow semantic versioning — every release until
   listed one per row, once there are any, with an icon for where they come
   from, how they will be checked out, and buttons to edit or remove them. The project selected in the sidebar is already in the list.
   Each project can start a new branch (named after the workspace title
-  unless you name it; from its default branch or one you pick), check out
-  an existing branch, or track a remote branch. When a remote branch meets
-  a local branch of the same name you choose to keep it or reset it to the
-  remote; nothing is reset unless you say so. Real problems show in red
+  unless you name it; from its default branch or one you pick) or check out
+  an existing one from a single list of the repository's branches, local
+  and remote together. A remote branch is checked out as a local branch
+  that tracks it; when that name is already taken locally you choose to
+  keep it or reset it to the remote, and nothing is reset unless you say
+  so. Real problems show in red
   under the project they concern, and what is still missing is named next
   to the disabled Create button. Each project shows its progress while the
   workspace is created, Cancel rolls back and reports anything it

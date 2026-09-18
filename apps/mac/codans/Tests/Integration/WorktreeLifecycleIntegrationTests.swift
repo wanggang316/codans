@@ -607,4 +607,19 @@ struct WorktreeLifecycleIntegrationTests {
     try await client.removeWorktree(repo, worktreePath)
     #expect(!fm.fileExists(atPath: worktreePath.path(percentEncoded: false)))
   }
+
+  /// A remote's HEAD is not a branch. `%(refname:short)` reports
+  /// `refs/remotes/origin/HEAD` as plain `origin`, which the pickers would
+  /// otherwise offer as a branch named after the remote.
+  @Test
+  func branchRefsListsBranchesWithoutTheRemoteHead() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+    try runGit(["branch", "feat/x"], cwd: repo)
+    try runGit(["update-ref", "refs/remotes/origin/main", "HEAD"], cwd: repo)
+    try runGit(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], cwd: repo)
+
+    let refs = try await GitWorktreeClient.makeLive().branchRefs(repo)
+    #expect(refs.sorted() == ["feat/x", "main", "origin/main"])
+  }
 }

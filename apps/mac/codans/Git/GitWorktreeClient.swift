@@ -740,16 +740,25 @@ nonisolated extension GitWorktreeClient {
           executable: GitWorktreeShell.gitURL,
           arguments: [
             "-C", repoRoot.path(percentEncoded: false),
-            "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes",
+            "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes",
           ],
           cwd: repoRoot
         )
         let stdout = try extractStdout(outcome, command: "git for-each-ref refs/heads refs/remotes")
+        // Full names, shortened here: `%(refname:short)` reports
+        // `refs/remotes/origin/HEAD` as plain `origin`, which then reads as a
+        // branch named after the remote.
         return
           stdout
           .components(separatedBy: "\n")
           .map { $0.trimmingCharacters(in: .whitespaces) }
           .filter { !$0.isEmpty && !$0.hasSuffix("/HEAD") }
+          .compactMap { ref in
+            for prefix in ["refs/heads/", "refs/remotes/"] where ref.hasPrefix(prefix) {
+              return String(ref.dropFirst(prefix.count))
+            }
+            return nil
+          }
       },
 
       defaultRemoteBranchRef: { repoRoot in

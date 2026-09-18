@@ -12,12 +12,19 @@ struct WorkspaceRefPicker: View {
   let placeholder: String
   let includeLocal: Bool
   let includeRemote: Bool
+  /// Second line under the title, when the choice needs a word.
+  var subtitle: String?
   let onSelect: (String?) -> Void
 
   var body: some View {
     if let inventory = refs.inventory {
-      Picker(title, selection: Binding(get: { selection ?? "" }, set: { onSelect($0.isEmpty ? nil : $0) })) {
+      Picker(selection: Binding(get: { selection ?? "" }, set: { onSelect($0.isEmpty ? nil : $0) })) {
         menuItems(inventory)
+      } label: {
+        Text(title)
+        if let subtitle {
+          Text(subtitle)
+        }
       }
     } else {
       LabeledContent(title) {

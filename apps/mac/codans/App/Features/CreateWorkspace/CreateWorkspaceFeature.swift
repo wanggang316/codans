@@ -189,11 +189,10 @@ struct CreateWorkspaceFeature {
       switch member.mode {
       case .newBranch:
         return .newBranch(branch: branch, baseRef: member.baseRef)
-      case .existingLocal:
-        return .existingBranch(branch)
-      case .existingRemote:
+      case .existing:
+        guard member.existingRefIsRemote else { return .existingBranch(branch) }
         return .remoteTrackingRef(
-          remoteRef: member.remoteRef ?? "", branch: branch, resetLocal: member.localConflict == .resetToRemote)
+          remoteRef: member.existingRef ?? "", branch: branch, resetLocal: member.localConflict == .resetToRemote)
       }
     }
 
@@ -204,10 +203,9 @@ struct CreateWorkspaceFeature {
       case .newBranch:
         let base = member.baseRef ?? member.refs.inventory?.defaultBaseRef ?? "the default branch"
         return branch.isEmpty ? "New branch from \(base), named after the title" : "New branch \(branch) from \(base)"
-      case .existingLocal:
-        return branch.isEmpty ? "Existing branch" : "Branch \(branch)"
-      case .existingRemote:
-        guard let remoteRef = member.remoteRef, !branch.isEmpty else { return "Remote branch" }
+      case .existing:
+        guard !branch.isEmpty else { return "Existing branch" }
+        guard let remoteRef = member.existingRef, member.existingRefIsRemote else { return "Branch \(branch)" }
         guard member.hasLocalConflict else { return "Branch \(branch), tracking \(remoteRef)" }
         return member.localConflict == .resetToRemote
           ? "Branch \(branch), reset to \(remoteRef)"
@@ -238,7 +236,9 @@ struct CreateWorkspaceFeature {
       let hasNameIssue = !issues.isEmpty
       issues.append(contentsOf: checkoutIssues(for: member))
       if case .failed(let message) = member.refs {
-        issues.append(member.mode == .existingRemote ? .blocking(message) : .warning(message))
+        // Without the list there is no branch to choose; a new branch can
+        // still be created from the repository's default.
+        issues.append(member.mode == .existing ? .blocking(message) : .warning(message))
       }
       issues.append(
         contentsOf: member.preflightIssues
@@ -264,25 +264,21 @@ struct CreateWorkspaceFeature {
           ]
         }
         return []
-      case .existingLocal:
+      case .existing:
         if member.refs.isLoading { return [.incomplete("Loading branches for \(label)…")] }
-        guard !branch.isEmpty else { return [.incomplete("Choose a branch for \(label).")] }
-        guard let inventory else { return [] }
-        if !inventory.local.contains(branch) {
-          return [.blocking("There is no local branch named \u{201C}\(branch)\u{201D}.")]
-        }
-        return checkedOutIssue(branch: branch, inventory: inventory)
-      case .existingRemote:
-        if member.refs.isLoading { return [.incomplete("Loading branches for \(label)…")] }
-        guard let remoteRef = member.remoteRef, !remoteRef.isEmpty else {
-          return [.incomplete("Choose a remote branch for \(label).")]
+        guard let ref = member.existingRef, !ref.isEmpty else {
+          return [.incomplete("Choose a branch for \(label).")]
         }
         guard let inventory else { return [] }
-        if !inventory.remote.contains(remoteRef) {
-          return [.blocking("\u{201C}\(remoteRef)\u{201D} is not a remote branch of this repository.")]
+        if inventory.local.contains(ref) {
+          return checkedOutIssue(branch: ref, inventory: inventory)
         }
-        // Keep checks the local branch out; reset moves it with `-B`. Git
-        // refuses both while another worktree has it.
+        guard inventory.remote.contains(ref) else {
+          return [.blocking("\u{201C}\(ref)\u{201D} is not a branch of this repository.")]
+        }
+        // A remote branch is checked out as its local twin. Keep checks that
+        // branch out; reset moves it with `-B`. Git refuses both while
+        // another worktree has it.
         return member.hasLocalConflict ? checkedOutIssue(branch: branch, inventory: inventory) : []
       }
     }
@@ -418,8 +414,7 @@ struct CreateWorkspaceFeature {
       case modeChanged(MemberDraft.CheckoutMode)
       case branchOverrideChanged(String)
       case baseRefChanged(String?)
-      case localBranchChanged(String?)
-      case remoteRefChanged(String?)
+      case existingRefChanged(String?)
       case localConflictChanged(MemberDraft.LocalConflictResolution)
       case chooseCloneDestinationTapped
       case cloneDestinationPicked(URL?)
@@ -643,8 +638,8 @@ struct CreateWorkspaceFeature {
       updateEverywhere(id, &state) { $0.refs = .failed(message) }
       return .none
 
-    case .nameChanged, .modeChanged, .branchOverrideChanged, .baseRefChanged, .localBranchChanged,
-      .remoteRefChanged, .localConflictChanged:
+    case .nameChanged, .modeChanged, .branchOverrideChanged, .baseRefChanged, .existingRefChanged,
+      .localConflictChanged:
       if case .nameChanged = action, state.editor?.draft?.id == id {
         state.editor?.nameEditedManually = true
       }
@@ -666,12 +661,10 @@ struct CreateWorkspaceFeature {
       draft.branchOverride = branch
     case .baseRefChanged(let ref):
       draft.baseRef = ref
-    case .localBranchChanged(let branch):
-      draft.localBranch = branch
-    case .remoteRefChanged(let ref):
-      draft.remoteRef = ref
-      // Another ref means another local branch; the reset choice belonged to
-      // the old one.
+    case .existingRefChanged(let ref):
+      draft.existingRef = ref
+      // Another branch means another local twin; the reset choice belonged
+      // to the old one.
       draft.localConflict = .keepLocal
     case .localConflictChanged(let choice):
       draft.localConflict = choice
@@ -855,12 +848,8 @@ struct CreateWorkspaceFeature {
     if !editor.nameEditedManually {
       draft.name = state.suggestedName(for: source, excluding: editor.id)
     }
-    if !draft.availableModes.contains(draft.mode) {
-      draft.mode = .newBranch
-    }
     draft.baseRef = nil
-    draft.localBranch = nil
-    draft.remoteRef = nil
+    draft.existingRef = nil
     draft.localConflict = .keepLocal
     draft.preflightIssues = []
     draft.refs = .loading

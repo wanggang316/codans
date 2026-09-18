@@ -236,7 +236,6 @@ struct CreateWorkspaceFeatureTests {
       store.state.editor?.draft?.source
         == .remote(url: "git@github.com:org/lib.git", cloneDestination: Self.defaultSource("lib")))
     #expect(store.state.editor?.draft?.name == "lib")
-    #expect(store.state.editor?.draft?.availableModes == [.newBranch, .existingRemote])
     await store.receive(\.member) {
       $0.editor?.draft?.refs = .loaded(Self.libRefs)
     }
@@ -296,8 +295,8 @@ struct CreateWorkspaceFeatureTests {
     }
     // Its own project counts as available again; the other row's does not.
     #expect(store.state.availableCandidates == [app])
-    await store.send(.member(UUID(1), .modeChanged(.existingLocal)))
-    await store.send(.member(UUID(1), .localBranchChanged("wip")))
+    await store.send(.member(UUID(1), .modeChanged(.existing)))
+    await store.send(.member(UUID(1), .existingRefChanged("wip")))
     await store.send(.member(UUID(1), .nameChanged("front")))
     #expect(store.state.members[0].mode == .newBranch)
     #expect(store.state.members[0].name == "app")
@@ -307,15 +306,15 @@ struct CreateWorkspaceFeatureTests {
     #expect(store.state.members[0].mode == .newBranch)
 
     await store.send(.editTapped(UUID(1)))
-    await store.send(.member(UUID(1), .modeChanged(.existingLocal)))
-    await store.send(.member(UUID(1), .localBranchChanged("wip")))
+    await store.send(.member(UUID(1), .modeChanged(.existing)))
+    await store.send(.member(UUID(1), .existingRefChanged("wip")))
     // Branches loaded meanwhile reach the row as well as the dialog.
     await store.send(.member(UUID(1), .refsLoaded(RefInventory(local: ["wip"]))))
     #expect(store.state.members[0].refs == .loaded(RefInventory(local: ["wip"])))
     await store.send(.editor(.saveTapped)) {
       $0.editor = nil
-      $0.members[0].mode = .existingLocal
-      $0.members[0].localBranch = "wip"
+      $0.members[0].mode = .existing
+      $0.members[0].existingRef = "wip"
     }
     #expect(store.state.checkoutSummary(for: store.state.members[0]) == "Branch wip")
 
@@ -339,7 +338,7 @@ struct CreateWorkspaceFeatureTests {
     #expect(store.state.defaultBranch.isEmpty)
     #expect(store.state.canSaveEditor)
     // Other missing pieces still hold the dialog back.
-    await store.send(.member(UUID(0), .modeChanged(.existingLocal)))
+    await store.send(.member(UUID(0), .modeChanged(.existing)))
     #expect(store.state.editorIssues == [.incomplete("Choose a branch for app.")])
     #expect(!store.state.canSaveEditor)
   }
@@ -366,7 +365,7 @@ struct CreateWorkspaceFeatureTests {
     }
     // A failure only warns for a new branch, but blocks a remote checkout.
     #expect(store.state.issues(for: store.state.members[0]).allSatisfy { !$0.blocksCreation })
-    await store.send(.member(UUID(1), .modeChanged(.existingRemote)))
+    await store.send(.member(UUID(1), .modeChanged(.existing)))
     #expect(
       store.state.issues(for: store.state.members[0]).contains(
         .blocking("The remote did not answer within 20 seconds.")))
@@ -427,26 +426,23 @@ struct CreateWorkspaceFeatureTests {
     #expect(store.state.plan == nil)
 
     // Existing branch: must be chosen, exist, and be free.
-    await store.send(.member(UUID(1), .modeChanged(.existingLocal)))
+    await store.send(.member(UUID(1), .modeChanged(.existing)))
     #expect(store.state.issues(for: store.state.members[0]) == [.incomplete("Choose a branch for app.")])
-    await store.send(.member(UUID(1), .localBranchChanged("main")))
+    await store.send(.member(UUID(1), .existingRefChanged("main")))
     #expect(
       store.state.issues(for: store.state.members[0]) == [
         .blocking(
           "\u{201C}main\u{201D} is checked out at /src/app. A branch can be checked out in only one place.")
       ])
-    await store.send(.member(UUID(1), .localBranchChanged("gone")))
+    await store.send(.member(UUID(1), .existingRefChanged("gone")))
     #expect(
       store.state.issues(for: store.state.members[0]) == [
-        .blocking("There is no local branch named \u{201C}gone\u{201D}.")
+        .blocking("\u{201C}gone\u{201D} is not a branch of this repository.")
       ])
     #expect(store.state.checkout(for: store.state.members[0]) == .existingBranch("gone"))
 
-    // Remote branch: nothing is picked for the user.
-    await store.send(.member(UUID(1), .modeChanged(.existingRemote)))
-    #expect(store.state.members[0].remoteRef == nil)
-    #expect(store.state.issues(for: store.state.members[0]) == [.incomplete("Choose a remote branch for app.")])
-    await store.send(.member(UUID(1), .remoteRefChanged("origin/feat/x")))
+    // A remote branch from the same list is checked out as its local twin.
+    await store.send(.member(UUID(1), .existingRefChanged("origin/feat/x")))
     #expect(store.state.members[0].hasLocalConflict)
     #expect(store.state.issues(for: store.state.members[0]).isEmpty)
     #expect(
@@ -460,20 +456,20 @@ struct CreateWorkspaceFeatureTests {
         == .remoteTrackingRef(remoteRef: "origin/feat/x", branch: "feat/x", resetLocal: true))
     // Another ref forgets the reset; a checked-out local twin blocks either
     // way, since git refuses `-B` on it too.
-    await store.send(.member(UUID(1), .remoteRefChanged("origin/main"))) {
-      $0.members[0].remoteRef = "origin/main"
+    await store.send(.member(UUID(1), .existingRefChanged("origin/main"))) {
+      $0.members[0].existingRef = "origin/main"
       $0.members[0].localConflict = .keepLocal
     }
     #expect(store.state.issues(for: store.state.members[0]).count == 1)
     await store.send(.member(UUID(1), .localConflictChanged(.resetToRemote)))
     #expect(store.state.issues(for: store.state.members[0]).first?.message.contains("checked out at") == true)
     // No local twin: no choice to make.
-    await store.send(.member(UUID(1), .remoteRefChanged("origin/release")))
+    await store.send(.member(UUID(1), .existingRefChanged("origin/release")))
     #expect(!store.state.members[0].hasLocalConflict)
-    await store.send(.member(UUID(1), .remoteRefChanged("upstream/none")))
+    await store.send(.member(UUID(1), .existingRefChanged("upstream/none")))
     #expect(
       store.state.issues(for: store.state.members[0]) == [
-        .blocking("\u{201C}upstream/none\u{201D} is not a remote branch of this repository.")
+        .blocking("\u{201C}upstream/none\u{201D} is not a branch of this repository.")
       ])
   }
 
@@ -488,12 +484,13 @@ struct CreateWorkspaceFeatureTests {
     row.baseRef = "origin/release"
     row.branchOverride = "feat/y"
     #expect(state.checkoutSummary(for: row) == "New branch feat/y from origin/release")
-    row.mode = .existingLocal
+    row.mode = .existing
     #expect(state.checkoutSummary(for: row) == "Existing branch")
-    row.mode = .existingRemote
-    row.remoteRef = "origin/release"
+    row.existingRef = "wip"
+    #expect(state.checkoutSummary(for: row) == "Branch wip")
+    row.existingRef = "origin/release"
     #expect(state.checkoutSummary(for: row) == "Branch release, tracking origin/release")
-    row.remoteRef = "origin/feat/x"
+    row.existingRef = "origin/feat/x"
     #expect(state.checkoutSummary(for: row) == "Local branch feat/x, tracking origin/feat/x")
     row.localConflict = .resetToRemote
     #expect(state.checkoutSummary(for: row) == "Branch feat/x, reset to origin/feat/x")
