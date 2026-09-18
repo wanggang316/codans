@@ -30,10 +30,10 @@ struct DiffFileSidebar: View {
             .font(.system(size: 11, weight: .semibold))
           let totals = store.snapshot?.lineTotals
           DiffLineCounts(additions: totals?.additions ?? 0, deletions: totals?.deletions ?? 0)
-          .help(
-            "Total text changes across all files, including files hidden by the filter. Files without line counts are excluded."
-          )
-          .accessibilityIdentifier("diff-total-line-counts")
+            .help(
+              "Total text changes across all files, including files hidden by the filter. Files without line counts are excluded."
+            )
+            .accessibilityIdentifier("diff-total-line-counts")
         }
         Spacer(minLength: 8)
         Picker(
