@@ -48,7 +48,14 @@ struct WorkspaceRefPicker: View {
     if !locals.isEmpty {
       Section("Local") {
         ForEach(locals, id: \.self) { branch in
-          Text(inventory.checkedOut[branch] == nil ? branch : "\(branch) (checked out)").tag(branch)
+          // A branch another worktree holds is marked the way the header's
+          // branch popover marks it: a leading `+`, since a checkout of it
+          // here would have to be a new branch.
+          if inventory.checkedOut[branch] == nil {
+            Text(branch).tag(branch)
+          } else {
+            Label(branch, systemImage: "plus").tag(branch)
+          }
         }
       }
     }
