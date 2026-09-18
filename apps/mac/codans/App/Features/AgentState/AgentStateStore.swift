@@ -64,6 +64,12 @@ final class AgentStateStore {
     case working
     case blocked
     case finished
+
+    /// True while the agent's turn is still open — working, or blocked on
+    /// the user mid-turn. `idle` / `finished` mean the turn has ended.
+    var isMidTask: Bool {
+      self == .working || self == .blocked
+    }
   }
 
   /// Public, read-only view of bound agents. `@Observable` tracks

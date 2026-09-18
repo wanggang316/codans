@@ -158,7 +158,8 @@ struct SettingsGeneralView: View {
         }
       } footer: {
         Text(
-          "Keep session running lets long-running commands survive the quit; "
+          "Auto asks only when a pane is running a command or an agent is mid-task. "
+            + "Keep session running lets long-running commands survive the quit; "
             + "Snapshot saves the screen state and exits."
         )
       }

@@ -25,20 +25,21 @@ enum QuitChoice {
 enum QuitConfirmationDialog {
   /// Present the dialog. Returns the user's chosen `QuitChoice`.
   ///
-  /// `paneCount` is the number of live panes shown in the alert body. The dialog itself
-  /// does not gate on that count — the caller decides via `QuitConfirmation` whether to
-  /// present at all — but the message text reflects it so the user sees what's at stake.
+  /// `busyPaneCount` is the number of busy panes shown in the alert body. The dialog
+  /// itself does not gate on that count — the caller decides via `QuitConfirmation`
+  /// whether to present at all — but the message text reflects it so the user sees
+  /// what's at stake.
   ///
   /// `defaultAction` selects which non-cancel button is wired to Return (Enter) and is
   /// the focused choice on open. The setting's "On quit" action picker therefore steers
   /// the dialog's default-button bias.
   static func present(
-    paneCount: Int,
+    busyPaneCount: Int,
     defaultAction: QuitAction
   ) -> QuitChoice {
     let alert = NSAlert()
     alert.alertStyle = .warning
-    alert.messageText = "\(paneCount) panes are running. How should they be handled?"
+    alert.messageText = messageText(busyPaneCount: busyPaneCount)
     alert.informativeText =
       "Keep session running lets long-running commands continue. "
       + "Snapshot and exit preserves the visible buffer for next launch."
@@ -77,6 +78,16 @@ enum QuitConfirmationDialog {
     default:
       // Third (or Cmd-.) → Cancel.
       return .cancel
+    }
+  }
+
+  /// Alert headline. Zero is reachable only under `QuitConfirmation.always`, which
+  /// prompts with nothing busy — say so rather than print "0 panes".
+  static func messageText(busyPaneCount: Int) -> String {
+    switch busyPaneCount {
+    case ...0: "No panes are busy. How should open sessions be handled?"
+    case 1: "1 pane is busy. How should it be handled?"
+    default: "\(busyPaneCount) panes are busy. How should they be handled?"
     }
   }
 }
