@@ -131,7 +131,9 @@ EOF
   "worktree": { "defaultWorktreesDirectory": "$WTS", "fetchRemoteOnCreate": false },
   "agents": { "profiles": [
     { "id": "11111111-1111-1111-1111-111111111111", "kind": "claude-code", "name": "Fake Claude",
-      "envVars": { "PATH": "$FAKEBIN:/usr/bin:/bin", "FAKE_STATE": "$FAKESTATE" } }
+      "envVars": { "PATH": "$FAKEBIN:/usr/bin:/bin", "FAKE_STATE": "$FAKESTATE" } },
+    { "id": "22222222-2222-2222-2222-222222222222", "kind": "claude-code", "name": "Real Claude",
+      "executionModeID": "bypass", "extraArguments": "-p" }
   ] }
 }
 EOF
