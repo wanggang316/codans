@@ -6,7 +6,7 @@ import CodansCore
 /// Per-Worktree FSEvents observer on the working-tree root subtree. Fires
 /// `events()` whenever a file under `<worktree>` (excluding `.git/`) is
 /// created / modified / removed so the sidebar's `+N −M` chip — backed by
-/// `git diff HEAD --shortstat` via `WorktreeLocalDiffMonitor` — refreshes
+/// `WorktreeLocalDiffMonitor` — refreshes
 /// after edits made in a pane / editor, not just on commit or row remount.
 ///
 /// Why FSEvents and not `DispatchSource` (which `WorktreeHeadWatcher` uses):
@@ -17,8 +17,8 @@ import CodansCore
 ///
 /// Intrusiveness: FSEvents is a read-only kernel event subscription — it
 /// never writes to disk, touches `.git`, or holds locks. The only side
-/// effect is the downstream read-only `git diff HEAD --shortstat` the
-/// monitor runs when an event lands.
+/// effect is the downstream read-only git comparison the monitor runs when
+/// an event lands.
 ///
 /// Design notes:
 /// - One `FSEventStream` per watched worktree root, on a shared serial

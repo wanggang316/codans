@@ -28,11 +28,8 @@ struct DiffFileSidebar: View {
         VStack(alignment: .leading, spacing: 3) {
           Text("Changed Files \(store.snapshot?.files.count ?? 0)")
             .font(.system(size: 11, weight: .semibold))
-          let allFiles = store.snapshot?.files ?? []
-          DiffLineCounts(
-            additions: allFiles.compactMap(\.additions).reduce(0, +),
-            deletions: allFiles.compactMap(\.deletions).reduce(0, +)
-          )
+          let totals = store.snapshot?.lineTotals
+          DiffLineCounts(additions: totals?.additions ?? 0, deletions: totals?.deletions ?? 0)
           .help(
             "Total text changes across all files, including files hidden by the filter. Files without line counts are excluded."
           )

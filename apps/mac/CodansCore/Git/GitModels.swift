@@ -219,8 +219,9 @@ public nonisolated struct WorkingTreeStatus: Equatable, Codable, Sendable {
   public var isClean: Bool { entries.isEmpty }
 }
 
-/// Summed line counts for a worktree's uncommitted edits (`git diff HEAD
-/// --shortstat`). Sidebar rows render this as `+additions −deletions` so
+/// Summed line counts for a worktree's uncommitted edits, untracked files
+/// included (the diff viewer's Uncommitted totals, `GitComparisonSnapshot.lineTotals`).
+/// Sidebar rows render this as `+additions −deletions` so
 /// users can see "how much I've changed since the last commit" at a glance,
 /// independent of whether a PR has been opened.
 public nonisolated struct LocalDiffStats: Equatable, Codable, Sendable {

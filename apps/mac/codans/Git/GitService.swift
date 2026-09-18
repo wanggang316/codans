@@ -43,8 +43,9 @@ public nonisolated protocol GitService: Sendable {
   /// the standard `GitError` cases.
   func showFileAtHEAD(_ path: String, at worktreePath: URL) async throws -> String?
 
-  /// `git diff HEAD --shortstat` — summed insertions / deletions for the
-  /// worktree's uncommitted edits. Returns `nil` only when the call itself
+  /// Summed insertions / deletions for the worktree's uncommitted edits,
+  /// untracked files included — the totals of `comparison(scope: .all)`, so
+  /// they match the diff viewer. Returns `nil` only when the call itself
   /// fails (not a repo, transient git error). A clean tree returns a stats
   /// value with both counts at zero, not nil.
   func localDiffStats(at worktreePath: URL) async throws -> LocalDiffStats?

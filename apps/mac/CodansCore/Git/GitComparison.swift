@@ -54,6 +54,16 @@ public nonisolated struct GitComparisonSnapshot: Sendable, Equatable {
   }
 }
 
+nonisolated extension GitComparisonSnapshot {
+  /// Line counts summed across every file. Files without counts (binary, unreadable, oversized)
+  /// are skipped. The single definition of a comparison's totals, so every surface agrees.
+  public var lineTotals: LocalDiffStats {
+    LocalDiffStats(
+      additions: files.compactMap(\.additions).reduce(0, +),
+      deletions: files.compactMap(\.deletions).reduce(0, +))
+  }
+}
+
 public nonisolated struct GitComparisonContent: Sendable, Equatable {
   public var oldText: String
   public var newText: String

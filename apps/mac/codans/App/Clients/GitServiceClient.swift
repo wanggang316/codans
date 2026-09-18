@@ -34,7 +34,8 @@ nonisolated struct GitServiceClient: Sendable {
   /// Returns `nil` for paths that don't yet exist at HEAD (newly-added files).
   var showFileAtHEAD: @Sendable (String, String) async throws -> String?
   /// `(worktreePath) -> LocalDiffStats?`. Sums insertions/deletions for the
-  /// worktree's uncommitted edits (`git diff HEAD --shortstat`). Nil only on
+  /// worktree's uncommitted edits, untracked files included — the diff
+  /// viewer's Uncommitted totals. Nil only on
   /// git failure; a clean tree yields `LocalDiffStats(0, 0)`.
   var localDiffStats: @Sendable (URL) async throws -> LocalDiffStats?
   /// `(repoURL) -> currentBranch?`. `git symbolic-ref --short HEAD`. Returns nil on

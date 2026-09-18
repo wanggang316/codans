@@ -88,6 +88,26 @@ struct GitComparisonTests {
     }
   }
 
+  @Test func worktreeLineStatsMatchUncommittedComparisonTotals() async throws {
+    let url = try await repository()
+    defer { try? FileManager.default.removeItem(at: url) }
+    let service = LiveGitService()
+    // No commits yet: the comparison runs against the empty tree.
+    try write("a\nb\n", "first.txt", at: url)
+    let unborn = try await service.comparison(at: url, scope: .all, base: nil)
+    #expect(try await service.localDiffStats(at: url) == unborn.lineTotals)
+    #expect(unborn.lineTotals == LocalDiffStats(additions: 2, deletions: 0))
+
+    try await git(["add", "."], at: url)
+    try await git(["commit", "-m", "initial"], at: url)
+    try write("a\nB\nc\n", "first.txt", at: url)
+    try write("new\nfile\nlines\n", "untracked.txt", at: url)
+    try Data([0, 1, 10]).write(to: url.appendingPathComponent("binary"))
+    let snapshot = try await service.comparison(at: url, scope: .all, base: nil)
+    #expect(try await service.localDiffStats(at: url) == snapshot.lineTotals)
+    #expect(snapshot.lineTotals == LocalDiffStats(additions: 5, deletions: 1))
+  }
+
   @Test func outgoingExcludesTargetOnlyChangesAndUncommittedWork() async throws {
     let url = try await repository()
     defer { try? FileManager.default.removeItem(at: url) }
