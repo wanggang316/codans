@@ -2,16 +2,30 @@ import Foundation
 
 /// User-facing "Confirm before quitting" preference. Decoupled from the action taken on
 /// quit so that "ask vs don't ask" and "what to do" are orthogonal. Default `.auto`:
-/// the quit dialog appears only when at least one pane is live; quitting with no live
-/// panes never prompts. Migration of the retired `quitStrategy` / `resumePanesOnLaunch`
-/// keys is handled by `GeneralSettings.init(from:)`.
+/// the quit dialog appears only when at least one pane is busy (running a command, or
+/// hosting an agent mid-task); open-but-idle panes get `quitAction` applied silently.
+/// Migration of the retired `quitStrategy` / `resumePanesOnLaunch` keys is handled by
+/// `GeneralSettings.init(from:)`.
 public enum QuitConfirmation: String, Codable, CaseIterable, Equatable, Sendable {
-  /// Ask only when there are active panes — the smart default.
+  /// Ask only when a pane is busy — the smart default.
   case auto
   /// Always present the dialog on quit, even with zero panes.
   case always
   /// Never present the dialog; apply `quitAction` directly.
   case never
+
+  /// Whether quitting with `busyPaneCount` busy panes should present the dialog.
+  ///
+  /// `.auto` keys on busy panes rather than open ones: an idle shell or an agent
+  /// waiting at its prompt has no in-flight work for the choice to protect, and
+  /// asking on every quit trains the user to click through the dialog.
+  public func shouldPrompt(busyPaneCount: Int) -> Bool {
+    switch self {
+    case .auto: busyPaneCount > 0
+    case .always: true
+    case .never: false
+    }
+  }
 }
 
 /// User-facing "On quit" action. Drives both the no-dialog branch

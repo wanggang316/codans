@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 import os.log
 
 /// Quit-time bridge between the live pane runtime and the per-Pane zmx
@@ -30,6 +30,11 @@ final class SessionLifecycle {
   /// AppState once the registry is built. Nil keeps tests and headless
   /// callers from needing to wire it.
   var agentSnapshotProvider: (@MainActor () -> [PersistedAgentRecord])?
+  /// Optional "agent in this pane is mid-task" probe for `busyPaneCount`.
+  /// Set by AppState alongside `agentSnapshotProvider`, for the same reason:
+  /// lifecycle stays ignorant of `AgentStateStore`'s type. Nil counts agents
+  /// as idle, leaving only the terminal busy signals.
+  var agentBusyProvider: (@MainActor (PaneID) -> Bool)?
 
   init(
     manager: HierarchyManager,
@@ -44,10 +49,23 @@ final class SessionLifecycle {
   }
 
   /// Number of live pane surfaces. `CodansApp.applicationShouldTerminate`
-  /// reads this to decide whether to surface the quit confirmation dialog at
-  /// all — zero panes means there is nothing to ask about.
+  /// reads this to decide whether the quit action has any daemons to act on —
+  /// zero panes means there is nothing to detach or snapshot.
   var liveZmxClientCount: Int {
     ghosttyRuntime?.allLiveSurfaces().count ?? 0
+  }
+
+  /// Number of live panes doing work a quit could interrupt: a running
+  /// foreground command or OSC 9;4 progress (`HierarchyManager.paneIsBusy`),
+  /// or an agent mid-task (`agentBusyProvider`). An idle shell or an agent
+  /// waiting at its prompt does not count. Drives the `.auto` quit
+  /// confirmation, which should only interrupt the user when there is
+  /// something at stake.
+  var busyPaneCount: Int {
+    guard let ghosttyRuntime else { return 0 }
+    return ghosttyRuntime.allLiveSurfaces()
+      .filter { manager.paneIsBusy($0.paneID) || agentBusyProvider?($0.paneID) == true }
+      .count
   }
 
   /// Per-pane snapshot deadline. `ZmxControlClient.snapshot(for:)` rounds the

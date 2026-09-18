@@ -295,28 +295,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       guard !dispositionInProgress else { return .terminateLater }
       guard let appState else { return .terminateNow }
       let lifecycle = appState.sessionLifecycle
-      let activePanes = lifecycle?.liveZmxClientCount ?? 0
+      // Two counts on purpose: busy panes decide whether to ask, live panes
+      // decide whether the action has anything to act on. Idle panes still
+      // need the action — `.snapshot` must serialize them even unprompted.
+      let livePanes = lifecycle?.liveZmxClientCount ?? 0
+      let busyPanes = lifecycle?.busyPaneCount ?? 0
 
       let confirmation = appState.settingsStore.settings.general.quitConfirmation
       let action = appState.settingsStore.settings.general.quitAction
 
-      let shouldAsk: Bool
-      switch confirmation {
-      case .never: shouldAsk = false
-      case .always: shouldAsk = true
-      case .auto: shouldAsk = activePanes > 0
-      }
-
-      if !shouldAsk {
+      if !confirmation.shouldPrompt(busyPaneCount: busyPanes) {
         // No dialog — apply the configured action directly. `detachAllForQuit` is a
-        // no-op when there are no live clients, so skipping it for activePanes == 0
+        // no-op when there are no live clients, so skipping it for livePanes == 0
         // is purely an optimisation; the explicit guard keeps the no-panes path cheap.
-        guard activePanes > 0, let lifecycle else { return .terminateNow }
+        guard livePanes > 0, let lifecycle else { return .terminateNow }
         return runDetachThenTerminate(lifecycle, action: action, sender: sender)
       }
 
       let choice = QuitConfirmationDialog.present(
-        paneCount: activePanes,
+        busyPaneCount: busyPanes,
         defaultAction: action
       )
       switch choice {
@@ -763,6 +760,9 @@ final class AppState {
             capturedAt: now
           )
         }
+      }
+      lifecycle.agentBusyProvider = { [weak registry] paneID in
+        registry?.entries[paneID]?.state.isMidTask ?? false
       }
     }
     startCommandQueueRunner(manager: manager, engine: engine)
