@@ -33,13 +33,9 @@ Outgoing commit endpoints and index blob identities are resolved before content 
 
 ## Rendering and package delivery
 
-The pinned source package lives at `apps/mac/ThirdParty/DiffViewKit`. Its UPSTREAM.md records the independent diff-view revision. SwiftPM/Tuist compiles the wrapper and embeds generated HTML/JavaScript/CSS resources. Codans builds require no npm install, CDN, HTTP server, or absolute path to the independent repository.
+DiffViewKit comes from the independent [diff-view](https://github.com/wanggang316/diff-view) repository as a SwiftPM dependency pinned by exact tag in `apps/mac/Tuist/Package.swift`; `Package.resolved` records the resolved revision. Each tag commits the generated HTML/JavaScript/CSS resources next to the Swift wrapper, so SwiftPM/Tuist compiles the wrapper and embeds them. Codans builds require no npm install, CDN, HTTP server, or local checkout of the independent repository.
 
-To update the package, build and test the independent repository, commit it, then run:
-
-```bash
-node scripts/export-swift-package.mjs /path/to/codans/apps/mac/ThirdParty/DiffViewKit
-```
+To update the package, change and test diff-view, run `npm run check:resources` there, tag the commit, push the tag, then bump the exact version in `apps/mac/Tuist/Package.swift` and run `make mac-generate` to refresh `Package.resolved`.
 
 The renderer accepts two text snapshots and emits validated file/line intents. Its jsdiff presentation can group hunks differently from Git. Git remains the authority for status, rename detection, and file statistics. Web limits are stricter than the transport limit: 1M UTF-16 units / 10,000 lines per side, 10,000 characters per line, 4,000 rendered lines, and a bounded diff calculation. Unavailable previews are never silently truncated.
 

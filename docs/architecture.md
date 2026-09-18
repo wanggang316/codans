@@ -57,7 +57,7 @@ Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by *
 | `apps/mac/Makefile` | Mac-platform build targets (bootstrap, generate, build, lint, etc.) |
 | `apps/mac/Configurations/` | `Project.xcconfig` + `mac-Info.plist` |
 | `apps/mac/scripts/` | `build-ghostty.sh` (Zig → XCFramework, fingerprint-cached) |
-| `apps/mac/ThirdParty/DiffViewKit/` | Pinned Swift-package export of the independent diff-view component: WKWebView bridge and bundled offline Web assets. `UPSTREAM.md` records the source revision. No Codans dependency, Git access, or editor launching inside the component. |
+| `DiffViewKit` (SwiftPM, [diff-view](https://github.com/wanggang316/diff-view)) | Independent diff-view component pinned by exact tag in `apps/mac/Tuist/Package.swift` / `Package.resolved`: WKWebView bridge and bundled offline Web assets. No Codans dependency, Git access, or editor launching inside the component. |
 | `apps/mac/ThirdParty/ghostty/` | Git submodule pointing at `ghostty-org/ghostty`. Built into `apps/mac/.build/ghostty/GhosttyKit.xcframework`. |
 | `apps/mac/.swift-format.json`, `.swiftlint.yml` | Lint + format configs, scoped to mac sources |
 
