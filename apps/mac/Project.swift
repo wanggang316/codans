@@ -51,7 +51,9 @@ let project = Project(
         "CodansCore/Shortcuts",
         "CodansCore/Shortcuts/ConflictDetectors",
         "CodansCore/StatusBar",
+        "CodansCore/Workflow",
       ],
+      dependencies: [.external(name: "Yams")],
       settings: .settings(
         base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
         defaultSettings: .essential
