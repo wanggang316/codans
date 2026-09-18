@@ -1,0 +1,37 @@
+name: Advisor
+description: Ask a second agent for an independent opinion and get the answer back in this pane.
+
+inputs:
+  question:
+    description: What you want advice on.
+    type: string
+    required: true
+
+roles:
+  asker:
+    source: current
+  advisor:
+    source: launch
+    placement: split
+    direction: right
+    background: true
+
+steps:
+  - name: Ask the advisor
+    id: ask
+    launch: advisor
+    prompt: |
+      You are an advisor. Another agent working in this worktree asks:
+
+      ${{ inputs.question }}
+
+      Investigate the code as needed, then answer in markdown with a "## Advice" section
+      (concrete recommendations, with file references) and a "## Risks" section.
+    expect:
+      delivery: advice
+      sections: ["## Advice"]
+
+  - name: Hand the advice back
+    id: reply
+    message: asker
+    text: "[codans] The advisor answered your question — read ${{ deliveries.advice.path }} and continue."
