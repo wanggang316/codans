@@ -46,7 +46,13 @@ extension EditorClient {
       openRemote: { host, remotePath, preferred in
         try await service.openRemote(host: host, remotePath: remotePath, preferred: preferred)
       },
-      clearCache: { await service.clearCache() }
+      clearCache: {
+        await service.clearCache()
+        // The icon cache shares this invalidation point: a newly installed
+        // or updated editor should re-resolve both its descriptor and its
+        // app icon without an app restart.
+        await MainActor.run { EditorAppIcons.clear() }
+      }
     )
   }
 }

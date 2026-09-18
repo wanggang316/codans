@@ -1444,17 +1444,14 @@ struct HierarchySidebarView: View {
     }
   }
 
-  /// Reads a 16×16 copy of the bundle's icon. The `NSWorkspace` cache
-  /// returns a multi-representation image; we copy and rescale so
-  /// neither our menu rendering nor any other consumer of the cached
-  /// icon ends up with a one-off size mutation.
+  /// Reads a 16×16 copy of the bundle's icon through the `EditorAppIcons`
+  /// process cache. The redraw gives the image an intrinsic 16×16 size so
+  /// menu bridging never stretches the bundle's largest representation;
+  /// caching keeps the eager per-row context-menu build off LaunchServices.
   private func appIcon(at appURL: URL) -> NSImage {
-    let icon = NSWorkspace.shared.icon(
-      forFile: appURL.path(percentEncoded: false)
+    EditorAppIcons.resizedIcon(
+      atPath: appURL.path(percentEncoded: false), side: 16
     )
-    let copy = (icon.copy() as? NSImage) ?? icon
-    copy.size = NSSize(width: 16, height: 16)
-    return copy
   }
 
   /// Resolves which editor would actually launch for the project today,
