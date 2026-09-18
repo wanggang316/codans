@@ -70,10 +70,14 @@ struct UpdatesSettingsView: View {
 
   var body: some View {
     Form {
-      channelSection
-      cadenceSection
-      automaticSection
-      manualSection
+      disabledChannelSection
+      Group {
+        channelSection
+        cadenceSection
+        automaticSection
+        manualSection
+      }
+      .disabled(!UpdatesEnvironment.isEnabled)
       feedSection
     }
     .formStyle(.grouped)
@@ -92,6 +96,19 @@ struct UpdatesSettingsView: View {
   }
 
   // MARK: - Sections
+
+  @ViewBuilder
+  private var disabledChannelSection: some View {
+    if !UpdatesEnvironment.isEnabled {
+      Section {
+        Label(
+          "Development builds don't check for updates.",
+          systemImage: "info.circle"
+        )
+        .foregroundStyle(.secondary)
+      }
+    }
+  }
 
   @ViewBuilder
   private var channelSection: some View {
