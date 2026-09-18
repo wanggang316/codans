@@ -9,11 +9,15 @@ extension WorkflowMachine {
   /// `token` must match unless `allowManual` (the caller named the run
   /// and step explicitly). Accepted and provisional deliveries both move
   /// the activation to `persisting`; the run only advances once the
-  /// engine reports `deliveryPersisted`.
+  /// engine reports `deliveryPersisted`. `force` keeps a body that a
+  /// `strict` step would refuse for missing sections or verdict, as a
+  /// provisional delivery for the user to judge; hard rejections (empty,
+  /// oversized, unknown verdict) still refuse.
   public mutating func deliver(
     ordinal: Int,
     token: String?,
     allowManual: Bool = false,
+    force: Bool = false,
     body: String,
     verdict: String?,
     now: Date
@@ -25,7 +29,8 @@ extension WorkflowMachine {
       { machine, transition in
         guard !machine.run.status.isTerminal else { return }
         outcome = machine.performDeliver(
-          ordinal: ordinal, token: token, allowManual: allowManual, body: body, verdict: verdict, &transition)
+          ordinal: ordinal, token: token, allowManual: allowManual, force: force, body: body, verdict: verdict,
+          &transition)
       })
     return (outcome, effects)
   }
@@ -34,6 +39,7 @@ extension WorkflowMachine {
     ordinal: Int,
     token: String?,
     allowManual: Bool,
+    force: Bool,
     body: String,
     verdict: String?,
     _ transition: inout Transition
@@ -54,7 +60,7 @@ extension WorkflowMachine {
       return .rejected(code: rejection.code, message: rejection.message)
     }
     let issues = result.issues.map(\.message)
-    if !issues.isEmpty, activation.expectation.strict, let first = result.issues.first {
+    if !issues.isEmpty, activation.expectation.strict, !force, let first = result.issues.first {
       return .rejected(code: first.code, message: issues.joined(separator: "; "))
     }
     activation.state = .persisting

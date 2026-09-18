@@ -50,6 +50,9 @@ struct HierarchySidebarView: View {
   /// 🤖-style toggle button in the footer. Optional so previews / tests
   /// without `AppState.bringUp` wiring omit the panel and the button.
   var agentStateStore: AgentStateStore?
+  /// Active workflow runs for the panel's "Workflows" group. Optional for
+  /// the same reason as `agentStateStore`.
+  var workflowEngine: WorkflowEngine?
   /// Row-tap dispatcher for the AgentState panel — routes to
   /// `RootFeature.agentState(.rowTapped)`. Closure (rather than direct
   /// store write) keeps Sidebar decoupled from Root.
@@ -279,6 +282,7 @@ struct HierarchySidebarView: View {
               }
             },
             onHandOffRow: { paneID in onAgentStateRowHandOff(paneID) },
+            workflowEngine: workflowEngine,
             height: $agentStatePanelHeight,
             minHeight: Self.agentStatePanelMinHeight,
             maxHeight: max(Self.agentStatePanelMinHeight, sidebarHeightObservation * 0.5)

@@ -52,6 +52,10 @@ struct AgentStateSidebarPanel: View {
   /// `RootFeature.agentState(.handOffTapped)`. Defaulted so previews and
   /// tests that don't wire it still render rows.
   var onHandOffRow: (PaneID) -> Void = { _ in }
+  /// Active workflow runs, rendered as a read-only group under the agent
+  /// rows. Defaulted so previews and tests without the engine render the
+  /// agent list alone.
+  var workflowEngine: WorkflowEngine?
 
   /// Current panel height in points. The view writes to this binding as
   /// the user drags the handle; the host is responsible for persisting
@@ -214,13 +218,38 @@ struct AgentStateSidebarPanel: View {
     }
   }
 
+  /// Agent rows, then the workflow group. With no agents the empty state
+  /// keeps its place above the group so a run started from a bare shell
+  /// still shows up.
   @ViewBuilder
   private var content: some View {
-    let rows = orderedRows
-    if rows.isEmpty {
+    if let workflowEngine, !workflowEngine.activeRuns.isEmpty {
+      ScrollView {
+        VStack(spacing: 0) {
+          if orderedRows.isEmpty {
+            emptyState.frame(minHeight: 60)
+          } else {
+            agentRows
+          }
+          WorkflowRunsSection(engine: workflowEngine, onTapRun: onTapRow)
+        }
+      }
+      .accessibilityIdentifier("agentState.sidebarPanel.list")
+    } else if orderedRows.isEmpty {
       emptyState
     } else {
       ScrollView {
+        agentRows
+      }
+      .accessibilityIdentifier("agentState.sidebarPanel.list")
+    }
+  }
+
+  @ViewBuilder
+  private var agentRows: some View {
+    let rows = orderedRows
+    if !rows.isEmpty {
+      Group {
         LazyVStack(spacing: 0) {
           ForEach(rows, id: \.paneID) { item in
             let resolved = resolveSourcePath(item.paneID)
@@ -248,7 +277,6 @@ struct AgentStateSidebarPanel: View {
         // users get the reorder with no animation.
         .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: order.orderedIDs)
       }
-      .accessibilityIdentifier("agentState.sidebarPanel.list")
     }
   }
 

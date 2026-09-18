@@ -32,6 +32,10 @@ struct ContentView: View {
   /// Registry that backs the worktree-toolbar badge + popover. Optional
   /// because `AppState.bringUp` constructs it lazily; nil renders no badge.
   let agentStateStore: AgentStateStore?
+  /// Active workflow runs for the AgentState panel's "Workflows" group.
+  /// Defaulted so previews and tests that build `ContentView` without the
+  /// engine keep compiling.
+  var workflowEngine: WorkflowEngine?
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
@@ -98,6 +102,7 @@ struct ContentView: View {
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         editorStore: store.scope(state: \.editor, action: \.editor),
         agentStateStore: agentStateStore,
+        workflowEngine: workflowEngine,
         onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) },
         onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) }
       )

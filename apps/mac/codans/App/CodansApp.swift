@@ -83,7 +83,8 @@ struct CodansApp: App {
             notificationRollup: appState.notificationRollup,
             notificationStore: appState.notificationStore,
             osNotifier: appState.osNotifier,
-            agentStateStore: appState.agentStateStore
+            agentStateStore: appState.agentStateStore,
+            workflowEngine: appState.workflowEngine
           )
           .frame(minWidth: 800, minHeight: 600)
           .environment(appState.agentInstallation)
@@ -481,6 +482,12 @@ final class AppState {
   /// requests. Shared by the `handoff.*` IPC handler (claims / publishes)
   /// and the in-app Hand Off panel (registers / observes).
   let handoffRegistry = HandoffRequestRegistry()
+  /// Token ↔ activation and pane ↔ run bookkeeping for workflow runs.
+  /// Shared by admission (`PANE_BUSY`), the engine and the IPC handler.
+  let workflowRegistry = WorkflowActivationRegistry()
+  /// Owns the active workflow runs. Built in `bringUp` once the live
+  /// clients exist; the AgentState panel reads `activeRuns` from it.
+  @ObservationIgnored private(set) var workflowEngine: WorkflowEngine?
   /// Notifications inbox owner; survives the full app lifetime so the
   /// debounced JSON write to `~/.codans/state/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
@@ -842,6 +849,9 @@ final class AppState {
     let workspaceClient = WorkspaceClient.live(
       hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI(),
       fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate })
+    let workflowEngine = makeWorkflowEngine(
+      hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, engine: engine)
+    self.workflowEngine = workflowEngine
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
@@ -908,7 +918,8 @@ final class AppState {
     startIPC(
       hierarchy: manager, editor: editor, hierarchyClient: hierarchy,
       settingsStore: settings, terminalEngine: engine, handoffHandlers: handoffHandlers,
-      gitWorktreeClient: worktreeClient, workspaceClient: workspaceClient
+      workflowEngine: workflowEngine, gitWorktreeClient: worktreeClient,
+      workspaceClient: workspaceClient
     )
 
     self.developerPaneDependencies = DeveloperPaneDependencies.live(
@@ -1153,6 +1164,7 @@ final class AppState {
     settingsStore: SettingsStore,
     terminalEngine: TerminalEngine,
     handoffHandlers: HandoffHandlers,
+    workflowEngine: WorkflowEngine,
     gitWorktreeClient: GitWorktreeClient,
     workspaceClient: WorkspaceClient
   ) {
@@ -1237,7 +1249,10 @@ final class AppState {
         hierarchy: hierarchyClient,
         workspace: workspaceClient,
         gitCLI: GitWorktreeCLI()
-      )
+      ),
+      workflowHandlers: makeWorkflowHandlers(
+        engine: workflowEngine, hierarchy: hierarchy, hierarchyClient: hierarchyClient,
+        settingsStore: settingsStore, terminalEngine: terminalEngine, handleRegistry: targetHandles)
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
@@ -1253,6 +1268,192 @@ final class AppState {
         "SocketServer bind failed at \(resolvedSocketPath, privacy: .public): \(String(describing: error), privacy: .public)"
       )
     }
+  }
+
+  /// The workflow engine on the live runtime. Every injection goes through
+  /// `TerminalClient.sendCommand` (text, gap, Return); launches through the
+  /// shared agent pipeline; `run:` steps through `CommandRunner` with the
+  /// socket path set so `codans` inside them reaches this app.
+  private func makeWorkflowEngine(
+    hierarchy: HierarchyManager,
+    hierarchyClient: HierarchyClient,
+    settingsStore: SettingsStore,
+    engine: TerminalEngine
+  ) -> WorkflowEngine {
+    let terminal = TerminalClient.live(engine: engine)
+    let socketPath = SocketPaths.resolve()
+    let dependencies = WorkflowEngineDependencies(
+      sendLine: { paneID, line in
+        guard terminal.surface(paneID) != nil else { return false }
+        terminal.sendCommand(paneID, line)
+        return true
+      },
+      launch: { request, source, profile in
+        var frozen = profile
+        frozen.envVars.merge(request.environment) { _, workflowValue in workflowValue }
+        let spec = AgentLaunchSpec(
+          profile: frozen,
+          projectID: source.projectID,
+          worktreeID: source.worktreeID,
+          prompt: request.prompt,
+          target: request.placement == .split ? .split : .newTab,
+          direction: request.direction,
+          anchorPaneID: request.anchorPaneID,
+          focus: !request.background
+        )
+        let outcome = try await hierarchyClient.launchAgent(spec)
+        guard let paneID = outcome.paneID else {
+          throw IPCError.internal("\(profile.displayName) launched without a pane")
+        }
+        return paneID
+      },
+      runCommand: { command, workingDirectory, environment, timeoutSeconds in
+        await FoundationCommandRunner().run(
+          executable: URL(fileURLWithPath: "/bin/sh"),
+          arguments: ["-c", command],
+          env: WorkflowEngine.commandEnvironment(step: environment, socketPath: socketPath),
+          cwd: URL(fileURLWithPath: workingDirectory, isDirectory: true),
+          timeout: .seconds(timeoutSeconds),
+          maxOutputBytes: WorkflowRunStore.maximumStdoutBytes
+        )
+      },
+      closePane: { paneID in
+        guard let address = hierarchyClient.addressOf(paneID) else { return }
+        try? hierarchyClient.closePane(paneID, address.tabID, address.worktreeID, address.projectID)
+      },
+      focusPane: { paneID in
+        guard let address = hierarchyClient.addressOf(paneID) else { return }
+        try? hierarchyClient.focusPane(paneID, address.tabID, address.worktreeID, address.projectID)
+      },
+      paneExists: { paneID in hierarchyClient.addressOf(paneID) != nil },
+      agentState: { [weak self] paneID in self?.agentStateStore?.entries[paneID]?.state },
+      notify: { [weak self, weak hierarchy] title, body, paneID in
+        guard let self, let hierarchy else { return }
+        self.postWorkflowNotification(title: title, body: body, paneID: paneID, hierarchy: hierarchy)
+      },
+      profile: { settingsStore.settings.agents.profile(id: $0) },
+      rememberBinding: { memory in settingsStore.mutateWorkflows { $0.remember(memory) } }
+    )
+    return WorkflowEngine(registry: workflowRegistry, dependencies: dependencies)
+  }
+
+  /// Workflow notifications go through `NotificationCoordinator` rather
+  /// than straight into the store: it owns the settings toggles, banners
+  /// and the dock badge, and a run stopping to ask the user is exactly the
+  /// kind of event those toggles exist for. Like agent notifications, one
+  /// whose pane the user is already looking at is dropped. Before the
+  /// coordinator exists the entry lands in the inbox directly.
+  private func postWorkflowNotification(
+    title: String, body: String, paneID: PaneID?, hierarchy: HierarchyManager
+  ) {
+    let catalog = hierarchy.catalog
+    let sourcePane =
+      paneID
+      ?? Self.currentlyFocusedPane(
+        catalog: catalog, lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) })
+    guard let sourcePane, let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: sourcePane) else {
+      return
+    }
+    let entry = InboxEntry(
+      kind: title.hasSuffix("completed") || body == "completed" ? .taskFinished : .waitingForInput,
+      title: title,
+      body: body,
+      source: InboxEntry.SourcePath(projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: sourcePane)
+    )
+    guard let coordinator = notificationCoordinator else {
+      notificationStore.append(entry)
+      return
+    }
+    let focused = Self.currentlyFocusedPane(
+      catalog: catalog, lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) })
+    Task { @MainActor in
+      _ = await coordinator.handle(
+        NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: focused == sourcePane))
+    }
+  }
+
+  /// `workflow.*` handler: admission and the engine on the live catalog,
+  /// caller attribution from the peer PID the same way `hierarchy.*` does.
+  private func makeWorkflowHandlers(
+    engine: WorkflowEngine,
+    hierarchy: HierarchyManager,
+    hierarchyClient: HierarchyClient,
+    settingsStore: SettingsStore,
+    terminalEngine: TerminalEngine,
+    handleRegistry: TargetHandleRegistry
+  ) -> WorkflowHandlers {
+    let discovery = WorkflowDiscovery(
+      bundleDirectory: Bundle.main.resourceURL?.appendingPathComponent("workflows", isDirectory: true),
+      userDirectory: AppDirectories.workflowsDirectory())
+    let registry = workflowRegistry
+    let admission = WorkflowAdmission(
+      context: WorkflowAdmission.Context(
+        discovery: discovery,
+        settings: { settingsStore.settings },
+        catalog: { hierarchy.catalog },
+        addressOf: { hierarchyClient.addressOf($0) },
+        resolvePane: { [weak hierarchy] reference in
+          guard let hierarchy else { return nil }
+          return Self.resolvePaneReference(reference, catalog: hierarchy.catalog, handles: handleRegistry)
+        },
+        agentKind: { [weak self, weak hierarchy] paneID in
+          self?.agentStateStore?.entries[paneID]?.kind ?? hierarchy?.catalog.pane(paneID)?.agentKind
+        },
+        runID: { registry.runID(forPane: $0) },
+        cliCommand: Self.cliInvocation()
+      ))
+    return WorkflowHandlers(
+      settings: settingsStore,
+      engine: engine,
+      registry: registry,
+      admission: admission,
+      discovery: discovery,
+      catalog: { hierarchy.catalog },
+      addressOf: { hierarchyClient.addressOf($0) },
+      callerPaneResolver: { [weak terminalEngine] callerPID in
+        guard let runtime = terminalEngine?.ghosttyRuntime else { return nil }
+        var paneByShellPID: [pid_t: PaneID] = [:]
+        for surface in runtime.allLiveSurfaces() {
+          guard let shellPID = surface.childProcessID() else { continue }
+          paneByShellPID[shellPID] = surface.paneID
+        }
+        return CallerPaneResolver.resolve(callerPID: callerPID, paneByShellPID: paneByShellPID)
+      },
+      paneHandles: { [weak hierarchy] in
+        guard let hierarchy else { return [:] }
+        handleRegistry.sync(with: hierarchy.catalog)
+        var handles: [PaneID: Int] = [:]
+        for (raw, handle) in handleRegistry.snapshot().panes {
+          if let uuid = UUID(uuidString: raw) { handles[PaneID(raw: uuid)] = handle }
+        }
+        return handles
+      }
+    )
+  }
+
+  /// `p<n>`, a pane UUID, or `@label` → pane, for `--role r=<pane>`.
+  static func resolvePaneReference(
+    _ reference: String, catalog: Catalog, handles: TargetHandleRegistry
+  ) -> PaneID? {
+    if let uuid = UUID(uuidString: reference) {
+      let paneID = PaneID(raw: uuid)
+      return catalog.pane(paneID) != nil ? paneID : nil
+    }
+    if let handle = TargetHandleRegistry.parse(reference, prefix: "p") {
+      handles.sync(with: catalog)
+      return handles.pane(forHandle: handle)
+    }
+    guard reference.hasPrefix("@") else { return nil }
+    let label = String(reference.dropFirst())
+    var matches: [PaneID] = []
+    for project in catalog.projects {
+      for worktree in project.worktrees {
+        for tab in worktree.tabs {
+          matches += tab.panes.filter { $0.labels.contains(label) }.map(\.id)
+        }
+      }
+    }
+    return matches.count == 1 ? matches[0] : nil
   }
 
   /// Handoff transition core wired to the live runtime: pane → source
