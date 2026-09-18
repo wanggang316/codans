@@ -20,6 +20,26 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.7.1] - 2026-09-19
+
+### Changed
+
+- **Quitting asks only when something is still working.** With "Confirm
+  before quitting" set to Auto, the dialog now appears only if a pane is
+  running a command or an agent is mid-task; idle shells and agents
+  waiting at their prompt no longer trigger it. The dialog counts busy
+  panes instead of every open one.
+
+### Fixed
+
+- **Codans stays responsive after launch and after updating.** With agents
+  running, the app could be sluggish for about a minute after every
+  relaunch — and hang far longer right after an update — while the
+  sidebar kept reloading editor icons.
+- **Placeholders no longer grow in while a worktree is being created.**
+  The loading bars in the window toolbar appear at full size instead of
+  swelling from a dot.
+
 ## [0.7.0] - 2026-09-18
 
 ### Added
