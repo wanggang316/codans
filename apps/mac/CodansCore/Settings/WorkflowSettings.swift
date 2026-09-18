@@ -104,11 +104,7 @@ public nonisolated struct WorkflowSettings: Equatable, Codable, Sendable {
 /// what the role asks for invalidates the memory while a prompt-only edit
 /// keeps it.
 public nonisolated struct WorkflowBindingMemory: Equatable, Codable, Sendable {
-  public enum Scope: String, Codable, Sendable {
-    case bundle
-    case user
-    case repo
-  }
+  public typealias Scope = WorkflowScope
 
   public var scope: Scope
   public var workflowID: String
