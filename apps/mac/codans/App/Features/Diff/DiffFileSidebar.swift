@@ -6,12 +6,30 @@ struct DiffFileSidebar: View {
   @Bindable var store: StoreOf<DiffFeature>
   @State private var showingBase = false
   @State private var collapsedFolders: Set<String> = []
+  @State private var listGeneration = 0
 
   private var outgoing: Bool { store.state.scope == .outgoing }
   private var files: [GitComparisonFile] {
     (store.snapshot?.files ?? []).filter {
       store.filter.isEmpty || $0.path.localizedCaseInsensitiveContains(store.filter)
     }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+  }
+
+  /// File rows the list shows: filtered, and in the tree only those outside collapsed folders.
+  private var visibleFileIDs: [String] {
+    guard store.filePresentation == .tree else { return files.map(\.id) }
+    func visible(_ nodes: [DiffFileTreeNode]) -> [String] {
+      nodes.flatMap { node -> [String] in
+        if let children = node.children { return collapsedFolders.contains(node.id) ? [] : visible(children) }
+        return node.file.map { [$0.id] } ?? []
+      }
+    }
+    return visible(DiffFileTreeNode.build(files))
+  }
+
+  private struct ListRows: Equatable {
+    var fileIDs: [String]
+    var selectedFileID: String?
   }
 
   var body: some View {
@@ -74,6 +92,7 @@ struct DiffFileSidebar: View {
         }
       }
       .listStyle(.sidebar).environment(\.defaultMinListRowHeight, 28)
+      .id(listGeneration)
       .overlay {
         if files.isEmpty, store.snapshot?.files.isEmpty == false {
           Text("No matching files").font(.caption).foregroundStyle(.secondary)
@@ -86,6 +105,14 @@ struct DiffFileSidebar: View {
     }
     .onChange(of: store.selectedFileID) { _, _ in revealSelection() }
     .onChange(of: store.filePresentation) { _, _ in revealSelection() }
+    .onChange(of: ListRows(fileIDs: visibleFileIDs, selectedFileID: store.selectedFileID)) { old, new in
+      // The macOS List leaves a user-selected row on screen after that row is removed (scope
+      // switch, refresh without the file, filter, collapsing its folder), drawn over the rows
+      // below. A fresh List discards it; other updates keep the list, its scroll and focus.
+      if let selected = old.selectedFileID, old.fileIDs.contains(selected), !new.fileIDs.contains(selected) {
+        listGeneration += 1
+      }
+    }
   }
 
   private func revealSelection() {
