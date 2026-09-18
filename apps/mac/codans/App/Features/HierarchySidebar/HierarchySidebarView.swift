@@ -351,41 +351,7 @@ struct HierarchySidebarView: View {
       }
     }
     .toolbar { sidebarToolbarContent }
-    .sheet(
-      isPresented: Binding(
-        get: { store.createWorktreeSheet != nil },
-        set: { isPresented in
-          if !isPresented {
-            store.send(.createWorktreeSheet(.cancelButtonTapped))
-          }
-        }
-      )
-    ) {
-      if let childStore = store.scope(
-        state: \.createWorktreeSheet,
-        action: \.createWorktreeSheet
-      ) {
-        CreateWorktreeSheet(store: childStore)
-      }
-    }
-    .sheet(
-      isPresented: Binding(
-        get: { store.cloneRepoSheet != nil },
-        set: { isPresented in
-          if !isPresented {
-            store.send(.cloneRepoSheet(.cancelButtonTapped))
-          }
-        }
-      )
-    ) {
-      if let childStore = store.scope(
-        state: \.cloneRepoSheet,
-        action: \.cloneRepoSheet
-      ) {
-        CloneRepoSheet(store: childStore)
-          .interactiveDismissDisabled(store.cloneRepoSheet?.isCloning ?? false)
-      }
-    }
+    .modifier(SidebarSheetPresenter(store: store))
     .modifier(RemoteConnectionSheetPresenter(store: store))
     .modifier(CreateWorkspaceSheetPresenter(store: store))
     .modifier(WorkspaceRemovalDialogs(store: store))
@@ -422,20 +388,6 @@ struct HierarchySidebarView: View {
       }
     } message: {
       Text(projectRemovalMessage)
-    }
-    // Archived Worktrees sheet (opened from Project ⋯ menu).
-    .sheet(
-      isPresented: Binding(
-        get: { store.archivedWorktreesSheet != nil },
-        set: { if !$0 { store.send(.archivedWorktreesSheetDismissed) } }
-      )
-    ) {
-      if let childStore = store.scope(
-        state: \.archivedWorktreesSheet,
-        action: \.archivedWorktreesSheet
-      ) {
-        ArchivedWorktreesSheet(store: childStore)
-      }
     }
     // First-archive explainer (once per session).
     .confirmationDialog(

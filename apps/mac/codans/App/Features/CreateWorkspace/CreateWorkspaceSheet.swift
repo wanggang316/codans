@@ -232,23 +232,13 @@ struct CreateWorkspaceSheetPresenter: ViewModifier {
   @Bindable var store: StoreOf<HierarchySidebarFeature>
 
   func body(content: Content) -> some View {
-    content.sheet(
-      isPresented: Binding(
-        get: { store.createWorkspaceSheet != nil },
-        set: { isPresented in
-          if !isPresented {
-            store.send(.createWorkspaceSheet(.cancelButtonTapped))
-          }
-        }
-      )
-    ) {
-      if let childStore = store.scope(
-        state: \.createWorkspaceSheet,
-        action: \.createWorkspaceSheet
-      ) {
+    content.childSheet(
+      store.scope(state: \.createWorkspaceSheet, action: \.createWorkspaceSheet),
+      onDismiss: { store.send(.createWorkspaceSheet(.cancelButtonTapped)) },
+      content: { childStore in
         CreateWorkspaceSheet(store: childStore)
           .interactiveDismissDisabled(store.createWorkspaceSheet?.creation.isBusy ?? false)
       }
-    }
+    )
   }
 }
