@@ -1,7 +1,7 @@
 import AppKit
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Project General detail pane.
 ///
@@ -43,6 +43,7 @@ struct ProjectGeneralSettingsView: View {
   /// can assert visibility without inspecting SwiftUI's view tree.
   enum SectionID: String, CaseIterable, Hashable {
     case general
+    case workspace
     case editor
     case worktree
     case github
@@ -51,7 +52,8 @@ struct ProjectGeneralSettingsView: View {
   }
 
   /// Pure visibility logic. Worktree / GitHub / Lifecycle gate
-  /// on `kind == .gitRepo`; everything else is always visible.
+  /// on `kind == .gitRepo`, Workspace on `kind == .workspace`; everything
+  /// else is always visible.
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
     case .dir:
@@ -59,13 +61,13 @@ struct ProjectGeneralSettingsView: View {
     case .workspace:
       // A workspace root has no repository of its own: the worktree, GitHub,
       // and lifecycle sections all read `Project.gitRoot`, which is nil by
-      // construction. Per-child settings are a later milestone.
-      return [.general, .editor, .environment]
+      // construction. Its own section lists the checkouts it holds.
+      return [.general, .workspace, .editor, .environment]
     case .gitRepo, .server:
       // Server projects manage worktrees over SSH just like a local git repo,
       // so they surface the full section set — keeping remote management
       // consistent with local.
-      return Set(SectionID.allCases)
+      return Set(SectionID.allCases).subtracting([.workspace])
     }
   }
 
@@ -150,6 +152,9 @@ struct ProjectGeneralSettingsView: View {
     Form {
       if visible.contains(.general) {
         generalSection
+      }
+      if visible.contains(.workspace) {
+        workspaceSection
       }
       if visible.contains(.editor) {
         editorSection
@@ -298,6 +303,42 @@ struct ProjectGeneralSettingsView: View {
         try? hierarchyClient.setProjectColor(projectID, newValue)
       }
     )
+  }
+
+  // MARK: - Workspace
+
+  /// The checkouts inside a workspace, one row each: the folder, the
+  /// repository it is a checkout of, and its branch. Read from the catalog
+  /// rows the sidebar shows, so it follows adds and drops as they happen.
+  private var workspaceSection: some View {
+    Section("Projects") {
+      let checkouts = workspaceCheckouts
+      if checkouts.isEmpty {
+        Text("No projects yet. Add one from the workspace's + in the sidebar.")
+          .foregroundStyle(.secondary)
+      }
+      ForEach(checkouts, id: \.id) { checkout in
+        LabeledContent {
+          Text(checkout.branch ?? "Detached")
+            .foregroundStyle(.secondary)
+        } label: {
+          Text(checkout.name)
+          if let source = checkout.sourceGitRoot {
+            Text((source as NSString).abbreviatingWithTildeInPath)
+              .lineLimit(1)
+              .truncationMode(.middle)
+              .help(source)
+          }
+        }
+      }
+    }
+  }
+
+  private var workspaceCheckouts: [Worktree] {
+    guard let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }) else {
+      return []
+    }
+    return project.worktrees.filter { !$0.archived && $0.path != project.rootPath }
   }
 
   // MARK: - Editor

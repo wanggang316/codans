@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -19,20 +19,22 @@ struct ProjectGeneralSettingsViewKindRenderTests {
     #expect(!visible.contains(.worktree))
     #expect(!visible.contains(.github))
     #expect(!visible.contains(.lifecycle))
+    #expect(!visible.contains(.workspace))
   }
 
   @Test
   func workspaceHidesRepositoryScopedSections() {
     // A workspace root has no repository of its own; the git-only sections
-    // read `Project.gitRoot`, which is nil by construction.
+    // read `Project.gitRoot`, which is nil by construction. It lists its
+    // checkouts instead.
     let visible = ProjectGeneralSettingsView.visibleSections(for: .workspace)
-    #expect(visible == [.general, .editor, .environment])
+    #expect(visible == [.general, .workspace, .editor, .environment])
   }
 
   @Test
-  func gitRepoShowsAllSections() {
+  func gitRepoShowsEverySectionButTheWorkspaceOne() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .gitRepo)
-    #expect(visible == Set(ProjectGeneralSettingsView.SectionID.allCases))
+    #expect(visible == Set(ProjectGeneralSettingsView.SectionID.allCases).subtracting([.workspace]))
     #expect(visible.count == 6)
     // Worktree-lifecycle script editors live at the bottom of this pane and
     // are git-only.
@@ -45,7 +47,7 @@ struct ProjectGeneralSettingsViewKindRenderTests {
     // test pins the canonical order so a future refactor cannot silently
     // shuffle sections. Lifecycle scripts render last.
     let canonical: [ProjectGeneralSettingsView.SectionID] = [
-      .general, .editor, .worktree, .github, .environment, .lifecycle,
+      .general, .workspace, .editor, .worktree, .github, .environment, .lifecycle,
     ]
     #expect(ProjectGeneralSettingsView.SectionID.allCases == canonical)
   }
