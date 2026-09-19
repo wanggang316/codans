@@ -175,35 +175,25 @@ struct HierarchySidebarView: View {
   /// (x=0) frames the AppKit introspection retries paper over.
   @State private var sidebarIndentReady = false
 
-  /// Heterogeneous sidebar rows in render order: main → pinned → pending →
-  /// unpinned. `pendings` is filtered to the given project (caller passes the
-  /// full sidebar-wide list). Used by ordering tests + the hotkey enumeration
-  /// shim; the production view splits the segments across separate ForEach
-  /// blocks so each can own its own .onMove.
+  /// Heterogeneous rows under a Project row, in render order: main → pinned →
+  /// pending → unpinned (`Project.childWorktrees` plus the Project's pending
+  /// creations). `pendings` is filtered to the given project (caller passes
+  /// the full sidebar-wide list). Used by ordering tests; the production view
+  /// splits the segments across separate ForEach blocks so each can own its
+  /// own .onMove.
   static func orderedSidebarRows(
     project: Project,
     pendings: [PendingWorktree]
   ) -> [SidebarRow] {
-    let visible = project.worktrees.filter { !$0.archived }
-    let main = visible.filter { $0.path == project.rootPath }
-    let pinned = visible.filter { $0.isPinned && $0.path != project.rootPath }
-    let rest = visible.filter { !$0.isPinned && $0.path != project.rootPath }
+    let children = project.childWorktrees
+    let main = children.filter { $0.path == project.rootPath }
+    let pinned = children.filter { $0.isPinned && $0.path != project.rootPath }
+    let rest = children.filter { !$0.isPinned && $0.path != project.rootPath }
     let projectPending = pendings.filter { $0.projectID == project.id }
     return main.map(SidebarRow.worktree)
       + pinned.map(SidebarRow.worktree)
       + projectPending.map(SidebarRow.pending)
       + rest.map(SidebarRow.worktree)
-  }
-
-  /// Compat shim for the hotkey-enumeration path (`treeBody.hotkeyIndex`),
-  /// which only assigns slots to real worktrees. Derived from
-  /// `orderedSidebarRows` so the segment ordering stays in one place; the
-  /// `pendings: []` argument is correct for hotkey purposes — pending rows
-  /// never claim a `⌃N` slot per design doc §pending 段 用户操作.
-  static func orderedVisibleWorktrees(in project: Project) -> [Worktree] {
-    orderedSidebarRows(project: project, pendings: []).compactMap { row in
-      if case .worktree(let w) = row { return w } else { return nil }
-    }
   }
 
   var body: some View {
@@ -219,7 +209,7 @@ struct HierarchySidebarView: View {
     // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
-    let visibleProjects = catalog.sorted(filteredProjects(catalog: catalog))
+    let visibleProjects = catalog.sidebarProjects
     let untaggedExists = catalog.projects.contains { $0.tagIDs.isEmpty }
 
     let isReordering = store.isReorderingProjects
@@ -546,26 +536,6 @@ struct HierarchySidebarView: View {
     }
   }
 
-  // MARK: - Tag filter
-
-  /// Apply `Catalog.activeTagFilter` to `catalog.projects`. Linear scan;
-  /// project counts are small enough (<200) that a per-render filter is
-  /// sub-millisecond.
-  private func filteredProjects(catalog: Catalog) -> [Project] {
-    switch catalog.activeTagFilter {
-    case .all:
-      return catalog.projects
-    case .tags(let set) where set.isEmpty:
-      // Empty `.tags` is normalized to `.all` by the manager but defend
-      // here too — a corrupted catalog shouldn't hide every project.
-      return catalog.projects
-    case .tags(let set):
-      return catalog.projects.filter { !$0.tagIDs.isDisjoint(with: set) }
-    case .untagged:
-      return catalog.projects.filter { $0.tagIDs.isEmpty }
-    }
-  }
-
   // MARK: - Tree
 
   @ViewBuilder
@@ -575,22 +545,14 @@ struct HierarchySidebarView: View {
     if projects.isEmpty {
       emptyState
     } else {
-      // Top-down flat enumeration of visible worktrees across projects, following the
-      // same main → pinned → others partition the rows themselves render in. Used to
-      // assign `⌃1`…`⌃9` plus `⌃0` (10th slot) and reveal matching hints while ⌘ is
-      // held. Archived rows live in a separate sheet and never claim a hotkey slot.
-      let hotkeyIndex: [WorktreeID: Int] = {
-        var map: [WorktreeID: Int] = [:]
-        var slot = 0
-        for project in projects {
-          for worktree in Self.orderedVisibleWorktrees(in: project) {
-            if slot >= 10 { return map }
-            map[worktree.id] = slot
-            slot += 1
-          }
-        }
-        return map
-      }()
+      // `⌃1`…`⌃9` plus `⌃0` (10th slot) go to the first ten selectable rows on
+      // screen, top-down (`Catalog.sidebarSelectionOrder`: Project rows that
+      // stand for a folder, and the rows of expanded Projects); matching hints
+      // show while ⌘ is held. Archived, pending, and collapsed rows claim none.
+      let hotkeyIndex: [WorktreeID: Int] = Dictionary(
+        hierarchyManager.catalog.sidebarSelectionOrder.prefix(10).enumerated()
+          .map { ($0.element.worktreeID, $0.offset) },
+        uniquingKeysWith: { first, _ in first })
       // List + .listStyle(.sidebar) with NO `.scrollIndicators(.*)` modifier.
       // On macOS 26 / NavigationSplitView sidebar columns, both `.hidden` and
       // `.never` silently collapse the List's top titlebar safe area — the
@@ -808,37 +770,16 @@ struct HierarchySidebarView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       case .loading, .ready:
-        // Header is its own List row. DisclosureGroup used to nest the worktree rows
-        // inside the header row — that made AppKit animate the single wrapping row's
-        // height on every expand / collapse, visibly jittering the Project name.
-        // Emitting header + each worktree as SIBLING rows lets NSTableView handle
-        // expansion as plain row insert / remove instead.
-        Button {
-          var txn = Transaction()
-          txn.disablesAnimations = true
-          _ = withTransaction(txn) {
-            store.send(.toggleProjectExpansion(project.id))
-          }
-        } label: {
-          ProjectHeaderRow(
-            project: project,
-            store: store,
-            gitHubStore: gitHubStore
-          )
-        }
-        .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
+        projectRow(project, hotkeySlot: project.rowWorktree.flatMap { hotkeyIndex[$0.id] })
         if isExpanded {
           // Render the four segments individually so pinned and unpinned
           // each own their own ForEach + .onMove (per design doc §渲染合并
           // / 拖拽). Pending rows render in source order between pinned
           // and unpinned; main and pending segments do not admit reorder.
-          let visible = project.worktrees.filter { !$0.archived }
-          let mainRows = visible.filter { $0.path == project.rootPath }
-          let pinnedRows = visible.filter { $0.isPinned && $0.path != project.rootPath }
-          let unpinnedRows = visible.filter { !$0.isPinned && $0.path != project.rootPath }
+          let children = project.childWorktrees
+          let mainRows = children.filter { $0.path == project.rootPath }
+          let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
+          let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
           let pendingRows = store.pendingWorktrees.filter { $0.projectID == project.id }
           ForEach(mainRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
@@ -870,6 +811,94 @@ struct HierarchySidebarView: View {
           }
         }
       }
+    }
+  }
+
+  // MARK: - Project row
+
+  /// A Project's own row. When the Project stands for a folder of its own
+  /// (`Project.rowWorktree`: a plain folder, a remote folder, a workspace),
+  /// the row is that folder: selecting it opens the folder the way a worktree
+  /// row opens a worktree, and only the chevron opens and closes the rows
+  /// under it. A git Project's row is not selectable: a click anywhere on it
+  /// opens or closes its worktrees, as the chevron does.
+  ///
+  /// The row and the rows under it are separate sibling List rows.
+  /// DisclosureGroup used to nest the worktree rows inside the Project row —
+  /// that made AppKit animate the single wrapping row's height on every
+  /// expand / collapse, visibly jittering the Project name. Siblings let
+  /// NSTableView handle expansion as plain row insert / remove instead.
+  @ViewBuilder
+  private func projectRow(_ project: Project, hotkeySlot: Int?) -> some View {
+    let toggleExpansion = {
+      var txn = Transaction()
+      txn.disablesAnimations = true
+      _ = withTransaction(txn) {
+        store.send(.toggleProjectExpansion(project.id))
+      }
+    }
+    if let root = project.rowWorktree {
+      let hotkeyNumber = hotkeySlot.map { $0 + 1 }
+      ProjectHeaderRow(
+        project: project,
+        store: store,
+        gitHubStore: gitHubStore,
+        rowWorktree: root,
+        isRowSelected: currentSelection.worktreeID == root.id,
+        isRowBusy: hierarchyManager.worktreeIsDirty(root.id) || anyAgentWorking(in: root),
+        hotkeyHint: commandKeyObserver.isCommandHeld ? hotkeyNumber : nil,
+        onToggleExpansion: toggleExpansion
+      ) {
+        runScriptPingAccessory(for: root, in: project)
+      }
+      .background(alignment: .topLeading) {
+        hotkeyChord(hotkeyNumber, worktreeID: root.id, projectID: project.id)
+      }
+      // Tagged like a worktree row: the native List selection paints its
+      // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
+      .tag(root.id)
+      .id(root.id)
+      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+      .listRowSeparator(.hidden)
+      .contextMenu { worktreeContextMenu(worktree: root, project: project) }
+    } else {
+      Button(action: toggleExpansion) {
+        ProjectHeaderRow(
+          project: project,
+          store: store,
+          gitHubStore: gitHubStore,
+          onToggleExpansion: toggleExpansion
+        ) {
+          EmptyView()
+        }
+      }
+      .buttonStyle(.plain)
+      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+      .listRowBackground(Color.clear)
+      .listRowSeparator(.hidden)
+    }
+  }
+
+  /// The per-row hotkey still requires a Button to bind to. Mounted as a 0×0
+  /// invisible background so the shortcut lives in the responder chain
+  /// without painting pixels or competing with List's hit-test for clicks
+  /// (zero frame == zero hit area). The chord itself comes from the shortcut
+  /// registry — defaults are ⌃1..⌃9 / ⌃0 but a user rebind takes effect here
+  /// without restart.
+  @ViewBuilder
+  private func hotkeyChord(
+    _ hotkeyNumber: Int?, worktreeID: WorktreeID, projectID: ProjectID
+  ) -> some View {
+    if let hotkeyNumber, let commandID = CommandID.selectWorktreeAt(index: hotkeyNumber) {
+      Button {
+        store.send(.worktreeRowTapped(worktreeID, inProject: projectID))
+      } label: {
+        EmptyView()
+      }
+      .appKeyboardShortcut(commandID, in: resolvedShortcuts)
+      .frame(width: 0, height: 0)
+      .opacity(0)
+      .accessibilityHidden(true)
     }
   }
 
@@ -962,17 +991,7 @@ struct HierarchySidebarView: View {
       // always pins to the right edge of the row instead of being shoved leftwards by
       // the pill's intrinsic width. Visible only while ⌘ is held.
       if let hotkeyNumber, commandKeyObserver.isCommandHeld {
-        Text("⌃\(hotkeyNumber == 10 ? "0" : String(hotkeyNumber))")
-          .font(.caption2.monospaced())
-          .foregroundStyle(.secondary)
-          .padding(.horizontal, 4)
-          .padding(.vertical, 1)
-          .overlay(
-            RoundedRectangle(cornerRadius: 3)
-              .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-          )
-          .padding(.leading, 6)
-          .accessibilityHidden(true)
+        SidebarHotkeyHint(number: hotkeyNumber)
       }
     }
     // Worktree rows are real List children. Selection chrome is owned by
@@ -1021,18 +1040,12 @@ struct HierarchySidebarView: View {
   /// A row's name line and the caption under it. A worktree reads name over
   /// branch, and the branch line is dropped when it restates the name — the
   /// common case (main/main, test0003/test0003) would otherwise double every
-  /// row's height for nothing. A workspace's rows turn that around:
-  /// - The root row names its kind, "Workspace", on one line: the Project
-  ///   header already carries the folder's name, and a second "handos" under
-  ///   a "handos" header read as one more repository.
-  /// - A checkout leads with its branch, the thing that tells checkouts
-  ///   apart, and its folder — named after its project — goes below.
+  /// row's height for nothing. A workspace's checkout turns that around: it
+  /// leads with its branch, the thing that tells checkouts apart, and its
+  /// folder — named after its project — goes below.
   private func rowLabels(
-    for worktree: Worktree, in project: Project, isWorkspaceRoot: Bool
+    for worktree: Worktree, in project: Project
   ) -> (title: String, caption: String?) {
-    if isWorkspaceRoot {
-      return ("Workspace", nil)
-    }
     guard let branch = worktree.branch, branch != worktree.name else {
       return (worktree.name, nil)
     }
@@ -1055,10 +1068,8 @@ struct HierarchySidebarView: View {
     // shared computed property — `gitRoot == nil` + path match is the same
     // pair already used to suppress git affordances elsewhere in this view.
     let isSyntheticWorktree = isMainCheckout && project.gitRoot == nil
-    let isWorkspaceRoot = isMainCheckout && project.isWorkspace
-    let (rowTitle, rowCaption) = rowLabels(for: worktree, in: project, isWorkspaceRoot: isWorkspaceRoot)
-    let leadingGlyph: WorktreeRowIcon.LeadingGlyph =
-      isWorkspaceRoot ? .workspaceRoot : (isSyntheticWorktree ? .folder : .gitAnchor)
+    let (rowTitle, rowCaption) = rowLabels(for: worktree, in: project)
+    let leadingGlyph: WorktreeRowIcon.LeadingGlyph = isSyntheticWorktree ? .folder : .gitAnchor
     // Plain content (no Button wrapping). With native `List(selection:)`,
     // the row's tap is owned by AppKit's NSTableView so the click also
     // promotes the table to first responder — that's what flips the
@@ -1148,26 +1159,8 @@ struct HierarchySidebarView: View {
     }
     .contentShape(Rectangle())
 
-    // The per-row hotkey still requires a Button to bind to. Mount a
-    // 0×0 invisible Button via `.background` so the shortcut lives in
-    // the responder chain without painting pixels or competing with
-    // List's hit-test for clicks (zero frame == zero hit area). The
-    // chord itself comes from the shortcut registry — defaults are
-    // ⌃1..⌃9 / ⌃0 but a user rebind takes effect here without restart.
-    if let hotkeyNumber, let commandID = CommandID.selectWorktreeAt(index: hotkeyNumber) {
-      content.background(alignment: .topLeading) {
-        Button {
-          store.send(.worktreeRowTapped(worktree.id, inProject: project.id))
-        } label: {
-          EmptyView()
-        }
-        .appKeyboardShortcut(commandID, in: resolvedShortcuts)
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .accessibilityHidden(true)
-      }
-    } else {
-      content
+    content.background(alignment: .topLeading) {
+      hotkeyChord(hotkeyNumber, worktreeID: worktree.id, projectID: project.id)
     }
   }
 
@@ -1870,13 +1863,24 @@ struct HierarchySidebarView: View {
 
 /// Dedicated subview so `@State var isHovering` is per-row. Hovering is a
 /// view-local concern — not worth promoting to reducer state.
-private struct ProjectHeaderRow: View {
+private struct ProjectHeaderRow<Accessory: View>: View {
   let project: Project
   @Bindable var store: StoreOf<HierarchySidebarFeature>
   /// Read-only access to per-Worktree PR snapshots so the ⋯ menu can resolve
   /// the project's merged Worktrees for the "… All Merged Worktrees" items.
   /// Nil in previews — the items then render disabled.
   var gitHubStore: StoreOf<GitHubFeature>?
+  /// The folder this row stands for (`Project.rowWorktree`), nil for a git
+  /// Project. The row then carries that worktree's selection, busy state,
+  /// unread bell, and ⌃N hint, the way a worktree row does.
+  var rowWorktree: Worktree?
+  var isRowSelected = false
+  var isRowBusy = false
+  /// The ⌃N number to show, while ⌘ is held.
+  var hotkeyHint: Int?
+  let onToggleExpansion: () -> Void
+  /// Trailing indicators for `rowWorktree`, ahead of the hover controls.
+  @ViewBuilder let accessory: () -> Accessory
   @Environment(RollupIndexProvider.self) private var rollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(HierarchyManager.self) private var hierarchyManager
@@ -1884,6 +1888,7 @@ private struct ProjectHeaderRow: View {
   @State private var isHovering = false
   @State private var isPlusHovering = false
   @State private var isMenuHovering = false
+  @State private var isChevronHovering = false
 
   /// Non-archived, non-main Worktrees in this project whose GitHub PR is
   /// merged. Drives the Project ⋯ menu's "Archive / Remove All Merged
@@ -1917,30 +1922,41 @@ private struct ProjectHeaderRow: View {
     return parts.joined(separator: " · ")
   }
 
-  /// Project name tint — hover-driven only. The Project color deliberately
-  /// does *not* reach the name: the icon to its left already carries it, and
-  /// tinting both painted the same signal twice and cost the name the
-  /// primary/secondary hover contrast every other sidebar row keeps.
+  /// Project name tint — hover- and selection-driven. The Project color
+  /// deliberately does *not* reach the name: the icon to its left already
+  /// carries it, and tinting both painted the same signal twice and cost the
+  /// name the primary/secondary hover contrast every other sidebar row keeps.
   private var projectNameColor: Color {
-    isHovering ? .primary : .secondary
+    isHovering || isRowSelected ? .primary : .secondary
+  }
+
+  /// L4 (the Project, collapsed, has unread inside) or, for a row that
+  /// stands for a folder, L3 (that folder's worktree has unread).
+  private var hasUnread: Bool {
+    let notifications = settingsStore.settings.notifications
+    let projectUnread =
+      rollup?.current.unreadProjects.contains(project.id) == true && notifications.projectBellEnabled
+    let rowUnread =
+      rowWorktree.map { rollup?.current.unreadWorktrees.contains($0.id) == true } == true
+      && notifications.worktreeBellEnabled
+    return projectUnread || rowUnread
   }
 
   var body: some View {
-    let hasUnread =
-      rollup?.current.unreadProjects.contains(project.id) == true
-      && settingsStore.settings.notifications.projectBellEnabled
     HStack(spacing: 6) {
-      // L4 unread indicator. When the project is in `unreadProjects`
-      // (rollup rule = project collapsed + unread inside), the leading
-      // project icon swaps for a red bell glyph — same pattern as
-      // the worktree row icon. Click target / disclosure semantics are
-      // unchanged: the parent Button still owns the tap.
+      // The leading slot shows the Project icon; a running command in the
+      // folder this row stands for swaps in a spinner, and unread swaps in a
+      // bell — the same pattern as the worktree row icon.
       //
-      // The icon occupies the slot the disclosure chevron used to hold, and
-      // does not change with expansion — the row carries the Project's
-      // identity, not its disclosure state.
+      // The icon does not change with expansion — the row carries the
+      // Project's identity; the trailing chevron carries its disclosure state.
       Group {
-        if hasUnread {
+        if isRowBusy {
+          ProgressView()
+            .controlSize(.small)
+            .frame(width: 14, height: 14)
+            .accessibilityLabel("Running a command")
+        } else if hasUnread {
           Image(systemName: "bell.fill")
             .resizable()
             .aspectRatio(contentMode: .fit)
@@ -1983,6 +1999,7 @@ private struct ProjectHeaderRow: View {
         }
       }
       Spacer(minLength: 4)
+      accessory()
       // Keep the hover chrome from collapsing row width when hidden —
       // use opacity, not conditional rendering.
       HStack(spacing: 2) {
@@ -2111,8 +2128,23 @@ private struct ProjectHeaderRow: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .onHover { isMenuHovering = $0 }
+        // Opens and closes the rows under the Project. The only way to do so
+        // on a row that stands for a folder, where a click selects instead.
+        if project.hasChildRows {
+          Button(action: onToggleExpansion) {
+            iconLabel(systemName: "chevron.right", isHovering: isChevronHovering)
+              .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
+              .accessibilityLabel(project.isExpanded ? "Collapse" : "Expand")
+          }
+          .buttonStyle(.plain)
+          .onHover { isChevronHovering = $0 }
+          .help(project.isExpanded ? "Collapse" : "Expand")
+        }
       }
       .opacity(isHovering ? 1 : 0)
+      if let hotkeyHint {
+        SidebarHotkeyHint(number: hotkeyHint)
+      }
     }
     .contentShape(Rectangle())
     .onHover { isHovering = $0 }
@@ -2132,6 +2164,26 @@ private struct ProjectHeaderRow: View {
         Circle().fill(Color.primary.opacity(isHovering ? 0.08 : 0))
       )
       .contentShape(Circle())
+  }
+}
+
+/// The `⌃N` chord a sidebar row answers to, shown at its trailing edge while
+/// ⌘ is held. Slot 10 reads `⌃0`.
+private struct SidebarHotkeyHint: View {
+  let number: Int
+
+  var body: some View {
+    Text("⌃\(number == 10 ? "0" : String(number))")
+      .font(.caption2.monospaced())
+      .foregroundStyle(.secondary)
+      .padding(.horizontal, 4)
+      .padding(.vertical, 1)
+      .overlay(
+        RoundedRectangle(cornerRadius: 3)
+          .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+      )
+      .padding(.leading, 6)
+      .accessibilityHidden(true)
   }
 }
 

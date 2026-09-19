@@ -20,6 +20,8 @@
 
 `HierarchySidebarView` 渲染当前 Catalog 的**扁平 Project 列表**，每个 Project 是一个 section，其下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），当前露出排序（reorder）与刷新两个动作。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
 
+**Project 行。** git Project 的行不可选中：点整行或行右侧悬停出现的 `>` 箭头开合其 Worktree 行，主检出（星标）是第一个子行。没有自己仓库的 Project——普通文件夹、远程文件夹、workspace——的行就是它的根目录（`Project.rowWorktree`：`path == rootPath` 的合成 worktree）：行打上该 worktree 的 tag，与 worktree 行一样可选中、打开终端，并承载它的忙碌转圈、未读铃铛、⌃N 与右键菜单；它下面不再列根目录行，于是文件夹没有子行，workspace 只列检出目录，开合只能用箭头。⌃1…⌃0 与 ⌘⌃↑ / ⌘⌃↓ 共用 `Catalog.sidebarSelectionOrder`：按侧栏的 Tag 过滤与排序，只数屏幕上的可选行（折叠 Project 的子行、加载失败的 Project 不计）；揭示（palette、通知跳转、Agents 面板）选中的若是 Project 行自身，不展开该 Project。
+
 ### 不变量
 
 - **结构数据直读 `@Environment(HierarchyManager.self)`，不进 TCA state。** `HierarchySidebarView` 从 `@Observable` 的 `HierarchyManager.catalog` 直接读 Project / Worktree 树，而非把它镜像进 reducer state。这是一个刻意的状态归属权衡：结构数据有单一事实来源（catalog），catalog 任意变更都经普通 SwiftUI observation 触发重渲染，reducer 不需要平行的 `.catalogChanged` 派发。reducer 只持有**交互意图**与瞬态 UI 状态。未读点的读取同理——直读 `InboxStore`（`@Observable`），它在每次 inbox 变更时 republish。

@@ -1651,7 +1651,7 @@ struct RootFeature {
         // Scroll the now-selected worktree into view. Done before the
         // tab/pane guards so a teardown race that drops the tab still leaves
         // the worktree revealed.
-        revealWorktreeInSidebar(projectID: address.projectID, state: &state)
+        revealWorktreeInSidebar(address.worktreeID, in: address.projectID, state: &state)
         guard
           hierarchyClient.snapshot()
             .projects.first(where: { $0.id == address.projectID })?
@@ -1973,7 +1973,7 @@ struct RootFeature {
         try? hierarchyClient.selectWorktree(source.worktreeID, source.projectID)
         // Scroll the deep-linked worktree into view before the tab/pane
         // guards so a teardown race still leaves the worktree revealed.
-        revealWorktreeInSidebar(projectID: source.projectID, state: &state)
+        revealWorktreeInSidebar(source.worktreeID, in: source.projectID, state: &state)
 
         guard
           let worktree = hierarchyClient.snapshot()
@@ -2258,7 +2258,7 @@ struct RootFeature {
 
       case .selectAdjacentWorktreeRequested(let direction):
         let catalog = hierarchyClient.snapshot()
-        let order = Self.flattenedWorktreeOrder(in: catalog)
+        let order = catalog.sidebarSelectionOrder
         guard !order.isEmpty else { return .none }
         let currentIndex =
           order.firstIndex(where: { $0.worktreeID == state.selection.worktreeID }) ?? -1
@@ -2344,8 +2344,15 @@ struct RootFeature {
     )
   }
 
-  private func revealWorktreeInSidebar(projectID: ProjectID, state: inout State) {
-    hierarchyClient.setProjectExpanded(projectID, true)
+  /// Brings a worktree's row on screen: opens its Project unless the
+  /// worktree is the Project row itself, which shows either way.
+  private func revealWorktreeInSidebar(
+    _ worktreeID: WorktreeID, in projectID: ProjectID, state: inout State
+  ) {
+    let project = hierarchyClient.snapshot().projects.first { $0.id == projectID }
+    if project?.rowWorktree?.id != worktreeID {
+      hierarchyClient.setProjectExpanded(projectID, true)
+    }
     state.sidebarVisible = true
     state.revealSelectionTrigger = UUID()
   }
@@ -2388,7 +2395,7 @@ struct RootFeature {
       // The palette is keyboard-only, so the user can't act on a highlighted
       // row that's scrolled off-screen or hidden under a collapsed project —
       // reveal it. Selection itself still routes through the sidebar.
-      revealWorktreeInSidebar(projectID: projectID, state: &state)
+      revealWorktreeInSidebar(worktreeID, in: projectID, state: &state)
       return .send(
         .sidebar(.worktreeRowTapped(worktreeID, inProject: projectID))
       )
@@ -3014,26 +3021,6 @@ struct RootFeature {
         fallback: gitHubFetchUnits(in: project).first)
     else { return paused }
     return .pollTargetChanged(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
-  }
-
-  /// Flat list of (projectID, worktreeID) tuples in the order the sidebar
-  /// renders: projects in catalog order; within each project, main row
-  /// first, then pinned, then unpinned. Archived rows are excluded — they
-  /// only appear in the Archived sheet, not the navigable list.
-  static func flattenedWorktreeOrder(
-    in catalog: Catalog
-  ) -> [(projectID: ProjectID, worktreeID: WorktreeID)] {
-    var result: [(projectID: ProjectID, worktreeID: WorktreeID)] = []
-    for project in catalog.projects {
-      let visible = project.worktrees.filter { !$0.archived }
-      let main = visible.filter { $0.path == project.rootPath }
-      let pinned = visible.filter { $0.isPinned && $0.path != project.rootPath }
-      let unpinned = visible.filter { !$0.isPinned && $0.path != project.rootPath }
-      for worktree in main + pinned + unpinned {
-        result.append((projectID: project.id, worktreeID: worktree.id))
-      }
-    }
-    return result
   }
 
 }

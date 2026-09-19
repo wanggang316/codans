@@ -30,7 +30,7 @@ struct WorktreeHeaderInfoLabel: View {
     }()
     let isSynthetic = isMainCheckout && project.gitRoot == nil
     let glyph: WorktreeRowIcon.LeadingGlyph =
-      isMainCheckout && project.isWorkspace ? .workspaceRoot : (isSynthetic ? .folder : .gitAnchor)
+      isFolderRoot && project.isWorkspace ? .workspaceRoot : (isSynthetic ? .folder : .gitAnchor)
     let hasUnread = notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
 
     HStack(spacing: 8) {
@@ -67,10 +67,11 @@ struct WorktreeHeaderInfoLabel: View {
 
   private var isMainCheckout: Bool { worktree.path == project.rootPath }
 
-  /// The workspace root folder: no branch to show and no repository to list
-  /// branches from, so the headline names the kind and is not a popover
-  /// target.
-  private var isWorkspaceRoot: Bool { isMainCheckout && project.isWorkspace }
+  /// The folder a Project row stands for (`Project.rowWorktree`): a plain
+  /// folder, a remote folder, or a workspace root. No branch to show and no
+  /// repository to list branches from, so the headline names the Project, as
+  /// its sidebar row does, and is not a popover target.
+  private var isFolderRoot: Bool { project.rowWorktree?.id == worktree.id }
 
   /// Project name tint in the caption row. Uses the project's configured
   /// color when set; otherwise keeps the caption `.secondary` hue so a
@@ -83,7 +84,7 @@ struct WorktreeHeaderInfoLabel: View {
 
   @ViewBuilder
   private var branchRowButton: some View {
-    if isWorkspaceRoot {
+    if isFolderRoot {
       branchRowContent
         .accessibilityIdentifier("worktree_header.branch_text")
         .accessibilityLabel(branchTitle)
@@ -159,7 +160,11 @@ struct WorktreeHeaderInfoLabel: View {
     // row 1 owns as the click target.
     let folderRestatesBranch = worktree.name == (worktree.branch ?? "")
     return HStack(spacing: 4) {
-      if !folderRestatesBranch {
+      if isFolderRoot {
+        // The headline already names the Project; say what kind of folder it
+        // is. A path would be wider than the toolbar item can give it.
+        Text(project.isWorkspace ? "Workspace" : "Folder")
+      } else if !folderRestatesBranch {
         Text(worktree.name)
         Text("· \(project.name)")
           .foregroundStyle(projectNameColor)
@@ -192,7 +197,7 @@ struct WorktreeHeaderInfoLabel: View {
   /// Source of truth is the model field. Detached HEAD renders explicit
   /// text rather than a `git rev-parse` short sha.
   private var branchTitle: String {
-    if isWorkspaceRoot { return "Workspace" }
+    if isFolderRoot { return project.name }
     return worktree.branch ?? "(detached)"
   }
 }

@@ -1,6 +1,6 @@
 # 设计文档：Workspace
 
-**状态：** 已上线（打开已有 workspace、创建与添加成员、源 Project 标记、成员与整体移除、按成员仓库取 PR 并在根行聚合）
+**状态：** 已上线（打开已有 workspace、创建与添加成员、源 Project 标记、成员与整体移除、按成员仓库取 PR 并在 workspace 行聚合）
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -21,11 +21,11 @@
 
 ### 目标
 
-- 把一个已有 manifest 的文件夹加进侧栏即成为 workspace：根行 + 子行，分支实时刷新，`tree --json` 报 `kind: workspace`。（M1）
+- 把一个已有 manifest 的文件夹加进侧栏即成为 workspace：workspace 行（即根目录）+ 子行，分支实时刷新，`tree --json` 报 `kind: workspace`。（M1）
 - 从侧栏已注册的本地 Project 或任意本地仓库路径创建 workspace，CLI 优先（`codans workspace create/add`），GUI sheet 走同一条编排。（M2）
 - 成员可增删；移除 workspace 默认只删条目，显式选择才动磁盘与分支。（M2/M3）
 - 子仓库在其源 Project 中仍可见、带「in workspace X」标记，但所有破坏性批量操作绕开它。（M2）
-- 子仓库 PR 状态按仓库取数，根行聚合显示。（M3）
+- 子仓库 PR 状态按仓库取数，workspace 行聚合显示。（M3）
 - 成员来源补齐：远程 URL（先 clone 到用户选定的本地位置，之后与本地仓库一致）；检出模式补「使用已有远程跟踪分支」（本地同名分支存在时显式选 Keep / Reset，默认 Keep）。（M4）
 
 ### 非目标
@@ -124,10 +124,10 @@ ProjectReconciler.reconcile
 |---|---|
 | 侧栏 Project 行 | 未设置自定义图标时默认显示 `square.stack.3d.up`（`ProjectIconView.defaultSymbol(for:)`，Settings 侧栏同源）；`+` 对 workspace 是「Add Repository…」（打开 add 模式的 New Workspace sheet），对其余 kind 沿用 `supportsWorktrees`；`⋯` 菜单隐藏 Prune / Archive-Remove All Merged |
 | 子行上下文菜单 | 保留 Pin，隐藏 Archive / Remove；`HierarchySidebarFeature` 的 `worktreeArchiveTapped` / `worktreeRemoveTapped` 以 `isWorkspaceChild` 再守一次（快捷键不能绕过） |
-| Header | 根行标题「Workspace」，不是分支 popover 目标 |
+| Header | 根目录的标题是 workspace 名、第二行「Workspace」（普通文件夹项目的第二行为「Folder」），不是分支 popover 目标 |
 | 分支切换器 | `blockedBranches` 按 `repoRoot(for:)` 分组，只统计同仓库的兄弟行 |
 | 命令面板 | workspace 隐藏 `worktree.new`（并对 `.dir` 一并隐藏）、`worktree.archive` / `worktree.close` / `worktree.open-project-on-github`、`project.prune-stale` 与 merged 批量 |
-| 侧栏根行 | 标题固定为 "Workspace"，单行、不带路径（header 已经写了文件夹名，再写一次会被读成又一个仓库）；图标为 `folder`（`WorktreeRowIcon.LeadingGlyph.workspaceRoot`，与目录项目的文件夹行同形，读屏仍称 workspace root）；子行沿用普通 worktree 行的图标与缩进，与根行同级；子行与普通 worktree 行上下颠倒：分支在上、文件夹名在下（区分各子行的是分支，文件夹名随项目；两者相同时只显示一行，`rowLabels(for:in:isWorkspaceRoot:)`）；header 信息标签同源 |
+| 侧栏 | 没有单独的根行：workspace 的 Project 行就是根目录（`Project.rowWorktree`），可选中并打开根目录终端，见 [main-window.md](main-window.md) 的 Project 行；其下只列检出目录，沿用普通 worktree 行的图标与缩进，分支在上、文件夹名在下（区分各子行的是分支，文件夹名随项目；两者相同时只显示一行，`rowLabels(for:in:)`）；开合只能用行右侧悬停出现的 `>` 箭头；header 信息标签的图标仍为 `folder`（`WorktreeRowIcon.LeadingGlyph.workspaceRoot`，读屏称 workspace root） |
 | Settings | `visibleSections(.workspace) = [general, workspace, editor, environment]`：`workspace` 节标题「Projects」，每个子目录一行（文件夹名 + 所属仓库路径，右侧分支），读侧栏同一份 catalog 行，增删成员即时反映；侧栏图标区分 |
 | IPC | `hierarchy.createWorktree` 对 workspace 返回 `invalidParams`；`hierarchy.addProject` 见 manifest 即注册为 workspace；`hierarchy.removeWorktree` 拒绝根行（`conflict`） |
 | CLI | `codans tree` 的 Project 行带 `[workspace]`，`--json` 增加 `kind` 与 worktree 的 `sourceGitRoot` |
