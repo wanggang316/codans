@@ -127,7 +127,7 @@ ProjectReconciler.reconcile
 | Header | 根行标题「Workspace」，不是分支 popover 目标 |
 | 分支切换器 | `blockedBranches` 按 `repoRoot(for:)` 分组，只统计同仓库的兄弟行 |
 | 命令面板 | workspace 隐藏 `worktree.new`（并对 `.dir` 一并隐藏）、`worktree.archive` / `worktree.close` / `worktree.open-project-on-github`、`project.prune-stale` 与 merged 批量 |
-| 侧栏根行 | 标题固定为 "Workspace"，副标题为 `~` 缩写的根路径（header 已经写了文件夹名，再写一次会被读成又一个仓库）；图标为 `star.fill`（`WorktreeRowIcon.LeadingGlyph.workspaceRoot`，与默认分支的锚点标记同形）；子行沿用普通 worktree 行的图标，并比根行再缩进一级（`workspaceCheckoutIndent` = 20pt，图标对齐根行标题），表示它们在这个文件夹里；header 信息标签同源 |
+| 侧栏根行 | 标题固定为 "Workspace"，单行、不带路径（header 已经写了文件夹名，再写一次会被读成又一个仓库）；图标为 `star.fill`（`WorktreeRowIcon.LeadingGlyph.workspaceRoot`，与默认分支的锚点标记同形）；子行沿用普通 worktree 行的图标，并比根行再缩进一级（`workspaceCheckoutIndent` = 20pt，图标对齐根行标题），表示它们在这个文件夹里；子行与普通 worktree 行上下颠倒：分支在上、文件夹名在下（区分各子行的是分支，文件夹名随项目；两者相同时只显示一行，`rowLabels(for:in:isWorkspaceRoot:)`）；header 信息标签同源 |
 | Settings | `visibleSections(.workspace) = [general, workspace, editor, environment]`：`workspace` 节标题「Projects」，每个子目录一行（文件夹名 + 所属仓库路径，右侧分支），读侧栏同一份 catalog 行，增删成员即时反映；侧栏图标区分 |
 | IPC | `hierarchy.createWorktree` 对 workspace 返回 `invalidParams`；`hierarchy.addProject` 见 manifest 即注册为 workspace；`hierarchy.removeWorktree` 拒绝根行（`conflict`） |
 | CLI | `codans tree` 的 Project 行带 `[workspace]`，`--json` 增加 `kind` 与 worktree 的 `sourceGitRoot` |

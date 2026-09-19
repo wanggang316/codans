@@ -1028,6 +1028,27 @@ struct HierarchySidebarView: View {
     project.isWorkspace && worktree.path != project.rootPath
   }
 
+  /// A row's name line and the caption under it. A worktree reads name over
+  /// branch, and the branch line is dropped when it restates the name — the
+  /// common case (main/main, test0003/test0003) would otherwise double every
+  /// row's height for nothing. A workspace's rows turn that around:
+  /// - The root row names its kind, "Workspace", on one line: the Project
+  ///   header already carries the folder's name, and a second "handos" under
+  ///   a "handos" header read as one more repository.
+  /// - A checkout leads with its branch, the thing that tells checkouts
+  ///   apart, and its folder — named after its project — goes below.
+  private func rowLabels(
+    for worktree: Worktree, in project: Project, isWorkspaceRoot: Bool
+  ) -> (title: String, caption: String?) {
+    if isWorkspaceRoot {
+      return ("Workspace", nil)
+    }
+    guard let branch = worktree.branch, branch != worktree.name else {
+      return (worktree.name, nil)
+    }
+    return isWorkspaceCheckout(worktree, in: project) ? (branch, worktree.name) : (worktree.name, branch)
+  }
+
   /// The selection-tappable portion of a Worktree row. Extracted so `worktreeRow` fits
   /// under swiftlint's `function_body_length` and so the hotkey-hint + keyboard shortcut
   /// wiring stays close to the button those bindings drive.
@@ -1044,12 +1065,8 @@ struct HierarchySidebarView: View {
     // shared computed property — `gitRoot == nil` + path match is the same
     // pair already used to suppress git affordances elsewhere in this view.
     let isSyntheticWorktree = isMainCheckout && project.gitRoot == nil
-    // The workspace root row names its kind, not the folder: the Project
-    // header already carries the folder's name, and a second "handos" under
-    // a "handos" header read as one more repository. The path takes the
-    // caption slot the branch would have used.
     let isWorkspaceRoot = isMainCheckout && project.isWorkspace
-    let rowTitle = isWorkspaceRoot ? "Workspace" : worktree.name
+    let (rowTitle, rowCaption) = rowLabels(for: worktree, in: project, isWorkspaceRoot: isWorkspaceRoot)
     let leadingGlyph: WorktreeRowIcon.LeadingGlyph =
       isWorkspaceRoot ? .workspaceRoot : (isSyntheticWorktree ? .folder : .gitAnchor)
     // Plain content (no Button wrapping). With native `List(selection:)`,
@@ -1125,17 +1142,8 @@ struct HierarchySidebarView: View {
           // so the whole row reads as one in-progress unit.
           LifecyclePhaseLineView(progress: lifecycle)
             .shimmer(isActive: !reduceMotion)
-        } else if isWorkspaceRoot {
-          Text((project.rootPath as NSString).abbreviatingWithTildeInPath)
-            .font(.caption.monospaced())
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-        } else if let branch = worktree.branch, branch != worktree.name {
-          // Suppress the secondary branch line when it restates the worktree name —
-          // the common case (main/main, test0003/test0003) otherwise doubles every
-          // row height for zero information.
-          Text(branch)
+        } else if let rowCaption {
+          Text(rowCaption)
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
         }
