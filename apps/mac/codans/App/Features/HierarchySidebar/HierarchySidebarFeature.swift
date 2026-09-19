@@ -647,14 +647,10 @@ struct HierarchySidebarFeature {
     case .newWorkspaceTapped:
       // Only local git repositories can be members: a workspace checks
       // members out with `git worktree add`, which needs a local repository
-      // root, and a workspace inside a workspace is not a thing. The
-      // selected project, when eligible, is the first row.
-      let snapshot = hierarchyClient.snapshot()
-      let candidates = Self.workspaceCandidates(in: snapshot)
-      let preselected = snapshot.displayedSelectedProjectID.flatMap { id in
-        candidates.contains { $0.id == id } ? id : nil
-      }
-      state.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: candidates, preselected: preselected)
+      // root, and a workspace inside a workspace is not a thing. The list
+      // starts empty: every project is one the user added.
+      let candidates = Self.workspaceCandidates(in: hierarchyClient.snapshot())
+      state.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: candidates)
       return .none
 
     case .workspaceMembershipBadgeTapped(let membership):

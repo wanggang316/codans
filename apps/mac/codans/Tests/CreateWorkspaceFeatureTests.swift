@@ -85,20 +85,6 @@ struct CreateWorkspaceFeatureTests {
   // MARK: - Workspace fields
 
   @Test
-  func preselectedProjectBecomesTheFirstRowAndLoadsRefs() async {
-    let store = makeStore(Feature.State(candidates: [app, api], preselected: app.id))
-    store.exhaustivity = .off(showSkippedAssertions: false)
-    await store.send(.onAppear)
-    await store.receive(\.member) {
-      $0.members[0].refs = .loaded(appRefs)
-    }
-    #expect(store.state.members.map(\.source) == [appSource])
-    #expect(store.state.members[0].name == "app")
-    #expect(store.state.preselected == nil)
-    #expect(store.state.availableCandidates == [api])
-  }
-
-  @Test
   func titleNamesTheFolderAndEveryUnnamedNewBranch() async {
     var initial = Feature.State(candidates: [app, api], locationPath: "/ws")
     initial.members = [member(1, appSource, name: "app"), member(2, apiSource, name: "api")]

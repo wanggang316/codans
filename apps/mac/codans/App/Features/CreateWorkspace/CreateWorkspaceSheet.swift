@@ -22,7 +22,6 @@ struct CreateWorkspaceSheet: View {
     .frame(width: 560)
     .frame(maxHeight: 760)
     .onAppear {
-      store.send(.onAppear)
       if !store.isAddMode { isTitleFocused = true }
     }
     // `item:`, not `isPresented:`: the dialog's state is gone the moment it

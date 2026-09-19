@@ -82,18 +82,13 @@ struct CreateWorkspaceFeature {
     var creation: CreationState = .idle
     var creationToken: UUID?
 
-    /// Added by `onAppear`, so its refs load through the normal path.
-    var preselected: ProjectID?
-
     init(
       candidates: [Candidate],
-      preselected: ProjectID? = nil,
       mode: Mode = .create,
       locationPath: String = WorkspaceLayout.defaultWorkspacesDirectory().path(percentEncoded: false)
     ) {
       self.mode = mode
       self.candidates = IdentifiedArray(uniqueElements: candidates)
-      self.preselected = preselected
       self.locationPath = locationPath
       if case .add(_, let title, _, _) = mode {
         titleDraft = title
@@ -397,7 +392,6 @@ struct CreateWorkspaceFeature {
   }
 
   enum Action: Equatable {
-    case onAppear
     // Workspace
     case titleChanged(String)
     case chooseLocationTapped
@@ -481,18 +475,6 @@ struct CreateWorkspaceFeature {
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .onAppear:
-        guard let preselected = state.preselected, let candidate = state.candidates[id: preselected] else {
-          return .none
-        }
-        state.preselected = nil
-        var member = MemberDraft(
-          id: uuid(), source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot), name: "")
-        member.name = state.suggestedName(for: member.source, excluding: nil)
-        member.refs = .loading
-        state.members.append(member)
-        return .merge(loadRefs(for: member), edited(&state))
-
       // MARK: Workspace
 
       case .titleChanged(let title):
