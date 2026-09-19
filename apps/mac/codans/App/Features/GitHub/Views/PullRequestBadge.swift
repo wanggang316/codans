@@ -1,15 +1,15 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// Compact trailing-slot badge for a sidebar Worktree row. Renders only when the Worktree
 /// has a matched PR — consumers are responsible for not mounting the view when the
 /// snapshot is nil.
 ///
-/// Three render states surfaced via `BadgeState`:
+/// Two render states surfaced via `BadgeState`:
 ///   - `.loaded(snapshot, rollup)` — full render
-///   - `.loading` — skeleton outline + progress indicator, suppressed for the first 200 ms
-///     so fast responses don't flicker in (consumer-managed)
 ///   - `.error(GitHubError)` — tertiary-label exclamation with tooltip
+///
+/// There is deliberately no loading state: a fetch in flight renders nothing in the row.
 ///
 /// `onTap` runs the badge's primary action. Hover-triggered behavior (such as opening the
 /// PR popover after a 150 ms dwell) lives at the call site — this view intentionally does
@@ -17,7 +17,6 @@ import CodansCore
 struct PullRequestBadge: View {
   enum BadgeState: Equatable {
     case loaded(PullRequestSnapshot, rollup: CheckRollup)
-    case loading
     case error(GitHubError)
   }
 
@@ -46,8 +45,6 @@ struct PullRequestBadge: View {
     switch state {
     case .loaded(let snapshot, let rollup):
       loadedBody(snapshot: snapshot, rollup: rollup)
-    case .loading:
-      loadingBody
     case .error:
       errorBody
     }
@@ -57,22 +54,6 @@ struct PullRequestBadge: View {
     // Shared with the titlebar via `PullRequestNumberPill` so the `#N` chip — and its
     // red merge-conflict styling — stays identical across the sidebar and the status bar.
     PullRequestNumberPill(snapshot: snapshot)
-  }
-
-  private var loadingBody: some View {
-    HStack(spacing: 3) {
-      ProgressView()
-        .controlSize(.mini)
-      Text("loading")
-        .font(.system(size: 10))
-        .foregroundStyle(.secondary)
-    }
-    .padding(.horizontal, 4)
-    .padding(.vertical, 1)
-    .background(
-      RoundedRectangle(cornerRadius: 4, style: .continuous)
-        .stroke(Color.secondary.opacity(0.4), lineWidth: 0.75)
-    )
   }
 
   private var errorBody: some View {
@@ -106,8 +87,6 @@ struct PullRequestBadge: View {
         "Pull request \(snapshot.number), \(stateWord), \(rollupWord)\(conflictWord). "
           + "Activate to see details."
       )
-    case .loading:
-      return Text("Loading pull request status")
     case .error(let error):
       return Text("GitHub error: \(error.userFacingMessage)")
     }
@@ -119,8 +98,6 @@ struct PullRequestBadge: View {
       let draftTag = snapshot.isDraft ? " (draft)" : ""
       let conflictLine = snapshot.hasMergeConflict ? "\n⚠︎ Has merge conflicts" : ""
       return "#\(snapshot.number)\(draftTag) \(snapshot.title)\n@\(snapshot.author)\(conflictLine)"
-    case .loading:
-      return "Loading pull request status…"
     case .error(let error):
       return error.userFacingMessage
     }
