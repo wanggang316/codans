@@ -24,7 +24,14 @@ struct DiffFeature {
     var prBase: String?
     var prRepository: URL?
     var filter = ""
-    var snapshot: GitComparisonSnapshot?
+    /// The last comparison of each scope, so switching back shows it while a refresh runs.
+    var snapshots: [GitComparisonScope: GitComparisonSnapshot] = [:]
+    /// The file each scope had selected when the user switched away from it.
+    var scopeSelections: [GitComparisonScope: String] = [:]
+    var snapshot: GitComparisonSnapshot? {
+      get { snapshots[scope] }
+      set { snapshots[scope] = newValue }
+    }
     var selectedFileID: String?
     var document: DiffDocument?
     var notice: String?
@@ -67,6 +74,7 @@ struct DiffFeature {
     case refresh
     case tick
     case loaded(Int, GitComparisonSnapshot)
+    case lineCountsLoaded(Int, GitComparisonSnapshot)
     case failed(Int, String)
     case selectFile(String)
     case contentLoaded(Int, String, GitComparisonContent)
@@ -146,9 +154,27 @@ struct DiffFeature {
         state.layout = layout
         return .none
       case .scopeChanged(let scope):
+        guard scope != state.scope else { return .none }
+        state.scopeSelections[state.scope] = state.selectedFileID
         state.scope = scope
-        clear(&state)
-        return .send(.refresh)
+        state.request += 1
+        state.loading = false
+        state.error = nil
+        state.editorMessage = nil
+        // Show the scope's last comparison and selection at once; the refresh replaces them.
+        let remembered = state.scopeSelections[scope] ?? state.selectedFileID
+        guard let snapshot = state.snapshot else {
+          // Nothing cached: `.loaded` selects the remembered file if the comparison still has it.
+          state.selectedFileID = remembered
+          clearContent(&state)
+          return .send(.refresh)
+        }
+        guard let file = snapshot.files.first(where: { $0.id == remembered }) ?? snapshot.files.first else {
+          state.selectedFileID = nil
+          clearContent(&state)
+          return .send(.refresh)
+        }
+        return .merge(select(&state, file: file, silent: false), .send(.refresh))
       case .baseChanged(let value):
         state.base = value
         return .none
@@ -209,6 +235,11 @@ struct DiffFeature {
           return .none
         }
         return select(&state, file: file, silent: file.id == state.selectedFileID)
+      case .lineCountsLoaded(let request, let snapshot):
+        // Counts only: the files, selection and content already arrived with `.loaded`.
+        guard request == state.request else { return .none }
+        state.snapshot = snapshot
+        return .none
       case .failed(let request, let message):
         guard request == state.request else { return .none }
         state.loading = false
@@ -236,14 +267,19 @@ struct DiffFeature {
 
   private func clear(_ state: inout State) {
     state.request += 1
-    state.contentRequest += 1
-    state.snapshot = nil
-    state.document = nil
-    state.notice = nil
+    state.snapshots = [:]
+    state.scopeSelections = [:]
     state.error = nil
     state.editorMessage = nil
     state.loading = false
+    clearContent(&state)
+  }
+
+  private func clearContent(_ state: inout State) {
+    state.contentRequest += 1
     state.contentLoading = false
+    state.document = nil
+    state.notice = nil
   }
 
   private func load(_ state: inout State, silent: Bool) -> Effect<Action> {
@@ -257,11 +293,22 @@ struct DiffFeature {
     if !silent { state.error = nil }
     let scope = state.scope
     let base = state.appliedBase.trimmingCharacters(in: .whitespacesAndNewlines)
+    // With nothing on screen for this scope, list the files first and read untracked files after;
+    // otherwise swap in the complete comparison once, so the header totals never flicker.
+    let listFirst = state.snapshot == nil
     return .run { [git] send in
       do {
+        let url = URL(fileURLWithPath: path)
         let selectedBase: String? = base.isEmpty ? nil : base
-        let snapshot = try await git.comparison(URL(fileURLWithPath: path), scope, selectedBase)
-        await send(.loaded(request, snapshot))
+        guard listFirst else {
+          let snapshot = try await git.comparison(url, scope, selectedBase)
+          await send(.loaded(request, snapshot))
+          return
+        }
+        let listing = try await git.comparisonListing(url, scope, selectedBase)
+        await send(.loaded(request, listing))
+        guard !listing.pendingLineCounts.isEmpty else { return }
+        await send(.lineCountsLoaded(request, try await git.comparisonLineCounts(url, listing)))
       } catch { await send(.failed(request, Self.errorMessage(error))) }
     }.cancellable(id: CancelID.refresh, cancelInFlight: true)
   }
