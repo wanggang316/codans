@@ -13,11 +13,11 @@ struct DiffFileIcon: View {
   }()
 
   var body: some View {
-    Image(nsImage: Self.icon(for: path)).resizable().interpolation(.high)
+    Image(nsImage: Self.image(for: path)).resizable().interpolation(.high)
       .frame(width: 16, height: 16).accessibilityHidden(true)
   }
 
-  private static func icon(for path: String) -> NSImage {
+  static func image(for path: String) -> NSImage {
     let name = (path as NSString).lastPathComponent
     let ext = (name as NSString).pathExtension.lowercased()
     let type = UTType(filenameExtension: ext) ?? (name.hasPrefix(".") ? .plainText : .data)

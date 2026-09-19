@@ -60,12 +60,10 @@ struct DiffFileSidebar: View {
       .font(.system(size: 12)).padding(.horizontal, 8).padding(.vertical, 5)
       .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
       .padding(.horizontal, 8).padding(.bottom, 6)
-      // Each scope keeps its list alive, so switching back does not rebuild thousands of rows.
-      // Fixed positions: a ForEach over the scopes let SwiftUI compare one scope's list with the
-      // other's, which defeated the equality check and re-diffed every row.
+      // Each scope keeps its outline, rows and scroll position, so switching back only shows it.
       ZStack {
-        scopeList(.all, files: files)
-        scopeList(.outgoing, files: files)
+        scopeOutline(.all, files: files)
+        scopeOutline(.outgoing, files: files)
       }
       .overlay {
         if files.isEmpty, store.snapshot?.files.isEmpty == false {
@@ -82,15 +80,20 @@ struct DiffFileSidebar: View {
   }
 
   @ViewBuilder
-  private func scopeList(_ scope: GitComparisonScope, files active: [GitComparisonFile]) -> some View {
+  private func scopeOutline(_ scope: GitComparisonScope, files active: [GitComparisonFile]) -> some View {
     let isActive = scope == store.state.scope
     if isActive || store.snapshots[scope] != nil {
-      DiffFileList(
+      DiffFileOutline(
         files: isActive ? active : filtered(store.snapshots[scope]?.files ?? []),
+        tree: store.filePresentation == .tree,
         selection: isActive ? store.selectedFileID : store.scopeSelections[scope],
-        collapsedFolders: $collapsedFolders, store: store
+        isActive: isActive, collapsedFolders: $collapsedFolders,
+        onSelect: { store.send(.selectFile($0)) },
+        onOpenInEditor: { id in
+          store.send(.selectFile(id))
+          store.send(.openFile("new", nil))
+        }
       )
-      .opacity(isActive ? 1 : 0).allowsHitTesting(isActive).accessibilityHidden(!isActive)
     }
   }
 
@@ -187,170 +190,6 @@ struct DiffFileSidebar: View {
     .background(selected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
     .accessibilityAddTraits(selected ? .isSelected : [])
     .help(title)
-  }
-}
-
-/// One scope's file list.
-private struct DiffFileList: View {
-  let files: [GitComparisonFile]
-  /// The active scope's selection, or the one an inactive scope had when the user left it.
-  let selection: String?
-  @Binding var collapsedFolders: Set<String>
-  let store: StoreOf<DiffFeature>
-  @State private var generation = 0
-
-  private struct ListRows: Equatable {
-    var fileIDs: [String]
-    var selectedFileID: String?
-  }
-
-  var body: some View {
-    let tree = store.filePresentation == .tree
-    let nodes = tree ? DiffFileTreeNode.build(files) : []
-    DiffFileListContent(
-      files: files, nodes: nodes, tree: tree, collapsed: collapsedFolders, selection: selection,
-      collapsedFolders: $collapsedFolders, store: store
-    )
-    .equatable()
-    .id(generation)
-    .onChange(of: ListRows(fileIDs: visibleFileIDs(tree ? nil : files, nodes), selectedFileID: selection)) {
-      old, new in
-      // The macOS List leaves a user-selected row on screen after that row is removed (scope
-      // switch, refresh without the file, filter, collapsing its folder), drawn over the rows
-      // below. A fresh List discards it; other updates keep the list, its scroll and focus.
-      if let selected = old.selectedFileID, old.fileIDs.contains(selected), !new.fileIDs.contains(selected) {
-        generation += 1
-      }
-    }
-  }
-
-  /// File rows the list shows: the flat list shows all of them, the tree only those outside
-  /// collapsed folders.
-  private func visibleFileIDs(_ flat: [GitComparisonFile]?, _ nodes: [DiffFileTreeNode]) -> [String] {
-    if let flat { return flat.map(\.id) }
-    func visible(_ nodes: [DiffFileTreeNode]) -> [String] {
-      nodes.flatMap { node -> [String] in
-        if let children = node.children { return collapsedFolders.contains(node.id) ? [] : visible(children) }
-        return node.file.map { [$0.id] } ?? []
-      }
-    }
-    return visible(nodes)
-  }
-}
-
-/// The list, equatable on everything its rows draw. A scope switch changes none of it for
-/// either scope's list, so SwiftUI skips re-diffing thousands of rows; line-count updates are
-/// ignored because rows do not show counts.
-private struct DiffFileListContent: View, Equatable {
-  let files: [GitComparisonFile]
-  let nodes: [DiffFileTreeNode]
-  let tree: Bool
-  let collapsed: Set<String>
-  let selection: String?
-  @Binding var collapsedFolders: Set<String>
-  let store: StoreOf<DiffFeature>
-
-  nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-    lhs.tree == rhs.tree && lhs.selection == rhs.selection && lhs.collapsed == rhs.collapsed
-      && lhs.files.elementsEqual(rhs.files) { $0.path == $1.path && $0.status == $1.status }
-  }
-
-  var body: some View {
-    // Separate lists per presentation: sharing one list's content type slowed the flat rows down.
-    if tree {
-      list { DiffFileTreeRows(nodes: nodes, collapsedFolders: $collapsedFolders) }
-    } else {
-      list {
-        ForEach(files) { file in
-          // The tag stays outside `.equatable()`, where the list can see it for selection.
-          DiffFileSidebarRow(path: file.path, status: file.status, showsDirectory: true).equatable().tag(file.id)
-        }
-      }
-    }
-  }
-
-  private func list<Rows: View>(@ViewBuilder rows: () -> Rows) -> some View {
-    List(
-      selection: Binding(
-        get: { selection },
-        set: { id in
-          if let id, files.contains(where: { $0.id == id }) { store.send(.selectFile(id)) }
-        }),
-      content: rows
-    )
-    .listStyle(.sidebar).environment(\.defaultMinListRowHeight, 28)
-    // One menu for the list instead of one per row: per-row menus slow large lists down.
-    .contextMenu(forSelectionType: String.self) { ids in
-      if ids.count == 1, let id = ids.first, let file = files.first(where: { $0.id == id }) {
-        Button("Open in Editor") {
-          store.send(.selectFile(id))
-          store.send(.openFile("new", nil))
-        }
-        .disabled(file.status == "D")
-      }
-    }
-  }
-}
-
-private struct DiffFileTreeRows: View {
-  let nodes: [DiffFileTreeNode]
-  @Binding var collapsedFolders: Set<String>
-
-  var body: some View {
-    ForEach(nodes) { node in
-      if let children = node.children {
-        DisclosureGroup(
-          isExpanded: Binding(
-            get: { !collapsedFolders.contains(node.id) },
-            set: { expanded in
-              if expanded { collapsedFolders.remove(node.id) } else { collapsedFolders.insert(node.id) }
-            }
-          )
-        ) {
-          DiffFileTreeRows(nodes: children, collapsedFolders: $collapsedFolders)
-        } label: {
-          Label(node.name, systemImage: "folder").font(.system(size: 13))
-            .lineLimit(1).help(node.path)
-        }
-      } else if let file = node.file {
-        DiffFileSidebarRow(path: file.path, status: file.status, showsDirectory: false).equatable().tag(file.id)
-      }
-    }
-  }
-}
-
-/// Takes only what it draws, so line-count updates leave rows untouched.
-private struct DiffFileSidebarRow: View, Equatable {
-  let path: String
-  let status: String
-  let showsDirectory: Bool
-
-  var body: some View {
-    HStack(spacing: 8) {
-      DiffFileIcon(path: path)
-      VStack(alignment: .leading, spacing: 2) {
-        Text((path as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle)
-        let directory = (path as NSString).deletingLastPathComponent
-        if showsDirectory && !directory.isEmpty {
-          Text(directory).font(.system(size: 11)).foregroundStyle(.secondary)
-            .lineLimit(1).truncationMode(.middle)
-        }
-      }
-      Spacer(minLength: 4)
-      Text(status).font(.system(size: 10, weight: .semibold)).foregroundStyle(statusColor)
-        .frame(width: 9)
-    }
-    .font(.system(size: 13)).help(path)
-  }
-
-  private var statusColor: Color {
-    switch status {
-    case "A": ThemeGit.kindAdded
-    case "D": ThemeGit.kindDeleted
-    case "M": ThemeGit.kindModified
-    case "R": ThemeGit.kindRenamed
-    default: .secondary
-    }
   }
 }
 
