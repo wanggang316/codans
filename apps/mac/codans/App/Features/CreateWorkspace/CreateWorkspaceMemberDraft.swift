@@ -224,24 +224,40 @@ nonisolated struct RefInventory: Equatable, Sendable {
   var remote: [String]
   /// The repository's default remote branch, when known and present.
   var defaultBaseRef: String?
+  /// The branch checked out at the repository root, which is where `git
+  /// worktree add` starts a new branch when no default remote branch is
+  /// known. Nil when the root is detached.
+  var headBranch: String?
   /// Branch → path of the worktree that has it checked out.
   var checkedOut: [String: String]
 
-  init(local: [String] = [], remote: [String] = [], defaultBaseRef: String? = nil, checkedOut: [String: String] = [:]) {
+  init(
+    local: [String] = [], remote: [String] = [], defaultBaseRef: String? = nil, headBranch: String? = nil,
+    checkedOut: [String: String] = [:]
+  ) {
     self.local = local
     self.remote = remote
     self.defaultBaseRef = defaultBaseRef
+    self.headBranch = headBranch
     self.checkedOut = checkedOut
   }
 
-  /// From the four repository queries the worktree sheet also runs.
-  init(branchRefs: [String], localBranchNames: Set<String>, worktrees: [GitWtEntry], defaultRemoteBranchRef: String?) {
+  /// From the four repository queries the worktree sheet also runs, for the
+  /// repository at `repoRoot`.
+  init(
+    branchRefs: [String], localBranchNames: Set<String>, worktrees: [GitWtEntry], defaultRemoteBranchRef: String?,
+    repoRoot: String
+  ) {
     let locals = localBranchNames.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     let remotes = branchRefs.filter { !localBranchNames.contains($0) }
+    let root = URL(fileURLWithPath: repoRoot).standardizedFileURL.path
+    let rootBranch = worktrees.first { URL(fileURLWithPath: $0.path).standardizedFileURL.path == root }?.branch
+      .trimmingCharacters(in: .whitespaces)
     self.init(
       local: locals,
       remote: remotes,
       defaultBaseRef: defaultRemoteBranchRef.flatMap { branchRefs.contains($0) ? $0 : nil },
+      headBranch: rootBranch.flatMap { localBranchNames.contains($0) ? $0 : nil },
       checkedOut: Dictionary(
         worktrees.compactMap { entry in
           let branch = entry.branch.trimmingCharacters(in: .whitespaces)
@@ -258,6 +274,12 @@ nonisolated struct RefInventory: Equatable, Sendable {
       remote: remoteHeads.branches.map { "origin/\($0)" },
       defaultBaseRef: remoteHeads.defaultBranch.map { "origin/\($0)" },
       checkedOut: [:])
+  }
+
+  /// What a new branch with no base chosen starts from: the default
+  /// remote branch, else the branch the repository root is on.
+  var defaultBase: String? {
+    defaultBaseRef ?? headBranch
   }
 
   func contains(_ ref: String) -> Bool {

@@ -196,7 +196,7 @@ struct CreateWorkspaceFeature {
       let branch = branch(for: member)
       switch member.mode {
       case .newBranch:
-        let base = member.baseRef ?? member.refs.inventory?.defaultBaseRef ?? "the default branch"
+        let base = member.baseRef ?? member.refs.inventory?.defaultBase ?? "the default branch"
         return branch.isEmpty ? "New branch from \(base), named after the title" : "New branch \(branch) from \(base)"
       case .existing:
         guard !branch.isEmpty else { return "Existing branch" }
@@ -705,7 +705,7 @@ struct CreateWorkspaceFeature {
         async let auto = (try? client.defaultRemoteBranchRef(repoRoot)) ?? nil
         let inventory = RefInventory(
           branchRefs: await refs, localBranchNames: await locals, worktrees: await worktrees,
-          defaultRemoteBranchRef: await auto)
+          defaultRemoteBranchRef: await auto, repoRoot: gitRoot)
         await send(.member(id, .refsLoaded(inventory)))
       }
       .cancellable(id: CancelID.refs(id), cancelInFlight: true)

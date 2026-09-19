@@ -27,7 +27,7 @@ struct CreateWorkspaceFeatureTests {
 
   private let appRefs = RefInventory(
     local: ["feat/x", "main", "wip"], remote: ["origin/main", "origin/feat/x", "origin/release"],
-    defaultBaseRef: "origin/main", checkedOut: ["main": "/src/app"])
+    defaultBaseRef: "origin/main", headBranch: "main", checkedOut: ["main": "/src/app"])
 
   private nonisolated static let libHeads = RemoteHeads(defaultBranch: "main", branches: ["main", "release"])
   private static let libRefs = RefInventory(
@@ -458,6 +458,30 @@ struct CreateWorkspaceFeatureTests {
       store.state.issues(for: store.state.members[0]) == [
         .blocking("\u{201C}upstream/none\u{201D} is not a branch of this repository.")
       ])
+  }
+
+  @Test
+  func defaultBaseFallsBackToTheBranchAtTheRepositoryRoot() {
+    let worktrees = [
+      GitWtEntry(branch: "develop", path: "/src/app/", head: "a", isBare: false),
+      GitWtEntry(branch: "feat/x", path: "/wt/app-x", head: "b", isBare: false),
+    ]
+    let noRemote = RefInventory(
+      branchRefs: ["develop", "feat/x"], localBranchNames: ["develop", "feat/x"], worktrees: worktrees,
+      defaultRemoteBranchRef: nil, repoRoot: "/src/app")
+    #expect(noRemote.headBranch == "develop")
+    #expect(noRemote.defaultBase == "develop")
+
+    let withRemote = RefInventory(
+      branchRefs: ["develop", "feat/x", "origin/main"], localBranchNames: ["develop", "feat/x"], worktrees: worktrees,
+      defaultRemoteBranchRef: "origin/main", repoRoot: "/src/app")
+    #expect(withRemote.defaultBase == "origin/main")
+
+    let detached = RefInventory(
+      branchRefs: ["feat/x"], localBranchNames: ["feat/x"],
+      worktrees: [GitWtEntry(branch: "(detached)", path: "/src/app", head: "a", isBare: false)],
+      defaultRemoteBranchRef: nil, repoRoot: "/src/app")
+    #expect(detached.defaultBase == nil)
   }
 
   @Test

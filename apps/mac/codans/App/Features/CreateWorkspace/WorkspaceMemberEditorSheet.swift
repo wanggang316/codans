@@ -215,7 +215,7 @@ struct WorkspaceMemberEditorSheet: View {
       title: "Based on",
       refs: draft.refs,
       selection: draft.baseRef,
-      placeholder: draft.refs.inventory?.defaultBaseRef.map { "Default (\($0))" } ?? "Default branch",
+      placeholder: "Default (\(draft.refs.inventory?.defaultBase ?? "HEAD"))",
       includeLocal: true,
       includeRemote: true,
       onSelect: { send(draft, .baseRefChanged($0)) })
