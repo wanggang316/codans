@@ -319,11 +319,8 @@ struct DiffFeature {
     state.contentRequest += 1
     let request = state.contentRequest
     state.contentLoading = true
-    if !silent {
-      state.document = nil
-      state.notice = nil
-      state.editorMessage = nil
-    }
+    // The previous file stays on screen until this one arrives, so switching files never blanks.
+    if !silent { state.editorMessage = nil }
     return .run { [git] send in
       do {
         let content = try await git.comparisonContent(URL(fileURLWithPath: path), snapshot, file)
