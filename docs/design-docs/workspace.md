@@ -159,7 +159,7 @@ App/Features/CreateWorkspace/
   CreateWorkspaceMemberDraft  MemberDraft、MemberEditor、RefInventory、MemberIssue
   CreateWorkspaceAddEntry     URL 输入的分类（URL / 路径）与远程去重键
   CreateWorkspaceSheet        分组 Form 外壳（工作区一节、添加按钮、项目列表）+ presenter
-  WorkspaceMemberRow          列表行：来源图标、名称与来源、检出摘要、问题 / 进度、编辑与删除
+  WorkspaceMemberRow          列表行：来源图标、名称与来源、检出行（WorkspaceCheckoutLine：种类徽标 + 分支 + 关系 ref，Settings 的 Projects 同形）、问题 / 进度、编辑与删除
   WorkspaceMemberEditorSheet  添加 / 编辑弹窗（已打开项目、文件夹、远程三种来源 + 检出设置）
   WorkspaceRefPicker / WorkspaceCreationBar
 ```

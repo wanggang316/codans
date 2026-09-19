@@ -191,21 +191,29 @@ struct CreateWorkspaceFeature {
       }
     }
 
-    /// How a row describes its checkout in one line.
-    func checkoutSummary(for member: MemberDraft) -> String {
+    /// What a row's checkout will be, as the list describes it.
+    func checkoutDescription(for member: MemberDraft) -> WorkspaceCheckoutDescription {
       let branch = branch(for: member)
       switch member.mode {
       case .newBranch:
         let base = member.baseRef ?? member.refs.inventory?.defaultBase ?? "the default branch"
-        return branch.isEmpty ? "New branch from \(base), named after the title" : "New branch \(branch) from \(base)"
+        return .newBranch(branch: branch.isEmpty ? nil : branch, base: base)
       case .existing:
-        guard !branch.isEmpty else { return "Existing branch" }
-        guard let remoteRef = member.existingRef, member.existingRefIsRemote else { return "Branch \(branch)" }
-        guard member.hasLocalConflict else { return "Branch \(branch), tracking \(remoteRef)" }
-        return member.localConflict == .resetToRemote
-          ? "Branch \(branch), reset to \(remoteRef)"
-          : "Local branch \(branch), tracking \(remoteRef)"
+        guard !branch.isEmpty else { return .existingBranch(nil) }
+        guard let remoteRef = member.existingRef, member.existingRefIsRemote else { return .existingBranch(branch) }
+        let local: WorkspaceCheckoutDescription.LocalBranch
+        if !member.hasLocalConflict {
+          local = .none
+        } else {
+          local = member.localConflict == .resetToRemote ? .reset : .kept
+        }
+        return .trackingRemote(branch: branch, remoteRef: remoteRef, local: local)
       }
+    }
+
+    /// How a row describes its checkout in one sentence.
+    func checkoutSummary(for member: MemberDraft) -> String {
+      checkoutDescription(for: member).summary
     }
 
     // MARK: Issues

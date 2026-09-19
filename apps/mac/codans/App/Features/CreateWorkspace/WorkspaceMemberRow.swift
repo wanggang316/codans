@@ -4,8 +4,9 @@ import SwiftUI
 
 /// One project in the New Workspace list: an icon for where it comes from
 /// (the project's own icon, a folder on disk, or a remote), its folder name
-/// and source, how it is checked out, and its problems or creation
-/// progress. Edit and remove sit on the trailing edge.
+/// and source, the checkout as `WorkspaceCheckoutLine` draws it, and its
+/// problems or creation progress. Edit and remove sit on the trailing edge.
+/// A workspace's settings page lists its checkouts in the same shape.
 struct WorkspaceMemberRow: View {
   let store: StoreOf<CreateWorkspaceFeature>
   let member: MemberDraft
@@ -14,9 +15,10 @@ struct WorkspaceMemberRow: View {
     HStack(spacing: 10) {
       icon
         .frame(width: 18)
-      VStack(alignment: .leading, spacing: 2) {
+      VStack(alignment: .leading, spacing: 3) {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
           Text(member.name.isEmpty ? member.source.title : member.name)
+            .fontWeight(.medium)
             .lineLimit(1)
             .layoutPriority(1)
           Text(member.source.location)
@@ -26,11 +28,7 @@ struct WorkspaceMemberRow: View {
             .truncationMode(.middle)
             .help(sourceHelp)
         }
-        Text(store.state.checkoutSummary(for: member))
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
+        WorkspaceCheckoutLine(checkout: store.state.checkoutDescription(for: member))
         statusLine
       }
       Spacer(minLength: 8)
@@ -48,15 +46,15 @@ struct WorkspaceMemberRow: View {
       let candidate = store.candidates[id: id]
       ProjectIconView(icon: candidate?.icon, color: candidate?.color, size: 16)
     case .localRepo:
-      symbol("folder")
+      symbol("folder", tint: .secondary)
     case .remote:
-      symbol("globe")
+      symbol("globe", tint: .blue)
     }
   }
 
-  private func symbol(_ name: String) -> some View {
+  private func symbol(_ name: String, tint: Color) -> some View {
     Image(systemName: name)
-      .foregroundStyle(.secondary)
+      .foregroundStyle(tint)
       .accessibilityHidden(true)
   }
 

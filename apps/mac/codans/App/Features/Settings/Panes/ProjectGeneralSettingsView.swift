@@ -307,9 +307,10 @@ struct ProjectGeneralSettingsView: View {
 
   // MARK: - Workspace
 
-  /// The checkouts inside a workspace, one row each: the folder, the
-  /// repository it is a checkout of, and its branch. Read from the catalog
-  /// rows the sidebar shows, so it follows adds and drops as they happen.
+  /// The checkouts inside a workspace, one row each in the shape the New
+  /// Workspace sheet uses: the source's icon, the folder, the repository it
+  /// is a checkout of, and its branch. Read from the catalog rows the
+  /// sidebar shows, so it follows adds and drops as they happen.
   private var workspaceSection: some View {
     Section("Projects") {
       let checkouts = workspaceCheckouts
@@ -318,20 +319,36 @@ struct ProjectGeneralSettingsView: View {
           .foregroundStyle(.secondary)
       }
       ForEach(checkouts, id: \.id) { checkout in
-        LabeledContent {
-          Text(checkout.branch ?? "Detached")
-            .foregroundStyle(.secondary)
-        } label: {
-          Text(checkout.name)
-          if let source = checkout.sourceGitRoot {
-            Text((source as NSString).abbreviatingWithTildeInPath)
-              .lineLimit(1)
-              .truncationMode(.middle)
-              .help(source)
+        HStack(spacing: 10) {
+          let source = checkout.sourceGitRoot.flatMap { sourceProject(for: $0) }
+          ProjectIconView(icon: source?.icon, color: source?.color, size: 16)
+            .frame(width: 18)
+          VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+              Text(checkout.name)
+                .fontWeight(.medium)
+                .lineLimit(1)
+                .layoutPriority(1)
+              if let root = checkout.sourceGitRoot {
+                Text((root as NSString).abbreviatingWithTildeInPath)
+                  .font(.subheadline)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+                  .truncationMode(.middle)
+                  .help(root)
+              }
+            }
+            WorkspaceCheckoutLine(checkout: .checkedOut(branch: checkout.branch))
           }
         }
+        .padding(.vertical, 2)
       }
     }
+  }
+
+  /// The open project a checkout comes from, when its repository is one.
+  private func sourceProject(for gitRoot: String) -> Project? {
+    hierarchyManager.catalog.projects.first { $0.gitRoot == gitRoot }
   }
 
   private var workspaceCheckouts: [Worktree] {
