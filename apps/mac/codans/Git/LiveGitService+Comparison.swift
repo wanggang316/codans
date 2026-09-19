@@ -6,6 +6,12 @@ extension LiveGitService {
   static let comparisonContentLimit = 2 * 1024 * 1024
 
   func comparison(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot {
+    try await comparisonLineCounts(try await comparisonListing(at: path, scope: scope, base: base), at: path)
+  }
+
+  /// The comparison's files without reading untracked ones: their line counts stay pending,
+  /// so a list can show before `comparisonLineCounts` reads them.
+  func comparisonListing(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot {
     try await ensureIsRepo(at: path)
     var endpoints: [String] = []
     var label = "HEAD"
@@ -37,6 +43,7 @@ extension LiveGitService {
         "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--raw", "--numstat", "--no-abbrev", "-z", "-M",
       ] + endpoints + ["--"], cwd: path)
     var files = try Self.parseComparison(bytes)
+    var untracked: [String] = []
     if scope != .outgoing {
       let unmerged = try await run(arguments: ["ls-files", "--unmerged", "-z"], cwd: path)
       guard let entries = String(data: unmerged, encoding: .utf8) else {
@@ -55,13 +62,13 @@ extension LiveGitService {
       }
     }
     if scope != .staged && scope != .outgoing {
-      let untracked = try await run(arguments: ["ls-files", "--others", "--exclude-standard", "-z"], cwd: path)
-      guard let text = String(data: untracked, encoding: .utf8) else {
+      let others = try await run(arguments: ["ls-files", "--others", "--exclude-standard", "-z"], cwd: path)
+      guard let text = String(data: others, encoding: .utf8) else {
         throw GitError.unparsable(context: "Unsupported filename encoding")
       }
       var listed = Set(files.map(\.path))
-      let names = text.split(separator: "\0").map(String.init).filter { listed.insert($0).inserted }
-      files += try await comparisonUntrackedFiles(names, at: path)
+      untracked = text.split(separator: "\0").map(String.init).filter { listed.insert($0).inserted }
+      files += untracked.map { GitComparisonFile(path: $0, status: "A") }
     }
     let fingerprint = SHA256.hash(
       data: bytes + Data((scope.rawValue + label + files.map(\.path).joined(separator: "\0")).utf8)
@@ -71,7 +78,21 @@ extension LiveGitService {
       let order = lhs.path.localizedStandardCompare(rhs.path)
       return order == .orderedSame ? lhs.path < rhs.path : order == .orderedAscending
     }
-    return .init(id: fingerprint, scope: scope, baseLabel: label, files: sorted, repositoryPath: path.path)
+    return .init(
+      id: fingerprint, scope: scope, baseLabel: label, files: sorted, repositoryPath: path.path,
+      pendingLineCounts: Set(untracked))
+  }
+
+  /// Reads the untracked files whose line counts `comparisonListing` left pending.
+  func comparisonLineCounts(_ snapshot: GitComparisonSnapshot, at path: URL) async throws -> GitComparisonSnapshot {
+    guard !snapshot.pendingLineCounts.isEmpty else { return snapshot }
+    let pending = snapshot.files.map(\.path).filter(snapshot.pendingLineCounts.contains)
+    let counted = Dictionary(
+      uniqueKeysWithValues: try await comparisonUntrackedFiles(pending, at: path).map { ($0.path, $0) })
+    var result = snapshot
+    result.files = result.files.map { counted[$0.path] ?? $0 }
+    result.pendingLineCounts = []
+    return result
   }
 
   /// Line counts for untracked files. Local reads happen in-process; each remote read is an SSH

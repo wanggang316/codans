@@ -88,6 +88,25 @@ struct GitComparisonTests {
     }
   }
 
+  @Test func listingLeavesUntrackedCountsPendingUntilCounted() async throws {
+    let url = try await repository()
+    defer { try? FileManager.default.removeItem(at: url) }
+    try write("base\n", "tracked.txt", at: url)
+    try await git(["add", "."], at: url)
+    try await git(["commit", "-m", "initial"], at: url)
+    try write("changed\n", "tracked.txt", at: url)
+    try write("a\nb\n", "new.txt", at: url)
+    try write("", "empty.txt", at: url)
+    let service = LiveGitService()
+    let listing = try await service.comparisonListing(at: url, scope: .all, base: nil)
+    #expect(listing.pendingLineCounts == ["new.txt", "empty.txt"])
+    #expect(listing.files.first { $0.path == "new.txt" }?.additions == nil)
+    #expect(listing.files.first { $0.path == "tracked.txt" }?.additions == 1)
+    let counted = try await service.comparisonLineCounts(listing, at: url)
+    #expect(counted.pendingLineCounts.isEmpty)
+    #expect(counted == (try await service.comparison(at: url, scope: .all, base: nil)))
+  }
+
   @Test func worktreeLineStatsMatchUncommittedComparisonTotals() async throws {
     let url = try await repository()
     defer { try? FileManager.default.removeItem(at: url) }

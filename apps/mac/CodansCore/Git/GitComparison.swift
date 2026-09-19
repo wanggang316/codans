@@ -41,16 +41,19 @@ public nonisolated struct GitComparisonSnapshot: Sendable, Equatable {
   public var baseLabel: String
   public var files: [GitComparisonFile]
   public var repositoryPath: String
+  /// Paths of untracked files whose line counts have not been read yet.
+  public var pendingLineCounts: Set<String>
 
   public init(
     id: String = UUID().uuidString, scope: GitComparisonScope, baseLabel: String,
-    files: [GitComparisonFile], repositoryPath: String = ""
+    files: [GitComparisonFile], repositoryPath: String = "", pendingLineCounts: Set<String> = []
   ) {
     self.id = id
     self.scope = scope
     self.baseLabel = baseLabel
     self.files = files
     self.repositoryPath = repositoryPath
+    self.pendingLineCounts = pendingLineCounts
   }
 }
 

@@ -8,6 +8,9 @@ import Foundation
 /// fighting the app target's `@MainActor` default.
 public nonisolated protocol GitService: Sendable {
   func comparison(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot
+  /// `comparison` split in two: files first, untracked line counts pending until the second call.
+  func comparisonListing(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot
+  func comparisonLineCounts(_ snapshot: GitComparisonSnapshot, at path: URL) async throws -> GitComparisonSnapshot
   func comparisonContent(at path: URL, snapshot: GitComparisonSnapshot, file: GitComparisonFile) async throws
     -> GitComparisonContent
 
