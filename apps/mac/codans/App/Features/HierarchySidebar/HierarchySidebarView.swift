@@ -1594,7 +1594,7 @@ struct HierarchySidebarView: View {
   // MARK: - Diff stats chip
 
   /// Compact `+N −M` chip rendered to the right of the row content. Counts
-  /// come from `WorktreeLocalDiffMonitor` (`git diff HEAD --shortstat`) so
+  /// come from `WorktreeLocalDiffMonitor` (the diff viewer's Uncommitted totals) so
   /// every worktree — PR-matched or not — surfaces the same "uncommitted
   /// edits in this worktree" signal. Refresh on HEAD events is wired in
   /// `RootFeature.worktreeHeadChanged`; row-mount falls back to the

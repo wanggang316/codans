@@ -8,13 +8,14 @@ struct DiffFileSidebar: View {
   @State private var collapsedFolders: Set<String> = []
 
   private var outgoing: Bool { store.state.scope == .outgoing }
-  private var files: [GitComparisonFile] {
-    (store.snapshot?.files ?? []).filter {
-      store.filter.isEmpty || $0.path.localizedCaseInsensitiveContains(store.filter)
-    }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+
+  /// The comparison arrives in display order, so the list only filters it.
+  private func filtered(_ files: [GitComparisonFile]) -> [GitComparisonFile] {
+    store.filter.isEmpty ? files : files.filter { $0.path.localizedCaseInsensitiveContains(store.filter) }
   }
 
   var body: some View {
+    let files = filtered(store.snapshot?.files ?? [])
     VStack(spacing: 0) {
       DiffComparisonPicker(
         outgoing: Binding(
@@ -28,15 +29,13 @@ struct DiffFileSidebar: View {
         VStack(alignment: .leading, spacing: 3) {
           Text("Changed Files \(store.snapshot?.files.count ?? 0)")
             .font(.system(size: 11, weight: .semibold))
-          let allFiles = store.snapshot?.files ?? []
-          DiffLineCounts(
-            additions: allFiles.compactMap(\.additions).reduce(0, +),
-            deletions: allFiles.compactMap(\.deletions).reduce(0, +)
-          )
-          .help(
-            "Total text changes across all files, including files hidden by the filter. Files without line counts are excluded."
-          )
-          .accessibilityIdentifier("diff-total-line-counts")
+          // Untracked files are counted after the list shows; "—" until then.
+          let totals = store.snapshot?.pendingLineCounts.isEmpty == false ? nil : store.snapshot?.lineTotals
+          DiffLineCounts(additions: totals?.additions, deletions: totals?.deletions)
+            .help(
+              "Total text changes across all files, including files hidden by the filter. Files without line counts are excluded."
+            )
+            .accessibilityIdentifier("diff-total-line-counts")
         }
         Spacer(minLength: 8)
         Picker(
@@ -61,22 +60,11 @@ struct DiffFileSidebar: View {
       .font(.system(size: 12)).padding(.horizontal, 8).padding(.vertical, 5)
       .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
       .padding(.horizontal, 8).padding(.bottom, 6)
-      List(
-        selection: Binding(
-          get: { store.selectedFileID },
-          set: { id in
-            if let id, store.snapshot?.files.contains(where: { $0.id == id }) == true { store.send(.selectFile(id)) }
-          })
-      ) {
-        if store.filePresentation == .tree {
-          DiffFileTreeRows(nodes: DiffFileTreeNode.build(files), collapsedFolders: $collapsedFolders, store: store)
-        } else {
-          ForEach(files) { file in
-            DiffFileSidebarRow(file: file, showsDirectory: true, store: store)
-          }
-        }
+      // Each scope keeps its outline, rows and scroll position, so switching back only shows it.
+      ZStack {
+        scopeOutline(.all, files: files)
+        scopeOutline(.outgoing, files: files)
       }
-      .listStyle(.sidebar).environment(\.defaultMinListRowHeight, 28)
       .overlay {
         if files.isEmpty, store.snapshot?.files.isEmpty == false {
           Text("No matching files").font(.caption).foregroundStyle(.secondary)
@@ -89,6 +77,24 @@ struct DiffFileSidebar: View {
     }
     .onChange(of: store.selectedFileID) { _, _ in revealSelection() }
     .onChange(of: store.filePresentation) { _, _ in revealSelection() }
+  }
+
+  @ViewBuilder
+  private func scopeOutline(_ scope: GitComparisonScope, files active: [GitComparisonFile]) -> some View {
+    let isActive = scope == store.state.scope
+    if isActive || store.snapshots[scope] != nil {
+      DiffFileOutline(
+        files: isActive ? active : filtered(store.snapshots[scope]?.files ?? []),
+        tree: store.filePresentation == .tree,
+        selection: isActive ? store.selectedFileID : store.scopeSelections[scope],
+        isActive: isActive, collapsedFolders: $collapsedFolders,
+        onSelect: { store.send(.selectFile($0)) },
+        onOpenInEditor: { id in
+          store.send(.selectFile(id))
+          store.send(.openFile("new", nil))
+        }
+      )
+    }
   }
 
   private func revealSelection() {
@@ -184,74 +190,6 @@ struct DiffFileSidebar: View {
     .background(selected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
     .accessibilityAddTraits(selected ? .isSelected : [])
     .help(title)
-  }
-}
-
-private struct DiffFileTreeRows: View {
-  let nodes: [DiffFileTreeNode]
-  @Binding var collapsedFolders: Set<String>
-  let store: StoreOf<DiffFeature>
-
-  var body: some View {
-    ForEach(nodes) { node in
-      if let children = node.children {
-        DisclosureGroup(
-          isExpanded: Binding(
-            get: { !collapsedFolders.contains(node.id) },
-            set: { expanded in
-              if expanded { collapsedFolders.remove(node.id) } else { collapsedFolders.insert(node.id) }
-            }
-          )
-        ) {
-          DiffFileTreeRows(nodes: children, collapsedFolders: $collapsedFolders, store: store)
-        } label: {
-          Label(node.name, systemImage: "folder").font(.system(size: 13))
-            .lineLimit(1).help(node.path)
-        }
-      } else if let file = node.file {
-        DiffFileSidebarRow(file: file, showsDirectory: false, store: store)
-      }
-    }
-  }
-}
-
-private struct DiffFileSidebarRow: View {
-  let file: GitComparisonFile
-  let showsDirectory: Bool
-  let store: StoreOf<DiffFeature>
-
-  var body: some View {
-    HStack(spacing: 8) {
-      DiffFileIcon(path: file.path)
-      VStack(alignment: .leading, spacing: 2) {
-        Text((file.path as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle)
-        let directory = (file.path as NSString).deletingLastPathComponent
-        if showsDirectory && !directory.isEmpty {
-          Text(directory).font(.system(size: 11)).foregroundStyle(.secondary)
-            .lineLimit(1).truncationMode(.middle)
-        }
-      }
-      Spacer(minLength: 4)
-      Text(file.status).font(.system(size: 10, weight: .semibold)).foregroundStyle(statusColor)
-        .frame(width: 9)
-    }
-    .font(.system(size: 13)).tag(file.id).help(file.path)
-    .contextMenu {
-      Button("Open in Editor") {
-        store.send(.selectFile(file.id))
-        store.send(.openFile("new", nil))
-      }.disabled(file.status == "D")
-    }
-  }
-
-  private var statusColor: Color {
-    switch file.status {
-    case "A": ThemeGit.kindAdded
-    case "D": ThemeGit.kindDeleted
-    case "M": ThemeGit.kindModified
-    case "R": ThemeGit.kindRenamed
-    default: .secondary
-    }
   }
 }
 

@@ -186,35 +186,14 @@ nonisolated final class LiveGitService: GitService {
   }
 
   func localDiffStats(at worktreePath: URL) async throws -> LocalDiffStats? {
-    try await ensureIsRepo(at: worktreePath)
-    let out: Data
+    // Totals of the diff viewer's Uncommitted comparison, so the sidebar chip and the viewer
+    // agree by construction. `git diff HEAD --shortstat` alone omits untracked files.
     do {
-      out = try await run(arguments: ["diff", "HEAD", "--shortstat"], cwd: worktreePath)
+      return try await comparison(at: worktreePath, scope: .all, base: nil).lineTotals
     } catch GitError.exec {
-      // Unborn HEAD / freshly cloned repo with no commits — surface as
-      // "no stats available" rather than throwing onto the sidebar.
+      // A transient git failure surfaces as "no stats available" rather than an error.
       return nil
     }
-    let text = String(data: out, encoding: .utf8) ?? ""
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.isEmpty { return LocalDiffStats(additions: 0, deletions: 0) }
-    return parseShortStat(trimmed)
-  }
-
-  /// Extracts `+additions −deletions` from `git diff --shortstat` output.
-  /// Sample line: ` 3 files changed, 17 insertions(+), 4 deletions(-)`.
-  private func parseShortStat(_ text: String) -> LocalDiffStats {
-    func firstIntBefore(_ token: String, in source: String) -> Int {
-      guard let range = source.range(of: token) else { return 0 }
-      let head = source[source.startIndex..<range.lowerBound]
-      let digits = head.reversed().drop(while: { $0 == " " }).prefix(while: { $0.isNumber })
-      let str = String(digits.reversed())
-      return Int(str) ?? 0
-    }
-    return LocalDiffStats(
-      additions: firstIntBefore("insertion", in: text),
-      deletions: firstIntBefore("deletion", in: text)
-    )
   }
 
   func remoteInfo(at path: URL) async throws -> RemoteInfo {

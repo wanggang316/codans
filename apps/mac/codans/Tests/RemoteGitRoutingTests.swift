@@ -15,26 +15,21 @@ struct RemoteGitRoutingTests {
     let runner = RecordingCommandRunner(outcomes: [
       // ensureIsRepo → rev-parse --is-inside-work-tree
       .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
-      // localDiffStats → diff HEAD --shortstat
-      .exited(
-        code: 0,
-        stdout: Data(" 3 files changed, 17 insertions(+), 4 deletions(-)\n".utf8),
-        stderr: Data(),
-        stdoutOverflow: false
-      ),
+      // status → status --porcelain=v1 -z
+      .exited(code: 0, stdout: Data(" M app.swift\0".utf8), stderr: Data(), stdoutOverflow: false),
     ])
     let service = LiveGitService(
       runner: runner,
       resolveRemoteHost: { url in url.path == "/srv/app" ? Self.host : nil }
     )
 
-    let stats = try await service.localDiffStats(at: URL(fileURLWithPath: "/srv/app"))
-    #expect(stats == LocalDiffStats(additions: 17, deletions: 4))
+    let status = try await service.status(at: URL(fileURLWithPath: "/srv/app"))
+    #expect(status.entries.map(\.path) == ["app.swift"])
 
     let calls = await runner.calls
     #expect(calls.count == 2)
     for call in calls {
-      // Both the repo probe and the diff ride /usr/bin/ssh to the host…
+      // Both the repo probe and the status read ride /usr/bin/ssh to the host…
       #expect(call.executable.path == "/usr/bin/ssh")
       #expect(call.arguments.contains("alice@example.com"))
       #expect(call.arguments.contains("2222"))
@@ -50,8 +45,8 @@ struct RemoteGitRoutingTests {
     #expect(probe.contains("git"))
     #expect(probe.contains("rev-parse"))
     #expect(probe.contains("/srv/app"))
-    let diff = calls[1].arguments.last ?? ""
-    #expect(diff.contains("--shortstat"))
+    let statusCommand = calls[1].arguments.last ?? ""
+    #expect(statusCommand.contains("--porcelain=v1"))
   }
 
   @Test
@@ -64,7 +59,7 @@ struct RemoteGitRoutingTests {
       runner: runner,
       resolveRemoteHost: { _ in nil }
     )
-    _ = try await service.localDiffStats(at: URL(fileURLWithPath: "/tmp"))
+    _ = try await service.status(at: URL(fileURLWithPath: "/tmp"))
     let calls = await runner.calls
     #expect(calls.allSatisfy { $0.executable.path == "/usr/bin/git" })
     #expect(calls.allSatisfy { $0.cwd.path == "/tmp" })

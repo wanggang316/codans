@@ -8,6 +8,9 @@ import Foundation
 /// fighting the app target's `@MainActor` default.
 public nonisolated protocol GitService: Sendable {
   func comparison(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot
+  /// `comparison` split in two: files first, untracked line counts pending until the second call.
+  func comparisonListing(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot
+  func comparisonLineCounts(_ snapshot: GitComparisonSnapshot, at path: URL) async throws -> GitComparisonSnapshot
   func comparisonContent(at path: URL, snapshot: GitComparisonSnapshot, file: GitComparisonFile) async throws
     -> GitComparisonContent
 
@@ -43,8 +46,9 @@ public nonisolated protocol GitService: Sendable {
   /// the standard `GitError` cases.
   func showFileAtHEAD(_ path: String, at worktreePath: URL) async throws -> String?
 
-  /// `git diff HEAD --shortstat` — summed insertions / deletions for the
-  /// worktree's uncommitted edits. Returns `nil` only when the call itself
+  /// Summed insertions / deletions for the worktree's uncommitted edits,
+  /// untracked files included — the totals of `comparison(scope: .all)`, so
+  /// they match the diff viewer. Returns `nil` only when the call itself
   /// fails (not a repo, transient git error). A clean tree returns a stats
   /// value with both counts at zero, not nil.
   func localDiffStats(at worktreePath: URL) async throws -> LocalDiffStats?

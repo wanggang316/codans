@@ -114,6 +114,12 @@ private final class FakeGitService: GitService, @unchecked Sendable {
   func comparison(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot {
     fatalError()
   }
+  func comparisonListing(at path: URL, scope: GitComparisonScope, base: String?) async throws -> GitComparisonSnapshot {
+    fatalError()
+  }
+  func comparisonLineCounts(_ snapshot: GitComparisonSnapshot, at path: URL) async throws -> GitComparisonSnapshot {
+    fatalError()
+  }
   func comparisonContent(
     at path: URL, snapshot: GitComparisonSnapshot, file: GitComparisonFile
   ) async throws -> GitComparisonContent {

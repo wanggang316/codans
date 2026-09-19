@@ -3,8 +3,8 @@ import Foundation
 import CodansCore
 import os.log
 
-/// Cached per-Worktree "uncommitted edits" line-count observer
-/// (`git diff HEAD --shortstat`). Drives the `+N −M` chip on every sidebar
+/// Cached per-Worktree "uncommitted edits" line-count observer (the diff
+/// viewer's Uncommitted totals). Drives the `+N −M` chip on every sidebar
 /// worktree row, including rows with no PR matched.
 ///
 /// Refresh triggers:

@@ -19,5 +19,12 @@ if [ ! -f "${zmx_source}" ]; then
 fi
 
 mkdir -p "${zmx_destination_dir}"
+# Unlink before copying so the new zmx gets a fresh inode. `cp -f` onto an
+# existing file rewrites that inode in place. Once the kernel has cached the
+# inode's code signature (any earlier exec, e.g. a pane daemon that outlived
+# the app), an in-place rewrite, even with identical bytes, gets every later
+# exec of it SIGKILLed ("load code signature error 2"), so each new pane
+# closes the moment it opens.
+rm -f "${zmx_destination}"
 /bin/cp -f "${zmx_source}" "${zmx_destination}"
 chmod +x "${zmx_destination}"
