@@ -107,6 +107,17 @@ struct GitComparisonTests {
     #expect(counted == (try await service.comparison(at: url, scope: .all, base: nil)))
   }
 
+  @Test func emptyAddedFileIsNotReportedAsAMetadataChange() async throws {
+    let url = try await repository()
+    defer { try? FileManager.default.removeItem(at: url) }
+    try write("", "empty.txt", at: url)
+    let service = LiveGitService()
+    let snapshot = try await service.comparison(at: url, scope: .all, base: nil)
+    let empty = try #require(snapshot.files.first { $0.path == "empty.txt" })
+    let content = try await service.comparisonContent(at: url, snapshot: snapshot, file: empty)
+    #expect(content.notice == "Empty file added.")
+  }
+
   @Test func worktreeLineStatsMatchUncommittedComparisonTotals() async throws {
     let url = try await repository()
     defer { try? FileManager.default.removeItem(at: url) }

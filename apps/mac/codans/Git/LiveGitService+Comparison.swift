@@ -244,6 +244,9 @@ extension LiveGitService {
         return .init(notice: "File encoding is not UTF-8")
       }
       if oldText == newText {
+        if oldText.isEmpty && (file.status == "A" || file.status == "D") {
+          return .init(notice: file.status == "A" ? "Empty file added." : "Empty file deleted.")
+        }
         return .init(notice: "Metadata or path change (\(file.oldMode) → \(file.newMode)); text is unchanged.")
       }
       return .init(oldText: oldText, newText: newText)
