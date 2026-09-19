@@ -89,7 +89,9 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
     for source: InboxEntry.SourcePath,
     focus: RollupFocusState
   ) -> Level {
-    if !focus.expandedProjectIDs.contains(source.projectID) {
+    if !focus.expandedProjectIDs.contains(source.projectID),
+      !focus.rowWorktreeIDs.contains(source.worktreeID)
+    {
       return .project
     }
     let projectIsActive = focus.activeProjectID == source.projectID
@@ -119,18 +121,24 @@ public nonisolated struct RollupFocusState: Equatable, Sendable {
   /// Worktrees / tabs / panes inside a collapsed project are not visible
   /// to the user, so unread events for them roll up to project level.
   public let expandedProjectIDs: Set<ProjectID>
+  /// Worktrees drawn as their Project's own row (`Project.rowWorktree`):
+  /// on screen whether or not the Project is expanded, so their unread
+  /// events stay at worktree level.
+  public let rowWorktreeIDs: Set<WorktreeID>
 
   public init(
     focusedPaneID: PaneID? = nil,
     activeTabID: TabID? = nil,
     activeWorktreeID: WorktreeID? = nil,
     activeProjectID: ProjectID? = nil,
-    expandedProjectIDs: Set<ProjectID> = []
+    expandedProjectIDs: Set<ProjectID> = [],
+    rowWorktreeIDs: Set<WorktreeID> = []
   ) {
     self.focusedPaneID = focusedPaneID
     self.activeTabID = activeTabID
     self.activeWorktreeID = activeWorktreeID
     self.activeProjectID = activeProjectID
     self.expandedProjectIDs = expandedProjectIDs
+    self.rowWorktreeIDs = rowWorktreeIDs
   }
 }
