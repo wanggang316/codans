@@ -9,14 +9,14 @@ struct DiffFileSidebar: View {
   @State private var listGeneration = 0
 
   private var outgoing: Bool { store.state.scope == .outgoing }
+  /// The comparison arrives in display order, so the list only filters it.
   private var files: [GitComparisonFile] {
-    (store.snapshot?.files ?? []).filter {
-      store.filter.isEmpty || $0.path.localizedCaseInsensitiveContains(store.filter)
-    }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    let all = store.snapshot?.files ?? []
+    return store.filter.isEmpty ? all : all.filter { $0.path.localizedCaseInsensitiveContains(store.filter) }
   }
 
-  /// File rows the list shows: filtered, and in the tree only those outside collapsed folders.
-  private var visibleFileIDs: [String] {
+  /// File rows the list shows: in the tree, only those outside collapsed folders.
+  private func visibleFileIDs(_ files: [GitComparisonFile], tree nodes: [DiffFileTreeNode]) -> [String] {
     guard store.filePresentation == .tree else { return files.map(\.id) }
     func visible(_ nodes: [DiffFileTreeNode]) -> [String] {
       nodes.flatMap { node -> [String] in
@@ -24,7 +24,7 @@ struct DiffFileSidebar: View {
         return node.file.map { [$0.id] } ?? []
       }
     }
-    return visible(DiffFileTreeNode.build(files))
+    return visible(nodes)
   }
 
   private struct ListRows: Equatable {
@@ -33,6 +33,9 @@ struct DiffFileSidebar: View {
   }
 
   var body: some View {
+    // Filtered and built once per render: a comparison can hold thousands of files.
+    let files = self.files
+    let nodes = store.filePresentation == .tree ? DiffFileTreeNode.build(files) : []
     VStack(spacing: 0) {
       DiffComparisonPicker(
         outgoing: Binding(
@@ -84,7 +87,7 @@ struct DiffFileSidebar: View {
           })
       ) {
         if store.filePresentation == .tree {
-          DiffFileTreeRows(nodes: DiffFileTreeNode.build(files), collapsedFolders: $collapsedFolders, store: store)
+          DiffFileTreeRows(nodes: nodes, collapsedFolders: $collapsedFolders, store: store)
         } else {
           ForEach(files) { file in
             DiffFileSidebarRow(file: file, showsDirectory: true, store: store)
@@ -105,7 +108,8 @@ struct DiffFileSidebar: View {
     }
     .onChange(of: store.selectedFileID) { _, _ in revealSelection() }
     .onChange(of: store.filePresentation) { _, _ in revealSelection() }
-    .onChange(of: ListRows(fileIDs: visibleFileIDs, selectedFileID: store.selectedFileID)) { old, new in
+    .onChange(of: ListRows(fileIDs: visibleFileIDs(files, tree: nodes), selectedFileID: store.selectedFileID)) {
+      old, new in
       // The macOS List leaves a user-selected row on screen after that row is removed (scope
       // switch, refresh without the file, filter, collapsing its folder), drawn over the rows
       // below. A fresh List discards it; other updates keep the list, its scroll and focus.

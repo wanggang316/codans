@@ -66,9 +66,12 @@ extension LiveGitService {
     let fingerprint = SHA256.hash(
       data: bytes + Data((scope.rawValue + label + files.map(\.path).joined(separator: "\0")).utf8)
     ).map { String(format: "%02x", $0) }.joined()
-    return .init(
-      id: fingerprint, scope: scope, baseLabel: label, files: files.sorted { $0.path < $1.path },
-      repositoryPath: path.path)
+    // Display order, sorted here off the main actor so the file list does not re-sort per render.
+    let sorted = files.sorted { lhs, rhs in
+      let order = lhs.path.localizedStandardCompare(rhs.path)
+      return order == .orderedSame ? lhs.path < rhs.path : order == .orderedAscending
+    }
+    return .init(id: fingerprint, scope: scope, baseLabel: label, files: sorted, repositoryPath: path.path)
   }
 
   /// Line counts for untracked files. Local reads happen in-process; each remote read is an SSH
