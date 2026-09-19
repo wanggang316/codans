@@ -59,9 +59,9 @@ extension LiveGitService {
       guard let text = String(data: untracked, encoding: .utf8) else {
         throw GitError.unparsable(context: "Unsupported filename encoding")
       }
-      for name in text.split(separator: "\0") where !files.contains(where: { $0.path == name }) {
-        files.append(try await comparisonUntrackedFile(String(name), at: path))
-      }
+      var listed = Set(files.map(\.path))
+      let names = text.split(separator: "\0").map(String.init).filter { listed.insert($0).inserted }
+      files += try await comparisonUntrackedFiles(names, at: path)
     }
     let fingerprint = SHA256.hash(
       data: bytes + Data((scope.rawValue + label + files.map(\.path).joined(separator: "\0")).utf8)
@@ -71,11 +71,39 @@ extension LiveGitService {
       repositoryPath: path.path)
   }
 
-  private func comparisonUntrackedFile(_ name: String, at path: URL) async throws -> GitComparisonFile {
+  /// Line counts for untracked files. Local reads happen in-process; each remote read is an SSH
+  /// round trip, so a few run at once — kept below sshd's default of 10 sessions per connection.
+  private func comparisonUntrackedFiles(_ names: [String], at path: URL) async throws -> [GitComparisonFile] {
+    let host = await resolveRemoteHost(path)
+    guard host != nil else {
+      var files: [GitComparisonFile] = []
+      for name in names { files.append(try await comparisonUntrackedFile(name, at: path, host: nil)) }
+      return files
+    }
+    return try await withThrowingTaskGroup(of: (Int, GitComparisonFile).self) { group in
+      var files = names.map { GitComparisonFile(path: $0, status: "A") }
+      var next = 0
+      func start() {
+        let index = next
+        next += 1
+        group.addTask { (index, try await self.comparisonUntrackedFile(names[index], at: path, host: host)) }
+      }
+      for _ in 0..<min(4, names.count) { start() }
+      while let (index, file) = try await group.next() {
+        files[index] = file
+        if next < names.count { start() }
+      }
+      return files
+    }
+  }
+
+  private func comparisonUntrackedFile(_ name: String, at path: URL, host: RemoteHost?) async throws
+    -> GitComparisonFile
+  {
     var file = GitComparisonFile(path: name, status: "A")
     // Reuse the preview's bounded, symlink-safe read for both local and SSH worktrees.
     // Unreadable or oversized files retain unknown statistics rather than reporting zero.
-    guard let bytes = try? await comparisonWorkingFile(name, at: path) else {
+    guard let bytes = try? await comparisonWorkingFile(name, at: path, host: host) else {
       try Task.checkCancellation()
       return file
     }
@@ -210,9 +238,17 @@ extension LiveGitService {
   }
 
   private func comparisonWorkingFile(_ name: String, at path: URL) async throws -> Data {
+    try await comparisonWorkingFile(name, at: path, host: await resolveRemoteHost(path))
+  }
+
+  private static let changedWorkingFile =
+    "File is missing, a symlink, or no longer a regular file. Refresh the comparison."
+
+  private func comparisonWorkingFile(_ name: String, at path: URL, host: RemoteHost?) async throws -> Data {
     let parts = name.split(separator: "/", omittingEmptySubsequences: false)
     guard !name.hasPrefix("/"), !parts.contains(".."), !parts.contains("."), !parts.contains(""), !name.contains("\0")
     else { throw GitError.invalidInput("Invalid relative file path") }
+    guard let host else { return try Self.localWorkingFile(parts, in: path) }
     // Positional arguments preserve spaces, tabs, newlines and shell metacharacters.
     // Reject links at every component instead of following paths outside the worktree.
     let script = """
@@ -226,24 +262,42 @@ extension LiveGitService {
       if [ ! -f "./$name" ]; then exit 43; fi
       head -c \(Self.comparisonContentLimit + 1) "./$name"
       """
-    var executable = URL(fileURLWithPath: "/bin/sh")
-    var arguments = ["-c", script, "diff-view", name] + parts.map(String.init)
-    var cwd = path
-    var environment = GitProcessEnv.build()
-    if let host = await resolveRemoteHost(path) {
-      (executable, arguments) = SSHCommand.invocation(
-        host: host, executable: "sh", arguments: arguments, workingDirectory: path.path,
-        extraOptions: SSHCommand.backgroundProbeOptions)
-      cwd = URL(fileURLWithPath: NSHomeDirectory())
-      environment = ProcessInfo.processInfo.environment
-    }
+    let (executable, arguments) = SSHCommand.invocation(
+      host: host, executable: "sh", arguments: ["-c", script, "diff-view", name] + parts.map(String.init),
+      workingDirectory: path.path, extraOptions: SSHCommand.backgroundProbeOptions)
     let result = await runner.run(
-      executable: executable, arguments: arguments, env: environment, cwd: cwd, timeout: Self.sshTimeout,
+      executable: executable, arguments: arguments, env: ProcessInfo.processInfo.environment,
+      cwd: URL(fileURLWithPath: NSHomeDirectory()), timeout: Self.sshTimeout,
       maxOutputBytes: Self.comparisonContentLimit)
     if case .exited(let code, _, _, _) = result, code == 42 || code == 43 {
-      throw GitError.invalidInput("File is missing, a symlink, or no longer a regular file. Refresh the comparison.")
+      throw GitError.invalidInput(Self.changedWorkingFile)
     }
     return try Self.comparisonOutput(result)
+  }
+
+  /// The script's rules applied in-process for local worktrees: a process per file made
+  /// comparisons with many untracked files take seconds.
+  private static func localWorkingFile(_ parts: [Substring], in root: URL) throws -> Data {
+    var current = root.path
+    var info = stat()
+    for component in parts {
+      current += "/" + component
+      guard lstat(current, &info) == 0, info.st_mode & S_IFMT != S_IFLNK else {
+        throw GitError.invalidInput(changedWorkingFile)
+      }
+    }
+    guard info.st_mode & S_IFMT == S_IFREG else { throw GitError.invalidInput(changedWorkingFile) }
+    // O_NOFOLLOW and the fstat recheck cover a swap between the checks above and the open;
+    // O_NONBLOCK keeps a file replaced by a FIFO from blocking the open.
+    let descriptor = open(current, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+    guard descriptor >= 0 else { throw GitError.invalidInput(changedWorkingFile) }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
+      throw GitError.invalidInput(changedWorkingFile)
+    }
+    let data = try handle.read(upToCount: comparisonContentLimit + 1) ?? Data()
+    if data.count > comparisonContentLimit { throw GitError.outputTooLarge }
+    return data
   }
 
   private static func comparisonOutput(_ outcome: CommandOutcome) throws -> Data {
