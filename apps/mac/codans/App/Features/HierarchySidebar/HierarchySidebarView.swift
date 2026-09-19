@@ -983,15 +983,9 @@ struct HierarchySidebarView: View {
     // moves to a terminal pane), with the matching white / dark text.
     // Leading 14 compensates the +6pt clip-view shift in
     // `_UnclampedClipView` and adds a +8pt visual indent so worktree content
-    // reads as a child level under the (left-aligned) project header. A
-    // workspace's checkouts go one level deeper, their icon under the
-    // Workspace row's title, since they live inside that folder.
+    // reads as a child level under the (left-aligned) project header.
     .tag(worktree.id)
-    .listRowInsets(
-      EdgeInsets(
-        top: 2, leading: 14 + (isWorkspaceCheckout(worktree, in: project) ? Self.workspaceCheckoutIndent : 0),
-        bottom: 2, trailing: 0)
-    )
+    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     .contextMenu { worktreeContextMenu(worktree: worktree, project: project) }
     .task(id: worktree.path) {
@@ -1019,10 +1013,6 @@ struct HierarchySidebarView: View {
       }
     }
   }
-
-  /// How far a workspace's checkout rows sit inside its Workspace row: the
-  /// row icon's width plus the gap before the title.
-  private static let workspaceCheckoutIndent: CGFloat = 20
 
   private func isWorkspaceCheckout(_ worktree: Worktree, in project: Project) -> Bool {
     project.isWorkspace && worktree.path != project.rootPath

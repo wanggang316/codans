@@ -1,5 +1,5 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// Leading-edge icon for a Sidebar Worktree row. Replaces the old `circle.fill`/`circle`
 /// selection dot with a GitHub-style glyph that doubles as the row's PR-state signal:
@@ -28,7 +28,8 @@ struct WorktreeRowIcon: View {
     case gitAnchor
     /// A plain directory: git semantics (branch, PR state) don't apply.
     case folder
-    /// The root folder of a workspace; anchors its member checkouts.
+    /// The root folder of a workspace. Drawn as a folder like `.folder`, but
+    /// announced as the workspace root.
     case workspaceRoot
   }
 
@@ -74,27 +75,18 @@ struct WorktreeRowIcon: View {
           .aspectRatio(contentMode: .fit)
           .frame(width: 12, height: 12)
           .foregroundStyle(Color.orange)
-      } else if glyph == .folder {
-        // Render a folder rather than the `circlebadge` git-anchor glyph.
-        // 12pt inside a 14pt slot mirrors the `circlebadge` sizing so the
-        // label column stays aligned with sibling git rows.
+      } else if glyph == .folder || glyph == .workspaceRoot {
+        // Render a folder rather than the `circlebadge` git-anchor glyph: a
+        // plain directory and a workspace root are both folders, with no
+        // branch or PR to outrank the mark. 12pt inside a 14pt slot mirrors
+        // the `circlebadge` sizing so the label column stays aligned with
+        // sibling git rows.
         Image(systemName: "folder")
           .resizable()
           .aspectRatio(contentMode: .fit)
           .frame(width: 12, height: 12)
           .foregroundStyle(tint)
           .frame(width: 14, height: 14)
-      } else if glyph == .workspaceRoot {
-        // The root has no branch and no PR, so nothing ever outranks the
-        // anchor mark here.
-        Image(systemName: "star.fill")
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(width: 12, height: 12)
-          .foregroundStyle(tint)
-          .frame(width: 14, height: 14)
-          // The Group's label speaks for the slot; the glyph itself is silent.
-          .accessibilityHidden(true)
       } else if isDefaultBranch && snapshot == nil {
         // Default-branch identity marker in the leading slot (replaces
         // git-branch for the main checkout). PR snapshot still trumps
