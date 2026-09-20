@@ -46,6 +46,10 @@ final class WorktreeWorkingTreeWatcher {
   /// claim it was dispatched under. Paths alone cannot tell those apart.
   private var nextGeneration: UInt64 = 0
   private var debounceTasks: [WorktreeID: Task<Void, Never>] = [:]
+  /// Test observability: how many registered streams have been discarded
+  /// (torn down without staying installed). The re-point test asserts the
+  /// superseded start is discarded exactly once.
+  private(set) var discardedStreamCount = 0
   private var eventContinuation: AsyncStream<WorktreeID>.Continuation?
 
   private let debounceInterval: Duration
@@ -170,12 +174,10 @@ final class WorktreeWorkingTreeWatcher {
         // invalidated, so an in-flight callback can never race the box's
         // deallocation regardless of which queue teardown runs on.
         retain: { info in
-          Unmanaged<StreamBox>.fromOpaque(UnsafeMutableRawPointer(mutating: info!))
-            .retain().toOpaque()
+          UnsafeRawPointer(Unmanaged<StreamBox>.fromOpaque(info!).retain().toOpaque())
         },
         release: { info in
-          Unmanaged<StreamBox>.fromOpaque(UnsafeMutableRawPointer(mutating: info!))
-            .release()
+          Unmanaged<StreamBox>.fromOpaque(info!).release()
         },
         copyDescription: nil
       )
@@ -227,9 +229,7 @@ final class WorktreeWorkingTreeWatcher {
         guard let self else {
           // The watcher died mid-start; nobody would ever stop this stream.
           registerQueue.async {
-            withExtendedLifetime(watcher.box) {
-              tearDownFSEventStream(watcher.stream)
-            }
+            tearDownFSEventStream(watcher.stream)
           }
           return
         }
@@ -308,6 +308,7 @@ final class WorktreeWorkingTreeWatcher {
   /// callbacks, so no `withExtendedLifetime` dance is needed against an
   /// in-flight callback on the delivery queue.
   private func discard(_ watcher: Watcher) {
+    discardedStreamCount += 1
     registerQueue.async {
       tearDownFSEventStream(watcher.stream)
     }
