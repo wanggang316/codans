@@ -28,9 +28,6 @@ struct WorktreeRowIcon: View {
     case gitAnchor
     /// A plain directory: git semantics (branch, PR state) don't apply.
     case folder
-    /// The root folder of a workspace. Drawn as a folder like `.folder`, but
-    /// announced as the workspace root.
-    case workspaceRoot
   }
 
   let snapshot: PullRequestSnapshot?
@@ -42,8 +39,7 @@ struct WorktreeRowIcon: View {
   var roleTint: Color = .secondary
   /// What the row stands for when no PR snapshot claims the icon slot.
   /// `.folder` is the placeholder worktree under a dir-kind Project
-  /// (`Project.gitRoot == nil` + `worktree.path == project.rootPath`);
-  /// `.workspaceRoot` is the root folder row of a workspace.
+  /// (`Project.gitRoot == nil` + `worktree.path == project.rootPath`).
   var glyph: LeadingGlyph = .gitAnchor
   /// L3 unread override. When `true`, the row icon swaps to a bell glyph
   /// regardless of PR / branch state, and the role tint is replaced by
@@ -75,10 +71,11 @@ struct WorktreeRowIcon: View {
           .aspectRatio(contentMode: .fit)
           .frame(width: 12, height: 12)
           .foregroundStyle(Color.orange)
-      } else if glyph == .folder || glyph == .workspaceRoot {
+      } else if glyph == .folder {
         // Render a folder rather than the `circlebadge` git-anchor glyph: a
-        // plain directory and a workspace root are both folders, with no
-        // branch or PR to outrank the mark. 12pt inside a 14pt slot mirrors
+        // plain directory has no branch or PR to outrank the mark, and a
+        // Project row draws the Project's own icon instead of coming here.
+        // 12pt inside a 14pt slot mirrors
         // the `circlebadge` sizing so the label column stays aligned with
         // sibling git rows.
         Image(systemName: "folder")
@@ -180,9 +177,6 @@ struct WorktreeRowIcon: View {
   private var accessibilityLabel: Text {
     if glyph == .folder {
       return Text(isSelected ? "Active project folder" : "Project folder")
-    }
-    if glyph == .workspaceRoot {
-      return Text(isSelected ? "Active workspace root" : "Workspace root")
     }
     guard let snapshot else {
       if isDefaultBranch {

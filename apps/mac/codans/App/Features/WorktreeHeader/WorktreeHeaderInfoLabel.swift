@@ -29,22 +29,29 @@ struct WorktreeHeaderInfoLabel: View {
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
     }()
     let isSynthetic = isMainCheckout && project.gitRoot == nil
-    let glyph: WorktreeRowIcon.LeadingGlyph =
-      isFolderRoot && project.isWorkspace ? .workspaceRoot : (isSynthetic ? .folder : .gitAnchor)
+    let glyph: WorktreeRowIcon.LeadingGlyph = isSynthetic ? .folder : .gitAnchor
     let hasUnread = notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
 
     HStack(spacing: 8) {
-      WorktreeRowIcon(
-        snapshot: snapshot,
-        rollup: rollup,
-        // Toolbar has no row-selection chrome, so the icon should keep
-        // its role tint rather than swap to the selected-text colour
-        // the sidebar uses on the active row.
-        isSelected: false,
-        glyph: glyph,
-        hasUnreadNotification: hasUnread,
-        isDefaultBranch: isMainCheckout && !isSynthetic
-      )
+      if isFolderRoot {
+        // The row this header names is the Project itself, so it wears the
+        // Project's icon — the same one the sidebar row draws, including a
+        // user-picked one and the workspace default. `WorktreeRowIcon` knows
+        // only the fixed folder glyph and would contradict the sidebar.
+        folderRootIcon(hasUnread: hasUnread)
+      } else {
+        WorktreeRowIcon(
+          snapshot: snapshot,
+          rollup: rollup,
+          // Toolbar has no row-selection chrome, so the icon should keep
+          // its role tint rather than swap to the selected-text colour
+          // the sidebar uses on the active row.
+          isSelected: false,
+          glyph: glyph,
+          hasUnreadNotification: hasUnread,
+          isDefaultBranch: isMainCheckout && !isSynthetic
+        )
+      }
       VStack(alignment: .leading, spacing: 0) {
         branchRowButton
           .popover(
@@ -72,6 +79,30 @@ struct WorktreeHeaderInfoLabel: View {
   /// repository to list branches from, so the headline names the Project, as
   /// its sidebar row does, and is not a popover target.
   private var isFolderRoot: Bool { project.rowWorktree?.id == worktree.id }
+
+  /// Leading icon for such a folder: the Project's own icon, sized to the
+  /// slot `WorktreeRowIcon` uses so the headline sits at the same offset
+  /// either way. Unread still takes the slot, as it does on every row.
+  @ViewBuilder
+  private func folderRootIcon(hasUnread: Bool) -> some View {
+    if hasUnread {
+      Image(systemName: "bell.fill")
+        .resizable()
+        .aspectRatio(contentMode: .fit)
+        .frame(width: 12, height: 12)
+        .foregroundStyle(Color.orange)
+        .frame(width: 14, height: 14)
+        .accessibilityLabel("Has unread notifications")
+    } else {
+      ProjectIconView(
+        icon: project.icon, color: project.color, size: 13,
+        defaultSymbol: ProjectIconView.defaultSymbol(for: project.kind)
+      )
+      // Decorative, like the sidebar row's copy of it: the context row
+      // under the headline already says "Workspace" or "Folder" in words.
+      .frame(width: 14, height: 14)
+    }
+  }
 
   /// Project name tint in the caption row. Uses the project's configured
   /// color when set; otherwise keeps the caption `.secondary` hue so a

@@ -983,7 +983,6 @@ struct HierarchySidebarView: View {
         isSelected: isSelected
       )
       newBadgePill(for: worktree)
-      workspaceMembershipBadge(for: worktree, in: project)
       diffStatsChip(for: worktree, in: project, snapshot: snapshot)
       gitHubBadge(for: worktree, in: project)
       runScriptPingAccessory(for: worktree, in: project)
@@ -1123,6 +1122,10 @@ struct HierarchySidebarView: View {
             // row uses. The phase line's stage value below is the
             // probeable signal; the shimmer is purely cosmetic.
             .shimmer(isActive: lifecycle != nil && !reduceMotion)
+          // Beside the name rather than at the row's trailing edge: it
+          // qualifies *this* checkout, and the trailing corner belongs to
+          // the accessories that report on it.
+          workspaceMembershipBadge(for: worktree, in: project)
           // Default-branch marker now lives in WorktreeRowIcon's leading
           // slot (star.fill replaces git-branch for the main checkout),
           // so there's no longer an inline star next to the name.
@@ -1578,8 +1581,13 @@ struct HierarchySidebarView: View {
   }
 
   /// On a source Project's row whose checkout a workspace lists as a child:
-  /// names the workspace and jumps to its row. Never shown inside the
+  /// marks the row and jumps to the workspace. Never shown inside the
   /// workspace itself, where every child row would carry it.
+  ///
+  /// The glyph alone, beside the name: a pill spelling the workspace out sat
+  /// at the row's trailing edge, where it competed with the PR pill and the
+  /// diff chip for the same corner and squeezed the name into an ellipsis.
+  /// The name is one hover away instead.
   @ViewBuilder
   fileprivate func workspaceMembershipBadge(for worktree: Worktree, in project: Project) -> some View {
     if !project.isWorkspace,
@@ -1588,24 +1596,11 @@ struct HierarchySidebarView: View {
       Button {
         store.send(.workspaceMembershipBadgeTapped(membership))
       } label: {
-        HStack(spacing: 2) {
-          Image(systemName: "square.stack.3d.up")
-            .font(.system(size: 9, weight: .semibold))
-            .accessibilityHidden(true)
-          Text(membership.workspaceName)
-            .font(.system(size: 10, weight: .semibold))
-            .lineLimit(1)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 1)
-        .background(
-          RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .stroke(Color.secondary.opacity(0.6), lineWidth: 0.75)
-        )
+        Image(systemName: "square.stack.3d.up")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(.secondary)
       }
       .buttonStyle(.plain)
-      .padding(.leading, 6)
       .help("Checked out for workspace \(membership.workspaceName) — click to show it there")
       .accessibilityLabel("In workspace \(membership.workspaceName)")
     }
@@ -1972,7 +1967,10 @@ private struct ProjectHeaderRow<Accessory: View>: View {
       }
       .frame(width: 14, alignment: .center)
       Text(project.name)
-        .font(.subheadline)
+        // Semibold, though the row sits a size below its worktrees: the
+        // Project is the heading of the rows under it, and at subheadline
+        // size the regular weight let a child's name outweigh its parent.
+        .font(.subheadline.weight(.semibold))
         .foregroundStyle(projectNameColor)
         .lineLimit(1)
       // Server projects carry a small network glyph so a remote repo is
