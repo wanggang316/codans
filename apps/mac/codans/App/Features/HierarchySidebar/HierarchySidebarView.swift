@@ -731,7 +731,7 @@ struct HierarchySidebarView: View {
     }
     .padding(.vertical, 2)
     .contentShape(Rectangle())
-    .listRowInsets(EdgeInsets(top: 4, leading: 8 - sidebarRowLeadingPull, bottom: 4, trailing: 8))
+    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
     .listRowBackground(Color.clear)
     .listRowSeparator(.hidden)
     .accessibilityLabel(project.name)
@@ -766,7 +766,7 @@ struct HierarchySidebarView: View {
         // Same row metrics as the healthy Project header below — without
         // them the failed row falls back to the sidebar's default insets and
         // sits at a different indent than its siblings.
-        .listRowInsets(EdgeInsets(top: 4, leading: -sidebarRowLeadingPull, bottom: 2, trailing: 0))
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       case .loading, .ready:
@@ -858,7 +858,7 @@ struct HierarchySidebarView: View {
       // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
       .tag(root.id)
       .id(root.id)
-      .listRowInsets(EdgeInsets(top: 4, leading: -sidebarRowLeadingPull, bottom: 2, trailing: 0))
+      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
       .listRowSeparator(.hidden)
       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
     } else {
@@ -873,7 +873,7 @@ struct HierarchySidebarView: View {
         }
       }
       .buttonStyle(.plain)
-      .listRowInsets(EdgeInsets(top: 4, leading: -sidebarRowLeadingPull, bottom: 2, trailing: 0))
+      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
       .listRowBackground(Color.clear)
       .listRowSeparator(.hidden)
     }
@@ -927,7 +927,7 @@ struct HierarchySidebarView: View {
     // with sibling worktree rows. Without this the row renders flush-left:
     // the child indent lives in `leading: 14` (see `worktreeRow`), not in
     // the outline view, whose own indentation is zeroed.
-    .listRowInsets(EdgeInsets(top: 2, leading: 14 - sidebarRowLeadingPull, bottom: 2, trailing: 0))
+    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     // Manual "selected" pill while the detail pane follows this creation.
     // Approximates the native source-list emphasized selection (accent
@@ -1000,11 +1000,11 @@ struct HierarchySidebarView: View {
     // sourceList renderer paints the focus-aware highlight (emphasized blue
     // when sidebar holds first-responder, unemphasized grey when focus
     // moves to a terminal pane), with the matching white / dark text.
-    // Leading 14 carries the same `sidebarRowLeadingPull` the project row
-    // takes back plus a +8pt visual indent, so worktree content reads as a
-    // child level under the (left-aligned) project header.
+    // Leading 14 is the +8pt visual indent over the project row's own
+    // leading inset, so worktree content reads as a child level under the
+    // (left-aligned) project header.
     .tag(worktree.id)
-    .listRowInsets(EdgeInsets(top: 2, leading: 14 - sidebarRowLeadingPull, bottom: 2, trailing: 0))
+    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     .contextMenu { worktreeContextMenu(worktree: worktree, project: project) }
     .task(id: worktree.path) {
@@ -2189,22 +2189,13 @@ private struct SidebarHotkeyHint: View {
 
 /// Transparent helper that hunts down the AppKit `NSOutlineView` backing
 /// `List(.sidebar)` and zeroes its built-in indentation / intercell spacing,
-/// so rows carry no per-level offset on top of the scroll-view gutter. The
-/// leading padding the sidebar style adds on top of that is taken back per
-/// row by `sidebarRowLeadingPull`, which leaves the rows' own frame — and so
-/// the selection highlight — centred in the sidebar.
+/// so rows carry no per-level offset on top of the scroll-view gutter and
+/// the indent each row wants lives in its own `listRowInsets`.
 ///
 /// Retries a few times because the List may not be attached when
 /// `viewDidMoveToWindow` first fires. Fires `onReady` once any outline has
 /// been patched so the SwiftUI parent can gate visibility on install — the
 /// indent would otherwise visibly snap rows left mid-launch.
-/// How much of `List(.sidebar)`'s built-in leading padding the rows take back,
-/// as a negative leading `listRowInsets`. Applied per row rather than by
-/// shifting the whole list sideways: a sideways shift moves the rows' own
-/// frame too, which left AppKit's selection highlight 4pt from the sidebar's
-/// leading edge and 15pt from its trailing one.
-private let sidebarRowLeadingPull: CGFloat = 6
-
 private struct SidebarIndentZeroer: NSViewRepresentable {
   var onReady: () -> Void = {}
   func makeNSView(context: Context) -> NSView {
