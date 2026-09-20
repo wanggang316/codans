@@ -70,6 +70,8 @@ struct WorktreeWorkingTreeWatcherTests {
     // register queue. (With the old unconditional claim removal, BOTH
     // starts tore themselves down and no stream ever installed.)
     watcher.setWorktrees([(id: id, path: oldDir.path)])
+    watcher.setWorktrees([(id: id, path: newDir.path)])
+
     try await Self.waitUntil { watcher.isWatching(id, path: newDir.path) }
     // The superseded start was torn down, not leaked: exactly one discard.
     #expect(watcher.discardedStreamCount == 1)
