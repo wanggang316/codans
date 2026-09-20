@@ -233,6 +233,7 @@ struct WorkspaceMemberEditorSheet: View {
       placeholder: "Choose a branch",
       includeLocal: true,
       includeRemote: true,
+      blocksCheckedOut: true,
       subtitle: draft.hasLocalConflict ? nil : trackingNote(draft),
       onSelect: { send(draft, .existingRefChanged($0)) })
     if draft.hasLocalConflict, let branch = draft.remoteRefBranch {

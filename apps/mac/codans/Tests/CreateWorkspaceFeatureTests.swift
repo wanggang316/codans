@@ -485,6 +485,52 @@ struct CreateWorkspaceFeatureTests {
   }
 
   @Test
+  func aBranchAnotherWorktreeHoldsIsNotFreeToCheckOut() {
+    #expect(appRefs.checkoutHolder(for: "main") == "/src/app")
+    // A remote ref is checked out as its local twin, so the twin decides.
+    #expect(appRefs.checkoutHolder(for: "origin/main") == "/src/app")
+    #expect(appRefs.checkoutHolder(for: "wip") == nil)
+    #expect(appRefs.checkoutHolder(for: "origin/release") == nil)
+    // A local twin that is free is the Keep / Reset case, not a refusal.
+    #expect(appRefs.checkoutHolder(for: "origin/feat/x") == nil)
+    // Not a branch of this repository at all.
+    #expect(appRefs.checkoutHolder(for: "upstream/none") == nil)
+    #expect(appRefs.hasFreeBranch)
+    #expect(!appRefs.isEmpty)
+
+    let allTaken = RefInventory(
+      local: ["main", "wip"], remote: ["origin/main", "origin/wip"],
+      checkedOut: ["main": "/src/app", "wip": "/wt/app-wip"])
+    #expect(!allTaken.hasFreeBranch)
+    #expect(RefInventory().isEmpty)
+    #expect(!RefInventory().hasFreeBranch)
+  }
+
+  @Test
+  func aRepositoryWithNoFreeBranchPointsAtNewBranch() {
+    var state = Feature.State(candidates: [app])
+    let allTaken = RefInventory(
+      local: ["main"], remote: ["origin/main"], defaultBaseRef: "origin/main", headBranch: "main",
+      checkedOut: ["main": "/src/app"])
+    state.members = [member(1, appSource, name: "app", refs: allTaken)]
+    state.members[0].mode = .existing
+    #expect(
+      state.issues(for: state.members[0]) == [
+        .blocking("Every branch of app is already checked out somewhere. Choose New branch instead.")
+      ])
+
+    state.members[0].refs = .loaded(RefInventory())
+    #expect(
+      state.issues(for: state.members[0]) == [
+        .blocking("app has no branches yet. Choose New branch instead.")
+      ])
+
+    // With one branch free it is an ordinary empty field again.
+    state.members[0].refs = .loaded(appRefs)
+    #expect(state.issues(for: state.members[0]) == [.incomplete("Choose a branch for app.")])
+  }
+
+  @Test
   func rowsSummarizeTheirCheckout() {
     var state = Feature.State(candidates: [app])
     var row = member(1, appSource, name: "app")

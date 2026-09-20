@@ -285,6 +285,25 @@ nonisolated struct RefInventory: Equatable, Sendable {
   func contains(_ ref: String) -> Bool {
     local.contains(ref) || remote.contains(ref)
   }
+
+  /// Whether the repository listed any branch at all.
+  var isEmpty: Bool { local.isEmpty && remote.isEmpty }
+
+  /// The worktree already holding the branch that checking out `ref` would
+  /// need, if any — git keeps a branch in one worktree at a time. A remote
+  /// ref is checked out as its local twin, so the twin decides for it.
+  func checkoutHolder(for ref: String) -> String? {
+    if local.contains(ref) { return checkedOut[ref] }
+    guard remote.contains(ref), let branch = WorkspaceCheckout.splitRemoteRef(ref)?.branch else { return nil }
+    return checkedOut[branch]
+  }
+
+  /// Whether any listed branch can still be checked out here. False with
+  /// branches listed means every one of them is taken, and only a new
+  /// branch will do.
+  var hasFreeBranch: Bool {
+    local.contains { checkedOut[$0] == nil } || remote.contains { checkoutHolder(for: $0) == nil }
+  }
 }
 
 /// Something the sheet has to say about a member or the workspace.

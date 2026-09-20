@@ -270,6 +270,16 @@ struct CreateWorkspaceFeature {
       case .existing:
         if member.refs.isLoading { return [.incomplete("Loading branches for \(label)…")] }
         guard let ref = member.existingRef, !ref.isEmpty else {
+          // Nothing to choose: say so here rather than leave a menu whose
+          // every item is disabled.
+          if let inventory, !inventory.hasFreeBranch {
+            return [
+              .blocking(
+                inventory.isEmpty
+                  ? "\(label) has no branches yet. Choose New branch instead."
+                  : "Every branch of \(label) is already checked out somewhere. Choose New branch instead.")
+            ]
+          }
           return [.incomplete("Choose a branch for \(label).")]
         }
         guard let inventory else { return [] }
