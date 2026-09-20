@@ -101,6 +101,17 @@ final class WorktreeWorkingTreeWatcher {
     }
   }
 
+  /// Test observability for the asynchronous install path: true once a
+  /// stream for exactly this (id, path) is running. Event delivery can't be
+  /// asserted in-process (`IgnoreSelf` suppresses our own writes, and CI
+  /// fseventsd latency varies), so the suite pins install state instead.
+  func isWatching(_ worktreeID: WorktreeID, path: String) -> Bool {
+    if case .running(let watcher) = entries[worktreeID] {
+      return watcher.rootPath == path
+    }
+    return false
+  }
+
   /// Tear everything down. Called from the host app's `onQuit` path.
   func stopAll() {
     for id in Array(entries.keys) { retire(id) }
@@ -154,8 +165,18 @@ final class WorktreeWorkingTreeWatcher {
       var context = FSEventStreamContext(
         version: 0,
         info: Unmanaged.passUnretained(box).toOpaque(),
-        retain: nil,
-        release: nil,
+        // The stream owns a reference to the box: FSEvents calls `retain`
+        // when it copies the context and `release` when the stream is
+        // invalidated, so an in-flight callback can never race the box's
+        // deallocation regardless of which queue teardown runs on.
+        retain: { info in
+          Unmanaged<StreamBox>.fromOpaque(UnsafeMutableRawPointer(mutating: info!))
+            .retain().toOpaque()
+        },
+        release: { info in
+          Unmanaged<StreamBox>.fromOpaque(UnsafeMutableRawPointer(mutating: info!))
+            .release()
+        },
         copyDescription: nil
       )
       let flags = UInt32(
@@ -167,10 +188,18 @@ final class WorktreeWorkingTreeWatcher {
       guard
         let stream = FSEventStreamCreate(
           kCFAllocatorDefault,
-          { _, info, _, _, _, _ in
+          {
+            _, info, numEvents, eventPaths, _, _ in
             guard let info else { return }
             let box = Unmanaged<StreamBox>.fromOpaque(info).takeUnretainedValue()
-            box.notify(box)
+            guard
+              let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String]
+            else { return }
+            for path in paths.prefix(numEvents) {
+              if path.contains("/.git/") || path.hasSuffix("/.git") { continue }
+              box.notify(box)
+              return
+            }
           },
           &context,
           [rootPath] as CFArray,
@@ -272,17 +301,15 @@ final class WorktreeWorkingTreeWatcher {
     debounceTasks.removeValue(forKey: worktreeID)?.cancel()
   }
 
-  /// Stop / invalidate / release must run as a trio, in order, on
-  /// `registerQueue` — serialized with every other stream-lifecycle call —
-  /// and never on the main actor: `Invalidate` can talk to fseventsd just
-  /// like `Start` did. `withExtendedLifetime` keeps the box (the callback's
-  /// unretained `info`) alive until invalidation has drained in-flight
-  /// callbacks.
+  /// Stop / invalidate / release must run as a trio, in order, off the
+  /// main actor (`Invalidate` can talk to fseventsd just like `Start` did),
+  /// on `registerQueue` alongside every other stream-lifecycle call. The
+  /// box's lifetime is stream-owned via the context retain/release
+  /// callbacks, so no `withExtendedLifetime` dance is needed against an
+  /// in-flight callback on the delivery queue.
   private func discard(_ watcher: Watcher) {
     registerQueue.async {
-      withExtendedLifetime(watcher.box) {
-        tearDownFSEventStream(watcher.stream)
-      }
+      tearDownFSEventStream(watcher.stream)
     }
   }
 }
@@ -303,7 +330,7 @@ private enum Entry {
   case running(Watcher)
 }
 
-private struct Watcher: @unchecked Sendable {
+private nonisolated struct Watcher: @unchecked Sendable {
   let rootPath: String
   let stream: FSEventStreamRef
   /// Retained for the stream's lifetime; its opaque pointer is handed to
@@ -329,7 +356,16 @@ private final class StreamBox: @unchecked Sendable {
 }
 
 extension WorktreeWorkingTreeWatcher: DependencyKey {
-  static let liveValue = WorktreeWorkingTreeWatcher()
+  /// Unconfigured fallback until `CodansApp.bringUp` overrides it with the
+  /// live instance. Mirrors `WorktreeHeadWatcher.liveValue`: a real instance
+  /// whose `setWorktrees` is never called, so no streams attach and `events()`
+  /// finishes immediately — lets reducer wiring resolve the dependency in
+  /// tests without an explicit override.
+  static var liveValue: WorktreeWorkingTreeWatcher {
+    MainActor.assumeIsolated { WorktreeWorkingTreeWatcher() }
+  }
+
+  static var testValue: WorktreeWorkingTreeWatcher { liveValue }
 }
 
 extension DependencyValues {
