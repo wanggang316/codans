@@ -324,21 +324,24 @@ struct ProjectGeneralSettingsView: View {
           ProjectIconView(icon: source?.icon, color: source?.color, size: 16)
             .frame(width: 18)
           VStack(alignment: .leading, spacing: 3) {
+            // Folder and branch together on top, source path beneath: the
+            // pair names the checkout, while the path is the long,
+            // middle-truncated line you only read when you need it.
             HStack(alignment: .firstTextBaseline, spacing: 6) {
               Text(checkout.name)
                 .fontWeight(.medium)
                 .lineLimit(1)
                 .layoutPriority(1)
-              if let root = checkout.sourceGitRoot {
-                Text((root as NSString).abbreviatingWithTildeInPath)
-                  .font(.subheadline)
-                  .foregroundStyle(.secondary)
-                  .lineLimit(1)
-                  .truncationMode(.middle)
-                  .help(root)
-              }
+              WorkspaceCheckoutLine(checkout: .checkedOut(branch: checkout.branch))
             }
-            WorkspaceCheckoutLine(checkout: .checkedOut(branch: checkout.branch))
+            if let root = checkout.sourceGitRoot {
+              Text((root as NSString).abbreviatingWithTildeInPath)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(root)
+            }
           }
         }
         .padding(.vertical, 2)

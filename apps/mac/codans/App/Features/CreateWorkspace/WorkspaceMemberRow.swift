@@ -4,9 +4,10 @@ import SwiftUI
 
 /// One project in the New Workspace list: an icon for where it comes from
 /// (the project's own icon, a folder on disk, or a remote), its folder name
-/// and source, the checkout as `WorkspaceCheckoutLine` draws it, and its
-/// problems or creation progress. Edit and remove sit on the trailing edge.
-/// A workspace's settings page lists its checkouts in the same shape.
+/// beside the checkout as `WorkspaceCheckoutLine` draws it, then the source
+/// it comes from and its problems or creation progress. Edit and remove sit
+/// on the trailing edge. A workspace's settings page lists its checkouts in
+/// the same shape.
 struct WorkspaceMemberRow: View {
   let store: StoreOf<CreateWorkspaceFeature>
   let member: MemberDraft
@@ -16,19 +17,22 @@ struct WorkspaceMemberRow: View {
       icon
         .frame(width: 18)
       VStack(alignment: .leading, spacing: 3) {
+        // Folder and checkout together on top, source beneath: the pair is
+        // what the row is about, while the source is the long,
+        // middle-truncated line you only read when you need it.
         HStack(alignment: .firstTextBaseline, spacing: 6) {
           Text(member.name.isEmpty ? member.source.title : member.name)
             .fontWeight(.medium)
             .lineLimit(1)
             .layoutPriority(1)
-          Text(member.source.location)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .help(sourceHelp)
+          WorkspaceCheckoutLine(checkout: store.state.checkoutDescription(for: member))
         }
-        WorkspaceCheckoutLine(checkout: store.state.checkoutDescription(for: member))
+        Text(member.source.location)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .help(sourceHelp)
         statusLine
       }
       Spacer(minLength: 8)
