@@ -170,9 +170,9 @@ struct HierarchySidebarView: View {
     )
   }
 
-  /// Flips to true once `_UnclampedClipView` has been swapped in. Until then
-  /// the List renders at `opacity(0)` so the user never sees the unshifted
-  /// (x=0) frames the AppKit introspection retries paper over.
+  /// Flips to true once the outline view's own indentation has been zeroed.
+  /// Until then the List renders at `opacity(0)` so the user never sees the
+  /// per-level indent the AppKit introspection retries paper over.
   @State private var sidebarIndentReady = false
 
   /// Heterogeneous rows under a Project row, in render order: main → pinned →
@@ -731,7 +731,7 @@ struct HierarchySidebarView: View {
     }
     .padding(.vertical, 2)
     .contentShape(Rectangle())
-    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+    .listRowInsets(EdgeInsets(top: 4, leading: 8 - sidebarRowLeadingPull, bottom: 4, trailing: 8))
     .listRowBackground(Color.clear)
     .listRowSeparator(.hidden)
     .accessibilityLabel(project.name)
@@ -766,7 +766,7 @@ struct HierarchySidebarView: View {
         // Same row metrics as the healthy Project header below — without
         // them the failed row falls back to the sidebar's default insets and
         // sits at a different indent than its siblings.
-        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+        .listRowInsets(EdgeInsets(top: 4, leading: -sidebarRowLeadingPull, bottom: 2, trailing: 0))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       case .loading, .ready:
@@ -858,7 +858,7 @@ struct HierarchySidebarView: View {
       // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
       .tag(root.id)
       .id(root.id)
-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+      .listRowInsets(EdgeInsets(top: 4, leading: -sidebarRowLeadingPull, bottom: 2, trailing: 0))
       .listRowSeparator(.hidden)
       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
     } else {
@@ -873,7 +873,7 @@ struct HierarchySidebarView: View {
         }
       }
       .buttonStyle(.plain)
-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+      .listRowInsets(EdgeInsets(top: 4, leading: -sidebarRowLeadingPull, bottom: 2, trailing: 0))
       .listRowBackground(Color.clear)
       .listRowSeparator(.hidden)
     }
@@ -924,10 +924,10 @@ struct HierarchySidebarView: View {
     .onTapGesture { store.send(.pendingWorktreeRowTapped(pending.id)) }
     .accessibilityAddTraits(.isButton)
     // Match the worktree row's `listRowInsets` so the spinner + name line up
-    // with sibling worktree rows. Without this the row renders flush-left
-    // because the clip-view shift compensated by `leading: 14` (see
-    // `worktreeRow`) is not applied.
-    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
+    // with sibling worktree rows. Without this the row renders flush-left:
+    // the child indent lives in `leading: 14` (see `worktreeRow`), not in
+    // the outline view, whose own indentation is zeroed.
+    .listRowInsets(EdgeInsets(top: 2, leading: 14 - sidebarRowLeadingPull, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     // Manual "selected" pill while the detail pane follows this creation.
     // Approximates the native source-list emphasized selection (accent
@@ -1000,11 +1000,11 @@ struct HierarchySidebarView: View {
     // sourceList renderer paints the focus-aware highlight (emphasized blue
     // when sidebar holds first-responder, unemphasized grey when focus
     // moves to a terminal pane), with the matching white / dark text.
-    // Leading 14 compensates the +6pt clip-view shift in
-    // `_UnclampedClipView` and adds a +8pt visual indent so worktree content
-    // reads as a child level under the (left-aligned) project header.
+    // Leading 14 carries the same `sidebarRowLeadingPull` the project row
+    // takes back plus a +8pt visual indent, so worktree content reads as a
+    // child level under the (left-aligned) project header.
     .tag(worktree.id)
-    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
+    .listRowInsets(EdgeInsets(top: 2, leading: 14 - sidebarRowLeadingPull, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     .contextMenu { worktreeContextMenu(worktree: worktree, project: project) }
     .task(id: worktree.path) {
@@ -2188,19 +2188,23 @@ private struct SidebarHotkeyHint: View {
 }
 
 /// Transparent helper that hunts down the AppKit `NSOutlineView` backing
-/// `List(.sidebar)` and applies two leading-edge adjustments:
-///
-///   1. Zero `NSOutlineView`'s built-in indentation / intercell spacing, so
-///      rows have no per-level offset on top of the scroll-view gutter.
-///   2. Swap the scroll view's clip view for `_UnclampedClipView`, which pins
-///      `bounds.origin.x` at a fixed offset — visually shifting all row
-///      content leftward by that amount (defeats SwiftUI sidebar style's
-///      internal leading padding without losing hit-testing).
+/// `List(.sidebar)` and zeroes its built-in indentation / intercell spacing,
+/// so rows carry no per-level offset on top of the scroll-view gutter. The
+/// leading padding the sidebar style adds on top of that is taken back per
+/// row by `sidebarRowLeadingPull`, which leaves the rows' own frame — and so
+/// the selection highlight — centred in the sidebar.
 ///
 /// Retries a few times because the List may not be attached when
 /// `viewDidMoveToWindow` first fires. Fires `onReady` once any outline has
 /// been patched so the SwiftUI parent can gate visibility on install — the
-/// 6pt clip-view shift would otherwise visibly snap rows left mid-launch.
+/// indent would otherwise visibly snap rows left mid-launch.
+/// How much of `List(.sidebar)`'s built-in leading padding the rows take back,
+/// as a negative leading `listRowInsets`. Applied per row rather than by
+/// shifting the whole list sideways: a sideways shift moves the rows' own
+/// frame too, which left AppKit's selection highlight 4pt from the sidebar's
+/// leading edge and 15pt from its trailing one.
+private let sidebarRowLeadingPull: CGFloat = 6
+
 private struct SidebarIndentZeroer: NSViewRepresentable {
   var onReady: () -> Void = {}
   func makeNSView(context: Context) -> NSView {
@@ -2242,45 +2246,11 @@ private final class _IndentZeroerView: NSView {
       outline.indentationPerLevel = 0
       outline.intercellSpacing = NSSize(width: 0, height: outline.intercellSpacing.height)
       outline.outlineTableColumn?.minWidth = 0
-      installUnclampedClipView(for: outline, leadingOffset: 6)
     }
     if !outlines.isEmpty, !didFireReady {
       didFireReady = true
       onReady?()
     }
-  }
-
-  /// Replaces the scroll view's clip view with `_UnclampedClipView` (idempotent)
-  /// and pins its `leadingOffset`. Preserves the original clip view's
-  /// background / cursor / copy-on-scroll state so the visual stays identical
-  /// apart from the horizontal shift.
-  ///
-  /// `constrainBoundsRect:` only fires on AppKit-initiated bounds proposals
-  /// (scroll, resize, animation), so on first install we drive `setBoundsOrigin`
-  /// + `tile()` ourselves — otherwise the leading shift only "kicks in" after
-  /// the first user interaction.
-  private func installUnclampedClipView(for outline: NSOutlineView, leadingOffset: CGFloat) {
-    guard let scrollView = outline.enclosingScrollView else { return }
-    // `bounds.origin.y` on the original clip view encodes the top
-    // content-inset / safe-area offset AppKit sets during initial layout
-    // (titlebar gutter on a sidebar column). A freshly allocated
-    // _UnclampedClipView starts at y=0, so we must carry that y forward —
-    // otherwise rows render visibly lower than the eventual steady-state.
-    let preservedY = scrollView.contentView.bounds.origin.y
-    if !(scrollView.contentView is _UnclampedClipView) {
-      let oldClip = scrollView.contentView
-      let newClip = _UnclampedClipView()
-      newClip.drawsBackground = oldClip.drawsBackground
-      newClip.backgroundColor = oldClip.backgroundColor
-      newClip.documentCursor = oldClip.documentCursor
-      scrollView.contentView = newClip
-      if scrollView.documentView !== outline { scrollView.documentView = outline }
-    }
-    guard let clip = scrollView.contentView as? _UnclampedClipView else { return }
-    clip.leadingOffset = leadingOffset
-    clip.setBoundsOrigin(NSPoint(x: leadingOffset, y: preservedY))
-    scrollView.tile()
-    scrollView.reflectScrolledClipView(clip)
   }
 
   private func findOutlineViews(in root: NSView) -> [NSOutlineView] {
@@ -2292,35 +2262,6 @@ private final class _IndentZeroerView: NSView {
       queue.append(contentsOf: v.subviews)
     }
     return result
-  }
-}
-
-/// `NSClipView` subclass that pins horizontal `bounds.origin.x` to a fixed
-/// offset (`leadingOffset`) so the documentView visually shifts left by that
-/// amount — bypassing super's clamp that snaps `x` back to 0 for a non-
-/// horizontally-scrollable clip view.
-///
-/// Why pin instead of returning the proposed rect verbatim: AppKit calls
-/// `constrainBoundsRect:` during animation / momentum scroll with values
-/// that include `±infinity` (legitimate intermediates that super would
-/// normally sanitize). Returning identity for those crashes the geometry
-/// pipeline (`Invalid view geometry: x is -infinity`). Calling super first
-/// hands us a finite, sensible rect; we only override the axis we control.
-///
-/// Per the AppKit 10.9 release notes and WWDC 2013 §215, `constrainBoundsRect:`
-/// is the sanctioned override point for custom positioning; this does NOT
-/// disable responsive scrolling (that requires overriding `scrollWheel:`,
-/// which we do not do) or elastic scrolling (governed by independent
-/// `verticalScrollElasticity`/`horizontalScrollElasticity` properties).
-private final class _UnclampedClipView: NSClipView {
-  /// Target `bounds.origin.x` — positive shifts documentView visually left
-  /// by that many points (we're "scrolling right" without horizontal scroll).
-  var leadingOffset: CGFloat = 0
-
-  override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
-    var rect = super.constrainBoundsRect(proposedBounds)
-    rect.origin.x = leadingOffset
-    return rect
   }
 }
 
