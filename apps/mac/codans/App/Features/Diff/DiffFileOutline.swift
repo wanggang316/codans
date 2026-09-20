@@ -374,7 +374,8 @@ private final class DiffOutlineCell: NSTableCellView {
     directory.textColor =
       emphasized ? .alternateSelectedControlTextColor.withAlphaComponent(0.75) : .secondaryLabelColor
     status.textColor = emphasized ? .alternateSelectedControlTextColor : statusColor
-    icon.contentTintColor = isFolder ? (emphasized ? .alternateSelectedControlTextColor : .labelColor) : nil
+    icon.contentTintColor =
+      emphasized ? .alternateSelectedControlTextColor : (isFolder ? .labelColor : .secondaryLabelColor)
   }
 
   override func layout() {
