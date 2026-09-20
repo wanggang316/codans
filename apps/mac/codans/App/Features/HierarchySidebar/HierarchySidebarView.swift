@@ -1601,9 +1601,9 @@ struct HierarchySidebarView: View {
           .foregroundStyle(.secondary)
       }
       .buttonStyle(.plain)
-      // The glyph already says "workspace"; the tooltip only has to say
-      // which one.
-      .help(membership.workspaceName)
+      // Names the workspace and how this row relates to it. What clicking
+      // does is left to the pointer.
+      .help("In workspace \(membership.workspaceName)")
       .accessibilityLabel("In workspace \(membership.workspaceName)")
     }
   }
