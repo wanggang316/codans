@@ -290,7 +290,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     fakeRuntime.reset()
 
     _ = manager.reconcileDiscoveredWorktrees(
-      projectID: projectID, entries: [(path: "/repo", branch: "main")]
+      projectID: projectID, entries: [(path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     )
 
     #expect(fakeRuntime.announceHierarchyMutatedCount == 0)
@@ -334,8 +334,8 @@ struct HierarchyManagerWorktreeMgmtTests {
     let appended = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
       entries: [
-        (path: "/repo", branch: "main"),
-        (path: "/repo/feature", branch: "feature"),
+        (path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000"),
+        (path: "/repo/feature", branch: "feature", head: "f00dcafe00000000000000000000000000000000"),
       ]
     )
     #expect(appended == 1)
@@ -347,9 +347,9 @@ struct HierarchyManagerWorktreeMgmtTests {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
-    let entries: [(path: String, branch: String?)] = [
-      (path: "/repo", branch: "main"),
-      (path: "/repo/feature", branch: "feature"),
+    let entries: [(path: String, branch: String?, head: String?)] = [
+      (path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000"),
+      (path: "/repo/feature", branch: "feature", head: "f00dcafe00000000000000000000000000000000"),
     ]
     let first = manager.reconcileDiscoveredWorktrees(
       projectID: projectID, entries: entries
@@ -380,7 +380,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     manager.setProjectGitRoot(projectID: projectID, gitRoot: "/scratch")
     let appended = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
-      entries: [(path: "/scratch", branch: "main")]
+      entries: [(path: "/scratch", branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     )
 
     #expect(appended == 0)
@@ -408,8 +408,8 @@ struct HierarchyManagerWorktreeMgmtTests {
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
       entries: [
-        (path: "/repo", branch: "main"),
-        (path: "/repo/feat", branch: "other-branch"),
+        (path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000"),
+        (path: "/repo/feat", branch: "other-branch", head: "f00dcafe00000000000000000000000000000000"),
       ]
     )
     let updated = manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }
@@ -436,8 +436,8 @@ struct HierarchyManagerWorktreeMgmtTests {
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
       entries: [
-        (path: "/repo", branch: "main"),
-        (path: "/repo/feat", branch: "other-branch"),
+        (path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000"),
+        (path: "/repo/feat", branch: "other-branch", head: "f00dcafe00000000000000000000000000000000"),
       ]
     )
     let updated = manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }
@@ -459,13 +459,15 @@ struct HierarchyManagerWorktreeMgmtTests {
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
       entries: [
-        (path: "/repo", branch: "main"),
-        (path: "/repo/feat", branch: nil),
+        (path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000"),
+        (path: "/repo/feat", branch: nil, head: "4042de1faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
       ]
     )
     let updated = manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }
     #expect(updated?.branch == nil)
     #expect(updated?.name == "feature")
+    // Detach also lands the SHA: the row can render "Detached HEAD @…".
+    #expect(updated?.headSHA == "4042de1faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
   }
 
   /// Produces `(varForm, privateForm)` — two aliased paths to the same
@@ -514,7 +516,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     // produce for a repo discovered under /var).
     let appended = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
-      entries: [(path: alias.varForm, branch: "main")]
+      entries: [(path: alias.varForm, branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     )
     #expect(appended == 0)
     #expect(manager.catalog.projects[0].worktrees.count == 1)
@@ -599,7 +601,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     )
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
-      entries: [(path: "/repo", branch: "main")]
+      entries: [(path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     )
     let worktrees = manager.catalog.projects[0].worktrees
     #expect(worktrees.count == 2)
@@ -644,7 +646,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     manager.setWorktreePinned(worktreeID: pinnedID, isPinned: true)
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
-      entries: [(path: "/repo", branch: "main")]
+      entries: [(path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     )
     let pinned = manager.catalog.projects[0].worktrees
       .first { $0.id == pinnedID }
@@ -678,7 +680,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     fakeRuntime.livePaneIDs.insert(paneID)
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
-      entries: [(path: "/repo", branch: "main")]
+      entries: [(path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     )
     // Suspend, not close. This path archives, and `closeSurface`'s
     // `.paneExited` routes through `paneLifecycleExited` into `closeTab` /
@@ -708,7 +710,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     _ = try manager.createWorktree(
       in: projectID, name: "stale", path: "/repo/stale", branch: "stale"
     )
-    let entries: [(path: String, branch: String?)] = [(path: "/repo", branch: "main")]
+    let entries: [(path: String, branch: String?, head: String?)] = [(path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID, entries: entries
     )
@@ -943,7 +945,7 @@ struct HierarchyManagerWorktreeMgmtTests {
     )
     let appended = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
-      entries: [(path: "/repo/feat-web-ui", branch: "feat-web-ui")]
+      entries: [(path: "/repo/feat-web-ui", branch: "feat-web-ui", head: "f00dcafe00000000000000000000000000000000")]
     )
     #expect(appended == 1)
     let adoptedID = manager.catalog.projects[0].worktrees
@@ -959,6 +961,65 @@ struct HierarchyManagerWorktreeMgmtTests {
     let row = manager.catalog.projects[0].worktrees.first { $0.id == replayed }
     #expect(row?.name == "feat/web-ui")
     #expect(row?.branch == "feat-web-ui")
+  }
+
+  // MARK: - reconcileDiscoveredWorktrees (detached HEAD)
+
+  /// A detached entry (`branch == nil`, HEAD SHA known — e.g. a Codex
+  /// sandbox under `~/.codex/worktrees/<hash>/codans`) appends with the
+  /// SHA on the row so the sidebar's second line can render
+  /// "Detached HEAD @<short>" instead of five indistinguishable basenames.
+  @Test
+  func reconcileAppendsDetachedWorktreeWithHeadSHA() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let sha = "4042de1faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    let appended = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [(path: "/repo/codans", branch: nil, head: sha)]
+    )
+    #expect(appended == 1)
+    let row = manager.catalog.projects[0].worktrees.first { $0.path == "/repo/codans" }
+    #expect(row?.branch == nil)
+    #expect(row?.name == "codans")
+    #expect(row?.headSHA == sha)
+    #expect(row?.detachedHeadTitle == "Detached HEAD @4042de1")
+  }
+
+  /// A detached worktree whose HEAD moved between reconciles (sandbox
+  /// committing onto its base) re-renders with the new SHA: the in-place
+  /// upgrade must fire even though `branch` stayed nil on both sides.
+  @Test
+  func reconcileRefreshesDetachedHeadSHAInPlace() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let first = "4042de1faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    let second = "b7c1ff7eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    _ = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [(path: "/repo/codans", branch: nil, head: first)]
+    )
+    let appended = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [(path: "/repo/codans", branch: nil, head: second)]
+    )
+    #expect(appended == 0)
+    #expect(manager.catalog.projects[0].worktrees.count == 1)
+    let row = manager.catalog.projects[0].worktrees.first { $0.path == "/repo/codans" }
+    #expect(row?.headSHA == second)
+    #expect(row?.detachedHeadTitle == "Detached HEAD @b7c1ff7")
+  }
+
+  /// Synthetic dir-kind worktrees (no git, no SHA) must stay single-line:
+  /// `detachedHeadTitle` is nil when the SHA is unknown.
+  @Test
+  func reconcileWithoutHeadSHAYieldsNoDetachedTitle() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    _ = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [(path: "/repo/plain", branch: nil, head: nil)]
+    )
+    let row = manager.catalog.projects[0].worktrees.first { $0.path == "/repo/plain" }
+    #expect(row?.headSHA == nil)
+    #expect(row?.detachedHeadTitle == nil)
   }
 
   /// A row whose name no longer tracks its branch was customized by the

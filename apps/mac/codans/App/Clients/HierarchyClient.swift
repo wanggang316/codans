@@ -1856,9 +1856,11 @@ extension HierarchyClient {
       let entries = try await gitWorktreeClient.lsWorktrees(
         URL(fileURLWithPath: gitRoot)
       )
-      let mapped = entries.map { entry -> (path: String, branch: String?) in
+      let mapped = entries.map { entry -> (path: String, branch: String?, head: String?) in
         let branch = entry.branch.isEmpty ? nil : entry.branch
-        return (path: HierarchyManager.canonicalPath(entry.path), branch: branch)
+        return (
+          path: HierarchyManager.canonicalPath(entry.path), branch: branch, head: entry.head
+        )
       }
       _ = manager.reconcileDiscoveredWorktrees(
         projectID: projectID,
@@ -1917,9 +1919,11 @@ extension HierarchyClient {
     guard let gitRoot else { return }
     do {
       let entries = try await service.listWorktrees(gitRoot: gitRoot)
-      let mapped = entries.map { entry -> (path: String, branch: String?) in
+      let mapped = entries.map { entry -> (path: String, branch: String?, head: String?) in
         let branch = (entry.branch?.isEmpty == false) ? entry.branch : nil
-        return (path: HierarchyManager.normalizeRemotePath(entry.path), branch: branch)
+        return (
+          path: HierarchyManager.normalizeRemotePath(entry.path), branch: branch, head: entry.head
+        )
       }
       _ = manager.reconcileDiscoveredWorktrees(
         projectID: projectID,

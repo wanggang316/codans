@@ -52,7 +52,7 @@ The two bonus identifiers (`branch_switcher.search` from T7 and `diff_inspector.
 |---|---|---|---|
 | UT-BSH-HD-001 | MANUAL-PENDING | manual probe required | Layout invariant (two-row, secondary-font row 2). The reducer/view wiring at `WorktreeHeaderInfoLabel` is exercised indirectly by `RootFeatureTests.onLaunchExhaustivelyPropagatesSelectionFromStream` (verifies `.selectionChanged` → `.branchSwitcher.worktreeChanged`), but text content + font hierarchy are only observable from the rendered view. |
 | UT-BSH-HD-002 | MANUAL-PENDING | manual probe required | Hover affordance is a SwiftUI `.onHover` side-effect. No unit test exercises it; XCUITest probe over `worktree_header.branch_button` would assert hover background / underline trait. |
-| UT-BSH-HD-003 | MANUAL-PENDING | manual probe required | `branchTitle` returns `(detached HEAD)` literal when `worktree.branch == nil`. No snapshot test of the header label. The detached-HEAD repo fixture (`docs/user-tests/_shared/fixtures/repo-detached.bundle`) is in place; promotion requires either a SwiftUI snapshot test or an XCUITest probe. |
+| UT-BSH-HD-003 | MANUAL-PENDING | manual probe required | `branchTitle` returns `Worktree.detachedHeadTitle` (`"Detached HEAD @<short-sha>"`, falling back to `"(detached)"` when `headSHA` is unknown) when `worktree.branch == nil`; the SHA lands via launch reconcile. The title helper itself is unit-covered (`HierarchyManagerWorktreeMgmtTests.reconcileAppendsDetachedWorktreeWithHeadSHA`). The detached-HEAD repo fixture (`docs/user-tests/_shared/fixtures/repo-detached.bundle`) is in place; promotion requires either a SwiftUI snapshot test or an XCUITest probe. |
 
 ### Journey BP-Open — Popover contents
 

@@ -175,9 +175,11 @@ struct WorktreeHeaderInfoLabel: View {
 
   // MARK: - Branch title
 
-  /// Source of truth is the model field. Detached HEAD renders explicit
-  /// text rather than a `git rev-parse` short sha.
+  /// Source of truth is the model field. Detached HEAD renders the commit
+  /// ("Detached HEAD @<short>") via the same helper the sidebar row uses;
+  /// the bare "(detached)" fallback only shows when even the SHA is
+  /// unknown (synthetic non-git worktree).
   private var branchTitle: String {
-    worktree.branch ?? "(detached)"
+    worktree.branch ?? worktree.detachedHeadTitle ?? "(detached)"
   }
 }

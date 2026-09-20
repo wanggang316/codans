@@ -101,7 +101,7 @@ Codable 模式（与 `isPinned` 同形）：`decodeIfPresent ?? false` 保读兼
 
 1. 读 Project `gitRoot`，nil 则跳过（非 git Project）。
 2. `lsWorktrees(gitRoot)`。
-3. 每个磁盘上、catalog 里没有的条目（按 `URL.standardizedFileURL.path` 规范化路径匹配）追加一行新 `Worktree`（`archived = false`，detached HEAD 用目录末段当 name）。
+3. 每个磁盘上、catalog 里没有的条目（按 `URL.standardizedFileURL.path` 规范化路径匹配）追加一行新 `Worktree`（`archived = false`，detached HEAD 用目录末段当 name，并把 `git worktree list --porcelain` 的 HEAD SHA 记入 `headSHA`——就地条目每次 reconcile 同步刷新，detached HEAD 移动后侧栏随之下一次聚焦脉冲更新）。
 4. catalog 里路径已不在磁盘 **且** 不在 `git worktree list` 输出里的，标记 stale——**stale 是视图层按 live git state 每次渲染派生的计算标志，不是存储字段**。
 5. **发现绝不删 catalog 行**；prune（用户发起）是唯一删除路径——守住"绝不静默地让 catalog 与磁盘脱节"。
 
@@ -295,7 +295,7 @@ header 分支区是可点击入口，分支切换在应用内完成。**分支�
 
 ### Header 布局
 
-行 1 = `WorktreeRowIcon` + 分支名（`.headline`）+ 尾随 chevron-down（`isSwitching` 时换 `ProgressView().controlSize(.mini)`）；行 2 = `worktree.name · project.name`（`.caption .secondary`）。`branchTitle`：`worktree.branch == nil` → `"(detached)"`（未来 `Worktree.headSha` 可用后点亮 `"(detached @ <short-sha>)"`）；否则 `worktree.branch ?? worktree.name`（worktree.name fallback 覆盖刚 clone 无 HEAD 的情形）。整行 `.contentShape(.rect)` + hover 高亮，点击 toggle `popoverTapped`，`.popover(arrowEdge: .bottom)` 挂 `BranchSwitcherView`。Project 名沿 `Worktree → Project` 反查，`WorktreeHeaderInfoLabel` 已接收 `project: Project` 直接读 `project.name`。
+行 1 = `WorktreeRowIcon` + 分支名（`.headline`）+ 尾随 chevron-down（`isSwitching` 时换 `ProgressView().controlSize(.mini)`）；行 2 = `worktree.name · project.name`（`.caption .secondary`）。`branchTitle`：`worktree.branch == nil` → `Worktree.detachedHeadTitle`，即 `"Detached HEAD @<short-sha>"`（SHA 来自 reconcile 记录的 `Worktree.headSHA`，与侧栏行第二行共用同一 helper；SHA 未知——合成目录型 worktree——时回退 `"(detached)"`）；否则 `worktree.branch ?? worktree.name`（worktree.name fallback 覆盖刚 clone 无 HEAD 的情形）。整行 `.contentShape(.rect)` + hover 高亮，点击 toggle `popoverTapped`，`.popover(arrowEdge: .bottom)` 挂 `BranchSwitcherView`。Project 名沿 `Worktree → Project` 反查，`WorktreeHeaderInfoLabel` 已接收 `project: Project` 直接读 `project.name`。
 
 ### Diff Viewer History tab（`已设计未实现`）
 

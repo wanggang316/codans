@@ -85,4 +85,43 @@ struct WorktreeArchivedCodableTests {
     #expect(decoded == worktree)
     #expect(decoded.archivedAt == stamp)
   }
+
+  // MARK: - headSHA (detached-HEAD identification)
+
+  @Test
+  func defaultWorktreeOmitsHeadSHAKey() throws {
+    let worktree = Worktree(name: "main", path: "/tmp/repo")
+    let data = try JSONEncoder().encode(worktree)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    #expect(object?["headSHA"] == nil)
+  }
+
+  @Test
+  func missingHeadSHADecodesToNil() throws {
+    // Pre-headSHA catalog row: no key, decode must not fail.
+    let json = #"""
+      {
+        "id": { "raw": "00000000-0000-0000-0000-000000000001" },
+        "name": "main",
+        "path": "/tmp/repo",
+        "branch": "main",
+        "tabs": []
+      }
+      """#
+    let decoded = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
+    #expect(decoded.headSHA == nil)
+  }
+
+  @Test
+  func headSHARoundTrips() throws {
+    let sha = "4042de1faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    let worktree = Worktree(name: "codans", path: "/repo/codans", branch: nil, headSHA: sha)
+    let data = try JSONEncoder().encode(worktree)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    #expect(object?["headSHA"] as? String == sha)
+
+    let decoded = try JSONDecoder().decode(Worktree.self, from: data)
+    #expect(decoded == worktree)
+    #expect(decoded.headSHA == sha)
+  }
 }

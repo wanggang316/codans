@@ -1150,6 +1150,14 @@ struct HierarchySidebarView: View {
           Text(branch)
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
+        } else if let detached = worktree.detachedHeadTitle {
+          // Detached checkout (branch == nil, HEAD commit known — Codex
+          // sandboxes, `git checkout <sha>`): name the commit so sibling
+          // detached worktrees sharing a directory basename stay
+          // distinguishable. Same caption style as the branch line.
+          Text(detached)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
         }
       }
       Spacer()
