@@ -73,6 +73,11 @@ struct DiffFileOutlineTests {
     #expect(harness.topVisibleName == anchor)
     harness.show(many)
     #expect(harness.topVisibleName == anchor)
+
+    // Selecting a file the user cannot see — switching scopes carries the selection over — must
+    // not scroll the list to it either.
+    harness.show(many, selection: try #require(many.last).id)
+    #expect(harness.topVisibleName == anchor)
   }
 
   @Test func hiddenOutlineAppliesChangesOnceShown() throws {
