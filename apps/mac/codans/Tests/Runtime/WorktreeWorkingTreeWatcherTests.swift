@@ -11,27 +11,27 @@ import Testing
 /// fseventsd (`register_with_server`), which on a busy machine blocks for
 /// seconds per stream — measured locally with 16 agents churning worktrees:
 /// 17 sequential starts ≈ 39 s. The watcher used to run that loop on the
-/// main actor at launch, freezing the UI for the whole window. The first
-/// test injects a start that blocks on a semaphore (an idle CI machine
-/// can't reproduce the real-world latency) and asserts `setWorktrees`
-/// returns while the registration is still parked, then confirms the
-/// stream delivers once it goes through. The second pins the claim
-/// bookkeeping under A → B re-pointing.
+/// main actor at launch, freezing the UI for the whole window.
+///
+/// Event delivery is deliberately NOT asserted here: the stream is created
+/// with `IgnoreSelf`, so writes from this process never fire, and CI's
+/// fseventsd latency varies wildly. The tests instead pin the two halves
+/// that must hold regardless — `setWorktrees` returns while the (injected,
+/// semaphore-gated) registration is still parked, and the install/supersede
+/// claim bookkeeping lands the right stream in `isWatching`.
 @MainActor
 struct WorktreeWorkingTreeWatcherTests {
   @Test
   func setWorktreesReturnsWhileRegistrationIsStillBlocked() async throws {
     let dir = try Self.makeTempDir()
-
     let id = WorktreeID(raw: UUID())
     let gate = StartGate()
     let watcher = WorktreeWorkingTreeWatcher(streamStarter: gate.start)
-    let events = watcher.events()
-    var iterator = events.makeAsyncIterator()
-    let received = Handoff<WorktreeID>()
-    let collector = Task { received.value = await iterator.next() }
+
     defer {
-      collector.cancel()
+      // A failure before the assertions must not leave `registerQueue`
+      // parked on the semaphore for the rest of the test run.
+      gate.open()
       watcher.stopAll()
       try? FileManager.default.removeItem(at: dir)
     }
@@ -45,32 +45,21 @@ struct WorktreeWorkingTreeWatcherTests {
     // the caller must have returned before it could possibly finish.
     try await Self.waitUntil { gate.isEntered }
     #expect(!gate.hasFinished, "start already finished — nothing was proven")
+    #expect(!watcher.isWatching(id, path: dir.path))
 
+    // Release and let the install land.
     gate.open()
-    let file = dir.appendingPathComponent("nudge.txt")
-    var landed = false
-    for _ in 0..<60 {
-      try? "\(Date())".write(to: file, atomically: true, encoding: .utf8)
-      if received.value != nil { landed = true; break }
-      try? await Task.sleep(for: .milliseconds(250))
-    }
-    #expect(landed, "no working-tree event after the start was released")
-    #expect(received.value == id)
+    try await Self.waitUntil { watcher.isWatching(id, path: dir.path) }
   }
 
   @Test
   func rePointingAWorktreeSupersedesTheInFlightStartForTheOldPath() async throws {
     let oldDir = try Self.makeTempDir()
     let newDir = try Self.makeTempDir()
-
     let id = WorktreeID(raw: UUID())
     let watcher = WorktreeWorkingTreeWatcher()
-    let events = watcher.events()
-    var iterator = events.makeAsyncIterator()
-    let received = Handoff<WorktreeID>()
-    let collector = Task { received.value = await iterator.next() }
+
     defer {
-      collector.cancel()
       watcher.stopAll()
       try? FileManager.default.removeItem(at: oldDir)
       try? FileManager.default.removeItem(at: newDir)
@@ -79,30 +68,12 @@ struct WorktreeWorkingTreeWatcherTests {
     // Back-to-back with no await between: the second claim must supersede
     // the first whether or not the old start already completed on the
     // register queue. (With the old unconditional claim removal, BOTH
-    // starts tore themselves down here and the worktree went unwatched.)
+    // starts tore themselves down and no stream ever installed.)
     watcher.setWorktrees([(id: id, path: oldDir.path)])
     watcher.setWorktrees([(id: id, path: newDir.path)])
 
-    let newFile = newDir.appendingPathComponent("nudge.txt")
-    var landed = false
-    for _ in 0..<60 {
-      try? "\(Date())".write(to: newFile, atomically: true, encoding: .utf8)
-      if received.value != nil { landed = true; break }
-      try? await Task.sleep(for: .milliseconds(250))
-    }
-    #expect(landed, "the re-pointed path never produced an event")
-
-    // The old path must be unwatched: whichever interleaving won, the
-    // superseded stream was torn down instead of installed.
-    received.value = nil
-    let oldFile = oldDir.appendingPathComponent("stale.txt")
-    var stale = false
-    for _ in 0..<12 {
-      try? "\(Date())".write(to: oldFile, atomically: true, encoding: .utf8)
-      if received.value != nil { stale = true; break }
-      try? await Task.sleep(for: .milliseconds(250))
-    }
-    #expect(!stale, "the superseded path still delivered an event")
+    try await Self.waitUntil { watcher.isWatching(id, path: newDir.path) }
+    #expect(!watcher.isWatching(id, path: oldDir.path))
   }
 
   // MARK: - Helpers
@@ -115,13 +86,14 @@ struct WorktreeWorkingTreeWatcherTests {
   }
 
   private static func waitUntil(
-    _ condition: @autoclosure @Sendable () -> Bool,
-    timeout: Duration = .seconds(5)
+    _ condition: @autoclosure @escaping () -> Bool,
+    timeout: Duration = .seconds(15)
   ) async throws {
+    let box = ConditionBox(condition)
     let deadline = ContinuousClock.now + timeout
-    while !condition() {
+    while !box.check() {
       if ContinuousClock.now > deadline {
-        Issue.record("condition not met within \(timeout)")
+        Issue.record("condition not met within \(timeout) seconds")
         return
       }
       try await Task.sleep(for: .milliseconds(50))
@@ -162,10 +134,20 @@ struct WorktreeWorkingTreeWatcherTests {
     }
   }
 
-  /// Mutable box shared with the collector task. `@unchecked Sendable`
-  /// mirrors the `CallCounter` / `Gate` pattern in `WorktreeMonitorRetainTests`:
-  /// a single writer (the collector) and a main-actor reader.
-  private final class Handoff<T>: @unchecked Sendable {
-    var value: T?
+  /// The polling condition touches MainActor state and is only ever
+  /// invoked from the (MainActor) `waitUntil` loop; the lock mirrors the
+  /// `CallCounter` pattern in `WorktreeMonitorRetainTests`.
+  private final class ConditionBox: @unchecked Sendable {
+    private let condition: () -> Bool
+    private let lock = NSLock()
+
+    init(_ condition: @escaping () -> Bool) {
+      self.condition = condition
+    }
+
+    func check() -> Bool {
+      lock.lock(); defer { lock.unlock() }
+      return condition()
+    }
   }
 }
