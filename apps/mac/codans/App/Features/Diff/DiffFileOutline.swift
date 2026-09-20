@@ -77,6 +77,7 @@ struct DiffFileOutline: NSViewRepresentable {
     private var shownFiles: [GitComparisonFile] = []
     private var shownTree = false
     private var shownCollapsed: Set<String> = []
+    private var shownSelection: String?
     /// True while the outline is changed from `update`, so its delegate callbacks do not echo
     /// those changes back as user actions.
     private var applying = false
@@ -99,16 +100,18 @@ struct DiffFileOutline: NSViewRepresentable {
       shownTree = config.tree
 
       if rowsChanged {
+        let anchor = topVisibleFile()
         rebuild()
         // Flat rows need no disclosure column, so the outline lays them out like a table.
         outline.outlineTableColumn = config.tree ? outline.tableColumns.first : nil
         outline.reloadData()
         applyExpansion(config.collapsedFolders)
+        restore(anchor)
       } else if config.collapsedFolders != shownCollapsed {
         applyExpansion(config.collapsedFolders)
       }
       shownCollapsed = config.collapsedFolders
-      syncSelection(config.selection, reveal: presentationChanged)
+      syncSelection(config.selection)
     }
 
     private func rebuild() {
@@ -149,18 +152,39 @@ struct DiffFileOutline: NSViewRepresentable {
       outline.endUpdates()
     }
 
-    /// Selects the row for `id`, scrolling to it when the selection moved or the rows were laid
-    /// out anew (`reveal`).
-    private func syncSelection(_ id: String?, reveal: Bool) {
+    /// Selects the row for `id`. Only a file the user did not pick here is scrolled to: reordering
+    /// rows, or switching between the tree and the list, must not move the list under them.
+    private func syncSelection(_ id: String?) {
       guard let outline else { return }
+      let isNewSelection = id != shownSelection
+      shownSelection = id
       let row = id.flatMap { itemsByFileID[$0] }.map { outline.row(forItem: $0) } ?? -1
       guard row >= 0 else {
         if outline.selectedRow >= 0 { outline.deselectAll(nil) }
         return
       }
-      let moved = outline.selectedRow != row
-      if moved { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
-      if moved || reveal { outline.scrollRowToVisible(row) }
+      if outline.selectedRow != row { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+      if isNewSelection { outline.scrollRowToVisible(row) }
+    }
+
+    /// The first file row on screen and how far it sits below the top edge. Rows are rebuilt for
+    /// a refresh or a presentation switch, and both keep whatever the user was looking at.
+    private func topVisibleFile() -> (id: String, offset: CGFloat)? {
+      guard let outline else { return nil }
+      let visible = outline.visibleRect
+      let rows = outline.rows(in: visible)
+      for row in rows.location..<(rows.location + rows.length) {
+        guard let file = (outline.item(atRow: row) as? DiffOutlineItem)?.file else { continue }
+        return (file.id, outline.rect(ofRow: row).minY - visible.minY)
+      }
+      return nil
+    }
+
+    private func restore(_ anchor: (id: String, offset: CGFloat)?) {
+      guard let outline, let anchor, let item = itemsByFileID[anchor.id] else { return }
+      let row = outline.row(forItem: item)
+      guard row >= 0 else { return }
+      outline.scroll(NSPoint(x: 0, y: max(0, outline.rect(ofRow: row).minY - anchor.offset)))
     }
 
     // MARK: Data source

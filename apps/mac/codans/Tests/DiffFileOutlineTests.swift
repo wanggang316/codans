@@ -62,6 +62,19 @@ struct DiffFileOutlineTests {
     #expect(harness.outline.selectedRow == -1)
   }
 
+  @Test func switchingPresentationKeepsTheFileTheUserIsLookingAt() throws {
+    let harness = try Harness()
+    let many = (0..<60).map { GitComparisonFile(path: "d/f\(String(format: "%02d", $0)).swift", status: "M") }
+    harness.show(many)
+    harness.scroll(toRow: 40)
+    let anchor = try #require(harness.topVisibleName)
+
+    harness.show(many, tree: false)
+    #expect(harness.topVisibleName == anchor)
+    harness.show(many)
+    #expect(harness.topVisibleName == anchor)
+  }
+
   @Test func hiddenOutlineAppliesChangesOnceShown() throws {
     let harness = try Harness()
     harness.show([one, two, top])
@@ -116,6 +129,18 @@ private final class Harness {
 
   func row(named name: String) -> Int {
     rowNames.firstIndex(of: name) ?? -1
+  }
+
+  /// The first row on screen, as the user sees it.
+  var topVisibleName: String? {
+    let visible = outline.rows(in: outline.visibleRect)
+    guard visible.length > 0 else { return nil }
+    return (outline.item(atRow: visible.location) as? DiffOutlineItem)?.name
+  }
+
+  func scroll(toRow row: Int) {
+    outline.scroll(NSPoint(x: 0, y: outline.rect(ofRow: row).minY))
+    outline.layoutSubtreeIfNeeded()
   }
 
   func show(_ files: [GitComparisonFile], tree: Bool = true, selection: String? = nil, active: Bool = true) {
