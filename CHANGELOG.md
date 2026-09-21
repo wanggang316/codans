@@ -10,6 +10,20 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.7.2] - 2026-09-21
+
+### Added
+
 - **Workspaces — one Project for a task that spans several repositories.**
   A folder carrying `.codans/workspace.json` now opens as a workspace: the
   folder itself is the main row (the directory an agent runs in), and every
@@ -76,13 +90,52 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-### Deprecated
-
-### Removed
+- **Diff viewer — a cleaner file list and a wider diff.** File rows no
+  longer carry a per-file icon, a file's name lines up with the folder
+  holding it, and a folder opens or closes from anywhere on its row. In
+  the diff itself the leading `+`/`−` column is gone — each row's tint
+  already says which it is — and the code gets that width back.
+- **A folder project's own row is the folder.** A project with no
+  repository of its own — a plain folder, a remote folder, or a
+  workspace — used to list its root as a child row that only repeated
+  the project. Selecting the project row now opens that folder's
+  terminal, carrying its busy spinner, unread bell, ⌃N slot, and context
+  menu; the disclosure triangle folds it. A git project keeps its main
+  checkout as a child row.
+- **Sidebar rows sit square between the sidebar's edges.** The selection
+  pill no longer leaves an empty strip down its trailing side, and a
+  project's name is semibold so it reads as the heading of the rows
+  beneath it.
 
 ### Fixed
 
-### Security
+- **Diff viewer — the file list stays where you left it.** Switching
+  between tree and list, between Uncommitted and Outgoing, or refreshing
+  after a commit no longer jumps the list somewhere else; each view
+  keeps its own scroll position and selection. A file that disappears —
+  committed, filtered out, or in a scope that no longer has it — no
+  longer lingers as a ghost row drawn over the ones below.
+- **Diff viewer — no more flashing while browsing.** The file tree opens
+  fully expanded in one pass instead of unfolding a level at a time,
+  selecting a file keeps the previous content on screen until the new
+  one is drawn, and returning to a scope in a repository with a thousand
+  changed files is no longer a visible pause.
+- **Diff line numbers stay with their lines.** The gutter used to hold
+  still while the code scrolled past it, and horizontally scrolled code
+  could show through it.
+- **An empty added or deleted file now says it is empty** instead of
+  "Metadata or path change; text is unchanged".
+- **A worktree's `+N −M` chip matches the diff viewer.** The chip left
+  untracked files out, so a worktree whose only changes were new files
+  showed no chip at all.
+- **Selecting a worktree no longer flashes a loading pill** on its row
+  while the project's pull requests are fetched.
+- **Unread replies land on the row you are looking at.** In a collapsed
+  project, a folder project's own worktree keeps its bell on its own row
+  instead of rolling it up to the project.
+- **Sheets no longer blank out as they close.** New Worktree, Clone
+  Repository, Archived Worktrees, and Connect to Server shrank to an
+  empty card for the last frames of their dismissal.
 
 ## [0.7.1] - 2026-09-19
 
