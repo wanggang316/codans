@@ -206,7 +206,7 @@ struct DiffFileOutline: NSViewRepresentable {
       let cell =
         outlineView.makeView(withIdentifier: DiffOutlineCell.identifier, owner: nil) as? DiffOutlineCell
         ?? DiffOutlineCell()
-      cell.show(item, showsDirectory: !shownTree)
+      cell.show(item, tree: shownTree)
       return cell
     }
 
@@ -318,6 +318,7 @@ private final class DiffOutlineCell: NSTableCellView {
   private let status = NSTextField(labelWithString: "")
   private var statusColor = NSColor.secondaryLabelColor
   private var isFolder = false
+  private var inTree = false
 
   init() {
     super.init(frame: .zero)
@@ -342,15 +343,18 @@ private final class DiffOutlineCell: NSTableCellView {
 
   override var isFlipped: Bool { true }
 
-  func show(_ item: DiffOutlineItem, showsDirectory: Bool) {
+  func show(_ item: DiffOutlineItem, tree: Bool) {
     isFolder = item.file == nil
+    inTree = tree
     name.stringValue = item.name
     toolTip = item.path
     if let file = item.file {
-      icon.image = DiffFileIcon.image(for: file.path)
+      // No icon: a kind symbol says nothing the file name does not, and the icon of the app that
+      // happens to own the extension says even less.
+      icon.image = nil
       let parent = (file.path as NSString).deletingLastPathComponent
       directory.stringValue = parent
-      directory.isHidden = !showsDirectory || parent.isEmpty
+      directory.isHidden = tree || parent.isEmpty
       status.stringValue = file.status
       status.isHidden = false
       statusColor = Self.color(forStatus: file.status)
@@ -374,15 +378,15 @@ private final class DiffOutlineCell: NSTableCellView {
     directory.textColor =
       emphasized ? .alternateSelectedControlTextColor.withAlphaComponent(0.75) : .secondaryLabelColor
     status.textColor = emphasized ? .alternateSelectedControlTextColor : statusColor
-    icon.contentTintColor =
-      emphasized ? .alternateSelectedControlTextColor : (isFolder ? .labelColor : .secondaryLabelColor)
+    icon.contentTintColor = emphasized ? .alternateSelectedControlTextColor : .labelColor
   }
 
   override func layout() {
     super.layout()
     let height = bounds.height
     icon.frame = NSRect(x: 0, y: (height - Self.iconWidth) / 2, width: Self.iconWidth, height: Self.iconWidth)
-    let textX = Self.iconWidth + Self.iconSpacing
+    // In the tree a file's name lines up with the folder names, one indent step further in.
+    let textX = isFolder || inTree ? Self.iconWidth + Self.iconSpacing : 2
     let trailing = status.isHidden ? 0 : Self.statusWidth + 4
     let textWidth = max(0, bounds.width - textX - trailing)
     let nameHeight = name.intrinsicContentSize.height

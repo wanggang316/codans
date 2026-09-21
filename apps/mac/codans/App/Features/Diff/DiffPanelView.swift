@@ -56,7 +56,6 @@ struct DiffPanelView: View {
 
   private var fileHeader: some View {
     HStack(spacing: 8) {
-      DiffFileIcon(path: selectedFile?.path ?? "")
       Text(selectedFile?.path ?? (outgoing ? "Outgoing" : "Uncommitted"))
         .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
         .help(selectedFile?.path ?? "Select a file")
