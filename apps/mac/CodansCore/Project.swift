@@ -71,6 +71,19 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Encoded only when set so catalogs without an icon stay byte-identical
   /// on round-trip.
   public var icon: ProjectIcon?
+  /// `true` when `rootPath` is a workspace: a plain folder holding several
+  /// child checkouts described by `<root>/.codans/workspace.json`. The main
+  /// Worktree row is the root itself; every other row is one child checkout.
+  /// Persisted (omitted when `false`) so the kind is known synchronously at
+  /// launch and survives the root being temporarily unreachable; the
+  /// catalog load path re-derives it from the manifest on disk when an older
+  /// build has stripped the key. Sticky: it is never cleared because the
+  /// manifest went missing — see `ProjectKind`.
+  public var isWorkspace: Bool
+  /// Transient. The decoded manifest, filled by the workspace reconcile and
+  /// used for display only (title, description, roles). Nil until the first
+  /// reconcile after launch; no catalog logic may depend on it.
+  public var workspace: WorkspaceManifest?
   /// Transient. See `ProjectLoadState` doc-comment.
   public var loadState: ProjectLoadState
 
@@ -89,6 +102,8 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     manualOrder: Int = 0,
     color: ProjectColor? = nil,
     icon: ProjectIcon? = nil,
+    isWorkspace: Bool = false,
+    workspace: WorkspaceManifest? = nil,
     loadState: ProjectLoadState = .loading
   ) {
     self.id = id
@@ -110,6 +125,8 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     self.manualOrder = manualOrder
     self.color = color
     self.icon = icon
+    self.isWorkspace = isWorkspace
+    self.workspace = workspace
     self.loadState = loadState
   }
 
@@ -117,7 +134,22 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// For non-git Projects, the UI presents a single synthetic Worktree (`Project.rootPath`)
   /// and the "Add Worktree" affordance is suppressed. Holds for remote git repos too — a
   /// Server project with a resolved (remote) git root supports worktree operations over SSH.
+  /// A workspace answers `false`: its rows are checkouts of *other* repositories, added
+  /// through the workspace flow rather than `git worktree add` on a project root.
   public var supportsWorktrees: Bool { gitRoot != nil }
+
+  /// The repository a Worktree row's git operations run against: the row's
+  /// own `sourceGitRoot` when it is a workspace child, else the Project's
+  /// `gitRoot`. Nil for the root row of a dir-kind or workspace Project.
+  public func repoRoot(for worktree: Worktree) -> String? {
+    worktree.sourceGitRoot ?? gitRoot
+  }
+
+  /// `true` when `worktree` is the Project's main checkout — the row whose
+  /// path is the Project root. For a workspace this is the root folder row.
+  public func isMainCheckout(_ worktree: Worktree) -> Bool {
+    worktree.path == rootPath
+  }
 
   /// True for a Server project — its `rootPath` / `gitRoot` / worktree paths are
   /// remote, and terminals / git run over SSH. Local-filesystem operations
@@ -141,7 +173,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, name, displayName, rootPath, gitRoot, remoteHost, worktrees, selectedWorktreeID,
-      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon
+      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon, isWorkspace
   }
 
   public init(from decoder: Decoder) throws {
@@ -180,6 +212,8 @@ extension Project: Codable {
     // staring at an empty app over a cosmetic value. Hand-edited catalogs and
     // a future icon case written by a newer build both land in this branch.
     self.icon = try? container.decodeIfPresent(ProjectIcon.self, forKey: .icon)
+    self.isWorkspace = try container.decodeIfPresent(Bool.self, forKey: .isWorkspace) ?? false
+    self.workspace = nil
     self.loadState = .loading
   }
 
@@ -224,6 +258,11 @@ extension Project: Codable {
     }
     try container.encodeIfPresent(color, forKey: .color)
     try container.encodeIfPresent(icon, forKey: .icon)
-    // `loadState` intentionally not encoded (transient).
+    // Omit `isWorkspace` when false so every non-workspace catalog stays
+    // byte-identical on round-trip.
+    if isWorkspace {
+      try container.encode(true, forKey: .isWorkspace)
+    }
+    // `workspace` and `loadState` intentionally not encoded (transient).
   }
 }

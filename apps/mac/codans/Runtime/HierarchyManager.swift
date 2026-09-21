@@ -265,10 +265,18 @@ final class HierarchyManager {
 
   // MARK: - Project mutations
 
-  func addProject(name: String, rootPath: String, gitRoot: String? = nil) -> ProjectID {
+  /// Registers a local project. `isWorkspace` marks a workspace root: a plain
+  /// folder of child checkouts — it never carries a `gitRoot`, and the
+  /// synthetic row seeded below doubles as the workspace's main row (the
+  /// folder agents run in). Child rows are appended by the workspace
+  /// reconcile from the manifest, not here.
+  func addProject(
+    name: String, rootPath: String, gitRoot: String? = nil, isWorkspace: Bool = false
+  ) -> ProjectID {
     let projectID = ProjectID()
     var worktrees: [Worktree] = []
     var selectedWorktreeID: WorktreeID?
+    let gitRoot = isWorkspace ? nil : gitRoot
 
     if gitRoot == nil {
       let synthetic = Worktree(
@@ -295,7 +303,8 @@ final class HierarchyManager {
       worktrees: worktrees,
       selectedWorktreeID: selectedWorktreeID,
       addedAt: Date(),
-      manualOrder: nextManualOrder
+      manualOrder: nextManualOrder,
+      isWorkspace: isWorkspace
     )
     catalog.projects.append(project)
     store.scheduleSave(catalog)
@@ -749,6 +758,14 @@ final class HierarchyManager {
     }
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
+    // The main checkout is the Project root itself: dropping its row would
+    // leave a dir-kind or workspace Project with nothing to open, and the
+    // git-backed caller's relocate-then-prune would move the project root
+    // into the trash. The sidebar trims the menu item; this guard covers the
+    // IPC / CLI path, which has no menu to trim.
+    if worktree.path == catalog.projects[projectIndex].rootPath {
+      throw HierarchyError.invariantViolation("Cannot remove main checkout")
+    }
     for pane in worktree.tabs.flatMap({ $0.panes }) {
       runtime.closeSurface(for: pane.id)
     }
@@ -1305,6 +1322,138 @@ final class HierarchyManager {
     return appended
   }
 
+  // MARK: - Workspace
+
+  /// What the workspace reconcile observed for one manifest entry.
+  struct WorkspaceChildObservation: Equatable, Sendable {
+    /// Manifest entry name — the row's display name.
+    let name: String
+    /// Canonical absolute path of the child folder.
+    let path: String
+    /// Whether the folder exists on disk.
+    let exists: Bool
+    /// Live branch from git; nil when detached, missing, or not a repo.
+    let branch: String?
+    /// Root of the repository the checkout belongs to, from git.
+    let sourceGitRoot: String?
+  }
+
+  /// Transient decoded manifest for display. Never persisted, equal-value
+  /// writes dropped — same contract as `setProjectLoadState`.
+  func setProjectWorkspaceManifest(projectID: ProjectID, manifest: WorkspaceManifest?) {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else { return }
+    guard catalog.projects[projectIndex].workspace != manifest else { return }
+    catalog.projects[projectIndex].workspace = manifest
+  }
+
+  /// Workspace counterpart of `reconcileDiscoveredWorktrees`. The manifest,
+  /// not `git worktree list`, is the membership source: every observation is
+  /// one manifest entry, resolved and probed on disk by the caller.
+  ///
+  /// - An observed folder with no row: append a child row (name = entry
+  ///   name, branch / sourceGitRoot from git).
+  /// - An observed folder with a row: refresh `branch` and `sourceGitRoot`
+  ///   in place. The name is never re-synced — it tracks the folder, not the
+  ///   branch — so tabs, panes, and flags survive as they do for worktrees.
+  /// - A missing folder with a live row: soft-archive it, exactly as the
+  ///   stale sweep does for a worktree removed outside the app. The
+  ///   manifest entry is left alone; only an explicit removal edits it.
+  /// - A row no observation names (an entry the user deleted from the
+  ///   manifest by hand): left untouched and logged. Reconcile never deletes.
+  ///
+  /// The root row is never touched, and an empty observation set — a
+  /// manifest that names nothing — never archives anything, mirroring the
+  /// empty-discovery guard on the git path.
+  @discardableResult
+  func reconcileWorkspaceChildren(
+    projectID: ProjectID,
+    observations: [WorkspaceChildObservation]
+  ) -> (appended: Int, updated: Int, archived: Int) {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[projectIndex].isWorkspace
+    else { return (0, 0, 0) }
+    let rootCanonical = Self.canonicalPath(catalog.projects[projectIndex].rootPath)
+    var appended = 0
+    var updated = 0
+    var archived = 0
+    var observedPaths = Set<String>()
+    for observation in observations {
+      let canonical = Self.canonicalPath(observation.path)
+      guard canonical != rootCanonical else { continue }
+      observedPaths.insert(canonical)
+      let existingIndex = catalog.projects[projectIndex].worktrees
+        .firstIndex { Self.canonicalPath($0.path) == canonical }
+      if let existingIndex {
+        let existing = catalog.projects[projectIndex].worktrees[existingIndex]
+        if observation.exists {
+          if existing.branch != observation.branch {
+            catalog.projects[projectIndex].worktrees[existingIndex].branch = observation.branch
+            updated += 1
+          }
+          if let sourceGitRoot = observation.sourceGitRoot,
+            existing.sourceGitRoot != sourceGitRoot
+          {
+            catalog.projects[projectIndex].worktrees[existingIndex].sourceGitRoot = sourceGitRoot
+            updated += 1
+          }
+        } else if !existing.archived, !existing.isPinned {
+          for pane in existing.tabs.flatMap({ $0.panes }) {
+            runtime.suspendSurface(for: pane.id)
+          }
+          purgeRuntimeState(forTabs: existing.tabs)
+          catalog.projects[projectIndex].worktrees[existingIndex].archived = true
+          catalog.projects[projectIndex].worktrees[existingIndex].archivedAt = Date()
+          archived += 1
+        }
+        continue
+      }
+      guard observation.exists else { continue }
+      catalog.projects[projectIndex].worktrees.append(
+        Worktree(
+          id: WorktreeID(),
+          name: observation.name,
+          path: canonical,
+          branch: observation.branch,
+          tabs: [],
+          selectedTabID: nil,
+          sourceGitRoot: observation.sourceGitRoot
+        )
+      )
+      appended += 1
+    }
+    let unmanaged = catalog.projects[projectIndex].worktrees.filter {
+      let canonical = Self.canonicalPath($0.path)
+      return canonical != rootCanonical && !observedPaths.contains(canonical)
+    }
+    if !unmanaged.isEmpty {
+      reconcileLogger.notice(
+        "workspace has \(unmanaged.count, privacy: .public) row(s) the manifest no longer names; left as-is: project=\(projectID.raw.uuidString, privacy: .public)"
+      )
+    }
+    if archived > 0 {
+      reconcileLogger.notice(
+        "auto-archived \(archived, privacy: .public) workspace child(ren) whose folder is gone: project=\(projectID.raw.uuidString, privacy: .public)"
+      )
+    }
+    if appended > 0 || updated > 0 || archived > 0 {
+      store.scheduleSave(catalog)
+    }
+    if archived > 0 {
+      runtime.announceHierarchyMutated()
+    }
+    return (appended, updated, archived)
+  }
+
+  /// The workspace child row at `path`, if any Project's child checkout lives
+  /// there. Answers from the catalog alone — no manifest read, no I/O — so
+  /// the sidebar and the reconcile can ask on every pass.
+  func workspaceMembership(forPath path: String) -> WorkspaceMembership? {
+    catalog.workspaceMembership(
+      forCanonicalPath: Self.canonicalPath(path),
+      canonicalize: Self.canonicalPath
+    )
+  }
+
   /// **Single** canonical form used across the hierarchy layer:
   /// - reconcile dedupe (`reconcileDiscoveredWorktrees`),
   /// - duplicate-path join (`isPathRegistered`),
@@ -1324,7 +1473,7 @@ final class HierarchyManager {
   /// any drift (e.g. one side adding trimming) would silently break
   /// the symmetry the PR body guarantees. Route all call-sites
   /// through this function.
-  static func canonicalPath(_ path: String) -> String {
+  nonisolated static func canonicalPath(_ path: String) -> String {
     URL(fileURLWithPath: path)
       .resolvingSymlinksInPath()
       .standardizedFileURL
@@ -2164,9 +2313,11 @@ final class HierarchyManager {
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
     let rootPath = catalog.projects[projectIndex].rootPath
+    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: newPane, in: worktree,
-      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+      env: Self.injectingBuiltins(
+        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
     )
 
     store.scheduleSave(catalog)
@@ -2293,9 +2444,11 @@ final class HierarchyManager {
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
     let rootPath = catalog.projects[projectIndex].rootPath
+    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: pane, in: worktree,
-      env: Self.injectingBuiltins(env, worktreePath: worktree.path, rootPath: rootPath)
+      env: Self.injectingBuiltins(
+        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
     )
   }
 
@@ -2731,11 +2884,21 @@ final class HierarchyManager {
   nonisolated static func injectingBuiltins(
     _ env: [String: String],
     worktreePath: String,
-    rootPath: String
+    rootPath: String,
+    workspaceRoot: String? = nil
   ) -> [String: String] {
     var merged = env
     merged[BuiltinEnvVar.worktreePath.key] = worktreePath
     merged[BuiltinEnvVar.rootPath.key] = rootPath
+    // Present only inside a workspace, so its absence is itself a signal.
+    // A user-defined entry of the same name is dropped either way: the
+    // editor refuses the key, and a stale value from a project's envVars
+    // must not leak into a non-workspace pane.
+    if let workspaceRoot {
+      merged[BuiltinEnvVar.workspaceRoot.key] = workspaceRoot
+    } else {
+      merged.removeValue(forKey: BuiltinEnvVar.workspaceRoot.key)
+    }
     return merged
   }
 

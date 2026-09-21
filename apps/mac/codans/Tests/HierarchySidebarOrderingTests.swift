@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -22,11 +22,12 @@ struct HierarchySidebarOrderingTests {
     Worktree(name: name, path: path, archived: archived, isPinned: isPinned)
   }
 
+  /// A git Project: its main checkout is a row under the Project row.
   private static func project(
     rootPath: String = "/repo/main",
     worktrees: [Worktree]
   ) -> Project {
-    Project(name: "p", rootPath: rootPath, worktrees: worktrees)
+    Project(name: "p", rootPath: rootPath, gitRoot: rootPath, worktrees: worktrees)
   }
 
   private static func makeSpec() -> CreateWorktreeSpec {
@@ -95,6 +96,7 @@ struct HierarchySidebarOrderingTests {
       id: projectID,
       name: "p",
       rootPath: "/repo/main",
+      gitRoot: "/repo/main",
       worktrees: [main, pin, un1, un2]
     )
     let pend1 = Self.pending(projectID: projectID, name: "feat/a")
@@ -116,11 +118,26 @@ struct HierarchySidebarOrderingTests {
   }
 
   @Test
+  func aFolderProjectListsNoRowForItsRoot() {
+    // The Project row itself stands for a folder's root; a workspace lists
+    // only its checkouts under it.
+    let root = Self.worktree(name: "ws", path: "/ws")
+    let checkout = Self.worktree(name: "app", path: "/ws/app")
+    let folder = Project(name: "notes", rootPath: "/ws", worktrees: [root])
+    let workspace = Project(name: "ws", rootPath: "/ws", worktrees: [root, checkout], isWorkspace: true)
+
+    #expect(HierarchySidebarView.orderedSidebarRows(project: folder, pendings: []).isEmpty)
+    #expect(
+      HierarchySidebarView.orderedSidebarRows(project: workspace, pendings: []).map(\.id)
+        == ["wt:\(checkout.id.raw)"])
+  }
+
+  @Test
   func filtersOutOtherProjectPending() {
     let projectID = ProjectID()
     let otherID = ProjectID()
     let main = Self.worktree(name: "main", path: "/repo/main")
-    let project = Project(id: projectID, name: "p", rootPath: "/repo/main", worktrees: [main])
+    let project = Project(id: projectID, name: "p", rootPath: "/repo/main", gitRoot: "/repo/main", worktrees: [main])
     let mine = Self.pending(projectID: projectID, name: "mine")
     let theirs = Self.pending(projectID: otherID, name: "theirs")
 

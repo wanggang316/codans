@@ -116,7 +116,7 @@
 | `codans status` | `system.status` | server 标识、uptime、connected-clients 数 |
 | `codans launch [--wait N]` | *(本地)* | 若未运行则 `open -g Codans.app` 并最多等 N 秒（默认 10）等 socket 出现；唯一会拉起应用的命令。CLI 自己环境里的 `CODANS_SOCKET_PATH` / `CODANS_CONFIG_DIR` 经 `open --env` 转交给应用，等待的 socket 与应用绑定的是同一个 |
 | `codans doctor` | *(本地)* | 检查 socket 路径、可达性、是否来自环境变量、CLI 版本；不做应用往返 |
-| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级；`--json` 在 tab / pane 上附 `handle`（`t<n>` / `p<n>`） |
+| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级。Project 行对非 git 仓库带 `[dir]` / `[server]` / `[workspace]`；`--json` 的 project 带 `kind`（`ProjectKind` raw value），worktree 带 `sourceGitRoot`（workspace 子仓库的所属仓库，其余为 null），tab / pane 带 `handle`（`t<n>` / `p<n>`） |
 | `codans broadcast` | `terminal.broadcastInput` | 见 [send / broadcast](#codans-pane-send--codans-broadcast) |
 
 > `codans --version` 印 `Codans <version>`（ArgumentParser 内建）。
@@ -128,12 +128,12 @@
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans project list` | `hierarchy.listProjects` | `HierarchyHandlers.listProjects` | 无 |
-| `codans project add PATH` | `hierarchy.addProject` | `HierarchyHandlers.addProject` → `HierarchyManager.addProject` | `PATH`，`[--name NAME]` |
+| `codans project add PATH` | `hierarchy.addProject` | `HierarchyHandlers.addProject` → `HierarchyManager.addProject` | `PATH`，`[--name NAME]`。`PATH` 下存在 `.codans/workspace.json` 时注册为 workspace（见 [Workspace](workspace.md)） |
 | `codans project show [ID]` | `hierarchy.describeProject` | `HierarchyHandlers.describeProject` | `[ID]`；回带 `{id, name, canonicalName, rootPath, gitRoot, remoteHost, isSelected, selectedWorktreeID, worktreeCount, archivedWorktreeCount, tagIDs}` |
 | `codans project rename ID NAME` | `hierarchy.renameProject` | `HierarchyManager.renameProject` | `ID`，`NAME`（空串或等于文件夹名 → 清除覆盖） |
 | `codans project rm ID` | `hierarchy.removeProject` | `HierarchyManager.removeProject` | `ID`（id/名字/`current`） |
 
-`add` 在边界校验：目录必须存在（否则 `invalidParams`，exit 1）、规范化路径未注册（否则 `conflict` 并回带已有 id）；未传 `gitRoot` 时服务端用 `git rev-parse --show-toplevel` 探测，落库后触发与侧栏 Add Project 相同的 reconcile，使仓库项目立刻列出真实 worktree 而非一行无分支的合成 worktree。响应 `{id, rootPath, gitRoot}`。
+`add` 在边界校验：目录必须存在（否则 `invalidParams`，exit 1）、规范化路径未注册（否则 `conflict` 并回带已有 id）；未传 `gitRoot` 时服务端用 `git rev-parse --show-toplevel` 探测（带 `.codans/workspace.json` 的目录注册为 workspace，不探测、忽略传入的 `gitRoot`），落库后触发与侧栏 Add Project 相同的 reconcile，使仓库项目立刻列出真实 worktree 而非一行无分支的合成 worktree。响应 `{id, rootPath, gitRoot}`。
 
 #### `codans worktree …`
 
@@ -150,6 +150,20 @@
 | `codans worktree rm [ID]` | `hierarchy.removeWorktree` | `HierarchyManager.removeWorktree`；`--delete` → `HierarchyClient.removeWorktreeWithGit` | `ID`，或 `--by-path PATH [--all]`（按规范化路径删一/多行），`[--project P] [--delete]`。不带 `--delete` 只删 catalog 行（真实 git worktree 会被下一次 reconcile 收回）；`--delete` 走侧栏 Remove Worktree 同一条路径（拆 surface → relocate-then-prune → 按 Settings 删分支），响应 `{id, deleted, warning?}` |
 
 `--path` 缺省由服务端解析：展开 project 配置的 worktrees 目录并附加分支名；响应回带解析后的绝对路径。目标路径**不存在**且项目是本地 git 项目时，服务端先经 New Worktree sheet 同一条 `wt sw` 流水线把 worktree 造出来（分支不存在则从 `--base` / 项目 pinned base ref / 默认远程分支 / `HEAD` 新建，存在则直接 checkout；项目的 copy / fetch / setup 设置生效；`wt sw --path` 让分支名与目录名解耦），再入 catalog；路径已存在则原样登记（收编外部创建的 worktree）；远端项目与无 git root 的文件夹项目保持只写 catalog。响应回带 `created`。`--reuse-existing`：若同规范化路径的 worktree 已存在，返回其 id 而非以 conflict 失败（名字冲突仍失败）。git 失败按"调用方该怎么办"映射：非法分支名 / 未知 ref → `invalidParams`，分支已存在 / 未提交改动 / 锁 → `conflict`，其它 → `internal` 附 stderr。
+
+#### `codans workspace …`
+
+`WorkspaceCommand.subcommands`：`create`、`add`、`show`。这是唯一会在服务端**写磁盘**的命令组（见 D21）。
+
+| Subcommand | IPC method | Anchors to | Args |
+|---|---|---|---|
+| `codans workspace create TITLE` | `workspace.create` | `WorkspaceHandlers.create` → `WorkspaceClient.create` | `TITLE`，`--project P` / `--repo PATH`（非裸仓库）/ `--remote URL`（各可重复），合计 ≥ 2；`[--branch B] [--base REF] [--existing \| --track] [--reset-local] [--clone-into DIR] [--path ROOT] [--description D]` |
+| `codans workspace add WS` | `workspace.add` | `WorkspaceHandlers.add` → `WorkspaceClient.add` | `WS`（别名/名字/`current`），`--project P` / `--repo PATH` / `--remote URL` 三选一；`[--name N] [--branch B] [--base REF] [--existing \| --track \| --ref REMOTE/BRANCH] [--reset-local] [--clone-into DIR] [--role R]` |
+| `codans workspace drop WS MEMBER` | `workspace.drop` | `WorkspaceHandlers.drop` → `WorkspaceClient.drop` | `MEMBER` 为成员目录名；`[--keep-branch]`。移走 checkout（relocate-then-prune）、删分支（git 拒绝时回带 note）、改 manifest、删本行与源 Project 的镜像行 |
+| `codans workspace remove WS` | `workspace.remove` | `WorkspaceHandlers.remove` → `WorkspaceClient.remove` | 缺省只删条目；`--delete-files` 逐成员注销并删根目录（任一失败则根目录保留并回带 `failures`）；`--delete-branches` 需配合 `--delete-files` |
+| `codans workspace show [WS]` | `workspace.describe` | `WorkspaceHandlers.describe` | `WS` 缺省 `current` |
+
+成员来源：`--project` 先经 `hierarchy.resolveAlias` 解析为 id，服务端读其 `gitRoot`；`--repo` 发绝对路径，服务端 `git rev-parse --git-common-dir` + `--is-bare-repository` 求仓库根（仓库子目录、linked worktree 归一到根；裸仓库以 `invalidParams` 拒绝）；`--remote` 发 URL，服务端定 clone 目标（`--clone-into`，缺省 `~/.codans/sources/<repoName>`；该处已是同一远程的 clone 则复用，否则取空闲的 `-N` 兄弟），clone 后与本地来源一致。检出模式：缺省新建分支；`--existing` 用已有本地分支；`--track` 用远程跟踪分支 `origin/<branch>`（`add` 上可用 `--ref <remote>/<branch>` 指定任意远程 ref，分支名缺省取 ref 的分支部分）；`--reset-local` 只与 `--track` / `--ref` 搭配，把已存在的同名本地分支重置到远程 tip，缺省保留本地分支原样。缺省值：成员目录名 = 仓库目录名，分支 = 标题 slug（`add` 用 workspace 名 slug），base = 仓库默认远端分支，根目录 = `~/.codans/workspaces/<slug>`（被占用则 `-2`、`-3`）。`--json` 输出经 `WorkspaceSummaryRenderable`，nil 字段编码为 `null`；成员带 `sourceKind`（`local` / `remote`）与 `remoteURL`。见 [Workspace](workspace.md)。
 
 #### `codans tab …`
 
@@ -432,6 +446,10 @@ CLIFilesystem (probe only; real impl + test fakes)
 - **D11 — CLI 本地做 UUID 快路径，其余都是 mutation 前一次服务端往返。** 用延迟换一致性；本地 socket 往返成本（亚毫秒）可忽略。
 - **D14 — `codans open` 用 `EditorService` 的内建注册表 + 用户模板，走 `editor.*` IPC 面。** 服务端 4 级优先级（显式 `--in` → per-Project 覆盖 → 全局默认 → Finder 回退）比 CLI 侧 Launch Services 发现更简单，且把"哪个编辑器"的真相留在应用侧。
 - **D20 — `handoff` 的源默认是调用方 pane，且 briefing 必须显式给出或显式放弃。** 让在线 agent 交接自己是主路径（它持有任何 transcript 都无法复原的工作上下文）；`--brief`/`--no-brief` 二选一避免 codans 替第三方调用方发起模型调用。接收方任何 agent 均可启动：有已验证 `promptStyle` 的走命令行参数，其余在 agent 出现后由 app 键入 kickoff；`--no-launch` 仍可只归档不启动。见 [agent-handoff.md](agent-handoff.md)。
+- **D21 — `workspace create` / `add` 是 CLI 里第一组在服务端产生磁盘副作用的动词，编排放在 app 层 `WorkspaceClient`，不放 handler。** `hierarchy.createWorktree` 只登记 catalog 行；workspace 成员必须真的落盘（`git worktree add`、写 manifest），否则行指向空目录。GUI sheet 与 IPC handler 共用同一个 `WorkspaceClient`，失败或取消按记账逆序回滚；handler 只做 wire → `WorkspacePlan` 的翻译与错误映射（校验类 → `invalidParams`，已存在类 → `conflict`，git 分支已存在 → `conflict`）。见 [workspace.md](workspace.md)。
+- **D22 — 成员来源在客户端只区分「已注册 Project」与「本地路径」，仓库根一律由服务端求。** `--project` 走 D4 的别名解析拿到 id；`--repo` 发绝对路径。这样 CLI 不需要本地 git，也不会把 CLI 机器上的路径解析结果与 app 的 catalog 对不上。
+- **D23 — workspace 成员数量校验放 `CodansKit`（`CLIWorkspaceMemberSource.resolve`），在拨号前抛 `userError`。** 与 `CLIBroadcastScopeSelection` 同型：纯参数逻辑放 kit 才能被 `CodansKitTests` 覆盖，且区分于服务端的 `notFound` / `conflict`。
+- **D24 — 检出模式三选一（`--existing` / `--track` / `--ref`）与 `--reset-local` 的搭配约束同样放 kit（`CLIWorkspaceCheckoutFlags.resolve`），服务端 `WorkspaceHandlers.checkout` 再守一次。** wire 上 `useExistingBranch` / `remoteRef` / `trackRemote` 是三个独立字段而非一个枚举：第三方客户端漏传其一时缺省仍是「新建分支」，永不落到会改写本地分支的 `-B` 路径；`resetLocalBranch` 缺省 nil，只有显式 `true` 才生效。
 - **D18 — `broadcast` 在顶层命名空间，而 `send` 在 `codans pane` 下。** `broadcast` 是显式的扇出动作、置于顶层减少键入；`send`/`send-key`/`read`/`capture` 作为 pane 级操作归在 `pane` 子命令树下（与 `codans pane send` 的 discussion 示例一致）。
 
 ## Cross-Cutting

@@ -24,6 +24,7 @@ public final class MethodRouter {
   private let projectHandlers: ProjectHandlers?
   private let agentHandlers: AgentHandlers?
   private let handoffHandlers: HandoffHandlers?
+  private let workspaceHandlers: WorkspaceHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -33,7 +34,8 @@ public final class MethodRouter {
     editorHandlers: EditorHandlers? = nil,
     projectHandlers: ProjectHandlers? = nil,
     agentHandlers: AgentHandlers? = nil,
-    handoffHandlers: HandoffHandlers? = nil
+    handoffHandlers: HandoffHandlers? = nil,
+    workspaceHandlers: WorkspaceHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -42,6 +44,7 @@ public final class MethodRouter {
     self.projectHandlers = projectHandlers
     self.agentHandlers = agentHandlers
     self.handoffHandlers = handoffHandlers
+    self.workspaceHandlers = workspaceHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -61,7 +64,37 @@ public final class MethodRouter {
     if let outcome = await routeProject(request) { return outcome }
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
+    if let outcome = await routeWorkspace(request) { return outcome }
     return notWired(request.method)
+  }
+
+  /// `workspace.*` adapter — typed handlers; `asyncOutcome` for the two
+  /// verbs that touch disk and git, `projectOutcome` for the read.
+  private func routeWorkspace(_ request: IPC.Request) async -> RouterOutcome? {
+    guard let h = workspaceHandlers else { return nil }
+    switch request.method {
+    case .workspaceCreate:
+      return await Self.asyncOutcome {
+        try await h.create(request.params.decoded(as: IPC.WorkspaceCreateRequest.self))
+      }
+    case .workspaceAdd:
+      return await Self.asyncOutcome {
+        try await h.add(request.params.decoded(as: IPC.WorkspaceAddRequest.self))
+      }
+    case .workspaceDrop:
+      return await Self.asyncOutcome {
+        try await h.drop(request.params.decoded(as: IPC.WorkspaceDropRequest.self))
+      }
+    case .workspaceRemove:
+      return await Self.asyncOutcome {
+        try await h.remove(request.params.decoded(as: IPC.WorkspaceRemoveRequest.self))
+      }
+    case .workspaceDescribe:
+      return Self.projectOutcome {
+        try h.describe(request.params.decoded(as: IPC.WorkspaceDescribeRequest.self))
+      }
+    default: return nil
+    }
   }
 
   /// `pane.*` namespace — explicit-termination verbs that own the zmx

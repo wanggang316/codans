@@ -85,4 +85,19 @@ struct CatalogResolutionTests {
     let catalog = Catalog()
     #expect(catalog.paneIDs(inWorktree: WorktreeID()).isEmpty)
   }
+
+  @Test
+  func displayedSelectedProjectFallsBackToTheFirstRememberedWorktree() {
+    let bare = Project(name: "a", rootPath: "/a")
+    let remembered = Project(name: "b", rootPath: "/b", selectedWorktreeID: WorktreeID())
+    let other = Project(name: "c", rootPath: "/c", selectedWorktreeID: WorktreeID())
+    var catalog = Catalog(projects: [bare, remembered, other])
+    #expect(catalog.displayedSelectedProjectID == remembered.id)
+    catalog.selectedProjectID = other.id
+    #expect(catalog.displayedSelectedProjectID == other.id)
+    // A stale id falls back as if nothing were picked.
+    catalog.selectedProjectID = ProjectID()
+    #expect(catalog.displayedSelectedProjectID == remembered.id)
+    #expect(Catalog(projects: [bare]).displayedSelectedProjectID == nil)
+  }
 }

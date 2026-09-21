@@ -17,4 +17,14 @@ extension Catalog {
     }
     return nil
   }
+
+  /// The project the sidebar shows as selected: `selectedProjectID` once
+  /// the user has picked a row, otherwise (right after launch) the first
+  /// project that remembers a selected worktree.
+  public var displayedSelectedProjectID: ProjectID? {
+    if let id = selectedProjectID, projects.contains(where: { $0.id == id }) {
+      return id
+    }
+    return projects.first { $0.selectedWorktreeID != nil }?.id
+  }
 }

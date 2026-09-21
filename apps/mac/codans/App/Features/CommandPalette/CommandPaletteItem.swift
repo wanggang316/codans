@@ -64,6 +64,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case quit
     case openProject
     case cloneRepository
+    case newWorkspace
     case showUnreadNotifications
     case toggleSidebar
     case openGhosttyConfig

@@ -2,6 +2,7 @@ import AppKit
 import CodansCore
 import CodansIPC
 import ComposableArchitecture
+import CryptoKit
 import Foundation
 import GhosttyKit
 
@@ -648,10 +649,7 @@ struct RootFeature {
           .run { [projectReconciler, client = hierarchyClient] send in
             await projectReconciler.reconcileAll()
             let actions: [GitHubFeature.Action] = await MainActor.run {
-              var result: [GitHubFeature.Action] = []
-              if let refresh = Self.makeActiveProjectGitHubRefresh(client: client) {
-                result.append(refresh)
-              }
+              var result: [GitHubFeature.Action] = Self.makeActiveProjectGitHubRefresh(client: client)
               // Arm the liveness poll if the app launched frontmost.
               result.append(
                 Self.makePollTargetChange(
@@ -672,10 +670,7 @@ struct RootFeature {
             for await _ in focusStream {
               await projectReconciler.reconcileAll()
               let actions: [GitHubFeature.Action] = await MainActor.run {
-                var result: [GitHubFeature.Action] = []
-                if let refresh = Self.makeActiveProjectGitHubRefresh(client: client) {
-                  result.append(refresh)
-                }
+                var result: [GitHubFeature.Action] = Self.makeActiveProjectGitHubRefresh(client: client)
                 // Re-point the liveness poll at the active Project (app is frontmost
                 // because didBecomeActive just fired).
                 result.append(Self.makePollTargetChange(client: client, appActive: true))
@@ -750,19 +745,24 @@ struct RootFeature {
             guard !cached.isEmpty else { return }
             let catalog = await MainActor.run { client.snapshot() }
             var pairsByProject: [ProjectID: [GitHubFeature.Action.WorktreeBranchPair]] = [:]
+            // The live set is every Project and every fetch unit, not just
+            // those with branch pairs: a Project whose worktrees are all
+            // archived or detached still owns its cache entry and must not be
+            // swept as an orphan. A workspace contributes one unit per member
+            // repository, keyed by its derived group id.
+            var liveIDs = Set(catalog.projects.map(\.id))
             for project in catalog.projects {
-              let pairs = Self.branchPairs(in: project)
-              if !pairs.isEmpty { pairsByProject[project.id] = pairs }
+              for unit in Self.gitHubFetchUnits(in: project) {
+                liveIDs.insert(unit.projectID)
+                if !unit.pairs.isEmpty { pairsByProject[unit.projectID] = unit.pairs }
+              }
             }
-            // The live set is every Project, not just those with branch pairs:
-            // a Project whose worktrees are all archived or detached still owns
-            // its cache entry and must not be swept as an orphan.
             await send(
               .gitHub(
                 .seedFromCache(
                   cached: cached,
                   branchPairsByProject: pairsByProject,
-                  liveProjectIDs: Set(catalog.projects.map(\.id))
+                  liveProjectIDs: liveIDs
                 ))
             )
           }
@@ -884,13 +884,19 @@ struct RootFeature {
           else { return [:] }
           let snapshot = hierarchyClient.snapshot()
           guard
-            let project = snapshot.projects.first(where: { $0.id == projectID })
+            let project = snapshot.projects.first(where: { $0.id == projectID }),
+            let current = project.worktrees.first(where: { $0.id == worktreeID })
           else { return [:] }
+          // Only siblings of the same repository can hold a branch checked
+          // out: a workspace's rows span several repositories, and repo B's
+          // `main` says nothing about whether repo A's is free.
+          let currentRepo = project.repoRoot(for: current)
           var map: [String: String] = [:]
           for worktree in project.worktrees {
             // The active worktree's own branch is never "blocked from
             // itself"; detached worktrees (branch == nil) cannot block.
             if worktree.id == worktreeID { continue }
+            guard project.repoRoot(for: worktree) == currentRepo else { continue }
             guard let branch = worktree.branch else { continue }
             map[branch] = worktree.name
           }
@@ -911,28 +917,37 @@ struct RootFeature {
         // `gh api graphql` for the whole repo instead of N per-Worktree calls.
         if selection.projectID != priorProjectID,
           let projectID = selection.projectID,
-          let project = lookupProject(projectID: projectID),
-          let gitRootString = project.gitRoot
+          let project = lookupProject(projectID: projectID)
         {
-          let gitRoot = URL(fileURLWithPath: gitRootString)
-          let pairs = Self.branchPairs(in: project)
-          effects.append(
-            .send(
-              .gitHub(
-                .projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
-              ))
-          )
-          // Re-point the liveness poll at the newly-activated Project (or pause
-          // it if the app is not frontmost). `projectActivated` above owns the immediate
-          // refresh; this only arms the recurring poll.
-          if NSApplication.shared.isActive {
+          // One batched fetch per repository the Project's rows belong to —
+          // a single unit for a git Project, one per member repository for a
+          // workspace.
+          let units = Self.gitHubFetchUnits(in: project)
+          for unit in units {
             effects.append(
               .send(
                 .gitHub(
-                  .pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
+                  .projectActivated(
+                    unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
                 ))
             )
-          } else {
+          }
+          // Re-point the liveness poll at the newly-activated Project (or pause
+          // it if the app is not frontmost). `projectActivated` above owns the immediate
+          // refresh; this only arms the recurring poll. The poll has one slot,
+          // so in a workspace it follows the selected member's repository.
+          if NSApplication.shared.isActive,
+            let unit = Self.gitHubFetchUnit(
+              in: project, worktreeID: selection.worktreeID, fallback: units.first)
+          {
+            effects.append(
+              .send(
+                .gitHub(
+                  .pollTargetChanged(
+                    unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
+                ))
+            )
+          } else if !units.isEmpty {
             effects.append(
               .send(.gitHub(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])))
             )
@@ -942,7 +957,14 @@ struct RootFeature {
 
       case .catalogMembershipChanged:
         let catalog = hierarchyClient.snapshot()
-        let projectIDs = Set(catalog.projects.map(\.id))
+        // Live keys are Projects plus every fetch unit a workspace derives
+        // from its member repositories; the prune must keep those too.
+        var projectIDs = Set(catalog.projects.map(\.id))
+        let unitsByProject = Dictionary(
+          uniqueKeysWithValues: catalog.projects.map { ($0.id, Self.gitHubFetchUnits(in: $0)) })
+        for units in unitsByProject.values {
+          for unit in units { projectIDs.insert(unit.projectID) }
+        }
         let worktreeIDs = Set(catalog.projects.flatMap { $0.worktrees.map(\.id) })
         var effects: [Effect<Action>] = [
           .send(.gitHub(.pruneToCatalog(projectIDs: projectIDs, worktreeIDs: worktreeIDs)))
@@ -955,16 +977,13 @@ struct RootFeature {
         // already pauses a poll whose Project is gone, so this only re-arms a
         // target that survived.
         if let target = state.gitHub.pollTarget,
-          let project = catalog.projects.first(where: { $0.id == target }),
-          let gitRootString = project.gitRoot
+          let unit = unitsByProject.values.lazy.flatMap({ $0 }).first(where: { $0.projectID == target })
         {
           effects.append(
             .send(
               .gitHub(
                 .pollTargetChanged(
-                  target,
-                  gitRoot: URL(fileURLWithPath: gitRootString),
-                  worktreeBranches: Self.branchPairs(in: project)
+                  target, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs
                 )))
           )
         }
@@ -1005,7 +1024,7 @@ struct RootFeature {
             )
           }
           await projectReconciler.reconcile(projectID: projectID)
-          if let action = await MainActor.run(body: {
+          for action in await MainActor.run(body: {
             Self.makeActiveProjectGitHubRefresh(client: client)
           }) {
             await send(.gitHub(action))
@@ -1080,23 +1099,16 @@ struct RootFeature {
         }
         guard
           let project = owner,
-          let gitRootString = project.gitRoot,
           let worktree = project.worktrees.first(where: { worktree in
             worktree.tabs.contains { $0.panes.contains { $0.id == paneID } }
-          })
+          }),
+          // The fetch unit the pane's row belongs to: the Project's repository,
+          // or — in a workspace — the member repository this checkout came from.
+          let unit = Self.gitHubFetchUnit(in: project, worktreeID: worktree.id, fallback: nil)
         else { return .none }
         let projectID = project.id
         let worktreeID = worktree.id
         let worktreePath = worktree.path
-        let gitRoot = URL(fileURLWithPath: gitRootString)
-        let pairs = project.worktrees.compactMap {
-          worktree -> GitHubFeature.Action.WorktreeBranchPair? in
-          guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty
-          else { return nil }
-          return GitHubFeature.Action.WorktreeBranchPair(
-            worktreeID: worktree.id, branch: branch
-          )
-        }
         return .run { [projectReconciler, monitor = worktreeLocalDiffMonitor] send in
           // `git commit` / `git push` move the working-tree diff and the
           // ahead/behind counts but NOT `.git/HEAD`, so neither the HEAD
@@ -1118,12 +1130,12 @@ struct RootFeature {
           await send(
             .gitHub(
               .projectRefreshRequested(
-                projectID, gitRoot: gitRoot, worktreeBranches: pairs
+                unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs
               )
             )
           )
         }
-        .cancellable(id: CancelID.gitCommandRefresh(projectID), cancelInFlight: true)
+        .cancellable(id: CancelID.gitCommandRefresh(unit.projectID), cancelInFlight: true)
 
       case .paneLivePwdChanged(let paneID, let path):
         // No reducer state mutation — the manager writes through to the
@@ -1224,7 +1236,7 @@ struct RootFeature {
         // worktree list populates via the reconcileDiscoveredWorktrees closure.
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcile(projectID: projectID)
-          if let action = await MainActor.run(body: {
+          for action in await MainActor.run(body: {
             Self.makeActiveProjectGitHubRefresh(client: client)
           }) {
             await send(.gitHub(action))
@@ -1239,7 +1251,7 @@ struct RootFeature {
         // to the PR badges without waiting for the next selection event.
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcileAll(force: true)
-          if let action = await MainActor.run(body: {
+          for action in await MainActor.run(body: {
             Self.makeActiveProjectGitHubRefresh(client: client)
           }) {
             await send(.gitHub(action))
@@ -1639,7 +1651,7 @@ struct RootFeature {
         // Scroll the now-selected worktree into view. Done before the
         // tab/pane guards so a teardown race that drops the tab still leaves
         // the worktree revealed.
-        revealWorktreeInSidebar(projectID: address.projectID, state: &state)
+        revealWorktreeInSidebar(address.worktreeID, in: address.projectID, state: &state)
         guard
           hierarchyClient.snapshot()
             .projects.first(where: { $0.id == address.projectID })?
@@ -1866,20 +1878,22 @@ struct RootFeature {
         return .send(.gitHub(.delegate(.openURL(snapshot.url))))
 
       case .openCurrentProjectOnGitHubRequested:
-        guard let projectID = state.selection.projectID else { return .none }
+        guard let projectID = state.selection.projectID,
+          let project = lookupProject(projectID: projectID),
+          // In a workspace "the project's repository" is the selected
+          // member's repository; a git Project has exactly one unit.
+          let unit = Self.gitHubFetchUnit(
+            in: project, worktreeID: state.selection.worktreeID,
+            fallback: Self.gitHubFetchUnits(in: project).first)
+        else { return .none }
         // Prefer the cached batched-PR snapshot when present — it already holds
         // a parsed `(host, owner, repo)` triple, so we skip the subprocess.
-        if let cached = state.gitHub.snapshotsByProject[projectID],
+        if let cached = state.gitHub.snapshotsByProject[unit.projectID],
           let url = URL(string: "https://\(cached.host)/\(cached.owner)/\(cached.repo)")
         {
           return .send(.gitHub(.delegate(.openURL(url))))
         }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let project = catalog.projects.first(where: { $0.id == projectID }),
-          let gitRootPath = project.gitRoot
-        else { return .none }
-        let gitRoot = URL(fileURLWithPath: gitRootPath)
+        let gitRoot = unit.gitRoot
         return .run { [gitService = gitServiceClient] send in
           guard let info = try? await gitService.remoteInfo(gitRoot) else { return }
           guard
@@ -1959,7 +1973,7 @@ struct RootFeature {
         try? hierarchyClient.selectWorktree(source.worktreeID, source.projectID)
         // Scroll the deep-linked worktree into view before the tab/pane
         // guards so a teardown race still leaves the worktree revealed.
-        revealWorktreeInSidebar(projectID: source.projectID, state: &state)
+        revealWorktreeInSidebar(source.worktreeID, in: source.projectID, state: &state)
 
         guard
           let worktree = hierarchyClient.snapshot()
@@ -2244,7 +2258,7 @@ struct RootFeature {
 
       case .selectAdjacentWorktreeRequested(let direction):
         let catalog = hierarchyClient.snapshot()
-        let order = Self.flattenedWorktreeOrder(in: catalog)
+        let order = catalog.sidebarSelectionOrder
         guard !order.isEmpty else { return .none }
         let currentIndex =
           order.firstIndex(where: { $0.worktreeID == state.selection.worktreeID }) ?? -1
@@ -2330,8 +2344,15 @@ struct RootFeature {
     )
   }
 
-  private func revealWorktreeInSidebar(projectID: ProjectID, state: inout State) {
-    hierarchyClient.setProjectExpanded(projectID, true)
+  /// Brings a worktree's row on screen: opens its Project unless the
+  /// worktree is the Project row itself, which shows either way.
+  private func revealWorktreeInSidebar(
+    _ worktreeID: WorktreeID, in projectID: ProjectID, state: inout State
+  ) {
+    let project = hierarchyClient.snapshot().projects.first { $0.id == projectID }
+    if project?.rowWorktree?.id != worktreeID {
+      hierarchyClient.setProjectExpanded(projectID, true)
+    }
     state.sidebarVisible = true
     state.revealSelectionTrigger = UUID()
   }
@@ -2360,6 +2381,8 @@ struct RootFeature {
       return .send(.sidebar(.toolbarAddProjectTapped))
     case .cloneRepository:
       return .send(.sidebar(.cloneRepoTapped))
+    case .newWorkspace:
+      return .send(.sidebar(.newWorkspaceTapped))
     case .showUnreadNotifications:
       return .send(.showUnreadRequested)
     case .toggleSidebar:
@@ -2372,7 +2395,7 @@ struct RootFeature {
       // The palette is keyboard-only, so the user can't act on a highlighted
       // row that's scrolled off-screen or hidden under a collapsed project —
       // reveal it. Selection itself still routes through the sidebar.
-      revealWorktreeInSidebar(projectID: projectID, state: &state)
+      revealWorktreeInSidebar(worktreeID, in: projectID, state: &state)
       return .send(
         .sidebar(.worktreeRowTapped(worktreeID, inProject: projectID))
       )
@@ -2382,7 +2405,7 @@ struct RootFeature {
       guard let projectID = state.selection.projectID else { return .none }
       return .run { [projectReconciler, client = hierarchyClient] send in
         await projectReconciler.reconcile(projectID: projectID)
-        if let action = await MainActor.run(body: {
+        for action in await MainActor.run(body: {
           Self.makeActiveProjectGitHubRefresh(client: client)
         }) {
           await send(.gitHub(action))
@@ -2573,6 +2596,13 @@ struct RootFeature {
     guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
+      // A checkout a workspace still names is that workspace's to remove.
+      .filter {
+        catalog.workspaceMembership(
+          forCanonicalPath: HierarchyManager.canonicalPath($0.path),
+          canonicalize: HierarchyManager.canonicalPath
+        ) == nil
+      }
       .filter { gitHub.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }
@@ -2893,21 +2923,78 @@ struct RootFeature {
   @MainActor
   static func makeActiveProjectGitHubRefresh(
     client: HierarchyClient
-  ) -> GitHubFeature.Action? {
+  ) -> [GitHubFeature.Action] {
     let catalog = client.snapshot()
     guard let projectID = catalog.selectedProjectID,
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let gitRootString = project.gitRoot
-    else { return nil }
-    let gitRoot = URL(fileURLWithPath: gitRootString)
-    let pairs = project.worktrees.compactMap { worktree -> GitHubFeature.Action.WorktreeBranchPair? in
-      guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty
-      else { return nil }
-      return GitHubFeature.Action.WorktreeBranchPair(
-        worktreeID: worktree.id, branch: branch
-      )
+      let project = catalog.projects.first(where: { $0.id == projectID })
+    else { return [] }
+    return gitHubFetchUnits(in: project).map { unit in
+      .projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
     }
-    return .projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
+  }
+
+  /// One batched GitHub fetch: the repository to ask about and the rows
+  /// whose branches to ask for. A git Project is one unit keyed by its own
+  /// id. A workspace is one unit per member repository, each keyed by a
+  /// group id derived from the workspace id and the repository root — a
+  /// `ProjectID` in shape, so `GitHubFeature`'s per-project maps, cancel
+  /// ids, and on-disk cache carry it unchanged.
+  nonisolated struct GitHubFetchUnit: Equatable, Sendable {
+    let projectID: ProjectID
+    let gitRoot: URL
+    let pairs: [GitHubFeature.Action.WorktreeBranchPair]
+  }
+
+  nonisolated static func gitHubFetchUnits(in project: Project) -> [GitHubFetchUnit] {
+    guard project.isWorkspace else {
+      guard let gitRoot = project.gitRoot else { return [] }
+      return [
+        GitHubFetchUnit(
+          projectID: project.id, gitRoot: URL(fileURLWithPath: gitRoot),
+          pairs: branchPairs(in: project))
+      ]
+    }
+    var order: [String] = []
+    var pairsByRoot: [String: [GitHubFeature.Action.WorktreeBranchPair]] = [:]
+    for worktree in project.worktrees {
+      guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty,
+        let root = project.repoRoot(for: worktree)
+      else { continue }
+      let canonical = HierarchyManager.canonicalPath(root)
+      if pairsByRoot[canonical] == nil { order.append(canonical) }
+      pairsByRoot[canonical, default: []].append(
+        GitHubFeature.Action.WorktreeBranchPair(worktreeID: worktree.id, branch: branch))
+    }
+    return order.map { root in
+      GitHubFetchUnit(
+        projectID: workspaceFetchGroupID(workspace: project.id, gitRoot: root),
+        gitRoot: URL(fileURLWithPath: root),
+        pairs: pairsByRoot[root] ?? [])
+    }
+  }
+
+  /// The unit `worktreeID`'s row belongs to, else `fallback`.
+  nonisolated static func gitHubFetchUnit(
+    in project: Project, worktreeID: WorktreeID?, fallback: GitHubFetchUnit?
+  ) -> GitHubFetchUnit? {
+    let units = gitHubFetchUnits(in: project)
+    guard let worktreeID else { return fallback }
+    return units.first { $0.pairs.contains { $0.worktreeID == worktreeID } } ?? fallback
+  }
+
+  /// Stable id for a workspace's per-repository fetch group: the first 16
+  /// bytes of SHA-256 over the workspace id and the canonical repository
+  /// root, stamped as a UUID. Deterministic across launches so the on-disk
+  /// snapshot cache seeds the same group it was written for.
+  nonisolated static func workspaceFetchGroupID(workspace: ProjectID, gitRoot: String) -> ProjectID {
+    let digest = SHA256.hash(data: Data("\(workspace.raw.uuidString)|\(gitRoot)".utf8))
+    let bytes = Array(digest.prefix(16))
+    let uuid = UUID(
+      uuid: (
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+      ))
+    return ProjectID(raw: uuid)
   }
 
   /// Builds the `.gitHub(.pollTargetChanged)` that drives the active-Project liveness
@@ -2929,37 +3016,11 @@ struct RootFeature {
     let catalog = client.snapshot()
     guard let projectID = catalog.selectedProjectID,
       let project = catalog.projects.first(where: { $0.id == projectID }),
-      let gitRootString = project.gitRoot
+      let unit = gitHubFetchUnit(
+        in: project, worktreeID: project.selectedWorktreeID,
+        fallback: gitHubFetchUnits(in: project).first)
     else { return paused }
-    let gitRoot = URL(fileURLWithPath: gitRootString)
-    let pairs = project.worktrees.compactMap { worktree -> GitHubFeature.Action.WorktreeBranchPair? in
-      guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty
-      else { return nil }
-      return GitHubFeature.Action.WorktreeBranchPair(
-        worktreeID: worktree.id, branch: branch
-      )
-    }
-    return .pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: pairs)
-  }
-
-  /// Flat list of (projectID, worktreeID) tuples in the order the sidebar
-  /// renders: projects in catalog order; within each project, main row
-  /// first, then pinned, then unpinned. Archived rows are excluded — they
-  /// only appear in the Archived sheet, not the navigable list.
-  static func flattenedWorktreeOrder(
-    in catalog: Catalog
-  ) -> [(projectID: ProjectID, worktreeID: WorktreeID)] {
-    var result: [(projectID: ProjectID, worktreeID: WorktreeID)] = []
-    for project in catalog.projects {
-      let visible = project.worktrees.filter { !$0.archived }
-      let main = visible.filter { $0.path == project.rootPath }
-      let pinned = visible.filter { $0.isPinned && $0.path != project.rootPath }
-      let unpinned = visible.filter { !$0.isPinned && $0.path != project.rootPath }
-      for worktree in main + pinned + unpinned {
-        result.append((projectID: project.id, worktreeID: worktree.id))
-      }
-    }
-    return result
+    return .pollTargetChanged(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
   }
 
 }

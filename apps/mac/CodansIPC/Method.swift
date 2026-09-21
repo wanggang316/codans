@@ -49,6 +49,15 @@ extension IPC {
     case handoffSave = "handoff.save"
     case handoffTo = "handoff.to"
 
+    // workspace — multi-repository workspaces. `create` and `add`
+    // materialize checkouts on disk before touching the catalog; handlers
+    // live in `WorkspaceHandlers`.
+    case workspaceCreate = "workspace.create"
+    case workspaceAdd = "workspace.add"
+    case workspaceDrop = "workspace.drop"
+    case workspaceRemove = "workspace.remove"
+    case workspaceDescribe = "workspace.describe"
+
     // hierarchy — reads
     case hierarchyListProjects = "hierarchy.listProjects"
     case hierarchyListWorktrees = "hierarchy.listWorktrees"

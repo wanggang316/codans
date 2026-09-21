@@ -123,7 +123,10 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
     var lines: [String] = []
     for (projectIndex, project) in projects.enumerated() {
       let isLastProject = projectIndex == projects.count - 1
-      lines.append("\(project.name)  \(project.id)")
+      // Only the non-default kinds are labelled: a git repo is the common
+      // case and reads cleaner bare.
+      let kindSuffix = project.kind == .gitRepo ? "" : "  [\(project.kind.rawValue)]"
+      lines.append("\(project.name)  \(project.id)\(kindSuffix)")
       lines.append("  path: \(project.rootPath)")
 
       let worktrees = project.worktrees.filter { !$0.archived }
@@ -166,6 +169,8 @@ struct HierarchyProjectDTO: Encodable {
   let name: String
   let rootPath: String
   let gitRoot: String?
+  /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
+  let kind: String
   let selectedWorktreeID: String?
   let worktrees: [HierarchyWorktreeDTO]
 
@@ -174,6 +179,7 @@ struct HierarchyProjectDTO: Encodable {
     self.name = project.name
     self.rootPath = project.rootPath
     self.gitRoot = project.gitRoot
+    self.kind = project.kind.rawValue
     self.selectedWorktreeID = project.selectedWorktreeID?.description
     self.worktrees = project.worktrees.filter { !$0.archived }
       .map { HierarchyWorktreeDTO(worktree: $0, handles: handles) }
@@ -185,6 +191,9 @@ struct HierarchyWorktreeDTO: Encodable {
   let name: String
   let path: String
   let branch: String?
+  /// Repository root for a workspace child checkout; null otherwise (the
+  /// Project's `gitRoot` applies).
+  let sourceGitRoot: String?
   let selectedTabID: String?
   let tabs: [HierarchyTabDTO]
 
@@ -193,6 +202,7 @@ struct HierarchyWorktreeDTO: Encodable {
     self.name = worktree.name
     self.path = worktree.path
     self.branch = worktree.branch
+    self.sourceGitRoot = worktree.sourceGitRoot
     self.selectedTabID = worktree.selectedTabID?.description
     self.tabs = worktree.tabs.map { HierarchyTabDTO(tab: $0, handles: handles) }
   }

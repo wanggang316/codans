@@ -96,7 +96,10 @@ struct SettingsSidebarView: View {
       Label {
         Text(project.name)
       } icon: {
-        ProjectIconView(icon: project.icon, color: project.color)
+        ProjectIconView(
+          icon: project.icon, color: project.color,
+          defaultSymbol: ProjectIconView.defaultSymbol(for: project.kind)
+        )
       }
       .contentShape(Rectangle())
       .accessibilityAddTraits(.isButton)

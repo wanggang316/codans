@@ -56,13 +56,30 @@ struct RollupIndexTests {
   }
 
   @Test
+  func aProjectRowsOwnWorktreeStaysVisibleWhileCollapsed() {
+    // A folder or workspace Project row stands for its root worktree, so
+    // collapsing the Project hides only the rows under it.
+    let p = Pathset()
+    let unread = [
+      entry(project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: p.paneA1ActiveTabFocused),
+      entry(project: p.projectA, worktree: p.worktreeA2, tab: p.tabA1Inactive, pane: p.paneA1ActiveTabUnfocused),
+    ]
+    let focus = RollupFocusState(
+      activeProjectID: p.projectB, expandedProjectIDs: [], rowWorktreeIDs: [p.worktreeA1])
+    let index = RollupIndex.compute(unread: unread, focus: focus)
+
+    #expect(index.unreadWorktrees == [p.worktreeA1])
+    #expect(index.unreadProjects == [p.projectA])
+  }
+
+  @Test
   func projectExpandedButNotActiveRollsToWorktree() {
     let p = Pathset()
     let unread = [
       entry(project: p.projectA, worktree: p.worktreeA1, tab: p.tabA1Active, pane: p.paneA1ActiveTabFocused)
     ]
     let focus = RollupFocusState(
-      activeProjectID: p.projectB,    // user is on a different project
+      activeProjectID: p.projectB,  // user is on a different project
       expandedProjectIDs: [p.projectA, p.projectB]
     )
     let index = RollupIndex.compute(unread: unread, focus: focus)

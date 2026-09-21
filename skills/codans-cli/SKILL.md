@@ -1,6 +1,6 @@
 ---
 name: codans
-description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, run a command in a pane and capture its output, send keystrokes or text, read back rendered output, broadcast input across panes, see which panes run agents and wait for their state, launch agent profiles, hand a task off to another agent, install this skill for agents, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
+description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, run a command in a pane and capture its output, send keystrokes or text, read back rendered output, broadcast input across panes, see which panes run agents and wait for their state, launch agent profiles, hand a task off to another agent, create a multi-repository workspace or add a repository to one, install this skill for agents, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
 ---
 
 # codans CLI (`codans`)
@@ -67,11 +67,18 @@ Three outcomes:
 ## Hierarchy in 60 seconds
 
 ```
-Project       a tracked git repo (one Project per repo)
+Project       a tracked git repo (one Project per repo) — or a workspace
  └── Worktree a git worktree of that repo (own dir + branch + tab layout)
       └── Tab one named grouping of panes in a worktree (one Tab visible)
            └── Pane a single libghostty terminal session
 ```
+
+A **workspace** Project (`"kind": "workspace"` in `codans tree --json`) is a
+plain folder holding checkouts of *several* repositories for one task, listed
+in `<root>/.codans/workspace.json`. Its first Worktree row is the folder
+itself; every other row is one member checkout, whose repository is reported
+as `sourceGitRoot`. Treat those rows as independent repos: `git -C <path>`
+per row, never `git worktree` commands against the workspace root.
 
 `codans` is on `PATH` automatically inside every codans Pane, and the app
 auto-detects which Project / Worktree / Tab / Pane that Pane belongs to —
@@ -273,6 +280,42 @@ branch). `--json` reports `path` and whether the worktree was `created`
 or merely registered. `rm` only forgets the entry, and a real git worktree
 is re-adopted on the next reconcile; pass `--delete` to run the sidebar's
 Remove Worktree (directory removed, branch deleted per Settings).
+
+### `codans workspace` — one task, several repositories
+
+```bash
+codans workspace create "Checkout Flow" --project app --project api   # ≥ 2 members
+codans workspace create "Checkout Flow" --project app --repo ~/dev/shared-lib \
+  --branch feat/checkout --base origin/main --path ~/tmp/checkout-flow
+codans workspace create "Release" --project app --remote git@github.com:org/lib.git \
+  --branch release/1.2 --track                          # remote-tracking origin/release/1.2
+codans workspace add <workspace> --repo ~/dev/other --existing --branch main
+codans workspace add <workspace> --repo ~/dev/tool --ref origin/main   # remote-tracking ref
+codans workspace add <workspace> --remote https://host/team/svc --clone-into ~/src
+codans workspace drop <workspace> <member> [--keep-branch]   # unregister one checkout
+codans workspace remove <workspace> [--delete-files [--delete-branches]]
+codans workspace show [<workspace>]                    # manifest + live rows
+```
+
+`create` makes `<root>/<name>` for every member with `git worktree add`
+(new branch `--branch`, default: a slug of the title, from `--base`, default:
+the repository's default remote branch; `--existing` checks out an existing
+local branch instead; `--track` checks out the remote-tracking
+`origin/<branch>`), writes `<root>/.codans/workspace.json`, and registers the
+folder as a workspace Project. Members come from registered projects
+(`--project`), any local repository that is not bare (`--repo`), or a
+remote URL (`--remote`) — all repeatable. A remote is cloned once into
+`--clone-into` (default `~/.codans/sources/<name>`; an existing clone of the
+same remote there is reused) and then behaves like a local repository. With
+`--track` or `add --ref <remote>/<branch>`, a local branch of the same name is
+checked out as is; `--reset-local` points it at the remote tip instead and is
+never implied. The root defaults to `~/.codans/workspaces/<slug>` and must
+not sit inside a git repository. Both verbs really write to disk — a failure
+midway removes everything the call created, including a clone it made. `drop` moves one member's checkout out of the
+workspace and deletes its branch (unless `--keep-branch`); `remove` alone
+only de-registers, while `--delete-files` unregisters every member and
+deletes the folder — but keeps the folder if any member could not be
+unregistered, so a repository is never left pointing at a missing worktree.
 
 ### `codans tab` — manage tabs inside a worktree
 
@@ -548,6 +591,17 @@ codans pane send -p @repl 'print(math.pi)' --capture
 WT=$(codans worktree new exp/feature-x --json | jq -r '.data.id')   # git worktree add + register
 TAB=$(codans tab new "dev" --worktree "$WT" --json | jq -r '.data.id')
 codans pane new --tab "$TAB" --cwd "$(codans worktree show "$WT" --json | jq -r '.data.path')" -- npm run dev
+```
+
+### Start a cross-repository task in a workspace
+
+```bash
+codans workspace create "Checkout Flow" --project app --project api --branch feat/checkout
+# The workspace root is the new project's first worktree; each member is a row.
+WS=$(codans tree --json | jq -r '.projects[] | select(.kind == "workspace") | .id')
+codans workspace show "$WS"
+codans tab new --worktree "$(codans tree --json | jq -r --arg ws "$WS" '.projects[] | select(.id == $ws) | .worktrees[0].id')" "agent"
+codans pane new -- claude    # runs at the workspace root; `git -C app`, `git -C api` per member
 ```
 
 ### Take over a task from the previous agent
