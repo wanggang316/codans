@@ -597,8 +597,8 @@ final class AppState {
   /// Per-Worktree "git status is non-clean" cache. The sidebar row's `.task(id:)`
   /// refreshes this lazily; a small dot is drawn next to the row name when dirty.
   let worktreeStatusMonitor: WorktreeStatusMonitor
-  /// Per-Worktree "uncommitted edits" line counts (`git diff HEAD
-  /// --shortstat`). Drives the `+N −M` chip on sidebar worktree rows
+  /// Per-Worktree "uncommitted edits" line counts (the diff viewer's
+  /// Uncommitted totals). Drives the `+N −M` chip on sidebar worktree rows
   /// regardless of PR state. Shared with the reducer via the
   /// `WorktreeLocalDiffMonitor` DependencyKey so HEAD-watcher events can
   /// invalidate the cache.
@@ -1408,7 +1408,7 @@ final class AppState {
     CLIInvocation.command(bundledBinary: try? CLIBundleLocator.locateBinary())
   }
 
-  /// Git facts for `context.md`. Read-only (`status`, branch, shortstat);
+  /// Git facts for `context.md`. Read-only (`status`, branch, line stats);
   /// any failure — not a repository, git missing — degrades to "not git"
   /// rather than blocking the handoff.
   nonisolated static func handoffRepoState(at root: URL, git: GitServiceClient) async -> HandoffRepoState {

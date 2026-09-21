@@ -6,8 +6,20 @@ import SwiftUI
 struct DiffPanelView: View {
   @Bindable var store: StoreOf<DiffFeature>
   @Environment(\.colorScheme) private var colorScheme
+  /// Set once the renderer has drawn a document and kept while it swaps to the next one, so a
+  /// stale or blank renderer never flashes between two screens.
+  @State private var showingDocument = false
+  /// The last notice, kept on screen while the next file's document is still being drawn.
+  @State private var heldNotice: String?
+  /// Loading indicators appear only when loading is slow, not on every file switch.
+  @State private var slowLoading = false
 
   private var outgoing: Bool { store.state.scope == .outgoing }
+  private var comparisonIsEmpty: Bool { store.snapshot?.files.isEmpty == true }
+  private var documentVisible: Bool {
+    store.document != nil && showingDocument && store.error == nil && !comparisonIsEmpty
+  }
+  private var loadingKey: Int? { store.contentLoading || store.snapshot == nil ? store.contentRequest : nil }
   private var selectedFile: GitComparisonFile? {
     store.snapshot?.files.first { $0.id == store.selectedFileID }
   }
@@ -44,11 +56,13 @@ struct DiffPanelView: View {
 
   private var fileHeader: some View {
     HStack(spacing: 8) {
-      DiffFileIcon(path: selectedFile?.path ?? "")
       Text(selectedFile?.path ?? (outgoing ? "Outgoing" : "Uncommitted"))
         .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
         .help(selectedFile?.path ?? "Select a file")
       Spacer(minLength: 8)
+      if slowLoading && store.contentLoading {
+        ProgressView().controlSize(.mini).accessibilityLabel("Loading file")
+      }
       if let added = selectedFile?.additions, let removed = selectedFile?.deletions {
         Text("+\(added)").foregroundStyle(ThemeGit.added)
         Text("−\(removed)").foregroundStyle(ThemeGit.removed)
@@ -68,28 +82,41 @@ struct DiffPanelView: View {
         options: DiffOptions(layout: store.layout, theme: colorScheme == .dark ? "dark" : "light", chrome: "none")
       ) { event in
         guard event.documentID == nil || event.documentID == store.document?.id else { return }
+        if event.type == "rendered" {
+          showingDocument = true
+          heldNotice = nil
+        }
         if event.type == "openFile", let side = event.side { store.send(.openFile(side, event.line)) }
         if event.type == "error", let message = event.message { store.send(.rendererFailed(message)) }
       }
       .id(store.rendererGeneration)
-      .opacity(store.document == nil ? 0 : 1)
-      .allowsHitTesting(store.document != nil)
-      .accessibilityHidden(store.document == nil)
+      .opacity(documentVisible ? 1 : 0)
+      .allowsHitTesting(documentVisible)
+      .accessibilityHidden(!documentVisible)
       if let error = store.error {
         message(error, symbol: "exclamationmark.triangle")
-      } else if let snapshot = store.snapshot, snapshot.files.isEmpty {
+      } else if comparisonIsEmpty {
         message(
           outgoing ? "No committed changes against this base." : "No changes in this worktree.",
           symbol: "checkmark.circle")
-      } else if store.document == nil {
-        if let notice = store.notice {
+      } else if !documentVisible {
+        if let notice = store.notice ?? (store.document != nil ? heldNotice : nil) {
           message(notice, symbol: "doc.text.magnifyingglass")
-        } else if store.contentLoading || store.snapshot == nil {
-          ProgressView("Loading changes…").controlSize(.small)
-        } else {
+        } else if store.document == nil && (store.contentLoading || store.snapshot == nil) {
+          if slowLoading { ProgressView("Loading changes…").controlSize(.small) }
+        } else if store.document == nil {
           message("Select a file to view its changes.", symbol: "doc.text")
         }
       }
+    }
+    .onChange(of: store.document?.id) { _, id in if id == nil { showingDocument = false } }
+    .onChange(of: store.rendererGeneration) { _, _ in showingDocument = false }
+    .onChange(of: store.notice) { _, notice in if let notice { heldNotice = notice } }
+    .task(id: loadingKey) {
+      slowLoading = false
+      guard loadingKey != nil else { return }
+      try? await Task.sleep(for: .milliseconds(300))
+      if !Task.isCancelled { slowLoading = true }
     }
   }
 

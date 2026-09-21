@@ -11,6 +11,8 @@ import Foundation
 /// Closures are `@Sendable` async — safe to call from any reducer effect.
 nonisolated struct GitServiceClient: Sendable {
   var comparison: @Sendable (URL, GitComparisonScope, String?) async throws -> GitComparisonSnapshot
+  var comparisonListing: @Sendable (URL, GitComparisonScope, String?) async throws -> GitComparisonSnapshot
+  var comparisonLineCounts: @Sendable (URL, GitComparisonSnapshot) async throws -> GitComparisonSnapshot
   var comparisonContent: @Sendable (URL, GitComparisonSnapshot, GitComparisonFile) async throws -> GitComparisonContent
   /// `(repoURL, cursor) -> LogPage`.
   var log: @Sendable (URL, LogPage.Cursor) async throws -> LogPage
@@ -34,7 +36,8 @@ nonisolated struct GitServiceClient: Sendable {
   /// Returns `nil` for paths that don't yet exist at HEAD (newly-added files).
   var showFileAtHEAD: @Sendable (String, String) async throws -> String?
   /// `(worktreePath) -> LocalDiffStats?`. Sums insertions/deletions for the
-  /// worktree's uncommitted edits (`git diff HEAD --shortstat`). Nil only on
+  /// worktree's uncommitted edits, untracked files included — the diff
+  /// viewer's Uncommitted totals. Nil only on
   /// git failure; a clean tree yields `LocalDiffStats(0, 0)`.
   var localDiffStats: @Sendable (URL) async throws -> LocalDiffStats?
   /// `(repoURL) -> currentBranch?`. `git symbolic-ref --short HEAD`. Returns nil on
@@ -62,6 +65,10 @@ extension GitServiceClient {
   static func live(service: any GitService = Git.makeService()) -> GitServiceClient {
     GitServiceClient(
       comparison: { url, scope, base in try await service.comparison(at: url, scope: scope, base: base) },
+      comparisonListing: { url, scope, base in
+        try await service.comparisonListing(at: url, scope: scope, base: base)
+      },
+      comparisonLineCounts: { url, snapshot in try await service.comparisonLineCounts(snapshot, at: url) },
       comparisonContent: { url, snapshot, file in
         try await service.comparisonContent(at: url, snapshot: snapshot, file: file)
       },
@@ -106,6 +113,10 @@ extension GitServiceClient: DependencyKey {
   static let testValue: GitServiceClient = GitServiceClient(
     comparison: unimplemented(
       "GitServiceClient.comparison", placeholder: .init(scope: .all, baseLabel: "HEAD", files: [])),
+    comparisonListing: unimplemented(
+      "GitServiceClient.comparisonListing", placeholder: .init(scope: .all, baseLabel: "HEAD", files: [])),
+    comparisonLineCounts: unimplemented(
+      "GitServiceClient.comparisonLineCounts", placeholder: .init(scope: .all, baseLabel: "HEAD", files: [])),
     comparisonContent: unimplemented("GitServiceClient.comparisonContent", placeholder: .init()),
     log: unimplemented(
       "GitServiceClient.log",

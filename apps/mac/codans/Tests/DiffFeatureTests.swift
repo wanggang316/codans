@@ -30,19 +30,103 @@ struct DiffFeatureTests {
     await store.send(.contentFailed(6, "stale failure"))
     await store.send(.failed(3, "stale failure"))
     await store.send(.loaded(3, .init(scope: .all, baseLabel: "old", files: [])))
+    await store.send(.lineCountsLoaded(3, .init(scope: .all, baseLabel: "old", files: [])))
   }
 
-  @Test func changingScopeClearsContentAndInvalidatesResponses() async {
+  @Test func switchingToAnUncachedScopeClearsContentAndInvalidatesResponses() async {
     let store = TestStore(initialState: populatedState()) { DiffFeature() }
     await store.send(.scopeChanged(.outgoing)) {
+      $0.scopeSelections[.all] = "file.swift"
       $0.scope = .outgoing
       $0.request = 5
       $0.contentRequest = 8
-      $0.snapshot = nil
       $0.document = nil
     }
     await store.receive(.refresh)
     await store.send(.contentLoaded(7, "file.swift", .init(oldText: "old", newText: "new")))
+    #expect(store.state.snapshots[.all]?.id == "snapshot")
+  }
+
+  @Test func switchingBackShowsTheCachedComparisonWhileRefreshing() async {
+    var state = populatedState()
+    state.isVisible = true
+    let outgoing = GitComparisonSnapshot(
+      id: "outgoing", scope: .outgoing, baseLabel: "origin/main",
+      files: [GitComparisonFile(path: "pushed.swift", status: "M")])
+    state.snapshots[.outgoing] = outgoing
+    state.scopeSelections[.outgoing] = "pushed.swift"
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.comparison = { _, scope, _ in
+        #expect(scope == .outgoing)
+        return outgoing
+      }
+      $0.gitService.comparisonContent = { _, _, file in .init(oldText: "old", newText: file.path) }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    await store.send(.scopeChanged(.outgoing)) {
+      $0.scopeSelections[.all] = "file.swift"
+      $0.scope = .outgoing
+      $0.selectedFileID = "pushed.swift"
+      $0.contentLoading = true
+    }
+    // The cached list and selection show at once; the previous document stays until replaced.
+    #expect(store.state.snapshot == outgoing)
+    #expect(store.state.document?.path == "file.swift")
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.document?.path == "pushed.swift")
+    #expect(store.state.snapshot == outgoing)
+  }
+
+  @Test func firstLoadListsFilesBeforeCountingUntrackedLines() async {
+    var state = DiffFeature.State()
+    state.path = "/tmp/repository"
+    state.isVisible = true
+    let listing = GitComparisonSnapshot(
+      id: "listing", scope: .all, baseLabel: "HEAD", files: [GitComparisonFile(path: "new.swift", status: "A")],
+      pendingLineCounts: ["new.swift"])
+    let counted = GitComparisonSnapshot(
+      id: "listing", scope: .all, baseLabel: "HEAD",
+      files: [GitComparisonFile(path: "new.swift", status: "A", additions: 3, deletions: 0)])
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.comparisonListing = { _, _, _ in listing }
+      $0.gitService.comparisonLineCounts = { _, snapshot in
+        #expect(snapshot == listing)
+        return counted
+      }
+      $0.gitService.comparisonContent = { _, _, _ in .init(oldText: "", newText: "a\nb\nc\n") }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    await store.send(.refresh)
+    await store.receive(.loaded(1, listing)) {
+      $0.snapshot = listing
+      $0.selectedFileID = "new.swift"
+    }
+    await store.receive(.lineCountsLoaded(1, counted)) { $0.snapshot = counted }
+    await store.finish()
+  }
+
+  @Test func selectingAFileKeepsThePreviousContentUntilTheNewOneArrives() async {
+    var state = populatedState()
+    state.snapshot?.files.append(GitComparisonFile(path: "other.swift", status: "M"))
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.comparisonContent = { _, _, _ in .init(oldText: "x", newText: "y") }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    await store.send(.selectFile("other.swift")) {
+      $0.selectedFileID = "other.swift"
+      $0.contentRequest = 8
+      $0.contentLoading = true
+    }
+    #expect(store.state.document?.path == "file.swift")
+    await store.receive(\.contentLoaded)
+    #expect(store.state.document?.path == "other.swift")
   }
 
   @Test func historicalSideNeverOpensEditor() async {
@@ -119,7 +203,7 @@ struct DiffFeatureTests {
     let store = TestStore(initialState: state) {
       DiffFeature()
     } withDependencies: {
-      $0.gitService.comparison = { _, scope, resolvedBase in
+      $0.gitService.comparisonListing = { _, scope, resolvedBase in
         #expect(scope == .outgoing)
         #expect(resolvedBase == (expectedBase.isEmpty ? nil : expectedBase))
         return snapshot
@@ -273,7 +357,7 @@ struct DiffFeatureTests {
     let store = TestStore(initialState: state) {
       DiffFeature()
     } withDependencies: {
-      $0.gitService.comparison = { _, scope, selectedBase in
+      $0.gitService.comparisonListing = { _, scope, selectedBase in
         #expect(scope == .outgoing)
         #expect(selectedBase == (base.isEmpty ? nil : base))
         return snapshot

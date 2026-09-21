@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Sidebar-row GitHub badge with hover-triggered popover. Click on the badge opens the PR
 /// on github.com; dwelling the cursor over the badge for 150 ms opens the rich
@@ -27,12 +27,11 @@ struct WorktreeGitHubBadge<PopoverContent: View>: View {
 
   var body: some View {
     let snapshot = store.snapshots[worktreeID]
-    let isLoading = store.loading.contains(worktreeID)
     let lastError = store.lastError[worktreeID]
     // True when a real pill renders; false for the 0-pt popover anchor. Drives the
     // leading gap below so the anchor adds no spacing — that's what lets a preceding
     // diff-stats chip sit flush at the row's trailing edge (see `worktreeRow`).
-    let hasVisiblePill = snapshot != nil || isLoading || lastError != nil
+    let hasVisiblePill = snapshot != nil || lastError != nil
 
     Group {
       if let snapshot {
@@ -46,8 +45,6 @@ struct WorktreeGitHubBadge<PopoverContent: View>: View {
           state: .loaded(snapshot, rollup: rollup),
           onTap: { store.send(.delegate(.openURL(snapshot.url))) }
         )
-      } else if isLoading {
-        PullRequestBadge(state: .loading, onTap: {})
       } else if let lastError {
         PullRequestBadge(
           state: .error(lastError),
@@ -56,6 +53,10 @@ struct WorktreeGitHubBadge<PopoverContent: View>: View {
           }
         )
       } else {
+        // Also the state while a fetch is in flight: the row never shows a loading
+        // pill, since selecting a Worktree starts a fetch and would flash one on every
+        // click. The PR pill appears when the data lands; the popover shows progress.
+        //
         // 0-pt anchor so `.popover`/`.onHover` modifiers below have a concrete view to
         // attach to even before any PR data has loaded. `EmptyView()` is a structural
         // placeholder — SwiftUI never mounts it, which silently suppresses every modifier

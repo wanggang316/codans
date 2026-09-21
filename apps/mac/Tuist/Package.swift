@@ -20,8 +20,9 @@ let packageSettings = PackageSettings(
 let package = Package(
   name: "CodansDependencies",
   dependencies: [
-    .package(path: "../ThirdParty/DiffViewKit"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
+    // Tags carry the generated Web resources, so resolving needs no npm build.
+    .package(url: "https://github.com/wanggang316/diff-view", exact: "0.1.2"),
     .package(url: "https://github.com/pointfreeco/swift-composable-architecture", exact: "1.26.2"),
     // Snapshot-testing harness used by view snapshot tests (e.g. TabChip).
     // Resolved eagerly so any future test target can depend on it without

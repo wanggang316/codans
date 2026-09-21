@@ -29,7 +29,8 @@ struct GitHubFeature {
     var latestWorkflowRuns: [Int: WorkflowRun] = [:]
 
     /// Worktrees whose owning Project has a batched fetch in flight (or
-    /// queued behind one). The badge and popover render a spinner from this.
+    /// queued behind one). Only the popover renders a spinner from this; the
+    /// sidebar row never shows one.
     var loading: Set<WorktreeID> = []
 
     /// Mutation operations in flight per Worktree. Views observe this to disable the
@@ -692,11 +693,11 @@ struct GitHubFeature {
     // current even when this call collapses into the queued-refresh slot.
     state.projectWorktreePairs[projectID] = pairs
     for pair in pairs { state.projectByWorktree[pair.worktreeID] = projectID }
-    // The spinner means "nothing known yet", so only a Project's first fetch
-    // marks its Worktrees. A refresh over a cached batch — poll ticks, the
-    // post-mutation refetch, a fresh-on-activation miss — runs silently; the
-    // rows keep showing what they know until the new batch lands. Marking on
-    // every refresh made every PR-less row flip to a spinner on each poll.
+    // The popover's spinner means "nothing known yet", so only a Project's
+    // first fetch marks its Worktrees. A refresh over a cached batch — poll
+    // ticks, the post-mutation refetch, a fresh-on-activation miss — runs
+    // silently; the popover keeps showing what it knows until the new batch
+    // lands.
     // Marked before the in-flight short-circuit: a call that collapses into
     // the queued-refresh slot still has a fetch pending on its behalf.
     if state.snapshotsByProject[projectID] == nil {

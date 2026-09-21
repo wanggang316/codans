@@ -1012,7 +1012,7 @@ struct RootFeature {
         let shouldForwardToBranchSwitcher = worktreeID == state.branchSwitcher.worktreeID
         return .run {
           [projectReconciler, client = hierarchyClient, monitor = worktreeLocalDiffMonitor] send in
-          // HEAD moved → the cached `git diff HEAD --shortstat` numbers are
+          // HEAD moved → the cached uncommitted line counts are
           // stale by definition. Drop the freshness stamp and immediately
           // re-fetch so the sidebar chip updates in the same tick the
           // reconciler runs, instead of waiting for the row to remount.
@@ -1037,7 +1037,7 @@ struct RootFeature {
       case .worktreeWorkingTreeChanged(let worktreeID):
         // FSEvents fired for a working-tree edit. Branch / HEAD are
         // unaffected, so skip the reconcile + GitHub refresh the HEAD path
-        // runs — only the `git diff HEAD --shortstat` numbers can have moved.
+        // runs — only the uncommitted line counts can have moved.
         // Drop the freshness stamp and re-fetch so the chip tracks the edit
         // instead of waiting for the row to remount.
         let catalog = hierarchyClient.snapshot()
