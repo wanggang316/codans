@@ -131,7 +131,7 @@ In addition to the project's standard "App launched" signal, cases in this docum
 2. Wait until `worktree_header.branch_text` is visible.
 
 **Assertions:**
-1. (UI) `worktree_header.branch_text` matches the regex `^\(detached( @ [0-9a-f]{7,12})?\)$`.
+1. (UI) `worktree_header.branch_text` matches the regex `^Detached HEAD @[0-9a-f]{7}$` (`Worktree.detachedHeadTitle`; the launch reconcile must have discovered the fixture worktree and recorded its `headSHA` — the catalog seed itself has no `headSHA` key).
 2. (UI) `worktree_header.branch_button` is still hittable (the click target exists; see Journey BP for its behaviour on detached HEAD).
 
 **Artifacts on FAIL:** `screenshot.png` of the header.
@@ -566,7 +566,7 @@ See [Source-Code Seams](#source-code-seams) — the implementation must declare 
 
 ## Open Questions
 
-1. **OQ-UT1** — On detached HEAD, the spec text shows `(detached @ <short-sha>)` but does not state whether the short sha must come from `Worktree.headSha` (model field) or from a fresh `git rev-parse --short HEAD`. UT-BSH-HD-003's assertion uses a permissive regex that accepts either. **Default:** keep the permissive regex; if the design doc's OQ-D1 lands on the model-field path, tighten the assertion in a follow-up.
+1. **OQ-UT1 — RESOLVED** — The model-field path landed: reconcile records `Worktree.headSHA` from `git worktree list --porcelain`, and `Worktree.detachedHeadTitle` renders `"Detached HEAD @<7-char-sha>"` (no `git rev-parse` call). UT-BSH-HD-003's assertion was tightened to that literal format.
 
 2. **OQ-UT2** — UT-BSH-VS-001 needs SwiftUI material introspection that may not be exposed in our XCUITest harness today. **Default:** if introspection is unavailable, fall back to the pixel-sample comparison branch of the assertion; if both prove infeasible, downgrade this case to MANUAL like VS-003.
 

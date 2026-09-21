@@ -5,6 +5,18 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
   public var name: String
   public var path: String
   public var branch: String?
+  /// HEAD commit of the worktree's checkout, as reported by
+  /// `git worktree list --porcelain` (full 40-char SHA). The only way to
+  /// identify a detached worktree (`branch == nil`): the sidebar renders it
+  /// as "Detached HEAD @<short>". `nil` when unknown — synthetic non-git
+  /// worktrees, and pre-existing catalogs until the next reconcile. Updated
+  /// in place by `reconcileDiscoveredWorktrees` on every launch / focus
+  /// pulse, so a detached worktree whose HEAD moved (e.g. a Codex sandbox
+  /// committing onto its base) re-renders with the new SHA.
+  /// Encode omits the key when `nil` so existing catalogs round-trip
+  /// identically.
+  public var headSHA: String?
+
   public var tabs: [Tab]
   public var selectedTabID: TabID?
   /// App-layer soft-hide. `true` removes the Worktree from the main sidebar
@@ -47,6 +59,7 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     name: String,
     path: String,
     branch: String? = nil,
+    headSHA: String? = nil,
     tabs: [Tab] = [],
     selectedTabID: TabID? = nil,
     archived: Bool = false,
@@ -59,6 +72,7 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     self.name = name
     self.path = path
     self.branch = branch
+    self.headSHA = headSHA
     self.tabs = tabs
     self.selectedTabID = selectedTabID
     self.archived = archived
@@ -71,7 +85,7 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
 
 extension Worktree: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, path, branch, tabs, selectedTabID, archived, archivedAt, isPinned, isNew,
+    case id, name, path, branch, headSHA, tabs, selectedTabID, archived, archivedAt, isPinned, isNew,
       sourceGitRoot
   }
 
@@ -80,7 +94,7 @@ extension Worktree: Codable {
     self.id = try container.decode(WorktreeID.self, forKey: .id)
     self.name = try container.decode(String.self, forKey: .name)
     self.path = try container.decode(String.self, forKey: .path)
-    self.branch = try container.decodeIfPresent(String.self, forKey: .branch)
+    self.headSHA = try container.decodeIfPresent(String.self, forKey: .headSHA)
     self.tabs = try container.decodeIfPresent([Tab].self, forKey: .tabs) ?? []
     self.selectedTabID = try container.decodeIfPresent(TabID.self, forKey: .selectedTabID)
     self.archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
@@ -95,7 +109,7 @@ extension Worktree: Codable {
     try container.encode(id, forKey: .id)
     try container.encode(name, forKey: .name)
     try container.encode(path, forKey: .path)
-    try container.encodeIfPresent(branch, forKey: .branch)
+    try container.encodeIfPresent(headSHA, forKey: .headSHA)
     try container.encode(tabs, forKey: .tabs)
     try container.encodeIfPresent(selectedTabID, forKey: .selectedTabID)
     // Omit `archived` when false so pre-archive catalogs round-trip
@@ -114,5 +128,17 @@ extension Worktree: Codable {
     }
     // Omit when nil so ordinary worktrees round-trip identically.
     try container.encodeIfPresent(sourceGitRoot, forKey: .sourceGitRoot)
+  }
+}
+
+extension Worktree {
+  /// Secondary-line title for a detached checkout: "Detached HEAD @<7-char
+  /// SHA>". `nil` unless `branch == nil` **and** the HEAD commit is known —
+  /// synthetic non-git worktrees (`branch == nil`, no SHA) stay single-line.
+  /// Shared by the sidebar row and the WorktreeHeader so both surfaces name
+  /// a detached checkout identically.
+  public var detachedHeadTitle: String? {
+    guard branch == nil, let headSHA, !headSHA.isEmpty else { return nil }
+    return "Detached HEAD @\(String(headSHA.prefix(7)))"
   }
 }

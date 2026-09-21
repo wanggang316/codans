@@ -80,7 +80,7 @@ struct RemoteGitRoutingTests {
     )
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
-      entries: [(path: "/data/app", branch: "main"), (path: "/data/x", branch: "x")],
+      entries: [(path: "/data/app", branch: "main", head: "f00dcafe00000000000000000000000000000000"), (path: "/data/x", branch: "x", head: "f00dcafe00000000000000000000000000000000")],
       normalizePath: HierarchyManager.normalizeRemotePath
     )
     let rowsBefore = manager.catalog.projects[0].worktrees.map(\.id)
@@ -121,7 +121,7 @@ struct RemoteGitRoutingTests {
     )
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: serverID,
-      entries: [(path: "/data/app-feature", branch: "feature")],
+      entries: [(path: "/data/app-feature", branch: "feature", head: "f00dcafe00000000000000000000000000000000")],
       normalizePath: HierarchyManager.normalizeRemotePath
     )
 

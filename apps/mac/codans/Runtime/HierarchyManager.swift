@@ -1178,8 +1178,12 @@ final class HierarchyManager {
   ///
   /// - Parameters:
   ///   - projectID: target Project.
-  ///   - entries: on-disk worktree metadata (path, branch) from
-  ///     `GitWorktreeClient.lsWorktrees`.
+  ///   - entries: on-disk worktree metadata (path, branch, HEAD SHA) from
+  ///     `GitWorktreeClient.lsWorktrees`. `head` carries the full commit SHA
+  /// so detached entries (`branch == nil`) render as
+  /// "Detached HEAD @<short>" instead of collapsing onto the directory
+  /// basename (five Codex sandboxes under `~/.codex/worktrees/*/codans`
+  /// would otherwise be indistinguishable).
   ///   - normalizePath: canonicalization applied to every path before dedupe.
   ///     Defaults to the local symlink-resolving `canonicalPath`; Server
   ///     (remote) projects pass `normalizeRemotePath` so a remote path is never
@@ -1188,7 +1192,7 @@ final class HierarchyManager {
   @discardableResult
   func reconcileDiscoveredWorktrees(
     projectID: ProjectID,
-    entries: [(path: String, branch: String?)],
+    entries: [(path: String, branch: String?, head: String?)],
     normalizePath: (String) -> String = { HierarchyManager.canonicalPath($0) }
   ) -> Int {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID })
@@ -1200,7 +1204,8 @@ final class HierarchyManager {
     var upgraded = 0
     for entry in entries {
       let canonical = normalizePath(entry.path)
-      let entryBranch = (entry.branch?.isEmpty == false) ? entry.branch! : nil
+      let entryBranch = (entry.branch?.isEmpty == false) ? entry.branch : nil
+      let entryHead = (entry.head?.isEmpty == false) ? entry.head : nil
       if let existingIdx = catalog.projects[projectIndex].worktrees
         .firstIndex(where: { normalizePath($0.path) == canonical })
       {
@@ -1223,11 +1228,16 @@ final class HierarchyManager {
         // sanitized git branch "feat-web-ui", set via `createWorktreeWithGit`)
         // are kept intact.
         let existing = catalog.projects[projectIndex].worktrees[existingIdx]
-        if existing.branch != entryBranch {
+        if existing.branch != entryBranch || existing.headSHA != entryHead {
           catalog.projects[projectIndex].worktrees[existingIdx].branch = entryBranch
           if let newBranch = entryBranch, existing.name == existing.branch || existing.branch == nil {
             catalog.projects[projectIndex].worktrees[existingIdx].name = newBranch
           }
+          // HEAD SHA syncs independently of the branch: a detached worktree
+          // whose HEAD moved between reconciles (Codex sandbox committing
+          // onto its base) must re-render with the new SHA even though
+          // `branch` stayed nil on both sides.
+          catalog.projects[projectIndex].worktrees[existingIdx].headSHA = entryHead
           upgraded += 1
         }
         continue
@@ -1238,6 +1248,7 @@ final class HierarchyManager {
         name: name,
         path: canonical,
         branch: entryBranch,
+        headSHA: entryHead,
         tabs: [],
         selectedTabID: nil
       )

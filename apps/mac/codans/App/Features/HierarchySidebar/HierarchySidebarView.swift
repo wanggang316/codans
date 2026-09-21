@@ -1046,7 +1046,12 @@ struct HierarchySidebarView: View {
     for worktree: Worktree, in project: Project
   ) -> (title: String, caption: String?) {
     guard let branch = worktree.branch, branch != worktree.name else {
-      return (worktree.name, nil)
+      // No branch to speak of. A detached checkout (branch == nil, HEAD
+      // commit known — Codex sandboxes, `git checkout <sha>`) captions the
+      // commit so sibling detached worktrees sharing a directory basename
+      // (five `~/.codex/worktrees/*/codans`) stay distinguishable; a
+      // synthetic non-git worktree stays single-line.
+      return (worktree.name, worktree.detachedHeadTitle)
     }
     return isWorkspaceCheckout(worktree, in: project) ? (branch, worktree.name) : (worktree.name, branch)
   }

@@ -66,6 +66,13 @@ and the project does not yet follow semantic versioning — every release until
 - **Pull requests per member repository.** Rows inside a workspace show
   their own repository's PR badge, and the workspace header rolls them up
   ("3 PRs · 1 merged").
+- **Detached-HEAD worktrees are named by their commit.** A worktree whose
+  HEAD is on no branch (Codex sandboxes under `~/.codex/worktrees`, a
+  manual `git checkout <sha>`) used to collapse onto its directory name —
+  five rows all reading "codans". Reconcile now records each checkout's
+  HEAD commit and the sidebar row and worktree header caption it
+  "Detached HEAD @<sha>" (folder-only worktrees without git stay
+  single-line).
 
 ### Changed
 
