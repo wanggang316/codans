@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -107,6 +107,41 @@ struct RootFeatureCommandPaletteRoutingTests {
     #expect(expandCalls.value.count == 1)
     #expect(expandCalls.value.first?.0 == projectID)
     #expect(expandCalls.value.first?.1 == true)
+  }
+
+  @Test
+  func activateSelectFolderRowRevealsWithoutExpanding() async {
+    // A folder Project's row is its root worktree and shows whether or not
+    // the Project is expanded, so revealing it leaves the rows under it as
+    // they are.
+    let root = Worktree(name: "notes", path: "/notes")
+    let project = Project(name: "notes", rootPath: "/notes", worktrees: [root], isExpanded: false)
+    let expandCalls = LockIsolated<[(ProjectID, Bool)]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      $0.hierarchyClient.lastFocusedPane = { _ in nil }
+      $0.hierarchyClient.setProjectExpanded = { pid, expanded in
+        expandCalls.withValue { $0.append((pid, expanded)) }
+      }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+    }
+    store.exhaustivity = .off
+
+    let before = store.state.revealSelectionTrigger
+    await store.send(.commandPaletteToggle(nil))
+    await store.send(
+      .commandPalette(.presented(.delegate(.activate(.selectWorktree(project.id, root.id)))))
+    )
+    await store.receive(\.sidebar.worktreeRowTapped)
+    await store.finish()
+
+    #expect(store.state.revealSelectionTrigger != before)
+    #expect(expandCalls.value.isEmpty)
   }
 
   @Test

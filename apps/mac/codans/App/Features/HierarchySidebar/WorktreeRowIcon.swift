@@ -1,11 +1,13 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// Leading-edge icon for a Sidebar Worktree row. Replaces the old `circle.fill`/`circle`
 /// selection dot with a GitHub-style glyph that doubles as the row's PR-state signal:
 ///
 /// - Dir-kind synthetic worktree → `folder` SF Symbol. The synthetic worktree under a
 ///   dir-kind Project reads as a filesystem directory rather than a git anchor.
+/// - Workspace root → `star.fill`, the same anchor mark the default-branch checkout
+///   carries: it is the row the Project is centred on, not one of the checkouts.
 /// - Default-branch checkout (no PR) → `star.fill` SF Symbol, tinted by `roleTint`.
 ///   Carries the "this is the project's default checkout" signal that previously sat
 ///   inline next to the worktree name. PR snapshot still wins — when a PR exists on
@@ -21,6 +23,13 @@ import CodansCore
 /// A 10×10 circle overlays the bottom-right corner when the aggregated check rollup is
 /// non-empty, so the row can surface CI health at a glance without expanding the popover.
 struct WorktreeRowIcon: View {
+  enum LeadingGlyph {
+    /// A branch of the Project's own repository.
+    case gitAnchor
+    /// A plain directory: git semantics (branch, PR state) don't apply.
+    case folder
+  }
+
   let snapshot: PullRequestSnapshot?
   let rollup: PullRequestBadge.CheckRollup
   let isSelected: Bool
@@ -28,12 +37,10 @@ struct WorktreeRowIcon: View {
   /// "role" in the Project — orange for pinned rows, secondary for everything else
   /// (including the main checkout, which shares the regular-worktree palette).
   var roleTint: Color = .secondary
-  /// `true` for the placeholder worktree auto-injected under a dir-kind
-  /// Project (`Project.gitRoot == nil` + `worktree.path == project.rootPath`).
-  /// Swaps the leading glyph to `folder` so the row reads as a filesystem
-  /// directory rather than a git anchor — git semantics (branch, PR state)
-  /// don't apply.
-  var isSynthetic: Bool = false
+  /// What the row stands for when no PR snapshot claims the icon slot.
+  /// `.folder` is the placeholder worktree under a dir-kind Project
+  /// (`Project.gitRoot == nil` + `worktree.path == project.rootPath`).
+  var glyph: LeadingGlyph = .gitAnchor
   /// L3 unread override. When `true`, the row icon swaps to a bell glyph
   /// regardless of PR / branch state, and the role tint is replaced by
   /// the accent colour. PR check rollup overlay still renders unchanged.
@@ -64,11 +71,13 @@ struct WorktreeRowIcon: View {
           .aspectRatio(contentMode: .fit)
           .frame(width: 12, height: 12)
           .foregroundStyle(Color.orange)
-      } else if isSynthetic {
-        // Dir-kind Project's synthetic worktree: render a folder rather
-        // than the `circlebadge` git-anchor glyph. 12pt inside a 14pt
-        // slot mirrors the `circlebadge` sizing so the label column stays
-        // aligned with sibling git rows.
+      } else if glyph == .folder {
+        // Render a folder rather than the `circlebadge` git-anchor glyph: a
+        // plain directory has no branch or PR to outrank the mark, and a
+        // Project row draws the Project's own icon instead of coming here.
+        // 12pt inside a 14pt slot mirrors
+        // the `circlebadge` sizing so the label column stays aligned with
+        // sibling git rows.
         Image(systemName: "folder")
           .resizable()
           .aspectRatio(contentMode: .fit)
@@ -166,7 +175,7 @@ struct WorktreeRowIcon: View {
   }
 
   private var accessibilityLabel: Text {
-    if isSynthetic {
+    if glyph == .folder {
       return Text(isSelected ? "Active project folder" : "Project folder")
     }
     guard let snapshot else {

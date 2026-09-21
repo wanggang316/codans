@@ -9,24 +9,14 @@ struct RemoteConnectionSheetPresenter: ViewModifier {
   @Bindable var store: StoreOf<HierarchySidebarFeature>
 
   func body(content: Content) -> some View {
-    content.sheet(
-      isPresented: Binding(
-        get: { store.remoteConnectionSheet != nil },
-        set: { isPresented in
-          if !isPresented {
-            store.send(.remoteConnectionSheet(.cancelButtonTapped))
-          }
-        }
-      )
-    ) {
-      if let childStore = store.scope(
-        state: \.remoteConnectionSheet,
-        action: \.remoteConnectionSheet
-      ) {
+    content.childSheet(
+      store.scope(state: \.remoteConnectionSheet, action: \.remoteConnectionSheet),
+      onDismiss: { store.send(.remoteConnectionSheet(.cancelButtonTapped)) },
+      content: { childStore in
         RemoteConnectionSheet(store: childStore)
           .interactiveDismissDisabled(store.remoteConnectionSheet?.isConnecting ?? false)
       }
-    }
+    )
   }
 }
 

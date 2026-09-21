@@ -1,3 +1,4 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 
@@ -131,14 +132,7 @@ extension CloneRepoFeature {
   /// (`https://host/owner/repo.git`) and scp-style (`git@host:owner/repo`).
   /// Returns nil when nothing usable remains.
   static func repoName(fromRemoteURL raw: String) -> String? {
-    var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return nil }
-    if trimmed.hasSuffix("/") { trimmed.removeLast() }
-    if trimmed.hasSuffix(".git") { trimmed.removeLast(4) }
-    let separator = trimmed.lastIndex(where: { $0 == "/" || $0 == ":" })
-    let name = separator.map { String(trimmed[trimmed.index(after: $0)...]) } ?? trimmed
-    let cleaned = name.trimmingCharacters(in: .whitespaces)
-    return cleaned.isEmpty ? nil : cleaned
+    WorkspaceLayout.repositoryName(fromRemoteURL: raw)
   }
 
   /// Suggested destination under the user's home directory, named after the

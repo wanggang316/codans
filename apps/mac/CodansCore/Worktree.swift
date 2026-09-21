@@ -45,6 +45,14 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
   /// catalogs decode to `false` via `decodeIfPresent`, and the encode path omits
   /// the key when `false` so existing catalogs round-trip identically.
   public var isNew: Bool
+  /// Absolute root of the repository this row's checkout belongs to, when it
+  /// is not the owning Project's `gitRoot` — set on workspace child rows,
+  /// whose checkouts come from other repositories. Read through
+  /// `Project.repoRoot(for:)`, never directly. Refreshed from git on every
+  /// reconcile so a stripped or stale value self-heals. `nil` for ordinary
+  /// worktrees; the encode path omits the key so existing catalogs
+  /// round-trip identically.
+  public var sourceGitRoot: String?
 
   public init(
     id: WorktreeID = WorktreeID(),
@@ -57,7 +65,8 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     archived: Bool = false,
     archivedAt: Date? = nil,
     isPinned: Bool = false,
-    isNew: Bool = false
+    isNew: Bool = false,
+    sourceGitRoot: String? = nil
   ) {
     self.id = id
     self.name = name
@@ -70,12 +79,14 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     self.archivedAt = archivedAt
     self.isPinned = isPinned
     self.isNew = isNew
+    self.sourceGitRoot = sourceGitRoot
   }
 }
 
 extension Worktree: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, path, branch, headSHA, tabs, selectedTabID, archived, archivedAt, isPinned, isNew
+    case id, name, path, branch, headSHA, tabs, selectedTabID, archived, archivedAt, isPinned, isNew,
+      sourceGitRoot
   }
 
   public init(from decoder: Decoder) throws {
@@ -90,6 +101,7 @@ extension Worktree: Codable {
     self.archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
     self.isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
     self.isNew = try container.decodeIfPresent(Bool.self, forKey: .isNew) ?? false
+    self.sourceGitRoot = try container.decodeIfPresent(String.self, forKey: .sourceGitRoot)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -114,6 +126,8 @@ extension Worktree: Codable {
     if isNew {
       try container.encode(true, forKey: .isNew)
     }
+    // Omit when nil so ordinary worktrees round-trip identically.
+    try container.encodeIfPresent(sourceGitRoot, forKey: .sourceGitRoot)
   }
 }
 

@@ -431,6 +431,8 @@ struct ProjectDTO: Encodable {
   let name: String
   let rootPath: String
   let gitRoot: String?
+  /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
+  let kind: String
   let selectedWorktreeID: String?
 
   init(project: Project) {
@@ -438,6 +440,7 @@ struct ProjectDTO: Encodable {
     self.name = project.name
     self.rootPath = project.rootPath
     self.gitRoot = project.gitRoot
+    self.kind = project.kind.rawValue
     self.selectedWorktreeID = project.selectedWorktreeID?.description
   }
 }

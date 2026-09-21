@@ -127,6 +127,47 @@ nonisolated struct GitWorktreeClient: Sendable {
   var defaultRemoteBranchRef: @Sendable (_ repoRoot: URL) async throws -> String?
   var isValidBranchName: @Sendable (_ repoRoot: URL, _ name: String) async -> Bool
 
+  /// `git worktree add` at a caller-named destination — the workspace
+  /// member checkout. `createWorktreeStream` drives the bundled `wt` script,
+  /// which derives the directory from the branch name; a workspace needs the
+  /// folder named after the repository instead. Local only: workspaces never
+  /// span hosts. Defaults to a throwing stub so existing memberwise callers
+  /// (tests) stay source-compatible.
+  var addWorktreeAt:
+    @Sendable (_ repoRoot: URL, _ destination: URL, _ checkout: WorkspaceCheckout) async throws -> Void =
+      { _, _, _ in
+        throw GitWorktreeError.commandFailed(command: "git worktree add", stderr: "not configured")
+      }
+
+  /// `git clone --progress <url> <destination>`, yielding each output line
+  /// (git reports progress on stderr) until the clone exits. Cancelling the
+  /// consumer terminates the child. The destination's parent is created;
+  /// git creates the leaf. Local only.
+  var cloneStream: @Sendable (_ remoteURL: String, _ destination: URL) -> AsyncThrowingStream<String, Error> = {
+    _, _ in
+    AsyncThrowingStream {
+      $0.finish(throwing: GitWorktreeError.commandFailed(command: "git clone", stderr: "not configured"))
+    }
+  }
+  /// Branches a remote advertises, read without cloning
+  /// (`git ls-remote --symref <url> HEAD refs/heads/*`). Bounded to 30 s and
+  /// never prompts for credentials.
+  var lsRemoteHeads: @Sendable (_ remoteURL: String) async throws -> RemoteHeads = { _ in
+    throw GitWorktreeError.commandFailed(command: "git ls-remote", stderr: "not configured")
+  }
+  /// Commit the local branch points at; nil when no such branch exists.
+  var branchTip: @Sendable (_ repoRoot: URL, _ branch: String) async throws -> String? = { _, _ in
+    throw GitWorktreeError.commandFailed(command: "git rev-parse", stderr: "not configured")
+  }
+  /// `git branch -f <branch> <commit>` — rollback's way to undo a `-B`
+  /// reset by pointing the branch back at the tip it had.
+  var forceMoveBranch: @Sendable (_ repoRoot: URL, _ branch: String, _ commit: String) async throws -> Void = {
+    _, _, _ in
+    throw GitWorktreeError.commandFailed(command: "git branch -f", stderr: "not configured")
+  }
+  /// Fetch URL of the named remote; nil when the remote is not configured.
+  var remoteURL: @Sendable (_ repoRoot: URL, _ remote: String) async -> String? = { _, _ in nil }
+
   var createWorktreeStream:
     @Sendable (_ spec: CreateWorktreeSpec)
       -> AsyncThrowingStream<CreateWorktreeEvent, Error>
@@ -429,6 +470,15 @@ nonisolated enum GitWorktreeShell {
   static let defaultTimeout: Duration = .seconds(60)
   static let maxOutputBytes = 4 * 1024 * 1024
 
+  /// The process environment with credential prompts disabled, for git
+  /// commands that talk to a remote: a missing credential must fail the
+  /// command, not hang it on a prompt nobody can answer.
+  static var nonInteractiveEnvironment: [String: String] {
+    var env = ProcessInfo.processInfo.environment
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+  }
+
   /// One-shot invocation returning captured stdout/stderr.
   static func run(
     executable: URL, arguments: [String], cwd: URL
@@ -449,6 +499,44 @@ nonisolated enum GitWorktreeShell {
     String(data: data, encoding: .utf8) ?? ""
   }
 
+  /// Mutable line buffer boxed so the Sendable readability handlers can
+  /// accumulate partial lines across reads without data races; the caller's
+  /// lock is what actually serializes access.
+  final class LineBuffer: @unchecked Sendable {
+    var buffer = ""
+    var lastNonEmpty = ""
+    /// Every byte consumed with `keepAll`, for the error report: the line
+    /// loop drains `buffer`, which alone would leave only the trailing
+    /// partial line.
+    var collected = ""
+
+    /// Appends a chunk and returns the complete lines it closed. With
+    /// `splitOnCarriageReturn`, progress-style output that redraws one line
+    /// with `\r` (`git clone --progress`) streams each redraw as a line.
+    func consume(
+      _ chunk: Data, lock: NSLock, splitOnCarriageReturn: Bool, trackLastNonEmpty: Bool, keepAll: Bool = false
+    ) -> [String] {
+      guard !chunk.isEmpty, let raw = String(data: chunk, encoding: .utf8) else { return [] }
+      let text = splitOnCarriageReturn ? raw.replacingOccurrences(of: "\r", with: "\n") : raw
+      lock.lock()
+      defer { lock.unlock() }
+      if keepAll { collected += raw }
+      buffer += text
+      var lines: [String] = []
+      while let newline = buffer.firstIndex(of: "\n") {
+        lines.append(String(buffer[..<newline]))
+        buffer.removeSubrange(...newline)
+      }
+      if trackLastNonEmpty {
+        for line in lines {
+          let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+          if !trimmed.isEmpty { lastNonEmpty = trimmed }
+        }
+      }
+      return lines
+    }
+  }
+
   /// Low-level streaming runner for `wt sw` — spawns a `Process`, wires
   /// per-line stdout/stderr handlers, and yields line-level events until
   /// the child exits. On success the final event is
@@ -463,6 +551,8 @@ nonisolated enum GitWorktreeShell {
     executable: URL,
     arguments: [String],
     cwd: URL,
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    splitOnCarriageReturn: Bool = false,
     onSpawn: @Sendable (Process) -> Void = { _ in },
     onStdout: @escaping @Sendable (String) -> Void,
     onStderr: @escaping @Sendable (String) -> Void
@@ -472,7 +562,7 @@ nonisolated enum GitWorktreeShell {
       process.executableURL = executable
       process.arguments = arguments
       process.currentDirectoryURL = cwd
-      process.environment = ProcessInfo.processInfo.environment
+      process.environment = environment
       process.standardInput = FileHandle.nullDevice
 
       let stdoutPipe = Pipe()
@@ -480,52 +570,21 @@ nonisolated enum GitWorktreeShell {
       process.standardOutput = stdoutPipe
       process.standardError = stderrPipe
 
-      // Box mutable line buffers so the Sendable readability handlers can
-      // accumulate partial lines across reads without data races.
-      final class LineBuffer: @unchecked Sendable {
-        var buffer = ""
-        var lastNonEmpty = ""
-        var collected = ""
-      }
       let stdoutState = LineBuffer()
       let stderrState = LineBuffer()
       let stdoutLock = NSLock()
       let stderrLock = NSLock()
 
       stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-        let chunk = handle.availableData
-        guard !chunk.isEmpty, let str = String(data: chunk, encoding: .utf8) else { return }
-        stdoutLock.lock()
-        stdoutState.buffer += str
-        var lines: [String] = []
-        while let nl = stdoutState.buffer.firstIndex(of: "\n") {
-          let line = String(stdoutState.buffer[..<nl])
-          stdoutState.buffer.removeSubrange(...nl)
-          lines.append(line)
-        }
-        for line in lines {
-          let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-          if !trimmed.isEmpty { stdoutState.lastNonEmpty = trimmed }
-        }
-        stdoutLock.unlock()
+        let lines = stdoutState.consume(
+          handle.availableData, lock: stdoutLock, splitOnCarriageReturn: splitOnCarriageReturn,
+          trackLastNonEmpty: true)
         for line in lines { onStdout(line) }
       }
       stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-        let chunk = handle.availableData
-        guard !chunk.isEmpty, let str = String(data: chunk, encoding: .utf8) else { return }
-        stderrLock.lock()
-        stderrState.buffer += str
-        // Keep every byte for the error report: the line loop below
-        // consumes `buffer`, which used to leave `stderrCollected` with
-        // only the trailing partial line.
-        stderrState.collected += str
-        var lines: [String] = []
-        while let nl = stderrState.buffer.firstIndex(of: "\n") {
-          let line = String(stderrState.buffer[..<nl])
-          stderrState.buffer.removeSubrange(...nl)
-          lines.append(line)
-        }
-        stderrLock.unlock()
+        let lines = stderrState.consume(
+          handle.availableData, lock: stderrLock, splitOnCarriageReturn: splitOnCarriageReturn,
+          trackLastNonEmpty: false, keepAll: true)
         for line in lines { onStderr(line) }
       }
 
@@ -681,16 +740,25 @@ nonisolated extension GitWorktreeClient {
           executable: GitWorktreeShell.gitURL,
           arguments: [
             "-C", repoRoot.path(percentEncoded: false),
-            "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes",
+            "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes",
           ],
           cwd: repoRoot
         )
         let stdout = try extractStdout(outcome, command: "git for-each-ref refs/heads refs/remotes")
+        // Full names, shortened here: `%(refname:short)` reports
+        // `refs/remotes/origin/HEAD` as plain `origin`, which then reads as a
+        // branch named after the remote.
         return
           stdout
           .components(separatedBy: "\n")
           .map { $0.trimmingCharacters(in: .whitespaces) }
           .filter { !$0.isEmpty && !$0.hasSuffix("/HEAD") }
+          .compactMap { ref in
+            for prefix in ["refs/heads/", "refs/remotes/"] where ref.hasPrefix(prefix) {
+              return String(ref.dropFirst(prefix.count))
+            }
+            return nil
+          }
       },
 
       defaultRemoteBranchRef: { repoRoot in
@@ -717,6 +785,87 @@ nonisolated extension GitWorktreeClient {
           return true
         }
         return false
+      },
+
+      addWorktreeAt: { repoRoot, destination, checkout in
+        var arguments = ["-C", repoRoot.path(percentEncoded: false), "worktree", "add"]
+        switch checkout {
+        case .newBranch(let branch, let baseRef):
+          arguments += ["-b", branch, destination.path(percentEncoded: false)]
+          if let baseRef, !baseRef.isEmpty {
+            arguments.append(baseRef)
+          }
+        case .existingBranch(let branch):
+          arguments += [destination.path(percentEncoded: false), branch]
+        case .remoteTrackingRef(let remoteRef, let branch, let resetLocal):
+          // `-B` only when the caller confirmed the reset; `-b` refuses to
+          // touch an existing branch, which is the safe default.
+          arguments += [
+            "--track", resetLocal ? "-B" : "-b", branch, destination.path(percentEncoded: false), remoteRef,
+          ]
+        }
+        let outcome = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL, arguments: arguments, cwd: repoRoot
+        )
+        _ = try extractStdout(outcome, command: "git worktree add")
+      },
+
+      cloneStream: { remoteURL, destination in
+        makeLocalCloneStream(remoteURL: remoteURL, destination: destination)
+      },
+
+      lsRemoteHeads: { remoteURL in
+        let outcome = await GitWorktreeShell.runner.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: ["ls-remote", "--symref", "--", remoteURL, "HEAD", "refs/heads/*"],
+          env: GitWorktreeShell.nonInteractiveEnvironment,
+          cwd: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+          timeout: .seconds(30),
+          maxOutputBytes: GitWorktreeShell.maxOutputBytes
+        )
+        let stdout = try extractStdout(outcome, command: "git ls-remote \(remoteURL)")
+        return RemoteHeads.parse(lsRemoteOutput: stdout)
+      },
+
+      branchTip: { repoRoot, branch in
+        let outcome = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: [
+            "-C", repoRoot.path(percentEncoded: false),
+            "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)",
+          ],
+          cwd: repoRoot
+        )
+        switch outcome {
+        case .exited(let code, let stdout, _, _) where code == 0:
+          let sha = GitWorktreeShell.decodeUTF8(stdout).trimmingCharacters(in: .whitespacesAndNewlines)
+          return sha.isEmpty ? nil : sha
+        case .exited(1, _, _, _):
+          return nil
+        default:
+          _ = try extractStdout(outcome, command: "git rev-parse --verify refs/heads/\(branch)")
+          return nil
+        }
+      },
+
+      forceMoveBranch: { repoRoot, branch, commit in
+        let outcome = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: ["-C", repoRoot.path(percentEncoded: false), "branch", "-f", branch, commit],
+          cwd: repoRoot
+        )
+        _ = try extractStdout(outcome, command: "git branch -f \(branch)")
+      },
+
+      remoteURL: { repoRoot, remote in
+        let outcome = await GitWorktreeShell.run(
+          executable: GitWorktreeShell.gitURL,
+          arguments: ["-C", repoRoot.path(percentEncoded: false), "remote", "get-url", remote],
+          cwd: repoRoot
+        )
+        guard case .exited(let code, let stdout, _, _) = outcome, code == 0 else { return nil }
+        let url = GitWorktreeShell.decodeUTF8(stdout).trimmingCharacters(in: .whitespacesAndNewlines)
+        return url.isEmpty ? nil : url
       },
 
       createWorktreeStream: { spec in
@@ -884,6 +1033,57 @@ nonisolated extension GitWorktreeClient {
       }
     }
     return nil
+  }
+
+  /// Streaming `git clone` body behind `cloneStream`. Same shape as the
+  /// worktree stream: a locked process box so `onTermination` can kill the
+  /// child, then cancel the task. Git prints progress on stderr with `\r`
+  /// between updates, so the runner splits on both so each update arrives
+  /// as its own line while the clone is still running.
+  private static func makeLocalCloneStream(
+    remoteURL: String, destination: URL
+  ) -> AsyncThrowingStream<String, Error> {
+    AsyncThrowingStream { continuation in
+      let processBox = CreateWorktreeProcessBox()
+      let task = Task {
+        let parent = destination.deletingLastPathComponent()
+        do {
+          try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        } catch {
+          continuation.finish(
+            throwing: GitWorktreeError.commandFailed(command: "git clone", stderr: error.localizedDescription))
+          return
+        }
+        let arguments = ["clone", "--progress", "--", remoteURL, destination.path(percentEncoded: false)]
+        let outcome = await GitWorktreeShell.runStream(
+          executable: GitWorktreeShell.gitURL,
+          arguments: arguments,
+          cwd: parent,
+          environment: GitWorktreeShell.nonInteractiveEnvironment,
+          splitOnCarriageReturn: true,
+          onSpawn: { process in processBox.set(process) },
+          onStdout: { line in continuation.yield(line) },
+          onStderr: { line in continuation.yield(line) }
+        )
+        if let reason = outcome.spawnFailedReason {
+          continuation.finish(throwing: GitWorktreeError.commandFailed(command: "git clone", stderr: reason))
+          return
+        }
+        guard outcome.exitCode == 0 else {
+          continuation.finish(
+            throwing: GitWorktreeError.commandFailed(
+              command: "git clone \(remoteURL)",
+              stderr: outcome.stderrCollected.trimmingCharacters(in: .whitespacesAndNewlines)))
+          return
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in
+        // Child first, then the task — see `makeLocalCreateWorktreeStream`.
+        processBox.terminateIfRunning()
+        task.cancel()
+      }
+    }
   }
 
   // Local streaming `wt sw` creation body, extracted verbatim so the routed
@@ -1367,6 +1567,14 @@ extension GitWorktreeClient: DependencyKey {
     branchRefs: unimplemented("GitWorktreeClient.branchRefs", placeholder: []),
     defaultRemoteBranchRef: unimplemented("GitWorktreeClient.defaultRemoteBranchRef", placeholder: nil),
     isValidBranchName: unimplemented("GitWorktreeClient.isValidBranchName", placeholder: false),
+    addWorktreeAt: unimplemented("GitWorktreeClient.addWorktreeAt"),
+    cloneStream: { _, _ in
+      AsyncThrowingStream { $0.finish() }
+    },
+    lsRemoteHeads: unimplemented("GitWorktreeClient.lsRemoteHeads", placeholder: RemoteHeads()),
+    branchTip: unimplemented("GitWorktreeClient.branchTip", placeholder: nil),
+    forceMoveBranch: unimplemented("GitWorktreeClient.forceMoveBranch"),
+    remoteURL: unimplemented("GitWorktreeClient.remoteURL", placeholder: nil),
     createWorktreeStream: { _ in
       AsyncThrowingStream { $0.finish() }
     },

@@ -136,7 +136,7 @@ inbox 在内存中是 `[InboxEntry]`，持久化到 `~/.config/codans/notificati
 
 在一个 TCA reducer 派生中计算（catalog 是几十个节点；每次输入增量做 O(N) 重算没问题），当两个输入之一变化时重建：未读集合，以及焦点状态（`focusedPaneID`、活跃 tab/worktree、展开集合）。各级指示器为**布尔**，唯一例外是状态栏铃铛——它携带数值型全局未读计数（被 Dock 徽标镜像）。
 
-**不变量——每条未读只贡献给恰好一个层级：最深的隐藏祖先。** L4 Project（折叠）· L3 Worktree（project 展开但 worktree 未活跃）· L2 Tab（worktree 活跃但 tab 未活跃）· L1 Pane（tab 活跃但 pane 未聚焦）。在 L1，未读的 `.waitingForInput`（琥珀）压过 `.taskFinished`（绿）。`globalUnreadCount` 是未经上卷的总数（「每一条未读，无论你能否看到其来源」）。徽标计数必须是**对实时 catalog 的计算读取**，而非缓存字段——缓存会在仅 catalog 变更时变陈旧（例如删除一个非选中、令某条未读成为孤儿的 worktree），因为没有 selection 信号去使其失效。
+**不变量——每条未读只贡献给恰好一个层级：最深的隐藏祖先。** L4 Project（折叠）· L3 Worktree（project 展开但 worktree 未活跃；Project 行自身代表的 worktree——文件夹、workspace 根，`Project.rowWorktree`——折叠时也在屏幕上，按 L3 计、铃铛画在 Project 行，见 `RollupFocusState.rowWorktreeIDs`）· L2 Tab（worktree 活跃但 tab 未活跃）· L1 Pane（tab 活跃但 pane 未聚焦）。在 L1，未读的 `.waitingForInput`（琥珀）压过 `.taskFinished`（绿）。`globalUnreadCount` 是未经上卷的总数（「每一条未读，无论你能否看到其来源」）。徽标计数必须是**对实时 catalog 的计算读取**，而非缓存字段——缓存会在仅 catalog 变更时变陈旧（例如删除一个非选中、令某条未读成为孤儿的 worktree），因为没有 selection 信号去使其失效。
 
 每个表面（侧栏 Project 点、Worktree 铃铛字形、Tab 点、Pane 顶线）通过一个小的 Equatable 切片读取 `RollupIndex`；L1–L4 仅为视觉。状态栏铃铛是**唯一**的 popover 入口（A5：逐级作用域 popover 被否——层级中的位置本身就回答了「在哪」，而对一个已上卷层级开作用域 popover，会展示其真实来源在更深几层的条目）。
 

@@ -21,8 +21,19 @@ class CatalogStore {
       // unknown keys). The sidecar is invisible to those builds, so it
       // survives; persist the healed catalog immediately so a crash before
       // the next debounced save can't lose the repair.
+      var repaired = false
       if RemoteHostSidecar.repair(&existing, sidecarURL: sidecarURL) {
         logger.notice("restored remoteHost fields from sidecar")
+        repaired = true
+      }
+      // Same failure, different field: a build predating `isWorkspace` drops
+      // the key and may probe a `gitRoot` onto the workspace root. The
+      // manifest on disk is the durable signal — re-derive the flag from it.
+      if WorkspaceMarkerRepair.repair(&existing) {
+        logger.notice("restored isWorkspace flags from workspace manifests")
+        repaired = true
+      }
+      if repaired {
         try? saveNow(existing)
       }
       return existing

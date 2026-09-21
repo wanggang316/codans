@@ -20,7 +20,7 @@
 
 ### 共同架构约束（不可违反）
 
-- **Catalog ↔ on-disk 一致**：`catalog.json` 的每条 Worktree 行必须对应一个真实存在的 git worktree 目录。发现/reconcile 只追加不删；唯一的删除路径是用户主动 Prune / Remove。
+- **Catalog ↔ on-disk 一致**：`catalog.json` 的每条 Worktree 行必须对应一个真实存在的 git worktree 目录。发现/reconcile 只追加不删；唯一的删除路径是用户主动 Prune / Remove。Workspace Project 是唯一例外：其行是**其他仓库**的 checkout，由 manifest 而非 `git worktree list` 定成员，见 [Workspace](workspace.md)。
 - **`HierarchyManager` 是 `@MainActor @Observable` 运行时态**，不持有 TCA / 表现层瞬时状态，也不 spawn 进程；git 工作一律经 `GitWorktreeClient` / `GitService`（nonisolated async），成功后才回到 manager 改 catalog。
 - **标识符一律 UUID**；`WorktreeID` 在 `HierarchyManager.createWorktree` 写入 catalog 那一刻才生成（不预分配）。
 - **持久化是带 version 的原子 rename JSON**；给 `Worktree` 加字段走 `decodeIfPresent` + 条件编码模式，已有 `archived` / `archivedAt` / `isPinned` 先例，且不升 schema 版本。

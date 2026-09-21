@@ -426,13 +426,19 @@ final class HierarchyHandlers {
       return .failed(
         .conflict(reason: "\(canonical) is already project \(existing.description)"))
     }
+    // A folder carrying `.codans/workspace.json` registers as a workspace
+    // root, whatever `gitRoot` the caller sent: it is never probed for one,
+    // and the reconcile below takes its manifest path, not the git one.
+    let isWorkspace = WorkspaceManifestStore.hasManifest(rootPath: canonical)
     let gitRoot: String?
-    if let supplied = req.gitRoot, !supplied.isEmpty {
+    if isWorkspace {
+      gitRoot = nil
+    } else if let supplied = req.gitRoot, !supplied.isEmpty {
       gitRoot = supplied
     } else {
       gitRoot = await gitRootDiscovery(canonical)
     }
-    let id = manager.addProject(name: req.name, rootPath: canonical, gitRoot: gitRoot)
+    let id = manager.addProject(name: req.name, rootPath: canonical, gitRoot: gitRoot, isWorkspace: isWorkspace)
     await reconcileWorktrees(id)
     do {
       return .unary(
@@ -500,6 +506,16 @@ final class HierarchyHandlers {
     }
     guard let project = manager.catalog.projects.first(where: { $0.id == req.projectID }) else {
       return .failed(.notFound(kind: "project", id: req.projectID.description))
+    }
+    // A workspace's rows are checkouts of other repositories, materialized on
+    // disk by the workspace flow; a catalog-only row under a workspace would
+    // point at nothing and carry no source repository.
+    if project.isWorkspace {
+      return .failed(
+        .invalidParams(
+          message: "createWorktree is not available on a workspace; use `workspace add`",
+          path: nil
+        ))
     }
     let settings = settingsProvider()
     let resolvedPath: String
@@ -783,6 +799,23 @@ final class HierarchyHandlers {
     let req: RemoveWorktreeParams
     do { req = try params.decoded(as: RemoveWorktreeParams.self) } catch {
       return .failed(.invalidParams(message: "removeWorktree requires {id, projectID}", path: nil))
+    }
+    // Workspace membership is edited through the workspace flow: a child row
+    // is a checkout the manifest still names, and the same folder listed
+    // under its source repository belongs to the workspace too.
+    if let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == req.id })
+    {
+      if project.isWorkspace, worktree.path != project.rootPath {
+        return .failed(
+          .conflict(reason: "\(worktree.name) is a workspace repository; remove it from the workspace instead"))
+      }
+      if !project.isWorkspace, let membership = manager.workspaceMembership(forPath: worktree.path) {
+        return .failed(
+          .conflict(
+            reason:
+              "\(worktree.name) is checked out for workspace \(membership.workspaceName); remove it there"))
+      }
     }
     do {
       var warning: String?

@@ -10,6 +10,70 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Workspaces — one Project for a task that spans several repositories.**
+  A folder carrying `.codans/workspace.json` now opens as a workspace: the
+  folder itself is the main row (the directory an agent runs in), and every
+  repository the manifest names appears as a child row with its live branch,
+  so tabs, panes, notifications, and agent status work per checkout exactly
+  as they do for worktrees. Add one through **Open Project…** or
+  `codans project add`; `codans tree --json` reports it as
+  `"kind": "workspace"`. The workspace root is never probed for a git
+  repository, so a workspace nested inside a repo stays a workspace.
+- **Create workspaces from the app or the CLI.** **New Workspace…** in the
+  sidebar's Add menu (and the command palette) opens a form laid out like
+  Settings: a title and where the folder goes, then **Add Project** (a
+  project already open in codans), **Add Folder…** (any repository on this
+  Mac), and **Add Remote…** (a URL whose branches are read before anything
+  is cloned), each opening a dialog to set up the checkout. Projects are
+  listed one per row, once there are any, with an icon for where they come
+  from, how they will be checked out, and buttons to edit or remove them. The project selected in the sidebar is already in the list.
+  Each project can start a new branch (named after the workspace title
+  unless you name it; from its default branch or one you pick) or check out
+  an existing one from a single list of the repository's branches, local
+  and remote together. A remote branch is checked out as a local branch
+  that tracks it; when that name is already taken locally you choose to
+  keep it or reset it to the remote, and nothing is reset unless you say
+  so. Real problems show in red
+  under the project they concern, and what is still missing is named next
+  to the disabled Create button. Each project shows its progress while the
+  workspace is created, Cancel rolls back and reports anything it
+  could not undo, and after a failure Create tries again. Remote
+  repositories are cloned once into `~/.codans/sources/<name>` (or a
+  folder you choose) and used like local ones from then on. Bare
+  repositories are not accepted as members.
+  `codans workspace create "Checkout Flow" --project app --project api`
+  does the same from a terminal, with `--repo` for local repositories,
+  `--remote` for URLs, `--track` for remote-tracking branches, and
+  `--reset-local` to opt into resetting a same-named local branch; `codans workspace add` extends an existing workspace
+  (`--ref origin/feature` picks any remote branch), `codans workspace show`
+  describes one and names each member's source. A failure midway removes
+  everything the call created, including a clone it made. A workspace's `+`
+  adds a repository. Panes inside a workspace carry `CODANS_WORKSPACE_ROOT`.
+- **Workspace members stay visible in their source project.** A repository
+  checked out for a workspace also appears under its own project, marked
+  with the workspace's name (click to jump there). Archive, Remove, the
+  merged-worktree batches, and the auto-delete sweep leave those rows alone:
+  the checkout belongs to the workspace.
+- **Remove a repository from a workspace, or the whole workspace.** A
+  member row's context menu offers **Remove from Workspace…**, which
+  unregisters the checkout from its repository, deletes its branch, and
+  updates the manifest. The workspace's ⋯ menu offers **Remove
+  Workspace…** with two answers: remove from the sidebar only, or also
+  unregister every checkout and delete the folder (the folder is kept if
+  any member could not be unregistered). `codans workspace drop` and
+  `codans workspace remove [--delete-files [--delete-branches]]` do the
+  same from a terminal.
+- **Pull requests per member repository.** Rows inside a workspace show
+  their own repository's PR badge, and the workspace header rolls them up
+  ("3 PRs · 1 merged").
+- **Detached-HEAD worktrees are named by their commit.** A worktree whose
+  HEAD is on no branch (Codex sandboxes under `~/.codex/worktrees`, a
+  manual `git checkout <sha>`) used to collapse onto its directory name —
+  five rows all reading "codans". Reconcile now records each checkout's
+  HEAD commit and the sidebar row and worktree header caption it
+  "Detached HEAD @<sha>" (folder-only worktrees without git stay
+  single-line).
+
 ### Changed
 
 ### Deprecated

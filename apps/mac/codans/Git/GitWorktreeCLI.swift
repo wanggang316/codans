@@ -7,6 +7,15 @@ nonisolated struct GitWorktreeEntry: Equatable, Sendable {
   let head: String
 }
 
+/// What a candidate source path is, git-wise. See
+/// `GitWorktreeCLI.inspectRepository(at:)`.
+nonisolated struct RepositoryProbe: Equatable, Sendable {
+  /// Repository root: the folder holding `.git` for a normal repository,
+  /// the directory itself for a bare one. Not canonicalized.
+  let root: String
+  let isBare: Bool
+}
+
 enum GitCLIError: Error, Equatable, Sendable {
   case exitCode(Int32, stderr: String)
   case executableNotFound
@@ -50,6 +59,67 @@ actor GitWorktreeCLI {
   func discoverGitRoot(candidatePath: String) throws -> String? {
     do {
       let output = try run(arguments: ["rev-parse", "--show-toplevel"], cwd: candidatePath)
+      let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    } catch GitCLIError.exitCode {
+      return nil
+    }
+  }
+
+  /// Short name of the branch checked out at `path`; nil on a detached HEAD
+  /// or when `path` is not inside a repository (both are non-zero exits).
+  func currentBranch(path: String) throws -> String? {
+    do {
+      let output = try run(arguments: ["symbolic-ref", "--short", "HEAD"], cwd: path)
+      let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    } catch GitCLIError.exitCode {
+      return nil
+    }
+  }
+
+  /// Root of the repository the checkout at `path` belongs to — for a linked
+  /// worktree that is the *source* repository, not the checkout itself, which
+  /// is what `--show-toplevel` would report. Read from the common git dir:
+  /// `<source>/.git` for a normal repository, the directory itself for a bare
+  /// one. Nil when `path` is not inside a repository.
+  func repositoryRoot(forCheckoutAt path: String) throws -> String? {
+    do {
+      let output = try run(
+        arguments: ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd: path)
+      let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else { return nil }
+      let url = URL(fileURLWithPath: trimmed, isDirectory: true)
+      return url.lastPathComponent == ".git"
+        ? url.deletingLastPathComponent().path(percentEncoded: false)
+        : url.path(percentEncoded: false)
+    } catch GitCLIError.exitCode {
+      return nil
+    }
+  }
+
+  /// Classifies `path` as a repository source: its root — the checkout's own
+  /// root for a normal repository, the *source* repository for a linked
+  /// worktree, the directory itself for a bare repository — and whether it
+  /// is bare. Nil when `path` is not inside any repository.
+  /// `discoverGitRoot` cannot answer this for a bare repository, whose
+  /// `--show-toplevel` has no working tree to report.
+  func inspectRepository(at path: String) throws -> RepositoryProbe? {
+    guard let root = try repositoryRoot(forCheckoutAt: path) else { return nil }
+    do {
+      let output = try run(arguments: ["rev-parse", "--is-bare-repository"], cwd: path)
+      let isBare = output.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+      return RepositoryProbe(root: root, isBare: isBare)
+    } catch GitCLIError.exitCode {
+      return nil
+    }
+  }
+
+  /// Fetch URL of `remote` in the repository at `repoPath`; nil when the
+  /// remote is not configured or `repoPath` is not a repository.
+  func remoteURL(repoPath: String, remote: String = "origin") throws -> String? {
+    do {
+      let output = try run(arguments: ["remote", "get-url", remote], cwd: repoPath)
       let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmed.isEmpty ? nil : trimmed
     } catch GitCLIError.exitCode {

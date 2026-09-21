@@ -27,7 +27,10 @@ struct CodansEnvironmentTests {
   func olderTypedHoldersSpellThroughTheCatalogue() {
     #expect(BuiltinEnvVar.worktreePath.key == CodansEnvironment.Key.worktreePath.rawValue)
     #expect(BuiltinEnvVar.rootPath.key == CodansEnvironment.Key.rootPath.rawValue)
-    #expect(BuiltinEnvVar.reservedKeys == ["CODANS_WORKTREE_PATH", "CODANS_ROOT_PATH"])
+    #expect(BuiltinEnvVar.workspaceRoot.key == CodansEnvironment.Key.workspaceRoot.rawValue)
+    #expect(
+      BuiltinEnvVar.reservedKeys
+        == ["CODANS_WORKTREE_PATH", "CODANS_ROOT_PATH", "CODANS_WORKSPACE_ROOT"])
     #expect(TermProgramEnv.programKey == CodansEnvironment.Key.termProgram.rawValue)
     #expect(TermProgramEnv.versionKey == CodansEnvironment.Key.termProgramVersion.rawValue)
     #expect(CLIBundleLocator.EnvKey.binary == CodansEnvironment.Key.cliBinary.rawValue)
