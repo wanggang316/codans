@@ -47,6 +47,10 @@ struct DiffFileOutline: NSViewRepresentable {
     outline.allowsEmptySelection = true
     outline.dataSource = coordinator
     outline.delegate = coordinator
+    outline.indentationPerLevel = DiffOutlineCell.indentPerLevel
+    // Every single click goes here, so a folder opens from anywhere on its row.
+    outline.target = coordinator
+    outline.action = #selector(Coordinator.outlineClicked(_:))
     let menu = NSMenu()
     menu.autoenablesItems = false
     menu.delegate = coordinator
@@ -261,6 +265,25 @@ struct DiffFileOutline: NSViewRepresentable {
       }
     }
 
+    // MARK: Clicks
+
+    @objc func outlineClicked(_ sender: Any?) {
+      guard let outline else { return }
+      toggleFolder(
+        atRow: outline.clickedRow, clickedAt: NSApp.currentEvent.map { outline.convert($0.locationInWindow, from: nil) }
+      )
+    }
+
+    /// Opens and closes a folder from anywhere on its row. Folder rows cannot be selected, so a
+    /// click that is not the disclosure triangle would otherwise do nothing.
+    func toggleFolder(atRow row: Int, clickedAt point: NSPoint?) {
+      guard let outline, row >= 0, let item = outline.item(atRow: row) as? DiffOutlineItem, item.children != nil
+      else { return }
+      // The triangle has already toggled the folder; toggling again here would undo it.
+      if let point, outline.frameOfOutlineCell(atRow: row).contains(point) { return }
+      if outline.isItemExpanded(item) { outline.collapseItem(item) } else { outline.expandItem(item) }
+    }
+
     // MARK: Context menu
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -303,12 +326,14 @@ nonisolated final class DiffOutlineItem: NSObject {
 
 /// One row's content, in AppKit: hosting a SwiftUI row per cell cost about a millisecond of layout
 /// per row whenever the list changed, about half of a presentation switch.
-private final class DiffOutlineCell: NSTableCellView {
+final class DiffOutlineCell: NSTableCellView {
   static let identifier = NSUserInterfaceItemIdentifier("DiffOutlineCell")
+  /// The outline's indent step, which is also how far back a file's name moves for want of an icon.
+  static let indentPerLevel: CGFloat = 16
   private static let folderImage = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)?
     .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular))
   private static let iconWidth: CGFloat = 16
-  private static let iconSpacing: CGFloat = 8
+  private static let iconSpacing: CGFloat = 4
   private static let statusWidth: CGFloat = 12
   private static let lineSpacing: CGFloat = 2
 
@@ -319,6 +344,7 @@ private final class DiffOutlineCell: NSTableCellView {
   private var statusColor = NSColor.secondaryLabelColor
   private var isFolder = false
   private var inTree = false
+  private var depth = 0
 
   init() {
     super.init(frame: .zero)
@@ -346,6 +372,7 @@ private final class DiffOutlineCell: NSTableCellView {
   func show(_ item: DiffOutlineItem, tree: Bool) {
     isFolder = item.file == nil
     inTree = tree
+    depth = item.depth
     name.stringValue = item.name
     toolTip = item.path
     if let file = item.file {
@@ -381,12 +408,23 @@ private final class DiffOutlineCell: NSTableCellView {
     icon.contentTintColor = emphasized ? .alternateSelectedControlTextColor : .labelColor
   }
 
+  /// Where the row's text starts, from the row's own indent.
+  var textX: CGFloat {
+    guard !isFolder else { return Self.iconWidth + Self.iconSpacing }
+    guard inTree else { return 2 }
+    // A file has no icon, so its name takes the icon's place and lines up with the name of the
+    // folder above it. A file at the root of the tree has none, and stays in the root's column.
+    return Self.iconWidth + Self.iconSpacing - (depth > 0 ? Self.indentPerLevel : 0)
+  }
+
+  /// The name label, in the row's coordinates, for the test that keeps the columns lined up.
+  var nameFrame: NSRect { name.frame }
+
   override func layout() {
     super.layout()
     let height = bounds.height
     icon.frame = NSRect(x: 0, y: (height - Self.iconWidth) / 2, width: Self.iconWidth, height: Self.iconWidth)
-    // In the tree a file's name lines up with the folder names, one indent step further in.
-    let textX = isFolder || inTree ? Self.iconWidth + Self.iconSpacing : 2
+    let textX = self.textX
     let trailing = status.isHidden ? 0 : Self.statusWidth + 4
     let textWidth = max(0, bounds.width - textX - trailing)
     let nameHeight = name.intrinsicContentSize.height

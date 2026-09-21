@@ -38,6 +38,35 @@ struct DiffFileOutlineTests {
     #expect(harness.rowNames == ["a", "b", "c", "one.swift", "two.swift", "z.swift"])
   }
 
+  @Test func clickingAFolderRowAnywhereButTheTriangleOpensAndClosesIt() throws {
+    let harness = try Harness()
+    harness.show([one, two, top])
+    harness.coordinator.toggleFolder(atRow: 0, clickedAt: nil)
+    #expect(harness.collapsed == ["dir:a"])
+    #expect(harness.rowNames == ["a", "z.swift"])
+    harness.coordinator.toggleFolder(atRow: 0, clickedAt: nil)
+    #expect(harness.collapsed.isEmpty)
+    #expect(harness.rowNames == ["a", "b", "c", "one.swift", "two.swift", "z.swift"])
+
+    // The triangle toggles the folder on its own, and a file row is not a folder at all.
+    let triangle = harness.outline.frameOfOutlineCell(atRow: 0)
+    #expect(triangle.width > 0)
+    harness.coordinator.toggleFolder(atRow: 0, clickedAt: NSPoint(x: triangle.midX, y: triangle.midY))
+    harness.coordinator.toggleFolder(atRow: harness.row(named: "one.swift"), clickedAt: nil)
+    #expect(harness.rowNames.count == 6)
+  }
+
+  @Test func aFileNameStartsWhereTheNameOfTheFolderItSitsInStarts() throws {
+    let harness = try Harness()
+    harness.show([one, two, top])
+    // One step per level, so the rows below are being measured and not defaulted.
+    #expect(harness.nameX(named: "b") == harness.nameX(named: "a") + DiffOutlineCell.indentPerLevel)
+    #expect(harness.nameX(named: "one.swift") == harness.nameX(named: "c"))
+    #expect(harness.nameX(named: "two.swift") == harness.nameX(named: "a"))
+    // A file at the root of the tree has no folder above it and stays in the root's column.
+    #expect(harness.nameX(named: "z.swift") == harness.nameX(named: "a"))
+  }
+
   @Test func flatListShowsOneRowPerFileAndMakesRowsWithADirectoryTaller() throws {
     let harness = try Harness()
     harness.show([one, two, top], tree: false)
@@ -141,6 +170,15 @@ private final class Harness {
     let visible = outline.rows(in: outline.visibleRect)
     guard visible.length > 0 else { return nil }
     return (outline.item(atRow: visible.location) as? DiffOutlineItem)?.name
+  }
+
+  /// Where the row's name is drawn, across the whole outline.
+  func nameX(named name: String) -> CGFloat {
+    outline.layoutSubtreeIfNeeded()
+    guard let cell = outline.view(atColumn: 0, row: row(named: name), makeIfNecessary: true) as? DiffOutlineCell
+    else { return -1 }
+    cell.layoutSubtreeIfNeeded()
+    return cell.convert(cell.nameFrame.origin, to: outline).x
   }
 
   func scroll(toRow row: Int) {
