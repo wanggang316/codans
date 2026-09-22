@@ -167,9 +167,12 @@ struct WorkflowRunPopoverView: View {
       Text(attention.message)
         .font(.caption)
         .foregroundStyle(.primary)
-      if !attention.issues.isEmpty {
+      // The machine folds a provisional delivery's issues into its message;
+      // repeating them below would say the same thing twice.
+      let unlisted = attention.issues.filter { !attention.message.contains($0) }
+      if !unlisted.isEmpty {
         VStack(alignment: .leading, spacing: 2) {
-          ForEach(attention.issues, id: \.self) { issue in
+          ForEach(unlisted, id: \.self) { issue in
             Text("• \(issue)")
               .font(.caption2)
               .foregroundStyle(.secondary)

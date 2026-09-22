@@ -92,7 +92,7 @@ struct WorkflowRunRowView: View {
 
   private var subtitle: String {
     var parts: [String] = []
-    if let step = session.currentStepName { parts.append(step) }
+    if !isFinished, let step = session.currentStepName { parts.append(step) }
     parts.append(isFinished ? session.stateName : (session.attention == nil ? "running" : "needs attention"))
     return parts.joined(separator: " · ")
   }

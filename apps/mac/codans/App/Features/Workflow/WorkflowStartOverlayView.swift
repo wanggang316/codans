@@ -57,21 +57,18 @@ struct WorkflowStartOverlayView: View {
     VStack(alignment: .leading, spacing: 2) {
       Text(store.workflowName)
         .font(.headline)
-      Text(subtitle)
+      if let description = store.definition.description, !description.isEmpty {
+        Text(description)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      Text("Runs in \(store.source.worktreeName)")
         .font(.subheadline)
         .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
     }
     .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  private var subtitle: String {
-    var parts = ["Runs in \(store.source.worktreeName)"]
-    if let description = store.definition.description, !description.isEmpty {
-      parts.insert(description, at: 0)
-    }
-    return parts.joined(separator: " · ")
   }
 
   // MARK: - Form
@@ -109,6 +106,7 @@ struct WorkflowStartOverlayView: View {
       .padding(16)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .fixedSize(horizontal: false, vertical: true)
     .frame(maxHeight: 380)
   }
 
@@ -305,6 +303,7 @@ struct WorkflowStartOverlayView: View {
       .padding(16)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .fixedSize(horizontal: false, vertical: true)
     .frame(maxHeight: 380)
     .accessibilityIdentifier("workflowStart.trust")
   }

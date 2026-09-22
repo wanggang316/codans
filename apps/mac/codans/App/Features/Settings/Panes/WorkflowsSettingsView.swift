@@ -128,7 +128,7 @@ struct WorkflowsSettingsView: View {
         }
       }
       if scanResult.user.isEmpty {
-        Text("No workflows in ~/.codans/workflows yet.")
+        Text("No workflows in \(userDirectoryDisplayPath) yet.")
           .foregroundStyle(.secondary)
       } else {
         ForEach(scanResult.user, id: \.id) { entry in
