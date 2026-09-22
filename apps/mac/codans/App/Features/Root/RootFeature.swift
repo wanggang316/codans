@@ -108,6 +108,11 @@ struct RootFeature {
     /// Opened by `.handoffRequested` from a pane's info menu, the palette,
     /// or an AgentState row; cleared on the child's dismiss.
     @Presents var handoff: HandoffFeature.State?
+    /// Workflow start panel. `nil` = hidden; non-nil renders the floating
+    /// card over the main split, same presentation as the Hand Off panel.
+    /// Opened by a Command Palette "Run Workflow" row; holds only the
+    /// start draft — a run that exists belongs to the engine.
+    @Presents var workflowStart: WorkflowStartFeature.State?
     /// Command Queue panel (⌘⌥L, or a click on a pane's queue badge).
     /// `nil` = hidden. Scoped to exactly one pane for the presentation's
     /// lifetime; re-opening on a different pane replaces the state rather
@@ -401,6 +406,12 @@ struct RootFeature {
     /// A hand-off ordered from the panel finished; the panel is long gone.
     case handoffFinished(HandoffCompletion, targetTitle: String)
     case handoffFailed(message: String)
+    /// Open the workflow start panel for `workflowID`, scoped to a worktree.
+    /// Sent by the palette's "Run Workflow" rows; `sourcePaneID` is the pane
+    /// the palette was opened from, which becomes the `current` role only
+    /// when it is an agent pane in that worktree.
+    case workflowStartRequested(ProjectID, WorktreeID, workflowID: String, sourcePaneID: PaneID?)
+    case workflowStart(PresentationAction<WorkflowStartFeature.Action>)
     /// Toggle the Command Queue panel. `nil` resolves the target pane the
     /// same way `commandPaletteToggle` does (the active tab's last-focused
     /// leaf), which is what the ⌘⌥L menu binding sends; the pane badge sends
@@ -484,6 +495,7 @@ struct RootFeature {
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
   @Dependency(HandoffClient.self) private var handoffClient
   @Dependency(TerminalLinkClient.self) private var terminalLinkClient
+  @Dependency(WorkflowStartClient.self) private var workflowStartClient
   @Dependency(\.uuid) private var uuid
   @Dependency(GitHubSnapshotCacheClient.self) private var gitHubSnapshotCache
   @Dependency(GitServiceClient.self) private var gitServiceClient
@@ -1874,6 +1886,24 @@ struct RootFeature {
       case .handoffFailed(let message):
         return .send(.statusBar(.push(.warning("Hand off failed: \(message)"))))
 
+      case .workflowStartRequested(let projectID, let worktreeID, let workflowID, let explicitPaneID):
+        return openWorkflowStart(
+          projectID: projectID, worktreeID: worktreeID, workflowID: workflowID,
+          explicitPaneID: explicitPaneID, state: &state)
+
+      case .workflowStart(.presented(.delegate(.dismiss))), .workflowStart(.dismiss):
+        state.workflowStart = nil
+        return .none
+
+      case .workflowStart(.presented(.delegate(.started(_, let workflowName)))):
+        // The panel's job ends the moment admission accepts; the run itself
+        // is the engine's, and the AgentState panel is where it is watched.
+        state.workflowStart = nil
+        return .send(.statusBar(.push(.success("Started \(workflowName)"))))
+
+      case .workflowStart:
+        return .none
+
       case .commandPalette:
         return .none
 
@@ -2363,6 +2393,9 @@ struct RootFeature {
     .ifLet(\.$handoff, action: \.handoff) {
       HandoffFeature()
     }
+    .ifLet(\.$workflowStart, action: \.workflowStart) {
+      WorkflowStartFeature()
+    }
     .ifLet(\.$tagManagerSheet, action: \.tagManagerSheet) {
       TagManagerFeature()
     }
@@ -2602,6 +2635,13 @@ struct RootFeature {
 
     case .handOff:
       return .send(.handoffRequested(sourcePaneID))
+
+    // Agent Workflows — open the start panel for the chosen definition in
+    // the worktree that built the item.
+    case .runWorkflow(let projectID, let worktreeID, let workflowID):
+      return .send(
+        .workflowStartRequested(
+          projectID, worktreeID, workflowID: workflowID, sourcePaneID: sourcePaneID))
 
     // Pane / Window — thin wrappers over the routers
     case .paneAction(let req):
@@ -2859,6 +2899,55 @@ struct RootFeature {
       selection: state.selection, catalog: catalog,
       lastFocusedPane: { _ in lastFocused }
     )
+  }
+
+  /// Builds the workflow start draft for one definition. Refuses only what
+  /// the panel could not render at all — workflows switched off, a worktree
+  /// or a definition that has since gone. Everything the user can still fix
+  /// (a missing profile, a pane already in a run, an unfilled input) is left
+  /// to the panel and to admission behind it.
+  private func openWorkflowStart(
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    workflowID: String,
+    explicitPaneID: PaneID?,
+    state: inout State
+  ) -> Effect<Action> {
+    guard state.workflowStart == nil else { return .none }
+    let settings = settingsWriter.readSnapshotSync()
+    guard settings.workflows.isEnabled else { return .none }
+    guard
+      let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+    else { return .none }
+    guard
+      let entry = workflowStartClient.catalog(worktree.path).first(where: { $0.id == workflowID }),
+      entry.isValid
+    else {
+      return .send(.statusBar(.push(.warning("Workflow \"\(workflowID)\" is no longer available"))))
+    }
+    // A `current` role binds the focused pane only when an agent is running
+    // in it; otherwise the row stays empty and admission reports
+    // SOURCE_REQUIRED rather than the panel guessing a pane.
+    let focused = explicitPaneID ?? focusedPaneForSelection(state)
+    let sourcePane = focused.flatMap { workflowStartClient.agentPane($0, worktreeID) }
+    guard
+      let draft = WorkflowStartFeature.State.make(
+        entry: entry,
+        source: WorkflowStartFeature.Source(
+          projectID: projectID,
+          worktreeID: worktreeID,
+          worktreeName: worktree.name,
+          worktreePath: worktree.path,
+          paneID: sourcePane?.id,
+          paneLabel: sourcePane.map { "\($0.label) · \($0.agent.displayName)" },
+          agent: sourcePane?.agent),
+        agents: settings.agents,
+        workflows: settings.workflows,
+        panes: workflowStartClient.freeAgentPanes(worktreeID))
+    else { return .none }
+    state.workflowStart = draft
+    return .none
   }
 
   // MARK: - Hand-off orders

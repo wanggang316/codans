@@ -88,6 +88,12 @@ struct ContentView: View {
           HandoffOverlayView(store: handoffStore)
             .zIndex(100)
         }
+        if let workflowStartStore = store.scope(
+          state: \.workflowStart, action: \.workflowStart.presented
+        ) {
+          WorkflowStartOverlayView(store: workflowStartStore)
+            .zIndex(100)
+        }
       }
     }
   }

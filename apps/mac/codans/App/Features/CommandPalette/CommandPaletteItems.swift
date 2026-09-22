@@ -62,6 +62,14 @@ enum CommandPaletteItems {
           contentsOf: agentProfileItems(projectID: projectID, worktreeID: worktreeID)
         )
         items.append(handOffItem(worktreeName: worktree.name))
+        // Workflows are scoped to a local worktree (the run directory lives
+        // under it), so a Server project offers none.
+        if !project.isRemote {
+          items.append(
+            contentsOf: workflowItems(
+              projectID: projectID, worktreeID: worktreeID, worktreePath: worktree.path)
+          )
+        }
       }
     }
     if let focusedPaneID {
@@ -232,7 +240,7 @@ enum CommandPaletteItems {
         shortcut: .command("G", shift: true),
         commandID: .toggleDiffInspector,
         kind: .toggleDiffInspector
-      )
+      ),
     ]
     // `git worktree add` needs a repository root the Project owns; a dir or
     // workspace Project has none, and the reducer would no-op anyway.
@@ -546,6 +554,34 @@ enum CommandPaletteItems {
         kind: .launchAgentProfile(projectID, worktreeID, profile.id)
       )
     }
+  }
+
+  /// One "Run Workflow: <name>" row per definition the selected Worktree can
+  /// see — bundle, user, and that Worktree's own repository scope, shadowing
+  /// already resolved by `WorkflowDiscovery`. A definition the user switched
+  /// off, or one whose file has error diagnostics, is not offered: it could
+  /// not start anyway. The whole group disappears while workflows are off.
+  private static func workflowItems(
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    worktreePath: String
+  ) -> [CommandPaletteItem] {
+    @Dependency(SettingsWriter.self) var settingsWriter
+    @Dependency(WorkflowStartClient.self) var workflowClient
+    let settings = settingsWriter.readSnapshotSync().workflows
+    guard settings.isEnabled else { return [] }
+    return workflowClient.catalog(worktreePath)
+      .filter { $0.isValid && !settings.isDisabled($0.id) }
+      .map { entry in
+        CommandPaletteItem(
+          id: "workflow.run.\(entry.id)",
+          title: "Run Workflow: \(entry.name)",
+          subtitle: entry.definition?.description,
+          searchText: "workflow run \(entry.id) \(entry.name)",
+          icon: "arrow.triangle.branch",
+          kind: .runWorkflow(projectID, worktreeID, entry.id)
+        )
+      }
   }
 
   /// Single "Hand Off…" row. Always offered while a Worktree is selected;

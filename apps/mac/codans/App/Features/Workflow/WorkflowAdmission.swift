@@ -174,7 +174,7 @@ struct WorkflowAdmission {
     return typed
   }
 
-  static func parse(_ text: String, as input: WorkflowInput) throws -> WorkflowValue {
+  nonisolated static func parse(_ text: String, as input: WorkflowInput) throws -> WorkflowValue {
     let path = ["inputs", input.name]
     switch input.kind {
     case .string:
@@ -336,20 +336,12 @@ struct WorkflowAdmission {
     }
     let scope = context.discovery.resolve(workflowID, worktreeRoot: nil)?.scope
     if let scope,
-      let memory = context.settings().workflows.binding(
-        scope: scope, workflowID: workflowID, role: role.name, digest: Self.requirementsDigest(for: role)),
-      let profile = agents.profile(id: memory.profileID), Self.qualifies(profile, for: role)
+      let profile = Self.preferredProfile(
+        for: role, workflowID: workflowID, scope: scope, agents: agents, workflows: context.settings().workflows)
     {
       return profile
     }
-    if let name = role.profile,
-      let profile = agents.enabledProfiles.first(where: { $0.displayName.caseInsensitiveCompare(name) == .orderedSame }
-      ),
-      Self.qualifies(profile, for: role)
-    {
-      return profile
-    }
-    let candidates = agents.enabledProfiles.filter { Self.qualifies($0, for: role) }
+    let candidates = Self.candidateProfiles(for: role, in: agents)
     if candidates.count == 1 { return candidates[0] }
     throw IPCError.domain(
       code: "PROFILE_REQUIRED",
@@ -359,17 +351,50 @@ struct WorkflowAdmission {
       hint: "pass --role \(role.name)=<profile name or id>")
   }
 
-  static func qualifies(_ profile: AgentProfile, for role: WorkflowRole) -> Bool {
+  /// Remembered binding → the definition's `profile:` name → the single
+  /// qualifying profile. `nil` when nothing decides: the CLI then answers
+  /// `PROFILE_REQUIRED` and the start panel leaves its picker unset, so
+  /// both ask the same question at the same moment.
+  nonisolated static func preferredProfile(
+    for role: WorkflowRole,
+    workflowID: String,
+    scope: WorkflowScope,
+    agents: AgentSettings,
+    workflows: WorkflowSettings
+  ) -> AgentProfile? {
+    if let memory = workflows.binding(
+      scope: scope, workflowID: workflowID, role: role.name, digest: requirementsDigest(for: role)),
+      let profile = agents.profile(id: memory.profileID), qualifies(profile, for: role)
+    {
+      return profile
+    }
+    if let name = role.profile,
+      let profile = agents.enabledProfiles.first(where: { $0.displayName.caseInsensitiveCompare(name) == .orderedSame }
+      ),
+      qualifies(profile, for: role)
+    {
+      return profile
+    }
+    let candidates = candidateProfiles(for: role, in: agents)
+    return candidates.count == 1 ? candidates[0] : nil
+  }
+
+  /// Every enabled profile that could play `role`, in Settings order.
+  nonisolated static func candidateProfiles(for role: WorkflowRole, in agents: AgentSettings) -> [AgentProfile] {
+    agents.enabledProfiles.filter { qualifies($0, for: role) }
+  }
+
+  nonisolated static func qualifies(_ profile: AgentProfile, for role: WorkflowRole) -> Bool {
     guard profile.isEnabled, profile.descriptor.supportsInitialPrompt else { return false }
     if let allowed = role.agents { return allowed.contains(profile.kind) }
     return true
   }
 
-  private static func requirement(_ role: WorkflowRole) -> String {
+  private nonisolated static func requirement(_ role: WorkflowRole) -> String {
     role.agents.map { "agents: \(list($0))" } ?? "any agent that accepts a prompt"
   }
 
-  private static func list(_ kinds: [AgentKind]) -> String {
+  private nonisolated static func list(_ kinds: [AgentKind]) -> String {
     kinds.map(\.rawValue).joined(separator: ", ")
   }
 

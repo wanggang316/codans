@@ -485,6 +485,10 @@ final class AppState {
   /// Token ↔ activation and pane ↔ run bookkeeping for workflow runs.
   /// Shared by admission (`PANE_BUSY`), the engine and the IPC handler.
   let workflowRegistry = WorkflowActivationRegistry()
+  /// `t<n>` / `p<n>` handles. One registry so every handler that prints or
+  /// resolves a handle — and the workflow start panel's pane picker —
+  /// names the same pane.
+  let targetHandles = TargetHandleRegistry()
   /// Owns the active workflow runs. Built in `bringUp` once the live
   /// clients exist; the AgentState panel reads `activeRuns` from it.
   @ObservationIgnored private(set) var workflowEngine: WorkflowEngine?
@@ -869,6 +873,10 @@ final class AppState {
             for: paneID, manager: manager, agentState: self?.agentStateStore)
         }
       )
+      // The workflow start panel goes through the same discovery and the
+      // same admission as `workflow.*` over IPC (see `makeWorkflowAdmission`).
+      $0[WorkflowStartClient.self] = self.makeWorkflowStartClient(
+        engine: workflowEngine, hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings)
       $0.terminalClient = .live(engine: engine)
       // SSH-routing git clients (see construction above) so every reducer-side
       // git consumer transparently reaches Server-project repositories.
@@ -1186,9 +1194,7 @@ final class AppState {
     // truth; nil falls back to the handler's "no persistent catalog to
     // reap" path (second-instance no-resume mode).
     let sessionCoordinator = self.sessionCoordinator
-    // One handle registry for every handler that prints or resolves
-    // `t<n>` / `p<n>`, so `agent status` and `tree` agree.
-    let targetHandles = TargetHandleRegistry()
+    let targetHandles = self.targetHandles
     let hierarchyHandlers = makeHierarchyHandlers(
       hierarchy: hierarchy,
       handleRegistry: targetHandles,
@@ -1372,21 +1378,24 @@ final class AppState {
     }
   }
 
-  /// `workflow.*` handler: admission and the engine on the live catalog,
-  /// caller attribution from the peer PID the same way `hierarchy.*` does.
-  private func makeWorkflowHandlers(
-    engine: WorkflowEngine,
+  static func makeWorkflowDiscovery() -> WorkflowDiscovery {
+    WorkflowDiscovery(
+      bundleDirectory: Bundle.main.resourceURL?.appendingPathComponent("workflows", isDirectory: true),
+      userDirectory: AppDirectories.workflowsDirectory())
+  }
+
+  /// Admission on the live catalog. Built once per consumer but from one
+  /// factory, so the GUI start panel and the `workflow.*` IPC handlers
+  /// refuse a run for exactly the same reasons.
+  private func makeWorkflowAdmission(
+    discovery: WorkflowDiscovery,
     hierarchy: HierarchyManager,
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
-    terminalEngine: TerminalEngine,
     handleRegistry: TargetHandleRegistry
-  ) -> WorkflowHandlers {
-    let discovery = WorkflowDiscovery(
-      bundleDirectory: Bundle.main.resourceURL?.appendingPathComponent("workflows", isDirectory: true),
-      userDirectory: AppDirectories.workflowsDirectory())
+  ) -> WorkflowAdmission {
     let registry = workflowRegistry
-    let admission = WorkflowAdmission(
+    return WorkflowAdmission(
       context: WorkflowAdmission.Context(
         discovery: discovery,
         settings: { settingsStore.settings },
@@ -1402,6 +1411,57 @@ final class AppState {
         runID: { registry.runID(forPane: $0) },
         cliCommand: Self.cliInvocation()
       ))
+  }
+
+  /// The start panel's seam. Same discovery and same admission as the IPC
+  /// path; the panel adds only the trust grant, which the CLI must not have.
+  private func makeWorkflowStartClient(
+    engine: WorkflowEngine,
+    hierarchy: HierarchyManager,
+    hierarchyClient: HierarchyClient,
+    settingsStore: SettingsStore
+  ) -> WorkflowStartClient {
+    let discovery = Self.makeWorkflowDiscovery()
+    let handleRegistry = targetHandles
+    return .live(
+      discovery: discovery,
+      admission: makeWorkflowAdmission(
+        discovery: discovery, hierarchy: hierarchy, hierarchyClient: hierarchyClient,
+        settingsStore: settingsStore, handleRegistry: handleRegistry),
+      engine: engine,
+      settings: settingsStore,
+      registry: workflowRegistry,
+      catalog: { hierarchy.catalog },
+      paneHandles: { [weak hierarchy] in
+        guard let hierarchy else { return [:] }
+        handleRegistry.sync(with: hierarchy.catalog)
+        var handles: [PaneID: Int] = [:]
+        for (raw, handle) in handleRegistry.snapshot().panes {
+          if let uuid = UUID(uuidString: raw) { handles[PaneID(raw: uuid)] = handle }
+        }
+        return handles
+      },
+      agentKind: { [weak self, weak hierarchy] paneID in
+        self?.agentStateStore?.entries[paneID]?.kind ?? hierarchy?.catalog.pane(paneID)?.agentKind
+      }
+    )
+  }
+
+  /// `workflow.*` handler: admission and the engine on the live catalog,
+  /// caller attribution from the peer PID the same way `hierarchy.*` does.
+  private func makeWorkflowHandlers(
+    engine: WorkflowEngine,
+    hierarchy: HierarchyManager,
+    hierarchyClient: HierarchyClient,
+    settingsStore: SettingsStore,
+    terminalEngine: TerminalEngine,
+    handleRegistry: TargetHandleRegistry
+  ) -> WorkflowHandlers {
+    let discovery = Self.makeWorkflowDiscovery()
+    let registry = workflowRegistry
+    let admission = makeWorkflowAdmission(
+      discovery: discovery, hierarchy: hierarchy, hierarchyClient: hierarchyClient,
+      settingsStore: settingsStore, handleRegistry: handleRegistry)
     return WorkflowHandlers(
       settings: settingsStore,
       engine: engine,
