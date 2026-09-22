@@ -36,7 +36,9 @@ extension WorkflowClient: DependencyKey {
   )
 
   static let testValue = WorkflowClient(
-    activeRuns: unimplemented("WorkflowClient.activeRuns", placeholder: []),
+    // No runs is the honest default: every palette build asks, and a test
+    // that cares seeds its own.
+    activeRuns: { [] },
     cancel: unimplemented("WorkflowClient.cancel")
   )
 }

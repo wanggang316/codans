@@ -207,10 +207,14 @@ enum CommandPaletteItems {
   /// workflow design doc. Hidden entirely when the feature is off so a
   /// user who never turned on Workflows never sees it.
   private static func cancelWorkflowItems() -> [CommandPaletteItem] {
+    // Runs first, settings second: most palette openings have no run, and
+    // then there is nothing to gate and no settings read at all.
+    @Dependency(WorkflowClient.self) var workflowClient
+    let runs = workflowClient.activeRuns()
+    guard !runs.isEmpty else { return [] }
     @Dependency(SettingsWriter.self) var settingsWriter
     guard settingsWriter.readSnapshotSync().workflows.isEnabled else { return [] }
-    @Dependency(WorkflowClient.self) var workflowClient
-    return workflowClient.activeRuns().map { run in
+    return runs.map { run in
       CommandPaletteItem(
         id: "workflow.cancel.\(run.id.uuidString)",
         title: "Cancel Workflow: \(run.name)",
