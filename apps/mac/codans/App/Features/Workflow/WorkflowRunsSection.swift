@@ -1,18 +1,25 @@
 import CodansCore
 import SwiftUI
 
-/// Read-only "Workflows" rows under the agent list in the AgentState
-/// panel: one row per active run — name, current step, state, elapsed
-/// time. A run waiting on the user carries an orange dot and its
-/// attention message as the tooltip. Clicking a row focuses the pane the
-/// run is about; attention actions stay on the CLI for now.
+/// "Workflows" rows under the agent list in the AgentState panel: one row
+/// per active run — name, current step, state, elapsed time — followed by
+/// a dimmed strip of recently finished runs. A row waiting on the user
+/// carries an orange dot and its attention message as the tooltip.
+/// Clicking any row opens `WorkflowRunPopoverView`; a finished row's
+/// popover renders the same sections minus attention and Cancel Run.
 struct WorkflowRunsSection: View {
+  /// Recently finished runs shown below the active ones, oldest first as
+  /// the engine keeps them; capped so the panel doesn't grow unbounded
+  /// across a long session.
+  static let maxFinishedRowsShown = 5
+
   let engine: WorkflowEngine
   let onTapRun: (PaneID) -> Void
 
   var body: some View {
     let runs = engine.activeRuns
-    if !runs.isEmpty {
+    let finished = Array(engine.finishedRuns.suffix(Self.maxFinishedRowsShown).reversed())
+    if !runs.isEmpty || !finished.isEmpty {
       VStack(spacing: 0) {
         Divider()
           .padding(.vertical, 4)
@@ -25,9 +32,10 @@ struct WorkflowRunsSection: View {
         .padding(.horizontal, 10)
         .padding(.bottom, 4)
         ForEach(runs, id: \.id) { session in
-          WorkflowRunRowView(session: session) {
-            if let paneID = session.focusPaneID { onTapRun(paneID) }
-          }
+          WorkflowRunRowView(session: session, engine: engine, onTapRun: onTapRun, isFinished: false)
+        }
+        ForEach(finished, id: \.id) { session in
+          WorkflowRunRowView(session: session, engine: engine, onTapRun: onTapRun, isFinished: true)
         }
       }
       .accessibilityIdentifier("agentState.sidebarPanel.workflows")
@@ -37,9 +45,16 @@ struct WorkflowRunsSection: View {
 
 struct WorkflowRunRowView: View {
   let session: WorkflowRunSession
-  let onTap: () -> Void
+  let engine: WorkflowEngine
+  let onTapRun: (PaneID) -> Void
+  /// Dims the row and opens the popover without any action affordances —
+  /// its `session.attention` is always nil and its status terminal, so
+  /// the popover's own sections gate those off; this only drives the row's
+  /// visual treatment.
+  let isFinished: Bool
 
   @State private var isHovering = false
+  @State private var isPopoverPresented = false
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -61,20 +76,24 @@ struct WorkflowRunRowView: View {
       }
       .padding(.horizontal, 10)
       .padding(.vertical, 5)
+      .opacity(isFinished ? 0.55 : 1)
       .background(isHovering ? Color.primary.opacity(0.06) : Color.clear)
       .contentShape(Rectangle())
       .onHover { isHovering = $0 }
-      .onTapGesture(perform: onTap)
+      .onTapGesture { isPopoverPresented = true }
       .accessibilityAddTraits(.isButton)
       .help(session.attention?.message ?? "\(session.name) · \(session.stateName)")
       .accessibilityIdentifier("agentState.sidebarPanel.workflowRow")
+      .popover(isPresented: $isPopoverPresented, arrowEdge: .trailing) {
+        WorkflowRunPopoverView(session: session, engine: engine, onFocusPane: onTapRun)
+      }
     }
   }
 
   private var subtitle: String {
     var parts: [String] = []
     if let step = session.currentStepName { parts.append(step) }
-    parts.append(session.attention == nil ? "running" : "needs attention")
+    parts.append(isFinished ? session.stateName : (session.attention == nil ? "running" : "needs attention"))
     return parts.joined(separator: " · ")
   }
 
