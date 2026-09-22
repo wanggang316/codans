@@ -1,10 +1,10 @@
 # 设计文档：Agent Workflow
 
-**状态：** 已实现（M1 + M3：CLI 全流程、内建工作流、skill；M2 的 GUI 启动面板与 Command Palette 入口；M2 余下的 attention 按钮 / Settings 面板未做）
+**状态：** 已实现（M1 + M3：CLI 全流程、内建工作流、skill；M2 的 GUI 启动面板、Command Palette 入口与 Settings → Workflows 面板已做；M2 余下的 attention 按钮未做）
 **作者：** Gump（与 Claude）
 **日期：** 2026-09-18
 
-> **现状（读前须知）。** Core（`CodansCore/Workflow/`）、IPC `workflow.*`、CLI `codans workflow`、app 侧 `WorkflowEngine` / `WorkflowAdmission` / `WorkflowHandlers`、三个内建工作流与 `codans-workflow` skill 均已落地；`docs/user-tests/workflow/harness.sh` 用 fake 参与者在隔离实例上端到端跑通 review-loop / handoff / advisor。GUI 启动面板（`WorkflowStartFeature` / `WorkflowStartOverlayView`，宿主与外观同 Handoff 面板）与 Command Palette 的 `Run Workflow: <name>` 入口也已落地，与 CLI 共用同一个 `WorkflowAdmission`；仓库作用域的信任（D8）只能在这个面板里授予。attention 的处理目前只有 CLI（`codans workflow resolve`）与通知；AgentState 面板只列出只读的 run 行；Settings → Workflows 面板未做。
+> **现状（读前须知）。** Core（`CodansCore/Workflow/`）、IPC `workflow.*`、CLI `codans workflow`、app 侧 `WorkflowEngine` / `WorkflowAdmission` / `WorkflowHandlers`、三个内建工作流与 `codans-workflow` skill 均已落地；`docs/user-tests/workflow/harness.sh` 用 fake 参与者在隔离实例上端到端跑通 review-loop / handoff / advisor。GUI 启动面板（`WorkflowStartFeature` / `WorkflowStartOverlayView`，宿主与外观同 Handoff 面板）与 Command Palette 的 `Run Workflow: <name>` 入口也已落地，与 CLI 共用同一个 `WorkflowAdmission`；仓库作用域的信任（D8）可在这个面板或 Settings → Workflows 中授予。Settings → Workflows 面板（三作用域列表、启用开关、诊断、记忆绑定、仓库信任）已落地。attention 的处理目前只有 CLI（`codans workflow resolve`）与通知；AgentState 面板只列出只读的 run 行；attention 按钮仍未做。
 
 ## 背景与范围
 
@@ -303,7 +303,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 - **AgentState 面板**新增一组 "Workflows" 行：`<name> · <step name> · running/needs attention · 已用时间`，点击弹出 popover：步骤列表、角色 pane（可跳转）、attention 动作按钮（**按 `attention.actions` 原样渲染，UI 不重新推导策略**）、log 与 run 目录链接。选择这里而不是 toolbar 中央状态槽：该槽已被 worktree 进程徽标与状态项占用，而 AgentState 本来就是用户分诊 agent 的唯一去处，run 就是 agent 的上下文。
 - **通知**：run 进入 `needs_attention` / 终态时进 inbox（`NotificationCoordinator` 门控），`notify:` 步骤同路。
 - **Command Palette**：`Run Workflow: <name>`（对当前 worktree 可见的定义）、`Cancel Workflow: <name>`（活动 run）。
-- **Settings → Agents → Workflows**：三个作用域的列表、启用开关、校验诊断、每个 launch 角色的记忆绑定（可清除）、仓库作用域文件的信任状态（D8）。
+- **Settings → Agents → Workflows**（已实现；作为 Agents 的同级行而非嵌套子页——简化，见下）：三个作用域的列表、启用开关、校验诊断、每个 launch 角色的记忆绑定（可清除）、仓库作用域文件的信任状态（D8）。侧边栏里 Workflows 紧跟在 Agents 之后，与其平级，不是 Agents 下的子项。
 
 ### 组件边界
 

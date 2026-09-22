@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Root view for the Settings window scene. Two-column `NavigationSplitView` with the
 /// sidebar (global sections + Repositories disclosure) on the left and a per-section detail
@@ -115,6 +115,8 @@ struct SettingsWindowView: View {
       )
     case .agents:
       AgentsSettingsView()
+    case .workflows:
+      WorkflowsSettingsView()
     case .github:
       GitHubSettingsView(settingsStore: settingsStore)
     case .worktree:
@@ -131,6 +133,16 @@ struct SettingsWindowView: View {
       UpdatesSettingsView()
     case .about:
       AboutSettingsView()
+    case .projectGeneral, .projectScripts:
+      // Split out so `detailView` itself stays under the complexity cap —
+      // these two cases are the only ones with a nested store-scope branch.
+      projectDetailView(for: section)
+    }
+  }
+
+  @ViewBuilder
+  private func projectDetailView(for section: SettingsSection) -> some View {
+    switch section {
     case .projectGeneral(let projectID):
       if let paneStore = store.scope(
         state: \.projectPanes[id: projectID],
@@ -156,6 +168,8 @@ struct SettingsWindowView: View {
       } else {
         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
       }
+    default:
+      EmptyView()
     }
   }
 }
