@@ -91,18 +91,78 @@ Bail with a clear message if any of these are wrong:
 4. Wait for explicit confirmation of `X.Y.Z` and the new build number
    before proceeding. **Never invent a version silently.**
 
-### 2. Verify the changelog has shippable content
+### 2. Rewrite `[Unreleased]` into release notes
 
-If `[Unreleased]` is empty (or only contains category headers with no
-entries), **stop**. Tell the user to run `/hs-changelog` first to
-extract recent commits, then resume.
+`[Unreleased]` is **input, never output.** It accumulates roughly one
+bullet per feature PR, so by release time a single capability owns
+several bullets written at different stages, and the later ones often
+describe a surface the earlier ones got wrong. Promoting that body
+verbatim publishes the work record instead of release notes.
 
-**Writing style — user-facing language.** The CHANGELOG follows
-[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) —
-"changelogs are *for humans*, not machines." Rewrite raw commit
-messages; don't paste them.
+Never promote `[Unreleased]` as-is. Run both passes below over it, then
+show the user the rewritten section before touching the file.
 
-Use the six standard categories with their intended meanings:
+If `[Unreleased]` is empty, derive the notes from git history instead:
+
+```bash
+git log --no-merges --pretty='%h %s' "$(git describe --tags --abbrev=0)..HEAD"
+```
+
+Keep commits a user can perceive — new features, options, commands, CLI
+verbs; changed defaults, output, shortcuts, config keys; removals and
+deprecations; fixes to observable behavior; security fixes. Drop
+`chore` / `refactor` / `test` / `ci` / `build` / `style`, internal
+renames, and `docs` commits unless they record a user-facing contract.
+A revert and its target cancel out — neither is listed. Then run the
+same two passes.
+
+#### Pass 1 — one entry per surface
+
+1. **Group every bullet by the UI or CLI surface it touches** — a
+   feature area, a viewer, the sidebar, a Settings pane, a CLI verb —
+   and write **one entry per surface per category.** However many
+   bullets a surface accumulated, it gets one.
+2. **Describe the end state, not the journey.** When later work in the
+   same cycle supersedes earlier work on a surface, the earlier bullet
+   is *dropped*, not merged. A surface reworked twice before shipping
+   reaches the user once; only its final shape is news.
+3. **Splitting across categories is fine; splitting within one is not.**
+   A surface's new capability goes to `Added`, its behavior change to
+   `Changed`, its bug to `Fixed`. Two entries in the same category need
+   to be two things a user would name separately.
+4. **Bundle the leftovers.** Small polish on one area becomes a single
+   bullet ("Various tab-bar polish: smoother color sheet, snappier
+   middle-click close, tidier overflow menu").
+
+Target shape: a release reads as **3–8 entries total.** Twenty entries
+means Pass 1 never ran.
+
+#### Pass 2 — three lines per entry
+
+House style is a bold lead-in and then at most two sentences:
+
+```markdown
+- **Detached-HEAD worktrees are named by their commit.** A worktree on
+  no branch used to collapse onto its directory name — five rows all
+  reading "codans"; the sidebar now captions it "Detached HEAD @<sha>".
+```
+
+**Three lines as the file wraps (~240 characters) is a hard cap, not a
+target.** The lead-in alone has to satisfy a user scanning the GitHub
+Release page; the two sentences after it earn their place by naming
+what changed for that user.
+
+Cut in this order until it fits: how it works internally; per-control
+tours of a new sheet; error, rollback, and edge-case behavior; every
+CLI flag (name the verb — `codans workspace create` — and leave its
+flags to `--help`); reassurances that something else still works.
+
+If an entry won't fit, it is over-described far more often than it is
+two entries.
+
+#### Categories
+
+Keep a Changelog 1.1.0's six, with their intended meanings:
 
 | Section | What goes here |
 |---|---|
@@ -113,9 +173,10 @@ Use the six standard categories with their intended meanings:
 | `Fixed` | Bug fixes |
 | `Security` | Vulnerability fixes |
 
-The rules below govern the bullets under those headers.
+#### Entry rules
 
-In priority order — when rules conflict, earlier ones win:
+In priority order — when rules conflict, earlier ones win. Pass 1 and
+Pass 2 outrank all of them.
 
 1. **Describe what the user gets.** Lead with the feature, outcome,
    or — for bugs — the symptom that's now gone. Skip the mechanism.
@@ -124,12 +185,7 @@ In priority order — when rules conflict, earlier ones win:
    - Bad: "Persist `Tab.colorToken` to `CodansCore.TabState`."
      "Fix race in `PaneHostView` state-restoration."
 
-2. **Clarity beats brevity.** Be concise once the entry is clear. If
-   one extra clause is what makes it land, write the clause. Don't
-   cut words just to be short. Cap each entry at one or two short
-   lines — three lines means the entry is doing too much.
-
-3. **Skip engineering-only changes.** Refactors, module renames, CI
+2. **Skip engineering-only changes.** Refactors, module renames, CI
    tweaks, lint rules, dependency bumps, build-script edits, internal
    abstractions — out. The git log is their home. Two exceptions
    override this rule:
@@ -141,7 +197,7 @@ In priority order — when rules conflict, earlier ones win:
      who hit a removed feature, a renamed setting, or an incompatible
      file format must find it here, not in a stack trace.
 
-4. **Drop developer jargon.** No commit prefixes (`feat:`, `fix:`),
+3. **Drop developer jargon.** No commit prefixes (`feat:`, `fix:`),
    no PR / issue numbers, no commit hashes, no module or type names,
    no protocol terms (`EPIPE`, `O_NONBLOCK`, `WKWebView`). Refer to
    features by the UI surface the user sees ("Settings → Updates",
@@ -149,17 +205,13 @@ In priority order — when rules conflict, earlier ones win:
    crash when reopening a project" beats "a non-deterministic crash
    on project reopen".
 
-5. **Consolidate within a release.** If several commits chased the
-   same bug or refined the same feature inside one cycle, fold them
-   into one entry that names the end state — the reader doesn't need
-   the debugging journey. Bundle many tiny polish items into one
-   bullet ("Various tab-bar polish: smoother color sheet, snappier
-   middle-click close, tidier overflow menu") instead of five
-   near-identical micro-bullets.
-
 Sanity check before finalizing each entry: *would a user who only
 uses the app care about this line, and could they understand it?* If
 either answer is "no", rewrite or drop.
+
+This section is what users actually read — CI extracts it verbatim as
+the GitHub Release body and injects it into `appcast.xml` as Sparkle's
+"What's New" pane. It is published prose, not a work record.
 
 ### 3. Cut the changelog version section
 
@@ -169,9 +221,12 @@ Edit `CHANGELOG.md`:
    - A fresh empty `## [Unreleased]` at top with all six standard
      headers (`Added / Changed / Deprecated / Removed / Fixed /
      Security`) but **leave them empty** — the next cycle fills them.
-   - The previous `[Unreleased]` body promoted under
-     `## [X.Y.Z] - YYYY-MM-DD` (today's date in the user's local TZ).
-2. Show the diff to the user before writing.
+   - The **rewritten** body from step 2 — not the accumulated one —
+     under `## [X.Y.Z] - YYYY-MM-DD` (today's date in the user's local
+     TZ).
+2. Drop any category header left with no entries under the dated
+   version; the empty six belong to `[Unreleased]` only.
+3. Show the diff to the user before writing.
 
 ### 4. Bump the version files
 
@@ -305,11 +360,16 @@ Before reporting "done":
 - [ ] `git log -1 --oneline origin/main` shows `chore(release): bump to X.Y.Z`.
 - [ ] `awk -F'=' '/^MARKETING_VERSION/ ...' apps/mac/Configurations/Project.xcconfig` matches the tag.
 - [ ] `CHANGELOG.md` has `## [X.Y.Z] - YYYY-MM-DD` with non-empty body and a fresh empty `## [Unreleased]` above.
+- [ ] That section is the step-2 rewrite: **3–8 entries**, no two in one
+      category covering the same surface, **none over three lines**.
 - [ ] `gh run list --workflow=release.yml --limit 1` shows a queued or running job.
 - [ ] User informed the GitHub Release will land as **draft** and needs manual publish.
 
 ## Anti-patterns
 
+- ❌ Promoting the accumulated `[Unreleased]` body verbatim — it is a work record; step 2 turns it into release notes.
+- ❌ One entry per commit or per PR — group by the surface a user sees.
+- ❌ An entry that runs past three lines, tours every control in a new sheet, or lists a CLI verb's flags.
 - ❌ Bumping `MARKETING_VERSION` and `CHANGELOG.md` in separate commits — pre-1.0 we keep the bump atomic.
 - ❌ `git add -A` / `git add -u` — only stage the release files.
 - ❌ Co-Authored-By trailer on the bump commit.
