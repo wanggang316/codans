@@ -222,7 +222,10 @@ public nonisolated struct WorkflowStep: Equatable, Sendable {
     self.path = path
   }
 
-  public var displayName: String { name ?? id }
+  /// What a list calls this step: its `name`, else its own id, else — for
+  /// a step the parser had to number — what it does, so a run's step list
+  /// never reads "step-4".
+  public var displayName: String { name ?? (hasExplicitID ? id : verb.summary) }
 
   /// The role a step addresses, when it addresses one.
   public var role: String? {
@@ -259,6 +262,22 @@ public nonisolated indirect enum WorkflowStepVerb: Equatable, Sendable {
   case loop(condition: WorkflowExpression, maxIterations: Int?, steps: [WorkflowStep])
   case breakLoop
   case continueLoop
+
+  /// A short label for a step that has neither a name nor an explicit id.
+  public var summary: String {
+    switch self {
+    case .message(let role, _, _): return "Message \(role)"
+    case .launch(let role, _, _): return "Launch \(role)"
+    case .run: return "Run command"
+    case .wait(let role, let until, _): return "Wait for \(role) (\(until.rawValue))"
+    case .notify: return "Notify"
+    case .close(let role): return "Close \(role)"
+    case .set(let assignments): return "Set " + assignments.map(\.name).joined(separator: ", ")
+    case .loop: return "Loop"
+    case .breakLoop: return "Break"
+    case .continueLoop: return "Continue"
+    }
+  }
 
   /// The YAML key that names this verb, for diagnostics and logs.
   public var keyword: String {

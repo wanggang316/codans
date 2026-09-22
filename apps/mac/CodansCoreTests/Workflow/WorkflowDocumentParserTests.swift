@@ -393,6 +393,10 @@ struct WorkflowDocumentParserTests {
     #expect(definition.step(id: "inner")?.path == "steps[1].steps[1]")
     #expect(definition.step(id: "inner")?.hasExplicitID == true)
     #expect(definition.step(id: "step-5")?.hasExplicitID == false)
+    // Numbered steps are named by what they do; explicit ids stand as they are.
+    #expect(definition.step(id: "step-3")?.displayName == "Set n")
+    #expect(definition.step(id: "step-5")?.displayName == "Notify")
+    #expect(definition.step(id: "inner")?.displayName == "inner")
   }
 
   @Test
