@@ -1,10 +1,10 @@
 # 设计文档：Agent Workflow
 
-**状态：** 已实现（M1 + M3：CLI 全流程、内建工作流、skill；M2 的 GUI 启动面板、Command Palette 入口与 Settings → Workflows 面板已做；M2 余下的 attention 按钮未做）
+**状态：** 已实现（M1 + M3：CLI 全流程、内建工作流、skill；M2 的 GUI 启动面板、Command Palette 入口与取消、Settings → Workflows 面板、AgentState 面板 popover / attention 按钮均已做）
 **作者：** Gump（与 Claude）
 **日期：** 2026-09-18
 
-> **现状（读前须知）。** Core（`CodansCore/Workflow/`）、IPC `workflow.*`、CLI `codans workflow`、app 侧 `WorkflowEngine` / `WorkflowAdmission` / `WorkflowHandlers`、三个内建工作流与 `codans-workflow` skill 均已落地；`docs/user-tests/workflow/harness.sh` 用 fake 参与者在隔离实例上端到端跑通 review-loop / handoff / advisor。GUI 启动面板（`WorkflowStartFeature` / `WorkflowStartOverlayView`，宿主与外观同 Handoff 面板）与 Command Palette 的 `Run Workflow: <name>` 入口也已落地，与 CLI 共用同一个 `WorkflowAdmission`；仓库作用域的信任（D8）可在这个面板或 Settings → Workflows 中授予。Settings → Workflows 面板（三作用域列表、启用开关、诊断、记忆绑定、仓库信任）已落地。attention 的处理目前只有 CLI（`codans workflow resolve`）与通知；AgentState 面板只列出只读的 run 行；attention 按钮仍未做。
+> **现状（读前须知）。** Core（`CodansCore/Workflow/`）、IPC `workflow.*`、CLI `codans workflow`、app 侧 `WorkflowEngine` / `WorkflowAdmission` / `WorkflowHandlers`、三个内建工作流与 `codans-workflow` skill 均已落地；`docs/user-tests/workflow/harness.sh` 用 fake 参与者在隔离实例上端到端跑通 review-loop / handoff / advisor。GUI 启动面板（`WorkflowStartFeature` / `WorkflowStartOverlayView`，宿主与外观同 Handoff 面板）与 Command Palette 的 `Run Workflow: <name>` 入口已落地，与 CLI 共用同一个 `WorkflowAdmission`；仓库作用域的信任（D8）可在这个面板或 Settings → Workflows 中授予。Settings → Workflows 面板（三作用域列表、启用开关、诊断、记忆绑定、仓库信任）已落地。attention 的处理 CLI（`codans workflow resolve`）与 AgentState 面板都能做：点击 Workflows 行弹出 popover（步骤列表、角色 pane、attention 动作按钮按 `attention.actions` 原样渲染、log 与 run 目录链接），面板同时列出最近完成的几个 run（灰显，无动作）；Command Palette 提供 `Cancel Workflow: <name>`。
 
 ## 背景与范围
 
