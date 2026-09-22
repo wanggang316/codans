@@ -496,6 +496,8 @@ struct RootFeature {
   @Dependency(HandoffClient.self) private var handoffClient
   @Dependency(TerminalLinkClient.self) private var terminalLinkClient
   @Dependency(WorkflowStartClient.self) private var workflowStartClient
+
+  @Dependency(WorkflowClient.self) private var workflowClient
   @Dependency(\.uuid) private var uuid
   @Dependency(GitHubSnapshotCacheClient.self) private var gitHubSnapshotCache
   @Dependency(GitServiceClient.self) private var gitServiceClient
@@ -2642,6 +2644,10 @@ struct RootFeature {
       return .send(
         .workflowStartRequested(
           projectID, worktreeID, workflowID: workflowID, sourcePaneID: sourcePaneID))
+
+    case .cancelWorkflow(let runID):
+      workflowClient.cancel(runID)
+      return .none
 
     // Pane / Window — thin wrappers over the routers
     case .paneAction(let req):

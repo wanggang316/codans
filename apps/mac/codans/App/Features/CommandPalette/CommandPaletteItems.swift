@@ -26,6 +26,7 @@ enum CommandPaletteItems {
     paneFocusPrecise: Bool = false
   ) -> [CommandPaletteItem] {
     var items = appItems()
+    items.append(contentsOf: cancelWorkflowItems())
     items.append(contentsOf: worktreeSwitchItems(selection: selection, catalog: catalog))
     // Project-level maintenance commands surface whenever a Project is
     // selected, independent of whether a Worktree is also selected.
@@ -199,6 +200,26 @@ enum CommandPaletteItems {
         kind: .quit
       ),
     ]
+  }
+
+  /// One "Cancel Workflow: <name>" item per active run, across every
+  /// worktree the engine is tracking — the Command Palette bullet in the
+  /// workflow design doc. Hidden entirely when the feature is off so a
+  /// user who never turned on Workflows never sees it.
+  private static func cancelWorkflowItems() -> [CommandPaletteItem] {
+    @Dependency(SettingsWriter.self) var settingsWriter
+    guard settingsWriter.readSnapshotSync().workflows.isEnabled else { return [] }
+    @Dependency(WorkflowClient.self) var workflowClient
+    return workflowClient.activeRuns().map { run in
+      CommandPaletteItem(
+        id: "workflow.cancel.\(run.id.uuidString)",
+        title: "Cancel Workflow: \(run.name)",
+        searchText: "workflow cancel run",
+        icon: "xmark.circle",
+        hiddenWhenQueryEmpty: true,
+        kind: .cancelWorkflow(run.id)
+      )
+    }
   }
 
   private static func resolveWorktree(

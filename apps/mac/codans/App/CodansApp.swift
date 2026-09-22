@@ -877,6 +877,7 @@ final class AppState {
       // same admission as `workflow.*` over IPC (see `makeWorkflowAdmission`).
       $0[WorkflowStartClient.self] = self.makeWorkflowStartClient(
         engine: workflowEngine, hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings)
+      $0.workflowClient = .live(engine: workflowEngine)
       $0.terminalClient = .live(engine: engine)
       // SSH-routing git clients (see construction above) so every reducer-side
       // git consumer transparently reaches Server-project repositories.

@@ -131,6 +131,10 @@ struct CommandPaletteItem: Equatable, Identifiable {
     // selection for the same staleness reason as scripts.
     case runWorkflow(ProjectID, WorktreeID, String)
 
+    // Cancels an active workflow run, wherever its worktree is. The run
+    // id is captured when the item is built (`WorkflowClient.activeRuns`).
+    case cancelWorkflow(UUID)
+
     // Pane / Window (thin wrappers over the existing request enums)
     case paneAction(PaneActionRequest)
     case windowAction(WindowActionRequest)
