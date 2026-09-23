@@ -139,13 +139,21 @@ EOF
 EOF
 }
 
+# The test instance is known only by the pid this script started. Matching on
+# the bundle path is not enough: a developer's own dev app often runs from the
+# same DerivedData bundle, and quitting "whatever runs that path" killed it.
+test_app_pid() {
+  local pid; pid=$(cat "$SCRATCH/app.pid" 2>/dev/null) || return 1
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
 launch_app() {
-  if pgrep -f "$APP/Contents/MacOS/Codans" >/dev/null; then
-    echo "test app already running"; return
+  if test_app_pid >/dev/null; then
+    echo "test app already running pid=$(test_app_pid)"; return
   fi
   rm -f "$SOCK"
   nohup "$APP/Contents/MacOS/Codans" >"$SCRATCH/app.log" 2>&1 &
   APP_PID=$!
+  echo "$APP_PID" >"$SCRATCH/app.pid"
   echo "launched test app pid=$APP_PID"
   for _ in $(seq 1 100); do
     if cli doctor --json 2>/dev/null | jq -e '.data | .socketStatus == "ok"' >/dev/null 2>&1; then break; fi
@@ -155,9 +163,10 @@ launch_app() {
   awk -v u="$up" 'BEGIN{ if (u+0 > 30) { print "uptime too high: " u; exit 1 } }' || { echo "REFUSING: socket answered by an older instance"; exit 1; }
 }
 quit_app() {
-  local pid; pid=$(pgrep -f "$APP/Contents/MacOS/Codans" | head -1)
-  [[ -n "$pid" ]] && kill -TERM "$pid" && sleep 2
-  pgrep -f "$APP/Contents/MacOS/Codans" >/dev/null && kill -KILL "$pid"
+  local pid; pid=$(test_app_pid) || { echo "no test app running"; return; }
+  kill -TERM "$pid" && sleep 2
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid"
+  rm -f "$SCRATCH/app.pid"
   echo "quit test app"
 }
 wait_text() { # wait_text <pane> <needle> [secs]
