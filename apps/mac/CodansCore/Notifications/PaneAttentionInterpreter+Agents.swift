@@ -323,7 +323,9 @@ extension PaneAttentionInterpreter {
     // title is matched line-initially: a transcript that merely quotes
     // the cue (docs, this classifier's own source) must not read as the
     // dialog — observed live as a working pane badging blocked.
-    if hasOmpApprovalTitle(content) || hasOmpSelectorOptions(content) {
+    if hasOmpApprovalTitle(content) || hasOmpSelectorOptions(content)
+      || hasOmpAskFooter(content)
+    {
       return .blocked
     }
     // Working loader: omp renders the live working line as
@@ -407,6 +409,24 @@ extension PaneAttentionInterpreter {
   private static func hasOmpApprovalTitle(_ content: String) -> Bool {
     content.split(separator: "\n").contains { line in
       line.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("allow tool:")
+    }
+  }
+
+  /// The `ask` tool's question selector renders no approval title — only
+  /// unnumbered option rows plus a key-hint footer built from fixed
+  /// templates (verified in the v18.2.8 bundle): single-select
+  /// `Enter select · n note · ↑/↓ move · … · Esc cancel`, multi-select
+  /// `Space toggle · Enter next|submit · ↑/↓ …`, and the review page
+  /// `Enter submit · ↑/↓ scroll · … cancel`. Matched line-initially and
+  /// only with the trailing cancel hint, so prose quoting a fragment is
+  /// not the dialog.
+  private static func hasOmpAskFooter(_ content: String) -> Bool {
+    let footerPrefixes = [
+      "enter select · n note", "space toggle · enter ", "enter submit · ↑/↓ scroll",
+    ]
+    return content.split(separator: "\n").contains { line in
+      let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
+      return footerPrefixes.contains(where: trimmed.hasPrefix) && trimmed.contains(" cancel")
     }
   }
 

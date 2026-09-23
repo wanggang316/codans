@@ -608,6 +608,29 @@ struct PaneAttentionInterpreterTests {
   }
 
   @Test
+  func ompAskQuestionSelectorClassifiesBlocked() {
+    // Live screen (omp 18.2.8): the `ask` tool waiting on the user rendered
+    // no `Allow tool:` title and no Approve/Deny rows, so the pane badged
+    // idle while the agent was paused on a question.
+    let askScreen = """
+      ⎋ 确认 X 日报数据添加位置与数据流
+       Ask
+       target   derivation   ctab   Submit
+      "X 日报" 数据要加到哪个子系统？
+      ❯ ○ Top News 第五类 (Recommended)
+        ○ 管理端概览统计卡
+        ○ Other (type your own)
+      Enter select · n note · ↑/↓ move · Tab/←/→ · Esc cancel
+      """
+    #expect(activity(.omp, askScreen) == .blocked)
+    // Multi-select and review-page footers.
+    #expect(activity(.omp, "Space toggle · Enter next · ↑/↓ move · Esc cancel") == .blocked)
+    #expect(activity(.omp, "Enter submit · ↑/↓ scroll · Esc cancel") == .blocked)
+    // Prose quoting a footer fragment mid-line stays idle.
+    #expect(activity(.omp, "the footer says Enter select · n note · Esc cancel\n❯ ") == .idle)
+  }
+
+  @Test
   func ompProseMentioningApproveDenyStaysIdle() {
     // Guard the reverse of the selector cue: transcript prose that merely
     // contains the words "approve"/"deny" inside longer lines must not
