@@ -20,6 +20,17 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.7.3] - 2026-09-24
+
+### Fixed
+
+- **Panes no longer vanish when a split resizes them.** A failed terminal
+  resize used to end the pane's session; the pane now keeps running.
+- **Restored panes wrap their scrollback to the current width** instead of
+  keeping the line breaks from the old size.
+- **An omp agent waiting on your answer shows as blocked.** Its question used
+  to read as idle, so the Agents View showed the agent as done.
+
 ## [0.7.2] - 2026-09-21
 
 ### Added
