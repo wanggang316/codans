@@ -12,6 +12,9 @@ struct WorkflowStartOverlayView: View {
 
   private let cardCornerRadius: CGFloat = 12
   @FocusState private var cardFocused: Bool
+  @FocusState private var focusedInput: String?
+  @State private var formHeight: CGFloat = 0
+  @State private var trustHeight: CGFloat = 0
 
   var body: some View {
     ZStack(alignment: .top) {
@@ -48,7 +51,13 @@ struct WorkflowStartOverlayView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .onAppear { cardFocused = true }
+    .onAppear {
+      if let name = firstTextInput {
+        focusedInput = name
+      } else {
+        cardFocused = true
+      }
+    }
   }
 
   // MARK: - Header
@@ -73,73 +82,83 @@ struct WorkflowStartOverlayView: View {
 
   // MARK: - Form
 
+  /// One grid for every section so roles, inputs, and skippable steps share
+  /// a label column. The scroll area takes the form's own height, capped —
+  /// a short form must not sit centred in a tall empty card.
   private var form: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
+      Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 8) {
         if store.isEmptyForm {
-          Text("This workflow takes no roles or inputs.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+          GridRow {
+            Text("This workflow takes no roles or inputs.")
+              .font(.callout)
+              .foregroundStyle(.secondary)
+              .gridCellColumns(2)
+          }
         }
         if !store.roles.isEmpty {
-          section("Roles") {
-            ForEach(store.roles) { role in
-              roleRow(role)
-            }
+          sectionHeader("Roles", isFirst: true)
+          ForEach(store.roles) { role in
+            roleRow(role)
           }
         }
         if !store.inputs.isEmpty {
-          section("Inputs") {
-            ForEach(store.inputs) { row in
-              inputRow(row)
-            }
+          sectionHeader("Inputs", isFirst: store.roles.isEmpty)
+          ForEach(store.inputs) { row in
+            inputRow(row)
           }
         }
         if !store.skippable.isEmpty {
-          section("Skip steps") {
-            ForEach(store.skippable) { row in
-              skipRow(row)
-            }
+          sectionHeader("Steps", isFirst: store.roles.isEmpty && store.inputs.isEmpty)
+          ForEach(store.skippable) { row in
+            skipRow(row)
           }
         }
       }
       .padding(16)
       .frame(maxWidth: .infinity, alignment: .leading)
+      .onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: { formHeight = $0 })
     }
-    .fixedSize(horizontal: false, vertical: true)
-    .frame(maxHeight: 380)
+    .frame(height: min(max(formHeight, 1), Self.maxFormHeight))
   }
 
-  private func section<Content: View>(
-    _ title: String, @ViewBuilder content: () -> Content
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
+  private static let maxFormHeight: CGFloat = 380
+
+  private func sectionHeader(_ title: String, isFirst: Bool) -> some View {
+    GridRow {
       Text(title)
         .font(.caption)
         .foregroundStyle(.secondary)
-      content()
+        .padding(.top, isFirst ? 0 : 8)
+        .gridCellColumns(2)
     }
+  }
+
+  private func label(_ text: String) -> some View {
+    Text(text)
+      .font(.body)
+      .frame(minWidth: 96, alignment: .leading)
+      .gridColumnAlignment(.leading)
   }
 
   // MARK: - Roles
 
-  @ViewBuilder
   private func roleRow(_ role: WorkflowStartFeature.RoleRow) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 10) {
-      Text(role.name)
-        .font(.body)
-        .frame(width: 110, alignment: .leading)
-      switch role.source {
-      case .launch:
-        launchPicker(role)
-      case .pick:
-        pickPicker(role)
-      case .current:
-        Text(store.source.paneLabel ?? "No agent pane focused")
-          .font(.callout)
-          .foregroundStyle(store.source.paneLabel == nil ? .secondary : .primary)
-        Spacer(minLength: 0)
+    GridRow {
+      label(role.name)
+      Group {
+        switch role.source {
+        case .launch:
+          launchPicker(role)
+        case .pick:
+          pickPicker(role)
+        case .current:
+          Text(store.source.paneLabel ?? "No agent pane focused")
+            .font(.callout)
+            .foregroundStyle(store.source.paneLabel == nil ? .secondary : .primary)
+        }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .accessibilityIdentifier("workflowStart.role.\(role.name)")
   }
@@ -150,7 +169,6 @@ struct WorkflowStartOverlayView: View {
       Text("No enabled profile qualifies")
         .font(.callout)
         .foregroundStyle(.secondary)
-      Spacer(minLength: 0)
     } else {
       Picker(
         "Profile",
@@ -160,14 +178,21 @@ struct WorkflowStartOverlayView: View {
       ) {
         Text("Choose…").tag(UUID?.none)
         ForEach(role.profiles) { profile in
-          Text("\(profile.name) · \(profile.agent.displayName)").tag(UUID?.some(profile.id))
+          Text(Self.profileTitle(profile)).tag(UUID?.some(profile.id))
         }
       }
       .pickerStyle(.menu)
       .labelsHidden()
-      .controlSize(.small)
+      .fixedSize()
       .help("Which Agent Profile codans launches for \"\(role.name)\"")
     }
+  }
+
+  /// "Claude Code · Claude Code" says nothing twice; a profile named after
+  /// its agent shows the name once.
+  private static func profileTitle(_ profile: WorkflowStartFeature.ProfileChoice) -> String {
+    let agent = profile.agent.displayName
+    return profile.name.caseInsensitiveCompare(agent) == .orderedSame ? profile.name : "\(profile.name) · \(agent)"
   }
 
   @ViewBuilder
@@ -176,7 +201,6 @@ struct WorkflowStartOverlayView: View {
       Text("No free agent pane in this worktree")
         .font(.callout)
         .foregroundStyle(.secondary)
-      Spacer(minLength: 0)
     } else {
       Picker(
         "Pane",
@@ -191,20 +215,18 @@ struct WorkflowStartOverlayView: View {
       }
       .pickerStyle(.menu)
       .labelsHidden()
-      .controlSize(.small)
+      .fixedSize()
       .help("Which running agent plays \"\(role.name)\"")
     }
   }
 
   // MARK: - Inputs
 
-  @ViewBuilder
   private func inputRow(_ row: WorkflowStartFeature.InputRow) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 10) {
-      Text(row.input.name)
-        .font(.body)
-        .frame(width: 110, alignment: .leading)
+    GridRow {
+      label(row.input.name)
       inputControl(row)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     .help(row.input.description ?? "")
     .accessibilityIdentifier("workflowStart.input.\(row.input.name)")
@@ -221,7 +243,6 @@ struct WorkflowStartOverlayView: View {
         .labelsHidden()
         .toggleStyle(.switch)
         .controlSize(.small)
-      Spacer(minLength: 0)
     case .choice:
       Picker("", selection: text) {
         Text("Choose…").tag("")
@@ -231,11 +252,13 @@ struct WorkflowStartOverlayView: View {
       }
       .pickerStyle(.menu)
       .labelsHidden()
-      .controlSize(.small)
+      .fixedSize()
     case .string, .number:
-      TextField(row.input.kind == .number ? rangeHint(row.input) : "", text: text)
-        .textFieldStyle(.roundedBorder)
-        .controlSize(.small)
+      TextField(
+        row.input.kind == .number ? rangeHint(row.input) : (row.input.description ?? ""), text: text
+      )
+      .textFieldStyle(.roundedBorder)
+      .focused($focusedInput, equals: row.input.name)
     }
   }
 
@@ -248,26 +271,37 @@ struct WorkflowStartOverlayView: View {
     }
   }
 
+  /// The first text input the user still has to fill — where typing should
+  /// land when the panel opens.
+  private var firstTextInput: String? {
+    let texts = store.inputs.filter { $0.input.kind == .string || $0.input.kind == .number }
+    return (texts.first(where: \.isBlank) ?? texts.first)?.input.name
+  }
+
   // MARK: - Skips
 
+  /// Step name in the label column, an explicit "Skip" box beside it — a
+  /// bare checkbox titled with the step reads as "run this", the opposite.
   private func skipRow(_ row: WorkflowStartFeature.SkipRow) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Toggle(
-        isOn: Binding(
-          get: { store.skipped.contains(row.stepID) },
-          set: { store.send(.setSkipped(stepID: row.stepID, $0)) })
-      ) {
-        Text(row.title)
-          .font(.callout)
+    GridRow {
+      label(row.title)
+      VStack(alignment: .leading, spacing: 2) {
+        Toggle(
+          "Skip",
+          isOn: Binding(
+            get: { store.skipped.contains(row.stepID) },
+            set: { store.send(.setSkipped(stepID: row.stepID, $0)) })
+        )
+        .toggleStyle(.checkbox)
+        .focusable(false)
+        if let consequence = store.state.consequence(for: row) {
+          Text(consequence)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
-      .toggleStyle(.checkbox)
-      if let consequence = store.state.consequence(for: row) {
-        Text(consequence)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-          .padding(.leading, 20)
-      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .accessibilityIdentifier("workflowStart.skip.\(row.stepID)")
   }
@@ -302,9 +336,9 @@ struct WorkflowStartOverlayView: View {
       }
       .padding(16)
       .frame(maxWidth: .infinity, alignment: .leading)
+      .onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: { trustHeight = $0 })
     }
-    .fixedSize(horizontal: false, vertical: true)
-    .frame(maxHeight: 380)
+    .frame(height: min(max(trustHeight, 1), Self.maxFormHeight))
     .accessibilityIdentifier("workflowStart.trust")
   }
 
@@ -342,6 +376,7 @@ struct WorkflowStartOverlayView: View {
         } else {
           Button("Run") { store.send(.runTapped) }
             .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
             .disabled(!store.canRun)
             .accessibilityIdentifier("workflowStart.run")
         }

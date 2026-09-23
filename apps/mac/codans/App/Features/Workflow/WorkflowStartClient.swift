@@ -91,7 +91,9 @@ extension WorkflowStartClient {
         for pane in tab.panes {
           guard let kind = agentKind(pane.id), isFree(pane.id) else { continue }
           let handle = handles[pane.id].map { "p\($0)" } ?? String(pane.id.raw.uuidString.prefix(8))
-          choices.append(PaneChoice(id: pane.id, label: "\(handle) · \(tab.name)", agent: kind))
+          let title = [tab.name, tab.cachedDisplayTitle].compactMap { $0 }.first { !$0.isEmpty }
+          let label = title.map { "\(handle) · \($0)" } ?? handle
+          choices.append(PaneChoice(id: pane.id, label: label, agent: kind))
         }
       }
     }
