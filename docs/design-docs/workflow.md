@@ -251,7 +251,7 @@ effect（engine 解释）：`awaitRole(role, until)`、`openActivation(ordinal, 
 6. 角色绑定（上节）；`current` / `pick` pane 被占用 → `PANE_BUSY`；
 7. 冻结 profile + 渲染好的 `AgentLaunchSpec`，分配 run 目录，写初始 `run.json`，**然后**才回复 CLI。
 
-GUI 启动面板（`WorkflowStartFeature`，与 Handoff 面板同宿主同外观）只做三件事：角色选择器（launch 角色预填解析结果，pick 角色列出 worktree 内的 agent pane）、输入表单、可跳过 step 的勾选（旁边即时显示 Skip 后果）。确认即调用与 CLI 相同的 admission；面板不持有任何运行态。
+GUI 启动面板（`WorkflowStartFeature`，与 Handoff 面板同宿主同外观）只做三件事：角色选择器（launch 角色预填解析结果，pick 角色列出 worktree 内的 agent pane）、输入表单、可跳过 step 的勾选（旁边即时显示 Skip 后果；只列出真能跳过的 step——其 delivery 的每个消费者自身也可跳过，否则不出现）。确认即调用与 CLI 相同的 admission；面板不持有任何运行态。
 
 **自发起。** 当 `run` 从将成为 `current` 角色的 pane 里调用、且第一步就是给该角色的 `message`，响应里直接带上渲染好的指令与完成命令（`self_initiated`），engine **不**再往调用方 pane 键入——调用它的 agent 手里已经有任务了。这让 agent 的自我交接变成两条命令：`codans workflow run handoff`，然后照返回的命令 `deliver`。
 

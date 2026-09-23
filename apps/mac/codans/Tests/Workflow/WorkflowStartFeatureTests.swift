@@ -239,6 +239,28 @@ struct WorkflowStartFeatureTests {
     #expect(store.state.validationMessage == nil)
   }
 
+  /// A delivery a non-skippable step reads can never be skipped, so the
+  /// panel does not offer it at all — advisor shows no Steps section.
+  @Test
+  func aStepWhoseDeliveryAMessageReadsIsNotOffered() throws {
+    let yaml = """
+      name: Advisor
+      roles:
+        asker: {source: current}
+        advisor: {source: launch, agents: [claude-code]}
+      steps:
+        - id: ask
+          launch: advisor
+          prompt: Help.
+          expect: {delivery: advice}
+        - id: reply
+          message: asker
+          text: Read ${{ deliveries.advice.path }}.
+      """
+    let state = try Self.makeState(yaml, id: "advisor")
+    #expect(state.skippable.isEmpty)
+  }
+
   // MARK: - Admission
 
   /// Admission's domain code is what the panel reports, verbatim, so the

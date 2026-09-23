@@ -151,7 +151,7 @@ struct WorkflowStartFeature {
       let inputs = definition.inputs.map { input in
         InputRow(input: input, text: Self.initialText(for: input))
       }
-      let skippable = definition.flattenedSteps.compactMap { step -> SkipRow? in
+      let candidates = definition.flattenedSteps.compactMap { step -> SkipRow? in
         guard let expectation = step.expectation else { return nil }
         let consumers = WorkflowValidator.consumers(of: expectation.delivery, in: definition)
           .filter { $0.id != step.id }
@@ -159,9 +159,31 @@ struct WorkflowStartFeature {
         return SkipRow(
           stepID: step.id, title: step.displayName, delivery: expectation.delivery, consumers: consumers)
       }
+      let skippable = Self.offerableSkips(candidates)
       return State(
         entry: entry, definition: definition, source: source, roles: roles, inputs: inputs,
         skippable: skippable)
+    }
+
+    /// The steps a user could actually leave out. Admission refuses a skip
+    /// whose delivery a remaining step still needs, so a step is offered only
+    /// when every consumer of its delivery could be skipped too — a chain
+    /// (review → fix) stays, but a delivery a plain `message` step reads
+    /// (advisor's reply) can never be skipped and would only be a box that
+    /// blocks Run when ticked.
+    static func offerableSkips(_ candidates: [SkipRow]) -> [SkipRow] {
+      var offerable = Set(candidates.map(\.stepID))
+      var changed = true
+      while changed {
+        changed = false
+        for row in candidates where offerable.contains(row.stepID) {
+          if row.consumers.contains(where: { !offerable.contains($0.id) }) {
+            offerable.remove(row.stepID)
+            changed = true
+          }
+        }
+      }
+      return candidates.filter { offerable.contains($0.stepID) }
     }
 
     /// A choice with no default has to start unset so it can be refused;
