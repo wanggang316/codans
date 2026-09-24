@@ -111,6 +111,11 @@ extension IPC {
     case paneInfo = "pane.info"
     case paneRead = "pane.read"
 
+    // events — server-push subscription. `subscribe` is a streaming call:
+    // a snapshot frame first, then debounced change frames until either
+    // side closes (wire types in `EventsWireTypes.swift`).
+    case eventsSubscribe = "events.subscribe"
+
     // terminal
     case terminalSendInput = "terminal.sendInput"
     case terminalSendKey = "terminal.sendKey"
