@@ -76,7 +76,7 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 ## Tab Bar
 
-终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（标题 + hover 揭示的关闭按钮 + active 顶部下划线），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / rename / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
+终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（居中标题 + hover 时在左侧出现的关闭按钮 + active 浮起底板），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / rename / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
 
 ### 不变量
 
@@ -93,7 +93,7 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 - **重排用 snapshot-on-drop，不逐 tick 调 `moveTab`。** 拖拽重排在**落下**时一次性提交绝对顺序 `reorderTabs(orderedIDs:)`，而非每个指针 tick 调 `moveTab(offset:)`。后者每次触发一次持久化保存，且两个连续 tick 跨过同一中点时引入重排闪烁。snapshot-on-drop 更省、更易单测、且贴合 catalog 真正想要的变更形态。
 
-- **active 用顶部下划线，不用填充背景。** active tab 用 2pt 顶部下划线指示，而非填充背景。填充背景会与 per-chip hover 态竞争（hover 任意 chip 都近似"选中"），削弱选中信号；细色下划线让 hover 词汇保持干净、在密集 tab 条中一眼可辨。
+- **视觉对齐 macOS 系统 tab 条（Safari / Finder），用 SwiftUI 复刻而非原生 tabbing。** 原生 `NSWindowTabGroup` 的每个 tab 是一个独立窗口、只挂在标题栏下，无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 颜色 / 快捷键提示，因此按系统参数复刻：chip 放在下凹圆角轨道里，**平分轨道宽度**（下限 `chipMinWidth`，超出则横向滚动）；active 是内缩 2pt 的**浮起圆角底板**（填充 + 细描边 + 轻阴影，浅色模式近白、深色模式浅灰），idle 只在 hover / press 时有扁平淡填充——两者的形态不同（浮起 vs 扁平），所以 hover 不会被读成选中。标题居中，关闭按钮在 hover 时出现在左侧，颜色点 / ⌘ 快捷键提示在右侧。分隔线以 overlay 形式画在 chip 边缘（不占宽度，保证等宽），紧挨 active chip 的两侧不画。所有参数集中在 `TabBarMetrics` / `TabBarColors`。
 
 - **不建并行 `TabBarState`。** tab 是 hierarchy-scoped（每 Worktree）。另起一个 `@Observable TabBarState` 容器意味着同一数据两个事实来源，并在 create/close/select 周围引入同步危险。既有模式（视图读 `HierarchyManager`、reducer 经 `HierarchyClient` 转发）已可扩展；在 `HierarchyClient` 上多挂几个闭包的边际成本，低于长期协调两个 store 的成本。
 

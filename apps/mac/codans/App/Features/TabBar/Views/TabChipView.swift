@@ -52,69 +52,60 @@ struct TabChipView: View {
 
   var body: some View {
     // Hit layout: the select Button claims the whole chip rectangle so
-    // a click anywhere on the chip selects it; the close button is
-    // overlaid on the trailing edge inside the same ZStack so it
-    // intercepts its own taps without forwarding to the outer Button.
-    // Without this, an HStack-of-Button-plus-sibling layout leaves dead
-    // zones (between the label and the close glyph, and on either
-    // chip-padding strip) that swallow clicks.
-    ZStack(alignment: .trailing) {
-      Button(action: onSelect) {
-        TabChipLabel(
-          title: title,
-          isActive: isActive,
-          isDirty: isDirty,
-          hasUnreadNotification: hasUnreadNotification,
-          icon: icon,
-          iconTint: iconTint
-        )
-        // `maxHeight: .infinity` is the load-bearing piece — without
-        // it the label collapses to its intrinsic text height (~16pt)
-        // and the Button's hit region only covers that strip,
-        // leaving most of the chip dead. Pair with the explicit
-        // `contentShape` here so the styled Button uses the expanded
-        // rectangle as its hit shape, not the text glyph bounds.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .padding(.horizontal, TabBarMetrics.chipHorizontalPadding)
-        // Reserve space for the close glyph + its gap so long titles
-        // truncate before they slide under the overlay.
-        .padding(.trailing, TabBarMetrics.closeButtonSize + 4)
-      }
-      .buttonStyle(ChipPressTrackingStyle(isPressing: $isPressing))
-      .frame(
-        minWidth: TabBarMetrics.chipMinWidth,
-        maxWidth: TabBarMetrics.chipMaxWidth,
-        minHeight: TabBarMetrics.chipHeight,
-        maxHeight: TabBarMetrics.chipHeight
+    // a click anywhere on the chip selects it; the close button (leading)
+    // and the color dot / chord hint (trailing) are overlays on the same
+    // rectangle so the close button intercepts its own taps without
+    // forwarding to the outer Button. Without this, an HStack-of-Button-
+    // plus-sibling layout leaves dead zones that swallow clicks.
+    //
+    // Width is owned by the row (`TabBarRowView` splits the track equally),
+    // so the chip only fills whatever it is given.
+    Button(action: onSelect) {
+      TabChipLabel(
+        title: title,
+        isActive: isActive,
+        isDirty: isDirty,
+        hasUnreadNotification: hasUnreadNotification,
+        icon: icon,
+        iconTint: iconTint
       )
-
-      // Trailing slot: chord hint takes precedence while ⌘ is held;
-      // otherwise the color dot (when set) occupies the close-button slot —
-      // hover/active reveals the close button on top, hiding the dot.
-      if let chordHint {
-        Text(chordHint)
-          .font(.caption.monospaced())
-          .foregroundStyle(.secondary)
-          .padding(.trailing, TabBarMetrics.chipHorizontalPadding)
-          .accessibilityHidden(true)
-          .allowsHitTesting(false)
-      } else {
-        ZStack {
-          if let tabColor {
-            Circle()
-              .fill(tabColor.swiftUIColor)
-              .frame(width: 8, height: 8)
-              .opacity(isHovering ? 0 : 1)
-              .allowsHitTesting(false)
-          }
-          TabChipCloseButton(
-            isVisible: isHovering,
-            action: onClose
-          )
+      // `maxHeight: .infinity` is the load-bearing piece — without
+      // it the label collapses to its intrinsic text height (~16pt)
+      // and the Button's hit region only covers that strip,
+      // leaving most of the chip dead. Pair with the explicit
+      // `contentShape` here so the styled Button uses the expanded
+      // rectangle as its hit shape, not the text glyph bounds.
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(Rectangle())
+      // Reserve the side slots symmetrically so the centered title stays
+      // optically centered and truncates before it slides under either
+      // overlay.
+      .padding(.horizontal, TabBarMetrics.chipHorizontalPadding + TabBarMetrics.closeButtonSize + 4)
+    }
+    .buttonStyle(ChipPressTrackingStyle(isPressing: $isPressing))
+    .frame(maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight)
+    .overlay(alignment: .leading) {
+      TabChipCloseButton(isVisible: isHovering, action: onClose)
+        .padding(.leading, TabBarMetrics.chipHorizontalPadding)
+    }
+    .overlay(alignment: .trailing) {
+      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
+      // tab's color dot (when set) sits there.
+      Group {
+        if let chordHint {
+          Text(chordHint)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+        } else if let tabColor {
+          Circle()
+            .fill(tabColor.swiftUIColor)
+            .frame(width: 8, height: 8)
+            .frame(width: TabBarMetrics.closeButtonSize)
         }
-        .padding(.trailing, TabBarMetrics.chipHorizontalPadding)
       }
+      .padding(.trailing, TabBarMetrics.chipHorizontalPadding)
+      .allowsHitTesting(false)
     }
     .background(
       TabChipBackground(

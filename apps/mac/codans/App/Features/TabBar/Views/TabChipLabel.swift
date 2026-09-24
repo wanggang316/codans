@@ -43,7 +43,7 @@ struct TabChipLabel: View {
           .accessibilityLabel("Has unread notifications")
       } else if let icon, !icon.isEmpty {
         glyph(for: icon)
-          .font(.system(size: 10))
+          .font(.system(size: 11))
           .foregroundStyle(
             iconTint ?? (isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
           )
@@ -52,7 +52,7 @@ struct TabChipLabel: View {
       Text(title)
         .lineLimit(1)
         .truncationMode(.middle)
-        .font(.caption)
+        .font(.system(size: 12))
         .foregroundStyle(isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
     }
   }
