@@ -65,11 +65,18 @@ struct ProjectScriptsSettingsView: View {
         onMove: moveScript,
         validateChord: { binding, excluding in
           chordValidator(binding, excludingScriptID: excluding)
-        }
+        },
+        suggestionGroups: store.commandSuggestions,
+        isScanningSuggestions: store.isScanningCommandSuggestions,
+        onAddSuggestion: addSuggestion,
+        onRefreshSuggestions: { store.send(.scanCommandSuggestions) }
       )
     }
     .padding(20)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    // Scan on every appearance so edits made outside codans (a new npm
+    // script) show up the next time the pane is opened.
+    .task(id: projectID) { store.send(.scanCommandSuggestions) }
   }
 
   /// Reject reserved / conflicting chords at recording time. Order
@@ -122,6 +129,14 @@ struct ProjectScriptsSettingsView: View {
     let new = ScriptDefinition(kind: kind, name: name)
     store.send(.setProjectScripts(scripts + [new]))
     selectedScriptID = new.id
+  }
+
+  /// Adopt a detected command and select the row that now carries it (a Run
+  /// suggestion may fill the built-in Run rather than append).
+  private func addSuggestion(_ suggestion: CommandSuggestion) {
+    let result = CommandSuggestionAdoption.adopt(suggestion, into: scripts)
+    store.send(.setProjectScripts(result.scripts))
+    selectedScriptID = result.scriptID
   }
 
   /// Move a command up (`offset == -1`) or down (`offset == 1`) by swapping it

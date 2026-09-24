@@ -20,6 +20,10 @@ struct ProjectSettingsFeature {
     /// the pane falls back to the catalog's first worktree, and disables
     /// Run when neither resolves.
     var lastFocusedWorktreeID: WorktreeID?
+    /// Commands detected in the Project's manifests, offered by the Commands
+    /// pane's `+` menu. Derived on every scan, never persisted.
+    var commandSuggestions: [CommandSuggestionGroup] = []
+    var isScanningCommandSuggestions = false
 
     var id: ProjectID { projectID }
   }
@@ -38,11 +42,18 @@ struct ProjectSettingsFeature {
     /// reducer surfaces the message via `.writeFailed` so the pane's
     /// existing failure banner displays it.
     case runScriptTapped(scriptID: UUID, worktreeID: WorktreeID)
+    /// (Re)scan the Project's manifests for command suggestions. Sent when
+    /// the Commands pane appears and from the menu's Refresh item.
+    case scanCommandSuggestions
+    case commandSuggestionsScanned([CommandSuggestionGroup])
   }
+
+  nonisolated enum CancelID: Sendable { case commandSuggestionScan }
 
   @Dependency(HierarchyClient.self) var hierarchyClient
   @Dependency(FinderClient.self) var finderClient
   @Dependency(SettingsWriter.self) var settingsWriter
+  @Dependency(CommandSuggestionClient.self) var commandSuggestionClient
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
@@ -90,8 +101,38 @@ struct ProjectSettingsFeature {
             await send(.writeFailed("Run script failed: \(error.localizedDescription)"))
           }
         }
+
+      case .scanCommandSuggestions:
+        guard let location = manifestLocation(for: state) else {
+          state.commandSuggestions = []
+          state.isScanningCommandSuggestions = false
+          return .cancel(id: CancelID.commandSuggestionScan)
+        }
+        state.isScanningCommandSuggestions = true
+        let scan = commandSuggestionClient.scan
+        return .run { send in
+          await send(.commandSuggestionsScanned(await scan(location)))
+        }
+        .cancellable(id: CancelID.commandSuggestionScan, cancelInFlight: true)
+
+      case .commandSuggestionsScanned(let groups):
+        state.commandSuggestions = groups
+        state.isScanningCommandSuggestions = false
+        return .none
       }
     }
+  }
+
+  /// Scan the checkout the user is working in — the pane's focused worktree,
+  /// else the Project's selected one — since branches can carry different
+  /// manifests; fall back to the Project root. Server projects read over SSH.
+  private func manifestLocation(for state: State) -> ManifestLocation? {
+    guard let project = hierarchyClient.snapshot().projects.first(where: { $0.id == state.projectID }) else {
+      return nil
+    }
+    let worktreeID = state.lastFocusedWorktreeID ?? project.selectedWorktreeID
+    let directory = project.worktrees.first(where: { $0.id == worktreeID })?.path ?? project.rootPath
+    return ManifestLocation(directory: directory, host: project.remoteHost)
   }
 
   /// Human-friendly mapping for the failure banner. Mirrors
