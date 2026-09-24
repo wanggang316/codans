@@ -1110,6 +1110,65 @@ struct RootFeatureTests {
     #expect(rec.worktree.value == worktreeID)
   }
 
+  /// The Create sheet's agent launches once the worktree materializes (the
+  /// setup script already ran in-stream); selection auto-seed is held off
+  /// until the launch settles so the agent owns the first tab.
+  @Test
+  func materializedWithAgentLaunchesProfile() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let profileID = UUID()
+    let launched = LockIsolated<[(UUID, ProjectID, WorktreeID)]>([])
+    let store = makeGateStore(
+      autoSwitch: true, activePendingWorktreeID: pendingID, recorder: SelectRecorder())
+    store.dependencies.hierarchyClient.launchAgentProfile = { pid, proj, wt in
+      launched.withValue { $0.append((pid, proj, wt)) }
+    }
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID,
+            agentProfileID: profileID)))
+    ) {
+      $0.agentLaunchWorktreeIDs = [worktreeID]
+    }
+    await store.receive(\.worktreeAgentLaunchFinished) {
+      $0.agentLaunchWorktreeIDs = []
+    }
+    #expect(launched.value.count == 1)
+    #expect(launched.value.first?.0 == profileID)
+    #expect(launched.value.first?.1 == projectID)
+    #expect(launched.value.first?.2 == worktreeID)
+  }
+
+  @Test
+  func materializedAgentLaunchFailureWarns() async {
+    let worktreeID = WorktreeID()
+    let profileID = UUID()
+    let store = makeGateStore(
+      autoSwitch: false, activePendingWorktreeID: nil, recorder: SelectRecorder())
+    store.dependencies.hierarchyClient.launchAgentProfile = { id, _, _ in
+      throw RunScriptError.unknownScript(id)
+    }
+    store.dependencies.continuousClock = ImmediateClock()
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: ProjectID(), pendingID: PendingWorktreeID(),
+            agentProfileID: profileID))))
+    await store.receive(
+      .worktreeAgentLaunchFinished(
+        worktreeID, failure: "Launch agent failed: profile no longer exists"))
+    await store.receive(
+      .statusBar(.push(.warning("Launch agent failed: profile no longer exists"))))
+    #expect(store.state.agentLaunchWorktreeIDs.isEmpty)
+  }
+
   @Test
   func gateOnAwaySwitches() async {
     // VAL-SWITCH-002: auto-switch ON + user navigated away (active id is a

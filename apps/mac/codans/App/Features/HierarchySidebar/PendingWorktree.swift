@@ -47,6 +47,10 @@ struct PendingWorktree: Equatable, Identifiable {
   /// Stashed here so a future cancel can materialize-on-cancel; this
   /// feature only sets it, it does not yet act on it.
   var materializedPath: URL?
+  /// Agent profile to launch in the new worktree after it materializes —
+  /// i.e. after the setup script, which runs inside the creation stream.
+  /// `nil` launches nothing.
+  var launchAgentProfileID: UUID?
 
   /// Soft cap on the streaming tail. Five lines is enough to read git's
   /// "Resolving deltas: 100% (842/842), done." without the loading

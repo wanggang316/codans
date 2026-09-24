@@ -79,6 +79,12 @@ struct RootFeature {
     /// them back would be a yank).
     var pendingPriorSelection: HierarchySelection?
 
+    /// New worktrees whose Create sheet picked an agent that is still being
+    /// launched. The agent's tab is the worktree's first tab, so selection
+    /// auto-seed skips these instead of racing it with a second, plain
+    /// shell tab. Cleared when the launch settles.
+    var agentLaunchWorktreeIDs: Set<WorktreeID> = []
+
     /// Command Palette overlay presentation. `nil` = hidden; non-nil
     /// renders the floating search card on top of the main split. Cleared
     /// on activation (the child emits `.delegate(.activate(…))`, the root
@@ -182,6 +188,9 @@ struct RootFeature {
     case onLaunch
     case onQuit
     case selectionChanged(HierarchySelection)
+    /// The Create-sheet agent launch for a new worktree settled. `failure`
+    /// is the status-bar message when it did not start.
+    case worktreeAgentLaunchFinished(WorktreeID, failure: String?)
     /// A structural hierarchy mutation landed (Project / Worktree removal,
     /// archive, auto-archive). Re-derives GitHub state from the live catalog.
     case catalogMembershipChanged
@@ -837,7 +846,9 @@ struct RootFeature {
         // forces the user to click twice. Safe to run unconditionally on
         // every selection change: createTab/openPane are no-ops when the
         // Worktree already has tabs/panes (we gate on .isEmpty below).
-        autoSeedTabAndPaneIfNeeded(for: selection)
+        if !(selection.worktreeID.map(state.agentLaunchWorktreeIDs.contains) ?? false) {
+          autoSeedTabAndPaneIfNeeded(for: selection)
+        }
         // Mirror the selection's active tab into the split viewport so the
         // lazy-surface lifecycle can react without reading HierarchyManager
         // from a reducer. Tab is resolved on-the-fly from the catalog.
@@ -1334,7 +1345,15 @@ struct RootFeature {
       // `pendingWorktreeFailed`), so failure never switches and never
       // mints a marker.
       case .sidebar(
-        .delegate(.worktreeMaterialized(let worktreeID, let projectID, let pendingID))):
+        .delegate(
+          .worktreeMaterialized(let worktreeID, let projectID, let pendingID, let agentProfileID))):
+        // The setup script already ran inside the creation stream, so the
+        // Create sheet's agent starts now — whether or not focus switches.
+        let launch =
+          agentProfileID.map {
+            launchAgentAfterCreate(
+              profileID: $0, projectID: projectID, worktreeID: worktreeID, state: &state)
+          } ?? .none
         let autoSwitch =
           settingsWriter.readSnapshotSync().worktree.autoSwitchToNewWorktree
         let shouldSelect = autoSwitch
@@ -1351,7 +1370,7 @@ struct RootFeature {
             state.activePendingWorktreeID = nil
             restorePendingPriorSelection(&state)
           }
-          return .none
+          return launch
         }
         // Select the project too for cross-project correctness, then the
         // worktree. `selectWorktree` emits a `.selectionChanged` that runs
@@ -1359,7 +1378,17 @@ struct RootFeature {
         // `activePendingWorktreeID`.
         hierarchyClient.selectProject(projectID)
         try? hierarchyClient.selectWorktree(worktreeID, projectID)
-        return .none
+        return launch
+
+      case .worktreeAgentLaunchFinished(let worktreeID, let failure):
+        state.agentLaunchWorktreeIDs.remove(worktreeID)
+        guard let failure else { return .none }
+        // No agent tab landed: give the worktree the shell tab its selection
+        // skipped while the launch was in flight.
+        if state.selection.worktreeID == worktreeID {
+          autoSeedTabAndPaneIfNeeded(for: state.selection)
+        }
+        return .send(.statusBar(.push(.warning(failure))))
 
       case .sidebar:
         return .none
@@ -2872,6 +2901,27 @@ struct RootFeature {
         let message = (error as? IPCError)?.displayMessage ?? error.localizedDescription
         await send(.handoffFailed(message: message))
       }
+    }
+  }
+
+  /// Launches the Create sheet's agent in a just-materialized worktree. The
+  /// worktree is parked in `agentLaunchWorktreeIDs` until the launch settles
+  /// so selection auto-seed leaves the first tab to the agent.
+  private func launchAgentAfterCreate(
+    profileID: UUID, projectID: ProjectID, worktreeID: WorktreeID, state: inout State
+  ) -> Effect<Action> {
+    state.agentLaunchWorktreeIDs.insert(worktreeID)
+    let client = hierarchyClient
+    return .run { send in
+      var failure: String?
+      do {
+        try await client.launchAgentProfile(profileID, projectID, worktreeID)
+      } catch let error as RunScriptError {
+        failure = await Self.launchAgentErrorMessage(error)
+      } catch {
+        failure = "Launch agent failed: \(error.localizedDescription)"
+      }
+      await send(.worktreeAgentLaunchFinished(worktreeID, failure: failure))
     }
   }
 

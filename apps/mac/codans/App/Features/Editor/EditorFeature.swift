@@ -343,6 +343,7 @@ nonisolated struct SettingsWriter: Sendable {
     case defaultMergeStrategy(MergeStrategy?)
     case postMergeAction(MergedWorktreeAction?)
     case githubDisabled(Bool)
+    case launchAgentProfileOnWorktreeCreate(UUID?)
   }
 
   var readSnapshot: @Sendable () async -> Settings
@@ -428,6 +429,8 @@ extension SettingsWriter {
               git.postMergeAction = value
             case .githubDisabled(let value):
               git.githubDisabled = value
+            case .launchAgentProfileOnWorktreeCreate(let value):
+              git.launchAgentProfileOnWorktreeCreate = value
             }
             project.git = git
             project.collapseEmptyGit()
