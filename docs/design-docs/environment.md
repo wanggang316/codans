@@ -133,6 +133,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 | `CODANS_CLI_BINARY` | 安装器指向 `.app` 外新编的 CLI | dev |
 | `CODANS_GHOSTTY_RESOURCES` | libghostty 资源树的替代根 | 未打包的 `xcodebuild run` |
 | `CODANS_DISABLE_ACTION_ROUTING` / `CODANS_DISABLE_THEME_DEV_FALLBACK` | 诊断与测试开关 | 值为 `"1"` 生效 |
+| `CODANS_REMOTE_DISABLED` | 无视设置，强制关闭 iOS 伴侣的局域网网关（不监听、不广播 Bonjour） | 隔离测试实例，值为 `"1"` 生效 |
 
 完整清单、写者与读者见 `CodansEnvironment.Key` 的逐条注释；那里是唯一真相来源，本表只列覆盖用途的。
 

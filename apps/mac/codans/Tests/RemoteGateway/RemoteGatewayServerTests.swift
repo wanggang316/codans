@@ -1,0 +1,119 @@
+import CodansRemote
+import Foundation
+import Network
+import Testing
+
+@testable import Codans
+@testable import CodansCore
+@testable import CodansIPC
+
+/// End to end on 127.0.0.1 (the `.loopback` scope never advertises over
+/// Bonjour): pairing, TLS-PSK handshake, per-request permission, revoke.
+@MainActor
+struct RemoteGatewayServerTests {
+  @Test(.timeLimit(.minutes(1)))
+  func pairedDeviceIsServedWithinItsTierUntilRevoked() async throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    let gateway = Self.makeGateway(store: store)
+    defer { gateway.setEnabled(false) }
+
+    gateway.setEnabled(true)
+    #expect(gateway.status == .noDevices)
+    let payload = try gateway.pairNewDevice()
+    #expect(payload.channel == BuildChannel.current.slug)
+    let port = try await Self.waitUntilListening(gateway)
+
+    let client = try await RemoteRPCClient.connect(
+      to: .hostPort(host: "127.0.0.1", port: port),
+      credential: payload.credential,
+      hello: HelloRequest(clientVersion: "1", clientBinary: "test")
+    )
+    #expect(store.device(payload.deviceID)?.state == .active)
+    #expect(gateway.connectedDeviceIDs == [payload.deviceID])
+
+    _ = try await client.callRaw(.systemPing, params: [String: String]())
+    #expect(await Self.errorCode(client, .terminalSendInput) == "forbidden")
+
+    // A permission change applies to the next request, no reconnect.
+    store.setPermission(payload.deviceID, to: .interactive)
+    #expect(await Self.errorCode(client, .terminalSendInput) == "unsupported")
+    #expect(await Self.errorCode(client, .systemQuit) == "forbidden")
+
+    store.revoke(payload.deviceID)
+    for _ in 0..<250 where await client.isConnected {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(await !client.isConnected)
+    #expect(gateway.status == .noDevices)
+  }
+
+  @Test
+  func environmentOverrideKeepsTheGatewayOff() throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    let gateway = Self.makeGateway(store: store, environment: ["CODANS_REMOTE_DISABLED": "1"])
+    _ = try store.beginPairing()
+    gateway.setEnabled(true)
+    #expect(gateway.status == .forcedOff)
+  }
+
+  @Test
+  func debugAndReleaseAdvertiseDistinctNames() throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    let dev = RemoteGatewayServer(
+      router: Self.makeRouter(), devices: store, channel: .development, environment: [:], hostName: "Mac",
+      scope: .loopback)
+    let release = RemoteGatewayServer(
+      router: Self.makeRouter(), devices: store, channel: .release, environment: [:], hostName: "Mac",
+      scope: .loopback)
+    #expect(dev.serviceName == "Mac (codans-dev)")
+    #expect(release.serviceName == "Mac")
+  }
+
+  // MARK: - Helpers
+
+  private static func makeRouter() -> MethodRouter {
+    MethodRouter(systemHandlers: SystemHandlers(versions: .init(server: "1", appBundle: "1")))
+  }
+
+  private static func makeGateway(
+    store: PairedDeviceStore,
+    environment: [String: String] = [:]
+  ) -> RemoteGatewayServer {
+    RemoteGatewayServer(
+      router: makeRouter(), devices: store, environment: environment, hostName: "Test", scope: .loopback)
+  }
+
+  private static func waitUntilListening(_ gateway: RemoteGatewayServer) async throws -> NWEndpoint.Port {
+    for _ in 0..<250 {
+      if case .listening(let port) = gateway.status, let endpoint = NWEndpoint.Port(rawValue: port) {
+        return endpoint
+      }
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    throw CancellationError()
+  }
+
+  private static func errorCode(_ client: RemoteRPCClient, _ method: IPC.Method) async -> String? {
+    do {
+      _ = try await client.callRaw(method, params: [String: String]())
+      return nil
+    } catch RemoteRPCClient.ClientError.ipc(let error) {
+      return error.code
+    } catch {
+      return "\(error)"
+    }
+  }
+
+  private static func makeTempDir() throws -> URL {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("remote-gateway-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+  }
+}

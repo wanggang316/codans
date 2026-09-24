@@ -82,6 +82,10 @@ public nonisolated enum CodansEnvironment {
     /// `"1"` stops the theme catalog falling back to the developer
     /// worktree's `.build/ghostty` tree, so "empty catalog" tests hold.
     case disableThemeDevFallback = "CODANS_DISABLE_THEME_DEV_FALLBACK"
+    /// `"1"` forces the LAN remote-access gateway off whatever Settings
+    /// says, so an isolated test instance never listens or advertises on
+    /// the network.
+    case remoteDisabled = "CODANS_REMOTE_DISABLED"
 
     // MARK: One-shot, per request
 

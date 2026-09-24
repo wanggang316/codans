@@ -198,6 +198,7 @@ struct CodansApp: App {
           .environment(appState.developerPaneDependencies)
           .environment(appState.osNotifier)
           .environment(appState.agentInstallation)
+          .environment(appState.remoteGateway)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
         } else {
@@ -621,6 +622,9 @@ final class AppState {
   private var worktreeWorkingTreeWatcherSyncTask: Task<Void, Never>?
 
   private var socketServer: SocketServer?
+  /// LAN gateway for the iOS companion; nil until IPC bring-up (and under
+  /// tests). Observed so the Settings pane appears once it lands.
+  private(set) var remoteGateway: RemoteGatewayServer?
   // EditorClient is built inside bringUp() alongside the TCA dependency
   // wiring and then threaded into startIPC() so EditorHandlers and the
   // in-app reducer stack share a single service instance.
@@ -1223,35 +1227,38 @@ final class AppState {
       settings: settingsStore,
       hierarchy: hierarchyClient
     )
+    let agentHandlers = AgentHandlers(
+      settings: settingsStore,
+      hierarchy: hierarchyClient,
+      installation: agentInstallation,
+      stateStore: { [weak self] in self?.agentStateStore },
+      handleRegistry: targetHandles,
+      focusedPane: { [weak hierarchy] in
+        guard let hierarchy else { return nil }
+        return Self.currentlyFocusedPane(
+          catalog: hierarchy.catalog,
+          lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
+        )
+      }
+    )
     let router = MethodRouter(
       systemHandlers: systemHandlers,
       hierarchyHandlers: hierarchyHandlers,
       terminalHandlers: terminalHandlers,
       editorHandlers: editorHandlers,
       projectHandlers: projectHandlers,
-      agentHandlers: AgentHandlers(
-        settings: settingsStore,
-        hierarchy: hierarchyClient,
-        installation: agentInstallation,
-        stateStore: { [weak self] in self?.agentStateStore },
-        handleRegistry: targetHandles,
-        focusedPane: { [weak hierarchy] in
-          guard let hierarchy else { return nil }
-          return Self.currentlyFocusedPane(
-            catalog: hierarchy.catalog,
-            lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
-          )
-        }
-      ),
+      agentHandlers: agentHandlers,
       handoffHandlers: handoffHandlers,
       workspaceHandlers: WorkspaceHandlers(
         hierarchy: hierarchyClient,
         workspace: workspaceClient,
         gitCLI: GitWorktreeCLI()
-      )
+      ),
+      eventHub: makeEventHub(hierarchy: hierarchy, handles: targetHandles, agentHandlers: agentHandlers)
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
+    startRemoteGateway(router: router, settingsStore: settingsStore)
     do {
       try server.start()
       self.socketServer = server
@@ -1264,6 +1271,44 @@ final class AppState {
         "SocketServer bind failed at \(resolvedSocketPath, privacy: .public): \(String(describing: error), privacy: .public)"
       )
     }
+  }
+
+  /// `events.subscribe` sources: the hierarchy summary and the agent-state
+  /// rows `agent.listStates` returns, so the stream and the CLI agree.
+  private func makeEventHub(
+    hierarchy: HierarchyManager,
+    handles: TargetHandleRegistry,
+    agentHandlers: AgentHandlers
+  ) -> EventHub {
+    EventHub(
+      sources: EventHub.Sources(
+        hierarchy: { [weak self, weak hierarchy] in
+          guard let hierarchy else { return IPC.HierarchySummary(projects: [], selectedProjectID: nil) }
+          let catalog = hierarchy.catalog
+          handles.sync(with: catalog)
+          let agentStates = self?.agentStateStore
+          return EventProjection.hierarchySummary(
+            catalog: catalog,
+            handles: handles.snapshot(),
+            focusedPane: { hierarchy.lastFocusedPane(in: $0) },
+            paneTitle: { agentStates?.title(for: $0) }
+          )
+        },
+        agents: { (try? agentHandlers.listStates().agents) ?? [] }
+      )
+    )
+  }
+
+  /// The LAN gateway for the iOS companion. Built even when the setting is
+  /// off so Settings can manage paired devices; it listens only while
+  /// enabled.
+  private func startRemoteGateway(router: MethodRouter, settingsStore: SettingsStore) {
+    let gateway = RemoteGatewayServer(
+      router: router,
+      devices: PairedDeviceStore(keys: KeychainRemoteKeyStore())
+    )
+    gateway.setEnabled(settingsStore.settings.remoteAccess.enabled)
+    self.remoteGateway = gateway
   }
 
   /// Handoff transition core wired to the live runtime: pane → source

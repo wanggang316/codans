@@ -380,6 +380,7 @@ let project = Project(
       dependencies: [
         .target(name: "CodansCore"),
         .target(name: "CodansIPC"),
+        .target(name: "CodansRemote"),
         .target(name: "codans-cli"),
         .target(name: "CodansKit"),
         .target(name: "GhosttyKit"),
