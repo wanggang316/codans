@@ -37,6 +37,13 @@ struct ScriptCommandTable: View {
   /// pane) there are no kind presets — `+` adds a single plain Custom command
   /// and every row is freely removable.
   var allowsKindPresets: Bool = true
+  /// Commands detected in the Project's manifests, listed under the preset
+  /// kinds in the `+` menu. Only consulted when `onAddSuggestion` is set.
+  var suggestionGroups: [CommandSuggestionGroup] = []
+  var isScanningSuggestions = false
+  /// Adopt a detected command. nil hides the suggestion section entirely.
+  var onAddSuggestion: ((CommandSuggestion) -> Void)?
+  var onRefreshSuggestions: (() -> Void)?
 
   private let iconColumnWidth: CGFloat = 48
   private let nameColumnWidth: CGFloat = 130
@@ -181,7 +188,8 @@ struct ScriptCommandTable: View {
   }
 
   /// `+` menu: offers each preset kind plus Custom. Predefined kinds already
-  /// present are excluded so a Project can't hold two `Run` commands.
+  /// present are excluded so a Project can't hold two `Run` commands. Below
+  /// them, one submenu per manifest lists the Project's detected commands.
   private var addMenu: some View {
     let usedKinds = Set(scripts.map(\.kind))
     return Menu {
@@ -201,6 +209,9 @@ struct ScriptCommandTable: View {
           }
         }
       }
+      if let onAddSuggestion {
+        suggestionSection(onAddSuggestion)
+      }
     } label: {
       ZStack {
         Image(systemName: "plus")
@@ -215,6 +226,69 @@ struct ScriptCommandTable: View {
     .menuIndicator(.hidden)
     .fixedSize()
     .help("Add command")
+  }
+}
+
+// MARK: - Suggestions
+
+extension ScriptCommandTable {
+  /// Menu subtitles are single-line; a long script body only needs its head.
+  private static let suggestionDetailLimit = 60
+
+  @ViewBuilder
+  fileprivate func suggestionSection(_ onAddSuggestion: @escaping (CommandSuggestion) -> Void) -> some View {
+    Divider()
+    Section("From Project") {
+      if suggestionGroups.isEmpty {
+        Text(isScanningSuggestions ? "Scanning…" : "No commands found")
+      }
+      ForEach(suggestionGroups) { group in
+        Menu(group.source.displayName) {
+          ForEach(group.suggestions) { suggestion in
+            suggestionButton(suggestion, onAddSuggestion)
+          }
+        }
+      }
+      if let onRefreshSuggestions {
+        Button("Refresh", action: onRefreshSuggestions)
+      }
+    }
+  }
+
+  /// Already-adopted commands stay listed but disabled with a checkmark, so
+  /// the menu still mirrors the manifest and never offers a duplicate.
+  private func suggestionButton(
+    _ suggestion: CommandSuggestion,
+    _ onAddSuggestion: @escaping (CommandSuggestion) -> Void
+  ) -> some View {
+    let isAdopted = CommandSuggestionAdoption.isAdopted(suggestion, in: scripts)
+    return Button {
+      onAddSuggestion(suggestion)
+    } label: {
+      Label {
+        Text(suggestion.name)
+        Text(Self.menuDetail(for: suggestion))
+      } icon: {
+        if isAdopted {
+          Image(systemName: "checkmark")
+        } else {
+          ScriptTintColorPalette.menuIcon(
+            systemName: suggestion.kind.defaultSystemImage,
+            tint: suggestion.kind.defaultTintColor
+          )
+        }
+      }
+    }
+    .disabled(isAdopted)
+  }
+
+  /// The runnable command, plus what it expands to when the manifest says.
+  private static func menuDetail(for suggestion: CommandSuggestion) -> String {
+    guard let detail = suggestion.detail, detail != suggestion.command else { return suggestion.command }
+    let oneLine = detail.split(whereSeparator: \.isNewline).joined(separator: " ")
+    let clipped =
+      oneLine.count > suggestionDetailLimit ? String(oneLine.prefix(suggestionDetailLimit)) + "…" : oneLine
+    return "\(suggestion.command) — \(clipped)"
   }
 }
 
