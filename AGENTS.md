@@ -29,7 +29,7 @@ On Xcode 26.4+, zig 0.15.2 cannot link against the stock macOS SDK; `build-ghost
 
 ## Architecture Overview
 
-codans is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `codans` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI. Architecture is adapted from the user's reference projects **supacode** and **supaterm**.
+codans is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `codans` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI (the same protocol also serves a paired iOS companion over a default-off LAN TLS-PSK gateway). Architecture is adapted from the user's reference projects **supacode** and **supaterm**.
 
 See [Architecture](docs/architecture.md) for domains, layers, and dependency rules.
 
@@ -42,15 +42,17 @@ codans/
 │   ├── codans-cli/             # `codans` CLI binary (RPC client to the running app)
 │   ├── CodansKit/              # CLI-side library shared by codans-cli + tests
 │   ├── CodansCore/          # Pure domain models (Project / Worktree / Tab / Pane / Tag)
-│   ├── CodansIPC/           # JSON-RPC wire protocol shared by app + CLI
+│   ├── CodansIPC/           # JSON-RPC wire protocol shared by app + CLI + iOS app
+│   ├── CodansRemote/           # LAN remote access (TLS-PSK, Bonjour, pairing) shared by Mac gateway + iOS app
 │   ├── ThirdParty/ghostty/     # libghostty submodule (built into GhosttyKit.xcframework)
 │   ├── Project.swift           # Tuist project definition
 │   └── Makefile                # Mac-platform build targets
+├── apps/ios/                   # iOS companion app (CodansMobile): Tuist project reusing apps/mac shared targets
 ├── docs/                       # Project documentation (architecture, specs, design, plans)
 ├── skills/                     # Published Agent Skill content (text-only, no engineering coupling)
 ├── scripts/                    # Repo-wide scripts
 ├── mise.toml                   # Pinned tool versions (tuist / zig / swiftlint / xcbeautify)
-├── Makefile                    # Top-level delegator → apps/mac/Makefile
+├── Makefile                    # Top-level delegator → apps/mac/Makefile, apps/ios/Makefile
 └── .github/workflows/          # CI workflows
 ```
 
