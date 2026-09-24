@@ -107,6 +107,51 @@ let project = Project(
       )
     ),
 
+    // LAN remote-access plumbing shared by the Mac gateway and the iOS
+    // companion: pairing payload, TLS-PSK parameters, NWConnection transport,
+    // long-lived multiplexed RPC client. Network + Security only, no UI.
+    .target(
+      name: "CodansRemote",
+      destinations: sharedDestinations,
+      product: .staticFramework,
+      bundleId: "com.gumpw.codans.remote",
+      deploymentTargets: sharedDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["CodansRemote"],
+      dependencies: [
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
+      ],
+      settings: .settings(
+        base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
+        defaultSettings: .essential
+      )
+    ),
+
+    // CodansRemote unit tests. Hostless; the TLS-PSK tests run a real
+    // NWListener / NWConnection pair on 127.0.0.1.
+    .target(
+      name: "CodansRemoteTests",
+      destinations: .macOS,
+      product: .unitTests,
+      bundleId: "com.gumpw.codans.remote-tests",
+      deploymentTargets: .macOS("14.0"),
+      infoPlist: .default,
+      buildableFolders: ["CodansRemoteTests"],
+      dependencies: [
+        .target(name: "CodansRemote"),
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
+      ],
+      settings: .settings(
+        base: [
+          "CODE_SIGNING_ALLOWED": "NO",
+          "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
+        ],
+        defaultSettings: .essential
+      )
+    ),
+
     // Ghostty foreign build. Produces GhosttyKit.xcframework from ThirdParty/ghostty.
     .foreignBuild(
       name: "GhosttyKit",
