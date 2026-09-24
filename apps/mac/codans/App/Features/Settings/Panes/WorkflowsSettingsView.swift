@@ -1,5 +1,6 @@
 import AppKit
 import CodansCore
+import ComposableArchitecture
 import SwiftUI
 
 /// Settings → Agents → Workflows. Lists every discovered
@@ -19,6 +20,7 @@ struct WorkflowsSettingsView: View {
   @State private var scanResult = ScanResult()
   @State private var isScanning = false
   @State private var trustPrompt: TrustPromptTarget?
+  @State private var isCreating = false
 
   private struct ScanResult: Sendable {
     var bundle: [WorkflowCatalogEntry] = []
@@ -53,6 +55,20 @@ struct WorkflowsSettingsView: View {
     }
     .formStyle(.grouped)
     .task { await refresh() }
+    .sheet(isPresented: $isCreating) {
+      NewWorkflowSheet(
+        locations: newWorkflowLocations,
+        starters: newWorkflowStarters,
+        onCreated: { url, location in
+          isCreating = false
+          Task {
+            await refresh()
+            await open(url, in: location)
+          }
+        },
+        onCancel: { isCreating = false }
+      )
+    }
     .sheet(item: $trustPrompt) { target in
       WorkflowTrustConfirmationSheet(
         entry: target.entry,
@@ -82,8 +98,62 @@ struct WorkflowsSettingsView: View {
         .help("Rescan workflow files")
         .disabled(isScanning)
       }
+      HStack {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("New workflow")
+          Text("Start from a blank starter or a copy of any workflow below.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("New Workflow…") { isCreating = true }
+          .accessibilityIdentifier("settings.workflows.new")
+      }
     } footer: {
       Text("Turning this off removes the `codans workflow` commands and palette entries.")
+    }
+  }
+
+  // MARK: - New workflow
+
+  /// The user scope first, then every repository the scan would list.
+  private var newWorkflowLocations: [NewWorkflowSheet.Location] {
+    let user = NewWorkflowSheet.Location(
+      id: "user", title: "User", directory: AppDirectories.workflowsDirectory(),
+      worktreeRoot: nil, projectID: nil)
+    let repositories = eligibleProjects.map { project in
+      let root = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+      return NewWorkflowSheet.Location(
+        id: project.id.raw.uuidString, title: "Repository — \(project.name)",
+        directory: WorkflowDiscovery.repositoryDirectory(worktreeRoot: root), worktreeRoot: root,
+        projectID: project.id)
+    }
+    return [user] + repositories
+  }
+
+  /// Blank, then a copy of every definition that currently validates.
+  private var newWorkflowStarters: [NewWorkflowSheet.Starter] {
+    let blank = NewWorkflowSheet.Starter(id: "blank", title: "Blank starter", source: .blank)
+    let groups: [(String, [WorkflowCatalogEntry])] =
+      [("Built-in", scanResult.bundle), ("User", scanResult.user)]
+      + repositoryGroups.map { ($0.projectName, $0.entries) }
+    let copies = groups.flatMap { scope, entries in
+      entries.filter(\.isValid).map { entry in
+        NewWorkflowSheet.Starter(
+          id: entry.path, title: "Copy of \(entry.name) (\(scope))", source: .copy(yaml: entry.yaml))
+      }
+    }
+    return [blank] + copies
+  }
+
+  /// Opens the new file in the user's editor — the project's default for a
+  /// repository file — and falls back to Finder when no editor can open it.
+  private func open(_ url: URL, in location: NewWorkflowSheet.Location) async {
+    @Dependency(DiffEditorClient.self) var editor
+    do {
+      try await editor.openFile(location.directory, url.lastPathComponent, nil, location.projectID)
+    } catch {
+      NSWorkspace.shared.activateFileViewerSelecting([url])
     }
   }
 
