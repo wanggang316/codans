@@ -307,4 +307,61 @@ struct TabBarFeatureTests {
       ))
     #expect(!splitCalled.value)
   }
+
+  // MARK: - `+` agent menu
+
+  @Test
+  func launchAgentFromNewTabMenuForcesANewTab() async {
+    let profile = AgentProfile(kind: .codex, target: .split)
+    let worktreeID = WorktreeID()
+    let projectID = ProjectID()
+    let launched = LockIsolated<AgentLaunchSpec?>(nil)
+    let store = TestStore(initialState: TabBarFeature.State()) {
+      TabBarFeature()
+    } withDependencies: {
+      $0[SettingsWriter.self].readSnapshotSync = {
+        Settings(agents: AgentSettings(profiles: [profile]))
+      }
+      $0.hierarchyClient.launchAgent = { spec in
+        launched.withValue { $0 = spec }
+        return AgentLaunchOutcome(profile: spec.profile, command: "codex", tabID: nil, paneID: nil)
+      }
+    }
+
+    await store.send(
+      .launchAgentInNewTabTapped(
+        profileID: profile.id, inWorktree: worktreeID, inProject: projectID))
+    await store.finish()
+    #expect(launched.value?.profile.id == profile.id)
+    #expect(launched.value?.worktreeID == worktreeID)
+    #expect(launched.value?.projectID == projectID)
+    // The profile's saved `.split` placement yields to the new-tab button.
+    #expect(launched.value?.target == .newTab)
+  }
+
+  @Test
+  func launchAgentFromNewTabMenuIgnoresRemovedProfile() async {
+    let store = TestStore(initialState: TabBarFeature.State()) {
+      TabBarFeature()
+    } withDependencies: {
+      $0[SettingsWriter.self].readSnapshotSync = { Settings(agents: AgentSettings(profiles: [])) }
+    }
+    // `launchAgent` stays unimplemented: reaching it would record an issue.
+    await store.send(
+      .launchAgentInNewTabTapped(
+        profileID: UUID(), inWorktree: WorktreeID(), inProject: ProjectID()))
+  }
+
+  @Test
+  func manageAgentsOpensTheAgentsSettingsPane() async {
+    let opened = LockIsolated<SettingsSection?>(nil)
+    let store = TestStore(initialState: TabBarFeature.State()) {
+      TabBarFeature()
+    } withDependencies: {
+      $0.settingsWindowPresenter.openAt = { section in opened.withValue { $0 = section } }
+    }
+    await store.send(.manageAgentsTapped)
+    await store.finish()
+    #expect(opened.value == .agents)
+  }
 }

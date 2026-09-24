@@ -81,9 +81,18 @@ struct TabBarFeature {
     case resumeAgentSessionTapped(
       agent: AgentKind, sessionID: String,
       inWorktree: WorktreeID, inProject: ProjectID)
+    /// An agent picked from the `+` button's press-and-hold / right-click
+    /// menu. Starts the profile in a new tab whatever its saved placement —
+    /// the user reached it from the new-tab button.
+    case launchAgentInNewTabTapped(
+      profileID: UUID, inWorktree: WorktreeID, inProject: ProjectID)
+    /// "Manage Agents…" footer of the same menu.
+    case manageAgentsTapped
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
+  @Dependency(SettingsWriter.self) private var settingsWriter
+  @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
@@ -238,6 +247,23 @@ struct TabBarFeature {
           // surface view must attach to the hosting window before
           // `makeFirstResponder` takes.
           await MainActor.run { client.focusSurfaceView(paneID) }
+        }
+
+      case .launchAgentInNewTabTapped(let profileID, let worktreeID, let projectID):
+        // A profile removed between opening the menu and picking it is a
+        // silent no-op, like the rest of the tab bar's rare failures.
+        guard let profile = settingsWriter.readSnapshotSync().agents.profile(id: profileID)
+        else { return .none }
+        let spec = AgentLaunchSpec(
+          profile: profile, projectID: projectID, worktreeID: worktreeID, target: .newTab)
+        return .run { [client = hierarchyClient] _ in
+          _ = try? await client.launchAgent(spec)
+        }
+
+      case .manageAgentsTapped:
+        let presenter = settingsWindowPresenter
+        return .run { _ in
+          await MainActor.run { presenter.openAt(.agents) }
         }
       }
     }

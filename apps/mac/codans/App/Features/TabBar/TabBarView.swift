@@ -111,6 +111,12 @@ struct TabBarView: View {
               inWorktree: worktreeID, inProject: projectID
             ))
         },
+        onLaunchAgent: { profileID in
+          store.send(
+            .launchAgentInNewTabTapped(
+              profileID: profileID, inWorktree: worktreeID, inProject: projectID))
+        },
+        onManageAgents: { store.send(.manageAgentsTapped) },
         onResumeSession: { session in
           store.send(
             .resumeAgentSessionTapped(
