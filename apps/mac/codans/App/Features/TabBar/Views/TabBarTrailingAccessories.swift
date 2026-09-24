@@ -5,7 +5,8 @@ import CodansCore
 /// outside the scrollable chip row so these buttons stay visible
 /// regardless of how many tabs are open.
 ///
-/// Four actions: `+` creates a new tab in the active worktree; the session
+/// Four actions: `+` creates a new tab in the active worktree (press-and-hold
+/// or right-click it to start an agent in the new tab instead); the session
 /// history clock resumes a recorded agent session in a new tab; the two
 /// split buttons cut a new pane horizontally or vertically off the active
 /// tab's leftmost leaf.
@@ -19,6 +20,8 @@ struct TabBarTrailingAccessories: View {
   /// for local — routes the session-history scan to the host's stores.
   var remoteHost: RemoteHost?
   let onNewTab: () -> Void
+  let onLaunchAgent: (_ profileID: UUID) -> Void
+  let onManageAgents: () -> Void
   let onResumeSession: (AgentSessionSummary) -> Void
   let onSplitRight: () -> Void
   let onSplitDown: () -> Void
@@ -29,7 +32,8 @@ struct TabBarTrailingAccessories: View {
     // next button. The tight `commandKeyHint(spacing:)` on each accessory
     // is the other half of the same grouping.
     HStack(spacing: 6) {
-      NewTabAccessoryButton(action: onNewTab)
+      NewTabAccessoryButton(
+        action: onNewTab, onLaunchAgent: onLaunchAgent, onManageAgents: onManageAgents)
 
       if let worktreePath {
         AgentSessionHistoryButton(
@@ -80,8 +84,16 @@ private struct AccessoryIconChrome: ViewModifier {
 
 /// `+` button. Split into its own view so the hover state is local and
 /// doesn't redraw siblings on every pointer crossing.
+///
+/// Press-and-hold or right-click opens a menu of the offered agent profiles
+/// (the toolbar Agents menu's list) that each start in a new tab, plus a
+/// "Manage Agents…" footer.
 private struct NewTabAccessoryButton: View {
   let action: () -> Void
+  let onLaunchAgent: (_ profileID: UUID) -> Void
+  let onManageAgents: () -> Void
+  @Environment(SettingsStore.self) private var settingsStore
+  @Environment(AgentInstallationStore.self) private var installation
   @State private var isHovering = false
 
   var body: some View {
@@ -94,8 +106,24 @@ private struct NewTabAccessoryButton: View {
         .commandKeyHint(.newTab, spacing: 2)
     }
     .buttonStyle(.plain)
+    .overlay(NewTabMenuOverlay(onClick: action, menuItems: agentMenuItems))
     .onHover { isHovering = $0 }
     .helpWithShortcut("New Tab", .newTab)
+  }
+
+  private func agentMenuItems() -> [NewTabMenuItem] {
+    let profiles = AgentInstallationStore.offeredProfiles(
+      enabled: settingsStore.settings.agents.enabledProfiles,
+      isInstalled: installation.isInstalled
+    )
+    var items = profiles.map { profile in
+      NewTabMenuItem.action(
+        profile.displayName, image: AgentMenuIcon.nsImage(for: profile.icon)
+      ) { onLaunchAgent(profile.id) }
+    }
+    if !items.isEmpty { items.append(.separator) }
+    items.append(.action("Manage Agents…", perform: onManageAgents))
+    return items
   }
 }
 
