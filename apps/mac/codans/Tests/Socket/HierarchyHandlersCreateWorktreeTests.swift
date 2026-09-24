@@ -301,6 +301,101 @@ struct HierarchyHandlersCreateWorktreeTests {
     }
   }
 
+  // MARK: - Launch agent
+
+  @Test
+  func agentProfileLaunchesInTheCreatedWorktree() async throws {
+    let spy = CreatorSpy()
+    let launcher = LauncherSpy()
+    let codex = AgentProfile(kind: .codex, name: "Build")
+    let fixture = Self.makeFixture(
+      globalWorktreesDirectory: Self.tempDirectory().path, creator: spy,
+      agentProfiles: [codex], launcher: launcher)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: nil, branch: "x", reuseExisting: nil,
+        agentProfile: "build"))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    let spec = try #require(launcher.specs.first)
+    #expect(spec.profile.id == codex.id)
+    #expect(spec.worktreeID == result.id)
+    #expect(spec.projectID == fixture.projectID)
+    #expect(result.created)
+    #expect(result.agent?.profileID == codex.id)
+    #expect(result.agent?.paneID == launcher.paneID)
+  }
+
+  @Test
+  func agentTokenPicksItsFirstEnabledProfile() async throws {
+    let launcher = LauncherSpy()
+    let disabled = AgentProfile(kind: .claudeCode, name: "Off", isEnabled: false)
+    let claude = AgentProfile(kind: .claudeCode, name: "On")
+    let fixture = Self.makeFixture(agentProfiles: [disabled, claude], launcher: launcher)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: "/x", branch: "x", reuseExisting: nil,
+        agent: "claude"))
+
+    _ = await fixture.handlers.createWorktree(params)
+
+    #expect(launcher.specs.map(\.profile.id) == [claude.id])
+  }
+
+  /// A bad selector fails the call before anything is materialised.
+  @Test
+  func disabledAgentProfileFailsBeforeCreating() async throws {
+    let spy = CreatorSpy()
+    let launcher = LauncherSpy()
+    let off = AgentProfile(kind: .codex, name: "Off", isEnabled: false)
+    let fixture = Self.makeFixture(
+      globalWorktreesDirectory: Self.tempDirectory().path, creator: spy,
+      agentProfiles: [off], launcher: launcher)
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: nil, branch: "x", reuseExisting: nil,
+        agentProfile: "Off"))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+
+    guard case .failed(.conflict) = outcome else {
+      Issue.record("expected .conflict, got \(outcome)")
+      return
+    }
+    #expect(spy.specs.isEmpty)
+    #expect(launcher.specs.isEmpty)
+  }
+
+  @Test
+  func agentIsUnsupportedWithoutALauncher() async throws {
+    let fixture = Self.makeFixture()
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: "/x", branch: "x", reuseExisting: nil,
+        agent: "codex"))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+
+    guard case .failed(.unsupported) = outcome else {
+      Issue.record("expected .unsupported, got \(outcome)")
+      return
+    }
+  }
+
+  /// Records every launch and answers with a fixed pane.
+  @MainActor
+  private final class LauncherSpy {
+    var specs: [AgentLaunchSpec] = []
+    let paneID = PaneID()
+    func launch(_ spec: AgentLaunchSpec) -> AgentLaunchOutcome {
+      specs.append(spec)
+      return AgentLaunchOutcome(
+        profile: spec.profile, command: "agent", tabID: TabID(), paneID: paneID)
+    }
+  }
+
   /// Records every spec the handler hands to the creator and answers with
   /// the requested path (or throws the configured failure).
   @MainActor
@@ -328,7 +423,9 @@ struct HierarchyHandlersCreateWorktreeTests {
     gitRoot: String? = "/repo",
     creator: CreatorSpy? = nil,
     defaultBaseRef: String? = nil,
-    removerWarning: String? = nil
+    removerWarning: String? = nil,
+    agentProfiles: [AgentProfile] = [],
+    launcher: LauncherSpy? = nil
   ) -> Fixture {
     let projectID = ProjectID()
     let project = Project(
@@ -346,6 +443,7 @@ struct HierarchyHandlersCreateWorktreeTests {
     )
     var settings = Settings()
     settings.worktree.defaultWorktreesDirectory = globalWorktreesDirectory
+    settings.agents = AgentSettings(profiles: agentProfiles)
     if let override = worktreesDirectoryOverride {
       settings.projects[projectID] = ProjectSettings(worktreesDirectory: override)
     }
@@ -361,7 +459,8 @@ struct HierarchyHandlersCreateWorktreeTests {
           try manager.removeWorktree(worktreeID, from: projectID)
           return warning
         }
-      }
+      },
+      agentLauncher: launcher.map { spy in { @MainActor @Sendable spec in spy.launch(spec) } }
     )
     return Fixture(handlers: handlers, projectID: projectID, removedBox: removed)
   }

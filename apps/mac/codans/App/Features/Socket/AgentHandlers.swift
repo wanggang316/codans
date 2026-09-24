@@ -72,26 +72,11 @@ final class AgentHandlers {
     guard hierarchy.kind(request.projectID) != nil else {
       throw IPCError.notFound(kind: "project", id: request.projectID.description)
     }
-    let agent: AgentKind?
-    if let token = request.agent {
-      guard let kind = AgentKind(token: token) else {
-        throw IPCError.invalidParams(
-          message: "unknown agent \"\(token)\"; expected one of: \(Self.agentTokens)",
-          path: ["agent"])
-      }
-      agent = kind
-    } else {
-      agent = nil
-    }
-    let profile = try AgentProfileSelector.resolve(
+    let profile = try AgentProfileSelector.resolveLaunchable(
       selector: request.profile,
-      agent: agent,
+      agentToken: request.agent,
       in: settings.settings.agents
     )
-    guard profile.isEnabled else {
-      throw IPCError.conflict(
-        reason: "profile \"\(profile.displayName)\" is disabled; enable it in Settings > Agents")
-    }
     if let prompt = request.prompt, !prompt.isEmpty, !profile.descriptor.supportsInitialPrompt {
       throw IPCError.unsupported(
         reason: "\(profile.kind.displayName) cannot start with a prompt; launch it without --prompt")
@@ -120,10 +105,6 @@ final class AgentHandlers {
       tabID: outcome.tabID,
       paneID: outcome.paneID
     )
-  }
-
-  static var agentTokens: String {
-    AgentKind.allCases.map(\.rawValue).joined(separator: ", ")
   }
 
   // MARK: - listStates
@@ -239,6 +220,38 @@ final class AgentHandlers {
 ///    agent, else the agent's bare preset (transient, never persisted).
 /// 4. Nothing given → the first enabled profile in list order.
 nonisolated enum AgentProfileSelector {
+  static var agentTokens: String {
+    AgentKind.allCases.map(\.rawValue).joined(separator: ", ")
+  }
+
+  /// `resolve` for a caller about to launch: parses the `--agent` token and
+  /// refuses a disabled profile with `conflict` — disabling is the user's way
+  /// of taking a preset out of circulation, and a CLI launch must not bypass
+  /// that.
+  static func resolveLaunchable(
+    selector: String?,
+    agentToken: String?,
+    in agents: AgentSettings
+  ) throws -> AgentProfile {
+    let agent: AgentKind?
+    if let agentToken {
+      guard let kind = AgentKind(token: agentToken) else {
+        throw IPCError.invalidParams(
+          message: "unknown agent \"\(agentToken)\"; expected one of: \(agentTokens)",
+          path: ["agent"])
+      }
+      agent = kind
+    } else {
+      agent = nil
+    }
+    let profile = try resolve(selector: selector, agent: agent, in: agents)
+    guard profile.isEnabled else {
+      throw IPCError.conflict(
+        reason: "profile \"\(profile.displayName)\" is disabled; enable it in Settings > Agents")
+    }
+    return profile
+  }
+
   static func resolve(
     selector: String?,
     agent: AgentKind?,

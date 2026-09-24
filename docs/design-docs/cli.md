@@ -145,7 +145,7 @@
 | `codans worktree show [ID]` | `hierarchy.describeWorktree` | `HierarchyHandlers.describeWorktree` | `[ID]`；回带 `{id, projectID, projectName, name, path, branch, isArchived, isPinned, isSelected, selectedTabID, tabCount}` |
 | `codans worktree rename ID NAME` | `hierarchy.renameWorktree` | `HierarchyManager.renameWorktree` | `ID`，`NAME`（仅侧栏标签，路径/分支不变；空白拒绝），`[--project P]` |
 | `codans worktree prune` | `hierarchy.pruneWorktrees` | `GitWorktreeClient.pruneWorktrees` → `HierarchyClient.reconcileDiscoveredWorktrees` | `[--project P]`；回带 `{projectID, pruned}`。文件夹项目 → `invalidParams`，远端项目 → `unsupported` |
-| `codans worktree new BRANCH` | `hierarchy.createWorktree` | `HierarchyHandlers.createWorktree` → `GitWorktreeClient.createWorktreeStream` + `HierarchyManager.createWorktree` | `BRANCH`，`[--project P] [--path PATH] [--name NAME] [--base REF] [--reuse-existing]` |
+| `codans worktree new BRANCH` | `hierarchy.createWorktree` | `HierarchyHandlers.createWorktree` → `GitWorktreeClient.createWorktreeStream` + `HierarchyManager.createWorktree` | `BRANCH`，`[--project P] [--path PATH] [--name NAME] [--base REF] [--reuse-existing] [--profile NAME\|ID] [--agent TOKEN]` |
 | `codans worktree switch ID` | `hierarchy.activateWorktree` | `HierarchyManager.selectWorktree` | `ID` |
 | `codans worktree rm [ID]` | `hierarchy.removeWorktree` | `HierarchyManager.removeWorktree`；`--delete` → `HierarchyClient.removeWorktreeWithGit` | `ID`，或 `--by-path PATH [--all]`（按规范化路径删一/多行），`[--project P] [--delete]`。不带 `--delete` 只删 catalog 行（真实 git worktree 会被下一次 reconcile 收回）；`--delete` 走侧栏 Remove Worktree 同一条路径（拆 surface → relocate-then-prune → 按 Settings 删分支），响应 `{id, deleted, warning?}` |
 

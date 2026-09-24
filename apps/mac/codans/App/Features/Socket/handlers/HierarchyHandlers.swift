@@ -99,6 +99,10 @@ final class HierarchyHandlers {
   /// registrations went away — the sidebar's Prune Worktrees. `nil` makes
   /// `hierarchy.pruneWorktrees` unsupported (tests, harness).
   let worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)?
+  /// Starts an agent profile in a worktree — the toolbar Agents pipeline —
+  /// for `hierarchy.createWorktree`'s `agentProfile` / `agent`. `nil` makes
+  /// those params unsupported (tests, harness).
+  private let agentLauncher: (@MainActor @Sendable (AgentLaunchSpec) async throws -> AgentLaunchOutcome)?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "hierarchy")
 
   init(
@@ -115,7 +119,8 @@ final class HierarchyHandlers {
     worktreeCreator: (@MainActor @Sendable (CreateWorktreeSpec) async throws -> URL)? = nil,
     defaultBaseRef: @escaping @MainActor (URL) async -> String? = { _ in nil },
     worktreeRemover: (@MainActor @Sendable (WorktreeID, ProjectID) async throws -> String?)? = nil,
-    worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)? = nil
+    worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)? = nil,
+    agentLauncher: (@MainActor @Sendable (AgentLaunchSpec) async throws -> AgentLaunchOutcome)? = nil
   ) {
     self.manager = manager
     self.handleRegistry = handleRegistry
@@ -131,6 +136,7 @@ final class HierarchyHandlers {
     self.defaultBaseRef = defaultBaseRef
     self.worktreeRemover = worktreeRemover
     self.worktreePruner = worktreePruner
+    self.agentLauncher = agentLauncher
   }
 
   // MARK: - Error mapping
@@ -464,10 +470,19 @@ final class HierarchyHandlers {
     /// Committish a *new* branch starts from. Absent ⇒ the repo's default
     /// remote branch when it has one, else `HEAD` — the sheet's default.
     public let baseRef: String?
+    /// Agent profile (name or id) to start in the worktree once it — and
+    /// the project's setup script — is in place; the New Worktree sheet's
+    /// "Launch agent". Resolved like `agent.launch`: with only `agent`, that
+    /// agent's first enabled profile. Both absent ⇒ no agent.
+    public let agentProfile: String?
+    /// Agent token (claude, codex, …) narrowing or standing in for
+    /// `agentProfile`.
+    public let agent: String?
 
     public init(
       projectID: ProjectID, name: String, path: String?, branch: String?,
-      reuseExisting: Bool?, baseRef: String? = nil
+      reuseExisting: Bool?, baseRef: String? = nil,
+      agentProfile: String? = nil, agent: String? = nil
     ) {
       self.projectID = projectID
       self.name = name
@@ -475,6 +490,8 @@ final class HierarchyHandlers {
       self.branch = branch
       self.reuseExisting = reuseExisting
       self.baseRef = baseRef
+      self.agentProfile = agentProfile
+      self.agent = agent
     }
   }
   public struct CreateWorktreeResult: Codable, Sendable {
@@ -483,11 +500,16 @@ final class HierarchyHandlers {
     /// True when this call ran `git worktree add`; false when the path
     /// already existed and was registered as-is.
     public let created: Bool
+    /// The agent started in the new worktree; absent when none was asked for.
+    public let agent: IPC.AgentLaunchResponse?
 
-    public init(id: WorktreeID, path: String, created: Bool = false) {
+    public init(
+      id: WorktreeID, path: String, created: Bool = false, agent: IPC.AgentLaunchResponse? = nil
+    ) {
       self.id = id
       self.path = path
       self.created = created
+      self.agent = agent
     }
   }
   /// `hierarchy.createWorktree` — the CLI's New Worktree. A path that
@@ -518,6 +540,13 @@ final class HierarchyHandlers {
         ))
     }
     let settings = settingsProvider()
+    // Resolve the agent up front so an unknown or disabled profile fails the
+    // call before anything lands on disk.
+    let agentProfile: AgentProfile?
+    switch resolveCreateAgent(req, agents: settings.agents) {
+    case .success(let profile): agentProfile = profile
+    case .failure(let error): return .failed(error)
+    }
     let resolvedPath: String
     if let explicit = req.path, !explicit.isEmpty {
       resolvedPath = explicit
@@ -556,29 +585,9 @@ final class HierarchyHandlers {
       let gitRoot = project.gitRoot, let branch = req.branch, !branch.isEmpty,
       !FileManager.default.fileExists(atPath: resolvedPath)
     {
-      let repoRoot = URL(fileURLWithPath: gitRoot, isDirectory: true)
-      let projectGit = settings.projects[project.id]?.git
-      let baseRef: String
-      if let explicit = req.baseRef, !explicit.isEmpty {
-        baseRef = explicit
-      } else if let pinned = projectGit?.worktreeBaseRef, !pinned.isEmpty {
-        baseRef = pinned
-      } else {
-        baseRef = await defaultBaseRef(repoRoot) ?? ""
-      }
-      let target = URL(fileURLWithPath: resolvedPath, isDirectory: true)
-      let spec = CreateWorktreeSpec(
-        repoRoot: repoRoot,
-        baseDirectory: target.deletingLastPathComponent(),
-        name: branch,
-        baseRef: baseRef,
-        fetchOrigin: projectGit?.fetchRemoteOnWorktreeCreate ?? settings.worktree.fetchRemoteOnCreate,
-        copyIgnored: projectGit?.copyIgnoredOnWorktreeCreate ?? settings.worktree.copyIgnoredOnCreate,
-        copyUntracked: projectGit?.copyUntrackedOnWorktreeCreate
-          ?? settings.worktree.copyUntrackedOnCreate,
-        setupCommand: projectGit?.createScript?.command,
-        pathOverride: target
-      )
+      let spec = await materializeSpec(
+        req, branch: branch, gitRoot: gitRoot, path: resolvedPath,
+        projectGit: settings.projects[project.id]?.git, worktree: settings.worktree)
       do {
         materializedPath = try await worktreeCreator(spec).path(percentEncoded: false)
         created = true
@@ -600,10 +609,99 @@ final class HierarchyHandlers {
         reuseExisting: (req.reuseExisting ?? false) || created
       )
       let canonical = HierarchyManager.canonicalPath(materializedPath)
+      let launch = await launchCreateAgent(
+        agentProfile, projectID: req.projectID, worktreeID: id, path: canonical)
+      let launched: IPC.AgentLaunchResponse?
+      switch launch {
+      case .success(let response): launched = response
+      case .failure(let error): return .failed(error)
+      }
       return .unary(
-        try JSONValue.encoded(CreateWorktreeResult(id: id, path: canonical, created: created)))
+        try JSONValue.encoded(
+          CreateWorktreeResult(id: id, path: canonical, created: created, agent: launched)))
     } catch {
       return failure(for: error, fallbackKind: "project", fallbackID: req.projectID.description)
+    }
+  }
+
+  /// The profile `hierarchy.createWorktree` should start, `nil` when the
+  /// request names none.
+  private func resolveCreateAgent(
+    _ req: CreateWorktreeParams, agents: AgentSettings
+  ) -> Result<AgentProfile?, IPCError> {
+    guard req.agentProfile != nil || req.agent != nil else { return .success(nil) }
+    guard agentLauncher != nil else {
+      return .failure(.unsupported(reason: "launching an agent is not available here"))
+    }
+    do {
+      return .success(
+        try AgentProfileSelector.resolveLaunchable(
+          selector: req.agentProfile, agentToken: req.agent, in: agents))
+    } catch let error as IPCError {
+      return .failure(error)
+    } catch {
+      return .failure(.internal("resolve agent profile: \(error)"))
+    }
+  }
+
+  /// The `wt sw` spec for a worktree `hierarchy.createWorktree` must put on
+  /// disk: the sheet's pipeline with the project's effective copy / fetch /
+  /// setup settings. Base ref: explicit → project pin → repo default.
+  private func materializeSpec(
+    _ req: CreateWorktreeParams, branch: String, gitRoot: String, path: String,
+    projectGit: GitProjectSettings?, worktree: WorktreeSettings
+  ) async -> CreateWorktreeSpec {
+    let repoRoot = URL(fileURLWithPath: gitRoot, isDirectory: true)
+    let baseRef: String
+    if let explicit = req.baseRef, !explicit.isEmpty {
+      baseRef = explicit
+    } else if let pinned = projectGit?.worktreeBaseRef, !pinned.isEmpty {
+      baseRef = pinned
+    } else {
+      baseRef = await defaultBaseRef(repoRoot) ?? ""
+    }
+    let target = URL(fileURLWithPath: path, isDirectory: true)
+    return CreateWorktreeSpec(
+      repoRoot: repoRoot,
+      baseDirectory: target.deletingLastPathComponent(),
+      name: branch,
+      baseRef: baseRef,
+      fetchOrigin: projectGit?.fetchRemoteOnWorktreeCreate ?? worktree.fetchRemoteOnCreate,
+      copyIgnored: projectGit?.copyIgnoredOnWorktreeCreate ?? worktree.copyIgnoredOnCreate,
+      copyUntracked: projectGit?.copyUntrackedOnWorktreeCreate ?? worktree.copyUntrackedOnCreate,
+      setupCommand: projectGit?.createScript?.command,
+      pathOverride: target
+    )
+  }
+
+  /// Starts `profile` (if any) in the worktree `hierarchy.createWorktree`
+  /// just registered. Called with no suspension after the catalog write, so
+  /// the agent's tab exists before the selection change reaches the root
+  /// reducer and its auto-seed finds tabs already.
+  private func launchCreateAgent(
+    _ profile: AgentProfile?, projectID: ProjectID, worktreeID: WorktreeID, path: String
+  ) async -> Result<IPC.AgentLaunchResponse?, IPCError> {
+    guard let profile else { return .success(nil) }
+    guard let agentLauncher else {
+      return .failure(.unsupported(reason: "launching an agent is not available here"))
+    }
+    do {
+      let outcome = try await agentLauncher(
+        AgentLaunchSpec(profile: profile, projectID: projectID, worktreeID: worktreeID))
+      return .success(
+        IPC.AgentLaunchResponse(
+          profileID: outcome.profile.id,
+          profileName: outcome.profile.displayName,
+          agent: outcome.profile.kind.rawValue,
+          command: outcome.command,
+          tabID: outcome.tabID,
+          paneID: outcome.paneID
+        ))
+    } catch {
+      return .failure(
+        .internal(
+          "worktree \(worktreeID.description) is ready at \(path), but launching "
+            + "\(profile.displayName) failed: \(error)"))
     }
   }
 
