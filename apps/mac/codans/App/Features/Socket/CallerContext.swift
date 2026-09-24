@@ -23,6 +23,14 @@ public enum CallerContext: Equatable, Sendable {
     }
   }
 
+  /// The paired device's permission; nil for a local caller.
+  public var remotePermission: IPC.RemotePermission? {
+    switch self {
+    case .local: return nil
+    case .remote(_, let permission): return permission
+    }
+  }
+
   /// Nil when the caller may call `method`, otherwise the error to answer
   /// with. Local callers are never gated.
   public func refusal(for method: IPC.Method) -> IPCError? {

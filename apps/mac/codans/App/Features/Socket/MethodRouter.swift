@@ -67,7 +67,7 @@ public final class MethodRouter {
       }
       return .failed(refusal)
     }
-    if let outcome = await routeSystem(request) { return outcome }
+    if let outcome = await routeSystem(request, context: context) { return outcome }
     if let outcome = await routeHierarchy(request, peerPID: context.peerPID) { return outcome }
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
@@ -409,9 +409,10 @@ public final class MethodRouter {
     }
   }
 
-  private func routeSystem(_ request: IPC.Request) async -> RouterOutcome? {
+  private func routeSystem(_ request: IPC.Request, context: CallerContext) async -> RouterOutcome? {
     switch request.method {
-    case .systemHello: return await systemHandlers.hello(request.params)
+    case .systemHello:
+      return await systemHandlers.hello(request.params, remotePermission: context.remotePermission)
     case .systemPing: return await systemHandlers.ping(request.params)
     case .systemVersion: return await systemHandlers.version(request.params)
     case .systemStatus: return await systemHandlers.status(request.params)

@@ -78,6 +78,27 @@ struct MethodRouterCallerContextTests {
   }
 
   @Test
+  func helloReportsThePermissionToRemoteCallersOnly() async throws {
+    let router = Self.makeRouter()
+    let params = try JSONValue.encoded(HelloRequest(clientVersion: "1", clientBinary: "test"))
+    let request = IPC.Request(id: "h", method: .systemHello, params: params)
+
+    let remote = await router.route(request, context: .remote(deviceID: Self.device, permission: .interactive))
+    guard case .unary(let remoteJSON) = remote else {
+      Issue.record("expected a unary hello result, got \(remote)")
+      return
+    }
+    #expect(try remoteJSON.decoded(as: HelloResponse.self).remotePermission == .interactive)
+
+    let local = await router.route(request, context: .local(peerPID: nil))
+    guard case .unary(let localJSON) = local else {
+      Issue.record("expected a unary hello result, got \(local)")
+      return
+    }
+    #expect(try localJSON.decoded(as: HelloResponse.self).remotePermission == nil)
+  }
+
+  @Test
   func revokedDeviceIsRefusedOnTheConnection() async throws {
     let (reader, feed) = AsyncStream<Data>.makeStream()
     let responses = ResponseCollector()

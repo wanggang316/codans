@@ -54,7 +54,10 @@ public final class SystemHandlers {
   /// `system.hello` — connection handshake. Returns the server's version
   /// info. Major-version skew surfaces as `.versionMismatch`; clients that
   /// send a malformed `clientVersion` get `.invalidParams`.
-  public func hello(_ params: JSONValue) async -> RouterOutcome {
+  public func hello(
+    _ params: JSONValue,
+    remotePermission: IPC.RemotePermission? = nil
+  ) async -> RouterOutcome {
     await Task.yield()
     let request: HelloRequest
     do {
@@ -74,7 +77,8 @@ public final class SystemHandlers {
       appBundleVersion: versions.appBundle,
       protocolMajor: versions.protocolMajor,
       protocolMinor: versions.protocolMinor,
-      deprecatedMethods: versions.deprecatedMethods
+      deprecatedMethods: versions.deprecatedMethods,
+      remotePermission: remotePermission
     )
     do {
       return .unary(try JSONValue.encoded(response))
