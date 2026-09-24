@@ -101,6 +101,35 @@ struct CreateWorktreeSheet: View {
         }
       }
 
+      // Launched once the worktree exists and its setup script has run.
+      // Hidden when no agent profile is enabled — a None-only picker says
+      // nothing.
+      if !store.agentProfiles.isEmpty {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Launch agent").font(.callout)
+          Picker(
+            "",
+            selection: Binding(
+              get: { store.launchAgentProfileID },
+              set: { store.send(.launchAgentSelected($0)) }
+            )
+          ) {
+            Text("None").tag(UUID?.none)
+            Divider()
+            ForEach(store.agentProfiles) { profile in
+              Label {
+                Text(profile.displayName)
+              } icon: {
+                AgentMenuIcon.image(for: profile.icon)
+                  .accessibilityHidden(true)
+              }
+              .tag(UUID?.some(profile.id))
+            }
+          }
+          .labelsHidden()
+        }
+      }
+
       if let error = store.submitError {
         Text(error)
           .font(.caption)

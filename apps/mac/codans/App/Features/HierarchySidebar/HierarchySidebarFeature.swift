@@ -446,8 +446,13 @@ struct HierarchySidebarFeature {
       /// setting and on whether the user is still viewing this pending
       /// creation (`activePendingWorktreeID`, which only RootFeature owns).
       /// The sidebar no longer selects or seeds panes itself.
+      ///
+      /// `agentProfileID` is the sheet's "Launch agent" pick, carried up so
+      /// RootFeature launches it now that the setup script (run in-stream)
+      /// has finished.
       case worktreeMaterialized(
-        worktreeID: WorktreeID, projectID: ProjectID, pendingID: PendingWorktreeID)
+        worktreeID: WorktreeID, projectID: ProjectID, pendingID: PendingWorktreeID,
+        agentProfileID: UUID? = nil)
     }
   }
 
@@ -487,7 +492,22 @@ struct HierarchySidebarFeature {
         // pending lifecycle in the same reducer frame so the user never
         // sees a "sheet closed but row not yet present" gap.
         state.createWorktreeSheet = nil
-        return .send(.beginPendingWorktreeCreation(pending))
+        // Remember the "Launch agent" pick per project so the next sheet
+        // opens on it. Skip the write when unchanged.
+        let remembered = settingsWriter.readSnapshotSync()
+          .projects[pending.projectID]?.git?.launchAgentProfileOnWorktreeCreate
+        guard remembered != pending.launchAgentProfileID else {
+          return .send(.beginPendingWorktreeCreation(pending))
+        }
+        let writer = settingsWriter
+        return .merge(
+          .send(.beginPendingWorktreeCreation(pending)),
+          .run { _ in
+            await writer.setProjectGitField(
+              pending.projectID,
+              .launchAgentProfileOnWorktreeCreate(pending.launchAgentProfileID))
+          }
+        )
       case .createWorktreeSheet:
         // Other child actions are handled by the ifLet-scoped
         // reducer; no-op at the parent level.
@@ -872,6 +892,12 @@ struct HierarchySidebarFeature {
           projectOverride: projectSettings?.worktreesDirectory
         )
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count
+      // "Launch agent" offers every enabled profile; a remembered pick whose
+      // profile was since removed or disabled falls back to None.
+      let agentProfiles = settingsSnapshot.agents.enabledProfiles
+      let rememberedAgentID = projectSettings?.git?.launchAgentProfileOnWorktreeCreate
+      let launchAgentDefault = agentProfiles.contains { $0.id == rememberedAgentID }
+        ? rememberedAgentID : nil
       // Seed the sheet toggles from the effective settings so the
       // checkboxes match what the user pinned in Project Settings → Worktree
       // (with the global Worktree pane as the fallback). Each per-project
@@ -911,7 +937,9 @@ struct HierarchySidebarFeature {
         archivedBranchOwnersByLower: archivedOwners,
         fetchOrigin: fetchOriginDefault,
         copyIgnored: project.isRemote ? false : copyIgnoredDefault,
-        copyUntracked: project.isRemote ? false : copyUntrackedDefault
+        copyUntracked: project.isRemote ? false : copyUntrackedDefault,
+        agentProfiles: agentProfiles,
+        launchAgentProfileID: launchAgentDefault
       )
       return .none
 
@@ -1249,7 +1277,9 @@ struct HierarchySidebarFeature {
       // which seeds the first pane.
       return .send(
         .delegate(
-          .worktreeMaterialized(worktreeID: worktreeID, projectID: pid, pendingID: id)))
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: pid, pendingID: id,
+            agentProfileID: pending.launchAgentProfileID)))
 
     case .pendingWorktreeFailed(let id, let err):
       // Race guard symmetric with progress / finished arms: a Cancel

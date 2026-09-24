@@ -103,7 +103,8 @@ struct HierarchySidebarFeatureTests {
         baseRefOverride: "origin/main",
         fetchOrigin: false,
         copyIgnored: true,
-        copyUntracked: true
+        copyUntracked: true,
+        agentProfiles: settings.agents.enabledProfiles
       )
     }
   }
@@ -141,12 +142,118 @@ struct HierarchySidebarFeatureTests {
         baseRefOverride: nil,
         fetchOrigin: false,
         copyIgnored: true,
-        copyUntracked: true
+        copyUntracked: true,
+        agentProfiles: settings.agents.enabledProfiles
       )
     }
   }
 
   // MARK: - Pending phase lifecycle (pending-phase-lifecycle)
+
+  // MARK: - Launch agent pick
+
+  @Test
+  func projectAddWorktreeTappedSeedsRememberedLaunchAgent() async {
+    let projectID = ProjectID()
+    let project = Project(id: projectID, name: "p", rootPath: "/p", gitRoot: "/p")
+    let codex = AgentProfile(kind: .codex)
+    let disabled = AgentProfile(kind: .claudeCode, isEnabled: false)
+    let settings: Settings = {
+      var settings = Settings()
+      settings.agents = AgentSettings(profiles: [codex, disabled])
+      settings.projects[projectID] = ProjectSettings(
+        git: GitProjectSettings(launchAgentProfileOnWorktreeCreate: codex.id))
+      return settings
+    }()
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.projectAddWorktreeTapped(projectID: projectID))
+    #expect(store.state.createWorktreeSheet?.agentProfiles == [codex])
+    #expect(store.state.createWorktreeSheet?.launchAgentProfileID == codex.id)
+  }
+
+  /// A remembered profile that was since disabled (or removed) must not be
+  /// launched silently — the sheet falls back to None.
+  @Test
+  func projectAddWorktreeTappedDropsUnavailableRememberedLaunchAgent() async {
+    let projectID = ProjectID()
+    let project = Project(id: projectID, name: "p", rootPath: "/p", gitRoot: "/p")
+    let disabled = AgentProfile(kind: .claudeCode, isEnabled: false)
+    let settings: Settings = {
+      var settings = Settings()
+      settings.agents = AgentSettings(profiles: [disabled])
+      settings.projects[projectID] = ProjectSettings(
+        git: GitProjectSettings(launchAgentProfileOnWorktreeCreate: disabled.id))
+      return settings
+    }()
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.projectAddWorktreeTapped(projectID: projectID))
+    #expect(store.state.createWorktreeSheet?.agentProfiles == [])
+    #expect(store.state.createWorktreeSheet?.launchAgentProfileID == nil)
+  }
+
+  @Test
+  func beginCreateRemembersChangedLaunchAgentPick() async {
+    let projectID = ProjectID()
+    let profileID = UUID()
+    let written = LockIsolated<[(ProjectID, SettingsWriter.GitFieldUpdate)]>([])
+    var initial = HierarchySidebarFeature.State()
+    initial.createWorktreeSheet = CreateWorktreeFeature.State(
+      projectID: projectID,
+      repoRoot: URL(fileURLWithPath: "/p"),
+      worktreesDirectory: URL(fileURLWithPath: "/p/.worktrees"),
+      currentPendingCountForProject: 0
+    )
+    let pending = PendingWorktree(
+      id: PendingWorktreeID(),
+      projectID: projectID,
+      spec: CreateWorktreeSpec(
+        repoRoot: URL(fileURLWithPath: "/p"),
+        baseDirectory: URL(fileURLWithPath: "/p/.worktrees"),
+        name: "feat",
+        baseRef: "origin/main",
+        fetchOrigin: false,
+        copyIgnored: false,
+        copyUntracked: false
+      ),
+      displayName: "feat",
+      status: .running,
+      startedAt: Date(),
+      launchAgentProfileID: profileID
+    )
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      $0[SettingsWriter.self].setProjectGitField = { pid, update in
+        written.withValue { $0.append((pid, update)) }
+      }
+      $0.gitWorktreeClient.createWorktreeStream = { _ in
+        AsyncThrowingStream { $0.finish() }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.createWorktreeSheet(.delegate(.beginCreate(pending))))
+    await store.skipReceivedActions()
+    await store.finish()
+    #expect(written.value.count == 1)
+    #expect(written.value.first?.0 == projectID)
+    #expect(written.value.first?.1 == .launchAgentProfileOnWorktreeCreate(profileID))
+  }
 
   /// Builds a `.running` pending row whose spec carries no setup command —
   /// `beginPendingWorktreeCreation` stashes the project's createScript into

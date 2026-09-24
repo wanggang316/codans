@@ -126,6 +126,12 @@ struct CreateWorktreeFeature {
     var fetchOrigin: Bool = true
     var copyIgnored: Bool = false
     var copyUntracked: Bool = false
+    /// Enabled agent profiles offered by the "Launch agent" picker, in
+    /// Settings order. Snapshotted at sheet construction.
+    var agentProfiles: [AgentProfile] = []
+    /// Agent launched once the worktree (and its setup script) finishes.
+    /// `nil` = None. Seeded from the project's remembered choice.
+    var launchAgentProfileID: UUID?
 
     // Transient derived state.
     var validationError: String?
@@ -181,6 +187,7 @@ struct CreateWorktreeFeature {
     case fetchOriginToggled(Bool)
     case copyIgnoredToggled(Bool)
     case copyUntrackedToggled(Bool)
+    case launchAgentSelected(UUID?)
 
     case createButtonTapped
 
@@ -381,6 +388,10 @@ struct CreateWorktreeFeature {
         state.copyUntracked = value
         return .none
 
+      case .launchAgentSelected(let profileID):
+        state.launchAgentProfileID = profileID
+        return .none
+
       case .createButtonTapped:
         let trimmed = state.branchNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, state.validationError == nil else {
@@ -448,7 +459,8 @@ struct CreateWorktreeFeature {
           displayName: trimmed,
           status: .running,
           lastProgressLine: nil,
-          startedAt: Date()
+          startedAt: Date(),
+          launchAgentProfileID: state.launchAgentProfileID
         )
         return .send(.delegate(.beginCreate(pending)))
 

@@ -293,6 +293,27 @@ struct CreateWorktreeFeatureTests {
   }
 
   @Test
+  func createCarriesLaunchAgentPickIntoPending() async {
+    let profileID = UUID()
+    var state = initialState()
+    state.branchNameDraft = "feature/new-idea"
+    state.selectedBaseRef = "origin/main"
+    state.agentProfiles = [AgentProfile(id: profileID, kind: .codex)]
+    let store = TestStore(initialState: state) {
+      CreateWorktreeFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.launchAgentSelected(profileID)) {
+      $0.launchAgentProfileID = profileID
+    }
+    await store.send(.createButtonTapped)
+    await store.receive({ action in
+      guard case .delegate(.beginCreate(let pending)) = action else { return false }
+      return pending.launchAgentProfileID == profileID
+    })
+  }
+
+  @Test
   func createButtonTappedRejectedAtCap() async {
     var state = initialState(currentPendingCountForProject: 8)
     state.branchNameDraft = "feature/new-idea"

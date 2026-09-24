@@ -17,6 +17,12 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
   public var defaultMergeStrategy: MergeStrategy?
   public var postMergeAction: MergedWorktreeAction?
   public var githubDisabled: Bool
+  /// Agent profile (`Settings.agents`) the Create Worktree sheet launches in
+  /// a new worktree once its setup script finishes. Written back from the
+  /// sheet on every Create so the next sheet opens on the last choice;
+  /// `nil` means "None". A profile id that no longer resolves to an enabled
+  /// profile reads as `nil`.
+  public var launchAgentProfileOnWorktreeCreate: UUID?
 
   /// Script run as the `initialCommand` of the worktree's first
   /// auto-opened pane right after `git worktree add` completes.
@@ -46,6 +52,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     defaultMergeStrategy: MergeStrategy? = nil,
     postMergeAction: MergedWorktreeAction? = nil,
     githubDisabled: Bool = false,
+    launchAgentProfileOnWorktreeCreate: UUID? = nil,
     createScript: ScriptDefinition? = nil,
     archiveScript: ScriptDefinition? = nil,
     deleteScript: ScriptDefinition? = nil
@@ -57,6 +64,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     self.defaultMergeStrategy = defaultMergeStrategy
     self.postMergeAction = postMergeAction
     self.githubDisabled = githubDisabled
+    self.launchAgentProfileOnWorktreeCreate = launchAgentProfileOnWorktreeCreate
     self.createScript = createScript
     self.archiveScript = archiveScript
     self.deleteScript = deleteScript
@@ -75,6 +83,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
       && defaultMergeStrategy == nil
       && postMergeAction == nil
       && githubDisabled == false
+      && launchAgentProfileOnWorktreeCreate == nil
       && (createScript?.command.isEmpty ?? true)
       && (archiveScript?.command.isEmpty ?? true)
       && (deleteScript?.command.isEmpty ?? true)
@@ -88,6 +97,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     case defaultMergeStrategy
     case postMergeAction
     case githubDisabled
+    case launchAgentProfileOnWorktreeCreate
     case createScript
     case archiveScript
     case deleteScript
@@ -102,6 +112,8 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     self.defaultMergeStrategy = try c.decodeIfPresent(MergeStrategy.self, forKey: .defaultMergeStrategy)
     self.postMergeAction = try c.decodeIfPresent(MergedWorktreeAction.self, forKey: .postMergeAction)
     self.githubDisabled = try c.decodeIfPresent(Bool.self, forKey: .githubDisabled) ?? false
+    self.launchAgentProfileOnWorktreeCreate = try c.decodeIfPresent(
+      UUID.self, forKey: .launchAgentProfileOnWorktreeCreate)
     self.createScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .createScript)
     self.archiveScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .archiveScript)
     self.deleteScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .deleteScript)
@@ -121,6 +133,8 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     if githubDisabled {
       try c.encode(true, forKey: .githubDisabled)
     }
+    try c.encodeIfPresent(
+      launchAgentProfileOnWorktreeCreate, forKey: .launchAgentProfileOnWorktreeCreate)
     if let createScript, !createScript.command.isEmpty {
       try c.encode(createScript, forKey: .createScript)
     }
