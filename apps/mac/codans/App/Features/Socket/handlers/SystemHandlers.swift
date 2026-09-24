@@ -1,7 +1,7 @@
 import AppKit
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 
 /// Handlers for the `system.*` method namespace. Construct once and inject
 /// into `MethodRouter`.
@@ -18,7 +18,8 @@ public final class SystemHandlers {
       server: String,
       appBundle: String,
       protocolMajor: Int = 1,
-      protocolMinor: Int = 0,
+      // Minor 1 added `events.subscribe`.
+      protocolMinor: Int = 1,
       deprecatedMethods: [String] = []
     ) {
       self.server = server

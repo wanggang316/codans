@@ -25,6 +25,7 @@ public final class MethodRouter {
   private let agentHandlers: AgentHandlers?
   private let handoffHandlers: HandoffHandlers?
   private let workspaceHandlers: WorkspaceHandlers?
+  private let eventHub: EventHub?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -35,7 +36,8 @@ public final class MethodRouter {
     projectHandlers: ProjectHandlers? = nil,
     agentHandlers: AgentHandlers? = nil,
     handoffHandlers: HandoffHandlers? = nil,
-    workspaceHandlers: WorkspaceHandlers? = nil
+    workspaceHandlers: WorkspaceHandlers? = nil,
+    eventHub: EventHub? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -45,6 +47,7 @@ public final class MethodRouter {
     self.agentHandlers = agentHandlers
     self.handoffHandlers = handoffHandlers
     self.workspaceHandlers = workspaceHandlers
+    self.eventHub = eventHub
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -73,7 +76,23 @@ public final class MethodRouter {
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
     if let outcome = await routeWorkspace(request) { return outcome }
+    if let outcome = routeEvents(request) { return outcome }
     return notWired(request.method)
+  }
+
+  /// `events.subscribe` — the one streaming method. The subscription is
+  /// registered here, on the main actor, so its snapshot reflects the state
+  /// at the moment the request was served.
+  private func routeEvents(_ request: IPC.Request) -> RouterOutcome? {
+    guard request.method == .eventsSubscribe, let hub = eventHub else { return nil }
+    let params: IPC.EventsSubscribeRequest
+    do {
+      params = try request.params.decoded(as: IPC.EventsSubscribeRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: String(describing: error), path: ["topics"]))
+    }
+    let subscription = hub.subscribe(topics: params.resolvedTopics)
+    return .streaming { subscription.jsonFrames() }
   }
 
   /// `workspace.*` adapter — typed handlers; `asyncOutcome` for the two
