@@ -51,13 +51,21 @@ public final class MethodRouter {
   /// verb `system.hello` is routed here alongside other `system.*` calls.
   /// Unknown methods produce `RouterOutcome.failed(.unknownMethod)`.
   ///
-  /// `peerPID` is the connection's kernel-reported peer PID (nil on
-  /// transports without one); only `hierarchy.resolveAlias` consumes it,
-  /// for caller-pane attribution.
-  public func route(_ request: IPC.Request, peerPID: pid_t? = nil) async -> RouterOutcome {
+  /// `context` says who is calling. A remote caller outside the method's
+  /// tier is refused here, before any handler runs, so authorization lives
+  /// at exactly one choke point.
+  public func route(_ request: IPC.Request, context: CallerContext = .local(peerPID: nil)) async -> RouterOutcome {
     logger.debug("route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
+    if let refusal = context.refusal(for: request.method) {
+      if case .remote(let deviceID, let permission) = context {
+        logger.notice(
+          "refused \(request.method.rawValue, privacy: .public) for device \(deviceID.uuidString, privacy: .public) (\(permission.rawValue, privacy: .public))"
+        )
+      }
+      return .failed(refusal)
+    }
     if let outcome = await routeSystem(request) { return outcome }
-    if let outcome = await routeHierarchy(request, peerPID: peerPID) { return outcome }
+    if let outcome = await routeHierarchy(request, peerPID: context.peerPID) { return outcome }
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }

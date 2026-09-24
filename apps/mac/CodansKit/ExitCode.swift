@@ -1,5 +1,5 @@
-import Foundation
 import CodansIPC
+import Foundation
 
 /// Stable CLI exit codes. Agents and shell scripts branch on these
 /// values, so they must not change across releases within the same
@@ -32,6 +32,9 @@ public enum CLIExitCode: Int32, Sendable {
     case .overloaded: return .overloaded
     case .versionMismatch: return .versionMismatch
     case .invalidFrame: return .internal
+    // Only remote callers are ever refused; the local CLI should not see
+    // it, and "the server will not do this" is closest to unsupported.
+    case .forbidden: return .unsupported
     case .internal: return .internal
     }
   }
