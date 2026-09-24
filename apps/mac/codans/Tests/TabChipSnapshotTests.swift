@@ -39,10 +39,11 @@ struct TabChipSnapshotTests {
     height: TabBarMetrics.chipHeight
   )
 
-  /// Bar row footprint — three chips plus an interior divider.
+  /// Row footprint — three min-width chips; dividers overlay chip edges
+  /// rather than taking width.
   @MainActor static let rowSize = CGSize(
-    width: TabBarMetrics.chipMinWidth * 3 + TabBarMetrics.dividerWidth,
-    height: TabBarMetrics.barHeight
+    width: TabBarMetrics.chipMinWidth * 3,
+    height: TabBarMetrics.chipHeight
   )
 
   // MARK: - Background state matrix
@@ -104,7 +105,7 @@ struct TabChipSnapshotTests {
       onCopyID: { _ in },
       onReorder: { _ in }
     )
-    .frame(width: Self.rowSize.width, height: Self.rowSize.height, alignment: .bottom)
+    .frame(width: Self.rowSize.width, height: Self.rowSize.height)
     .background(Color(nsColor: .windowBackgroundColor))
 
     let hosting = NSHostingView(rootView: view)
@@ -126,7 +127,7 @@ struct TabChipSnapshotTests {
       isHovering: isHovering,
       isPressing: isPressing
     )
-    .frame(width: chipSize.width, height: chipSize.height, alignment: .bottom)
+    .frame(width: chipSize.width, height: chipSize.height)
     .background(Color(nsColor: .windowBackgroundColor))
 
     let hosting = NSHostingView(rootView: view)

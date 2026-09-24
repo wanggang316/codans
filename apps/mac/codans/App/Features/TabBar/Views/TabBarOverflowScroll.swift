@@ -11,9 +11,12 @@ import CodansCore
 ///   space never fades.
 /// - Selected-tab auto-scrolls into view (center anchor) with a short
 ///   easeInOut on `activeTabID` changes, matching the plan.
+/// - Draws the recessed rounded track behind the row and clips the
+///   scrolling content to it, as the system tab bar does. The visible
+///   track width is handed to `content` so the row can split it equally.
 struct TabBarOverflowScroll<Content: View>: View {
   let activeTabID: TabID?
-  @ViewBuilder let content: () -> Content
+  @ViewBuilder let content: (_ trackWidth: CGFloat) -> Content
 
   @State private var atLeadingEdge: Bool = true
   @State private var atTrailingEdge: Bool = true
@@ -22,7 +25,7 @@ struct TabBarOverflowScroll<Content: View>: View {
     ScrollViewReader { proxy in
       GeometryReader { container in
         ScrollView(.horizontal, showsIndicators: false) {
-          content()
+          content(container.size.width)
             .background(
               GeometryReader { contentGeo in
                 Color.clear
@@ -44,6 +47,9 @@ struct TabBarOverflowScroll<Content: View>: View {
         }
         .overlay(alignment: .leading) { leadingShadow }
         .overlay(alignment: .trailing) { trailingShadow }
+        .background(TabBarColors.trackBackground)
+        .clipShape(
+          RoundedRectangle(cornerRadius: TabBarMetrics.trackCornerRadius, style: .continuous))
         .onChange(of: activeTabID) { _, newID in
           guard let newID else { return }
           withAnimation(.easeInOut(duration: 0.15)) {
