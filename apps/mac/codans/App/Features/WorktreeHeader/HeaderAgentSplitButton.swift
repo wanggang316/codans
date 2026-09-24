@@ -65,7 +65,7 @@ struct HeaderAgentSplitButton: View {
     .menuIndicator(.visible)
     .accessibilityLabel(primary == nil ? "Manage agents" : "Start \(primaryName)")
     .help(primary == nil ? "Manage Agents…" : "Start \(primaryName)")
-    .id(Self.identitySignature(of: profiles))
+    .id(Self.identitySignature(of: profiles) + (workflowsEnabled ? "|workflows" : ""))
   }
 
   // MARK: - Caret menu
@@ -89,10 +89,20 @@ struct HeaderAgentSplitButton: View {
       }
       Divider()
     }
+    if workflowsEnabled {
+      Button {
+        store.send(.runWorkflowTapped)
+      } label: {
+        Label("Run Workflow…", systemImage: "arrow.triangle.branch")
+      }
+      Divider()
+    }
     Button("Manage Agents…") {
       store.send(.manageAgentsTapped)
     }
   }
+
+  private var workflowsEnabled: Bool { settingsStore.settings.workflows.isEnabled }
 
   /// Stable identity for `.id(_:)`. Folds every field the menu renders plus
   /// the list's order, so a rename / reorder / enable-toggle in Settings

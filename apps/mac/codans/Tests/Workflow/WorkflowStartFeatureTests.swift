@@ -261,6 +261,33 @@ struct WorkflowStartFeatureTests {
     #expect(state.skippable.isEmpty)
   }
 
+  // MARK: - Toolbar entry
+
+  /// The toolbar's "Run Workflow…" opens the palette already narrowed to
+  /// the `Run Workflow:` items.
+  @Test
+  @MainActor
+  func runWorkflowFromTheToolbarOpensTheNarrowedPalette() async {
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.lastFocusedPane = { _ in nil }
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      $0.editorClient = EditorClient.testValue
+      $0.gitService = GitServiceClient.testValue
+    }
+    store.exhaustivity = .off
+
+    await store.send(.worktreeHeader(.delegate(.runWorkflowRequested)))
+    await store.receive(\.commandPaletteToggle)
+    await store.receive(\.commandPalette.presented.queryChanged) {
+      $0.commandPalette?.query = RootFeature.runWorkflowQuery
+    }
+  }
+
   // MARK: - Admission
 
   /// Admission's domain code is what the panel reports, verbatim, so the

@@ -1633,6 +1633,18 @@ struct RootFeature {
             }
           }
 
+        case .runWorkflowRequested:
+          // The palette is the workflow chooser: it rescans the definitions
+          // visible to this worktree on every open, so a file created a
+          // moment ago is already listed.
+          guard state.commandPalette == nil else {
+            return .send(.commandPalette(.presented(.queryChanged(Self.runWorkflowQuery))))
+          }
+          return .concatenate(
+            .send(.commandPaletteToggle(nil)),
+            .send(.commandPalette(.presented(.queryChanged(Self.runWorkflowQuery))))
+          )
+
         }
 
       case .worktreeHeader:
@@ -3047,6 +3059,9 @@ struct RootFeature {
   /// Agent-launch sibling of `runScriptErrorMessage`. Same failure set (the
   /// launch reuses the script pipeline) with the vocabulary the user was
   /// working in — "profile", not "script".
+  /// The palette query that narrows it to the `Run Workflow: <name>` items.
+  static let runWorkflowQuery = "Run Workflow: "
+
   static func launchAgentErrorMessage(_ error: RunScriptError) -> String {
     switch error {
     case .unknownScript:
