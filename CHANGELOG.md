@@ -20,6 +20,22 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.7.4] - 2026-09-24
+
+### Added
+
+- **Start an agent when you create a worktree.** The Create Worktree sheet
+  has a "Launch agent" picker, remembered per project; the agent starts once
+  the setup script has run. `codans worktree new` can do the same.
+- **Start an agent from the tab bar's + button.** Press and hold or
+  right-click + to open a new tab running an agent profile; a plain click
+  still opens a shell.
+
+### Fixed
+
+- **Worktrees no longer flash "Detached HEAD" at launch.** Worktrees on a
+  branch briefly showed as detached until the sidebar caught up.
+
 ## [0.7.3] - 2026-09-24
 
 ### Fixed
