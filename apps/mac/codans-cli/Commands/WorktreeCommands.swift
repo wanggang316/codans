@@ -130,6 +130,11 @@ struct WorktreeNew: AsyncParsableCommand {
       checked out if it already exists, the project's copy / fetch / setup
       settings apply, and the new worktree becomes the project's selection.
       A --path that already exists on disk is registered as-is.
+
+      --profile / --agent start an agent in the new worktree after its setup
+      script finishes, the sheet's "Launch agent". They pick the profile the
+      way `agent launch` does: a profile name or id, or --agent for that
+      agent's first enabled profile.
       """
   )
 
@@ -153,6 +158,13 @@ struct WorktreeNew: AsyncParsableCommand {
       "If a worktree with the same canonical path already exists, return its id instead of failing with a conflict. Name collisions still fail."
   )
   var reuseExisting: Bool = false
+  @Option(name: .long, help: "Agent profile name or id to start once the worktree is ready.")
+  var profile: String?
+  @Option(
+    name: .long,
+    help: "Agent token (claude, codex, gemini, …) to start its first enabled profile, or to narrow --profile."
+  )
+  var agent: String?
 
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
@@ -168,11 +180,14 @@ struct WorktreeNew: AsyncParsableCommand {
         let branch: String?
         let reuseExisting: Bool
         let baseRef: String?
+        let agentProfile: String?
+        let agent: String?
       }
       struct Result: Codable {
         let id: WorktreeID
         let path: String
         let created: Bool?
+        let agent: IPC.AgentLaunchResponse?
       }
       let result: Result = try await client.call(
         .hierarchyCreateWorktree,
@@ -182,18 +197,34 @@ struct WorktreeNew: AsyncParsableCommand {
           path: explicitPath,
           branch: branch,
           reuseExisting: reuseExisting,
-          baseRef: base
+          baseRef: base,
+          agentProfile: profile,
+          agent: agent
         )
       )
       let created = result.created ?? false
-      try Renderer.emitObject(
-        [
-          "id": result.id.description, "name": displayName, "path": result.path,
-          "created": created,
-        ],
-        mode: globals.renderMode
-      ) { _ in
-        "\(created ? "created" : "registered") worktree \(result.id.description)  \(displayName)  \(result.path)"
+      var object: [String: Any] = [
+        "id": result.id.description, "name": displayName, "path": result.path,
+        "created": created,
+      ]
+      if let launched = result.agent {
+        object["agent"] = [
+          "profileID": launched.profileID.uuidString,
+          "profileName": launched.profileName,
+          "agent": launched.agent,
+          "command": launched.command,
+          "tabID": launched.tabID?.description ?? "",
+          "paneID": launched.paneID?.description ?? "",
+        ]
+      }
+      try Renderer.emitObject(object, mode: globals.renderMode) { _ in
+        var line =
+          "\(created ? "created" : "registered") worktree \(result.id.description)  \(displayName)  \(result.path)"
+        if let launched = result.agent {
+          line += "\nlaunched \(launched.profileName)"
+            + (launched.paneID.map { " in pane \($0.description)" } ?? "")
+        }
+        return line
       }
     }
   }

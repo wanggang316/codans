@@ -260,6 +260,8 @@ codans worktree list --project <project>
 codans worktree new <branch>                           # git worktree add + register
 codans worktree new <branch> --base origin/main        # new branch starts from --base
 codans worktree new --path /abs/path --name "Hotfix" <branch>
+codans worktree new <branch> --profile "Build"         # start an agent profile once setup finishes
+codans worktree new <branch> --agent codex             # …or that agent's first enabled profile
 codans worktree show <worktree>                        # path, branch, project, selection, tab count
 codans worktree switch <worktree>                      # activate it in the GUI
 codans worktree rename <worktree> "Hotfix"             # sidebar label only (path/branch stay)

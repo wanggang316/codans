@@ -1146,6 +1146,9 @@ final class AppState {
       },
       worktreePruner: { repoRoot in
         try await gitWorktreeClient.pruneWorktrees(repoRoot)
+      },
+      agentLauncher: { spec in
+        try await hierarchyClient.launchAgent(spec)
       }
     )
   }
