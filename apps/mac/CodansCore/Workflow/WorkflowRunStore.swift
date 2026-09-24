@@ -46,10 +46,17 @@ public nonisolated struct WorkflowRunStore: Sendable {
   /// when it is missing or still the pre-workflow `*`. Any other content
   /// is the user's and is left alone.
   public static func ensureWorktreeLayout(worktreeRoot: URL) throws {
-    let fileManager = FileManager.default
-    let stateDirectory = worktreeRoot.appending(path: WorkflowRunLayout.stateDirectoryName, directoryHint: .isDirectory)
-    try fileManager.createDirectory(
+    try FileManager.default.createDirectory(
       at: WorkflowRunLayout.runsDirectory(worktreeRoot: worktreeRoot), withIntermediateDirectories: true)
+    try ensureIgnoreFile(worktreeRoot: worktreeRoot)
+  }
+
+  /// Writes `.codans/.gitignore` so `workflows/` can be committed, when it
+  /// is missing or still the pre-workflow `*`. Any other content is the
+  /// user's and is left alone.
+  public static func ensureIgnoreFile(worktreeRoot: URL) throws {
+    let stateDirectory = worktreeRoot.appending(path: WorkflowRunLayout.stateDirectoryName, directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
     let ignoreURL = stateDirectory.appending(path: HandoffLayout.ignoreFileName)
     let existing = try? String(contentsOf: ignoreURL, encoding: .utf8)
     let stillLegacy = existing?.trimmingCharacters(in: .whitespacesAndNewlines) == "*"
