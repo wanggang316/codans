@@ -1,4 +1,3 @@
-import Carbon.HIToolbox
 import Foundation
 
 /// User-defined script attached to a Project. Surfaced in the Scripts
@@ -81,7 +80,7 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
   public static let builtinRun = ScriptDefinition(
     id: builtinRunID,
     kind: .run,
-    keyboardShortcut: ShortcutBinding(keyCode: UInt16(kVK_ANSI_R), modifiers: .command)
+    keyboardShortcut: ShortcutBinding(keyCode: KeyCode.ansiR, modifiers: .command)
   )
 
   /// User-visible label. Falls back to the kind's default when the user

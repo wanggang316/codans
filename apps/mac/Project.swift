@@ -7,6 +7,11 @@ let ghosttyFingerprintInputScript = """
 "${SRCROOT}/\(ghosttyBuildScriptPath.pathString)" --print-fingerprint
 """
 
+// CodansCore / CodansIPC are also linked by the iOS companion (apps/ios), so
+// they must stay free of AppKit / Carbon and build for iPhone + iPad too.
+let sharedDestinations: Destinations = [.mac, .iPhone, .iPad]
+let sharedDeploymentTargets: DeploymentTargets = .multiplatform(iOS: "26.0", macOS: "14.0")
+
 let project = Project(
   name: "codans",
   settings: .settings(
@@ -35,13 +40,13 @@ let project = Project(
     defaultSettings: .essential
   ),
   targets: [
-    // Shared domain types. Zero internal deps. Consumed by app + CLI.
+    // Shared domain types. Zero internal deps. Consumed by app + CLI + iOS companion.
     .target(
       name: "CodansCore",
-      destinations: .macOS,
+      destinations: sharedDestinations,
       product: .staticFramework,
       bundleId: "com.gumpw.codans.core",
-      deploymentTargets: .macOS("14.0"),
+      deploymentTargets: sharedDeploymentTargets,
       infoPlist: .default,
       buildableFolders: [
         "CodansCore",
@@ -86,13 +91,13 @@ let project = Project(
       )
     ),
 
-    // JSON-RPC wire protocol. Consumed by app + CLI.
+    // JSON-RPC wire protocol. Consumed by app + CLI + iOS companion.
     .target(
       name: "CodansIPC",
-      destinations: .macOS,
+      destinations: sharedDestinations,
       product: .staticFramework,
       bundleId: "com.gumpw.codans.ipc",
-      deploymentTargets: .macOS("14.0"),
+      deploymentTargets: sharedDeploymentTargets,
       infoPlist: .default,
       buildableFolders: ["CodansIPC", "CodansIPC/WireTypes"],
       dependencies: [.target(name: "CodansCore")],
