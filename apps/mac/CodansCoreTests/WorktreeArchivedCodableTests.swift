@@ -124,4 +124,20 @@ struct WorktreeArchivedCodableTests {
     #expect(decoded == worktree)
     #expect(decoded.headSHA == sha)
   }
+
+  /// A branch-attached worktree must restore its branch from the catalog,
+  /// or every row renders as "Detached HEAD @<sha>" at launch until the
+  /// first git reconcile fills `branch` back in.
+  @Test
+  func branchRoundTripsAlongsideHeadSHA() throws {
+    let sha = "4042de1faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    let worktree = Worktree(name: "codans", path: "/repo/codans", branch: "main", headSHA: sha)
+    let data = try JSONEncoder().encode(worktree)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    #expect(object?["branch"] as? String == "main")
+
+    let decoded = try JSONDecoder().decode(Worktree.self, from: data)
+    #expect(decoded == worktree)
+    #expect(decoded.detachedHeadTitle == nil)
+  }
 }

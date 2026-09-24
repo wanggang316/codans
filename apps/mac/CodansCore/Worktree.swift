@@ -94,6 +94,7 @@ extension Worktree: Codable {
     self.id = try container.decode(WorktreeID.self, forKey: .id)
     self.name = try container.decode(String.self, forKey: .name)
     self.path = try container.decode(String.self, forKey: .path)
+    self.branch = try container.decodeIfPresent(String.self, forKey: .branch)
     self.headSHA = try container.decodeIfPresent(String.self, forKey: .headSHA)
     self.tabs = try container.decodeIfPresent([Tab].self, forKey: .tabs) ?? []
     self.selectedTabID = try container.decodeIfPresent(TabID.self, forKey: .selectedTabID)
@@ -109,6 +110,7 @@ extension Worktree: Codable {
     try container.encode(id, forKey: .id)
     try container.encode(name, forKey: .name)
     try container.encode(path, forKey: .path)
+    try container.encodeIfPresent(branch, forKey: .branch)
     try container.encodeIfPresent(headSHA, forKey: .headSHA)
     try container.encode(tabs, forKey: .tabs)
     try container.encodeIfPresent(selectedTabID, forKey: .selectedTabID)
