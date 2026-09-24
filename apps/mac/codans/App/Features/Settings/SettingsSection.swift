@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 
 /// One row in the Settings window sidebar. The global cases are fixed-order; the
 /// Project-scoped cases carry the `ProjectID` they bind to and are surfaced under the
@@ -12,6 +12,7 @@ public enum SettingsSection: Hashable, Sendable {
   case worktree
   case terminal
   case notifications
+  case remoteAccess
   case developer
   case shortcuts
   case updates
@@ -28,7 +29,7 @@ public enum SettingsSection: Hashable, Sendable {
 
   /// Canonical iteration order for global sidebar rows.
   public static let globals: [SettingsSection] = [
-    .general, .github, .worktree, .terminal, .agents, .notifications, .developer, .globalCommands,
+    .general, .github, .worktree, .terminal, .agents, .notifications, .remoteAccess, .developer, .globalCommands,
     .shortcuts, .updates, .about,
   ]
 
@@ -44,6 +45,7 @@ public enum SettingsSection: Hashable, Sendable {
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"
     case .notifications: return "Notifications"
+    case .remoteAccess: return "Remote Access"
     case .developer: return "Developer"
     case .shortcuts: return "Shortcuts"
     case .updates: return "Updates"
