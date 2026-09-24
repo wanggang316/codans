@@ -139,8 +139,8 @@ The key never appears in `remote-devices.json`, logs, or crash reports.
 
 Pairing is initiated on the Mac and completed on the phone:
 
-1. Settings → Remote Access → **Pair New Device**. The Mac generates a device ID and key, stores the key in the Keychain, and writes a *pending* device record (name "New device", tier `.readOnly` unless the user picks `.interactive` in the sheet).
-2. The sheet shows a QR code (generated with CoreImage's QR filter) and the same payload as a copyable text code.
+1. Settings → Remote Access → **Pair New Device…** (enabled while the gateway is on). The Mac generates a device ID and key, stores the key in the Keychain, and writes a *pending* device record (name "New device", tier `.readOnly`; the permission picker next to the code switches it to `.interactive`).
+2. The pane shows, inline in its grouped form rather than in a custom sheet, a QR code (generated with CoreImage's QR filter) and a **Copy Pairing Code** button for the same payload. The section turns into "*name* is paired" once the phone's first handshake lands.
 3. The phone scans the code (VisionKit `DataScannerViewController`) or the user pastes it (the only option on the simulator).
 4. The phone stores the key, browses for the gateway, connects and handshakes. The first successful handshake flips the record from pending to active and stamps `lastSeenAt`.
 5. A pending record unused for 10 minutes is discarded along with its key, so an abandoned QR code on screen stops being a credential.
@@ -200,6 +200,8 @@ enum CallerContext { case local(peerPID: pid_t?), remote(deviceID: UUID, permiss
 - `SocketServer` connections are `.local(peerPID:)`; behaviour is unchanged, including pane attribution for `hierarchy.resolveAlias`.
 - Gateway connections are `.remote(...)` with `peerPID == nil`, so process-ancestry attribution never runs for them. The permission is read from `PairedDeviceStore` per request, not captured at connect time, so a downgrade takes effect on the next call without reconnecting.
 - The tier check runs in `route` before any namespace adapter, so handlers stay unaware of remote callers.
+- `SocketConnection` takes an optional context resolver instead of a fixed context; the gateway's resolver reads the device's current permission from `PairedDeviceStore` on every request. A device revoked while connected resolves to nil and is answered with `forbidden` even before the gateway finishes closing its connection.
+- Refusals use a new `IPCError.forbidden(reason:)` (wire code `forbidden`). The CLI maps it to exit code 4 (unsupported); a local caller never receives it.
 
 ### Client Connection Model
 
@@ -236,7 +238,7 @@ Every frame carries a monotonically increasing `seq`, for diagnostics and orderi
 **Semantics.**
 
 - **Snapshot, then deltas.** The client replaces its model on `snapshot` and applies deltas afterwards. There is no resume token: any reconnect starts with a new snapshot, which keeps the server stateless per subscriber.
-- **Debounced, coalesced.** Each topic has a trailing-edge debounce of ~250 ms. Changes within the window coalesce into one frame; a topic has at most one pending frame, so a slow reader costs bounded memory no matter how chatty the source is.
+- **Coalesced.** The first change to a topic after a quiet period opens a ~250 ms window; when it closes the `EventHub` recomputes that topic's projection once (re-arming observation in the same step) and hands the value to every subscriber. A window anchored on the first change, rather than a trailing debounce, bounds latency even under a source that never goes quiet (agent viewport text changes continuously). Each subscriber keeps only the latest value per topic and builds its frame when the connection pulls it, so a slow reader costs bounded memory no matter how chatty the source is, and a value identical to what was already sent produces no frame.
 - **Hierarchy deltas are whole-section replacements.** The summary is small (tens of kilobytes for large catalogs) and replacing it avoids a patch algebra and its bugs. Agent states change far more often, so they are sent as per-pane upserts.
 - **Sources.** An `EventHub` on the main actor observes `HierarchyManager` and `AgentStateStore` with `withObservationTracking`, re-arming after each change, and fans out to subscribers. It projects into wire types; it never exposes live objects.
 - **End of stream.** The server ends the stream (final `stream: false` frame, then close) when the gateway is turned off or the device is revoked. The heartbeat lets the client detect half-open connections after Wi-Fi hand-offs.
@@ -339,6 +341,11 @@ Goal: reach the Mac from outside the LAN and notify the phone when an agent need
 | D14 | iOS layout uses size classes and standard containers only; no `UIScreen.main`, per-edge safe areas, multi-scene, `@SceneStorage`. | Correct on iPhone, iPad, Split View and both Duo displays. |
 | D15 | Full iPhone Duo validation waits for Xcode 27.1 + DeviceHub; v1 ships built with the iOS 26 SDK. | The installed toolchain is Xcode 26.0.1. |
 | D16 | `CodansCore` replaces Carbon `kVK_*` with its own `KeyCode` table (identical numeric values) and moves `NSColor` conversions to the app. | Unblocks iOS builds without changing persisted `shortcuts.json`. |
+| D17 | Tier refusals are a new `IPCError.forbidden`; `system.hello` reports protocol minor 1 (`events.subscribe`). | A dedicated code lets the phone tell "not allowed" from "not supported"; the minor bump is additive. |
+| D18 | Event coalescing is a per-topic window opened by the first change and computed once by the hub for all subscribers; frames are built on pull. | Bounded latency under continuously changing sources, one projection per window regardless of subscriber count, one pending value per topic per subscriber. |
+| D19 | A failed write cancels the connection's serve task (Unix socket and gateway alike). | A streaming response never reads again, so a vanished peer is only noticed on write; without this a dead subscriber would stream heartbeats forever. |
+| D20 | The pairing flow is inline in the Remote Access pane's grouped form, not a sheet. | Settings panes use native grouped forms without custom chrome. |
+| D21 | Pending (not yet used) pairings are included in the listener's key set until they expire; `RemoteGatewayServer` has a `.loopback` scope used only by tests. | The phone's first handshake must succeed against a pending key; loopback tests exercise the real TLS-PSK path without listening on the LAN or advertising over Bonjour. |
 
 ## Cross-Cutting Concerns
 
