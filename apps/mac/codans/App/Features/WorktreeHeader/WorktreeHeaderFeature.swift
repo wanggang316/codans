@@ -76,9 +76,12 @@ struct WorktreeHeaderFeature {
     /// "Manage Agents…" menu footer, and the primary half's fallback when no
     /// profile is enabled. Deep-links into the Settings window's Agents pane.
     case manageAgentsTapped
-    /// "Run Workflow…" menu row. RootFeature opens the Command Palette
-    /// narrowed to the selected worktree's `Run Workflow:` items.
-    case runWorkflowTapped
+    /// A row of the "Run Workflow" submenu. RootFeature resolves the
+    /// selected worktree at handle-time and opens the start panel.
+    case runWorkflowTapped(workflowID: String)
+    /// "New Workflow…" / "Manage Workflows…" footer rows.
+    case newWorkflowTapped
+    case manageWorkflowsTapped
     /// "Hand Off…" menu row. RootFeature resolves the source pane (the
     /// selected worktree's focused pane) and opens the Hand Off panel.
     /// Scan the worktree's manifests for command suggestions. Sent when the
@@ -141,8 +144,10 @@ struct WorktreeHeaderFeature {
       /// User asked to manage agents — open the Settings window AND deep-link
       /// into the Agents pane.
       case manageAgentsRequested
-      /// User asked to pick a workflow to run in the selected worktree.
-      case runWorkflowRequested
+      /// Open the start panel for `workflowID` in the selected worktree.
+      case runWorkflowRequested(workflowID: String)
+      /// Open Settings → Workflows, optionally straight into New Workflow.
+      case manageWorkflowsRequested(createNew: Bool)
     }
   }
 
@@ -199,8 +204,14 @@ struct WorktreeHeaderFeature {
       case .manageAgentsTapped:
         return .send(.delegate(.manageAgentsRequested))
 
-      case .runWorkflowTapped:
-        return .send(.delegate(.runWorkflowRequested))
+      case .runWorkflowTapped(let workflowID):
+        return .send(.delegate(.runWorkflowRequested(workflowID: workflowID)))
+
+      case .newWorkflowTapped:
+        return .send(.delegate(.manageWorkflowsRequested(createNew: true)))
+
+      case .manageWorkflowsTapped:
+        return .send(.delegate(.manageWorkflowsRequested(createNew: false)))
 
       case .scanCommandSuggestions(let projectID, let worktreeID):
         if state.commandSuggestionsWorktreeID != worktreeID {

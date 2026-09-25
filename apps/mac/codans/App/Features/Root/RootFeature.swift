@@ -458,6 +458,9 @@ struct RootFeature {
     /// Row context menu "Hand Off…" — opens the panel for the row's own
     /// pane, whatever pane currently holds focus.
     case handOffTapped(PaneID)
+    /// Row context menu "Run Workflow ▸ <name>" — the row's pane plays the
+    /// `current` role, whatever pane currently holds focus.
+    case runWorkflowTapped(PaneID, workflowID: String)
     case dismissRequested
   }
 
@@ -1633,17 +1636,24 @@ struct RootFeature {
             }
           }
 
-        case .runWorkflowRequested:
-          // The palette is the workflow chooser: it rescans the definitions
-          // visible to this worktree on every open, so a file created a
-          // moment ago is already listed.
-          guard state.commandPalette == nil else {
-            return .send(.commandPalette(.presented(.queryChanged(Self.runWorkflowQuery))))
+        case .runWorkflowRequested(let workflowID):
+          // Same handle-time selection resolution as `launchAgentRequested`.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
+          return .send(
+            .workflowStartRequested(projectID, worktreeID, workflowID: workflowID, sourcePaneID: nil))
+
+        case .manageWorkflowsRequested(let createNew):
+          let presenter = settingsWindowPresenter
+          let client = workflowStartClient
+          return .run { _ in
+            await MainActor.run {
+              if createNew { client.requestNewWorkflow() }
+              presenter.openAt(.workflows)
+            }
           }
-          return .concatenate(
-            .send(.commandPaletteToggle(nil)),
-            .send(.commandPalette(.presented(.queryChanged(Self.runWorkflowQuery))))
-          )
 
         }
 
@@ -1727,6 +1737,12 @@ struct RootFeature {
 
       case .agentState(.handOffTapped(let paneID)):
         return .send(.handoffRequested(paneID))
+
+      case .agentState(.runWorkflowTapped(let paneID, let workflowID)):
+        guard let address = hierarchyClient.addressOf(paneID) else { return .none }
+        return .send(
+          .workflowStartRequested(
+            address.projectID, address.worktreeID, workflowID: workflowID, sourcePaneID: paneID))
 
       case .agentState(.rowTapped(let paneID)):
         // Walk the live catalog to the (project, worktree, tab) chain
@@ -3059,9 +3075,6 @@ struct RootFeature {
   /// Agent-launch sibling of `runScriptErrorMessage`. Same failure set (the
   /// launch reuses the script pipeline) with the vocabulary the user was
   /// working in — "profile", not "script".
-  /// The palette query that narrows it to the `Run Workflow: <name>` items.
-  static let runWorkflowQuery = "Run Workflow: "
-
   static func launchAgentErrorMessage(_ error: RunScriptError) -> String {
     switch error {
     case .unknownScript:

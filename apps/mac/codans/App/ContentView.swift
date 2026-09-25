@@ -110,7 +110,10 @@ struct ContentView: View {
         agentStateStore: agentStateStore,
         workflowEngine: workflowEngine,
         onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) },
-        onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) }
+        onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) },
+        onAgentStateRowRunWorkflow: { paneID, workflowID in
+          store.send(.agentState(.runWorkflowTapped(paneID, workflowID: workflowID)))
+        }
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {

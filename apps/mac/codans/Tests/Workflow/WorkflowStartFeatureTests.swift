@@ -261,31 +261,55 @@ struct WorkflowStartFeatureTests {
     #expect(state.skippable.isEmpty)
   }
 
-  // MARK: - Toolbar entry
+  // MARK: - GUI entry points
 
-  /// The toolbar's "Run Workflow…" opens the palette already narrowed to
-  /// the `Run Workflow:` items.
-  @Test
-  @MainActor
-  func runWorkflowFromTheToolbarOpensTheNarrowedPalette() async {
-    let store = TestStore(initialState: RootFeature.State()) {
+  private static func rootStore(
+    selection: HierarchySelection = .empty,
+    addressOf: @escaping @MainActor @Sendable (PaneID) -> PaneAddress? = { _ in nil }
+  ) -> TestStoreOf<RootFeature> {
+    var state = RootFeature.State()
+    state.selection = selection
+    let store = TestStore(initialState: state) {
       RootFeature()
     } withDependencies: {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { Catalog() }
-      $0.hierarchyClient.lastFocusedPane = { _ in nil }
+      $0.hierarchyClient.addressOf = addressOf
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
       $0.editorClient = EditorClient.testValue
       $0.gitService = GitServiceClient.testValue
     }
     store.exhaustivity = .off
+    return store
+  }
 
-    await store.send(.worktreeHeader(.delegate(.runWorkflowRequested)))
-    await store.receive(\.commandPaletteToggle)
-    await store.receive(\.commandPalette.presented.queryChanged) {
-      $0.commandPalette?.query = RootFeature.runWorkflowQuery
-    }
+  /// A pick from the toolbar's Run Workflow menu opens the start panel for
+  /// the worktree selected at that moment, with no pinned source pane.
+  @Test
+  @MainActor
+  func theToolbarMenuStartsInTheSelectedWorktree() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let store = Self.rootStore(selection: HierarchySelection(projectID: projectID, worktreeID: worktreeID))
+
+    await store.send(.worktreeHeader(.delegate(.runWorkflowRequested(workflowID: "advisor"))))
+    await store.receive(
+      .workflowStartRequested(projectID, worktreeID, workflowID: "advisor", sourcePaneID: nil))
+  }
+
+  /// A pick from an Agents View row's menu pins that row's pane as the
+  /// source, in the worktree the pane lives in.
+  @Test
+  @MainActor
+  func anAgentRowMenuStartsWithThatPaneAsTheSource() async {
+    let address = PaneAddress(projectID: ProjectID(), worktreeID: WorktreeID(), tabID: TabID(), paneID: PaneID())
+    let store = Self.rootStore(addressOf: { $0 == address.paneID ? address : nil })
+
+    await store.send(.agentState(.runWorkflowTapped(address.paneID, workflowID: "advisor")))
+    await store.receive(
+      .workflowStartRequested(
+        address.projectID, address.worktreeID, workflowID: "advisor", sourcePaneID: address.paneID))
   }
 
   // MARK: - Admission

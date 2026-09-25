@@ -60,6 +60,9 @@ struct HierarchySidebarView: View {
   /// Row context-menu "Hand Off…" dispatcher — routes to
   /// `RootFeature.agentState(.handOffTapped)`.
   var onAgentStateRowHandOff: (PaneID) -> Void = { _ in }
+  /// Row context-menu "Run Workflow" dispatcher — routes to
+  /// `RootFeature.agentState(.runWorkflowTapped)`.
+  var onAgentStateRowRunWorkflow: (PaneID, String) -> Void = { _, _ in }
   /// Whether the AgentState bottom panel is currently expanded.
   /// Persisted so the footer toggle's last state survives a relaunch —
   /// users who keep the panel open during long sessions should not
@@ -282,6 +285,7 @@ struct HierarchySidebarView: View {
               }
             },
             onHandOffRow: { paneID in onAgentStateRowHandOff(paneID) },
+            onRunWorkflowRow: { paneID, workflowID in onAgentStateRowRunWorkflow(paneID, workflowID) },
             workflowEngine: workflowEngine,
             height: $agentStatePanelHeight,
             minHeight: Self.agentStatePanelMinHeight,

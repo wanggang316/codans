@@ -480,8 +480,10 @@ struct WorktreeDetailView: View {
     case .creating:
       SkeletonActionChipView()
     case .worktree(_, let info):
-      if info != nil {
-        HeaderAgentSplitButton(store: headerStore)
+      if let info {
+        HeaderAgentSplitButton(
+          store: headerStore,
+          worktreePath: info.project.remoteHost == nil ? info.worktree.path : nil)
       }
     }
   }

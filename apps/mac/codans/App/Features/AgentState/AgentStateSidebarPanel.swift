@@ -52,6 +52,9 @@ struct AgentStateSidebarPanel: View {
   /// `RootFeature.agentState(.handOffTapped)`. Defaulted so previews and
   /// tests that don't wire it still render rows.
   var onHandOffRow: (PaneID) -> Void = { _ in }
+  /// Row context-menu "Run Workflow" pick — starts `workflowID` with the
+  /// row's pane as the `current` role.
+  var onRunWorkflowRow: (PaneID, String) -> Void = { _, _ in }
   /// Active workflow runs, rendered as a read-only group under the agent
   /// rows. Defaulted so previews and tests without the engine render the
   /// agent list alone.
@@ -75,6 +78,7 @@ struct AgentStateSidebarPanel: View {
   /// Drives per-row layout density (`normal` two-line, `compact`
   /// one-line) from `Settings → General → Agents View display`.
   @Environment(SettingsStore.self) private var settingsStore
+  @Environment(WorkflowCatalogStore.self) private var workflowCatalog
 
   /// Suppresses the reorder animation for users who opt out of motion.
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -266,7 +270,9 @@ struct AgentStateSidebarPanel: View {
               worktreePath: resolved?.worktreePath,
               remoteHost: resolved?.remoteHost,
               onTap: { onTapRow(item.paneID) },
-              onHandOff: { onHandOffRow(item.paneID) }
+              onHandOff: { onHandOffRow(item.paneID) },
+              workflows: workflowRows(worktreePath: resolved?.remoteHost == nil ? resolved?.worktreePath : nil),
+              onRunWorkflow: { onRunWorkflowRow(item.paneID, $0) }
             )
           }
         }
@@ -278,6 +284,17 @@ struct AgentStateSidebarPanel: View {
         .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: order.orderedIDs)
       }
     }
+  }
+
+  /// The workflows a run started from a row in `worktreePath` could use —
+  /// none for a remote worktree or while workflows are off.
+  private func workflowRows(worktreePath: String?) -> [(id: String, name: String, isValid: Bool)] {
+    let settings = settingsStore.settings.workflows
+    guard settings.isEnabled, let worktreePath else { return [] }
+    return workflowCatalog.catalog(forWorktreePath: worktreePath)
+      .filter { !settings.isDisabled($0.id) }
+      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+      .map { (id: $0.id, name: $0.name, isValid: $0.isValid) }
   }
 
   /// Empty-state invitation when no agents are bound.
