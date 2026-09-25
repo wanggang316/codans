@@ -134,7 +134,15 @@ struct HeaderRunScriptSplitButton: View {
     // Settings-side edits don't reflect here.
     .id(
       Self.identitySignature(of: scripts) + "##"
-        + Self.identitySignature(of: globalScripts) + "#" + runningSignature)
+        + Self.identitySignature(of: globalScripts) + "#" + runningSignature + "#"
+        + CommandSuggestionMenuSection.identitySignature(
+          of: store.commandSuggestionsWorktreeID == worktreeID ? store.commandSuggestions : [],
+          isScanning: store.isScanningCommandSuggestions))
+    // Outside the `.id` so a script edit (which rebuilds the Menu) does not
+    // restart the scan; only a worktree switch does.
+    .task(id: worktreeID) {
+      store.send(.scanCommandSuggestions(projectID: projectID, worktreeID: worktreeID))
+    }
   }
 
   // MARK: - Caret menu
@@ -163,6 +171,24 @@ struct HeaderRunScriptSplitButton: View {
       }
     }
     if !scripts.isEmpty || !globalScripts.isEmpty {
+      Divider()
+    }
+    // Detected commands, adopted (not run) on click — see
+    // `CommandSuggestionMenuSection`. Hidden until a scan for this worktree
+    // finds something, so projects without manifests keep today's menu.
+    if store.commandSuggestionsWorktreeID == worktreeID, !store.commandSuggestions.isEmpty {
+      CommandSuggestionMenuSection(
+        title: "Add from Project",
+        groups: store.commandSuggestions,
+        scripts: scripts,
+        isScanning: store.isScanningCommandSuggestions,
+        onAdd: { suggestion in
+          store.send(.addCommandSuggestionTapped(projectID: projectID, suggestion))
+        },
+        onRefresh: {
+          store.send(.scanCommandSuggestions(projectID: projectID, worktreeID: worktreeID))
+        }
+      )
       Divider()
     }
     Button("Manage Project Commands…") {

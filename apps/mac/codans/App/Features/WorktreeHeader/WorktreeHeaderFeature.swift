@@ -16,7 +16,15 @@ import Foundation
 @Reducer
 struct WorktreeHeaderFeature {
   @ObservableState
-  struct State: Equatable {}
+  struct State: Equatable {
+    /// Commands detected in the selected worktree's manifests, offered by the
+    /// Run dropdown's "Add from Project" section. Tagged with the worktree
+    /// they were scanned for so a switch never shows the previous checkout's
+    /// list while the next scan is in flight.
+    var commandSuggestions: [CommandSuggestionGroup] = []
+    var commandSuggestionsWorktreeID: WorktreeID?
+    var isScanningCommandSuggestions = false
+  }
 
   enum Action: Equatable {
     case onAppear
@@ -70,6 +78,12 @@ struct WorktreeHeaderFeature {
     case manageAgentsTapped
     /// "Hand Off…" menu row. RootFeature resolves the source pane (the
     /// selected worktree's focused pane) and opens the Hand Off panel.
+    /// Scan the worktree's manifests for command suggestions. Sent when the
+    /// Run button appears for a worktree and from the dropdown's Refresh.
+    case scanCommandSuggestions(projectID: ProjectID, worktreeID: WorktreeID)
+    case commandSuggestionsScanned(worktreeID: WorktreeID, [CommandSuggestionGroup])
+    /// Adopt a detected command into the Project's commands. Never runs it.
+    case addCommandSuggestionTapped(projectID: ProjectID, CommandSuggestion)
     case delegate(Delegate)
 
     /// Parent-consumed delegate. `RootFeature` routes these into the existing
@@ -122,9 +136,13 @@ struct WorktreeHeaderFeature {
   }
 
   @Dependency(HierarchyClient.self) var hierarchyClient
+  @Dependency(CommandSuggestionClient.self) var commandSuggestionClient
+  @Dependency(SettingsWriter.self) var settingsWriter
+
+  nonisolated enum CancelID: Sendable { case commandSuggestionScan }
 
   var body: some Reducer<State, Action> {
-    Reduce { _, action in
+    Reduce { state, action in
       switch action {
       case .onAppear:
         return .none
@@ -169,6 +187,40 @@ struct WorktreeHeaderFeature {
 
       case .manageAgentsTapped:
         return .send(.delegate(.manageAgentsRequested))
+
+      case .scanCommandSuggestions(let projectID, let worktreeID):
+        if state.commandSuggestionsWorktreeID != worktreeID {
+          state.commandSuggestions = []
+          state.commandSuggestionsWorktreeID = worktreeID
+        }
+        guard
+          let location = ManifestLocation.resolve(
+            projectID: projectID, worktreeID: worktreeID, in: hierarchyClient.snapshot())
+        else {
+          state.commandSuggestions = []
+          state.isScanningCommandSuggestions = false
+          return .cancel(id: CancelID.commandSuggestionScan)
+        }
+        state.isScanningCommandSuggestions = true
+        let scan = commandSuggestionClient.scan
+        return .run { send in
+          await send(.commandSuggestionsScanned(worktreeID: worktreeID, await scan(location)))
+        }
+        .cancellable(id: CancelID.commandSuggestionScan, cancelInFlight: true)
+
+      case .commandSuggestionsScanned(let worktreeID, let groups):
+        // A late result for a worktree the header has since left is dropped.
+        guard worktreeID == state.commandSuggestionsWorktreeID else { return .none }
+        state.commandSuggestions = groups
+        state.isScanningCommandSuggestions = false
+        return .none
+
+      case .addCommandSuggestionTapped(let projectID, let suggestion):
+        let scripts = settingsWriter.readSnapshotSync().projects[projectID]?.scripts ?? []
+        guard !CommandSuggestionAdoption.isAdopted(suggestion, in: scripts) else { return .none }
+        let adopted = CommandSuggestionAdoption.adopt(suggestion, into: scripts).scripts
+        let write = settingsWriter.setProjectScripts
+        return .run { _ in await write(projectID, adopted) }
 
       case .delegate:
         // Consumed by the parent; reducer has no local state change.

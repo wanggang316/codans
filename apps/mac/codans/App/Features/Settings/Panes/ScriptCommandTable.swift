@@ -210,7 +210,15 @@ struct ScriptCommandTable: View {
         }
       }
       if let onAddSuggestion {
-        suggestionSection(onAddSuggestion)
+        Divider()
+        CommandSuggestionMenuSection(
+          title: "From Project",
+          groups: suggestionGroups,
+          scripts: scripts,
+          isScanning: isScanningSuggestions,
+          onAdd: onAddSuggestion,
+          onRefresh: onRefreshSuggestions
+        )
       }
     } label: {
       ZStack {
@@ -226,68 +234,6 @@ struct ScriptCommandTable: View {
     .menuIndicator(.hidden)
     .fixedSize()
     .help("Add command")
-  }
-}
-
-// MARK: - Suggestions
-
-extension ScriptCommandTable {
-  /// AppKit wraps a long menu subtitle onto a second line; clipping the whole
-  /// subtitle keeps every item one row tall.
-  private static let suggestionSubtitleLimit = 44
-
-  @ViewBuilder
-  fileprivate func suggestionSection(_ onAddSuggestion: @escaping (CommandSuggestion) -> Void) -> some View {
-    Divider()
-    Section("From Project") {
-      if suggestionGroups.isEmpty {
-        Text(isScanningSuggestions ? "Scanning…" : "No commands found")
-      }
-      ForEach(suggestionGroups) { group in
-        Menu(group.source.displayName) {
-          ForEach(group.suggestions) { suggestion in
-            suggestionButton(suggestion, onAddSuggestion)
-          }
-        }
-      }
-      if let onRefreshSuggestions {
-        Button("Refresh", action: onRefreshSuggestions)
-      }
-    }
-  }
-
-  /// Already-adopted commands stay listed but disabled with a checkmark, so
-  /// the menu still mirrors the manifest and never offers a duplicate.
-  private func suggestionButton(
-    _ suggestion: CommandSuggestion,
-    _ onAddSuggestion: @escaping (CommandSuggestion) -> Void
-  ) -> some View {
-    let isAdopted = CommandSuggestionAdoption.isAdopted(suggestion, in: scripts)
-    return Button {
-      onAddSuggestion(suggestion)
-    } label: {
-      // Icon + title + a second Text: the shape AppKit-backed menus render as
-      // a subtitle. Wrapping the texts in a `Label` drops the subtitle.
-      if isAdopted {
-        Image(systemName: "checkmark")
-      } else {
-        ScriptTintColorPalette.menuIcon(suggestion.resolvedIcon, tint: suggestion.kind.defaultTintColor)
-      }
-      Text(suggestion.name)
-      Text(Self.menuDetail(for: suggestion))
-    }
-    .help(Self.menuDetail(for: suggestion))
-    .disabled(isAdopted)
-  }
-
-  /// The runnable command, plus what it expands to when the manifest says.
-  private static func menuDetail(for suggestion: CommandSuggestion) -> String {
-    var subtitle = suggestion.command
-    if let detail = suggestion.detail, detail != suggestion.command {
-      subtitle += " — " + detail.split(whereSeparator: \.isNewline).joined(separator: " ")
-    }
-    return subtitle.count > suggestionSubtitleLimit
-      ? String(subtitle.prefix(suggestionSubtitleLimit)) + "…" : subtitle
   }
 }
 
