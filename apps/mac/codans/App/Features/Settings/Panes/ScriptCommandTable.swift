@@ -232,8 +232,9 @@ struct ScriptCommandTable: View {
 // MARK: - Suggestions
 
 extension ScriptCommandTable {
-  /// Menu subtitles are single-line; a long script body only needs its head.
-  private static let suggestionDetailLimit = 60
+  /// AppKit wraps a long menu subtitle onto a second line; clipping the whole
+  /// subtitle keeps every item one row tall.
+  private static let suggestionSubtitleLimit = 44
 
   @ViewBuilder
   fileprivate func suggestionSection(_ onAddSuggestion: @escaping (CommandSuggestion) -> Void) -> some View {
@@ -265,30 +266,31 @@ extension ScriptCommandTable {
     return Button {
       onAddSuggestion(suggestion)
     } label: {
-      Label {
-        Text(suggestion.name)
-        Text(Self.menuDetail(for: suggestion))
-      } icon: {
-        if isAdopted {
-          Image(systemName: "checkmark")
-        } else {
-          ScriptTintColorPalette.menuIcon(
-            systemName: suggestion.kind.defaultSystemImage,
-            tint: suggestion.kind.defaultTintColor
-          )
-        }
+      // Icon + title + a second Text: the shape AppKit-backed menus render as
+      // a subtitle. Wrapping the texts in a `Label` drops the subtitle.
+      if isAdopted {
+        Image(systemName: "checkmark")
+      } else {
+        ScriptTintColorPalette.menuIcon(
+          systemName: suggestion.kind.defaultSystemImage,
+          tint: suggestion.kind.defaultTintColor
+        )
       }
+      Text(suggestion.name)
+      Text(Self.menuDetail(for: suggestion))
     }
+    .help(Self.menuDetail(for: suggestion))
     .disabled(isAdopted)
   }
 
   /// The runnable command, plus what it expands to when the manifest says.
   private static func menuDetail(for suggestion: CommandSuggestion) -> String {
-    guard let detail = suggestion.detail, detail != suggestion.command else { return suggestion.command }
-    let oneLine = detail.split(whereSeparator: \.isNewline).joined(separator: " ")
-    let clipped =
-      oneLine.count > suggestionDetailLimit ? String(oneLine.prefix(suggestionDetailLimit)) + "…" : oneLine
-    return "\(suggestion.command) — \(clipped)"
+    var subtitle = suggestion.command
+    if let detail = suggestion.detail, detail != suggestion.command {
+      subtitle += " — " + detail.split(whereSeparator: \.isNewline).joined(separator: " ")
+    }
+    return subtitle.count > suggestionSubtitleLimit
+      ? String(subtitle.prefix(suggestionSubtitleLimit)) + "…" : subtitle
   }
 }
 
