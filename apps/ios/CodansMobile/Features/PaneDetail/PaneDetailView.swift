@@ -98,6 +98,7 @@ struct PaneDetailView: View {
       ScrollView(.vertical) {
         ScrollView(.horizontal) {
           Text(store.content)
+            .accessibilityIdentifier("pane-output")
             .font(.system(.footnote, design: .monospaced))
             .textSelection(.enabled)
             .fixedSize(horizontal: true, vertical: false)
@@ -155,6 +156,8 @@ private struct PaneInputBar: View {
           .labelStyle(.iconOnly)
           .font(.title2)
           .disabled(!store.canSend || !isConnected)
+          // The software keyboard's return key is also labelled "Send".
+          .accessibilityIdentifier("pane-send")
       }
       .padding(.horizontal)
     }

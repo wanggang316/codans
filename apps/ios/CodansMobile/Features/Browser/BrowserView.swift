@@ -117,5 +117,10 @@ private struct PaneRow: View {
       Image(systemName: pane.agent == nil ? "terminal" : "sparkles")
         .accessibilityHidden(true)
     }
+    // One element per row (VoiceOver reads title and tab together); the
+    // identifier is the UI-test probe, since the title is whatever the
+    // shell sets.
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("pane-row")
   }
 }

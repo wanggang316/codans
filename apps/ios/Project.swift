@@ -115,6 +115,23 @@ let project = Project(
         defaultSettings: .essential
       )
     ),
+
+    // End-to-end UI test against a live Mac gateway. Skipped unless
+    // docs/user-tests/ios-companion/harness.sh passes a pairing code.
+    .target(
+      name: "CodansMobileUITests",
+      destinations: [.iPhone, .iPad],
+      product: .uiTests,
+      bundleId: "com.gumpw.codans.mobile-uitests",
+      deploymentTargets: .iOS("26.0"),
+      infoPlist: .default,
+      buildableFolders: ["CodansMobileUITests"],
+      dependencies: [.target(name: "CodansMobile")],
+      settings: .settings(
+        base: ["CODE_SIGNING_ALLOWED": "NO", "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
+        defaultSettings: .essential
+      )
+    ),
   ],
   additionalFiles: [
     "Configurations/**"
