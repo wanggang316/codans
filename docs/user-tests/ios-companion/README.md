@@ -11,7 +11,8 @@ UI test (`apps/ios/CodansMobileUITests`) on a simulator.
 |---|---|
 | interactive | A "View and type" code opened as a `codans-pair:` link is confirmed, then pairs over Bonjour + TLS-PSK. The fixture project and its pane are listed. A line typed on the phone runs in the Mac pane, and the Mac reads the output back. |
 | read-only | A "View only" pairing never shows the input bar. |
-| revoke | Revoking both devices in Settings removes their records and their Keychain keys. |
+| composer | A "View and type" pairing opens the composer at the bottom of the home screen, picks Create New Worktree, and sends a message. The Mac creates the worktree on `agent/<first words of the message>` and starts the fake `claude` profile with the message as its prompt. The phone navigates to the new agent's pane. |
+| revoke | Revoking every device in Settings removes their records and their Keychain keys. |
 
 The UI test skips itself unless the harness passes a pairing code through a
 `TEST_RUNNER_CODANS_E2E_*` variable, so `make ios-test` never needs a Mac.
@@ -25,16 +26,18 @@ docs/user-tests/ios-companion/harness.sh \
   ~/Library/Developer/Xcode/DerivedData/codans-*/Build/Products/Debug/Codans.app
 ```
 
-An optional second argument picks the simulator UDID. The default is the
-first available iPhone 17 Pro.
+An optional second argument picks the simulator UDID; it must be on an
+iOS 26 runtime. The default is the iPhone 17 Pro on iOS 26.
 
 The terminal running the harness needs Accessibility permission. The
 harness borrows the clipboard to copy the pairing code, then restores it.
 
 ## Isolation
 
-- The instance gets a private config dir, zmx cache and socket. It never
-  touches the default dev or release instance.
+- The instance gets a private config dir, zmx cache, socket and worktrees
+  directory. It never touches the default dev or release instance. Its only
+  agent profile runs a fake `claude` that prints its arguments, so no real
+  agent session starts.
 - The socket and the cache are short `/tmp` paths. zmx puts one socket per
   pane in the cache dir, and AF_UNIX paths are capped near 104 bytes. A long
   cache path makes every pane exit at spawn.

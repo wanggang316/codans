@@ -11,7 +11,9 @@
 #   interactive  pair "View and type", browse to the fixture pane, send a line,
 #                and read the echoed output back on the Mac
 #   read-only    pair "View only"; the phone must not offer an input bar
-#   revoke       revoke both devices; their records and Keychain keys are gone
+#   composer     pair "View and type", start the fake agent from the composer in
+#                a new worktree; the Mac has the branch and the agent got the prompt
+#   revoke       revoke every device; their records and Keychain keys are gone
 #
 # Needs: a Debug build (`make mac-build`), the iOS project generated
 # (`make ios-generate`), jq, and Accessibility permission for the terminal
@@ -30,6 +32,8 @@ SOCK="/tmp/codans-ie-$(id -u).sock"
 CACHE="/tmp/cie-cache-$(id -u)"
 CONF="$SCRATCH/conf"
 FIX="$SCRATCH/fixture"
+WTS="$SCRATCH/wts"
+FAKEBIN="$SCRATCH/fakebin"
 SHOTS="$SCRATCH/shots"
 KEYCHAIN_SERVICE="com.gumpw.codans.remote.codans-dev"
 IOS_DIR="$REPO_ROOT/apps/ios"
@@ -38,7 +42,7 @@ IOS_DIR="$REPO_ROOT/apps/ios"
 SIM="${2:-$(xcrun simctl list devices available -j |
   jq -r '[.devices | to_entries[] | select(.key | test("iOS-26")) | .value[] |
     select(.name == "iPhone 17 Pro")][0].udid')}"
-mkdir -p "$CONF" "$FIX" "$SHOTS"
+mkdir -p "$CONF" "$FIX" "$SHOTS" "$WTS" "$FAKEBIN"
 
 PASS=0; FAIL=0
 ok() { PASS=$((PASS+1)); echo "PASS  $*"; }
@@ -58,8 +62,24 @@ launch_mac() {
   fi
   git -C "$FIX" init -q -b main
   git -C "$FIX" -c user.name=e2e -c user.email=e2e@example.com commit -q --allow-empty -m init
+  # A fake `claude` that prints its arguments, so a launch with a prompt is
+  # visible in the pane without a real agent session.
+  cat >"$FAKEBIN/claude" <<'AGENT'
+#!/bin/sh
+echo "FAKE-AGENT claude ARGS: $*"
+while IFS= read -r line; do echo "RECEIVED: $line"; done
+AGENT
+  chmod +x "$FAKEBIN/claude"
   cat >"$CONF/settings.json" <<EOF
-{ "version": 3, "worktree": { "fetchRemoteOnCreate": false }, "remoteAccess": { "enabled": true } }
+{
+  "version": 3,
+  "remoteAccess": { "enabled": true },
+  "worktree": { "defaultWorktreesDirectory": "$WTS", "fetchRemoteOnCreate": false },
+  "agents": { "profiles": [
+    { "id": "11111111-1111-1111-1111-111111111111", "kind": "claude-code", "name": "Fake Claude",
+      "envVars": { "PATH": "$FAKEBIN:/usr/bin:/bin" } }
+  ] }
+}
 EOF
   rm -rf "$CACHE" && mkdir -p "$CACHE"
   rm -f "$SOCK"
@@ -86,7 +106,11 @@ EOF
 
 quit_mac() {
   [[ -n "${MAC_PID:-}" ]] || return
-  kill -TERM "$MAC_PID" 2>/dev/null; sleep 2
+  # A graceful quit withdraws the Bonjour advertisement. A killed app
+  # leaves a stale record in mDNS for up to an hour, which the next run's
+  # phone then finds first.
+  kill -TERM "$MAC_PID" 2>/dev/null
+  for _ in $(seq 1 30); do kill -0 "$MAC_PID" 2>/dev/null || break; sleep 0.5; done
   kill -KILL "$MAC_PID" 2>/dev/null
   # Keys of devices the cases did not revoke.
   for id in $(jq -r '.devices[].id' "$CONF/remote-devices.json" 2>/dev/null); do
@@ -125,18 +149,24 @@ reset_sim() {
   xcrun simctl boot "$SIM" && xcrun simctl bootstatus "$SIM" -b >/dev/null
 }
 
-run_ui_test() { # run_ui_test <name> <pairing code> [line to send]
-  local name="$1" code="$2" line="${3:-}"
+# run_ui_test <case> <test method> <pairing code> [line to send] [composer prompt]
+run_ui_test() {
+  local name="$1" method="$2" code="$3" line="${4:-}" prompt="${5:-}"
   mkdir -p "$SHOTS/$name"
   (cd "$IOS_DIR" &&
     TEST_RUNNER_CODANS_E2E_PAIRING_CODE="$code" \
     TEST_RUNNER_CODANS_E2E_PROJECT="$(basename "$FIX")" \
     TEST_RUNNER_CODANS_E2E_INPUT="$line" \
+    TEST_RUNNER_CODANS_E2E_COMPOSER_PROMPT="$prompt" \
     TEST_RUNNER_CODANS_E2E_SHOTS="$SHOTS/$name" \
     xcodebuild -workspace CodansMobile.xcworkspace -scheme CodansMobile \
       -destination "platform=iOS Simulator,id=$SIM" \
       -resultBundlePath "$SCRATCH/$name.xcresult" \
-      test -only-testing:CodansMobileUITests >"$SCRATCH/$name.log" 2>&1)
+      test -only-testing:"CodansMobileUITests/RemoteEndToEndUITests/$method" >"$SCRATCH/$name.log" 2>&1)
+  local status=$?
+  # Result bundles carry a screen recording; keep them only for failures.
+  [[ $status == 0 ]] && rm -rf "$SCRATCH/$name.xcresult"
+  return $status
 }
 
 device_ids() { jq -r '.devices[].id' "$CONF/remote-devices.json" 2>/dev/null; }
@@ -147,7 +177,7 @@ launch_mac
 MARKER="hi-from-phone-$$"
 code=$(pairing_code "View and type")
 reset_sim
-if run_ui_test interactive "$code" "echo $MARKER"; then
+if run_ui_test interactive testPairBrowseReadAndSend "$code" "echo $MARKER"; then
   ok "interactive: paired, browsed, sent a line"
 else
   bad "interactive UI test (see $SCRATCH/interactive.log)"
@@ -160,14 +190,31 @@ fi
 
 code=$(pairing_code "View only")
 reset_sim
-if run_ui_test read-only "$code"; then
+if run_ui_test read-only testPairBrowseReadAndSend "$code"; then
   ok "read-only: no input bar"
 else
   bad "read-only UI test (see $SCRATCH/read-only.log)"
 fi
 
+PROMPT="e2e composer run $$"
+BRANCH="agent/e2e-composer-run-$$"
+code=$(pairing_code "View and type")
+reset_sim
+if run_ui_test composer testComposerStartsAnAgentInANewWorktree "$code" "" "$PROMPT"; then
+  ok "composer: started an agent from the phone"
+else
+  bad "composer UI test (see $SCRATCH/composer.log)"
+fi
+new_wt=$(cli tree --json | jq -r --arg b "$BRANCH" '.data.projects[0].worktrees[] | select(.branch == $b) | .id')
+if [[ -n "$new_wt" ]]; then ok "composer: the Mac created worktree $BRANCH"; else bad "composer: no worktree on branch $BRANCH"; fi
+got_prompt=0
+for pane in $(cli tree --json | jq -r --arg w "$new_wt" '.data.projects[0].worktrees[] | select(.id == $w) | .tabs[].panes[].id'); do
+  cli pane read "$pane" | grep -q "FAKE-AGENT claude ARGS: .*$PROMPT" && got_prompt=1
+done
+[[ $got_prompt == 1 ]] && ok "composer: the agent started with the prompt" || bad "composer: no pane shows the agent with the prompt"
+
 active=$(jq '[.devices[] | select(.state == "active")] | length' "$CONF/remote-devices.json")
-[[ "$active" == 2 ]] && ok "both pairings became active" || bad "expected 2 active devices, got $active"
+[[ "$active" == 3 ]] && ok "all three pairings became active" || bad "expected 3 active devices, got $active"
 
 ids=$(device_ids)
 for _ in $ids; do
