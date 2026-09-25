@@ -149,3 +149,61 @@ struct CommandSuggestionAdoptionTests {
     #expect(!CommandSuggestionAdoption.isAdopted(suggestion("build", "npm run build"), in: scripts))
   }
 }
+
+struct NestedManifestTests {
+  @Test
+  func scopedViewKeepsDirectChildrenAndExposesAncestors() {
+    let snapshot = ManifestSnapshot(
+      contents: ["package.json": "{}", "packages/web/package.json": "{}", "packages/web/src/x.json": "{}"],
+      presentPaths: ["pnpm-lock.yaml"])
+    #expect(snapshot.directories == ["", "packages/web", "packages/web/src"])
+    let web = snapshot.scoped(to: "packages/web")
+    #expect(web.presentPaths == ["package.json"])
+    #expect(web.ancestors.count == 2)  // packages, root
+    #expect(web.ancestors.last?.exists("pnpm-lock.yaml") == true)
+  }
+
+  @Test
+  func nestedGroupsUseFullPathTitlesAndCdIntoTheirDirectory() {
+    let snapshot = ManifestSnapshot(
+      contents: [
+        "package.json": #"{ "packageManager": "pnpm@9", "scripts": { "dev": "turbo dev" } }"#,
+        "apps/web/package.json": #"{ "scripts": { "dev": "vite" } }"#,
+        "services/api/Makefile": "run:\n\tgo run .\n",
+      ])
+    let groups = CommandSuggestionRegistry.standard.groups(in: snapshot)
+    #expect(groups.map(\.source.displayName) == ["package.json", "apps/web/package.json", "services/api/Makefile"])
+    #expect(groups[1].suggestions.first?.command == "cd apps/web && pnpm run dev")
+    #expect(groups[2].suggestions.first?.command == "cd services/api && make run")
+    // Same entry name in two directories stays two distinct suggestions.
+    #expect(groups[0].suggestions.first?.id != groups[1].suggestions.first?.id)
+  }
+
+  @Test
+  func workspaceMemberInheritsTheRootLockfile() {
+    let snapshot = ManifestSnapshot(
+      contents: ["packages/ui/package.json": #"{ "scripts": { "build": "tsc" } }"#],
+      presentPaths: ["yarn.lock"])
+    let groups = CommandSuggestionRegistry.standard.groups(in: snapshot)
+    #expect(groups.first?.suggestions.first?.command == "cd packages/ui && yarn run build")
+  }
+
+  @Test
+  func nearerDeclarationWinsOverAncestorLockfile() {
+    let snapshot = ManifestSnapshot(
+      contents: ["tools/package.json": #"{ "packageManager": "bun@1", "scripts": { "x": "y" } }"#],
+      presentPaths: ["pnpm-lock.yaml"])
+    #expect(
+      CommandSuggestionRegistry.standard.groups(in: snapshot).first?.suggestions.first?.command
+        == "cd tools && bun run x")
+  }
+
+  @Test
+  func scopeSkipsHiddenAndDependencyDirectories() {
+    let scope = ManifestScope.standard
+    #expect(scope.shouldDescend(into: "packages"))
+    #expect(!scope.shouldDescend(into: "node_modules"))
+    #expect(!scope.shouldDescend(into: ".git"))
+    #expect(!scope.shouldDescend(into: "target"))
+  }
+}

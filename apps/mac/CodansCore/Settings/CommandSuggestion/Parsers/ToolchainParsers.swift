@@ -16,7 +16,7 @@ nonisolated enum ToolchainCommands {
 
 /// `Cargo.toml` → the everyday cargo verbs.
 public nonisolated struct CargoParser: CommandSuggestionParser {
-  public let source = CommandSuggestionSource(id: "cargo", displayName: "Cargo")
+  public let source = CommandSuggestionSource(id: "cargo", displayName: "Cargo.toml")
 
   public init() {}
 
@@ -38,7 +38,7 @@ public nonisolated struct CargoParser: CommandSuggestionParser {
 /// `go.mod` → module-wide go verbs. No `go run`: the module root is often not
 /// a main package, and guessing the entry point would be wrong more than right.
 public nonisolated struct GoModuleParser: CommandSuggestionParser {
-  public let source = CommandSuggestionSource(id: "go", displayName: "Go")
+  public let source = CommandSuggestionSource(id: "go", displayName: "go.mod")
 
   public init() {}
 
@@ -58,7 +58,7 @@ public nonisolated struct GoModuleParser: CommandSuggestionParser {
 
 /// `Package.swift` → SwiftPM verbs.
 public nonisolated struct SwiftPackageParser: CommandSuggestionParser {
-  public let source = CommandSuggestionSource(id: "swiftpm", displayName: "Swift Package")
+  public let source = CommandSuggestionSource(id: "swiftpm", displayName: "Package.swift")
 
   public init() {}
 
