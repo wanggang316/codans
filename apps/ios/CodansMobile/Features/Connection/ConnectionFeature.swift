@@ -92,6 +92,15 @@ struct ConnectionFeature {
     return min(.milliseconds(500) * (1 << exponent), .seconds(30))
   }
 
+  /// The Mac sends a heartbeat on an idle events stream every 30 s. A
+  /// stream silent for this long is treated as half-open (a Wi-Fi
+  /// hand-off or a sleeping Mac that never sent FIN/RST), which TCP
+  /// keepalive alone would take minutes to notice.
+  nonisolated static let streamIdleTimeout: Duration = .seconds(60)
+  /// How often the watchdog samples the stream; detection lands between
+  /// `streamIdleTimeout` and `streamIdleTimeout + watchdogTick` of silence.
+  nonisolated static let watchdogTick: Duration = .seconds(15)
+
   @Dependency(\.remoteClient) var remoteClient
   @Dependency(\.pairingStore) var pairingStore
   @Dependency(\.networkPath) var networkPath
@@ -236,21 +245,55 @@ struct ConnectionFeature {
     state.status = .connecting
     let remote = remoteClient
     let credential = pairingStore.credential
-    return .run { send in
+    return .run { [clock] send in
       guard let key = credential(gateway) else {
         await send(.sessionEnded(.missingKey))
         return
       }
       let session = try await remote.connect(gateway, key)
       await send(.sessionOpened(session.info))
-      for try await frame in session.events {
-        await send(.eventReceived(frame))
-      }
+      try await Self.relay(session.events, clock: clock, send: send)
       await send(.sessionEnded(.streamEnded))
     } catch: { error, send in
       await send(.sessionEnded(RemoteFailure(error)))
     }
     .cancellable(id: CancelID.session, cancelInFlight: true)
+  }
+
+  /// Forwards event frames until the stream ends, racing it against an
+  /// idle watchdog that throws `RemoteFailure.stalled` once nothing
+  /// (heartbeats included) has arrived for `streamIdleTimeout`.
+  nonisolated private static func relay(
+    _ events: AsyncThrowingStream<IPC.EventFrame, Error>,
+    clock: any Clock<Duration>,
+    send: Send<Action>
+  ) async throws {
+    let received = LockIsolated(0)
+    try await withThrowingTaskGroup(of: Void.self) { group in
+      group.addTask {
+        for try await frame in events {
+          received.withValue { $0 += 1 }
+          await send(.eventReceived(frame))
+        }
+      }
+      group.addTask {
+        var lastSeen = received.value
+        var quiet: Duration = .zero
+        while true {
+          try await clock.sleep(for: watchdogTick)
+          let seen = received.value
+          if seen == lastSeen {
+            quiet += watchdogTick
+            if quiet >= streamIdleTimeout { throw RemoteFailure.stalled }
+          } else {
+            lastSeen = seen
+            quiet = .zero
+          }
+        }
+      }
+      try await group.next()
+      group.cancelAll()
+    }
   }
 
   /// Cancels the session and any pending retry, then closes the sockets.

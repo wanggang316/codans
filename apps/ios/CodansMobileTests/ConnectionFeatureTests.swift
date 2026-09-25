@@ -115,6 +115,7 @@ struct ConnectionFeatureTests {
     } withDependencies: {
       $0.pairingStore = .inMemory(.init(gateways: [Fixtures.gateway], activeID: Fixtures.deviceID))
       $0.pairingStore.credential = { _ in Fixtures.payload.credential }
+      $0.continuousClock = TestClock()
       $0.remoteClient.disconnect = {}
       $0.remoteClient.connect = { _, _ in RemoteSession(info: Fixtures.info, events: events) }
     }
@@ -190,6 +191,56 @@ struct ConnectionFeatureTests {
     }
     pathFeed.finish()
     eventFeed.finish()
+    await store.finish()
+  }
+
+  /// A half-open connection never ends the stream; only the missing
+  /// heartbeats reveal it.
+  @Test
+  func silentStreamIsTreatedAsHalfOpenAndReconnected() async {
+    let clock = TestClock()
+    let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+    let disconnects = LockIsolated(0)
+    let store = TestStore(initialState: Self.pairedState(status: .idle, isAppActive: true)) {
+      ConnectionFeature()
+    } withDependencies: {
+      $0.pairingStore.credential = { _ in Fixtures.payload.credential }
+      $0.continuousClock = clock
+      $0.remoteClient.disconnect = { disconnects.withValue { $0 += 1 } }
+      $0.remoteClient.connect = { _, _ in RemoteSession(info: Fixtures.info, events: events) }
+    }
+
+    await store.send(.connectTapped) {
+      $0.status = .connecting
+    }
+    await store.receive(\.sessionOpened) {
+      $0.status = .connected
+      $0.session = Fixtures.info
+    }
+
+    // Heartbeats keep the watchdog quiet well past the idle timeout.
+    for seq in 0..<4 {
+      await clock.advance(by: .seconds(30))
+      feed.yield(IPC.EventFrame(seq: seq, payload: .heartbeat))
+      await store.receive(\.eventReceived)
+      await store.receive(\.delegate.eventReceived)
+    }
+    #expect(store.state.status == .connected)
+
+    await clock.advance(by: ConnectionFeature.streamIdleTimeout + ConnectionFeature.watchdogTick)
+    await store.receive(\.sessionEnded) {
+      $0.status = .retrying(after: .milliseconds(500))
+      $0.failedAttempts = 1
+      $0.session = nil
+      $0.lastFailure = .stalled
+    }
+    #expect(disconnects.value == 1)
+
+    await store.send(.scenePhaseChanged(.background)) {
+      $0.isAppActive = false
+      $0.status = .suspended
+    }
+    feed.finish()
     await store.finish()
   }
 

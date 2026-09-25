@@ -43,6 +43,9 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
   }
 
   static let streamEnded = RemoteFailure(.streamEnded, "The connection to your Mac ended.")
+  /// The events stream went silent past the heartbeat deadline: the
+  /// connection is presumed half-open.
+  static let stalled = RemoteFailure(.streamEnded, "Your Mac stopped responding.")
   static let missingKey = RemoteFailure(
     .missingKey, "This pairing's key is missing on this device. Pair with your Mac again.")
 

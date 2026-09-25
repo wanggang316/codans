@@ -108,18 +108,19 @@ private actor LiveRemoteSessions {
 
   func readPane(_ paneID: String, tail: Int) async throws -> String {
     let request = IPC.PaneReadRequest(paneID: try Self.paneID(paneID), range: .all, tail: tail, raw: false)
-    let response = try await requireControl().call(.paneRead, params: request, as: IPC.PaneReadResponse.self)
-    return response.content
+    return try await withControl { control in
+      try await control.call(.paneRead, params: request, as: IPC.PaneReadResponse.self).content
+    }
   }
 
   func sendInput(_ paneID: String, text: String) async throws {
-    _ = try await requireControl().callRaw(
-      .terminalSendInput, params: SendInputParams(paneID: try Self.paneID(paneID), text: text))
+    let params = SendInputParams(paneID: try Self.paneID(paneID), text: text)
+    _ = try await withControl { try await $0.callRaw(.terminalSendInput, params: params) }
   }
 
   func sendKey(_ paneID: String, key: IPC.TerminalNamedKey) async throws {
-    _ = try await requireControl().callRaw(
-      .terminalSendKey, params: SendKeyParams(paneID: try Self.paneID(paneID), key: key))
+    let params = SendKeyParams(paneID: try Self.paneID(paneID), key: key)
+    _ = try await withControl { try await $0.callRaw(.terminalSendKey, params: params) }
   }
 
   // MARK: - Internals
@@ -137,9 +138,24 @@ private actor LiveRemoteSessions {
     let key: IPC.TerminalNamedKey
   }
 
-  private func requireControl() throws -> RemoteRPCClient {
+  /// Runs a unary call on the control connection. A control connection
+  /// that died takes the session with it: closing the events connection
+  /// ends the stream, so `ConnectionFeature` notices and reconnects
+  /// instead of leaving every later call to fail against a dead socket.
+  private func withControl<T>(_ call: (RemoteRPCClient) async throws -> T) async throws -> T {
     guard let control else { throw RemoteRPCClient.ClientError.connectionClosed }
-    return control
+    do {
+      return try await call(control)
+    } catch let error as RemoteRPCClient.ClientError {
+      switch error {
+      case .connectionClosed, .writeFailed:
+        // A newer session may have replaced this one while the call ran.
+        if self.control === control { await disconnect() }
+      default:
+        break
+      }
+      throw error
+    }
   }
 
   private static func paneID(_ string: String) throws -> PaneID {
