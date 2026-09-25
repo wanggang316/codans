@@ -298,6 +298,76 @@ struct ConnectionFeatureTests {
   }
 
   @Test
+  func pairingLinkPairsOnlyAfterConfirmation() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: ConnectionFeature.State()) {
+      ConnectionFeature()
+    } withDependencies: {
+      $0.pairingStore = .inMemory()
+      $0.continuousClock = clock
+      $0.date.now = Fixtures.pairedAt
+      $0.remoteClient.disconnect = {}
+      $0.remoteClient.connect = { _, _ in throw RemoteFailure(.notFound, "gone") }
+    }
+    let link = URL(string: Fixtures.pairingCode)!
+
+    await store.send(.pairingLinkOpened(link)) {
+      $0.linkPairing = .confirm(Fixtures.payload)
+    }
+    await store.send(.linkPairingConfirmed) {
+      $0.linkPairing = nil
+      $0.gateways = [Fixtures.gateway]
+      $0.activeID = Fixtures.deviceID
+      $0.status = .connecting
+    }
+    await store.receive(\.delegate.activeGatewayChanged)
+    await store.receive(\.sessionEnded) {
+      $0.status = .retrying(after: .milliseconds(500))
+      $0.failedAttempts = 1
+      $0.lastFailure = RemoteFailure(.notFound, "gone")
+    }
+    await store.send(.scenePhaseChanged(.background)) {
+      $0.isAppActive = false
+      $0.status = .suspended
+    }
+  }
+
+  @Test
+  func dismissingAPairingLinkStoresNothing() async {
+    let saves = LockIsolated(0)
+    let store = TestStore(initialState: ConnectionFeature.State()) {
+      ConnectionFeature()
+    } withDependencies: {
+      $0.pairingStore.save = { payload, date in
+        saves.withValue { $0 += 1 }
+        return PairedGateway(payload: payload, pairedAt: date)
+      }
+    }
+
+    await store.send(.pairingLinkOpened(URL(string: Fixtures.pairingCode)!)) {
+      $0.linkPairing = .confirm(Fixtures.payload)
+    }
+    await store.send(.linkPairingDismissed) {
+      $0.linkPairing = nil
+    }
+    // A late confirmation (e.g. from a second window's alert) is a no-op.
+    await store.send(.linkPairingConfirmed)
+    #expect(saves.value == 0)
+  }
+
+  @Test
+  func unrelatedLinksAreIgnoredAndBrokenPairingLinksReportAnError() async {
+    let store = TestStore(initialState: ConnectionFeature.State()) {
+      ConnectionFeature()
+    }
+
+    await store.send(.pairingLinkOpened(URL(string: "https://example.com/codans-pair")!))
+    await store.send(.pairingLinkOpened(URL(string: "codans-pair:AAAA")!)) {
+      $0.linkPairing = .invalid(ConnectionFeature.message(for: PairingPayload.DecodingError.malformed))
+    }
+  }
+
+  @Test
   func forgettingTheActiveMacDisconnectsAndClearsModels() async {
     var initial = Self.pairedState(status: .connected, isAppActive: true)
     initial.session = Fixtures.info

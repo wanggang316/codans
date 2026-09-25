@@ -35,6 +35,41 @@ struct RootView: View {
     }
     .tabViewStyle(.sidebarAdaptable)
     .task { store.send(.connection(.task)) }
+    .onOpenURL { store.send(.connection(.pairingLinkOpened($0))) }
+    .alert(linkPairingTitle, isPresented: isLinkPairingPresented) {
+      if case .confirm = store.connection.linkPairing {
+        Button("Pair") { store.send(.connection(.linkPairingConfirmed)) }
+        Button("Cancel", role: .cancel) { store.send(.connection(.linkPairingDismissed)) }
+      } else {
+        Button("OK", role: .cancel) { store.send(.connection(.linkPairingDismissed)) }
+      }
+    } message: {
+      switch store.connection.linkPairing {
+      case .confirm:
+        Text(
+          "Only pair with a Mac you own. Codans will connect to it over your local network "
+            + "and show its terminals here.")
+      case .invalid(let message):
+        Text(message)
+      case nil:
+        EmptyView()
+      }
+    }
+  }
+
+  private var linkPairingTitle: String {
+    switch store.connection.linkPairing {
+    case .confirm(let payload): "Pair with \u{201C}\(payload.serviceName)\u{201D}?"
+    case .invalid: "Can't Pair"
+    case nil: ""
+    }
+  }
+
+  private var isLinkPairingPresented: Binding<Bool> {
+    Binding(
+      get: { store.connection.linkPairing != nil },
+      set: { if !$0 { store.send(.connection(.linkPairingDismissed)) } }
+    )
   }
 
   private func openSettings() {

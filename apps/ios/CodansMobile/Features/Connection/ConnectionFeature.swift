@@ -29,6 +29,11 @@ struct ConnectionFeature {
     var session: RemoteSessionInfo?
     var lastFailure: RemoteFailure?
     var pairingError: String?
+    /// A `codans-pair:` link opened from outside the app (Camera, Safari,
+    /// Messages). It is never paired silently: any web page can carry such
+    /// a link, and pairing with a stranger's Mac would send it everything
+    /// typed into its panes.
+    var linkPairing: LinkPairing?
     /// False while every scene is in the background.
     var isAppActive = true
     var hasStarted = false
@@ -42,6 +47,13 @@ struct ConnectionFeature {
     var permission: IPC.RemotePermission {
       session?.permission ?? .readOnly
     }
+  }
+
+  enum LinkPairing: Equatable {
+    /// Waiting for the user to confirm pairing with this Mac.
+    case confirm(PairingPayload)
+    /// The link was a `codans-pair:` link that could not be decoded.
+    case invalid(String)
   }
 
   enum Status: Equatable {
@@ -67,6 +79,9 @@ struct ConnectionFeature {
     case retryTimerFired
     case networkBecameAvailable
     case pairingCodeSubmitted(String)
+    case pairingLinkOpened(URL)
+    case linkPairingConfirmed
+    case linkPairingDismissed
     case gatewaySelected(UUID)
     case forgetTapped(UUID)
     case delegate(Delegate)
@@ -198,17 +213,25 @@ struct ConnectionFeature {
           state.pairingError = Self.message(for: error)
           return .none
         }
-        let gateway: PairedGateway
+        return pair(payload, state: &state)
+
+      case .pairingLinkOpened(let url):
+        guard url.scheme?.lowercased() == PairingPayload.urlScheme else { return .none }
         do {
-          gateway = try pairingStore.save(payload, now)
+          state.linkPairing = .confirm(try PairingPayload.decode(url.absoluteString))
         } catch {
-          state.pairingError = "Couldn't store the pairing key: \(error.localizedDescription)"
-          return .none
+          state.linkPairing = .invalid(Self.message(for: error))
         }
-        state.pairingError = nil
-        state.gateways.removeAll { $0.deviceID == gateway.deviceID }
-        state.gateways.append(gateway)
-        return switchActive(to: gateway.deviceID, state: &state)
+        return .none
+
+      case .linkPairingConfirmed:
+        guard case .confirm(let payload) = state.linkPairing else { return .none }
+        state.linkPairing = nil
+        return pair(payload, state: &state)
+
+      case .linkPairingDismissed:
+        state.linkPairing = nil
+        return .none
 
       case .gatewaySelected(let id):
         guard id != state.activeID, state.gateways.contains(where: { $0.deviceID == id }) else { return .none }
@@ -304,6 +327,21 @@ struct ConnectionFeature {
       .cancel(id: CancelID.retry),
       .run { _ in await disconnect() }
     )
+  }
+
+  /// Stores a decoded pairing and makes its Mac the active one.
+  private func pair(_ payload: PairingPayload, state: inout State) -> Effect<Action> {
+    let gateway: PairedGateway
+    do {
+      gateway = try pairingStore.save(payload, now)
+    } catch {
+      state.pairingError = "Couldn't store the pairing key: \(error.localizedDescription)"
+      return .none
+    }
+    state.pairingError = nil
+    state.gateways.removeAll { $0.deviceID == gateway.deviceID }
+    state.gateways.append(gateway)
+    return switchActive(to: gateway.deviceID, state: &state)
   }
 
   private func switchActive(to id: UUID?, state: inout State) -> Effect<Action> {

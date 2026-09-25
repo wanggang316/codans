@@ -24,6 +24,14 @@ let infoPlist: [String: Plist.Value] = [
     "Codans finds and connects to the Codans app on your Mac over the local network.",
   "NSBonjourServices": ["_codans._tcp"],
   "NSCameraUsageDescription": "Codans uses the camera to scan the pairing code shown on your Mac.",
+  // The pairing QR code is a `codans-pair:` URL, so the system Camera can
+  // hand it to the app; the app confirms before pairing.
+  "CFBundleURLTypes": [
+    [
+      "CFBundleURLName": "com.gumpw.codans.mobile.pairing",
+      "CFBundleURLSchemes": ["codans-pair"],
+    ]
+  ],
 ]
 
 let project = Project(
