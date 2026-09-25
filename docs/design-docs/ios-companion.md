@@ -141,7 +141,7 @@ Pairing is initiated on the Mac and completed on the phone:
 
 1. Settings → Remote Access → **Pair New Device…** (enabled while the gateway is on). The Mac generates a device ID and key, stores the key in the Keychain, and writes a *pending* device record (name "New device", tier `.readOnly`; the permission picker next to the code switches it to `.interactive`).
 2. The pane shows, inline in its grouped form rather than in a custom sheet, a QR code (generated with CoreImage's QR filter) and a **Copy Pairing Code** button for the same payload. The section turns into "*name* is paired" once the phone's first handshake lands.
-3. The phone scans the code (VisionKit `DataScannerViewController`) or the user pastes it (the only option on the simulator).
+3. The phone scans the code (VisionKit `DataScannerViewController`), the user pastes it, or the system Camera opens it: the payload is a `codans-pair:` URL the app registers. A link opened from outside the app is never paired silently; the app names the Mac and asks first, because any web page or message can carry such a link and pairing with a stranger's Mac would send it everything typed into its panes.
 4. The phone stores the key, browses for the gateway, connects and handshakes. The first successful handshake flips the record from pending to active and stamps `lastSeenAt`.
 5. A pending record unused for 10 minutes is discarded along with its key, so an abandoned QR code on screen stops being a credential.
 
@@ -379,7 +379,7 @@ Targeted suites run with `xcodebuild test -workspace codans.xcworkspace -scheme 
 | Events | Snapshot is first; bursts within the debounce window coalesce into one frame; a slow reader keeps at most one pending frame per topic; stream ends on revoke/disable. |
 | iOS reducers | `TestStore` for the connection state machine (connect, background, backoff, resubscribe), agent grouping, PaneDetail input visibility per tier. |
 | Build | `make mac-build`; `make ios-build` (iOS Simulator). |
-| End to end | An isolated Debug instance (private `CODANS_SOCKET_PATH`, config and cache directories; never the user's running app): enable Remote Access → simulator discovers via Bonjour → paste pairing code → Agents / Browse / PaneDetail show real data → an interactive device sends `echo hi` and reads it back → after revoke, reconnect fails. Screenshots with `xcrun simctl io booted screenshot` on iPhone and iPad (portrait, landscape, Split View sizes). |
+| End to end | [`docs/user-tests/ios-companion/harness.sh`](../user-tests/ios-companion/README.md): an isolated Debug instance (private socket, config and a short cache path; never the user's running app) with Remote Access on issues pairing codes from its Settings pane over the accessibility API, and the `CodansMobileUITests` target on a simulator opens the `codans-pair:` link, confirms, browses to the fixture pane and sends a line that the Mac reads back. A view-only pairing must not show the input bar; revoking removes the records and their Keychain keys. The UI test skips without the harness's `TEST_RUNNER_CODANS_E2E_*` variables. |
 | iPhone Duo (after Xcode 27.1) | DeviceHub simulator: fold/unfold keeps selection and scroll position, rotation on the inner display, Split View with another app, two windows of Codans side by side. |
 
 ## Risks
@@ -395,3 +395,4 @@ Targeted suites run with `xcodebuild test -workspace codans.xcworkspace -scheme 
 | Shared targets regress on macOS when made multiplatform | Behaviour-preserving changes, identical `KeyCode` values, full `CodansCoreTests` and `make mac-build` before commit. |
 | Duo behaviour differs from expectations built without the 27.1 SDK | Standard containers only; validation scheduled as soon as Xcode 27.1 is available; the gap is stated in the deliverable. |
 | Interactive tier is effectively shell access | Opt-in per device, visible in the device list, downgradable instantly without reconnect. |
+| A revoked or expired device only sees a handshake timeout over Bonjour (the server logs `unknown PSK identity`, but the client's connection keeps racing the other resolved endpoints until the deadline), so the phone retries with "Your Mac did not answer in time" instead of asking to pair again | Open. Loopback connections do surface the TLS failure; the LAN path needs the rejection made terminal on the client, or a client-side "pair again" hint after repeated handshake failures against a reachable Mac. |
