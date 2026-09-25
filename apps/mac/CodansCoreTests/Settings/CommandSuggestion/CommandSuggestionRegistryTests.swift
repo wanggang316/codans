@@ -207,3 +207,18 @@ struct NestedManifestTests {
     #expect(!scope.shouldDescend(into: "target"))
   }
 }
+
+struct TransientSuggestionScriptTests {
+  private let source = CommandSuggestionSource(id: "package-json", displayName: "package.json")
+
+  @Test
+  func idIsStablePerSuggestionAndDistinctAcrossThem() {
+    let dev = CommandSuggestion(source: source, name: "dev", command: "pnpm run dev")
+    let build = CommandSuggestion(source: source, name: "build", command: "pnpm run build")
+    let first = CommandSuggestionAdoption.transientScript(for: dev)
+    #expect(first.id == CommandSuggestionAdoption.transientScript(for: dev).id)
+    #expect(first.id != CommandSuggestionAdoption.transientScript(for: build).id)
+    #expect(first.command == "pnpm run dev")
+    #expect(first.target == .newTab)
+  }
+}

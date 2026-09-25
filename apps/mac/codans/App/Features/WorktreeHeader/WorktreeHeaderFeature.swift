@@ -84,6 +84,9 @@ struct WorktreeHeaderFeature {
     case commandSuggestionsScanned(worktreeID: WorktreeID, [CommandSuggestionGroup])
     /// Adopt a detected command into the Project's commands. Never runs it.
     case addCommandSuggestionTapped(projectID: ProjectID, CommandSuggestion)
+    /// Run a detected command in a new tab. An adopted one runs as its saved
+    /// script (shared Run/Stop state); otherwise as an unsaved transient one.
+    case runCommandSuggestionTapped(projectID: ProjectID, CommandSuggestion)
     case delegate(Delegate)
 
     /// Parent-consumed delegate. `RootFeature` routes these into the existing
@@ -107,6 +110,9 @@ struct WorktreeHeaderFeature {
       /// (see `runScriptTapped` for the staleness rationale) and dispatches
       /// to `HierarchyClient.runScript`.
       case runScriptRequested(scriptID: UUID)
+      /// Run an unsaved command (a detected manifest entry) in the selected
+      /// worktree. Resolved against `state.selection` like `runScriptRequested`.
+      case runCommandRequested(ScriptDefinition)
       /// Run a user-defined global command. RootFeature resolves the target
       /// Project + Worktree from `state.selection` at handle-time (see
       /// `runScriptRequested`) and dispatches to `HierarchyClient.runGlobalScript`.
@@ -221,6 +227,13 @@ struct WorktreeHeaderFeature {
         let adopted = CommandSuggestionAdoption.adopt(suggestion, into: scripts).scripts
         let write = settingsWriter.setProjectScripts
         return .run { _ in await write(projectID, adopted) }
+
+      case .runCommandSuggestionTapped(let projectID, let suggestion):
+        let scripts = settingsWriter.readSnapshotSync().projects[projectID]?.scripts ?? []
+        if let saved = CommandSuggestionAdoption.adoptedScript(for: suggestion, in: scripts) {
+          return .send(.delegate(.runScriptRequested(scriptID: saved.id)))
+        }
+        return .send(.delegate(.runCommandRequested(CommandSuggestionAdoption.transientScript(for: suggestion))))
 
       case .delegate:
         // Consumed by the parent; reducer has no local state change.

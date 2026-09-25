@@ -13,8 +13,7 @@ public nonisolated enum CommandSuggestionAdoption {
   /// `true` when some script already runs exactly this command, so the menu
   /// can show it as added instead of offering a duplicate.
   public static func isAdopted(_ suggestion: CommandSuggestion, in scripts: [ScriptDefinition]) -> Bool {
-    let command = normalized(suggestion.command)
-    return scripts.contains { normalized($0.command) == command }
+    adoptedScript(for: suggestion, in: scripts) != nil
   }
 
   public static func adopt(_ suggestion: CommandSuggestion, into scripts: [ScriptDefinition]) -> Result {
@@ -51,6 +50,51 @@ public nonisolated enum CommandSuggestionAdoption {
       systemImage: iconOverride(for: suggestion, kind: kind)
     )
     return Result(scripts: scripts + [script], scriptID: script.id)
+  }
+
+  /// The saved script that already runs this suggestion's command, if any.
+  public static func adoptedScript(for suggestion: CommandSuggestion, in scripts: [ScriptDefinition])
+    -> ScriptDefinition?
+  {
+    let command = normalized(suggestion.command)
+    return scripts.first { normalized($0.command) == command }
+  }
+
+  /// An unsaved script for running a suggestion directly. Its id is derived
+  /// from the suggestion's id, so running the same entry again reuses the
+  /// pane the previous run opened, exactly like a saved script does.
+  public static func transientScript(for suggestion: CommandSuggestion) -> ScriptDefinition {
+    ScriptDefinition(
+      id: stableID(for: "command-suggestion:" + suggestion.id),
+      kind: suggestion.kind,
+      name: suggestion.name,
+      command: suggestion.command,
+      systemImage: suggestion.icon?.storedValue
+    )
+  }
+
+  /// FNV-1a over the key with two seeds → 128 bits, stamped as a v5-style
+  /// UUID. Deterministic across launches; collisions need two suggestion ids
+  /// hashing alike, which only costs a shared run pane.
+  static func stableID(for key: String) -> UUID {
+    func fnv(_ seed: UInt64) -> UInt64 {
+      var hash = seed
+      for byte in key.utf8 {
+        hash ^= UInt64(byte)
+        hash &*= 0x100_0000_01b3
+      }
+      return hash
+    }
+    var bytes = [UInt8](repeating: 0, count: 16)
+    withUnsafeBytes(of: fnv(0xcbf2_9ce4_8422_2325).bigEndian) { bytes.replaceSubrange(0..<8, with: $0) }
+    withUnsafeBytes(of: fnv(0x84_2222_325c_bf29).bigEndian) { bytes.replaceSubrange(8..<16, with: $0) }
+    bytes[6] = (bytes[6] & 0x0F) | 0x50
+    bytes[8] = (bytes[8] & 0x3F) | 0x80
+    return UUID(
+      uuid: (
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+      ))
   }
 
   /// The mapped icon as a stored override — nil when there is none or it is
