@@ -4,15 +4,29 @@ import Network
 import dnssd
 import os
 
-/// Finds the endpoint of a paired gateway with `NWBrowser`. Only services
-/// whose TXT `channel` equals the pairing's channel are considered, so a
-/// phone paired with the Release build never reaches a Debug build on the
-/// same Mac. The exact service name wins; when the Mac was renamed since
-/// pairing, a single same-channel gateway is used instead.
+/// Finds the endpoints a paired gateway may be at, with `NWBrowser`. Only
+/// services whose TXT `channel` equals the pairing's channel are
+/// considered, so a phone paired with the Release build never reaches a
+/// Debug build on the same Mac.
+///
+/// Several candidates are normal: after the Mac app crashes or is killed,
+/// mDNS keeps its stale advertisement for up to an hour, and the relaunched
+/// app registers under a renamed variant ("Name (2)"). The caller tries the
+/// candidates in order until one connects.
 nonisolated enum GatewayDiscovery {
   static let defaultTimeout: Duration = .seconds(8)
+  /// After the first qualifying result, how long to keep browsing for the
+  /// rest (a stale record and the live one arrive separately).
+  static let settleDelay: DispatchTimeInterval = .milliseconds(750)
 
-  static func resolve(_ gateway: PairedGateway, timeout: Duration = defaultTimeout) async throws -> NWEndpoint {
+  /// One browse result, reduced to what matching needs.
+  struct Offer: Equatable {
+    let name: String?
+    let channel: String?
+    let endpoint: NWEndpoint
+  }
+
+  static func resolve(_ gateway: PairedGateway, timeout: Duration = defaultTimeout) async throws -> [NWEndpoint] {
     let browser = NWBrowser(
       for: .bonjourWithTXTRecord(type: RemoteBonjour.serviceType, domain: nil),
       using: NWParameters()
@@ -20,18 +34,27 @@ nonisolated enum GatewayDiscovery {
     let queue = DispatchQueue(label: "com.gumpw.codans.mobile.discovery")
     defer { browser.cancel() }
 
-    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NWEndpoint, Error>) in
-      let pending = OSAllocatedUnfairLock<CheckedContinuation<NWEndpoint, Error>?>(initialState: continuation)
-      let finish: @Sendable (Result<NWEndpoint, Error>) -> Void = { result in
-        pending.withLock { slot -> CheckedContinuation<NWEndpoint, Error>? in
+    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[NWEndpoint], Error>) in
+      let pending = OSAllocatedUnfairLock<CheckedContinuation<[NWEndpoint], Error>?>(initialState: continuation)
+      let settling = OSAllocatedUnfairLock(initialState: false)
+      let finish: @Sendable (Result<[NWEndpoint], Error>) -> Void = { result in
+        pending.withLock { slot -> CheckedContinuation<[NWEndpoint], Error>? in
           defer { slot = nil }
           return slot
         }?.resume(with: result)
       }
 
       browser.browseResultsChangedHandler = { results, _ in
-        if let endpoint = match(gateway, in: results) {
-          finish(.success(endpoint))
+        guard !candidates(for: gateway, in: offers(results)).isEmpty else { return }
+        // Keep collecting briefly, then answer with whatever is known.
+        let isFirst = settling.withLock { started in
+          let first = !started
+          started = true
+          return first
+        }
+        guard isFirst else { return }
+        queue.asyncAfter(deadline: .now() + settleDelay) {
+          finish(.success(candidates(for: gateway, in: offers(browser.browseResults))))
         }
       }
       browser.stateUpdateHandler = { state in
@@ -58,21 +81,27 @@ nonisolated enum GatewayDiscovery {
     }
   }
 
-  /// The endpoint to connect to among `results`, if any qualifies.
-  static func match(_ gateway: PairedGateway, in results: Set<NWBrowser.Result>) -> NWEndpoint? {
-    let sameChannel = results.filter { result in
-      guard case .bonjour(let record) = result.metadata else { return false }
-      return RemoteBonjour.channel(in: record) == gateway.channel
-    }
-    if let exact = sameChannel.first(where: { serviceName(of: $0.endpoint) == gateway.serviceName }) {
-      return exact.endpoint
-    }
-    return sameChannel.count == 1 ? sameChannel.first?.endpoint : nil
+  /// Same-channel endpoints to try, best first: the paired service name,
+  /// then names mDNS derived from it after a conflict ("Name (2)"), then,
+  /// only when neither exists (the Mac was renamed), every other gateway on
+  /// the channel. Ties are ordered by name so retries are stable.
+  static func candidates(for gateway: PairedGateway, in offers: [Offer]) -> [NWEndpoint] {
+    let sameChannel = offers.filter { $0.channel == gateway.channel }
+      .sorted { ($0.name ?? "") < ($1.name ?? "") }
+    let exact = sameChannel.filter { $0.name == gateway.serviceName }
+    let renamed = sameChannel.filter { $0.name?.hasPrefix(gateway.serviceName + " (") == true }
+    let preferred = exact + renamed
+    return (preferred.isEmpty ? sameChannel : preferred).map(\.endpoint)
   }
 
-  private static func serviceName(of endpoint: NWEndpoint) -> String? {
-    if case .service(let name, _, _, _) = endpoint { return name }
-    return nil
+  private static func offers(_ results: Set<NWBrowser.Result>) -> [Offer] {
+    results.map { result in
+      var channel: String?
+      if case .bonjour(let record) = result.metadata { channel = RemoteBonjour.channel(in: record) }
+      var name: String?
+      if case .service(let serviceName, _, _, _) = result.endpoint { name = serviceName }
+      return Offer(name: name, channel: channel, endpoint: result.endpoint)
+    }
   }
 
   private static func isPolicyDenied(_ error: NWError) -> Bool {

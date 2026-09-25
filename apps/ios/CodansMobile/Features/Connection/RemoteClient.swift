@@ -3,6 +3,7 @@ import CodansIPC
 import CodansRemote
 import ComposableArchitecture
 import Foundation
+import Network
 
 /// What a successful connect learned from the Mac.
 nonisolated struct RemoteSessionInfo: Equatable, Sendable {
@@ -87,9 +88,24 @@ private actor LiveRemoteSessions {
 
   func connect(_ gateway: PairedGateway, credential: RemoteTLS.PSKCredential) async throws -> RemoteSession {
     await disconnect()
-    let endpoint = try await GatewayDiscovery.resolve(gateway)
+    let candidates = try await GatewayDiscovery.resolve(gateway)
     let hello = HelloRequest(clientVersion: Self.clientVersion, clientBinary: "codans-mobile")
-    let control = try await RemoteRPCClient.connect(to: endpoint, credential: credential, hello: hello)
+    // A stale advertisement never answers, so with several candidates each
+    // gets a shorter handshake budget before moving on to the next.
+    let budget: Duration = candidates.count > 1 ? .seconds(5) : RemoteHandshake.defaultTimeout
+    var control: RemoteRPCClient?
+    var endpoint: NWEndpoint?
+    var lastError: Error = RemoteFailure(.notFound, "Couldn't reach \(gateway.displayName).")
+    for candidate in candidates {
+      do {
+        control = try await RemoteRPCClient.connect(to: candidate, credential: credential, hello: hello, timeout: budget)
+        endpoint = candidate
+        break
+      } catch {
+        lastError = error
+      }
+    }
+    guard let control, let endpoint else { throw lastError }
     let events: RemoteRPCClient
     do {
       events = try await RemoteRPCClient.connect(to: endpoint, credential: credential, hello: hello)
