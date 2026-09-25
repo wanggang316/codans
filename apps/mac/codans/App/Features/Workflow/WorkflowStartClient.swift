@@ -33,6 +33,9 @@ nonisolated struct WorkflowStartClient: Sendable {
   /// Records the user's agreement to run a repository file's shell steps.
   /// Only the panel calls this; the CLI can never grant trust (D8).
   var trust: @MainActor @Sendable (_ path: String, _ sha256: String) -> Void
+  /// Asks Settings → Workflows to open its New Workflow sheet the next time
+  /// it is on screen — the toolbar menu's "New Workflow…".
+  var requestNewWorkflow: @MainActor @Sendable () -> Void = {}
 }
 
 extension WorkflowStartClient {
@@ -44,6 +47,7 @@ extension WorkflowStartClient {
     settings: SettingsStore,
     registry: WorkflowActivationRegistry,
     catalog: @escaping @MainActor @Sendable () -> Catalog,
+    workflowCatalog: WorkflowCatalogStore,
     paneHandles: @escaping @MainActor @Sendable () -> [PaneID: Int],
     agentKind: @escaping @MainActor @Sendable (PaneID) -> AgentKind?
   ) -> WorkflowStartClient {
@@ -71,7 +75,8 @@ extension WorkflowStartClient {
       },
       trust: { path, sha256 in
         settings.mutateWorkflows { $0.trust(path: path, sha256: sha256, at: Date()) }
-      }
+      },
+      requestNewWorkflow: { [weak workflowCatalog] in workflowCatalog?.requestNewWorkflow() }
     )
   }
 

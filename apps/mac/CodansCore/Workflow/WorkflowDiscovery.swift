@@ -84,8 +84,15 @@ public nonisolated struct WorkflowDiscovery: Sendable {
   /// Every entry, one per id, the highest-precedence scope winning; sorted
   /// by id for stable listings.
   public func catalog(worktreeRoot: URL?) -> [WorkflowCatalogEntry] {
+    Self.resolveShadowing(scanAll(worktreeRoot: worktreeRoot))
+  }
+
+  /// One entry per id, the highest-precedence scope winning; sorted by id.
+  /// Shared by `catalog(worktreeRoot:)` and the app's watched catalog, so
+  /// both agree on which file a run would use.
+  public static func resolveShadowing(_ entries: [WorkflowCatalogEntry]) -> [WorkflowCatalogEntry] {
     var byID: [String: WorkflowCatalogEntry] = [:]
-    for entry in scanAll(worktreeRoot: worktreeRoot) {
+    for entry in entries {
       if let existing = byID[entry.id], existing.scope > entry.scope { continue }
       byID[entry.id] = entry
     }

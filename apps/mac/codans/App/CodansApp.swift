@@ -88,6 +88,7 @@ struct CodansApp: App {
           )
           .frame(minWidth: 800, minHeight: 600)
           .environment(appState.agentInstallation)
+          .environment(appState.workflowCatalog)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
           // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
@@ -199,6 +200,7 @@ struct CodansApp: App {
           .environment(appState.developerPaneDependencies)
           .environment(appState.osNotifier)
           .environment(appState.agentInstallation)
+          .environment(appState.workflowCatalog)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
         } else {
@@ -489,6 +491,10 @@ final class AppState {
   /// resolves a handle — and the workflow start panel's pane picker —
   /// names the same pane.
   let targetHandles = TargetHandleRegistry()
+  /// Watched workflow definitions for the GUI surfaces (toolbar menu,
+  /// Agents View row menu, Settings → Workflows). Follows the hierarchy
+  /// from `bringUp`.
+  let workflowCatalog = WorkflowCatalogStore(discovery: AppState.makeWorkflowDiscovery())
   /// Owns the active workflow runs. Built in `bringUp` once the live
   /// clients exist; the AgentState panel reads `activeRuns` from it.
   @ObservationIgnored private(set) var workflowEngine: WorkflowEngine?
@@ -856,6 +862,7 @@ final class AppState {
     let workflowEngine = makeWorkflowEngine(
       hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, engine: engine)
     self.workflowEngine = workflowEngine
+    workflowCatalog.follow(hierarchyManager)
     self.store = Store(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
@@ -1433,6 +1440,7 @@ final class AppState {
       settings: settingsStore,
       registry: workflowRegistry,
       catalog: { hierarchy.catalog },
+      workflowCatalog: workflowCatalog,
       paneHandles: { [weak hierarchy] in
         guard let hierarchy else { return [:] }
         handleRegistry.sync(with: hierarchy.catalog)
