@@ -6,13 +6,12 @@ import SwiftUI
 /// the chip views — select / close / rename / reorder callbacks come from
 /// the parent.
 ///
-/// Chips sit flush against one another (`spacing: 0`) and split
-/// `trackWidth` equally, bottoming out at `TabBarMetrics.chipMinWidth` (the
-/// enclosing scroll view takes over past that). A short separator is
-/// overlaid on the trailing edge of a chip when neither it nor its right
-/// neighbor is selected — the selected chip's raised plate already carries
-/// that boundary. Overlaying (rather than inserting) the separator keeps
-/// every chip exactly the same width.
+/// Layout follows the system tab bar: chips sit 1 pt apart and split
+/// `trackWidth` equally (the leftover points go to the leading chips),
+/// bottoming out at `TabBarMetrics.chipMinWidth`, past which the enclosing
+/// scroll view takes over. A separator fills the gap between two chips
+/// unless either of them is selected or hovered — their capsules already
+/// carry that boundary.
 ///
 /// Reorder: an in-app `DragGesture` drives a live preview. While dragging,
 /// a local `orderIDs` snapshot is mutated once the dragged chip overlaps a
@@ -25,7 +24,7 @@ import SwiftUI
 struct TabBarRowView: View {
   let tabs: [CodansCore.Tab]
   let activeTabID: TabID?
-  /// Width of the visible track the chips share. `0` (previews / tests)
+  /// Width available to the chips inside the track. `0` (previews / tests)
   /// collapses every chip to `chipMinWidth`.
   var trackWidth: CGFloat = 0
   /// Per-tab terminal-busy lookup — typically `HierarchyManager.tabIsDirty(_:)`
@@ -81,6 +80,8 @@ struct TabBarRowView: View {
   /// Per-chip layout rects (row space) reported via `ChipFrameKey`. Read
   /// for neighbor-midpoint hit testing and to size the floating copy.
   @State private var chipFrames: [TabID: CGRect] = [:]
+  /// Chip under the pointer; its flanking separators are hidden.
+  @State private var hoveredID: TabID?
 
   /// Render order: during a drag the locally-mutated `orderIDs`; otherwise
   /// the `tabs` prop verbatim. Content is always resolved from the current
@@ -96,11 +97,21 @@ struct TabBarRowView: View {
 
   var body: some View {
     let rendered = renderedTabs
-    let chipWidth = chipWidth(count: rendered.count)
-    HStack(spacing: 0) {
+    let widths = chipWidths(count: rendered.count)
+    HStack(spacing: TabBarMetrics.chipSpacing) {
       ForEach(Array(rendered.enumerated()), id: \.element.id) { index, tab in
         chipView(for: tab, index: index, count: rendered.count)
-          .frame(width: chipWidth)
+          .frame(width: widths[index])
+          .onHover { hovering in
+            if hovering {
+              hoveredID = tab.id
+            } else if hoveredID == tab.id {
+              hoveredID = nil
+            }
+          }
+          // Overlaid and pushed into the inter-chip gap rather than
+          // inserted into the HStack, so the gap stays exactly
+          // `chipSpacing` whether or not the separator shows.
           .overlay(alignment: .trailing) {
             if showsDivider(at: index, in: rendered) {
               Rectangle()
@@ -109,7 +120,7 @@ struct TabBarRowView: View {
                   width: TabBarMetrics.dividerWidth,
                   height: TabBarMetrics.dividerHeight
                 )
-                .offset(x: TabBarMetrics.dividerWidth / 2)
+                .offset(x: TabBarMetrics.chipSpacing)
                 .allowsHitTesting(false)
             }
           }
@@ -189,11 +200,7 @@ struct TabBarRowView: View {
         // Opaque plate so the lifted copy occludes the chips it floats
         // over — the chip's own idle fill is `.clear`, which would let
         // their titles bleed through and overlap.
-        .background(
-          RoundedRectangle(cornerRadius: TabBarMetrics.chipCornerRadius, style: .continuous)
-            .fill(TabBarColors.draggingBackground)
-            .padding(TabBarMetrics.chipPlateInset)
-        )
+        .background(Capsule().fill(TabBarColors.draggingBackground))
         // Hard-clip the lifted copy to its own chip frame. On macOS 26 the
         // copy's opaque background otherwise paints a tall white column up to
         // the titlebar during a drag (a SwiftUI host/overlay regression — the
@@ -272,21 +279,28 @@ struct TabBarRowView: View {
     }
   }
 
-  /// Equal share of the track, floored at `chipMinWidth`. Rounded down so
-  /// the sum never exceeds the track and trips the scroll view by a
-  /// sub-pixel.
-  private func chipWidth(count: Int) -> CGFloat {
-    guard count > 0 else { return TabBarMetrics.chipMinWidth }
-    return max(TabBarMetrics.chipMinWidth, (trackWidth / CGFloat(count)).rounded(.down))
+  /// Whole-point chip widths that exactly fill the track: an equal share
+  /// after the 1-pt gaps, with the remainder handed one point at a time to
+  /// the leading chips (the system bar lays out 293 / 293 / 292). Floored
+  /// at `chipMinWidth`, where the row overflows into the scroll view.
+  private func chipWidths(count: Int) -> [CGFloat] {
+    guard count > 0 else { return [] }
+    let available = Int(trackWidth - TabBarMetrics.chipSpacing * CGFloat(count - 1))
+    let base = available / count
+    guard CGFloat(base) >= TabBarMetrics.chipMinWidth else {
+      return Array(repeating: TabBarMetrics.chipMinWidth, count: count)
+    }
+    let remainder = available - base * count
+    return (0..<count).map { CGFloat(base + ($0 < remainder ? 1 : 0)) }
   }
 
   /// Draws a separator between adjacent chips, except next to the selected
-  /// chip (its raised plate is the boundary) and around the drag gap (so
-  /// the empty slot reads clean while the dragged chip floats).
+  /// or hovered chip (their capsules are the boundary) and around the drag
+  /// gap (so the empty slot reads clean while the dragged chip floats).
   private func showsDivider(at index: Int, in rendered: [CodansCore.Tab]) -> Bool {
     guard index < rendered.count - 1 else { return false }
     let pair = [rendered[index].id, rendered[index + 1].id]
-    return !pair.contains { $0 == draggingID || $0 == activeTabID }
+    return !pair.contains { $0 == draggingID || $0 == activeTabID || $0 == hoveredID }
   }
 
   /// Resolves the registry chord (`switchToTabN`) to a display string while ⌘ is held.

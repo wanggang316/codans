@@ -26,7 +26,8 @@ struct TabBarView: View {
   var body: some View {
     HStack(spacing: 4, content: barContent)
       .padding(.leading, TabBarMetrics.trackLeadingInset)
-      .frame(height: TabBarMetrics.barHeight)
+      .frame(height: TabBarMetrics.trackHeight)
+      .padding(.bottom, TabBarMetrics.trackBottomInset)
       .sheet(
         item: Binding(
           get: { store.renameTarget },
