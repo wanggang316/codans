@@ -98,8 +98,8 @@ struct TabBarView: View {
   private func barContent() -> some View {
     Group {
       if let worktree = currentWorktree() {
-        TabBarOverflowScroll(activeTabID: activeTabID) { trackWidth in
-          rowView(for: worktree, trackWidth: trackWidth)
+        TabBarOverflowScroll { viewport in
+          rowView(for: worktree, viewport: viewport)
         }
         .frame(height: TabBarMetrics.trackHeight)
       }
@@ -169,11 +169,11 @@ struct TabBarView: View {
   }
 
   @ViewBuilder
-  private func rowView(for worktree: Worktree, trackWidth: CGFloat) -> some View {
+  private func rowView(for worktree: Worktree, viewport: TabBarViewport) -> some View {
     TabBarRowView(
       tabs: worktree.tabs,
       activeTabID: activeTabID,
-      trackWidth: trackWidth,
+      viewport: viewport,
       // Two busy signals, kept apart so the chip can treat them differently.
       // Terminal (OSC 9;4 progress ∪ running foreground command): reading the
       // @Observable HierarchyManager re-renders the chip on a flip. Agent (the

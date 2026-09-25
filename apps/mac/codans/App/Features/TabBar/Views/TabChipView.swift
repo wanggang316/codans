@@ -46,10 +46,70 @@ struct TabChipView: View {
   /// Script-tint colour for `icon` while the tab's run pane executes; see
   /// `TabChipLabel.iconTint`.
   var iconTint: Color?
+  /// Overflow stacking (`TabStackLayout`): the visible width of this chip
+  /// when it is compressed into a stack sliver. The chip still lays its
+  /// content out at full chip width — as the system bar does — shifts it by
+  /// `contentShift`, and clips it to the sliver. `nil` = not compressed.
+  var sliceWidth: CGFloat?
+  var contentShift: CGFloat = 0
+  /// A click on a stack sliver scrolls the row instead of selecting the
+  /// tab. `nil` for chips that are not part of a stack.
+  var onStackClick: (() -> Void)?
 
   @State private var isHovering = false
 
   var body: some View {
+    Group {
+      if let sliceWidth {
+        chipContent
+          // A sliver is not a click target of its own: the select button
+          // fires on mouse-down and would win over the stack click.
+          .allowsHitTesting(onStackClick == nil)
+          .offset(x: contentShift)
+          .frame(width: TabStackLayout.chipWidth, alignment: .leading)
+          .mask(alignment: .leading) { Rectangle().frame(width: sliceWidth) }
+          .background(alignment: .leading) { background.frame(width: sliceWidth) }
+          .overlay(alignment: .leading) {
+            if let onStackClick {
+              Color.clear
+                .frame(width: sliceWidth)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onStackClick)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Show Stacked Tabs")
+            }
+          }
+      } else {
+        chipContent.background(background)
+      }
+    }
+    .overlay(TabChipMiddleClickView(onMiddleClick: onMiddleClick))
+    .onHover { hovering in
+      withAnimation(.easeInOut(duration: 0.10)) {
+        isHovering = hovering
+      }
+    }
+    .contextMenu {
+      TabChipContextMenu(
+        isOnlyTab: isOnlyTab,
+        isLastTab: isLastTab,
+        onRename: onRenameRequested,
+        onChangeColor: onChangeColor,
+        onChangeIcon: onChangeIcon,
+        onCopyID: onCopyID,
+        onClose: onClose,
+        onCloseOthers: onCloseOthers,
+        onCloseToRight: onCloseToRight,
+        onCloseAll: onCloseAll
+      )
+    }
+  }
+
+  private var background: some View {
+    TabChipBackground(isActive: isActive, isHovering: isHovering)
+  }
+
+  private var chipContent: some View {
     // Hit layout: the select Button claims the whole chip rectangle so
     // a click anywhere on the chip selects it; the close button (leading)
     // and the color dot / chord hint (trailing) are overlays on the same
@@ -108,32 +168,6 @@ struct TabChipView: View {
       }
       .padding(.trailing, TabBarMetrics.chipSlotInset)
       .allowsHitTesting(false)
-    }
-    .background(
-      TabChipBackground(
-        isActive: isActive,
-        isHovering: isHovering
-      )
-    )
-    .overlay(TabChipMiddleClickView(onMiddleClick: onMiddleClick))
-    .onHover { hovering in
-      withAnimation(.easeInOut(duration: 0.10)) {
-        isHovering = hovering
-      }
-    }
-    .contextMenu {
-      TabChipContextMenu(
-        isOnlyTab: isOnlyTab,
-        isLastTab: isLastTab,
-        onRename: onRenameRequested,
-        onChangeColor: onChangeColor,
-        onChangeIcon: onChangeIcon,
-        onCopyID: onCopyID,
-        onClose: onClose,
-        onCloseOthers: onCloseOthers,
-        onCloseToRight: onCloseToRight,
-        onCloseAll: onCloseAll
-      )
     }
   }
 
