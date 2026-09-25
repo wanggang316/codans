@@ -175,6 +175,7 @@ final class AgentHandlers {
       switch request.until {
       case .idle: satisfied = entry?.state == .idle
       case .working: satisfied = entry?.state == .working
+      case .error: satisfied = entry?.state == .error
       case .blocked: satisfied = entry?.state == .blocked
       case .finished: satisfied = entry?.state == .finished
       case .changed: satisfied = entry?.state != baseline?.state || entry?.kind != baseline?.kind

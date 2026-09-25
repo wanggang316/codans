@@ -231,8 +231,8 @@
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans agent list` | `agent.listProfiles` | `AgentHandlers.listProfiles` | 无；每行回带 id、名字、agent、enabled、PATH 探测结果（未探测完为 null）、是否支持 prompt、完整启动命令 |
-| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/finished）、`since`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。运行态是纯内存派生态，不持久化 |
-| `codans agent wait PANE --until COND` | `agent.wait` | `AgentHandlers.wait`（服务端每 200 ms 轮询 store） | `PANE`，`--until idle\|working\|blocked\|finished\|changed\|exit`，`[--wait-timeout 1..600]`（默认 60；全局 `--timeout` 是 RPC 客户端上限，会被抬高以覆盖它）。`changed` = 相对 arm 时的状态有任何变化；`exit` = pane 上不再绑定 agent。服务端在 deadline 返回 `satisfied=false`，CLI 转成 exit 11 / `WAIT_TIMEOUT` 并在 `details` 里带最后状态 |
+| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/error/finished）、`since`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。运行态是纯内存派生态，不持久化 |
+| `codans agent wait PANE --until COND` | `agent.wait` | `AgentHandlers.wait`（服务端每 200 ms 轮询 store） | `PANE`，`--until idle\|working\|blocked\|error\|finished\|changed\|exit`，`[--wait-timeout 1..600]`（默认 60；全局 `--timeout` 是 RPC 客户端上限，会被抬高以覆盖它）。`changed` = 相对 arm 时的状态有任何变化；`exit` = pane 上不再绑定 agent。服务端在 deadline 返回 `satisfied=false`，CLI 转成 exit 11 / `WAIT_TIMEOUT` 并在 `details` 里带最后状态 |
 | `codans agent launch [PROFILE]` | `agent.launch` | `HierarchyClient.launchAgent` | `[PROFILE]`（名字或 id）或 `--agent TOKEN`（该 agent 第一个启用的 profile，缺则临时裸预设），`[--project P] [--worktree W] [--prompt TEXT\|-] [--tab \| --split right\|left\|up\|down] [--background]` |
 
 `launch` 走与 toolbar 相同的管线（渲染 profile → 合成 `ScriptDefinition` → 新 tab / 分屏 / 当前 pane），永不复用 run pane。禁用的 profile 以 `conflict` 拒绝；不支持初始 prompt 的 agent 带 `--prompt` 以 `unsupported` 拒绝；重名 profile 以 `conflict` 要求传 id。

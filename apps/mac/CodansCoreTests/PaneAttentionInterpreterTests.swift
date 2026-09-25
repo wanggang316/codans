@@ -565,15 +565,15 @@ struct PaneAttentionInterpreterTests {
     // done→working flicker). A done screen — completion summary, a
     // truncated recap, and an empty `❯` prompt — must classify as idle.
     let screen = """
-          ✻ Crunched for 34m 0s
+        ✻ Crunched for 34m 0s
 
-        ※ recap: Goal: fix the width bug. The serializer change is committed and tests pass. Next: push the submodule then the main repo, and optionally rebuild …
+      ※ recap: Goal: fix the width bug. The serializer change is committed and tests pass. Next: push the submodule then the main repo, and optionally rebuild …
 
-        ────────────────────────────────────────
-        ❯
-        ────────────────────────────────────────
-          [Opus 4.8 (1M context)] ██░░░░░░░░ 22% | resume-width
-        """
+      ────────────────────────────────────────
+      ❯
+      ────────────────────────────────────────
+        [Opus 4.8 (1M context)] ██░░░░░░░░ 22% | resume-width
+      """
     #expect(activity(.claudeCode, screen) == .idle)
   }
 
@@ -712,6 +712,26 @@ struct PaneAttentionInterpreterTests {
     #expect(activity(.omp, "grep matched: allow tool: bash\n❯ ") == .idle)
     // The dialog itself still wins: the title leads its line.
     #expect(activity(.omp, "Allow tool: bash\nReason: destructive") == .blocked)
+  }
+
+  @Test
+  func terminalErrorBannersAreNarrowAndYieldToLiveActivity() {
+    #expect(activity(.codex, "■ stream disconnected before completion: timeout") == .error)
+    #expect(activity(.claudeCode, "⎿ API Error: 503 unavailable\n❯") == .error)
+    #expect(activity(.claudeCode, "API Error: 401 unauthorized") == .error)
+    #expect(
+      activity(.codex, "■ stream disconnected before completion: timeout\nReconnecting... 1/5")
+        != .error)
+    #expect(activity(.claudeCode, "API Error: 503\nRetrying in 3 seconds") != .error)
+    #expect(activity(.claudeCode, "API Error: 503\nesc to interrupt") == .working)
+    #expect(activity(.claudeCode, "API Error: 503\nDo you want to proceed? yes") == .blocked)
+    #expect(activity(.codex, "Tool failed with exit code 1") == .idle)
+    #expect(activity(.claudeCode, "Example: API Error: 503") == .idle)
+    #expect(activity(.claudeCode, "```\nAPI Error: 503") == .idle)
+    #expect(
+      activity(.codex, "■ stream disconnected before completion: timeout\nCompleted successfully")
+        == .idle)
+    #expect(activity(.omp, "API Error: 503") == .idle)
   }
 
   private func activity(

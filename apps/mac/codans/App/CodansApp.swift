@@ -533,6 +533,7 @@ final class AppState {
   /// app lifetime — the poll loop is the only thing that fires a deferred
   /// command, so dropping it would silently strand every queue.
   @ObservationIgnored private(set) var commandQueueRunner: CommandQueueRunner?
+  @ObservationIgnored private(set) var agentRecoveryRunner: AgentRecoveryRunner?
   /// Long-running focus observer for AgentStateStore. Re-arms on every
   /// catalog mutation that could change the globally-focused pane and
   /// forwards new ids to `registry.onPaneFocused`. Same re-arming
@@ -766,6 +767,7 @@ final class AppState {
       }
     }
     startCommandQueueRunner(manager: manager, engine: engine)
+    startAgentRecoveryRunner(manager: manager, engine: engine)
     // SwiftUI views (e.g. `ProjectGeneralSettingsView`) read `@Dependency(SettingsWriter.self)`
     // directly; that resolution bypasses the per-store `withDependencies` overrides below and
     // would otherwise hit the `liveValue` `fatalError` placeholders. Install the live
@@ -2037,9 +2039,40 @@ final class AppState {
       hasLiveSurface: { [weak engine] paneID in
         engine?.ghosttyRuntime?.surface(for: paneID) != nil
       },
-      send: { paneID, text in terminal.sendCommand(paneID, text) }
+      send: { [weak registry = self.agentStateStore] paneID, text in
+        registry?.onPaneKeyboardActivity(paneID)
+        terminal.sendCommand(paneID, text)
+      }
     )
     self.commandQueueRunner = runner
+    runner.start()
+  }
+
+  private func startAgentRecoveryRunner(manager: HierarchyManager, engine: TerminalEngine) {
+    guard agentRecoveryRunner == nil else { return }
+    let runner = AgentRecoveryRunner(
+      policy: { [weak settingsStore] in settingsStore?.settings.agents.recovery ?? AgentRecoveryPolicy() },
+      targets: { [weak manager, weak engine, weak registry = self.agentStateStore] in
+        guard let manager, let engine, let registry else { return [] }
+        return AgentRecoveryRunner.liveTargets(manager: manager, engine: engine, registry: registry)
+      },
+      deliver: { [weak engine] target, policy, attempt, validate in
+        switch policy.action {
+        case .prompt:
+          guard validate(true), let surface = engine?.ghosttyRuntime?.surface(for: target.paneID) else { return }
+          surface.sendText(policy.prompt)
+          do { try await Task.sleep(for: TerminalClient.submitDelay) } catch { return }
+          guard validate(false), engine?.ghosttyRuntime?.surface(for: target.paneID) === surface else { return }
+          surface.sendNamedKey(.enter)
+        case .script:
+          await AgentRecoveryRunner.runScript(
+            target: target, policy: policy, attempt: attempt,
+            runner: FoundationCommandRunner(), validate: validate
+          )
+        }
+      }
+    )
+    agentRecoveryRunner = runner
     runner.start()
   }
 

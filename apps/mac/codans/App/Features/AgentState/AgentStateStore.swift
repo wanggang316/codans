@@ -8,8 +8,8 @@ private let storeLogger = Logger(
 )
 
 /// Runtime-only state machine that derives each bound agent pane's
-/// runtime state (`idle` / `working` / `blocked` / `finished`) from the
-/// raw `working` / `blocked` / `idle` classifier plus an observed/
+/// runtime state (`idle` / `working` / `blocked` / `error` / `finished`) from the
+/// raw `working` / `blocked` / `error` / `idle` classifier plus an observed/
 /// unobserved attention bit. Raw state comes from the rendered active
 /// region; `finished` is the display form of an unobserved completion.
 /// Designed to be the single source of truth for the AgentState badge +
@@ -22,7 +22,10 @@ private let storeLogger = Logger(
 /// on every transition; every mutation writes the full entry struct
 /// back to the subscript so change tracking fires reliably.
 ///
-/// Display priority is `blocked > working > finished > idle`.
+/// Sidebar priority is `error > blocked > finished > working > idle`.
+/// Live working and blocked cues take precedence over heuristic errors.
+/// Errors survive focus; keyboard input suppresses the same old error until
+/// it disappears or live activity resumes.
 /// A blocked raw state clears when the user observably interacts
 /// (keystroke / focus). Working fires only after the bound agent has
 /// observed user input and its rendered region matches an agent-specific
@@ -51,10 +54,15 @@ final class AgentStateStore {
     let sessionID: String?
     var state: AgentRuntimeState
     var lastTransitionAt: Date
+    /// Recovery budgets span autonomous retries, but never manual interaction
+    /// or a new agent binding. This token is intentionally runtime-only.
+    var recoveryGeneration = UUID()
+    var recoveryEligible = false
+    var recoverySuppressed = false
   }
 
   /// Derived runtime state surfaced to UI. Shares its vocabulary with the
-  /// raw `AgentActivityState` classifier (`working` / `blocked` / `idle`)
+  /// raw `AgentActivityState` classifier (`working` / `blocked` / `error` / `idle`)
   /// and adds `finished` for an unobserved completion, so no state has to
   /// be renamed as it flows from classifier to UI. Distinct from the
   /// inbox-side `InboxEntry.Kind`, which tracks notification events rather
@@ -63,10 +71,12 @@ final class AgentStateStore {
     case idle
     case working
     case blocked
+    case error
     case finished
 
     /// True while the agent's turn is still open — working, or blocked on
-    /// the user mid-turn. `idle` / `finished` mean the turn has ended.
+    /// the user mid-turn. An `error` is a stopped failure requiring recovery;
+    /// `idle` / `finished` mean the turn has ended.
     var isMidTask: Bool {
       self == .working || self == .blocked
     }
@@ -88,6 +98,7 @@ final class AgentStateStore {
     var userInputSeen: Bool
     var lastViewportText: String?
     var lastWorkingAt: Date?
+    var suppressedErrorFingerprint: String?
     /// Latest OSC title the pane's terminal pushed. Display-only cache
     /// for the hover summary card's "what is the agent doing" line —
     /// never an input to state derivation (see the reaction table).
@@ -229,10 +240,19 @@ final class AgentStateStore {
   /// prompt, so drop the attention cue until the next snapshot re-derives it.
   func onPaneKeyboardActivity(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    if s.rawState == .blocked {
+    if s.rawState == .error, let kind = entries[paneID]?.kind, let text = s.lastViewportText {
+      s.suppressedErrorFingerprint = PaneAttentionInterpreter.agentErrorFingerprint(
+        kind: kind, viewportText: text)
+    }
+    if s.rawState == .blocked || s.rawState == .error {
       s.lastViewportText = nil
       s.lastWorkingAt = nil
       s.rawState = .idle
+    }
+    if var entry = entries[paneID] {
+      entry.recoveryGeneration = UUID()
+      entry.recoverySuppressed = false
+      entries[paneID] = entry
     }
     s.userInputSeen = true
     s.seen = true
@@ -240,8 +260,8 @@ final class AgentStateStore {
     refresh(paneID)
   }
 
-  /// `paneID` was focused. Same semantics as `onPaneKeyboardActivity`:
-  /// the user has observed the pane, so clear display-only attention.
+  /// Focus clears display-only attention and blocked prompts, but preserves
+  /// errors and their recovery identity until actual input or new evidence.
   func onPaneFocused(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
     if s.rawState == .blocked {
@@ -271,6 +291,17 @@ final class AgentStateStore {
     sessionID: String?,
     assumeUserInputSeen: Bool = false
   ) {
+    if let previous = entries[paneID],
+      previous.kind != kind || previous.sessionID != sessionID,
+      var previousScratch = scratch[paneID]
+    {
+      previousScratch.lastViewportText = nil
+      previousScratch.lastWorkingAt = nil
+      previousScratch.suppressedErrorFingerprint = nil
+      previousScratch.rawState = .idle
+      previousScratch.awaitingFirstClassification = true
+      scratch[paneID] = previousScratch
+    }
     let viewportImpliesActive: Bool = {
       guard let text = scratch[paneID]?.lastViewportText else { return false }
       let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
@@ -297,6 +328,15 @@ final class AgentStateStore {
       lastTransitionAt: seeded?.lastTransitionAt ?? now()
     )
     refresh(paneID)
+  }
+
+  /// Keep the error visible while invalidating pending recovery work. Only
+  /// explicit keyboard input or a new binding permits automatic recovery again.
+  func cancelRecovery(for paneID: PaneID) {
+    guard var entry = entries[paneID] else { return }
+    entry.recoverySuppressed = true
+    entry.recoveryGeneration = UUID()
+    entries[paneID] = entry
   }
 
   /// User-driven unbind path. Drops both the entry and its scratch so
@@ -379,7 +419,13 @@ final class AgentStateStore {
   private func deriveRawState(_ s: Scratch, kind: AgentKind?) -> AgentRawState {
     guard let kind, let text = s.lastViewportText else { return .idle }
     let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
-    if raw == .blocked { return .blocked }
+    if raw == .error,
+      let suppressed = s.suppressedErrorFingerprint,
+      PaneAttentionInterpreter.agentErrorFingerprint(kind: kind, viewportText: text) == suppressed
+    {
+      return .idle
+    }
+    if raw == .blocked || raw == .error { return raw }
     return s.userInputSeen ? raw : .idle
   }
 
@@ -387,6 +433,8 @@ final class AgentStateStore {
     switch s.rawState {
     case .blocked:
       return .blocked
+    case .error:
+      return .error
     case .working:
       return .working
     case .idle:
@@ -407,6 +455,16 @@ final class AgentStateStore {
   private func applyViewportText(_ text: String, paneID: PaneID) {
     var s = scratch[paneID] ?? .fresh()
     s.lastViewportText = text
+    if let kind = entries[paneID]?.kind, s.suppressedErrorFingerprint != nil {
+      let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
+      let oldErrorRemains = text.split(separator: "\n").contains { line in
+        PaneAttentionInterpreter.agentErrorFingerprint(kind: kind, viewportText: String(line))
+          == s.suppressedErrorFingerprint
+      }
+      if raw == .working || raw == .blocked || !oldErrorRemains {
+        s.suppressedErrorFingerprint = nil
+      }
+    }
     // A real viewport classification now governs; release the restored
     // seed so normal derivation takes over (see `seedRestored`).
     s.awaitingFirstClassification = false
@@ -429,9 +487,16 @@ final class AgentStateStore {
     case .paneClosedByTab(let id, _): return "paneClosedByTab(\(id.raw.uuidString.prefix(8)))"
     case .paneInfoChanged(let id, let delta):
       return "paneInfoChanged(\(id.raw.uuidString.prefix(8)),\(deltaTag(delta)))"
-    case .foregroundJobChanged(let id, _): return "foregroundJobChanged(\(id.raw.uuidString.prefix(8)))"
+    case .foregroundJobChanged(let id, _):
+      return "foregroundJobChanged(\(id.raw.uuidString.prefix(8)))"
     case .paneCreated(let id, _): return "paneCreated(\(id.raw.uuidString.prefix(8)))"
     case .paneReady(let id): return "paneReady(\(id.raw.uuidString.prefix(8)))"
+    default: return hierarchyEventTag(event)
+    }
+  }
+
+  private static func hierarchyEventTag(_ event: TerminalEvent) -> String {
+    switch event {
     case .tabActivated: return "tabActivated"
     case .tabAutoClosed: return "tabAutoClosed"
     case .worktreeActivated: return "worktreeActivated"
@@ -439,6 +504,7 @@ final class AgentStateStore {
     case .paneActionRequested: return "paneActionRequested"
     case .windowActionRequested: return "windowActionRequested"
     case .configChanged: return "configChanged"
+    default: return "paneEvent"
     }
   }
 
@@ -486,7 +552,11 @@ final class AgentStateStore {
 
     guard var entry = entries[paneID] else { return }
     let newState = displayState(for: s)
-    guard entry.state != newState else { return }
+    entry.recoveryEligible = newState == .error
+    guard entry.state != newState else {
+      if entries[paneID] != entry { entries[paneID] = entry }
+      return
+    }
     storeLogger.info(
       "state-transition pane=\(paneID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public)"
     )

@@ -1021,13 +1021,13 @@ _codans_agent_status() {
 
 _codans_agent_wait() {
     local -i ret=1
-    local -ar ___until=('idle' 'working' 'blocked' 'finished' 'changed' 'exit')
+    local -ar ___until=('idle' 'working' 'blocked' 'error' 'finished' 'changed' 'exit')
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':pane:'
-        '--until[Condition\: idle, working, blocked, finished, changed, or exit.]:until:{__codans_complete "${___until[@]}"}'
+        '--until[Condition\: idle, working, blocked, error, finished, changed, or exit.]:until:{__codans_complete "${___until[@]}"}'
         '--wait-timeout[Seconds to wait before giving up (1 through 600, default 60).]:wait-timeout:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'

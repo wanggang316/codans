@@ -618,7 +618,7 @@ complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options 
 complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" json' -l 'json' -d 'Emit JSON on stdout instead of human-readable text.'
 complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" socket' -l 'socket' -d 'Override the socket path (default: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).' -rfka ''
 complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" timeout' -l 'timeout' -d 'Client-side timeout in seconds for a single unary call.' -rfka ''
-complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" until' -l 'until' -d 'Condition: idle, working, blocked, finished, changed, or exit.' -rfka 'idle working blocked finished changed exit'
+complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" until' -l 'until' -d 'Condition: idle, working, blocked, error, finished, changed, or exit.' -rfka 'idle working blocked error finished changed exit'
 complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" wait-timeout' -l 'wait-timeout' -d 'Seconds to wait before giving up (1 through 600, default 60).' -rfka ''
 complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" version' -l 'version' -d 'Show the version.'
 complete -c 'codans' -n '__codans_should_offer_completions_for_flags_or_options "codans agent wait" h help' -s 'h' -l 'help' -d 'Show help information.'

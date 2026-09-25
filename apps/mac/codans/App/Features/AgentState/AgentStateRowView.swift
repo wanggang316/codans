@@ -80,6 +80,7 @@ struct AgentStateRowView: View {
   /// Pending hover-dwell + scan task. Cancelled on hover exit / row tap
   /// so a sweep across rows doesn't queue up stale card presentations.
   @State private var summaryCardTask: Task<Void, Never>?
+  @Environment(AgentStateStore.self) private var stateStore: AgentStateStore?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
@@ -108,6 +109,12 @@ struct AgentStateRowView: View {
     }
     .buttonStyle(.plain)
     .contextMenu {
+      if entry.state == .error, !entry.recoverySuppressed, let stateStore {
+        Button("Cancel Automatic Recovery", systemImage: "stop.circle") {
+          stateStore.cancelRecovery(for: paneID)
+        }
+      }
+
       if let onHandOff {
         Button {
           onHandOff()
@@ -327,6 +334,10 @@ struct AgentStateRowView: View {
   @ViewBuilder
   private var stateIcon: some View {
     switch entry.state {
+    case .error:
+      Image(systemName: "exclamationmark.circle.fill")
+        .foregroundStyle(.red)
+        .accessibilityHidden(true)
     case .blocked:
       // Pause-fill glyph — terminal-style "agent has paused for you".
       // Static (no pulse) per design feedback; the orange tint alone
@@ -364,6 +375,7 @@ struct AgentStateRowView: View {
   /// uses the long form via `sentenceVerb`.
   private var stateVerb: String {
     switch entry.state {
+    case .error: return "error"
     case .blocked: return "blocked"
     case .working: return "working"
     case .finished: return "finished"
@@ -375,6 +387,7 @@ struct AgentStateRowView: View {
   /// after the `<DisplayName>, <Project>, <Worktree>` prefix.
   private var sentenceVerb: String {
     switch entry.state {
+    case .error: return "error"
     case .blocked: return "blocked"
     case .working: return "working"
     case .finished: return "finished"

@@ -4,6 +4,7 @@ extension PaneAttentionInterpreter {
   public enum AgentActivityState: Equatable, Sendable {
     case working
     case blocked
+    case error
     case idle
 
     public var isActive: Bool {
@@ -28,9 +29,13 @@ extension PaneAttentionInterpreter {
     case .pi:
       return detectPi(screen)
     case .claudeCode:
-      return detectClaude(screen)
+      let activity = detectClaude(screen)
+      return activity == .idle && agentErrorFingerprint(kind: kind, viewportText: screen) != nil
+        ? .error : activity
     case .codex:
-      return detectCodex(screen)
+      let activity = detectCodex(screen)
+      return activity == .idle && agentErrorFingerprint(kind: kind, viewportText: screen) != nil
+        ? .error : activity
     case .gemini:
       return detectGemini(screen)
     case .cursorAgent:
@@ -51,6 +56,47 @@ extension PaneAttentionInterpreter {
       return detectGenericInterruptCue(screen)
     case .omp:
       return detectOmp(screen)
+    }
+  }
+
+  /// A deliberately narrow terminal fallback. Only a terminal error banner at
+  /// the end of the active region qualifies; tool output and prose do not.
+  /// This is an observation fingerprint, not a provider error code.
+  public static func agentErrorFingerprint(kind: AgentKind, viewportText: String) -> String? {
+    guard kind == .codex || kind == .claudeCode else { return nil }
+    let lines = recentAgentLines(viewportText, limit: agentActivityRecentLineLimit)
+      .split(separator: "\n")
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty }
+    let lower = lines.joined(separator: "\n").lowercased()
+    // Provider-owned retries must finish before an external recovery intervenes.
+    if lower.contains("```") || lower.contains("retrying") || lower.contains("reconnecting")
+      || lower.contains("attempting to reconnect") || lower.contains("retry in ")
+    {
+      return nil
+    }
+    let trailing = lines.reversed().drop { line in
+      line == "❯" || line == "›" || line == "codex>"
+        || (line.count >= 3 && line.allSatisfy { $0 == "─" || $0 == "━" })
+    }
+    guard let line = trailing.first else { return nil }
+    switch kind {
+    case .claudeCode:
+      let banner =
+        line.hasPrefix("⎿ ") ? String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces) : line
+      guard banner.hasPrefix("API Error: ") else { return nil }
+      return banner
+    case .codex:
+      guard line.hasPrefix("■ ") else { return nil }
+      let message = String(line.dropFirst(2))
+      let prefixes = [
+        "stream disconnected before completion:", "unexpected status ",
+        "exceeded retry limit", "You've hit your usage limit",
+      ]
+      guard prefixes.contains(where: message.hasPrefix) else { return nil }
+      return message
+    default:
+      return nil
     }
   }
 
@@ -98,6 +144,9 @@ extension PaneAttentionInterpreter {
       return .working
     case .blocked:
       return .blocked
+    case .error:
+      lastWorkingAt = nil
+      return .error
     case .idle where previous == .working:
       guard let lastWorkingAt else { return .idle }
       return now.timeIntervalSince(lastWorkingAt) < agentWorkingHold ? .working : .idle

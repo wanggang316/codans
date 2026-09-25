@@ -8,6 +8,88 @@ import Testing
 @MainActor
 struct AgentStateStoreTests {
   @Test
+  func keyboardSuppressesTheSameErrorAcrossComposerRepaints() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "session")
+    f.viewport("■ stream disconnected before completion: timeout")
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    let generation = f.registry.entries[f.paneID]?.recoveryGeneration
+    f.viewport("■ stream disconnected before completion: timeout\n› retry manually")
+    f.viewport("\n■ stream disconnected before completion: timeout\n›")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration == generation)
+    f.viewport("• Working (10s)")
+    f.viewport("■ stream disconnected before completion: timeout")
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration == generation)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("■ stream disconnected before completion: unavailable")
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+  }
+
+  @Test
+  func cancellingRecoveryPersistsUntilKeyboardInput() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "session", assumeUserInputSeen: true)
+    f.viewport("■ stream disconnected before completion: timeout")
+    let generation = f.registry.entries[f.paneID]?.recoveryGeneration
+    f.registry.cancelRecovery(for: f.paneID)
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+    #expect(f.registry.entries[f.paneID]?.recoverySuppressed == true)
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration != generation)
+    f.viewport("• Working (10s)")
+    f.viewport("■ stream disconnected before completion: timeout")
+    #expect(f.registry.entries[f.paneID]?.recoverySuppressed == true)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    #expect(f.registry.entries[f.paneID]?.recoverySuppressed == false)
+  }
+
+  @Test
+  func errorRecoveryRequiresLiveEvidenceAndPreservesAttemptGeneration() {
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .error)])
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "session")
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    let generation = f.registry.entries[f.paneID]?.recoveryGeneration
+    f.viewport("■ stream disconnected before completion: timeout")
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == true)
+    let unchanged = f.registry.entries[f.paneID]
+    f.viewport("■ stream disconnected before completion: timeout")
+    #expect(f.registry.entries[f.paneID] == unchanged)
+    f.registry.onPaneFocused(f.paneID)
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration == generation)
+    f.viewport("■ stream disconnected before completion: unavailable")
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration == generation)
+    f.viewport("• Working (10s)")
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    f.viewport("■ stream disconnected before completion: timeout")
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration == generation)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration != generation)
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 30))
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+  }
+
+  @Test
+  func startupErrorDoesNotRequireUserInput() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.viewport("API Error: 401 unauthorized")
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == true)
+    let generation = f.registry.entries[f.paneID]?.recoveryGeneration
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: "replacement")
+    #expect(f.registry.entries[f.paneID]?.recoveryGeneration != generation)
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+  }
+
+  @Test
   func boundOnlyYieldsIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)

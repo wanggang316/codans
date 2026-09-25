@@ -24,7 +24,8 @@ struct AgentHandlersStateTests {
     let tab2 = Tab(
       cachedDisplayTitle: "zsh",
       // swiftlint:disable:next force_try
-      splitTree: try! SplitTree(leaf: idlePane.id).inserting(plain.id, at: idlePane.id, direction: .right),
+      splitTree: try! SplitTree(leaf: idlePane.id).inserting(
+        plain.id, at: idlePane.id, direction: .right),
       panes: [idlePane, plain])
     let worktree = Worktree(name: "main", path: "/repo", branch: "main", tabs: [tab, tab2])
     let project = Project(name: "repo", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
@@ -41,7 +42,20 @@ struct AgentHandlersStateTests {
     let handlers = AgentHandlers(
       settings: SettingsStore(fileURL: url), hierarchy: hierarchy, installation: nil,
       stateStore: { store }, focusedPane: { focused }, waitPollMillis: waitPollMillis)
-    return Fixture(handlers: handlers, store: store, pane: pane, idlePane: idlePane, catalog: catalog)
+    return Fixture(
+      handlers: handlers, store: store, pane: pane, idlePane: idlePane, catalog: catalog)
+  }
+
+  @Test
+  func errorStateIsExposedAndWaitable() async throws {
+    let fixture = makeFixture()
+    fixture.store.onTerminalEvent(
+      .paneViewportChanged(fixture.pane.id, text: "API Error: 503 unavailable"))
+    #expect(try fixture.handlers.listStates().agents.first?.state == "error")
+    let response = try await fixture.handlers.wait(
+      .init(paneID: fixture.pane.id, until: .error, timeoutMillis: 100))
+    #expect(response.satisfied)
+    #expect(response.state == "error")
   }
 
   @Test
@@ -50,7 +64,10 @@ struct AgentHandlersStateTests {
     let response = try fixture.handlers.listStates()
 
     #expect(response.count == 2)
-    #expect(response.agents.map(\.paneID) == [fixture.pane.id.description, fixture.idlePane.id.description])
+    #expect(
+      response.agents.map(\.paneID) == [
+        fixture.pane.id.description, fixture.idlePane.id.description,
+      ])
     let first = try #require(response.agents.first)
     #expect(first.agent == "claude-code")
     #expect(first.agentName == AgentKind.claudeCode.displayName)
@@ -86,7 +103,8 @@ struct AgentHandlersStateTests {
     let handlers = AgentHandlers(
       settings: SettingsStore(fileURL: url), hierarchy: hierarchy, installation: nil,
       stateStore: { store }, focusedPane: { pane.id })
-    return Fixture(handlers: handlers, store: store, pane: pane, idlePane: base.idlePane, catalog: base.catalog)
+    return Fixture(
+      handlers: handlers, store: store, pane: pane, idlePane: base.idlePane, catalog: base.catalog)
   }
 
   @Test
@@ -169,10 +187,12 @@ struct AgentHandlersStateTests {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
       "AgentHandlersStateTests-\(UUID().uuidString).json")
     let handlers = AgentHandlers(
-      settings: SettingsStore(fileURL: url), hierarchy: HierarchyClient.testValue, installation: nil)
+      settings: SettingsStore(fileURL: url), hierarchy: HierarchyClient.testValue, installation: nil
+    )
     #expect(throws: IPCError.self) { try handlers.listStates() }
     await #expect(throws: IPCError.self) {
-      try await handlers.wait(IPC.AgentWaitRequest(paneID: PaneID(), until: .idle, timeoutMillis: 10))
+      try await handlers.wait(
+        IPC.AgentWaitRequest(paneID: PaneID(), until: .idle, timeoutMillis: 10))
     }
   }
 }
