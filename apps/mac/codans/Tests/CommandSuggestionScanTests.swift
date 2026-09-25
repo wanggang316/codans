@@ -112,33 +112,29 @@ struct RemoteManifestReaderTests {
     #expect(snapshot.contents.count == 2)
   }
 
-  /// Runs the exact host-side script under the local `/bin/sh`, so the shell
-  /// half of the protocol is exercised, not just the parser.
+  /// Runs the exact host-side script under the local `/bin/sh` against a real
+  /// tree, so the `find` pruning half of the protocol is exercised too.
   @Test
-  func scriptOutputRoundTripsThroughLocalShell() async throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("manifest-reader-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let makefile = "build: ## Build\n\tgo build\n"
-    try makefile.write(to: directory.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
-    try "".write(to: directory.appendingPathComponent("yarn.lock"), atomically: true, encoding: .utf8)
+  func scriptWalksTheTreeLikeTheLocalReader() async throws {
+    let root = try ManifestFixtureTree.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = CommandSuggestionRegistry.standard.request
 
     let process = Process()
     let stdout = Pipe()
     process.executableURL = URL(fileURLWithPath: "/bin/sh")
-    process.arguments =
-      ["-c", RemoteManifestReader.script, "sh", directory.path, "package.json", "Makefile"]
-      + [RemoteManifestReader.presenceSeparator, "yarn.lock", "bun.lockb"]
+    process.arguments = ["-c", RemoteManifestReader.script(for: request, scope: .standard), "sh", root.path]
     process.standardOutput = stdout
     try process.run()
     let data = stdout.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
-
-    let snapshot = RemoteManifestReader.parse(String(decoding: data, as: UTF8.self))
     #expect(process.terminationStatus == 0)
-    #expect(snapshot.contents == ["Makefile": makefile])
-    #expect(snapshot.presentPaths == ["Makefile", "yarn.lock"])
+
+    let remote = RemoteManifestReader.parse(String(decoding: data, as: UTF8.self))
+    let local = await LocalManifestReader().read(request, in: root.path, scope: .standard)
+    #expect(remote == local)
+    #expect(remote.presentPaths == ManifestFixtureTree.expectedPaths)
+    #expect(remote["apps/web/package.json"] == ManifestFixtureTree.webManifest)
   }
 
   @Test
@@ -146,7 +142,8 @@ struct RemoteManifestReaderTests {
     let runner = RecordingCommandRunner(outcomes: [.timedOut])
     let reader = RemoteManifestReader(host: RemoteHost(alias: "devbox"), runner: runner)
     let snapshot = await reader.read(
-      ManifestRequest(contentPaths: ["package.json"], presencePaths: ["yarn.lock"]), in: "/srv/app")
+      ManifestRequest(contentPaths: ["package.json"], presencePaths: ["yarn.lock"]), in: "/srv/app",
+      scope: .standard)
     #expect(snapshot == ManifestSnapshot())
     let calls = await runner.calls
     #expect(calls.count == 1)
@@ -157,19 +154,44 @@ struct RemoteManifestReaderTests {
 
 struct LocalManifestReaderTests {
   @Test
-  func readsContentsAndProbesPresence() async throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("manifest-local-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    try #"{"scripts":{"dev":"vite"}}"#.write(
-      to: directory.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
-    try "".write(to: directory.appendingPathComponent("pnpm-lock.yaml"), atomically: true, encoding: .utf8)
+  func readsTheTreeWithinScope() async throws {
+    let root = try ManifestFixtureTree.make()
+    defer { try? FileManager.default.removeItem(at: root) }
 
     let snapshot = await LocalManifestReader().read(
-      CommandSuggestionRegistry.standard.request, in: directory.path)
+      CommandSuggestionRegistry.standard.request, in: root.path, scope: .standard)
+    #expect(snapshot.presentPaths == ManifestFixtureTree.expectedPaths)
     let groups = CommandSuggestionRegistry.standard.groups(in: snapshot)
-    #expect(groups.map(\.source.id) == ["package-json"])
-    #expect(groups.first?.suggestions.map(\.command) == ["pnpm run dev"])
+    #expect(groups.map(\.source.displayName) == ["package.json", "apps/web/package.json", "services/api/Makefile"])
+    #expect(groups[1].suggestions.map(\.command) == ["cd apps/web && pnpm run dev"])
+  }
+}
+
+/// A small monorepo on disk: manifests at the root, two levels down, and in
+/// places the scope must skip (too deep, hidden, dependency cache).
+enum ManifestFixtureTree {
+  static let webManifest = #"{"scripts":{"dev":"vite"}}"#
+  static let expectedPaths: Set<String> = [
+    "package.json", "pnpm-lock.yaml", "apps/web/package.json", "services/api/Makefile",
+  ]
+
+  static func make() throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("manifest-tree-\(UUID().uuidString)")
+    let files: [String: String] = [
+      "package.json": #"{"scripts":{"build":"turbo build"}}"#,
+      "pnpm-lock.yaml": "",
+      "apps/web/package.json": webManifest,
+      "services/api/Makefile": "run:\n\tgo run .\n",
+      // Excluded: dependency cache, hidden directory, and deeper than 3 levels.
+      "node_modules/left-pad/package.json": "{}",
+      ".cache/package.json": "{}",
+      "a/b/c/d/package.json": "{}",
+    ]
+    for (path, text) in files {
+      let url = root.appendingPathComponent(path)
+      try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+    return root
   }
 }

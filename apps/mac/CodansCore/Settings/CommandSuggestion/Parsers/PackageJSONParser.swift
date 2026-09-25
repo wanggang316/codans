@@ -33,7 +33,7 @@ public nonisolated struct PackageJSONParser: CommandSuggestionParser {
       let scripts = object["scripts"] as? [String: Any]
     else { return [] }
 
-    let manager = Self.packageManager(declared: object["packageManager"] as? String, snapshot: snapshot)
+    let manager = Self.packageManager(for: object, in: snapshot)
     let bodies = scripts.compactMapValues { $0 as? String }
     return bodies.keys
       .filter { !Self.isLifecycleHook($0, among: bodies) }
@@ -48,15 +48,30 @@ public nonisolated struct PackageJSONParser: CommandSuggestionParser {
       }
   }
 
-  static func packageManager(declared: String?, snapshot: ManifestSnapshot) -> String {
-    // `"packageManager": "pnpm@9.1.0+sha512…"` → `pnpm`.
-    if let declared,
-      let name = declared.split(separator: "@", maxSplits: 1).first.map(String.init),
-      knownManagers.contains(name)
-    {
-      return name
+  /// A workspace member usually has neither a `packageManager` field nor a
+  /// lockfile of its own — both live at the workspace root — so the search
+  /// walks outward: this directory first, then each enclosing one.
+  static func packageManager(for manifest: [String: Any], in snapshot: ManifestSnapshot) -> String {
+    let levels = [snapshot] + snapshot.ancestors
+    for (index, level) in levels.enumerated() {
+      let object =
+        index == 0
+        ? manifest
+        : level[manifestPath].flatMap {
+          try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }
+      if let declared = declaredManager(object?["packageManager"] as? String) { return declared }
+      if let lockfile = lockfiles.first(where: { level.exists($0.path) }) { return lockfile.manager }
     }
-    return lockfiles.first { snapshot.exists($0.path) }?.manager ?? "npm"
+    return "npm"
+  }
+
+  /// `"packageManager": "pnpm@9.1.0+sha512…"` → `pnpm`.
+  static func declaredManager(_ declared: String?) -> String? {
+    guard let name = declared?.split(separator: "@", maxSplits: 1).first.map(String.init),
+      knownManagers.contains(name)
+    else { return nil }
+    return name
   }
 
   /// `prebuild` / `postbuild` run automatically around `build`; offering them
