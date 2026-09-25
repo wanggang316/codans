@@ -7,7 +7,12 @@
 
 Project 的 Commands（Settings → 项目 → Commands）是用户自定义的 `ScriptDefinition` 列表，驱动 Header 的 Run 按钮、Command Palette 与快捷键。大多数项目已经在自己的清单里写好了入口——`package.json` 的 `scripts`、Makefile 目标、justfile recipe——手工再抄一遍是纯摩擦。
 
-Command Suggest 在 Commands 表格的 `+` 菜单里，于预设类型（Run / Test / …）之下，按来源列出从项目清单识别出的命令；点一下即落成一条普通 `ScriptDefinition`。
+Command Suggest 按来源列出从项目清单识别出的命令，点一下即落成一条普通 `ScriptDefinition`。两个入口共用同一个菜单分节（`CommandSuggestionMenuSection`）：
+
+- Settings → Commands 表格的 `+` 菜单，位于预设类型（Run / Test / …）之下（"From Project"）；
+- worktree header Run 按钮的下拉菜单，位于 Project / Global 命令之下（"Add from Project"），扫描的是 header 当前显示的 worktree。
+
+两处点击都只**加入**命令、不运行——header 下拉里其它项点了就执行，但识别出的 `deploy` 不能因为一次误点就跑起来；加入后它出现在上方 Project 列表，再点才运行。
 
 ## 目标与非目标
 
@@ -42,7 +47,9 @@ codans/App/Features/CommandSuggestion/        IO
   CommandSuggestionClient (TCA dependency)    选 reader → 读一次 → registry 解析
 
 ProjectSettingsFeature                        scanCommandSuggestions / commandSuggestionsScanned
-ScriptCommandTable.addMenu                    "From Project" 分节 + 每来源一个子菜单
+CommandSuggestionMenuSection                  共享菜单分节：每来源一个子菜单，已采纳的打勾禁用
+ScriptCommandTable.addMenu                    Settings 入口（"From Project"）
+WorktreeHeaderFeature / HeaderRunScriptSplitButton  Header 入口（"Add from Project"），按 worktree 扫描
 ```
 
 ### 解析器契约
@@ -80,7 +87,8 @@ protocol CommandSuggestionParser: Sendable {
 - **位置**：Settings pane 的 `lastFocusedWorktreeID` → Project 的 `selectedWorktreeID` → `rootPath`。分支可能带不同的清单，所以优先用户正在用的 checkout。
 - **本地**：`FileManager` 读 request 中的固定文件名；单文件上限 1 MiB。
 - **Server 项目**：一次 SSH 调用（共享 ControlMaster，`BatchMode`）。远端 `/bin/sh` 脚本以位置参数接收目录与路径（路径不进入脚本解析），输出 `===CODANS-MANIFEST <path>===` / `===CODANS-PRESENT <path>===` 标记分隔的流；首个标记前的登录 shell 横幅被忽略。超时、非零退出或输出溢出都得到空 snapshot——表现为"无建议"，不报错。
-- **时机**：Commands pane 每次出现时扫描（`.task(id: projectID)`），菜单内有 Refresh。无文件监听。新扫描取消在途扫描。
+- **时机**：Commands pane 每次出现时扫描（`.task(id: projectID)`）；header 在切换 worktree 时扫描（`.task(id: worktreeID)`，挂在 Menu 的 `.id` 之外，脚本编辑触发的 Menu 重建不会重扫）。两处菜单内都有 Refresh。无文件监听。新扫描取消在途扫描；header 的结果带上扫描时的 worktree，切走后迟到的结果直接丢弃。
+- 位置解析统一在 `ManifestLocation.resolve`：指定 worktree → Project 选中的 worktree → Project 根目录。
 
 ### 采纳（`CommandSuggestionAdoption`）
 
@@ -122,4 +130,6 @@ protocol CommandSuggestionParser: Sendable {
 - `CodansCoreTests`：各解析器、registry 合并 / 分组、类型推断、采纳不变量；`CommandIconCatalogTests` / `CommandIconRefTests`（优先级、`mark:` 往返、未知 mark 回退、每个 `ToolMark` 都可由映射表到达）。
 - `CodansTests`：`ToolMarkAssetTests`（每个 mark 都随包带模板资源）、`WorktreeProcessIconTests`（进程列表走同一映射）。
 - `CodansTests`：`CommandSuggestionScanTests`（扫描位置解析、Server 项目走 host、项目缺失清空）、`RemoteManifestReaderTests`（流解析、远端脚本在本机 `/bin/sh` 实跑往返、失败得空）、`LocalManifestReaderTests`。
+- `CodansTests`：`WorktreeHeaderCommandSuggestionTests`（按 header 的 worktree 扫描、切换后丢弃迟到结果、加入只写 Project 命令不走运行路径、已加入的不重复写）。
+- 隔离实例上检查过 header 下拉：菜单结构、子菜单图标与已加入打勾、点 `build` 后进入 Project 列表且未产生任何 tab/pane（未运行）。
 - 隔离实例上检查过菜单外观（含映射图标）、"点 dev → 填入内置 Run"、采纳后写入 `mark:docker` / `mark:prisma`、图标弹窗 Tools 网格，以及打开弹窗不会冲掉已选 mark。
