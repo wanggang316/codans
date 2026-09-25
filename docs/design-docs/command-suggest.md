@@ -89,20 +89,37 @@ protocol CommandSuggestionParser: Sendable {
 - 其他预设类型若已被占用，降级为 `.custom`，保持"每种预设类型至多一条"。
 - 名称取清单中的入口名；采纳后选中该行。
 
+### 图标映射（`CommandIconCatalog`）
+
+一张集中维护的「常见命令 → 图标」表，命令建议与前台进程列表共用。对一个清单入口，按从具体到一般的顺序解析：
+
+1. 入口名以工具命名（`storybook`、`docker:up`）→ 该工具的 mark；
+2. 入口名含动作词（`build`、`test:unit`）→ 动作的 SF Symbol（build→`hammer.fill`、test→`testtube.2`、lint→`checklist`、typecheck→`checkmark.shield.fill`、migrate/db→`cylinder.split.1x2.fill` …）。**动作优先**，同一清单里的十几个脚本才不会全顶着 npm 图标、无从区分；
+3. 脚本体里调用了已知工具（`prisma generate`）→ 该工具的 mark；
+4. 执行它的 runner（`pnpm run …`、`make …`、`cargo …`）→ 其 mark。
+
+工具 mark 是 `ToolMark` 枚举（56 个），资源为 `tool-<raw>.imageset`：单色、24×24 viewBox、模板渲染，**跟随脚本颜色**，与 SF Symbol 同一套着色；来源与许可登记在 [tool-marks](../references/tool-marks.md)（Simple Icons CC0，`mise` 为自绘；Playwright 用 SF `theatermasks.fill`）。小尺寸下读成噪点的插画/细线/纯文字标（Composer、GNU、Maven、.NET）不收录。
+
+**存储**：沿用已有字符串字段——`ScriptDefinition.systemImage` 存 SF 名或 `mark:<tool>`，与 `Tab.icon` 的 `agent:` 前缀同构（运行脚本时该串原样写进 `Tab.icon`）。无 schema 变更：旧构建把 `mark:npm` 当作未知 symbol，只是不画；本构建遇到未知 mark 回退到类型默认图标。采纳建议时只在映射图标 ≠ 类型默认图标时写入，且不覆盖用户已给空 Run 选的图标。
+
+**渲染**：所有画命令图标的地方都经 `CommandIconGlyph`（`CommandIconRef`）/ `StoredIconGlyph`（存储串，含 `agent:`）——Commands 表格、`+` 菜单、Header Run 按钮与其菜单、Command Palette、Tab chip、进程列表。菜单与 toolbar 会把 asset 图重新模板化并丢色，因此经 `CommandIconImage.tinted` 把颜色烘焙进非模板 `NSImage`。图标弹窗在 SF 网格下增加 Tools 网格。
+
 ### 菜单呈现
 
-每项 = 图标（按推断类型着色；已采纳为对勾）+ 入口名 + 副标题（`<命令> — <脚本体>`，整体截断到 44 字符避免 AppKit 折行）。副标题依赖按钮 label 为"Image + Text + Text"的平铺结构——用 `Label` 包裹两个 `Text` 时 AppKit 菜单会丢掉副标题。
+每项 = 图标（映射图标，按推断类型着色；已采纳为对勾）+ 入口名 + 副标题（`<命令> — <脚本体>`，整体截断到 44 字符避免 AppKit 折行）。副标题依赖按钮 label 为"Image + Text + Text"的平铺结构——用 `Label` 包裹两个 `Text` 时 AppKit 菜单会丢掉副标题。
 
 ## 扩展一个新生态
 
 1. 在 `CodansCore/Settings/CommandSuggestion/Parsers/` 新增实现 `CommandSuggestionParser` 的类型：声明 `request`、在 `suggestions(in:)` 中纯解析。
 2. 追加到 `CommandSuggestionRegistry.standard`（顺序即菜单顺序）。
 3. 在 `CodansCoreTests/Settings/CommandSuggestion/` 用字面量 fixture 覆盖。
+4. 若该生态有新的 runner / 工具，在 `CommandIconCatalog.toolIcons` 登记可执行名；需要新 mark 时按 [tool-marks](../references/tool-marks.md) 的「Adding a mark」添加。
 
 读取层、SSH 协议、UI、采纳逻辑均无需改动。
 
 ## 验证
 
-- `CodansCoreTests`：各解析器、registry 合并 / 分组、类型推断、采纳不变量。
+- `CodansCoreTests`：各解析器、registry 合并 / 分组、类型推断、采纳不变量；`CommandIconCatalogTests` / `CommandIconRefTests`（优先级、`mark:` 往返、未知 mark 回退、每个 `ToolMark` 都可由映射表到达）。
+- `CodansTests`：`ToolMarkAssetTests`（每个 mark 都随包带模板资源）、`WorktreeProcessIconTests`（进程列表走同一映射）。
 - `CodansTests`：`CommandSuggestionScanTests`（扫描位置解析、Server 项目走 host、项目缺失清空）、`RemoteManifestReaderTests`（流解析、远端脚本在本机 `/bin/sh` 实跑往返、失败得空）、`LocalManifestReaderTests`。
-- 隔离实例上检查过菜单外观与"点 dev → 填入内置 Run"的端到端写入。
+- 隔离实例上检查过菜单外观（含映射图标）、"点 dev → 填入内置 Run"、采纳后写入 `mark:docker` / `mark:prisma`、图标弹窗 Tools 网格，以及打开弹窗不会冲掉已选 mark。
