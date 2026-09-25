@@ -13,6 +13,10 @@ struct WorkspaceView: View {
   let openSettings: () -> Void
   @Binding var selectedWorktreeID: String?
   @Binding var selectedPaneID: String?
+  /// A pane the composer just started that the hierarchy has not reported
+  /// yet; selected as soon as it appears, since a selection the list cannot
+  /// show does not navigate.
+  @State private var pendingPaneID: String?
 
   var body: some View {
     NavigationSplitView {
@@ -76,13 +80,23 @@ struct WorkspaceView: View {
             macName: store.connection.activeGateway?.displayName ?? "Mac",
             onLaunched: { launch in
               selectedWorktreeID = launch.worktreeID
-              if let paneID = launch.paneID { selectedPaneID = paneID }
+              pendingPaneID = launch.paneID
+              selectPendingPane()
             }
           )
         }
       }
       .task(id: store.browser.hierarchy?.projects.count) { followSelection() }
+      .onChange(of: store.browser.hierarchy) { _, _ in selectPendingPane() }
     }
+  }
+
+  private func selectPendingPane() {
+    guard let paneID = pendingPaneID,
+      store.browser.location(ofPane: paneID)?.worktree.id == selectedWorktreeID
+    else { return }
+    pendingPaneID = nil
+    selectedPaneID = paneID
   }
 
   /// The composer sends into the worktree selected in the sidebar, else the
