@@ -46,12 +46,21 @@ final class RemoteEndToEndUITests: XCTestCase {
     shot("2-worktrees")
     let worktreeRow = app.descendants(matching: .any)["worktree-row"].firstMatch
     XCTAssertTrue(worktreeRow.waitForExistence(timeout: 5), "project has no worktree rows")
+    // The "Connecting…" banner above the list disappears once connected and
+    // shifts the rows up; a tap during that shift lands on empty space.
+    let connecting = app.staticTexts.containing(
+      NSPredicate(format: "label BEGINSWITH 'Connecting' OR label BEGINSWITH 'Reconnecting'")
+    ).firstMatch
+    _ = connecting.waitForNonExistence(timeout: 20)
     worktreeRow.tap()
 
     // By identifier: in compact width the collapsed worktree list stays in
     // the accessibility tree, so "first cell" would hit a worktree row.
     let paneRow = app.descendants(matching: .any)["pane-row"].firstMatch
-    XCTAssertTrue(paneRow.waitForExistence(timeout: 10), "project has no pane rows")
+    if !paneRow.waitForExistence(timeout: 5), worktreeRow.isHittable {
+      worktreeRow.tap()  // a late hierarchy update can still swallow the first tap
+    }
+    XCTAssertTrue(paneRow.waitForExistence(timeout: 10), "worktree has no pane rows")
     shot("3-panes")
     paneRow.tap()
 

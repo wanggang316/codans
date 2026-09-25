@@ -356,6 +356,14 @@ struct ConnectionFeatureTests {
   }
 
   @Test
+  func reopeningAnAlreadyPairedLinkAsksNothing() async {
+    let store = TestStore(initialState: Self.pairedState(status: .connected, isAppActive: true)) {
+      ConnectionFeature()
+    }
+    await store.send(.pairingLinkOpened(URL(string: Fixtures.pairingCode)!))
+  }
+
+  @Test
   func unrelatedLinksAreIgnoredAndBrokenPairingLinksReportAnError() async {
     let store = TestStore(initialState: ConnectionFeature.State()) {
       ConnectionFeature()

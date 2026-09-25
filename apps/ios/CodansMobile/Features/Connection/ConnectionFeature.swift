@@ -218,7 +218,12 @@ struct ConnectionFeature {
       case .pairingLinkOpened(let url):
         guard url.scheme?.lowercased() == PairingPayload.urlScheme else { return .none }
         do {
-          state.linkPairing = .confirm(try PairingPayload.decode(url.absoluteString))
+          let payload = try PairingPayload.decode(url.absoluteString)
+          // The Mac issues a new device ID per code, so a known ID is the
+          // same code opened again (a second tap, or iOS delivering the link
+          // twice); asking again would only cover the workspace.
+          guard !state.gateways.contains(where: { $0.deviceID == payload.deviceID }) else { return .none }
+          state.linkPairing = .confirm(payload)
         } catch {
           state.linkPairing = .invalid(Self.message(for: error))
         }

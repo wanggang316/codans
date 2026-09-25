@@ -5,7 +5,7 @@
 # the CodansMobile UI test on a simulator. Never touches the default dev /
 # release sockets, config or zmx cache.
 #
-# Usage: harness.sh <Debug Codans.app path> [simulator UDID]
+# Usage: harness.sh <Debug Codans.app path> [simulator UDID, on an iOS 26 runtime]
 #
 # Cases:
 #   interactive  pair "View and type", browse to the fixture pane, send a line,
@@ -33,8 +33,11 @@ FIX="$SCRATCH/fixture"
 SHOTS="$SCRATCH/shots"
 KEYCHAIN_SERVICE="com.gumpw.codans.remote.codans-dev"
 IOS_DIR="$REPO_ROOT/apps/ios"
+# The app needs iOS 26, and an older runtime can carry a device of the same
+# name, so the default is picked from iOS 26 runtimes only.
 SIM="${2:-$(xcrun simctl list devices available -j |
-  jq -r '[.devices[][] | select(.name == "iPhone 17 Pro")][0].udid')}"
+  jq -r '[.devices | to_entries[] | select(.key | test("iOS-26")) | .value[] |
+    select(.name == "iPhone 17 Pro")][0].udid')}"
 mkdir -p "$CONF" "$FIX" "$SHOTS"
 
 PASS=0; FAIL=0
