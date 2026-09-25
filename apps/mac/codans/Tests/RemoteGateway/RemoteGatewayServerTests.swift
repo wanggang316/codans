@@ -105,6 +105,66 @@ struct RemoteGatewayServerTests {
     #expect(gateway.status == .noDevices)
   }
 
+  @Test(.timeLimit(.minutes(1)))
+  func revokingADeviceEndsItsLiveEventStream() async throws {
+    try await expectLiveStreamEnds { _, store, deviceID in store.revoke(deviceID) }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func turningTheGatewayOffEndsLiveEventStreams() async throws {
+    try await expectLiveStreamEnds { gateway, _, _ in gateway.setEnabled(false) }
+  }
+
+  /// Subscribes over a real TLS connection, reads the snapshot, applies
+  /// `end`, and requires the stream to finish rather than hang.
+  private func expectLiveStreamEnds(
+    _ end: (RemoteGatewayServer, PairedDeviceStore, UUID) -> Void
+  ) async throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    let hub = EventHub(
+      sources: EventHub.Sources(
+        hierarchy: { IPC.HierarchySummary(projects: [], selectedProjectID: nil) },
+        agents: { [] }
+      ))
+    let router = MethodRouter(
+      systemHandlers: SystemHandlers(versions: .init(server: "1", appBundle: "1")), eventHub: hub)
+    let gateway = RemoteGatewayServer(
+      router: router, devices: store, environment: [:], hostName: "Test", scope: .loopback)
+    defer { gateway.setEnabled(false) }
+
+    gateway.setEnabled(true)
+    let payload = try gateway.pairNewDevice()
+    let port = try await Self.waitUntilListening(gateway)
+    let client = try await RemoteRPCClient.connect(
+      to: .hostPort(host: "127.0.0.1", port: port),
+      credential: payload.credential,
+      hello: HelloRequest(clientVersion: "1", clientBinary: "test")
+    )
+    defer { Task { await client.close() } }
+
+    let frames = try await client.subscribe(
+      .eventsSubscribe, params: IPC.EventsSubscribeRequest(), as: IPC.EventFrame.self)
+    var iterator = frames.makeAsyncIterator()
+    let first = try await iterator.next()
+    guard case .snapshot = first?.payload else {
+      Issue.record("expected a snapshot first, got \(String(describing: first))")
+      return
+    }
+
+    end(gateway, store, payload.deviceID)
+    // The stream must terminate: either a clean finish or a closed-connection error.
+    do {
+      while try await iterator.next() != nil {}
+    } catch {}
+    // The client notices the server's close on its next read.
+    for _ in 0..<250 where await client.isConnected {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(await !client.isConnected)
+  }
+
   @Test
   func environmentOverrideKeepsTheGatewayOff() throws {
     let dir = try Self.makeTempDir()
