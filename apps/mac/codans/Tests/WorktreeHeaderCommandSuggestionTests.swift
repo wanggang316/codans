@@ -104,4 +104,35 @@ struct WorktreeHeaderCommandSuggestionTests {
     // `setProjectScripts` stays unimplemented: any write would fail the test.
     await store.send(.addCommandSuggestionTapped(projectID: projectID, Self.build))
   }
+
+  @Test
+  func runningAnAdoptedSuggestionRunsTheSavedScript() async {
+    let projectID = ProjectID()
+    let saved = ScriptDefinition(kind: .custom, command: "pnpm run build")
+    let settings = Settings(projects: [projectID: ProjectSettings(scripts: [saved])])
+    let store = TestStore(initialState: WorktreeHeaderFeature.State()) {
+      WorktreeHeaderFeature()
+    } withDependencies: {
+      $0.settingsWriter = .testValue
+      $0.settingsWriter.readSnapshotSync = { settings }
+    }
+
+    await store.send(.runCommandSuggestionTapped(projectID: projectID, Self.build))
+    await store.receive(.delegate(.runScriptRequested(scriptID: saved.id)))
+  }
+
+  @Test
+  func runningANewSuggestionRunsATransientScriptWithAStableID() async {
+    let store = TestStore(initialState: WorktreeHeaderFeature.State()) {
+      WorktreeHeaderFeature()
+    } withDependencies: {
+      $0.settingsWriter = .testValue
+      $0.settingsWriter.readSnapshotSync = { Settings() }
+    }
+
+    let expected = CommandSuggestionAdoption.transientScript(for: Self.build)
+    await store.send(.runCommandSuggestionTapped(projectID: ProjectID(), Self.build))
+    await store.receive(.delegate(.runCommandRequested(expected)))
+    #expect(expected.command == "pnpm run build")
+  }
 }

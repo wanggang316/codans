@@ -1509,6 +1509,24 @@ struct RootFeature {
             }
           }
 
+        case .runCommandRequested(let script):
+          // Same selection-resolution + staleness rationale as
+          // `runScriptRequested`; the script is unsaved, so it travels whole.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
+          let client = hierarchyClient
+          return .run { send in
+            do {
+              try await client.runCommand(script, projectID, worktreeID)
+            } catch let error as RunScriptError {
+              await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
+            } catch {
+              await send(.statusBar(.push(.warning("Run command failed: \(error.localizedDescription)"))))
+            }
+          }
+
         case .runGlobalScriptRequested(let scriptID):
           // Same selection-resolution + staleness rationale as
           // `runScriptRequested`, routed through the global run path which
