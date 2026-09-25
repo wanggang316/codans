@@ -123,6 +123,26 @@ struct CommandSuggestionAdoptionTests {
   }
 
   @Test
+  func mappedIconIsStoredOnlyWhenItDiffersFromTheKindDefault() {
+    // `docker:up` → docker mark on a custom script.
+    var result = CommandSuggestionAdoption.adopt(suggestion("docker:up", "make docker:up"), into: [])
+    #expect(result.scripts.last?.systemImage == "mark:docker")
+    // `lint` → checklist symbol, not the lint kind's magnifying glass.
+    result = CommandSuggestionAdoption.adopt(suggestion("lint", "npm run lint"), into: [])
+    #expect(result.scripts.last?.systemImage == "checklist")
+    // `dev` → play.fill, which is Run's own default: nothing stored.
+    result = CommandSuggestionAdoption.adopt(suggestion("dev", "npm run dev"), into: [])
+    #expect(result.scripts.first?.systemImage == nil)
+  }
+
+  @Test
+  func fillingABlankRunKeepsTheUsersIcon() {
+    let blank = ScriptDefinition(kind: .run, systemImage: "bolt.fill")
+    let result = CommandSuggestionAdoption.adopt(suggestion("start", "npm run start"), into: [blank])
+    #expect(result.scripts[0].systemImage == "bolt.fill")
+  }
+
+  @Test
   func adoptedWhenAnyScriptRunsTheSameCommand() {
     let scripts = [ScriptDefinition(kind: .custom, command: "npm run dev\n")]
     #expect(CommandSuggestionAdoption.isAdopted(suggestion("dev", "npm run dev"), in: scripts))
