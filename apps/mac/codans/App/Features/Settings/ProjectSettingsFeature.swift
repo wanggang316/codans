@@ -123,16 +123,9 @@ struct ProjectSettingsFeature {
     }
   }
 
-  /// Scan the checkout the user is working in — the pane's focused worktree,
-  /// else the Project's selected one — since branches can carry different
-  /// manifests; fall back to the Project root. Server projects read over SSH.
   private func manifestLocation(for state: State) -> ManifestLocation? {
-    guard let project = hierarchyClient.snapshot().projects.first(where: { $0.id == state.projectID }) else {
-      return nil
-    }
-    let worktreeID = state.lastFocusedWorktreeID ?? project.selectedWorktreeID
-    let directory = project.worktrees.first(where: { $0.id == worktreeID })?.path ?? project.rootPath
-    return ManifestLocation(directory: directory, host: project.remoteHost)
+    ManifestLocation.resolve(
+      projectID: state.projectID, worktreeID: state.lastFocusedWorktreeID, in: hierarchyClient.snapshot())
   }
 
   /// Human-friendly mapping for the failure banner. Mirrors
