@@ -142,6 +142,20 @@ final class PairedDeviceStore {
     return expired
   }
 
+  /// When the oldest still-pending pairing code stops working, or nil when
+  /// nothing is pending.
+  func nextPendingExpiry() -> Date? {
+    devices.filter { $0.state == .pending }
+      .map { $0.createdAt.addingTimeInterval(Self.pendingLifetimeSeconds) }
+      .min()
+  }
+
+  /// The store's clock, so timers measure against the same time as
+  /// `isExpired`.
+  func currentDate() -> Date {
+    now()
+  }
+
   func isExpired(_ device: PairedDevice) -> Bool {
     guard device.state == .pending else { return false }
     return now().timeIntervalSince(device.createdAt) >= Self.pendingLifetimeSeconds

@@ -109,7 +109,6 @@ final class RemoteGatewayServer {
   /// unless the phone connects first.
   func pairNewDevice(permission: IPC.RemotePermission = .readOnly) throws -> PairingPayload {
     let device = try devices.beginPairing(permission: permission)
-    scheduleExpiry()
     guard let payload = payload(for: device.id) else {
       devices.revoke(device.id)
       throw CocoaError(.keyValueValidation)
@@ -127,6 +126,7 @@ final class RemoteGatewayServer {
   // MARK: - Listener
 
   private func reconcileListener() {
+    scheduleExpiry()
     guard isEnabled, !isForcedOff else {
       stopListener()
       status = isForcedOff && isEnabled ? .forcedOff : .off
@@ -250,11 +250,14 @@ final class RemoteGatewayServer {
       logger.notice("handshake rejected: \(String(describing: error), privacy: .public)")
       return
     }
-    // Re-check against the store: the device may have been revoked, or the
-    // gateway turned off, while the handshake was in flight.
+    // Re-check against the store: the device may have been revoked, its
+    // pairing code may have expired (the listener still holds that key
+    // until the next rebuild), or the gateway turned off, while the
+    // handshake was in flight.
     guard isEnabled, !isForcedOff, let deviceID = UUID(uuidString: accepted.identity),
-      devices.permission(for: deviceID) != nil
+      let device = devices.device(deviceID), !devices.isExpired(device)
     else {
+      devices.pruneExpiredPending()
       logger.notice("handshake for \(accepted.identity, privacy: .public) no longer authorized")
       accepted.transport.close()
       return
@@ -326,12 +329,21 @@ final class RemoteGatewayServer {
     connectedDeviceIDs = Set(connections.values.map(\.deviceID))
   }
 
+  /// Arms one timer for the earliest pending pairing's deadline. Runs on
+  /// every reconcile, so pairings loaded at launch and codes issued while
+  /// another is still pending each expire on time, not when the newest
+  /// code does.
   private func scheduleExpiry() {
     expiryTask?.cancel()
+    expiryTask = nil
+    guard let deadline = devices.nextPendingExpiry() else { return }
+    let delay = max(deadline.timeIntervalSince(devices.currentDate()), 0)
     expiryTask = Task { [weak self] in
-      try? await Task.sleep(for: PairedDeviceStore.pendingLifetime + .seconds(1))
-      guard !Task.isCancelled else { return }
-      self?.devices.pruneExpiredPending()
+      // The slack keeps a wake-up a hair early from re-arming a zero delay.
+      try? await Task.sleep(for: .seconds(delay) + .milliseconds(500))
+      guard !Task.isCancelled, let self else { return }
+      self.devices.pruneExpiredPending()
+      self.scheduleExpiry()
     }
   }
 }

@@ -49,6 +49,62 @@ struct RemoteGatewayServerTests {
     #expect(gateway.status == .noDevices)
   }
 
+  /// The listener keeps an expired code's key until its next rebuild, so
+  /// the post-handshake check must reject the code on its own.
+  @Test(.timeLimit(.minutes(1)))
+  func expiredPairingCodeIsRejectedWhileTheListenerStillHoldsIt() async throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let clock = MutableClock(Date(timeIntervalSince1970: 1_000_000))
+    let store = PairedDeviceStore(
+      fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore(), now: { clock.date })
+    let gateway = Self.makeGateway(store: store)
+    defer { gateway.setEnabled(false) }
+
+    gateway.setEnabled(true)
+    let payload = try gateway.pairNewDevice()
+    let port = try await Self.waitUntilListening(gateway)
+    clock.date += PairedDeviceStore.pendingLifetimeSeconds + 1
+
+    await #expect(throws: (any Error).self) {
+      let client = try await RemoteRPCClient.connect(
+        to: .hostPort(host: "127.0.0.1", port: port),
+        credential: payload.credential,
+        hello: HelloRequest(clientVersion: "1", clientBinary: "test")
+      )
+      await client.close()
+    }
+    #expect(store.device(payload.deviceID) == nil)
+    #expect(gateway.status == .noDevices)
+  }
+
+  /// A code issued before a relaunch is not re-issued, so the gateway must
+  /// arm its expiry from the persisted record.
+  @Test(.timeLimit(.minutes(1)))
+  func pendingPairingLoadedAtLaunchExpiresOnTime() async throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("d.json")
+    let keys = InMemoryRemoteKeyStore()
+    let issuedAt = Date(timeIntervalSince1970: 1_000_000)
+    let pending = try PairedDeviceStore(fileURL: url, keys: keys, now: { issuedAt }).beginPairing()
+
+    let clock = MutableClock(issuedAt + PairedDeviceStore.pendingLifetimeSeconds - 0.5)
+    let store = PairedDeviceStore(fileURL: url, keys: keys, now: { clock.date })
+    let gateway = Self.makeGateway(store: store)
+    defer { gateway.setEnabled(false) }
+    gateway.setEnabled(true)
+    _ = try await Self.waitUntilListening(gateway)
+    #expect(store.device(pending.id) != nil)
+
+    clock.date = issuedAt + PairedDeviceStore.pendingLifetimeSeconds
+    for _ in 0..<250 where store.device(pending.id) != nil {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(store.device(pending.id) == nil)
+    #expect(gateway.status == .noDevices)
+  }
+
   @Test
   func environmentOverrideKeepsTheGatewayOff() throws {
     let dir = try Self.makeTempDir()
@@ -115,5 +171,14 @@ struct RemoteGatewayServerTests {
       .appendingPathComponent("remote-gateway-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     return dir
+  }
+}
+
+@MainActor
+private final class MutableClock {
+  var date: Date
+
+  init(_ date: Date) {
+    self.date = date
   }
 }
