@@ -92,16 +92,22 @@ struct PaneDetailView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     } else {
-      ScrollView([.vertical, .horizontal]) {
-        Text(store.content)
-          .font(.system(.footnote, design: .monospaced))
-          .textSelection(.enabled)
-          .fixedSize(horizontal: true, vertical: false)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(12)
+      // Vertical outside, horizontal inside: a two-axis scroll view places
+      // content smaller than itself on its own terms and ignores the input
+      // bar's safe-area inset, so a short pane rendered off screen.
+      ScrollView(.vertical) {
+        ScrollView(.horizontal) {
+          Text(store.content)
+            .font(.system(.footnote, design: .monospaced))
+            .textSelection(.enabled)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(12)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      // Terminals grow at the bottom; start there and stay there.
-      .defaultScrollAnchor(.bottomLeading)
+      // Terminals grow at the bottom; start there and stay there. Also
+      // aligns a short pane to the bottom, just above the input bar.
+      .defaultScrollAnchor(.bottom)
       .overlay(alignment: .top) {
         if let message = store.errorMessage {
           Text(message)
