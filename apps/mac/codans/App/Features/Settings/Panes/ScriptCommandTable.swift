@@ -271,10 +271,7 @@ extension ScriptCommandTable {
       if isAdopted {
         Image(systemName: "checkmark")
       } else {
-        ScriptTintColorPalette.menuIcon(
-          systemName: suggestion.kind.defaultSystemImage,
-          tint: suggestion.kind.defaultTintColor
-        )
+        ScriptTintColorPalette.menuIcon(suggestion.resolvedIcon, tint: suggestion.kind.defaultTintColor)
       }
       Text(suggestion.name)
       Text(Self.menuDetail(for: suggestion))
@@ -359,11 +356,12 @@ private struct ScriptCommandRow: View {
       commandPopover = false
       iconPopover.toggle()
     } label: {
-      Image(systemName: script.resolvedSystemImage)
+      CommandIconGlyph(icon: script.resolvedIcon)
         .foregroundStyle(ScriptTintColorPalette.color(for: script.resolvedTintColor))
         .frame(width: 16, alignment: .center)
         .accessibilityHidden(true)
     }
+    .accessibilityLabel("Icon for \(script.displayName)")
     .popover(isPresented: $iconPopover, arrowEdge: .bottom) {
       ScriptIconPopover(script: script, onUpdate: onUpdate)
     }
@@ -524,13 +522,39 @@ private struct ScriptIconPopover: View {
   let script: ScriptDefinition
   let onUpdate: (ScriptDefinition) -> Void
 
+  /// SF Symbol name for the text field and grid; empty while a tool mark is
+  /// selected so the field never shows the `mark:` wire format.
   private var symbolBinding: Binding<String> {
     Binding(
-      get: { script.systemImage ?? script.resolvedSystemImage },
+      get: { displayedSymbol },
       set: {
-        var updated = script
         let trimmed = $0.trimmingCharacters(in: .whitespaces)
+        // The field writes its text back when it takes focus as the popover
+        // opens. With a tool mark selected that text is "", which must not
+        // read as "clear the icon" — only a real edit may change it.
+        guard trimmed != displayedSymbol else { return }
+        var updated = script
         updated.systemImage = trimmed.isEmpty ? nil : trimmed
+        onUpdate(updated)
+      }
+    )
+  }
+
+  private var displayedSymbol: String {
+    if case .symbol(let name) = script.resolvedIcon { return name }
+    return ""
+  }
+
+  private var markBinding: Binding<ToolMark?> {
+    Binding(
+      get: {
+        if case .mark(let mark) = script.resolvedIcon { return mark }
+        return nil
+      },
+      set: { mark in
+        guard let mark else { return }
+        var updated = script
+        updated.systemImage = CommandIconRef.mark(mark).storedValue
         onUpdate(updated)
       }
     )
@@ -558,6 +582,14 @@ private struct ScriptIconPopover: View {
 
       SFSymbolPicker(
         selection: symbolBinding,
+        highlight: ScriptTintColorPalette.color(for: script.resolvedTintColor)
+      )
+
+      Text("Tools")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+      ToolMarkPicker(
+        selection: markBinding,
         highlight: ScriptTintColorPalette.color(for: script.resolvedTintColor)
       )
 

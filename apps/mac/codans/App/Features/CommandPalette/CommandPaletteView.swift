@@ -130,7 +130,7 @@ struct CommandPaletteView: View {
 
   private func row(_ item: CommandPaletteItem, selected: Bool) -> some View {
     HStack(spacing: 10) {
-      Image(systemName: item.icon)
+      StoredIconGlyph(icon: item.icon)
         .frame(width: 20)
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)

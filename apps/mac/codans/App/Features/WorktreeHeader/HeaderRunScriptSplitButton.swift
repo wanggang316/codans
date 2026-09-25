@@ -64,8 +64,8 @@ struct HeaderRunScriptSplitButton: View {
       primary.map {
         hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id)
       } ?? false
-    let primaryIcon =
-      isRunning ? "stop.fill" : (primary?.resolvedSystemImage ?? ScriptKind.run.defaultSystemImage)
+    let primaryIcon: CommandIconRef =
+      isRunning ? .symbol("stop.fill") : (primary?.resolvedIcon ?? .symbol(ScriptKind.run.defaultSystemImage))
     let primaryTint =
       isRunning
       ? ScriptTintColorPalette.color(for: .red)
@@ -101,9 +101,7 @@ struct HeaderRunScriptSplitButton: View {
       // that would otherwise re-monochrome the glyph at render time. The
       // script name (and Run/Stop verb) lives in the tooltip and
       // accessibility label; the red stop square is the visible state.
-      Image(systemName: primaryIcon)
-        .symbolRenderingMode(.palette)
-        .foregroundStyle(primaryTint)
+      Self.toolbarGlyph(primaryIcon, tint: primaryTint)
         // play.fill (triangle) and stop.fill (square) have different glyph
         // widths, so a bare swap made the button reflow on every toggle.
         // A fixed square footprint keeps the icon column constant and the
@@ -209,7 +207,7 @@ struct HeaderRunScriptSplitButton: View {
         Text(isRunning ? "Stop \(script.displayName)" : script.displayName)
       } icon: {
         ScriptTintColorPalette.menuIcon(
-          systemName: isRunning ? "stop.fill" : script.resolvedSystemImage,
+          isRunning ? .symbol("stop.fill") : script.resolvedIcon,
           tint: isRunning ? .red : script.resolvedTintColor
         )
       }
@@ -220,6 +218,23 @@ struct HeaderRunScriptSplitButton: View {
       button.keyboardShortcut(key, modifiers: ShortcutDisplay.eventModifiers(for: chord.modifiers))
     } else {
       button
+    }
+  }
+
+  /// Primary-button glyph. A tool mark gets its tint baked into a
+  /// non-template image: toolbar reduction re-templates asset images and
+  /// would drop the colour that `.foregroundStyle` keeps on SF Symbols.
+  @ViewBuilder
+  private static func toolbarGlyph(_ icon: CommandIconRef, tint: Color) -> some View {
+    switch icon {
+    case .symbol(let name):
+      Image(systemName: name)
+        .symbolRenderingMode(.palette)
+        .foregroundStyle(tint)
+    case .mark:
+      if let image = CommandIconImage.tinted(icon, color: NSColor(tint), pointSize: 15) {
+        Image(nsImage: image)
+      }
     }
   }
 
