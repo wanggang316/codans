@@ -41,11 +41,7 @@ struct EventHubTests {
     fixture.sources.agents = [Self.entry("p1", state: "working")]
     fixture.sources.agents = [Self.entry("p1", state: "blocked")]
     fixture.sources.agents = [Self.entry("p1", state: "blocked"), Self.entry("p2", state: "idle")]
-    let pending = Task { await subscription.next() }
-    await Task.megaYield()
-    await fixture.clock.advance(by: .milliseconds(250))
-
-    let frame = try #require(await pending.value)
+    let frame = try #require(await fixture.nextFrame(subscription))
     #expect(frame.seq == 2)
     #expect(
       frame.payload
@@ -72,17 +68,15 @@ struct EventHubTests {
     await Task.megaYield()
     await fixture.clock.advance(by: .milliseconds(250))
 
-    let frame = try #require(await subscription.next())
+    let frame = try #require(await fixture.nextFrame(subscription))
     // p1 went working → idle between reads, so it is unchanged from the
     // snapshot; only p2's removal is left to report.
     #expect(
       frame.payload == .agentStatesChanged(IPC.AgentStatesDelta(upserted: [], removedPaneIDs: ["p2"])))
 
     // Nothing else is queued: the next frame is the heartbeat.
-    let pending = Task { await subscription.next() }
-    await Task.megaYield()
-    await fixture.clock.advance(by: fixture.hub.heartbeatInterval)
-    #expect(try #require(await pending.value).payload == .heartbeat)
+    let heartbeat = try #require(await fixture.nextFrame(subscription, step: fixture.hub.heartbeatInterval))
+    #expect(heartbeat.payload == .heartbeat)
   }
 
   @Test(.timeLimit(.minutes(1)))
@@ -97,15 +91,13 @@ struct EventHubTests {
     #expect(content.agents == nil)
 
     fixture.sources.agents = [Self.entry("p9", state: "working")]
-    let pending = Task { await subscription.next() }
     await Task.megaYield()
     await fixture.clock.advance(by: .milliseconds(250))
     await Task.megaYield()
     fixture.sources.projects = ["beta"]
-    await Task.megaYield()
-    await fixture.clock.advance(by: .milliseconds(250))
 
-    let frame = try #require(await pending.value)
+    // The agents change must not surface: the first frame is the hierarchy one.
+    let frame = try #require(await fixture.nextFrame(subscription))
     guard case .hierarchyChanged(let summary) = frame.payload else {
       Issue.record("expected hierarchyChanged, got \(frame.payload)")
       return
@@ -181,6 +173,26 @@ struct EventHubTests {
     let sources = FakeSources()
     let clock = TestClock<Duration>()
     let hub: EventHub
+
+    /// Pulls the next frame while stepping the test clock. A source change
+    /// arms its coalescing window asynchronously, so a single `advance` can
+    /// land before the window's sleep is registered and never wake it;
+    /// stepping until delivery removes that race.
+    func nextFrame(
+      _ subscription: EventSubscription, step: Duration = .milliseconds(250)
+    ) async -> IPC.EventFrame? {
+      let delivered = LockIsolated<IPC.EventFrame??>(nil)
+      let pending = Task {
+        let frame = await subscription.next()
+        delivered.setValue(.some(frame))
+        return frame
+      }
+      for _ in 0..<40 where delivered.value == nil {
+        await Task.megaYield()
+        await clock.advance(by: step)
+      }
+      return await pending.value
+    }
 
     init() {
       let sources = self.sources
