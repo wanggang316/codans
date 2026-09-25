@@ -11,9 +11,10 @@ import CodansCore
 ///   space never fades.
 /// - Selected-tab auto-scrolls into view (center anchor) with a short
 ///   easeInOut on `activeTabID` changes, matching the plan.
-/// - Draws the recessed rounded track behind the row and clips the
-///   scrolling content to it, as the system tab bar does. The visible
-///   track width is handed to `content` so the row can split it equally.
+/// - Draws the recessed capsule track behind the row, with the scrolling
+///   content inset `trackContentInset` on every side as in the system tab
+///   bar. The width inside that inset is handed to `content` so the row
+///   can split it equally.
 struct TabBarOverflowScroll<Content: View>: View {
   let activeTabID: TabID?
   @ViewBuilder let content: (_ trackWidth: CGFloat) -> Content
@@ -40,6 +41,10 @@ struct TabBarOverflowScroll<Content: View>: View {
             )
         }
         .coordinateSpace(name: tabBarOverflowCoordinateSpace)
+        // Clip at the track's outer capsule instead of the inset scroll
+        // bounds, so the selected capsule's drop shadow shows in the inset
+        // margin as it does in the system bar.
+        .scrollClipDisabled()
         .onPreferenceChange(TabBarOverflowGeometryKey.self) { geo in
           let maxOffset = max(0, geo.contentWidth - container.size.width)
           atLeadingEdge = geo.offset <= 0.5
@@ -47,9 +52,6 @@ struct TabBarOverflowScroll<Content: View>: View {
         }
         .overlay(alignment: .leading) { leadingShadow }
         .overlay(alignment: .trailing) { trailingShadow }
-        .background(TabBarColors.trackBackground)
-        .clipShape(
-          RoundedRectangle(cornerRadius: TabBarMetrics.trackCornerRadius, style: .continuous))
         .onChange(of: activeTabID) { _, newID in
           guard let newID else { return }
           withAnimation(.easeInOut(duration: 0.15)) {
@@ -58,6 +60,9 @@ struct TabBarOverflowScroll<Content: View>: View {
         }
       }
     }
+    .padding(TabBarMetrics.trackContentInset)
+    .background(Capsule().fill(TabBarColors.trackBackground))
+    .clipShape(Capsule())
   }
 
   @ViewBuilder

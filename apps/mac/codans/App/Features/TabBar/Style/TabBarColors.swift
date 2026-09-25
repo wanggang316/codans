@@ -5,60 +5,82 @@ import SwiftUI
 /// hex value, so dark-mode and accent-color changes propagate without
 /// per-view overrides. Any visual-system shift lives here, not in the
 /// individual chip views.
+///
+/// Chip / track tokens reproduce AppKit's macOS 26 window-tabbing tab bar,
+/// sampled per appearance. The system draws the track and the selected tab
+/// with private Liquid Glass variants that public API cannot select
+/// (`.glassEffect` renders visibly different), so they are expressed as
+/// translucent fills that land on the same pixels over the window backdrop.
 enum TabBarColors {
-  /// Recessed track behind the chips. `primary` at low opacity reads as
-  /// slightly darker than the titlebar in light mode and slightly lighter
-  /// in dark mode — the same relationship the system tab bar has.
-  static let trackBackground: Color = Color.primary.opacity(0.05)
+  /// Recessed capsule track behind the chips.
+  static let trackBackground: Color = adaptive(
+    light: .black.withAlphaComponent(0.10),
+    dark: .white.withAlphaComponent(0.041)
+  )
 
-  /// Chip background when the tab is not selected and the pointer is
-  /// elsewhere.
-  static let idleBackground: Color = .clear
+  /// Capsule under an idle chip while the pointer is over it.
+  static let chipHoverBackground: Color = adaptive(
+    light: .black.withAlphaComponent(0.044),
+    dark: .white.withAlphaComponent(0.048)
+  )
 
-  /// Chip background while the pointer is over it but the mouse button
-  /// is up. Subtle so it reads as affordance, not selection.
-  static let hoverBackground: Color = Color.primary.opacity(0.06)
-
-  /// Chip background while an idle chip is being clicked, before the
-  /// selection commits.
-  static let pressedBackground: Color = Color.primary.opacity(0.10)
-
-  /// Raised plate of the selected chip. Not expressible as a `primary`
-  /// opacity: light mode wants a near-white plate over the grey track, dark
-  /// mode a lighter grey one.
+  /// Raised capsule of the selected chip. Opaque in light mode: its drop
+  /// shadow would otherwise show through a translucent fill and grey it.
   static let activeBackground: Color = adaptive(
-    light: NSColor.white.withAlphaComponent(0.95),
-    dark: NSColor.white.withAlphaComponent(0.11)
+    light: NSColor(srgbRed: 248 / 255, green: 248 / 255, blue: 248 / 255, alpha: 1),
+    dark: .white.withAlphaComponent(0.14)
   )
 
-  /// Hairline border around the selected plate.
-  static let activeBorder: Color = adaptive(
-    light: NSColor.black.withAlphaComponent(0.10),
-    dark: NSColor.white.withAlphaComponent(0.14)
+  /// Two stacked 0.5-pt rims (outer, inner) that give the selected capsule
+  /// its glass edge highlight.
+  static let activeRimOuter: Color = adaptive(
+    light: .white,
+    dark: .white.withAlphaComponent(0.22)
+  )
+  static let activeRimInner: Color = adaptive(
+    light: .white.withAlphaComponent(0.7),
+    dark: .white.withAlphaComponent(0.13)
   )
 
-  /// Soft drop shadow under the selected plate; carries the "raised" read
-  /// in light mode, where the border alone is too faint.
-  static let activeShadow: Color = Color.black.opacity(0.08)
+  /// Soft drop shadow under the selected capsule — light mode only; the
+  /// dark-mode system bar shows none.
+  static let activeShadow: Color = adaptive(
+    light: .black.withAlphaComponent(0.10),
+    dark: .clear
+  )
+
+  /// Circle behind the close glyph while the pointer is on the button,
+  /// layered over the chip's own hover / selected capsule.
+  static let closeButtonHoverBackground: Color = adaptive(
+    light: .black.withAlphaComponent(0.073),
+    dark: .white.withAlphaComponent(0.106)
+  )
+
+  /// Close glyph: secondary while the chip is hovered, primary once the
+  /// pointer is on the button itself.
+  static let closeButtonForeground: Color = .secondary
+  static let closeButtonHoverForeground: Color = .primary
+
+  /// Separator between two adjacent idle chips. Darker than the track in
+  /// both appearances (`.separatorColor` is lighter in dark mode).
+  static let divider: Color = adaptive(
+    light: .black.withAlphaComponent(0.087),
+    dark: .black.withAlphaComponent(0.17)
+  )
 
   /// Opaque surface stamped under a chip while it is lifted in a drag, so
   /// the floating copy fully occludes the chips it passes over instead of
-  /// letting their text bleed through the otherwise-`.clear` idle fill.
+  /// letting their text bleed through the otherwise-transparent idle chip.
   static let draggingBackground: Color = Color(nsColor: .windowBackgroundColor)
 
-  /// Separator drawn between adjacent idle chips. Hidden next to the
-  /// selected chip, whose plate already carries the boundary.
-  static let divider: Color = Color(nsColor: .separatorColor)
+  /// Round hover affordance of the trailing accessory buttons (+, history,
+  /// splits) — the bar's generic icon-button hover, not a chip state.
+  static let hoverBackground: Color = Color.primary.opacity(0.06)
 
-  /// Foreground tint for the close-button glyph.
-  static let closeButtonForeground: Color = Color.primary.opacity(0.7)
-
-  /// Title color for the active chip — full primary strength so the
-  /// selected tab reads first when the bar holds many idle ones.
+  /// Title color for the active chip.
   static let activeText: Color = Color.primary
 
-  /// Title color for idle / hovered chips — softened to keep visual
-  /// weight on the active chip rather than competing with it.
+  /// Title color for idle / hovered chips.
   static let inactiveText: Color = Color.secondary
 
   private static func adaptive(light: NSColor, dark: NSColor) -> Color {

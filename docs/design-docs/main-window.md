@@ -93,7 +93,7 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 - **重排用 snapshot-on-drop，不逐 tick 调 `moveTab`。** 拖拽重排在**落下**时一次性提交绝对顺序 `reorderTabs(orderedIDs:)`，而非每个指针 tick 调 `moveTab(offset:)`。后者每次触发一次持久化保存，且两个连续 tick 跨过同一中点时引入重排闪烁。snapshot-on-drop 更省、更易单测、且贴合 catalog 真正想要的变更形态。
 
-- **视觉对齐 macOS 系统 tab 条（Safari / Finder），用 SwiftUI 复刻而非原生 tabbing。** 原生 `NSWindowTabGroup` 的每个 tab 是一个独立窗口、只挂在标题栏下，无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 颜色 / 快捷键提示，因此按系统参数复刻：chip 放在下凹圆角轨道里，**平分轨道宽度**（下限 `chipMinWidth`，超出则横向滚动）；active 是内缩 2pt 的**浮起圆角底板**（填充 + 细描边 + 轻阴影，浅色模式近白、深色模式浅灰），idle 只在 hover / press 时有扁平淡填充——两者的形态不同（浮起 vs 扁平），所以 hover 不会被读成选中。标题居中，关闭按钮在 hover 时出现在左侧，颜色点 / ⌘ 快捷键提示在右侧。分隔线以 overlay 形式画在 chip 边缘（不占宽度，保证等宽），紧挨 active chip 的两侧不画。所有参数集中在 `TabBarMetrics` / `TabBarColors`。
+- **视觉与交互对齐 AppKit 的 macOS 26 window-tabbing tab 条（Finder / Safari 同款），用 SwiftUI 按实测复刻。** 原生 tab 条是私有 `NSTabBar` / `NSTabButton`，只服务 `NSWindowTabGroup`（每个 tab 是一个独立窗口、挂在标题栏下），无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 颜色 / 快捷键提示；公开 API 里也没有能在窗口内渲染它的控件。所有参数取自在进程内遍历原生 tab 条视图树（frame / 字体）与 2x 截图取色，集中在 `TabBarMetrics` / `TabBarColors`：胶囊轨道高 28pt、内容内缩 2pt、chip 高 24pt 且间隔 1pt（分隔线 1×18pt 画在间隔里）、最小宽 120pt、关闭按钮与右侧槽位 16pt 距边 5pt、标题两侧对称留 29pt、11pt 标题（选中 semibold）尾部截断。选中 tab 在原生里是私有 Liquid Glass variant，`.glassEffect(.regular/.clear)` 实测色值对不上，故用半透明填充 + 两道 0.5pt 亮边 + 浅色模式阴影落到同样的像素；hover 是扁平淡胶囊并隐藏两侧分隔线；与原生一致在**按下时即选中**（没有单独的 pressed 态）。已知差异：原生溢出时把视口外的 tab 在边缘压扁堆叠，我们仍是横向滚动 + 边缘渐隐。
 
 - **不建并行 `TabBarState`。** tab 是 hierarchy-scoped（每 Worktree）。另起一个 `@Observable TabBarState` 容器意味着同一数据两个事实来源，并在 create/close/select 周围引入同步危险。既有模式（视图读 `HierarchyManager`、reducer 经 `HierarchyClient` 转发）已可扩展；在 `HierarchyClient` 上多挂几个闭包的边际成本，低于长期协调两个 store 的成本。
 

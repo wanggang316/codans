@@ -4,10 +4,11 @@ import SwiftUI
 /// so later milestones can add keyboard-shortcut hints and focus styling
 /// without widening `TabChipView`.
 ///
-/// Visible only while the chip is hovered; opacity transition is short
-/// (100 ms) so the button does not linger after the pointer leaves. Hit
-/// testing stays on so space kept for the glyph is never dead. Hovering the
-/// glyph itself adds a small rounded plate, as the system tab bar does.
+/// Visible only while the chip is hovered (selected or not); opacity
+/// transition is short (100 ms) so the button does not linger after the
+/// pointer leaves. Hit testing stays on so space kept for the glyph is
+/// never dead. With the pointer on the button itself the glyph strengthens
+/// and a circle fills in behind it, as in the system tab bar.
 struct TabChipCloseButton: View {
   let isVisible: Bool
   let action: () -> Void
@@ -17,17 +18,16 @@ struct TabChipCloseButton: View {
   var body: some View {
     Button(action: action) {
       Image(systemName: "xmark")
-        .font(.system(size: 9, weight: .semibold))
-        .foregroundStyle(TabBarColors.closeButtonForeground)
+        .font(.system(size: TabBarMetrics.closeGlyphSize, weight: .medium))
+        .foregroundStyle(
+          isHovering ? TabBarColors.closeButtonHoverForeground : TabBarColors.closeButtonForeground
+        )
         .frame(
           width: TabBarMetrics.closeButtonSize,
           height: TabBarMetrics.closeButtonSize
         )
-        .background(
-          RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(isHovering ? TabBarColors.pressedBackground : .clear)
-        )
-        .contentShape(Rectangle())
+        .background(Circle().fill(isHovering ? TabBarColors.closeButtonHoverBackground : .clear))
+        .contentShape(Circle())
         .accessibilityLabel("Close Tab")
     }
     .buttonStyle(.plain)

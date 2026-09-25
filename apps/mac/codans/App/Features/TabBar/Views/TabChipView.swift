@@ -1,5 +1,5 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// One tab chip. Composes label + close button on top of a state-aware
 /// background and owns the chip's local hover / press state. The chip
@@ -48,7 +48,6 @@ struct TabChipView: View {
   var iconTint: Color?
 
   @State private var isHovering = false
-  @State private var isPressing = false
 
   var body: some View {
     // Hit layout: the select Button claims the whole chip rectangle so
@@ -60,7 +59,11 @@ struct TabChipView: View {
     //
     // Width is owned by the row (`TabBarRowView` splits the track equally),
     // so the chip only fills whatever it is given.
-    Button(action: onSelect) {
+    // Selection happens on mouse-down (see `SelectOnPressStyle`), like the
+    // system tab bar. The Button action only fires for a chip that is still
+    // unselected on release — i.e. an accessibility / keyboard press — so a
+    // mouse click never dispatches select twice.
+    Button(action: selectIfInactive) {
       TabChipLabel(
         title: title,
         isActive: isActive,
@@ -78,15 +81,14 @@ struct TabChipView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .contentShape(Rectangle())
       // Reserve the side slots symmetrically so the centered title stays
-      // optically centered and truncates before it slides under either
-      // overlay.
-      .padding(.horizontal, TabBarMetrics.chipHorizontalPadding + TabBarMetrics.closeButtonSize + 4)
+      // centered and truncates before it slides under either overlay.
+      .padding(.horizontal, TabBarMetrics.chipTitleInset)
     }
-    .buttonStyle(ChipPressTrackingStyle(isPressing: $isPressing))
+    .buttonStyle(SelectOnPressStyle(onPress: selectIfInactive))
     .frame(maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight)
     .overlay(alignment: .leading) {
       TabChipCloseButton(isVisible: isHovering, action: onClose)
-        .padding(.leading, TabBarMetrics.chipHorizontalPadding)
+        .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
       // Chord hint takes the trailing slot while ⌘ is held; otherwise the
@@ -104,14 +106,13 @@ struct TabChipView: View {
             .frame(width: TabBarMetrics.closeButtonSize)
         }
       }
-      .padding(.trailing, TabBarMetrics.chipHorizontalPadding)
+      .padding(.trailing, TabBarMetrics.chipSlotInset)
       .allowsHitTesting(false)
     }
     .background(
       TabChipBackground(
         isActive: isActive,
-        isHovering: isHovering,
-        isPressing: isPressing
+        isHovering: isHovering
       )
     )
     .overlay(TabChipMiddleClickView(onMiddleClick: onMiddleClick))
@@ -135,19 +136,23 @@ struct TabChipView: View {
       )
     }
   }
+
+  private func selectIfInactive() {
+    if !isActive { onSelect() }
+  }
 }
 
-/// Button style that exposes `isPressed` as a binding so the chip can
-/// recolor its background during a tap without capturing pointer events
-/// away from the surrounding hover handler.
-private struct ChipPressTrackingStyle: ButtonStyle {
-  @Binding var isPressing: Bool
+/// Button style that selects the chip as soon as the mouse goes down,
+/// matching the system tab bar, without capturing pointer events away from
+/// the surrounding hover handler or the reorder drag gesture.
+private struct SelectOnPressStyle: ButtonStyle {
+  let onPress: () -> Void
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .contentShape(Rectangle())
-      .onChange(of: configuration.isPressed) { _, newValue in
-        isPressing = newValue
+      .onChange(of: configuration.isPressed) { _, isPressed in
+        if isPressed { onPress() }
       }
   }
 }

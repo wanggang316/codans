@@ -1,38 +1,33 @@
 import SwiftUI
 
-/// Background plate for one tab chip. State-aware so chips share a single
+/// Background capsule for one tab chip. State-aware so chips share a single
 /// background type — future state expansion (e.g. dirty styling) lives here
 /// rather than being scattered across the chip view.
 ///
-/// Mirrors the macOS system tab bar: the selected chip is a raised rounded
-/// plate (fill + hairline border + soft shadow) inset inside the track;
-/// idle chips are transparent and only pick up a flat fill on hover / press.
-/// All tokens come from `TabBarMetrics` / `TabBarColors` so visual-system
-/// shifts are a one-file diff.
+/// Mirrors the macOS system tab bar: the selected chip is a raised capsule
+/// (fill + two 0.5-pt glass rims + a light-mode drop shadow); an idle chip
+/// is transparent and picks up a flat capsule only while hovered. There is
+/// no separate pressed look — like the system bar, a chip is selected on
+/// mouse-down, so a press renders as the selected capsule immediately.
+/// All tokens come from `TabBarMetrics` / `TabBarColors`.
 struct TabChipBackground: View {
   let isActive: Bool
   let isHovering: Bool
-  let isPressing: Bool
 
   var body: some View {
-    let plate = RoundedRectangle(
-      cornerRadius: TabBarMetrics.chipCornerRadius, style: .continuous)
-    Group {
-      if isActive {
-        plate
-          .fill(TabBarColors.activeBackground)
-          .overlay(plate.strokeBorder(TabBarColors.activeBorder, lineWidth: 0.5))
-          .shadow(color: TabBarColors.activeShadow, radius: 1, y: 0.5)
-      } else {
-        plate.fill(idleFill)
-      }
+    if isActive {
+      Capsule()
+        .fill(TabBarColors.activeBackground)
+        .overlay(Capsule().strokeBorder(TabBarColors.activeRimOuter, lineWidth: 0.5))
+        .overlay(
+          Capsule().strokeBorder(TabBarColors.activeRimInner, lineWidth: 0.5).padding(0.5)
+        )
+        // Flatten first: without it SwiftUI shadows each layer separately
+        // and the rims cast a grey band onto the inside of the capsule.
+        .compositingGroup()
+        .shadow(color: TabBarColors.activeShadow, radius: 1.5, y: 0.5)
+    } else {
+      Capsule().fill(isHovering ? TabBarColors.chipHoverBackground : .clear)
     }
-    .padding(TabBarMetrics.chipPlateInset)
-  }
-
-  private var idleFill: Color {
-    if isPressing { return TabBarColors.pressedBackground }
-    if isHovering { return TabBarColors.hoverBackground }
-    return TabBarColors.idleBackground
   }
 }
