@@ -4,13 +4,19 @@ import Testing
 
 @testable import CodansMobile
 
-/// Event frames from the connection feed both the agents and the browser
-/// models; changing the active Mac clears them.
+/// Event frames from the connection feed the agents and browser models, and
+/// a snapshot refreshes the composer's profiles; changing the active Mac
+/// clears them all.
 @MainActor
 struct AppFeatureTests {
   @Test
   func eventFramesFanOutToAgentsAndBrowser() async {
-    let store = TestStore(initialState: AppFeature.State()) { AppFeature() }
+    let profile = Fixtures.profile("Claude")
+    let store = TestStore(initialState: AppFeature.State()) {
+      AppFeature()
+    } withDependencies: {
+      $0.remoteClient.listProfiles = { [profile] }
+    }
     let agent = Fixtures.agent("A", state: "blocked")
     let frame = Fixtures.snapshot(agents: [agent])
 
@@ -23,6 +29,11 @@ struct AppFeatureTests {
     await store.receive(\.browser.eventReceived) {
       $0.browser.hierarchy = Fixtures.hierarchy
     }
+    // A snapshot (every connect starts with one) refreshes the profiles.
+    await store.receive(\.composer.loadProfiles)
+    await store.receive(\.composer.profilesLoaded) {
+      $0.composer.profiles = [profile]
+    }
     #expect(store.state.browser.location(ofPane: "A")?.paneTitle == "claude")
 
     await store.send(.connection(.delegate(.activeGatewayChanged)))
@@ -31,6 +42,9 @@ struct AppFeatureTests {
     }
     await store.receive(\.browser.reset) {
       $0.browser = BrowserFeature.State()
+    }
+    await store.receive(\.composer.reset) {
+      $0.composer = ComposerFeature.State()
     }
   }
 }

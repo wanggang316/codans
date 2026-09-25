@@ -33,6 +33,15 @@ nonisolated struct RemoteClient: Sendable {
   var readPane: @Sendable (_ paneID: String, _ tail: Int) async throws -> String
   var sendInput: @Sendable (_ paneID: String, _ text: String) async throws -> Void
   var sendKey: @Sendable (_ paneID: String, _ key: IPC.TerminalNamedKey) async throws -> Void
+  /// `agent.listProfiles`: every profile the Mac knows, enabled or not.
+  var listProfiles: @Sendable () async throws -> [IPC.AgentProfileSummary]
+  /// `hierarchy.createWorktree` with only a branch name (the Mac picks the
+  /// path); returns the new worktree's ID.
+  var createWorktree: @Sendable (_ projectID: String, _ branch: String) async throws -> String
+  /// `agent.launch` in the background with `prompt` as the agent's first
+  /// message; returns the new pane's ID when the Mac created one.
+  var launchAgent:
+    @Sendable (_ projectID: String, _ worktreeID: String, _ profile: String, _ prompt: String?) async throws -> String?
 }
 
 nonisolated extension RemoteClient: DependencyKey {
@@ -43,7 +52,10 @@ nonisolated extension RemoteClient: DependencyKey {
       disconnect: { await sessions.disconnect() },
       readPane: { try await sessions.readPane($0, tail: $1) },
       sendInput: { try await sessions.sendInput($0, text: $1) },
-      sendKey: { try await sessions.sendKey($0, key: $1) }
+      sendKey: { try await sessions.sendKey($0, key: $1) },
+      listProfiles: { try await sessions.listProfiles() },
+      createWorktree: { try await sessions.createWorktree(projectID: $0, branch: $1) },
+      launchAgent: { try await sessions.launchAgent(projectID: $0, worktreeID: $1, profile: $2, prompt: $3) }
     )
   }()
 
@@ -52,7 +64,10 @@ nonisolated extension RemoteClient: DependencyKey {
     disconnect: unimplemented("RemoteClient.disconnect"),
     readPane: unimplemented("RemoteClient.readPane"),
     sendInput: unimplemented("RemoteClient.sendInput"),
-    sendKey: unimplemented("RemoteClient.sendKey")
+    sendKey: unimplemented("RemoteClient.sendKey"),
+    listProfiles: unimplemented("RemoteClient.listProfiles"),
+    createWorktree: unimplemented("RemoteClient.createWorktree"),
+    launchAgent: unimplemented("RemoteClient.launchAgent")
   )
 }
 
@@ -123,7 +138,49 @@ private actor LiveRemoteSessions {
     _ = try await withControl { try await $0.callRaw(.terminalSendKey, params: params) }
   }
 
+  func listProfiles() async throws -> [IPC.AgentProfileSummary] {
+    try await withControl { control in
+      try await control.call(
+        .agentListProfiles, params: [String: String](), as: IPC.AgentProfileListResponse.self
+      ).profiles
+    }
+  }
+
+  func createWorktree(projectID: String, branch: String) async throws -> String {
+    let params = CreateWorktreeParams(projectID: ProjectID(raw: try Self.uuid(projectID)), name: branch, branch: branch)
+    return try await withControl { control in
+      try await control.call(.hierarchyCreateWorktree, params: params, as: CreateWorktreeResult.self)
+    }.id.raw.uuidString
+  }
+
+  func launchAgent(projectID: String, worktreeID: String, profile: String, prompt: String?) async throws -> String? {
+    // `focus: false`: a launch from the phone must not pull the Mac's
+    // window to the new tab under someone working there.
+    let request = IPC.AgentLaunchRequest(
+      projectID: ProjectID(raw: try Self.uuid(projectID)),
+      worktreeID: WorktreeID(raw: try Self.uuid(worktreeID)),
+      profile: profile,
+      prompt: prompt,
+      focus: false
+    )
+    return try await withControl { control in
+      try await control.call(.agentLaunch, params: request, as: IPC.AgentLaunchResponse.self)
+    }.paneID?.raw.uuidString
+  }
+
   // MARK: - Internals
+
+  /// `hierarchy.createWorktree` params and result, the part a phone may
+  /// send: the Mac refuses `path` and `reuseExisting` from paired devices.
+  private struct CreateWorktreeParams: Encodable, Sendable {
+    let projectID: ProjectID
+    let name: String
+    let branch: String
+  }
+
+  private struct CreateWorktreeResult: Decodable, Sendable {
+    let id: WorktreeID
+  }
 
   /// `terminal.sendInput` / `terminal.sendKey` params. The Mac declares
   /// these next to its handlers rather than in CodansIPC; the shapes are
@@ -159,10 +216,14 @@ private actor LiveRemoteSessions {
   }
 
   private static func paneID(_ string: String) throws -> PaneID {
+    PaneID(raw: try uuid(string))
+  }
+
+  private static func uuid(_ string: String) throws -> UUID {
     guard let uuid = UUID(uuidString: string) else {
-      throw RemoteFailure(.other, "Invalid pane id \(string).")
+      throw RemoteFailure(.other, "Invalid id \(string).")
     }
-    return PaneID(raw: uuid)
+    return uuid
   }
 
   /// Sent in `system.hello`; the Mac refuses a different major version.

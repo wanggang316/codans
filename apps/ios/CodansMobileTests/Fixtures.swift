@@ -23,6 +23,14 @@ enum Fixtures {
 
   static let gateway = PairedGateway(payload: payload, pairedAt: pairedAt)
 
+  static func profile(
+    _ name: String, id: UUID = UUID(), enabled: Bool = true, installed: Bool? = true, prompt: Bool = true
+  ) -> IPC.AgentProfileSummary {
+    IPC.AgentProfileSummary(
+      id: id, name: name, agent: "claude", agentName: "Claude Code", isEnabled: enabled,
+      isInstalled: installed, supportsPrompt: prompt, command: "claude")
+  }
+
   static let info = RemoteSessionInfo(serverVersion: "0.7.4", permission: .interactive)
 
   static func agent(

@@ -35,6 +35,7 @@ struct WorkspaceView: View {
       }
     }
     .onChange(of: selectedWorktreeID) { _, _ in
+      followSelection()
       // A pane from another worktree would leave the columns disagreeing.
       if let paneID = selectedPaneID,
         store.browser.location(ofPane: paneID)?.worktree.id != selectedWorktreeID
@@ -67,6 +68,48 @@ struct WorkspaceView: View {
       .safeAreaInset(edge: .top, spacing: 0) {
         ConnectionBanner(connection: store.connection)
       }
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        if store.connection.permission == .interactive {
+          ComposerView(
+            store: store.scope(state: \.composer, action: \.composer),
+            projects: store.browser.projects,
+            macName: store.connection.activeGateway?.displayName ?? "Mac",
+            onLaunched: { launch in
+              selectedWorktreeID = launch.worktreeID
+              if let paneID = launch.paneID { selectedPaneID = paneID }
+            }
+          )
+        }
+      }
+      .task(id: store.browser.hierarchy?.projects.count) { followSelection() }
+    }
+  }
+
+  /// The composer sends into the worktree selected in the sidebar, else the
+  /// Mac's own selection; an explicit pick in the composer stays until the
+  /// sidebar selection changes.
+  private func followSelection() {
+    let browser = store.browser
+    if let found = browser.worktree(id: selectedWorktreeID) {
+      store.send(.composer(.targetSelected(.worktree(projectID: found.project.id, worktreeID: found.worktree.id))))
+      return
+    }
+    // Keep a target that still exists on the Mac (including a pending new
+    // worktree in a project that still exists).
+    if let target = store.composer.target, Self.exists(target, in: browser) { return }
+    let project = browser.project(id: browser.hierarchy?.selectedProjectID) ?? browser.projects.first
+    guard let project else { return }
+    let worktree = project.worktrees.first { $0.id == project.selectedWorktreeID } ?? project.worktrees.first
+    store.send(
+      .composer(
+        .targetSelected(
+          worktree.map { .worktree(projectID: project.id, worktreeID: $0.id) } ?? .newWorktree(projectID: project.id))))
+  }
+
+  private static func exists(_ target: ComposerFeature.Target, in browser: BrowserFeature.State) -> Bool {
+    switch target {
+    case .worktree(_, let worktreeID): return browser.worktree(id: worktreeID) != nil
+    case .newWorktree(let projectID): return browser.project(id: projectID) != nil
     }
   }
 

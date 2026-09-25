@@ -65,6 +65,7 @@ let project = Project(
         "CodansMobile/App",
         "CodansMobile/Features/Agents",
         "CodansMobile/Features/Browser",
+        "CodansMobile/Features/Composer",
         "CodansMobile/Features/Connection",
         "CodansMobile/Features/PaneDetail",
         "CodansMobile/Features/Settings",
