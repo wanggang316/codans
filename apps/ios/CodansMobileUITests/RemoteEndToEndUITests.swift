@@ -40,14 +40,16 @@ final class RemoteEndToEndUITests: XCTestCase {
     shot("1-confirm")
     pair.tap()
 
-    app.tabBars.buttons["Browse"].tap()
-    let projectRow = app.staticTexts[project]
-    XCTAssertTrue(projectRow.waitForExistence(timeout: 20), "project \(project) never listed")
-    shot("2-projects")
-    projectRow.tap()
+    // The home screen lists each project with its worktrees.
+    let projectHeader = app.staticTexts[project]
+    XCTAssertTrue(projectHeader.waitForExistence(timeout: 20), "project \(project) never listed")
+    shot("2-worktrees")
+    let worktreeRow = app.descendants(matching: .any)["worktree-row"].firstMatch
+    XCTAssertTrue(worktreeRow.waitForExistence(timeout: 5), "project has no worktree rows")
+    worktreeRow.tap()
 
-    // By identifier: in compact width the collapsed project list stays in
-    // the accessibility tree, so "first cell" would hit the project row.
+    // By identifier: in compact width the collapsed worktree list stays in
+    // the accessibility tree, so "first cell" would hit a worktree row.
     let paneRow = app.descendants(matching: .any)["pane-row"].firstMatch
     XCTAssertTrue(paneRow.waitForExistence(timeout: 10), "project has no pane rows")
     shot("3-panes")

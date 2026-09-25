@@ -77,4 +77,38 @@ struct AgentsFeatureTests {
       $0 = AgentsFeature.State()
     }
   }
+
+  @Test
+  func worktreeSummaryReportsTheMostUrgentKindAndItsCount() {
+    var state = AgentsFeature.State()
+    #expect(state.summary(forWorktree: "W") == nil)
+
+    state.entries = [
+      "A": Fixtures.agent("A", state: "working"),
+      "B": Fixtures.agent("B", state: "idle"),
+    ]
+    #expect(state.summary(forWorktree: "W").map { [$0.kind == .working, $0.count == 1] } == [true, true])
+
+    state.entries["C"] = Fixtures.agent("C", state: "blocked")
+    state.entries["D"] = Fixtures.agent("D", state: "blocked")
+    let summary = state.summary(forWorktree: "W")
+    #expect(summary?.kind == .needsInput)
+    #expect(summary?.count == 2)
+    // Agents elsewhere do not leak into this worktree.
+    #expect(state.summary(forWorktree: "other") == nil)
+    #expect(state.kind(ofPane: "C") == .needsInput)
+    #expect(state.kind(ofPane: "missing") == nil)
+  }
+
+  @Test
+  func worktreeLookupReturnsItsProject() {
+    var browser = BrowserFeature.State()
+    #expect(browser.worktree(id: "W") == nil)
+    browser.hierarchy = Fixtures.hierarchy
+    let found = browser.worktree(id: "W")
+    #expect(found?.project.id == "P")
+    #expect(found?.worktree.name == "main")
+    #expect(browser.worktree(id: "nope") == nil)
+    #expect(browser.worktree(id: nil) == nil)
+  }
 }

@@ -3,7 +3,7 @@ import ComposableArchitecture
 import Foundation
 
 /// The Mac's Project → Worktree → Tab → Pane tree as last streamed. The
-/// selection itself is per scene (`@SceneStorage` in `BrowserView`), so
+/// selection itself is per scene (`@SceneStorage` in `WorkspaceView`), so
 /// two windows can browse different places over the same model.
 @Reducer
 struct BrowserFeature {
@@ -16,6 +16,17 @@ struct BrowserFeature {
     func project(id: String?) -> IPC.ProjectSummary? {
       guard let id else { return nil }
       return projects.first { $0.id == id }
+    }
+
+    /// A worktree and the project that owns it.
+    func worktree(id: String?) -> (project: IPC.ProjectSummary, worktree: IPC.WorktreeSummary)? {
+      guard let id else { return nil }
+      for project in projects {
+        if let worktree = project.worktrees.first(where: { $0.id == id }) {
+          return (project, worktree)
+        }
+      }
+      return nil
     }
 
     /// Where a pane sits, for titles and breadcrumbs.

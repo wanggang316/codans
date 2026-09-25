@@ -2,25 +2,25 @@ import CodansIPC
 import ComposableArchitecture
 import SwiftUI
 
-/// Agents grouped by needs input / working / idle; selecting one shows its
-/// pane. A two-column split view collapses into a stack in compact width,
-/// so the same code serves iPhone, iPad and both iPhone Duo displays.
+/// Every agent on the Mac, grouped by needs input / working / idle, shown
+/// as a sheet from the workspace toolbar. Picking one hands its pane back
+/// to the workspace, which navigates there.
 struct AgentsView: View {
   let store: StoreOf<AppFeature>
-  let openSettings: () -> Void
+  let onSelect: (IPC.AgentStateEntry) -> Void
 
-  @SceneStorage("agents.selectedPane") private var selectedPaneID: String?
+  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
-    NavigationSplitView {
+    NavigationStack {
       list
         .navigationTitle("Agents")
-    } detail: {
-      if let paneID = selectedPaneID {
-        PaneDetailContainer(store: store, paneID: paneID)
-      } else {
-        ContentUnavailableView("Select an Agent", systemImage: "sparkles")
-      }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") { dismiss() }
+          }
+        }
     }
   }
 
@@ -28,25 +28,28 @@ struct AgentsView: View {
   private var list: some View {
     let agents = store.agents
     if !agents.hasSnapshot {
-      ConnectionPlaceholderView(connection: store.connection, openSettings: openSettings)
+      ContentUnavailableView {
+        Label(ConnectionStatusView.title(for: store.connection), systemImage: "sparkles")
+      }
     } else if agents.entries.isEmpty {
       ContentUnavailableView(
         "No Agents Running",
         systemImage: "sparkles",
         description: Text("Agents started in Codans on your Mac appear here."))
     } else {
-      List(selection: $selectedPaneID) {
+      List {
         ForEach(agents.groups) { group in
           Section(group.kind.title) {
             ForEach(group.entries, id: \.paneID) { entry in
-              AgentRow(entry: entry, kind: group.kind)
-                .tag(entry.paneID)
+              Button {
+                onSelect(entry)
+              } label: {
+                AgentRow(entry: entry, kind: group.kind)
+              }
+              .foregroundStyle(.primary)
             }
           }
         }
-      }
-      .safeAreaInset(edge: .top, spacing: 0) {
-        ConnectionBanner(connection: store.connection)
       }
     }
   }
@@ -59,8 +62,8 @@ private struct AgentRow: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 6) {
-        Image(systemName: symbol)
-          .foregroundStyle(tint)
+        Image(systemName: kind.symbol)
+          .foregroundStyle(kind.tint)
           .accessibilityHidden(true)
         Text(entry.title ?? entry.tabTitle ?? entry.agentName)
           .font(.headline)
@@ -73,21 +76,5 @@ private struct AgentRow: View {
     }
     .accessibilityElement(children: .combine)
     .accessibilityValue(kind.title)
-  }
-
-  private var symbol: String {
-    switch kind {
-    case .needsInput: return "exclamationmark.bubble.fill"
-    case .working: return "circle.dotted.circle"
-    case .idle: return "moon.zzz"
-    }
-  }
-
-  private var tint: Color {
-    switch kind {
-    case .needsInput: return .orange
-    case .working: return .blue
-    case .idle: return .secondary
-    }
   }
 }

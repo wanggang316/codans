@@ -27,6 +27,17 @@ struct AgentsFeature {
     var needsInputCount: Int {
       entries.values.filter { AgentGroup.Kind(state: $0.state) == .needsInput }.count
     }
+
+    /// The most urgent agent state in a worktree, with how many agents are
+    /// in it, for the badge on the worktree row. Nil when no agent runs
+    /// there.
+    func summary(forWorktree worktreeID: String) -> AgentSummary? {
+      AgentSummary(entries.values.filter { $0.worktreeID == worktreeID })
+    }
+
+    func kind(ofPane paneID: String) -> AgentGroup.Kind? {
+      entries[paneID].map { AgentGroup.Kind(state: $0.state) }
+    }
   }
 
   enum Action: Equatable {
@@ -63,6 +74,20 @@ struct AgentsFeature {
   }
 }
 
+struct AgentSummary: Equatable {
+  let kind: AgentGroup.Kind
+  /// Agents in the most urgent kind.
+  let count: Int
+
+  init?(_ entries: some Collection<IPC.AgentStateEntry>) {
+    let kinds = entries.map { AgentGroup.Kind(state: $0.state) }
+    // `allCases` is ordered most urgent first.
+    guard let kind = AgentGroup.Kind.allCases.first(where: kinds.contains) else { return nil }
+    self.kind = kind
+    self.count = kinds.count { $0 == kind }
+  }
+}
+
 struct AgentGroup: Equatable, Identifiable {
   enum Kind: String, CaseIterable, Equatable {
     case needsInput
@@ -85,6 +110,14 @@ struct AgentGroup: Equatable, Identifiable {
       case .needsInput: return "Needs Input"
       case .working: return "Working"
       case .idle: return "Idle"
+      }
+    }
+
+    var symbol: String {
+      switch self {
+      case .needsInput: return "exclamationmark.bubble.fill"
+      case .working: return "circle.dotted.circle"
+      case .idle: return "moon.zzz"
       }
     }
 

@@ -2,7 +2,8 @@ import ComposableArchitecture
 import SwiftUI
 import VisionKit
 
-/// Paired Macs, connection status, and pairing. Pairing accepts the QR
+/// Paired Macs, connection status, and pairing, shown as a sheet from the
+/// workspace toolbar. Pairing accepts the QR
 /// code from the Mac's Remote Access pane, or the same code pasted as text
 /// (the only way on the simulator or a device without a camera).
 struct SettingsView: View {
@@ -10,6 +11,7 @@ struct SettingsView: View {
 
   @State private var pairingCode = ""
   @State private var isScanning = false
+  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     NavigationStack {
@@ -21,6 +23,12 @@ struct SettingsView: View {
         pairingSection
       }
       .navigationTitle("Settings")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") { dismiss() }
+        }
+      }
       .sheet(isPresented: $isScanning) {
         PairingScannerSheet { code in
           isScanning = false
