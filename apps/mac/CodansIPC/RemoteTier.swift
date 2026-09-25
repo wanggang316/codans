@@ -58,8 +58,11 @@ extension IPC.Method {
 
     // Typing into a pane and navigating: equivalent to shell access, so
     // opt-in per device.
+    // Creating a worktree runs git on the Mac but only ever adds: the
+    // router further limits a remote caller to a branch name, so it cannot
+    // choose where on disk the worktree lands.
     case .terminalSendInput, .terminalSendKey, .terminalRetryPane,
-      .agentLaunch,
+      .agentLaunch, .hierarchyCreateWorktree,
       .hierarchyActivateWorktree, .hierarchyActivateTab, .hierarchyFocusPane,
       .hierarchyCreateTab, .hierarchyOpenPane, .hierarchySplitPane,
       .hierarchyZoomPane, .hierarchyUnzoomPane:
@@ -80,7 +83,7 @@ extension IPC.Method {
     // `agent.wait` blocks its connection and the event stream answers the
     // same question.
     case .hierarchyAddProject, .hierarchyRenameProject, .hierarchySetProjectEditor,
-      .hierarchyCreateWorktree, .hierarchyRenameWorktree,
+      .hierarchyRenameWorktree,
       .hierarchyCloseTab, .hierarchyRenameTab,
       .hierarchyClosePane, .hierarchyResizePane, .hierarchySetPaneLabels,
       .hierarchyCreateTag, .hierarchyRenameTag, .hierarchyRecolorTag, .hierarchyRemoveTag,

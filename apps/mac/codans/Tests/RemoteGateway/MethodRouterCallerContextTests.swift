@@ -41,6 +41,26 @@ struct MethodRouterCallerContextTests {
   }
 
   @Test
+  func remoteWorktreeCreationTakesABranchButNeverAPath() {
+    let phone = CallerContext.remote(deviceID: Self.device, permission: .interactive)
+    func request(_ fields: [String: JSONValue]) -> IPC.Request {
+      IPC.Request(id: "r", method: .hierarchyCreateWorktree, params: .object(fields))
+    }
+    let base: [String: JSONValue] = ["projectID": .string(UUID().uuidString), "name": .string("fix")]
+
+    #expect(phone.refusal(for: request(base.merging(["branch": .string("fix")]) { $1 })) == nil)
+    #expect(phone.refusal(for: request(base.merging(["path": .null]) { $1 })) == nil)
+    #expect(phone.refusal(for: request(base.merging(["path": .string("/etc")]) { $1 })) != nil)
+    #expect(phone.refusal(for: request(base.merging(["reuseExisting": .bool(true)]) { $1 })) != nil)
+    // The same call from the CLI is unrestricted.
+    #expect(
+      CallerContext.local(peerPID: nil).refusal(for: request(base.merging(["path": .string("/tmp/x")]) { $1 })) == nil)
+    // And a read-only device cannot create worktrees at all.
+    let viewer = CallerContext.remote(deviceID: Self.device, permission: .readOnly)
+    #expect(viewer.refusal(for: request(base.merging(["branch": .string("fix")]) { $1 })) != nil)
+  }
+
+  @Test
   func tierAllowedMethodsPassTheGate() async {
     let router = Self.makeRouter()
     for method in IPC.Method.allCases where method.remoteTier == .readOnly {

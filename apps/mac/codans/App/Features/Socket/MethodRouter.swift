@@ -59,7 +59,7 @@ public final class MethodRouter {
   /// at exactly one choke point.
   public func route(_ request: IPC.Request, context: CallerContext = .local(peerPID: nil)) async -> RouterOutcome {
     logger.debug("route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
-    if let refusal = context.refusal(for: request.method) {
+    if let refusal = context.refusal(for: request) {
       if case .remote(let deviceID, let permission) = context {
         logger.notice(
           "refused \(request.method.rawValue, privacy: .public) for device \(deviceID.uuidString, privacy: .public) (\(permission.rawValue, privacy: .public))"

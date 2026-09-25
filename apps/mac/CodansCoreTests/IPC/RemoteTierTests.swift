@@ -44,7 +44,7 @@ struct RemoteTierTests {
     .hierarchyAddProject: .localOnly,
     .hierarchyRenameProject: .localOnly,
     .hierarchySetProjectEditor: .localOnly,
-    .hierarchyCreateWorktree: .localOnly,
+    .hierarchyCreateWorktree: .interactive,
     .hierarchyRenameWorktree: .localOnly,
     .hierarchyCloseTab: .localOnly,
     .hierarchyRenameTab: .localOnly,

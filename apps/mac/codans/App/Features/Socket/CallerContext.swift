@@ -42,4 +42,28 @@ public enum CallerContext: Equatable, Sendable {
       return .forbidden(reason: "\(method.rawValue) is not available to this device")
     }
   }
+
+  /// `refusal(for:)` on the method, then limits on the parameters a remote
+  /// caller may pass to a method its tier allows.
+  public func refusal(for request: IPC.Request) -> IPCError? {
+    if let refusal = refusal(for: request.method) { return refusal }
+    guard case .remote = self else { return nil }
+    switch request.method {
+    case .hierarchyCreateWorktree:
+      // A phone names a branch and the Mac derives the path from its own
+      // worktree settings. An explicit path (or adopting an existing one)
+      // could register any directory on this Mac as a worktree.
+      guard case .object(let fields) = request.params else { return nil }
+      let restricted = ["path", "reuseExisting"].filter { key in
+        fields[key].map { $0 != .null } ?? false
+      }
+      guard !restricted.isEmpty else { return nil }
+      return .forbidden(
+        reason:
+          "hierarchy.createWorktree from a paired device takes a branch name, not \(restricted.joined(separator: " or "))"
+      )
+    default:
+      return nil
+    }
+  }
 }
