@@ -1,0 +1,4 @@
+// The iOS companion ships co-versioned with the Mac app: `system.hello`
+// refuses a client whose major version differs from the server's, so the
+// marketing version must come from the same place.
+#include "../../mac/Configurations/Project.xcconfig"

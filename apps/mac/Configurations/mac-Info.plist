@@ -24,6 +24,12 @@
 	<string>14.0</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Gump</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Codans uses the local network so your paired iPhone or iPad can connect when Remote Access is turned on.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_codans._tcp</string>
+	</array>
 	<key>NSMainStoryboardFile</key>
 	<string></string>
 	<key>NSPrincipalClass</key>

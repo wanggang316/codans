@@ -7,6 +7,11 @@ let ghosttyFingerprintInputScript = """
 "${SRCROOT}/\(ghosttyBuildScriptPath.pathString)" --print-fingerprint
 """
 
+// CodansCore / CodansIPC are also linked by the iOS companion (apps/ios), so
+// they must stay free of AppKit / Carbon and build for iPhone + iPad too.
+let sharedDestinations: Destinations = [.mac, .iPhone, .iPad]
+let sharedDeploymentTargets: DeploymentTargets = .multiplatform(iOS: "26.0", macOS: "14.0")
+
 let project = Project(
   name: "codans",
   settings: .settings(
@@ -35,13 +40,13 @@ let project = Project(
     defaultSettings: .essential
   ),
   targets: [
-    // Shared domain types. Zero internal deps. Consumed by app + CLI.
+    // Shared domain types. Zero internal deps. Consumed by app + CLI + iOS companion.
     .target(
       name: "CodansCore",
-      destinations: .macOS,
+      destinations: sharedDestinations,
       product: .staticFramework,
       bundleId: "com.gumpw.codans.core",
-      deploymentTargets: .macOS("14.0"),
+      deploymentTargets: sharedDeploymentTargets,
       infoPlist: .default,
       buildableFolders: [
         "CodansCore",
@@ -86,18 +91,63 @@ let project = Project(
       )
     ),
 
-    // JSON-RPC wire protocol. Consumed by app + CLI.
+    // JSON-RPC wire protocol. Consumed by app + CLI + iOS companion.
     .target(
       name: "CodansIPC",
-      destinations: .macOS,
+      destinations: sharedDestinations,
       product: .staticFramework,
       bundleId: "com.gumpw.codans.ipc",
-      deploymentTargets: .macOS("14.0"),
+      deploymentTargets: sharedDeploymentTargets,
       infoPlist: .default,
       buildableFolders: ["CodansIPC", "CodansIPC/WireTypes"],
       dependencies: [.target(name: "CodansCore")],
       settings: .settings(
         base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
+        defaultSettings: .essential
+      )
+    ),
+
+    // LAN remote-access plumbing shared by the Mac gateway and the iOS
+    // companion: pairing payload, TLS-PSK parameters, NWConnection transport,
+    // long-lived multiplexed RPC client. Network + Security only, no UI.
+    .target(
+      name: "CodansRemote",
+      destinations: sharedDestinations,
+      product: .staticFramework,
+      bundleId: "com.gumpw.codans.remote",
+      deploymentTargets: sharedDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["CodansRemote"],
+      dependencies: [
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
+      ],
+      settings: .settings(
+        base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
+        defaultSettings: .essential
+      )
+    ),
+
+    // CodansRemote unit tests. Hostless; the TLS-PSK tests run a real
+    // NWListener / NWConnection pair on 127.0.0.1.
+    .target(
+      name: "CodansRemoteTests",
+      destinations: .macOS,
+      product: .unitTests,
+      bundleId: "com.gumpw.codans.remote-tests",
+      deploymentTargets: .macOS("14.0"),
+      infoPlist: .default,
+      buildableFolders: ["CodansRemoteTests"],
+      dependencies: [
+        .target(name: "CodansRemote"),
+        .target(name: "CodansCore"),
+        .target(name: "CodansIPC"),
+      ],
+      settings: .settings(
+        base: [
+          "CODE_SIGNING_ALLOWED": "NO",
+          "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
+        ],
         defaultSettings: .essential
       )
     ),
@@ -330,6 +380,7 @@ let project = Project(
       dependencies: [
         .target(name: "CodansCore"),
         .target(name: "CodansIPC"),
+        .target(name: "CodansRemote"),
         .target(name: "codans-cli"),
         .target(name: "CodansKit"),
         .target(name: "GhosttyKit"),

@@ -192,6 +192,7 @@ struct SettingsSidebarView: View {
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"
     case .notifications: return "bell"
+    case .remoteAccess: return "iphone.radiowaves.left.and.right"
     case .developer: return "hammer"
     case .shortcuts: return "command"
     case .updates: return "arrow.down.circle"

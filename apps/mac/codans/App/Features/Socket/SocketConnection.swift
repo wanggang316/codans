@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 import os
 
 /// One accepted connection's request/response loop. Shared by the real
@@ -17,6 +17,12 @@ public actor SocketConnection {
   /// peer (the in-memory test harness). Forwarded to the router with
   /// every request so handlers can attribute the call to a live pane.
   public let peerPID: pid_t?
+  /// Resolves the caller for each request. Nil for Unix-socket
+  /// connections, which are always `.local(peerPID:)`. The gateway passes
+  /// a closure that reads the device's current permission, so a downgrade
+  /// applies to the next request without reconnecting; a nil answer means
+  /// the device was revoked mid-connection.
+  private let resolveContext: (@MainActor @Sendable () -> CallerContext?)?
   public let inflightLimit: Int
   private let router: MethodRouter
   private let reader: AsyncStream<Data>
@@ -39,10 +45,12 @@ public actor SocketConnection {
     reader: AsyncStream<Data>,
     write: @escaping @Sendable (Data) async -> Void,
     close: @escaping @Sendable () async -> Void,
+    context: (@MainActor @Sendable () -> CallerContext?)? = nil,
     inflightLimit: Int = 64
   ) {
     self.id = id
     self.peerPID = peerPID
+    self.resolveContext = context
     self.router = router
     self.reader = reader
     self.write = write
@@ -121,8 +129,22 @@ public actor SocketConnection {
     }
   }
 
+  /// The caller for one request; nil when a remote device has been
+  /// revoked since it connected.
+  private func callerContext() async -> CallerContext? {
+    guard let resolveContext else { return .local(peerPID: peerPID) }
+    return await resolveContext()
+  }
+
+  private func route(_ request: IPC.Request) async -> RouterOutcome {
+    guard let context = await callerContext() else {
+      return .failed(.forbidden(reason: "this device is no longer paired"))
+    }
+    return await router.route(request, context: context)
+  }
+
   private func handleUnary(_ request: IPC.Request) async {
-    let outcome = await router.route(request, peerPID: peerPID)
+    let outcome = await route(request)
     switch outcome {
     case .unary(let result):
       if request.method == .systemHello { helloCompleted = true }
@@ -140,7 +162,7 @@ public actor SocketConnection {
   }
 
   private func handleStreaming(_ request: IPC.Request) async {
-    let outcome = await router.route(request, peerPID: peerPID)
+    let outcome = await route(request)
     switch outcome {
     case .streaming(let subscribe):
       let stream = subscribe()
