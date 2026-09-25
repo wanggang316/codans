@@ -471,6 +471,16 @@ nonisolated struct HierarchyClient: Sendable {
       _ scriptID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
     ) async throws -> Void
 
+  /// Runs a command that is not saved anywhere — a detected manifest entry
+  /// run straight from the header dropdown. Goes through the same pipeline as
+  /// `runScript` (tab spawn, env, run-pane reuse keyed by `script.id`, Run/Stop
+  /// tracking), so callers pass a stable id to reuse the pane on a rerun.
+  /// Throws `RunScriptError.missingWorktree` when the worktree is gone.
+  var runCommand:
+    @MainActor @Sendable (
+      _ script: ScriptDefinition, _ projectID: ProjectID, _ worktreeID: WorktreeID
+    ) async throws -> Void
+
   /// Launches an `AgentProfile` from `Settings.agents` in the given Worktree.
   /// Renders the profile through `AgentLaunchCommand` and dispatches it the
   /// same way a script is dispatched (new tab / split / focused pane), with
@@ -1058,6 +1068,16 @@ extension HierarchyClient {
           worktreeID: worktreeID,
           manager: manager,
           settings: settings,
+          terminalClient: terminalClient
+        )
+      },
+      runCommand: { [weak settings] script, projectID, worktreeID in
+        _ = try await runResolvedScript(
+          script: script,
+          projectID: projectID,
+          worktreeID: worktreeID,
+          manager: manager,
+          snapshot: settings?.settings ?? .default,
           terminalClient: terminalClient
         )
       },
@@ -2283,6 +2303,7 @@ extension HierarchyClient: DependencyKey {
     unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    runCommand: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     launchAgentProfile: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     launchAgent: { _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2399,6 +2420,7 @@ extension HierarchyClient: DependencyKey {
     unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
+    runCommand: unimplemented("HierarchyClient.runCommand"),
     launchAgentProfile: unimplemented("HierarchyClient.launchAgentProfile"),
     launchAgent: unimplemented(
       "HierarchyClient.launchAgent",
