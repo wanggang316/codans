@@ -9,23 +9,24 @@ import SwiftUI
 /// `launch` role bindings, and repository-file trust — the Settings surface
 /// `docs/design-docs/workflow.md` describes under "可观测性与 UI".
 ///
-/// Discovery is a plain filesystem scan (`WorkflowDiscovery`, which caches
-/// nothing by design) run off the main thread on appear and on demand via
-/// the refresh button; the pane owns no long-lived state beyond the last
-/// scan's results.
+/// The lists come from `WorkflowCatalogStore`, which watches the files, so
+/// an edit saved in an editor or a file an agent writes shows up (and
+/// revalidates) without a refresh; the button only forces a rescan.
 struct WorkflowsSettingsView: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(WorkflowCatalogStore.self) private var catalog
 
-  @State private var scanResult = ScanResult()
-  @State private var isScanning = false
   @State private var trustPrompt: TrustPromptTarget?
-  @State private var isCreating = false
+  @State private var newWorkflow: NewWorkflowRequest?
+  @State private var trashCandidate: WorkflowCatalogEntry?
+  @State private var isAskingAgent = false
 
-  private struct ScanResult: Sendable {
-    var bundle: [WorkflowCatalogEntry] = []
-    var user: [WorkflowCatalogEntry] = []
-    var repositories: [ProjectID: [WorkflowCatalogEntry]] = [:]
+  /// What the New Workflow sheet opens with: blank, or a duplicate.
+  private struct NewWorkflowRequest: Identifiable {
+    let id = UUID()
+    var name = ""
+    var starterID: String?
   }
 
   private struct TrustPromptTarget: Identifiable {
@@ -40,34 +41,54 @@ struct WorkflowsSettingsView: View {
     WorkflowsSettingsLogic.eligibleRepositoryProjects(hierarchyManager.catalog.projects)
   }
 
+  /// Repository scopes are keyed by the project's main checkout — the same
+  /// directory the watched catalog follows for that worktree.
   private var repositoryGroups: [WorkflowsSettingsLogic.RepositoryGroup] {
-    WorkflowsSettingsLogic.repositoryGroups(eligibleProjects: eligibleProjects, scanned: scanResult.repositories)
+    var scanned: [ProjectID: [WorkflowCatalogEntry]] = [:]
+    for project in eligibleProjects {
+      scanned[project.id] = catalog.repositories[project.rootPath] ?? []
+    }
+    return WorkflowsSettingsLogic.repositoryGroups(eligibleProjects: eligibleProjects, scanned: scanned)
   }
 
   var body: some View {
     Form {
       masterSection
-      scopeSection(title: "Built-in", entries: scanResult.bundle, emptyText: "No built-in workflows.")
+      scopeSection(title: "Built-in", entries: catalog.bundle, emptyText: "No built-in workflows.")
       userScopeSection
       ForEach(repositoryGroups) { group in
         scopeSection(title: "Repository — \(group.projectName)", entries: group.entries, emptyText: "")
       }
     }
     .formStyle(.grouped)
-    .task { await refresh() }
-    .sheet(isPresented: $isCreating) {
+    .onChange(of: catalog.isNewWorkflowRequested, initial: true) {
+      if catalog.consumeNewWorkflowRequest() { newWorkflow = NewWorkflowRequest() }
+    }
+    .sheet(item: $newWorkflow) { request in
       NewWorkflowSheet(
         locations: newWorkflowLocations,
         starters: newWorkflowStarters,
+        initialName: request.name,
+        initialStarterID: request.starterID,
         onCreated: { url, location in
-          isCreating = false
-          Task {
-            await refresh()
-            await open(url, in: location)
-          }
+          newWorkflow = nil
+          catalog.rescanAll()
+          Task { await open(url, projectID: location.projectID) }
         },
-        onCancel: { isCreating = false }
+        onCancel: { newWorkflow = nil }
       )
+    }
+    .sheet(isPresented: $isAskingAgent) {
+      AskAgentForWorkflowSheet(userDirectory: userDirectoryDisplayPath) { isAskingAgent = false }
+    }
+    .confirmationDialog(
+      "Move \"\(trashCandidate?.name ?? "")\" to the Trash?",
+      isPresented: Binding(get: { trashCandidate != nil }, set: { if !$0 { trashCandidate = nil } }),
+      presenting: trashCandidate
+    ) { entry in
+      Button("Move to Trash", role: .destructive) { moveToTrash(entry) }
+    } message: { entry in
+      Text("\((entry.path as NSString).abbreviatingWithTildeInPath) can be restored from the Trash.")
     }
     .sheet(item: $trustPrompt) { target in
       WorkflowTrustConfirmationSheet(
@@ -85,28 +106,25 @@ struct WorkflowsSettingsView: View {
       HStack {
         Toggle("Enable Agent Workflows", isOn: enabledBinding)
         Spacer()
-        if isScanning {
-          ProgressView()
-            .controlSize(.small)
-        }
         Button {
-          Task { await refresh() }
+          catalog.rescanAll()
         } label: {
           Image(systemName: "arrow.clockwise")
         }
         .buttonStyle(.borderless)
-        .help("Rescan workflow files")
-        .disabled(isScanning)
+        .help("Rescan workflow files (changes on disk are picked up automatically)")
       }
       HStack {
         VStack(alignment: .leading, spacing: 2) {
           Text("New workflow")
-          Text("Start from a blank starter or a copy of any workflow below.")
+          Text("Start from a blank starter or a copy, or have an agent write one.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         Spacer()
-        Button("New Workflow…") { isCreating = true }
+        Button("Ask an Agent…") { isAskingAgent = true }
+          .accessibilityIdentifier("settings.workflows.askAgent")
+        Button("New Workflow…") { newWorkflow = NewWorkflowRequest() }
           .accessibilityIdentifier("settings.workflows.new")
       }
     } footer: {
@@ -135,7 +153,7 @@ struct WorkflowsSettingsView: View {
   private var newWorkflowStarters: [NewWorkflowSheet.Starter] {
     let blank = NewWorkflowSheet.Starter(id: "blank", title: "Blank starter", source: .blank)
     let groups: [(String, [WorkflowCatalogEntry])] =
-      [("Built-in", scanResult.bundle), ("User", scanResult.user)]
+      [("Built-in", catalog.bundle), ("User", catalog.user)]
       + repositoryGroups.map { ($0.projectName, $0.entries) }
     let copies = groups.flatMap { scope, entries in
       entries.filter(\.isValid).map { entry in
@@ -146,15 +164,30 @@ struct WorkflowsSettingsView: View {
     return [blank] + copies
   }
 
-  /// Opens the new file in the user's editor — the project's default for a
-  /// repository file — and falls back to Finder when no editor can open it.
-  private func open(_ url: URL, in location: NewWorkflowSheet.Location) async {
+  /// Opens a workflow file in the user's editor — the project's default for
+  /// a repository file — and falls back to Finder when no editor can.
+  private func open(_ url: URL, projectID: ProjectID?) async {
     @Dependency(DiffEditorClient.self) var editor
     do {
-      try await editor.openFile(location.directory, url.lastPathComponent, nil, location.projectID)
+      try await editor.openFile(url.deletingLastPathComponent(), url.lastPathComponent, nil, projectID)
     } catch {
       NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+  }
+
+  /// The repository project a file belongs to, for its editor preference.
+  private func projectID(of entry: WorkflowCatalogEntry) -> ProjectID? {
+    guard entry.scope == .repo else { return nil }
+    return eligibleProjects.first { entry.path.hasPrefix($0.rootPath + "/") }?.id
+  }
+
+  private func duplicate(_ entry: WorkflowCatalogEntry) {
+    newWorkflow = NewWorkflowRequest(name: "\(entry.name) Copy", starterID: entry.path)
+  }
+
+  private func moveToTrash(_ entry: WorkflowCatalogEntry) {
+    try? FileManager.default.trashItem(at: URL(fileURLWithPath: entry.path), resultingItemURL: nil)
+    catalog.rescanAll()
   }
 
   private var enabledBinding: Binding<Bool> {
@@ -197,11 +230,11 @@ struct WorkflowsSettingsView: View {
           .help("Show in Finder")
         }
       }
-      if scanResult.user.isEmpty {
+      if catalog.user.isEmpty {
         Text("No workflows in \(userDirectoryDisplayPath) yet.")
           .foregroundStyle(.secondary)
       } else {
-        ForEach(scanResult.user, id: \.id) { entry in
+        ForEach(catalog.user, id: \.id) { entry in
           workflowRow(entry)
         }
       }
@@ -239,6 +272,36 @@ struct WorkflowsSettingsView: View {
         statusGlyph(for: entry)
       }
       .padding(.vertical, 2)
+      .contextMenu { workflowActions(entry) }
+    }
+  }
+
+  /// The same actions in the row's context menu and its expanded detail.
+  @ViewBuilder
+  private func workflowActions(_ entry: WorkflowCatalogEntry) -> some View {
+    Button {
+      Task { await open(URL(fileURLWithPath: entry.path), projectID: projectID(of: entry)) }
+    } label: {
+      Label(entry.scope == .bundle ? "View Source" : "Open in Editor", systemImage: "square.and.pencil")
+    }
+    Button {
+      reveal(entry)
+    } label: {
+      Label("Reveal in Finder", systemImage: "folder")
+    }
+    Button {
+      duplicate(entry)
+    } label: {
+      Label("Duplicate…", systemImage: "plus.square.on.square")
+    }
+    .disabled(!entry.isValid)
+    if entry.scope != .bundle {
+      Divider()
+      Button(role: .destructive) {
+        trashCandidate = entry
+      } label: {
+        Label("Move to Trash…", systemImage: "trash")
+      }
     }
   }
 
@@ -301,14 +364,16 @@ struct WorkflowsSettingsView: View {
         trustRow(entry)
       }
 
-      HStack {
-        Spacer()
-        Button {
-          reveal(entry)
-        } label: {
-          Label("Reveal", systemImage: "folder")
+      HStack(spacing: 12) {
+        if entry.scope == .bundle {
+          Text("Built-in · read only — duplicate it to customize.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        .buttonStyle(.borderless)
+        Spacer()
+        workflowActions(entry)
+          .buttonStyle(.borderless)
+          .labelStyle(.titleAndIcon)
       }
     }
     .padding(.leading, 24)
@@ -420,33 +485,6 @@ struct WorkflowsSettingsView: View {
     let directory = AppDirectories.workflowsDirectory()
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     NSWorkspace.shared.activateFileViewerSelecting([directory])
-  }
-
-  // MARK: - Discovery
-
-  /// Rescans all three scopes off the main thread. `WorkflowDiscovery` is a
-  /// pure, cacheless filesystem reader (see its doc comment), so a fresh
-  /// scan per appearance / refresh is the intended usage rather than
-  /// something to optimize away.
-  private func refresh() async {
-    isScanning = true
-    defer { isScanning = false }
-    let projects = eligibleProjects
-    let bundleDirectory = Bundle.main.resourceURL?.appendingPathComponent("workflows", isDirectory: true)
-    let userDirectory = AppDirectories.workflowsDirectory()
-    scanResult = await Task.detached(priority: .userInitiated) { () -> ScanResult in
-      var result = ScanResult()
-      if let bundleDirectory {
-        result.bundle = WorkflowDiscovery.scan(directory: bundleDirectory, scope: .bundle)
-      }
-      result.user = WorkflowDiscovery.scan(directory: userDirectory, scope: .user)
-      for project in projects {
-        let directory = WorkflowDiscovery.repositoryDirectory(
-          worktreeRoot: URL(fileURLWithPath: project.rootPath, isDirectory: true))
-        result.repositories[project.id] = WorkflowDiscovery.scan(directory: directory, scope: .repo)
-      }
-      return result
-    }.value
   }
 }
 

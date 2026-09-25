@@ -251,7 +251,7 @@ effect（engine 解释）：`awaitRole(role, until)`、`openActivation(ordinal, 
 6. 角色绑定（上节）；`current` / `pick` pane 被占用 → `PANE_BUSY`；
 7. 冻结 profile + 渲染好的 `AgentLaunchSpec`，分配 run 目录，写初始 `run.json`，**然后**才回复 CLI。
 
-GUI 启动面板（`WorkflowStartFeature`，与 Handoff 面板同宿主同外观）只做三件事：角色选择器（launch 角色预填解析结果，pick 角色列出 worktree 内的 agent pane）、输入表单、可跳过 step 的勾选（旁边即时显示 Skip 后果；只列出真能跳过的 step——其 delivery 的每个消费者自身也可跳过，否则不出现）。确认即调用与 CLI 相同的 admission；面板不持有任何运行态。入口两处：Command Palette 的 `Run Workflow: <name>`，以及工具栏 agent 按钮下拉菜单里的 "Run Workflow…"——后者打开已按 `Run Workflow: ` 过滤的 palette，palette 每次打开都重新扫描，刚建的文件立即可见。
+GUI 启动面板（`WorkflowStartFeature`，与 Handoff 面板同宿主同外观）只做三件事：角色选择器（launch 角色预填解析结果，pick 角色列出 worktree 内的 agent pane）、输入表单、可跳过 step 的勾选（旁边即时显示 Skip 后果；只列出真能跳过的 step——其 delivery 的每个消费者自身也可跳过，否则不出现）。确认即调用与 CLI 相同的 admission；面板不持有任何运行态。入口三处：Command Palette 的 `Run Workflow: <name>`；工具栏 agent 按钮下拉菜单的 "Run Workflow" 子菜单（直接列出当前 worktree 可用的定义，有错误的置灰并注明，末尾是 New Workflow… / Manage Workflows…）；Agents View 行的右键菜单 "Run Workflow"，以该行的 pane 作 `current` 角色，不看当前焦点。菜单的数据来自 `WorkflowCatalogStore`：它监视用户目录与每个本地 worktree 的 `.codans/workflows`（目录尚不存在时监视最近的已存在祖先，直到 worktree 根）及其中每个文件，事件合并后只重扫变动的作用域——agent 在 pane 里写出的文件、编辑器里保存的修改，都无需刷新即出现并重新校验。
 
 **自发起。** 当 `run` 从将成为 `current` 角色的 pane 里调用、且第一步就是给该角色的 `message`，响应里直接带上渲染好的指令与完成命令（`self_initiated`），engine **不**再往调用方 pane 键入——调用它的 agent 手里已经有任务了。这让 agent 的自我交接变成两条命令：`codans workflow run handoff`，然后照返回的命令 `deliver`。
 
@@ -303,7 +303,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 - **AgentState 面板**新增一组 "Workflows" 行：`<name> · <step name> · running/needs attention · 已用时间`，点击弹出 popover：步骤列表、角色 pane（可跳转）、attention 动作按钮（**按 `attention.actions` 原样渲染，UI 不重新推导策略**）、log 与 run 目录链接。选择这里而不是 toolbar 中央状态槽：该槽已被 worktree 进程徽标与状态项占用，而 AgentState 本来就是用户分诊 agent 的唯一去处，run 就是 agent 的上下文。
 - **通知**：run 进入 `needs_attention` / 终态时进 inbox（`NotificationCoordinator` 门控），`notify:` 步骤同路。
 - **Command Palette**：`Run Workflow: <name>`（对当前 worktree 可见的定义）、`Cancel Workflow: <name>`（活动 run）。
-- **Settings → Agents → Workflows**（已实现；作为 Agents 的同级行而非嵌套子页——简化，见下）：三个作用域的列表、启用开关、校验诊断、每个 launch 角色的记忆绑定（可清除）、仓库作用域文件的信任状态（D8）；"New Workflow…" 在 User 或任一仓库下新建 `<id>.workflow.yaml`（空白起点或复制任一有效定义，经 `WorkflowScaffold` 写入、从不覆盖；仓库位置同时确保 `.codans/.gitignore` 放行 `workflows/`），建好后用默认编辑器打开。侧边栏里 Workflows 紧跟在 Agents 之后，与其平级，不是 Agents 下的子项。
+- **Settings → Agents → Workflows**（已实现；作为 Agents 的同级行而非嵌套子页——简化，见下）：三个作用域的列表、启用开关、校验诊断、每个 launch 角色的记忆绑定（可清除）、仓库作用域文件的信任状态（D8）；"New Workflow…" 在 User 或任一仓库下新建 `<id>.workflow.yaml`（空白起点或复制任一有效定义，经 `WorkflowScaffold` 写入、从不覆盖；仓库位置同时确保 `.codans/.gitignore` 放行 `workflows/`），建好后用默认编辑器打开。每行（右键或展开后）有 Open in Editor（内置的为 View Source）/ Reveal in Finder / Duplicate…（预填的 New Workflow）/ Move to Trash…（仅 User 与仓库；带确认，可从废纸篓恢复）；内置定义只读，提示复制后再改。"Ask an Agent…" 生成一段指向 `codans-workflow` skill 的提示词供复制。列表同样来自 `WorkflowCatalogStore`，刷新按钮只是强制重扫。侧边栏里 Workflows 紧跟在 Agents 之后，与其平级，不是 Agents 下的子项。
 
 ### 组件边界
 

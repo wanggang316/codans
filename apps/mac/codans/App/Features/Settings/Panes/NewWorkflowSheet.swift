@@ -37,9 +37,12 @@ struct NewWorkflowSheet: View {
   @State private var failure: String?
   @FocusState private var nameFocused: Bool
 
+  /// `initialName` / `initialStarterID` preset the form for Duplicate.
   init(
     locations: [Location],
     starters: [Starter],
+    initialName: String = "",
+    initialStarterID: String? = nil,
     onCreated: @escaping (URL, Location) -> Void,
     onCancel: @escaping () -> Void
   ) {
@@ -47,8 +50,11 @@ struct NewWorkflowSheet: View {
     self.starters = starters
     self.onCreated = onCreated
     self.onCancel = onCancel
+    _name = State(initialValue: initialName)
+    _id = State(initialValue: WorkflowScaffold.suggestedID(forName: initialName) ?? "")
     _locationID = State(initialValue: locations.first?.id ?? "")
-    _starterID = State(initialValue: starters.first?.id ?? "")
+    let starter = initialStarterID.flatMap { id in starters.first { $0.id == id }?.id }
+    _starterID = State(initialValue: starter ?? starters.first?.id ?? "")
   }
 
   private var location: Location? { locations.first { $0.id == locationID } }
