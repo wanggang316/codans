@@ -27,6 +27,9 @@ public nonisolated struct CommandSuggestion: Hashable, Sendable, Identifiable {
   /// make `##` help comment). Shown as the menu item's subtitle.
   public var detail: String?
   public var kind: ScriptKind
+  /// Glyph from the shared command-icon mapping; nil when nothing in the
+  /// table matches and the kind's default icon should show.
+  public var icon: CommandIconRef?
 
   public init(
     source: CommandSuggestionSource,
@@ -40,6 +43,12 @@ public nonisolated struct CommandSuggestion: Hashable, Sendable, Identifiable {
     self.command = command
     self.detail = detail.flatMap { $0.isEmpty ? nil : $0 }
     self.kind = kind ?? ScriptKindInference.kind(forEntryName: name)
+    self.icon = CommandIconCatalog.icon(forEntryName: name, command: command, body: self.detail)
+  }
+
+  /// Icon to draw for this suggestion before it is adopted.
+  public var resolvedIcon: CommandIconRef {
+    icon ?? .symbol(kind.defaultSystemImage)
   }
 
   public var id: String { "\(source.id):\(name)" }

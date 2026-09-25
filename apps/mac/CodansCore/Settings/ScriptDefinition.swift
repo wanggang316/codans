@@ -90,13 +90,11 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
     name.isEmpty ? kind.defaultName : name
   }
 
-  /// SF Symbol used by view-side icons. A per-command override wins;
-  /// otherwise the kind default applies.
+  /// Icon string for surfaces that store or compare it (`Tab.icon`, menu
+  /// identity): an SF Symbol name or a `mark:` tool reference — see
+  /// `CommandIconRef`. Render through `resolvedIcon`, not this string.
   public var resolvedSystemImage: String {
-    if let systemImage, !systemImage.isEmpty {
-      return systemImage
-    }
-    return kind.defaultSystemImage
+    resolvedIcon.storedValue
   }
 
   /// Tint colour used by view-side icons / button accents. A per-command
