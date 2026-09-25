@@ -25,6 +25,10 @@ public nonisolated enum CommandSuggestionAdoption {
           var updated = scripts
           updated[index].command = suggestion.command
           updated[index].name = suggestion.name
+          // Keep an icon the user already chose for the blank Run.
+          if let icon = iconOverride(for: suggestion, kind: .run) {
+            updated[index].systemImage = icon
+          }
           return Result(scripts: updated, scriptID: updated[index].id)
         }
       } else {
@@ -33,17 +37,27 @@ public nonisolated enum CommandSuggestionAdoption {
         var run = ScriptDefinition.builtinRun
         run.command = suggestion.command
         run.name = suggestion.name
+        run.systemImage = iconOverride(for: suggestion, kind: .run)
         return Result(scripts: [run] + scripts, scriptID: run.id)
       }
     }
 
     let kindTaken = suggestion.kind != .custom && scripts.contains { $0.kind == suggestion.kind }
+    let kind = kindTaken ? .custom : suggestion.kind
     let script = ScriptDefinition(
-      kind: kindTaken ? .custom : suggestion.kind,
+      kind: kind,
       name: suggestion.name,
-      command: suggestion.command
+      command: suggestion.command,
+      systemImage: iconOverride(for: suggestion, kind: kind)
     )
     return Result(scripts: scripts + [script], scriptID: script.id)
+  }
+
+  /// The mapped icon as a stored override — nil when there is none or it is
+  /// what the script's kind shows anyway, keeping `settings.json` minimal.
+  private static func iconOverride(for suggestion: CommandSuggestion, kind: ScriptKind) -> String? {
+    guard let icon = suggestion.icon, icon != .symbol(kind.defaultSystemImage) else { return nil }
+    return icon.storedValue
   }
 
   private static func normalized(_ command: String) -> String {
