@@ -166,6 +166,21 @@ struct EventHubTests {
     }
   }
 
+  @Test(.timeLimit(.minutes(1)))
+  func emptyTopicListIsInvalidParams() async throws {
+    let router = MethodRouter(
+      systemHandlers: SystemHandlers(versions: .init(server: "1", appBundle: "1")),
+      eventHub: Fixture().hub
+    )
+    let outcome = await router.route(
+      IPC.Request(
+        id: "s", method: .eventsSubscribe, params: .object(["topics": .array([])]), stream: true))
+    guard case .failed(.invalidParams) = outcome else {
+      Issue.record("expected invalidParams, got \(outcome)")
+      return
+    }
+  }
+
   // MARK: - Fixture
 
   @MainActor

@@ -9,7 +9,8 @@ extension IPC {
 
   /// `events.subscribe` params. `topics == nil` means every topic. An
   /// unknown topic fails decoding, which the server reports as
-  /// `invalidParams` — a client can never silently subscribe to nothing.
+  /// `invalidParams`, and so does an empty list — a client can never
+  /// silently subscribe to nothing.
   public struct EventsSubscribeRequest: Codable, Equatable, Sendable {
     public let topics: [EventTopic]?
 

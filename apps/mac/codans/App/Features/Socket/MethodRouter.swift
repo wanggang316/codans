@@ -91,7 +91,11 @@ public final class MethodRouter {
     } catch {
       return .failed(.invalidParams(message: String(describing: error), path: ["topics"]))
     }
-    let subscription = hub.subscribe(topics: params.resolvedTopics)
+    let topics = params.resolvedTopics
+    guard !topics.isEmpty else {
+      return .failed(.invalidParams(message: "topics must not be empty", path: ["topics"]))
+    }
+    let subscription = hub.subscribe(topics: topics)
     return .streaming { subscription.jsonFrames() }
   }
 
